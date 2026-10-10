@@ -15,7 +15,7 @@
  * validates every base URL (approved stack: LangChain.js / LangGraph.js).
  * With no `AI_PROVIDER` configured, no model is installed and every
  * model-running route answers `422 VALIDATION_ERROR` with
- * `details.code: "FEATURE_DISABLED"`; listing agents and serving cards keep
+ * `details.code: "FEATURE_DISABLED"`; listing agents keeps
  * working. Tests inject a fake model via `setAiModel`.
  *
  * `AI_REASONING_EFFORT` optionally fixes how hard the model thinks — `none`,

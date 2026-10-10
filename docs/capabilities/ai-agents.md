@@ -1,14 +1,13 @@
 # AI and agents
 
-Language-model capabilities over a lens: holding a conversation, and exposing that
-conversation to other systems as an agent.
+Language-model capabilities over a lens: holding a conversation with tools, configured
+as agents.
 
 **All of it requires a configured language-model provider.** With none configured, every
 operation that would run a model is rejected. Clients are expected to check the server's
 feature flags first and hide what is unavailable — see [../README.md](../README.md). One
-asymmetry to know when reimplementing: listing agents and fetching an agent card do not
-run a model, so they keep answering normally on a server with no provider. Only a task
-sent to that agent fails.
+asymmetry to know when reimplementing: listing agents does not run a model, so it keeps
+answering normally on a server with no provider. Only a chat with an agent fails.
 
 Everything here is runtime, and everything is scoped to one lens of one ontology
 ([ontology-lenses.md](ontology-lenses.md)). A model is given the lens's schema — the
@@ -34,24 +33,23 @@ An **agent** is a named language-model configuration belonging to one lens:
 | Field | Meaning |
 |---|---|
 | Key | Addresses the agent within its lens. Matches `^[a-z][a-z0-9_-]*$`, at most 64 characters |
-| Name | Human-readable label, also the name on its agent card |
-| Description | What it is for; also advertised on its card |
+| Name | Human-readable label |
+| Description | What it is for |
 | System prompt | Replaces the built-in chat prompt |
 | Tools | Allowlist of tool names, or absent for "every tool available to an agent" |
 
 Every lens also has an **implicit default agent**. It is not stored, cannot be configured
 or deleted, has no system prompt of its own and no tool restriction. Its key begins with
 an underscore, which no configurable key may, so it can never be shadowed. It appears in
-agent listings alongside the configured ones and publishes its own card. Plain chat
-without naming an agent is a run of this default agent.
+agent listings alongside the configured ones. Plain chat without naming an agent is a
+run of this default agent.
 
 ### Rules
 
 - **Agent tools are the read-only subset, always.** The allowlist is validated against
   that set, so a write tool name is not merely ignored — it is rejected at definition
-  time and at import. There is no configuration, and no system prompt, that gives an
-  agent the ability to create, update or delete anything. This is what makes it safe to
-  expose an agent to an untrusted caller over A2A.
+  time and at import. Agents are read-only so that no configuration, and no system
+  prompt, can make one create, update or delete anything.
 - The grantable set is *narrower* than the read tools available over MCP — being read-only
   is not sufficient to be grantable. The tools are named, and the read-only one left out
   of the set is called out, in [../interfaces.md](../interfaces.md#runtime-tools).
@@ -86,8 +84,7 @@ still produces an answer. The wire contract lives in [interfaces](../interfaces.
 
 A fatal failure retains earlier results and marks the turn incomplete. Disconnect cancels
 further model and tool work; cancellation of already-running operations is best effort.
-Abandoned turns do not continue in the background or automatically restart. The shared
-execution service still returns a complete answer to callers such as A2A.
+Abandoned turns do not continue in the background or automatically restart.
 
 ### Conversation history
 
@@ -104,50 +101,6 @@ Consequences a reimplementer should not have to discover:
   context limit.
 - History is per caller. Two clients chatting with the same agent share nothing.
 
-## A2A
-
-The agent-to-agent protocol lets an external system use an agent without knowing anything
-about OntoForge's own API. Every agent participates — the default one and each configured
-one — each with its own card and its own task endpoint.
-
-### The card
-
-A card is a machine-readable JSON description served at a well-known path under the
-agent's route. It advertises:
-
-| Advertises | Notes |
-|---|---|
-| Name and description | The agent's own. An agent with no description gets a generated one naming the lens and listing its entity and relation type keys |
-| Task endpoint URL | Absolute, so a client needs nothing else to call it |
-| Version | Of the card |
-| Capability flags | Streaming and push notifications, both false |
-| Skills | Exactly one, a chat skill named for the lens |
-
-The absolute URL is built from the configured public base address; without one, it is
-derived from the request's forwarded-protocol and host headers. Deployments behind a
-proxy that rewrites neither will advertise an address their callers cannot reach.
-
-### Sending a task
-
-One JSON-RPC 2.0 call over a single request. Exactly one method is supported —
-task submission. Any other method name answers a JSON-RPC method-not-found error rather
-than an HTTP error.
-
-The request's message carries parts; the text parts are concatenated into the prompt, and
-a message with no text answers an invalid-params error. The reply carries the task
-identifier — echoed from the request when given, otherwise generated — a status of
-completed, and a single artifact holding one text part with the answer.
-
-Three properties follow from that shape and are load-bearing:
-
-- **Non-streaming.** The call blocks until the answer is complete and returns it whole.
-  There is no incremental delivery, no polling, and no state other than completed.
-- **Single skill.** A card never advertises more than the one chat skill, whatever the
-  agent's tools are.
-- **No conversation.** Each task is independent. The task identifier is echoed, not
-  remembered, and no history is carried, so a caller cannot build a conversation out of
-  successive tasks.
-
 ## Through the interfaces
 
 Configuring agents is modeling; running them is runtime. Complete operation index:
@@ -158,7 +111,6 @@ Configuring agents is modeling; running them is runtime. Complete operation inde
 | Configure agents | Modeling REST, modeling MCP, the studio's agents tab | List, upsert by key, delete |
 | Chat | Runtime REST only | One operation, also in a per-agent form |
 | Discover agents | Runtime REST | Lists the default agent and every configured one |
-| A2A | Runtime REST | A card and a task endpoint per agent, including the default |
 | Web UI | The workbench's AI surface | Chat with an agent picker and persisted local threads |
 
 Note the deliberate gap: **there are no MCP tools for chat.** An MCP

@@ -406,7 +406,7 @@ Both default and configured chat use their existing routes and one response cont
 Results retain their JSON structure; only the final answer carries assistant text.
 Failures preserve received results and mark the turn incomplete. Disconnect cancels further
 work, and delivery bounds buffering. Shared execution remains usable by complete-response
-callers; A2A and MCP retain their own transport contracts. The wire details live in
+callers; MCP retains its own transport contract. The wire details live in
 [interfaces](interfaces.md#ai); the delivery alternatives are weighed in
 [the chat transport deliberation](adr/0021-rest-chat-tool-streaming.md).
 

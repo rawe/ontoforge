@@ -389,7 +389,7 @@ per-ontology deployment configuration.
 | Search indexing | Attempts before a queued item counts as failed, worker batch size, polling interval | Defaults apply |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
 | Decision model | Endpoint, model, credential | Entity identity comparison unavailable |
-| Public URL | Base address advertised in agent cards | Cards advertise a local address |
+| Public URL | The server's public base address, read by no capability yet | Nothing changes |
 
 Exact variable names are in the repository README; they are deployment surface, not
 architecture.

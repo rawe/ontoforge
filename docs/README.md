@@ -40,7 +40,7 @@ what rules bind it, and how it is reached from every interface.
 | [search-indices](capabilities/search-indices.md) | What ranked search reads: indices, entries, managed and custom indices, cost preview and entry outline, generations and build status |
 | [oql](capabilities/oql.md) | The query language |
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
-| [ai-agents](capabilities/ai-agents.md) | Chat, A2A |
+| [ai-agents](capabilities/ai-agents.md) | Chat |
 | [retriever-agents](capabilities/retriever-agents.md) | Lens-local question answering over search indices: configuration, validation, planning, retrieval, retrieve, the default agent, portable JSON |
 | [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
 | [transfer](capabilities/transfer.md) | Schema export and import |
@@ -148,8 +148,7 @@ Some capabilities depend on external providers and are absent unless one is conf
 The server reports what is available, and clients hide what is not.
 
 - **Semantic search** needs an embedding provider. Without it, keyword ranking remains available where the adapter supports it.
-- **AI features** need a language-model provider. Without it, chat and the agent
-  protocol are unavailable.
+- **AI features** need a language-model provider. Without it, chat is unavailable.
 - **Entity identity comparison** needs a Decision provider. It remains independent of
   language-model and embedding availability; see its [capability](capabilities/entity-identity-comparison.md).
 
@@ -366,15 +365,12 @@ query without composing one.
 **Agent** — a named language-model configuration bound to one lens: a system prompt
 plus the set of read-only tools it may use.
 
-**A2A** — the agent-to-agent protocol. Each agent publishes a machine-readable card and
-accepts tasks, so external systems can call it without knowing OntoForge's own API.
-
 **Retriever agent** — a stored configuration bound to one lens that answers questions over
 search indices: a planning model turns a question into searches of the agent's indices,
 optionally narrowed to relation groups and exact filters, and an answer model replies from
 what they found — or, for a retrieve, the found entities are returned without an answer.
 Every lens also has an implicit **default retriever agent**, derived from its managed
-indices and never stored. Separate from agents; not reachable over A2A. See
+indices and never stored. Separate from agents. See
 [capabilities/retriever-agents.md](capabilities/retriever-agents.md).
 
 ### Internals

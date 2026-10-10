@@ -1,6 +1,6 @@
 /**
- * AI-powered runtime operations (`docs/capabilities/ai-agents.md`): chat,
- * agent discovery, and A2A cards and tasks. The engine is
+ * AI-powered runtime operations (`docs/capabilities/ai-agents.md`): chat
+ * and agent discovery. The engine is
  * LangChain.js / LangGraph.js (approved stack).
  *
  * Each operation builds a fresh agent per request with a scoped tool
@@ -678,7 +678,7 @@ export async function aiAgentChat(
 }
 
 // ---------------------------------------------------------------------------
-// Agent discovery and A2A
+// Agent discovery
 // ---------------------------------------------------------------------------
 
 /** List all agents (default + configured) for a lens. */
@@ -699,106 +699,4 @@ export async function listRuntimeAgents(lensKey: string, store: RuntimeStore): P
     });
   }
   return agents;
-}
-
-/** Generate an A2A agent card JSON. The advertised task URL names the
- * ontology and lens, mirroring the runtime tree the card is served from. */
-export function buildAgentCard(
-  agentConfig: AgentConfig,
-  ontologyKey: string,
-  schemaCache: SchemaCacheValue,
-  baseUrl: string,
-): Row {
-  let description = agentConfig.description;
-  if (!description) {
-    const entityTypes = Object.keys(schemaCache.entityTypes);
-    const relationTypes = Object.keys(schemaCache.relationTypes);
-    description =
-      `Knowledge assistant for ${schemaCache.lensName}. ` +
-      `Entity types: ${entityTypes.join(", ")}. ` +
-      `Relation types: ${relationTypes.join(", ")}.`;
-  }
-
-  const lensUrl = `${baseUrl}/api/ontologies/${ontologyKey}/runtime/lenses/${schemaCache.lensKey}`;
-  const url =
-    agentConfig.key === "_default"
-      ? `${lensUrl}/ai/a2a`
-      : `${lensUrl}/ai/agents/${agentConfig.key}/a2a`;
-
-  return {
-    name: agentConfig.name,
-    description,
-    url,
-    version: "0.1.0",
-    capabilities: {
-      streaming: false,
-      pushNotifications: false,
-    },
-    skills: [
-      {
-        id: "chat",
-        name: "Knowledge Graph Chat",
-        description: `Chat with the ${schemaCache.lensName} knowledge graph`,
-      },
-    ],
-  };
-}
-
-function isPlainObject(value: unknown): value is Row {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-/** Handle an A2A JSON-RPC `tasks/send` request. */
-export async function handleA2aTask(
-  agentConfig: AgentConfig,
-  lensKey: string,
-  requestBody: Row,
-  store: RuntimeStore,
-): Promise<Row> {
-  const requestId = requestBody.id ?? null;
-  const method = requestBody.method;
-  if (method !== "tasks/send") {
-    return {
-      jsonrpc: "2.0",
-      id: requestId,
-      error: { code: -32601, message: `Method not found: ${String(method)}` },
-    };
-  }
-
-  const params = isPlainObject(requestBody.params) ? requestBody.params : {};
-  const taskId = "id" in params ? params.id : randomUUID();
-
-  // Extract text message from parts.
-  let messageText = "";
-  const message = isPlainObject(params.message) ? params.message : {};
-  const parts = Array.isArray(message.parts) ? message.parts : [];
-  for (const part of parts) {
-    if (isPlainObject(part) && part.type === "text") {
-      messageText += String(part.text ?? "");
-    }
-  }
-
-  if (!messageText) {
-    return {
-      jsonrpc: "2.0",
-      id: requestId,
-      error: { code: -32602, message: "No text message found in request" },
-    };
-  }
-
-  const result = await runAgentChat(agentConfig, lensKey, messageText, store);
-
-  return {
-    jsonrpc: "2.0",
-    id: requestId,
-    result: {
-      id: taskId,
-      status: { state: "completed" },
-      artifacts: [
-        {
-          parts: [{ type: "text", text: result.reply }],
-        },
-      ],
-    },
-  };
 }

@@ -26,7 +26,7 @@ Saving an agent changes nothing else: no schema, no instance, no index, no other
 A save creates the agent or replaces its name, description and configuration; its identity
 and creation time stay, and its conversion warnings are cleared. Deleting an agent removes
 it alone; deleting its lens deletes its agents. Retriever agents are separate from the
-tool-using [agents](ai-agents.md) and are not reachable over A2A.
+tool-using [agents](ai-agents.md).
 
 ## The configuration
 

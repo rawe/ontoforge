@@ -292,13 +292,6 @@ describe("the runtime surface itself", () => {
     expect((agents as unknown as Row[])[0]!.key).toBe("_default");
   });
 
-  it("the A2A agent card advertises the ontology-scoped task URL", async () => {
-    const card = await getJson(`${crm}/ai/.well-known/agent.json`);
-    expect(card.url as string).toContain(
-      "/api/ontologies/crm/runtime/lenses/default/ai/a2a",
-    );
-  });
-
   it("an unknown ontology answers 404 on every runtime shape", async () => {
     for (const url of [
       `${runtimePrefix("ghost", "default")}/schema`,

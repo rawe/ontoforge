@@ -188,7 +188,7 @@ of an adapter without search indices. A client can therefore
 tell a switched-off capability from a rejected request. Model-free operations remain
 available: agent discovery and retriever-agent management do not require a
 language-model provider; execution requirements are listed with the routes below. Agent
-task execution requires a language-model provider
+chat requires a language-model provider
 ([capabilities/ai-agents.md](capabilities/ai-agents.md)).
 
 Call `GET /api/server/features` first all the same. Probing lets a client hide what is
@@ -659,7 +659,7 @@ milliseconds (`plan`, `planModel`, `validation`, `retrieve`, `search`, `total`) 
 `modelIO`, the one planning call's trace. No results is not an error.
 
 A question or a retrieve needs a language-model provider; without an embedding provider it
-searches by keyword only. Neither route has an MCP or A2A equivalent.
+searches by keyword only. Neither route has an MCP equivalent.
 
 ### AI
 
@@ -693,22 +693,6 @@ streaming where possible, using the ordinary HTTP error response. Unexpected fai
 after streaming begins have the generic `INTERNAL_ERROR` message `Internal Server Error`.
 Disconnect cancels further agent work, with best-effort cancellation of running operations.
 Delivery bounds buffering and terminates stalled or oversized streams.
-
-### Agent-to-agent
-
-The interoperability surface: a published card describing an agent, and a task endpoint.
-Each named agent gets its own pair, and the default agent gets one at the `/ai` root.
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/ai/.well-known/agent.json` | Card for the default agent |
-| POST | `/ai/a2a` | Submit a task to the default agent |
-| GET | `/ai/agents/{agentKey}/.well-known/agent.json` | Card for one named agent |
-| POST | `/ai/agents/{agentKey}/a2a` | Submit a task to one named agent |
-
-A card advertises absolute URLs, whose host is derived rather than fixed. What a card
-carries, how its host is resolved and what a proxied deployment must do about it are in
-[capabilities/ai-agents.md](capabilities/ai-agents.md#the-card).
 
 ## MCP
 

@@ -1,71 +1,16 @@
 /**
  * Runtime AI agent functions (service-level), ported from
  * `tests/runtime/test_ai_agents.py`: agent discovery lists the implicit
- * default agent alongside configured ones, and A2A cards carry the agent's
- * own description or a generated one naming the lens and its type keys.
- * Neither operation runs a model, so both work with no provider installed.
+ * default agent alongside configured ones. It runs no model, so it works
+ * with no provider installed.
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { DEFAULT_AGENT_CONFIG, type AgentConfig } from "../../src/core/ai.js";
-import { buildAgentCard, listRuntimeAgents } from "../../src/runtime/aiService.js";
-import { invalidateLoadedSchemaCache, type SchemaCacheValue } from "../../src/runtime/schemaCache.js";
+import { DEFAULT_AGENT_CONFIG } from "../../src/core/ai.js";
+import { listRuntimeAgents } from "../../src/runtime/aiService.js";
+import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { asRuntimeStore, createMockRuntimeStore, makeFullSchema } from "./helpers.js";
-
-function makeSchemaCache(options?: {
-  lensKey?: string;
-  lensName?: string;
-  lensDescription?: string | null;
-}): SchemaCacheValue {
-  return {
-    lensId: "lens-1",
-    lensKey: options?.lensKey ?? "test_lens",
-    lensName: options?.lensName ?? "Test Lens",
-    lensDescription: options?.lensDescription ?? null,
-    entityTypes: {
-      person: {
-        key: "person",
-        displayName: "Person",
-        description: null,
-        properties: {
-          name: {
-            key: "name",
-            displayName: "Name",
-            description: null,
-            dataType: "string",
-            required: true,
-            defaultValue: null,
-          },
-        },
-      },
-      company: {
-        key: "company",
-        displayName: "Company",
-        description: null,
-        properties: {},
-      },
-    },
-    relationTypes: {
-      works_for: {
-        key: "works_for",
-        displayName: "Works For",
-        description: null,
-        fromEntityTypeKey: "person",
-        toEntityTypeKey: "company",
-        properties: {},
-      },
-    },
-  };
-}
-
-const TEST_AGENT_CONFIG: AgentConfig = {
-  key: "my-agent",
-  name: "My Agent",
-  description: "A custom agent",
-  systemPrompt: "You are a test agent",
-  tools: ["get_schema"],
-};
 
 beforeEach(() => {
   invalidateLoadedSchemaCache();
@@ -105,61 +50,5 @@ describe("listRuntimeAgents", () => {
 
     expect(agents).toHaveLength(1);
     expect(agents[0]!.key).toBe("_default");
-  });
-});
-
-describe("buildAgentCard", () => {
-  it("builds an A2A agent card with all fields", () => {
-    const card = buildAgentCard(
-      TEST_AGENT_CONFIG,
-      "test_ont",
-      makeSchemaCache(),
-      "http://localhost:8000",
-    );
-
-    expect(card.name).toBe("My Agent");
-    expect(card.description).toBe("A custom agent");
-    expect(card.url).toBe(
-      "http://localhost:8000/api/ontologies/test_ont/runtime/lenses/test_lens/ai/agents/my-agent/a2a",
-    );
-    expect(card.version).toBe("0.1.0");
-    expect((card.capabilities as Record<string, unknown>).streaming).toBe(false);
-    expect((card.capabilities as Record<string, unknown>).pushNotifications).toBe(false);
-    expect(card).toHaveProperty("skills");
-    expect(card.skills).toHaveLength(1);
-  });
-
-  it("default agent card uses the default A2A URL path", () => {
-    const card = buildAgentCard(
-      DEFAULT_AGENT_CONFIG,
-      "test_ont",
-      makeSchemaCache(),
-      "http://localhost:8000",
-    );
-
-    expect(card.name).toBe(DEFAULT_AGENT_CONFIG.name);
-    expect(card.url).toBe("http://localhost:8000/api/ontologies/test_ont/runtime/lenses/test_lens/ai/a2a");
-  });
-
-  it("auto-generates a description from schema types when none is set", () => {
-    const agentNoDesc: AgentConfig = {
-      key: "auto-desc",
-      name: "Auto Desc Agent",
-      description: null,
-      systemPrompt: null,
-      tools: null,
-    };
-    const card = buildAgentCard(
-      agentNoDesc,
-      "test_ont",
-      makeSchemaCache({ lensName: "HR Lens" }),
-      "http://localhost:8000",
-    );
-
-    const description = card.description as string;
-    expect(description).toContain("person");
-    expect(description).toContain("company");
-    expect(description).toContain("works_for");
-    expect(description).toContain("HR Lens");
   });
 });

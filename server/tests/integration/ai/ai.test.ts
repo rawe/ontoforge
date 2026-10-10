@@ -1,9 +1,8 @@
 /**
  * AI runtime endpoints against the real docker-compose database and the
  * configured language model, ported from `backend/tests/integration/test_ai.py` plus
- * the session-11 additions: chat with a restricted agent whose trace shows
- * only allowlisted tools, and an A2A task round-trip against the default and
- * a named agent.
+ * the session-11 addition: chat with a restricted agent whose trace shows
+ * only allowlisted tools.
  *
  * Configuration comes from the suite's own env file (`env/test-ai.env` via
  * the npm script), never `server/.env`. Skips when the database is down or
@@ -273,82 +272,5 @@ describe("agents", () => {
       message: "Hi",
     });
     expect(statusCode).toBe(404);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// A2A: cards and task round-trips
-// ---------------------------------------------------------------------------
-
-describe("A2A", () => {
-  ifAvailable("serves the default card and a named card", async () => {
-    const def = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/.well-known/agent.json");
-    expect(def.statusCode).toBe(200);
-    expect(def.body.name).toBe("Knowledge Assistant");
-    expect(def.body.url as string).toContain("/api/ontologies/test_ont/runtime/lenses/ai_test/ai/a2a");
-    expect((def.body.capabilities as Row).streaming).toBe(false);
-    expect(def.body.skills as Row[]).toHaveLength(1);
-
-    const named = await inject(
-      "GET",
-      "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/analyst/.well-known/agent.json",
-    );
-    expect(named.statusCode).toBe(200);
-    expect(named.body.name).toBe("Analyst");
-    expect(named.body.url as string).toContain("/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/analyst/a2a");
-  });
-
-  ifAvailable("task round-trip against the default agent", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/a2a", {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tasks/send",
-      params: {
-        id: "task-1",
-        message: { parts: [{ type: "text", text: "How many persons are there?" }] },
-      },
-    });
-    expect(statusCode).toBe(200);
-    expect(body.jsonrpc).toBe("2.0");
-    expect(body.id).toBe(1);
-    const result = body.result as Row;
-    expect(result.id).toBe("task-1");
-    expect((result.status as Row).state).toBe("completed");
-    const artifacts = result.artifacts as Row[];
-    expect(artifacts).toHaveLength(1);
-    const parts = artifacts[0]!.parts as Row[];
-    expect(parts).toHaveLength(1);
-    expect(parts[0]!.type).toBe("text");
-    expect((parts[0]!.text as string).length).toBeGreaterThan(0);
-  });
-
-  ifAvailable("task round-trip against a named agent", async () => {
-    const { statusCode, body } = await inject(
-      "POST",
-      "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/analyst/a2a",
-      {
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tasks/send",
-        params: {
-          message: { parts: [{ type: "text", text: "How many companies are there?" }] },
-        },
-      },
-    );
-    expect(statusCode).toBe(200);
-    const result = body.result as Row;
-    expect((result.status as Row).state).toBe("completed");
-    expect(typeof result.id).toBe("string");
-  });
-
-  ifAvailable("an unsupported method answers JSON-RPC method-not-found", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/a2a", {
-      jsonrpc: "2.0",
-      id: 3,
-      method: "tasks/stream",
-      params: {},
-    });
-    expect(statusCode).toBe(200);
-    expect((body.error as Row).code).toBe(-32601);
   });
 });

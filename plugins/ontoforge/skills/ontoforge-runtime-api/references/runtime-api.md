@@ -403,18 +403,6 @@ that answers questions over chosen search indices.
   request cannot change the agent's configuration. Without an embedding provider the
   agent searches by keyword only.
 
-### Agent-to-agent
-
-Each named agent gets a card and a task endpoint; the default agent gets one pair at the
-`/ai` root.
-
-- `GET /ai/.well-known/agent.json`
-- `POST /ai/a2a`
-- `GET /ai/agents/{agentKey}/.well-known/agent.json`
-- `POST /ai/agents/{agentKey}/a2a`
-
-A card advertises absolute URLs whose host is derived from the request rather than fixed.
-
 ## Feature Discovery
 
 - `GET /api/server/features`
@@ -461,12 +449,12 @@ separates it from an ordinary rejected request on the same route:
 
 // same route, malformed request
 {"error": {"code": "VALIDATION_ERROR", "message": "Request validation failed",
-           "details": {"errors": [{"path": "/question", "message": "…"}]}}}
+           "details": {"errors": [{"path": "/message", "message": "…"}]}}}
 ```
 
 Branch on `details.code` to tell a client "this deployment has no AI configured" instead
-of reporting a bad request. Listing agents and fetching an agent card never run a model,
-so they answer normally even with no provider.
+of reporting a bad request. Listing agents never runs a model, so it answers normally
+even with no provider.
 
 `CASCADE_REQUIRED` belongs to the modeling surface and is listed here only for
 completeness of the envelope.

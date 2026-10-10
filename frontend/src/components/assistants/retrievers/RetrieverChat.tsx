@@ -49,7 +49,7 @@ export function RetrieverChat({ ontologyKey, lensKey, retrieverKey, name, descri
       assistantKey={retrieverKey}
       name={name}
       description={description}
-      intro="Ask about a topic, an exact value, or both. Follow-up questions refer to completed answers in this conversation."
+      intro="Ask about a topic, an exact value, or both."
       placeholder="What would you like to find?"
       remember={remember}
       blockedReason={blockedReason}

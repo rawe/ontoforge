@@ -1,15 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  agentExecution, defaultAnswerFields, draftOf, draftProblems, editableConfig, emptyConfig, filterChoices, filterLabel,
-  callCounts, importProblem, modelCallName, isSupportedAgent, mergeDiagnostics, stepText, newFilter, plannedFilterText, relationName, resultTypes, resultsBySubQuery, sameDraft,
-  toInput, withIndex, withRelations, withoutIndex, type AgentSchema,
-} from '../src/components/retrieverAgent/retrieverAgentModel.ts'
-import { chatRetrieverAgent, readRetrieverAgentStream, saveRetrieverAgent, type RetrieverAgent, type RetrieverAgentConfig } from '../src/api/retrieverAgents.ts'
+  retrieverExecution, defaultAnswerFields, draftOf, draftProblems, editableConfig, emptyConfig, filterChoices, filterLabel,
+  callCounts, importProblem, modelCallName, isSupportedRetriever, mergeDiagnostics, stepText, newFilter, plannedFilterText, relationName, resultTypes, resultsBySubQuery, sameDraft,
+  toInput, withIndex, withRelations, withoutIndex, type RetrieverSchema,
+} from '../src/components/assistants/retrievers/retrieverModel.ts'
+import { chatRetriever, readRetrieverStream, saveRetriever, type Retriever, type RetrieverConfig } from '../src/api/retrievers.ts'
 import type { SearchCatalogEntry } from '../src/api/types.ts'
 
 const prop = (key: string, dataType = 'string') => ({ key, displayName: key[0].toUpperCase() + key.slice(1), dataType })
-const schema: AgentSchema = {
+const schema: RetrieverSchema = {
   entityTypes: [
     { key: 'person', displayName: 'Person', nameProperty: 'name', properties: [prop('name'), prop('email'), prop('bio', 'document')] },
     { key: 'company', displayName: 'Company', nameProperty: 'title', properties: [prop('title'), prop('founded', 'integer')] },
@@ -31,8 +31,8 @@ const catalog = [
   entry({ key: 'person_employment', kind: 'custom', name: 'People by employment', relations: [{ relationType: 'works_for', direction: 'outgoing', label: 'Employment' }] }),
   entry({ key: 'company~default', name: 'Company', entityType: 'company' }),
 ]
-const config: RetrieverAgentConfig = { ...emptyConfig(), indices: [{ index: 'person~default' }], answerFields: { person: ['name'] } }
-const agent = (patch: Partial<RetrieverAgent> = {}): RetrieverAgent => ({
+const config: RetrieverConfig = { ...emptyConfig(), indices: [{ index: 'person~default' }], answerFields: { person: ['name'] } }
+const agent = (patch: Partial<Retriever> = {}): Retriever => ({
   key: 'people', lensKey: 'main', name: 'People', description: null, configVersion: 2, config,
   validation: { valid: true, errors: [], warnings: [] }, createdAt: '', updatedAt: '', ...patch,
 })
@@ -49,16 +49,16 @@ test('the shape guard keeps unavailable references but rejects malformed shapes 
   assert.equal(editableConfig({ ...config, filters: [{ id: 'x', entityType: 'person', field: 'name', path: [null] }] }), false)
   assert.equal(editableConfig({ ...config, answerFields: { person: 'name' } }), false)
   assert.equal(editableConfig({ buckets: [], threshold: 0.3 }), false)
-  assert.equal(isSupportedAgent(agent({ configVersion: 1 })), false)
-  assert.equal(isSupportedAgent(agent()), true)
+  assert.equal(isSupportedRetriever(agent({ configVersion: 1 })), false)
+  assert.equal(isSupportedRetriever(agent()), true)
 })
 
 test('only a saved, unchanged, valid version 2 agent runs — by its key', () => {
-  assert.deepEqual(agentExecution(agent(), false), { mode: 'saved', key: 'people' })
-  assert.match((agentExecution(null, false) as { reason: string }).reason, /Save this retriever to test it/)
-  assert.match((agentExecution(agent(), true) as { reason: string }).reason, /Save them to test/)
-  assert.equal(agentExecution(agent({ validation: { valid: false, errors: ['x'], warnings: [] } }), false).mode, 'blocked')
-  assert.equal(agentExecution(agent({ configVersion: 1 }), false).mode, 'blocked')
+  assert.deepEqual(retrieverExecution(agent(), false), { mode: 'saved', key: 'people' })
+  assert.match((retrieverExecution(null, false) as { reason: string }).reason, /Save this retriever to test it/)
+  assert.match((retrieverExecution(agent(), true) as { reason: string }).reason, /Save them to test/)
+  assert.equal(retrieverExecution(agent({ validation: { valid: false, errors: ['x'], warnings: [] } }), false).mode, 'blocked')
+  assert.equal(retrieverExecution(agent({ configVersion: 1 }), false).mode, 'blocked')
 })
 
 test('dirty compares name, description and config; the write body never carries a key', () => {
@@ -102,7 +102,7 @@ test('filter paths reach own fields and up to two relations in both directions',
 })
 
 test('client problems name what blocks a save', () => {
-  const messages = (c: RetrieverAgentConfig) => draftProblems(c, catalog, schema).map((p) => `${p.path}: ${p.message}`)
+  const messages = (c: RetrieverConfig) => draftProblems(c, catalog, schema).map((p) => `${p.path}: ${p.message}`)
   assert.deepEqual(messages(config), [])
   assert.deepEqual(messages(emptyConfig()), ['indices: Choose at least one search index.'])
   assert.match(messages({ ...config, indices: [{ index: 'gone' }] }).join('\n'), /indices\[0\]\.index: Index gone is not available/)
@@ -154,31 +154,31 @@ const T = { type: 'thread', threadId: 't1' }
 
 test('the stream reader accepts retriever diagnostics and rejects malformed results', async () => {
   const received: unknown[] = []
-  await readRetrieverAgentStream(stream([
+  await readRetrieverStream(stream([
     T,
     { type: 'retriever.diagnostics', plan: { subQueries: [{ indices: ['person~default'], relations: [], query: 'q', variants: [], mode: 'hybrid', filters: [] }] }, searchCalls: 1 },
     { type: 'retriever.diagnostics', results: [{ entityId: 'e1', entityType: 'person', label: 'Ada', subQuery: 0, answerFields: { name: 'Ada' }, matched: { index: 'person~default', partKind: 'self' } }] },
     { type: 'final', reply: 'Ada' },
   ]), (event) => received.push(event), new AbortController().signal)
   assert.equal(received.length, 4)
-  await assert.rejects(readRetrieverAgentStream(stream([T, { type: 'retriever.diagnostics', results: [{ entityId: 'e1' }] }]), () => {}, new AbortController().signal), /Invalid event/)
-  await assert.rejects(readRetrieverAgentStream(stream([T, { type: 'delta', text: 'Partial' }]), () => {}, new AbortController().signal), /Connection closed/)
+  await assert.rejects(readRetrieverStream(stream([T, { type: 'retriever.diagnostics', results: [{ entityId: 'e1' }] }]), () => {}, new AbortController().signal), /Invalid event/)
+  await assert.rejects(readRetrieverStream(stream([T, { type: 'delta', text: 'Partial' }]), () => {}, new AbortController().signal), /Connection closed/)
   // The final answer must be the streamed text.
-  await assert.rejects(readRetrieverAgentStream(stream([T, { type: 'delta', text: 'Ada' }, { type: 'final', reply: 'Bob' }]), () => {}, new AbortController().signal), /Invalid final/)
+  await assert.rejects(readRetrieverStream(stream([T, { type: 'delta', text: 'Ada' }, { type: 'final', reply: 'Bob' }]), () => {}, new AbortController().signal), /Invalid final/)
 })
 
 test('kind events the retriever does not know are ignored; the old unprefixed ones fail the turn', async () => {
   const received: { type: string }[] = []
-  await readRetrieverAgentStream(stream([T, { type: 'retriever.future', x: 1 }, { type: 'agent.tool_call' }, { type: 'final', reply: 'Hi' }]),
+  await readRetrieverStream(stream([T, { type: 'retriever.future', x: 1 }, { type: 'agent.tool_call' }, { type: 'final', reply: 'Hi' }]),
     (event) => received.push(event), new AbortController().signal)
   assert.deepEqual(received.map((e) => e.type), ['thread', 'final'])
-  await assert.rejects(readRetrieverAgentStream(stream([T, { type: 'meta' }]), () => {}, new AbortController().signal), /Invalid event/)
+  await assert.rejects(readRetrieverStream(stream([T, { type: 'meta' }]), () => {}, new AbortController().signal), /Invalid event/)
 })
 
 test('cancelled streams stop before buffered events complete a stale turn', async () => {
   const controller = new AbortController()
   const received: unknown[] = []
-  await assert.rejects(readRetrieverAgentStream(stream([
+  await assert.rejects(readRetrieverStream(stream([
     T, { type: 'retriever.phase', phase: 'plan', status: 'start' }, { type: 'delta', text: 'Stale' }, { type: 'final', reply: 'Stale' },
   ]), (event) => { received.push(event); controller.abort() }, controller.signal), { name: 'AbortError' })
   assert.equal(received.length, 1)
@@ -193,9 +193,9 @@ test('chat and save use the assistant routes and never send browser configuratio
       : new Response(JSON.stringify(agent()), { headers: { 'content-type': 'application/json' } })
   }
   try {
-    await chatRetrieverAgent('example', 'main', 'people', { message: 'Who?', threadId: 't1', diagnostics: true }, () => {}, new AbortController().signal)
+    await chatRetriever('example', 'main', 'people', { message: 'Who?', threadId: 't1', diagnostics: true }, () => {}, new AbortController().signal)
     const reviewed = { key: 'people', ...toInput(draftOf(agent())) }
-    await saveRetrieverAgent('example', 'main', reviewed.key, reviewed)
+    await saveRetriever('example', 'main', reviewed.key, reviewed)
     assert.equal(requests[0].path, '/api/ontologies/example/runtime/lenses/main/ai/assistants/retrievers/people/chat')
     assert.deepEqual(requests[0].body, { message: 'Who?', threadId: 't1', diagnostics: true })
     assert.equal(requests[1].path, '/api/ontologies/example/model/lenses/main/assistants/retrievers/people')

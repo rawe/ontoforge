@@ -1,22 +1,22 @@
 import { Activity, LoaderCircle, RotateCcw, SendHorizonal, Square } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { chatErrorText, threadError } from '@/api/chatStream'
-import { chatRetrieverAgent, type RetrieverAgentConfig, type RetrieverAgentEvent, type RetrieverDiagnostics } from '@/api/retrieverAgents'
+import { chatRetriever, type RetrieverConfig, type RetrieverEvent, type RetrieverDiagnostics } from '@/api/retrievers'
 import type { ChatMessage, RuntimeSchema, SearchCatalogEntry } from '@/api/types'
 import { EXPIRED_TEXT, forgetThread, rememberThread, rememberedThread, restoreThread } from '@/components/ai/chatStore'
 import { Markdown } from '@/components/ai/Markdown'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { RetrieverAgentDiagnostics } from './RetrieverAgentDiagnostics'
-import { mergeDiagnostics, phaseName } from './retrieverAgentModel'
+import { RetrieverDiagnosticsPanel } from './RetrieverDiagnosticsPanel'
+import { mergeDiagnostics, phaseName } from './retrieverModel'
 
 type Turn = { id: string; question: string; reply: string; status: 'pending' | 'complete' | 'failed'; error?: string; diagnostics: RetrieverDiagnostics }
 
-interface RetrieverAgentChatProps {
+interface RetrieverChatProps {
   ontologyKey: string
   lensKey: string
-  /** The agent's key; null = nothing to ask yet. */
+  /** The retriever's key; null = nothing to ask yet. */
   agentKey: string | null
   /** Why questions are blocked (unsaved, invalid, unsupported); null = they run. */
   blockedReason: string | null
@@ -25,7 +25,7 @@ interface RetrieverAgentChatProps {
   /** Remember the thread in the browser and restore it on open (the Workbench); else each mount starts a new one. */
   remember?: boolean
   /** The saved configuration, for readable filter names in the plan; null shows filter ids. */
-  config: RetrieverAgentConfig | null
+  config: RetrieverConfig | null
   catalog: SearchCatalogEntry[] | undefined
   schema: RuntimeSchema | undefined
   /** Shown above the input while there is no turn yet. */
@@ -44,12 +44,12 @@ function restoredTurns(messages: readonly ChatMessage[]): Turn[] {
 }
 
 /**
- * Conversation with one retriever agent on a server thread, with its
+ * Conversation with one retriever on a server thread, with its
  * diagnostics beside or below it. Shared by the Studio test panel and the
  * Workbench chat; remount it (React `key`) to start a new thread, as the
  * test panel does after every save.
  */
-export function RetrieverAgentChat({ ontologyKey, lensKey, agentKey, blockedReason, diagnostics, remember = false, config, catalog, schema, intro, className }: RetrieverAgentChatProps) {
+export function RetrieverChat({ ontologyKey, lensKey, agentKey, blockedReason, diagnostics, remember = false, config, catalog, schema, intro, className }: RetrieverChatProps) {
   const owner = useMemo(() => (remember && agentKey !== null ? { ontologyKey, lensKey, kind: 'retrievers' as const, assistantKey: agentKey } : null), [remember, ontologyKey, lensKey, agentKey])
   const [turns, setTurns] = useState<Turn[]>([])
   const [restoring, setRestoring] = useState(owner !== null)
@@ -105,7 +105,7 @@ export function RetrieverAgentChat({ ontologyKey, lensKey, agentKey, blockedReas
     const save = () => { if (active.current === controller) setTurns([...previous, turn]) }
     setBusy(true); setPhase('Starting …'); setInput(''); setInspected(null); setNotice(null); save()
     try {
-      const onEvent = (event: RetrieverAgentEvent) => {
+      const onEvent = (event: RetrieverEvent) => {
         if (active.current !== controller || controller.signal.aborted) return
         switch (event.type) {
           case 'thread':
@@ -120,7 +120,7 @@ export function RetrieverAgentChat({ ontologyKey, lensKey, agentKey, blockedReas
         }
         save()
       }
-      await chatRetrieverAgent(ontologyKey, lensKey, agentKey, { message: question, threadId: threadId.current ?? undefined, diagnostics }, onEvent, controller.signal)
+      await chatRetriever(ontologyKey, lensKey, agentKey, { message: question, threadId: threadId.current ?? undefined, diagnostics }, onEvent, controller.signal)
     } catch (err) {
       if (active.current !== controller) return
       if (threadError(err) === 'THREAD_NOT_FOUND') {
@@ -166,7 +166,7 @@ export function RetrieverAgentChat({ ontologyKey, lensKey, agentKey, blockedReas
       </section>
       {diagnostics && <aside aria-label="Diagnostics" className="flex max-h-[60vh] min-h-[320px] w-full shrink-0 flex-col border-t @3xl:max-h-none @3xl:w-[340px] @3xl:border-t-0 @3xl:border-l @5xl:w-[420px] @7xl:w-[460px]">
         <div className="border-b px-4 py-3"><h2 className="text-sm font-medium">Diagnostics</h2><p className="mt-1 text-xs text-muted-foreground">How the selected answer was found. Pick another answer with its Diagnostics button.</p></div>
-        {inspectedTurn ? <RetrieverAgentDiagnostics key={inspectedTurn.id} meta={inspectedTurn.diagnostics} question={inspectedTurn.question} status={inspectedTurn.status} config={config} catalog={catalog} schema={schema} />
+        {inspectedTurn ? <RetrieverDiagnosticsPanel key={inspectedTurn.id} meta={inspectedTurn.diagnostics} question={inspectedTurn.question} status={inspectedTurn.status} config={config} catalog={catalog} schema={schema} />
           : <p className="p-4 text-xs text-muted-foreground">Ask a question. Its plan, results, timings and model calls appear here while it runs.</p>}
       </aside>}
     </div>

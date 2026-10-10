@@ -1,14 +1,14 @@
 import { useState } from 'react'
-import type { RetrieverAgentConfig, RetrieverDiagnostics, RetrieverAgentResult } from '@/api/retrieverAgents'
+import type { RetrieverConfig, RetrieverDiagnostics, RetrieverResult } from '@/api/retrievers'
 import type { RuntimeSchema, SearchCatalogEntry } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { matchedViaText } from '@/lib/matchedVia'
 import {
   MODE_LABEL, STEPS, callCounts, formatMs, indexName, stepText, type TurnStatus, modelCallName, phaseName, plannedFilterText, relationName, resultLabel, resultsBySubQuery,
-} from './retrieverAgentModel'
+} from './retrieverModel'
 
-interface Context { config: RetrieverAgentConfig | null; catalog: SearchCatalogEntry[] | undefined; schema: RuntimeSchema | undefined }
+interface Context { config: RetrieverConfig | null; catalog: SearchCatalogEntry[] | undefined; schema: RuntimeSchema | undefined }
 
 function Value({ value, depth = 0 }: { value: unknown; depth?: number }) {
   if (value === null || value === undefined) return <span className="text-muted-foreground">–</span>
@@ -77,7 +77,7 @@ function Plan({ meta, config, catalog, schema }: { meta: RetrieverDiagnostics } 
   </div>
 }
 
-function ResultRow({ result, rank, via, schema }: { result: RetrieverAgentResult; rank: number; via: string | null; schema: RuntimeSchema | undefined }) {
+function ResultRow({ result, rank, via, schema }: { result: RetrieverResult; rank: number; via: string | null; schema: RuntimeSchema | undefined }) {
   const [open, setOpen] = useState(false)
   const type = schema?.entityTypes.find((t) => t.key === result.entityType)
   return <li>
@@ -130,7 +130,7 @@ function ModelCalls({ meta }: { meta: RetrieverDiagnostics }) {
  * Diagnostics of one answer, split along the pipeline so each tab answers
  * one question. No scores.
  */
-export function RetrieverAgentDiagnostics({ meta, question, status, config, catalog, schema }: { meta: RetrieverDiagnostics; question: string; status: TurnStatus } & Context) {
+export function RetrieverDiagnosticsPanel({ meta, question, status, config, catalog, schema }: { meta: RetrieverDiagnostics; question: string; status: TurnStatus } & Context) {
   const [tab, setTab] = useState('overview')
   const tabs = [['overview', 'Overview'], ['plan', 'Plan'], ['results', `Results${meta.results ? ` (${meta.results.length})` : ''}`], ['models', 'Model calls']]
   return <div className="flex min-h-0 flex-1 flex-col text-xs">

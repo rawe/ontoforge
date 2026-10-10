@@ -2,8 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   DEFAULT_RETRIEVER, isStale, questionToSend, resolveRetriever, resultEntities,
-} from '../src/components/retrieverAgent/retrieveModel.ts'
-import { retrieveWithAgent, type RetrieveResponse } from '../src/api/retrieverAgents.ts'
+} from '../src/components/assistants/retrievers/retrieveModel.ts'
+import { retrieveQuestion, type RetrieveResponse } from '../src/api/retrievers.ts'
 
 test('the remembered retriever falls back to Default when the runtime list does not have it', () => {
   const choices = [{ key: DEFAULT_RETRIEVER }, { key: 'alpha' }]
@@ -49,7 +49,7 @@ test('retrieve posts the query to the retriever route and never a configuration'
     return new Response(JSON.stringify({ results: [], limitations: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
   }) as typeof fetch
   try {
-    const result = await retrieveWithAgent('o 1', 'all', '_default', { query: 'Who?' })
+    const result = await retrieveQuestion('o 1', 'all', '_default', { query: 'Who?' })
     assert.deepEqual(result, { results: [], limitations: [] })
     assert.equal(calls[0]!.url, '/api/ontologies/o%201/runtime/lenses/all/ai/assistants/retrievers/_default/retrieve')
     assert.equal(calls[0]!.init.method, 'POST')

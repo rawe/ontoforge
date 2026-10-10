@@ -15,12 +15,12 @@
  *   of.queryHistory.{ontologyKey}.{lensKey} — last 10 run OQL queries
  *   of.chatToolCalls          — "true" | "false": Workbench agent chat shows its
  *                               tool calls in a side panel (default true)
- *   of.retrieverDiagnostics   — "true" | "false": Workbench retriever-agent chat
+ *   of.retrieverDiagnostics   — "true" | "false": Workbench retriever chat
  *                               requests and shows diagnostics
- *   of.retrieverTestMode      — "chat" | "retrieve": the retriever-agent
+ *   of.retrieverTestMode      — "chat" | "retrieve": the retriever
  *                               editor's test panel mode
  *   of.retriever.{ontologyKey}.{lensKey} — key of the palette question mode's
- *                               retriever agent
+ *                               retriever
  */
 
 export const storageKeys = {

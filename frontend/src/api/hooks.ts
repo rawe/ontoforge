@@ -7,7 +7,7 @@ import * as model from './model'
 import * as registry from './registry'
 import * as server from './server'
 import * as runtime from './runtime'
-import { listRetrieverAgents } from './retrieverAgents'
+import { listRetrievers } from './retrievers'
 import { qk } from './queryKeys'
 import type { AssistantKind, EntityInstance, Matched } from './types'
 
@@ -112,11 +112,11 @@ export function useSearchCatalog(ontologyKey: string, lensKey: string, enabled: 
   })
 }
 
-/** Retriever agents of a lens (modeling API, by lens key) with configuration and validation — the Studio's list. */
-export function useRetrieverAgents(ontologyKey: string, lensKey: string, enabled = true) {
+/** Retrievers of a lens (modeling API, by lens key) with configuration and validation — the Studio's list. */
+export function useRetrievers(ontologyKey: string, lensKey: string, enabled = true) {
   return useQuery({
-    queryKey: qk.retrieverAgents(ontologyKey, lensKey),
-    queryFn: () => listRetrieverAgents(ontologyKey, lensKey),
+    queryKey: qk.retrievers(ontologyKey, lensKey),
+    queryFn: () => listRetrievers(ontologyKey, lensKey),
     enabled: enabled && ontologyKey !== '' && lensKey !== '',
     retry: false,
   })

@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import * as model from '@/api/model'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
-import { AGENT_TOOL_NAMES, type AiAgent, type Lens } from '@/api/types'
+import { AGENT_TOOL_NAMES, type Agent, type Lens } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import {
   AlertDialog,
@@ -41,7 +41,7 @@ interface AgentDialogProps {
   /** Modeling agent routes are addressed by lens KEY (not UUID). */
   lensKey: string
   /** null → create mode. */
-  agent: AiAgent | null
+  agent: Agent | null
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -82,7 +82,7 @@ function AgentDialog({
 
   const save = useMutation({
     mutationFn: () =>
-      model.upsertAiAgent(ontologyKey, lensKey, key, {
+      model.upsertAgent(ontologyKey, lensKey, key, {
         name: name.trim(),
         description: description.trim() === '' ? null : description.trim(),
         systemPrompt: systemPrompt.trim() === '' ? null : systemPrompt,
@@ -214,23 +214,23 @@ function AgentDialog({
   )
 }
 
-/** Agents tab: list of AI agent definitions + editor dialog. */
+/** Agents tab: list of agent definitions + editor dialog. */
 export function AgentsTab({ ontologyKey, lens }: { ontologyKey: string; lens: Lens }) {
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [editing, setEditing] = useState<AiAgent | null>(null)
-  const [toDelete, setToDelete] = useState<AiAgent | null>(null)
+  const [editing, setEditing] = useState<Agent | null>(null)
+  const [toDelete, setToDelete] = useState<Agent | null>(null)
 
   // NOTE: modeling agent routes are key-addressed, unlike the other
   // /api/ontologies/{key}/model/lenses/{id}/... routes.
   const agentsQuery = useQuery({
     queryKey: qk.model(ontologyKey, 'lenses', lens.key, 'assistants', 'agents'),
-    queryFn: () => model.listAiAgents(ontologyKey, lens.key),
+    queryFn: () => model.listAgents(ontologyKey, lens.key),
   })
   const agents = agentsQuery.data
 
   const remove = useMutation({
-    mutationFn: (agentKey: string) => model.deleteAiAgent(ontologyKey, lens.key, agentKey),
+    mutationFn: (agentKey: string) => model.deleteAgent(ontologyKey, lens.key, agentKey),
     onSuccess: () => {
       invalidateModeling(queryClient)
       toast.success('Agent deleted')
@@ -241,7 +241,7 @@ export function AgentsTab({ ontologyKey, lens }: { ontologyKey: string; lens: Le
   return (
     <div>
       <div className="mb-3 flex items-center gap-2">
-        <h3 className="text-[13px] font-semibold">AI agents</h3>
+        <h3 className="text-[13px] font-semibold">Agents</h3>
         <span className="text-[13px] text-muted-foreground">{agents?.length ?? 0}</span>
         <Button
           size="sm"

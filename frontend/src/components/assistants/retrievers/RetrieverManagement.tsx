@@ -1,5 +1,5 @@
 /**
- * Management pieces of the retriever-agent editor: the name + key dialog
+ * Management pieces of the retriever editor: the name + key dialog
  * (New, Save as copy), the save bar, the import dialog and the "More" panel
  * with export, copy/move to another lens, raw JSON and delete.
  */
@@ -7,9 +7,9 @@ import { Copy, Save, Undo2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useLenses } from '@/api/hooks'
 import {
-  deleteRetrieverAgent, exportRetrieverAgent, importRetrieverAgent, transferRetrieverAgent,
-  type RetrieverAgent, type RetrieverAgentConfig, type RetrieverAgentExport,
-} from '@/api/retrieverAgents'
+  deleteRetriever, exportRetriever, importRetriever, transferRetriever,
+  type Retriever, type RetrieverConfig, type RetrieverExport,
+} from '@/api/retrievers'
 import { deriveKey, isValidLensResourceKey } from '@/components/studio/lib'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
@@ -18,12 +18,12 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { errorText } from './errorText'
-import { editableConfig, importProblem } from './retrieverAgentModel'
+import { editableConfig, importProblem } from './retrieverModel'
 
 const MAX_KEY_LENGTH = 64
 const selectClass = 'h-8 rounded-md border bg-background px-2 text-sm disabled:opacity-50'
 
-/** Name and key of a new retriever agent (New, Save as copy). Keys are permanent and unique in the lens. */
+/** Name and key of a new retriever (New, Save as copy). Keys are permanent and unique in the lens. */
 export function NameKeyDialog({ open, title, description, confirmLabel, initialName, existingKeys, busy, error, onCancel, onConfirm }: {
   open: boolean; title: string; description: string; confirmLabel: string; initialName: string; existingKeys: readonly string[]
   busy: boolean; error: string; onCancel: () => void; onConfirm: (name: string, key: string) => void
@@ -48,7 +48,7 @@ export function NameKeyDialog({ open, title, description, confirmLabel, initialN
 }
 
 /** The one place that decides whether edits take effect: Save writes them, Discard drops them, Save as copy forks them. */
-export function RetrieverAgentSaveBar({ isNew, dirty, canSave, busy, onSave, onDiscard, onSaveAsCopy }: {
+export function RetrieverSaveBar({ isNew, dirty, canSave, busy, onSave, onDiscard, onSaveAsCopy }: {
   isNew: boolean; dirty: boolean; canSave: boolean; busy: boolean; onSave: () => void; onDiscard: () => void; onSaveAsCopy: () => void
 }) {
   return <div className={cn('space-y-2 rounded-xl border bg-card p-3', (dirty || isNew) && 'border-(--tc-amber-border) bg-(--tc-amber-bg)')}>
@@ -64,10 +64,10 @@ export function RetrieverAgentSaveBar({ isNew, dirty, canSave, busy, onSave, onD
   </div>
 }
 
-/** Create a retriever agent from an exported JSON (file or paste). Existing keys are never replaced. */
+/** Create a retriever from an exported JSON (file or paste). Existing keys are never replaced. */
 export function ImportDialog({ open, ontologyKey, lensKey, existingKeys, onClose, onImported }: {
   open: boolean; ontologyKey: string; lensKey: string; existingKeys: readonly string[]
-  onClose: () => void; onImported: (agent: RetrieverAgent) => void
+  onClose: () => void; onImported: (agent: Retriever) => void
 }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -79,7 +79,7 @@ export function ImportDialog({ open, ontologyKey, lensKey, existingKeys, onClose
     const problem = importProblem(body, existingKeys)
     if (problem !== null) { setError(problem); return }
     setBusy(true)
-    try { onImported(await importRetrieverAgent(ontologyKey, lensKey, body as RetrieverAgentExport)); setText('') }
+    try { onImported(await importRetriever(ontologyKey, lensKey, body as RetrieverExport)); setText('') }
     catch (reason) { setError(errorText(reason)) } finally { setBusy(false) }
   }
   return <Dialog open={open} onOpenChange={(next) => { if (!next && !busy) onClose() }}>
@@ -98,9 +98,9 @@ export function ImportDialog({ open, ontologyKey, lensKey, existingKeys, onClose
 type Confirm = { title: string; description: string; label: string; run: () => Promise<void> }
 
 /** Rare operations, kept out of the way: export, copy or move to another lens, raw JSON, delete. */
-export function RetrieverAgentMore({ ontologyKey, lensKey, agent, config, unsupported, disabled, onBusy, onDeleted, onConfig }: {
-  ontologyKey: string; lensKey: string; agent: RetrieverAgent; config: RetrieverAgentConfig; unsupported: boolean; disabled: boolean
-  onBusy: (busy: boolean) => void; onDeleted: () => void; onConfig: (config: RetrieverAgentConfig) => void
+export function RetrieverMore({ ontologyKey, lensKey, agent, config, unsupported, disabled, onBusy, onDeleted, onConfig }: {
+  ontologyKey: string; lensKey: string; agent: Retriever; config: RetrieverConfig; unsupported: boolean; disabled: boolean
+  onBusy: (busy: boolean) => void; onDeleted: () => void; onConfig: (config: RetrieverConfig) => void
 }) {
   const lenses = useLenses(ontologyKey)
   const otherLenses = lenses.data?.filter((lens) => lens.key !== lensKey) ?? []
@@ -123,9 +123,9 @@ export function RetrieverAgentMore({ ontologyKey, lensKey, agent, config, unsupp
     finally { if (active.current === controller) { active.current = null; setBusy(false); onBusy(false) } }
   }
   const download = () => work(async (signal) => {
-    const exported = await exportRetrieverAgent(ontologyKey, lensKey, agent.key, signal)
+    const exported = await exportRetriever(ontologyKey, lensKey, agent.key, signal)
     const url = URL.createObjectURL(new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' }))
-    const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${agent.key}.retriever-agent.json`; anchor.click()
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${agent.key}.retriever.json`; anchor.click()
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   })
 
@@ -140,7 +140,7 @@ export function RetrieverAgentMore({ ontologyKey, lensKey, agent, config, unsupp
           title: kind === 'copy' ? 'Copy to another lens?' : 'Move to another lens?', label: kind === 'copy' ? 'Copy' : 'Move',
           description: `${agent.name} (${agent.key}) → lens ${targetLensKey}. ${kind === 'copy' ? 'This retriever stays here.' : 'It is removed from this lens.'} Unsaved changes are not included.`,
           run: () => work(async (signal) => {
-            await transferRetrieverAgent(ontologyKey, lensKey, agent.key, kind, { targetLensKey, targetKey: agent.key }, signal)
+            await transferRetriever(ontologyKey, lensKey, agent.key, kind, { targetLensKey, targetKey: agent.key }, signal)
             if (kind === 'move') onDeleted(); else setNotice(`Copied to lens ${targetLensKey}.`)
           }),
         })}>{kind === 'copy' ? 'Copy there' : 'Move there'}</Button>)}</div>
@@ -150,7 +150,7 @@ export function RetrieverAgentMore({ ontologyKey, lensKey, agent, config, unsupp
         <Button size="sm" variant="outline" disabled={locked} onClick={() => { try { const next: unknown = JSON.parse(rawConfig.current?.value ?? ''); if (!editableConfig(next)) throw new Error('Unsupported configuration shape. Keep indices, filters, answerFields, threshold and answerFieldCharacters.'); onConfig(next); setError('') } catch (reason) { setError(errorText(reason)) } }}>Apply to editor</Button></section>
       <section className="space-y-2 border-t pt-3"><h3 className="font-medium text-destructive">Delete</h3><p className="text-muted-foreground">Deletes this retriever. Indices and entity data are not touched. This cannot be undone.</p>
         <Button size="sm" variant="destructive" disabled={locked} onClick={() => setConfirm({ title: 'Delete retriever?', label: 'Delete', description: `Deletes ${agent.name} (${agent.key}) from ${lensKey}. This cannot be undone.`,
-          run: () => work(async (signal) => { await deleteRetrieverAgent(ontologyKey, lensKey, agent.key, signal); onDeleted() }) })}>Delete retriever</Button></section>
+          run: () => work(async (signal) => { await deleteRetriever(ontologyKey, lensKey, agent.key, signal); onDeleted() }) })}>Delete retriever</Button></section>
       {notice && <p role="status" className="text-muted-foreground">{notice}</p>}
       {error && <p role="alert" className="whitespace-pre-wrap break-words text-destructive">{error}</p>}
     </div>

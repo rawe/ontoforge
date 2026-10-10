@@ -5,14 +5,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 
 /**
- * What one index lets a retriever agent match: its entries per entity,
+ * What one index lets a retriever match: its entries per entity,
  * composed from the schema by the index preview. Relation entries of
- * groups the agent leaves out are shown dimmed — the agent never searches them.
+ * groups the retriever leaves out are shown dimmed — the retriever never searches them.
  */
 export function IndexAnatomy({ ontologyKey, indexKey, relations }: {
   ontologyKey: string
   indexKey: string
-  /** The relation groups the agent searches; undefined: all of them. */
+  /** The relation groups the retriever searches; undefined: all of them. */
   relations: string[] | undefined
 }) {
   const record = useSearchIndex(ontologyKey, indexKey).data
@@ -38,7 +38,7 @@ export function IndexAnatomy({ ontologyKey, indexKey, relations }: {
       const searched = part.partKind !== 'relation' || relations === undefined || relations.includes(part.relationType ?? '')
       const caption = part.partKind === 'self' ? <>One own entry per {rootName}</>
         : part.partKind === 'passage' ? <>One passage entry per chunk of {documentName ?? 'the document'}</>
-        : <>One “{label}” entry per {relationName} relation{searched ? '' : ' — not searched by this agent'}</>
+        : <>One “{label}” entry per {relationName} relation{searched ? '' : ' — not searched by this retriever'}</>
       return <div key={`${part.partKind}-${part.groupNo}`} className={cn(!searched && 'opacity-50')}>
         <EntryPreview part={part} types={root && partTypes(schema, root.key, part)} caption={caption}
           semantic={definition.semantic.enabled} keyword={definition.keyword.enabled} stale={false}

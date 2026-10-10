@@ -2,7 +2,7 @@ import { MessagesSquare, Sparkles } from 'lucide-react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useFeatures, useRuntimeSchema } from '@/api/hooks'
 import { ChatTab } from '@/components/ai/ChatTab'
-import { RetrieverAgentTab } from '@/components/ai/RetrieverAgentTab'
+import { RetrieverTab } from '@/components/ai/RetrieverTab'
 import { EmptyState } from '@/components/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -79,7 +79,7 @@ export function AiPage() {
       ) : (
         <>
           <TabsContent value="retriever" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-            {tab === 'retriever' && <RetrieverAgentTab key={`${ontologyKey}/${lensKey}`} ontologyKey={ontologyKey} lensKey={lensKey} />}
+            {tab === 'retriever' && <RetrieverTab key={`${ontologyKey}/${lensKey}`} ontologyKey={ontologyKey} lensKey={lensKey} />}
           </TabsContent>
           <TabsContent
             value="chat"

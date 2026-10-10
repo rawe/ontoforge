@@ -7,10 +7,10 @@ import { RetrievalResults } from './RetrievalResults'
 import { MAX_QUESTION, questionToSend } from './retrieveModel'
 import { useRetrieve } from './useRetrieve'
 
-interface RetrieverAgentRetrieveProps {
+interface RetrieverRetrieveProps {
   ontologyKey: string
   lensKey: string
-  /** The saved agent's key; null = nothing to ask yet. */
+  /** The saved retriever's key; null = nothing to ask yet. */
   agentKey: string | null
   /** Why questions are blocked (unsaved, invalid, unsupported); null = they run. */
   blockedReason: string | null
@@ -19,11 +19,11 @@ interface RetrieverAgentRetrieveProps {
 }
 
 /**
- * The test panel's Retrieve mode: one question to the saved agent and the
+ * The test panel's Retrieve mode: one question to the saved retriever and the
  * found entities without an answer — results only, no diagnostics. Remount
- * it (React `key`) when the saved agent changes: saving clears the result.
+ * it (React `key`) when the saved retriever changes: saving clears the result.
  */
-export function RetrieverAgentRetrieve({ ontologyKey, lensKey, agentKey, blockedReason, catalog, schema }: RetrieverAgentRetrieveProps) {
+export function RetrieverRetrieve({ ontologyKey, lensKey, agentKey, blockedReason, catalog, schema }: RetrieverRetrieveProps) {
   const [input, setInput] = useState('')
   const canAsk = agentKey !== null && blockedReason === null
   const retrieve = useRetrieve(ontologyKey, lensKey, canAsk ? agentKey : null)

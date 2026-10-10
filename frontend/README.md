@@ -3,7 +3,7 @@
 The OntoForge frontend — a single-page app. The start page (`/`) lists the server's ontologies; each ontology has two surfaces:
 
 - **Workbench** (`/o/:ontologyKey/w/:lensKey`) — work with instance data through one lens: overview dashboard, schema-driven type tables, entity detail, Explorer canvas, OQL query workbench, Assistants (agent chat, retriever chat).
-- **Studio** (`/o/:ontologyKey/studio`) — design one ontology: entity/relation type editors, lenses (scope, agents, retriever agents with a test panel, saved queries, connect), search indices and search settings, export/import.
+- **Studio** (`/o/:ontologyKey/studio`) — design one ontology: entity/relation type editors, lenses (scope, agents, retrievers with a test panel, saved queries, connect), search indices and search settings, export/import.
 
 What the surfaces offer: [../docs/product-surface.md](../docs/product-surface.md).
 System architecture: [../docs/architecture.md](../docs/architecture.md).
@@ -48,9 +48,9 @@ src/
 │   ├── entity/  # entity detail building blocks
 │   ├── query/   # query console (OQL) + saved-query library
 │   ├── ai/      # Assistants page tabs: agent chat, retriever chat
-│   ├── retrieverAgent/ # retriever-agent editor parts, chat + diagnostics (Studio test panel and Workbench)
+│   ├── assistants/retrievers/ # retriever editor parts, chat + diagnostics (Studio test panel and Workbench)
 │   ├── search/  # Studio Search area: index list parts, index designer, managed index view
-│   ├── studio/  # Studio editors (types, scope, agents, retriever agents, saved queries, transfer)
+│   ├── studio/  # Studio editors (types, scope, agents, retrievers, saved queries, transfer)
 │   └── home/    # Workbench Home cards
 ├── lib/         # displayLabel, matchedVia, typeColors, storage (of.* localStorage keys), recents
 ├── pages/       # route components (StartPage, workbench/, studio/)

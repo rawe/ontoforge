@@ -2,9 +2,9 @@ import { ExternalLink } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAssistants, useFeatures, useLenses, useRuntimeSchema, useSearchCatalog } from '@/api/hooks'
-import { RetrieverAgentChat } from '@/components/retrieverAgent/RetrieverAgentChat'
-import { errorText } from '@/components/retrieverAgent/errorText'
-import { DEFAULT_RETRIEVER } from '@/components/retrieverAgent/retrieveModel'
+import { RetrieverChat } from '@/components/assistants/retrievers/RetrieverChat'
+import { errorText } from '@/components/assistants/retrievers/errorText'
+import { DEFAULT_RETRIEVER } from '@/components/assistants/retrievers/retrieveModel'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -13,13 +13,13 @@ import { readString, storageKeys, writeString } from '@/lib/storage'
 const selectClass = 'h-8 rounded-md border bg-background px-2 text-sm disabled:opacity-50'
 
 /**
- * Workbench AI → Retriever: chat with one of the lens's retriever agents
- * from the runtime list — the built-in default first. The agent is picked
+ * Workbench AI → Retriever: chat with one of the lens's retrievers
+ * from the runtime list — the built-in default first. The retriever is picked
  * in the header (`?agent=`, else Default); a question to one the lens
  * cannot run shows the server's refusal. Authoring lives in the Studio lens
- * detail ("Edit in Studio") — the default agent has no editor.
+ * detail ("Edit in Studio") — the default retriever has no editor.
  */
-export function RetrieverAgentTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
+export function RetrieverTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
   const features = useFeatures().data
   const supported = features?.searchIndices === true
   const agents = useAssistants(ontologyKey, lensKey, 'retrievers', supported)
@@ -31,7 +31,7 @@ export function RetrieverAgentTab({ ontologyKey, lensKey }: { ontologyKey: strin
   const requested = searchParams.get('agent')
   const resolvedKey = agents.data === undefined ? null
     : agents.data.find((a) => a.key === requested)?.key ?? DEFAULT_RETRIEVER
-  // The URL always names the agent shown (deep links, "Edit in Studio"), also when it was picked by default.
+  // The URL always names the retriever shown (deep links, "Edit in Studio"), also when it was picked by default.
   useEffect(() => {
     if (resolvedKey === null || resolvedKey === requested) return
     setSearchParams((current) => { const next = new URLSearchParams(current); next.set('agent', resolvedKey); return next }, { replace: true })
@@ -68,7 +68,7 @@ export function RetrieverAgentTab({ ontologyKey, lensKey }: { ontologyKey: strin
       <label className="ml-auto flex cursor-pointer items-center gap-2 text-xs" title="Stream the search plan, results, timings and model calls with each answer">
         <Checkbox aria-label="Show diagnostics" checked={diagnostics} onCheckedChange={(checked) => { setDiagnostics(checked === true); writeString(storageKeys.retrieverDiagnostics, String(checked === true)) }} />Show diagnostics</label>
     </div>
-    <RetrieverAgentChat key={agent?.key ?? 'none'} ontologyKey={ontologyKey} lensKey={lensKey}
+    <RetrieverChat key={agent?.key ?? 'none'} ontologyKey={ontologyKey} lensKey={lensKey}
       agentKey={agent?.key ?? null} blockedReason={null} diagnostics={diagnostics} remember
       config={null} catalog={catalog.data} schema={schema.data}
       intro={<div className="mx-auto max-w-lg py-12 text-sm text-muted-foreground">{isDefault

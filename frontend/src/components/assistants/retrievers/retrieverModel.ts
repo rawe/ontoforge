@@ -1,19 +1,19 @@
 /**
- * Pure helpers of the retriever-agent editor, test panel and Workbench chat:
+ * Pure helpers of the retriever editor, test panel and Workbench chat:
  * config v2 draft edits, client-side checks, execution rule, filter paths
  * and diagnostics formatting. No React, no runtime imports — unit-tested
  * with `node --test`.
  */
 import type {
   PlanSubQuery,
-  RetrieverAgent,
-  RetrieverAgentConfig,
-  RetrieverAgentFilter,
+  Retriever,
+  RetrieverConfig,
+  RetrieverFilter,
   RetrieverDiagnostics,
-  RetrieverAgentPathStep,
-  RetrieverAgentResult,
+  RetrieverPathStep,
+  RetrieverResult,
   SearchMode,
-} from '@/api/retrieverAgents'
+} from '@/api/retrievers'
 import type { SearchCatalogEntry, ValidationError } from '@/api/types'
 
 /** Client defaults (the server has no catalog endpoint for them). */
@@ -26,19 +26,19 @@ export const MAX_FILTER_HOPS = 2
 export const CONFIG_VERSION = 2
 
 /** The parts of a lens schema the editor reads (a `RuntimeSchema` fits). */
-export interface AgentSchemaProperty { key: string; displayName: string; dataType: string }
-export interface AgentSchemaType {
+export interface RetrieverSchemaProperty { key: string; displayName: string; dataType: string }
+export interface RetrieverSchemaType {
   key: string
   displayName: string
   nameProperty: string | null
-  properties: readonly AgentSchemaProperty[]
+  properties: readonly RetrieverSchemaProperty[]
 }
-export interface AgentSchema {
-  entityTypes: readonly AgentSchemaType[]
+export interface RetrieverSchema {
+  entityTypes: readonly RetrieverSchemaType[]
   relationTypes: readonly { key: string; displayName: string; fromEntityTypeKey: string; toEntityTypeKey: string }[]
 }
 
-export function emptyConfig(): RetrieverAgentConfig {
+export function emptyConfig(): RetrieverConfig {
   return { indices: [], filters: [], answerFields: {}, threshold: DEFAULT_THRESHOLD, answerFieldCharacters: DEFAULT_ANSWER_FIELD_CHARACTERS }
 }
 
@@ -48,7 +48,7 @@ const record = (item: unknown): item is Record<string, unknown> => typeof item =
 const strings = (items: unknown): items is string[] => Array.isArray(items) && items.every((item) => typeof item === 'string')
 
 /** Keeps references the lens no longer has (for repair) while rejecting shapes that would break the editor. */
-export function editableConfig(value: unknown): value is RetrieverAgentConfig {
+export function editableConfig(value: unknown): value is RetrieverConfig {
   if (!record(value)) return false
   const { indices, filters, answerFields, threshold, answerFieldCharacters } = value
   return Array.isArray(indices) && indices.every((item) => record(item) && typeof item.index === 'string' && (item.relations === undefined || strings(item.relations))) &&
@@ -60,35 +60,35 @@ export function editableConfig(value: unknown): value is RetrieverAgentConfig {
 }
 
 /** Version 2 with an editable shape — anything else is preserved but can only be exported or deleted. */
-export const isSupportedAgent = (agent: Pick<RetrieverAgent, 'configVersion' | 'config'>) =>
+export const isSupportedRetriever = (agent: Pick<Retriever, 'configVersion' | 'config'>) =>
   agent.configVersion === CONFIG_VERSION && editableConfig(agent.config)
 
-export interface AgentDraft { name: string; description: string; config: RetrieverAgentConfig }
+export interface RetrieverDraft { name: string; description: string; config: RetrieverConfig }
 
-export function draftOf(agent: RetrieverAgent | null): AgentDraft {
+export function draftOf(agent: Retriever | null): RetrieverDraft {
   return {
     name: agent?.name ?? '',
     description: agent?.description ?? '',
-    config: agent !== null && isSupportedAgent(agent) ? agent.config : emptyConfig(),
+    config: agent !== null && isSupportedRetriever(agent) ? agent.config : emptyConfig(),
   }
 }
 
-export const sameDraft = (a: AgentDraft, b: AgentDraft) =>
+export const sameDraft = (a: RetrieverDraft, b: RetrieverDraft) =>
   a.name === b.name && a.description === b.description && JSON.stringify(a.config) === JSON.stringify(b.config)
 
 /** The write body of a draft. */
-export function toInput(draft: AgentDraft) {
+export function toInput(draft: RetrieverDraft) {
   return { name: draft.name.trim(), description: draft.description.trim() || null, configVersion: CONFIG_VERSION as 2, config: draft.config }
 }
 
 /**
- * An agent runs only from its saved, unchanged, valid version 2 configuration.
+ * A retriever runs only from its saved, unchanged, valid version 2 configuration.
  * The editor's test panel asks this; elsewhere the server's refusal says why.
  */
-export function agentExecution(agent: Pick<RetrieverAgent, 'key' | 'configVersion' | 'config' | 'validation'> | null, dirty: boolean):
+export function retrieverExecution(agent: Pick<Retriever, 'key' | 'configVersion' | 'config' | 'validation'> | null, dirty: boolean):
   { mode: 'saved'; key: string } | { mode: 'blocked'; reason: string } {
   if (agent === null) return { mode: 'blocked', reason: 'Save this retriever to test it.' }
-  if (!isSupportedAgent(agent)) return { mode: 'blocked', reason: 'Unsupported saved configuration. Export it, or delete it.' }
+  if (!isSupportedRetriever(agent)) return { mode: 'blocked', reason: 'Unsupported saved configuration. Export it, or delete it.' }
   if (dirty) return { mode: 'blocked', reason: 'Unsaved changes. Save them to test; questions use the saved configuration.' }
   if (!agent.validation.valid) return { mode: 'blocked', reason: 'This retriever is invalid in the current lens. Repair and save it before asking.' }
   return { mode: 'saved', key: agent.key }
@@ -96,20 +96,20 @@ export function agentExecution(agent: Pick<RetrieverAgent, 'key' | 'configVersio
 
 /* ---------------------------------- indices -------------------------------- */
 
-const scalar = (p: AgentSchemaProperty) => p.dataType !== 'document'
+const scalar = (p: RetrieverSchemaProperty) => p.dataType !== 'document'
 
 /** Fields an answer may use: every visible property; documents are truncated like any value. */
-export const answerFieldOptions = (type: AgentSchemaType) => type.properties
+export const answerFieldOptions = (type: RetrieverSchemaType) => type.properties
 
 /** The name property, else the first non-document field. */
-export function defaultAnswerFields(type: AgentSchemaType | undefined): string[] {
+export function defaultAnswerFields(type: RetrieverSchemaType | undefined): string[] {
   if (type === undefined) return []
   const name = type.properties.find((p) => p.key === type.nameProperty)
   return name !== undefined ? [name.key] : type.properties.filter(scalar).slice(0, 1).map((p) => p.key)
 }
 
 /** Result types: the root types of the chosen indices the lens offers, in config order. */
-export function resultTypes(config: RetrieverAgentConfig, catalog: readonly SearchCatalogEntry[]): string[] {
+export function resultTypes(config: RetrieverConfig, catalog: readonly SearchCatalogEntry[]): string[] {
   const types: string[] = []
   for (const ref of config.indices) {
     const type = catalog.find((entry) => entry.key === ref.index)?.entityType
@@ -119,7 +119,7 @@ export function resultTypes(config: RetrieverAgentConfig, catalog: readonly Sear
 }
 
 /** Add an index; a new result type gets default answer fields. */
-export function withIndex(config: RetrieverAgentConfig, entry: SearchCatalogEntry, schema: AgentSchema | undefined): RetrieverAgentConfig {
+export function withIndex(config: RetrieverConfig, entry: SearchCatalogEntry, schema: RetrieverSchema | undefined): RetrieverConfig {
   if (config.indices.some((ref) => ref.index === entry.key)) return config
   const answerFields = entry.entityType in config.answerFields ? config.answerFields
     : { ...config.answerFields, [entry.entityType]: defaultAnswerFields(schema?.entityTypes.find((t) => t.key === entry.entityType)) }
@@ -127,7 +127,7 @@ export function withIndex(config: RetrieverAgentConfig, entry: SearchCatalogEntr
 }
 
 /** Remove an index; when no other chosen index has its root type, that type's answer fields and filters go too. */
-export function withoutIndex(config: RetrieverAgentConfig, key: string, catalog: readonly SearchCatalogEntry[]): RetrieverAgentConfig {
+export function withoutIndex(config: RetrieverConfig, key: string, catalog: readonly SearchCatalogEntry[]): RetrieverConfig {
   const indices = config.indices.filter((ref) => ref.index !== key)
   const type = catalog.find((entry) => entry.key === key)?.entityType
   const next = { ...config, indices }
@@ -141,7 +141,7 @@ export function withoutIndex(config: RetrieverAgentConfig, key: string, catalog:
 export const groupRelationTypes = (entry: SearchCatalogEntry) => [...new Set(entry.relations.map((g) => g.relationType))]
 
 /** `undefined` = all relation groups of the index. */
-export function withRelations(config: RetrieverAgentConfig, key: string, relations: string[] | undefined): RetrieverAgentConfig {
+export function withRelations(config: RetrieverConfig, key: string, relations: string[] | undefined): RetrieverConfig {
   return {
     ...config,
     indices: config.indices.map((ref) => {
@@ -153,19 +153,19 @@ export function withRelations(config: RetrieverAgentConfig, key: string, relatio
 
 /* ---------------------------------- filters -------------------------------- */
 
-export interface PathChoice { key: string; path: RetrieverAgentPathStep[]; label: string; target: AgentSchemaType }
+export interface PathChoice { key: string; path: RetrieverPathStep[]; label: string; target: RetrieverSchemaType }
 
-export const pathKey = (path: readonly RetrieverAgentPathStep[]) => path.map((p) => `${p.relationTypeKey}:${p.direction}`).join('/')
+export const pathKey = (path: readonly RetrieverPathStep[]) => path.map((p) => `${p.relationTypeKey}:${p.direction}`).join('/')
 
 /** Own fields plus every visible path of up to two relations, both directions, without revisiting a type. */
-export function filterChoices(schema: AgentSchema, startKey: string): PathChoice[] {
+export function filterChoices(schema: RetrieverSchema, startKey: string): PathChoice[] {
   const start = schema.entityTypes.find((t) => t.key === startKey)
   if (start === undefined) return []
   const choices: PathChoice[] = [{ key: '', path: [], label: start.displayName, target: start }]
-  function visit(type: AgentSchemaType, path: RetrieverAgentPathStep[], labels: string[], visited: string[]) {
+  function visit(type: RetrieverSchemaType, path: RetrieverPathStep[], labels: string[], visited: string[]) {
     if (path.length === MAX_FILTER_HOPS) return
     for (const relation of schema.relationTypes) {
-      const directions: RetrieverAgentPathStep['direction'][] = []
+      const directions: RetrieverPathStep['direction'][] = []
       if (relation.fromEntityTypeKey === type.key) directions.push('outgoing')
       if (relation.toEntityTypeKey === type.key) directions.push('incoming')
       for (const direction of directions) {
@@ -184,7 +184,7 @@ export function filterChoices(schema: AgentSchema, startKey: string): PathChoice
 }
 
 /** Fields a filter offers: visible non-document properties of the reached type (any visible field stays valid). */
-export const filterFieldOptions = (type: AgentSchemaType) => type.properties.filter(scalar)
+export const filterFieldOptions = (type: RetrieverSchemaType) => type.properties.filter(scalar)
 
 function uniqueId(base: string, taken: readonly string[]): string {
   const stem = base.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^[^a-z]+|_+$/g, '') || 'filter'
@@ -195,7 +195,7 @@ function uniqueId(base: string, taken: readonly string[]): string {
 }
 
 /** A filter on the choice's reached type; compares its name property, else its first field. The id names it for the planner. */
-export function newFilter(config: RetrieverAgentConfig, entityType: string, choice: PathChoice): RetrieverAgentFilter {
+export function newFilter(config: RetrieverConfig, entityType: string, choice: PathChoice): RetrieverFilter {
   const fields = filterFieldOptions(choice.target)
   const field = fields.find((p) => p.key === choice.target.nameProperty)?.key ?? fields[0]?.key ?? ''
   const base = choice.path.length === 0 ? field : `${choice.target.key}_${field}`
@@ -203,7 +203,7 @@ export function newFilter(config: RetrieverAgentConfig, entityType: string, choi
 }
 
 /** "Person · works for → Company · City" — the readable form of a filter, also for diagnostics. */
-export function filterLabel(filter: RetrieverAgentFilter, schema: AgentSchema | undefined): string {
+export function filterLabel(filter: RetrieverFilter, schema: RetrieverSchema | undefined): string {
   const choice = schema === undefined ? undefined : filterChoices(schema, filter.entityType).find((c) => c.key === pathKey(filter.path))
   if (choice === undefined) return filter.id
   const field = choice.target.properties.find((p) => p.key === filter.field)?.displayName ?? filter.field
@@ -216,7 +216,7 @@ export function filterLabel(filter: RetrieverAgentFilter, schema: AgentSchema | 
  * Client checks of a draft, worded for the editor. The server validates
  * again on save and reports what the lens no longer offers.
  */
-export function draftProblems(config: RetrieverAgentConfig, catalog: readonly SearchCatalogEntry[] | undefined, schema: AgentSchema | undefined): ValidationError[] {
+export function draftProblems(config: RetrieverConfig, catalog: readonly SearchCatalogEntry[] | undefined, schema: RetrieverSchema | undefined): ValidationError[] {
   const problems: ValidationError[] = []
   if (config.indices.length === 0) problems.push({ path: 'indices', message: 'Choose at least one search index.' })
   config.indices.forEach((ref, i) => {
@@ -336,26 +336,26 @@ export const indexName = (key: string, catalog: readonly SearchCatalogEntry[] | 
   catalog?.find((entry) => entry.key === key)?.name ?? key
 
 /** A relation group's label in the given indices, else the relation type's display name. */
-export function relationName(key: string, indices: readonly string[], catalog: readonly SearchCatalogEntry[] | undefined, schema: AgentSchema | undefined): string {
+export function relationName(key: string, indices: readonly string[], catalog: readonly SearchCatalogEntry[] | undefined, schema: RetrieverSchema | undefined): string {
   const label = catalog?.filter((entry) => indices.includes(entry.key)).flatMap((entry) => entry.relations)
     .find((group) => group.relationType === key && group.label !== null)?.label
   return label ?? schema?.relationTypes.find((r) => r.key === key)?.displayName ?? key
 }
 
 /** Results per planned sub-query, in plan order; results of an unknown sub-query come last. */
-export function resultsBySubQuery(meta: RetrieverDiagnostics): { subQuery: number; plan: PlanSubQuery | null; results: RetrieverAgentResult[] }[] {
+export function resultsBySubQuery(meta: RetrieverDiagnostics): { subQuery: number; plan: PlanSubQuery | null; results: RetrieverResult[] }[] {
   const planned = meta.plan?.subQueries ?? []
-  const groups = new Map<number, RetrieverAgentResult[]>()
+  const groups = new Map<number, RetrieverResult[]>()
   for (const result of meta.results ?? []) groups.set(result.subQuery, [...(groups.get(result.subQuery) ?? []), result])
   return [...groups.keys()].sort((a, b) => a - b).map((subQuery) => ({ subQuery, plan: planned[subQuery] ?? null, results: groups.get(subQuery) ?? [] }))
 }
 
 /** "City = Berlin (from “in Berlin”)" for one planned filter. */
-export function plannedFilterText(filter: PlanSubQuery['filters'][number], config: RetrieverAgentConfig | null, schema: AgentSchema | undefined): string {
+export function plannedFilterText(filter: PlanSubQuery['filters'][number], config: RetrieverConfig | null, schema: RetrieverSchema | undefined): string {
   const configured = config?.filters.find((f) => f.id === filter.id)
   const label = configured === undefined ? filter.id : filterLabel(configured, schema)
   return `${label} = ${filter.value}${filter.quote ? ` (from “${filter.quote}”)` : ''}`
 }
 
 /** A result's display label: its label, else the truncated id. */
-export const resultLabel = (result: RetrieverAgentResult) => result.label ?? result.entityId.slice(0, 12)
+export const resultLabel = (result: RetrieverResult) => result.label ?? result.entityId.slice(0, 12)

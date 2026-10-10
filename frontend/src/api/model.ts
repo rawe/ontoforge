@@ -6,8 +6,8 @@
 
 import { buildQuery, request } from './http'
 import type {
-  AiAgent,
-  AiAgentInput,
+  Agent,
+  AgentInput,
   EntityType,
   EntityTypeInput,
   JsonValue,
@@ -277,26 +277,26 @@ export const importSchema = (ontologyKey: string, data: Record<string, JsonValue
     body: data,
   })
 
-/* ---------------------------------- AI agents -------------------------------- */
+/* ---------------------------------- Agents ---------------------------------- */
 /* Unlike the routes above, assistant and saved-query routes address the lens
    by its KEY, not its UUID. The built-in default agent is no modeling resource. */
 
-export const listAiAgents = (ontologyKey: string, lensKey: string) =>
-  request<AiAgent[]>(`${base(ontologyKey)}/lenses/${lensKey}/assistants/agents`)
+export const listAgents = (ontologyKey: string, lensKey: string) =>
+  request<Agent[]>(`${base(ontologyKey)}/lenses/${lensKey}/assistants/agents`)
 
 /** Upsert — 201 created / 200 updated. */
-export const upsertAiAgent = (
+export const upsertAgent = (
   ontologyKey: string,
   lensKey: string,
   agentKey: string,
-  body: AiAgentInput,
+  body: AgentInput,
 ) =>
-  request<AiAgent>(`${base(ontologyKey)}/lenses/${lensKey}/assistants/agents/${agentKey}`, {
+  request<Agent>(`${base(ontologyKey)}/lenses/${lensKey}/assistants/agents/${agentKey}`, {
     method: 'PUT',
     body,
   })
 
-export const deleteAiAgent = (ontologyKey: string, lensKey: string, agentKey: string) =>
+export const deleteAgent = (ontologyKey: string, lensKey: string, agentKey: string) =>
   request<undefined>(`${base(ontologyKey)}/lenses/${lensKey}/assistants/agents/${agentKey}`, {
     method: 'DELETE',
   })

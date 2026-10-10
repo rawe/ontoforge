@@ -1,6 +1,6 @@
 import { ChevronRight, Plus, Trash2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import type { RetrieverAgentConfig, RetrieverAgentFilter } from '@/api/retrieverAgents'
+import type { RetrieverConfig, RetrieverFilter } from '@/api/retrievers'
 import type { RuntimeSchema, SearchCatalogEntry, ValidationError } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
 import { Badge } from '@/components/ui/badge'
@@ -14,15 +14,15 @@ import {
   MAX_ANSWER_FIELDS, MAX_ANSWER_FIELD_CHARACTERS, MIN_ANSWER_FIELD_CHARACTERS,
   answerFieldOptions, filterChoices, filterFieldOptions, filterLabel, groupRelationTypes, newFilter, pathKey, resultTypes,
   withIndex, withRelations, withoutIndex,
-} from './retrieverAgentModel'
+} from './retrieverModel'
 
 const selectClass = 'h-8 rounded-md border bg-background px-2 text-sm disabled:opacity-50'
 const KIND_LABEL: Record<SearchCatalogEntry['kind'], string> = { default: 'default', passage: 'passages', custom: 'custom' }
 
 interface ConfigEditorProps {
   ontologyKey: string
-  config: RetrieverAgentConfig
-  onChange: (config: RetrieverAgentConfig) => void
+  config: RetrieverConfig
+  onChange: (config: RetrieverConfig) => void
   catalog: SearchCatalogEntry[]
   schema: RuntimeSchema
   disabled: boolean
@@ -41,18 +41,18 @@ function Section({ id, title, description, issues, children }: { id: string; tit
 const at = (issues: ValidationError[], prefix: string) => issues.filter((i) => i.path === prefix || i.path.startsWith(`${prefix}[`) || i.path.startsWith(`${prefix}.`))
 
 /**
- * Editor of a retriever agent's config v2: indices (with relation groups),
+ * Editor of a retriever's config v2: indices (with relation groups),
  * hard filters, answer fields per result type, threshold and answer size.
  * Controlled; the caller owns the draft and the Save.
  */
-export function RetrieverAgentConfigEditor({ ontologyKey, config, onChange, catalog, schema, disabled, issues }: ConfigEditorProps) {
+export function RetrieverConfigEditor({ ontologyKey, config, onChange, catalog, schema, disabled, issues }: ConfigEditorProps) {
   const types = resultTypes(config, catalog)
   const typeName = (key: string) => schema.entityTypes.find((t) => t.key === key)?.displayName ?? key
   const relationLabel = (entry: SearchCatalogEntry, relationType: string) =>
     entry.relations.find((g) => g.relationType === relationType && g.label !== null)?.label ?? schema.relationTypes.find((r) => r.key === relationType)?.displayName ?? relationType
   const byType = [...new Set(catalog.map((entry) => entry.entityType))].map((type) => ({ type, entries: catalog.filter((entry) => entry.entityType === type) }))
   const unavailable = config.indices.filter((ref) => !catalog.some((entry) => entry.key === ref.index))
-  const setFilter = (i: number, filter: RetrieverAgentFilter) => onChange({ ...config, filters: config.filters.map((f, j) => (j === i ? filter : f)) })
+  const setFilter = (i: number, filter: RetrieverFilter) => onChange({ ...config, filters: config.filters.map((f, j) => (j === i ? filter : f)) })
 
   return <div className="grid gap-4">
     <RetrievalPipeline />

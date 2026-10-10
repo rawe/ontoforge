@@ -1,14 +1,14 @@
 import { Loader2 } from 'lucide-react'
 import type { ReactNode } from 'react'
-import type { RetrieveResponse, RetrieveResult } from '@/api/retrieverAgents'
+import type { RetrieveResponse, RetrieveResult } from '@/api/retrievers'
 import type { SearchCatalogEntry } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
 import { matchedViaText } from '@/lib/matchedVia'
 import { cn } from '@/lib/utils'
-import type { AgentSchema } from './retrieverAgentModel'
+import type { RetrieverSchema } from './retrieverModel'
 
 interface Context {
-  schema: AgentSchema | undefined
+  schema: RetrieverSchema | undefined
   catalog: readonly SearchCatalogEntry[] | undefined
 }
 
@@ -46,7 +46,7 @@ export function RetrievalResultRow({ result, schema, catalog }: { result: Retrie
 
 /**
  * The result list of a retrieve, shared by the palette's question mode and
- * the retriever-agent test panel: results in server order, the
+ * the retriever test panel: results in server order, the
  * limitations in one collapsible note above them, an unsupported reason as
  * the empty state, errors inline with the server's message. Results of an
  * earlier question stay, dimmed, until the next one is asked.

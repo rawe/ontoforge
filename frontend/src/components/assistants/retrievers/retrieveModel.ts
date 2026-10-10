@@ -1,14 +1,14 @@
 /**
- * Pure helpers of retrieve — a question to a retriever agent answered with
+ * Pure helpers of retrieve — a question to a retriever answered with
  * the found entities, no answer text: the palette's `!` question mode and
  * the editor test panel's Retrieve mode. The retriever choice (the runtime
  * list, `Default` first), when Enter sends, and staleness. No React —
  * unit-tested with `node --test`.
  */
-import type { RetrieveResponse } from '@/api/retrieverAgents'
+import type { RetrieveResponse } from '@/api/retrievers'
 import type { RuntimeAssistant } from '@/api/types'
 
-/** The key of every lens's implicit default retriever agent. */
+/** The key of every lens's implicit default retriever. */
 export const DEFAULT_RETRIEVER = '_default'
 
 /** Longest question the server accepts. */

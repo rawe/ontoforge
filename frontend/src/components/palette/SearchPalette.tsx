@@ -26,14 +26,14 @@ import {
 } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAssistants, useFeatures, useRuntimeSchema, useSearchCatalog } from '@/api/hooks'
-import { RetrievalResults } from '@/components/retrieverAgent/RetrievalResults'
+import { RetrievalResults } from '@/components/assistants/retrievers/RetrievalResults'
 import {
   QUESTION_PREFIX,
   questionToSend,
   resolveRetriever,
   resultEntities,
-} from '@/components/retrieverAgent/retrieveModel'
-import { useRetrieve } from '@/components/retrieverAgent/useRetrieve'
+} from '@/components/assistants/retrievers/retrieveModel'
+import { useRetrieve } from '@/components/assistants/retrievers/useRetrieve'
 import { TypeChip, TypeDot } from '@/components/TypeChip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { readString, storageKeys, writeString } from '@/lib/storage'
@@ -102,7 +102,7 @@ interface SearchPaletteProps {
 /**
  * Cmd+K palette: cross-type (semantic) entity search by default, `#` to scope
  * to one entity type, `?` for saved queries, `>` for navigation/actions, `!`
- * to ask a retriever agent a question (sent on Enter, never as you type).
+ * to ask a retriever a question (sent on Enter, never as you type).
  * Enter opens an entity's detail page; Cmd+Enter focuses it in the Explorer.
  *
  * The stateful content only mounts while the dialog is open, so every open

@@ -114,7 +114,7 @@ export interface SavedQuerySearchHit {
   score: number
 }
 
-export interface AiAgent {
+export interface Agent {
   key: string
   name: string
   description: string | null
@@ -129,7 +129,7 @@ export interface SchemaLens {
   description: string | null
   /** null = unscoped (full schema visible) */
   includes: { entityTypes?: unknown; relationTypes?: unknown } | null
-  aiAgents: AiAgent[]
+  aiAgents: Agent[]
   savedQueries: SavedQuery[]
 }
 
@@ -549,7 +549,7 @@ export interface PropertyInput {
   defaultValue?: JsonPrimitive | null
 }
 
-export interface AiAgentInput {
+export interface AgentInput {
   name: string
   description?: string | null
   systemPrompt?: string | null

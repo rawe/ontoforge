@@ -1,10 +1,10 @@
 /**
- * Retriever agents: lens-local saved configurations (config v2) that answer
+ * Retrievers: lens-local saved configurations (config v2) that answer
  * questions over the lens's search indices with a planner and an answer
- * model. Modeling CRUD by lens key + agent key under
+ * model. Modeling CRUD by lens key + retriever key under
  * `assistants/retrievers`, the runtime chat on a thread with the
  * retriever's own stream events, and retrieve — the found entities without
- * an answer. Every lens also has the implicit default agent `_default`,
+ * an answer. Every lens also has the implicit default retriever `_default`,
  * derived from its managed indices: first in the runtime list
  * (`runtime.ts` → `listAssistants`), never a modeling resource. The editor
  * reads the runtime index catalog and lens schema (`runtime.ts`), not a
@@ -16,25 +16,25 @@ import type { Matched, RelationDirection } from './types'
 
 export type SearchMode = 'semantic' | 'keyword' | 'hybrid'
 
-/** One index the agent searches; `relations` absent = all its relation groups. */
-export interface RetrieverAgentIndex {
+/** One index the retriever searches; `relations` absent = all its relation groups. */
+export interface RetrieverIndex {
   index: string
   relations?: string[]
 }
-export interface RetrieverAgentPathStep {
+export interface RetrieverPathStep {
   relationTypeKey: string
   direction: RelationDirection
 }
 /** A hard condition: exact value compare on a field reached by 0..2 hops from a result type. */
-export interface RetrieverAgentFilter {
+export interface RetrieverFilter {
   id: string
   entityType: string
-  path: RetrieverAgentPathStep[]
+  path: RetrieverPathStep[]
   field: string
 }
-export interface RetrieverAgentConfig {
-  indices: RetrieverAgentIndex[]
-  filters: RetrieverAgentFilter[]
+export interface RetrieverConfig {
+  indices: RetrieverIndex[]
+  filters: RetrieverFilter[]
   /** Per result entity type, the fields sent to the answer model as evidence. */
   answerFields: Record<string, string[]>
   /** Cosine, −1…1. */
@@ -42,24 +42,24 @@ export interface RetrieverAgentConfig {
   answerFieldCharacters: number
 }
 
-export interface RetrieverAgentInput {
+export interface RetrieverInput {
   name: string
   description: string | null
   configVersion: 2
-  config: RetrieverAgentConfig
+  config: RetrieverConfig
 }
 /** Portable JSON (export, import). */
-export interface RetrieverAgentExport extends RetrieverAgentInput {
+export interface RetrieverExport extends RetrieverInput {
   key: string
 }
-export interface RetrieverAgent {
+export interface Retriever {
   key: string
   lensKey: string
   name: string
   description: string | null
   /** Stored versions are preserved; only 2 is editable and executable. */
   configVersion: number
-  config: RetrieverAgentConfig
+  config: RetrieverConfig
   validation: { valid: boolean; errors: string[]; warnings: string[] }
   createdAt: string
   updatedAt: string
@@ -75,7 +75,7 @@ export interface PlanSubQuery {
   mode: SearchMode
   filters: { id: string; value: string; quote: string }[]
 }
-export interface RetrieverAgentResult {
+export interface RetrieverResult {
   entityId: string
   entityType: string
   label: string | null
@@ -99,14 +99,14 @@ export interface RetrieverDiagnostics {
   llmCalls?: number
   searchCalls?: number
   plan?: { subQueries?: PlanSubQuery[] } & Record<string, unknown>
-  results?: RetrieverAgentResult[]
+  results?: RetrieverResult[]
   timings?: Record<string, number>
   modelIO?: ModelCall[]
   limitations?: string[]
 }
 /** One exact condition a result is proven to satisfy. */
 export interface RetrieveCondition {
-  /** The filter id of the agent's configuration. */
+  /** The filter id of the retriever's configuration. */
   filter: string
   value: string
   /** The condition in plain words: "reported by Customer Name: Acme". */
@@ -133,45 +133,45 @@ export type RetrieverKindEvent =
   | ({ type: 'retriever.diagnostics' } & RetrieverDiagnostics)
 
 /** A retriever's turn: the shared events plus its own. */
-export type RetrieverAgentEvent = SharedEvent | RetrieverKindEvent
+export type RetrieverEvent = SharedEvent | RetrieverKindEvent
 
 /* ---------------------------------- routes --------------------------------- */
 
 const modelBase = (ontologyKey: string, lensKey: string) =>
   `/api/ontologies/${encodeURIComponent(ontologyKey)}/model/lenses/${encodeURIComponent(lensKey)}/assistants/retrievers`
-const modelAgent = (ontologyKey: string, lensKey: string, key: string) =>
+const modelRetriever = (ontologyKey: string, lensKey: string, key: string) =>
   `${modelBase(ontologyKey, lensKey)}/${encodeURIComponent(key)}`
 
-/** The modeling list: stored agents with configuration and validation (Studio). */
-export const listRetrieverAgents = (ontologyKey: string, lensKey: string) =>
-  request<RetrieverAgent[]>(modelBase(ontologyKey, lensKey))
+/** The modeling list: stored retrievers with configuration and validation (Studio). */
+export const listRetrievers = (ontologyKey: string, lensKey: string) =>
+  request<Retriever[]>(modelBase(ontologyKey, lensKey))
 /** Create (201) or replace (200). Sends exactly the write fields — never an export's `key`. */
-export const saveRetrieverAgent = (ontologyKey: string, lensKey: string, key: string, body: RetrieverAgentInput, signal?: AbortSignal) =>
-  request<RetrieverAgent>(modelAgent(ontologyKey, lensKey, key), {
+export const saveRetriever = (ontologyKey: string, lensKey: string, key: string, body: RetrieverInput, signal?: AbortSignal) =>
+  request<Retriever>(modelRetriever(ontologyKey, lensKey, key), {
     method: 'PUT', signal,
     body: { name: body.name, description: body.description, configVersion: body.configVersion, config: body.config },
   })
-export const deleteRetrieverAgent = (ontologyKey: string, lensKey: string, key: string, signal?: AbortSignal) =>
-  request<void>(modelAgent(ontologyKey, lensKey, key), { method: 'DELETE', signal })
-export const transferRetrieverAgent = (ontologyKey: string, lensKey: string, key: string, mode: 'copy' | 'move', body: { targetLensKey: string; targetKey: string }, signal?: AbortSignal) =>
-  request<RetrieverAgent>(`${modelAgent(ontologyKey, lensKey, key)}/${mode}`, { method: 'POST', body, signal })
-export const exportRetrieverAgent = (ontologyKey: string, lensKey: string, key: string, signal?: AbortSignal) =>
-  request<RetrieverAgentExport>(`${modelAgent(ontologyKey, lensKey, key)}/export`, { signal })
+export const deleteRetriever = (ontologyKey: string, lensKey: string, key: string, signal?: AbortSignal) =>
+  request<void>(modelRetriever(ontologyKey, lensKey, key), { method: 'DELETE', signal })
+export const transferRetriever = (ontologyKey: string, lensKey: string, key: string, mode: 'copy' | 'move', body: { targetLensKey: string; targetKey: string }, signal?: AbortSignal) =>
+  request<Retriever>(`${modelRetriever(ontologyKey, lensKey, key)}/${mode}`, { method: 'POST', body, signal })
+export const exportRetriever = (ontologyKey: string, lensKey: string, key: string, signal?: AbortSignal) =>
+  request<RetrieverExport>(`${modelRetriever(ontologyKey, lensKey, key)}/export`, { signal })
 /** Create only: an existing key is a conflict, never replaced. */
-export const importRetrieverAgent = (ontologyKey: string, lensKey: string, body: RetrieverAgentExport, signal?: AbortSignal) =>
-  request<RetrieverAgent>(`${modelBase(ontologyKey, lensKey)}/import`, { method: 'POST', body, signal })
+export const importRetriever = (ontologyKey: string, lensKey: string, body: RetrieverExport, signal?: AbortSignal) =>
+  request<Retriever>(`${modelBase(ontologyKey, lensKey)}/import`, { method: 'POST', body, signal })
 
-/** One message to the saved (or default) agent on a thread; the browser never sends a configuration. */
-export async function chatRetrieverAgent(
+/** One message to the saved (or default) retriever on a thread; the browser never sends a configuration. */
+export async function chatRetriever(
   ontologyKey: string, lensKey: string, key: string,
   body: ChatRequest & { diagnostics: boolean },
-  onEvent: (event: RetrieverAgentEvent) => void, signal: AbortSignal,
+  onEvent: (event: RetrieverEvent) => void, signal: AbortSignal,
 ) {
   await postChat(assistantPath(ontologyKey, lensKey, 'retrievers', key), body, retrieverReader, onEvent, signal)
 }
 
-/** One query to the saved (or default) agent: its planning and retrieval, no answer. */
-export const retrieveWithAgent = (
+/** One query to the saved (or default) retriever: its planning and retrieval, no answer. */
+export const retrieveQuestion = (
   ontologyKey: string, lensKey: string, key: string,
   body: { query: string }, signal?: AbortSignal,
 ) => request<RetrieveResponse>(`${assistantPath(ontologyKey, lensKey, 'retrievers', key)}/retrieve`, { method: 'POST', body, signal })
@@ -212,5 +212,5 @@ const retrieverReader: KindReader<RetrieverKindEvent> = {
   },
 }
 
-export const readRetrieverAgentStream = (response: Response, onEvent: (event: RetrieverAgentEvent) => void, signal: AbortSignal) =>
+export const readRetrieverStream = (response: Response, onEvent: (event: RetrieverEvent) => void, signal: AbortSignal) =>
   readAssistantStream(response, retrieverReader, onEvent, signal)

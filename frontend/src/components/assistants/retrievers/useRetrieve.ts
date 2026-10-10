@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { chatErrorText } from '@/api/chatStream'
-import { retrieveWithAgent, type RetrieveResponse } from '@/api/retrieverAgents'
+import { retrieveQuestion, type RetrieveResponse } from '@/api/retrievers'
 import { isStale, questionToSend, type Asked } from './retrieveModel'
 
 /**
- * One retrieve at a time against one agent, results only: `send` asks a question unless
+ * One retrieve at a time against one retriever, results only: `send` asks a question unless
  * it is the one already running or answered, `cancel` aborts a running
  * request. The last results stay until the next ones arrive; they are
- * stale for another question or another agent. Changing the agent while a
+ * stale for another question or another retriever. Changing the retriever while a
  * question runs is the caller's to cancel.
  */
 export function useRetrieve(ontologyKey: string, lensKey: string, agentKey: string | null) {
-  // What was asked, and of which agent: another agent may be asked the same question.
+  // What was asked, and of which retriever: another retriever may be asked the same question.
   const [asked, setAsked] = useState<(Asked & { agentKey: string }) | null>(null)
   const askedHere = asked !== null && asked.agentKey === agentKey ? asked : null
   const [answered, setAnswered] = useState<{ question: string; agentKey: string; response: RetrieveResponse } | null>(null)
@@ -39,7 +39,7 @@ export function useRetrieve(ontologyKey: string, lensKey: string, agentKey: stri
       active.current = controller
       setAsked({ question, status: 'running', agentKey })
       setError(null)
-      retrieveWithAgent(ontologyKey, lensKey, agentKey, { query: question }, controller.signal).then(
+      retrieveQuestion(ontologyKey, lensKey, agentKey, { query: question }, controller.signal).then(
         (response) => {
           if (controller.signal.aborted) return
           active.current = null
@@ -68,7 +68,7 @@ export function useRetrieve(ontologyKey: string, lensKey: string, agentKey: stri
     answered: answered?.question ?? null,
     response: answered?.response ?? null,
     error,
-    /** Whether the shown results answer something else than `input` to this agent. */
+    /** Whether the shown results answer something else than `input` to this retriever. */
     staleFor: (input: string) => answered !== null && (isStale(input, answered.question) || answered.agentKey !== agentKey),
   }
 }

@@ -1,12 +1,11 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Box, PanelTop, Plus, SearchX, ShieldCheck, Waypoints } from 'lucide-react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import * as model from '@/api/model'
 import type { ValidationResult } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
-import { SchemaDiagram } from '@/components/studio/SchemaDiagram'
 import {
   EntityTypeCreateDialog,
   RelationTypeCreateDialog,
@@ -18,7 +17,7 @@ import { DeleteProvider } from '@/components/studio/modeling/DeleteDialog'
 import { useModelSchema } from '@/components/studio/modeling/useModelSchema'
 import { ClassicList } from '@/components/studio/schema/ClassicList'
 import { ClassicTypePage } from '@/components/studio/schema/ClassicTypePage'
-import { buildSchemaUrl, type SchemaView } from '@/components/studio/schema/schemaUrl'
+import type { SchemaView } from '@/components/studio/schema/schemaUrl'
 import { SchemaWorkspaceProvider } from '@/components/studio/schema/workspace'
 import { useSchemaWorkspace } from '@/components/studio/schema/workspaceContext'
 import { Button } from '@/components/ui/button'
@@ -26,6 +25,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { isPlainKey, isTyping, overlayOpen } from '@/lib/shortcuts'
+
+// React Flow loads only when the graph is shown.
+const SchemaCanvas = lazy(() =>
+  import('@/components/studio/graph/SchemaCanvas').then((m) => ({ default: m.SchemaCanvas })),
+)
 
 /**
  * `/o/:ontologyKey/studio/schema/…` — the schema page: Graph (default) or
@@ -104,7 +108,11 @@ function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
   } else if (view === 'classic') {
     body = <ClassicList />
   } else {
-    body = <InterimGraph ontologyKey={ontologyKey} />
+    body = (
+      <Suspense fallback={null}>
+        <SchemaCanvas />
+      </Suspense>
+    )
   }
 
   return (
@@ -215,23 +223,6 @@ function BodySkeleton() {
           <Skeleton className="h-20 rounded-xl" />
         </div>
       ))}
-    </div>
-  )
-}
-
-/** Today's read-only diagram until the editable canvas arrives. Double-click opens the classic page. */
-function InterimGraph({ ontologyKey }: { ontologyKey: string }) {
-  const { entityTypes, relationTypes } = useModelSchema(ontologyKey)
-  const navigate = useNavigate()
-  return (
-    <div className="h-full p-6">
-      <SchemaDiagram
-        entityTypes={entityTypes}
-        relationTypes={relationTypes}
-        onOpenEntityType={(key) =>
-          void navigate(buildSchemaUrl(ontologyKey, 'classic', { kind: 'entity-types', key }))
-        }
-      />
     </div>
   )
 }

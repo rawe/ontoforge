@@ -503,9 +503,6 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
 
   return (
     <div ref={containerRef} className="relative h-full w-full">
-      {relayouting && (
-        <style>{'.of-relayout .react-flow__node{transition:transform .4s ease}'}</style>
-      )}
       <div className={relayouting ? 'of-relayout h-full w-full' : 'h-full w-full'}>
         <ReactFlow<EntityFlowNode, RelationFlowEdge>
           nodes={rfNodes}

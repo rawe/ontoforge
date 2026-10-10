@@ -200,3 +200,12 @@
       transparent;
   }
 }
+
+/* React Flow canvases: hovering a selectable schema edge darkens its stroke;
+   `.of-relayout` animates node moves once (re-layout / tidy). */
+.react-flow__edge.selectable:not(.selected):hover .of-edge-path {
+  stroke: color-mix(in oklab, var(--foreground) 45%, transparent) !important;
+}
+.of-relayout .react-flow__node {
+  transition: transform 0.4s ease;
+}

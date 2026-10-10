@@ -38,7 +38,7 @@ data through one lens — never both.
 
 Modeling REST does **not** nest types under a lens. Entity types, relation types and
 their properties are resources of the ontology, at the top level of its modeling
-surface. Scope inclusions, agent configurations, saved queries and retriever agents
+surface. Scope inclusions, agent configurations, saved queries and retrievers
 are addressed per lens.
 
 ### What a path segment identifies
@@ -50,12 +50,12 @@ This is the single most common source of mistakes against the modeling surface.
 | Registry | Ontology key |
 | Runtime REST, everywhere | Keys — ontology key, lens key, type key, property key; instance ids for entities and relations |
 | Modeling REST — lenses, entity types, relation types, properties, inclusions | **Internal identifiers**, not keys |
-| Modeling REST — agent configs, saved queries, retriever agents | Lens key and the resource key |
+| Modeling REST — agent configs, saved queries, retrievers | Lens key and the resource key |
 | Modeling REST — search indices | Index key — managed keys included, which carry `~` |
 | Both MCP servers | Keys only |
 
 So `PUT .../model/lenses/{lensId}` takes an identifier while
-`PUT .../model/lenses/{lensKey}/ai-agents/{agentKey}` takes a key, even though the two
+`PUT .../model/lenses/{lensKey}/assistants/agents/{assistantKey}` takes a key, even though the two
 routes share a prefix. Identifiers are obtained from the response of the create call or
 from a list call. A key is never accepted where an identifier is expected.
 
@@ -183,13 +183,18 @@ Requesting an unavailable search strategy, a capability whose provider is not co
 or one the storage adapter does not support answers `VALIDATION_ERROR` with
 `details.code` of `FEATURE_DISABLED` — on the two routes that need an embedding provider,
 semantic search and saved-query search, on AI execution and entity identity
-comparison alike, and on the search settings, search-index and retriever-agent operations
+comparison alike, and on the search settings, search-index and retriever operations
 of an adapter without search indices. A client can therefore
 tell a switched-off capability from a rejected request. Model-free operations remain
-available: agent discovery and retriever-agent management do not require a
+available: agent discovery and retriever management do not require a
 language-model provider; execution requirements are listed with the routes below. Agent
-task execution requires a language-model provider
-([capabilities/ai-agents.md](capabilities/ai-agents.md)).
+chat requires a language-model provider
+([capabilities/agents.md](capabilities/agents.md)).
+
+An assistant thread that is unknown, expired or bound to another assistant answers
+`RESOURCE_NOT_FOUND` with `details.code` of `THREAD_NOT_FOUND`; a message to a thread whose
+previous message is still being answered answers `RESOURCE_CONFLICT` with `details.code`
+of `THREAD_BUSY` ([assistant chat and threads](#assistant-chat-and-threads)).
 
 Call `GET /api/server/features` first all the same. Probing lets a client hide what is
 unavailable, rather than offering it and explaining the refusal afterwards.
@@ -208,9 +213,9 @@ auto-created.
 | PATCH | `/api/ontologies/{ontologyKey}` | Rename — the display name only; the key is immutable |
 | DELETE | `/api/ontologies/{ontologyKey}` | Hard cascade delete of the ontology and everything it contains |
 
-Keys match `^[a-z][a-z0-9_]*$` at up to 59 characters and are unique server-wide, as are
-display names. Delete is a plain request with no API-level guard — the web client adds
-its own confirmation, callers of the API get none.
+Keys follow the schema [key](README.md) rule at up to 59 characters and are unique
+server-wide, as are display names. Delete is a plain request with no API-level guard —
+the web client adds its own confirmation, callers of the API get none.
 
 ## Server
 
@@ -324,14 +329,18 @@ The three routes answer `FEATURE_DISABLED` on an adapter without search indices.
 
 ### Agent configurations
 
-Per-lens, addressed by lens key. Semantics:
-[capabilities/ai-agents.md](capabilities/ai-agents.md).
+Per-lens, addressed by lens key and assistant key. Semantics:
+[capabilities/agents.md](capabilities/agents.md).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/lenses/{lensKey}/ai-agents` | List the lens's agent configurations |
-| PUT | `/lenses/{lensKey}/ai-agents/{agentKey}` | Create or replace one; answers 201 on create, 200 on replace |
-| DELETE | `/lenses/{lensKey}/ai-agents/{agentKey}` | Delete an agent configuration |
+| GET | `/lenses/{lensKey}/assistants/agents` | List the lens's agent configurations |
+| GET | `/lenses/{lensKey}/assistants/agents/{assistantKey}` | Read one agent configuration |
+| PUT | `/lenses/{lensKey}/assistants/agents/{assistantKey}` | Create or replace one; answers 201 on create, 200 on replace |
+| DELETE | `/lenses/{lensKey}/assistants/agents/{assistantKey}` | Delete an agent configuration |
+
+The built-in default agent is not a modeling resource: it is not listed, and `_default`
+can be neither read nor written here.
 
 ### Saved queries
 
@@ -344,21 +353,21 @@ Per-lens, addressed by lens key. Semantics:
 | PUT | `/lenses/{lensKey}/saved-queries/{queryKey}` | Create or replace one; answers 201 on create, 200 on replace |
 | DELETE | `/lenses/{lensKey}/saved-queries/{queryKey}` | Delete a saved query |
 
-### Retriever agents
+### Retrievers
 
-Per-lens, addressed by lens key and agent key. Semantics, configuration and validation:
-[capabilities/retriever-agents.md](capabilities/retriever-agents.md).
+Per-lens, addressed by lens key and assistant key. Semantics, configuration and validation:
+[capabilities/retrievers.md](capabilities/retrievers.md).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/lenses/{lensKey}/retriever-agents` | List the lens's agents, by name, each with its current validation |
-| GET | `/lenses/{lensKey}/retriever-agents/{agentKey}` | Read one agent as stored, with its current validation |
-| PUT | `/lenses/{lensKey}/retriever-agents/{agentKey}` | Create or replace; 201 on create, 200 on replace |
-| DELETE | `/lenses/{lensKey}/retriever-agents/{agentKey}` | Delete the agent; 204 |
-| POST | `/lenses/{lensKey}/retriever-agents/{agentKey}/copy` | Independent copy to `targetLensKey`/`targetKey` in this ontology; 201 |
-| POST | `/lenses/{lensKey}/retriever-agents/{agentKey}/move` | Move to `targetLensKey`/`targetKey` in this ontology, identity kept; 200 |
-| GET | `/lenses/{lensKey}/retriever-agents/{agentKey}/export` | The agent's portable JSON |
-| POST | `/lenses/{lensKey}/retriever-agents/import` | Create from portable JSON; 201, never replaces a key |
+| GET | `/lenses/{lensKey}/assistants/retrievers` | List the lens's retrievers, by name, each with its current validation |
+| GET | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}` | Read one retriever as stored, with its current validation |
+| PUT | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}` | Create or replace; 201 on create, 200 on replace |
+| DELETE | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}` | Delete the retriever; 204 |
+| POST | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}/copy` | Independent copy to `targetLensKey`/`targetKey` in this ontology; 201 |
+| POST | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}/move` | Move to `targetLensKey`/`targetKey` in this ontology, identity kept; 200 |
+| GET | `/lenses/{lensKey}/assistants/retrievers/{assistantKey}/export` | The retriever's portable JSON |
+| POST | `/lenses/{lensKey}/assistants/retrievers/import` | Create from portable JSON; 201, never replaces a key |
 
 A write carries `name`, optional `description`, `configVersion: 2` and `config`; unknown
 fields are rejected. A read carries `key`, `lensKey`, `name`, `description`,
@@ -368,7 +377,8 @@ import also accepts `configVersion: 1`, converted first. A configuration the len
 run — on write, import, or copy or move into the target lens — is refused with
 `VALIDATION_ERROR` and the errors under `details.errors`; a taken target key, or a source
 changed since it was read, is a conflict. Management calls no model. Every route answers
-`FEATURE_DISABLED` on an adapter without search indices.
+`FEATURE_DISABLED` on an adapter without search indices. The built-in default retriever
+is not a modeling resource, as for agents.
 
 ### Search settings
 
@@ -405,8 +415,8 @@ A request body is a definition in the index wire format. An index reads as `key`
 `kind` (`default`, `passage` or `custom`), `enabled` (false for a switched-off managed
 index), `definition`, `documentProperty` (the document field it cuts into passages, or
 null), `status` and timestamps. A status carries `state`, `representations` — each
-enabled one with `representation`, `state`, `done`, `total`, `pending` and `failed` —
-and `lastErrors`, each with `entityId`, `partKind`, `message` and `at`.
+enabled one with `representation`, `state`, `build` (`{done, total}`, null while no
+generation is filling), `pending` and `failed` — and `lastErrors`, each with `entityId`, `partKind`, `message` and `at`.
 
 A preview answers `{valid, issues, estimate, outline}`: `issues` as `{path, message}` by
 dotted path, `estimate` null for an invalid draft, else `entities`, `entries`, `seconds`
@@ -452,7 +462,7 @@ provider: without one it skips the vector work and says so in its summary. It do
 touch search indices. After an embedding-provider switch it is run once per ontology. See
 [capabilities/search.md](capabilities/search.md#rebuild).
 
-Transfer carries the design only — schema, lenses, agents, saved queries, retriever agents,
+Transfer carries the design only — schema, lenses, agents, saved queries, retrievers,
 search indices; no instance
 data and no ontology identity — see
 [capabilities/transfer.md](capabilities/transfer.md) and
@@ -466,7 +476,9 @@ answers not found within the ontology.
 
 ### Schema introspection
 
-Read-only, and already filtered to the lens.
+Read-only, and already filtered to the lens. `/schema` returns the lens's key, name and
+description together with the entity types and relation types it exposes, each with its
+visible properties.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -604,36 +616,88 @@ Requires a Decision provider, independently of AI and search.
 |---|---|---|
 | POST | `/decisions/compare-entities` | Judge the identity of two supplied partial snapshots of one scoped entity type |
 
-### Retriever-agent chat and retrieve
+### Assistant chat and threads
 
-The stored agent runs — or, under the key `_default`, the lens's
-[default retriever agent](capabilities/retriever-agents.md#the-default-retriever-agent);
-a request can never supply or override its configuration. Semantics:
-[capabilities/retriever-agents.md](capabilities/retriever-agents.md#answering-a-question)
-and [retrieve](capabilities/retriever-agents.md#retrieve).
+Every assistant kind — `agents`, `retrievers` — converses through the same request, the
+same stream frame and the same threads. Semantics:
+[capabilities/threads.md](capabilities/threads.md). The kind's own section below lists its
+routes, its extra request fields and its own events.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/retriever-agents/{agentKey}/chat` | Stream the answer to one question |
-| POST | `/retriever-agents/{agentKey}/retrieve` | The entities one question finds, without an answer |
+| POST | `/ai/assistants/<kind>/{assistantKey}/chat` | One message: a new thread, or a turn on an existing one |
+| GET | `/ai/assistants/<kind>/{assistantKey}/threads/{threadId}` | Read a thread back |
 
-**Chat.** The body carries `message` (1 to 2,000 characters) and optionally `history` (up to 30
-user/assistant turns), the previous answer's `turnToken` and `diagnostics`; unknown
-fields are rejected. Without a language-model provider the route answers
-`FEATURE_DISABLED`, as the AI routes do. An unknown agent answers not found, an agent its
+**Request.** `message` (1 to 2,000 characters) and optionally `threadId`; a kind may add
+fields, and unknown fields are rejected. Without `threadId` the message starts a new
+thread bound to the addressed assistant; with it, the message continues that thread. A
+thread that is unknown, expired or bound to another assistant answers
+`RESOURCE_NOT_FOUND` with `details.code` `THREAD_NOT_FOUND`; a thread whose previous
+message is still being answered answers `RESOURCE_CONFLICT` with `details.code`
+`THREAD_BUSY`. Both are plain error responses before the stream opens, like every other
+refusal the kind lists; a busy message is never queued.
+
+**Stream.** Successful responses use `application/x-ndjson`: one complete JSON object per
+line, each with a `type`. The shared events mean the same for every kind:
+
+| Event `type` | Fields | Meaning |
+|---|---|---|
+| `thread` | `threadId` | Always first: the thread this turn runs on |
+| `delta` | `text` | A fragment of the answer, for kinds that stream their answer |
+| `final` | `reply` | Terminal: the complete answer |
+| `error` | `error` | Terminal: the public error object with `code`, `message` and optional `details` |
+
+A kind's own events are named `<kind>.<event>` — `agent.…`, `retriever.…`; a client may
+ignore those it does not know. A writable stream has exactly one terminal `final` or
+`error`; EOF without one means an incomplete turn. A closed connection cancels the turn,
+and a cancelled or failed turn leaves nothing in its thread. Unexpected failures after
+streaming begins have the generic `INTERNAL_ERROR` message `Internal Server Error`.
+Delivery bounds buffering and terminates stalled or oversized streams.
+
+**Read a thread.** `200` with `threadId` and `messages` — the user messages and the
+assistant's answers in order, each `role` (`user` or `assistant`) and `content`, at most
+the turns a thread keeps, without tool payloads. Unknown, expired or another assistant's
+thread: `THREAD_NOT_FOUND`. Reading needs no language-model provider and does not count as
+use; it is gated like the kind's list.
+
+### Retriever list, chat and retrieve
+
+The stored retriever runs — or, under the key `_default`, the lens's
+[default retriever](capabilities/retrievers.md#the-default-retriever);
+a request can never supply or override its configuration. Semantics:
+[capabilities/retrievers.md](capabilities/retrievers.md#answering-a-question)
+and [retrieve](capabilities/retrievers.md#retrieve).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/ai/assistants/retrievers` | List the lens's retrievers, the default first |
+| POST | `/ai/assistants/retrievers/{assistantKey}/chat` | Stream the answer to one question |
+| GET | `/ai/assistants/retrievers/{assistantKey}/threads/{threadId}` | Read a thread back |
+| POST | `/ai/assistants/retrievers/{assistantKey}/retrieve` | The entities one query finds, without an answer |
+
+**List.** Every retriever of the lens, runnable or not, as `key`, `name`,
+`description` and `builtIn`; the default comes first, keyed `_default`, named `Default`,
+with `builtIn` true. The list carries no configuration and no validation, and needs no
+language-model provider; on an adapter without search indices it answers
+`FEATURE_DISABLED`.
+
+**Chat.** The [shared request](#assistant-chat-and-threads) plus `diagnostics` (boolean,
+default false). Without a language-model provider the route answers
+`FEATURE_DISABLED`, as the AI routes do. An unknown retriever answers not found, a retriever its
 lens can no longer run `VALIDATION_ERROR` with the errors under `details.errors`, a
-default agent with nothing to search `VALIDATION_ERROR`, an adapter without search
-indices `FEATURE_DISABLED` — each before the stream opens.
+default retriever with nothing to search `VALIDATION_ERROR`, an adapter without search
+indices `FEATURE_DISABLED`, an unknown or busy thread as shared — each before the stream
+opens.
 
-The response streams newline-delimited events: `phase` (`plan`, `retrieve` and `answer`,
-each with `status` `start` or `end`, an end with `durationMs`), `delta` (answer text),
-`meta`, then one terminal `final` or `error`. With `diagnostics` false, the default, the
-only `meta` event carries the `turnToken` for a follow-up question. With `diagnostics`
-true, earlier `meta` events carry:
+The response streams the [shared frame](#assistant-chat-and-threads): `thread`, the answer
+as `delta` events, then one terminal `final` or `error`. Its own events:
+`retriever.phase` (`phase` `plan`, `retrieve` or `answer`, `status` `start` or `end`, an
+end with `durationMs`), and — only with `diagnostics` true — `retriever.diagnostics`
+events, which carry:
 
 | Field | Content |
 |---|---|
-| `plan` | `subQueries` — each `indices`, `relations`, `query`, `variants`, `mode`, `filters` (`id`, `value`, `quote`) and `previous` — and `unsupportedReason` |
+| `plan` | `subQueries` — each `indices`, `relations`, `query`, `variants`, `mode`, `filters` (`id`, `value`, `quote`, and the filter's definition from the retriever's configuration: `entityType`, `path`, `field`) and `previous` — and `unsupportedReason` |
 | `results` | One row per entity and sub-query that found it, in fused order: `entityId`, `entityType`, `label`, `subQuery`, `matched` when the search ranked the entity, `answerFields` |
 | `limitations` | What the answer model was told limits the results |
 | `searchCalls` | The number of index searches run |
@@ -643,73 +707,56 @@ true, earlier `meta` events carry:
 
 `matched` has the form of a search hit's ([capabilities/search.md](capabilities/search.md#response)).
 
-**Retrieve.** The body carries `question` (1 to 2,000 characters) and optionally
-`diagnostics`; unknown fields — a history or follow-up token among them — are rejected.
+**Read a thread.** As [shared](#assistant-chat-and-threads); on an adapter without search
+indices it answers `FEATURE_DISABLED`, as the list does.
+
+**Retrieve.** The body carries `query` (1 to 2,000 characters); unknown fields — a thread
+id or `diagnostics` among them — are rejected.
 It is refused exactly as chat is, with plain error responses: `FEATURE_DISABLED` without
 a language-model provider or on an adapter without search indices, not found for an
-unknown agent, `VALIDATION_ERROR` for an agent its lens can no longer run (errors under
-`details.errors`), a default agent with nothing to search, a planner input over the cap,
+unknown retriever, `VALIDATION_ERROR` for a retriever its lens can no longer run (errors under
+`details.errors`), a default retriever with nothing to search, a planner input over the cap,
 a failed planning call or a malformed plan. A closed connection cancels the work.
 
 The response is `200` with `results` — best first, each `entityId`, `entityType`,
 `label`, `conditions` (`filter`, `value`, `text`) and `matched` (a search hit's form, or
-null) — `limitations`, `unsupportedReason` when no index can answer, and with
-`diagnostics` true a `diagnostics` object: `plan`, `searchCalls`, `timings` in
-milliseconds (`plan`, `planModel`, `validation`, `retrieve`, `search`, `total`) and
-`modelIO`, the one planning call's trace. No results is not an error.
+null) — `limitations` and `unsupportedReason` when no index can answer. No results is not
+an error.
 
 A question or a retrieve needs a language-model provider; without an embedding provider it
-searches by keyword only. Neither route has an MCP or A2A equivalent.
+searches by keyword only. Neither route has an MCP equivalent.
 
 ### AI
 
-Semantics: [capabilities/ai-agents.md](capabilities/ai-agents.md). Every route here
-requires a language-model provider for execution; agent discovery remains available without one.
+Semantics: [capabilities/agents.md](capabilities/agents.md). Chat requires a
+language-model provider; the list remains available without one.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/ai/query` | Turn a natural-language question into an OQL query and run it |
-| POST | `/ai/chat` | Converse with the default agent over the lens |
-| GET | `/ai/agents` | List the agents configured on this lens |
-| POST | `/ai/agents/{agentKey}/chat` | Converse with one named agent |
+| GET | `/ai/assistants/agents` | List the lens's agents, the default first |
+| POST | `/ai/assistants/agents/{assistantKey}/chat` | Converse with one agent |
+| GET | `/ai/assistants/agents/{assistantKey}/threads/{threadId}` | Read a thread back |
 
-The default agent is implicit — it needs no configuration and exists on every lens.
+The default agent is implicit — it needs no configuration, exists on every lens and is
+addressed by the key `_default` like any configured agent. The list names every agent as
+`key`, `name`, `description` and `builtIn`; the default comes first, named `Default`, with
+`builtIn` true.
 
-Both chat POST routes accept `message` and optional user/assistant text `history`.
-Successful responses always use `application/x-ndjson`: one complete JSON object per line.
-Tool events are unconditional; there is no response-mode option.
+Chat takes the [shared request](#assistant-chat-and-threads) and streams the shared frame:
+`thread`, then the agent's tool events, then one terminal `final` or `error`; the answer
+arrives whole in `final`, never as `delta`. Tool events are unconditional; there is no
+response-mode option.
 
 | Event `type` | Fields | Meaning |
 |---|---|---|
-| `tool_call` | `callId`, `tool`, `args` | One invocation begins, including schema-invalid arguments |
-| `tool_result` | `callId`, `result` | That invocation completes; result retains its native JSON structure |
-| `final` | `reply` | The complete assistant answer, with no repeated tool payloads |
-| `error` | `error` | Terminal public error object with `code`, `message`, and optional `details` |
+| `agent.tool_call` | `callId`, `tool`, `args` | One invocation begins, including schema-invalid arguments |
+| `agent.tool_result` | `callId`, `result` | That invocation completes; result retains its native JSON structure |
 
 Call IDs are unique within a turn. Calls precede their results, and parallel results arrive
-as each completes. A writable stream has exactly one terminal `final` or `error` event;
-there are no assistant text fragments. EOF without a terminal event means an incomplete
-turn. Invalid requests, unknown selections, and unavailable providers are rejected before
-streaming where possible, using the ordinary HTTP error response. Unexpected failures
-after streaming begins have the generic `INTERNAL_ERROR` message `Internal Server Error`.
-Disconnect cancels further agent work, with best-effort cancellation of running operations.
-Delivery bounds buffering and terminates stalled or oversized streams.
-
-### Agent-to-agent
-
-The interoperability surface: a published card describing an agent, and a task endpoint.
-Each named agent gets its own pair, and the default agent gets one at the `/ai` root.
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/ai/.well-known/agent.json` | Card for the default agent |
-| POST | `/ai/a2a` | Submit a task to the default agent |
-| GET | `/ai/agents/{agentKey}/.well-known/agent.json` | Card for one named agent |
-| POST | `/ai/agents/{agentKey}/a2a` | Submit a task to one named agent |
-
-A card advertises absolute URLs, whose host is derived rather than fixed. What a card
-carries, how its host is resolved and what a proxied deployment must do about it are in
-[capabilities/ai-agents.md](capabilities/ai-agents.md#the-card).
+as each completes. An unknown agent, an unavailable provider and an unknown or busy thread
+are rejected before streaming, using the ordinary HTTP error response. Disconnect cancels
+further agent work, with best-effort cancellation of running operations. Reading a thread
+needs no provider, as the list does.
 
 ## MCP
 
@@ -722,7 +769,7 @@ connection carries state.
 |---|---|---|
 | Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
 | Bound to | One ontology | One ontology and one lens |
-| Tools | 40 | 22 |
+| Tools | 45 | 22 |
 
 ### How a mount is bound
 
@@ -748,7 +795,7 @@ exist; its tools answer not-found tool errors otherwise.
 | Tool | Purpose |
 |---|---|
 | `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation |
-| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries and retriever agents. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
+| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries and retrievers. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
 | `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`) |
 | `update_entity_type` | Change display name, description or name property (`name_property`); the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |
@@ -781,9 +828,14 @@ exist; its tools answer not-found tool errors otherwise.
 | `add_search_index_to_lens` | Include a search index in a lens, by `index_key` |
 | `remove_search_index_from_lens` | Drop a search index from a lens, by `index_key` |
 | `validate_lens` | Check one lens's inclusions against the schema; warnings name what limits its search indices |
-| `list_ai_agents` | List a lens's agent configurations |
-| `set_ai_agent` | Create or replace an agent configuration |
-| `delete_ai_agent` | Delete an agent configuration |
+| `list_agents` | List a lens's agents |
+| `get_agent` | Read one agent, by `agent_key` |
+| `set_agent` | Create or replace an agent |
+| `delete_agent` | Delete an agent, by `agent_key` |
+| `list_retrievers` | List a lens's retrievers, each with its validation |
+| `get_retriever` | Read one retriever with its validation, by `retriever_key` |
+| `set_retriever` | Create or replace a retriever from a `config` in the REST wire format; an invalid configuration is refused with every error in one message |
+| `delete_retriever` | Delete a retriever, by `retriever_key` |
 | `list_saved_queries` | List a lens's saved queries |
 | `set_saved_query` | Create or replace a saved query pipeline |
 | `delete_saved_query` | Delete a saved query |
@@ -793,6 +845,9 @@ The per-lens tools take a `lens_key` naming a lens of the bound ontology.
 `delete_relation_type` and `delete_search_index` take a `cascade` flag with the same
 meaning as the REST parameter. The search-index tools take the index key as
 `index_key` and a definition in the same wire format as REST, camelCase included.
+`set_retriever` writes the current configuration version, so it takes no version argument;
+the retriever tools are refused as a disabled feature where the adapter has no search
+indices. Copying, moving, exporting and importing a single retriever are REST only.
 There is no modeling tool for the search-data rebuild (`rebuild-search-data`).
 
 ### Runtime tools
@@ -801,7 +856,7 @@ Everything a client can do to instance data through one lens.
 
 | Tool | Purpose |
 |---|---|
-| `get_schema` | The scoped schema — types, properties, required flags, name properties |
+| `get_schema` | The scoped schema, as REST `/schema` returns it — the lens's key, name and description; types, properties, required flags, name properties |
 | `create_entity` | Create an entity |
 | `list_entities` | List entities with search, filters, sorting, paging and projection |
 | `get_entity` | Read one entity by id |
@@ -833,7 +888,7 @@ An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
 return the REST envelope and take no strategy and no `min_similarity`; they apply the
 fixed floor of [capabilities/search.md](capabilities/search.md#similarity-floor) whenever
 the default strategy ranks semantically, echoed as `minSimilarity`. MCP also accepts
-filters and fields. See [capabilities/ai-agents.md](capabilities/ai-agents.md).
+filters and fields. See [capabilities/agents.md](capabilities/agents.md).
 
 `search_by_index` is the index search of `POST /search`, on MCP only. It takes `query`,
 `index` — one index key or a list, absent for every index the lens can search —

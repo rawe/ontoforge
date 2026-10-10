@@ -17,15 +17,14 @@ ontologies, transfer included.
 | Relation types | The same, plus the keys of the source and target entity types |
 | Property definitions | Key, display name, description, data type, required flag, default |
 | Lenses | Key, name, description, their type inclusions — absent entirely for an unscoped lens — and the keys of the search indices they include |
-| Agents | Every agent of every lens: key, name, description, system prompt, tool allowlist |
+| Assistants | Every assistant of every lens, one list per kind under the lens's `assistants`: its agents under `agents` — key, name, description, system prompt, tool allowlist — and its retrievers under `retrievers`, in their portable form — key, name, description, configVersion, config |
 | Saved queries | Every saved query of every lens: key, name, description, steps, parameters |
-| Retriever agents | Every retriever agent of every lens, in its portable form: key, name, description, configVersion, config |
 | Keyword language set | The languages keyword search stems in, at the top level of the payload |
 | Search indices | The custom index definitions and the managed indices switched off, at the top level of the payload |
 
-Agents, saved queries and retriever agents are nested inside the lens they belong to, because that
-is where they belong ([ai-agents.md](ai-agents.md), [saved-queries.md](saved-queries.md),
-[retriever-agents.md](retriever-agents.md)).
+Assistants and saved queries are nested inside the lens they belong to, because that
+is where they belong ([agents.md](agents.md), [saved-queries.md](saved-queries.md),
+[retrievers.md](retrievers.md)).
 
 > **Instance data is not part of the format.** No entities, no relations, no document
 > content, no chunks, no embedding vectors. Exporting a design and importing it elsewhere
@@ -72,29 +71,38 @@ and keeps nothing of them.
 
 ## The format version
 
-The payload declares a format version, and export always writes the current one: `6.0`.
+The payload declares a format version, and export always writes the current one: `7.0`.
 The version is the format's own line, bumped only when the payload shape changes
 incompatibly.
 
-**Import dispatches on it.** It accepts two versions and refuses every other one with a
-field error on the version:
+**Import reads the current version only.** It accepts two older versions and brings
+each up to the current one first, one version at a time: a `5.0` payload becomes a
+`6.0` one, a `6.0` payload a `7.0` one. Every other version is refused with a field
+error on the version naming the three it accepts:
 
 | Version | Import |
 |---|---|
-| `6.0`, or no version at all | The current format, validated as described below |
-| `5.0` | The previous format, converted on the way in |
+| `7.0`, or no version at all | The current format, validated as described below |
+| `6.0` | Upgraded to `7.0` |
+| `5.0` | Upgraded to `6.0`, then to `7.0` |
+
+A `6.0` payload differs from `7.0` in one way: its lenses carry their agents under
+`aiAgents` and their retrievers under `retrieverAgents`, in place of `assistants`.
+The upgrade moves both lists under `assistants`, as `agents` and `retrievers`; each entry
+stays as it is.
 
 A `5.0` payload differs from `6.0` in four ways. It carries no search indices — a
 `searchIndices` field in it is ignored, and so is a lens's `indexInclusions`: each scoped
 lens includes the managed indices the import includes on its own
 ([above](#what-the-format-carries)). Its lenses carry retrievers of
-configuration version 1 under `retrievers`, in place of `retrieverAgents`; import
-converts each into a retriever agent
-([retriever-agents.md](retriever-agents.md#converting-version-1-configurations)) —
-renaming a key with `-`, which version 1 allowed, unique among its lens's agents. It carries one
-`textSearchLanguage`, `english` or `german`, in place of `keywordLanguages`; import takes
-that language alone as the set. And its entity types carry no name property
-([schema-modeling.md](schema-modeling.md#the-name-property)); import derives one per
+configuration version 1 under `retrievers`, in place of `retrieverAgents`; the upgrade
+converts each into a retriever
+([retrievers.md](retrievers.md#converting-version-1-configurations)) —
+renaming a key with `-`, which version 1 allowed, unique among its lens's agents — and
+the agent keeps the conversion's warnings, the rename among them. It carries one
+`textSearchLanguage`, `english` or `german`, in place of `keywordLanguages`; the upgrade
+takes that language alone as the set. And its entity types carry no name property
+([schema-modeling.md](schema-modeling.md#the-name-property)); the upgrade derives one per
 entity type: the first `string` property among `name`, `title`, `label` and
 `display_name`, in that order; otherwise the type's first `string` property in payload
 order. A type without any `string` property is given a new non-required `string`
@@ -102,13 +110,15 @@ property `name` — `name_2`, `name_3`, … when `name` is taken — and that be
 property. The same derivation brings storage written before name properties existed up to
 date ([../storage-adapters.md](../storage-adapters.md)).
 
-**Each version reads only its own fields.** `6.0` reads `keywordLanguages`,
-`searchIndices` and each lens's `indexInclusions` and `retrieverAgents`; `5.0` reads
-`textSearchLanguage` and each lens's `retrievers`. The other version's fields are ignored
-unchecked, however they look. Each version requires its own language field —
-`keywordLanguages` in `6.0`, `textSearchLanguage` in `5.0` — and its absence is a field
-error on it; both require the lenses field. A malformed field of the payload's own
-version fails like a payload of the wrong shape, every offending path named together.
+**Each version reads only its own fields.** An upgrade checks the fields it reads and
+reports a malformed one at its path in the payload's own version, every offending path
+named together, like a payload of the wrong shape: `6.0` checks each lens's `aiAgents`
+and `retrieverAgents`; `5.0` checks `textSearchLanguage` — its absence is a field error
+on it — and each lens's `retrievers`, a retriever without a readable configuration of
+version 1 among them. Fields of another version are ignored unchecked, however they
+look. The current version requires `keywordLanguages` — its absence is a field error on
+it — and the lenses field; a malformed field fails like a payload of the wrong shape,
+every offending path named together.
 
 ## Rules
 
@@ -140,9 +150,9 @@ Two consequences:
   is rejected. In practice this is not a restriction, because such a type would have
   triggered a conflict anyway.
 - **Import validates before it writes.** The entire payload is checked first, in order:
-  its shape, then its format version, then the fields of that version
-  ([above](#the-format-version)), then every [rule](#what-import-validates), then key
-  conflicts. Each step rejects on its own, and a later one runs only when the earlier ones
+  its format version, then the fields each upgrade reads, then the shape of the current
+  version ([above](#the-format-version)), then every [rule](#what-import-validates), then
+  key conflicts. Each step rejects on its own, and a later one runs only when the earlier ones
   pass — so rule violations and key conflicts are separate rejections: every rule
   violation is reported together in one validation error, and only a payload without
   violations is checked for conflicts, every conflicting key then reported together in
@@ -160,7 +170,7 @@ or deleting and recreating the whole ontology and importing into it bare.
 
 ### Identifiers are regenerated, keys are preserved
 
-Every imported object — type, property, lens, agent, saved query, retriever agent,
+Every imported object — type, property, lens, agent, saved query, retriever,
 search index — receives a freshly generated internal identifier. Nothing in the payload carries
 one, and nothing from the source ontology's identifiers survives.
 
@@ -184,16 +194,15 @@ Import is a write path, and the write-path rules apply to it:
   adapter's own objects is refused, with an error naming the reserved set and not the
   vendor. The reserved set is the adapter's to declare; see
   [../storage-adapters.md](../storage-adapters.md).
-- In a `6.0` payload every entity type names its name property, and it must be one of
-  that type's own `string` properties; a missing or unsuitable one is rejected, naming
-  the type.
+- Every entity type names its name property, and it must be one of that type's own
+  `string` properties; a missing or unsuitable one is rejected, naming the type.
 - `document` properties are permitted on entity types only. One on a relation type is
   rejected, naming the property and its type.
 - Every custom search index is validated against the payload's own schema, exactly as at
   definition time ([search-indices.md](search-indices.md#validation-and-limits)), and
   every switched-off key must name a managed index that schema derives. An invalid one
   fails the import, naming the index and the offending path. A definition holding a field
-  the wire format does not define is refused earlier, with the fields of the payload's
+  the wire format does not define is refused earlier, with the shape of the current
   version ([above](#the-format-version)), at its position in `searchIndices.custom`.
 - Every key in a lens's `indexInclusions` must name a custom index of the payload or a
   managed index its schema derives, once per lens; an unknown or repeated key fails the
@@ -212,15 +221,15 @@ One difference from definition time is worth knowing: an imported saved query's 
 is **not** parsed and checked against the lens. A pipeline that is structurally sound but
 names a type the lens does not expose imports successfully and fails when it is first run.
 
-Retriever agents are checked for shape only: a key following the key rules and unique in
-its lens — a `5.0` key once renamed — a name of 1 to 200 characters, and a configuration of the payload's version —
-2 in `6.0`, 1 in `5.0` — that has the shape and limits of version 2, a `5.0` one once
-converted. A violation fails the import. What
+Retrievers are checked for shape only: a key following the key rules and unique in
+its lens — a `5.0` key once renamed — a name of 1 to 200 characters, and a configuration
+of version 2 that has its shape and limits — a `5.0` one once converted. A violation fails
+the import. What
 an agent references is not checked: export carries every agent as stored, including one
 that became invalid, and it imports and is reported invalid on read, like any agent its
-lens cannot run ([retriever-agents.md](retriever-agents.md#validation-and-warnings)).
-Omitting `retrieverAgents` is valid. An adapter without search indices exports no
-`retrieverAgents`; its import checks them and keeps none.
+lens cannot run ([retrievers.md](retrievers.md#validation-and-warnings)).
+Omitting `assistants`, or either of its lists, is valid. An adapter without search
+indices exports no `retrievers`; its import checks them and keeps none.
 
 ### Side effects of import
 
@@ -244,8 +253,9 @@ artefacts and computes embeddings, all within the target ontology.
   the queries are semantically discoverable immediately. Nothing else is embedded — there
   is no instance data to embed.
 - **Cache invalidation.** Import clears the schema cache, as any modeling change does.
-- **Retriever agents** are written last, once the indices exist. They embed nothing; a
-  `5.0` payload's converted agents keep their conversion warnings, key renames among them.
+- **Retrievers** are written last, once the indices exist. They embed nothing; a
+  `5.0` payload's converted agents keep their conversion warnings, key renames among them
+  ([above](#the-format-version)).
 
 Import answers with the lenses it created.
 

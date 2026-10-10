@@ -1,9 +1,8 @@
 /**
  * AI runtime endpoints against the real docker-compose database and the
  * configured language model, ported from `backend/tests/integration/test_ai.py` plus
- * the session-11 additions: ask over seeded data (OQL present, rows
- * non-empty), chat with a restricted agent whose trace shows only allowlisted tools,
- * and an A2A task round-trip against the default and a named agent.
+ * the session-11 addition: chat with a restricted agent whose trace shows
+ * only allowlisted tools.
  *
  * Configuration comes from the suite's own env file (`env/test-ai.env` via
  * the npm script), never `server/.env`. Skips when the database is down or
@@ -59,6 +58,7 @@ async function inject(
     if (res.headers["content-type"]?.includes("application/x-ndjson")) {
       const events = res.body.trim().split("\n").map((line) => JSON.parse(line) as Row);
       expect(events.filter((event) => ["final", "error"].includes(String(event.type)))).toHaveLength(1);
+      expect(events[0]?.type).toBe("thread");
       expect(events.at(-1)?.type).toBe("final");
       body = { events };
     } else body = res.json() as Row;
@@ -134,7 +134,7 @@ beforeAll(async () => {
   // A restricted agent for the trace scenario.
   const res = await app.inject({
     method: "PUT",
-    url: "/api/ontologies/test_ont/model/lenses/ai_test/ai-agents/analyst",
+    url: "/api/ontologies/test_ont/model/lenses/ai_test/assistants/agents/analyst",
     payload: {
       name: "Analyst",
       description: "Answers only via OQL queries",
@@ -190,42 +190,12 @@ describe("features", () => {
 });
 
 // ---------------------------------------------------------------------------
-// AI Query (NL → OQL)
-// ---------------------------------------------------------------------------
-
-describe("POST /ai/query", () => {
-  ifAvailable("answers a question over seeded data with OQL and rows", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/query", {
-      question: "How many persons are there? Use the execute_query tool.",
-    });
-    expect(statusCode).toBe(200);
-    expect(typeof body.answer).toBe("string");
-    expect((body.answer as string).length).toBeGreaterThan(0);
-    // Session-11 spec: the generated OQL and the raw rows must be present.
-    expect(typeof body.query).toBe("string");
-    expect((body.query as string).toUpperCase()).toContain("MATCH");
-    const results = body.results as Row;
-    expect(results).toHaveProperty("columns");
-    expect(results).toHaveProperty("results");
-    expect((results.results as Row[]).length).toBeGreaterThan(0);
-    expect(body).not.toHaveProperty("cypher");
-  });
-
-  ifAvailable("rejects an empty question", async () => {
-    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/query", {
-      question: "",
-    });
-    expect(statusCode).toBe(422);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // AI Chat (conversational Q&A with tools)
 // ---------------------------------------------------------------------------
 
-describe("POST /ai/chat", () => {
+describe("chat with the default agent", () => {
   ifAvailable("returns one complete final reply", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/chat", {
+    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/_default/chat", {
       message: "How many companies are in the database?",
     });
     expect(statusCode).toBe(200);
@@ -235,32 +205,41 @@ describe("POST /ai/chat", () => {
   });
 
   ifAvailable("always includes tool activity", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/chat", {
+    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/_default/chat", {
       message: "List all persons",
     });
     expect(statusCode).toBe(200);
     expect((body.events as Row[]).at(-1)).toHaveProperty("reply");
     expect(Array.isArray(body.events)).toBe(true);
-    for (const call of (body.events as Row[]).filter((event) => event.type === "tool_call")) {
+    for (const call of (body.events as Row[]).filter((event) => event.type === "agent.tool_call")) {
       expect(call).toHaveProperty("tool");
       expect(call).toHaveProperty("args");
     }
   });
 
-  ifAvailable("accepts caller-supplied history", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/chat", {
-      message: "And how old is she?",
-      history: [
-        { role: "user", content: "How many persons are there?" },
-        { role: "assistant", content: "There are 2 persons: Alice and Bob." },
-      ],
-    });
-    expect(statusCode).toBe(200);
-    expect(typeof (body.events as Row[]).at(-1)!.reply).toBe("string");
+  ifAvailable("continues a conversation by its thread id, the second turn answering from the first's tool results", async () => {
+    const chat = "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/_default/chat";
+    const first = await inject("POST", chat, { message: "List all persons with their name, age and location." });
+    expect(first.statusCode).toBe(200);
+    const firstEvents = first.body.events as Row[];
+    expect(firstEvents.some((event) => event.type === "agent.tool_call")).toBe(true);
+    const threadId = firstEvents[0]!.threadId as string;
+
+    const second = await inject("POST", chat, { message: "Of those, who is the oldest? Answer with the name only.", threadId });
+    expect(second.statusCode).toBe(200);
+    const secondEvents = second.body.events as Row[];
+    expect(secondEvents[0]).toEqual({ type: "thread", threadId });
+    expect(String(secondEvents.at(-1)!.reply)).toContain("Alice");
+
+    const read = await inject("GET", `/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/_default/threads/${threadId}`);
+    expect(read.statusCode).toBe(200);
+    const messages = read.body.messages as Row[];
+    expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(messages[2]!.content).toBe("Of those, who is the oldest? Answer with the name only.");
   });
 
   ifAvailable("rejects an empty message", async () => {
-    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/chat", {
+    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/_default/chat", {
       message: "",
     });
     expect(statusCode).toBe(422);
@@ -273,7 +252,7 @@ describe("POST /ai/chat", () => {
 
 describe("agents", () => {
   ifAvailable("lists the default agent alongside the configured one", async () => {
-    const { statusCode, body } = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents");
+    const { statusCode, body } = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents");
     expect(statusCode).toBe(200);
     const agents = body as unknown as Row[];
     const keys = agents.map((a) => a.key);
@@ -284,14 +263,14 @@ describe("agents", () => {
   ifAvailable("a restricted agent's trace shows only allowlisted tools", async () => {
     const { statusCode, body } = await inject(
       "POST",
-      "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/analyst/chat",
+      "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/analyst/chat",
       {
         message: "How many persons are stored? Answer using your tools.",
         },
     );
     expect(statusCode).toBe(200);
     expect(typeof (body.events as Row[]).at(-1)!.reply).toBe("string");
-    const calls = (body.events as Row[]).filter((event) => event.type === "tool_call");
+    const calls = (body.events as Row[]).filter((event) => event.type === "agent.tool_call");
     expect(Array.isArray(calls)).toBe(true);
     for (const call of calls) {
       expect(call.tool).toBe("execute_query");
@@ -299,86 +278,9 @@ describe("agents", () => {
   });
 
   ifAvailable("chat with an unknown agent answers 404", async () => {
-    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/ghost/chat", {
+    const { statusCode } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/assistants/agents/ghost/chat", {
       message: "Hi",
     });
     expect(statusCode).toBe(404);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// A2A: cards and task round-trips
-// ---------------------------------------------------------------------------
-
-describe("A2A", () => {
-  ifAvailable("serves the default card and a named card", async () => {
-    const def = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/.well-known/agent.json");
-    expect(def.statusCode).toBe(200);
-    expect(def.body.name).toBe("Knowledge Assistant");
-    expect(def.body.url as string).toContain("/api/ontologies/test_ont/runtime/lenses/ai_test/ai/a2a");
-    expect((def.body.capabilities as Row).streaming).toBe(false);
-    expect(def.body.skills as Row[]).toHaveLength(1);
-
-    const named = await inject(
-      "GET",
-      "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/analyst/.well-known/agent.json",
-    );
-    expect(named.statusCode).toBe(200);
-    expect(named.body.name).toBe("Analyst");
-    expect(named.body.url as string).toContain("/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/analyst/a2a");
-  });
-
-  ifAvailable("task round-trip against the default agent", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/a2a", {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tasks/send",
-      params: {
-        id: "task-1",
-        message: { parts: [{ type: "text", text: "How many persons are there?" }] },
-      },
-    });
-    expect(statusCode).toBe(200);
-    expect(body.jsonrpc).toBe("2.0");
-    expect(body.id).toBe(1);
-    const result = body.result as Row;
-    expect(result.id).toBe("task-1");
-    expect((result.status as Row).state).toBe("completed");
-    const artifacts = result.artifacts as Row[];
-    expect(artifacts).toHaveLength(1);
-    const parts = artifacts[0]!.parts as Row[];
-    expect(parts).toHaveLength(1);
-    expect(parts[0]!.type).toBe("text");
-    expect((parts[0]!.text as string).length).toBeGreaterThan(0);
-  });
-
-  ifAvailable("task round-trip against a named agent", async () => {
-    const { statusCode, body } = await inject(
-      "POST",
-      "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/agents/analyst/a2a",
-      {
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tasks/send",
-        params: {
-          message: { parts: [{ type: "text", text: "How many companies are there?" }] },
-        },
-      },
-    );
-    expect(statusCode).toBe(200);
-    const result = body.result as Row;
-    expect((result.status as Row).state).toBe("completed");
-    expect(typeof result.id).toBe("string");
-  });
-
-  ifAvailable("an unsupported method answers JSON-RPC method-not-found", async () => {
-    const { statusCode, body } = await inject("POST", "/api/ontologies/test_ont/runtime/lenses/ai_test/ai/a2a", {
-      jsonrpc: "2.0",
-      id: 3,
-      method: "tasks/stream",
-      params: {},
-    });
-    expect(statusCode).toBe(200);
-    expect((body.error as Row).code).toBe(-32601);
   });
 });

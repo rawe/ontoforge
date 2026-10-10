@@ -8,13 +8,13 @@ import { KeywordLanguage, KeywordLanguageSetSchema } from "../core/keywordLangua
 
 import { z } from "zod";
 
-import { DATA_TYPES, DEFAULT_NAME_PROPERTY, KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
+import { DATA_TYPES, DEFAULT_NAME_PROPERTY, SCHEMA_KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
 import { SearchIndexDefinition } from "../core/searchIndex.js";
 
 // --- Lens ---
 
 export const LensCreate = z.object({
-  key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
+  key: z.string().regex(SCHEMA_KEY_PATTERN).max(MAX_KEY_LENGTH),
   name: z.string(),
   description: z.string().nullable().optional(),
 });
@@ -77,10 +77,10 @@ export const ValidationResult = z.object({
 /** Creating an entity type creates its name property too: a non-required
  * `string` property under `nameProperty` (default `name`). */
 export const EntityTypeCreate = z.object({
-  key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
+  key: z.string().regex(SCHEMA_KEY_PATTERN).max(MAX_KEY_LENGTH),
   displayName: z.string(),
   description: z.string().nullable().optional(),
-  nameProperty: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH).default(DEFAULT_NAME_PROPERTY),
+  nameProperty: z.string().regex(SCHEMA_KEY_PATTERN).max(MAX_KEY_LENGTH).default(DEFAULT_NAME_PROPERTY),
 });
 
 /** `nameProperty` reassigns the name property to another `string` property
@@ -105,7 +105,7 @@ export const EntityTypeResponse = z.object({
 // --- Relation Type ---
 
 export const RelationTypeCreate = z.object({
-  key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
+  key: z.string().regex(SCHEMA_KEY_PATTERN).max(MAX_KEY_LENGTH),
   displayName: z.string(),
   description: z.string().nullable().optional(),
   sourceEntityTypeKey: z.string(),
@@ -131,7 +131,7 @@ export const RelationTypeResponse = z.object({
 // --- Property Definition ---
 
 export const PropertyDefinitionCreate = z.object({
-  key: z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH),
+  key: z.string().regex(SCHEMA_KEY_PATTERN).max(MAX_KEY_LENGTH),
   displayName: z.string(),
   description: z.string().nullable().optional(),
   dataType: z.enum(DATA_TYPES),
@@ -165,23 +165,16 @@ export const PropertyDefinitionResponse = z.object({
   updatedAt: z.iso.datetime(),
 });
 
-// --- AI Agent Config ---
+// --- Agent Config ---
 
-/**
- * Agent and saved-query keys: hyphens allowed, unlike type and property
- * keys. Kept as a STRING so validation-error messages can interpolate the
- * exact pattern text.
- */
-export const AGENT_KEY_PATTERN = "^[a-z][a-z0-9_-]*$";
-
-export const AiAgentConfigUpsert = z.object({
+export const AgentConfigUpsert = z.object({
   name: z.string(),
   description: z.string().nullable().optional(),
   systemPrompt: z.string().nullable().optional(),
   tools: z.array(z.string()).nullable().optional(),
 });
 
-export const AiAgentConfigResponse = z.object({
+export const AgentConfigResponse = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string().nullable(),
@@ -250,18 +243,17 @@ export const SavedQueryResponse = z.object({
 // (`docs/capabilities/transfer.md`) — the schema-validation operation is
 // what catches those later.
 
-/** Current transfer format version — what export writes. */
-export const TRANSFER_FORMAT_VERSION = "6.0";
+/** Current transfer format version — what export writes and the only one
+ * import reads; older versions reach it through the upgrade chain
+ * (`modeling/transfer/upgrades.ts`). */
+export const TRANSFER_FORMAT_VERSION = "7.0";
 
-/** The previous format, still imported: entity types carry no
- * `nameProperty`, so import derives it (`core/legacyNameProperty.ts`). */
-export const LEGACY_TRANSFER_FORMAT_VERSION = "5.0";
-
-/** Every format version import accepts; an absent version is the current one. */
-export const IMPORTABLE_FORMAT_VERSIONS: readonly string[] = [
-  TRANSFER_FORMAT_VERSION,
-  LEGACY_TRANSFER_FORMAT_VERSION,
-];
+/** What import accepts as the request shape: an object with an optional
+ * version string. The rest belongs to the version — its upgrader, then
+ * import, check it (`ExportPayload`). */
+export const TransferEnvelope = z.looseObject({
+  formatVersion: z.string().optional(),
+});
 
 export const ExportProperty = z.object({
   key: z.string(),
@@ -276,8 +268,8 @@ export const ExportEntityType = z.object({
   key: z.string(),
   displayName: z.string(),
   description: z.string().nullable().optional(),
-  // Required from 6.0 on — import checks it itself, so a 5.0 payload
-  // (which has none) still parses.
+  // Required — import checks it itself, collecting a missing one with the
+  // other rule violations.
   nameProperty: z.string().optional(),
   properties: z.array(ExportProperty).default([]),
 });
@@ -301,7 +293,7 @@ export const ExportLensInclusions = z.object({
   relationTypes: z.array(ExportLensInclusion).default([]),
 });
 
-export const ExportAiAgent = z.object({
+export const ExportAgent = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string().nullable().optional(),
@@ -336,35 +328,33 @@ export const ExportSavedQuery = z.object({
   parameters: z.array(ExportSavedQueryParameter).default([]),
 });
 
-/** One retriever agent in its portable form — also the single-agent
+/** One retriever in its portable form — also the single-agent
  * export. Kept as stored: a version this release cannot run travels too. */
-export const ExportRetrieverAgent = z.object({
+export const ExportRetriever = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string().nullable(),
   configVersion: z.number(),
   config: z.unknown(),
 });
-export type ExportRetrieverAgentInput = z.infer<typeof ExportRetrieverAgent>;
+export type ExportRetrieverInput = z.infer<typeof ExportRetriever>;
+
+/** A lens's assistants, one list per kind; each entry in its portable form. */
+export const ExportAssistants = z.object({
+  agents: z.array(ExportAgent).default([]),
+  retrievers: z.array(ExportRetriever).default([]),
+});
 
 export const ExportLens = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string().nullable().optional(),
   includes: ExportLensInclusions.nullable().optional(),
-  // Version-specific fields are unchecked here: import reads each only in
-  // the version that carries it, with the schema below, and ignores it in
-  // the other (`docs/capabilities/transfer.md#the-format-version`).
-  // 6.0: `ExportIndexInclusions`. Absent (and in 5.0): the lens includes
+  // The keys of the indices the lens includes. Absent: the lens includes
   // the managed indices of the types it exposes, as a lens upgraded by
   // the storage step does.
-  indexInclusions: z.unknown().optional(),
-  // 6.0: `ExportRetrieverAgents` (configuration version 2).
-  retrieverAgents: z.unknown().optional(),
-  // 5.0 only: `ExportRetrieverAgents` (configuration version 1),
-  // converted on import.
-  retrievers: z.unknown().optional(),
-  aiAgents: z.array(ExportAiAgent).default([]),
+  indexInclusions: z.array(z.string()).optional(),
+  assistants: ExportAssistants.default({ agents: [], retrievers: [] }),
   savedQueries: z.array(ExportSavedQuery).default([]),
 });
 
@@ -376,27 +366,17 @@ export const ExportSearchIndices = z.object({
   disabled: z.array(z.string()).default([]),
 });
 
-/** A 6.0 lens's index inclusions: the keys of the indices it includes. */
-export const ExportIndexInclusions = z.array(z.string());
-
-/** A lens's retriever agents — 6.0 `retrieverAgents`, 5.0 `retrievers`. */
-export const ExportRetrieverAgents = z.array(ExportRetrieverAgent);
-
+/** The current version's payload, as import reads it once the upgrade
+ * chain has brought it here. The keyword language set is required; import
+ * reports its absence as a field error before this shape. */
 export const ExportPayload = z.object({
-  formatVersion: z.string().optional().default(TRANSFER_FORMAT_VERSION),
-  // Version-specific, so unchecked here like a lens's: each required by
-  // its own version and read with its schema by import only — 6.0 the
-  // keyword language set (`KeywordLanguageSetSchema`), 5.0 its one
-  // text-search language (`KeywordLanguage`).
-  keywordLanguages: z.unknown().optional(),
-  textSearchLanguage: z.unknown().optional(),
-  // 6.0 only: `ExportSearchIndices`; absent = no custom index, every
-  // managed index on.
-  searchIndices: z.unknown().optional(),
+  keywordLanguages: KeywordLanguageSetSchema,
+  // Absent: no custom index, every managed index on.
+  searchIndices: ExportSearchIndices.optional(),
   entityTypes: z.array(ExportEntityType).default([]),
   relationTypes: z.array(ExportRelationType).default([]),
-  // Required, no default: a pre-4.0 document (`ontologies[]`) must fail
-  // plain shape validation — the intended, final rejection of old payloads.
+  // Required, no default: a document without lenses (a pre-4.0
+  // `ontologies[]` one) is no transfer payload.
   lenses: z.array(ExportLens),
 });
 
@@ -452,8 +432,7 @@ export const IndexStatusResponse = z.object({
     z.object({
       representation: RepresentationSchema,
       state: z.enum(["ready", "building", "stale", "failed", "unavailable"]),
-      done: z.number().int(),
-      total: z.number().int(),
+      build: z.object({ done: z.number().int(), total: z.number().int() }).nullable(),
       pending: z.number().int(),
       failed: z.number().int(),
     }),
@@ -533,8 +512,8 @@ export type RelationTypeResponseBody = z.infer<typeof RelationTypeResponse>;
 export type PropertyDefinitionCreateInput = z.infer<typeof PropertyDefinitionCreate>;
 export type PropertyDefinitionUpdateInput = z.infer<typeof PropertyDefinitionUpdate>;
 export type PropertyDefinitionResponseBody = z.infer<typeof PropertyDefinitionResponse>;
-export type AiAgentConfigUpsertInput = z.infer<typeof AiAgentConfigUpsert>;
-export type AiAgentConfigResponseBody = z.infer<typeof AiAgentConfigResponse>;
+export type AgentConfigUpsertInput = z.infer<typeof AgentConfigUpsert>;
+export type AgentConfigResponseBody = z.infer<typeof AgentConfigResponse>;
 export type StepInput = z.infer<typeof StepSchema>;
 export type SavedQueryParameterInput = z.infer<typeof SavedQueryParameterSchema>;
 export type SavedQueryUpsertInput = z.infer<typeof SavedQueryUpsert>;

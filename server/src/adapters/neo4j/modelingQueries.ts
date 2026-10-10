@@ -142,7 +142,7 @@ export async function updateLens(
 }
 
 /** Delete lens and cascade to agent configs and saved queries — and to
- * retriever configurations a 5.x server stored (retriever agents need
+ * retriever configurations a 5.x server stored (retrievers need
  * search indices, which this adapter does not store). */
 export async function deleteLens(session: Session, lensId: string): Promise<boolean> {
   const result = await session.run(
@@ -992,9 +992,9 @@ export async function setSavedQueryEmbedding(
   );
 }
 
-// --- AI Agent Config ---
+// --- Agent Config ---
 
-export async function listAiAgents(session: Session, lensId: string): Promise<Row[]> {
+export async function listAgents(session: Session, lensId: string): Promise<Row[]> {
   const result = await session.run(
     `
     MATCH (o:Ontology {lensId: $lensId})-[:HAS_AI_AGENT]->(ac:AiAgentConfig)
@@ -1008,7 +1008,7 @@ export async function listAiAgents(session: Session, lensId: string): Promise<Ro
 
 /** MERGE-based upsert. Returns `[record, created]` — created is detected by
  * whether ON CREATE stamped this call's fresh id onto the node. */
-export async function upsertAiAgent(
+export async function upsertAgent(
   session: Session,
   lensId: string,
   agentConfigId: string,
@@ -1046,7 +1046,7 @@ export async function upsertAiAgent(
 
 /** List agents in the transfer shape (key, name, description, systemPrompt,
  * tools) — no ids, no timestamps. */
-export async function listAiAgentsForExport(
+export async function listAgentsForExport(
   session: Session,
   lensId: string,
 ): Promise<Row[]> {
@@ -1068,7 +1068,7 @@ export async function listAiAgentsForExport(
   }));
 }
 
-export async function deleteAiAgent(
+export async function deleteAgent(
   session: Session,
   lensId: string,
   agentKey: string,

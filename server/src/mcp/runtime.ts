@@ -755,7 +755,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         "named relation type keys ([] keeps none); an entity's own fields and document passages always count. " +
         "Filters take the list_entities keys and operators except '__contains' and apply before ranking, keeping only " +
         "the indices whose entity type declares every key; fields projects each entity; limit is an integer 1–100, default 10. " +
-        "Returns query, mode, minSimilarity and hits; each hit has entity, relativeScore and matched — the entry that " +
+        "Returns query, mode (hybrid: semantic+keyword), minSimilarity and hits; each hit has entity, relativeScore and matched — the entry that " +
         "matched best: index, partKind (self/relation/passage), relationType and relationId of a relation, target " +
         "(id, type, label of the entity at its other end), snippet (start of the entry's text), and a passage's " +
         "charOffset and charLength — for get_document use the index's documentProperty as property_key. " +

@@ -9,7 +9,7 @@ import { useLenses, useLensScope } from '@/api/hooks'
 import type { Lens } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
-import { deriveKey, invalidateModeling, isValidKey, toastError } from '@/components/studio/lib'
+import { deriveKey, invalidateModeling, isValidSchemaKey, toastError } from '@/components/studio/lib'
 import { KeyField } from '@/components/studio/shared'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -124,7 +124,7 @@ export function CreateLensDialog({
     },
   })
 
-  const valid = isValidKey(key) && name.trim() !== ''
+  const valid = isValidSchemaKey(key) && name.trim() !== ''
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { PARAMETER_DATA_TYPES, deriveKey, isValidKey, toastError } from '@/components/studio/lib'
+import { PARAMETER_DATA_TYPES, deriveKey, isValidLensResourceKey, toastError } from '@/components/studio/lib'
 import { KeyField } from '@/components/studio/shared'
 import { detectParams } from './resultUtils'
 
@@ -103,7 +103,7 @@ export function SaveQueryDialog({
   })
 
   const valid =
-    isValidKey(key) &&
+    isValidLensResourceKey(key) &&
     name.trim() !== '' &&
     description.trim() !== '' &&
     query.trim() !== '' &&
@@ -142,6 +142,7 @@ export function SaveQueryDialog({
             </div>
             <KeyField
               id="saveq-key"
+              lensResource
               value={key}
               onChange={(v) => {
                 setKeyTouched(true)

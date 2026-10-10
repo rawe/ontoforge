@@ -345,13 +345,18 @@ generation it would replace keeps serving.
 ### Status
 
 Every index reports a build status per representation it keeps — one its definition
-switches off is not reported — with the entities done and the total of a generation
-building, the items pending and the items failed:
+switches off is not reported — with three counts:
+
+- **build** — the entities done and the total of a generation filling; absent while
+  none is. It measures that build only, never the size of the index.
+- **pending** — queued items not yet indexed, of the building and the active generation.
+- **failed** — items whose retries are used up; a rebuild or a new write of their
+  entity queues them afresh.
 
 | State | Meaning |
 |---|---|
 | `ready` | the active generation is current, nothing pending |
-| `building` | a new generation is filling; done of total |
+| `building` | a new generation is filling; see build |
 | `stale` | the active generation has work pending, or no generation exists yet |
 | `failed` | items failed for good — in the active generation with nothing else pending, or all that a building generation has left |
 | `unavailable` | the semantic representation without an embedding provider |

@@ -52,7 +52,7 @@ key, the optional display name and timestamps. Six operations:
 | Read by key | One row, or an absent result. |
 | Read by display name | One row, or an absent result — display names are unique server-wide, and the pre-write conflict check needs the lookup. |
 | Rename | Set the display name; the key never changes. Absent result when not found. |
-| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, retriever agents, instances, chunks, and every search index. False when not found. |
+| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, retrievers, instances, chunks, and every search index. False when not found. |
 
 The registry — not the database's own catalog — is the authoritative list of ontologies.
 The store must enforce server-wide uniqueness of the ontology key and the display name;
@@ -259,7 +259,7 @@ It returns the page together with the total matching count — both, from one ca
 
 A second read lists, for a type key and one property key, up to a given number of that
 property's distinct stored values as text, in ascending order; an entity without the
-property, or with an empty value, contributes none. A retriever agent's planner sees them
+property, or with an empty value, contributes none. A retriever's planner sees them
 when they are few.
 
 The adapter must set and maintain the system properties on every write: the instance id,
@@ -357,7 +357,7 @@ includes, in key order — none for an unknown lens; include one index by key, c
 index does not exist, a conflict when the lens includes it already; and remove one —
 absent when the lens does not include it.
 
-**Retriever agents.** [Retriever agents](capabilities/retriever-agents.md) search the
+**Retrievers.** [Retrievers](capabilities/retrievers.md) search the
 indices, so this store keeps them. Each belongs to a lens, is addressed by key within it
 and is deleted with it. It carries an id, the key, a name, an optional description, a
 configuration version, the configuration as an opaque structured value kept exactly as
@@ -755,7 +755,7 @@ multi-ontology conformance tier runs on PostgreSQL only.
   its best passage; and when both kinds run their rankings are summed by reciprocal rank,
   or, over more than one searched type, combined by the best reciprocal kind rank
   ([decisions.md](decisions.md#interfaces)). A floor drops semantic candidates — entities
-  or passages — before fusion. Without the store there are no retriever agents either.
+  or passages — before fusion. Without the store there are no retrievers either.
 - **Path and relation existence conditions on search.** PostgreSQL declares support and
   evaluates them in both rankings; Neo4j declares none, so a query path or a relation
   existence test on search is rejected above the port with a validation error naming the
@@ -850,7 +850,7 @@ empty. Storage recorded at version 2 keeps them in `retriever_config`, so there 
 table is renamed to `retriever_agent` with its constraints, gains its `warnings` column,
 and has every stored configuration of version 1 converted to version 2 by the conversion
 an import applies
-([capabilities/retriever-agents.md](capabilities/retriever-agents.md#converting-version-1-configurations)),
+([capabilities/retrievers.md](capabilities/retrievers.md#converting-version-1-configurations)),
 storing its warnings; a configuration that is no readable version-1 shape stays as it
 is. Every agent key with `-` is renamed by the same conversion's key rule, unique within
 its lens, and the rename joins the agent's warnings. Last, the step drops the per-entity
@@ -890,19 +890,19 @@ per namespace:
 
 | Logical | Table | Joined by |
 |---|---|---|
-| Lens | `lens` | referenced by its inclusions, agents, saved queries and retriever agents |
+| Lens | `lens` | referenced by its inclusions, agents, saved queries and retrievers |
 | Entity type | `entity_type` | referenced by its property definitions and inclusions; its name property's key in `name_property`, a reference to `property_def` by entity type and key, checked at commit |
 | Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions |
 | Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
 | Scope inclusion | `lens_includes` | its lens plus exactly one of three columns — entity type, relation type or search index; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array. Search-index rows reach the runtime schema read as index keys; the type-inclusion reads skip them |
 | Agent configuration | `ai_agent_config` | its lens |
 | Saved query | `saved_query` | its lens, with the denormalized lens key alongside |
-| Retriever agent | `retriever_agent` | its lens, with delete cascade; unique per lens and key; configuration and warnings as `jsonb` |
+| Retriever | `retriever_agent` | its lens, with delete cascade; unique per lens and key; configuration and warnings as `jsonb` |
 
 Every schema row carries a `uuid` primary key.
 
 Deleting a schema object cascades through the foreign keys — property definitions,
-inclusions, agents, saved queries and retriever agents die with their owner. The DDL carries
+inclusions, agents, saved queries and retrievers die with their owner. The DDL carries
 structure only, per the rule in [decisions.md](decisions.md#storage): identity, referential
 integrity, exactly-one-owner and uniqueness, with no backstop for the business rules the
 service validates. The search-index tables are the one exception: they check their closed
@@ -1132,7 +1132,7 @@ Schema objects are nodes, joined by relationships:
 | Agent configuration | `AiAgentConfig` | `HAS_AI_AGENT` from its lens |
 | Saved query | `SavedQuery` | `HAS_SAVED_QUERY` from its lens |
 
-The adapter stores no retriever agents. Deleting a lens also removes any
+The adapter stores no retrievers. Deleting a lens also removes any
 `_RetrieverConfig` node its `_HAS_RETRIEVER` relationship reaches.
 
 Instance data lives in the same database, distinguished by underscore-prefixed internal
@@ -1271,8 +1271,8 @@ Provide, in this order:
 6. **The data side.** Entities, relations, traversal.
 7. **Filters, sorts and text search.** The predicate builder, shared by listing and by
    filtered vector search.
-8. **Search** — either the search-index store with its queue, wake-ups and retriever
-   agents, or own search
+8. **Search** — either the search-index store with its queue, wake-ups and retrievers,
+   or own search
    storage with its chunks, vectors and vector indexes — and the saved-query vector
    index, including width reconciliation.
 9. **Query compilation.** Last, because it needs the naming transformation from step 1 and

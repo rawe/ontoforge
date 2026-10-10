@@ -53,10 +53,11 @@ default ontology and no default lens: both must be resolved before any call is g
 - Runtime only: schema introspection, entity CRUD, document reads and partial writes,
   relation CRUD, neighbors, search (default search, index search and the search
   catalog), OQL query, saved query listing/search/run,
-  the AI runtime endpoints, and feature discovery.
+  the assistant endpoints (list, chat on server-held threads, thread read, retrieve), and
+  feature discovery.
 - Not modeling: creating or changing entity types, relation types, properties or lenses;
-  defining saved queries; configuring AI agents; defining search indices; schema export
-  and import; rebuilding search data.
+  defining saved queries; configuring assistants (agents and retrievers); defining search
+  indices; schema export and import; rebuilding search data.
 - Not the registry: creating, listing, renaming or deleting ontologies.
 - Absent everywhere: there is no data-wipe endpoint, no bulk write, no instance-data
   export and no health endpoint. Do not generate calls for them.

@@ -105,8 +105,8 @@ export class Neo4jRuntimeStore implements RuntimeStore {
     return runSession(this.driver, (session) => queries.getFullSchemaWithLensInclusions(session, lensKey));
   }
 
-  async getAiAgentConfigs(lensKey: string): Promise<Row[]> {
-    return runSession(this.driver, (session) => queries.getAiAgentConfigs(session, lensKey));
+  async getAgentConfigs(lensKey: string): Promise<Row[]> {
+    return runSession(this.driver, (session) => queries.getAgentConfigs(session, lensKey));
   }
 
   async getSavedQueries(lensKey: string): Promise<Row[]> {

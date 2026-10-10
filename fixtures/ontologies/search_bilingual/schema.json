@@ -1,5 +1,5 @@
 {
-  "formatVersion": "6.0",
+  "formatVersion": "7.0",
   "keywordLanguages": [
     "german",
     "english"
@@ -206,9 +206,11 @@
       "name": "All",
       "description": "Unscoped: the whole schema and every search index.",
       "indexInclusions": [],
-      "aiAgents": [],
-      "savedQueries": [],
-      "retrieverAgents": []
+      "assistants": {
+        "agents": [],
+        "retrievers": []
+      },
+      "savedQueries": []
     },
     {
       "key": "no_company",
@@ -239,9 +241,11 @@
         "person_employment",
         "person_residence"
       ],
-      "aiAgents": [],
-      "savedQueries": [],
-      "retrieverAgents": []
+      "assistants": {
+        "agents": [],
+        "retrievers": []
+      },
+      "savedQueries": []
     }
   ]
 }

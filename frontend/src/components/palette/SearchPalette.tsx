@@ -25,16 +25,15 @@ import {
   type ReactNode,
 } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useFeatures, useRetrieverAgents, useRuntimeSchema, useSearchCatalog } from '@/api/hooks'
-import { RetrievalResults } from '@/components/retrieverAgent/RetrievalResults'
+import { useAssistants, useFeatures, useRuntimeSchema, useSearchCatalog } from '@/api/hooks'
+import { RetrievalResults } from '@/components/assistants/retrievers/RetrievalResults'
 import {
   QUESTION_PREFIX,
   questionToSend,
   resolveRetriever,
   resultEntities,
-  retrieverChoices,
-} from '@/components/retrieverAgent/retrieveModel'
-import { useRetrieve } from '@/components/retrieverAgent/useRetrieve'
+} from '@/components/assistants/retrievers/retrieveModel'
+import { useRetrieve } from '@/components/assistants/retrievers/useRetrieve'
 import { TypeChip, TypeDot } from '@/components/TypeChip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { readString, storageKeys, writeString } from '@/lib/storage'
@@ -103,7 +102,7 @@ interface SearchPaletteProps {
 /**
  * Cmd+K palette: cross-type (semantic) entity search by default, `#` to scope
  * to one entity type, `?` for saved queries, `>` for navigation/actions, `!`
- * to ask a retriever agent a question (sent on Enter, never as you type).
+ * to ask a retriever a question (sent on Enter, never as you type).
  * Enter opens an entity's detail page; Cmd+Enter focuses it in the Explorer.
  *
  * The stateful content only mounts while the dialog is open, so every open
@@ -180,15 +179,15 @@ function PaletteContent({
 
   /* -------------------------------- questions -------------------------------- */
 
-  const agents = useRetrieverAgents(ontologyKey, lensKey, questions)
+  // The runtime list: the built-in default first, then the stored agents.
+  const choices = useAssistants(ontologyKey, lensKey, 'retrievers', questions).data
   const catalog = useSearchCatalog(ontologyKey, lensKey, questions).data
-  const choices = useMemo(() => retrieverChoices(agents.data), [agents.data])
   const [remembered, setRemembered] = useState(() => readString(storageKeys.retriever(ontologyKey, lensKey)))
   const retriever = resolveRetriever(remembered, choices)
-  const retrieverName = choices.find((choice) => choice.key === retriever)?.name ?? 'Default'
+  const retrieverName = choices?.find((choice) => choice.key === retriever)?.name ?? 'Default'
   const [pickerOpen, setPickerOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const retrieve = useRetrieve(ontologyKey, lensKey, retriever, false)
+  const retrieve = useRetrieve(ontologyKey, lensKey, retriever)
   const question = mode === 'question' ? q : null
   const { asked, cancel } = retrieve
   useEffect(() => {
@@ -269,10 +268,10 @@ function PaletteContent({
       ? [
           {
             id: 'ai',
-            label: 'Go to AI',
+            label: 'Go to Assistants',
             icon: Sparkles,
             run: () => go(`${base}/ai`),
-            keywords: 'assistant chat',
+            keywords: 'ai assistant agent retriever chat',
           } satisfies PaletteAction,
         ]
       : []),
@@ -571,17 +570,15 @@ function PaletteContent({
               </PopoverTrigger>
               <PopoverContent align="start" className="w-64 gap-0 p-1" onOpenAutoFocus={(e) => e.preventDefault()}>
                 <p className="px-2 py-1 text-[11px] text-muted-foreground">Ask with</p>
-                {choices.map((choice) => (
+                {(choices ?? []).map((choice) => (
                   <button
                     key={choice.key}
                     type="button"
-                    disabled={!choice.selectable}
                     onClick={() => chooseRetriever(choice.key)}
-                    className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+                    className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] hover:bg-muted"
                   >
                     <Check className={cn('size-3.5', choice.key === retriever ? 'opacity-100' : 'opacity-0')} />
                     <span className="min-w-0 flex-1 truncate">{choice.name}</span>
-                    {!choice.selectable && <span className="text-[11px] text-muted-foreground">invalid</span>}
                   </button>
                 ))}
               </PopoverContent>

@@ -238,8 +238,8 @@ export class PostgresRuntimeStore implements RuntimeStore {
     }, "REPEATABLE READ");
   }
 
-  /** AiAgentConfig rows for one lens, by key. */
-  async getAiAgentConfigs(lensKey: string): Promise<Row[]> {
+  /** AgentConfig rows for one lens, by key. */
+  async getAgentConfigs(lensKey: string): Promise<Row[]> {
     const result = await this.query(
       `SELECT ac.key, ac.name, ac.description, ac.system_prompt, ac.tools
        FROM ai_agent_config ac

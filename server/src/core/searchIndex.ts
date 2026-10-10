@@ -12,7 +12,7 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
-import { KEY_PATTERN, MAX_KEY_LENGTH, type PropertyDef } from "./schemas.js";
+import { SCHEMA_KEY_PATTERN, MAX_KEY_LENGTH, type PropertyDef } from "./schemas.js";
 
 /** Most fields one custom index reads: own, relation and target fields together. */
 export const MAX_INDEX_FIELDS = 12;
@@ -34,7 +34,7 @@ export const DEFAULT_INDEX_SUFFIX = "default";
  * the root's own field, at most once (→ passages). */
 const TEXT_DATA_TYPES = new Set(["string", "integer", "float", "boolean", "date", "datetime"]);
 
-const Key = z.string().regex(KEY_PATTERN).max(MAX_KEY_LENGTH);
+const Key = z.string().regex(SCHEMA_KEY_PATTERN).max(MAX_KEY_LENGTH);
 
 export const RelationDirection = z.enum(["outgoing", "incoming"]);
 export type RelationDirection = z.infer<typeof RelationDirection>;

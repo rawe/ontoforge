@@ -39,7 +39,7 @@ key, unique server-wide, with a mutable display name, also unique server-wide.
 Interfaces speak the key.
 
 **Key scoping** — every key is unique within its owner: property keys per type,
-saved-query, agent and retriever-agent keys per lens, type and lens keys per ontology,
+saved-query, agent and retriever keys per lens, type and lens keys per ontology,
 ontology keys per server.
 
 **Ontology lifecycle** — created bare (no types, no lenses, no data); rename changes
@@ -55,21 +55,31 @@ product names for its surfaces, and does.
 
 **Keys, never identifiers, on the runtime and MCP surfaces.**
 Everything an agent or a data client touches is addressed by human-readable key:
-ontologies, lenses, types, properties, saved queries, agents and retriever agents. Internal
+ontologies, lenses, types, properties, saved queries, agents and retrievers. Internal
 identifiers are resolved behind the interface. A language model should never have to
 carry an opaque identifier to name a type.
 
 The modeling REST surface is the exception: it addresses lenses, types and properties
-by internal identifier, and only agent configurations, saved queries and retriever
-agents by key. It is a schema-design surface used by a client that has just
+by internal identifier, and only agent configurations, saved queries and retrievers
+by key. It is a schema-design surface used by a client that has just
 listed the resource it is about to address, so the identifier is always at hand.
 
 **Key length cap.** Every key — entity type, relation type, lens, property,
-agent, saved query, retriever agent — is at most 64 characters (`MAX_KEY_LENGTH`), enforced at
+agent, saved query, retriever — is at most 64 characters (`MAX_KEY_LENGTH`), enforced at
 validation alongside the key pattern. Keys are human-typed identifiers; the cap
 keeps adapter-derived physical names legible and rejects absurd input at the
 boundary rather than deep inside an adapter. Ontology keys carry a tighter cap of
 their own — see the PostgreSQL layout rule under Storage.
+
+**One key rule per level, never per resource.** Schema keys — ontologies, types,
+properties, lenses, search indices — are lower snake case without `-`, because they appear
+as OQL identifiers, where `-` reads as minus, and in storage names. Lens-resource keys —
+saved queries, agents and retrievers — also allow `-`, because they travel only in
+URLs, JSON and tool arguments. A new keyed resource takes the rule of its level; no
+resource gets a rule of its own. Each rule is defined once in the server
+(`SCHEMA_KEY_PATTERN`, `LENS_RESOURCE_KEY_PATTERN`) and mirrored once in the client; every
+check, error message and tool description refers to it. The patterns: the glossary's *Key*
+in [README.md](README.md).
 
 **No vendor or implementation-language vocabulary anywhere a caller can see.**
 Not in route names, field names, tool names or error messages. The query endpoint takes a
@@ -90,6 +100,17 @@ routers and MCP handlers speak schema vocabulary only.
 exactly one ontology; registry operations live on a separate registry port. The
 physical isolation mechanism is each adapter's private business, behind the
 technology-neutral contract.
+
+**Conversations live in one thread store per server, beside the persistence port.**
+Assistant conversations are held by the server in a thread store — one per server, not per
+ontology — behind an interface of its own, separate from the storage adapter. A turn is
+atomic: a cancelled or failed turn leaves nothing in the thread. One run per thread: a run
+on a thread that is still running is refused, never queued. Conversation state is not
+ontology data — it is never exported, never cascades and expires on its own — so it stays
+out of the port, and its own interface lets the store move out of memory as a second
+implementation. Atomic turns and one run per thread keep a thread a sequence of complete
+turns; otherwise an interrupted step leaves a tool call without its result and two runs
+fork the conversation.
 
 **PostgreSQL layout** — one PG namespace per ontology, named `ont_<key>`; ontology
 keys are capped at 59 characters. `public` holds everything server-wide, starting
@@ -402,11 +423,10 @@ without per-connection state. This rule applies to MCP, as established in
 [the MCP transport deliberation](adr/0005-mcp-transport-streamable-http-embedded-in-fastapi.md).
 
 **REST chat always delivers tool activity and the complete answer as NDJSON.**
-Both default and configured chat use their existing routes and one response contract.
+The default agent and configured agents share one route and one response contract.
 Results retain their JSON structure; only the final answer carries assistant text.
 Failures preserve received results and mark the turn incomplete. Disconnect cancels further
-work, and delivery bounds buffering. Shared execution remains usable by complete-response
-callers; A2A and MCP retain their own transport contracts. The wire details live in
+work, and delivery bounds buffering. MCP retains its own transport contract. The wire details live in
 [interfaces](interfaces.md#ai); the delivery alternatives are weighed in
 [the chat transport deliberation](adr/0021-rest-chat-tool-streaming.md).
 
@@ -477,10 +497,10 @@ server is a recorded choice.
 or a passage — in a short label, never a number, a bar or the entry's text. A displayed
 score would be read as relevance or confidence, which a relative score is not.
 
-**Search indices and retriever agents are designed in the Studio and used in the
+**Search indices and retrievers are designed in the Studio and used in the
 Workbench.** The Studio owns the index designer, the search settings and the
-retriever-agent editor, which carries a test panel so an agent is configured and tried in
-one place; the Workbench only uses agents — it chats with them and asks them questions
+retriever editor, which carries a test panel so a retriever is configured and tried in
+one place; the Workbench only uses retrievers — it chats with them and asks them questions
 from the command palette, never edits them. Design stays with design, as schema and
 lenses do.
 
@@ -579,24 +599,24 @@ a warning, which never makes the lens invalid. The lens still governs everything
 returned: hits are projected through it, and a match whose index reads a hidden property
 carries no snippet of the entry's text.
 
-**Retriever agents are a lens-local resource that searches search indices.** Each has a
-key, name, description, configuration version and configuration; keys follow the shared
-key rules and are unique within the lens. A save is validated against the lens and
-refused when invalid; a stored agent that later becomes invalid stays readable and
+**Retrievers are a lens-local resource that searches search indices.** Each has a
+key, name, description, configuration version and configuration; keys follow the
+lens-resource key rule and are unique within the lens. A save is validated against the lens and
+refused when invalid; a stored retriever that later becomes invalid stays readable and
 exportable, nothing cascades to it, and a question to it is refused. Copying creates an
 independent identity; moving within the same ontology keeps it and is atomic. Neither
 overwrites a target key, and both validate the target lens. Cross-ontology portability is
-an explicit JSON copy validated in the target, never a shared live definition. Agents
+an explicit JSON copy validated in the target, never a shared live definition. Retrievers
 travel with their lens in design transfer and are deleted with it. Storage carries no
 vectors, snapshots, credentials or conversation state. Only an adapter that stores search
-indices keeps agents.
+indices keeps retrievers.
 
-**A retriever agent finds through search indices and embeds nothing of its own.** Its
+**A retriever finds through search indices and embeds nothing of its own.** Its
 configuration references indices, optionally narrowed to their relation groups; a fact of
 a relation is found by the planner choosing a relation group per question, and an exact
 structural condition is a filter of up to two hops. Answer fields, answer-field length and
-the similarity threshold are the agent's own settings. Retrieval runs the index search in
-process — no per-agent vectors, no in-memory vector cache, no preparation step and no
+the similarity threshold are the retriever's own settings. Retrieval runs the index search in
+process — no per-retriever vectors, no in-memory vector cache, no preparation step and no
 snapshot of the data. A question makes two model calls, planning and answering;
 retrieval between them is deterministic, and cancellation stops further work. A retrieve
 — the same question without an answer — makes one: planning, then retrieval, returning
@@ -612,13 +632,13 @@ the planner is shown the few stored values of the compared field — the stored 
 name; it is still compared exactly, and the reading is named as a limitation. The server
 leaves out what fails these checks, names it as a limitation and answers with the rest.
 
-**Every lens has an implicit default retriever agent, derived and never stored.** Keyed
+**Every lens has an implicit default retriever, derived and never stored.** Keyed
 `_default`, which no stored key can shadow, it is derived from the lens per question:
 its switched-on managed indices and exact filters on the names of result types and of
 their direct neighbours. The derivation is deterministic, so a follow-up stays bound to
 it until the schema changes. It is exempt from the stored limits on indices and filters
 but not from the planner input cap: a lens too large for it refuses the question and
-needs a configured agent — nothing is trimmed.
+needs a configured retriever — nothing is trimmed.
 
 **Exactly one env file is read, and it is always named.**
 `ENV_FILE` names it; without that it is `.env` in the working directory. Files never
@@ -693,7 +713,7 @@ no default ontology exists, and it ships as a major version bump. Deliberation:
 [adr/0018](adr/0018-multi-ontology-hard-cut.md).
 
 **Transfer scope** — export and import carry one ontology's design: schema, lenses,
-and their agents, saved queries and retriever agents, the keyword language set, and the custom
+and their agents, saved queries and retrievers, the keyword language set, and the custom
 search indices with the managed indices switched off. Never
 instance data, never the ontology's identity. A transfer document is portable into any
 ontology.

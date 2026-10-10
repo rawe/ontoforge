@@ -16,14 +16,13 @@ import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import { getModelingStore, getRuntimeStore } from "../core/ports.js";
-import { retrieverAgentModelingRouter } from "./retrieverAgentRouter.js";
+import { retrieverModelingRouter } from "./retrieverRouter.js";
 import {
-  AiAgentConfigResponse,
-  AiAgentConfigUpsert,
+  AgentConfigResponse,
+  AgentConfigUpsert,
   EntityTypeCreate,
   EntityTypeResponse,
   EntityTypeUpdate,
-  ExportPayload,
   IncludeSearchIndex,
   IncludeTypeRequest,
   IncludeTypeResponse,
@@ -45,6 +44,7 @@ import {
   SearchIndexResponse,
   SearchSettingsResponse,
   SearchSettingsUpdate,
+  TransferEnvelope,
   ValidationResult,
 } from "./schemas.js";
 import * as searchIndices from "./searchIndices.js";
@@ -66,10 +66,10 @@ const RelationTypePropertyParams = OntologyParams.extend({
   propertyId: z.string(),
 });
 
-// Agent configs and saved queries are the modeling exceptions addressed by
+// Assistants and saved queries are the modeling exceptions addressed by
 // KEY, not internal identifier (`docs/interfaces.md`).
 const LensKeyParams = OntologyParams.extend({ lensKey: z.string() });
-const AgentKeyParams = OntologyParams.extend({ lensKey: z.string(), agentKey: z.string() });
+const AssistantKeyParams = OntologyParams.extend({ lensKey: z.string(), assistantKey: z.string() });
 const QueryKeyParams = OntologyParams.extend({ lensKey: z.string(), queryKey: z.string() });
 // Search indices are addressed by key too: managed keys are derived from
 // the schema and carry no identifier of their own.
@@ -86,7 +86,7 @@ const CascadeQuery = z.object({
 
 /** Routes mounted at `/api/ontologies/:ontologyKey/model`. */
 export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
-  await app.register(retrieverAgentModelingRouter);
+  await app.register(retrieverModelingRouter);
   // --- Lenses ---
 
   app.post(
@@ -425,7 +425,8 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["modeling"],
         params: OntologyParams,
-        body: ExportPayload,
+        // The version's own fields are checked by the import itself.
+        body: TransferEnvelope,
       },
     },
     async (request, reply) => {
@@ -953,38 +954,55 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
-  // --- AI Agent Configs (addressed by lens key + agent key) ---
+  // --- Agents (addressed by lens key + assistant key) ---
 
   app.get(
-    "/lenses/:lensKey/ai-agents",
+    "/lenses/:lensKey/assistants/agents",
     {
       schema: {
         tags: ["modeling"],
         params: LensKeyParams,
-        response: { 200: z.array(AiAgentConfigResponse) },
+        response: { 200: z.array(AgentConfigResponse) },
       },
     },
     async (request) =>
-      service.listAiAgents(
+      service.listAgents(
         request.params.lensKey,
         await getModelingStore(request.params.ontologyKey),
       ),
   );
 
-  app.put(
-    "/lenses/:lensKey/ai-agents/:agentKey",
+  app.get(
+    "/lenses/:lensKey/assistants/agents/:assistantKey",
     {
       schema: {
         tags: ["modeling"],
-        params: AgentKeyParams,
-        body: AiAgentConfigUpsert,
-        response: { 200: AiAgentConfigResponse, 201: AiAgentConfigResponse },
+        params: AssistantKeyParams,
+        response: { 200: AgentConfigResponse },
+      },
+    },
+    async (request) =>
+      service.getAgent(
+        request.params.lensKey,
+        request.params.assistantKey,
+        await getModelingStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.put(
+    "/lenses/:lensKey/assistants/agents/:assistantKey",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: AssistantKeyParams,
+        body: AgentConfigUpsert,
+        response: { 200: AgentConfigResponse, 201: AgentConfigResponse },
       },
     },
     async (request, reply) => {
-      const [result, created] = await service.upsertAiAgent(
+      const [result, created] = await service.upsertAgent(
         request.params.lensKey,
-        request.params.agentKey,
+        request.params.assistantKey,
         request.body,
         await getModelingStore(request.params.ontologyKey),
       );
@@ -993,14 +1011,14 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.delete(
-    "/lenses/:lensKey/ai-agents/:agentKey",
+    "/lenses/:lensKey/assistants/agents/:assistantKey",
     {
-      schema: { tags: ["modeling"], params: AgentKeyParams },
+      schema: { tags: ["modeling"], params: AssistantKeyParams },
     },
     async (request, reply) => {
-      await service.deleteAiAgent(
+      await service.deleteAgent(
         request.params.lensKey,
-        request.params.agentKey,
+        request.params.assistantKey,
         await getModelingStore(request.params.ontologyKey),
       );
       return reply.status(204).send();

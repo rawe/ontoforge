@@ -52,8 +52,8 @@ something a reader would otherwise assume:
 
 ### Keys and immutability
 
-Type keys and property keys match `^[a-z][a-z0-9_]*$` — lower snake case, starting
-with a letter — and are at most 64 characters.
+Type keys and property keys follow the schema [key](../README.md) rule — lower snake
+case, starting with a letter — and are at most 64 characters.
 The leading-letter requirement is load-bearing: system properties
 are distinguished by a leading underscore, so no user key can ever collide with
 one.

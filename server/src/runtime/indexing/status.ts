@@ -1,6 +1,6 @@
 /**
  * The build status of search indices: per index and enabled
- * representation `ready`, `building` (done/total), `stale` (pending),
+ * representation `ready`, `building` (build progress), `stale` (pending),
  * `failed` (count, last errors) or `unavailable`, or `disabled` for a
  * switched-off managed index — derived from the generations and their
  * queues (`core/searchPipeline.ts`).

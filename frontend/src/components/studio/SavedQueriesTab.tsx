@@ -66,7 +66,7 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { TypedValueInput } from './TypedValueInput'
-import { PARAMETER_DATA_TYPES, coerceTypedValue, deriveKey, invalidateModeling, isValidKey, toastError } from './lib'
+import { PARAMETER_DATA_TYPES, coerceTypedValue, deriveKey, invalidateModeling, isValidLensResourceKey, toastError } from './lib'
 import { KeyField } from './shared'
 
 /* ------------------------------ bindings editor ------------------------------ */
@@ -401,7 +401,7 @@ function SavedQueryDialog({
   )
   const paramsValid = parameters.every((p) => p.name.trim() !== '')
   const valid =
-    isValidKey(key) && name.trim() !== '' && steps.length > 0 && stepsValid && paramsValid
+    isValidLensResourceKey(key) && name.trim() !== '' && steps.length > 0 && stepsValid && paramsValid
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -436,6 +436,7 @@ function SavedQueryDialog({
             </div>
             <KeyField
               id="sq-key"
+              lensResource
               value={key}
               onChange={(v) => {
                 setKeyTouched(true)

@@ -6,7 +6,7 @@ import { settings } from "../../src/config.js";
  * pipeline containing a search step fails at run time; deleting
  * the lens cascades to both configuration kinds; and the runtime listing
  * (served from the schema cache) reflects every modeling upsert. Includes
- * all six modeling MCP tools and the three runtime MCP tools.
+ * the seven agent and saved-query modeling MCP tools and the three runtime MCP tools.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -109,7 +109,7 @@ describe("agent configurations (modeling REST)", () => {
   it("upserts by key: 201 on create, 200 on replace, full wire shape", async () => {
     const created = await inject(
       "PUT",
-      "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents/hr-assistant",
+      "/api/ontologies/test_ont/model/lenses/test_lens/assistants/agents/hr-assistant",
       {
         name: "HR Assistant",
         description: "Answers HR questions",
@@ -126,32 +126,41 @@ describe("agent configurations (modeling REST)", () => {
 
     const replaced = await inject(
       "PUT",
-      "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents/hr-assistant",
+      "/api/ontologies/test_ont/model/lenses/test_lens/assistants/agents/hr-assistant",
       { name: "HR Assistant v2", tools: null },
     );
     expect(replaced.statusCode).toBe(200);
     expect((replaced.body as Row).name).toBe("HR Assistant v2");
     expect((replaced.body as Row).tools).toBeNull();
 
-    const list = await inject("GET", "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents");
+    const list = await inject("GET", "/api/ontologies/test_ont/model/lenses/test_lens/assistants/agents");
     expect(list.statusCode).toBe(200);
     const keys = (list.body as Row[]).map((a) => a.key);
     expect(keys).toContain("hr-assistant");
 
+    const one = await inject("GET", "/api/ontologies/test_ont/model/lenses/test_lens/assistants/agents/hr-assistant");
+    expect(one.statusCode).toBe(200);
+    expect((one.body as Row).name).toBe("HR Assistant v2");
+    // The built-in default is unknown to modeling; the old collection is gone.
+    expect(
+      (await inject("GET", "/api/ontologies/test_ont/model/lenses/test_lens/assistants/agents/_default")).statusCode,
+    ).toBe(404);
+    expect((await inject("GET", "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents")).statusCode).toBe(404);
+
     const deleted = await inject(
       "DELETE",
-      "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents/hr-assistant",
+      "/api/ontologies/test_ont/model/lenses/test_lens/assistants/agents/hr-assistant",
     );
     expect(deleted.statusCode).toBe(204);
     const again = await inject(
       "DELETE",
-      "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents/hr-assistant",
+      "/api/ontologies/test_ont/model/lenses/test_lens/assistants/agents/hr-assistant",
     );
     expect(again.statusCode).toBe(404);
   });
 
   it("an unknown tool name is rejected 422 naming the valid set", async () => {
-    const res = await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents/bad-tools", {
+    const res = await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/assistants/agents/bad-tools", {
       name: "Bad",
       tools: ["write_document"],
     });
@@ -162,16 +171,39 @@ describe("agent configurations (modeling REST)", () => {
   });
 
   it("rejects a bad key and the reserved '_default'", async () => {
-    const bad = await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents/BadKey", {
+    const bad = await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/assistants/agents/BadKey", {
       name: "X",
     });
     expect(bad.statusCode).toBe(422);
     const reserved = await inject(
       "PUT",
-      "/api/ontologies/test_ont/model/lenses/test_lens/ai-agents/_default",
+      "/api/ontologies/test_ont/model/lenses/test_lens/assistants/agents/_default",
       { name: "X" },
     );
     expect(reserved.statusCode).toBe(422);
+  });
+});
+
+describe("key rule by level", () => {
+  it("an agent and a saved query take 'support-bot'; a type key 'order-date' is refused", async () => {
+    const lens = "/api/ontologies/test_ont/model/lenses/test_lens";
+    const agent = await inject("PUT", `${lens}/assistants/agents/support-bot`, { name: "Support" });
+    expect(agent.statusCode).toBe(201);
+    const query = await inject("PUT", `${lens}/saved-queries/support-bot`, {
+      name: "Support",
+      description: "Lists people",
+      steps: [{ name: "main", type: "oql", oql: "MATCH (p:person) RETURN p.name AS name" }],
+      parameters: [],
+    });
+    expect(query.statusCode).toBe(201);
+    const type = await inject("POST", "/api/ontologies/test_ont/model/entity-types", {
+      key: "order-date",
+      displayName: "Order date",
+    });
+    expect(type.statusCode).toBe(422);
+
+    expect((await inject("DELETE", `${lens}/assistants/agents/support-bot`)).statusCode).toBe(204);
+    expect((await inject("DELETE", `${lens}/saved-queries/support-bot`)).statusCode).toBe(204);
   });
 });
 
@@ -453,10 +485,10 @@ describe("runtime run (no provider)", () => {
 });
 
 describe("modeling MCP tools", () => {
-  it("set/list/delete an agent config, reporting created vs updated", async () => {
+  it("set/get/list/delete an agent, reporting created vs updated", async () => {
     const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/model`);
     try {
-      const created = await call(client, "set_ai_agent", {
+      const created = await call(client, "set_agent", {
         lens_key: "test_lens",
         key: "mcp-agent",
         name: "MCP Agent",
@@ -468,7 +500,7 @@ describe("modeling MCP tools", () => {
       expect(json(created).created).toBe(true);
       expect(json(created).key).toBe("mcp-agent");
 
-      const updated = await call(client, "set_ai_agent", {
+      const updated = await call(client, "set_agent", {
         lens_key: "test_lens",
         key: "mcp-agent",
         name: "MCP Agent v2",
@@ -476,11 +508,16 @@ describe("modeling MCP tools", () => {
       expect(json(updated).created).toBe(false);
       expect(json(updated).name).toBe("MCP Agent v2");
 
-      const list = await call(client, "list_ai_agents", { lens_key: "test_lens" });
+      const read = await call(client, "get_agent", { lens_key: "test_lens", agent_key: "mcp-agent" });
+      expect(json(read)).toMatchObject({ key: "mcp-agent", name: "MCP Agent v2" });
+      // `_default` is runtime only: modeling does not know it.
+      expect((await call(client, "get_agent", { lens_key: "test_lens", agent_key: "_default" })).isError).toBe(true);
+
+      const list = await call(client, "list_agents", { lens_key: "test_lens" });
       const keys = (JSON.parse(text(list)) as Row[]).map((a) => a.key);
       expect(keys).toContain("mcp-agent");
 
-      const refused = await call(client, "set_ai_agent", {
+      const refused = await call(client, "set_agent", {
         lens_key: "test_lens",
         key: "mcp-agent",
         name: "X",
@@ -489,11 +526,12 @@ describe("modeling MCP tools", () => {
       expect(refused.isError).toBe(true);
       expect(text(refused)).toContain("Unknown tool(s)");
 
-      const deleted = await call(client, "delete_ai_agent", {
+      const deleted = await call(client, "delete_agent", {
         lens_key: "test_lens",
         agent_key: "mcp-agent",
       });
-      expect(text(deleted)).toBe("AI agent 'mcp-agent' deleted from lens 'test_lens'.");
+      expect(text(deleted)).toBe("Agent 'mcp-agent' deleted from lens 'test_lens'.");
+      expect((await call(client, "get_agent", { lens_key: "test_lens", agent_key: "mcp-agent" })).isError).toBe(true);
     } finally {
       await client.close();
     }
@@ -613,7 +651,7 @@ describe("lens cascade", () => {
     expect(created.statusCode).toBe(201);
     const lensId = (created.body as Row).lensId as string;
 
-    await inject("PUT", "/api/ontologies/test_ont/model/lenses/cascade_probe/ai-agents/doomed-agent", {
+    await inject("PUT", "/api/ontologies/test_ont/model/lenses/cascade_probe/assistants/agents/doomed-agent", {
       name: "Doomed",
     });
     await inject("PUT", "/api/ontologies/test_ont/model/lenses/cascade_probe/saved-queries/doomed-query", {
@@ -632,7 +670,7 @@ describe("lens cascade", () => {
       name: "Cascade Probe II",
     });
     expect(recreated.statusCode).toBe(201);
-    const agents = await inject("GET", "/api/ontologies/test_ont/model/lenses/cascade_probe/ai-agents");
+    const agents = await inject("GET", "/api/ontologies/test_ont/model/lenses/cascade_probe/assistants/agents");
     expect(agents.body).toEqual([]);
     const queries = await inject("GET", "/api/ontologies/test_ont/model/lenses/cascade_probe/saved-queries");
     expect(queries.body).toEqual([]);

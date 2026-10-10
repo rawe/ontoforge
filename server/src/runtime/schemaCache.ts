@@ -183,7 +183,7 @@ export async function loadSchemaUncached(
     schema.relationInclusions as InclusionRow[],
   );
 
-  const agentRows = await store.getAiAgentConfigs(lensKey);
+  const agentRows = await store.getAgentConfigs(lensKey);
   const agentConfigs: Record<string, AgentConfig> = {};
   for (const row of agentRows) {
     agentConfigs[row.key as string] = {

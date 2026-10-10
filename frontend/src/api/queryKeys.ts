@@ -12,14 +12,16 @@
  *   ['neighbors', ontologyKey, lensKey, typeKey, id, params]
  *   ['relations', ontologyKey, lensKey, typeKey, params]
  *   ['savedQueries', ontologyKey, lensKey]
- *   ['agents', ontologyKey, lensKey]
+ *   ['assistants', ontologyKey, lensKey, kind]       runtime assistant list of a kind
  *   ['model', ontologyKey, ...]                      modeling sub-keys
- *   ['model', ontologyKey, 'retriever-agents', lensKey]  retriever agents of a lens
+ *   ['model', ontologyKey, 'retrievers', lensKey]  retrievers of a lens
  *
  * Every ontology-scoped key carries the ontology key, so the same lens
  * key in two ontologies never shares a cache entry. Mutations invalidate
  * precisely; scope/schema mutations invalidate `['schema']` broadly.
  */
+
+import type { AssistantKind } from './types'
 
 export const qk = {
   features: ['features'] as const,
@@ -60,12 +62,12 @@ export const qk = {
 
   savedQueries: (ontologyKey: string, lensKey: string) =>
     ['savedQueries', ontologyKey, lensKey] as const,
-  agents: (ontologyKey: string, lensKey: string) =>
-    ['agents', ontologyKey, lensKey] as const,
+  assistants: (ontologyKey: string, lensKey: string, kind: AssistantKind) =>
+    ['assistants', ontologyKey, lensKey, kind] as const,
 
   model: (ontologyKey: string, ...parts: readonly unknown[]) =>
     ['model', ontologyKey, ...parts] as const,
   /** Under `model`: every modeling mutation (scope, schema) refreshes their validation. */
-  retrieverAgents: (ontologyKey: string, lensKey: string) =>
-    ['model', ontologyKey, 'retriever-agents', lensKey] as const,
+  retrievers: (ontologyKey: string, lensKey: string) =>
+    ['model', ontologyKey, 'retrievers', lensKey] as const,
 } as const

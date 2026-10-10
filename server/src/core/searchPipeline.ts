@@ -61,7 +61,7 @@ export function backoffDelayMs(
  * The state of one representation of an index, or of the index as a whole:
  *
  * - `ready` — the active generation is current.
- * - `building` — a new generation is filling (`done`/`total`).
+ * - `building` — a new generation is filling (`build`).
  * - `stale` — the active generation has queued work (`pending`).
  * - `failed` — items failed for good (`failed`); a rebuild retries them.
  * - `unavailable` — semantic without an embedding provider.
@@ -79,9 +79,9 @@ export type SearchIndexState =
 export interface SearchRepresentationStatus {
   representation: SearchRepresentation;
   state: SearchIndexState;
-  /** Building: entities composed of the backfill, and its size. */
-  done: number;
-  total: number;
+  /** The filling generation's progress — entities composed of the
+   * backfill, and its size; `null` while no generation is filling. */
+  build: { done: number; total: number } | null;
   /** Queued items not yet processed (building and active generation). */
   pending: number;
   /** Items failed for good. */
@@ -136,8 +136,7 @@ export function deriveRepresentationStatus(input: RepresentationStatusInput): Se
   const status: SearchRepresentationStatus = {
     representation: input.representation,
     state: "ready",
-    done: 0,
-    total: 0,
+    build: null,
     pending: buildingQueue.pending + readyQueue.pending,
     failed: buildingQueue.failed + readyQueue.failed,
     activeGenerationId: ready?.generationId ?? null,
@@ -147,8 +146,10 @@ export function deriveRepresentationStatus(input: RepresentationStatusInput): Se
   if (!input.enabled) return { ...status, state: "disabled" };
   if (!input.available) return { ...status, state: "unavailable" };
   if (building !== null) {
-    status.total = building.total;
-    status.done = Math.max(0, building.total - buildingQueue.pending - buildingQueue.failed);
+    status.build = {
+      done: Math.max(0, building.total - buildingQueue.pending - buildingQueue.failed),
+      total: building.total,
+    };
     // A build whose remaining items all failed for good never finishes.
     status.state = buildingQueue.failed > 0 && buildingQueue.pending === 0 ? "failed" : "building";
     return status;

@@ -53,8 +53,8 @@ All paths below are relative to this skill directory (`scripts/`).
 ### Export Schema
 
 Export one ontology's design — entity types, relation types, properties, the keyword
-language set, custom search indices, lenses with their inclusions, AI agents, retriever
-agents and saved queries — to a single JSON file.
+language set, custom search indices, lenses with their inclusions, agents, retrievers
+and saved queries — to a single JSON file.
 
 ```bash
 node scripts/export-schema.mjs [-o <output>] [--ontology <key>] [--base-url <url>]
@@ -68,7 +68,7 @@ node scripts/export-schema.mjs [-o <output>] [--ontology <key>] [--base-url <url
 
 **API used**: `GET /api/ontologies/{ontologyKey}/model/export`
 
-The output file is the OntoForge transfer format (v6.0) and can be committed to version
+The output file is the OntoForge transfer format (v7.0) and can be committed to version
 control. It carries the design only — no entities, no relations, no document content,
 and not the ontology's own key or display name. It is not a backup.
 
@@ -242,13 +242,13 @@ node scripts/import-schema.mjs /tmp/design.json --ontology clone
 
 ## File Formats
 
-### Schema file (transfer format v6.0)
+### Schema file (transfer format v7.0)
 
 Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
 
 ```json
 {
-  "formatVersion": "6.0",
+  "formatVersion": "7.0",
   "keywordLanguages": ["german", "english"],
   "searchIndices": {
     "custom": [
@@ -301,9 +301,8 @@ Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
       "key": "my_lens",
       "name": "My Lens",
       "indexInclusions": [],
-      "aiAgents": [],
-      "savedQueries": [],
-      "retrieverAgents": []
+      "assistants": { "agents": [], "retrievers": [] },
+      "savedQueries": []
     }
   ]
 }
@@ -321,14 +320,18 @@ Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
   the type keys it exposes and optionally restricts the visible properties.
   `indexInclusions` lists the search indices a scoped lens searches, by key; an unscoped
   lens searches every index and lists none.
-- `retrieverAgents` — the lens's retriever agents, each with `key`, `name`,
-  `description`, `configVersion` (2) and `config`. Optional.
+- `assistants` — the lens's assistants, one list per kind: `agents`, each with `key`,
+  `name`, `description`, `systemPrompt` and `tools`, and `retrievers`, the retrievers,
+  each with `key`, `name`, `description`, `configVersion` (2) and `config`.
+  Optional, and so is each list.
 
-The format version decides how import reads the file: `6.0` (or none) is the current
-format; `5.0` — one `textSearchLanguage` instead of `keywordLanguages`, no search indices,
-no name properties, lens `retrievers` of configuration version 1 instead of
-`retrieverAgents` — is converted on the way in, each retriever into a retriever agent
-that lists what the conversion dropped as warnings; any other version is refused. Import
+The format version decides how import reads the file: `7.0` (or none) is the current
+format. Two older versions are upgraded on the way in: `6.0` — lens `aiAgents` and
+`retrieverAgents` instead of `assistants` — and `5.0` — additionally one
+`textSearchLanguage` instead of `keywordLanguages`, no search indices, no name properties,
+and lens `retrievers` of configuration version 1 instead of `retrieverAgents`, each
+converted into a retriever that lists what the conversion dropped as warnings. Any
+other version is refused. Import
 provisions no search entries: each index is built in the background once data exists.
 
 ### Data file (v1.0)

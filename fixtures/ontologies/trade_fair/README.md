@@ -1,7 +1,7 @@
 # trade_fair
 
 Retrieval and search fixture: exhibitors, halls and events of the fictional Meridian
-Industrial Technology Fair 2027. Use it for retriever agents, semantic, keyword and hybrid
+Industrial Technology Fair 2027. Use it for retrievers, semantic, keyword and hybrid
 search over the managed search indices (properties and document passages), multi-passage
 documents, and an agent. All companies, events and texts are invented.
 
@@ -33,20 +33,20 @@ the passage indices `exhibitor~description` and `event~description`.
 
 ## Lenses
 
-| Lens | Scope | Search indices | Retriever agents | Agents | Saved queries |
+| Lens | Scope | Search indices | Retrievers | Agents | Saved queries |
 |---|---|---|---|---|---|
 | `all` | unscoped | every index | `event_finder`, `fair_guide` | — | — |
 | `visitor_guide` | `exhibitor` (without `founded`), `hall`, `industry`, `product_group`, `located_in`, `belongs_to_industry`, `offers` — no events | every index except the two `event` ones | `exhibitor_finder` | `visitor_assistant` | `exhibitors-in-hall`, `find-exhibitor-stands` |
 
-## Retriever agents
+## Retrievers
 
-| Agent | Lens | Searches | Filters | Answer fields |
+| Retriever | Lens | Searches | Filters | Answer fields |
 |---|---|---|---|---|
 | `exhibitor_finder` | `visitor_guide` | `exhibitor~default`, `exhibitor~description` | `hall` (`located_in` → `hall_number`) | `name`, `stand_number`, `website`, `description` (800 characters) |
 | `event_finder` | `all` | `event~default`, `event~description` | `hall` (`takes_place_in` → `hall_number`); `event_type` (own field) | `title`, `event_type`, `starts_at`, `description` (800 characters) |
 | `fair_guide` | `all` | `exhibitor~default`, `exhibitor~description`, `event~default`, `event~description` | `hall` on exhibitors (`located_in`), `event_hall` on events (`takes_place_in`), both → `hall_number` | exhibitor `name`, `stand_number`, `founded`, `description`; event `title`, `event_type`, `starts_at` (600 characters) |
 
-Every agent uses threshold 0.35. No index has a relation group, so an exhibitor's
+Every retriever uses threshold 0.35. No index has a relation group, so an exhibitor's
 industries and product groups, and an event's hosts, are found only where a description
 names them; a custom index on `exhibitor` with relation groups on `belongs_to_industry`
 and `offers` would make the first two searchable.
@@ -131,5 +131,5 @@ Deliberate features of the data:
 
 Semantic and hybrid search. Without one, keyword search over every index, saved queries
 and all model-free management work, and the semantic representations report
-`unavailable`. Retriever-agent chat and the agent need a language-model provider;
-without an embedding provider, retriever-agent chat searches by keyword only.
+`unavailable`. Retriever chat and the agent need a language-model provider;
+without an embedding provider, retriever chat searches by keyword only.

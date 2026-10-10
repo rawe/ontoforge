@@ -24,7 +24,7 @@ import { ValidationPanel } from '@/components/studio/ValidationPanel'
 import {
   deriveKey,
   invalidateModeling,
-  isValidKey,
+  isValidSchemaKey,
   leaveAfterDelete,
   toastError,
 } from '@/components/studio/lib'
@@ -189,7 +189,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
           : key.length > MAX_KEY_LENGTH
             ? `At most ${MAX_KEY_LENGTH} characters.`
             : undefined))
-  const keyOk = !isNew || (key !== '' && isValidKey(key) && keyMessage === undefined)
+  const keyOk = !isNew || (key !== '' && isValidSchemaKey(key) && keyMessage === undefined)
 
   // The preview (issues and estimate) counts only while it answers the current draft.
   const previewCurrent =
@@ -200,7 +200,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
   const outlineStale = !previewCurrent || preview.isFetching
   // Key problems are client-only (the key field shows them too); the panel lists them with the rest.
   const keyProblem: ValidationError[] =
-    isNew && key !== '' && !isValidKey(key)
+    isNew && key !== '' && !isValidSchemaKey(key)
       ? [{ path: 'key', message: 'Lowercase letters, digits and underscores only; must start with a letter.' }]
       : keyMessage !== undefined
         ? [{ path: 'key', message: keyMessage }]
@@ -639,7 +639,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
           <AlertDialogHeader>
             <AlertDialogTitle>Delete "{saved?.definition.name ?? ''}"?</AlertDialogTitle>
             <AlertDialogDescription>
-              The index and its entries are removed; search and retriever agents can no
+              The index and its entries are removed; search and retrievers can no
               longer use it. Lenses that include it are listed before anything changes.
             </AlertDialogDescription>
           </AlertDialogHeader>

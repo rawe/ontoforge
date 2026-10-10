@@ -61,8 +61,8 @@ The server is `--base-url`, else `ONTOFORGE_BASE_URL`, else `http://localhost:80
 ## Repairing after a format change
 
 When OntoForge changes its design or data format, `load` then `save` rewrites the files
-in the current format — `schema.json` in transfer format 6.0. The server still imports a
-5.0 file, converting it on the way in, so an old fixture loads as it is. If `load` fails
+in the current format — `schema.json` in transfer format 7.0. The server still imports
+6.0 and 5.0 files, upgrading them on the way in, so an old fixture loads as it is. If `load` fails
 on an old file, fix the JSON by hand once, then load and save.
 
 ## Safety
@@ -80,6 +80,6 @@ on an old file, fix the JSON by hand once, then load and save.
 | Name | Ontology key | Purpose | Size |
 |---|---|---|---|
 | [people_basic](ontologies/people_basic/README.md) | `fx_people_basic` | Simple general-purpose fixture: CRUD, scoped and unscoped lenses, agents, saved queries | 20 entities, 15 relations |
-| [trade_fair](ontologies/trade_fair/README.md) | `fx_trade_fair` | Retrieval and search: retriever agents, property and passage search over long documents, an agent, saved queries | 55 entities, 109 relations |
+| [trade_fair](ontologies/trade_fair/README.md) | `fx_trade_fair` | Retrieval and search: retrievers, property and passage search over long documents, an agent, saved queries | 55 entities, 109 relations |
 | [org_graph](ontologies/org_graph/README.md) | `fx_org_graph` | Graph structure without providers: multi-hop traversal, self-relations, relation properties, OQL, saved query pipelines, every lens scoping variant, query-path filters, near-duplicates for identity comparison | 59 entities, 150 relations |
 | [search_bilingual](ontologies/search_bilingual/README.md) | `fx_search_bilingual` | Search indices: relation pairing in a custom index (several employments per person), bilingual German/English keyword search, cross-language semantic search, a scoped lens that skips relation entries | 23 entities, 28 relations |

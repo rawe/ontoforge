@@ -161,7 +161,7 @@ describe("search tool descriptions", () => {
 
   it("describe search_by_index's own response — matched, no evidence — within 2000 characters", async () => {
     const description = await descriptionOf("search_by_index");
-    expect(description).toContain("Returns query, mode, minSimilarity and hits");
+    expect(description).toContain("Returns query, mode (hybrid: semantic+keyword), minSimilarity and hits");
     expect(description).toContain("matched");
     expect(description).not.toMatch(/\bmatches\b|semanticSimilarity|keywordScore|entity_type_key|adapter/i);
     expect(description.length).toBeLessThanOrEqual(2000);

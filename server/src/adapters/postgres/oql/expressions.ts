@@ -38,7 +38,7 @@
  * keyword carries no user text — as does a SKIP/LIMIT integer literal,
  * whose count position is not a value position (see `pagingOperand`).
  * Property keys are inlined too — they are schema keys, matched against
- * the scoped schema first and constrained to `[a-z][a-z0-9_]*` by the
+ * the scoped schema first and constrained to `SCHEMA_KEY_PATTERN` by the
  * modeling surface.
  */
 

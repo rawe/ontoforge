@@ -114,7 +114,7 @@ export interface SavedQuerySearchHit {
   score: number
 }
 
-export interface AiAgent {
+export interface Agent {
   key: string
   name: string
   description: string | null
@@ -127,10 +127,6 @@ export interface SchemaLens {
   key: string
   name: string
   description: string | null
-  /** null = unscoped (full schema visible) */
-  includes: { entityTypes?: unknown; relationTypes?: unknown } | null
-  aiAgents: AiAgent[]
-  savedQueries: SavedQuery[]
 }
 
 export interface RuntimeSchema {
@@ -256,16 +252,26 @@ export interface QueryResult {
 
 /* -------------------------------- runtime — AI ------------------------------- */
 
-export interface AiQueryResponse {
-  answer: string
-  /** The generated OQL query, when the AI ran one. */
-  query: string | null
-  results: QueryResult | null
+/** An assistant kind, as it appears in `/ai/assistants/<kind>`. */
+export type AssistantKind = 'agents' | 'retrievers'
+
+/** One entry of a kind's runtime list; the built-in default (`_default`) comes first. */
+export interface RuntimeAssistant {
+  key: string
+  name: string
+  description: string | null
+  builtIn: boolean
 }
 
+/** One message of a thread read back: user messages and the assistant's answers, no tool payloads. */
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+}
+
+export interface AssistantThread {
+  threadId: string
+  messages: ChatMessage[]
 }
 
 export interface ToolCall {
@@ -405,9 +411,8 @@ export interface RepresentationStatus {
   representation: Representation
   /** `unavailable` = semantic without an embedding provider. */
   state: Exclude<IndexState, 'disabled'>
-  /** Progress of a building generation (0/0 when ready). */
-  done: number
-  total: number
+  /** Progress of the build filling a new generation; `null` when none is. */
+  build: { done: number; total: number } | null
   /** Queued items on the active generation (stale when > 0). */
   pending: number
   /** Items that exhausted their retries. */
@@ -539,7 +544,7 @@ export interface PropertyInput {
   defaultValue?: JsonPrimitive | null
 }
 
-export interface AiAgentInput {
+export interface AgentInput {
   name: string
   description?: string | null
   systemPrompt?: string | null

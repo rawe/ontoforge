@@ -1,5 +1,5 @@
 {
-  "formatVersion": "6.0",
+  "formatVersion": "7.0",
   "keywordLanguages": [
     "english"
   ],
@@ -225,116 +225,118 @@
       "name": "All",
       "description": "Unscoped lens over the whole fair: exhibitors, halls, industries, product groups and events.",
       "indexInclusions": [],
-      "aiAgents": [],
-      "savedQueries": [],
-      "retrieverAgents": [
-        {
-          "key": "event_finder",
-          "name": "Event Finder",
-          "description": "Finds programme events by topic in their titles and descriptions. Hall and event type can be required exactly.",
-          "configVersion": 2,
-          "config": {
-            "filters": [
-              {
-                "id": "hall",
-                "path": [
-                  {
-                    "direction": "outgoing",
-                    "relationTypeKey": "takes_place_in"
-                  }
-                ],
-                "field": "hall_number",
-                "entityType": "event"
-              },
-              {
-                "id": "event_type",
-                "path": [],
-                "field": "event_type",
-                "entityType": "event"
-              }
-            ],
-            "indices": [
-              {
-                "index": "event~default"
-              },
-              {
-                "index": "event~description"
-              }
-            ],
-            "threshold": 0.35,
-            "answerFields": {
-              "event": [
-                "title",
-                "event_type",
-                "starts_at",
-                "description"
-              ]
-            },
-            "answerFieldCharacters": 800
-          }
-        },
-        {
-          "key": "fair_guide",
-          "name": "Fair Guide",
-          "description": "Searches exhibitors and events together by name, title and description. Hall is an exact condition for both.",
-          "configVersion": 2,
-          "config": {
-            "filters": [
-              {
-                "id": "hall",
-                "path": [
-                  {
-                    "direction": "outgoing",
-                    "relationTypeKey": "located_in"
-                  }
-                ],
-                "field": "hall_number",
-                "entityType": "exhibitor"
-              },
-              {
-                "id": "event_hall",
-                "path": [
-                  {
-                    "direction": "outgoing",
-                    "relationTypeKey": "takes_place_in"
-                  }
-                ],
-                "field": "hall_number",
-                "entityType": "event"
-              }
-            ],
-            "indices": [
-              {
-                "index": "exhibitor~default"
-              },
-              {
-                "index": "exhibitor~description"
-              },
-              {
-                "index": "event~default"
-              },
-              {
-                "index": "event~description"
-              }
-            ],
-            "threshold": 0.35,
-            "answerFields": {
-              "event": [
-                "title",
-                "event_type",
-                "starts_at"
+      "assistants": {
+        "agents": [],
+        "retrievers": [
+          {
+            "key": "event_finder",
+            "name": "Event Finder",
+            "description": "Finds programme events by topic in their titles and descriptions. Hall and event type can be required exactly.",
+            "configVersion": 2,
+            "config": {
+              "filters": [
+                {
+                  "id": "hall",
+                  "path": [
+                    {
+                      "direction": "outgoing",
+                      "relationTypeKey": "takes_place_in"
+                    }
+                  ],
+                  "field": "hall_number",
+                  "entityType": "event"
+                },
+                {
+                  "id": "event_type",
+                  "path": [],
+                  "field": "event_type",
+                  "entityType": "event"
+                }
               ],
-              "exhibitor": [
-                "name",
-                "stand_number",
-                "founded",
-                "description"
-              ]
-            },
-            "answerFieldCharacters": 600
+              "indices": [
+                {
+                  "index": "event~default"
+                },
+                {
+                  "index": "event~description"
+                }
+              ],
+              "threshold": 0.35,
+              "answerFields": {
+                "event": [
+                  "title",
+                  "event_type",
+                  "starts_at",
+                  "description"
+                ]
+              },
+              "answerFieldCharacters": 800
+            }
+          },
+          {
+            "key": "fair_guide",
+            "name": "Fair Guide",
+            "description": "Searches exhibitors and events together by name, title and description. Hall is an exact condition for both.",
+            "configVersion": 2,
+            "config": {
+              "filters": [
+                {
+                  "id": "hall",
+                  "path": [
+                    {
+                      "direction": "outgoing",
+                      "relationTypeKey": "located_in"
+                    }
+                  ],
+                  "field": "hall_number",
+                  "entityType": "exhibitor"
+                },
+                {
+                  "id": "event_hall",
+                  "path": [
+                    {
+                      "direction": "outgoing",
+                      "relationTypeKey": "takes_place_in"
+                    }
+                  ],
+                  "field": "hall_number",
+                  "entityType": "event"
+                }
+              ],
+              "indices": [
+                {
+                  "index": "exhibitor~default"
+                },
+                {
+                  "index": "exhibitor~description"
+                },
+                {
+                  "index": "event~default"
+                },
+                {
+                  "index": "event~description"
+                }
+              ],
+              "threshold": 0.35,
+              "answerFields": {
+                "event": [
+                  "title",
+                  "event_type",
+                  "starts_at"
+                ],
+                "exhibitor": [
+                  "name",
+                  "stand_number",
+                  "founded",
+                  "description"
+                ]
+              },
+              "answerFieldCharacters": 600
+            }
           }
-        }
-      ]
+        ]
+      },
+      "savedQueries": []
     },
     {
       "key": "visitor_guide",
@@ -386,26 +388,69 @@
         "industry~default",
         "product_group~default"
       ],
-      "aiAgents": [
-        {
-          "key": "visitor_assistant",
-          "name": "Visitor Guide Assistant",
-          "description": "Helps fair visitors find exhibitors, stands and halls for their interests.",
-          "systemPrompt": "You are the visitor assistant of the Meridian Industrial Technology Fair 2027. Help visitors find exhibitors that match their interests and tell them where to find them. Use search to find exhibitors by topic, and search_documents with get_document to quote the relevant passage of an exhibitor description. Use list_entities and get_neighbors to resolve halls, industries and product groups of an exhibitor. Always give the exhibitor name, stand number and hall. Answer only from the data the tools return; if nothing matches, say so.",
-          "tools": [
-            "get_schema",
-            "search",
-            "search_documents",
-            "get_document",
-            "list_entities",
-            "get_entity",
-            "get_neighbors",
-            "execute_query",
-            "list_saved_queries",
-            "run_saved_query"
-          ]
-        }
-      ],
+      "assistants": {
+        "agents": [
+          {
+            "key": "visitor_assistant",
+            "name": "Visitor Guide Assistant",
+            "description": "Helps fair visitors find exhibitors, stands and halls for their interests.",
+            "systemPrompt": "You are the visitor assistant of the Meridian Industrial Technology Fair 2027. Help visitors find exhibitors that match their interests and tell them where to find them. Use search to find exhibitors by topic, and search_documents with get_document to quote the relevant passage of an exhibitor description. Use list_entities and get_neighbors to resolve halls, industries and product groups of an exhibitor. Always give the exhibitor name, stand number and hall. Answer only from the data the tools return; if nothing matches, say so.",
+            "tools": [
+              "get_schema",
+              "search",
+              "search_documents",
+              "get_document",
+              "list_entities",
+              "get_entity",
+              "get_neighbors",
+              "execute_query",
+              "list_saved_queries",
+              "run_saved_query"
+            ]
+          }
+        ],
+        "retrievers": [
+          {
+            "key": "exhibitor_finder",
+            "name": "Exhibitor Finder",
+            "description": "Finds exhibitors by what they do, from their names and descriptions. A hall can be required exactly.",
+            "configVersion": 2,
+            "config": {
+              "filters": [
+                {
+                  "id": "hall",
+                  "path": [
+                    {
+                      "direction": "outgoing",
+                      "relationTypeKey": "located_in"
+                    }
+                  ],
+                  "field": "hall_number",
+                  "entityType": "exhibitor"
+                }
+              ],
+              "indices": [
+                {
+                  "index": "exhibitor~default"
+                },
+                {
+                  "index": "exhibitor~description"
+                }
+              ],
+              "threshold": 0.35,
+              "answerFields": {
+                "exhibitor": [
+                  "name",
+                  "stand_number",
+                  "website",
+                  "description"
+                ]
+              },
+              "answerFieldCharacters": 800
+            }
+          }
+        ]
+      },
       "savedQueries": [
         {
           "key": "exhibitors-in-hall",
@@ -463,47 +508,6 @@
               "dataType": "string"
             }
           ]
-        }
-      ],
-      "retrieverAgents": [
-        {
-          "key": "exhibitor_finder",
-          "name": "Exhibitor Finder",
-          "description": "Finds exhibitors by what they do, from their names and descriptions. A hall can be required exactly.",
-          "configVersion": 2,
-          "config": {
-            "filters": [
-              {
-                "id": "hall",
-                "path": [
-                  {
-                    "direction": "outgoing",
-                    "relationTypeKey": "located_in"
-                  }
-                ],
-                "field": "hall_number",
-                "entityType": "exhibitor"
-              }
-            ],
-            "indices": [
-              {
-                "index": "exhibitor~default"
-              },
-              {
-                "index": "exhibitor~description"
-              }
-            ],
-            "threshold": 0.35,
-            "answerFields": {
-              "exhibitor": [
-                "name",
-                "stand_number",
-                "website",
-                "description"
-              ]
-            },
-            "answerFieldCharacters": 800
-          }
         }
       ]
     }

@@ -1,13 +1,14 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bot, BotMessageSquare, ChevronLeft, ExternalLink, Layers, Plug, SquareTerminal, Trash2 } from 'lucide-react'
+import { ChevronLeft, ExternalLink, Layers, Plug, SquareTerminal, Trash2 } from 'lucide-react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
 import { useFeatures, useLenses } from '@/api/hooks'
+import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { EmptyState } from '@/components/EmptyState'
 import { AgentsTab } from '@/components/studio/AgentsTab'
 import { ConnectTab } from '@/components/studio/ConnectTab'
-import { RetrieverAgentsTab } from '@/components/studio/RetrieverAgentsTab'
+import { RetrieversTab } from '@/components/studio/RetrieversTab'
 import { ScopeTab } from '@/components/studio/ScopeTab'
 import { SavedQueriesTab } from '@/components/studio/SavedQueriesTab'
 import { invalidateModeling, toastError } from '@/components/studio/lib'
@@ -32,7 +33,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 const TABS = ['scope', 'agents', 'retriever-agents', 'queries', 'connect'] as const
 type Tab = (typeof TABS)[number]
 
-/** `/o/:ontologyKey/studio/lenses/:id` — scope editor, agents, retriever agents, saved queries, connect. */
+/** `/o/:ontologyKey/studio/lenses/:id` — scope editor, agents, retrievers, saved queries, connect. */
 export function LensDetailPage() {
   const { ontologyKey, id } = useParams<{ ontologyKey: string; id: string }>()
   const navigate = useNavigate()
@@ -42,8 +43,8 @@ export function LensDetailPage() {
   const tab: Tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : 'scope'
 
   const { data: lenses, isPending } = useLenses(ontologyKey)
-  // Retriever agents search indices; hidden where the adapter has none (optimistic while loading).
-  const retrieverAgents = useFeatures().data?.searchIndices !== false
+  // Retrievers search indices; hidden where the adapter has none (optimistic while loading).
+  const retrievers = useFeatures().data?.searchIndices !== false
   const lens = lenses?.find((o) => o.lensId === id)
 
   const update = useMutation({
@@ -131,7 +132,7 @@ export function LensDetailPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete "{lens.name}"?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This deletes the lens, its scope, agents, retriever agents and saved queries.
+                    This deletes the lens, its scope, agents, retrievers and saved queries.
                     The ontology's schema and instance data are not affected. This
                     cannot be undone.
                   </AlertDialogDescription>
@@ -172,11 +173,11 @@ export function LensDetailPage() {
               <Layers className="size-3.5" /> Scope
             </TabsTrigger>
             <TabsTrigger value="agents">
-              <Bot className="size-3.5" /> Agents
+              <ASSISTANT_KINDS.agents.icon className="size-3.5" /> Agents
             </TabsTrigger>
-            {retrieverAgents && (
+            {retrievers && (
               <TabsTrigger value="retriever-agents">
-                <BotMessageSquare className="size-3.5" /> Retriever agents
+                <ASSISTANT_KINDS.retrievers.icon className="size-3.5" /> Retrievers
               </TabsTrigger>
             )}
             <TabsTrigger value="queries">
@@ -193,7 +194,7 @@ export function LensDetailPage() {
             <AgentsTab ontologyKey={ontologyKey} lens={lens} />
           </TabsContent>
           <TabsContent value="retriever-agents">
-            <RetrieverAgentsTab ontologyKey={ontologyKey} lens={lens} />
+            <RetrieversTab ontologyKey={ontologyKey} lens={lens} />
           </TabsContent>
           <TabsContent value="queries">
             <SavedQueriesTab ontologyKey={ontologyKey} lens={lens} />

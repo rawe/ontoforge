@@ -15,7 +15,7 @@
  * validates every base URL (approved stack: LangChain.js / LangGraph.js).
  * With no `AI_PROVIDER` configured, no model is installed and every
  * model-running route answers `422 VALIDATION_ERROR` with
- * `details.code: "FEATURE_DISABLED"`; listing agents and serving cards keep
+ * `details.code: "FEATURE_DISABLED"`; listing agents keeps
  * working. Tests inject a fake model via `setAiModel`.
  *
  * `AI_REASONING_EFFORT` optionally fixes how hard the model thinks — `none`,
@@ -72,11 +72,11 @@ export interface SavedQueryConfig {
 
 /** The implicit default agent: `_default`-keyed (no configurable key may
  * begin with an underscore, so it can never be shadowed), undeletable,
- * no prompt of its own, unrestricted tools. */
+ * no prompt of its own, unrestricted tools; its description is fixed. */
 export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   key: "_default",
-  name: "Knowledge Assistant",
-  description: null,
+  name: "Default",
+  description: "Uses every read-only tool on this lens to answer.",
   systemPrompt: null,
   tools: null,
 };

@@ -7,9 +7,9 @@ import * as model from './model'
 import * as registry from './registry'
 import * as server from './server'
 import * as runtime from './runtime'
-import { listRetrieverAgents } from './retrieverAgents'
+import { listRetrievers } from './retrievers'
 import { qk } from './queryKeys'
-import type { EntityInstance, Matched } from './types'
+import type { AssistantKind, EntityInstance, Matched } from './types'
 
 /** Global feature flags — fetched once, never stale. */
 export function useFeatures() {
@@ -39,8 +39,8 @@ export function useLenses(ontologyKey: string | undefined) {
 
 /**
  * Scope includes of a lens (modeling API). `scoped` is true when any
- * include exists. NOTE: the runtime schema's `lens.includes` field is not
- * populated by the backend — use this hook for scoped/unscoped decisions.
+ * include exists. The runtime schema carries no scope information — use
+ * this hook for scoped/unscoped decisions.
  */
 export function useLensScope(ontologyKey: string | undefined, lensId: string | undefined) {
   return useQuery({
@@ -112,11 +112,24 @@ export function useSearchCatalog(ontologyKey: string, lensKey: string, enabled: 
   })
 }
 
-/** Retriever agents of a lens (modeling API, by lens key) — Studio editor and Workbench chat share the cache. */
-export function useRetrieverAgents(ontologyKey: string, lensKey: string, enabled = true) {
+/** Retrievers of a lens (modeling API, by lens key) with configuration and validation — the Studio's list. */
+export function useRetrievers(ontologyKey: string, lensKey: string, enabled = true) {
   return useQuery({
-    queryKey: qk.retrieverAgents(ontologyKey, lensKey),
-    queryFn: () => listRetrieverAgents(ontologyKey, lensKey),
+    queryKey: qk.retrievers(ontologyKey, lensKey),
+    queryFn: () => listRetrievers(ontologyKey, lensKey),
+    enabled: enabled && ontologyKey !== '' && lensKey !== '',
+    retry: false,
+  })
+}
+
+/**
+ * A kind's runtime assistant list of a lens — the built-in default first,
+ * no configuration or validation. The Workbench pickers and the palette.
+ */
+export function useAssistants(ontologyKey: string, lensKey: string, kind: AssistantKind, enabled = true) {
+  return useQuery({
+    queryKey: qk.assistants(ontologyKey, lensKey, kind),
+    queryFn: () => runtime.listAssistants(ontologyKey, lensKey, kind),
     enabled: enabled && ontologyKey !== '' && lensKey !== '',
     retry: false,
   })

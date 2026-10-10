@@ -5,7 +5,7 @@
  * (`initSchema`) to exactly the layout of a freshly created ontology,
  * every instance kept, every entity type given its name property, the
  * keyword language, the managed search indices and an empty retriever
- * agent table set up, and the retired search storage dropped. Storage at
+ * table set up, and the retired search storage dropped. Storage at
  * the unreleased version 2 (development storage with retrievers) is
  * produced by dropping what the current code adds and restoring the
  * per-entity search storage it retires; the same step upgrades it,
@@ -294,7 +294,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
     expect(withoutProviderIndex(await layout("ont_legacy"))).toEqual(fresh);
   });
 
-  it("gives real 5.1.0 storage its name properties, keyword languages, managed indices and retriever agents", async () => {
+  it("gives real 5.1.0 storage its name properties, keyword languages, managed indices and retrievers", async () => {
     await loadRelease510();
 
     await initSchema();
@@ -540,7 +540,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
     ]);
   });
 
-  it("renames retrievers to retriever agents and converts their configurations to version 2", async () => {
+  it("renames the retriever table and converts its configurations to version 2", async () => {
     await getOntologyRegistry().createOntology(ID_A, "older", null, null);
     await makeVersion2("ont_older");
     await seedVersion2Types("ont_older", {
@@ -613,7 +613,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version"
     ]);
     // The agent reads through the port with its conversion notes.
     const indices = (await getModelingStore("older")).searchIndices!();
-    expect((await indices.getRetrieverAgent(lensId, "notes"))!.warnings).toHaveLength(1);
+    expect((await indices.getRetriever(lensId, "notes"))!.warnings).toHaveLength(1);
   });
 
   it("drops the per-entity search storage and keeps every instance", async () => {

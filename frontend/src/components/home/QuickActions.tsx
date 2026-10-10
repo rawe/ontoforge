@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 
 /**
- * Quick actions row: Explorer, Query console, Ask AI (gated) and a passive
+ * Quick actions row: Explorer, Query console, Ask an assistant (gated) and a passive
  * ⌘K search hint.
  */
 export function QuickActions({
@@ -33,7 +33,7 @@ export function QuickActions({
         <Button asChild variant="outline" size="sm" className="h-8 gap-1.5 text-[13px]">
           <Link to={`/o/${ontologyKey}/w/${lensKey}/ai`}>
             <Sparkles className="size-3.5" />
-            Ask AI
+            Ask an assistant
           </Link>
         </Button>
       )}

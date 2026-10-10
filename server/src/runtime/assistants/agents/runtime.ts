@@ -1,0 +1,674 @@
+/**
+ * Agents at runtime (`docs/capabilities/agents.md`): agent
+ * chat and the agent list. The engine is
+ * LangChain.js / LangGraph.js (approved stack).
+ *
+ * Each turn builds a fresh agent with the agent's current configuration
+ * and a scoped tool subset, and runs it on its thread
+ * (`docs/capabilities/threads.md`): the thread's state holds the
+ * conversation with every tool call and result. Tools invoke the same
+ * runtime service functions the MCP tools use — no HTTP hop. A tool
+ * failure that is a not-found or validation error is returned to the
+ * model as the tool's result so it can correct itself and retry
+ * (`docs/capabilities/oql.md#self-correction-hints`); any other error
+ * aborts the run.
+ */
+
+import {
+  availableStrategies,
+  RELATIVE_SCORE_PROMISE,
+  SEARCH_EVIDENCE_GUIDANCE,
+  TOOL_MIN_SIMILARITY_GUIDANCE,
+  toolMinSimilarity,
+} from "../../search/strategies.js";
+
+import { randomUUID } from "node:crypto";
+
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import {
+  HumanMessage,
+  SystemMessage,
+  ToolMessage,
+  type BaseMessage,
+} from "@langchain/core/messages";
+import {
+  tool,
+  ToolInputParsingException,
+  type StructuredToolInterface,
+} from "@langchain/core/tools";
+import { createAgent, createMiddleware } from "langchain";
+import { z } from "zod";
+
+import { DEFAULT_AGENT_CONFIG, getAiModel, type AgentConfig } from "../../../core/ai.js";
+import { getEmbeddingProvider } from "../../../core/embedding.js";
+import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
+import type { RuntimeStore } from "../../../core/ports.js";
+import { loadSchema, type SchemaCacheValue } from "../../schemaCache.js";
+import * as service from "../../service.js";
+import { TURNS_THE_MODEL_SEES, type GraphThread } from "../../threads/threadStore.js";
+import { lastTurns, trimTurns } from "../../threads/turns.js";
+import {
+  TOOL_EXECUTE_QUERY,
+  TOOL_GET_DOCUMENT,
+  TOOL_GET_ENTITY,
+  TOOL_GET_NEIGHBORS,
+  TOOL_GET_SCHEMA,
+  TOOL_LIST_ENTITIES,
+  TOOL_LIST_RELATIONS,
+  TOOL_LIST_SAVED_QUERIES,
+  TOOL_RUN_SAVED_QUERY,
+  TOOL_SEARCH_DOCUMENTS,
+  TOOL_SEARCH_SAVED_QUERIES,
+  TOOL_SEARCH,
+} from "../../toolNames.js";
+
+type Row = Record<string, unknown>;
+
+// ---------------------------------------------------------------------------
+// Tool allowlists — controls which tools each AI feature can use
+// ---------------------------------------------------------------------------
+
+export const CHAT_TOOLS = [
+  TOOL_GET_SCHEMA,
+  TOOL_LIST_ENTITIES,
+  TOOL_GET_ENTITY,
+  TOOL_GET_DOCUMENT,
+  TOOL_LIST_RELATIONS,
+  TOOL_GET_NEIGHBORS,
+  TOOL_SEARCH,
+  TOOL_SEARCH_DOCUMENTS,
+  TOOL_EXECUTE_QUERY,
+  TOOL_LIST_SAVED_QUERIES,
+  TOOL_RUN_SAVED_QUERY,
+  TOOL_SEARCH_SAVED_QUERIES,
+];
+
+const EMBEDDING_TOOLS: ReadonlySet<string> = new Set([TOOL_SEARCH_SAVED_QUERIES]);
+
+// ---------------------------------------------------------------------------
+// Schema description builder (for system prompts)
+// ---------------------------------------------------------------------------
+
+/** Build a concise text description of the scoped schema for the LLM. */
+export function describeSchema(schema: SchemaCacheValue): string {
+  const lines = [`Lens: ${schema.lensName} (key: ${schema.lensKey})`];
+  if (schema.lensDescription) {
+    lines.push(`Description: ${schema.lensDescription}`);
+  }
+
+  lines.push("\nSystem properties (available on all entities and relations):");
+  lines.push("  - _id: string (unique identifier)");
+  lines.push("  - _createdAt: datetime");
+  lines.push("  - _updatedAt: datetime");
+
+  lines.push("\nEntity types:");
+  for (const et of Object.values(schema.entityTypes)) {
+    let desc = `  - ${et.key}`;
+    if (et.description) {
+      desc += `: ${et.description}`;
+    }
+    lines.push(desc);
+    for (const p of Object.values(et.properties)) {
+      const req = p.required ? " (required)" : "";
+      lines.push(`    - ${p.key}: ${p.dataType}${req}`);
+      if (p.description) {
+        lines.push(`      ${p.description}`);
+      }
+    }
+  }
+
+  lines.push("\nRelation types:");
+  for (const rt of Object.values(schema.relationTypes)) {
+    let desc = `  - ${rt.key}: ${rt.fromEntityTypeKey} -> ${rt.toEntityTypeKey}`;
+    if (rt.description) {
+      desc += ` (${rt.description})`;
+    }
+    lines.push(desc);
+    for (const p of Object.values(rt.properties)) {
+      const req = p.required ? " (required)" : "";
+      lines.push(`    - ${p.key}: ${p.dataType}${req}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Tool definitions — instantiated selectively per run
+// ---------------------------------------------------------------------------
+
+interface AgentToolDef {
+  name: string;
+  description: string;
+  schema: z.ZodType;
+  run: (lensKey: string, store: RuntimeStore, args: Row) => Promise<unknown>;
+}
+
+const clampLimit = (limit: unknown, fallback: number, max: number): number =>
+  Math.min(typeof limit === "number" ? limit : fallback, max);
+
+const AGENT_TOOL_DEFS: AgentToolDef[] = [
+  {
+    name: TOOL_GET_SCHEMA,
+    description:
+      "Get the full lens schema including entity types, relation types, " +
+      "and their property definitions with data types and required flags. " +
+      "Call this if you need to verify available types or properties.",
+    schema: z.object({}),
+    run: async (lensKey, store) => {
+      const loaded = await loadSchema(lensKey, store);
+      return describeSchema(loaded.scoped);
+    },
+  },
+  {
+    name: TOOL_LIST_ENTITIES,
+    description:
+      "List entities of a type with optional filtering and search. " +
+      "Use 'search' to match a term across ALL string properties at once. " +
+      "Use 'filters' to filter on specific properties: exact match " +
+      '("name": "Alice"), greater than ("age__gt": "25"), greater or equal ' +
+      '("__gte"), less than ("__lt"), less or equal ("__lte"), contains ' +
+      '("name__contains": "ali"). All filter values must be strings. ' +
+      "A filter key may also reach through ONE relation type, which answers a " +
+      "question about connections in a single call — use it instead of listing " +
+      "relations and matching ids by hand. Write the relation type key, then a " +
+      "dot for a property of the entity at the other end, or an at sign for a " +
+      'property of the relation itself. Listing person: ("works_for.name": ' +
+      '"Acme") are the people employed by Acme, ("works_for@role": "CTO") those ' +
+      'whose employment role is CTO, ("works_for@since__gte": "2021-01-01") ' +
+      "those employed since 2021. The direction follows the relation type's " +
+      "endpoints, so it needs no marker. A relation type that joins one type to " +
+      "itself is the exception: there the direction cannot be derived, and the " +
+      "error tells you which marker to add.",
+    schema: z.object({
+      entity_type_key: z.string(),
+      search: z.string().nullish(),
+      filters: z.record(z.string(), z.string()).nullish(),
+      limit: z.number().int().nullish(),
+    }),
+    run: async (lensKey, store, args) =>
+      service.listEntities(
+        lensKey,
+        args.entity_type_key as string,
+        clampLimit(args.limit, 20, 50),
+        0,
+        "_createdAt",
+        "asc",
+        (args.search as string | null | undefined) ?? null,
+        (args.filters as Record<string, string> | null | undefined) ?? {},
+        store,
+      ),
+  },
+  {
+    name: TOOL_GET_ENTITY,
+    description: "Retrieve a specific entity by its _id. Returns all properties.",
+    schema: z.object({
+      entity_type_key: z.string(),
+      entity_id: z.string(),
+    }),
+    run: async (lensKey, store, args) =>
+      service.getEntity(lensKey, args.entity_type_key as string, args.entity_id as string, store),
+  },
+  {
+    name: TOOL_GET_DOCUMENT,
+    description:
+      "Read a document property's content, whole or by character range. " +
+      "Document properties hold large text and are never returned inline by " +
+      'the other tools — they appear as {"document": true, "length": N} ' +
+      "stubs. 'offset' and 'limit' count characters; omit both to read the " +
+      "whole document. Read a segment rather than the whole document when you " +
+      "know where to look: pass the charOffset and charLength of a " +
+      "search_documents hit to read exactly the passage it matched.",
+    schema: z.object({
+      entity_type_key: z.string(),
+      entity_id: z.string(),
+      property_key: z.string(),
+      offset: z.number().int().nullish(),
+      limit: z.number().int().nullish(),
+    }),
+    run: async (lensKey, store, args) =>
+      service.getDocument(
+        lensKey,
+        args.entity_type_key as string,
+        args.entity_id as string,
+        args.property_key as string,
+        Math.max(0, (args.offset as number | null | undefined) ?? 0),
+        typeof args.limit === "number" ? Math.max(1, args.limit) : null,
+        store,
+      ),
+  },
+  {
+    name: TOOL_LIST_RELATIONS,
+    description:
+      "List relations of a type. Each result includes _id, source and target " +
+      "entity IDs, and relation properties.",
+    schema: z.object({
+      relation_type_key: z.string(),
+      limit: z.number().int().nullish(),
+    }),
+    run: async (lensKey, store, args) =>
+      service.listRelations(
+        lensKey,
+        args.relation_type_key as string,
+        clampLimit(args.limit, 20, 50),
+        0,
+        "_createdAt",
+        "asc",
+        null,
+        null,
+        {},
+        store,
+      ),
+  },
+  {
+    name: TOOL_GET_NEIGHBORS,
+    description:
+      "Explore an entity's connections. Returns the entity plus all connected " +
+      "entities with their connecting relations. Use this to answer 'what is X " +
+      "connected to?' questions. Direction: 'outgoing', 'incoming', or 'both'.",
+    schema: z.object({
+      entity_type_key: z.string(),
+      entity_id: z.string(),
+      direction: z.string().nullish(),
+      limit: z.number().int().nullish(),
+    }),
+    run: async (lensKey, store, args) =>
+      service.getNeighbors(
+        lensKey,
+        args.entity_type_key as string,
+        args.entity_id as string,
+        (args.direction as string | null | undefined) ?? "both",
+        null,
+        clampLimit(args.limit, 20, 50),
+        store,
+      ),
+  },
+  ...[false, true].map((document) => ({
+    name: document ? TOOL_SEARCH_DOCUMENTS : TOOL_SEARCH,
+    description:
+      (document
+        ? "Find entities whose document text matches the query. Every hit has passage matches with propertyKey, charOffset and charLength for get_document. "
+        : "Find entities for a text across properties and documents. Omit entity_type_key to search across the lens. ") +
+      "Returns the search envelope. " + TOOL_MIN_SIMILARITY_GUIDANCE +
+      " relativeScore is comparable only within this response: " +
+      RELATIVE_SCORE_PROMISE + " " + SEARCH_EVIDENCE_GUIDANCE,
+    schema: z.object({
+      query: z.string(),
+      entity_type_key: z.string().nullish(),
+      limit: z.number().int().nullish(),
+      ...(document ? { property: z.string().nullish() } : {}),
+    }),
+    run: async (lensKey: string, store: RuntimeStore, args: Row) =>
+      service.search(
+        lensKey,
+        {
+          query: args.query as string,
+          type: (args.entity_type_key as string | null) ?? null,
+          limit: clampLimit(args.limit, document ? 5 : 10, 20),
+          minSimilarity: toolMinSimilarity(store),
+          ...(document
+            ? {
+                in: ["document" as const],
+                document: { property: (args.property as string | undefined) ?? undefined },
+              }
+            : {}),
+        },
+        store,
+      ),
+  })),
+  {
+    name: TOOL_EXECUTE_QUERY,
+    description:
+      "Execute a read-only OQL query (openCypher-style graph pattern syntax) " +
+      "against the knowledge graph. " +
+      "Use entity type keys (snake_case) as node labels and relation type keys " +
+      "as relationship types. ALL node patterns MUST have a label. Only " +
+      "MATCH/RETURN — no writes, no CALL. Use CONTAINS for substring matching " +
+      "(not regex). If the query fails, read the error — it lists available " +
+      "types and properties. " +
+      "Examples: " +
+      "MATCH (p:person {name: 'Alice'}) RETURN p | " +
+      "MATCH (p:person)-[r:works_for]->(c:company) RETURN p.name, c.name | " +
+      "MATCH (p:person) WHERE p.age > 30 RETURN p.name, p.age LIMIT 10",
+    schema: z.object({
+      query: z.string(),
+    }),
+    run: async (lensKey, store, args) => service.executeQuery(lensKey, args.query as string, store),
+  },
+  {
+    name: TOOL_LIST_SAVED_QUERIES,
+    description:
+      "List available saved queries with their parameters. " +
+      "Each query has a key, name, description, and parameter definitions.",
+    schema: z.object({}),
+    run: async (lensKey, store) => {
+      const loaded = await loadSchema(lensKey, store);
+      return Object.values(loaded.savedQueries).map((sq) => ({
+        key: sq.key,
+        name: sq.name,
+        description: sq.description,
+        parameters: sq.parameters.map((p) => ({
+          name: p.name,
+          description: p.description,
+          dataType: p.dataType,
+        })),
+      }));
+    },
+  },
+  {
+    name: TOOL_RUN_SAVED_QUERY,
+    description:
+      "Execute a saved query by key with parameter values. " +
+      "Use list_saved_queries first to discover available queries and " +
+      "their required parameters.",
+    schema: z.object({
+      query_key: z.string(),
+      params: z.record(z.string(), z.unknown()).nullish(),
+    }),
+    run: async (lensKey, store, args) =>
+      service.executeSavedQuery(
+        lensKey,
+        args.query_key as string,
+        (args.params as Row | null | undefined) ?? {},
+        store,
+      ),
+  },
+  {
+    name: TOOL_SEARCH_SAVED_QUERIES,
+    description:
+      "Search saved queries by semantic similarity to a natural language query. " +
+      "Returns the most relevant saved queries ranked by how well their " +
+      "description matches your query. Use this to find the right saved query " +
+      "for a user's intent instead of listing all queries.",
+    schema: z.object({
+      query: z.string(),
+    }),
+    run: async (lensKey, store, args) =>
+      service.searchSavedQueries(lensKey, args.query as string, 3, 0.7, store),
+  },
+];
+
+const AGENT_TOOL_DEFS_BY_NAME: ReadonlyMap<string, AgentToolDef> = new Map(
+  AGENT_TOOL_DEFS.map((def) => [def.name, def]),
+);
+
+/** Every instantiable tool name. */
+export const ALL_TOOL_NAMES: ReadonlySet<string> = new Set(AGENT_TOOL_DEFS_BY_NAME.keys());
+
+/**
+ * Instantiate the named tools bound to one lens. A tool
+ * failure that is a not-found or validation error becomes the tool's
+ * result (`{"error": message}`) so the model self-corrects; model-supplied
+ * arguments that fail the tool's schema are fed back the same way.
+ * Anything else is rethrown and aborts the run.
+ */
+export type ToolEvent =
+  | { type: "agent.tool_call"; callId: string; tool: string; args: Row }
+  | { type: "agent.tool_result"; callId: string; result: unknown };
+
+export interface ChatExecution {
+  signal?: AbortSignal;
+  onToolEvent?: (event: ToolEvent) => Promise<void>;
+}
+
+export function buildTools(
+  lensKey: string,
+  store: RuntimeStore,
+  toolNames: string[],
+  execution: ChatExecution = {},
+): StructuredToolInterface[] {
+  return toolNames.flatMap((name) => {
+    const def = AGENT_TOOL_DEFS_BY_NAME.get(name);
+    if (!def) return [];
+    const structured = tool(
+      async (args: unknown) => {
+        execution.signal?.throwIfAborted();
+        let result: unknown;
+        try {
+          result = await def.run(lensKey, store, (args ?? {}) as Row);
+        } catch (error) {
+          if (!(error instanceof NotFoundError || error instanceof ValidationError)) throw error;
+          result = { error: error.message };
+        }
+        execution.signal?.throwIfAborted();
+        return [typeof result === "string" ? result : JSON.stringify(result), result];
+      },
+      { name: def.name, description: def.description, schema: def.schema,
+        responseFormat: "content_and_artifact" },
+    ) as StructuredToolInterface;
+    // Observe before schema parsing, so invalid arguments remain visible too.
+    const baseInvoke = structured.invoke.bind(structured);
+    structured.invoke = async (...invokeArgs: Parameters<typeof baseInvoke>) => {
+      execution.signal?.throwIfAborted();
+      const [input, config] = invokeArgs;
+      const isToolCall = input !== null && typeof input === "object" && "args" in input;
+      const args = ((isToolCall ? input.args : input) ?? {}) as Row;
+      const callId = randomUUID();
+      // The value handed back; a domain error becomes an `{error}` result.
+      let result: unknown;
+      await execution.onToolEvent?.({ type: "agent.tool_call", callId, tool: name, args });
+      execution.signal?.throwIfAborted();
+      let output: ToolMessage;
+      try {
+        output = await baseInvoke(isToolCall ? input : {
+          type: "tool_call", name, args, id: callId,
+        }, config) as ToolMessage;
+        result = output.artifact;
+      } catch (error) {
+        if (!(error instanceof ToolInputParsingException)) throw error;
+        result = { error: `Invalid arguments for ${name}: ${error.message}` };
+        output = new ToolMessage({
+          content: JSON.stringify(result), name,
+          tool_call_id: isToolCall ? String(input.id ?? "") : callId,
+        });
+      }
+      execution.signal?.throwIfAborted();
+      await execution.onToolEvent?.({ type: "agent.tool_result", callId, result });
+      return isToolCall ? output : output.content;
+    };
+    return [structured];
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Agent runner
+// ---------------------------------------------------------------------------
+
+/** The active model, or the FEATURE_DISABLED rejection. */
+function requireModel(): BaseChatModel {
+  const model = getAiModel();
+  if (model === null) {
+    throw new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", {
+      code: "FEATURE_DISABLED",
+    });
+  }
+  return model;
+}
+
+/** Flatten a message's content to plain text. */
+function messageText(message: BaseMessage | undefined): string {
+  if (message === undefined) {
+    return "";
+  }
+  const content = message.content as unknown;
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") {
+          return part;
+        }
+        if (part !== null && typeof part === "object" && (part as Row).type === "text") {
+          return String((part as Row).text ?? "");
+        }
+        return "";
+      })
+      .join("");
+  }
+  return "";
+}
+
+// A budget of roughly 50 model calls: one LangGraph step per model call
+// plus one per tool batch.
+const RECURSION_LIMIT = 100;
+
+/**
+ * Tool errors abort the run. `createAgent` hands every tool error back to
+ * the model unless a `wrapToolCall` middleware is present, whose errors it
+ * rethrows; this pass-through is that middleware. A tool name the model
+ * made up fails the same way.
+ */
+const ABORT_ON_TOOL_ERROR = createMiddleware({
+  name: "AbortOnToolError",
+  wrapToolCall: async (request, handler) => {
+    if (request.tool === undefined) throw new Error(`Tool "${request.toolCall.name}" not found.`);
+    return handler(request);
+  },
+});
+
+/**
+ * One ReAct-style turn on a thread: system prompt, the thread's
+ * conversation plus the new message, the given tools. The thread keeps at
+ * most `TURNS_PER_THREAD` turns; the model sees the last
+ * `TURNS_THE_MODEL_SEES`, tool calls and results included. Tool errors
+ * outside the self-correction paths abort (the wrappers in `buildTools`
+ * already feed domain and argument errors back). Returns the final reply
+ * text.
+ */
+async function runReactAgent(
+  model: BaseChatModel,
+  systemPrompt: string,
+  tools: StructuredToolInterface[],
+  message: string,
+  thread: GraphThread,
+  signal?: AbortSignal,
+): Promise<string> {
+  signal?.throwIfAborted();
+  const turns = createMiddleware({
+    name: "ThreadTurns",
+    beforeAgent: (state) => ({ messages: trimTurns(state.messages) }),
+    wrapModelCall: async (request, handler) => {
+      const messages = lastTurns(request.messages, TURNS_THE_MODEL_SEES);
+      // No tools: a plain model call is the same conversation without the
+      // tool loop (binding an empty toolset is rejected by providers).
+      if (tools.length === 0) return model.invoke([request.systemMessage, ...messages], { signal });
+      return handler({ ...request, messages });
+    },
+  });
+  // A SystemMessage keeps the prompt as plain string content; a string
+  // would be turned into a content-block array.
+  const agent = createAgent({
+    model, tools, systemPrompt: new SystemMessage(systemPrompt),
+    middleware: [turns, ABORT_ON_TOOL_ERROR], checkpointer: thread.checkpointer,
+  });
+  const state = await agent.invoke(
+    { messages: [new HumanMessage(message)] },
+    { recursionLimit: RECURSION_LIMIT, signal, configurable: { thread_id: thread.threadId } },
+  );
+  const finalMessages = state.messages as BaseMessage[];
+  return messageText(finalMessages[finalMessages.length - 1]);
+}
+
+// ---------------------------------------------------------------------------
+// Feature: Schema-Aware Chat
+// ---------------------------------------------------------------------------
+
+const CHAT_SYSTEM_PROMPT = `You are a knowledge graph assistant. You answer questions by querying data with the available tools. You can only read data, not create or modify it.
+
+SCHEMA:
+{schema}
+
+STRATEGY — use the exact keys from the schema as tool arguments (e.g. entity_type_key="person"):
+1. For questions about connections or relationships, use execute_query with a
+   relationship pattern. Example: "What does Lena do?" →
+   MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name CONTAINS 'Lena' RETURN p.name, c.name
+2. For counting, filtering, or combining conditions, use execute_query.
+3. For fuzzy or "find something like..." questions, use search.
+4. For exploring an entity's connections when you have its _id, use get_neighbors.
+5. For browsing entities of a type, use list_entities.
+6. A property shown as {"document": true, "length": N} is a large text held back
+   from the result. To answer from its content, use search_documents to find the
+   matching passage, then get_document with that propertyKey and
+   charOffset/charLength to read it — read a segment, not the whole document.
+
+Never make up answers — only use data from tool results. If the data doesn't contain the answer, say so. Be concise.
+`;
+
+/** Effective toolset: allowlist ∩ available. Embedding-dependent tools are
+ * dropped without an embedding provider — for the default agent and
+ * explicit allowlists alike. */
+export function resolveChatToolNames(agentConfig: AgentConfig, store: RuntimeStore): string[] {
+  const hasEmbedding = getEmbeddingProvider() !== null;
+  const hasSearch = availableStrategies(store).length > 0;
+  return (agentConfig.tools ?? CHAT_TOOLS).filter(
+    (t) =>
+      ALL_TOOL_NAMES.has(t) &&
+      (!EMBEDDING_TOOLS.has(t) || hasEmbedding) &&
+      (![TOOL_SEARCH, TOOL_SEARCH_DOCUMENTS].includes(t) || hasSearch),
+  );
+}
+
+/** One turn of agent chat on a thread. */
+export async function runAgentChat(
+  agentConfig: AgentConfig,
+  lensKey: string,
+  message: string,
+  store: RuntimeStore,
+  thread: GraphThread,
+  execution: ChatExecution = {},
+): Promise<Row> {
+  execution.signal?.throwIfAborted();
+  const loaded = await loadSchema(lensKey, store);
+  const schemaDesc = describeSchema(loaded.scoped);
+
+  // Resolve system prompt: a custom prompt gets the schema appended; no
+  // prompt gets the built-in one. The schema is in the prompt either way.
+  let systemPrompt = agentConfig.systemPrompt ?? CHAT_SYSTEM_PROMPT.replace("{schema}", schemaDesc);
+  if (agentConfig.systemPrompt) {
+    systemPrompt += "\n\nSCHEMA:\n" + schemaDesc;
+  }
+
+  const toolNames = resolveChatToolNames(agentConfig, store);
+  const model = requireModel();
+  const tools = buildTools(lensKey, store, toolNames, execution);
+
+  const reply = await runReactAgent(model, systemPrompt, tools, message, thread, execution.signal);
+  execution.signal?.throwIfAborted();
+
+  return { reply };
+}
+
+/** Resolve all chat prerequisites before the REST response starts: the
+ * agent (`_default` is the built-in default) and the model. */
+export async function prepareChat(lensKey: string, store: RuntimeStore, agentKey: string): Promise<AgentConfig> {
+  const loaded = await loadSchema(lensKey, store);
+  const config = agentKey === DEFAULT_AGENT_CONFIG.key ? DEFAULT_AGENT_CONFIG : loaded.agentConfigs[agentKey];
+  if (!config) throw new NotFoundError(`Agent '${agentKey}' not found`);
+  requireModel();
+  return config;
+}
+
+// ---------------------------------------------------------------------------
+// Agent list
+// ---------------------------------------------------------------------------
+
+/** One runtime list item, the same for every assistant kind. */
+export interface RuntimeAssistant {
+  key: string;
+  name: string;
+  description: string | null;
+  builtIn: boolean;
+}
+
+/** Every agent of a lens, the built-in default first. Needs no model. */
+export async function listRuntimeAgents(lensKey: string, store: RuntimeStore): Promise<RuntimeAssistant[]> {
+  const loaded = await loadSchema(lensKey, store);
+  return [DEFAULT_AGENT_CONFIG, ...Object.values(loaded.agentConfigs)].map((config) => ({
+    key: config.key,
+    name: config.name,
+    description: config.description,
+    builtIn: config === DEFAULT_AGENT_CONFIG,
+  }));
+}

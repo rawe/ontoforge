@@ -79,7 +79,7 @@ definitions and settings, cascade rules, schema validation, transfer, search-dat
 
 **Runtime** owns one ontology's instance data: entity and relation lifecycle, traversal,
 documents, search, search indexing, query execution, saved-query pipelines, agents and
-retriever agents.
+retrievers, and the [thread store](#thread-store) holding their conversations.
 
 **Server** carries the deployment's capability report — which optional providers this
 deployment has. It belongs to neither modeling nor runtime and is the only surface that
@@ -96,7 +96,7 @@ reads through the port. This keeps the schema a *value* to runtime rather than a
 it calls, which is what makes the schema cache possible. Runtime uses core alone. The
 other three may use runtime as well as core: modeling where it needs runtime's own view —
 assembling a lens's schema, deriving the managed search indices of a changed schema, and
-validating agent configurations and retriever agents against what runtime offers;
+validating agent configurations and retrievers against what runtime offers;
 registry to clear the schema cache when an ontology is deleted; server to report which
 search strategies the deployment offers.
 
@@ -121,8 +121,8 @@ agent ever spans two. The architecture makes that structural rather than checked
 The registry — not any storage catalog — is the authoritative list of ontologies. Zero
 ontologies is a valid server state: a fresh server starts empty, nothing is auto-created
 at boot, and the last ontology is deletable. Deleting an ontology is one hard cascade
-over everything it contains — schema, lenses, saved queries, agents, retriever
-agents, instance data and search indices.
+over everything it contains — schema, lenses, saved queries, agents, retrievers,
+instance data and search indices.
 
 ## Logical data model
 
@@ -152,9 +152,9 @@ Per ontology. "Unique" here always means unique within the owning ontology.
 | Inclusion | lens + type, or lens + search index | a type inclusion's optional property allowlist; absent means all properties |
 | Agent config | lens + `key` | name, description, system prompt, tool allowlist |
 | Saved query | lens + `key` | name, description, ordered steps, parameters, bindings |
-| Retriever agent | lens + `key` | name, description, configuration version, configuration, conversion warnings |
+| Retriever | lens + `key` | name, description, configuration version, configuration, conversion warnings |
 
-Inclusions, agent configs, saved queries and retriever agents are the four things
+Inclusions, agent configs, saved queries and retrievers are the four things
 that belong *to a lens*. Types, properties and search indices never do. The same type key, and the same
 lens key, can exist independently in two ontologies.
 
@@ -188,10 +188,10 @@ Enforced in the service layer on every write path, whichever interface it arrive
 is the summary; each one is stated with its consequences in
 [capabilities/schema-modeling.md](capabilities/schema-modeling.md).
 
-- Ontology keys match `^[a-z][a-z0-9_]*$` and are at most 59 characters; ontology keys
-  and display names are unique server-wide.
-- Type and property keys match `^[a-z][a-z0-9_]*$` and are at most 64 characters, on
-  every path that sets them — the modeling interfaces and import alike.
+- Ontology keys follow the schema [key](README.md) rule and are at most 59 characters;
+  ontology keys and display names are unique server-wide.
+- Type and property keys follow the schema [key](README.md) rule and are at most 64
+  characters, on every path that sets them — the modeling interfaces and import alike.
 - Entity type keys, relation type keys, lens keys and lens names are unique within
   their ontology. Property keys are unique within their owning type.
 - A relation type may only be created if both endpoint entity types exist.
@@ -242,6 +242,37 @@ any change of the ontology's index definitions.
 It is **per process**. Multiple server instances against one database will not see each
 other's schema changes until each rebuilds — a real constraint on horizontal scaling that
 no interface currently exposes.
+
+## Thread store
+
+Assistants converse in threads the server holds: a client sends a new message and, to
+continue, a thread id; the server continues from the state it kept. Every thread of a
+server lives in one thread store — one per server, not per ontology — behind an interface
+of its own, beside the persistence port rather than behind it
+([decisions.md](decisions.md#storage)).
+
+**Registry.** Each thread has a random, unguessable id — knowing it is what lets a client
+continue the thread — and a binding to exactly one assistant: ontology, lens, kind and key.
+A thread is found only through its own assistant; through any other it is unknown. Nothing
+cascades: a deleted ontology, lens or assistant leaves its threads to retention.
+
+**State.** The store keeps a thread's conversation state after the latest step of its last
+run, never earlier steps, plus — while a turn runs — the state the turn started from. A
+thread keeps at most 25 turns; older ones are removed. The model sees the last 8.
+
+**One run per thread, atomic turns.** A run holds the thread's run lock; a run on a thread
+that is still running is refused, never queued. A cancelled or failed turn returns the
+thread to the state the turn started from; a successful one drops it. A thread only ever
+holds complete turns, and an interrupted turn is asked again, never resumed.
+
+**Retention.** A thread expires 2 hours after its last turn; expiry removes its state and
+its registry entry, and reading a thread does not count as use. The store holds at most
+100 threads; reaching the cap removes the thread unused the longest. Retention is applied
+on every read and write of the store — no background job.
+
+Like the schema cache, the thread store is **per process**: threads live in the server's
+memory, a restart loses them all, and multiple instances do not share them. A client
+continuing a lost thread is told it is not found and starts a new one.
 
 ## Request lifecycle
 
@@ -327,8 +358,8 @@ There are exactly six top-level codes:
 
 | Condition | Status | Code | `details` |
 |---|---|---|---|
-| Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — |
-| Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | — |
+| Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — or `code` |
+| Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | — or `code` |
 | Input rejected | 422 | `VALIDATION_ERROR` | `fields` map or `errors` list |
 | Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses`, `affectedIndices` |
 | Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
@@ -339,8 +370,12 @@ Two refinements:
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
 stays one of the six. A request for an unavailable search strategy, search with no available strategy,
 saved-query discovery with no embedding provider, an AI request with no
-language-model provider configured — or a search-settings, search-index or retriever-agent
+language-model provider configured — or a search-settings, search-index or retriever
 request to a storage adapter without search indices — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
+An assistant thread that is unknown, expired or bound to another assistant answers
+`404 RESOURCE_NOT_FOUND` with `details.code` of `THREAD_NOT_FOUND`, and a message to a
+thread still running `409 RESOURCE_CONFLICT` with `details.code` of `THREAD_BUSY`
+([thread store](#thread-store)).
 
 **`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
 physical objects, which must not reach a client. The adapter logs the original against a
@@ -389,7 +424,7 @@ per-ontology deployment configuration.
 | Search indexing | Attempts before a queued item counts as failed, worker batch size, polling interval | Defaults apply |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
 | Decision model | Endpoint, model, credential | Entity identity comparison unavailable |
-| Public URL | Base address advertised in agent cards | Cards advertise a local address |
+| Public URL | The server's public base address, read by no capability yet | Nothing changes |
 
 Exact variable names are in the repository README; they are deployment surface, not
 architecture.
@@ -410,7 +445,7 @@ Stated plainly, because their absence is a design position and not an oversight:
   network.
 - **No multi-tenancy.** An ontology isolates data but is not a tenant — the rule and
   its reason are in [decisions.md](decisions.md#scope).
-- **No cross-process cache coherence**, as described above.
+- **No cross-process cache coherence and no shared threads**, as described above.
 
 Absences in the API surface itself — no health probe, no bulk write, no instance-data
 export — are listed with their consequences in

@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { isValidKey } from './lib'
+import { isValidLensResourceKey, isValidSchemaKey } from './lib'
 
 interface KeyFieldProps {
   id: string
@@ -20,11 +20,14 @@ interface KeyFieldProps {
   disabled?: boolean
   error?: string
   autoFocus?: boolean
+  /** Check against the lens-resource key rule (saved queries, assistants)
+   * instead of the schema key rule. */
+  lensResource?: boolean
 }
 
 /**
- * Key input with live pattern validation and the "immutable" note. Keys are
- * snake_case (`^[a-z][a-z0-9_]*$`) and permanent once created.
+ * Key input with live pattern validation and the "immutable" note. Keys follow
+ * their level's rule (`./lib`) and are permanent once created.
  */
 export function KeyField({
   id,
@@ -34,8 +37,10 @@ export function KeyField({
   disabled,
   error,
   autoFocus,
+  lensResource = false,
 }: KeyFieldProps) {
-  const invalid = !disabled && value !== '' && !isValidKey(value)
+  const isValid = lensResource ? isValidLensResourceKey : isValidSchemaKey
+  const invalid = !disabled && value !== '' && !isValid(value)
   return (
     <div className="grid gap-1.5">
       <Label htmlFor={id}>{label}</Label>
@@ -53,7 +58,9 @@ export function KeyField({
       />
       {invalid && (
         <p className="text-xs text-destructive">
-          Lowercase letters, digits and underscores only; must start with a letter.
+          {lensResource
+            ? 'Lowercase letters, digits, underscores and hyphens only; must start with a letter.'
+            : 'Lowercase letters, digits and underscores only; must start with a letter.'}
         </p>
       )}
       {!invalid && error !== undefined && <p className="text-xs text-destructive">{error}</p>}

@@ -1,21 +1,22 @@
-import { MessageCircleQuestion, MessagesSquare, Sparkles } from 'lucide-react'
+import { Sparkles } from 'lucide-react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useFeatures, useRuntimeSchema } from '@/api/hooks'
-import { AskTab } from '@/components/ai/AskTab'
-import { ChatTab } from '@/components/ai/ChatTab'
-import { RetrieverAgentTab } from '@/components/ai/RetrieverAgentTab'
+import { AgentChat } from '@/components/assistants/agents/AgentChat'
+import { AssistantTab } from '@/components/assistants/chat/AssistantTab'
+import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
+import { RetrieverTab } from '@/components/assistants/retrievers/RetrieverTab'
 import { EmptyState } from '@/components/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-const TABS = ['chat', 'ask', 'retriever'] as const
+const TABS = ['chat', 'retriever'] as const
 type TabKey = (typeof TABS)[number]
 
 /**
- * `/o/:ontologyKey/w/:lensKey/ai` — AI assistant with tabs Chat | Ask |
- * Retriever. The active tab lives in `?tab=` so ask/retriever can be
- * deep-linked (the retriever tab also takes `&agent=<key>`); leaving chat or
- * the retriever cancels its turn.
+ * `/o/:ontologyKey/w/:lensKey/ai` — Assistants, with tabs Agents (`chat`) | Retrievers (`retriever`).
+ * The active tab lives in `?tab=`, the chosen assistant of that kind in
+ * `?assistant=<key>`; an unknown tab falls back to chat. Leaving a tab
+ * cancels its running turn.
  */
 export function AiPage() {
   const { ontologyKey, lensKey } = useParams<{ ontologyKey: string; lensKey: string }>()
@@ -32,12 +33,12 @@ export function AiPage() {
     return (
       <div>
         <header className="border-b px-6 py-4">
-          <h1 className="text-[15px] font-semibold tracking-tight">AI</h1>
+          <h1 className="text-[15px] font-semibold tracking-tight">Assistants</h1>
         </header>
         <EmptyState
           icon={Sparkles}
           title="AI is not enabled"
-          description="This server has no AI provider configured. Set one up on the backend to unlock chat, one-shot questions and retriever agents."
+          description="This server has no AI provider configured. Set one up on the backend to use assistants."
         />
       </div>
     )
@@ -50,7 +51,7 @@ export function AiPage() {
         const next = new URLSearchParams(searchParams)
         if (value === 'chat') next.delete('tab')
         else next.set('tab', value)
-        if (value !== 'retriever') next.delete('agent')
+        next.delete('assistant')
         setSearchParams(next, { replace: true })
       }}
       className="flex h-full min-h-0 flex-col gap-0"
@@ -58,20 +59,16 @@ export function AiPage() {
       <header className="flex items-center gap-4 border-b px-6 py-3">
         <h1 className="flex items-center gap-2 text-[15px] font-semibold tracking-tight">
           <Sparkles className="size-4 text-muted-foreground" />
-          AI
+          Assistants
         </h1>
         <TabsList className="h-8">
           <TabsTrigger value="chat" className="gap-1.5 px-2.5 text-[13px]">
-            <MessagesSquare className="size-3.5" />
-            Chat
-          </TabsTrigger>
-          <TabsTrigger value="ask" className="gap-1.5 px-2.5 text-[13px]">
-            <MessageCircleQuestion className="size-3.5" />
-            Ask
+            <ASSISTANT_KINDS.agents.icon className="size-3.5" />
+            Agents
           </TabsTrigger>
           <TabsTrigger value="retriever" className="gap-1.5 px-2.5 text-[13px]">
-            <Sparkles className="size-3.5" />
-            Retriever
+            <ASSISTANT_KINDS.retrievers.icon className="size-3.5" />
+            Retrievers
           </TabsTrigger>
         </TabsList>
       </header>
@@ -83,30 +80,15 @@ export function AiPage() {
         </div>
       ) : (
         <>
-          <TabsContent value="retriever" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-            {tab === 'retriever' && <RetrieverAgentTab key={`${ontologyKey}/${lensKey}`} ontologyKey={ontologyKey} lensKey={lensKey} />}
+          <TabsContent value="retriever" className="flex min-h-0 flex-1 flex-col">
+            {tab === 'retriever' && <RetrieverTab key={`${ontologyKey}/${lensKey}`} ontologyKey={ontologyKey} lensKey={lensKey} />}
           </TabsContent>
-          <TabsContent
-            value="chat"
-            forceMount
-            className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
-          >
-            {tab === 'chat' && <ChatTab
-              key={`${ontologyKey}/${lensKey}`}
-              ontologyKey={ontologyKey}
-              lensKey={lensKey}
-            />}
-          </TabsContent>
-          <TabsContent
-            value="ask"
-            forceMount
-            className="min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden"
-          >
-            <AskTab
-              key={`${ontologyKey}/${lensKey}`}
-              ontologyKey={ontologyKey}
-              lensKey={lensKey}
-            />
+          <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col">
+            {tab === 'chat' && (
+              <AssistantTab key={`${ontologyKey}/${lensKey}`} ontologyKey={ontologyKey} lensKey={lensKey} kind="agents">
+                {(agent, picker) => <AgentChat key={agent.key} ontologyKey={ontologyKey} lensKey={lensKey} agent={agent} picker={picker} />}
+              </AssistantTab>
+            )}
           </TabsContent>
         </>
       )}

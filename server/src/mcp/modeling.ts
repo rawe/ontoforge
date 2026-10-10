@@ -25,14 +25,22 @@ import { z, ZodError } from "zod";
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import { getModelingStore, getOntologyRegistry, getRuntimeStore } from "../core/ports.js";
 import type { ModelingStore } from "../core/ports.js";
-import type { TypeKind } from "../core/schemas.js";
+import {
+  DEFAULT_ANSWER_FIELD_CHARACTERS,
+  DEFAULT_THRESHOLD,
+  MAX_RETRIEVER_FILTERS,
+  MAX_RETRIEVER_INDICES,
+  MAX_ANSWER_FIELDS,
+  MAX_FILTER_HOPS,
+  RETRIEVER_CONFIG_VERSION,
+} from "../core/retriever.js";
+import { LENS_RESOURCE_KEY_PATTERN, MAX_KEY_LENGTH, type TypeKind } from "../core/schemas.js";
 import { OntologyCreate } from "../registry/schemas.js";
 import * as registryService from "../registry/service.js";
 import {
-  AiAgentConfigUpsert,
+  AgentConfigUpsert,
   EntityTypeCreate,
   EntityTypeUpdate,
-  ExportPayload,
   IncludeTypeRequest,
   LensCreate,
   LensUpdate,
@@ -40,11 +48,12 @@ import {
   PropertyDefinitionUpdate,
   RelationTypeCreate,
   RelationTypeUpdate,
-  LEGACY_TRANSFER_FORMAT_VERSION,
   SavedQueryUpsert,
   SearchSettingsUpdate,
   TRANSFER_FORMAT_VERSION,
 } from "../modeling/schemas.js";
+import * as retrievers from "../modeling/retrievers.js";
+import { IMPORTABLE_FORMAT_VERSIONS } from "../modeling/transfer/upgrades.js";
 import * as searchIndices from "../modeling/searchIndices.js";
 import * as service from "../modeling/service.js";
 import { VALID_AGENT_TOOLS_CSV } from "../runtime/toolNames.js";
@@ -79,8 +88,9 @@ export function formatToolError(error: unknown): string {
       return `${message} — ${fieldErrors}`;
     }
     if ("errors" in details) {
-      const errors = details.errors as unknown[];
-      return `${message} — ${errors.map(String).join("; ")}`;
+      const errors = (details.errors as unknown[]).map(String).join("; ");
+      // Some messages already carry their errors; never repeat them.
+      return message.includes(errors) ? message : `${message} — ${errors}`;
     }
     return message;
   }
@@ -242,7 +252,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         "Get the current state of the ontology's schema. Returns all entity types, " +
         "relation types, and their properties, the keyword language set, the search " +
         "indices (custom definitions and switched-off managed indices) and the lenses with " +
-        "their type and search-index inclusions and retriever agents.",
+        "their type and search-index inclusions, assistants (agents and retrievers) and saved queries.",
       inputSchema: {},
     },
     wrap("get_schema", async () => {
@@ -569,8 +579,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     {
       description:
         `Export the full schema in the OntoForge v${TRANSFER_FORMAT_VERSION} transfer format ` +
-        "(JSON), including the keyword language set, the search indices and the lenses' " +
-        "retriever agents.",
+        "(JSON), including the keyword language set, the search indices and each lens's " +
+        "assistants (agents and retrievers) and saved queries.",
       inputSchema: {},
     },
     wrap("export_schema", async () => {
@@ -583,15 +593,16 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "import_schema",
     {
       description:
-        `Import a v${TRANSFER_FORMAT_VERSION} schema payload (v${LEGACY_TRANSFER_FORMAT_VERSION} ` +
-        "is accepted too). Creates entity types, relation types, and lenses with scope configuration.",
+        `Import a v${TRANSFER_FORMAT_VERSION} schema payload (also accepted, upgraded on the way in: ` +
+        IMPORTABLE_FORMAT_VERSIONS.filter((v) => v !== TRANSFER_FORMAT_VERSION).map((v) => `v${v}`).join(", ") +
+        "). Creates entity types, relation types, and lenses with scope configuration, " +
+        "assistants and saved queries.",
       inputSchema: {
         payload: z.record(z.string(), z.unknown()),
       },
     },
     wrap("import_schema", async (args: { payload: Record<string, unknown> }) => {
-      const parsed = ExportPayload.parse(args.payload);
-      const result = await service.importSchema(parsed, await getModelingStore(ontologyKey));
+      const result = await service.importSchema(args.payload, await getModelingStore(ontologyKey));
       return jsonResult(result);
     }),
   );
@@ -646,7 +657,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     {
       description:
         "List the ontology's search index definitions — managed (default and passage, " +
-        "keys with '~', switched in search settings) and custom — with their build status.",
+        "keys with '~', switched in search settings) and custom — with their build status " +
+        "(fields as get_search_index_status describes).",
       inputSchema: {},
     },
     wrap("list_search_indices", async () => {
@@ -658,7 +670,9 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
   server.registerTool(
     "get_search_index",
     {
-      description: "Get one search index definition with its build status.",
+      description:
+        "Get one search index definition with its build status (fields as " +
+        "get_search_index_status describes).",
       inputSchema: { index_key: z.string() },
     },
     wrap("get_search_index", async (args: { index_key: string }) => {
@@ -754,8 +768,11 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "get_search_index_status",
     {
       description:
-        "Get a search index's build status: ready, building (done/total), stale (pending), " +
-        "failed (with the last errors), disabled or unavailable, per representation.",
+        "Get a search index's build status, per representation: state (ready, building, " +
+        "stale, failed, disabled or unavailable); build — {done, total} of the build filling " +
+        "a new generation, null when none is; pending — queued changes not yet indexed; " +
+        "failed — items whose retries are used up, retried by a rebuild or a new write of " +
+        "their entity; and the last errors.",
       inputSchema: { index_key: z.string() },
     },
     wrap("get_search_index_status", async (args: { index_key: string }) => {
@@ -1047,30 +1064,50 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     }),
   );
 
-  // --- AI Agent Config Tools ---
+  // --- Assistants: the base set per kind (agents, retrievers) ---
+  // Copy, move, export and import of a retriever stay REST-only.
 
   server.registerTool(
-    "list_ai_agents",
+    "list_agents",
     {
-      description: "List all AI agent configurations for a lens.",
+      description: "List a lens's agents (tool-using chat assistants).",
       inputSchema: {
         lens_key: z.string(),
       },
     },
-    wrap("list_ai_agents", async (args: { lens_key: string }) => {
-      const results = await service.listAiAgents(args.lens_key, await getModelingStore(ontologyKey));
+    wrap("list_agents", async (args: { lens_key: string }) => {
+      const results = await service.listAgents(args.lens_key, await getModelingStore(ontologyKey));
       return jsonResult(results);
     }),
   );
 
   server.registerTool(
-    "set_ai_agent",
+    "get_agent",
+    {
+      description: "Read one agent of a lens by key.",
+      inputSchema: {
+        lens_key: z.string(),
+        agent_key: z.string(),
+      },
+    },
+    wrap("get_agent", async (args: { lens_key: string; agent_key: string }) => {
+      const result = await service.getAgent(
+        args.lens_key,
+        args.agent_key,
+        await getModelingStore(ontologyKey),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "set_agent",
     {
       description:
-        "Create or update an AI agent configuration for a lens. " +
-        "Key must match pattern ^[a-z][a-z0-9_-]*$, be at most 64 characters, and cannot be '_default'. " +
+        "Create or replace an agent of a lens. " +
+        `Key must match pattern ${LENS_RESOURCE_KEY_PATTERN.source} and be at most ${MAX_KEY_LENGTH} characters. ` +
         `Tools must be valid tool names (${VALID_AGENT_TOOLS_CSV}). ` +
-        "Set tools=null to allow all tools.",
+        "Omit tools to allow all tools.",
       inputSchema: {
         lens_key: z.string(),
         key: z.string(),
@@ -1080,7 +1117,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         tools: z.array(z.string()).optional(),
       },
     },
-    wrap("set_ai_agent", async (args: {
+    wrap("set_agent", async (args: {
       lens_key: string;
       key: string;
       name: string;
@@ -1088,13 +1125,13 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       system_prompt?: string | undefined;
       tools?: string[] | undefined;
     }) => {
-      const body = AiAgentConfigUpsert.parse({
+      const body = AgentConfigUpsert.parse({
         name: args.name,
         description: args.description ?? null,
         systemPrompt: args.system_prompt ?? null,
         tools: args.tools ?? null,
       });
-      const [result, created] = await service.upsertAiAgent(
+      const [result, created] = await service.upsertAgent(
         args.lens_key,
         args.key,
         body,
@@ -1105,19 +1142,141 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
   );
 
   server.registerTool(
-    "delete_ai_agent",
+    "delete_agent",
     {
-      description: "Delete an AI agent configuration from a lens.",
+      description: "Delete an agent from a lens.",
       inputSchema: {
         lens_key: z.string(),
         agent_key: z.string(),
       },
     },
-    wrap("delete_ai_agent", async (args: { lens_key: string; agent_key: string }) => {
-      await service.deleteAiAgent(args.lens_key, args.agent_key, await getModelingStore(ontologyKey));
-      return textResult(
-        `AI agent '${args.agent_key}' deleted from lens '${args.lens_key}'.`,
+    wrap("delete_agent", async (args: { lens_key: string; agent_key: string }) => {
+      await service.deleteAgent(args.lens_key, args.agent_key, await getModelingStore(ontologyKey));
+      return textResult(`Agent '${args.agent_key}' deleted from lens '${args.lens_key}'.`);
+    }),
+  );
+
+  // Retrievers search search indices: without them (an adapter that has
+  // none) every retriever tool is refused as a disabled feature, by the
+  // same service check as REST.
+
+  server.registerTool(
+    "list_retrievers",
+    {
+      description:
+        "List a lens's retrievers (assistants that answer questions over search indices), " +
+        "each with its configuration and its current validation against the lens.",
+      inputSchema: {
+        lens_key: z.string(),
+      },
+    },
+    wrap("list_retrievers", async (args: { lens_key: string }) => {
+      const results = await retrievers.listRetrievers(
+        args.lens_key,
+        await getModelingStore(ontologyKey),
+        await getRuntimeStore(ontologyKey),
       );
+      return jsonResult(results);
+    }),
+  );
+
+  server.registerTool(
+    "get_retriever",
+    {
+      description:
+        "Read one retriever of a lens by key, with its configuration and its current " +
+        "validation against the lens ({valid, errors, warnings}).",
+      inputSchema: {
+        lens_key: z.string(),
+        retriever_key: z.string(),
+      },
+    },
+    wrap("get_retriever", async (args: { lens_key: string; retriever_key: string }) => {
+      const result = await retrievers.getRetriever(
+        args.lens_key,
+        args.retriever_key,
+        await getModelingStore(ontologyKey),
+        await getRuntimeStore(ontologyKey),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
+    "set_retriever",
+    {
+      description:
+        "Create or replace a retriever of a lens: an assistant that answers questions over the " +
+        "lens's search indices. " +
+        `Key must match pattern ${LENS_RESOURCE_KEY_PATTERN.source} and be at most ${MAX_KEY_LENGTH} characters. ` +
+        `config is a configuration version ${RETRIEVER_CONFIG_VERSION} object (camelCase): ` +
+        `indices — 1 to ${MAX_RETRIEVER_INDICES} search indices it searches, each once, as {index, relations?}: ` +
+        "index is a key from list_search_indices (managed '<entityType>~default' or " +
+        "'<entityType>~<documentProperty>', or custom) that the lens can search — a scoped lens " +
+        "must include it and expose its root entity type; a switched-off managed index is not " +
+        "searchable. relations optionally narrows to relation types of the index's relation " +
+        "groups (omit for every group the lens shows). The root entity types of the chosen " +
+        "indices are the result types: the retriever finds entities of those types only. " +
+        `filters (optional, default []) — up to ${MAX_RETRIEVER_FILTERS} exact conditions a question may set, ` +
+        "as {id, entityType, path, field}: id unique in the retriever, entityType a result type, " +
+        `path 0 to ${MAX_FILTER_HOPS} hops [{relationTypeKey, direction: 'outgoing'|'incoming'}] from it ` +
+        "through relation types the lens shows, field a property visible on the entity type the " +
+        "path reaches. answerFields — {<resultType>: [property keys]}: for every result type, " +
+        `and no other type, 1 to ${MAX_ANSWER_FIELDS} properties visible on it that the answer model ` +
+        "receives. threshold (optional) — the cosine similarity a semantic match must reach, " +
+        `-1 to 1, default ${DEFAULT_THRESHOLD}. answerFieldCharacters (optional) — characters of one ` +
+        `answer field passed to the answer model, 100 to 2000, default ${DEFAULT_ANSWER_FIELD_CHARACTERS}. ` +
+        "Example: {indices: [{index: 'person~default'}], filters: [{id: 'city', entityType: " +
+        "'person', path: [{relationTypeKey: 'lives_in', direction: 'outgoing'}], field: 'name'}], " +
+        "answerFields: {person: ['name', 'email']}}. The configuration is checked against the " +
+        "lens; an invalid one is refused with every error at once and nothing is saved.",
+      inputSchema: {
+        lens_key: z.string(),
+        key: z.string(),
+        name: z.string(),
+        description: z.string().optional(),
+        config: z.record(z.string(), z.unknown()),
+      },
+    },
+    wrap("set_retriever", async (args: {
+      lens_key: string;
+      key: string;
+      name: string;
+      description?: string | undefined;
+      config: Record<string, unknown>;
+    }) => {
+      const [result, created] = await retrievers.saveRetriever(
+        args.lens_key,
+        args.key,
+        {
+          name: args.name,
+          description: args.description ?? null,
+          configVersion: RETRIEVER_CONFIG_VERSION,
+          config: args.config,
+        },
+        await getModelingStore(ontologyKey),
+        await getRuntimeStore(ontologyKey),
+      );
+      return jsonResult({ ...result, created });
+    }),
+  );
+
+  server.registerTool(
+    "delete_retriever",
+    {
+      description: "Delete a retriever from a lens.",
+      inputSchema: {
+        lens_key: z.string(),
+        retriever_key: z.string(),
+      },
+    },
+    wrap("delete_retriever", async (args: { lens_key: string; retriever_key: string }) => {
+      await retrievers.deleteRetriever(
+        args.lens_key,
+        args.retriever_key,
+        await getModelingStore(ontologyKey),
+      );
+      return textResult(`Retriever '${args.retriever_key}' deleted from lens '${args.lens_key}'.`);
     }),
   );
 
@@ -1142,7 +1301,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     {
       description:
         "Create or update a saved query pipeline for a lens. " +
-        "Key must match pattern ^[a-z][a-z0-9_-]*$ and be at most 64 characters. " +
+        `Key must match pattern ${LENS_RESOURCE_KEY_PATTERN.source} and be at most ${MAX_KEY_LENGTH} characters. ` +
         "Steps is an ordered array of pipeline steps. Each step requires a unique 'name' and a 'type'. " +
         "Step types: " +
         "'oql' — needs 'oql' field with a read-only OQL query (OQL-style " +

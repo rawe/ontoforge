@@ -9,11 +9,11 @@ Vocabulary: [../README.md](../README.md). The schema it looks at:
 ## What a lens is
 
 A lens belongs to exactly one ontology. It has a key, a name and an optional
-description. The key matches `^[a-z][a-z0-9_]*$` at up to 64 characters, is chosen
-at creation, is never updatable, and is what every interface uses to address the
-lens — always together with its ontology, because lens keys are unique only within
-their ontology: every ontology can have its own `default`. The name is unique
-within the ontology too, but purely for display.
+description. The key follows the schema [key](../README.md) rule at up to 64
+characters, is chosen at creation, is never updatable, and is what every interface uses
+to address the lens — always together with its ontology, because lens keys are unique
+only within their ontology: every ontology can have its own `default`. The name is
+unique within the ontology too, but purely for display.
 
 Any number of lenses may exist in an ontology, including any number that expose
 everything — and none at all: an ontology starts with no lens, and runtime access
@@ -24,9 +24,9 @@ data. It cannot define a type, override a property, or rename anything. Its enti
 content is a set of declarations about types that exist independently of it.
 
 Three things do belong to a lens, keyed within it, exported with it and deleted with
-it: **agent configurations** ([ai-agents.md](ai-agents.md)) and **saved queries**
-([saved-queries.md](saved-queries.md)) and **retriever agents**
-([retriever-agents.md](retriever-agents.md)). They are lens-local because they are
+it: **agent configurations** ([agents.md](agents.md)) and **saved queries**
+([saved-queries.md](saved-queries.md)) and **retrievers**
+([retrievers.md](retrievers.md)). They are lens-local because they are
 written in terms of what that lens exposes.
 
 Deleting a lens deletes those configurations and nothing else. Types, property definitions

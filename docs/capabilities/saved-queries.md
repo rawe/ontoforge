@@ -70,8 +70,8 @@ in bindings and no entity type key. A final search step returns the plain search
 
 ### Identity and ownership
 
-- Query keys match `^[a-z][a-z0-9_-]*$` at up to 64 characters — hyphens are allowed,
-  unlike the type and property keys described in [../README.md](../README.md).
+- Query keys follow the lens-resource [key](../README.md) rule — hyphens are allowed,
+  unlike in type and property keys — at up to 64 characters.
 - A key is unique within its lens. Two lenses may each hold a `people_by_skill`.
 - Writing a saved query is an upsert on that key: it creates or replaces wholesale.
 - Saved queries belong to a lens ([ontology-lenses.md](ontology-lenses.md)). Deleting the
@@ -194,4 +194,4 @@ answers it.
 A model reaching this capability over MCP or as an agent tool sees three tools that
 compose into one workflow: search or list to find a key and its parameters, then run it.
 An agent restricted to exactly those three can query a graph usefully while being unable
-to write a query at all — see [ai-agents.md](ai-agents.md).
+to write a query at all — see [agents.md](agents.md).

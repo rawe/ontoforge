@@ -72,7 +72,7 @@ import type {
   SearchSettings,
   SearchWritePlan,
 } from "../../core/ports.js";
-import type { RetrieverAgentRecord, RetrieverAgentWrite } from "../../core/retrieverAgent.js";
+import type { RetrieverRecord, RetrieverWrite } from "../../core/retriever.js";
 import type {
   SearchIndexDefinition,
   SearchIndexKind,
@@ -88,7 +88,7 @@ import { readTypesWithProperties } from "./schemaRead.js";
 
 const INDEX_COLS = "search_index_id, key, kind, definition, created_at, updated_at";
 
-const AGENT_COLS =
+const RETRIEVER_COLS =
   "retriever_agent_id, key, name, description, config_version, config, warnings, created_at, updated_at";
 
 const GENERATION_COLS =
@@ -189,9 +189,9 @@ function toIndex(row: Row): SearchIndexRecord {
   };
 }
 
-function toAgent(row: Row): RetrieverAgentRecord {
+function toRetriever(row: Row): RetrieverRecord {
   return {
-    retrieverAgentId: row["retriever_agent_id"] as string,
+    retrieverId: row["retriever_agent_id"] as string,
     key: row["key"] as string,
     name: row["name"] as string,
     description: (row["description"] as string | null) ?? null,
@@ -387,33 +387,33 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   }
 
   // ------------------------------------------------------------------
-  // Retriever agents
+  // Retrievers
   // ------------------------------------------------------------------
 
-  async listRetrieverAgents(lensId: string): Promise<RetrieverAgentRecord[]> {
+  async listRetrievers(lensId: string): Promise<RetrieverRecord[]> {
     if (!isUuid(lensId)) return [];
     const result = await this.query(
-      `SELECT ${AGENT_COLS} FROM retriever_agent WHERE lens_id = $1 ORDER BY name, key`,
+      `SELECT ${RETRIEVER_COLS} FROM retriever_agent WHERE lens_id = $1 ORDER BY name, key`,
       [lensId],
     );
-    return result.rows.map(toAgent);
+    return result.rows.map(toRetriever);
   }
 
-  async getRetrieverAgent(lensId: string, key: string): Promise<RetrieverAgentRecord | null> {
+  async getRetriever(lensId: string, key: string): Promise<RetrieverRecord | null> {
     if (!isUuid(lensId)) return null;
     const result = await this.query(
-      `SELECT ${AGENT_COLS} FROM retriever_agent WHERE lens_id = $1 AND key = $2`,
+      `SELECT ${RETRIEVER_COLS} FROM retriever_agent WHERE lens_id = $1 AND key = $2`,
       [lensId, key],
     );
     const row = result.rows[0];
-    return row ? toAgent(row) : null;
+    return row ? toRetriever(row) : null;
   }
 
-  async saveRetrieverAgent(
+  async saveRetriever(
     lensId: string,
-    agent: RetrieverAgentWrite,
+    agent: RetrieverWrite,
     createOnly: boolean,
-  ): Promise<[RetrieverAgentRecord, boolean]> {
+  ): Promise<[RetrieverRecord, boolean]> {
     return this.tx(async (querier) => {
       // The lens row lock serializes writes to one lens's agents.
       if (!isUuid(lensId) || (await querier.query(
@@ -431,21 +431,21 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
            (retriever_agent_id, lens_id, key, name, description, config_version, config, warnings)
          VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
          ${conflict}
-         RETURNING ${AGENT_COLS}, retriever_agent_id = $1 AS created`,
+         RETURNING ${RETRIEVER_COLS}, retriever_agent_id = $1 AS created`,
         [
-          agent.retrieverAgentId, lensId, agent.key, agent.name, agent.description,
+          agent.retrieverId, lensId, agent.key, agent.name, agent.description,
           agent.configVersion, JSON.stringify(agent.config), JSON.stringify(agent.warnings),
         ],
       );
       const row = result.rows[0];
       if (row === undefined) {
-        throw new ConflictError(`Retriever agent '${agent.key}' already exists in the target lens`);
+        throw new ConflictError(`Retriever '${agent.key}' already exists in the target lens`);
       }
-      return [toAgent(row), row["created"] === true];
+      return [toRetriever(row), row["created"] === true];
     });
   }
 
-  async deleteRetrieverAgent(lensId: string, key: string): Promise<boolean> {
+  async deleteRetriever(lensId: string, key: string): Promise<boolean> {
     if (!isUuid(lensId)) return false;
     const result = await this.query(
       `DELETE FROM retriever_agent WHERE lens_id = $1 AND key = $2`,
@@ -454,14 +454,14 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     return result.rowCount > 0;
   }
 
-  async transferRetrieverAgent(
+  async transferRetriever(
     sourceLensId: string,
     sourceKey: string,
     targetLensId: string,
     targetKey: string,
     copyId: string | null,
     expectedConfig: string,
-  ): Promise<RetrieverAgentRecord> {
+  ): Promise<RetrieverRecord> {
     return this.tx(async (querier) => {
       const ids = [...new Set([sourceLensId, targetLensId])];
       // Both owners locked in a fixed order, so two transfers never deadlock.
@@ -474,20 +474,20 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
       if (lenses.rows.length !== ids.length) throw new NotFoundError("Source or target lens not found");
       const source = (
         await querier.query(
-          `SELECT ${AGENT_COLS} FROM retriever_agent WHERE lens_id = $1 AND key = $2 FOR UPDATE`,
+          `SELECT ${RETRIEVER_COLS} FROM retriever_agent WHERE lens_id = $1 AND key = $2 FOR UPDATE`,
           [sourceLensId, sourceKey],
         )
       ).rows[0];
-      if (source === undefined) throw new NotFoundError(`Retriever agent '${sourceKey}' not found`);
+      if (source === undefined) throw new NotFoundError(`Retriever '${sourceKey}' not found`);
       if (JSON.stringify([source["config_version"], source["config"]]) !== expectedConfig) {
-        throw new ConflictError("Source retriever agent changed; reload before transfer");
+        throw new ConflictError("Source retriever changed; reload before transfer");
       }
       const taken = await querier.query(
         `SELECT key FROM retriever_agent WHERE lens_id = $1 AND key = $2`,
         [targetLensId, targetKey],
       );
       if (taken.rows.length > 0) {
-        throw new ConflictError(`Retriever agent '${targetKey}' already exists in the target lens`);
+        throw new ConflictError(`Retriever '${targetKey}' already exists in the target lens`);
       }
       const result = copyId !== null
         ? await querier.query(
@@ -495,15 +495,15 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
                (retriever_agent_id, lens_id, key, name, description, config_version, config, warnings)
              SELECT $1, $2, $3, name, description, config_version, config, warnings
                FROM retriever_agent WHERE lens_id = $4 AND key = $5
-             RETURNING ${AGENT_COLS}`,
+             RETURNING ${RETRIEVER_COLS}`,
             [copyId, targetLensId, targetKey, sourceLensId, sourceKey],
           )
         : await querier.query(
             `UPDATE retriever_agent SET lens_id = $1, key = $2, updated_at = now()
-             WHERE lens_id = $3 AND key = $4 RETURNING ${AGENT_COLS}`,
+             WHERE lens_id = $3 AND key = $4 RETURNING ${RETRIEVER_COLS}`,
             [targetLensId, targetKey, sourceLensId, sourceKey],
           );
-      return toAgent(result.rows[0]!);
+      return toRetriever(result.rows[0]!);
     });
   }
 

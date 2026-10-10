@@ -1,5 +1,5 @@
 {
-  "formatVersion": "6.0",
+  "formatVersion": "7.0",
   "keywordLanguages": [
     "english"
   ],
@@ -146,26 +146,29 @@
         "company~default",
         "person~default"
       ],
-      "aiAgents": [
-        {
-          "key": "assistant",
-          "name": "HR Assistant",
-          "description": "Answers HR questions",
-          "systemPrompt": "You are an HR assistant.",
-          "tools": [
-            "execute_query",
-            "get_entity",
-            "search"
-          ]
-        },
-        {
-          "key": "unrestricted",
-          "name": "Unrestricted",
-          "description": null,
-          "systemPrompt": null,
-          "tools": null
-        }
-      ],
+      "assistants": {
+        "agents": [
+          {
+            "key": "assistant",
+            "name": "HR Assistant",
+            "description": "Answers HR questions",
+            "systemPrompt": "You are an HR assistant.",
+            "tools": [
+              "execute_query",
+              "get_entity",
+              "search"
+            ]
+          },
+          {
+            "key": "unrestricted",
+            "name": "Unrestricted",
+            "description": null,
+            "systemPrompt": null,
+            "tools": null
+          }
+        ],
+        "retrievers": []
+      },
       "savedQueries": [
         {
           "key": "people-by-name",
@@ -224,17 +227,18 @@
             }
           ]
         }
-      ],
-      "retrieverAgents": []
+      ]
     },
     {
       "key": "test_lens",
       "name": "Test Lens",
       "description": "Person/Company lens for testing",
       "indexInclusions": [],
-      "aiAgents": [],
-      "savedQueries": [],
-      "retrieverAgents": []
+      "assistants": {
+        "agents": [],
+        "retrievers": []
+      },
+      "savedQueries": []
     }
   ]
 }

@@ -211,7 +211,7 @@ describe("reads", () => {
         // Semantic without a provider; keyword items failed for good.
         state: "failed",
         representations: [
-          { representation: "keyword", state: "failed", done: 0, total: 0, pending: 0, failed: 1 },
+          { representation: "keyword", state: "failed", build: null, pending: 0, failed: 1 },
           { representation: "semantic", state: "unavailable" },
         ],
         lastErrors: [{ entityId: "e-1", partKind: "relation", message: "boom", at: NOW.toISOString() }],

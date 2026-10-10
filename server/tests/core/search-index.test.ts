@@ -19,7 +19,7 @@ import {
   type SearchIndexSchema,
   validateSearchIndex,
 } from "../../src/core/searchIndex.js";
-import { KEY_PATTERN } from "../../src/core/schemas.js";
+import { SCHEMA_KEY_PATTERN } from "../../src/core/schemas.js";
 
 type Props = Record<string, { key: string; displayName: string; dataType: string }>;
 
@@ -530,7 +530,7 @@ describe("managed indices", () => {
     expect(managedIndexKey("person", "bio")).toBe("person~bio");
     expect(isManagedIndexKey("person~default")).toBe(true);
     expect(isManagedIndexKey("person_default")).toBe(false);
-    expect(KEY_PATTERN.test("person~default")).toBe(false);
+    expect(SCHEMA_KEY_PATTERN.test("person~default")).toBe(false);
   });
 });
 

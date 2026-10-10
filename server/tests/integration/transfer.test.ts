@@ -6,10 +6,11 @@
  * untouched on conflict, and the modeling MCP pair (`get_schema` ≡
  * export).
  *
- * `tests/fixtures/export.json` is a stored export payload (format 6.0)
- * over the same design this suite imports; the document is
- * identity-free — no ontology key or name — so it is portable into any
- * ontology. Two normalizations make the comparison meaningful:
+ * `tests/fixtures/export.json` is a stored export payload (format 7.0)
+ * over the same design this suite imports, `export-6.0.json` the same
+ * design in format 6.0; the document is identity-free — no ontology key
+ * or name — so it is portable into any ontology. Two normalizations make
+ * the comparison meaningful:
  *
  * - Property and inclusion arrays are sorted by key: the full-schema query
  *   collects them WITHOUT an ORDER BY, so their order is storage order —
@@ -35,9 +36,10 @@ import { keepsOwnSearchStorage, supportsMultipleOntologies } from "./tiers.js";
 
 type Row = Record<string, unknown>;
 
-const EXPORT_FIXTURE = JSON.parse(
-  readFileSync(new URL("../fixtures/export.json", import.meta.url), "utf8"),
-) as Row;
+const readFixture = (name: string): Row =>
+  JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8")) as Row;
+const EXPORT_FIXTURE = readFixture("export.json");
+const EXPORT_FIXTURE_6 = readFixture("export-6.0.json");
 
 /** Order-normalize a payload and drop `includes: null` (the fixture's
  * spelling of "absent" — this export omits the key). Index inclusions
@@ -55,10 +57,10 @@ function normalize(payload: Row): Row {
   }
   for (const lens of (clone.lenses as Row[]) ?? []) {
     // An adapter without search indices exports neither inclusions nor
-    // retriever agents.
+    // retrievers.
     if (keepsOwnSearchStorage) {
       delete lens.indexInclusions;
-      delete lens.retrieverAgents;
+      delete (lens.assistants as Row).retrievers;
     } else {
       (lens.indexInclusions as string[] | undefined)?.sort();
     }
@@ -140,7 +142,7 @@ describe("round-trip against a stored export document", () => {
 
     const agents = await app.inject({
       method: "GET",
-      url: "/api/ontologies/test_ont/model/lenses/hr_view/ai-agents",
+      url: "/api/ontologies/test_ont/model/lenses/hr_view/assistants/agents",
     });
     expect(agents.statusCode).toBe(200);
     const agentRows = agents.json() as Row[];
@@ -168,6 +170,37 @@ describe("round-trip against a stored export document", () => {
       "relationTypes",
       ...(keepsOwnSearchStorage ? [] : ["searchIndices"]),
     ]);
+  });
+});
+
+describe("older format versions", () => {
+  it("a stored 6.0 payload imports as the same design", async () => {
+    const res = await importInto("test_ont", EXPORT_FIXTURE_6);
+    expect(res.statusCode, res.body).toBe(201);
+    expect(normalize(await exportFrom("test_ont"))).toEqual(normalize(EXPORT_FIXTURE));
+  });
+
+  it("a 5.0 payload imports with its language as the set, derived name properties and the managed index inclusions", async () => {
+    const legacy = JSON.parse(JSON.stringify(EXPORT_FIXTURE_6)) as Row;
+    legacy.formatVersion = "5.0";
+    legacy.textSearchLanguage = "german";
+    delete legacy.keywordLanguages;
+    delete legacy.searchIndices;
+    for (const et of legacy.entityTypes as Row[]) delete et.nameProperty;
+    for (const lens of legacy.lenses as Row[]) {
+      delete lens.indexInclusions;
+      lens.retrievers = lens.retrieverAgents;
+      delete lens.retrieverAgents;
+    }
+    const res = await importInto("test_ont", legacy);
+    expect(res.statusCode, res.body).toBe(201);
+
+    const expected = normalize(EXPORT_FIXTURE);
+    expected.keywordLanguages = ["german"];
+    // hr_view does not show person's document property: no passage index.
+    const hrView = (expected.lenses as Row[]).find((lens) => lens.key === "hr_view")!;
+    if (!keepsOwnSearchStorage) hrView.indexInclusions = ["company~default", "person~default"];
+    expect(normalize(await exportFrom("test_ont"))).toEqual(expected);
   });
 });
 
@@ -325,10 +358,10 @@ describe("modeling MCP transfer pair", () => {
     }
   });
 
-  it("import_schema imports a payload and reports conflicts as tool errors", async () => {
+  it("import_schema imports a payload of any importable version and reports conflicts as tool errors", async () => {
     const client = await connect();
     try {
-      const result = await callJson(client, "import_schema", { payload: EXPORT_FIXTURE });
+      const result = await callJson(client, "import_schema", { payload: EXPORT_FIXTURE_6 });
       expect((result.lenses as Row[]).map((o) => o.key)).toEqual([
         "hr_view",
         "test_lens",

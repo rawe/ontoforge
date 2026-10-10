@@ -11,7 +11,7 @@ const TABS = ['chat', 'retriever'] as const
 type TabKey = (typeof TABS)[number]
 
 /**
- * `/o/:ontologyKey/w/:lensKey/ai` — AI assistant with tabs Chat | Retriever.
+ * `/o/:ontologyKey/w/:lensKey/ai` — Assistants, with tabs Agents (`chat`) | Retrievers (`retriever`).
  * The active tab lives in `?tab=` so the retriever can be deep-linked (it
  * also takes `&agent=<key>`); an unknown tab falls back to chat. Leaving chat
  * or the retriever cancels its turn.
@@ -31,12 +31,12 @@ export function AiPage() {
     return (
       <div>
         <header className="border-b px-6 py-4">
-          <h1 className="text-[15px] font-semibold tracking-tight">AI</h1>
+          <h1 className="text-[15px] font-semibold tracking-tight">Assistants</h1>
         </header>
         <EmptyState
           icon={Sparkles}
           title="AI is not enabled"
-          description="This server has no AI provider configured. Set one up on the backend to unlock chat and retriever agents."
+          description="This server has no AI provider configured. Set one up on the backend to use assistants."
         />
       </div>
     )
@@ -57,16 +57,16 @@ export function AiPage() {
       <header className="flex items-center gap-4 border-b px-6 py-3">
         <h1 className="flex items-center gap-2 text-[15px] font-semibold tracking-tight">
           <Sparkles className="size-4 text-muted-foreground" />
-          AI
+          Assistants
         </h1>
         <TabsList className="h-8">
           <TabsTrigger value="chat" className="gap-1.5 px-2.5 text-[13px]">
             <MessagesSquare className="size-3.5" />
-            Chat
+            Agents
           </TabsTrigger>
           <TabsTrigger value="retriever" className="gap-1.5 px-2.5 text-[13px]">
             <Sparkles className="size-3.5" />
-            Retriever
+            Retrievers
           </TabsTrigger>
         </TabsList>
       </header>

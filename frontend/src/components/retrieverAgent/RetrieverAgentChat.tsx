@@ -157,7 +157,7 @@ export function RetrieverAgentChat({ ontologyKey, lensKey, agentKey, blockedReas
               : turns.length > 0 && <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1" onClick={reset}><RotateCcw className="size-3" />New conversation</Button>}
           </div>
           <form className="flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); void send() }}>
-            <Textarea aria-label="Question for the retriever agent" placeholder="What would you like to find?" value={input} disabled={busy || agentKey === null || restoring} onChange={(e) => setInput(e.target.value)} rows={2} maxLength={2000}
+            <Textarea aria-label="Question for the retriever" placeholder="What would you like to find?" value={input} disabled={busy || agentKey === null || restoring} onChange={(e) => setInput(e.target.value)} rows={2} maxLength={2000}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send() } }} />
             <Button type="submit" aria-label="Send question" disabled={busy || !canAsk || !input.trim()}><SendHorizonal className="size-4" /></Button>
           </form>

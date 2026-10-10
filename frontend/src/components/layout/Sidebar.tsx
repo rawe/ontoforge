@@ -273,7 +273,7 @@ export function Sidebar({
         <NavItem to={`${base}/explore`} label="Explore" icon={Waypoints} collapsed={collapsed} />
         <NavItem to={`${base}/query`} label="Query" icon={SquareTerminal} collapsed={collapsed} />
         {features?.ai !== false && (
-          <NavItem to={`${base}/ai`} label="AI" icon={Sparkles} collapsed={collapsed} />
+          <NavItem to={`${base}/ai`} label="Assistants" icon={Sparkles} collapsed={collapsed} />
         )}
       </nav>
 

@@ -639,7 +639,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
           <AlertDialogHeader>
             <AlertDialogTitle>Delete "{saved?.definition.name ?? ''}"?</AlertDialogTitle>
             <AlertDialogDescription>
-              The index and its entries are removed; search and retriever agents can no
+              The index and its entries are removed; search and retrievers can no
               longer use it. Lenses that include it are listed before anything changes.
             </AlertDialogDescription>
           </AlertDialogHeader>

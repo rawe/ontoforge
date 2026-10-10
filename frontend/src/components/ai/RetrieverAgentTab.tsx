@@ -38,11 +38,11 @@ export function RetrieverAgentTab({ ontologyKey, lensKey }: { ontologyKey: strin
   }, [resolvedKey, requested, setSearchParams])
 
   if (features?.searchIndices === false) {
-    return <div className="p-6 text-sm text-muted-foreground">Retriever agents answer over search indices, which this server's storage adapter does not support.</div>
+    return <div className="p-6 text-sm text-muted-foreground">Retrievers answer over search indices, which this server's storage adapter does not support.</div>
   }
   if (agents.isPending) return <div className="space-y-3 p-6"><Skeleton className="h-8 w-64" /><Skeleton className="h-48 w-full" /></div>
   if (agents.error || !agents.data) {
-    return <div className="p-6 text-sm"><p role="alert">Could not load retriever agents: {errorText(agents.error)}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void agents.refetch()}>Reload</Button></div>
+    return <div className="p-6 text-sm"><p role="alert">Could not load retrievers: {errorText(agents.error)}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void agents.refetch()}>Reload</Button></div>
   }
 
   const list = agents.data
@@ -59,8 +59,8 @@ export function RetrieverAgentTab({ ontologyKey, lensKey }: { ontologyKey: strin
 
   return <div className="flex min-h-0 flex-1 flex-col">
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-2">
-      <label className="flex items-center gap-2 text-sm"><span className="font-medium">Retriever agent</span>
-        <select aria-label="Retriever agent" className={`${selectClass} max-w-64`} value={resolvedKey ?? DEFAULT_RETRIEVER} onChange={(e) => choose(e.target.value)}>
+      <label className="flex items-center gap-2 text-sm"><span className="font-medium">Retriever</span>
+        <select aria-label="Retriever" className={`${selectClass} max-w-64`} value={resolvedKey ?? DEFAULT_RETRIEVER} onChange={(e) => choose(e.target.value)}>
           {list.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}
         </select>
       </label>
@@ -72,8 +72,8 @@ export function RetrieverAgentTab({ ontologyKey, lensKey }: { ontologyKey: strin
       agentKey={agent?.key ?? null} blockedReason={null} diagnostics={diagnostics} remember
       config={null} catalog={catalog.data} schema={schema.data}
       intro={<div className="mx-auto max-w-lg py-12 text-sm text-muted-foreground">{isDefault
-        ? <><h3 className="mb-2 text-base font-medium text-foreground">Ask the default retriever agent</h3><p>It searches every switched-on managed index of this lens and may filter by the names of entities and of their direct neighbours. Ask about a topic, an exact name, or both.</p>
-          <p className="mt-2">{stored.length === 0 ? 'For a tailored agent, create one in the Studio.' : 'The lens\'s own retriever agents are in the picker above.'}</p>
+        ? <><h3 className="mb-2 text-base font-medium text-foreground">Ask the default retriever</h3><p>It searches every switched-on managed index of this lens and may filter by the names of entities and of their direct neighbours. Ask about a topic, an exact name, or both.</p>
+          <p className="mt-2">{stored.length === 0 ? 'For a tailored retriever, create one in the Studio.' : 'The lens\'s own retrievers are in the picker above.'}</p>
           {stored.length === 0 && <Button size="sm" variant="outline" className="mt-4 gap-1" asChild><Link to={studioTab}><ExternalLink className="size-3.5" />Create in Studio</Link></Button>}</>
         : <><h3 className="mb-2 text-base font-medium text-foreground">Ask {agent.name}</h3>{agent.description && <p className="mb-3">{agent.description}</p>}<p>Ask about a topic, an exact value, or both. Follow-up questions refer to completed answers in this conversation.</p></>}</div>} />
   </div>

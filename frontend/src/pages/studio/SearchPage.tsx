@@ -73,7 +73,7 @@ function SearchPageContent({ ontologyKey }: { ontologyKey: string }) {
     <div>
       <PageHeader
         title="Search"
-        description="Search indices decide what search finds and how. Managed indices follow the schema; custom indices add fields and relations for agents and retriever agents."
+        description="Search indices decide what search finds and how. Managed indices follow the schema; custom indices add fields and relations for agents and retrievers."
         actions={
           <Button size="sm" asChild>
             <Link to={`/o/${ontologyKey}/studio/search/new`}>

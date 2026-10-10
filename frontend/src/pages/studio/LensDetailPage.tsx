@@ -131,7 +131,7 @@ export function LensDetailPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete "{lens.name}"?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This deletes the lens, its scope, agents, retriever agents and saved queries.
+                    This deletes the lens, its scope, agents, retrievers and saved queries.
                     The ontology's schema and instance data are not affected. This
                     cannot be undone.
                   </AlertDialogDescription>
@@ -176,7 +176,7 @@ export function LensDetailPage() {
             </TabsTrigger>
             {retrieverAgents && (
               <TabsTrigger value="retriever-agents">
-                <BotMessageSquare className="size-3.5" /> Retriever agents
+                <BotMessageSquare className="size-3.5" /> Retrievers
               </TabsTrigger>
             )}
             <TabsTrigger value="queries">

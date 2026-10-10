@@ -55,7 +55,7 @@ test('the shape guard keeps unavailable references but rejects malformed shapes 
 
 test('only a saved, unchanged, valid version 2 agent runs — by its key', () => {
   assert.deepEqual(agentExecution(agent(), false), { mode: 'saved', key: 'people' })
-  assert.match((agentExecution(null, false) as { reason: string }).reason, /Save this retriever agent to test it/)
+  assert.match((agentExecution(null, false) as { reason: string }).reason, /Save this retriever to test it/)
   assert.match((agentExecution(agent(), true) as { reason: string }).reason, /Save them to test/)
   assert.equal(agentExecution(agent({ validation: { valid: false, errors: ['x'], warnings: [] } }), false).mode, 'blocked')
   assert.equal(agentExecution(agent({ configVersion: 1 }), false).mode, 'blocked')

@@ -268,10 +268,10 @@ function PaletteContent({
       ? [
           {
             id: 'ai',
-            label: 'Go to AI',
+            label: 'Go to Assistants',
             icon: Sparkles,
             run: () => go(`${base}/ai`),
-            keywords: 'assistant chat',
+            keywords: 'ai assistant agent retriever chat',
           } satisfies PaletteAction,
         ]
       : []),

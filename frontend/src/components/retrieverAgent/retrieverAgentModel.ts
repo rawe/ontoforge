@@ -87,10 +87,10 @@ export function toInput(draft: AgentDraft) {
  */
 export function agentExecution(agent: Pick<RetrieverAgent, 'key' | 'configVersion' | 'config' | 'validation'> | null, dirty: boolean):
   { mode: 'saved'; key: string } | { mode: 'blocked'; reason: string } {
-  if (agent === null) return { mode: 'blocked', reason: 'Save this retriever agent to test it.' }
+  if (agent === null) return { mode: 'blocked', reason: 'Save this retriever to test it.' }
   if (!isSupportedAgent(agent)) return { mode: 'blocked', reason: 'Unsupported saved configuration. Export it, or delete it.' }
   if (dirty) return { mode: 'blocked', reason: 'Unsaved changes. Save them to test; questions use the saved configuration.' }
-  if (!agent.validation.valid) return { mode: 'blocked', reason: 'This retriever agent is invalid in the current lens. Repair and save it before asking.' }
+  if (!agent.validation.valid) return { mode: 'blocked', reason: 'This retriever is invalid in the current lens. Repair and save it before asking.' }
   return { mode: 'saved', key: agent.key }
 }
 
@@ -271,7 +271,7 @@ export const asIssues = (messages: readonly string[]): ValidationError[] => mess
 /** One portable export body, checked before it is offered for import. */
 export function importProblem(body: unknown, existingKeys: readonly string[]): string | null {
   if (!record(body) || body.configVersion !== CONFIG_VERSION || typeof body.key !== 'string' || typeof body.name !== 'string' || !editableConfig(body.config)) {
-    return 'Expected a version 2 retriever agent export with key, name and config.'
+    return 'Expected a version 2 retriever export with key, name and config.'
   }
   if (existingKeys.includes(body.key)) return `Key ${body.key} already exists in this lens. Change the key in the JSON first.`
   return null

@@ -89,7 +89,7 @@ boundary — not even between same-keyed lenses of two ontologies.
 A collapsible sidebar (collapse state persists) carrying: the ontology switcher, the
 lens switcher beneath it, a search
 trigger, a create-entity trigger, fixed entries for Home, Explore, Query and — when
-available — AI, then a data section listing every entity type the lens exposes, each with
+available — Assistants, then a data section listing every entity type the lens exposes, each with
 its type colour. Below: a theme control cycling system → light → dark, and the Studio
 link. Every screen renders through the lens's schema; there is no hand-written per-type
 interface anywhere, so adding an entity type immediately produces a table, a form, a
@@ -218,9 +218,9 @@ The graph canvas. See [Working set](#working-set) for its model.
 Two tabs — Console and Library — which both stay live, so results survive a switch. See
 [Query console](#query-console) and [Saved-query library](#saved-query-library).
 
-### AI
+### Assistants
 
-Two tabs — Chat and Retriever. See [AI panel](#ai-panel). Without a language-model
+Two tabs — Agents and Retrievers. See [Assistants panel](#assistants-panel). Without a language-model
 provider the navigation entry is gone and the screen renders an explanation; see
 [Feature gating](#feature-gating).
 
@@ -286,8 +286,8 @@ unscoped and therefore exposes everything.
 
 Inline-editable name and description, an immutable key, a scope marker, an entry into the
 Workbench for this lens, and deletion behind a confirmation stating that the lens, its
-scope, its agents, retriever agents and saved queries go — while the schema and all
-instance data stay. Five tabs — Retriever agents only on a server with search indices:
+scope, its agents, retrievers and saved queries go — while the schema and all
+instance data stay. Five tabs — Retrievers only on a server with search indices:
 
 **Scope** — the [scope editor](#scope-editor).
 
@@ -296,10 +296,10 @@ key, description, system prompt, and either all tools or an explicit checklist o
 read-only runtime tools (at least one required). The list shows each agent's tool posture
 at a glance. See [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
-**Retriever agents** — the authoring surface for the lens's
+**Retrievers** — the authoring surface for the lens's
 [retriever agents](capabilities/retriever-agents.md), with a test panel beside the
 editor; see [Retriever-agent editor](#retriever-agent-editor). Chatting with a saved agent
-happens in the Workbench ([AI panel](#ai-panel)).
+happens in the Workbench ([Assistants panel](#assistants-panel)).
 
 **Saved queries** — the authoring surface for the lens's stored pipelines, and the only
 place multi-step pipelines can be built. Per query: name, derived-and-then-immutable key,
@@ -631,12 +631,12 @@ required before the run is allowed), a run action, results in the shared results
 and a "copy as cURL" action that reproduces the exact call. A query opened by deep link
 expands automatically, and runs immediately when it has no parameters.
 
-### AI panel
+### Assistants panel
 
-Two modes over one lens: Chat and Retriever. Both require a language-model
+Two tabs over one lens, one per assistant kind: Agents and Retrievers. Both require a language-model
 provider; see [capabilities/ai-agents.md](capabilities/ai-agents.md).
 
-**Chat** — a conversation with one of the lens's agents, chosen from a picker that lists
+**Agents** — a conversation with one of the lens's agents, chosen from a picker that lists
 them as the server does: `Default`, the built-in agent, first. Each conversation is a
 server-held [thread](capabilities/threads.md); the browser remembers only the current
 thread per ontology, lens and agent, and opening the chat restores its messages from the
@@ -669,7 +669,7 @@ another thread. Clearing the chat is confirmed, cancels active work and starts a
 conversation; the browser forgets the old thread, which the server removes when it
 expires. Storage failure does not break live chat.
 
-**Retriever** — chat with the lens's
+**Retrievers** — chat with the lens's
 [retriever agents](capabilities/retriever-agents.md). A header picker selects the agent:
 `Default` — the lens's
 [default retriever agent](capabilities/retriever-agents.md#the-default-retriever-agent) —
@@ -683,20 +683,20 @@ create one. A
 "Show diagnostics" switch, off by default and remembered, requests diagnostics with every
 answer and shows them beside the conversation. The conversation itself is the
 [retriever-agent chat](#retriever-agent-chat); here it is remembered and restored like
-the Chat mode's — per ontology, lens and agent, from the server, with the same expiry
+the Agents tab's — per ontology, lens and agent, from the server, with the same expiry
 and busy handling. On a server without search indices the tab explains that retriever
 agents are not available.
 
 ### Retriever-agent editor
 
-The Studio lens detail's Retriever agents tab, absent on a server without search indices.
+The Studio lens detail's Retrievers tab, absent on a server without search indices.
 Its configuration semantics are owned by
 [capabilities/retriever-agents.md](capabilities/retriever-agents.md).
 
 **List.** A card per agent: name, key, a badge for valid, invalid or unsupported, the
 number of warnings, the description, and which indices it searches with its filter count.
 A card opens the agent's editor; the address names the open agent, so it can be linked.
-"New retriever agent" asks for a name and a derived-but-editable key — permanent and
+"New retriever" asks for a name and a derived-but-editable key — permanent and
 unique in the lens — and opens the editor on a draft that exists only in the client until
 its first save. "Import" creates a new agent from an exported JSON, from a file or pasted;
 it never replaces an agent with the same key.
@@ -748,7 +748,7 @@ agent cannot answer.
 
 One conversation with one retriever agent on a server-held
 [thread](capabilities/threads.md), shared by the editor's test panel and the Workbench's
-Retriever tab. A status line names the running step; a running question can be
+Retrievers tab. A status line names the running step; a running question can be
 cancelled, and "New conversation" starts a new thread. Answers render as Markdown.
 Questions are at most 2,000 characters. Follow-up questions refer to earlier completed
 answers of the thread; a failed or cancelled turn leaves nothing in it. Another agent has
@@ -862,17 +862,17 @@ treats the answer as never going stale. None is inferred from a failed call — 
 never probes.
 
 Gated areas explain themselves rather than vanishing, except in navigation, where a dead
-entry would be worse than an absent one. Navigation is gated optimistically: the AI entry,
-the Studio's Search entry and the lens detail's Retriever agents tab are shown unless the
+entry would be worse than an absent one. Navigation is gated optimistically: the Assistants entry,
+the Studio's Search entry and the lens detail's Retrievers tab are shown unless the
 report has explicitly said their capability is off, so they do not flicker into existence
 while the report is loading.
 
 | Off | What changes |
 |---|---|
-| AI | The AI navigation entry, the AI palette action, the palette's question mode and the AI quick action are gone. The AI screen itself renders an explanation. |
+| AI | The Assistants navigation entry, the Assistants palette action, the palette's question mode and the Ask AI quick action are gone. The Assistants screen itself renders an explanation. |
 | No search strategies | Entity search falls back to substring matching — per type in parallel when unscoped. |
 | Semantic search | Saved-query search falls back to client-side substring filtering over the full list. With search indices the search-data rebuild is disabled and explains that there is nothing to rebuild; without them it stays available and explains that it will skip the embeddings. |
-| Search indices | The Studio's Search entry, the lens detail's Retriever agents tab and the palette's question mode are gone; their addresses render an explanation, and so does the Workbench's Retriever tab. The entity type editor's Search indices section and the scope editor's Search indices section are absent. Search hits name no entry, so results show document badges instead of [matched-via](#matched-via) lines. |
+| Search indices | The Studio's Search entry, the lens detail's Retrievers tab and the palette's question mode are gone; their addresses render an explanation, and so does the Workbench's Retrievers tab. The entity type editor's Search indices section and the scope editor's Search indices section are absent. Search hits name no entry, so results show document badges instead of [matched-via](#matched-via) lines. |
 
 Everything else works unchanged. See [capabilities/search.md](capabilities/search.md).
 
@@ -967,7 +967,7 @@ the address.
 | Explorer working set | Per ontology + lens | Bounded by the hard node cap |
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
-| Current conversation thread id (Workbench Chat and Retriever) | Per ontology + lens + agent | One |
+| Current conversation thread id (Workbench Agents and Retrievers tabs) | Per ontology + lens + agent | One |
 | Chat tool-call panel switch | Global | — |
 | Retriever diagnostics switch (Workbench) | Global | — |
 | Retriever-agent test panel mode (Chat or Retrieve) | Global | — |
@@ -1009,9 +1009,9 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/w/{lensKey}/query?query={text}` | The console with the query prefilled |
 | `/o/{ontologyKey}/w/{lensKey}/query?tab=library` | The saved-query library |
 | `/o/{ontologyKey}/w/{lensKey}/query?run={queryKey}` | The library with that query expanded, run at once when it has no parameters |
-| `/o/{ontologyKey}/w/{lensKey}/ai` | The AI panel, Chat; an unknown `tab` shows Chat as well |
-| `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever` | The Retriever mode |
-| `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever&agent={agentKey}` | The Retriever tab with that retriever agent — `_default` for the default one; the default agent when the lens has no such agent |
+| `/o/{ontologyKey}/w/{lensKey}/ai` | The Assistants panel, Agents tab; an unknown `tab` shows Agents as well |
+| `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever` | The Retrievers tab |
+| `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever&agent={agentKey}` | The Retrievers tab with that retriever agent — `_default` for the default one; the default agent when the lens has no such agent |
 | `/o/{ontologyKey}/studio` | The ontology's schema overview |
 | `/o/{ontologyKey}/studio/entity-types/{id}` · `.../relation-types/{id}` | A type editor |
 | `/o/{ontologyKey}/studio/lenses` | The lens list |

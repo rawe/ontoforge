@@ -208,7 +208,7 @@ const retrieverReader: KindReader<RetrieverKindEvent> = {
       case 'retriever.diagnostics': if (validDiagnostics(event)) return event as RetrieverKindEvent; break
       default: if (typeof event.type === 'string' && event.type.includes('.')) return null
     }
-    throw new Error('Invalid event in the retriever agent stream.')
+    throw new Error('Invalid event in the retriever stream.')
   },
 }
 

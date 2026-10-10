@@ -59,14 +59,14 @@ export function RetrieverAgentsTab({ ontologyKey, lens }: { ontologyKey: string;
     .map((queryKey) => queryClient.invalidateQueries({ queryKey })))
 
   if (features?.searchIndices === false) {
-    return <EmptyState icon={SearchX} title="Retriever agents are not available" description="Retriever agents answer over search indices, which this server's storage adapter does not support." />
+    return <EmptyState icon={SearchX} title="Retrievers are not available" description="Retrievers answer over search indices, which this server's storage adapter does not support." />
   }
   if (agents.isPending || catalog.isPending || schema.isPending) {
     return <div className="space-y-3"><Skeleton className="h-8 w-64" /><Skeleton className="h-40 rounded-xl" /></div>
   }
   const loadError = agents.error ?? catalog.error ?? schema.error
   if (loadError || !agents.data || !catalog.data || !schema.data) {
-    return <div className="text-sm"><p role="alert" className="text-destructive">Could not load retriever agents: {errorText(loadError)}</p>
+    return <div className="text-sm"><p role="alert" className="text-destructive">Could not load retrievers: {errorText(loadError)}</p>
       <Button variant="outline" size="sm" className="mt-3" onClick={() => { void agents.refetch(); void catalog.refetch(); void schema.refetch() }}>Reload</Button></div>
   }
 
@@ -78,8 +78,8 @@ export function RetrieverAgentsTab({ ontologyKey, lens }: { ontologyKey: string;
   if (selectedKey !== null) {
     const agent = agents.data.find((a) => a.key === selectedKey)
     if (agent === undefined) {
-      return <EmptyState icon={BotMessageSquare} title="Retriever agent not found" description={`This lens has no retriever agent ${selectedKey}. It may have been deleted or moved.`}
-        action={<Button variant="outline" onClick={() => select(null)}>All retriever agents</Button>} />
+      return <EmptyState icon={BotMessageSquare} title="Retriever not found" description={`This lens has no retriever ${selectedKey}. It may have been deleted or moved.`}
+        action={<Button variant="outline" onClick={() => select(null)}>All retrievers</Button>} />
     }
     return <AgentEditor key={`${agent.key}:${agent.updatedAt}`} {...common} agent={agent} identity={null}
       onSaved={(saved) => { queryClient.setQueryData<RetrieverAgent[]>(qk.retrieverAgents(ontologyKey, lens.key), (list) => list?.map((a) => (a.key === saved.key ? saved : a))); void refresh() }}
@@ -89,18 +89,18 @@ export function RetrieverAgentsTab({ ontologyKey, lens }: { ontologyKey: string;
 
   return <div className="space-y-4">
     <div className="flex flex-wrap items-start gap-3">
-      <p className="max-w-2xl flex-1 text-[13px] text-muted-foreground">Retriever agents answer questions over this lens's search indices: a planner picks indices, relation groups and filters per question, an answer model writes the reply from the found entities. Chat with them in the Workbench (AI → Retriever).</p>
+      <p className="max-w-2xl flex-1 text-[13px] text-muted-foreground">Retrievers answer questions over this lens's search indices: a planner picks indices, relation groups and filters per question, an answer model writes the reply from the found entities. Chat with them in the Workbench (Assistants → Retrievers).</p>
       <div className="flex gap-2">
         <Button size="sm" variant="outline" onClick={() => setDialog('import')}><FileUp className="size-3.5" /> Import</Button>
-        <Button size="sm" onClick={() => setDialog('new')}><Plus className="size-3.5" /> New retriever agent</Button>
+        <Button size="sm" onClick={() => setDialog('new')}><Plus className="size-3.5" /> New retriever</Button>
       </div>
     </div>
-    {agents.data.length === 0 ? <EmptyState icon={BotMessageSquare} title="No retriever agents yet" description="Create one, choose the indices it searches, save it and test it here." />
+    {agents.data.length === 0 ? <EmptyState icon={BotMessageSquare} title="No retrievers yet" description="Create one, choose the indices it searches, save it and test it here." />
       : <div className="grid gap-3 lg:grid-cols-2">{agents.data.map((agent) => <AgentCard key={agent.key} agent={agent} catalog={catalog.data} onOpen={() => select(agent.key)} />)}</div>}
-    {dialog === 'new' && <NameKeyDialog open title="New retriever agent" description="Name and key; then choose its indices and save it." confirmLabel="Continue"
+    {dialog === 'new' && <NameKeyDialog open title="New retriever" description="Name and key; then choose its indices and save it." confirmLabel="Continue"
       initialName="" existingKeys={existingKeys} busy={false} error="" onCancel={() => setDialog(null)} onConfirm={(name, key) => { setDialog(null); setCreating({ name, key }) }} />}
     <ImportDialog open={dialog === 'import'} ontologyKey={ontologyKey} lensKey={lens.key} existingKeys={existingKeys} onClose={() => setDialog(null)}
-      onImported={(agent) => { setDialog(null); toast.success(`Retriever agent "${agent.name}" imported`); void refresh().then(() => select(agent.key)) }} />
+      onImported={(agent) => { setDialog(null); toast.success(`Retriever "${agent.name}" imported`); void refresh().then(() => select(agent.key)) }} />
   </div>
 }
 
@@ -180,11 +180,11 @@ function AgentEditor({ ontologyKey, lensKey, existingKeys, catalog, schema, aiEn
     try {
       if (isNew) {
         const created = await importRetrieverAgent(ontologyKey, lensKey, { key, ...toInput(draft) })
-        toast.success(`Retriever agent "${created.name}" created`)
+        toast.success(`Retriever "${created.name}" created`)
         leave(() => onSaved(created))
       } else {
         const saved = await saveRetrieverAgent(ontologyKey, lensKey, key, toInput(draft))
-        toast.success('Retriever agent saved')
+        toast.success('Retriever saved')
         onSaved(saved)
       }
     } catch (error) {
@@ -205,7 +205,7 @@ function AgentEditor({ ontologyKey, lensKey, existingKeys, catalog, schema, aiEn
   const title = draft.name.trim() || agent?.name || key
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center gap-2">
-      <Button variant="ghost" size="sm" className="-ml-2 h-7 gap-1 text-xs text-muted-foreground" onClick={close}><ChevronLeft className="size-3.5" /> All retriever agents</Button>
+      <Button variant="ghost" size="sm" className="-ml-2 h-7 gap-1 text-xs text-muted-foreground" onClick={close}><ChevronLeft className="size-3.5" /> All retrievers</Button>
       <h2 className="text-[14px] font-semibold">{title}</h2>
       <Badge variant="outline" className="font-mono text-[11px]" title="Immutable key">{key}</Badge>
       <span className={`text-xs ${isNew || dirty ? 'text-(--tc-amber)' : agent && !agent.validation.valid ? 'text-destructive' : 'text-muted-foreground'}`}>
@@ -241,18 +241,18 @@ function AgentEditor({ ontologyKey, lensKey, existingKeys, catalog, schema, aiEn
           <p className="mt-0.5 text-xs text-muted-foreground">{testMode === 'chat'
             ? 'Ask the saved version and inspect how each answer was found. Saving starts a new conversation.'
             : 'Ask the saved version for the entities it finds, without an answer. Saving clears the result.'}</p></div>
-        {!aiEnabled ? <p className="p-4 text-xs text-muted-foreground">This server has no AI provider configured; retriever agents cannot answer here.</p>
+        {!aiEnabled ? <p className="p-4 text-xs text-muted-foreground">This server has no AI provider configured; retrievers cannot answer here.</p>
           : testMode === 'retrieve' ? <RetrieverAgentRetrieve key={agent ? `${agent.key}:${agent.updatedAt}` : 'new'} ontologyKey={ontologyKey} lensKey={lensKey}
             agentKey={agent?.key ?? null} blockedReason={execution.mode === 'blocked' ? execution.reason : null}
             catalog={catalog} schema={schema} />
           : <RetrieverAgentChat key={agent ? `${agent.key}:${agent.updatedAt}` : 'new'} ontologyKey={ontologyKey} lensKey={lensKey}
             agentKey={agent?.key ?? null} blockedReason={execution.mode === 'blocked' ? execution.reason : null} diagnostics
             config={agent && isSupportedAgent(agent) ? agent.config : null} catalog={catalog} schema={schema}
-            intro={<div className="mx-auto max-w-md py-8 text-sm text-muted-foreground">{agent === null ? 'Save this retriever agent to test it.' : <><h4 className="mb-2 text-base font-medium text-foreground">Ask {agent.name}</h4><p>Ask about a topic, an exact value, or both. Follow-up questions refer to completed answers in this conversation.</p></>}</div>} />}
+            intro={<div className="mx-auto max-w-md py-8 text-sm text-muted-foreground">{agent === null ? 'Save this retriever to test it.' : <><h4 className="mb-2 text-base font-medium text-foreground">Ask {agent.name}</h4><p>Ask about a topic, an exact value, or both. Follow-up questions refer to completed answers in this conversation.</p></>}</div>} />}
       </section>
     </div>
 
-    {copyOpen && agent && <NameKeyDialog open title={`Save ${agent.name} as copy`} description="Saves the current configuration, unsaved changes included, as a new retriever agent. The original stays as last saved."
+    {copyOpen && agent && <NameKeyDialog open title={`Save ${agent.name} as copy`} description="Saves the current configuration, unsaved changes included, as a new retriever. The original stays as last saved."
       confirmLabel="Save copy" initialName={`${draft.name.trim() || agent.name} copy`} existingKeys={existingKeys} busy={busy} error={copyError}
       onCancel={() => setCopyOpen(false)} onConfirm={(name, copyKey) => void saveAsCopy(name, copyKey)} />}
     <AlertDialog open={blocker.state === 'blocked' || confirmClose}>

@@ -691,8 +691,8 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
             : "Find entities for a text across properties and documents; to find them through what they are related to, or through chosen search indices, use search_by_index. ") +
           "Omit entity_type_key to search all exposed types. " +
           filterRules({ contains: false, relations: true }) +
-          " Filters apply before ranking and, across types, keep only the types every key applies to. " +
-          "fields projects each entity; limit is an integer 1–100, default 10. " +
+          " Filters narrow the hits, never list what the query misses; across types they keep only the types every key applies to. " +
+          "fields projects each entity; limit: an integer 1–100, default 10. " +
           SEARCH_RESPONSE + " " + TOOL_MIN_SIMILARITY_GUIDANCE + " relativeScore: " +
           RELATIVE_SCORE_PROMISE + " " + SEARCH_EVIDENCE_GUIDANCE,
         inputSchema: {
@@ -732,15 +732,15 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
     {
       description:
         "Find entities for a text through search indices (keys from list_search_indices). " +
-        "A custom index with relation groups also finds an entity through its relations (a person by their " +
-        "employer). index: one key or a non-empty list; omit it for every index of this lens. " +
-        "relations: the relation types whose relation entries count ([] none); own fields and passages always do. " +
+        "A custom index with relation groups also finds an entity through its relations. " +
+        "index: one key or a non-empty list; omit it for every index of this lens. " +
+        "relations: relation types whose entries count ([] none); own fields and passages always do. " +
         filterRules({ contains: false, relations: true }) +
-        " Filters apply before ranking and keep only the indices whose type every key applies to. " +
-        "fields projects each entity; limit is an integer 1–100, default 10. " +
+        " Filters narrow the hits, never list what the query misses, and keep only indices whose type every key applies to. " +
+        "fields projects each entity; limit: an integer 1–100, default 10. " +
         "Returns query, mode (hybrid: semantic+keyword), minSimilarity and hits; each hit has entity, relativeScore and " +
         "matched, its best entry: index, partKind (self/relation/passage), a relation's relationType, relationId and " +
-        "target (the other end: id, type, label), snippet (the entry's start), a passage's charOffset and charLength " +
+        "target (other end: id, type, label), snippet (the entry's start), a passage's charOffset and charLength " +
         "— for get_document use the index's documentProperty as property_key. " +
         TOOL_MIN_SIMILARITY_GUIDANCE + " relativeScore: " +
         RELATIVE_SCORE_PROMISE + " " + INDEX_SEARCH_GUIDANCE,

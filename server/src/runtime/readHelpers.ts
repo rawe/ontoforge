@@ -476,9 +476,9 @@ export function filterRules(options: { contains: boolean; relations: boolean }):
     "filters (all must hold): key is a property, a related entity's property as " +
     "'<relation>.<property>' (\"works_for.name\"), the relation's own as " +
     "'<relation>@<property>' (\"works_for@since\"), or a bare relation type " +
-    `("supersedes", with ${existence} only); ${suffixText}, e.g. ` +
+    `("works_for", with ${existence} only); ${suffixText}, e.g. ` +
     '"works_for@since__gte": "2021-01-01". A relation joining a type to itself needs ' +
-    "':out' (from the listed entity) or ':in': \"manages:out.name\". A relation condition " +
-    "holds if any one relation meets it, independently of the others."
+    "':out' (the listed entity is its source) or ':in' (its target): \"manages:in.name\". " +
+    "A relation condition holds if any one relation meets it, independently of the others."
   );
 }

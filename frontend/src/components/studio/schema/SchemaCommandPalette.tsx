@@ -23,6 +23,8 @@ import {
   LayoutGrid,
   ListPlus,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRight,
   PanelTop,
   Plus,
@@ -34,6 +36,7 @@ import {
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import type { DataType } from '@/api/types'
+import { useSidebarCollapsed } from '@/components/layout/sidebarCollapsed'
 import { TypeDot } from '@/components/TypeChip'
 import {
   Command,
@@ -126,6 +129,7 @@ function PaletteBody({ close }: { close: () => void }) {
   const requestDelete = useRequestDelete()
   const collapsed = useCollapsed(ontologyKey)
   const { resolvedTheme, setTheme } = useTheme()
+  const sidebar = useSidebarCollapsed()
   const [page, setPageState] = useState<Page>({ id: 'root' })
   const [query, setQuery] = useState('')
 
@@ -277,6 +281,13 @@ function PaletteBody({ close }: { close: () => void }) {
       search: 'theme dark light mode',
       icon: resolvedTheme === 'dark' ? <Sun /> : <Moon />,
       run: run(() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')),
+    },
+    {
+      id: 'sidebar',
+      label: sidebar.collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+      icon: sidebar.collapsed ? <PanelLeftOpen /> : <PanelLeftClose />,
+      shortcut: '[',
+      run: run(sidebar.toggle),
     },
   ]
 

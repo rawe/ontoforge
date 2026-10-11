@@ -230,7 +230,10 @@ provider the navigation entry is gone and the screen renders an explanation; see
 
 The Studio is scoped wholesale to one ontology: its sidebar carries the ontology
 switcher, its navigation covers Schema, Lenses, Search and Transfer, and everything it
-reads and writes belongs to the current ontology.
+reads and writes belongs to the current ontology. Its footer holds the theme control, the
+collapse control and the way back to the Workbench. Like the Workbench sidebar, it
+collapses to an icon rail whose entries name themselves on hover; both sidebars share one
+collapse preference.
 
 ### Schema
 
@@ -855,7 +858,7 @@ left. With nothing to restore or reveal, the first view fits all nodes.
 relation type, and clicking the empty canvas clears the selection; clicking a property row
 on a node selects the type with that property opened. A selection made on the canvas does
 not move the view, except to keep the selected node fully visible: when the canvas narrows
-— the inspector opens — or a type is created on it, the view pans just enough to show the
+— the inspector opens or the sidebar expands — or a type is created on it, the view pans just enough to show the
 node. One made anywhere else — outline, palette, issues, the address, a jump link, a
 return from the classic view with another selection — pans to the node or frames the
 relation type's two endpoints.
@@ -918,9 +921,9 @@ Commands button opens it in both views; each open starts at the root with an emp
 
 - **Actions** — new entity type, new relation type, add a property to the selected type
   or to a chosen one, focus, switch view, hide or show all properties and those of the
-  selected entity type, tidy layout, delete the selected type, and a theme toggle. Focus,
-  the property toggles and tidy layout are offered on the graph only. Every command whose
-  key works in the current view shows it.
+  selected entity type, tidy layout, delete the selected type, a theme toggle, and
+  collapse or expand the sidebar. Focus, the property toggles and tidy layout are offered
+  on the graph only. Every command whose key works in the current view shows it.
 - **Go to** — every type with its key, a relation type also with its endpoints; choosing
   one selects and reveals it.
 - **Quick create** — a line `source -name-> target` or `source name target` creates a
@@ -1137,7 +1140,7 @@ the address.
 |---|---|---|
 | Last-used lens | Per ontology | — |
 | Theme preference | Global | — |
-| Sidebar collapsed | Global | — |
+| Sidebar collapsed (Workbench and Studio alike) | Global | — |
 | Explorer working set | Per ontology + lens | Bounded by the hard node cap |
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
@@ -1219,6 +1222,7 @@ Any unrecognised address returns to the root.
 |---|---|---|
 | Anywhere in the Workbench | Cmd/Ctrl+K | Toggle the command palette |
 | Anywhere in the Workbench | `c` | Open quick add — ignored while typing and while any dialog is open |
+| Anywhere in the Workbench or the Studio | `[` | Collapse or expand the sidebar — the key as typed on the keyboard layout, also where it needs Option or AltGr; ignored while typing and while a dialog, popover, menu or list is open |
 | Palette | ↑ / ↓ | Move through results, wrapping |
 | Palette | Enter | Open the selection |
 | Palette | Cmd/Ctrl+Enter | Open the selected entity in the Explorer |

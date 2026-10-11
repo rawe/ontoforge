@@ -325,19 +325,14 @@ function Canvas() {
   const fitFocus = useCallback((ids: Iterable<string>) => fitNodes([...ids], 1.2), [fitNodes])
 
   // The selected node stays in view when the canvas changes size (the
-  // inspector opens) and after a type is created here: the view pans just
-  // enough, and not at all when the node is fully visible. `keepInView` holds
-  // the type's key until it is selected and measured.
+  // inspector opens, the sidebar expands) and after a type is created here:
+  // the view pans just enough, and not at all when the node is fully visible.
+  // `keepInView` holds the type's key until it is selected and measured.
   const keepInView = useRef<string | null>(null)
   const lastPaneSize = useRef({ width: 0, height: 0 })
   const onPaneResize = useEffectEvent(() => {
     if (selection?.kind === 'entity-types') keepInView.current = selection.key
   })
-  useEffect(() => {
-    const was = lastPaneSize.current
-    lastPaneSize.current = { width: paneWidth, height: paneHeight }
-    if (was.width > 0 && was.height > 0) onPaneResize()
-  }, [paneWidth, paneHeight])
 
   const panIntoView = useEffectEvent(() => {
     const key = keepInView.current
@@ -358,6 +353,18 @@ function Canvas() {
   })
   // After every commit: the selection and the node's measurements arrive in their own time.
   useEffect(() => panIntoView())
+  useEffect(() => {
+    const was = lastPaneSize.current
+    lastPaneSize.current = { width: paneWidth, height: paneHeight }
+    if (was.width === 0 || was.height === 0) return
+    // Once the size has settled: the sidebar's width transition resizes the
+    // canvas on every frame, and one pan at the end does not jitter.
+    const settled = setTimeout(() => {
+      onPaneResize()
+      panIntoView()
+    }, 100)
+    return () => clearTimeout(settled)
+  }, [paneWidth, paneHeight])
 
   // Reveal every selection that did not come from a click here: outline,
   // palette, address, back/forward, or a different one when coming back from

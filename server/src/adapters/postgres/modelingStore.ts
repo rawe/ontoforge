@@ -50,7 +50,7 @@ const PROPERTY_COLS =
   "property_id, key, display_name, description, data_type, required, default_value, " +
   "created_at, updated_at";
 const AGENT_COLS =
-  "agent_config_id, key, name, description, system_prompt, tools, created_at, updated_at";
+  "assistant_agent_id, key, name, description, system_prompt, tools, created_at, updated_at";
 const SAVED_QUERY_COLS =
   "saved_query_id, key, name, description, steps, parameters, created_at, updated_at";
 
@@ -750,7 +750,7 @@ export class PostgresModelingStore implements ModelingStore {
       return [];
     }
     const result = await this.query(
-      `SELECT ${AGENT_COLS} FROM ai_agent_config WHERE lens_id = $1 ORDER BY name`,
+      `SELECT ${AGENT_COLS} FROM assistant_agent WHERE lens_id = $1 ORDER BY name`,
       [lensId],
     );
     return camelizeRows(result.rows);
@@ -768,8 +768,8 @@ export class PostgresModelingStore implements ModelingStore {
     tools: string[] | null,
   ): Promise<[Row, boolean]> {
     const result = await this.query(
-      `INSERT INTO ai_agent_config
-         (agent_config_id, lens_id, key, name, description, system_prompt, tools)
+      `INSERT INTO assistant_agent
+         (assistant_agent_id, lens_id, key, name, description, system_prompt, tools)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (lens_id, key) DO UPDATE SET
          name = EXCLUDED.name,
@@ -777,7 +777,7 @@ export class PostgresModelingStore implements ModelingStore {
          system_prompt = EXCLUDED.system_prompt,
          tools = EXCLUDED.tools,
          updated_at = now()
-       RETURNING ${AGENT_COLS}, (agent_config_id = $1) AS created`,
+       RETURNING ${AGENT_COLS}, (assistant_agent_id = $1) AS created`,
       [agentConfigId, lensId, key, name, description, systemPrompt, tools],
     );
     const { created, ...row } = camelizeRow(result.rows[0]!);
@@ -791,7 +791,7 @@ export class PostgresModelingStore implements ModelingStore {
     }
     const result = await this.query(
       `SELECT key, name, description, system_prompt, tools
-       FROM ai_agent_config WHERE lens_id = $1 ORDER BY name`,
+       FROM assistant_agent WHERE lens_id = $1 ORDER BY name`,
       [lensId],
     );
     return camelizeRows(result.rows);
@@ -802,7 +802,7 @@ export class PostgresModelingStore implements ModelingStore {
       return false;
     }
     const result = await this.query(
-      `DELETE FROM ai_agent_config WHERE lens_id = $1 AND key = $2`,
+      `DELETE FROM assistant_agent WHERE lens_id = $1 AND key = $2`,
       [lensId, agentKey],
     );
     return result.rowCount > 0;

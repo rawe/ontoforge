@@ -188,7 +188,7 @@ describe("the truth table: 23505 named uniques", () => {
     expect((error as ConflictError).message).toBe(message);
   });
 
-  it.each(["ai_agent_config_key_unique", "saved_query_key_unique"])(
+  it.each(["assistant_agent_key_unique", "saved_query_key_unique"])(
     "the upsert arbiter %s is unclaimed — StoreError if it ever surfaces",
     async (constraint) => {
       vi.spyOn(console, "error").mockImplementation(() => {});
@@ -330,9 +330,9 @@ describe("bypass prevention", () => {
 
 describe("retriever constraints preserve domain errors", () => {
   it("maps concurrent target-key collisions to ConflictError", async () => {
-    expect(await translated(dbError("23505", "retriever_agent_key_unique"))).toBeInstanceOf(ConflictError);
+    expect(await translated(dbError("23505", "assistant_retriever_key_unique"))).toBeInstanceOf(ConflictError);
   });
   it("maps a vanished owner to NotFoundError", async () => {
-    expect(await translated(dbError("23503", "retriever_agent_lens_fk"))).toBeInstanceOf(NotFoundError);
+    expect(await translated(dbError("23503", "assistant_retriever_lens_fk"))).toBeInstanceOf(NotFoundError);
   });
 });

@@ -1513,20 +1513,20 @@ export async function importSchema(
   // became invalid still imports.
   for (const lens of payload.lenses) {
     const seen = new Set<string>();
-    for (const agent of lens.assistants.retrievers) {
-      if (seen.has(agent.key)) errors.push(`Import error: duplicate retriever '${agent.key}' in lens '${lens.key}'`);
-      seen.add(agent.key);
-      if (!LENS_RESOURCE_KEY_PATTERN.test(agent.key)) errors.push(badKey("retriever", agent.key, resourceKeyPattern));
-      if (agent.key.length > MAX_KEY_LENGTH) errors.push(longKey("retriever", agent.key));
-      if (agent.name.length === 0 || agent.name.length > 200) {
-        errors.push(`Import error: retriever '${agent.key}' needs a name of 1 to 200 characters`);
+    for (const retriever of lens.assistants.retrievers) {
+      if (seen.has(retriever.key)) errors.push(`Import error: duplicate retriever '${retriever.key}' in lens '${lens.key}'`);
+      seen.add(retriever.key);
+      if (!LENS_RESOURCE_KEY_PATTERN.test(retriever.key)) errors.push(badKey("retriever", retriever.key, resourceKeyPattern));
+      if (retriever.key.length > MAX_KEY_LENGTH) errors.push(longKey("retriever", retriever.key));
+      if (retriever.name.length === 0 || retriever.name.length > 200) {
+        errors.push(`Import error: retriever '${retriever.key}' needs a name of 1 to 200 characters`);
       }
       if (
-        agent.configVersion !== RETRIEVER_CONFIG_VERSION ||
-        !RetrieverConfig.safeParse(agent.config).success
+        retriever.configVersion !== RETRIEVER_CONFIG_VERSION ||
+        !RetrieverConfig.safeParse(retriever.config).success
       ) {
         errors.push(
-          `Import error: retriever '${agent.key}' has no valid configuration of version ` +
+          `Import error: retriever '${retriever.key}' has no valid configuration of version ` +
             `${RETRIEVER_CONFIG_VERSION}`,
         );
       }
@@ -1839,18 +1839,18 @@ export async function importSchema(
   invalidateLoadedSchemaCache();
   // Retrievers last, once their indices exist.
   for (const lens of payload.lenses) {
-    for (const agent of lens.assistants.retrievers) {
+    for (const retriever of lens.assistants.retrievers) {
       await indices.saveRetriever(
         lensIds.get(lens)!,
         {
           retrieverId: randomUUID(),
-          key: agent.key,
-          name: agent.name,
-          description: agent.description,
+          key: retriever.key,
+          name: retriever.name,
+          description: retriever.description,
           configVersion: RETRIEVER_CONFIG_VERSION,
-          config: RetrieverConfig.parse(agent.config),
-          // An upgraded agent keeps its conversion's warnings.
-          warnings: retrieverWarnings.get(retrieverWarningKey(lens.key, agent.key)) ?? [],
+          config: RetrieverConfig.parse(retriever.config),
+          // An upgraded retriever keeps its conversion's warnings.
+          warnings: retrieverWarnings.get(retrieverWarningKey(lens.key, retriever.key)) ?? [],
         },
         true,
       );

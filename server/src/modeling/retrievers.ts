@@ -80,24 +80,24 @@ export const RetrieverResponse = PortableRetriever.extend({
 });
 export type RetrieverResponse = z.infer<typeof RetrieverResponse>;
 
-export function portable(agent: RetrieverRecord): PortableRetriever {
+export function portable(retriever: RetrieverRecord): PortableRetriever {
   return {
-    key: agent.key,
-    name: agent.name,
-    description: agent.description,
-    configVersion: agent.configVersion,
-    config: agent.config,
+    key: retriever.key,
+    name: retriever.name,
+    description: retriever.description,
+    configVersion: retriever.configVersion,
+    config: retriever.config,
   };
 }
 
-function toResponse(agent: RetrieverRecord, lensKey: string, lens: RetrieverLens): RetrieverResponse {
-  const { errors } = checkRetrieverConfig(agent.configVersion, agent.config, lens);
+function toResponse(retriever: RetrieverRecord, lensKey: string, lens: RetrieverLens): RetrieverResponse {
+  const { errors } = checkRetrieverConfig(retriever.configVersion, retriever.config, lens);
   return {
-    ...portable(agent),
+    ...portable(retriever),
     lensKey,
-    validation: { valid: errors.length === 0, errors, warnings: agent.warnings },
-    createdAt: agent.createdAt.toISOString(),
-    updatedAt: agent.updatedAt.toISOString(),
+    validation: { valid: errors.length === 0, errors, warnings: retriever.warnings },
+    createdAt: retriever.createdAt.toISOString(),
+    updatedAt: retriever.updatedAt.toISOString(),
   };
 }
 
@@ -126,9 +126,9 @@ async function lensOf(
 }
 
 async function stored(indices: SearchIndexStore, lensId: string, key: string): Promise<RetrieverRecord> {
-  const agent = await indices.getRetriever(lensId, key);
-  if (agent === null) throw new NotFoundError(`Retriever '${key}' not found`);
-  return agent;
+  const retriever = await indices.getRetriever(lensId, key);
+  if (retriever === null) throw new NotFoundError(`Retriever '${key}' not found`);
+  return retriever;
 }
 
 /** Refuse a configuration the lens cannot run. */
@@ -147,7 +147,7 @@ export async function listRetrievers(
 ): Promise<RetrieverResponse[]> {
   const indices = requireSearchIndices(store);
   const { lensId, lens } = await lensOf(lensKey, store, runtime);
-  return (await indices.listRetrievers(lensId)).map((agent) => toResponse(agent, lensKey, lens));
+  return (await indices.listRetrievers(lensId)).map((retriever) => toResponse(retriever, lensKey, lens));
 }
 
 export async function getRetriever(
@@ -186,7 +186,7 @@ export async function saveRetriever(
   const parsed = RetrieverWriteBody.parse(body);
   const { lensId, lens } = await lensOf(lensKey, store, runtime);
   const config = requireValid(parsed.configVersion, parsed.config, lens);
-  const [agent, created] = await indices.saveRetriever(
+  const [retriever, created] = await indices.saveRetriever(
     lensId,
     {
       retrieverId: randomUUID(),
@@ -199,7 +199,7 @@ export async function saveRetriever(
     },
     false,
   );
-  return [toResponse(agent, lensKey, lens), created];
+  return [toResponse(retriever, lensKey, lens), created];
 }
 
 /** Create from a portable export (never replaces). A version-1 export is
@@ -218,7 +218,7 @@ export async function importRetriever(
   let warnings: string[] = [];
   if (parsed.configVersion === LEGACY_RETRIEVER_CONFIG_VERSION) {
     // A version-1 key with `-` is renamed, unique in the lens.
-    const taken = new Set((await indices.listRetrievers(lensId)).map((agent) => agent.key));
+    const taken = new Set((await indices.listRetrievers(lensId)).map((retriever) => retriever.key));
     const renamed = legacyRetrieverKey(key, taken);
     key = renamed.key;
     if (renamed.warning !== null) warnings.push(renamed.warning);
@@ -234,7 +234,7 @@ export async function importRetriever(
   }
   checkKey(key);
   const valid = requireValid(RETRIEVER_CONFIG_VERSION, config, lens);
-  const [agent] = await indices.saveRetriever(
+  const [retriever] = await indices.saveRetriever(
     lensId,
     {
       retrieverId: randomUUID(),
@@ -247,7 +247,7 @@ export async function importRetriever(
     },
     true,
   );
-  return toResponse(agent, lensKey, lens);
+  return toResponse(retriever, lensKey, lens);
 }
 
 export async function deleteRetriever(lensKey: string, key: string, store: ModelingStore): Promise<void> {
@@ -274,9 +274,9 @@ export async function transferRetriever(
   checkKey(target.targetKey);
   const source = await store.getLensByKey(lensKey);
   if (!source) throw new NotFoundError(`Lens '${lensKey}' not found`);
-  const agent = await stored(indices, source.lensId as string, key);
+  const retriever = await stored(indices, source.lensId as string, key);
   const { lensId: targetLensId, lens } = await lensOf(target.targetLensKey, store, runtime);
-  requireValid(agent.configVersion, agent.config, lens);
+  requireValid(retriever.configVersion, retriever.config, lens);
   if (await indices.getRetriever(targetLensId, target.targetKey)) {
     throw new ConflictError(`Retriever '${target.targetKey}' already exists in the target lens`);
   }
@@ -286,7 +286,7 @@ export async function transferRetriever(
     targetLensId,
     target.targetKey,
     copy ? randomUUID() : null,
-    JSON.stringify([agent.configVersion, agent.config]),
+    JSON.stringify([retriever.configVersion, retriever.config]),
   );
   return toResponse(moved, target.targetLensKey, lens);
 }

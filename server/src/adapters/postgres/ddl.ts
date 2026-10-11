@@ -172,18 +172,18 @@ export function ontologyDdlStatements(): string[] {
   CONSTRAINT lens_includes_search_index_unique UNIQUE (lens_id, search_index_id)
 )`, // no timestamps, no PK
 
-  `CREATE TABLE IF NOT EXISTS ai_agent_config (
-  agent_config_id uuid        CONSTRAINT ai_agent_config_pk PRIMARY KEY,
-  lens_id         uuid        NOT NULL CONSTRAINT ai_agent_config_lens_fk
-                              REFERENCES lens (lens_id) ON DELETE CASCADE,
-  key             text        NOT NULL,
-  name            text        NOT NULL,
-  description     text,
-  system_prompt   text,
-  tools           text[],     -- NULL = all tools
-  created_at      timestamptz NOT NULL DEFAULT now(),
-  updated_at      timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT ai_agent_config_key_unique UNIQUE (lens_id, key)   -- upsert arbiter
+  `CREATE TABLE IF NOT EXISTS assistant_agent (
+  assistant_agent_id uuid        CONSTRAINT assistant_agent_pk PRIMARY KEY,
+  lens_id            uuid        NOT NULL CONSTRAINT assistant_agent_lens_fk
+                                 REFERENCES lens (lens_id) ON DELETE CASCADE,
+  key                text        NOT NULL,
+  name               text        NOT NULL,
+  description        text,
+  system_prompt      text,
+  tools              text[],     -- NULL = all tools
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT assistant_agent_key_unique UNIQUE (lens_id, key)   -- upsert arbiter
 )`,
 
   `CREATE TABLE IF NOT EXISTS saved_query (
@@ -202,19 +202,19 @@ export function ontologyDdlStatements(): string[] {
   CONSTRAINT saved_query_key_unique UNIQUE (lens_id, key)        -- upsert arbiter
 )`,
 
-  `CREATE TABLE IF NOT EXISTS retriever_agent (
-  retriever_agent_id uuid        CONSTRAINT retriever_agent_pk PRIMARY KEY,
-  lens_id            uuid        NOT NULL CONSTRAINT retriever_agent_lens_fk
-                                 REFERENCES lens (lens_id) ON DELETE CASCADE,
-  key                text        NOT NULL,
-  name               text        NOT NULL,
-  description        text,
-  config_version     integer     NOT NULL,
-  config             jsonb       NOT NULL,
-  created_at         timestamptz NOT NULL DEFAULT now(),
-  updated_at         timestamptz NOT NULL DEFAULT now(),
-  warnings           jsonb       NOT NULL DEFAULT '[]'::jsonb,  -- notes of a version-1 conversion
-  CONSTRAINT retriever_agent_key_unique UNIQUE (lens_id, key)
+  `CREATE TABLE IF NOT EXISTS assistant_retriever (
+  assistant_retriever_id uuid        CONSTRAINT assistant_retriever_pk PRIMARY KEY,
+  lens_id                uuid        NOT NULL CONSTRAINT assistant_retriever_lens_fk
+                                     REFERENCES lens (lens_id) ON DELETE CASCADE,
+  key                    text        NOT NULL,
+  name                   text        NOT NULL,
+  description            text,
+  config_version         integer     NOT NULL,
+  config                 jsonb       NOT NULL,
+  created_at             timestamptz NOT NULL DEFAULT now(),
+  updated_at             timestamptz NOT NULL DEFAULT now(),
+  warnings               jsonb       NOT NULL DEFAULT '[]'::jsonb,  -- notes of a version-1 conversion
+  CONSTRAINT assistant_retriever_key_unique UNIQUE (lens_id, key)
 )`,
 
   // --- Instance side -----------------------------------------------------

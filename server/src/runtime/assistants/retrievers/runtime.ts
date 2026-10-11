@@ -143,7 +143,7 @@ export async function listRuntimeRetrievers(lensKey: string, store: RuntimeStore
   const stored = await indexStore.listRetrievers(loaded.scoped.lensId);
   return [
     { key: DEFAULT_RETRIEVER_KEY, name: DEFAULT_RETRIEVER_NAME, description: DEFAULT_RETRIEVER_DESCRIPTION, builtIn: true },
-    ...stored.map((agent) => ({ key: agent.key, name: agent.name, description: agent.description, builtIn: false })),
+    ...stored.map((retriever) => ({ key: retriever.key, name: retriever.name, description: retriever.description, builtIn: false })),
   ];
 }
 
@@ -253,7 +253,7 @@ function models() {
 type PlannerModel = ReturnType<typeof models>["plannerModel"];
 
 interface Planning {
-  agent: RunnableRetriever;
+  retriever: RunnableRetriever;
   scope: RetrievalScope;
   modes: SearchMode[];
   message: string;
@@ -276,14 +276,14 @@ interface Planning {
  * planner input over the cap, a failed call and a malformed plan.
  */
 export async function planQuestion(planning: Planning): Promise<{ plan: Plan; notes: string[] }> {
-  const { agent, scope, modes, message, history, previous, plannerModel, timings, io, report } = planning;
+  const { retriever, scope, modes, message, history, previous, plannerModel, timings, io, report } = planning;
   const { signal } = scope;
   const values = await filterValues(scope);
   signal.throwIfAborted();
-  const input = plannerInput(agent.config, scope.lens, scope.records, modes, message, history, previous, values);
+  const input = plannerInput(retriever.config, scope.lens, scope.records, modes, message, history, previous, values);
   if (input.length > PLANNER_INPUT_CHARACTERS) {
     throw new ValidationError(
-      agent.key === DEFAULT_RETRIEVER_KEY
+      retriever.key === DEFAULT_RETRIEVER_KEY
         ? "This lens is too large for the default retriever: its planning context exceeds the limit. " +
             "Configure a retriever with fewer indices or filters."
         : "Planning context exceeds the limit; choose fewer indices or filters.",
@@ -317,7 +317,7 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
     const validation = performance.now();
     const checked = validatePlan(
       parsePlannerOutput(output, finishReason),
-      agent.config,
+      retriever.config,
       scope.lens,
       modes,
       message,
@@ -326,7 +326,7 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
       values,
     );
     timings.validation = (timings.validation ?? 0) + performance.now() - validation;
-    await report({ plan: diagnosticPlan(checked.plan, agent.config), modelIO: [call] });
+    await report({ plan: diagnosticPlan(checked.plan, retriever.config), modelIO: [call] });
     return checked;
   };
   const first = await planWith(PLANNER, "plan");
@@ -359,16 +359,16 @@ export interface RetrieveResponse {
  * match.
  */
 export async function retrieveQuestion(
-  agent: RunnableRetriever,
+  retriever: RunnableRetriever,
   query: string,
   signal: AbortSignal,
 ): Promise<RetrieveResponse> {
   signal.throwIfAborted();
-  const scope: RetrievalScope = { ...agent.scope, signal };
+  const scope: RetrievalScope = { ...retriever.scope, signal };
   const { plannerModel } = models();
   // Timings and model calls are recorded for diagnostics, which only chat reports.
   const { plan, notes } = await planQuestion({
-    agent,
+    retriever,
     scope,
     modes: availableModes(),
     message: query,
@@ -398,7 +398,7 @@ export async function retrieveQuestion(
  * reference to them is ignored with a limitation.
  */
 export async function chat(
-  agent: RunnableRetriever,
+  retriever: RunnableRetriever,
   message: string,
   thread: GraphThread,
   execution: StreamExecution,
@@ -412,12 +412,12 @@ export async function chat(
   const started = performance.now();
   const timings: Record<string, number> = {};
   const io: ModelCall[] = [];
-  const scope: RetrievalScope = { ...agent.scope, signal };
+  const scope: RetrievalScope = { ...retriever.scope, signal };
   const modes = availableModes();
   let firstDelta = false;
   let searchCalls = 0;
   const { model, plannerModel } = models();
-  const hash = configHash(agent.config);
+  const hash = configHash(retriever.config);
 
   async function phase<T>(name: string, run: () => Promise<T>): Promise<T> {
     signal.throwIfAborted();
@@ -457,7 +457,7 @@ export async function chat(
     .addNode("planning", async (state) => {
       const { previous, history } = state;
       const { plan, notes } = await phase("plan", () =>
-        planQuestion({ agent, scope, modes, message, history, previous, plannerModel, timings, io, report }),
+        planQuestion({ retriever, scope, modes, message, history, previous, plannerModel, timings, io, report }),
       );
       return { plan, notes };
     })
@@ -466,7 +466,7 @@ export async function chat(
       const retrieval = await phase("retrieve", () => retrieve(scope, plan, previous));
       retrieval.limitations.push(...notes);
       const t = performance.now();
-      const context = boundContext(retrieval, plan, scope.lens, agent.config);
+      const context = boundContext(retrieval, plan, scope.lens, retriever.config);
       timings.context = performance.now() - t;
       timings.search = retrieval.searchMs;
       searchCalls = retrieval.searchCalls;
@@ -484,7 +484,7 @@ export async function chat(
         const input = JSON.stringify({
           question: message,
           history,
-          searches: answerSearches(plan, agent.config, scope.lens),
+          searches: answerSearches(plan, retriever.config, scope.lens),
           unsupportedReason: plan.unsupportedReason,
           results: context.results,
           limitations: context.limitations,

@@ -7,7 +7,7 @@ const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const config = { indices: [{ index: "item~default" }], filters: [], answerFields: { item: ["name"] }, threshold: .35, answerFieldCharacters: 800 };
 const now = new Date("2026-10-06T00:00:00Z");
-const source = { retriever_agent_id: 'stable', key: 'find', name: 'Find', description: null, config_version: 2, config, warnings: [], created_at: now, updated_at: now };
+const source = { assistant_retriever_id: 'stable', key: 'find', name: 'Find', description: null, config_version: 2, config, warnings: [], created_at: now, updated_at: now };
 const expected = JSON.stringify([2, config]);
 const agent = { retrieverId: 'id', key: 'find', name: 'Find', description: null, configVersion: 2, config, warnings: [] };
 const store = () => new PostgresSearchIndexStore('ont_one', 'one');
@@ -19,7 +19,7 @@ describe('PostgreSQL atomic retriever operations', () => {
         expect(result.retrieverId).toBe('stable');
         expect(mocks.transaction).toHaveBeenCalledTimes(1);
         expect(mocks.query.mock.calls[0]![0]).toContain('ORDER BY lens_id FOR UPDATE');
-        expect(mocks.query.mock.calls[3]![0]).toContain('UPDATE retriever_agent');
+        expect(mocks.query.mock.calls[3]![0]).toContain('UPDATE assistant_retriever');
     });
     it.each([null, 'new-id'])('rechecks target conflict after acquiring owner locks (copyId=%s)', async (id) => {
         mocks.query.mockResolvedValueOnce({ rows: [{}, {}] }).mockResolvedValueOnce({ rows: [source] }).mockResolvedValueOnce({ rows: [{ key: 'target' }] });

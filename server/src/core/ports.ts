@@ -923,30 +923,30 @@ export interface SearchIndexStore {
   // ------------------------------------------------------------------
   // Retrievers (lens-local; they search this store's indices)
   //
-  // Keyed by lens and agent key; deleted with their lens. A transfer
+  // Keyed by lens and retriever key; deleted with their lens. A transfer
   // never overwrites a target.
   // ------------------------------------------------------------------
 
-  /** The lens's agents, by name then key. */
+  /** The lens's retrievers, by name then key. */
   listRetrievers(lensId: string): Promise<RetrieverRecord[]>;
 
   getRetriever(lensId: string, key: string): Promise<RetrieverRecord | null>;
 
   /** Create, or replace name, description, configuration and warnings of
-   * the agent with this key (its id and creation time stay). `createOnly`:
+   * the retriever with this key (its id and creation time stay). `createOnly`:
    * an existing key is a `ConflictError`. The lens missing is a
-   * `NotFoundError`. True in the pair when the agent was created. */
+   * `NotFoundError`. True in the pair when the retriever was created. */
   saveRetriever(
     lensId: string,
-    agent: RetrieverWrite,
+    retriever: RetrieverWrite,
     createOnly: boolean,
   ): Promise<[RetrieverRecord, boolean]>;
 
-  /** False when the lens has no agent with this key. */
+  /** False when the lens has no retriever with this key. */
   deleteRetriever(lensId: string, key: string): Promise<boolean>;
 
   /** Copy (`copyId`: the copy's id) or move (`copyId` null: identity kept)
-   * an agent to another lens and key, atomically. The source must still
+   * a retriever to another lens and key, atomically. The source must still
    * hold `expectedConfig` (JSON of `[configVersion, config]`) — else a
    * `ConflictError`; a taken target key is a `ConflictError`. */
   transferRetriever(

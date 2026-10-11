@@ -1,8 +1,4 @@
 import { getEmbeddingProvider } from "../../core/embedding.js";
-import type { KeywordMatching } from "../../core/ports.js";
-import {
-  fuse, type FusionScore, type KeywordScore, type Ranked, type RankingScore, type SemanticSimilarity,
-} from "./fusion.js";
 export const SEARCH_STRATEGIES = [
   "semantic", "keyword", "keyword-any", "keyword-all", "hybrid",
 ] as const;
@@ -13,53 +9,35 @@ const KEYWORD_ONLY: ReadonlySet<SearchStrategy> = new Set(["keyword", "keyword-a
 export function ranksSemantically(strategy: SearchStrategy): boolean {
   return !KEYWORD_ONLY.has(strategy);
 }
-/** The source rankings of one search kind, each produced by one retrieval method and
- * ordered by its own score kind. */
-export interface RankingKind<T> {
-  semantic(): Promise<Ranked<T, SemanticSimilarity>[]>;
-  keyword(matching: KeywordMatching): Promise<Ranked<T, KeywordScore>[]>;
-}
 export interface SearchCapabilities {
   supportsKeywordRanking(): boolean;
 }
-/** A strategy's ranking holds one score kind, which one is known only at runtime. */
 interface Strategy {
   key: SearchStrategy;
   available(store: SearchCapabilities): boolean;
-  rank<T>(kind: RankingKind<T>): Promise<Ranked<T, RankingScore>[]>;
 }
-/** The keyword matching `keyword` and `hybrid` use, always the same one; `keyword-any`
- * and `keyword-all` each fix their own and never follow it. */
-const DEFAULT_KEYWORD_MATCHING: KeywordMatching = "any";
-/** Fixed preference order; every listed strategy has an implementation and requirements.
- * Each strategy uses one retrieval method directly or fuses several by rank. */
+/** Fixed preference order; every listed strategy has requirements. */
 export const strategies: Strategy[] = [
   {
     key: "hybrid",
     available: (store: SearchCapabilities) =>
       Boolean(getEmbeddingProvider()) && store.supportsKeywordRanking(),
-    rank: async <T>(kind: RankingKind<T>): Promise<Ranked<T, FusionScore>[]> =>
-      fuse(await Promise.all([kind.semantic(), kind.keyword(DEFAULT_KEYWORD_MATCHING)])),
   },
   {
     key: "keyword",
     available: (store: SearchCapabilities) => store.supportsKeywordRanking(),
-    rank: <T>(kind: RankingKind<T>) => kind.keyword(DEFAULT_KEYWORD_MATCHING),
   },
   {
     key: "keyword-any",
     available: (store: SearchCapabilities) => store.supportsKeywordRanking(),
-    rank: <T>(kind: RankingKind<T>) => kind.keyword("any"),
   },
   {
     key: "keyword-all",
     available: (store: SearchCapabilities) => store.supportsKeywordRanking(),
-    rank: <T>(kind: RankingKind<T>) => kind.keyword("all"),
   },
   {
     key: "semantic",
     available: () => Boolean(getEmbeddingProvider()),
-    rank: <T>(kind: RankingKind<T>) => kind.semantic(),
   },
 ];
 export function availableStrategies(store: SearchCapabilities): SearchStrategy[] {

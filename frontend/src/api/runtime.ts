@@ -224,7 +224,7 @@ export interface SearchParams {
 export const search = (ontologyKey: string, lensKey: string, params: SearchParams) =>
   request<SearchResponse>(`${base(ontologyKey, lensKey)}/search${buildQuery(params)}`)
 
-/** The search indices this lens can search (servers with search indices only). */
+/** The search indices this lens can search. */
 export const listSearchCatalog = (ontologyKey: string, lensKey: string) =>
   request<SearchCatalogEntry[]>(`${base(ontologyKey, lensKey)}/search-indices`)
 

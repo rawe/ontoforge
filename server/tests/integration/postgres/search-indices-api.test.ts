@@ -62,7 +62,7 @@ function passagesOf(length: number): number {
   return length <= size ? 1 : 1 + Math.ceil((length - size) / (size - settings.DOCUMENT_CHUNK_OVERLAP));
 }
 
-describe.skipIf(settings.DB_BACKEND !== "postgres")("custom search indices through the API", () => {
+describe("custom search indices through the API", () => {
   let app: FastifyInstance;
 
   type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";

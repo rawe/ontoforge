@@ -1,17 +1,10 @@
 /**
  * Session-06 integration suite — document properties, database-blind:
  * slice paging, partial writes with read-back, the compare-and-swap
- * guard, code-point offsets, and the chunk lifecycle verified through the
- * persistence port (a fake embedding provider activates the sync and
- * returns a fixed vector, so every chunk row carries one and the port's
- * text→vector map sees it).
+ * guard and code-point offsets.
  *
- * The chunk lifecycle is the own search storage of an adapter without
- * search indices (`keepsOwnSearchStorage`); on one that stores them the
- * worker chunks the current document into passage entries
- * (`tests/integration/postgres/search-pipeline.test.ts`). The physical
- * chunk-row assertions (virtual label, raw coordinates) live in
- * `tests/integration/neo4j/documents.test.ts`.
+ * The worker chunks the current document into passage entries
+ * (`tests/integration/postgres/search-pipeline.test.ts`).
  */
 
 import type { FastifyInstance } from "fastify";
@@ -19,14 +12,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { createApp } from "../../src/app.js";
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
-import {
-  closeStores,
-  getRuntimeStore,
-  initStores,
-} from "../../src/core/ports.js";
+import { closeStores, initStores } from "../../src/core/ports.js";
 import { defineEntityProperty } from "./fixture.js";
 import { wipeDatabase } from "./reset.js";
-import { keepsOwnSearchStorage } from "./tiers.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 
 type Row = Record<string, unknown>;
@@ -116,15 +104,6 @@ async function readDocument(entityId: string, propertyKey: string, query = ""): 
   });
   expect(res.statusCode, res.body).toBe(200);
   return res.json() as Row;
-}
-
-/** Chunk texts for one (entity, property), read through the port. The
- * provider stores a vector on every chunk, so the text→vector map lists
- * exactly the stored chunks (fixtures keep chunk texts distinct). */
-async function chunkTexts(entityId: string, propertyKey: string): Promise<string[]> {
-  const store = await getRuntimeStore("test_ont");
-  const map = await store.getChunkEmbeddingsForEntityProperty!(entityId, propertyKey);
-  return Object.keys(map);
 }
 
 describe("slice reads", () => {
@@ -351,129 +330,5 @@ describe("partial writes", () => {
     expect(nulled.statusCode).toBe(200);
     expect(nulled.json()).not.toHaveProperty("body");
     expect((await readDocument(entityId, "body")).totalLength).toBe(0);
-  });
-});
-
-describe.skipIf(!keepsOwnSearchStorage)("chunk lifecycle (fake provider, fixed vector)", () => {
-  const VECTOR = [0.5, 0.25, 0.125, 0.0625];
-
-  beforeEach(() => {
-    // Activates chunk sync; the fixed vector puts every chunk row into the
-    // port's text→vector map.
-    setEmbeddingProvider({ dimensions: 4, embed: async () => VECTOR });
-  });
-
-  it("creating an entity writes one chunk per slice of the value", async () => {
-    const entity = await createArticle({ title: "T", body: BODY });
-    const texts = await chunkTexts(entity._id as string, "body");
-
-    expect(texts.length).toBeGreaterThan(1);
-    for (const text of texts) {
-      expect(BODY).toContain(text); // every chunk is a verbatim slice
-    }
-    // The chunks jointly span the value: one starts it, one ends it.
-    expect(texts.some((text) => BODY.startsWith(text))).toBe(true);
-    expect(texts.some((text) => BODY.endsWith(text))).toBe(true);
-  });
-
-  it("an edit re-synchronizes the chunks to the new value", async () => {
-    const entity = await createArticle({ title: "T", body: BODY });
-    const entityId = entity._id as string;
-
-    const res = await app.inject({
-      method: "PATCH",
-      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}/documents/body`,
-      payload: { op: "str_replace", oldString: "Paragraph 3:", newString: "Chapter 3 —" },
-    });
-    expect(res.statusCode).toBe(200);
-
-    const texts = await chunkTexts(entityId, "body");
-    const newValue = BODY.replace("Paragraph 3:", "Chapter 3 —");
-    expect(texts.some((text) => text.includes("Chapter 3 —"))).toBe(true);
-    for (const text of texts) {
-      expect(newValue).toContain(text); // no chunk of the old value survives
-    }
-  });
-
-  it("nulling the value deletes its chunks; the sibling property keeps its own", async () => {
-    const entity = await createArticle({ title: "T", body: BODY, notes: BODY });
-    const entityId = entity._id as string;
-    expect((await chunkTexts(entityId, "body")).length).toBeGreaterThan(0);
-    expect((await chunkTexts(entityId, "notes")).length).toBeGreaterThan(0);
-
-    const res = await app.inject({
-      method: "PATCH",
-      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}`,
-      payload: { body: null },
-    });
-    expect(res.statusCode).toBe(200);
-
-    expect(await chunkTexts(entityId, "body")).toHaveLength(0);
-    expect((await chunkTexts(entityId, "notes")).length).toBeGreaterThan(0); // isolation
-  });
-
-  it("deleting the entity removes all of its chunks", async () => {
-    const entity = await createArticle({ title: "T", body: BODY, notes: BODY });
-    const entityId = entity._id as string;
-    expect((await chunkTexts(entityId, "body")).length).toBeGreaterThan(0);
-
-    const res = await app.inject({
-      method: "DELETE",
-      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}`,
-    });
-    expect(res.statusCode).toBe(204);
-
-    expect(await chunkTexts(entityId, "body")).toHaveLength(0);
-    expect(await chunkTexts(entityId, "notes")).toHaveLength(0);
-  });
-
-  it("deleting the property definition drops that property's chunks only", async () => {
-    const entity = await createArticle({ title: "T", body: BODY, notes: BODY });
-    const entityId = entity._id as string;
-
-    const res = await app.inject({
-      method: "DELETE",
-      url: `/api/ontologies/test_ont/model/entity-types/${ids.articleId}/properties/${ids.notesPropId}`,
-    });
-    expect(res.statusCode).toBe(204);
-
-    expect(await chunkTexts(entityId, "notes")).toHaveLength(0);
-    expect((await chunkTexts(entityId, "body")).length).toBeGreaterThan(0); // isolation
-  });
-
-  it("deleting the entity type drops the chunks of each document property", async () => {
-    const entity = await createArticle({ title: "T", body: BODY, notes: BODY });
-    const entityId = entity._id as string;
-
-    // The `title_only` lens includes the type: consent to the cascade.
-    const res = await app.inject({
-      method: "DELETE",
-      url: `/api/ontologies/test_ont/model/entity-types/${ids.articleId}?cascade=true`,
-    });
-    expect(res.statusCode, res.body).toBe(204);
-
-    expect(await chunkTexts(entityId, "body")).toHaveLength(0);
-    expect(await chunkTexts(entityId, "notes")).toHaveLength(0);
-  });
-
-  it("the chunk-embedding map reads back stored vectors for reuse", async () => {
-    // The store keeps the provider's vectors and the text→vector map
-    // returns them (the reuse path's storage half).
-    const entity = await createArticle({ title: "T", body: BODY });
-    const entityId = entity._id as string;
-
-    const store = await getRuntimeStore("test_ont");
-    const map = await store.getChunkEmbeddingsForEntityProperty!(entityId, "body");
-    expect(Object.keys(map).length).toBeGreaterThan(1);
-    for (const vector of Object.values(map)) {
-      expect(vector).toEqual(VECTOR);
-    }
-    // The rows carry the vector internally, but reads through the API
-    // never expose it — spot-check the fields projection.
-    const projected = await app.inject({
-      method: "GET",
-      url: `/api/ontologies/test_ont/runtime/lenses/docs_view/entities/article/${entityId}?fields=body`,
-    });
-    expect(projected.json().body).toBe(BODY);
   });
 });

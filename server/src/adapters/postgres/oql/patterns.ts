@@ -18,7 +18,7 @@
  *   disconnected pattern parts become a filtered cartesian join.
  * - An undirected relationship is one condition carrying both readings
  *   of the edge, so a two-ended match binds each row twice and a
- *   self-loop binds once — the reference adapter's row counts.
+ *   self-loop binds once.
  * - An inline property map is one cast equality per key, on the join of
  *   the element that carries it.
  * - An OPTIONAL MATCH is ONE `LEFT JOIN` over the parenthesized

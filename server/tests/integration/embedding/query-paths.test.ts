@@ -131,7 +131,7 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
         role,
       });
     }
-    // Search entries are built in the background (none on Neo4j).
+    // Search entries are built in the background.
     await drainSearchWork();
   }
 

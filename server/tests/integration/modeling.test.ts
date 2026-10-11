@@ -17,7 +17,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
 import { closeStores, getModelingStore, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
-import { supportsMultipleOntologies } from "./tiers.js";
 
 let app: FastifyInstance;
 
@@ -435,7 +434,7 @@ describe("full-schema snapshot", () => {
 });
 
 describe("ontology scoping", () => {
-  it.skipIf(!supportsMultipleOntologies)("two ontologies hold the same type key independently", async () => {
+  it("two ontologies hold the same type key independently", async () => {
     await createOntology("other_ont");
 
     const inTest = await app.inject({
@@ -480,7 +479,7 @@ describe("ontology scoping", () => {
     expect(otherAfter.json()).toHaveLength(1);
   });
 
-  it.skipIf(!supportsMultipleOntologies)("the same lens key exists in every ontology independently", async () => {
+  it("the same lens key exists in every ontology independently", async () => {
     await createOntology("other_ont");
     for (const ontology of ["test_ont", "other_ont"]) {
       const res = await app.inject({
@@ -492,7 +491,7 @@ describe("ontology scoping", () => {
     }
   });
 
-  it.skipIf(!supportsMultipleOntologies)("a schema mutation in one ontology never appears in another", async () => {
+  it("a schema mutation in one ontology never appears in another", async () => {
     await createOntology("other_ont");
     await createEntityType("person", "Person");
     const other = await app.inject({

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, FileUp, Plus, SearchX } from 'lucide-react'
+import { ChevronLeft, FileUp, Plus } from 'lucide-react'
 import { useBlocker, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useFeatures, useRetrievers, useRuntimeSchema, useSearchCatalog } from '@/api/hooks'
@@ -40,13 +40,12 @@ const TAB = 'retriever-agents'
  */
 export function RetrieversTab({ ontologyKey, lens }: { ontologyKey: string; lens: Lens }) {
   const features = useFeatures().data
-  const supported = features?.searchIndices === true
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedKey = searchParams.get('agent')
   const [creating, setCreating] = useState<{ name: string; key: string } | null>(null)
   const [dialog, setDialog] = useState<'new' | 'import' | null>(null)
-  const agents = useRetrievers(ontologyKey, lens.key, supported)
-  const catalog = useSearchCatalog(ontologyKey, lens.key, supported)
+  const agents = useRetrievers(ontologyKey, lens.key)
+  const catalog = useSearchCatalog(ontologyKey, lens.key)
   const schema = useRuntimeSchema(ontologyKey, lens.key)
   const queryClient = useQueryClient()
   const existingKeys = agents.data?.map((a) => a.key) ?? []
@@ -59,9 +58,6 @@ export function RetrieversTab({ ontologyKey, lens }: { ontologyKey: string; lens
   const refresh = () => Promise.all([qk.retrievers(ontologyKey, lens.key), qk.assistants(ontologyKey, lens.key, 'retrievers')]
     .map((queryKey) => queryClient.invalidateQueries({ queryKey })))
 
-  if (features?.searchIndices === false) {
-    return <EmptyState icon={SearchX} title="Retrievers are not available" description="Retrievers answer over search indices, which this server's storage adapter does not support." />
-  }
   if (agents.isPending || catalog.isPending || schema.isPending) {
     return <div className="space-y-3"><Skeleton className="h-8 w-64" /><Skeleton className="h-40 rounded-xl" /></div>
   }

@@ -15,6 +15,7 @@ const holder: { store: MockModelingStore } = { store: createMockModelingStore() 
 
 vi.mock("../../src/core/ports.js", () => ({
   getModelingStore: async () => holder.store,
+  getSearchIndexStore: async () => holder.store.searchIndices(),
   getRuntimeStore: async () => ({}),
 }));
 
@@ -187,11 +188,10 @@ describe("export", () => {
     });
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
-    // An adapter without search indices exports the set a new ontology
-    // starts with, and no search-index part.
     expect(res.json()).toEqual({
       formatVersion: "7.0",
       keywordLanguages: ["german", "english"],
+      searchIndices: { custom: [], disabled: [] },
       entityTypes: [],
       relationTypes: [],
       lenses: [],
@@ -234,8 +234,8 @@ describe("export", () => {
     expect(res.statusCode).toBe(200);
     const lens = res.json().lenses[0];
     expect("includes" in lens).toBe(false);
-    // An adapter without search indices has no retrievers.
-    expect(lens.assistants).toEqual({ agents: [] });
+    expect(lens.indexInclusions).toEqual([]);
+    expect(lens.assistants).toEqual({ agents: [], retrievers: [] });
     expect(lens.savedQueries).toEqual([]);
   });
 
@@ -404,8 +404,6 @@ describe("import", () => {
     expect(holder.store.createLens).toHaveBeenCalledTimes(1);
     expect(holder.store.addIncludesType).toHaveBeenCalledTimes(2);
     // No provider: no vector-index DDL at all.
-    expect(holder.store.createVectorIndex).not.toHaveBeenCalled();
-    expect(holder.store.createDocumentVectorIndex).not.toHaveBeenCalled();
     expect(holder.store.ensureSavedQueryVectorIndex).not.toHaveBeenCalled();
   });
 
@@ -514,11 +512,6 @@ describe("import keyword languages", () => {
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
     expect(indices.setSearchSettings).not.toHaveBeenCalled();
   });
-
-  it("an adapter without search indices checks the set and keeps nothing of it", async () => {
-    const res = await postImport({ ...empty, keywordLanguages: ["english"] });
-    expect(res.statusCode, res.body).toBe(201);
-  });
 });
 
 describe("import search indices", () => {
@@ -568,18 +561,11 @@ describe("import search indices", () => {
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
   });
 
-  it("5.0 carries no indices; an adapter without search indices validates and keeps nothing", async () => {
+  it("5.0 carries no indices", async () => {
     const indices = withSearchIndices();
     const legacy = await postImport(payload({ custom: [{ ...PEOPLE_INDEX, fields: ["nope"] }] }, "5.0"));
     expect(legacy.statusCode, legacy.body).toBe(201);
     expect(indices.createIndex).not.toHaveBeenCalled();
-
-    delete (holder.store as unknown as { searchIndices?: unknown }).searchIndices;
-    holder.store.createEntityType.mockClear();
-    const kept = await postImport(payload({ custom: [PEOPLE_INDEX], disabled: [] }));
-    expect(kept.statusCode, kept.body).toBe(201);
-    const invalid = await postImport(payload({ custom: [{ ...PEOPLE_INDEX, entityType: "ghost" }] }));
-    expect(invalid.statusCode).toBe(422);
   });
 });
 
@@ -613,11 +599,6 @@ describe("lens index inclusions", () => {
     });
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.json().lenses[0].indexInclusions).toEqual(["people", "person~default"]);
-    // An adapter without search indices omits the list, so an import into
-    // one that has them applies the migration rule.
-    delete (holder.store as unknown as { searchIndices?: unknown }).searchIndices;
-    const plain = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
-    expect(plain.json().lenses[0]).not.toHaveProperty("indexInclusions");
   });
 
   it("writes each lens's list exactly, once the indices exist — the root rule is not checked", async () => {
@@ -693,7 +674,7 @@ describe("retrievers", () => {
   });
   const retrievers = (...agents: unknown[]) => ({ assistants: { retrievers: agents } });
 
-  it("export carries each lens's agents in their portable form; an adapter without search indices none", async () => {
+  it("export carries each lens's agents in their portable form", async () => {
     const indices = withSearchIndices();
     const now = new Date("2026-10-06T00:00:00Z");
     indices.listRetrievers.mockResolvedValue([
@@ -706,9 +687,6 @@ describe("retrievers", () => {
     });
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.json().lenses[0].assistants).toEqual({ agents: [], retrievers: [agent(2, CONFIG)] });
-    delete (holder.store as unknown as { searchIndices?: unknown }).searchIndices;
-    const plain = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
-    expect(plain.json().lenses[0].assistants).toEqual({ agents: [] });
   });
 
   it("stores each agent create-only after the indices; references are not checked", async () => {
@@ -798,14 +776,6 @@ describe("retrievers", () => {
     ]);
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
     expect(indices.saveRetriever).not.toHaveBeenCalled();
-  });
-
-  it("an adapter without search indices checks the agents and keeps none", async () => {
-    holder.store.createLens.mockResolvedValue(LENS_DATA);
-    const res = await postImport(payload(retrievers(agent(2, CONFIG))));
-    expect(res.statusCode, res.body).toBe(201);
-    const invalid = await postImport(payload(retrievers(agent(2, { indices: [] }))));
-    expect(invalid.statusCode).toBe(422);
   });
 });
 
@@ -1075,16 +1045,6 @@ describe("import conflicts", () => {
 // ---------------------------------------------------------------------------
 
 describe("import validations", () => {
-  it("rejects a reserved entity type key", async () => {
-    const res = await postImport({
-      entityTypes: [entityType("ontology", "Bad")],
-      relationTypes: [],
-      lenses: [],
-    });
-    expect(res.statusCode).toBe(422);
-    expect(res.json().error.message).toContain("reserved");
-    expect(holder.store.createEntityType).not.toHaveBeenCalled();
-  });
 
   it("rejects a relation type endpoint missing from the payload", async () => {
     const res = await postImport({
@@ -1398,7 +1358,7 @@ describe("import key patterns", () => {
     expect(res.statusCode).toBe(201);
   });
 
-  it("reports pattern violations, structural rules and reserved keys together", async () => {
+  it("reports pattern violations and structural rules together", async () => {
     const res = await postImport({
       entityTypes: [entityType("_bad", "Bad")],
       relationTypes: [
@@ -1435,7 +1395,7 @@ describe("import key patterns", () => {
 // ---------------------------------------------------------------------------
 
 describe("import side effects with a provider", () => {
-  it("creates vector indexes with filterables, chunk indexes per document property, and embeds saved-query descriptions", async () => {
+  it("embeds saved-query descriptions and ensures their index", async () => {
     const embedded: string[] = [];
     setEmbeddingProvider({
       dimensions: 8,
@@ -1474,10 +1434,6 @@ describe("import side effects with a provider", () => {
       ],
     });
     expect(res.statusCode).toBe(201);
-    // Per-type index with the non-document properties as filterables.
-    expect(holder.store.createVectorIndex).toHaveBeenCalledWith("person", 8, ["name"]);
-    // One chunk index per document property.
-    expect(holder.store.createDocumentVectorIndex).toHaveBeenCalledWith("person", "bio", 8);
     // The description was embedded as written and handed to the store.
     expect(embedded).toEqual(["Find people by name"]);
     expect(holder.store.upsertSavedQuery.mock.calls[0]![8]).toEqual([0.1, 0.2]);

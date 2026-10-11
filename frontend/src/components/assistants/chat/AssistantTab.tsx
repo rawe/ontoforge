@@ -21,16 +21,14 @@ export function AssistantTab({
   ontologyKey,
   lensKey,
   kind,
-  enabled = true,
   children,
 }: {
   ontologyKey: string
   lensKey: string
   kind: AssistantKind
-  enabled?: boolean
   children: (assistant: RuntimeAssistant, picker: ReactNode) => ReactNode
 }) {
-  const assistants = useAssistants(ontologyKey, lensKey, kind, enabled)
+  const assistants = useAssistants(ontologyKey, lensKey, kind)
   const [searchParams, setSearchParams] = useSearchParams()
   const requested = searchParams.get(PARAM)
   const list = assistants.data

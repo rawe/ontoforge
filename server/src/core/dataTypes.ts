@@ -8,8 +8,8 @@
  * - A boolean is not a number: `true` is rejected for integer and float,
  *   never coerced to 1.
  * - Temporals are real values, not text: `date` coerces to a validated ISO
- *   `YYYY-MM-DD` string (the port-safe calendar-date form, see
- *   `adapters/neo4j/temporal.ts`), `datetime` to a JS `Date`; a naive
+ *   `YYYY-MM-DD` string (the port-safe calendar-date form), `datetime`
+ *   to a JS `Date`; a naive
  *   datetime (no offset) is treated as UTC.
  *
  * The two halves of a rejection message speak two different type systems,
@@ -128,10 +128,10 @@ const INTEGER_PATTERN = /^[+-]?\d+$/;
 
 /**
  * Reject a NUL character in any text bound for storage or comparison.
- * PostgreSQL text cannot hold NUL; Neo4j happens to accept it. The one
- * rejection keeps every adapter identical (only craftable input) — the
- * same wording guards stored strings, `contains` filter values and the
- * free-text search term.
+ * PostgreSQL text cannot hold NUL, so it is rejected above the port with
+ * a validation error rather than failing in storage (only craftable
+ * input) — the same wording guards stored strings, `contains` filter
+ * values and the free-text search term.
  */
 export function assertNoNulCharacter(text: string, key: string): void {
   if (text.includes("\u0000")) {

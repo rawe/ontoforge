@@ -7,15 +7,13 @@
  * design transfer — 6.0 round trip and 5.0 conversion — and retrieval of
  * a two-relation question on the real search engine (keyword mode, no
  * provider): fusion of two sub-queries, and one sub-query plus a filter.
- * On an adapter without search indices every route answers
- * FEATURE_DISABLED. Requires the docker-compose database.
+ * Requires the docker-compose database.
  */
 
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
-import { settings } from "../../src/config.js";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 
 import { setAiModel } from "../../src/core/ai.js";
@@ -32,7 +30,6 @@ import { wipeDatabase } from "./reset.js";
 
 type Row = Record<string, any>;
 
-const postgres = settings.DB_BACKEND === "postgres";
 const O = "agents";
 const MODEL = `/api/ontologies/${O}/model`;
 const RUNTIME = `/api/ontologies/${O}/runtime/lenses/all`;
@@ -95,23 +92,7 @@ beforeEach(async () => {
   setEmbeddingProvider(null);
 });
 
-it.skipIf(postgres)("an adapter without search indices answers FEATURE_DISABLED for every retriever route", async () => {
-  await post("/api/ontologies", { key: O });
-  await post(`${MODEL}/lenses`, { key: "all", name: "All" });
-  for (const res of [
-    await request("GET", AGENTS),
-    await request("PUT", `${AGENTS}/people`, BODY),
-    await request("POST", `${AGENTS}/import`, { key: "people", ...BODY }),
-    await request("GET", `${RUNTIME}/ai/assistants/retrievers`),
-    await request("POST", `${RUNTIME}/ai/assistants/retrievers/people/chat`, { message: "Who?" }),
-    await request("POST", `${RUNTIME}/ai/assistants/retrievers/_default/retrieve`, { query: "Who?" }),
-  ]) {
-    expect(res.statusCode, res.body).toBe(422);
-    expect(res.json().error.details.code).toBe("FEATURE_DISABLED");
-  }
-});
-
-describe.skipIf(!postgres)("retrievers", () => {
+describe("retrievers", () => {
   /** person (name, email, bio) —works_for (role)→ company; —lives_in→ city; lenses all and people (person only). */
   async function schema(o = O): Promise<{ peopleLensId: string }> {
     const model = `/api/ontologies/${o}/model`;

@@ -11,7 +11,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { runQuery } from "../../../src/adapters/postgres/errors.js";
 import { createApp } from "../../../src/app.js";
-import { settings } from "../../../src/config.js";
 import { getEmbeddingProvider } from "../../../src/core/embedding.js";
 import { closeStores, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
@@ -40,7 +39,7 @@ async function indexWidthIn(namespace: string, indexName: string): Promise<numbe
   return match === null ? null : Number(match[1]);
 }
 
-describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "postgres")(
+describe.skipIf(!ollamaUp)(
   "ontology provisioning with a live provider (Ollama)",
   () => {
     beforeAll(async () => {

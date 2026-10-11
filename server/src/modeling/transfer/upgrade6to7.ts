@@ -28,7 +28,7 @@ export const upgrade6to7: Upgrader = (raw) => {
       formatVersion: "7.0",
       lenses: payload.lenses.map(({ aiAgents, retrieverAgents, ...lens }) => ({
         ...lens,
-        // An adapter without search indices exported no retrievers.
+        // A payload without retrievers keeps none.
         assistants: retrieverAgents === undefined
           ? { agents: aiAgents }
           : { agents: aiAgents, retrievers: retrieverAgents },

@@ -13,7 +13,6 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { runQuery } from "../../../src/adapters/postgres/errors.js";
-import { settings } from "../../../src/config.js";
 import type {
   ModelingStore,
   SearchEntryWrite,
@@ -126,7 +125,7 @@ async function queueCount(): Promise<number> {
   return result.rows[0]!.n as number;
 }
 
-describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL search-index storage", () => {
+describe("PostgreSQL search-index storage", () => {
   let modeling: ModelingStore;
   let store: SearchIndexStore;
   let personTypeId: string;

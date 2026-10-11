@@ -5,7 +5,15 @@
 
 import { vi, type Mock } from "vitest";
 
-import type { RuntimeStore } from "../../src/core/ports.js";
+import type {
+  RankedSearchEntry,
+  RuntimeStore,
+  SearchEntryQuery,
+  SearchGenerationRecord,
+  SearchIndexRecord,
+} from "../../src/core/ports.js";
+import { deriveManagedIndices, type SearchIndexSchema } from "../../src/core/searchIndex.js";
+import { createMockSearchIndexStore, type MockSearchIndexStore } from "../mockSearchIndexStore.js";
 
 export const NOW = new Date("2025-01-01T12:00:00.000Z");
 
@@ -163,16 +171,19 @@ export function makeRelation(
 }
 
 /** Every port method as a mock — completeness is compiler-enforced. The
- * one non-method member, the store's ontology binding, stays a value. The
- * store keeps its own search storage: no search indices. */
+ * one non-method member, the store's ontology binding, stays a value; the
+ * search-index store it hands out is a mock too (`indices`). */
 export type MockRuntimeStore = {
-  [K in Exclude<keyof RuntimeStore, "ontologyKey" | "searchIndices">]: Mock;
-} & { ontologyKey: string };
+  [K in Exclude<keyof RuntimeStore, "ontologyKey">]: Mock;
+} & { ontologyKey: string; indices: MockSearchIndexStore };
 
 /** A mock store whose reads default to "nothing stored". */
 export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeStore {
+  const indices = createMockSearchIndexStore(ontologyKey);
   return {
     ontologyKey,
+    indices,
+    searchIndices: vi.fn(() => indices),
     supportsKeywordRanking: vi.fn(() => false),
     supportsSearchPathConditions: vi.fn(() => false),
     getFullSchemaWithLensInclusions: vi.fn(async () => null),
@@ -184,13 +195,7 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     getEntityById: vi.fn(async () => null),
     updateEntity: vi.fn(async () => null),
     deleteEntity: vi.fn(async () => false),
-    getChunkEmbeddingsForEntityProperty: vi.fn(async () => ({})),
-    deleteChunksForEntityProperty: vi.fn(async () => undefined),
-    createDocumentChunks: vi.fn(async () => undefined),
-    validateVectorIndexedProperties: vi.fn(() => undefined),
-    documentSearchSemantic: vi.fn(async () => []),
     getEntitiesByIds: vi.fn(async () => ({})),
-    propertySearchSemantic: vi.fn(async () => []),
     searchSavedQueries: vi.fn(async () => []),
     createRelation: vi.fn(),
     listRelations: vi.fn(async () => [[], 0]),
@@ -204,4 +209,69 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
 
 export function asRuntimeStore(mock: MockRuntimeStore): RuntimeStore {
   return mock;
+}
+
+/**
+ * Let the store's search indices answer through the managed indices of
+ * `schema`: each has a ready generation of both representations — the
+ * semantic one of `modelId` — and `rank` answers every ranking. Index
+ * `<type>~default` ranks a type's own fields, `<type>~<property>` the
+ * passages of a document property.
+ */
+export function withManagedIndices(
+  store: MockRuntimeStore,
+  schema: SearchIndexSchema,
+  modelId: string | undefined,
+  rank: (query: SearchEntryQuery) => RankedSearchEntry[],
+): void {
+  const records: SearchIndexRecord[] = deriveManagedIndices(schema).map(({ kind, definition }) => ({
+    searchIndexId: `id-${definition.key}`,
+    key: definition.key,
+    kind,
+    definition,
+    createdAt: NOW,
+    updatedAt: NOW,
+  }));
+  const generations: SearchGenerationRecord[] = records.flatMap((index) =>
+    (["semantic", "keyword"] as const).map((representation) => ({
+      generationId: `${index.key}/${representation}`,
+      searchIndexId: index.searchIndexId,
+      representation,
+      definitionHash: "h",
+      modelId: representation === "semantic" ? (modelId as string) : null,
+      dimensions: null,
+      languages: representation === "keyword" ? ["german", "english"] : null,
+      state: "ready" as const,
+      total: 0,
+      done: 0,
+      failed: 0,
+      createdAt: NOW,
+      readyAt: NOW,
+    })),
+  );
+  store.indices.listIndices.mockResolvedValue(records);
+  store.indices.listGenerations.mockResolvedValue(generations);
+  store.indices.rankEntries.mockImplementation(async (query: SearchEntryQuery) => rank(query));
+}
+
+/** One ranked entry: an entity's own fields, or — with `passage` — one
+ * passage of a document. */
+export function rankedEntry(
+  entityId: string,
+  score: number,
+  passage?: { startChar: number; charLength: number; text: string },
+): RankedSearchEntry {
+  return {
+    entityId,
+    partKind: passage === undefined ? "self" : "passage",
+    groupNo: 0,
+    partId: passage === undefined ? "" : "0",
+    relationType: null,
+    targetType: null,
+    targetId: null,
+    startChar: passage?.startChar ?? null,
+    charLength: passage?.charLength ?? null,
+    text: passage?.text ?? entityId,
+    score,
+  };
 }

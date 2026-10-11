@@ -33,8 +33,7 @@ The server is `--base-url`, else `ONTOFORGE_BASE_URL`, else `http://localhost:80
   included), writes `data.json` through the schema's unscoped lens, then waits until
   every search index of the ontology has built its entries, printing progress. Failed
   items are reported, and after 15 minutes the tool stops waiting with a warning — the
-  data is loaded either way and the indices keep building in the background. On a
-  server whose storage has no search indices (Neo4j) it rebuilds search data instead.
+  data is loaded either way and the indices keep building in the background.
   Refused when `fx_<name>` already exists (unload first). When a step after creating the
   ontology fails, the tool prints the server's error and leaves the partial ontology in
   place — run `unload` before loading again.
@@ -72,8 +71,6 @@ on an old file, fix the JSON by hand once, then load and save.
   server are never touched.
 - Loading builds search entries with whatever embedding provider the server is configured
   with — a cloud provider is called (and billed) if the server uses one.
-- Neo4j holds at most one ontology per server: a fixture loads there only into an
-  otherwise empty server.
 
 ## Registry
 

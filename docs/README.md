@@ -148,7 +148,7 @@ See [interfaces.md](interfaces.md).
 Some capabilities depend on external providers and are absent unless one is configured.
 The server reports what is available, and clients hide what is not.
 
-- **Semantic search** needs an embedding provider. Without it, keyword ranking remains available where the adapter supports it.
+- **Semantic search** needs an embedding provider. Without it, keyword ranking remains available.
 - **AI features** need a language-model provider. Without it, no assistant can answer.
 - **Entity identity comparison** needs a Decision provider. It remains independent of
   language-model and embedding availability; see its [capability](capabilities/entity-identity-comparison.md).

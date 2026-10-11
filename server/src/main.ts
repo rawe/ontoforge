@@ -16,60 +16,24 @@ import {
   getEmbeddingProvider,
   initEmbeddingProvider,
 } from "./core/embedding.js";
-import {
-  closeStores,
-  ensureSemanticIndexes,
-  getModelingStore,
-  getOntologyRegistry,
-  initStores,
-} from "./core/ports.js";
+import { closeStores, ensureSemanticIndexes, initStores } from "./core/ports.js";
 import { startSearchWorker, stopSearchWorker } from "./runtime/indexing/worker.js";
-
-/**
- * Name any stored type whose key is now reserved, walking the registry
- * — the check runs per ontology, and a server with zero ontologies has
- * nothing to check.
- *
- * Such types can only predate the reserved-key check. They are left in
- * place — renaming a type key is destructive and is the operator's call —
- * but without this warning their only symptom is an unexplained 500 from
- * the modeling API once instance data exists under them.
- */
-export async function warnAboutReservedTypeKeysInUse(): Promise<void> {
-  for (const ontology of await getOntologyRegistry().listOntologies()) {
-    const ontologyKey = ontology["key"] as string;
-    const store = await getModelingStore(ontologyKey);
-    const collisions = await store.findReservedTypeKeysInUse();
-    for (const collision of collisions) {
-      console.warn(
-        `Stored ${collision.kind} '${collision.key}' in ontology ` +
-          `'${ontologyKey}' uses a reserved key. It predates the ` +
-          "reserved-key check and can corrupt schema reads once instance " +
-          "data exists under it. Export its data, delete the type, and " +
-          "recreate it under a different key.",
-      );
-    }
-  }
-}
 
 /**
  * Run the ordered startup sequence and return the ready-to-listen app.
  *
  * 1. Connect storage, verify reachability, ensure constraints and indexes.
- * 2. Report any stored type key that the adapter now reserves.
- * 3. Initialize the embedding provider, if configured.
- * 4. Initialize the language-model provider, if configured.
- * 5. If embeddings are enabled, reconcile vector index widths against the
+ * 2. Initialize the embedding provider, if configured.
+ * 3. Initialize the language-model provider, if configured.
+ * 4. If embeddings are enabled, reconcile vector index widths against the
  *    provider — every mismatch is WARNED about and nothing is repaired
  *    (`docs/decisions.md#behaviour`); rebuild is where repair happens.
- * 6. Start the search worker, if the adapter stores search indices — it
- *    reconciles every ontology's index generations, then builds entries
- *    from the queue in the background.
- * 7. Start both MCP servers (mounted inside `createApp`).
+ * 5. Start the search worker — it reconciles every ontology's index
+ *    generations, then builds entries from the queue in the background.
+ * 6. Start both MCP servers (mounted inside `createApp`).
  */
 export async function startServer(): Promise<FastifyInstance> {
   await initStores();
-  await warnAboutReservedTypeKeysInUse();
   initEmbeddingProvider();
   initAiModel();
   initDecisionModel();
@@ -78,7 +42,7 @@ export async function startServer(): Promise<FastifyInstance> {
     await ensureSemanticIndexes(embeddingProvider.dimensions);
   }
   await startSearchWorker();
-  // Step 7: the MCP mounts are part of createApp.
+  // Step 6: the MCP mounts are part of createApp.
   return createApp();
 }
 

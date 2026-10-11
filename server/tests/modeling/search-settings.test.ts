@@ -1,7 +1,7 @@
 /**
  * Search settings over a mocked store: the keyword language set (validated,
  * canonical order) and the managed-index switches, both reconciled after a
- * change; an adapter without search indices answers FEATURE_DISABLED.
+ * change.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -14,6 +14,7 @@ const holder: { store: MockModelingStore } = { store: createMockModelingStore() 
 
 vi.mock("../../src/core/ports.js", () => ({
   getModelingStore: async () => holder.store,
+  getSearchIndexStore: async () => holder.store.searchIndices(),
   getRuntimeStore: async () => ({}),
 }));
 
@@ -135,16 +136,5 @@ describe("search settings", () => {
       "disabledIndices.2": "'nope' is not a managed search index",
     });
     expect(indices.setSearchSettings).not.toHaveBeenCalled();
-  });
-
-  it("an adapter without search indices answers FEATURE_DISABLED", async () => {
-    for (const request of [
-      { url: URL },
-      { method: "PUT" as const, url: URL, payload: { keywordLanguages: ["german"] } },
-    ]) {
-      const res = await app.inject(request);
-      expect(res.statusCode).toBe(422);
-      expect(res.json().error.details.code).toBe("FEATURE_DISABLED");
-    }
   });
 });

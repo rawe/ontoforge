@@ -112,11 +112,11 @@ agent ever spans two. The architecture makes that structural rather than checked
   The service layer obtains a modeling or runtime store *for* an ontology key; every
   method of that store resolves within the binding, and binding an unknown key fails as
   not found before any other rule runs. Registry operations live on a separate registry
-  port beside the bound stores; an adapter that stores search indices binds a third
-  store, for them, the same way.
+  port beside the bound stores, and the search indices sit in a third store, bound the
+  same way.
 - **The physical isolation mechanism is the adapter's private business.** Nothing above
   the port knows how an ontology's data is kept apart from its neighbours'; the contract
-  and each adapter's mechanism are in [storage-adapters.md](storage-adapters.md).
+  and the adapter's mechanism are in [storage-adapters.md](storage-adapters.md).
 
 The registry — not any storage catalog — is the authoritative list of ontologies. Zero
 ontologies is a valid server state: a fresh server starts empty, nothing is auto-created
@@ -197,9 +197,6 @@ is the summary; each one is stated with its consequences in
 - A relation type may only be created if both endpoint entity types exist.
 - An entity type cannot be deleted while any relation type references it.
 - `document` properties are permitted on entity types only, on creation and on import.
-- Type keys that would collide with the active adapter's own schema objects are rejected.
-  The adapter declares the reserved set; the service enforces it. Pre-existing collisions
-  are reported at startup, never silently rewritten.
 - Relation endpoints are fixed at creation. Properties may change; endpoints may not.
 
 ## Lens scoping
@@ -305,12 +302,11 @@ and what it refuses is in
 
 ## Search indexing
 
-An adapter that stores search indices keeps, per index, entries composed from the
+Every search index keeps entries composed from the
 current state of entities — their own fields, their relations together with the entities
 at the other end, and the passages of their documents. Entries are built in the
 background, never on the request path, so search over them is eventually consistent
-([decisions.md](decisions.md#storage)). On an adapter that stores no search indices,
-writes carry no search work and no worker runs.
+([decisions.md](decisions.md#storage)).
 
 **Every write queues its work in its own transaction.** Entity and relation writes —
 create, update, delete, document edits — hand the store, with the write, the search work
@@ -370,8 +366,7 @@ Two refinements:
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
 stays one of the six. A request for an unavailable search strategy, search with no available strategy,
 saved-query discovery with no embedding provider, an AI request with no
-language-model provider configured — or a search-settings, search-index or retriever
-request to a storage adapter without search indices — answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
+language-model provider configured answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
 An assistant thread that is unknown, expired or bound to another assistant answers
 `404 RESOURCE_NOT_FOUND` with `details.code` of `THREAD_NOT_FOUND`, and a message to a
 thread still running `409 RESOURCE_CONFLICT` with `details.code` of `THREAD_BUSY`
@@ -390,24 +385,22 @@ Ordered, and failure at any step prevents serving:
    exist, and bring storage of an older storage version up to date
    ([decisions.md](decisions.md#storage)). Per-ontology storage is provisioned when an
    ontology is created; at boot only an upgrade reaches into it.
-2. Walk the registry and report any stored type key that the adapter now reserves.
-3. Initialize the embedding provider, if configured.
-4. Initialize the language-model and decision-model providers, if configured.
-5. If embeddings are enabled, compare the width of every registered ontology's
+2. Initialize the embedding provider, if configured.
+3. Initialize the language-model and decision-model providers, if configured.
+4. If embeddings are enabled, compare the width of every registered ontology's
    saved-query description index with the provider's and warn on mismatch — see
    [capabilities/search.md](capabilities/search.md#vector-index-width-drift). Search
-   indices need no such check: a changed model starts new generations in step 6.
-6. Start the [search indexing](#search-indexing) worker, if the adapter stores search
-   indices. It runs in the background: it first brings every ontology's managed indices
+   indices need no such check: a changed model starts new generations in step 5.
+5. Start the [search indexing](#search-indexing) worker. It runs in the background: it first brings every ontology's managed indices
    in line with its schema, removes what interrupted generation removals left behind and
    brings every ontology's generations in line with the current definitions, embedding
    model and keyword language sets — a changed model or language set starts its new
    generations here — then drains the queue. Its failures are logged
    and never prevent serving; at shutdown it stops after the pass it is in.
-7. Start both MCP servers.
+6. Start both MCP servers.
 
-The registry walks in steps 2, 5 and 6 do nothing when no ontology exists — a zero-ontology
-server boots clean. Note step 5 warns and does not repair — deliberately, for the reason
+The registry walks in steps 4 and 5 do nothing when no ontology exists — a zero-ontology
+server boots clean. Note step 4 warns and does not repair — deliberately, for the reason
 given in [decisions.md](decisions.md#behaviour). Rebuild is where repair happens, one
 ontology at a time.
 

@@ -1,6 +1,5 @@
 /**
- * Search over search indices (spec §8): the search of every adapter that
- * stores them. One engine serves the index search (`searchByIndices`,
+ * Search over search indices (spec §8). One engine serves the index search (`searchByIndices`,
  * by index keys) and the default search (`searchThroughIndices`, the
  * `GET search` parameters mapped onto default and passage indices):
  *
@@ -199,7 +198,7 @@ export interface SearchIndexCatalogEntry {
 /**
  * The indices the lens may search (`searchableIndices`: switched-off
  * managed ones never), each projected through the lens, with its build
- * state. Adapter without search indices -> disabled feature.
+ * state.
  */
 export async function searchIndexCatalog(
   lensKey: string,
@@ -559,14 +558,8 @@ export interface IndexSearchResponse {
   hits: IndexSearchHit[];
 }
 
-/** The search-index store behind a runtime store, or the disabled-feature
- * refusal on an adapter without search indices. */
+/** The search-index store behind a runtime store. */
 export function indexStoreOf(store: RuntimeStore): SearchIndexStore {
-  if (store.searchIndices === undefined) {
-    throw new ValidationError("Search indices are not supported by the active storage adapter", {
-      code: "FEATURE_DISABLED",
-    });
-  }
   return store.searchIndices();
 }
 

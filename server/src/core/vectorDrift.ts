@@ -4,27 +4,15 @@
  *
  * A vector index fixes its width when it is created, so changing the
  * embedding model leaves indexes that reject every vector the new model
- * produces. Detecting that is each adapter's own business — the catalog
- * read and the physical naming differ per engine — but the *report* is
- * contract-visible and must not: every backend says the same thing in
- * the same words, and says it in the vocabulary of the API — by entity
- * type, by document property, by search scope — never by a physical
- * index name, a vendor, or a statement.
+ * produces. Detecting that is the adapter's own business — the catalog
+ * read and the physical naming are storage details — but the *report* is
+ * contract-visible: it speaks the vocabulary of the API — by search
+ * scope — never a physical index name, a vendor, or a statement.
  *
- * That is why the words live here, above the adapters, and only the
+ * That is why the words live here, above the adapter, and only the
  * words: nothing in this module knows how an index is found, named, or
  * dropped.
  */
-
-/** The semantic index of one entity type. */
-export function entityTypeScope(entityTypeKey: string): string {
-  return `entity type '${entityTypeKey}'`;
-}
-
-/** The chunk index of one document property. */
-export function documentPropertyScope(entityTypeKey: string, propertyKey: string): string {
-  return `document property '${propertyKey}' on entity type '${entityTypeKey}'`;
-}
 
 /** The saved-query description index. */
 export const SAVED_QUERY_SCOPE = "saved-query descriptions";
@@ -36,7 +24,7 @@ export const SAVED_QUERY_SCOPE = "saved-query descriptions";
  * column, and a drop leaves every one of them where it was. What a drop
  * costs is the search: it stays down until every vector has been
  * regenerated at the new width, which is one model call per stored item
- * and so the operator's call to make. The startup and per-type create
+ * and so the operator's call to make. The startup and create
  * paths therefore only say what they found and point at the one endpoint
  * that makes it. A mismatch report never fails the ensure.
  */

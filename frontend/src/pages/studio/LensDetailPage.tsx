@@ -3,7 +3,7 @@ import { ChevronLeft, ExternalLink, Layers, Plug, SquareTerminal, Trash2 } from 
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
-import { useFeatures, useLenses } from '@/api/hooks'
+import { useLenses } from '@/api/hooks'
 import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { EmptyState } from '@/components/EmptyState'
 import { AgentsTab } from '@/components/studio/AgentsTab'
@@ -43,8 +43,6 @@ export function LensDetailPage() {
   const tab: Tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : 'scope'
 
   const { data: lenses, isPending } = useLenses(ontologyKey)
-  // Retrievers search indices; hidden where the adapter has none (optimistic while loading).
-  const retrievers = useFeatures().data?.searchIndices !== false
   const lens = lenses?.find((o) => o.lensId === id)
 
   const update = useMutation({
@@ -175,11 +173,9 @@ export function LensDetailPage() {
             <TabsTrigger value="agents">
               <ASSISTANT_KINDS.agents.icon className="size-3.5" /> Agents
             </TabsTrigger>
-            {retrievers && (
-              <TabsTrigger value="retriever-agents">
-                <ASSISTANT_KINDS.retrievers.icon className="size-3.5" /> Retrievers
-              </TabsTrigger>
-            )}
+            <TabsTrigger value="retriever-agents">
+              <ASSISTANT_KINDS.retrievers.icon className="size-3.5" /> Retrievers
+            </TabsTrigger>
             <TabsTrigger value="queries">
               <SquareTerminal className="size-3.5" /> Saved queries
             </TabsTrigger>

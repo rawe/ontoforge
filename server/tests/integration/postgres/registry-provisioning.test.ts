@@ -13,7 +13,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { runQuery } from "../../../src/adapters/postgres/errors.js";
-import { settings } from "../../../src/config.js";
 import { ConflictError, StoreError } from "../../../src/core/exceptions.js";
 import { closeStores, getOntologyRegistry, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
@@ -57,7 +56,7 @@ async function registryRowCount(key: string): Promise<number> {
   return result.rowCount;
 }
 
-describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL registry provisioning", () => {
+describe("PostgreSQL registry provisioning", () => {
   beforeAll(async () => {
     await initStores();
     await wipeDatabase();

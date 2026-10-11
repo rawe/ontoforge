@@ -1,6 +1,6 @@
 /**
- * Integration suite — the name property against the real database, on
- * every adapter (contract tier): an entity type is created with its name
+ * Integration suite — the name property against the real database: an
+ * entity type is created with its name
  * property, reassigns it only to another of its string properties, and
  * cannot lose it; runtime schema reads show it where the lens exposes it;
  * transfer carries it in 6.0 and derives it for a 5.0 payload.

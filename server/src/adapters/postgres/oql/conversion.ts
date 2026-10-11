@@ -2,9 +2,8 @@
  * Result conversion — the compile-time plan, applied after the door.
  *
  * Rows come back in `rowMode: "array"` and are folded into the port's
- * `Row` map here; duplicate column names collapse onto the last value,
- * matching what the reference adapter's per-column `record.get` loop
- * does. The `ColumnConversion` plan is built at compile time, from
+ * `Row` map here; duplicate column names collapse onto the last value.
+ * The `ColumnConversion` plan is built at compile time, from
  * schema knowledge the runtime no longer has:
  *
  * - `count(*)` and other int8 columns arrive from `pg` as strings →

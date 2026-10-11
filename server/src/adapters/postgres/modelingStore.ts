@@ -1,11 +1,6 @@
 /**
  * `ModelingStore` on PostgreSQL.
  *
- * The reserved-key surface is final: under the jsonb mapping a type key
- * is only ever a value in a `type_key` column, never a table, column, or
- * index name, so both reserved sets are provably empty and
- * `findReservedTypeKeysInUse` answers without touching the database.
- *
  * Operation mapping:
  *
  * - Every method is a single statement through the `runQuery` door; the
@@ -14,39 +9,34 @@
  *   `withTransaction`, and `createEntityType`, which writes the type and
  *   its name property in one transaction.
  * - Deletes are one `DELETE` each, `rowCount > 0` as the boolean —
- *   `ON DELETE CASCADE` carries what the reference adapter needed
- *   explicit fan-out for (property definitions, inclusions, agents,
- *   saved queries), and the endpoint FKs' `ON DELETE RESTRICT` backs the
+ *   `ON DELETE CASCADE` carries the fan-out (property definitions,
+ *   inclusions, agents, saved queries), and the endpoint FKs' `ON DELETE RESTRICT` backs the
  *   service's in-use rule.
  * - Upserts (agents, saved queries, re-added inclusions) ride
  *   `INSERT … ON CONFLICT … DO UPDATE` on the composite uniques, with
  *   `RETURNING (id = $freshId) AS created` as the created-detection.
- * - Every UPDATE sets `updated_at = now()` explicitly where the
- *   reference adapter stamps `updatedAt` (no triggers; advances on no-op
- *   updates).
+ * - Every UPDATE that stamps `updatedAt` sets `updated_at = now()`
+ *   explicitly (no triggers; advances on no-op updates).
  * - Ids from the wire pass the strict `isUuid()` guard (`rows.ts`)
  *   before any statement; off-format input short-circuits to the
  *   method's not-found shape.
  *
  * The saved-query index methods are `ddl.ts`'s — physical naming and
- * index DDL live there, beside the init DDL. The adapter stores search
- * indices, so it implements none of the port's own-search-storage
- * methods (`core/ownSearch.ts`); its vector-index inventory is the
- * saved-query index alone.
+ * index DDL live there, beside the init DDL. The vector-index inventory
+ * is the saved-query index alone; search-index generations keep their
+ * own (`searchIndexStore.ts`).
  */
 
 
 import { toSql } from "pgvector";
 
-import type { ModelingStore, ReservedTypeKeyInUse, Row, SearchIndexStore } from "../../core/ports.js";
+import type { ModelingStore, Row, SearchIndexStore } from "../../core/ports.js";
 import type { NewPropertyDef, TypeKind } from "../../core/schemas.js";
 import * as vectorDdl from "./ddl.js";
 import { runQuery, withTransaction, type DbResult, type IsolationLevel, type Querier } from "./errors.js";
 import { camelizeRow, camelizeRows, isUuid } from "./rows.js";
 import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
 import { PostgresSearchIndexStore } from "./searchIndexStore.js";
-
-const NO_RESERVED_KEYS: ReadonlySet<string> = new Set();
 
 // Read column lists — the port-visible shape of each object; owner ids,
 // denormalized keys, and embeddings stay out of returned rows.
@@ -163,22 +153,6 @@ export class PostgresModelingStore implements ModelingStore {
     isolation: IsolationLevel = "READ COMMITTED",
   ): Promise<T> {
     return withTransaction(work, isolation, this.namespace);
-  }
-
-  // ------------------------------------------------------------------
-  // Reserved keys
-  // ------------------------------------------------------------------
-
-  reservedEntityTypeKeys(): ReadonlySet<string> {
-    return NO_RESERVED_KEYS;
-  }
-
-  reservedRelationTypeKeys(): ReadonlySet<string> {
-    return NO_RESERVED_KEYS;
-  }
-
-  findReservedTypeKeysInUse(): Promise<ReservedTypeKeyInUse[]> {
-    return Promise.resolve([]);
   }
 
   // ------------------------------------------------------------------
@@ -866,7 +840,7 @@ export class PostgresModelingStore implements ModelingStore {
   /** Upsert on the `(lens_id, key)` arbiter. Steps and parameters
    * arrive as serialized text this store does not interpret. A null
    * `lensKey` or `embedding` leaves the stored value untouched
-   * (COALESCE), mirroring the reference adapter's conditional SET. */
+   * (COALESCE). */
   async upsertSavedQuery(
     lensId: string,
     savedQueryId: string,
@@ -928,8 +902,7 @@ export class PostgresModelingStore implements ModelingStore {
     return camelizeRows(result.rows);
   }
 
-  /** No `updated_at` stamp: re-embedding is not a content change, and the
-   * reference adapter leaves the timestamp untouched here too. */
+  /** No `updated_at` stamp: re-embedding is not a content change. */
   async setSavedQueryEmbedding(savedQueryId: string, embedding: number[]): Promise<void> {
     if (!isUuid(savedQueryId)) {
       return;

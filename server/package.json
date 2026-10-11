@@ -33,7 +33,6 @@
     "fastify": "^5.10.0",
     "fastify-type-provider-zod": "^7.0.0",
     "langchain": "^1.5.16",
-    "neo4j-driver": "^6.2.0",
     "pg": "^8.23.0",
     "pgvector": "^0.3.0",
     "zod": "^4.4.3"

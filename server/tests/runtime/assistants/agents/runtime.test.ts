@@ -28,6 +28,8 @@ import {
   makeEntity,
   makeFullSchema,
   makeUnscopedSchema,
+  rankedEntry,
+  withManagedIndices,
   type MockRuntimeStore,
 } from "../../helpers.js";
 
@@ -83,7 +85,24 @@ function boundToolNames(fake: FakeToolCallingModel): string[] {
   return (fake.boundTools[0] ?? []).map((t) => (t as { name: string }).name);
 }
 
-const fakeEmbedding = { dimensions: 4, embed: async () => [0, 0, 0, 0] };
+const fakeEmbedding = { dimensions: 4, modelId: "fake:4", embed: async () => [0, 0, 0, 0] };
+
+/** What the managed person indices read of the fixture: its own fields
+ * and the `bio` document. */
+const PERSON_INDEX_SCHEMA = {
+  entityTypes: {
+    person: {
+      key: "person",
+      displayName: "Person",
+      nameProperty: "name",
+      properties: {
+        name: { key: "name", displayName: "Name", dataType: "string" },
+        bio: { key: "bio", displayName: "Bio", dataType: "document" },
+      },
+    },
+  },
+  relationTypes: {},
+};
 
 /** Keyword ranking is the search indices': give the store an index store
  * that holds no index yet, so search answers from it with no hits. */
@@ -178,9 +197,9 @@ describe("toolset computation", () => {
 
   it("search tools apply the fixed floor under a semantic default", async () => {
     setEmbeddingProvider(fakeEmbedding);
-    store.propertySearchSemantic.mockResolvedValue([
-      { entity: { _id: "a", _entityTypeKey: "person", name: "a" }, score: 0.8 },
-      { entity: { _id: "b", _entityTypeKey: "person", name: "b" }, score: 0.7 },
+    withManagedIndices(store, PERSON_INDEX_SCHEMA, fakeEmbedding.modelId, () => [
+      rankedEntry("a", 0.8),
+      rankedEntry("b", 0.7),
     ]);
     store.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
       Object.fromEntries(ids.map((id) => [id, { _id: id, _entityTypeKey: "person", name: id }])),
@@ -217,7 +236,6 @@ describe("toolset computation", () => {
     const payload = JSON.parse(String(fake.calls[1]!.find((m) => m instanceof ToolMessage)!.content));
     expect(payload.strategy).toBe("keyword");
     expect(payload.minSimilarity).toBeNull();
-    expect(store.propertySearchSemantic).not.toHaveBeenCalled();
   });
 
   it("explicit allowlist is intersected with availability, keeping its order", async () => {
@@ -396,21 +414,11 @@ describe("document reads", () => {
       toolCallMessage("search_documents", { query: "when did she join" }),
       new AIMessage("In 2019."),
     ]);
-    store.documentSearchSemantic.mockResolvedValue([
-      {
-        chunk: {
-          _id: "chunk-1",
-          _entityId: "ent-1",
-          _entityTypeKey: "person",
-          _propertyKey: "bio",
-          _index: 0,
-          startChar: 22,
-          charLength: 21,
-          text: "Alice joined in 2019.",
-        },
-        score: 0.91,
-      },
-    ]);
+    withManagedIndices(store, PERSON_INDEX_SCHEMA, fakeEmbedding.modelId, (query) =>
+      query.generationId === "person~bio/semantic"
+        ? [rankedEntry("ent-1", 0.91, { startChar: 22, charLength: 21, text: "Alice joined in 2019." })]
+        : [],
+    );
     store.getEntitiesByIds.mockResolvedValue({
       "ent-1": makeEntity({ name: "Alice", bio: BIO }),
     });
@@ -423,8 +431,10 @@ describe("document reads", () => {
     const hit = (payload.hits as Row[])[0]!;
     expect(hit.matches).toEqual([{ kind: "document", propertyKey: "bio", charOffset: 22, charLength: 21, evidence: { semanticSimilarity: 0.91, keywordMatch: null, keywordScore: null } }]);
     expect(hit.relativeScore).toBe(1);
-    // Only the passage ranking runs — the entity ranking is not consulted.
-    expect(store.propertySearchSemantic).not.toHaveBeenCalled();
+    // Only the passage index ranks — the entity's own index is not consulted.
+    expect(store.indices.rankEntries.mock.calls.map(([query]) => query.generationId)).toEqual([
+      "person~bio/semantic",
+    ]);
     expect(result.toolCalls).toEqual([
       { tool: "search_documents", args: { query: "when did she join" } },
     ]);

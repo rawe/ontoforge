@@ -16,18 +16,14 @@
 
 import { randomUUID } from "node:crypto";
 
-import { settings } from "../config.js";
 import { CoercionError, assertNoNulCharacter, coerceValue, valueToText } from "../core/dataTypes.js";
 import { getEmbeddingProvider } from "../core/embedding.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core/oql/index.js";
-import { keepsOwnSearch, type OwnSearchRuntimeStore } from "../core/ownSearch.js";
 import type { RuntimeStore, SearchWritePlan } from "../core/ports.js";
 import type { PropertyDef } from "../core/schemas.js";
 import { planSearchWrite, type SearchChange } from "../core/searchDependencies.js";
-import { chunkDocument } from "./search/document.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
-import { buildTextRepr } from "./search/propertyText.js";
 import { isQueryPath } from "./queryPaths.js";
 import {
   loadSchema,
@@ -65,43 +61,12 @@ type Row = Record<string, unknown>;
 /**
  * The search work a write causes, handed to the store with the write so
  * both commit together; the search worker (`runtime/indexing/`) builds
- * the entries from it later. Null when the adapter stores no search
- * indices or no index reads what the write changes.
+ * the entries from it later. Null when no index reads what the write
+ * changes.
  */
 async function searchPlan(store: RuntimeStore, change: SearchChange): Promise<SearchWritePlan | null> {
-  if (store.searchIndices === undefined) {
-    return null;
-  }
   const context = await loadSearchContext(store.ontologyKey, store.searchIndices());
   return planSearchWrite(context.dependencies, change);
-}
-
-/**
- * The semantic vector of one entity on an adapter with its own search
- * storage (`keepsOwnSearch`), composed from the FULL schema, never the
- * lens. Null when no provider is configured or the call fails — the write
- * then proceeds without one. An adapter that stores search indices
- * embeds nothing inside a write: its worker builds the entries later.
- */
-async function ownEntityEmbedding(
-  store: OwnSearchRuntimeStore,
-  entityTypeKey: string,
-  properties: Row,
-  fullProperties: Record<string, PropertyDef>,
-  entityId: string | null = null,
-): Promise<number[] | null> {
-  const provider = getEmbeddingProvider();
-  if (!provider) {
-    return null;
-  }
-  const docKeys = documentPropertyKeys(fullProperties);
-  store.validateVectorIndexedProperties(
-    entityTypeKey,
-    properties,
-    Object.keys(fullProperties).filter((k) => !docKeys.has(k)),
-    entityId,
-  );
-  return provider.embed(buildTextRepr(entityTypeKey, properties, fullProperties));
 }
 
 // ---------------------------------------------------------------------------
@@ -369,24 +334,13 @@ export async function createEntity(
     }
   }
 
-  const embedding =
-    keepsOwnSearch(store) && fullEt !== undefined
-      ? await ownEntityEmbedding(store, entityTypeKey, coerced, fullEt.properties)
-      : null;
-
   const entity = await store.createEntity(
     entityTypeKey,
     entityId,
     coerced,
     fullEt?.properties ?? {},
-    embedding,
     await searchPlan(store, { kind: "entityCreated", entityType: entityTypeKey, entityId }),
   );
-
-  // Own search storage: chunk + embed document properties.
-  if (keepsOwnSearch(store)) {
-    await syncDocumentChunks(store, entityTypeKey, entityId, docValues);
-  }
 
   return filterEntityProperties(entity, scopedEt);
 }
@@ -410,7 +364,7 @@ export async function listEntities(
   }
 
   // The free-text term crosses the port as-is, so it carries the same
-  // NUL rejection stored strings do — identically for every adapter.
+  // NUL rejection stored strings do.
   if (q !== null) {
     try {
       assertNoNulCharacter(q, "q");
@@ -515,44 +469,13 @@ export async function updateEntity(
 
   // Document properties: maintain stored lengths for changed values.
   const docKeys = fullEt !== undefined ? documentPropertyKeys(fullEt.properties) : new Set<string>();
-  const docChanges: Row = {};
   for (const k of docKeys) {
     if (k in coerced) {
-      docChanges[k] = coerced[k];
       const v = coerced[k];
       if (typeof v === "string") {
         setProps[docLengthKey(k)] = cpLength(v);
       } else {
         removeProps.push(docLengthKey(k));
-      }
-    }
-  }
-
-  // Own search storage: re-embed only when the update touches a string
-  // property — from the merged post-update state, not the submitted
-  // fragment. `hasEmbeddingUpdate` distinguishes "no new vector" from
-  // "store null".
-  let embedding: number[] | null = null;
-  let hasEmbeddingUpdate = false;
-  if (keepsOwnSearch(store) && fullEt !== undefined) {
-    const hasStringChanges = Object.keys(coerced).some(
-      (k) => k in fullEt.properties && fullEt.properties[k]!.dataType === "string",
-    );
-    if (hasStringChanges) {
-      const current = await store.getEntity(entityTypeKey, entityId);
-      if (current !== null) {
-        const merged: Row = {};
-        for (const [k, v] of Object.entries(current)) {
-          if (!k.startsWith("_")) {
-            merged[k] = v;
-          }
-        }
-        Object.assign(merged, setProps);
-        for (const k of removeProps) {
-          delete merged[k];
-        }
-        embedding = await ownEntityEmbedding(store, entityTypeKey, merged, fullEt.properties, entityId);
-        hasEmbeddingUpdate = true;
       }
     }
   }
@@ -563,8 +486,6 @@ export async function updateEntity(
     setProps,
     removeProps,
     fullEt?.properties ?? {},
-    embedding,
-    hasEmbeddingUpdate,
     await searchPlan(store, {
       kind: "entityUpdated",
       entityType: entityTypeKey,
@@ -574,11 +495,6 @@ export async function updateEntity(
   );
   if (entity === null) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
-  }
-
-  // Own search storage: re-chunk changed document properties only.
-  if (keepsOwnSearch(store)) {
-    await syncDocumentChunks(store, entityTypeKey, entityId, docChanges);
   }
 
   return filterEntityProperties(entity, scopedEt);
@@ -613,79 +529,6 @@ export async function deleteEntity(
 // ---------------------------------------------------------------------------
 // Document properties: chunk sync, slice read, partial writes
 // ---------------------------------------------------------------------------
-
-/**
- * Replace the chunk nodes for the given document property values — on an
- * adapter with its own search storage (`keepsOwnSearch`); search indices
- * chunk the current document themselves, in the worker.
- *
- * For each property: delete its existing chunks, then (for non-null values)
- * re-chunk and write new chunk nodes. Chunks are always written; they carry
- * an embedding only when an embedding provider is configured.
- */
-export async function syncDocumentChunks(
-  store: OwnSearchRuntimeStore,
-  entityTypeKey: string,
-  entityId: string,
-  docValues: Row,
-): Promise<void> {
-  if (Object.keys(docValues).length === 0) {
-    return;
-  }
-  const provider = getEmbeddingProvider();
-
-  for (const [propertyKey, value] of Object.entries(docValues)) {
-    // Reuse embeddings of chunks whose text is unchanged — after a partial
-    // edit the chunker re-synchronizes on the same boundaries, so most
-    // chunks keep their exact text (at shifted offsets) and only the
-    // chunks overlapping the edit need a fresh embedding.
-    //
-    // Only a vector the CURRENT model could have produced may be reused.
-    // After a switch of embedding model every stored vector has the old
-    // width, and reusing one would both answer with a vector from a
-    // different model and leave a row no index of the new width can be
-    // built over. The width check is what makes a rebuild after such a
-    // switch actually re-embed: the text is unchanged there, so every
-    // chunk would otherwise be reused and none regenerated.
-    const reusable = provider ? await store.getChunkEmbeddingsForEntityProperty(entityId, propertyKey) : {};
-    await store.deleteChunksForEntityProperty(entityId, propertyKey);
-    if (!value) {
-      continue;
-    }
-
-    const chunks = chunkDocument(
-      value as string,
-      settings.DOCUMENT_CHUNK_SIZE,
-      settings.DOCUMENT_CHUNK_OVERLAP,
-    );
-    const rows: Row[] = [];
-    for (let index = 0; index < chunks.length; index++) {
-      const chunk = chunks[index]!;
-      const row: Row = {
-        _id: randomUUID(),
-        _entityId: entityId,
-        _entityTypeKey: entityTypeKey,
-        _propertyKey: propertyKey,
-        _index: index,
-        startChar: chunk.startChar,
-        charLength: chunk.charLength,
-        text: chunk.text,
-      };
-      const stored = reusable[chunk.text] ?? null;
-      let chunkEmbedding =
-        stored !== null && stored.length === provider?.dimensions ? stored : null;
-      if (chunkEmbedding === null && provider) {
-        chunkEmbedding = await provider.embed(chunk.text);
-      }
-      if (chunkEmbedding !== null) {
-        row._embedding = chunkEmbedding;
-      }
-      rows.push(row);
-    }
-
-    await store.createDocumentChunks(entityId, entityTypeKey, propertyKey, rows);
-  }
-}
 
 /**
  * Resolve a scoped document property and return its current value plus the
@@ -857,9 +700,7 @@ function applyReplaceRange(
  * `replaceAll`); `replace_range` overwrites the character range
  * `[offset, offset+length)` with `content` (insert with length 0, append
  * at `offset == totalLength`). The changed value is persisted whole and the
- * property's search data follows: with own search storage its chunks are
- * re-synced — unchanged chunk texts keep their embeddings, so only chunks
- * overlapping the edit are re-embedded; search indices queue its passages.
+ * property's search data follows: the search indices queue its passages.
  */
 export async function editDocument(
   lensKey: string,
@@ -891,8 +732,6 @@ export async function editDocument(
     setProps,
     [],
     fullEt?.properties ?? {},
-    null,
-    false,
     await searchPlan(store, {
       kind: "entityUpdated",
       entityType: entityTypeKey,
@@ -902,10 +741,6 @@ export async function editDocument(
   );
   if (entity === null) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
-  }
-
-  if (keepsOwnSearch(store)) {
-    await syncDocumentChunks(store, entityTypeKey, entityId, { [propertyKey]: newValue });
   }
 
   const contextStart = Math.max(0, offset - EDIT_CONTEXT_CHARS);

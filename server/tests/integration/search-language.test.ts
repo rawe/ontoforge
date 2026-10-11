@@ -1,7 +1,6 @@
 /**
  * The keyword language set: an ontology setting edited through the search
- * settings (PostgreSQL — an adapter without search indices answers
- * FEATURE_DISABLED), never part of the registry; carried by transfer 6.0
+ * settings, never part of the registry; carried by transfer 6.0
  * and mapped from a 5.0 payload's text-search language. A change of the
  * set rebuilds the keyword entries of every index in new generations; the
  * old ones serve until the worker finishes them.
@@ -11,12 +10,10 @@ import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createApp } from "../../src/app.js";
 import { initStores, closeStores, getSearchIndexStore } from "../../src/core/ports.js";
-import { settings } from "../../src/config.js";
 import { wipeDatabase } from "./reset.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 
-const postgres = settings.DB_BACKEND === "postgres";
 const base = "/api/ontologies/language_test";
 const model = `${base}/model`;
 const runtime = `${base}/runtime/lenses/all`;
@@ -58,27 +55,7 @@ it("the registry takes no language and answers none; export carries the keyword 
   expect(exported).not.toHaveProperty("textSearchLanguage");
 });
 
-it.skipIf(postgres)("an adapter without search indices answers FEATURE_DISABLED for search settings and indices", async () => {
-  await post("/api/ontologies", { key: "language_test" });
-  const index = { key: "people", name: "People", description: "d", entityType: "person", fields: ["name"] };
-  for (const res of [
-    await app.inject({ url: `${model}/search-settings` }),
-    await putSettings({ keywordLanguages: ["german"] }),
-    await app.inject({ url: `${model}/search-indices` }),
-    await app.inject({ method: "POST", url: `${model}/search-indices`, payload: index }),
-    await app.inject({ method: "POST", url: `${model}/search-indices/preview`, payload: index }),
-    await app.inject({ url: `${model}/search-indices/people` }),
-    await app.inject({ method: "PUT", url: `${model}/search-indices/people`, payload: index }),
-    await app.inject({ method: "DELETE", url: `${model}/search-indices/people` }),
-    await app.inject({ url: `${model}/search-indices/people/status` }),
-    await app.inject({ method: "POST", url: `${model}/search-indices/people/rebuild` }),
-  ]) {
-    expect(res.statusCode).toBe(422);
-    expect(res.json().error.details.code).toBe("FEATURE_DISABLED");
-  }
-});
-
-describe.skipIf(!postgres)("search settings on PostgreSQL", () => {
+describe("search settings", () => {
   it("a new ontology stems in German and English; a change is stored in canonical order", async () => {
     await post("/api/ontologies", { key: "language_test" });
     expect(await getSettings()).toEqual({ keywordLanguages: ["german", "english"], disabledIndices: [] });

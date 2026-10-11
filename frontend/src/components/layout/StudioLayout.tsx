@@ -1,7 +1,7 @@
 import { ArrowLeftRight, ArrowLeft, Layers, Search, SearchX, Shapes } from 'lucide-react'
 import { useEffect } from 'react'
 import { Link, NavLink, Outlet, useParams } from 'react-router-dom'
-import { useFeatures, useLenses } from '@/api/hooks'
+import { useLenses } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { EmptyState } from '@/components/EmptyState'
 import { OntologySwitcher } from '@/components/layout/OntologySwitcher'
@@ -16,7 +16,6 @@ import { cn } from '@/lib/utils'
 /** Shell for all `/o/:ontologyKey/studio/...` routes — the modeling surface. */
 export function StudioLayout() {
   const { ontologyKey } = useParams<{ ontologyKey: string }>()
-  const { data: features } = useFeatures()
   const { collapsed } = useSidebarCollapsed()
   // The lens list answers 404 for an unknown ontology and validates the remembered lens.
   const lenses = useLenses(ontologyKey)
@@ -75,10 +74,7 @@ export function StudioLayout() {
         <nav className={cn('flex flex-col gap-0.5 px-2 pt-1', collapsed && 'px-1.5')} aria-label="Studio">
           <NavItem to={`${base}/schema`} label="Schema" icon={Shapes} collapsed={collapsed} />
           <NavItem to={`${base}/lenses`} label="Lenses" icon={Layers} collapsed={collapsed} />
-          {/* Optimistic: hidden only once the server reports no search indices. */}
-          {features?.searchIndices !== false && (
-            <NavItem to={`${base}/search`} label="Search" icon={Search} collapsed={collapsed} />
-          )}
+          <NavItem to={`${base}/search`} label="Search" icon={Search} collapsed={collapsed} />
           <NavItem to={`${base}/transfer`} label="Transfer" icon={ArrowLeftRight} collapsed={collapsed} />
         </nav>
         <div className="flex-1" />

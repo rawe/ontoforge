@@ -15,17 +15,11 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
-import { settings } from "../../src/config.js";
-import { closeStores, initStores, supportsKeywordRanking } from "../../src/core/ports.js";
+import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
-import { supportsMultipleOntologies } from "./tiers.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture, defineEntityProperty } from "./fixture.js";
-
-/** The adapter's declaration: only an adapter that ranks by keyword has a
- * keyword default strategy without an embedding provider. */
-const keywordRanking = await supportsKeywordRanking();
 
 interface ToolCallResult {
   content: { type: string; text: string }[];
@@ -142,7 +136,7 @@ describe("URL binding", () => {
   });
 });
 
-describe.skipIf(!supportsMultipleOntologies)("ontology isolation", () => {
+describe("ontology isolation", () => {
   it("two clients on two mounts cannot observe each other", async () => {
     // A second ontology with the SAME type key and the SAME lens key —
     // legal since keys are per-ontology — holding disjoint data.
@@ -510,18 +504,14 @@ describe("entity tools", () => {
     }
   });
 
-  // Scoped, not weakened: the case asserts the keyword default strategy,
-  // which exists only on an adapter that ranks by keyword. Without one and
-  // without a provider no strategy is available, and the search is a
-  // disabled feature (`search-contract.ts` covers that side).
-  it.skipIf(!keywordRanking)("search applies no similarity floor without a provider (keyword default)", async () => {
+  it("search applies no similarity floor without a provider (keyword default)", async () => {
     const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
     try {
       await call(client, "create_entity", {
         entity_type_key: "person",
         properties: { name: "Ada Lovelace" },
       });
-      // Search entries are built in the background (none on Neo4j).
+      // Search entries are built in the background.
       await drainSearchWork();
       const found = json(await call(client, "search", { query: "Lovelace" }));
       expect(found.strategy).toBe("keyword");
@@ -819,9 +809,8 @@ describe("query paths", () => {
 });
 
 describe("search indices", () => {
-  const postgres = settings.DB_BACKEND === "postgres";
 
-  it.skipIf(!postgres)("list_search_indices lists the lens's catalog; search_by_index pairs a relation with its target", async () => {
+  it("list_search_indices lists the lens's catalog; search_by_index pairs a relation with its target", async () => {
     const model = "/api/ontologies/test_ont/model";
     const created = await app.inject({
       method: "POST",
@@ -879,21 +868,6 @@ describe("search indices", () => {
       const unknown = await call(client, "search_by_index", { query: "x", index: "nope" });
       expect(unknown.isError).toBe(true);
       expect(text(unknown)).toContain("nope");
-    } finally {
-      await client.close();
-    }
-  });
-
-  it.skipIf(postgres)("is not supported by an adapter without search indices", async () => {
-    const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
-    try {
-      for (const result of [
-        await call(client, "list_search_indices"),
-        await call(client, "search_by_index", { query: "x", index: "person~default" }),
-      ]) {
-        expect(result.isError).toBe(true);
-        expect(text(result)).toContain("not supported");
-      }
     } finally {
       await client.close();
     }

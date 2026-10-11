@@ -153,8 +153,8 @@ function PaletteContent({
 
   const base = `/o/${ontologyKey}/w/${lensKey}`
   const semantic = features?.semanticSearch === true
-  // Questions need search indices and a language model.
-  const questions = features?.searchIndices === true && features?.ai === true
+  // Questions need a language model.
+  const questions = features?.ai === true
   const entityTypes = useMemo(() => schema.data?.entityTypes ?? [], [schema.data])
   const typeName = (key: string) =>
     entityTypes.find((t) => t.key === key)?.displayName ?? key

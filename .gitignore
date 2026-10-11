@@ -32,10 +32,6 @@ coverage/
 *.log
 npm-debug.log*
 
-# Neo4j local data
-neo4j/data/
-neo4j/logs/
-
 # Benchmark results (local comparison data)
 .bench-results.json
 .bench-baseline.json

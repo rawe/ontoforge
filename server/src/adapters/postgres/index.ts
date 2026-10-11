@@ -94,6 +94,3 @@ export async function ensureSemanticIndexes(dimensions: number): Promise<void> {
 }
 
 export function supportsKeywordRanking(): boolean { return PostgresRuntimeStore.prototype.supportsKeywordRanking(); }
-
-/** Search indices are stored in the ontology namespace. */
-export function supportsSearchIndices(): boolean { return true; }

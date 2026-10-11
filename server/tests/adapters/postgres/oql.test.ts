@@ -11,7 +11,7 @@
  * Covers the module layout and emitter seam, the pinned compilation
  * model, the compiler-side property-name enforcement, the whole clause
  * and expression matrix, and the single-SELECT invariant. Live behaviour
- * on both backends stays the conformance suite's job.
+ * stays the integration suite's job.
  */
 
 import { describe, expect, it } from "vitest";

@@ -21,10 +21,10 @@ every storage backend.
 **Storage-independent.** Parsing, validation and the read-only guarantee happen above the
 persistence port, against the lens. Compiling a validated query into whatever dialect the
 active database speaks is the adapter's private business: invisible to callers, absent from
-error messages, and not part of this contract. Two deployments on different backends
-accept exactly the same queries and reject them with identical validation; where the
-execution of an accepted query is known to diverge between adapters, the divergence is
-enumerated in [../storage-adapters.md](../storage-adapters.md#where-the-adapters-diverge).
+error messages, and not part of this contract. Acceptance and validation therefore do not
+depend on the backend; where the execution of an accepted query is known to fall short of
+this contract, the shortfall is enumerated in
+[../storage-adapters.md](../storage-adapters.md#known-limitations).
 
 ## The read-only guarantee
 

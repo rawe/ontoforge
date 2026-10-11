@@ -106,8 +106,7 @@ export interface RunnableRetriever {
  * Load a stored retriever and check it against its lens, or derive the
  * default retriever (`defaultRetriever.ts`) — refused when it has nothing to
  * search. Unknown retriever → not
- * found; a retriever the lens can no longer run → validation error; an
- * adapter without search indices → disabled feature.
+ * found; a retriever the lens can no longer run → validation error.
  */
 export async function loadRunnableRetriever(lensKey: string, key: string, store: RuntimeStore): Promise<RunnableRetriever> {
   const indexStore = indexStoreOf(store);
@@ -137,8 +136,7 @@ export async function loadRunnableRetriever(lensKey: string, key: string, store:
 }
 
 /** Every retriever of a lens, the built-in default first; no
- * configuration, no validation, no model. An adapter without search
- * indices → disabled feature. */
+ * configuration, no validation, no model. */
 export async function listRuntimeRetrievers(lensKey: string, store: RuntimeStore): Promise<RuntimeAssistant[]> {
   const indexStore = indexStoreOf(store);
   const loaded = await loadSchema(lensKey, store);
@@ -159,11 +157,9 @@ export function requireLanguageModel(): void {
   }
 }
 
-/** The feature and the lens the retriever routes need — what the list
- * needs, so reading a thread needs no language model. An adapter without
- * search indices → disabled feature; an unknown lens → not found. */
+/** The lens the retriever routes need — what the list needs, so reading
+ * a thread needs no language model. An unknown lens → not found. */
 export async function requireRetrievers(lensKey: string, store: RuntimeStore): Promise<void> {
-  indexStoreOf(store);
   await loadSchema(lensKey, store);
 }
 

@@ -22,9 +22,8 @@
  * - Instance rows carry no search data: search reads the search-index
  *   entries (`searchIndexStore.ts`), which every write queues work for in
  *   its own transaction.
- * - Relation deletes and lookups carry the type key in the WHERE — the
- *   reference adapter's typed relationship match answers not-found for a
- *   mismatched type key, and the PK alone would not.
+ * - Relation deletes and lookups carry the type key in the WHERE — a
+ *   mismatched type key answers not-found, which the PK alone would not.
  * - `getFullSchemaWithLensInclusions` is one REPEATABLE READ
  *   transaction (M2.3's coherent-snapshot obligation).
  *
@@ -77,10 +76,9 @@ const NO_DEFS: PropertyDefs = {};
 const ENTITY_COLS = "id, type_key, props, created_at, updated_at";
 const RELATION_COLS = "id, type_key, from_id, to_id, props, created_at, updated_at";
 
-/** Only saved queries the index can hold. The reference adapter's vector
- * index contains nothing without a vector, so an un-embedded description
- * is invisible to discovery there; here the predicate says so explicitly,
- * because a plan that does not use the index would otherwise see them. */
+/** Only saved queries the index can hold: an un-embedded description is
+ * invisible to discovery. The predicate says so explicitly, because a
+ * plan that does not use the index would otherwise see them. */
 const EMBEDDED = "embedding IS NOT NULL";
 
 /** One `entity` row → the port shape: system columns as underscore keys,
@@ -273,7 +271,6 @@ export class PostgresRuntimeStore implements RuntimeStore {
     entityId: string,
     properties: Row,
     propertyDefs: PropertyDefs,
-    _embedding: number[] | null = null,
     search?: SearchWritePlan | null,
   ): Promise<Row> {
     const result = await this.write(
@@ -288,7 +285,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
 
   /** Count, short-circuit on zero, then page — two statements in one
    * READ COMMITTED transaction; search fragment and filter conditions
-   * AND-ed, matching the reference adapter's clause composition. */
+   * AND-ed. */
   async listEntities(
     entityTypeKey: string,
     propertyDefs: PropertyDefs,
@@ -365,8 +362,6 @@ export class PostgresRuntimeStore implements RuntimeStore {
     setProperties: Row,
     removeProperties: string[],
     propertyDefs: PropertyDefs,
-    _embedding: number[] | null = null,
-    _hasEmbeddingUpdate = false,
     search?: SearchWritePlan | null,
   ): Promise<Row | null> {
     if (!isUuid(entityId)) {
@@ -604,7 +599,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
    * first, up to the whole limit, and incoming edges receive only the
    * remainder — the documented trap
    * (`docs/capabilities/instance-data.md#traversal`). No ORDER BY:
-   * neighbour order is arbitrary on every backend.
+   * neighbour order is arbitrary.
    */
   async getNeighbors(
     entityId: string,

@@ -23,10 +23,28 @@ import {
   asRuntimeStore,
   createMockRuntimeStore,
   makeUnscopedSchema,
+  rankedEntry,
+  withManagedIndices,
   type MockRuntimeStore,
 } from "./helpers.js";
 
 type Row = Record<string, unknown>;
+
+/** What the managed person indices read of the unscoped fixture. */
+const PERSON_INDEX_SCHEMA = {
+  entityTypes: {
+    person: {
+      key: "person",
+      displayName: "Person",
+      nameProperty: "name",
+      properties: {
+        name: { key: "name", displayName: "Name", dataType: "string" },
+        email: { key: "email", displayName: "Email", dataType: "string" },
+      },
+    },
+  },
+  relationTypes: {},
+};
 
 let store: MockRuntimeStore;
 
@@ -335,7 +353,7 @@ describe("executeSavedQuery pipelines", () => {
   });
 
   it("search -> oql: textual substitution reaches the search, _score is absent from bindings", async () => {
-    setEmbeddingProvider({ dimensions: 3, embed: vi.fn(async () => [0.1, 0.2, 0.3]) });
+    setEmbeddingProvider({ dimensions: 3, modelId: "fake:3", embed: vi.fn(async () => [0.1, 0.2, 0.3]) });
     stubSavedQueries([
       {
         key: "skilled-persons",
@@ -361,10 +379,13 @@ describe("executeSavedQuery pipelines", () => {
         ],
       },
     ]);
-    store.propertySearchSemantic.mockResolvedValue([
-      { entity: { _id: "skill-1", name: "Python" }, score: 0.95 },
-      { entity: { _id: "skill-2", name: "ML" }, score: 0.85 },
+    withManagedIndices(store, PERSON_INDEX_SCHEMA, "fake:3", () => [
+      rankedEntry("skill-1", 0.95),
+      rankedEntry("skill-2", 0.85),
     ]);
+    store.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
+      Object.fromEntries(ids.map((id) => [id, { _id: id, _entityTypeKey: "person", name: id }])),
+    );
     store.executeOql.mockResolvedValue([["p"], [{ p: { _id: "person-1", name: "Alice" } }]]);
 
     const result = await executeSavedQuery(
@@ -374,10 +395,10 @@ describe("executeSavedQuery pipelines", () => {
       asRuntimeStore(store),
     );
 
-    // The store-level search ran against the named type with the
+    // The search ranked the named type's default index with the
     // substituted text's embedding.
-    expect(store.propertySearchSemantic).toHaveBeenCalledTimes(1);
-    expect(store.propertySearchSemantic.mock.calls[0]![0][0].entityTypeKey).toBe("person");
+    expect(store.indices.rankEntries).toHaveBeenCalledTimes(1);
+    expect(store.indices.rankEntries.mock.calls[0]![0].generationId).toBe("person~default/semantic");
 
     // The oql step got the flat _id list plus the _score binding field.
     const params = store.executeOql.mock.calls[0]![1] as Row;
@@ -411,7 +432,7 @@ describe("executeSavedQuery pipelines", () => {
       },
     ]);
     store.executeOql.mockResolvedValue([["name"], [{ name: "Alice" }]]);
-    store.propertySearchSemantic.mockResolvedValue([]);
+    withManagedIndices(store, PERSON_INDEX_SCHEMA, undefined, () => []);
 
     await executeSavedQuery(
       "full_lens",

@@ -23,7 +23,6 @@ import {
   KindBadge,
   ManagedSwitch,
   RepresentationBadges,
-  SearchFeatureGate,
   StatusChip,
 } from '@/components/search/shared'
 import { toastError } from '@/components/studio/lib'
@@ -47,11 +46,7 @@ type Tab = (typeof TABS)[number]
 export function SearchPage() {
   const { ontologyKey } = useParams<{ ontologyKey: string }>()
   if (ontologyKey === undefined) return null
-  return (
-    <SearchFeatureGate>
-      <SearchPageContent ontologyKey={ontologyKey} />
-    </SearchFeatureGate>
-  )
+  return <SearchPageContent ontologyKey={ontologyKey} />
 }
 
 function useEntityTypeNames(ontologyKey: string) {

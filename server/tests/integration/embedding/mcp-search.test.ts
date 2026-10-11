@@ -11,7 +11,6 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../../../src/app.js";
-import { settings } from "../../../src/config.js";
 import { closeStores, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
 import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
@@ -76,7 +75,7 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
       bio: "Leads brand strategy and market research",
       age: 51,
     });
-    // Search entries are built in the background (none on Neo4j).
+    // Search entries are built in the background.
     await drainSearchWork();
 
     client = new Client({ name: "semantic-search-mcp-tests", version: "0.0.1" });
@@ -119,14 +118,12 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
       kind: "properties",
       evidence: {
         semanticSimilarity: expect.any(Number),
-        keywordMatch: settings.DB_BACKEND === "postgres" ? true : null,
-        keywordScore: settings.DB_BACKEND === "postgres" ? expect.any(Number) : null,
+        keywordMatch: true,
+        keywordScore: expect.any(Number),
       },
     });
-    // On PostgreSQL the best entry of the type's default index matched.
-    if (settings.DB_BACKEND === "postgres") {
-      expect(results[0]!.matched).toMatchObject({ index: "person~default", partKind: "self" });
-    }
+    // The best entry of the type's default index matched.
+    expect(results[0]!.matched).toMatchObject({ index: "person~default", partKind: "self" });
   });
 
   it("supports filters and field projection", async () => {
@@ -159,7 +156,7 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
     expect(documents.hits).toEqual([]);
   });
 
-  it.skipIf(settings.DB_BACKEND !== "postgres")("search_by_index searches that index under the same fixed floor", async () => {
+  it("search_by_index searches that index under the same fixed floor", async () => {
     const found = json(await call("search_by_index", { query: "distributed systems engineer", index: "person~default" }));
     expect(found).toMatchObject({ mode: "hybrid", minSimilarity: TOOL_MIN_SIMILARITY });
     const top = (found.hits as Row[])[0]!;
@@ -216,8 +213,8 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
       charLength: expect.any(Number),
       evidence: {
         semanticSimilarity: expect.any(Number),
-        keywordMatch: settings.DB_BACKEND === "postgres" ? true : null,
-        keywordScore: settings.DB_BACKEND === "postgres" ? expect.any(Number) : null,
+        keywordMatch: true,
+        keywordScore: expect.any(Number),
       },
     });
     expect(hit.entity).not.toHaveProperty("bio");

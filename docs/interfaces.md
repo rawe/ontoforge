@@ -179,12 +179,11 @@ MCP reports the same failures as tool errors. Because a tool error is a single s
 per-field detail that REST returns under `details.fields` is flattened into the message
 text, so a model still sees every offending field in one response.
 
-Requesting an unavailable search strategy, a capability whose provider is not configured,
-or one the storage adapter does not support answers `VALIDATION_ERROR` with
+Requesting an unavailable search strategy or a capability whose provider is not
+configured answers `VALIDATION_ERROR` with
 `details.code` of `FEATURE_DISABLED` — on the two routes that need an embedding provider,
-semantic search and saved-query search, on AI execution and entity identity
-comparison alike, and on the search settings, search-index and retriever operations
-of an adapter without search indices. A client can therefore
+semantic search and saved-query search, and on AI execution and entity identity
+comparison alike. A client can therefore
 tell a switched-off capability from a rejected request. Model-free operations remain
 available: agent discovery and retriever management do not require a
 language-model provider; execution requirements are listed with the routes below. Agent
@@ -246,7 +245,6 @@ deployment.
 | `searchStrategies` | list | The available search strategies, in preference order |
 | `ai` | boolean | A language-model provider is configured; gates the `/ai` routes |
 | `decisions` | boolean | A Decision provider is configured; gates the `/decisions` routes |
-| `searchIndices` | boolean | The storage adapter supports search indices |
 
 ## Modeling REST
 
@@ -334,7 +332,7 @@ Search-index inclusions never make a lens scoped, and take effect for search at 
 unknown lens or index, or removing an index the lens does not include, is not found;
 including an index twice is a conflict. A lens with entity type inclusions that does not
 include the index's root entity type answers `VALIDATION_ERROR` at `details.fields.key`.
-The three routes answer `FEATURE_DISABLED` on an adapter without search indices. Rules:
+Rules:
 [capabilities/ontology-lenses.md](capabilities/ontology-lenses.md#search-through-a-lens).
 
 ### Agent configurations
@@ -386,8 +384,7 @@ fields are rejected. A read carries `key`, `lensKey`, `name`, `description`,
 import also accepts `configVersion: 1`, converted first. A configuration the lens cannot
 run — on write, import, or copy or move into the target lens — is refused with
 `VALIDATION_ERROR` and the errors under `details.errors`; a taken target key, or a source
-changed since it was read, is a conflict. Management calls no model. Every route answers
-`FEATURE_DISABLED` on an adapter without search indices. The built-in default retriever
+changed since it was read, is a conflict. Management calls no model. The built-in default retriever
 is not a modeling resource, as for agents.
 
 ### Search settings
@@ -402,8 +399,7 @@ The ontology's keyword language set and its managed-index switches. Semantics:
 | PUT | `/search-settings` | Change either or both; an absent field stays as it is. Answers the settings now in force |
 
 A PUT is validated whole before anything is written; field errors name `keywordLanguages`
-or `disabledIndices.<i>` for a key that names no managed index. Both routes answer
-`FEATURE_DISABLED` on an adapter without search indices.
+or `disabledIndices.<i>` for a key that names no managed index.
 
 ### Search indices
 
@@ -445,8 +441,7 @@ A key with `~` is refused at `key`, and so is a replacement whose body names ano
 than the path. A taken key is a
 conflict. Replacing or deleting a managed index is a conflict — managed indices are only
 switched, in the search settings — and so is rebuilding a switched-off one. Deleting an
-index a lens includes without `cascade` answers `CASCADE_REQUIRED`. Every route answers
-`FEATURE_DISABLED` on an adapter without search indices.
+index a lens includes without `cascade` answers `CASCADE_REQUIRED`.
 
 ### Schema-wide operations
 
@@ -585,9 +580,6 @@ at `relations.<i>` — are collected under `details.fields`; a mode that needs a
 `FEATURE_DISABLED`. Rules:
 [capabilities/search.md](capabilities/search.md#index-search).
 
-Both routes answer `FEATURE_DISABLED` on an adapter without search indices; `GET /search`
-works on every adapter.
-
 ### Query
 
 Semantics: [capabilities/oql.md](capabilities/oql.md).
@@ -688,16 +680,14 @@ and [retrieve](capabilities/retrievers.md#retrieve).
 **List.** Every retriever of the lens, runnable or not, as `key`, `name`,
 `description` and `builtIn`; the default comes first, keyed `_default`, named `Default`,
 with `builtIn` true. The list carries no configuration and no validation, and needs no
-language-model provider; on an adapter without search indices it answers
-`FEATURE_DISABLED`.
+language-model provider.
 
 **Chat.** The [shared request](#assistant-chat-and-threads) plus `diagnostics` (boolean,
 default false). Without a language-model provider the route answers
 `FEATURE_DISABLED`, as the AI routes do. An unknown retriever answers not found, a retriever its
 lens can no longer run `VALIDATION_ERROR` with the errors under `details.errors`, a
-default retriever with nothing to search `VALIDATION_ERROR`, an adapter without search
-indices `FEATURE_DISABLED`, an unknown or busy thread as shared — each before the stream
-opens.
+default retriever with nothing to search `VALIDATION_ERROR`, an unknown or busy thread as
+shared — each before the stream opens.
 
 The response streams the [shared frame](#assistant-chat-and-threads): `thread`, the answer
 as `delta` events, then one terminal `final` or `error`. Its own events:
@@ -717,13 +707,12 @@ events, which carry:
 
 `matched` has the form of a search hit's ([capabilities/search.md](capabilities/search.md#response)).
 
-**Read a thread.** As [shared](#assistant-chat-and-threads); on an adapter without search
-indices it answers `FEATURE_DISABLED`, as the list does.
+**Read a thread.** As [shared](#assistant-chat-and-threads).
 
 **Retrieve.** The body carries `query` (1 to 2,000 characters); unknown fields — a thread
 id or `diagnostics` among them — are rejected.
 It is refused exactly as chat is, with plain error responses: `FEATURE_DISABLED` without
-a language-model provider or on an adapter without search indices, not found for an
+a language-model provider, not found for an
 unknown retriever, `VALIDATION_ERROR` for a retriever its lens can no longer run (errors under
 `details.errors`), a default retriever with nothing to search, a planner input over the cap,
 a failed planning call or a malformed plan. A closed connection cancels the work.
@@ -855,9 +844,8 @@ The per-lens tools take a `lens_key` naming a lens of the bound ontology.
 `delete_relation_type` and `delete_search_index` take a `cascade` flag with the same
 meaning as the REST parameter. The search-index tools take the index key as
 `index_key` and a definition in the same wire format as REST, camelCase included.
-`set_retriever` writes the current configuration version, so it takes no version argument;
-the retriever tools are refused as a disabled feature where the adapter has no search
-indices. Copying, moving, exporting and importing a single retriever are REST only.
+`set_retriever` writes the current configuration version, so it takes no version argument.
+Copying, moving, exporting and importing a single retriever are REST only.
 There is no modeling tool for the search-data rebuild (`rebuild-search-data`).
 
 ### Runtime tools
@@ -904,8 +892,7 @@ filters and fields. See [capabilities/agents.md](capabilities/agents.md).
 `index` — one index key or a list, absent for every index the lens can search —
 `relations`, `limit`, `filters` and `fields`, but no mode and no `minScore`: it runs the
 default mode under the same fixed floor and answers `query`, `mode`, `minSimilarity` and
-`hits`. `list_search_indices` answers the catalog of `GET /search-indices`. On an
-adapter without search indices both answer a not-supported tool error. Agents have
+`hits`. `list_search_indices` answers the catalog of `GET /search-indices`. Agents have
 neither.
 
 `write_document` has no REST counterpart of its own: over REST both document edit forms

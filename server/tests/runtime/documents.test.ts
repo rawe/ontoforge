@@ -1,5 +1,5 @@
 /**
- * Document properties: coercion, stubs, chunk sync, and the document read
+ * Document properties: coercion, stubs, length bookkeeping, and the document read
  * endpoint, including the code-point scenarios. Entity embedding is
  * covered in the embedding suites.
  */
@@ -10,10 +10,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { settings } from "../../src/config.js";
 import { coerceValue } from "../../src/core/dataTypes.js";
 import { setEmbeddingProvider, type EmbeddingProvider } from "../../src/core/embedding.js";
-import { chunkDocument } from "../../src/runtime/search/document.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import {
-  asRuntimeStore,
   createMockRuntimeStore,
   makeEntity,
   type MockRuntimeStore,
@@ -314,8 +312,8 @@ describe("document read endpoint", () => {
   });
 });
 
-describe("chunk sync on create / update", () => {
-  it("create stores the length and writes chunks", async () => {
+describe("length bookkeeping on create / update", () => {
+  it("create stores the length", async () => {
     setEmbeddingProvider(mockProvider());
     holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.createEntity.mockResolvedValue(
@@ -336,51 +334,6 @@ describe("chunk sync on create / update", () => {
     const stored = holder.store.createEntity.mock.calls[0]![2] as Row;
     expect(stored.bio).toBe(BIO);
     expect(stored._doc_bio_length).toBe(BIO.length);
-
-    // Chunks: old ones deleted, new ones created for the property.
-    expect(holder.store.deleteChunksForEntityProperty).toHaveBeenCalledTimes(1);
-    expect(holder.store.deleteChunksForEntityProperty.mock.calls[0]![1]).toBe("bio");
-    expect(holder.store.createDocumentChunks).toHaveBeenCalledTimes(1);
-    const call = holder.store.createDocumentChunks.mock.calls[0]!;
-    expect(call[1]).toBe("person");
-    expect(call[2]).toBe("bio");
-    const rows = call[3] as Row[];
-    const expected = chunkDocument(BIO, settings.DOCUMENT_CHUNK_SIZE, settings.DOCUMENT_CHUNK_OVERLAP);
-    expect(rows).toHaveLength(expected.length);
-    rows.forEach((row, index) => {
-      const chunk = expected[index]!;
-      expect(row._entityTypeKey).toBe("person");
-      expect(row._propertyKey).toBe("bio");
-      expect(row._index).toBe(index);
-      expect(row.startChar).toBe(chunk.startChar);
-      expect(row.charLength).toBe(chunk.charLength);
-      expect(row.text).toBe(chunk.text);
-      expect(row._embedding).toEqual(Array.from({ length: 8 }, () => 0.1));
-      expect(row).toHaveProperty("_id");
-      expect(row).toHaveProperty("_entityId");
-    });
-  });
-
-  it("create without a provider writes chunks without vectors", async () => {
-    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
-    holder.store.createEntity.mockResolvedValue(
-      makeEntity({ name: "Ada", bio: BIO, _doc_bio_length: BIO.length }),
-    );
-
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person",
-      payload: { name: "Ada", bio: BIO },
-    });
-
-    expect(res.statusCode).toBe(201);
-    // Value + length still stored — the type works without embeddings.
-    const stored = holder.store.createEntity.mock.calls[0]![2] as Row;
-    expect(stored.bio).toBe(BIO);
-    expect(stored._doc_bio_length).toBe(BIO.length);
-    expect(holder.store.deleteChunksForEntityProperty).toHaveBeenCalled();
-    expect(holder.store.createDocumentChunks).toHaveBeenCalled();
-    for (const chunk of holder.store.createDocumentChunks.mock.calls[0]![3] as Row[]) expect(chunk).not.toHaveProperty("_embedding");
   });
 
   it("length bookkeeping counts code points on writes", async () => {
@@ -403,7 +356,7 @@ describe("chunk sync on create / update", () => {
     expect(cpLen).not.toBe(emojiBio.length);
   });
 
-  it("updating a document property re-chunks and updates the length", async () => {
+  it("updating a document property updates the length", async () => {
     setEmbeddingProvider(mockProvider());
     holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.updateEntity.mockResolvedValue(
@@ -420,11 +373,9 @@ describe("chunk sync on create / update", () => {
     const setProps = holder.store.updateEntity.mock.calls[0]![2] as Row;
     expect(setProps.bio).toBe("new text");
     expect(setProps._doc_bio_length).toBe(8);
-    expect(holder.store.deleteChunksForEntityProperty).toHaveBeenCalledTimes(1);
-    expect(holder.store.createDocumentChunks).toHaveBeenCalledTimes(1);
   });
 
-  it("removing a document property deletes its chunks", async () => {
+  it("removing a document property removes its length", async () => {
     setEmbeddingProvider(mockProvider());
     holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
     holder.store.updateEntity.mockResolvedValue(makeEntity({ name: "Ada" }));
@@ -439,25 +390,5 @@ describe("chunk sync on create / update", () => {
     const removeProps = holder.store.updateEntity.mock.calls[0]![3] as string[];
     expect(removeProps).toContain("bio");
     expect(removeProps).toContain("_doc_bio_length");
-    expect(holder.store.deleteChunksForEntityProperty).toHaveBeenCalledTimes(1);
-    expect(holder.store.createDocumentChunks).not.toHaveBeenCalled();
-  });
-
-  it("updating another property leaves chunks untouched", async () => {
-    setEmbeddingProvider(mockProvider());
-    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeDocSchema());
-    const raw = makeEntity({ name: "Grace", bio: BIO, _doc_bio_length: BIO.length });
-    holder.store.getEntity.mockResolvedValue(raw);
-    holder.store.updateEntity.mockResolvedValue(raw);
-
-    const res = await app.inject({
-      method: "PATCH",
-      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/entities/person/ent-1",
-      payload: { name: "Grace" },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(holder.store.deleteChunksForEntityProperty).not.toHaveBeenCalled();
-    expect(holder.store.createDocumentChunks).not.toHaveBeenCalled();
   });
 });

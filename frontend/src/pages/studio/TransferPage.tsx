@@ -174,11 +174,9 @@ export function TransferPage() {
     },
   })
 
+  // The rebuild covers saved-query discovery only (search indices keep themselves
+  // current); without an embedding provider it has nothing to do.
   const semanticOff = features !== undefined && !features.semanticSearch
-  // With search indices the rebuild covers saved-query discovery only (indices keep
-  // themselves current); without a provider it then has nothing to do.
-  const indexed = features?.searchIndices === true
-  const nothingToRebuild = indexed && semanticOff
 
   if (ontologyKey === undefined) return null
 
@@ -240,18 +238,14 @@ export function TransferPage() {
         <TransferCard
           icon={RefreshCw}
           title="Rebuild search data"
-          description={
-            indexed
-              ? "Re-embed this ontology's saved-query descriptions and repair their vector index. Use after an embedding-provider change. Search indices keep themselves current; rebuild a single index under Search → index → Rebuild."
-              : "Rebuild this ontology's search data: re-chunk every document into passages and — with an embedding provider — rewrite each entity's vector and the saved-query description vectors. Use after schema edits, bulk imports or provider changes."
-          }
+          description="Re-embed this ontology's saved-query descriptions and repair their vector index. Use after an embedding-provider change. Search indices keep themselves current; rebuild a single index under Search → index → Rebuild."
         >
           <div className="flex items-center gap-3">
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button
                   variant="outline"
-                  disabled={rebuildMutation.isPending || nothingToRebuild}
+                  disabled={rebuildMutation.isPending || semanticOff}
                 >
                   <RefreshCw
                     className={rebuildMutation.isPending ? 'size-4 animate-spin' : 'size-4'}
@@ -261,13 +255,12 @@ export function TransferPage() {
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>
-                    {indexed ? 'Rebuild saved-query search data?' : 'Rebuild all search data?'}
-                  </AlertDialogTitle>
+                  <AlertDialogTitle>Rebuild saved-query search data?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    {indexed
-                      ? "Every saved-query description of this ontology is re-embedded and their vector index is rebuilt if its width no longer matches the provider. This calls the embedding provider once per description and can take a while. Search indices are not touched."
-                      : "Every document of this ontology is re-chunked into passages. With an embedding provider configured, each entity's vector, each passage and each saved-query description is also re-embedded, which depending on data volume can take a while."}
+                    Every saved-query description of this ontology is re-embedded and their
+                    vector index is rebuilt if its width no longer matches the provider. This
+                    calls the embedding provider once per description and can take a while.
+                    Search indices are not touched.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -286,9 +279,9 @@ export function TransferPage() {
           </div>
           {semanticOff && (
             <p className="mt-3 text-[12px] text-muted-foreground">
-              {indexed
-                ? 'No embedding provider is configured (EMBEDDING_PROVIDER), so there is nothing to rebuild: saved-query discovery needs description vectors, and search indices keep themselves current.'
-                : 'No embedding provider is configured (EMBEDDING_PROVIDER), so this re-chunks document passages only.'}
+              No embedding provider is configured (EMBEDDING_PROVIDER), so there is nothing to
+              rebuild: saved-query discovery needs description vectors, and search indices keep
+              themselves current.
             </p>
           )}
         </TransferCard>

@@ -6,42 +6,25 @@
 import { vi, type Mock } from "vitest";
 
 import type { ModelingStore } from "../../src/core/ports.js";
+import { createMockSearchIndexStore, type MockSearchIndexStore } from "../mockSearchIndexStore.js";
 
 export const NOW = new Date("2025-01-01T12:00:00.000Z");
 
-export const RESERVED_ENTITY_TYPE_KEYS = [
-  "ontology",
-  "entity_type",
-  "relation_type",
-  "property_definition",
-  "ai_agent_config",
-  "saved_query",
-];
-
-export const RESERVED_RELATION_TYPE_KEYS = [
-  "includes_type",
-  "has_property",
-  "relates_from",
-  "relates_to",
-  "has_ai_agent",
-  "has_saved_query",
-];
-
 /** Every port method as a mock — completeness is compiler-enforced. The
- * store keeps its own search storage: no search indices. */
+ * search-index store it hands out is a mock too (`indices`). */
 export type MockModelingStore = {
-  [K in Exclude<keyof ModelingStore, "searchIndices">]: Mock;
-};
+  [K in keyof ModelingStore]: Mock;
+} & { indices: MockSearchIndexStore };
 
 /**
- * A mock store whose reads default to "nothing stored" and whose reserved
- * sets are the adapter's real ones. Tests override per scenario.
+ * A mock store whose reads default to "nothing stored". Tests override
+ * per scenario.
  */
 export function createMockModelingStore(): MockModelingStore {
+  const indices = createMockSearchIndexStore();
   return {
-    reservedEntityTypeKeys: vi.fn(() => new Set(RESERVED_ENTITY_TYPE_KEYS)),
-    reservedRelationTypeKeys: vi.fn(() => new Set(RESERVED_RELATION_TYPE_KEYS)),
-    findReservedTypeKeysInUse: vi.fn(async () => []),
+    indices,
+    searchIndices: vi.fn(() => indices),
     createLens: vi.fn(),
     listLenses: vi.fn(async () => []),
     getLens: vi.fn(async () => null),
@@ -77,7 +60,6 @@ export function createMockModelingStore(): MockModelingStore {
     findLensesWithExplicitProperty: vi.fn(async () => []),
     addPropertyToIncludesLists: vi.fn(async () => 0),
     removePropertyFromIncludesLists: vi.fn(async () => 0),
-    deleteChunksForTypeProperty: vi.fn(async () => undefined),
     listAgents: vi.fn(async () => []),
     listAgentsForExport: vi.fn(async () => []),
     upsertAgent: vi.fn(),
@@ -87,15 +69,8 @@ export function createMockModelingStore(): MockModelingStore {
     upsertSavedQuery: vi.fn(),
     deleteSavedQuery: vi.fn(async () => false),
     getFullSchema: vi.fn(async () => ({ entityTypes: [], relationTypes: [], lenses: [] })),
-    getEntityTypesWithProperties: vi.fn(async () => []),
-    setEntityEmbedding: vi.fn(async () => undefined),
     listSavedQueryRefs: vi.fn(async () => []),
     setSavedQueryEmbedding: vi.fn(async () => undefined),
-    createVectorIndex: vi.fn(async () => undefined),
-    dropVectorIndex: vi.fn(async () => undefined),
-    rebuildVectorIndex: vi.fn(async () => undefined),
-    createDocumentVectorIndex: vi.fn(async () => undefined),
-    dropDocumentVectorIndex: vi.fn(async () => undefined),
     ensureSavedQueryVectorIndex: vi.fn(async () => undefined),
     dropMismatchedVectorIndexes: vi.fn(async () => undefined),
     ensureVectorIndexes: vi.fn(async () => undefined),

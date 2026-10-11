@@ -439,8 +439,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   // --- Search settings ---
-  // The keyword language set and the managed-index switches; an adapter
-  // without search indices answers FEATURE_DISABLED.
+  // The keyword language set and the managed-index switches.
 
   app.get(
     "/search-settings",
@@ -475,8 +474,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
   // --- Search indices ---
   // Managed and custom indices with their status; custom-index CRUD, the
   // draft preview with its cost estimate, rebuild. Definitions are parsed
-  // by the service (issues by dotted path). An adapter without search
-  // indices answers FEATURE_DISABLED.
+  // by the service (issues by dotted path).
 
   app.get(
     "/search-indices",
@@ -1090,13 +1088,11 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       // The one refusal lands before any streaming starts, so it reaches
       // the client in the standard error envelope rather than mid-stream:
       // an unknown ontology key answers 404 from the binding. A missing
-      // provider is not a refusal — the run then rebuilds the passages,
-      // which need no inference, and says so in its summary. On an adapter
-      // that stores search indices the run covers the saved-query
-      // descriptions alone.
+      // provider is not a refusal — the run then has no vectors to write
+      // and says so in its summary. The run covers the saved-query
+      // descriptions; search indices maintain themselves.
       const store = await getModelingStore(request.params.ontologyKey);
-      const runtimeStore = await getRuntimeStore(request.params.ontologyKey);
-      const stream = Readable.from(service.rebuildSearchData(store, runtimeStore));
+      const stream = Readable.from(service.rebuildSearchData(store));
       return reply.type("application/x-ndjson").send(stream);
     },
   );

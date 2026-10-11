@@ -118,7 +118,7 @@ These are the **only** environment variables recognized by the `ontoforge-server
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `DB_BACKEND` | no | `postgres` | Storage adapter selection (`postgres` or `neo4j`) |
+| `DB_BACKEND` | no | `postgres` | Storage adapter selection (`postgres`, the only adapter) |
 | `DB_URI` | yes | `postgresql://localhost:5432/ontoforge` | PostgreSQL connection DSN (carries host, port and database) |
 | `DB_USER` | yes | `postgres` | Database username |
 | `DB_PASSWORD` | yes | `ontoforge_dev` | Database password |
@@ -130,9 +130,9 @@ These are the **only** environment variables recognized by the `ontoforge-server
 | `EMBEDDING_DIMENSIONS` | no | `1024` | Vector dimensions — must match what the model returns |
 | `EMBEDDING_BATCH_SIZE` | no | `1` | Texts per embedding request when many texts are embedded together (positive integer) |
 | `EMBEDDING_CONCURRENCY` | no | `1` | Embedding requests in flight at once when many texts are embedded together (positive integer) |
-| `SEARCH_MAX_ATTEMPTS` | no | `5` | Failed attempts before a queued search-indexing item counts as failed (positive integer; PostgreSQL only) |
-| `SEARCH_WORKER_BATCH` | no | `64` | Queued search-indexing items the background worker claims per batch (positive integer; PostgreSQL only) |
-| `SEARCH_POLL_MS` | no | `5000` | Milliseconds the background search worker waits between queue checks when no wake-up arrives (positive integer; PostgreSQL only) |
+| `SEARCH_MAX_ATTEMPTS` | no | `5` | Failed attempts before a queued search-indexing item counts as failed (positive integer) |
+| `SEARCH_WORKER_BATCH` | no | `64` | Queued search-indexing items the background worker claims per batch (positive integer) |
+| `SEARCH_POLL_MS` | no | `5000` | Milliseconds the background search worker waits between queue checks when no wake-up arrives (positive integer) |
 | `AI_PROVIDER` | no | *(disabled)* | `ollama`, `openai` or `anthropic` — omit to disable AI features |
 | `AI_MODEL` | with `AI_PROVIDER` | *(none)* | AI model name (must support tool calling) |
 | `AI_BASE_URL` | no | `http://localhost:11434` (`ollama`), `https://api.openai.com/v1` (`openai`), `https://api.anthropic.com` (`anthropic`) | AI API base as the provider documents it — the Ollama or Anthropic host, or the OpenAI-compatible base including its version |

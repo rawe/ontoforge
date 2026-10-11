@@ -91,7 +91,7 @@ export function col(binding: TableBinding, column: string): string {
 }
 
 /**
- * `RETURN a` / `RETURN r` — the Neo4j-shaped property map.
+ * `RETURN a` / `RETURN r` — the bound element as a property map.
  *
  * The `CASE` guard is what makes an unmatched OPTIONAL MATCH project SQL
  * NULL instead of an all-nulls object. Relationship endpoints are

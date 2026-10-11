@@ -267,7 +267,7 @@ class Compiler implements CompileState {
     const items: ProjectedItem[] = [];
     if (itemsCtx.MULT() !== null) {
       // `RETURN *` / `WITH *`: every variable in scope, named after
-      // itself, in the reference adapter's alphabetical order. Anonymous
+      // itself, in alphabetical order. Anonymous
       // pattern elements never enter the scope, so they never expand.
       for (const name of [...this.stage.scope.keys()].sort()) {
         items.push(this.scopeItem(name));
@@ -377,8 +377,8 @@ class Compiler implements CompileState {
 
     const projectedNames = new Set(items.map((item) => item.name));
     const keys = this.orderKeys(body, projectedNames);
-    // Neo4j preserves the pipeline's last ordering all the way out, but
-    // SQL does not promise a CTE's order survives the outer SELECT — so
+    // The pipeline's last ordering holds all the way out, but SQL does
+    // not promise a CTE's order survives the outer SELECT — so
     // every sort key is carried out of the stage (an output column of
     // its own where it is an expression) for the RETURN to re-order on.
     this.carriedOrder = keys.map((key, index) => {

@@ -1,6 +1,4 @@
-import { getEmbeddingProvider } from "../../core/embedding.js";
 import { ValidationError } from "../../core/exceptions.js";
-import { keepsOwnSearch } from "../../core/ownSearch.js";
 import type {
   FilterCondition,
   KeywordMatching,
@@ -9,11 +7,6 @@ import type {
   SearchIndexStore,
 } from "../../core/ports.js";
 import { DEFAULT_INDEX_SUFFIX, managedIndexKey } from "../../core/searchIndex.js";
-import {
-  applyFieldProjection,
-  filterEntityProperties,
-  ENTITY_NEIGHBOR_ALWAYS_FIELDS,
-} from "../readHelpers.js";
 import {
   describeMatches,
   indexStoreOf,
@@ -25,14 +18,9 @@ import {
   type SearchMode,
 } from "./indexSearch.js";
 import { validateRequest, type SearchRequest, type SearchKind } from "./request.js";
+import { strategies, availableStrategies, type SearchStrategy } from "./strategies.js";
 import {
-  strategies, availableStrategies, ranksSemantically, type RankingKind, type SearchStrategy,
-} from "./strategies.js";
-import { propertyKind } from "./property.js";
-import { documentKind, collapsePassages } from "./document.js";
-import {
-  emptyEvidence, fuse, refineTies, relativeScore,
-  type KeywordScore, type Ranked, type RankingScore, type SearchEvidence, type SemanticSimilarity,
+  relativeScore, type KeywordScore, type SearchEvidence, type SemanticSimilarity,
 } from "./fusion.js";
 export type { SearchRequest } from "./request.js";
 export type { SearchEvidence } from "./fusion.js";
@@ -52,7 +40,7 @@ export interface SearchHit {
   /** Ratio to the best score in this response; see RELATIVE_SCORE_PROMISE. Never confidence. */
   relativeScore: number;
   matches: SearchMatch[];
-  /** What matched the entity best — on adapters that store search indices. */
+  /** What matched the entity best. */
   matched?: Matched;
 }
 export interface SearchResponse {
@@ -65,19 +53,6 @@ export interface SearchResponse {
   filter: Record<string, string>;
   hits: SearchHit[];
 }
-/** How many passages per requested hit the passage ranking fetches first, before they
- * are collapsed to entities and cut to the limit. */
-const CANDIDATE_FACTOR = 5;
-/** The floor drops semantic candidates below it before any fusion, above the storage
- * port; keyword rankings are never touched. A semantic row's score is its measured
- * similarity, so a floored page is short exactly when the ranking is exhausted. */
-function floored<T>(kind: RankingKind<T>, minSimilarity: number | null): RankingKind<T> {
-  if (minSimilarity === null) return kind;
-  return {
-    ...kind,
-    semantic: async () => (await kind.semantic()).filter((r) => r.score >= minSimilarity),
-  };
-}
 /** The engine mode and keyword matching a strategy maps to. */
 const STRATEGY_MODES: Record<SearchStrategy, { mode: SearchMode; matching: KeywordMatching }> = {
   semantic: { mode: "semantic", matching: "any" },
@@ -87,10 +62,8 @@ const STRATEGY_MODES: Record<SearchStrategy, { mode: SearchMode; matching: Keywo
   hybrid: { mode: "hybrid", matching: "any" },
 };
 /**
- * Ranked search. Requests are validated and a strategy chosen alike on
- * every adapter; an adapter that stores search indices then answers from
- * them (`searchThroughIndices`), any other from its own search storage —
- * by vector only, the one ranking such storage has.
+ * Ranked search: the request is validated and a strategy chosen, then the
+ * search indices answer it (`searchThroughIndices`).
  */
 export async function search(
   lensKey: string,
@@ -98,8 +71,6 @@ export async function search(
   store: RuntimeStore,
 ): Promise<SearchResponse> {
   const validated = await validateRequest(lensKey, request, store);
-  const { loaded, kinds, type, limit, minSimilarity, filter, searchedTypes, searchedProperties } =
-    validated;
   const available = availableStrategies(store);
   const strategy = strategies.find((s) => s.key === (request.strategy ?? available[0]));
   if (!strategy || !available.includes(strategy.key))
@@ -107,119 +78,7 @@ export async function search(
       `Search strategy unavailable. Available strategies: ${available.join(", ") || "none"}`,
       { code: "FEATURE_DISABLED" },
     );
-  if (!keepsOwnSearch(store))
-    return searchThroughIndices(indexStoreOf(store), store, request, validated, strategy.key);
-  const embedding = ranksSemantically(strategy.key)
-    ? await getEmbeddingProvider()!.embed(request.query)
-    : [];
-  if (!embedding) throw new ValidationError("Failed to generate embedding for search query");
-  type Hit = { entity: Row; matches: SearchMatch[] };
-  // The strategy is chosen at runtime, so a ranking's score kind is one of the three here.
-  const rankings: Ranked<Hit, RankingScore>[][] = [];
-  if (kinds.includes("properties"))
-    rankings.push(
-      (
-        await strategy.rank(
-          floored(
-            propertyKind(store, searchedTypes, embedding, limit),
-            minSimilarity,
-          ),
-        )
-      ).slice(0, limit).map((r) => ({
-        key: r.key,
-        score: r.score,
-        value: {
-          entity: r.value,
-          matches: [
-            {
-              kind: "properties",
-              evidence: { ...emptyEvidence(), ...r.evidence },
-            },
-          ],
-        },
-      })),
-    );
-  if (kinds.includes("document")) {
-    // Exhaust the passage ranking so a second document property cannot be hidden
-    // behind many passages of the first. Collapse and the entity limit live here.
-    let budget = limit * CANDIDATE_FACTOR;
-    let collapsed: ReturnType<typeof collapsePassages> = [];
-    while (searchedProperties.length) {
-      const passages = await strategy.rank(
-        floored(
-          documentKind(store, searchedProperties, embedding, budget),
-          minSimilarity,
-        ),
-      );
-      collapsed = collapsePassages(passages);
-      if (passages.length < budget) break;
-      budget *= 2;
-    }
-    rankings.push(
-      collapsed.map((r) => ({
-        ...r,
-        value: {
-          entity: { _id: r.key, _entityTypeKey: r.value.type },
-          matches: r.value.matches,
-        },
-      })),
-    );
-  }
-  const useBestKind = rankings.length > 1 && searchedTypes.length > 1;
-  let ranked: Ranked<Hit, RankingScore>[] =
-    rankings.length === 1
-      ? rankings[0]!
-      : fuse(
-          rankings,
-          (a, b) => ({
-            entity: a.matches.some((m) => m.kind === "properties") ? a.entity : b.entity,
-            matches: [...a.matches, ...b.matches],
-          }),
-          useBestKind ? "max" : "sum",
-        );
-  if (useBestKind) {
-    ranked = refineTies(ranked, (hit) => {
-      const measurements = hit.matches
-        .map((match) => match.evidence.semanticSimilarity)
-        .filter((value): value is SemanticSimilarity => value !== null && Number.isFinite(value));
-      return measurements.length ? Math.max(...measurements) : null;
-    });
-  }
-  ranked = ranked.slice(0, limit);
-  // Retrieve only final document-only hits. Keeping all collapsed candidates until
-  // fusion preserves a property hit's passages even below the document page cutoff.
-  const documentOnly = ranked.filter((r) => !r.value.matches.some((m) => m.kind === "properties"));
-  const retrieved: Record<string, Row> = {};
-  for (const t of searchedTypes) {
-    const ids = documentOnly
-      .filter((r) => r.value.entity._entityTypeKey === t.entityTypeKey)
-      .map((r) => r.key);
-    if (ids.length) Object.assign(retrieved, await store.getEntitiesByIds(ids, t.propertyDefs));
-  }
-  ranked = ranked.filter((r) => {
-    if (r.value.matches.some((m) => m.kind === "properties")) return true;
-    if (!retrieved[r.key]) return false;
-    r.value.entity = retrieved[r.key]!;
-    return true;
-  });
-  const hits = ranked.map((r) => {
-    const typeKey = String(r.value.entity._entityTypeKey ?? type);
-    const entity = filterEntityProperties(
-      { ...r.value.entity, _entityTypeKey: typeKey },
-      loaded.scoped.entityTypes[typeKey]!,
-      request.fields,
-    );
-    return {
-      entity: applyFieldProjection(entity, request.fields, ENTITY_NEIGHBOR_ALWAYS_FIELDS),
-      relativeScore: relativeScore(r.score, ranked[0]!.score),
-      matches: r.value.matches.sort(
-        (a, b) => Number(b.kind === "properties") - Number(a.kind === "properties"),
-      ),
-    };
-  });
-  return {
-    query: request.query, type, in: kinds, strategy: strategy.key, minSimilarity, filter, hits,
-  };
+  return searchThroughIndices(indexStoreOf(store), store, request, validated, strategy.key);
 }
 
 /**

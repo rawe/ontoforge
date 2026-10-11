@@ -1,14 +1,13 @@
 /**
  * Two-level test reset — harness code, deliberately outside the
- * persistence port: an adapter ships no test-only surface, so the reset
- * implementations live here, one per adapter, dispatched on `DB_BACKEND`.
+ * persistence port: the adapter ships no test-only surface, so the reset
+ * lives here.
  *
  * - `hardReset` — run once per suite invocation by `global-setup.ts`,
  *   before any test file: a virgin database, so nothing an earlier
  *   invocation left behind — the width imprint of a fixed vector index,
- *   for one — can leak into this one. PostgreSQL drops and recreates the
- *   database and runs the boot DDL; Neo4j Community has no
- *   `DROP DATABASE`, so its hard reset is the full wipe.
+ *   for one — can leak into this one. It drops and recreates the
+ *   database and runs the boot DDL.
  * - `wipeDatabase` — the per-file fast reset every integration file runs
  *   between tests. It needs the adapter initialized (`initStores`) and
  *   deletes all stored data while keeping schema objects.
@@ -16,8 +15,6 @@
 
 import pg from "pg";
 
-import { closeDriver, getDriver, initDriver } from "../../src/adapters/neo4j/driver.js";
-import { runSession } from "../../src/adapters/neo4j/errors.js";
 import { initSchema } from "../../src/adapters/postgres/ddl.js";
 import { closePool, initPool, withTransaction } from "../../src/adapters/postgres/errors.js";
 import { quoteIdent } from "../../src/adapters/postgres/oql/bindings.js";
@@ -29,7 +26,7 @@ import { settings } from "../../src/config.js";
  * every vector index and its width imprint with it — and the registry
  * (`public.ontology`, the only stateful server-wide table) truncates.
  */
-async function wipePostgres(): Promise<void> {
+export async function wipeDatabase(): Promise<void> {
   await withTransaction(async (querier) => {
     const namespaces = await querier.query(
       `SELECT nspname FROM pg_namespace WHERE nspname LIKE 'ont\\_%'`,
@@ -43,30 +40,6 @@ async function wipePostgres(): Promise<void> {
   });
 }
 
-/** Neo4j keeps everything in one graph: deleting every node is the full
- * wipe (constraints and indexes are fixed objects the boot recreates
- * idempotently). */
-async function wipeNeo4j(): Promise<void> {
-  await runSession(getDriver(), async (session) => {
-    await session.run("MATCH (n) DETACH DELETE n");
-  });
-}
-
-/** Per-file fast reset: delete all stored data via the initialized
- * adapter connection. */
-export async function wipeDatabase(): Promise<void> {
-  switch (settings.DB_BACKEND) {
-    case "postgres":
-      await wipePostgres();
-      return;
-    case "neo4j":
-      await wipeNeo4j();
-      return;
-    default:
-      throw new Error(`Unknown DB_BACKEND '${settings.DB_BACKEND}'`);
-  }
-}
-
 /**
  * `DROP DATABASE … WITH (FORCE)` + `CREATE DATABASE` on a maintenance
  * connection to the `postgres` database, then the boot DDL with the
@@ -74,7 +47,7 @@ export async function wipeDatabase(): Promise<void> {
  * a pool, so no connection of ours holds the database being dropped;
  * FORCE clears out anything else.
  */
-async function hardResetPostgres(): Promise<void> {
+export async function hardReset(): Promise<void> {
   const url = new URL(settings.DB_URI);
   const database = url.pathname.replace(/^\//, "");
   const maintenance = new pg.Client({
@@ -96,51 +69,5 @@ async function hardResetPostgres(): Promise<void> {
     await initSchema();
   } finally {
     await closePool();
-  }
-}
-
-/** Drop every constraint and every non-lookup index so the boot DDL
- * rebuilds the physical skeleton from nothing. Wholesale, so leftovers
- * from an older physical layout can never shadow the current one (a
- * renamed constraint over an equivalent schema would be skipped by
- * `IF NOT EXISTS` otherwise). */
-async function dropNeo4jSchemaObjects(): Promise<void> {
-  await runSession(getDriver(), async (session) => {
-    const constraints = await session.run("SHOW CONSTRAINTS YIELD name RETURN name");
-    for (const record of constraints.records) {
-      await session.run(`DROP CONSTRAINT \`${record.get("name") as string}\` IF EXISTS`);
-    }
-    const indexes = await session.run(
-      "SHOW INDEXES YIELD name, type WHERE type <> 'LOOKUP' RETURN name",
-    );
-    for (const record of indexes.records) {
-      await session.run(`DROP INDEX \`${record.get("name") as string}\` IF EXISTS`);
-    }
-  });
-}
-
-/** The full wipe, on a driver of its own (no stores exist yet). */
-async function hardResetNeo4j(): Promise<void> {
-  await initDriver();
-  try {
-    await dropNeo4jSchemaObjects();
-    await wipeNeo4j();
-  } finally {
-    await closeDriver();
-  }
-}
-
-/** Suite-level hard reset: guarantee a virgin database, once per suite
- * invocation, from `global-setup.ts`. */
-export async function hardReset(): Promise<void> {
-  switch (settings.DB_BACKEND) {
-    case "postgres":
-      await hardResetPostgres();
-      return;
-    case "neo4j":
-      await hardResetNeo4j();
-      return;
-    default:
-      throw new Error(`Unknown DB_BACKEND '${settings.DB_BACKEND}'`);
   }
 }

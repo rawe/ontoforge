@@ -20,14 +20,13 @@
  *
  * **The score is pinned:** `1 - distance/2` over pgvector's cosine
  * distance `1 - cos`, i.e. `(1 + cos)/2` — the [0,1] higher-better number
- * `docs/capabilities/search.md` calls the raw cosine similarity, and the
- * same number the reference adapter's cosine index returns.
+ * `docs/capabilities/search.md` calls the raw cosine similarity.
  *
  * **`minScore` is not in here.** The floor belongs after the limit, in
  * the caller (`minScoreFloor`). Pushed into the `WHERE` it would sit
  * *inside* the iterative scan, which would then keep scanning to refill
- * the page and return more rows than the reference adapter — a parity
- * break. Outside the scan, a floored page just shrinks.
+ * the page from beyond the nearest `limit` candidates. Outside the
+ * scan, a floored page just shrinks.
  */
 
 import { toSql } from "pgvector";

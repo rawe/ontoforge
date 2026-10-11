@@ -27,7 +27,7 @@ const PAYLOAD_6 = {
       savedQueries: [],
       retrieverAgents: [RETRIEVER],
     },
-    // An adapter without search indices exported no retrievers.
+    // A payload without retrievers.
     { key: "bare", name: "Bare", aiAgents: [] },
   ],
 };

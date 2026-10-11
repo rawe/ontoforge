@@ -1,12 +1,7 @@
-import { settings } from "../../src/config.js";
 /**
- * Skeleton contract, database-blind — runs against whichever adapter
- * `DB_BACKEND` selects. Covers: the adapter lifecycle (close→init cycle,
- * idempotent close) and the features/docs routes on a fully booted
- * server.
- *
- * The Neo4j-physical assertions (constraint/index names, raw seeding, raw
- * wipe probe) live in `tests/integration/neo4j/skeleton.test.ts`.
+ * Skeleton contract, database-blind. Covers: the adapter lifecycle
+ * (close→init cycle, idempotent close) and the features/docs routes on a
+ * fully booted server.
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -68,8 +63,7 @@ describe("features route on a fully booted server", () => {
         ai: false,
         decisions: false,
         searchStrategies:
-          settings.DB_BACKEND === "postgres" ? ["keyword", "keyword-any", "keyword-all"] : [],
-        searchIndices: settings.DB_BACKEND === "postgres",
+          ["keyword", "keyword-any", "keyword-all"],
       });
     } finally {
       await shutdownServer(app);

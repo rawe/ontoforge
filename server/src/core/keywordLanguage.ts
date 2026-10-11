@@ -3,7 +3,7 @@
  *
  * A keyword entry is stemmed in every language of the ontology's keyword
  * language set, and a query is parsed in each. The type lives in core
- * because modeling, runtime and every adapter speak it; nothing below the
+ * because modeling, runtime and the adapter speak it; nothing below the
  * registry imports the registry for it.
  */
 

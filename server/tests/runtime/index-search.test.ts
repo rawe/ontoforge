@@ -432,9 +432,4 @@ describe("catalog", () => {
       { key: "employment", description: "People by employer" },
     ]);
   });
-
-  it("answers the disabled feature on an adapter without search indices", async () => {
-    delete (runtime as unknown as { searchIndices?: unknown }).searchIndices;
-    await expect(catalog()).rejects.toMatchObject({ details: { code: "FEATURE_DISABLED" } });
-  });
 });

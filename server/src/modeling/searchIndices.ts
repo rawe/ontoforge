@@ -68,16 +68,9 @@ import type {
 /** The key a draft without one is validated under. */
 const DRAFT_KEY = "draft";
 
-/** The search-index store of the ontology; an adapter without search
- * indices answers `FEATURE_DISABLED`. */
+/** The search-index store of the ontology. */
 export function requireSearchIndices(store: ModelingStore): SearchIndexStore {
-  const indices = store.searchIndices?.();
-  if (indices === undefined) {
-    throw new ValidationError("Search indices are not supported by this storage adapter", {
-      code: "FEATURE_DISABLED",
-    });
-  }
-  return indices;
+  return store.searchIndices();
 }
 
 // ---------------------------------------------------------------------------
@@ -474,8 +467,7 @@ export async function excludeIndexFromLens(
  * (`lensIndexFindings`). Relation groups the lens skips are no warning. `full` and
  * `scoped` are the schema before and after the lens's scope; an
  * unscoped lens gets none. Paths: `lenses.<lens>.includes.searchIndices.
- * <index>.<definition path>`. Nothing on an adapter without search
- * indices.
+ * <index>.<definition path>`.
  */
 export async function lensIndexWarnings(
   store: ModelingStore,
@@ -483,8 +475,7 @@ export async function lensIndexWarnings(
   full: SearchIndexSchema,
   scoped: SearchIndexSchema,
 ): Promise<SearchIndexIssue[]> {
-  const indices = store.searchIndices?.();
-  if (indices === undefined) return [];
+  const indices = store.searchIndices();
   const included = new Set(await indices.listLensIndexInclusions(lens.lensId));
   if (included.size === 0) return [];
   const warnings: SearchIndexIssue[] = [];
@@ -506,8 +497,7 @@ export async function lensIndexWarnings(
 // ---------------------------------------------------------------------------
 
 /** What a schema removal does to the custom indices, and the lenses that
- * include an index it deletes. Nothing on an adapter without search
- * indices. */
+ * include an index it deletes. */
 export interface IndexCascadePlan extends SearchIndexCascade {
   /** Sorted keys of the indices it changes or deletes. */
   affectedIndices: string[];
@@ -515,15 +505,12 @@ export interface IndexCascadePlan extends SearchIndexCascade {
   affectedLenses: string[];
 }
 
-const NO_CASCADE: IndexCascadePlan = { updated: [], deleted: [], affectedIndices: [], affectedLenses: [] };
-
 /** Plan the custom-index side of a schema removal (`planSearchIndexCascade`). */
 export async function planIndexCascade(
   store: ModelingStore,
   removal: SchemaRemoval,
 ): Promise<IndexCascadePlan> {
-  const indices = store.searchIndices?.();
-  if (indices === undefined) return NO_CASCADE;
+  const indices = store.searchIndices();
   const custom = (await indices.listIndices()).filter((index) => index.kind === "custom");
   const cascade = planSearchIndexCascade(
     custom.map((index) => ({ ...index.definition, key: index.key })),
@@ -540,8 +527,7 @@ export async function planIndexCascade(
  * inclusions go with them), store the changed definitions. The caller
  * reconciles afterwards (the schema sync does). */
 export async function applyIndexCascade(store: ModelingStore, plan: IndexCascadePlan): Promise<void> {
-  const indices = store.searchIndices?.();
-  if (indices === undefined) return;
+  const indices = store.searchIndices();
   for (const key of plan.deleted) await indices.deleteIndex(key);
   for (const definition of plan.updated) await indices.updateIndexDefinition(definition.key, definition);
 }
@@ -559,8 +545,7 @@ export function indexCascadeText(plan: IndexCascadePlan): string {
 // ---------------------------------------------------------------------------
 
 /** The indices' part of an export: the custom definitions in key order
- * and the managed indices switched off. (An adapter without search
- * indices exports no such part.) */
+ * and the managed indices switched off. */
 export async function exportSearchIndices(indices: SearchIndexStore): Promise<ExportSearchIndicesInput> {
   const [records, searchSettings] = await Promise.all([
     indices.listIndices(),
@@ -639,11 +624,11 @@ export async function importedIndexConflicts(
   store: ModelingStore,
   payloadIndices: ExportSearchIndicesInput,
 ): Promise<string[]> {
-  const indices = store.searchIndices?.();
+  const indices = store.searchIndices();
   const conflicts: string[] = [];
   const seen = new Set<string>();
   for (const { key } of payloadIndices.custom) {
-    if (seen.has(key) || (indices !== undefined && (await indices.getIndex(key)) !== null)) {
+    if (seen.has(key) || (await indices.getIndex(key)) !== null) {
       conflicts.push(`Search index with key '${key}' already exists`);
     }
     seen.add(key);
@@ -654,15 +639,13 @@ export async function importedIndexConflicts(
 /**
  * Write a payload's indices once its types exist: the custom definitions,
  * and its switches added to the target's. No vectors are provisioned —
- * the schema sync that follows reconciles, and the worker builds. An
- * adapter without search indices keeps nothing.
+ * the schema sync that follows reconciles, and the worker builds.
  */
 export async function importSearchIndices(
   store: ModelingStore,
   payloadIndices: ExportSearchIndicesInput,
 ): Promise<void> {
-  const indices = store.searchIndices?.();
-  if (indices === undefined) return;
+  const indices = store.searchIndices();
   if (payloadIndices.disabled.length > 0) {
     const current = await indices.getSearchSettings();
     await indices.setSearchSettings({
@@ -678,15 +661,13 @@ export async function importSearchIndices(
 /**
  * Make a lens's index inclusions exactly `keys`, once the indices exist —
  * replacing the managed indices the schema sync included on its own.
- * Nothing on an adapter without search indices.
  */
 export async function importLensIndexInclusions(
   store: ModelingStore,
   lensId: string,
   keys: readonly string[],
 ): Promise<void> {
-  const indices = store.searchIndices?.();
-  if (indices === undefined) return;
+  const indices = store.searchIndices();
   const current = await indices.listLensIndexInclusions(lensId);
   for (const key of current) {
     if (!keys.includes(key)) await indices.excludeIndexFromLens(lensId, key);

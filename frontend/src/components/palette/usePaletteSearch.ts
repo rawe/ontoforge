@@ -26,7 +26,7 @@ export function useDebouncedValue<T>(value: T, delayMs: number): T {
 export interface EntitySearchResult {
   entity: EntityInstance
   matches?: SearchMatch[]
-  /** Which index entry found the hit (ranked search on servers with search indices). */
+  /** Which index entry found the hit (ranked search). */
   matched?: Matched
 }
 

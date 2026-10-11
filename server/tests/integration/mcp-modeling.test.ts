@@ -16,10 +16,8 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
-import { settings } from "../../src/config.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
-import { supportsMultipleOntologies } from "./tiers.js";
 
 interface ToolCallResult {
   content: { type: string; text: string }[];
@@ -158,9 +156,8 @@ describe("ensure_ontology", () => {
     expect(json(result)).toEqual({ key: "test_ont", created: false });
   });
 
-  // Multi-ontology tier: `fresh_ont` is a second ontology beside the
-  // fixture's `test_ont`.
-  it.skipIf(!supportsMultipleOntologies)("creates the mount's own ontology, no-ops on the second call, and the result is fully usable", async () => {
+  // `fresh_ont` is a second ontology beside the fixture's `test_ont`.
+  it("creates the mount's own ontology, no-ops on the second call, and the result is fully usable", async () => {
     // No REST create for fresh_ont — the mount names an ontology that
     // does not exist yet.
     const fresh = await connectClient("ensure-tests", "fresh_ont");
@@ -327,7 +324,7 @@ describe("schema lifecycle over MCP (keys, never ids)", () => {
 });
 
 describe("search settings over MCP", () => {
-  it.skipIf(settings.DB_BACKEND !== "postgres")("reads and changes the keyword language set and the switches", async () => {
+  it("reads and changes the keyword language set and the switches", async () => {
     expect(json(await call(client, "get_search_settings"))).toEqual({
       keywordLanguages: ["german", "english"],
       disabledIndices: [],
@@ -355,12 +352,6 @@ describe("search settings over MCP", () => {
     expect(invalid.isError).toBe(true);
     expect(text(invalid)).toContain("keywordLanguages");
   });
-
-  it.skipIf(settings.DB_BACKEND === "postgres")("is not supported by an adapter without search indices", async () => {
-    const result = await call(client, "get_search_settings");
-    expect(result.isError).toBe(true);
-    expect(text(result)).toContain("not supported");
-  });
 });
 
 describe("search indices over MCP", () => {
@@ -384,7 +375,7 @@ describe("search indices over MCP", () => {
     });
   }
 
-  it.skipIf(settings.DB_BACKEND !== "postgres")("creates, previews, reads, updates, rebuilds and deletes a custom index", async () => {
+  it("creates, previews, reads, updates, rebuilds and deletes a custom index", async () => {
     await schema();
     const preview = json(await call(client, "preview_search_index", { definition: { ...PEOPLE, key: undefined } }));
     expect(preview).toMatchObject({ valid: true, issues: [], estimate: { entities: 0, entries: 0 } });
@@ -423,7 +414,7 @@ describe("search indices over MCP", () => {
     expect((await call(client, "get_search_index", { index_key: "people" })).isError).toBe(true);
   }, 20_000);
 
-  it.skipIf(settings.DB_BACKEND !== "postgres")("delete tools' cascade flag covers custom indices", async () => {
+  it("delete tools' cascade flag covers custom indices", async () => {
     await schema();
     await call(client, "create_search_index", { definition: PEOPLE });
     const refused = await call(client, "delete_relation_type", { relation_type_key: "works_for" });
@@ -434,7 +425,7 @@ describe("search indices over MCP", () => {
     expect((people.definition as { relations: unknown[] }).relations).toEqual([]);
   });
 
-  it.skipIf(settings.DB_BACKEND !== "postgres")("includes indices in a lens by key; schema reads and validation show them", async () => {
+  it("includes indices in a lens by key; schema reads and validation show them", async () => {
     await schema();
     await call(client, "create_search_index", { definition: PEOPLE });
     await call(client, "create_lens", { key: "hr", name: "HR" });
@@ -462,16 +453,6 @@ describe("search indices over MCP", () => {
     );
     expect((await call(client, "remove_search_index_from_lens", { lens_key: "hr", index_key: "people" })).isError).toBe(true);
   });
-
-  it.skipIf(settings.DB_BACKEND === "postgres")("is not supported by an adapter without search indices", async () => {
-    const result = await call(client, "list_search_indices");
-    expect(result.isError).toBe(true);
-    expect(text(result)).toContain("not supported");
-    await call(client, "create_lens", { key: "hr", name: "HR" });
-    const included = await call(client, "add_search_index_to_lens", { lens_key: "hr", index_key: "x" });
-    expect(included.isError).toBe(true);
-    expect(text(included)).toContain("not supported");
-  });
 });
 
 describe("retrievers over MCP", () => {
@@ -496,7 +477,7 @@ describe("retrievers over MCP", () => {
     await call(client, "create_lens", { key: "hr", name: "HR" });
   }
 
-  it.skipIf(settings.DB_BACKEND !== "postgres")("creates, reads, lists, replaces and deletes a retriever", async () => {
+  it("creates, reads, lists, replaces and deletes a retriever", async () => {
     await schema();
     const created = await call(client, "set_retriever", { lens_key: "hr", key: "people-finder", name: "People", config: CONFIG });
     expect(created.isError, text(created)).toBeUndefined();
@@ -532,7 +513,7 @@ describe("retrievers over MCP", () => {
     expect(text(missing)).toContain("not found");
   });
 
-  it.skipIf(settings.DB_BACKEND !== "postgres")("an invalid configuration answers every error at once and saves nothing", async () => {
+  it("an invalid configuration answers every error at once and saves nothing", async () => {
     await schema();
     const refused = await call(client, "set_retriever", {
       lens_key: "hr",
@@ -563,20 +544,6 @@ describe("retrievers over MCP", () => {
     expect(badKey.isError).toBe(true);
     expect(text(badKey)).toContain("Must match pattern");
     expect(json(await call(client, "list_retrievers", { lens_key: "hr" }))).toEqual([]);
-  });
-
-  it.skipIf(settings.DB_BACKEND === "postgres")("every retriever tool is refused without search indices", async () => {
-    await schema();
-    for (const [name, args] of [
-      ["list_retrievers", { lens_key: "hr" }],
-      ["get_retriever", { lens_key: "hr", retriever_key: "people" }],
-      ["set_retriever", { lens_key: "hr", key: "people", name: "People", config: CONFIG }],
-      ["delete_retriever", { lens_key: "hr", retriever_key: "people" }],
-    ] as const) {
-      const result = await call(client, name, args);
-      expect(result.isError, name).toBe(true);
-      expect(text(result), name).toContain("not supported");
-    }
   });
 });
 
@@ -662,10 +629,6 @@ describe("tool errors", () => {
     expect(message).toContain("dataType");
     expect(message.split(";").length).toBeGreaterThanOrEqual(2);
   });
-
-  // The reserved-type-key rejection is adapter-specific (only the Neo4j
-  // adapter reserves keys) and lives in
-  // `tests/integration/neo4j/mcp-modeling.test.ts`.
 });
 
 describe("lenses over MCP", () => {
@@ -861,7 +824,7 @@ describe("lenses over MCP", () => {
   });
 });
 
-describe.skipIf(!supportsMultipleOntologies)("ontology isolation", () => {
+describe("ontology isolation", () => {
   it("two clients on two mounts cannot observe each other", async () => {
     const created = await app.inject({
       method: "POST",

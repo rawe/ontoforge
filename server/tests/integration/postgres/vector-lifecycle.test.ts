@@ -19,7 +19,6 @@ import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runQuery } from "../../../src/adapters/postgres/errors.js";
-import { settings } from "../../../src/config.js";
 import { setEmbeddingProvider } from "../../../src/core/embedding.js";
 import type { ModelingStore } from "../../../src/core/ports.js";
 import {
@@ -86,7 +85,7 @@ async function vectorIndexes(namespace: string = NAMESPACE): Promise<string[]> {
     .sort();
 }
 
-describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lifecycle", () => {
+describe("PostgreSQL vector-index lifecycle", () => {
   let store: ModelingStore;
 
   beforeAll(async () => {
@@ -192,7 +191,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       );
       await store.ensureSavedQueryVectorIndex(DRIFTED_WIDTH);
       const runtime = await getRuntimeStore(ONTOLOGY_KEY);
-      await runtime.createEntity("note", randomUUID(), { name: "N", body: "Some text." }, {}, null, null);
+      await runtime.createEntity("note", randomUUID(), { name: "N", body: "Some text." }, {}, null);
       const searchIndices = await getSearchIndexStore(ONTOLOGY_KEY);
       const generationsBefore = await searchIndices.listGenerations();
       const queueBefore = await runQuery(`SELECT count(*)::int AS n FROM ${NAMESPACE}.search_queue`);
@@ -202,7 +201,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL vector-index lif
       setEmbeddingProvider(current);
       const embed = vi.spyOn(current, "embed");
       const events: Record<string, unknown>[] = [];
-      for await (const line of modeling.rebuildSearchData(store, runtime)) {
+      for await (const line of modeling.rebuildSearchData(store)) {
         events.push(JSON.parse(line) as Record<string, unknown>);
       }
 

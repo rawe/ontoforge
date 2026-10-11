@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Rebuild one ontology's search data outside its search indices: the
-// saved-query description vectors and their vector index — on Neo4j, which
-// has no search indices, also its own entity vectors and document chunks.
-// Search indices rebuild themselves.
+// saved-query description vectors and their vector index. Search indices
+// rebuild themselves.
 
 import { die, getBaseUrl, getOntologyKey, modelPath, parseCliArgs } from './lib.mjs';
 
@@ -51,10 +50,6 @@ for await (const chunk of res.body) {
     } else if (event.type === 'summary') {
       console.error('');
       console.error('Rebuild complete:');
-      for (const et of event.entityTypes) {
-        const status = et.failed ? ` (${et.failed} failed)` : '';
-        console.error(`  ${et.entityTypeKey}: ${et.processed} rebuilt${status}`);
-      }
       const sqFailed = event.savedQueriesFailed
         ? ` (${event.savedQueriesFailed} failed)`
         : '';

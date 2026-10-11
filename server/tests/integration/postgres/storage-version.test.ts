@@ -5,7 +5,10 @@
  * (`initSchema`) to exactly the layout of a freshly created ontology,
  * every instance kept, every entity type given its name property, the
  * keyword language, the managed search indices and an empty retriever
- * table set up, and the retired search storage dropped. Storage at
+ * table set up, and the retired search storage dropped. Storage of the
+ * 6.x line (version 3) is produced by giving the assistant tables their
+ * 6.x names back; the 7.0 step names them after their kind again, every
+ * agent and retriever kept. Storage at
  * the unreleased version 2 (development storage with retrievers) is
  * produced by dropping what the current code adds and restoring the
  * per-entity search storage it retires; the same step upgrades it,
@@ -20,7 +23,7 @@ import { readFileSync } from "node:fs";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { initSchema, SAVED_QUERY_INDEX } from "../../../src/adapters/postgres/ddl.js";
-import { runQuery, withTransaction } from "../../../src/adapters/postgres/errors.js";
+import { type Querier, runQuery, withTransaction } from "../../../src/adapters/postgres/errors.js";
 import { STORAGE_VERSION } from "../../../src/adapters/postgres/storageVersion.js";
 import {
   closeStores,
@@ -66,6 +69,44 @@ async function instances(namespace: string): Promise<unknown> {
   return { entities: entities.rows, relations: relations.rows };
 }
 
+/** Rename a table, its id column and every constraint the way the
+ * storage of an older layout names them — NOT NULL constraints included,
+ * which PostgreSQL 18 names after table and column. */
+async function renameTable(
+  querier: Querier,
+  namespace: string,
+  [table, id]: [string, string],
+  [then, thenId]: [string, string],
+): Promise<void> {
+  await querier.query(`ALTER TABLE ${namespace}.${table} RENAME COLUMN ${id} TO ${thenId}`);
+  const constraints = await querier.query(
+    `SELECT c.conname, c.contype, a.attname FROM pg_constraint c
+       LEFT JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+      WHERE c.conrelid = '${namespace}.${table}'::regclass`,
+  );
+  for (const row of constraints.rows) {
+    const name = row["conname"] as string;
+    const renamed =
+      row["contype"] === "n" ? `${then}_${row["attname"] as string}_not_null` : name.replace(table, then);
+    await querier.query(`ALTER TABLE ${namespace}.${table} RENAME CONSTRAINT ${name} TO ${renamed}`);
+  }
+  await querier.query(`ALTER TABLE ${namespace}.${table} RENAME TO ${then}`);
+}
+
+/** Storage of the 6.x line (version 3): the assistant tables under their
+ * 6.x names. Records no version — `makeVersion2` builds on it. */
+async function makeVersion3Layout(namespace: string): Promise<void> {
+  await withTransaction(async (querier) => {
+    await renameTable(querier, namespace, ["assistant_agent", "assistant_agent_id"], ["ai_agent_config", "agent_config_id"]);
+    await renameTable(
+      querier,
+      namespace,
+      ["assistant_retriever", "assistant_retriever_id"],
+      ["retriever_agent", "retriever_agent_id"],
+    );
+  });
+}
+
 /** The per-type and per-document-property vector indexes of version 2,
  * named from schema-row uuids. */
 const VEC_ENTITY_INDEX = "vec_entity_4f2d8a31111142228333444455556666";
@@ -78,6 +119,7 @@ const VEC_CHUNK_INDEX = "vec_document_chunk_0a1b2c3d999948888777666655554444";
  * keyword indexes and per-type vector indexes — and the registry holding
  * each ontology's text-search language. */
 async function makeVersion2(namespace: string, language = "english"): Promise<void> {
+  await makeVersion3Layout(namespace);
   await withTransaction(async (querier) => {
     await querier.query(
       `ALTER TABLE public.ontology ADD COLUMN IF NOT EXISTS text_search_language text NOT NULL
@@ -273,7 +315,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 1 to 3 (2 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 1 to 4 (2 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     expect([await instances("ont_legacy"), await instances("ont_legacy_de")]).toEqual(before);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
@@ -363,10 +405,50 @@ describe("PostgreSQL storage version", () => {
       "kurz:dokument~default",
       "kurz:ort~default",
     ]);
-    // 5.1.0 has no retrievers: an empty agent table.
-    expect((await runQuery(`SELECT count(*)::int AS n FROM ont_legacy.retriever_agent`)).rows).toEqual([
+    // 5.1.0 has no retrievers: an empty retriever table.
+    expect((await runQuery(`SELECT count(*)::int AS n FROM ont_legacy.assistant_retriever`)).rows).toEqual([
       { n: 0 },
     ]);
+  });
+
+  it("upgrades 6.x storage to exactly the layout of a fresh ontology, keeping every agent and retriever", async () => {
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
+    const lensId = randomUUID();
+    const agentId = randomUUID();
+    const retrieverId = randomUUID();
+    const config = { indices: [], filters: [], answerFields: {}, threshold: 0.4, answerFieldCharacters: 500 };
+    await withTransaction(async (querier) => {
+      await querier.query(`INSERT INTO ont_older.lens (lens_id, key, name) VALUES ($1, 'all', 'All')`, [lensId]);
+      await querier.query(
+        `INSERT INTO ont_older.assistant_agent (assistant_agent_id, lens_id, key, name, system_prompt, tools)
+         VALUES ($1, $2, 'helper', 'Helper', 'Be brief.', '{search}')`,
+        [agentId, lensId],
+      );
+      await querier.query(
+        `INSERT INTO ont_older.assistant_retriever (assistant_retriever_id, lens_id, key, name, config_version, config)
+         VALUES ($1, $2, 'finder', 'Finder', 2, $3::jsonb)`,
+        [retrieverId, lensId, JSON.stringify(config)],
+      );
+    });
+    await makeVersion3Layout("ont_older");
+    await recordVersion(3);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await initSchema();
+
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 3 to 4 (1 ontologies).");
+    expect(await recordedVersion()).toBe(STORAGE_VERSION);
+    await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
+    expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
+    const agents = await runQuery(`SELECT assistant_agent_id, key, system_prompt, tools FROM ont_older.assistant_agent`);
+    expect(agents.rows).toEqual([
+      { assistant_agent_id: agentId, key: "helper", system_prompt: "Be brief.", tools: ["search"] },
+    ]);
+    // Both read through the port.
+    const modeling = await getModelingStore("older");
+    expect((await modeling.listAgents(lensId)).map((agent) => agent.key)).toEqual(["helper"]);
+    const retriever = (await modeling.searchIndices!().getRetriever(lensId, "finder"))!;
+    expect([retriever.retrieverId, retriever.config]).toEqual([retrieverId, config]);
   });
 
   it("upgrades version-2 storage to exactly the layout of a fresh ontology", async () => {
@@ -580,17 +662,17 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    const agents = await runQuery(
-      `SELECT key, config_version, config, warnings FROM ont_older.retriever_agent ORDER BY key`,
+    const retrievers = await runQuery(
+      `SELECT key, config_version, config, warnings FROM ont_older.assistant_retriever ORDER BY key`,
     );
     const soft =
       "Soft condition 'rule-2' of note was dropped: it needs a custom index with relation group about (outgoing).";
     // Keys with '-' follow the key rules, unique in the lens.
-    expect(agents.rows.filter((row) => String(row["key"]).startsWith("fair")).map((row) => [row["key"], row["warnings"]])).toEqual([
+    expect(retrievers.rows.filter((row) => String(row["key"]).startsWith("fair")).map((row) => [row["key"], row["warnings"]])).toEqual([
       ["fair_search", [soft]],
       ["fair_search_2", [soft, "Key renamed from 'fair-search' to 'fair_search_2'."]],
     ]);
-    expect(agents.rows.filter((row) => !String(row["key"]).startsWith("fair"))).toEqual([
+    expect(retrievers.rows.filter((row) => !String(row["key"]).startsWith("fair"))).toEqual([
       // Not a readable version-1 shape: kept as it was; reads report it invalid.
       { key: "broken", config_version: 1, config: { buckets: 7 }, warnings: [] },
       {
@@ -610,7 +692,7 @@ describe("PostgreSQL storage version", () => {
         ],
       },
     ]);
-    // The agent reads through the port with its conversion notes.
+    // The retriever reads through the port with its conversion notes.
     const indices = (await getModelingStore("older")).searchIndices!();
     expect((await indices.getRetriever(lensId, "notes"))!.warnings).toHaveLength(1);
   });

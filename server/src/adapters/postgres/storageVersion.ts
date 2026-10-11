@@ -47,7 +47,7 @@ import { quoteIdent } from "./oql/bindings.js";
 import { readTypesWithProperties } from "./schemaRead.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 3;
+export const STORAGE_VERSION = 4;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 1;
@@ -286,6 +286,31 @@ async function convertRetrievers(querier: Querier): Promise<void> {
   }
 }
 
+/**
+ * Give the NOT NULL constraints of `table` the names PostgreSQL 18 gives a
+ * freshly created table — `<table>_<column>_not_null` — which a table or
+ * column rename does not change.
+ */
+function renameNotNullConstraints(table: string): Action {
+  return async (querier) => {
+    const found = await querier.query(
+      `SELECT c.conname, a.attname FROM pg_constraint c
+         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+        WHERE c.conrelid = $1::regclass AND c.contype = 'n'`,
+      [table],
+    );
+    for (const row of found.rows) {
+      const name = row["conname"] as string;
+      const wanted = `${table}_${row["attname"] as string}_not_null`;
+      if (name !== wanted) {
+        await querier.query(
+          `ALTER TABLE ${quoteIdent(table)} RENAME CONSTRAINT ${quoteIdent(name)} TO ${quoteIdent(wanted)}`,
+        );
+      }
+    }
+  };
+}
+
 const STEPS: Step[] = [
   {
     // 6.0, from 5.x storage (version 1) or the unreleased version 2:
@@ -407,6 +432,24 @@ const STEPS: Step[] = [
     // 6.0: the keyword language set lives in each ontology's search
     // settings, initialised above from the registry's language.
     serverStatements: [`ALTER TABLE public.ontology DROP COLUMN text_search_language`],
+  },
+  {
+    // 7.0: the assistant tables are named after their kind.
+    to: 4,
+    actions: [
+      `ALTER TABLE ai_agent_config RENAME TO assistant_agent`,
+      `ALTER TABLE assistant_agent RENAME COLUMN agent_config_id TO assistant_agent_id`,
+      `ALTER TABLE assistant_agent RENAME CONSTRAINT ai_agent_config_pk TO assistant_agent_pk`,
+      `ALTER TABLE assistant_agent RENAME CONSTRAINT ai_agent_config_lens_fk TO assistant_agent_lens_fk`,
+      `ALTER TABLE assistant_agent RENAME CONSTRAINT ai_agent_config_key_unique TO assistant_agent_key_unique`,
+      renameNotNullConstraints("assistant_agent"),
+      `ALTER TABLE retriever_agent RENAME TO assistant_retriever`,
+      `ALTER TABLE assistant_retriever RENAME COLUMN retriever_agent_id TO assistant_retriever_id`,
+      `ALTER TABLE assistant_retriever RENAME CONSTRAINT retriever_agent_pk TO assistant_retriever_pk`,
+      `ALTER TABLE assistant_retriever RENAME CONSTRAINT retriever_agent_lens_fk TO assistant_retriever_lens_fk`,
+      `ALTER TABLE assistant_retriever RENAME CONSTRAINT retriever_agent_key_unique TO assistant_retriever_key_unique`,
+      renameNotNullConstraints("assistant_retriever"),
+    ],
   },
 ];
 

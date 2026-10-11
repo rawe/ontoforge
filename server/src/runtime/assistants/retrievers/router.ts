@@ -40,11 +40,11 @@ export const retrieverRuntimeRouter: FastifyPluginAsyncZod<{ threads: ThreadStor
       const store = await getRuntimeStore(request.params.ontologyKey);
       // Resolved before the stream opens: unknown and invalid retrievers answer
       // with a plain error response.
-      const agent = await loadRunnableRetriever(request.params.lensKey, request.params.assistantKey, store);
+      const retriever = await loadRunnableRetriever(request.params.lensKey, request.params.assistantKey, store);
       const threadId = await openThread(threads, threadBinding(request.params, "retrievers"), request.body.threadId);
       return sendChatStream(reply, { threads, threadId }, (execution) =>
         chat(
-          agent,
+          retriever,
           request.body.message,
           { checkpointer: threads.checkpointer, threadId },
           execution,
@@ -78,8 +78,8 @@ export const retrieverRuntimeRouter: FastifyPluginAsyncZod<{ threads: ThreadStor
       if (request.raw.aborted || reply.raw.destroyed) controller.abort();
       try {
         const store = await getRuntimeStore(request.params.ontologyKey);
-        const agent = await loadRunnableRetriever(request.params.lensKey, request.params.assistantKey, store);
-        return await retrieveQuestion(agent, request.body.query, controller.signal);
+        const retriever = await loadRunnableRetriever(request.params.lensKey, request.params.assistantKey, store);
+        return await retrieveQuestion(retriever, request.body.query, controller.signal);
       } finally {
         request.raw.removeListener("aborted", disconnect);
         reply.raw.removeListener("close", disconnect);

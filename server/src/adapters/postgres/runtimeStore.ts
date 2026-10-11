@@ -240,7 +240,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
   async getAgentConfigs(lensKey: string): Promise<Row[]> {
     const result = await this.query(
       `SELECT ac.key, ac.name, ac.description, ac.system_prompt, ac.tools
-       FROM ai_agent_config ac
+       FROM assistant_agent ac
        JOIN lens o ON o.lens_id = ac.lens_id
        WHERE o.key = $1
        ORDER BY ac.name`,

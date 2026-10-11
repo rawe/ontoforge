@@ -328,7 +328,7 @@ export const ExportSavedQuery = z.object({
   parameters: z.array(ExportSavedQueryParameter).default([]),
 });
 
-/** One retriever in its portable form — also the single-agent
+/** One retriever in its portable form — also the single-retriever
  * export. Kept as stored: a version this release cannot run travels too. */
 export const ExportRetriever = z.object({
   key: z.string(),

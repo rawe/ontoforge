@@ -625,9 +625,9 @@ per namespace:
 | Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions |
 | Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
 | Scope inclusion | `lens_includes` | its lens plus exactly one of three columns — entity type, relation type or search index; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array. Search-index rows reach the runtime schema read as index keys; the type-inclusion reads skip them |
-| Agent configuration | `ai_agent_config` | its lens |
+| Agent | `assistant_agent` | its lens |
 | Saved query | `saved_query` | its lens, with the denormalized lens key alongside |
-| Retriever | `retriever_agent` | its lens, with delete cascade; unique per lens and key; configuration and warnings as `jsonb` |
+| Retriever | `assistant_retriever` | its lens, with delete cascade; unique per lens and key; configuration and warnings as `jsonb` |
 
 Every schema row carries a `uuid` primary key.
 

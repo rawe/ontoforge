@@ -340,7 +340,7 @@ const NAME_PROPERTY_FK = "entity_type_name_property_fk";
  * RESTRICT` raises 23001 (restrict_violation). The table only claims
  * constraints whose pre-check already exists; anything else falls
  * through to `StoreError` (rule 4's "violations the code did not
- * anticipate"). The two upsert arbiters (`ai_agent_config_key_unique`,
+ * anticipate"). The two upsert arbiters (`assistant_agent_key_unique`,
  * `saved_query_key_unique`) never surface — they arbitrate `ON CONFLICT`.
  */
 function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
@@ -351,7 +351,7 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
   const value = detailKeyValue(exc.detail) ?? "unknown";
   switch (exc.code) {
     case "23503": // insert side: the parent vanished between pre-check and INSERT
-      if (constraint === "retriever_agent_lens_fk") return new NotFoundError("Lens not found");
+      if (constraint === "assistant_retriever_lens_fk") return new NotFoundError("Lens not found");
       if (ENTITY_FKS.has(constraint)) {
         return new NotFoundError(`Entity '${value}' not found`);
       }
@@ -376,7 +376,7 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
       return null;
     case "23505":
       switch (constraint) {
-        case "retriever_agent_key_unique":
+        case "assistant_retriever_key_unique":
           return new ConflictError("Retriever key already exists in the target lens");
         case "ontology_key_unique":
           return new ConflictError(`Ontology with key '${value}' already exists`);

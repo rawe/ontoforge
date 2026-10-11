@@ -383,6 +383,13 @@ describe("search indices over MCP", () => {
       await call(client, "preview_search_index", { definition: { ...PEOPLE, fields: ["nope"] } }),
     );
     expect(invalid).toMatchObject({ valid: false, estimate: null });
+    // The input schema only describes the definition: a malformed draft still
+    // reaches the service, which reports every shape issue.
+    const malformed = json(
+      await call(client, "preview_search_index", { definition: { ...PEOPLE, fields: "name", extra: 1 } }),
+    ) as { valid: boolean; issues: { path: string }[] };
+    expect(malformed.valid).toBe(false);
+    expect(malformed.issues.map((issue) => issue.path).sort()).toEqual(["definition", "fields"]);
 
     const created = json(await call(client, "create_search_index", { definition: PEOPLE }));
     expect(created).toMatchObject({ key: "people", kind: "custom", enabled: true });

@@ -57,6 +57,7 @@ import { IMPORTABLE_FORMAT_VERSIONS } from "../modeling/transfer/upgrades.js";
 import * as searchIndices from "../modeling/searchIndices.js";
 import * as service from "../modeling/service.js";
 import { VALID_AGENT_TOOLS_CSV } from "../runtime/toolNames.js";
+import { definitionParameter } from "./searchIndexDefinition.js";
 
 // ---------------------------------------------------------------------------
 // Error flattening
@@ -211,13 +212,6 @@ async function resolveOwner(
   const owner = await resolveRelationType(store, typeKey);
   return [owner.relationTypeId as string, typeKind];
 }
-
-/** A search index definition, as the tools that take one state it. */
-const SEARCH_INDEX_DEFINITION =
-  "definition: {key, name, description, entityType, fields, header?, relations?: " +
-  "[{relationType, direction: 'outgoing'|'incoming', fields, target: {<entityTypeKey>: " +
-  "[fields]}, label?, template?}], semantic?: {enabled, template?}, keyword?: {enabled}}. " +
-  "At most 12 fields and 4 relation groups; one entry per relation instance.";
 
 /** A search index's build status, as the tools that return one state it. */
 const SEARCH_INDEX_STATUS =
@@ -671,8 +665,9 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
 
   // --- Search indices ---
   // A definition travels in the index wire format (camelCase, as in REST
-  // and the transfer format), like `import_schema`'s payload. The shape and
-  // the status fields are stated in every tool that takes or returns them.
+  // and the transfer format), like `import_schema`'s payload; its input
+  // schema is MCP's own (`searchIndexDefinition.ts`). The status fields are
+  // stated in every tool that returns them.
 
   server.registerTool(
     "list_search_indices",
@@ -711,9 +706,10 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         "Validate a draft search index definition without saving it and estimate the cost of " +
         "building it (entities, entries, seconds per representation), and outline the entries " +
         "it holds per entity — their semantic and keyword text with ⟦root.x⟧, ⟦relation.x⟧, " +
-        "⟦target.x⟧ and ⟦passage⟧ standing in for the values. " + SEARCH_INDEX_DEFINITION +
-        " The key may be omitted. Returns {valid, issues, estimate, outline}.",
-      inputSchema: { definition: z.record(z.string(), z.unknown()) },
+        "⟦target.x⟧ and ⟦passage⟧ standing in for the values (outline notation only, not " +
+        "template syntax). definition: as the input schema describes it; the key may be " +
+        "omitted. Returns {valid, issues, estimate, outline}.",
+      inputSchema: { definition: definitionParameter("draft") },
     },
     wrap("preview_search_index", async (args: { definition: Record<string, unknown> }) => {
       const result = await searchIndices.previewSearchIndex(
@@ -728,9 +724,10 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "create_search_index",
     {
       description:
-        "Create a custom search index. " + SEARCH_INDEX_DEFINITION +
-        " Building starts in the background.",
-      inputSchema: { definition: z.record(z.string(), z.unknown()) },
+        "Create a custom search index from definition, as the input schema describes it. " +
+        "An invalid definition is refused with every issue at once. Building starts in the " +
+        "background.",
+      inputSchema: { definition: definitionParameter("create") },
     },
     wrap("create_search_index", async (args: { definition: Record<string, unknown> }) => {
       const result = await searchIndices.createSearchIndex(
@@ -745,11 +742,12 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "update_search_index",
     {
       description:
-        "Replace a custom search index's definition; the key cannot change. " +
-        SEARCH_INDEX_DEFINITION + " A changed definition is rebuilt in the background; the " +
-        "current entries serve until then. Managed indices can only be switched " +
-        "(set_search_settings).",
-      inputSchema: { index_key: z.string(), definition: z.record(z.string(), z.unknown()) },
+        "Replace a custom search index's whole definition, as the input schema describes it; " +
+        "the key cannot change, so definition.key may be omitted or must equal index_key. " +
+        "An invalid definition is refused with every issue at once. A changed definition is " +
+        "rebuilt in the background; the current entries serve until then. Managed indices can " +
+        "only be switched (set_search_settings).",
+      inputSchema: { index_key: z.string(), definition: definitionParameter("draft") },
     },
     wrap("update_search_index", async (args: {
       index_key: string;

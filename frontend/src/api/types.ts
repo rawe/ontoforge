@@ -10,6 +10,12 @@
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 
+export interface ServerInfo {
+  /** Where clients reach the server; null when the deployment configures none. */
+  baseUrl: string | null
+  version: string
+}
+
 export interface Features {
   searchStrategies: SearchStrategy[]
   semanticSearch: boolean

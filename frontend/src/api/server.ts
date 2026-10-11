@@ -1,9 +1,11 @@
 /**
  * Server API client — `/api/server`, the one phase-neutral surface:
- * read-only server-capability reads.
+ * read-only reads describing the deployment.
  */
 
 import { request } from './http'
-import type { Features } from './types'
+import type { Features, ServerInfo } from './types'
+
+export const getServerInfo = () => request<ServerInfo>('/api/server/info')
 
 export const getFeatures = () => request<Features>('/api/server/features')

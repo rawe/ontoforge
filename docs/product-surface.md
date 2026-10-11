@@ -363,11 +363,15 @@ a description and a scalar data type (document is not offered). An inline runner
 the query with typed parameter inputs and shows the result as a table or as raw JSON. See
 [capabilities/saved-queries.md](capabilities/saved-queries.md).
 
-**Connect** — one ready-to-paste AI-client configuration covering both MCP servers,
+**Connect** — a ready-to-paste AI-client configuration covering both MCP servers,
 bound entirely by their URLs: the modeling server to this ontology, the runtime server to
-this lens within it ([interfaces.md](interfaces.md#how-a-mount-is-bound)). The
-snippet is copyable and built from the address the client itself was served from, with a
-note to substitute the backend host when clients connect directly.
+this lens within it ([interfaces.md](interfaces.md#how-a-mount-is-bound)). It is offered
+in two formats, Claude Code and Codex, each with where to put it. The URLs start from the
+address the server reports for itself ([interfaces.md](interfaces.md#server)); when it
+reports none, a visible placeholder stands in its place with a note to replace it. A
+switch adds an `Authorization: Bearer` header holding a token placeholder for servers
+reached through an access-controlled entry point. The same panel opens from the
+Workbench home's AI-clients card and empty-state guide.
 
 ### Search
 

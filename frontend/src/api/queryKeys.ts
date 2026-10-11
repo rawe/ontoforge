@@ -2,6 +2,7 @@
  * TanStack Query key scheme (see master spec):
  *
  *   ['features']                                     staleTime Infinity
+ *   ['serverInfo']                                   staleTime Infinity
  *   ['ontologies']                                   registry ontology list
  *   ['lenses', ontologyKey]                          modeling lens list
  *   ['schema', ontologyKey, lensKey]                 runtime schema
@@ -25,6 +26,7 @@ import type { AssistantKind } from './types'
 
 export const qk = {
   features: ['features'] as const,
+  serverInfo: ['serverInfo'] as const,
   ontologies: ['ontologies'] as const,
   lenses: (ontologyKey: string) => ['lenses', ontologyKey] as const,
 

@@ -10,7 +10,7 @@ OntoForge is a graph-native ontology studio for designing graph schemas and usin
 
 - **KISS** — Keep it simple. Prefer the simplest solution that meets the requirement.
 - **YAGNI** — You ain't gonna need it. Don't build for hypothetical future requirements.
-- **Every architectural decision requires user approval.** Never settle a design or architectural choice silently — always ask the user first. Record the outcome as a rule in [docs/decisions.md](docs/decisions.md). Write a record in [docs/adr/](docs/adr/) **only** when alternatives were seriously weighed and would otherwise be re-proposed later — that record carries the deliberation, never the rule, and links to it. Most decisions need only the rule.
+- **Every architectural decision requires user approval.** Never settle a design or architectural choice silently — always ask the user first. Record it as [docs/workflows/recording-decisions.md](docs/workflows/recording-decisions.md) describes.
 
 ## Documentation Principles
 
@@ -18,7 +18,7 @@ OntoForge is a graph-native ontology studio for designing graph schemas and usin
 2. **Single source of truth.** Each piece of information belongs in exactly one place. Avoid redundancy by default. When a fact is needed elsewhere, reference the source — don't copy it.
 
 The remaining principles for writing under `docs/` — progressive disclosure, redundancy,
-document lifecycle, status quo only, technology neutrality — live in
+document lifecycle, status quo only, ontology storage neutrality — live in
 [docs/AGENTS.md](docs/AGENTS.md). Read it before writing under `docs/`.
 
 ## Git Commits
@@ -35,6 +35,7 @@ not documentation of the system.
 - **Testing** — [docs/workflows/testing.md](docs/workflows/testing.md): running unit and integration tests, prerequisites, conventions.
 - **Multi-agent test-and-fix cycles** — [docs/workflows/test-cycle.md](docs/workflows/test-cycle.md): agent roles, execution flow, fresh-state protocol, handover formats.
 - **Releasing** — [docs/workflows/releasing.md](docs/workflows/releasing.md). Read it before tagging a release.
+- **Recording decisions** — [docs/workflows/recording-decisions.md](docs/workflows/recording-decisions.md): what a decision is, rule or ADR, their formats. Read it before recording or changing a decision.
 - **Development fixtures** — [fixtures/README.md](fixtures/README.md): load, save and unload known ontologies (schema + data) on a running server.
 
 Documentation of a single script stays beside that script (`scripts/USAGE.md`).

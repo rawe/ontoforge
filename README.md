@@ -224,8 +224,8 @@ ontoforge/
     ├── storage-adapters.md         # The persistence port contract
     ├── product-surface.md          # What the web client offers
     ├── decisions.md                # Binding design rules
-    ├── adr/                        # Decision records (archive)
-    └── workflows/                  # Procedures: testing, release, test cycles
+    ├── adr/                        # Rejected alternatives behind rules
+    └── workflows/                  # Procedures for working on OntoForge
 ```
 
 ## Configuration

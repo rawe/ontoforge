@@ -1,13 +1,7 @@
 # Rules
 
-Binding constraints on the design. Each states a rule and the reason it exists.
-
-These are current state, not a history. When a rule changes, this file changes with it —
-the record of *when* a rule was adopted and what was weighed against it lives in
-[adr/](adr/).
-
-Design principles that govern how these rules are chosen — and the requirement that a new
-one be approved before it is adopted — are in the repository `AGENTS.md`.
+The rules OntoForge is built on, as they hold today. How a rule is added, changed or
+removed, and when it gets an ADR: [workflows/recording-decisions.md](workflows/recording-decisions.md).
 
 ## System shape
 

@@ -3,9 +3,6 @@
 How OntoForge is put together. Concepts and vocabulary: [README.md](README.md). The rules
 this document obeys: [decisions.md](decisions.md).
 
-This document is deliberately free of language and framework detail. Everything here
-should hold for a reimplementation in any language.
-
 ## Components
 
 Four parts, two processes.

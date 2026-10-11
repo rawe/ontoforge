@@ -19,6 +19,7 @@ import {
   INDEX_SEARCH_GUIDANCE,
   RELATIVE_SCORE_PROMISE,
   SEARCH_EVIDENCE_GUIDANCE,
+  SEARCH_RESPONSE,
   TOOL_MIN_SIMILARITY_GUIDANCE,
   toolMinSimilarity,
 } from "../runtime/search/strategies.js";
@@ -28,6 +29,7 @@ import { z } from "zod";
 
 import { valueToText } from "../core/dataTypes.js";
 import { getRuntimeStore } from "../core/ports.js";
+import { filterRules } from "../runtime/readHelpers.js";
 import * as service from "../runtime/service.js";
 import { formatToolError } from "./modeling.js";
 
@@ -140,28 +142,8 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         "List entities of a type with optional filtering, search, sorting and pagination: " +
         "'limit' (default 50) and 'offset' (items to skip); the response echoes total. Use " +
         "'search' for case-insensitive substring matching across all string properties. " +
-        "Use 'filters' for property-based filtering with operators: exact match " +
-        '("name": "Alice"), not equal ("status__ne": "archived"), "__gt", "__gte", "__lt", ' +
-        '"__lte", contains ("name__contains": "ali"), present ("email__exists": true) and ' +
-        'absent ("email__missing": true). A missing value matches no comparison, __ne ' +
-        "included. Under __exists/__missing the key may be a bare relation type, testing " +
-        'whether any relation of the type exists: ("supersedes__missing": true) returns ' +
-        "the entities nothing supersedes. A filter key may also be a query path crossing " +
-        'one relation type to a property of the related entity, "<relationTypeKey>.' +
-        '<propertyKey>", or of the relation itself, "<relationTypeKey>@<propertyKey>": ' +
-        '("works_for.name": "Acme") lists the persons employed by Acme, ("works_for@role": ' +
-        '"CTO") the persons holding a CTO employment; operator suffixes attach as to a ' +
-        'plain key ("works_for@since__gte": "2021-01-01"). For paths and bare relation ' +
-        "types the direction follows the relation type's endpoints, outgoing from its " +
-        'source type and incoming from its target type; a ":out"/":in" marker on the ' +
-        "relation segment must agree with it and is required where both endpoints are the " +
-        'same type ("manages:out.name": "Bob" for the persons managing a Bob, ' +
-        '"manages:in__missing": true for the persons nobody manages). An entity matches ' +
-        "when at least one relation of the type satisfies the condition. Conditions are " +
-        "ANDed but each is checked on its own, so two paths through one relation type may " +
-        'be satisfied by two different relations: ("works_for.name": "Acme", ' +
-        '"works_for@role": "CTO") also returns a person who is CTO elsewhere and a non-CTO ' +
-        "at Acme; to bind both to one relation use execute_query. 'fields' selects the " +
+        filterRules({ contains: true, relations: true }) +
+        " To bind two conditions to one relation use execute_query. 'fields' selects the " +
         "properties returned, plus _id always.",
       inputSchema: {
         entity_type_key: z.string(),
@@ -481,10 +463,10 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
     "list_relations",
     {
       description:
-        "List relations of a type. Optionally filter by source or target entity. 'filters' " +
-        "takes the relation's own properties with the list_entities operators — exact " +
-        'match, "__ne", "__gt", "__gte", "__lt", "__lte", "__contains", "__exists", ' +
-        '"__missing" — but no query paths and no relation type as a subject.',
+        "List relations of a type, optionally only those from or to one entity " +
+        "(from_entity_id, to_entity_id). " +
+        filterRules({ contains: true, relations: false }) +
+        " The properties are the relation's own.",
       inputSchema: {
         relation_type_key: z.string(),
         from_entity_id: z.string().optional(),
@@ -705,12 +687,13 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
       {
         description:
           (document
-            ? "Find entities whose document text matches. property restricts the search to one document property key. Every hit carries passage matches with propertyKey, charOffset and charLength for get_document. "
-            : "Find entities for a text across properties and documents. " +
-              "To find entities through what they are related to, or through chosen search indices, use search_by_index. ") +
-          "Omit entity_type_key to search all exposed types. Filters take the list_entities keys and operators except '__contains' and apply before ranking, narrowing the searched types; fields projects each entity; limit is an integer 1–100, default 10. " +
-          "Returns query, type, in, strategy, minSimilarity, filter and hits; each hit has entity, relativeScore and matches (kind properties, or document with propertyKey, charOffset, charLength). " +
-          TOOL_MIN_SIMILARITY_GUIDANCE + " relativeScore: " +
+            ? "Find entities whose document text matches; property restricts it to one document property key. Hits carry passage matches to read with get_document. "
+            : "Find entities for a text across properties and documents; to find them through what they are related to, or through chosen search indices, use search_by_index. ") +
+          "Omit entity_type_key to search all exposed types. " +
+          filterRules({ contains: false, relations: true }) +
+          " Filters apply before ranking and, across types, keep only the types every key applies to. " +
+          "fields projects each entity; limit is an integer 1–100, default 10. " +
+          SEARCH_RESPONSE + " " + TOOL_MIN_SIMILARITY_GUIDANCE + " relativeScore: " +
           RELATIVE_SCORE_PROMISE + " " + SEARCH_EVIDENCE_GUIDANCE,
         inputSchema: {
           query: z.string(),
@@ -748,17 +731,17 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
     "search_by_index",
     {
       description:
-        "Find entities for a text through chosen search indices, keys from list_search_indices. " +
-        "Unlike search, it can find an entity through its relations when the catalog shows a custom index with that " +
-        "relation group: a person by the company they work for, or by their role there. index takes one key or a " +
-        "non-empty list; omit it to search every index of this lens. relations keeps only the relation entries of the " +
-        "named relation type keys ([] keeps none); an entity's own fields and document passages always count. " +
-        "Filters take the list_entities keys and operators except '__contains' and apply before ranking, keeping only " +
-        "the indices whose entity type declares every key; fields projects each entity; limit is an integer 1–100, default 10. " +
-        "Returns query, mode (hybrid: semantic+keyword), minSimilarity and hits; each hit has entity, relativeScore and matched — the entry that " +
-        "matched best: index, partKind (self/relation/passage), relationType and relationId of a relation, target " +
-        "(id, type, label of the entity at its other end), snippet (start of the entry's text), and a passage's " +
-        "charOffset and charLength — for get_document use the index's documentProperty as property_key. " +
+        "Find entities for a text through search indices (keys from list_search_indices). " +
+        "A custom index with relation groups also finds an entity through its relations (a person by their " +
+        "employer). index: one key or a non-empty list; omit it for every index of this lens. " +
+        "relations: the relation types whose relation entries count ([] none); own fields and passages always do. " +
+        filterRules({ contains: false, relations: true }) +
+        " Filters apply before ranking and keep only the indices whose type every key applies to. " +
+        "fields projects each entity; limit is an integer 1–100, default 10. " +
+        "Returns query, mode (hybrid: semantic+keyword), minSimilarity and hits; each hit has entity, relativeScore and " +
+        "matched, its best entry: index, partKind (self/relation/passage), a relation's relationType, relationId and " +
+        "target (the other end: id, type, label), snippet (the entry's start), a passage's charOffset and charLength " +
+        "— for get_document use the index's documentProperty as property_key. " +
         TOOL_MIN_SIMILARITY_GUIDANCE + " relativeScore: " +
         RELATIVE_SCORE_PROMISE + " " + INDEX_SEARCH_GUIDANCE,
       inputSchema: {

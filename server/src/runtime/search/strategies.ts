@@ -53,17 +53,18 @@ export function toolMinSimilarity(store: SearchCapabilities): number | null {
   return fallback && ranksSemantically(fallback) ? TOOL_MIN_SIMILARITY : null;
 }
 export const TOOL_MIN_SIMILARITY_GUIDANCE =
-  "Semantic candidates below a fixed similarity floor are omitted; the applied floor is echoed as minSimilarity in the envelope (null when the server ranks by keyword only).";
+  "Semantic candidates below a fixed similarity floor are omitted; minSimilarity echoes it (null when ranking by keyword only).";
 export const RELATIVE_SCORE_PROMISE =
-  "1.0 for the best hit; multiple hits can tie. Comparable only within this response, never confidence. Even an unrelated query can return a best hit. Tied scores can be ordered by available evidence and do not mean equal relevance.";
-const CANDIDATES_NOT_ANSWERS = "Results are candidates, not verified answers.";
+  "1.0 for the best hit; comparable only within this response, never confidence; even an unrelated query has a best hit; a tie is not equal relevance.";
+/** The default search tools' response, as the agent and MCP tools return it. */
+export const SEARCH_RESPONSE =
+  "Returns query, type, in, strategy, minSimilarity, filter and hits; each hit has entity, relativeScore and matches (kind properties, or document with propertyKey, charOffset, charLength).";
 const KEYWORD_QUERY_GUIDANCE =
-  "Keyword queries use plain words, not operators; a hit need not carry every query term.";
-const VERIFY_BEFORE_CLAIMS =
-  "if the content does not support an answer, say so.";
+  "Keyword queries take plain words, no operators; a hit need not carry every term.";
+const CANDIDATES_NOT_ANSWERS = "Hits are candidates, not verified answers.";
 /** The default search tools' guidance: their hits carry per-match evidence. */
 export const SEARCH_EVIDENCE_GUIDANCE =
-  `${CANDIDATES_NOT_ANSWERS} Each match has evidence: semanticSimilarity is a normalized similarity from 0 to 1, not confidence; keywordMatch=true means query terms matched that unit; keywordScore is then the distinct query words matched plus the full-text rank as a fraction below one, comparable neither to semanticSimilarity nor across responses, for inspection only. Null means unknown or unmeasured, never false. ${KEYWORD_QUERY_GUIDANCE} Use short content terms and type/filter scope. Read entity values and get_document at returned passage coordinates before making claims; ${VERIFY_BEFORE_CLAIMS}`;
+  `Each match has evidence: semanticSimilarity is a normalized similarity from 0 to 1, not confidence; keywordMatch=true means query terms matched that unit; keywordScore is then the distinct query words matched plus the full-text rank as a fraction below one, for inspection only, comparable to nothing else. Null means unknown or unmeasured, never false. ${KEYWORD_QUERY_GUIDANCE} ${CANDIDATES_NOT_ANSWERS}`;
 /** The index search tool's guidance: its hits carry `matched`, no evidence. */
 export const INDEX_SEARCH_GUIDANCE =
-  `${CANDIDATES_NOT_ANSWERS} ${KEYWORD_QUERY_GUIDANCE} Use short content terms and index/filter scope. A relation match shows what the hit is connected to, not that the hit answers the question. Read entity values, and get_document at a passage's coordinates, before making claims; ${VERIFY_BEFORE_CLAIMS}`;
+  `${KEYWORD_QUERY_GUIDANCE} ${CANDIDATES_NOT_ANSWERS} A relation match shows a connection, not an answer.`;

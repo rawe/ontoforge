@@ -2,21 +2,21 @@
 
 How the engineering skills should consume this repo's domain documentation when exploring the codebase.
 
-This repo does not use a root `CONTEXT.md`. When a skill refers to `CONTEXT.md` or "the glossary", read the files below instead.
+This repo does not use a root `GLOSSARY.md`. When a skill refers to `GLOSSARY.md` or "the glossary", read the glossary section of `docs/README.md` ([docs/README.md#glossary](../README.md#glossary)) instead.
 
 ## Before exploring, read these
 
-- **`docs/README.md`** — concepts, glossary, and the map of all other docs.
+- **`docs/README.md`** — concepts, the map of all other docs, and the [glossary](../README.md#glossary).
 - **`docs/decisions.md`** — binding rules. Output that would violate one must stop and surface the conflict.
-- **`docs/adr/`** — read the ADRs that touch the area you're about to work in.
+- **`docs/adr/`** — read the ADRs linked from the rules that touch the area you're about to work in.
 
 ## Recording decisions
 
-Follow the repo convention (root `AGENTS.md`): every architectural decision requires user approval. The outcome is recorded as a rule in `docs/decisions.md`; an ADR in `docs/adr/` only when alternatives were seriously weighed — the ADR carries the deliberation and links to the rule, never the rule itself.
+Every architectural decision requires user approval. Record it as [docs/workflows/recording-decisions.md](../workflows/recording-decisions.md) describes; it replaces the skill's own ADR format.
 
 ## Use the glossary's vocabulary
 
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `docs/README.md`. Don't drift to synonyms the glossary avoids.
+When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in the [glossary](../README.md#glossary). Don't drift to synonyms the glossary avoids.
 
 If the concept you need isn't in the glossary yet, that's a signal — either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
 

@@ -68,7 +68,7 @@ The payload declares a format version, and export always writes the current one:
 The version is the format's own line, bumped only when the payload shape changes
 incompatibly.
 
-**Import reads the current version only.** It accepts two older versions and brings
+**Import upgrades older versions step by step.** It accepts two older versions and brings
 each up to the current one first, one version at a time: a `5.0` payload becomes a
 `6.0` one, a `6.0` payload a `7.0` one. Every other version is refused with a field
 error on the version naming the three it accepts:
@@ -175,7 +175,7 @@ For a caller this means: **an identifier obtained from the source ontology is me
 against the target.** Any script, saved artifact or external reference that pins a type by
 identifier breaks across a transfer; one that pins it by key does not. This is the same
 reason keys are the only currency of the public surface — see
-[../decisions.md](../decisions.md).
+[../decisions.md](../decisions.md#naming).
 
 Instance identifiers are unaffected, since there are no instances in the payload.
 

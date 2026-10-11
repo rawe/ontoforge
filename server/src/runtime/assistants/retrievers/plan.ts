@@ -9,7 +9,7 @@
  * restricted to some relation groups, exact filters and previous results.
  * A question about facts of two relations becomes two sub-queries, whose
  * results are fused per entity, or one sub-query and a filter: one index
- * entry never holds two relations (`docs/decisions.md`, relation entries).
+ * entry never holds two relations (`docs/decisions.md#search`).
  *
  * Queries are the planner's words. What restricts results exactly must
  * be the user's: a filter value needs a verbatim quote of a user message

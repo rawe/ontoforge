@@ -27,7 +27,7 @@ import { startSearchWorker, stopSearchWorker } from "./runtime/indexing/worker.j
  * 3. Initialize the language-model provider, if configured.
  * 4. If embeddings are enabled, reconcile vector index widths against the
  *    provider — every mismatch is WARNED about and nothing is repaired
- *    (`docs/decisions.md#behaviour`); rebuild is where repair happens.
+ *    (`docs/decisions.md#deployment`); rebuild is where repair happens.
  * 5. Start the search worker — it reconciles every ontology's index
  *    generations, then builds entries from the queue in the background.
  * 6. Start both MCP servers (mounted inside `createApp`).

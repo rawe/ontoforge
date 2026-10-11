@@ -175,7 +175,7 @@ broken under another:
 - **Defaults on create come from the full schema.** A property the lens hides
   cannot be written through it, yet if that property has a default the created
   entity still receives it. Reason and rule:
-  [../decisions.md](../decisions.md).
+  [../decisions.md](../decisions.md#schema-and-data).
 - **Relation endpoint checks use the full schema.** The source and target entity
   types a new relation is validated against are the type's real endpoints, not
   whatever the lens exposes.

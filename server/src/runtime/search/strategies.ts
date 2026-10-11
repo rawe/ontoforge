@@ -43,8 +43,8 @@ export const strategies: Strategy[] = [
 export function availableStrategies(store: SearchCapabilities): SearchStrategy[] {
   return strategies.filter((s) => s.available(store)).map((s) => s.key);
 }
-/** The fixed similarity floor the MCP and agent search tools apply, hidden from the
- * caller like the strategy itself. */
+/** The fixed similarity floor the MCP and agent search tools apply. The caller cannot set
+ * it; the envelope echoes it as `minSimilarity`. */
 export const TOOL_MIN_SIMILARITY = 0.75;
 /** The floor the tools pass: the constant when the default strategy ranks semantically,
  * null under a keyword default, where a floor would be rejected. */

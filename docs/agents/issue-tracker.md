@@ -11,6 +11,12 @@ gitignored — tickets are local working state and are never committed.
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
 
+## Backlog
+
+`.scratch/BACKLOG.md` is the one overview of open work: one line per open ticket, a short
+title and a link to its file, nothing more. Whoever creates, resolves or drops a ticket
+updates its line in the same step. Start a session there.
+
 ## When a skill says "publish to the issue tracker"
 
 Create a new file under `.scratch/<feature-slug>/` (creating the directory if needed).

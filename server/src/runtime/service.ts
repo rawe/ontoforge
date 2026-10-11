@@ -10,7 +10,7 @@
  * - ALL errors are collected — one rejected write names every offending
  *   field at once in `details.fields`.
  * - Writes validate against the LENS; defaults come from the FULL schema
- *   (`docs/decisions.md#behaviour`). A hidden property with a default is
+ *   (`docs/decisions.md#schema-and-data`). A hidden property with a default is
  *   applied; a hidden property in the payload is an unknown property.
  */
 

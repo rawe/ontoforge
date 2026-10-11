@@ -123,6 +123,10 @@ behaves differently on read, in search and under partial edits. What those
 differences are, and why the type exists at all, is
 [documents.md](documents.md).
 
+A field error names the expected data type and the received value's JSON type. Where the
+JSON type says nothing useful — a number for `integer`, or a string that does not parse —
+it quotes the rejected value instead.
+
 Where the coercion sits in the write path is described in
 [instance-data.md](instance-data.md).
 

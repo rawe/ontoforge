@@ -103,12 +103,10 @@ entities with many matching entries each can return fewer hits than the limit.
 A REST caller may supply a minimum similarity, a number from 0 to 1 on the
 `semanticSimilarity` scale below; absent means no floor. The floor is model-specific —
 what counts as related depends on the embedding model — so REST never chooses one. The
-MCP and agent search tools take none from the caller and instead apply the fixed floor
-pinned by the rule *Search evidence does not establish answer sufficiency* in
-[../decisions.md](../decisions.md) whenever the default strategy ranks semantically. A
-floor applies to semantic entries only: each semantic ranking drops every entry measured
-below the floor before it is grouped by entity, so the floor applies to an entity's best
-semantic entry.
+MCP and agent search tools take none from the caller and instead apply a fixed floor of
+0.75 whenever the default strategy ranks semantically. A floor applies to semantic
+entries only: each semantic ranking drops every entry measured below the floor before it
+is grouped by entity, so the floor applies to an entity's best semantic entry.
 Under `semantic` the filtered ranking is the result, and zero hits is a valid outcome.
 Under `hybrid` only the semantic rankings are filtered; keyword-only hits are untouched
 and keep an unmeasured similarity, which is not a negative. Under `keyword`, `keyword-any`
@@ -142,7 +140,7 @@ fetched that very entry:
 |---|---|
 | `semanticSimilarity` | Original measured similarity, `(1 + cosine) / 2`, or null when unavailable or unmeasured. It is not a probability or calibrated confidence. |
 | `keywordMatch` | True when the query terms matched this entry; null when unavailable or unmeasured. False requires an explicit negative evaluation; rankings alone emit only true/null. |
-| `keywordScore` | The entry's [keyword score](#ranking) — query words contained plus native full-text ranking below one — or null when unavailable or unmeasured. A number exactly when `keywordMatch` is true. Higher is better within one ranking; it has no fixed upper bound and no meaning across responses, ontologies or languages, and is not comparable to `semanticSimilarity`. It exists for inspection and retrieval evaluation and never enters any ranking step. |
+| `keywordScore` | The entry's [keyword score](#ranking) — query words contained plus native full-text ranking below one — or null when unavailable or unmeasured. A number exactly when `keywordMatch` is true. Higher is better within one ranking; it has no fixed upper bound and no meaning across responses, ontologies or languages, and is not comparable to `semanticSimilarity`. It exists for inspection and retrieval evaluation and never enters fusion or tie refinement. |
 
 A method whose ranking did not fetch the match's entry — it ranked other passages of the
 document, say — leaves that measurement null. Missing from a limited ranking does
@@ -316,7 +314,8 @@ healthy and online — so the failure does not appear at startup. It appears as 
 error on the first operation that touches the index: a saved-query write that embeds its
 description, or a saved-query discovery. Search indices are not affected: a changed model
 builds new generations of their semantic entries
-([search-indices.md](search-indices.md#lifecycle)).
+([search-indices.md](search-indices.md#lifecycle)). The stored vectors are never at stake:
+they live in their own column, not in the index.
 
 Startup detects the condition rather than the symptom: with a provider configured, the
 check walks every registered ontology, compares the configured width of each vector index
@@ -325,7 +324,7 @@ identifying the index by what it covers — saved-query descriptions — never b
 index name, and naming rebuild as the remedy.
 
 Startup warns and does not repair; the reasoning is in
-[../decisions.md](../decisions.md#behaviour). Rebuild does repair, in the three-phase
+[../decisions.md](../decisions.md#deployment). Rebuild does repair, in the three-phase
 order above — drop, regenerate, build. A startup ensure that cannot succeed, which is what
 an unfinished rebuild leaves behind, is reported against the ontology it belongs to and
 does not stop the server from starting.

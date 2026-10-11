@@ -20,12 +20,8 @@ reachable over REST, over MCP, and through a web UI.
 | [product-surface.md](product-surface.md) | What the web UI does |
 | [decisions.md](decisions.md) | Rules that constrain all of the above |
 | [capabilities/](capabilities/) | One document per capability, end to end |
-| [workflows/](workflows/) | Procedures for working *on* OntoForge — testing, releasing |
-| [adr/](adr/) | Archived decision records — history, not current documentation |
-
-Everything above `workflows/` describes what OntoForge **is**, and is written to hold for
-a reimplementation in any language. `workflows/` describes what to **do** in this
-repository, and is specific to it.
+| [workflows/](workflows/) | Procedures for working *on* OntoForge |
+| [adr/](adr/) | Why alternatives to a rule in decisions.md were rejected |
 
 Each capability document answers the same three questions: what the capability does,
 what rules bind it, and how it is reached from every interface.

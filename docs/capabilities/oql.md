@@ -10,13 +10,12 @@ being handed the database.
 **Normative anchor.** OQL's reference is the ISO GQL standard and its GPML pattern
 sublanguage. It is not defined by, and does not track, any storage vendor's query
 language. Where an implementation's own dialect and the standard disagree, the standard
-wins. The rule and its reasoning are in [../decisions.md](../decisions.md#behaviour).
+wins. The rule and its reasoning are in [../decisions.md](../decisions.md#query).
 
 **Written in keys.** Node labels are entity type keys, relationship types are relation
 type keys, and property names are property keys — exactly as declared in the schema, in
 `lower_snake_case`. A physical name from the underlying store never appears in a query and
-never appears in a result. A query about people is written with `person`, everywhere, for
-every storage backend.
+never appears in a result. A query about people is written with `person`, everywhere.
 
 **Storage-independent.** Parsing, validation and the read-only guarantee happen above the
 persistence port, against the lens. Compiling a validated query into whatever dialect the
@@ -42,9 +41,9 @@ transaction mode. Four categories:
 
 The language is a closed enumeration: what is named here is the whole surface. Any
 construct or function the grammar parses but this enumeration does not name is rejected
-at validation with a hint naming the supported alternative, identically for every
-storage backend. The rule this enforces is in
-[../decisions.md](../decisions.md#behaviour).
+at validation with a hint naming the supported alternative. Widening the surface is a
+deliberate addition; narrowing it is a breaking change. The rule this enforces is in
+[../decisions.md](../decisions.md#query).
 
 - **Clauses.** MATCH, OPTIONAL MATCH, WHERE, WITH, RETURN, ORDER BY with ASC and DESC,
   SKIP, LIMIT, and AS aliases. A query carries at most one WITH, so a pipeline is at
@@ -154,7 +153,7 @@ responsibility.
 
 Predicates follow three-valued logic: a comparison against a null or missing value is
 unknown, not false, and only rows whose predicate holds are returned. In ordering,
-nulls sort last ascending and first descending, on every backend. String comparison
+nulls sort last ascending and first descending. String comparison
 in WHERE and string ordering in ORDER BY follow the database's default collation —
 the same carve-out the list operations state.
 

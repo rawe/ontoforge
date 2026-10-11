@@ -31,11 +31,13 @@ the remote.
 
 The tag push triggers the GitHub Actions workflow (`.github/workflows/release-images.yml`), which runs `make release` to build and push container images to GHCR.
 
-## Storage version
+## Storage upgrades
 
 The storage version is its own number, not the release version — the rule is in
 [decisions.md](../decisions.md#storage). It lives with its upgrade steps in
-`server/src/adapters/postgres/storageVersion.ts`.
+`server/src/adapters/postgres/storageVersion.ts`. Each step carries its own statements
+and shares nothing with the DDL, so a major release can delete the steps without
+touching anything else.
 
 **A release that changes the PostgreSQL layout** (a table, column or index):
 
@@ -45,17 +47,16 @@ The storage version is its own number, not the release version — the rule is i
 3. `tests/integration/postgres/storage-version.test.ts` must still prove that upgraded
    storage equals freshly created storage.
 
-**A major release:**
+**A major release clears the upgrade steps out:**
 
 1. Delete every upgrade step and set `OLDEST_UPGRADABLE_VERSION` to the version the
    previous major line ended on.
 2. Renaming or removing storage happens only here, as the major release's own step.
-3. Adapt the upgrade test to start from the oldest upgradable layout, frozen as SQL
-   produced by the last release of the previous major line
-   (`server/tests/fixtures/storage-5.1.0.sql` for 6.0).
-4. What operators must do before booting the major release against existing storage is
-   in [storage-adapters.md](../storage-adapters.md#how-ontologies-are-isolated)
-   ("Running the major step") — keep it current with the major step.
+3. Freeze the oldest upgradable layout as SQL produced by the last release of the
+   previous major line (`server/tests/fixtures/storage-<x.y.z>.sql`), delete the previous
+   frozen layout, and start the upgrade test from the new one.
+4. Write what operators must do before booting the major release against existing
+   storage into the release notes, under "Upgrading from <previous major>".
 
 ## Local Build
 

@@ -49,8 +49,7 @@ know it: it is not listed, read or written there.
 
 - **Agent tools are the read-only subset, always.** The allowlist is validated against
   that set, so a write tool name is not merely ignored — it is rejected at definition
-  time and at import. Agents are read-only so that no configuration, and no system
-  prompt, can make one create, update or delete anything.
+  time and at import. Why agents are read-only: [decisions.md](../decisions.md#interfaces).
 - The grantable set is *narrower* than the read tools available over MCP — being read-only
   is not sufficient to be grantable. The tools are named, and the read-only one left out
   of the set is called out, in [../interfaces.md](../interfaces.md#runtime-tools).

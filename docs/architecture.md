@@ -3,9 +3,6 @@
 How OntoForge is put together. Concepts and vocabulary: [README.md](README.md). The rules
 this document obeys: [decisions.md](decisions.md).
 
-This document is deliberately free of language and framework detail. Everything here
-should hold for a reimplementation in any language.
-
 ## Components
 
 Four parts, two processes.
@@ -210,13 +207,10 @@ invisible endpoint would be unusable. The full rules are in
 Scoping cuts in three places: schema reads omit what is out of scope, writes reject it,
 and read results are filtered — including individual columns of a query result.
 
-One asymmetry is deliberate and easy to get wrong when reimplementing:
-
-> **Writes validate against the scoped schema, but apply defaults from the full schema.**
-
-Relation endpoint types are checked against the full schema for the same reason. The rule
-and what it buys are in [decisions.md](decisions.md#behaviour); the three operations that
-consult the full schema instead of the lens, and what each one costs a caller, are in
+One asymmetry is deliberate and easy to get wrong when reimplementing: writes validate
+against the scoped schema but apply defaults from the full schema. Relation endpoint types are checked against the full schema for the same reason. The rule
+and what it buys are in [decisions.md](decisions.md#schema-and-data); the three operations
+that consult the full schema instead of the lens, and what each one costs a caller, are in
 [capabilities/ontology-lenses.md](capabilities/ontology-lenses.md#the-lensfull-schema-asymmetry).
 
 ## Schema cache
@@ -294,7 +288,7 @@ A runtime write, which is the longest path:
 Two properties of the validation step are contractual rather than incidental, and both are
 rules rather than implementation choices:
 
-**All errors are collected, not the first one** — [decisions.md](decisions.md#behaviour).
+**All errors are collected, not the first one** — [decisions.md](decisions.md#schema-and-data).
 
 **Coercion is strict.** Values are converted, never guessed. What each data type converts
 and what it refuses is in
@@ -306,7 +300,7 @@ Every search index keeps entries composed from the
 current state of entities — their own fields, their relations together with the entities
 at the other end, and the passages of their documents. Entries are built in the
 background, never on the request path, so search over them is eventually consistent
-([decisions.md](decisions.md#storage)).
+([decisions.md](decisions.md#search)).
 
 **Every write queues its work in its own transaction.** Entity and relation writes —
 create, update, delete, document edits — hand the store, with the write, the search work
@@ -332,7 +326,7 @@ and, for semantic entries, the embedding model, for keyword entries the keyword 
 set. When no generation matches, a new one is built from a full backfill beside the
 active one, which keeps serving until the new one is complete and takes its place in one
 step. An entry's semantic text is labelled with the schema's display names, unless the
-index renders it from a template; its keyword text holds values only ([decisions.md](decisions.md#interfaces)).
+index renders it from a template; its keyword text holds values only ([decisions.md](decisions.md#search)).
 
 **Managed indices follow the schema.** After every schema change the modeling side derives
 the managed indices again from the full schema — creating, updating and deleting their
@@ -401,7 +395,7 @@ Ordered, and failure at any step prevents serving:
 
 The registry walks in steps 4 and 5 do nothing when no ontology exists — a zero-ontology
 server boots clean. Note step 4 warns and does not repair — deliberately, for the reason
-given in [decisions.md](decisions.md#behaviour). Rebuild is where repair happens, one
+given in [decisions.md](decisions.md#deployment). Rebuild is where repair happens, one
 ontology at a time.
 
 ## Configuration

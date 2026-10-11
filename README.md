@@ -224,8 +224,8 @@ ontoforge/
     ├── storage-adapters.md         # The persistence port contract
     ├── product-surface.md          # What the web client offers
     ├── decisions.md                # Binding design rules
-    ├── adr/                        # Decision records (archive)
-    └── workflows/                  # Procedures: testing, release, test cycles
+    ├── adr/                        # Rejected alternatives behind rules
+    └── workflows/                  # Procedures for working on OntoForge
 ```
 
 ## Configuration
@@ -267,7 +267,7 @@ Find entities by meaning rather than exact keywords — within a single entity t
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `EMBEDDING_PROVIDER` | *(unset — disabled)* | `ollama` or `openai` |
-| `EMBEDDING_MODEL` | `bge-m3` | Embedding model name |
+| `EMBEDDING_MODEL` | `bge-m3` | Embedding model name; the default is multilingual, because an ontology's content may mix German and English |
 | `EMBEDDING_BASE_URL` | `http://localhost:11434` (`ollama`), `https://api.openai.com/v1` (`openai`) | Embedding API base, as the provider documents it |
 | `EMBEDDING_API_KEY` | *(unset)* | API key (required for `openai` provider) |
 | `EMBEDDING_DIMENSIONS` | `1024` | Vector dimensions — must match what the model returns |

@@ -3,7 +3,7 @@
  * ontologies. The registry — not any storage catalog — is the
  * authoritative list of ontologies.
  *
- * Identity rules (`docs/decisions.md`): immutable `lower_snake_case`
+ * Identity rules (`docs/architecture.md#invariants`): immutable `lower_snake_case`
  * key, unique server-wide; mutable display name, also unique
  * server-wide, optional at creation. Create starts the ontology bare and
  * provisions its physical home atomically in the adapter; delete is a

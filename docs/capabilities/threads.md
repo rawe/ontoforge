@@ -28,10 +28,12 @@ A turn is one user message, the assistant's work on it and its answer. For an ag
 work is its tool calls and their results; they stay in the thread with the turn.
 
 - **One run per thread.** A message to a thread whose previous message is still being
-  answered is refused as busy before anything runs — never queued.
+  answered is refused as busy before anything runs — never queued, since two runs would
+  fork the conversation.
 - **A turn is atomic.** A turn cancelled — the client disconnects — or failed leaves
-  nothing in the thread: not the user's message, not partial tool work. A thread only ever
-  holds complete turns. An interrupted turn is asked again, never resumed.
+  nothing in the thread: not the user's message, not partial tool work, so no tool call is
+  left without its result. A thread only ever holds complete turns. An interrupted turn is
+  asked again, never resumed.
 - **The model sees the recent turns,** not the whole thread — for an agent including those
   turns' tool calls and results. A thread keeps a bounded number of turns; older ones are
   removed.

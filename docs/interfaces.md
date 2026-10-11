@@ -773,8 +773,8 @@ connection carries state.
 ### How a mount is bound
 
 **The URL is the only binding channel.** Each mount names its scope in its own address —
-there is no request header and no configured fallback, and no tool takes an ontology or
-lens argument. A URL that names no ontology (or, for runtime, no lens) is an unknown
+there is no request header and no configured fallback, no tool takes an ontology
+argument, and no runtime tool a lens argument. A URL that names no ontology (or, for runtime, no lens) is an unknown
 route and answers the standard not-found error. One MCP client configuration entry per
 ontology is the intended shape.
 

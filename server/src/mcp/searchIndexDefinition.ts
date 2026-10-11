@@ -66,7 +66,8 @@ export const McpSearchIndexDefinition = z.strictObject({
     .array(z.string())
     .nullable()
     .describe(
-      "Own property keys of the root that start every relation and passage entry, so it says whose it is. " +
+      "Own property keys of the root that start every relation and passage entry, so it says whose it is; " +
+        "a group with a template gets none in front, but its template can use them as {x}. " +
         "Null or absent: the root type's name property; []: no header.",
     )
     .optional(),

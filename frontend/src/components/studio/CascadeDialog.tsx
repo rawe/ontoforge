@@ -8,6 +8,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { affectedText } from './cascadeText'
 import type { CascadeState } from './useCascade'
 
 interface CascadeDialogProps {
@@ -31,17 +32,14 @@ function AffectedList({ title, keys }: { title: string; keys: string[] }) {
   )
 }
 
-/** Own wording, not the server message: the lists below carry the specifics. */
-function affectedText({ affectedLenses, affectedIndices }: CascadeState): string {
-  const parts = [
-    ...(affectedLenses.length > 0 ? ['the scope of the lenses'] : []),
-    ...(affectedIndices.length > 0
-      ? ['the search indices (an index left with nothing to read is deleted)']
-      : []),
-  ]
-  return parts.length === 0
-    ? 'This change also updates objects that depend on it.'
-    : `This change also updates ${parts.join(' and ')} listed below.`
+/** The lenses and search indices a cascade updates. */
+export function AffectedLists({ lenses, indices }: { lenses: string[]; indices: string[] }) {
+  return (
+    <>
+      <AffectedList title="Lenses" keys={lenses} />
+      <AffectedList title="Search indices" keys={indices} />
+    </>
+  )
 }
 
 /** Confirm dialog for cascading changes across affected lenses and search indices. */
@@ -56,10 +54,7 @@ export function CascadeDialog({ cascade, onClose }: CascadeDialogProps) {
           </AlertDialogDescription>
         </AlertDialogHeader>
         {cascade !== null && (
-          <>
-            <AffectedList title="Lenses" keys={cascade.affectedLenses} />
-            <AffectedList title="Search indices" keys={cascade.affectedIndices} />
-          </>
+          <AffectedLists lenses={cascade.affectedLenses} indices={cascade.affectedIndices} />
         )}
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>

@@ -1,11 +1,6 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
-import * as model from '@/api/model'
-import type { EntityType } from '@/api/types'
-import { ApiError } from '@/api/http'
+import type { EntityType, RelationType } from '@/api/types'
 import { TypeDot } from '@/components/TypeChip'
 import { Button } from '@/components/ui/button'
 import {
@@ -26,7 +21,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { deriveKey, invalidateModeling, isValidSchemaKey, toastError } from './lib'
+import { deriveKey, isValidSchemaKey } from './lib'
+import { fieldErrorsOf } from './modeling/errors'
+import { useCreateEntityType, useCreateRelationType } from './modeling/mutations'
 import { KeyField } from './shared'
 
 /** Form state shared by both create dialogs. */
@@ -36,6 +33,7 @@ function useTypeForm(open: boolean) {
   const [displayName, setDisplayName] = useState('')
   const [description, setDescription] = useState('')
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [formError, setFormError] = useState<string | null>(null)
 
   // Reset whenever the dialog is (re)opened.
   const [wasOpen, setWasOpen] = useState(open)
@@ -47,6 +45,7 @@ function useTypeForm(open: boolean) {
       setDisplayName('')
       setDescription('')
       setFieldErrors({})
+      setFormError(null)
     }
   }
 
@@ -59,12 +58,32 @@ function useTypeForm(open: boolean) {
     setKey(value)
   }
 
+  /** Before a submit: forget the last attempt's errors. */
+  const clearErrors = () => {
+    setFieldErrors({})
+    setFormError(null)
+  }
+  /** A failed create (already toasted): field errors under their fields, anything else as one line. */
+  const showError = (error: unknown) => {
+    const fields = fieldErrorsOf(error)
+    setFieldErrors(fields)
+    setFormError(
+      Object.keys(fields).length === 0
+        ? error instanceof Error
+          ? error.message
+          : String(error)
+        : null,
+    )
+  }
+
   return {
     key,
     displayName,
     description,
     fieldErrors,
-    setFieldErrors,
+    formError,
+    clearErrors,
+    showError,
     onDisplayNameChange,
     onKeyChange,
     setDescription,
@@ -72,20 +91,17 @@ function useTypeForm(open: boolean) {
   }
 }
 
-function applyApiError(
-  error: unknown,
-  setFieldErrors: (errors: Record<string, string>) => void,
-) {
-  if (error instanceof ApiError && error.fieldErrors !== undefined) {
-    setFieldErrors(error.fieldErrors)
-  }
-  toastError(error)
-}
-
-interface CreateDialogProps {
+interface CreateDialogProps<T> {
   ontologyKey: string
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** After the type exists and the dialog has closed — the caller decides where to go. */
+  onCreated: (created: T) => void
+}
+
+function FormError({ message }: { message: string | null }) {
+  if (message === null) return null
+  return <p className="text-xs text-destructive">{message}</p>
 }
 
 /**
@@ -96,11 +112,11 @@ export function EntityTypeCreateDialog({
   ontologyKey,
   open,
   onOpenChange,
-}: CreateDialogProps) {
+  onCreated,
+}: CreateDialogProps<EntityType>) {
   const form = useTypeForm(open)
   const [nameProperty, setNameProperty] = useState('name')
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
+  const { create, isPending } = useCreateEntityType(ontologyKey)
 
   const [wasOpen, setWasOpen] = useState(open)
   if (open !== wasOpen) {
@@ -108,24 +124,20 @@ export function EntityTypeCreateDialog({
     if (open) setNameProperty('name')
   }
 
-  const create = useMutation({
-    mutationFn: () =>
-      model.createEntityType(ontologyKey, {
-        key: form.key,
-        displayName: form.displayName.trim(),
-        description: form.description.trim() === '' ? null : form.description.trim(),
-        nameProperty,
-      }),
-    onSuccess: (created) => {
-      invalidateModeling(queryClient)
-      toast.success(`Entity type "${created.displayName}" created`)
-      onOpenChange(false)
-      void navigate(`/o/${ontologyKey}/studio/entity-types/${created.entityTypeId}`)
-    },
-    onError: (error) => applyApiError(error, form.setFieldErrors),
-  })
-
   const valid = form.valid && isValidSchemaKey(nameProperty)
+
+  const submit = () => {
+    form.clearErrors()
+    create({
+      key: form.key,
+      displayName: form.displayName.trim(),
+      description: form.description.trim() === '' ? null : form.description.trim(),
+      nameProperty,
+    }).then((created) => {
+      onOpenChange(false)
+      onCreated(created)
+    }, form.showError)
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -143,7 +155,7 @@ export function EntityTypeCreateDialog({
           className="grid gap-4"
           onSubmit={(e) => {
             e.preventDefault()
-            if (valid && !create.isPending) create.mutate()
+            if (valid && !isPending) submit()
           }}
         >
           <div className="grid gap-1.5">
@@ -182,11 +194,12 @@ export function EntityTypeCreateDialog({
               rows={2}
             />
           </div>
+          <FormError message={form.formError} />
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!valid || create.isPending}>
+            <Button type="submit" disabled={!valid || isPending}>
               Create entity type
             </Button>
           </DialogFooter>
@@ -196,7 +209,7 @@ export function EntityTypeCreateDialog({
   )
 }
 
-interface RelationTypeCreateDialogProps extends CreateDialogProps {
+interface RelationTypeCreateDialogProps extends CreateDialogProps<RelationType> {
   entityTypes: EntityType[]
 }
 
@@ -205,13 +218,13 @@ export function RelationTypeCreateDialog({
   ontologyKey,
   open,
   onOpenChange,
+  onCreated,
   entityTypes,
 }: RelationTypeCreateDialogProps) {
   const form = useTypeForm(open)
   const [source, setSource] = useState('')
   const [target, setTarget] = useState('')
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
+  const { create, isPending } = useCreateRelationType(ontologyKey)
 
   const [wasOpen, setWasOpen] = useState(open)
   if (open !== wasOpen) {
@@ -222,25 +235,21 @@ export function RelationTypeCreateDialog({
     }
   }
 
-  const create = useMutation({
-    mutationFn: () =>
-      model.createRelationType(ontologyKey, {
-        key: form.key,
-        displayName: form.displayName.trim(),
-        description: form.description.trim() === '' ? null : form.description.trim(),
-        sourceEntityTypeKey: source,
-        targetEntityTypeKey: target,
-      }),
-    onSuccess: (created) => {
-      invalidateModeling(queryClient)
-      toast.success(`Relation type "${created.displayName}" created`)
-      onOpenChange(false)
-      void navigate(`/o/${ontologyKey}/studio/relation-types/${created.relationTypeId}`)
-    },
-    onError: (error) => applyApiError(error, form.setFieldErrors),
-  })
-
   const valid = form.valid && source !== '' && target !== ''
+
+  const submit = () => {
+    form.clearErrors()
+    create({
+      key: form.key,
+      displayName: form.displayName.trim(),
+      description: form.description.trim() === '' ? null : form.description.trim(),
+      sourceEntityTypeKey: source,
+      targetEntityTypeKey: target,
+    }).then((created) => {
+      onOpenChange(false)
+      onCreated(created)
+    }, form.showError)
+  }
 
   const typeSelect = (
     id: string,
@@ -282,7 +291,7 @@ export function RelationTypeCreateDialog({
           className="grid gap-4"
           onSubmit={(e) => {
             e.preventDefault()
-            if (valid && !create.isPending) create.mutate()
+            if (valid && !isPending) submit()
           }}
         >
           <div className="grid gap-1.5">
@@ -319,11 +328,12 @@ export function RelationTypeCreateDialog({
               rows={2}
             />
           </div>
+          <FormError message={form.formError} />
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!valid || create.isPending}>
+            <Button type="submit" disabled={!valid || isPending}>
               Create relation type
             </Button>
           </DialogFooter>

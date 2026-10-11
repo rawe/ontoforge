@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { KindBadge, StatusChip } from './shared'
 
 /**
- * "Search indices" section of the entity type editor: the indices rooted
+ * "Search indices" section of the entity type page: the indices rooted
  * on the type, with links to the designer. Hidden when the server has no
  * search indices.
  */

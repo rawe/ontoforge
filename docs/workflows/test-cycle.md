@@ -144,7 +144,7 @@ routes live at `/api/ontologies`; every modeling route below is under
 ## Frontend Test Plan (Chrome Extension)
 
 The start page at `/` manages the ontologies; schema flows live in the Studio surface
-(`/o/{ontologyKey}/studio`, `.../studio/lenses`); data flows live in the Workbench
+(`/o/{ontologyKey}/studio/schema`, `.../studio/lenses`); data flows live in the Workbench
 (`/o/{ontologyKey}/w/{lensKey}`). See [../product-surface.md](../product-surface.md)
 for the route map and the full capability inventory.
 
@@ -152,13 +152,13 @@ Sequential UI flows — each step builds on the previous:
 
 1. **Start page, empty server** — `/` shows "No ontologies yet" with a create action; no redirect
 2. **Create ontology** — fill key + display name, submit, land in the new ontology's Studio
-3. **Create entity type** — add entity type, appears in the schema list
-4. **Entity type editor** — click in, editor loads
-5. **Add property** — add to entity type, appears in table
-6. **Create second entity type** — needed for relation type
-7. **Create relation type** — select source/target, submit, appears
-8. **Relation type editor** — click in, editor loads with properties
-9. **Add relation type property** — add, verify
+3. **Create entity type** — the Studio opens on the schema graph; double-click the empty canvas (or press `N`), name the type, Enter: the node appears where it was placed and is selected
+4. **Inspector and classic view** — the inspector shows the selected type's header, properties and relation types; `V` switches to its classic type page with the same selection, `V` switches back
+5. **Add property** — add one through the inspector's add form, it appears in the list and on the node; the classic type page shows it too
+6. **Create second entity type** — needed for relation type; in the classic view "+ Entity type" creates it and opens its type page
+7. **Create relation type** — on the graph drag the first type's "+" onto the second, name it, Enter: the edge appears and is selected
+8. **Relation type page** — open it from the classic list, the type page loads with its endpoints and properties
+9. **Add relation type property** — add one through the type page's add form, verify
 10. **Schema validation** — trigger, verify results display
 11. **Create lens** — Studio → Lenses, create, detail page loads
 12. **Workbench entry** — open the lens from the start page card or the lens detail, create an entity through the schema-driven form

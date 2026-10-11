@@ -137,7 +137,7 @@ export function useRebuildSearchIndex(ontologyKey: string) {
 
 /**
  * The modeling schema an index designer reads: entity and relation types
- * with their properties. Shares the type editor's cache keys.
+ * with their properties. Shares the modeling schema's cache keys.
  */
 export function useIndexSchema(ontologyKey: string): IndexSchema | undefined {
   const entityTypes = useQuery({

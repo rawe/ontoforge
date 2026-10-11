@@ -3,8 +3,6 @@ import {
   ChevronsUpDown,
   Layers,
   LayoutDashboard,
-  PanelLeftClose,
-  PanelLeftOpen,
   Plus,
   Search,
   Settings2,
@@ -13,10 +11,11 @@ import {
   SquareTerminal,
   Waypoints,
 } from 'lucide-react'
-import { useState, type ComponentType, type ReactNode } from 'react'
-import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import { useFeatures, useLenses, useRuntimeSchema } from '@/api/hooks'
 import { OntologySwitcher } from '@/components/layout/OntologySwitcher'
+import { useSidebarCollapsed } from '@/components/layout/sidebarCollapsed'
+import { NavItem, SidebarToggle } from '@/components/layout/SidebarItems'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { TypeDot } from '@/components/TypeChip'
 import { Button } from '@/components/ui/button'
@@ -31,51 +30,8 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { openQuickAdd } from '@/components/quickadd/quickAddBus'
-import { readString, storageKeys, writeString } from '@/lib/storage'
+import { storageKeys, writeString } from '@/lib/storage'
 import { cn } from '@/lib/utils'
-
-/* --------------------------------- nav item --------------------------------- */
-
-interface NavItemProps {
-  to: string
-  label: string
-  collapsed: boolean
-  icon?: ComponentType<{ className?: string }>
-  leading?: ReactNode
-  end?: boolean
-}
-
-function NavItem({ to, label, collapsed, icon: Icon, leading, end }: NavItemProps) {
-  // Active state is computed manually (instead of NavLink's className
-  // function) because Radix's Slot (TooltipTrigger asChild) stringifies a
-  // function-valued className when merging props.
-  const { pathname } = useLocation()
-  const isActive = end ? pathname === to : pathname === to || pathname.startsWith(`${to}/`)
-  const link = (
-    <Link
-      to={to}
-      aria-current={isActive ? 'page' : undefined}
-      className={cn(
-        'flex h-7 items-center gap-2.5 rounded-md px-2 text-[13px] font-medium',
-        'text-sidebar-foreground/65 transition-colors duration-100',
-        'hover:bg-sidebar-accent/60 hover:text-sidebar-foreground',
-        'focus-visible:outline-2 focus-visible:outline-ring/60',
-        isActive && 'bg-sidebar-accent text-sidebar-foreground',
-        collapsed && 'justify-center px-0',
-      )}
-    >
-      {Icon !== undefined ? <Icon className="size-4 shrink-0" /> : leading}
-      {!collapsed && <span className="truncate">{label}</span>}
-    </Link>
-  )
-  if (!collapsed) return link
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{link}</TooltipTrigger>
-      <TooltipContent side="right">{label}</TooltipContent>
-    </Tooltip>
-  )
-}
 
 /* ----------------------------- lens switcher ----------------------------- */
 
@@ -161,18 +117,9 @@ export function Sidebar({
   /** Opens the Cmd+K search palette (provided by WorkbenchLayout). */
   onSearch?: () => void
 }) {
-  const [collapsed, setCollapsed] = useState(
-    () => readString(storageKeys.sidebar) === 'collapsed',
-  )
+  const { collapsed } = useSidebarCollapsed()
   const { data: features } = useFeatures()
   const schema = useRuntimeSchema(ontologyKey, lensKey)
-
-  const toggle = () => {
-    setCollapsed((prev) => {
-      writeString(storageKeys.sidebar, prev ? 'expanded' : 'collapsed')
-      return !prev
-    })
-  }
 
   const base = `/o/${ontologyKey}/w/${lensKey}`
 
@@ -318,25 +265,7 @@ export function Sidebar({
           collapsed ? 'flex-col px-1.5' : 'flex-row',
         )}
       >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              onClick={toggle}
-            >
-              {collapsed ? (
-                <PanelLeftOpen className="size-4" />
-              ) : (
-                <PanelLeftClose className="size-4" />
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side={collapsed ? 'right' : 'top'}>
-            {collapsed ? 'Expand' : 'Collapse'}
-          </TooltipContent>
-        </Tooltip>
+        <SidebarToggle />
         <ThemeToggle />
         {!collapsed && <span className="flex-1" />}
         <Tooltip>

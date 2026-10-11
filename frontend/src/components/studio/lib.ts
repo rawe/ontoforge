@@ -8,16 +8,13 @@ import type { NavigateFunction } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError } from '@/api/http'
 import type { DataType, JsonPrimitive } from '@/api/types'
+import { DATA_TYPES, SCHEMA_KEY_PATTERN } from './modeling/schemaKeys'
+
+// The schema key rule, key suggestions and data types live in the pure
+// `modeling/schemaKeys.ts`; re-exported here for their existing importers.
+export { DATA_TYPES, SCHEMA_KEY_PATTERN, deriveKey } from './modeling/schemaKeys'
 
 /* ---------------------------------- keys ----------------------------------- */
-
-/**
- * Key rule of the schema level — ontologies, entity and relation types,
- * properties, lenses, search indices: lower snake case, starting with a
- * letter. No hyphen, because these keys appear as OQL identifiers (`-` reads
- * as minus) and in storage names. Mirrors the server's `SCHEMA_KEY_PATTERN`.
- */
-export const SCHEMA_KEY_PATTERN = /^[a-z][a-z0-9_]*$/
 
 /**
  * Key rule of the lens-resource level — saved queries and assistants of every
@@ -31,26 +28,7 @@ export const isValidSchemaKey = (key: string) => SCHEMA_KEY_PATTERN.test(key)
 
 export const isValidLensResourceKey = (key: string) => LENS_RESOURCE_KEY_PATTERN.test(key)
 
-/** Derive a snake_case key suggestion from a display name. */
-export function deriveKey(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .replace(/^[0-9]/, '')
-}
-
 /* -------------------------------- data types -------------------------------- */
-
-export const DATA_TYPES: readonly DataType[] = [
-  'string',
-  'integer',
-  'float',
-  'boolean',
-  'date',
-  'datetime',
-  'document',
-]
 
 /** Saved-query parameters are scalar only — `document` exists only as an
  * entity property type. */

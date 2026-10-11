@@ -22,7 +22,7 @@ export function McpConnectDialog({
   return (
     <Dialog>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-h-[88dvh] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>Connect AI clients</DialogTitle>
           <DialogDescription>

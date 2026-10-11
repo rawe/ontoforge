@@ -57,7 +57,7 @@ function CodeBlock({ label, code }: { label: string; code: string }) {
           Copy
         </Button>
       </div>
-      <pre className="max-h-72 overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
+      <pre className="overflow-x-auto rounded-lg border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
         {code}
       </pre>
     </div>

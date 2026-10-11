@@ -79,7 +79,7 @@ import type {
   SearchRepresentation,
 } from "../../core/searchIndex.js";
 import { MAX_LAST_ERRORS, type IndexContentSize } from "../../core/searchPipeline.js";
-import { keywordQuery } from "../../core/searchQuery.js";
+import { keywordQuery } from "./keywordQuery.js";
 import { runQuery, withTransaction, type DbResult, type Querier } from "./errors.js";
 import { buildFilterClauses } from "./filters.js";
 import { quoteIdent } from "./oql/bindings.js";

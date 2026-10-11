@@ -11,6 +11,15 @@ import { listRetrievers } from './retrievers'
 import { qk } from './queryKeys'
 import type { AssistantKind, EntityInstance, Matched } from './types'
 
+/** Where clients reach the server, and its version — fetched once, never stale. */
+export function useServerInfo() {
+  return useQuery({
+    queryKey: qk.serverInfo,
+    queryFn: server.getServerInfo,
+    staleTime: Infinity,
+  })
+}
+
 /** Global feature flags — fetched once, never stale. */
 export function useFeatures() {
   return useQuery({

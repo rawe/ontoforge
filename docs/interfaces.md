@@ -219,16 +219,26 @@ the web client adds its own confirmation, callers of the API get none.
 
 ## Server
 
-Prefix `/api/server`. Read-only capability reads describing the deployment.
+Prefix `/api/server`. Read-only reads describing the deployment.
 Ontology-scoped operations never live here, and server-wide data operations do not
 exist.
 
 | Method | Path | Purpose |
 |---|---|---|
+| GET | `/api/server/info` | Report where clients reach this server and which version it runs |
 | GET | `/api/server/features` | Report which optional capabilities this deployment offers |
 
-The one route that concerns neither the ontologies nor their content — it describes the
-deployment. Clients call it before offering optional capabilities.
+Both routes concern neither the ontologies nor their content — they describe the
+deployment.
+
+`info` answers:
+
+| Field | Type | Reports |
+|---|---|---|
+| `baseUrl` | string or null | The address clients reach this server at, without a trailing slash; REST and MCP paths are appended to it. Taken from the deployment's configured public address; `null` when none is configured |
+| `version` | string | The server's release version |
+
+`features` answers as follows; clients call it before offering optional capabilities.
 
 | Field | Type | Reports |
 |---|---|---|

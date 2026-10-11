@@ -220,7 +220,7 @@ async function resolveOwner(
 export function createModelingMcpServer(ontologyKey: string): McpServer {
   const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" });
 
-  // The ONE registry-touching tool over MCP (`docs/decisions.md`): with
+  // The ONE registry-touching tool over MCP (`docs/decisions.md#interfaces`): with
   // no arguments it can only ever act on the binding the client already
   // holds — it cannot list, reach, rename, or delete anything.
   server.registerTool(

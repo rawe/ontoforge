@@ -134,8 +134,7 @@ shape of the data and the rules the adapter must honour, not per-operation signa
 "Unique" in this section always means unique within the bound ontology.
 
 Internal identifiers appear in this section because they are the store's own currency.
-They never reach a caller — see the keys-not-identifiers rule in
-[decisions.md](decisions.md).
+They never reach a caller ([decisions.md](decisions.md#naming)).
 
 ### Schema side
 
@@ -451,7 +450,7 @@ that ontology alone, and registry delete removes them with the rest.
 **Vector index width reconciliation.** An index fixes its vector width when it is created,
 and a create-if-absent is a no-op against an index that already exists — the failure mode
 this produces, and why startup reports it instead of repairing it, are in
-[decisions.md](decisions.md#behaviour) and
+[decisions.md](decisions.md#deployment) and
 [capabilities/search.md](capabilities/search.md#vector-index-width-drift). The adapter's
 obligation is threefold: before every create, read the existing index's configured width
 and compare it; on the startup path — which walks every registered ontology — report a
@@ -468,8 +467,7 @@ enumerated once in [interfaces.md](interfaces.md#listing-sorting-filtering); an 
 supports all of it and invents none of it. Validation happens above the port: every filter
 fault — an unknown property, an unknown operator, a value that will not coerce, a query
 path or relation subject that does not resolve — is collected there into one domain
-validation error,
-identically on every backend, so the adapter receives only valid conditions and raises no
+validation error, so the adapter receives only valid conditions and raises no
 filter validation error of its own. Each comparison condition's value is already coerced
 to the
 property's declared data type; the substring operator is the exception, comparing
@@ -600,9 +598,10 @@ than the code, or older than the oldest upgradable version, fails the boot befor
 anything is written. Older storage holds the registry table against concurrent creates,
 runs each missing upgrade step inside every `ont_*` namespace — then the step's
 server-wide statements, if it has any, once in `public` — and records the new version
-last. The steps and both version constants live in the storage-version module beside the
-DDL. Before that transaction the adapter logs the pgvector version — the installed one,
-or the one the extension would install — and warns when it predates 0.7, which has no
+last. The upgrade is logged, and the server never backs up storage itself. The steps and
+both version constants live in the storage-version module beside the DDL. Before that
+transaction the adapter logs the pgvector version — the installed one, or the one the
+extension would install — and warns when it predates 0.7, which has no
 `halfvec`: the search entry table cannot then be created, so an upgrade of an existing
 namespace and every ontology creation fail.
 
@@ -676,11 +675,9 @@ per namespace:
 Every schema row carries a `uuid` primary key.
 
 Deleting a schema object cascades through the foreign keys — property definitions,
-inclusions, agents, saved queries and retrievers die with their owner. The DDL carries
-structure only, per the rule in [decisions.md](decisions.md#storage): identity, referential
-integrity, exactly-one-owner and uniqueness, with no backstop for the business rules the
-service validates. The search-index tables are the one exception: they check their closed
-vocabularies — index kind, representation, generation state. The uniqueness constraints on type keys act per namespace, which is
+inclusions, agents, saved queries and retrievers die with their owner. What the DDL
+may carry is a rule in [decisions.md](decisions.md#storage); the closed vocabularies the
+search-index tables check are index kind, representation and generation state. The uniqueness constraints on type keys act per namespace, which is
 exactly the per-ontology key scoping the contract requires.
 
 The name-property reference pins an entity type's name property to one of that type's own
@@ -750,10 +747,11 @@ Five tables per namespace hold search indices:
 An entry row carries its identity — generation, entity, part kind, group number, part id,
 together the primary key — the relation type and target of a relation part, a passage's
 offset and length, the text, its hash as bytes, and either an untyped `halfvec`
-(semantic) or a `tsvector` (keyword). As on `saved_query`, the vector column has no
-width: it lives only in the partition's index. A keyword entry's `tsvector` is built in
-the insert statement — `to_tsvector` of the text in every language of the generation's
-set, concatenated; languages reach SQL only from the closed list.
+(semantic) or a `tsvector` (keyword). Half precision halves the heap and the vector
+indexes, which a large ontology needs kept in memory for fast search. As on `saved_query`,
+the vector column has no width: it lives only in the partition's index. A keyword entry's
+`tsvector` is built in the insert statement — `to_tsvector` of the text in every language
+of the generation's set, concatenated; languages reach SQL only from the closed list.
 
 Each generation's entries live in a table of its own (naming, above), which joins
 `search_entry` as a partition when the generation becomes active:

@@ -51,10 +51,11 @@ screen; there is no separate settings area.
 | Addressed by | Ontology key and lens key, then type keys | Ontology key, then type keys and lens identifiers |
 | Answers | "What is in the graph?" | "What can be in the graph?" |
 
-The two never mix. Nothing in the Workbench edits the schema; nothing in the Studio
-touches instance data. Each surface has its own shell, and each links to the other: the
-Workbench sidebar has a Studio entry, the Studio sidebar returns to the ontology's
-last-used lens (or the start page when none is remembered).
+The two never mix. Nothing in the Workbench edits the schema, a lens, a search index or a
+retriever — it only uses them; nothing in the Studio touches instance data. Each surface
+has its own shell, and each links to the other: the Workbench sidebar has a Studio entry,
+the Studio sidebar returns to the ontology's last-used lens (or the start page when none
+is remembered).
 
 ### The two switchers
 
@@ -157,7 +158,9 @@ clear-all action.
 
 The table offers a subset of the entity list's filter vocabulary
 ([interfaces.md](interfaces.md#listing-sorting-filtering)): strict greater-than and
-less-than, and query paths in either form, are not offered.
+less-than, and query paths in either form, are not offered. This lists every difference
+from the server's vocabulary: a change to the filter vocabulary decides whether the table
+offers it and updates this list.
 
 Any change to search, filters or sort returns to the first page. Switching to another type
 resets search, filters, sort, column visibility, selection and page. If deleting the last
@@ -546,7 +549,8 @@ the [working set](#working-set) and opens the Explorer.
 
 ### Matched via
 
-Search results never show a score. Where the server names the entry that found a hit
+Search results never show a score: it would be read as relevance or confidence, which a
+relative score is not. Where the server names the entry that found a hit
 ([capabilities/search.md](capabilities/search.md#response)), a hit found through a
 relation or a passage carries one short line:
 

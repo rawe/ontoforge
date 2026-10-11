@@ -11,7 +11,7 @@ export interface SearchEvidence {
   keywordMatch: boolean | null;
   /** The entry's keyword score — distinct query words matched plus the full-text rank as a
    * fraction below one. Comparable neither to semanticSimilarity nor across responses; never
-   * used to rank.
+   * enters fusion or tie refinement.
    * A number exactly when keywordMatch is true, null exactly when it is null. */
   keywordScore: KeywordScore | null;
 }

@@ -21,7 +21,7 @@ documents, and an agent. All companies, events and texts are invented.
 | `takes_place_in` | relation `event` → `hall` | — |
 
 Every type and property carries a description. Stands are an exhibitor property, halls
-their own entity ([decision](../../../docs/decisions.md#retrieval-evaluation-dataset)).
+their own entity, so exact hall filtering stays explicit without a separate stand entity.
 Every type's name property is `name`, except `event`'s, which is `title`. Keyword
 languages: english.
 

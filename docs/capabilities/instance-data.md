@@ -86,7 +86,7 @@ sequence of them.
 
 **All errors are collected.** One rejected write names every offending field at once,
 keyed by property. This is contractual, not incidental — see
-[decisions.md](../decisions.md).
+[decisions.md](../decisions.md#schema-and-data).
 
 **Coercion is strict, and it is conversion, not guessing.** The write path applies the
 declared data type unchanged; the seven data types and exactly what each one accepts and

@@ -46,7 +46,7 @@ type. An entity's entries are of three part kinds:
 
 **An entry never combines relations.** Each relation entry holds exactly one relation
 instance; two relation types, or two instances of one, never share an entry
-([../decisions.md](../decisions.md#behaviour)). A question that spans two relations is
+([../decisions.md](../decisions.md#search)). A question that spans two relations is
 answered by an exact filter or by fusing rankings at entity level, not by one entry.
 
 A search ranks entries and groups them by entity: the entity's best entry scores it and is
@@ -92,10 +92,10 @@ change removes a managed index, its switch goes with it.
 ## Custom indices
 
 A custom index is written by a modeler: it chooses the root type, the fields, the header,
-the relation groups, the templates and the representations. Its key follows the shared
-key rules, so it never contains `~` and never collides with a managed key; a name and a
-description are required, and neither may be blank — the description is written for
-whoever picks an index to search. A definition looks like this:
+the relation groups, the templates and the representations. Its key, at most 64
+characters, follows the shared key rules, so it never contains `~` and never collides with
+a managed key; a name and a description are required, and neither may be blank — the
+description is written for whoever picks an index to search. A definition looks like this:
 
 ```json
 {
@@ -132,7 +132,7 @@ names the relation's own properties to include (`fields`) and those of the entit
 other end (`target`, keyed by that entity's type — the relation type's other endpoint,
 the one key it can hold). A group reaches the root's relations and the entities on their
 other end, nothing further: one hop
-([../decisions.md](../decisions.md#behaviour)).
+([../decisions.md](../decisions.md#search)).
 
 **Pairing is per relation instance.** Each relation of the group yields one entry of the
 entity on the root side, holding that relation's properties together with those of the
@@ -214,8 +214,9 @@ rule issue is reported at once:
 **Limits.** At most **12 fields** — own, relation and target fields counted together;
 the header does not count — and at most **4 relation groups**, of one hop each. There is
 no cap on the number of indices: the [cost preview](#cost-preview) shows what each one
-costs instead. The limits bind custom indices only; managed indices are derived and
-never validated against them.
+costs instead. The field cap bounds entry text, which dilutes a vector as it grows; each
+relation group multiplies entries. The limits bind custom indices only; managed indices
+are derived and never validated against them.
 
 ### Changing a custom index
 
@@ -312,7 +313,7 @@ edit that changes no indexed value costs no embedding call.
 
 **Entries are built in the background.** A write commits without its entries; they
 follow asynchronously, so search is eventually consistent
-([../decisions.md](../decisions.md#storage)):
+([../decisions.md](../decisions.md#search)):
 
 - a created entity is not searchable until its entries are built;
 - after an update, the entity's previous entries keep answering until they are replaced;

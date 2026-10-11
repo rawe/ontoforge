@@ -32,8 +32,7 @@
  *
  * Keyword entries hold the values only, in the same order, one per line
  * — no type, field or group label — so a schema label never counts as
- * matching content (`docs/decisions.md`, "Property keyword content
- * contains values, not schema labels").
+ * matching content (`docs/decisions.md#search`).
  *
  * Templates (`semantic.template` for the self part, `relations[].template`
  * per relation part) replace the labelled lines of semantic entries; a

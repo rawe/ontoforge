@@ -77,7 +77,7 @@ export async function closeStores(): Promise<void> {
  * model and width, and the worker builds new ones on a switch.
  *
  * The startup path: a width mismatch is REPORTED and nothing is repaired
- * (`docs/decisions.md#behaviour`).
+ * (`docs/decisions.md#deployment`).
  *
  * One ontology cannot stop the others, and none of them can stop the
  * boot: descriptions of mixed width leave an index that cannot be built,

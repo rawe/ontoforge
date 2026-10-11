@@ -11,7 +11,7 @@ it is recorded as below.
 | | [decisions.md](../decisions.md) | [adr/](../adr/) |
 |---|---|---|
 | Answers | What must I not violate? | Why not the obvious alternative? |
-| Holds | Every rule in force, grouped by concern | The rejected alternatives behind one rule |
+| Holds | Every rule in force, grouped by concern | The rejected alternatives behind one or more rules |
 | Written | For every decision | Only when alternatives were seriously weighed and would plausibly be proposed again |
 | Read | Before any work | When working on the rule that links to it |
 
@@ -28,11 +28,12 @@ it without noticing. It goes under the section of its concern:
 ```
 
 The link exists only when an ADR does. No examples, field lists, limits or procedures.
+Docs and code link a rule by its section anchor and never quote its wording.
 
 ## ADR
 
-One file per rule, `adr/NNNN-slug.md`, numbered with the next free four-digit number;
-numbers are never reused.
+One file per deliberation, `adr/NNNN-slug.md`, numbered with the next free four-digit
+number; numbers are never reused. Every rule it backs links to it.
 
 ```markdown
 # <The decision, as a short title>
@@ -61,5 +62,7 @@ Git keeps the history.
 - A capability's behaviour, fields and limits — its document in `capabilities/`
 - The web client — `product-surface.md`
 - Procedures — `workflows/`
+- Storage backend internals — `storage-adapters.md`
+- Configuration variables and their defaults — the configuration table in the root `README.md`
 - Terms — the [glossary](../README.md#glossary)
 - History, dates, migrations — git

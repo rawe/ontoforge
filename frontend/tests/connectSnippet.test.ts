@@ -6,6 +6,7 @@ const target = {
   baseUrl: 'https://api.example.com',
   ontologyKey: 'org_graph',
   lensKey: 'all',
+  servers: ['modeling', 'runtime'] as const,
   withToken: false,
 }
 
@@ -52,4 +53,14 @@ test('an unknown server address becomes a visible placeholder', () => {
     buildSnippet('codex', { ...target, baseUrl: null }),
     /url = "<server-url>\/mcp\/ontologies\/org_graph\/model"/,
   )
+})
+
+test('only the chosen servers are configured, always in a fixed order', () => {
+  const runtimeOnly = JSON.parse(buildSnippet('claude-code', { ...target, servers: ['runtime'] }))
+  assert.deepEqual(Object.keys(runtimeOnly.mcpServers), ['ontoforge-runtime'])
+  const reversed = JSON.parse(
+    buildSnippet('claude-code', { ...target, servers: ['runtime', 'modeling'] }),
+  )
+  assert.deepEqual(Object.keys(reversed.mcpServers), ['ontoforge-modeling', 'ontoforge-runtime'])
+  assert.doesNotMatch(buildSnippet('codex', { ...target, servers: ['modeling'] }), /runtime/)
 })

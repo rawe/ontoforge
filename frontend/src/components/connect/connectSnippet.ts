@@ -1,7 +1,9 @@
 /**
- * The AI-client configuration for one lens: both MCP servers, bound by URL —
- * modeling to the ontology, runtime to the lens within it.
+ * The AI-client configuration for one lens: the chosen MCP servers, each
+ * bound by its URL (see `mcpServers.ts`).
  */
+
+import { MCP_SERVERS, type McpServerKey } from './mcpServers.ts'
 
 export type ConnectClient = 'claude-code' | 'codex'
 
@@ -14,19 +16,18 @@ export interface ConnectTarget {
   baseUrl: string | null
   ontologyKey: string
   lensKey: string
+  /** The servers to include, in any order; the config lists them in `MCP_SERVERS` order. */
+  servers: readonly McpServerKey[]
   /** Add an `Authorization: Bearer` header carrying the token placeholder. */
   withToken: boolean
 }
 
-function servers({ baseUrl, ontologyKey, lensKey }: ConnectTarget) {
+function entries({ baseUrl, ontologyKey, lensKey, servers }: ConnectTarget) {
   const base = baseUrl ?? SERVER_URL_PLACEHOLDER
-  return [
-    { name: 'ontoforge-modeling', url: `${base}/mcp/ontologies/${ontologyKey}/model` },
-    {
-      name: 'ontoforge-runtime',
-      url: `${base}/mcp/ontologies/${ontologyKey}/runtime/lenses/${lensKey}`,
-    },
-  ]
+  return MCP_SERVERS.filter((server) => servers.includes(server.key)).map((server) => ({
+    name: server.entryName,
+    url: base + server.path(ontologyKey, lensKey),
+  }))
 }
 
 const authorization = `Bearer ${TOKEN_PLACEHOLDER}`
@@ -34,7 +35,7 @@ const authorization = `Bearer ${TOKEN_PLACEHOLDER}`
 /** Claude Code's `.mcp.json`. */
 function claudeCode(target: ConnectTarget): string {
   const mcpServers = Object.fromEntries(
-    servers(target).map(({ name, url }) => [
+    entries(target).map(({ name, url }) => [
       name,
       {
         type: 'http',
@@ -48,7 +49,7 @@ function claudeCode(target: ConnectTarget): string {
 
 /** Codex's `config.toml`. */
 function codex(target: ConnectTarget): string {
-  return servers(target)
+  return entries(target)
     .map(({ name, url }) =>
       [
         `[mcp_servers.${name}]`,

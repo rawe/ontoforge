@@ -1156,9 +1156,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     }),
   );
 
-  // Retrievers search search indices: without them (an adapter that has
-  // none) every retriever tool is refused as a disabled feature, by the
-  // same service check as REST.
+  // Retrievers search search indices.
 
   server.registerTool(
     "list_retrievers",

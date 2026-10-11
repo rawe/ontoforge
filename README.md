@@ -1,6 +1,6 @@
 # OntoForge
 
-A graph-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. Storage sits behind an exchangeable database adapter — PostgreSQL is the default deployment, Neo4j the alternative adapter.
+A graph-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. Storage sits behind a persistence port with a PostgreSQL adapter.
 
 ## Motivation
 
@@ -166,8 +166,8 @@ and AI suites also Ollama; see
 
 OntoForge is a modular monolith backed by a single database holding every ontology's
 schema and instance data. All database access goes through a persistence port with
-per-ontology bound stores; PostgreSQL is the default adapter (one PostgreSQL schema per
-ontology), Neo4j the alternative (capped at one ontology).
+per-ontology bound stores, implemented by the PostgreSQL adapter (one PostgreSQL schema
+per ontology).
 
 - **Registry** — ontologies as manageable units (`/api/ontologies`)
 - **Modeling** — one ontology's schema, lenses, validation, export/import (`/api/ontologies/{ontologyKey}/model`)
@@ -203,7 +203,7 @@ ontoforge/
 │   │   ├── app.ts                  # Fastify app, mounts routes and MCP servers
 │   │   ├── config.ts               # Environment-based settings
 │   │   ├── core/                   # Shared: persistence port, exceptions, OQL, AI
-│   │   ├── adapters/               # Database adapters (PostgreSQL, Neo4j)
+│   │   ├── adapters/               # Database adapter (PostgreSQL)
 │   │   ├── registry/               # Ontology registry CRUD
 │   │   ├── modeling/               # Schema CRUD, validation, export/import
 │   │   ├── runtime/                # Instance CRUD, search, graph traversal
@@ -234,14 +234,14 @@ The backend reads settings from environment variables (or a `.env` file in `serv
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DB_BACKEND` | `postgres` | Persistence adapter selection (`postgres` or `neo4j`) |
+| `DB_BACKEND` | `postgres` | Persistence adapter selection (`postgres`, the only adapter) |
 | `DB_URI` | `postgresql://localhost:5432/ontoforge` | Database connection — the DSN carries host, port and database |
 | `DB_USER` | `postgres` | Database username |
 | `DB_PASSWORD` | `ontoforge_dev` | Database password |
 | `PORT` | `8000` | HTTP listen port |
-| `SEARCH_MAX_ATTEMPTS` | `5` | Failed attempts before a queued search-indexing item counts as failed — a rebuild or a new write of its entity retries it (positive integer; PostgreSQL only) |
-| `SEARCH_WORKER_BATCH` | `64` | Queued search-indexing items the background worker claims per batch (positive integer; PostgreSQL only) |
-| `SEARCH_POLL_MS` | `5000` | Milliseconds the background worker waits between queue checks when no wake-up notification arrives (positive integer; PostgreSQL only) |
+| `SEARCH_MAX_ATTEMPTS` | `5` | Failed attempts before a queued search-indexing item counts as failed — a rebuild or a new write of its entity retries it (positive integer) |
+| `SEARCH_WORKER_BATCH` | `64` | Queued search-indexing items the background worker claims per batch (positive integer) |
+| `SEARCH_POLL_MS` | `5000` | Milliseconds the background worker waits between queue checks when no wake-up notification arrives (positive integer) |
 
 In Docker, `DB_URI` is set to `postgresql://postgres:5432/ontoforge` automatically via `docker-compose.yml`.
 
@@ -274,7 +274,7 @@ Find entities by meaning rather than exact keywords — within a single entity t
 | `EMBEDDING_BATCH_SIZE` | `1` | Texts per embedding request when many texts are embedded together (positive integer; cloud endpoints typically take 16 or more) |
 | `EMBEDDING_CONCURRENCY` | `1` | Embedding requests in flight at once when many texts are embedded together (positive integer) |
 
-Changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` on an existing database — including a reused Docker volume — needs no action for entity search: on PostgreSQL the search indices notice the new model and build new semantic entries in the background; until those are ready, semantic ranking finds nothing and hybrid search answers from keyword entries alone. Saved-query discovery is the exception: its description index is built for the vector width of the model that created it, and startup names each mismatched one in a warning. `POST /api/ontologies/{ontologyKey}/model/rebuild-search-data` rebuilds one ontology's saved-query description vectors and that index at the new width — run it once per ontology after a provider switch. On Neo4j, which keeps no search indices, the same operation also rebuilds every entity's and document chunk's vectors and their indexes.
+Changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` on an existing database — including a reused Docker volume — needs no action for entity search: the search indices notice the new model and build new semantic entries in the background; until those are ready, semantic ranking finds nothing and hybrid search answers from keyword entries alone. Saved-query discovery is the exception: its description index is built for the vector width of the model that created it, and startup names each mismatched one in a warning. `POST /api/ontologies/{ontologyKey}/model/rebuild-search-data` rebuilds one ontology's saved-query description vectors and that index at the new width — run it once per ontology after a provider switch.
 
 ### AI-Powered Runtime
 

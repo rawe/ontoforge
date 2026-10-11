@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
-import { useFeatures, useLensIndexInclusions, useLensScope, useRuntimeSchema } from '@/api/hooks'
+import { useLensIndexInclusions, useLensScope, useRuntimeSchema } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
 import { useSearchIndices } from '@/api/searchIndexHooks'
 import type {
@@ -350,9 +350,8 @@ export function ScopeTab({ ontologyKey, lens }: { ontologyKey: string; lens: Len
     queryFn: () => model.listRelationTypes(ontologyKey),
   })
   const scope = useLensScope(ontologyKey, lens.lensId)
-  const searchIndices = useFeatures().data?.searchIndices === true
-  const indexRecordsQuery = useSearchIndices(ontologyKey, searchIndices)
-  const indexInclusionsQuery = useLensIndexInclusions(ontologyKey, lens.lensId, searchIndices)
+  const indexRecordsQuery = useSearchIndices(ontologyKey)
+  const indexInclusionsQuery = useLensIndexInclusions(ontologyKey, lens.lensId)
   const indexRecords = indexRecordsQuery.data
   const indexInclusions = indexInclusionsQuery.data
 
@@ -478,7 +477,7 @@ export function ScopeTab({ ontologyKey, lens }: { ontologyKey: string; lens: Len
                 type={t}
                 include={entityIncludes.get(t.key)}
                 onInvalidate={invalidate}
-                onIncluded={searchIndices ? preselectIndices : undefined}
+                onIncluded={preselectIndices}
               />
             ))}
             {entityRows.length === 0 && (
@@ -508,23 +507,21 @@ export function ScopeTab({ ontologyKey, lens }: { ontologyKey: string; lens: Len
             A relation type is only usable at runtime when its source and target entity
             types are also in scope — run Validate to check.
           </p>
-          {searchIndices && (
-            <ScopeSearchIndices
-              ontologyKey={ontologyKey}
-              lensId={lens.lensId}
-              scoped={!unscoped}
-              records={indexRecords}
-              includedIndexKeys={
-                indexInclusions === undefined
-                  ? undefined
-                  : new Set(indexInclusions.map((i) => i.key))
-              }
-              includedEntityTypeKeys={new Set(entityIncludes.keys())}
-              entityTypeNames={new Map(entityRows.map((t) => [t.key, t.displayName]))}
-              failed={indexRecordsQuery.isError || indexInclusionsQuery.isError}
-              onInvalidate={invalidate}
-            />
-          )}
+          <ScopeSearchIndices
+            ontologyKey={ontologyKey}
+            lensId={lens.lensId}
+            scoped={!unscoped}
+            records={indexRecords}
+            includedIndexKeys={
+              indexInclusions === undefined
+                ? undefined
+                : new Set(indexInclusions.map((i) => i.key))
+            }
+            includedEntityTypeKeys={new Set(entityIncludes.keys())}
+            entityTypeNames={new Map(entityRows.map((t) => [t.key, t.displayName]))}
+            failed={indexRecordsQuery.isError || indexInclusionsQuery.isError}
+            onInvalidate={invalidate}
+          />
         </div>
         <LensPreview ontologyKey={ontologyKey} lensKey={lens.key} />
       </div>

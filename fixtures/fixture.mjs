@@ -51,9 +51,9 @@ function parseArgs(argv) {
   return { command, name, key, baseUrl, dir: join(ONTOLOGIES_DIR, name) };
 }
 
-// One request; returns the parsed JSON body (or the raw response when
-// `raw` is set). A non-2xx answer throws with the server's own message.
-async function request(baseUrl, method, path, body, { raw = false } = {}) {
+// One request; returns the parsed JSON body. A non-2xx answer throws with
+// the server's own message.
+async function request(baseUrl, method, path, body) {
   let res;
   try {
     res = await fetch(`${baseUrl}${path}`, {
@@ -78,7 +78,6 @@ async function request(baseUrl, method, path, body, { raw = false } = {}) {
     }
     throw new HttpError(res.status, `${method} ${path} -> ${res.status}: ${message}`);
   }
-  if (raw) return res;
   if (res.status === 204) return null;
   return res.json();
 }
@@ -105,21 +104,6 @@ function without(record, fields) {
   const out = {};
   for (const [k, v] of Object.entries(record)) if (!fields.includes(k)) out[k] = v;
   return out;
-}
-
-// Adapters without search indices (Neo4j) keep search data of their own;
-// the rebuild brings it up to date for the loaded data.
-async function rebuildSearchData(baseUrl, key) {
-  const res = await request(baseUrl, 'POST', `/api/ontologies/${key}/model/rebuild-search-data`, undefined, { raw: true });
-  const text = await res.text();
-  const events = text.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
-  const summary = events.find((e) => e.type === 'summary');
-  if (!summary) throw new Error('search data rebuild ended without a summary');
-  const embeddings = summary.embeddingsSkipped ? ', embeddings skipped (no provider)' : '';
-  console.log(`  search data rebuilt: ${summary.totalProcessed} processed, ${summary.totalFailed} failed${embeddings}`);
-  if (summary.totalFailed) {
-    console.warn('  Warning: some search data failed to build — the data is loaded; rebuild search data again once the provider works');
-  }
 }
 
 // Search indices build their entries in the background after every write;
@@ -197,9 +181,7 @@ async function load({ name, key, baseUrl, dir }) {
     }
     console.log(`  data imported: ${entityCount} entities, ${relationCount} relations`);
 
-    const features = await request(baseUrl, 'GET', '/api/server/features');
-    if (features.searchIndices) await waitForSearchIndices(baseUrl, key);
-    else await rebuildSearchData(baseUrl, key);
+    await waitForSearchIndices(baseUrl, key);
   } catch (err) {
     fail(`${err.message}\nOntology "${key}" is partially loaded — run: node fixtures/fixture.mjs unload ${name}`);
   }

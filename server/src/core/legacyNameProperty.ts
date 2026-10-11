@@ -1,8 +1,8 @@
 /**
  * The name-property fallback for data written before name properties
  * existed (storage below version 3, transfer format 5.0). It exists for
- * 5.x data only: the storage upgrade, the 5.0 import and the Neo4j boot
- * backfill call it, nothing else — remove it with them.
+ * 5.x data only: the storage upgrade and the 5.0 import call it,
+ * nothing else — remove it with them.
  */
 
 import { DEFAULT_NAME_PROPERTY, NAME_PROPERTY_DATA_TYPE } from "./schemas.js";

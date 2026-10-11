@@ -13,7 +13,6 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../../../src/app.js";
-import { settings } from "../../../src/config.js";
 import { closeStores, initStores } from "../../../src/core/ports.js";
 import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
@@ -27,7 +26,7 @@ const O = "runtime_search_emb";
 const MODEL = `/api/ontologies/${O}/model`;
 const RUNTIME = `/api/ontologies/${O}/runtime/lenses/all`;
 
-describe.skipIf(!ollamaUp || settings.DB_BACKEND !== "postgres")("runtime index search through REST (Ollama)", () => {
+describe.skipIf(!ollamaUp)("runtime index search through REST (Ollama)", () => {
   let app: FastifyInstance;
   const ids: Record<string, string> = {};
 

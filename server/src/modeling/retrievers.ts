@@ -1,8 +1,7 @@
 /**
  * Retrievers in modeling: lens-local CRUD, copy and move within the
  * ontology, and the single-retriever export and import. Retrievers search the
- * ontology's search indices, so an adapter without search indices answers
- * every operation with `FEATURE_DISABLED`.
+ * ontology's search indices.
  *
  * A save checks the configuration against the owning lens
  * (`runtime/assistants/retrievers/config.ts`) and refuses an invalid one; a

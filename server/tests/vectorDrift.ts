@@ -1,13 +1,11 @@
 /**
- * Shared fixtures for the width-drift tests of both adapters: the log
- * capture each of them needs, and the operator-facing vocabulary they
- * all assert against.
+ * Shared fixtures for the width-drift tests: the log capture they need,
+ * and the operator-facing vocabulary they assert against.
  *
- * The scope phrasings are spelled out here rather than imported from the
- * module that produces them — an assertion against its own source would
- * pin nothing. They are the contract: the words every backend's drift
- * report must use for the same index, for the fixture keys 'person' and
- * 'bio'.
+ * The scope phrasing is spelled out here rather than imported from the
+ * module that produces it — an assertion against its own source would
+ * pin nothing. It is the contract: the words the drift report must use
+ * for the index.
  */
 
 import { vi } from "vitest";
@@ -56,22 +54,8 @@ export async function logsOf(work: () => Promise<void>): Promise<string> {
   return captured.lines.join("\n");
 }
 
-/** The semantic index of the fixture entity type. */
-export const ENTITY_TYPE_SCOPE = "entity type 'person'";
-
-/** The chunk index of the fixture document property. */
-export const DOCUMENT_PROPERTY_SCOPE = "document property 'bio' on entity type 'person'";
-
-
 /** The saved-query description index. */
 export const SAVED_QUERY_SCOPE = "saved-query descriptions";
-
-/** Every scope a full-inventory drift report must name. */
-export const DRIFT_SCOPES = [
-  ENTITY_TYPE_SCOPE,
-  DOCUMENT_PROPERTY_SCOPE,
-  SAVED_QUERY_SCOPE,
-];
 
 /** What a PostgreSQL drift report may never contain: a physical index
  * name, the vendor, or a statement. */

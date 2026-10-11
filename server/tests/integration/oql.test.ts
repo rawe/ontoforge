@@ -1,6 +1,6 @@
 /**
  * Session-07 integration suite — OQL end to end against the
- * docker-compose Neo4j: parse → validate → compile → execute → per-column
+ * docker-compose PostgreSQL: parse → validate → compile → execute → per-column
  * post-processing, through unscoped and scoped lenses, plus the runtime
  * MCP `execute_query` round trip.
  *
@@ -19,7 +19,6 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
-import { settings } from "../../src/config.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
@@ -192,20 +191,15 @@ describe("query execution (unscoped lens)", () => {
     expect(traversal.results).toEqual([{ name: "Alice" }, { name: "Bob" }]);
   });
 
-  it("pins the empty leading OPTIONAL MATCH divergence between the backends", async () => {
-    // No person rows exist. The reference adapter preserves Cypher's
-    // single null row; the SQL emission opens the stage as a plain FROM
-    // (there is no left-hand relation to outer-join) and yields zero
-    // rows. Both sides are pinned so neither drifts unnoticed.
+  it("pins an empty leading OPTIONAL MATCH to zero rows", async () => {
+    // No person rows exist. The SQL emission opens the stage as a plain
+    // FROM (there is no left-hand relation to outer-join) and yields zero
+    // rows; pinned so it never drifts unnoticed.
     const body = await query(
       "test_lens",
       "OPTIONAL MATCH (p:person) RETURN p.name AS name",
     );
-    if (settings.DB_BACKEND === "neo4j") {
-      expect(body.results).toEqual([{ name: null }]);
-    } else {
-      expect(body.results).toEqual([]);
-    }
+    expect(body.results).toEqual([]);
   });
 
   it("rejects a variable-length pattern at validation", async () => {
@@ -395,15 +389,13 @@ describe("the clause and expression matrix", () => {
       expect(body.results).toEqual([]);
     });
 
-    it.skipIf(settings.DB_BACKEND !== "postgres")(
+    it(
       "answers a non-finite float literal as a comparison, never a 500",
       async () => {
         await seedAges();
         // 1e400 canonicalizes to Infinity, which the compiler binds as a
         // value SQL numeric accepts — the spliced-Infinity 500 is closed
-        // by construction. PostgreSQL-only: Neo4j's own server refuses
-        // the literal outright (22003, numeric value out of range), so
-        // there is no reference behaviour to match.
+        // by construction.
         const above = await query(
           "test_lens",
           "MATCH (p:person) WHERE p.age > 1e400 RETURN p.name AS name",
@@ -460,13 +452,11 @@ describe("the clause and expression matrix", () => {
       expect(body.results).toEqual([{ xs: ["Alice", "x"], m: { who: "Alice" } }]);
     });
 
-    it("pins the map-literal conversion divergence between the backends", async () => {
+    it("pins the map-literal conversion of a datetime", async () => {
       // Result conversion recurses through homogeneous lists only. A
-      // datetime inside a map literal is converted by the reference
-      // adapter (which recurses into plain objects and yields a Date,
-      // serialized in the Z form) but passes through PostgreSQL as the
-      // raw jsonb rendering of the timestamp column (offset form). Both
-      // carry the same instant; the shape is each backend's own.
+      // datetime inside a map literal passes through as the raw jsonb
+      // rendering of the timestamp column (offset form), carrying the
+      // same instant.
       const created = await createEntity("test_lens", "person", { name: "Eve" });
       const body = await query(
         "test_lens",
@@ -476,11 +466,7 @@ describe("the clause and expression matrix", () => {
       expect(new Date(value).getTime()).toBe(
         new Date(created._createdAt as string).getTime(),
       );
-      if (settings.DB_BACKEND === "neo4j") {
-        expect(value).toBe(new Date(created._createdAt as string).toISOString());
-      } else {
-        expect(value).toMatch(/[+-]\d{2}:\d{2}$/);
-      }
+      expect(value).toMatch(/[+-]\d{2}:\d{2}$/);
     });
 
     it("matches CONTAINS case-sensitively — unlike the list filter", async () => {
@@ -565,9 +551,8 @@ describe("the clause and expression matrix", () => {
 
     it("aggregates the rows a WITH ordered", async () => {
       await seedGraph();
-      // The order *inside* the collected list is contractual on both
-      // backends: the pipeline ordering is re-stated inside the
-      // aggregate, matching the reference adapter's preserved order.
+      // The order *inside* the collected list is contractual: the
+      // pipeline ordering is re-stated inside the aggregate.
       const collected = await query(
         "test_lens",
         "MATCH (p:person) WITH p ORDER BY p.age DESC LIMIT 2 RETURN collect(p.name) AS top",

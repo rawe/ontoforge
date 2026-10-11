@@ -3,9 +3,6 @@
  * probing (the suite SKIPS when the provider or model is absent) and
  * per-file provider enablement via `settings` mutation (config is read at
  * process start, so tests mutate and restore).
- *
- * The Neo4j vector-index helpers for the drift scenarios live in
- * `neo4j/support.ts`.
  */
 
 import { settings } from "../../../src/config.js";

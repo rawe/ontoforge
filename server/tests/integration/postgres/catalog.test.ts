@@ -15,7 +15,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 
 import { runQuery } from "../../../src/adapters/postgres/errors.js";
-import { settings } from "../../../src/config.js";
 import { closeStores, getOntologyRegistry, initStores } from "../../../src/core/ports.js";
 import { wipeDatabase } from "../reset.js";
 
@@ -153,7 +152,7 @@ async function assertCatalogComplete(): Promise<void> {
   }
 }
 
-describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL physical catalog", () => {
+describe("PostgreSQL physical catalog", () => {
   beforeAll(async () => {
     await initStores();
     await wipeDatabase();

@@ -97,7 +97,7 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
       fromEntityId: alice._id as string,
       toEntityId: python._id as string,
     });
-    // Search entries are built in the background (none on Neo4j).
+    // Search entries are built in the background.
     await drainSearchWork();
   }
 

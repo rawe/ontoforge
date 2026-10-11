@@ -8,8 +8,8 @@
  * `isUuid()` is strict: it accepts exactly the format the server itself
  * generates — lowercase hyphenated 8-4-4-4-12. PostgreSQL's own uuid
  * parsing is more lenient (uppercase, braces, no hyphens); accepting
- * what PG accepts would let PG find rows where the reference adapter's
- * string comparison answers not-found. Every id-taking store method
+ * what PG accepts would let PG find rows under an id the server never
+ * issued, in a form other than the one it hands out. Every id-taking store method
  * checks its ids here first and short-circuits off-format input to the
  * method's not-found shape without touching the database — which also
  * keeps 22P02 unreachable from caller input.

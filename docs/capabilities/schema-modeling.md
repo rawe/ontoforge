@@ -154,19 +154,6 @@ The "required, no default" state is the one that constrains lenses, because such
 property can never be supplied through a lens that hides it. That constraint is
 what the cascade protocol enforces.
 
-### Reserved type keys
-
-The active storage adapter declares two sets — reserved entity type keys and
-reserved relation type keys — naming keys whose physical form would collide with
-the adapter's own storage objects. A key in the applicable set is rejected on type
-creation and on import, with a validation error that lists the reserved set and
-names neither the vendor nor the physical name it would collide with. An adapter
-with no such collisions declares empty sets. See
-[../storage-adapters.md](../storage-adapters.md).
-
-Keys already stored that a newly reserved set would now forbid are reported at
-startup and never rewritten ([../architecture.md](../architecture.md)).
-
 ### Deletion
 
 Deleting a type deletes its property definitions with it. Nothing else cascades by

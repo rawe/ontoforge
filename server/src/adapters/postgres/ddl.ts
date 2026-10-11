@@ -386,8 +386,7 @@ export async function initSchema(): Promise<void> {
 /*
  * The saved-query description index is a cast-expression HNSW over the
  * dimensionless `embedding` column — `(embedding::vector(D))
- * vector_cosine_ops`, cosine mirroring the reference adapter's similarity
- * function. Because the column carries no width, there is no ALTER and no
+ * vector_cosine_ops`, cosine being the similarity the port pins. Because the column carries no width, there is no ALTER and no
  * absent-then-added state: the column is always there, NULL until
  * written, and the width lives only in the index. Queries must repeat the
  * same cast expression or the planner ignores the index; the width for

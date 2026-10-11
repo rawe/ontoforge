@@ -1,7 +1,7 @@
 /**
  * Session-05 integration suite — relation lifecycle and neighbourhood
- * traversal against the docker-compose Neo4j at bolt://localhost:7687,
- * through scoped and unscoped lenses built via the modeling API.
+ * traversal against the docker-compose PostgreSQL, through scoped and
+ * unscoped lenses built via the modeling API.
  *
  * Beyond the CRUD round trip: endpoint validation against the FULL schema,
  * lens-dropping of out-of-scope relation types, the shared direction

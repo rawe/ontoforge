@@ -339,7 +339,7 @@ unscoped and therefore exposes everything.
 Inline-editable name and description, an immutable key, a scope marker, an entry into the
 Workbench for this lens, and deletion behind a confirmation stating that the lens, its
 scope, its agents, retrievers and saved queries go — while the schema and all
-instance data stay. Five tabs — Retrievers only on a server with search indices:
+instance data stay. Five tabs:
 
 **Scope** — the [scope editor](#scope-editor).
 
@@ -483,17 +483,11 @@ Three operations, each with its own explanation. See
   refreshes every cached view.
 - **Rebuild search data** — runs the [search-data rebuild](capabilities/search.md#rebuild)
   for this ontology, behind a confirmation warning about duration and provider cost, then
-  live progress per group while it runs and a summary when it finishes. What it covers
-  depends on the adapter, and the card and confirmation say which:
-  - With search indices it re-embeds the saved-query descriptions and repairs their
-    vector index; search indices keep themselves current and are rebuilt one at a time
-    from the [index designer](#index-designer). With no embedding provider configured
-    there is nothing to rebuild: the action is disabled, with a note saying why.
-  - Without search indices it also rebuilds the adapter's own search data — it re-chunks
-    the document passages and, with an embedding provider, re-embeds entities and
-    passages ([storage-adapters.md](storage-adapters.md#own-search-storage)). With no
-    provider it stays available, with a note that it skips the embeddings; the summary
-    repeats that they were skipped.
+  live progress per group while it runs and a summary when it finishes. It re-embeds the
+  saved-query descriptions and repairs their vector index; search indices keep themselves
+  current and are rebuilt one at a time from the [index designer](#index-designer). With
+  no embedding provider configured there is nothing to rebuild: the action is disabled,
+  with a note saying why.
 
 ---
 
@@ -511,7 +505,7 @@ for questions, which is remembered.
 | `#` | Types | Filter the exposed entity types; choosing one *scopes* the palette to that type rather than navigating. |
 | `?` | Saved queries | Semantic search over query descriptions when available, substring filtering over the full list otherwise. An empty query lists everything. |
 | `>` | Actions | Navigation to each Workbench area, the Studio, and a theme toggle. |
-| `!` | Question | A question to a [retriever](capabilities/retrievers.md#retrieve), answered with the entities it finds. Sent on purpose, never as you type — see [Question mode](#question-mode). Only on a server with search indices and a language-model provider. |
+| `!` | Question | A question to a [retriever](capabilities/retrievers.md#retrieve), answered with the entities it finds. Sent on purpose, never as you type — see [Question mode](#question-mode). Only on a server with a language-model provider. |
 
 Scoping to a type replaces the prefix with a persistent type chip; the search then runs
 within that type, an empty query lists that type's first entities, and Backspace on an
@@ -566,9 +560,7 @@ The line never shows the entry's text. The palette and the relation target picke
 [default search](capabilities/search.md#ranked-search), which reads only managed indices,
 so no relation line appears there; relation lines appear in
 a retriever's diagnostics and in the palette's question results, whose searches
-reach custom indices. A server whose hits
-name no entry — one without search indices — shows instead one `in <property>` badge per
-document match, in match order.
+reach custom indices.
 
 ### Quick add
 
@@ -692,8 +684,7 @@ expands automatically, and runs immediately when it has no parameters.
 ### Assistants panel
 
 Two tabs over one lens, one per assistant kind: Agents and Retrievers. Both require a language-model
-provider; see [capabilities/agents.md](capabilities/agents.md). Retrievers are only on a server
-with search indices; without them the tab explains that retrievers are not available. Both tabs
+provider; see [capabilities/agents.md](capabilities/agents.md). Both tabs
 are the same [assistant chat](#assistant-chat).
 
 A toolbar picker selects the assistant: the kind's assistants as the server lists them —
@@ -725,7 +716,7 @@ the lens cannot run shows the server's refusal with its reasons.
 
 ### Retriever editor
 
-The Studio lens detail's Retrievers tab, absent on a server without search indices.
+The Studio lens detail's Retrievers tab.
 Its configuration semantics are owned by
 [capabilities/retrievers.md](capabilities/retrievers.md).
 
@@ -984,7 +975,7 @@ type begins scoping — after which *only* checked types remain visible. This is
 transition in the product that silently narrows what a running client can see, so it is
 stated rather than implied.
 
-On a server with search indices, a **Search indices** section follows the types. A scoped
+A **Search indices** section follows the types. A scoped
 lens lists every index of the ontology, managed and custom, grouped by root entity type
 in schema order, each with its name, key, entity type, kind and an "off" marker when
 switched off in the search settings; its checkbox includes or removes the index at once.
@@ -1040,22 +1031,20 @@ on the API for programmatic callers. See
 ## Feature gating
 
 The client asks the server once per session which optional capabilities exist — the
-available search strategies plus the semantic-search, AI and search-indices flags — and
+available search strategies plus the semantic-search and AI flags — and
 treats the answer as never going stale. None is inferred from a failed call — the client
 never probes.
 
 Gated areas explain themselves rather than vanishing, except in navigation, where a dead
-entry would be worse than an absent one. Navigation is gated optimistically: the Assistants entry,
-the Studio's Search entry and the lens detail's Retrievers tab are shown unless the
-report has explicitly said their capability is off, so they do not flicker into existence
-while the report is loading.
+entry would be worse than an absent one. Navigation is gated optimistically: the Assistants entry
+is shown unless the report has explicitly said its capability is off, so it does not
+flicker into existence while the report is loading.
 
 | Off | What changes |
 |---|---|
 | AI | The Assistants navigation entry, the Assistants palette action, the palette's question mode and the Ask an assistant quick action are gone. The Assistants screen itself renders an explanation. |
 | No search strategies | Entity search falls back to substring matching — per type in parallel when unscoped. |
-| Semantic search | Saved-query search falls back to client-side substring filtering over the full list. With search indices the search-data rebuild is disabled and explains that there is nothing to rebuild; without them it stays available and explains that it will skip the embeddings. |
-| Search indices | The Studio's Search entry, the lens detail's Retrievers tab and the palette's question mode are gone; their addresses render an explanation, and so does the Workbench's Retrievers tab. The entity type page's Search indices section and the scope editor's Search indices section are absent. Search hits name no entry, so results show document badges instead of [matched-via](#matched-via) lines. |
+| Semantic search | Saved-query search falls back to client-side substring filtering over the full list. The search-data rebuild is disabled and explains that there is nothing to rebuild. |
 
 Everything else works unchanged. See [capabilities/search.md](capabilities/search.md).
 
@@ -1120,9 +1109,8 @@ containing a quote, a comma or a newline is quoted with its quotes doubled.
 newline-delimited JSON objects, one per line, which must be read incrementally — a client
 that waits for a complete JSON body will hang until the whole rebuild finishes. Two event
 kinds appear: progress events carrying a group key, a processed count and a total — the
-saved queries form one pseudo-group at the end, present only when a provider is
-configured, and an adapter without search indices sends one group per entity type before
-it — and exactly one final summary carrying the overall processed and failed counts and
+saved queries form one pseudo-group, present only when a provider is
+configured — and exactly one final summary carrying the overall processed and failed counts and
 whether the embeddings were skipped. A stream that ends without a summary is an error,
 not a success.
 

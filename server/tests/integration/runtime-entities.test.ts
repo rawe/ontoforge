@@ -1,6 +1,6 @@
 /**
  * Session-04 integration suite — runtime schema introspection and entity
- * CRUD against the docker-compose Neo4j at bolt://localhost:7687, through
+ * CRUD against the docker-compose PostgreSQL, through
  * scoped and unscoped lenses built via the modeling API.
  */
 
@@ -193,7 +193,7 @@ describe("entity CRUD through the unscoped lens", () => {
 
   it("a garbage id answers not-found on read, update and delete", async () => {
     // Off-format ids short-circuit to not-found — indistinguishable from
-    // a well-formed id that matches nothing, on every backend.
+    // a well-formed id that matches nothing.
     for (const id of ["not-a-uuid", "4F2D8A31-0000-4000-8000-000000000000"]) {
       const read = await app.inject({
         method: "GET",
@@ -350,7 +350,7 @@ describe("listing with q + filters + sort + paging", () => {
     expect(secondPage.json().items[0].name).toBe("Alice");
   });
 
-  it("rejects a NUL character in a contains filter and in q, identically on every backend", async () => {
+  it("rejects a NUL character in a contains filter and in q, before storage", async () => {
     const filtered = await app.inject({
       method: "GET",
       url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person?filter.name__contains=%00",
@@ -482,7 +482,7 @@ describe("listing with q + filters + sort + paging", () => {
   });
 
   it("rows without the sort property go last ascending, first descending", async () => {
-    // Single-case data only: both backends order it identically.
+    // Single-case data only, so the order is independent of collation.
     await app.inject({
       method: "GET",
       url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person", // warm the lens

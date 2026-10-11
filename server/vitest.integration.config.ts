@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config";
 
-// Integration tests — require the docker-compose Neo4j at
-// bolt://localhost:7687 (credentials per `src/config.ts` defaults).
+// Integration tests — require the docker-compose PostgreSQL, reached
+// through the database the env file names (`env/test.env`).
 //
 // The embedding suite (`tests/integration/embedding/`) the AI suite
 // (`tests/integration/ai/`) and the decision suite

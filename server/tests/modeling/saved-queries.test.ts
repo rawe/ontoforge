@@ -27,6 +27,7 @@ const holder: { store: MockModelingStore; runtimeStore: MockRuntimeStore } = {
 
 vi.mock("../../src/core/ports.js", () => ({
   getModelingStore: async () => holder.store,
+  getSearchIndexStore: async () => holder.store.searchIndices(),
   getRuntimeStore: async () => holder.runtimeStore,
 }));
 

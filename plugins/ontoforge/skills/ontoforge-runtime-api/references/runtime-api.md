@@ -301,9 +301,6 @@ indices by key.
   An unknown index key answers 404; an index the lens cannot search is a 422 at
   `indices.<i>`.
 
-Both answer `FEATURE_DISABLED` on a server whose `searchIndices` feature is false
-(Neo4j); `GET /search` works everywhere.
-
 MCP `search` runs both kinds, `search_documents` runs only documents and accepts optional
 `property`. Both accept `query`, optional `entity_type_key`, `limit`, `filters`, `fields`;
 neither takes a strategy or `min_similarity` — both apply a fixed floor of 0.75 whenever
@@ -440,8 +437,7 @@ errors under `details.errors`.
   `conditions`, `matched`), `limitations`, and `unsupportedReason` when no index can
   answer. No results is not an error.
 
-Every retriever route needs a storage adapter with search indices (`searchIndices` in the
-feature probe). Without an embedding provider a retriever searches by keyword only.
+Without an embedding provider a retriever searches by keyword only.
 
 ### What needs a provider
 
@@ -452,8 +448,7 @@ reading a thread run no model and answer normally without one.
 
 - `GET /api/server/features`
   Describes the deployment, not any ontology — it takes no ontology and no lens.
-  Response fields: `semanticSearch`, `searchStrategies`, `ai`, `searchIndices` (whether
-  the index search and catalog exist)
+  Response fields: `semanticSearch`, `searchStrategies`, `ai`, `decisions`
 
 Semantic search and the AI routes depend on external providers and are unavailable unless
 one is configured. Call this **before** offering either, rather than relying on the

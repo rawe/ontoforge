@@ -2,10 +2,8 @@
 
 A search index decides what ranked search can find an entity by. It names a root entity
 type and the text composed for each entity of that type; ranked search ranks those texts
-and returns the entities that own them. On an adapter that stores search indices — the
-default deployment — every ranked search reads them ([search.md](search.md)); an adapter
-that stores none ranks by other means, recorded in
-[../storage-adapters.md](../storage-adapters.md#where-the-adapters-diverge).
+and returns the entities that own them. Every ranked search reads them
+([search.md](search.md)).
 
 Vocabulary: [../README.md](../README.md#glossary). The rules these follow:
 [../decisions.md](../decisions.md).
@@ -392,6 +390,4 @@ a draft and starts a rebuild
 ([../interfaces.md](../interfaces.md#search-indices)), and includes indices in lenses
 ([../interfaces.md](../interfaces.md#scope-inclusions)). The whole-schema read and the
 [transfer format](transfer.md) carry the custom definitions, the switched-off
-managed indices and each lens's index inclusions. The server's feature report says whether the storage adapter stores
-search indices ([../interfaces.md](../interfaces.md#server)); on one that stores none,
-every search-index operation is refused as a disabled feature.
+managed indices and each lens's index inclusions.

@@ -7,16 +7,14 @@
  * `GET search-indices` with its relation group label, without switched-off
  * managed indices. Plus the error cases, the filters object and the field
  * projection. Keyword mode throughout (no provider); the semantic and
- * hybrid legs run in the embedding suite. On an adapter without search
- * indices both routes answer FEATURE_DISABLED. Requires the
- * docker-compose database.
+ * hybrid legs run in the embedding suite. Requires the docker-compose
+ * database.
  */
 
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
-import { settings } from "../../src/config.js";
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
@@ -25,7 +23,6 @@ import { wipeDatabase } from "./reset.js";
 
 type Row = Record<string, any>;
 
-const postgres = settings.DB_BACKEND === "postgres";
 const O = "runtime_search";
 const MODEL = `/api/ontologies/${O}/model`;
 const runtimeOf = (lens: string) => `/api/ontologies/${O}/runtime/lenses/${lens}`;
@@ -91,19 +88,7 @@ async function hits(body: object, lens = "all"): Promise<Row[]> {
   return res.json().hits;
 }
 
-it.skipIf(postgres)("an adapter without search indices answers FEATURE_DISABLED for the catalog and the index search", async () => {
-  await post("/api/ontologies", { key: O });
-  await post(`${MODEL}/lenses`, { key: "all", name: "All" });
-  for (const res of [
-    await app.inject({ url: `${RUNTIME}/search-indices` }),
-    await search({ query: "x" }),
-  ]) {
-    expect(res.statusCode, res.body).toBe(422);
-    expect(res.json().error.details.code).toBe("FEATURE_DISABLED");
-  }
-});
-
-describe.skipIf(!postgres)("runtime index search through REST", () => {
+describe("runtime index search through REST", () => {
   const ids: Record<string, string> = {};
 
   /** person —works_for (role, since)→ company; Ada (CTO at ACME, Advisor

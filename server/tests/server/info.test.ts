@@ -7,7 +7,6 @@ vi.mock("../../src/core/ports.js", () => ({
   getModelingStore: async () => ({}),
   getRuntimeStore: async () => ({}),
   supportsKeywordRanking: async () => false,
-  supportsSearchIndices: async () => false,
 }));
 
 const { version } = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));

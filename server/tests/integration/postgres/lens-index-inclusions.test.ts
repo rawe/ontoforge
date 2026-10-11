@@ -16,7 +16,6 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../../src/app.js";
-import { settings } from "../../../src/config.js";
 import { setEmbeddingProvider } from "../../../src/core/embedding.js";
 import { ValidationError } from "../../../src/core/exceptions.js";
 import { closeStores, getRuntimeStore, getSearchIndexStore, initStores } from "../../../src/core/ports.js";
@@ -52,7 +51,7 @@ const EMPLOYMENT = {
   ],
 };
 
-describe.skipIf(settings.DB_BACKEND !== "postgres")("lens index inclusions", () => {
+describe("lens index inclusions", () => {
   let app: FastifyInstance;
 
   type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";

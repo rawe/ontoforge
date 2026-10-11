@@ -4,9 +4,8 @@
  * key exist in two ontologies, and every retrieval path — per-type
  * search, cross-type search (`cross-type ranking`), and saved-query
  * discovery — sees only the ontology the path names, even when the other
- * ontology holds the semantically better match. Two ontologies at
- * once — multi-ontology tier (`tiers.ts`). SKIPPED when Ollama or the
- * model is unavailable.
+ * ontology holds the semantically better match. SKIPPED when Ollama or
+ * the model is unavailable.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -18,7 +17,6 @@ import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
 import { defineEntityProperty, modelPrefix, runtimePrefix } from "../fixture.js";
 import { wipeDatabase } from "../reset.js";
-import { supportsMultipleOntologies } from "../tiers.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
 
 type Row = Record<string, unknown>;
@@ -30,7 +28,7 @@ let app: FastifyInstance;
 const crm = runtimePrefix("crm", "default");
 const hr = runtimePrefix("hr", "default");
 
-describe.skipIf(!ollamaUp || !supportsMultipleOntologies)("semantic search isolation between ontologies (Ollama)", () => {
+describe.skipIf(!ollamaUp)("semantic search isolation between ontologies (Ollama)", () => {
   beforeAll(async () => {
     await initStores();
     await wipeDatabase();
@@ -94,7 +92,7 @@ describe.skipIf(!ollamaUp || !supportsMultipleOntologies)("semantic search isola
       name: "Dana Fischer",
       bio: "Expert in distributed systems and consensus protocols",
     });
-    // Search entries are built in the background (none on Neo4j).
+    // Search entries are built in the background.
     await drainSearchWork();
   });
 

@@ -91,19 +91,13 @@ export function useRuntimeSchema(
 
 /**
  * Search-index inclusions of a lens (modeling API). Separate from
- * `useLensScope`: index inclusions never make a lens scoped, and only
- * servers with search indices answer this endpoint. The key sits below
- * the scope key, so invalidating the scope refreshes it too.
+ * `useLensScope`: index inclusions never make a lens scoped. The key sits
+ * below the scope key, so invalidating the scope refreshes it too.
  */
-export function useLensIndexInclusions(
-  ontologyKey: string,
-  lensId: string,
-  enabled: boolean,
-) {
+export function useLensIndexInclusions(ontologyKey: string, lensId: string) {
   return useQuery({
     queryKey: qk.model(ontologyKey, 'lenses', lensId, 'includes', 'search-indices'),
     queryFn: () => model.listScopeSearchIndices(ontologyKey, lensId),
-    enabled,
   })
 }
 
@@ -112,7 +106,7 @@ export function useLensIndexInclusions(
  * the runtime schema, so scope changes (which invalidate `['schema']`)
  * refresh it too.
  */
-export function useSearchCatalog(ontologyKey: string, lensKey: string, enabled: boolean) {
+export function useSearchCatalog(ontologyKey: string, lensKey: string, enabled = true) {
   return useQuery({
     queryKey: [...qk.schema(ontologyKey, lensKey), 'search-indices'] as const,
     queryFn: () => runtime.listSearchCatalog(ontologyKey, lensKey),
@@ -122,11 +116,11 @@ export function useSearchCatalog(ontologyKey: string, lensKey: string, enabled: 
 }
 
 /** Retrievers of a lens (modeling API, by lens key) with configuration and validation — the Studio's list. */
-export function useRetrievers(ontologyKey: string, lensKey: string, enabled = true) {
+export function useRetrievers(ontologyKey: string, lensKey: string) {
   return useQuery({
     queryKey: qk.retrievers(ontologyKey, lensKey),
     queryFn: () => listRetrievers(ontologyKey, lensKey),
-    enabled: enabled && ontologyKey !== '' && lensKey !== '',
+    enabled: ontologyKey !== '' && lensKey !== '',
     retry: false,
   })
 }
@@ -146,21 +140,16 @@ export function useAssistants(ontologyKey: string, lensKey: string, kind: Assist
 
 /**
  * "Matched via" text function for search hits in the current workbench
- * route's lens (see `matchedViaText`). The catalog (group labels,
- * document properties) is fetched only from servers with search indices.
+ * route's lens (see `matchedViaText`). The catalog supplies group labels
+ * and document properties.
  */
 export function useMatchedVia(): (matched: Matched | undefined) => string | null {
   const { ontologyKey = '', lensKey = '' } = useParams<{
     ontologyKey: string
     lensKey: string
   }>()
-  const supported = useFeatures().data?.searchIndices === true
   const schema = useRuntimeSchema(ontologyKey, lensKey).data
-  const catalog = useSearchCatalog(
-    ontologyKey,
-    lensKey,
-    supported && ontologyKey !== '' && lensKey !== '',
-  ).data
+  const catalog = useSearchCatalog(ontologyKey, lensKey, ontologyKey !== '' && lensKey !== '').data
   return useMemo(
     () => (matched: Matched | undefined) => matchedViaText(matched, schema, catalog),
     [schema, catalog],

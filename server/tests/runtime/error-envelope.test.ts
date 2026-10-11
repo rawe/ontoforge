@@ -191,7 +191,6 @@ describe("features route", () => {
       ai: false,
       decisions: false,
       searchStrategies: ["keyword", "keyword-any", "keyword-all"],
-      searchIndices: true,
     });
   });
 });

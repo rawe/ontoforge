@@ -1,6 +1,6 @@
 /**
  * Query paths and relation existence on the entity list — conformance
- * over REST, on whichever adapter `DB_BACKEND` selects. A filter key
+ * over REST. A filter key
  * crosses one relation type to a property of the related entity (`.`)
  * or to a property stored on the relation itself (`@`); the direction is
  * derived from the relation type's endpoints; an entity matches when at

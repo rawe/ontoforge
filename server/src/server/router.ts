@@ -5,7 +5,7 @@
  * (`docs/interfaces.md`).
  */
 
-import { supportsKeywordRanking, supportsSearchIndices } from "../core/ports.js";
+import { supportsKeywordRanking } from "../core/ports.js";
 import { availableStrategies } from "../runtime/search/strategies.js";
 
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
@@ -25,7 +25,6 @@ const FeaturesResponse = z.object({
   searchStrategies: z.array(z.string()),
   ai: z.boolean(),
   decisions: z.boolean(),
-  searchIndices: z.boolean(),
 });
 
 /** Routes mounted at `/api/server`. */
@@ -59,7 +58,6 @@ export const serverRouter: FastifyPluginAsyncZod = async (app) => {
         searchStrategies: availableStrategies({ supportsKeywordRanking: () => keyword }),
         ai: Boolean(settings.AI_PROVIDER),
         decisions: getDecisionModel() !== null,
-        searchIndices: await supportsSearchIndices(),
       };
     },
   );

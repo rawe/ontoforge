@@ -15,7 +15,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { runQuery } from "../../../src/adapters/postgres/errors.js";
 import { createApp } from "../../../src/app.js";
-import { settings } from "../../../src/config.js";
 import { setEmbeddingProvider } from "../../../src/core/embedding.js";
 import {
   closeStores,
@@ -57,7 +56,7 @@ const EMPLOYMENT = SearchIndexDefinition.parse({
   ],
 });
 
-describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL search query", () => {
+describe("PostgreSQL search query", () => {
   let app: FastifyInstance;
   let store: SearchIndexStore;
   let personTypeId: string;

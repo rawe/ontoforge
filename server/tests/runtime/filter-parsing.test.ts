@@ -1,9 +1,9 @@
 /**
- * The shared filter parser — request validation above the port. Every
- * backend receives only parsed, coerced conditions; the three faults
- * (unknown property, uncoercible value, unknown operator — at most one
- * per filter key, checked in that order) are collected across keys and
- * raised here once, identically for every adapter.
+ * The shared filter parser — request validation above the port. Storage
+ * receives only parsed, coerced conditions; the three faults (unknown
+ * property, uncoercible value, unknown operator — at most one per filter
+ * key, checked in that order) are collected across keys and raised here
+ * once.
  */
 
 import { describe, expect, it } from "vitest";

@@ -43,9 +43,7 @@ timestamped as such.
 The payload carries the ontology's
 [keyword language set](search.md#keyword-language) as `keywordLanguages`. Import replaces
 the target's set with it once the design is written; the set is the one part of the
-target an import overwrites rather than adds to. An adapter without search indices has no
-set: its export writes the set a new ontology starts with, German and English, and its
-import validates the field and keeps nothing of it.
+target an import overwrites rather than adds to.
 
 The payload carries the ontology's [search indices](search-indices.md) as
 `searchIndices`: `custom`, every custom definition in the index wire format, in key
@@ -53,9 +51,7 @@ order, and `disabled`, the keys of the managed indices switched off. Managed def
 are not carried — the imported schema derives them. The field is optional: without it a
 payload has no custom index and every managed index on. Import adds the payload's
 custom indices and switched-off keys to the target's, and every index's entries are then
-built in the background ([below](#side-effects-of-import)). An adapter
-without search indices exports no `searchIndices`, and its import validates the field and
-keeps nothing of it.
+built in the background ([below](#side-effects-of-import)).
 
 Each lens carries `indexInclusions`, the keys of the search indices it includes — managed
 and custom alike — in key order
@@ -64,10 +60,7 @@ as it comes once every index exists, in place of the managed indices the import 
 include in that lens on its own; a scoped lens without the field keeps those: the
 managed indices of the types it exposes, a passage index only when the lens shows its
 document property too, as for any managed index that comes into existence
-([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). An adapter without
-search indices exports no `indexInclusions`, so importing its payload where indices are
-stored gives each scoped lens those managed indices; its own import validates the lists
-and keeps nothing of them.
+([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)).
 
 ## The format version
 
@@ -190,10 +183,6 @@ Instance identifiers are unaffected, since there are no instances in the payload
 
 Import is a write path, and the write-path rules apply to it:
 
-- **Reserved keys are rejected.** A type key that would collide with the active storage
-  adapter's own objects is refused, with an error naming the reserved set and not the
-  vendor. The reserved set is the adapter's to declare; see
-  [../storage-adapters.md](../storage-adapters.md).
 - Every entity type names its name property, and it must be one of that type's own
   `string` properties; a missing or unsuitable one is rejected, naming the type.
 - `document` properties are permitted on entity types only. One on a relation type is
@@ -228,8 +217,7 @@ the import. What
 an agent references is not checked: export carries every agent as stored, including one
 that became invalid, and it imports and is reported invalid on read, like any agent its
 lens cannot run ([retrievers.md](retrievers.md#validation-and-warnings)).
-Omitting `assistants`, or either of its lists, is valid. An adapter without search
-indices exports no `retrievers`; its import checks them and keeps none.
+Omitting `assistants`, or either of its lists, is valid.
 
 ### Side effects of import
 

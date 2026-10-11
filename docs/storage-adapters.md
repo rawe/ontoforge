@@ -10,12 +10,11 @@ This document is the contract an adapter must satisfy. Concepts and vocabulary:
 [architecture.md](architecture.md). The rules that put it there:
 [decisions.md](decisions.md).
 
-**One part binds; two describe.** Part 1 is normative: it binds every adapter. Parts 2
-and 3 describe the two shipped adapters — PostgreSQL, the default deployment, and Neo4j
-— in named technology. They bind nothing: nothing in an adapter part may be relied on by
-code above the port, and nothing in one constrains another adapter. The known divergences
-in observable behaviour between the two are enumerated in one place, between the contract
-and the adapter parts.
+**One part binds; one describes.** Part 1 is normative: it binds every adapter. Part 2
+describes the adapter OntoForge ships — PostgreSQL, the only value `DB_BACKEND` accepts —
+in named technology. It binds nothing: nothing in it may be relied on by code above the
+port, and nothing in it constrains another adapter. The known limitations in observable
+behaviour are enumerated in one place, between the contract and the adapter part.
 
 ---
 
@@ -23,10 +22,9 @@ and the adapter parts.
 
 ## Bound stores and the registry
 
-The port has three surfaces: a modeling store and a runtime store, each obtained **bound
-to one ontology**, and an **ontology registry** that manages ontologies as whole units.
-An adapter that stores search indices adds a fourth: a search-index store, bound the same
-way ([below](#the-search-index-store)).
+The port has four surfaces: a modeling store, a runtime store and a search-index store
+([below](#the-search-index-store)), each obtained **bound to one ontology**, and an
+**ontology registry** that manages ontologies as whole units.
 
 **Stores are bound.** A store is requested for an ontology key and every operation on it
 resolves within that binding. The binding check happens above the adapter — the port
@@ -36,8 +34,8 @@ store operations below are written as if the ontology were the whole world, beca
 through a bound store it is.
 
 **Isolation is total.** An operation on a store bound to one ontology must never
-observe, return, or affect another ontology's data — schema, instances, chunks, vectors,
-or search indexes. "One request, one ontology" is structural above the adapter and
+observe, return, or affect another ontology's data — schema, instances, vectors, or
+search indexes. "One request, one ontology" is structural above the adapter and
 physical inside it: *how* the data of two ontologies is kept apart is each adapter's
 private business, described only in its own non-normative part, and nothing above the
 port may depend on the mechanism.
@@ -52,30 +50,19 @@ key, the optional display name and timestamps. Six operations:
 | Read by key | One row, or an absent result. |
 | Read by display name | One row, or an absent result — display names are unique server-wide, and the pre-write conflict check needs the lookup. |
 | Rename | Set the display name; the key never changes. Absent result when not found. |
-| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, retrievers, instances, chunks, and every search index. False when not found. |
+| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, retrievers, instances, and every search index. False when not found. |
 
 The registry — not the database's own catalog — is the authoritative list of ontologies.
 The store must enforce server-wide uniqueness of the ontology key and the display name;
 a concurrent pair of creates must produce a conflict, not a duplicate.
 
-**A capped registry is a valid implementation.** An adapter whose physical mapping
-cannot hold more than one ontology may enforce a cap by rejecting further creates as a
-domain conflict — see the conformance tiers below and the rule in
-[decisions.md](decisions.md#storage).
-
-### Conformance tiers
-
-The conformance suite splits in two. The **contract tier** covers everything in this
-part at a scale of one ontology — bound stores, the registry operations, isolation
-semantics — and every adapter must pass it. The **multi-ontology tier** exercises
-several ontologies at once — independent same-key schemas, disjoint instance data,
-cross-ontology search silence — and only adapters whose registry accepts more than one
-ontology run it. PostgreSQL runs both tiers; Neo4j, capped at one ontology, runs the
-contract tier only.
+The conformance suite covers everything in this part, at a scale of one ontology and of
+several at once — independent same-key schemas, disjoint instance data, cross-ontology
+search silence.
 
 ## What crosses the port
 
-Six rules govern the boundary itself. They hold for every operation without exception.
+Five rules govern the boundary itself. They hold for every operation without exception.
 
 **Only JSON-safe values cross.** Scalars, strings, booleans, numbers, lists, maps. No
 driver objects, no cursors, no result handles, no lazily-evaluated streams. An operation
@@ -115,15 +102,10 @@ against that id. Expected conditions are not exceptions: a missing row is an emp
 or an absent value, and a failed delete is a false return. See the error table in
 [architecture.md](architecture.md).
 
-**An adapter declares the type keys it reserves, as plain keys.** Two sets, one for entity
-type keys and one for relation type keys. They are returned as schema-level keys, never
-as physical names, so the modeling service can reject a colliding key without knowing what
-it would collide with. An adapter with no collisions returns two empty sets.
-
 **An adapter declares whether its search evaluates relation conditions** — path
 conditions and relation existence conditions alike. One plain
-flag on the runtime store, in the same spirit as the reserved keys: the constraint is the
-adapter's, the enforcement point is shared. The runtime service reads it before any search
+flag on the runtime store: the constraint is the adapter's, the enforcement point is
+shared. The runtime service reads it before any search
 runs. On an adapter declaring support, a query path or relation subject on search resolves
 exactly as on the entity list and crosses the port as its condition with every ranking; on
 one declaring none, it is rejected above the port as a validation error naming the entity
@@ -154,13 +136,6 @@ shape of the data and the rules the adapter must honour, not per-operation signa
 Internal identifiers appear in this section because they are the store's own currency.
 They never reach a caller — see the keys-not-identifiers rule in
 [decisions.md](decisions.md).
-
-**Own search storage is optional.** An adapter that stores no search indices keeps search
-data of its own instead — per-entity vectors, document chunks and the vector indexes over
-them — and the operations marked *own search storage* below serve it. Exactly such an
-adapter provides them; one that stores search indices provides none, and nothing above
-the port calls them on it. What that storage holds and when it changes is in
-[Own search storage](#own-search-storage).
 
 ### Schema side
 
@@ -215,17 +190,8 @@ the key of its owning lens alongside it, so that a search over descriptions can 
 narrowed to one lens without a join.
 
 **Search-data maintenance.** Backing the rebuild operation: list every saved query with
-enough identity to re-embed it; set the embedding on one saved query. Own search storage
-adds: list every entity type with its property keys; set one entity's vector by id — a
-vector that may be absent, because the rebuild runs without an embedding provider. Plus
-the vector index operations under obligations, below.
-
-**Reserved-key reporting.** Alongside the two declared sets, one operation scans stored
-types and returns those whose key is now reserved, as kind-and-key pairs. Startup reports
-them; nothing rewrites them.
-
-**Document-property cleanup** (own search storage). Delete every chunk belonging to a
-given entity type and document property. Invoked when the property, or its owning type, is removed.
+enough identity to re-embed it; set the embedding on one saved query. Plus the vector
+index operations under obligations, below.
 
 ### Data side
 
@@ -233,24 +199,20 @@ given entity type and document property. Invoked when the property, or its ownin
 modeling side. The runtime store exposes three operations, each keyed by lens key within
 its binding. One returns the full schema together with the lens and its inclusion rows,
 one returns the lens's agent configurations, and one returns the lens's saved queries. The
-caller uses the inclusion rows to compute the scoped schema. An adapter that stores
-search indices adds to the first the keys of the search indices the lens includes, in key
-order. The first returns nothing at all when no lens has that key, which is how an unknown lens
+caller uses the inclusion rows to compute the scoped schema. The first also carries the
+keys of the search indices the lens includes, in key order. The first returns nothing at all when no lens has that key, which is how an unknown lens
 is detected. The runtime store also exposes the ontology key it is bound to, because the
 schema cache keys its entries by ontology plus lens.
 
-**Entity lifecycle.** Create with the type key, a caller-supplied instance id, the
-validated property map and — own search storage only — an optional embedding vector; an
-adapter that stores search indices never receives one. Read by type key and id; read by
+**Entity lifecycle.** Create with the type key, a caller-supplied instance id and the
+validated property map. Read by type key and id; read by
 id alone, when the type is not known; read a batch by ids, returned as a map keyed by id.
 The by-id reads carry property definitions alongside — the adapter's guide for converting
 stored values back to their port forms on the way out, mirroring the definitions every
 write already carries for the conversion inward; an adapter whose storage distinguishes
-those forms natively may ignore them. Update takes the properties to set and the property keys to remove as two separate inputs,
-plus an optional embedding and an explicit flag saying whether the embedding is part of
-this update — again because "no new vector" and "clear the vector" must be
-distinguishable. Delete by type key and id, returning whether anything was deleted, and
-removing the entity's own search data with it, where the adapter keeps any.
+those forms natively may ignore them. Update takes the properties to set and the property
+keys to remove as two separate inputs. Delete by type key and id, returning whether
+anything was deleted.
 
 Listing is the one read with real machinery. It takes the type key, the scoped property
 definitions, the parsed filter conditions, an optional text-search string with the string
@@ -265,12 +227,6 @@ when they are few.
 The adapter must set and maintain the system properties on every write: the instance id,
 the type key, the creation timestamp on create, and the update timestamp on create and on
 every update. Stored embedding vectors must never appear in a returned row.
-
-**Write-value constraints** (own search storage). Before a write whose property values will become
-vector-index filter metadata, one operation lets the adapter reject a value it cannot
-store, as a domain validation error naming the property. An adapter whose storage imposes
-no such limit treats the operation as a no-op — the same pattern as reserved keys: the
-constraint is the adapter's, the enforcement point is shared.
 
 **Relation lifecycle.** Create with the relation type key, an instance id, the two
 endpoint entity ids and the property map. Read by type key and id. Update, with the same
@@ -288,18 +244,10 @@ incoming edges receive only what remains, so the two are not independently limit
 that costs a caller is in
 [capabilities/instance-data.md](capabilities/instance-data.md#traversal).
 
-**Document chunk management** (own search storage). Chunks are always stored, independently of embedding
-availability. They carry id, entity id, type key, property key, ordinal, character offset
-and length, text and an optional vector. Maintenance reads reusable vectors, deletes a
-property's chunks and writes its replacement batch; ordinary results omit vectors.
-
 **Search.** The runtime store declares whether search can rank by keyword — through its
-search-index store, on an adapter that stores search indices
-([below](#the-search-index-store)) — and declares path-condition support for all search
-strategies. The service ranks through the search-index store where the adapter stores
-search indices, and through the semantic rankings of
-[own search storage](#own-search-storage) otherwise; fusion belongs above the port either
-way. Neither a bound store nor a query carries a language: a keyword generation stems in
+search-index store ([below](#the-search-index-store)) — and declares path-condition
+support for all search strategies. The service ranks through the search-index store;
+fusion belongs above the port. Neither a bound store nor a query carries a language: a keyword generation stems in
 its own language set.
 Semantic scores are pinned to `(1 + cosine) / 2`, higher is better; arbitrary native
 scores must not be labeled semantic similarity. A keyword score is the number of distinct
@@ -322,17 +270,14 @@ map, compile, execute read-only, and return the ordered column names together wi
 rows. Each row maps column name to a converted value. Nodes and relationships become plain
 property maps; temporals are converted; vectors are stripped; conversion recurses through
 lists of one element type, and nothing driver-shaped survives at any depth. What a map
-literal or a mixed list carries back is each adapter's own shape — recorded with the
-divergences below.
+literal or a mixed list carries back is the adapter's own shape — recorded with the
+known limitations below.
 
 ## The search-index store
 
-**An adapter declares whether it stores search indices** — one plain flag on the adapter,
-in the same spirit as the declarations above; the server's feature report carries it
-([interfaces.md](interfaces.md)). Only an adapter declaring support provides the store,
-and asking one that declares none for it is a programming error, not a domain condition.
-The runtime store of such an adapter also hands out the search-index store of its own
-ontology, so a write can plan its search work without a second binding, and so does its
+The search-index store holds an ontology's search indices, their generations, entries and
+queued work, and its retrievers. The runtime store also hands out the search-index store
+of its own ontology, so a write can plan its search work without a second binding, and so does its
 modeling store, so a schema change can keep the managed indices in step. Registry delete
 removes everything the store holds. The pipeline that uses this store is described in
 [architecture.md](architecture.md#search-indexing).
@@ -444,13 +389,12 @@ index definitions. It names, by index, the parts to compose again: parts of one 
 the part of one relation, owned by its source end or its target end; and the parts of
 every relation of a type that has a given entity at its other end — the fan-out of a
 changed target, resolved by the adapter in one step. It also names an entity or relation
-whose deletion removes its entries. An adapter that stores search indices applies the plan
+whose deletion removes its entries. The adapter applies the plan
 **in the write's own transaction**: an index stands for every building or ready generation
 of it, and the work is queued exactly when the write commits — only when a create or
 update touched a row. A deletion removes the entity's or relation's entries and queued
 work in every generation, together with those of the relations that cascade with a
-deleted entity, so it is applied before the rows go. An adapter that stores no search
-indices receives no plan.
+deleted entity, so it is applied before the rows go.
 
 **The queue.** A queued item names a generation, an entity and a part — one part, or
 the whole entity (an entity created, a field every part renders changed, a backfill); a
@@ -476,129 +420,18 @@ queueing transaction commits, never before. A subscription may end on its own, a
 connection for instance; it then says so and the subscriber subscribes again. Polling
 above the port covers the time without one.
 
-## Own search storage
-
-An adapter that stores no search indices keeps search data of its own, written with the
-instance data, and ranks over it. It holds, per ontology:
-
-- per entity, one vector over a composed text ([below](#what-gets-embedded)), present
-  only when an embedding provider is configured;
-- per document property value, its chunks — cut by the chunking rules in
-  [capabilities/documents.md](capabilities/documents.md#chunking) — each with its
-  ordinal, character offset and length, text and optional vector;
-- with an embedding provider, the vector indexes over those vectors — at least one per
-  entity type and one per document property's chunks, kept through the lifecycle hooks
-  under [obligations](#obligations-beyond-storage).
-
-No keyword representation belongs to it: keyword ranking exists only through search
-indices, so such an adapter offers semantic ranking alone.
-
-**Rankings.** Two rankings take the complete searched set in one call and return rows in
-exact score order:
-
-| Ranking | Input | Returns |
-|---|---|---|
-| Property semantic | searched types, query vector, limit | entities and scores |
-| Document semantic | searched document properties, query vector, limit | passages and scores |
-
-A searched type carries its key, property definitions and parsed filter conditions. A
-searched document property carries its type key, property key and parsed conditions on
-its parent. Filters apply within ranking, so the limit counts filtered units. The
-service computes lens scope and filter narrowing once, and fuses above the port; how
-ranked search composes the two is recorded with the adapters that diverge
-([below](#where-the-adapters-diverge)).
-
-### What gets embedded
-
-An entity's vector comes from one composed text: the entity type key, then each `string`
-property that has a value, written as `key=value`, in the order the schema declares them.
-
-```
-person: name=Alice Chen, role=Distributed Systems Engineer
-```
-
-- **Only `string` properties contribute.** Integers, floats, booleans, dates and datetimes
-  are excluded.
-- **`document` properties are excluded.** They are chunked and embedded separately, so a
-  document's content never influences its own entity's vector, and a very long document
-  cannot drown out the entity's short identifying fields.
-- Properties with no value are skipped. An entity with no string values embeds as its type
-  key alone.
-- **The text is composed from the full schema, not from the lens.** Two lenses exposing
-  different subsets of a type still see identical vectors.
-- The composed text is capped at 30 000 characters and truncated at the cap.
-- Composition is deterministic, so re-embedding an unchanged entity reproduces the same
-  text.
-
-### Keeping search data current
-
-Document chunks are recomputed with every write that changes the value; vectors are added
-when a provider is configured:
-
-- on entity creation, always;
-- on entity update, whenever the update touches any `string` property — the vector is
-  recomputed from the merged post-update state, not from the submitted fragment;
-- for document properties, per changed property: its chunks are discarded, the value is
-  re-chunked, and the new chunks are embedded. A new chunk whose text is byte-identical to
-  one of the old ones keeps that vector, and only the rest are embedded afresh — so
-  editing part of a large document re-embeds only the chunks the edit touched. A vector
-  of any other width is never reused: it came from a different embedding model, and no
-  index of the current width could be built over it. That check is also what makes a
-  rebuild after a model switch re-embed at all, since the text is unchanged there.
-
-Chunks go with what they belong to: an emptied value leaves none, a deleted entity takes
-its chunks along, and deleting a document property — or its entity type — drops every
-chunk of that property with its vector index. Rewriting one document property never
-disturbs another property's chunks.
-
-Not recomputed, and all three are traps:
-
-- **A schema change refreshes nothing.** Adding a string property to an entity type leaves
-  every existing entity's vector reflecting the schema as of its last write. The property
-  contributes only for entities written afterwards.
-- **Deleting a string property leaves its values behind.** Deleting the definition does not
-  delete stored values, and a vector does not record which property a word came from, so
-  an entity keeps matching on a value the schema no longer declares — until the next
-  rebuild ([decisions.md](decisions.md#interfaces)).
-- **A failed embedding does not fail the write.** The entity or chunk is stored without
-  a vector. The failure is logged, not returned.
-
-All three are repaired by the rebuild.
-
-### Rebuilding it
-
-On such an adapter the search-data rebuild
-([capabilities/search.md](capabilities/search.md#rebuild)) covers this storage too, in the
-same three phases. Its first phase drops every vector index whose width no longer
-matches — per type and per document property as well as the saved-query one. Before the
-saved-query descriptions, it then recomposes and rewrites each entity's optional vector
-and discards and re-chunks every document property value, embedding every chunk whose
-stored vector is not already of the provider's width — after a model switch that is all
-of them. Its last phase builds every vector index the schema calls for and does not have.
-The progress records carry each entity type's key as their group, and the summary adds
-per-type processed and failed counts; an entity whose embedding call fails is counted as
-failed.
-
-Without a provider the run still re-chunks every document, which needs no model, and
-stores the entities without vectors. Rebuild therefore also repairs here: missing indexes,
-entities and chunks that were never embedded, vectors stale with respect to a schema
-change — including the values of a deleted string property — and chunking stale with
-respect to changed chunk-size configuration.
-
 ## Obligations beyond storage
 
 An adapter is not only a set of writes and reads. Seven responsibilities sit entirely inside
 it, and a new adapter that implements the operations but skips these is not a working
 adapter.
 
-**Physical naming, and the reserved keys it implies.** The adapter alone decides how a
-type key becomes a physical object. Whatever that transformation is, it must then declare
-every schema-level key whose transformed form would collide with the adapter's own
-storage objects. The declaration is what makes the collision rejectable at the service
-layer, in a message naming neither vendor nor physical name. Names the adapter reserves
-for internal use are safe without declaration only if they cannot be produced by the
-transformation at all — a leading underscore is such a case, since no valid key starts with
-one.
+**Physical naming without collisions.** The adapter alone decides how a type key becomes
+a physical object. Whatever that transformation is, no valid key may produce a name that
+collides with the adapter's own storage objects: nothing above the port rejects such a
+key. A name the transformation cannot produce at all is safe — a leading underscore is
+such a case, since no valid key starts with one — and so is any key that is stored as a
+value rather than turned into a name.
 
 **Uniqueness.** The store is the last line, not the first. Services pre-check for
 conflicts, but the store must itself enforce, within each ontology, uniqueness of: each
@@ -611,13 +444,7 @@ indexed — every listing depends on it.
 
 **Vector index lifecycle.** The adapter owns index creation and removal, and the port
 exposes exactly the hooks the lifecycle needs: ensure the saved-query index; drop every
-index whose width no longer matches; and ensure all of them at once. Own search storage
-adds the hooks of the schema lifecycle: create the index for an entity type at a given
-width, optionally naming the properties to be filterable inside it; drop it; rebuild it
-against the type's current properties; create and drop the index for a document
-property's chunks. Those are called at the points where the schema changes shape —
-adding a type, deleting a type, adding or removing a property, adding or removing a
-document property — and are no-ops when no embedding provider is configured.
+index whose width no longer matches; and ensure all of them at once.
 Indexes are per ontology like everything else: created through a bound store, they serve
 that ontology alone, and registry delete removes them with the rest.
 
@@ -631,8 +458,7 @@ and compare it; on the startup path — which walks every registered ontology �
 mismatch and change nothing; on the rebuild path, drop every index whose width no longer
 matches before any vector is regenerated, then — once every vector has the new width —
 create every missing index at that width. The report must describe the index the way the
-API does — by entity type, by document property, or by search scope — and never by its
-physical name.
+API does, never by its physical name.
 
 **Building predicates from structured filters.** Filters arrive as parsed conditions, and
 the adapter, dispatching on each condition's kind, must turn every condition into a
@@ -661,11 +487,8 @@ relation's own property when the source is the relation, in which case the relat
 entity is never read. A relation existence condition is the anti-existence predicate the
 runtime semantics require: it holds when at least one relation of the type leaves or
 arrives at the listed instance, or — for absence — when none does, with nothing about the
-relation or the related instance read or compared. One fault remains the adapter's to raise, as a
-domain validation error and not a storage error — Neo4j-specific, raised on the write path
-through the write-value constraint above: an indexed value exceeding the 32766-byte
-ceiling, in an error naming the property. Every value must reach the database as a bound
-parameter. Type keys, relation type keys and property keys may be interpolated into
+relation or the related instance read or compared. Every value must reach the database
+as a bound parameter. Type keys, relation type keys and property keys may be interpolated into
 generated query text — they originate from the stored schema, never from request input —
 but values never may.
 
@@ -719,88 +542,39 @@ above.
 
 ---
 
-# Where the adapters diverge
+# Known limitations
 
-Parsing and validation happen above the port, so the Neo4j and PostgreSQL adapters accept
-exactly the same queries and reject invalid ones identically. Beyond acceptance, the known
-divergences between them are enumerated here. Two deviations stand with the rules they
-attach to in Part 1 rather than here: the datetime text form on the two point reads
-(PostgreSQL), and the indexed-value size ceiling (Neo4j). One is structural and stands
-with the registry contract: Neo4j caps the registry at one ontology, so the
-multi-ontology conformance tier runs on PostgreSQL only.
+Parsing and validation happen above the port, so which queries are accepted, and how an
+invalid one is rejected, does not depend on the adapter. Beyond acceptance, the known
+limitations of the PostgreSQL adapter's observable behaviour are enumerated here. One
+deviation stands with the rule it attaches to in Part 1 rather than here: the datetime
+text form on the two point reads.
 
 - **Decoding through a shared type key.** An entity type and a relation type may share a
   key; if both declare the same property key at different data types, the traversal read
   can decode the value through the wrong definition, silently. A known limitation, accepted.
-- **Substring matching against non-string values.** The substring filter compares text
-  forms. PostgreSQL renders them as the documented behaviour states — numbers as
-  printed, booleans as `true`/`false`, datetimes as their ISO-8601 string — while
-  Neo4j's temporal and float rendering is its own, so a substring match against a
-  non-string value can differ between the adapters.
-- **String sort order.** PostgreSQL sorts strings by the database's default collation,
-  dictionary-style, as the documented behaviour states; Neo4j sorts by Unicode code
-  points, capitals before lowercase.
-- **Keyword ranking on Neo4j.** The adapter declares no keyword support, so it offers
-  only semantic search with a provider and no ranked search without one; without a
-  provider it stores chunks without vectors.
-- **Search indices on Neo4j.** The adapter declares no support: it provides no
-  search-index store and no wake-ups, its writes carry no search work, and no worker
-  runs. It keeps [own search storage](#own-search-storage) instead, embedding and
-  chunking inside each write, and ranked search there ranks it through its two semantic
-  rankings — the only ones it offers — with these differences from the search over index entries the
-  search capability describes: a hit carries no `matched`; a lens's index inclusions
-  play no part; property search ranks one composed text per entity across all searched
-  types in one ranking; document search ranks passages, its budget doubling until the
-  ranking is exhausted, and collapses them to entities, each document property keeping
-  its best passage; and when both kinds run their rankings are summed by reciprocal rank,
-  or, over more than one searched type, combined by the best reciprocal kind rank
-  ([decisions.md](decisions.md#interfaces)). A floor drops semantic candidates — entities
-  or passages — before fusion. Without the store there are no retrievers either.
-- **Path and relation existence conditions on search.** PostgreSQL declares support and
-  evaluates them in both rankings; Neo4j declares none, so a query path or a relation
-  existence test on search is rejected above the port with a validation error naming the
-  entity list — where both work on both adapters.
-- **Filtered passage pages.** PostgreSQL applies filter conditions inside the ranking of
-  passage entries, on the owning entity under the iterative scan, so a page holds the
-  requested number of matching passages; Neo4j applies them after its index lookup, so a
-  filtered passage page may come back short.
 - **Width drift blocks writes, not just search.** While the saved-query description index
-  of a stale width stands, PostgreSQL rejects every saved-query write that carries a
-  description vector until the widths are reconciled; on Neo4j the mismatched vector — of
-  a saved query, an entity or a chunk — is left unindexed and the write succeeds.
-- **Faults only execution can see.** A query fault the compiler itself detects — an
-  un-aliased `WITH` item that is not a plain variable, a missing parameter, a variable
-  used as a node or relationship when it is bound to neither — is a domain validation
-  error on PostgreSQL; Neo4j surfaces the same query as a storage error. A clean client
-  error on one adapter is a generic failure on the other.
-- **Reading a property of a `WITH` alias that cannot be verified against the schema.**
-  An error on PostgreSQL, per the documented behaviour; Neo4j does not reject it — the
-  access silently yields null, leaking past the lens.
-- **Aggregates versus projection on temporal properties.** On PostgreSQL, `min` and `max`
-  over a date or datetime property return a decoded temporal value where a plain
-  projection of the same property returns its stored text — the two forms disagree about
-  the property's type; on Neo4j they agree.
+  of a stale width stands, every saved-query write that carries a description vector is
+  rejected until the widths are reconciled.
+- **Aggregates versus projection on temporal properties.** `min` and `max` over a date or
+  datetime property return a decoded temporal value where a plain projection of the same
+  property returns its stored text — the two forms disagree about the property's type.
 - **Map literals and mixed lists in query results.** Conversion recurses through lists of
-  one element type only; a map literal, or a list mixing element types, comes back in
-  each adapter's own shape — converted temporals on Neo4j, the stored text on PostgreSQL.
-  The conformance suite pins both shapes.
-- **An empty leading `OPTIONAL MATCH`.** When it matches nothing, Neo4j returns one row
-  of nulls; PostgreSQL returns no row.
-- **Out-of-range float literals.** A float literal beyond double range, such as `1e400`,
-  executes with correct comparison semantics on PostgreSQL; Neo4j refuses the query with
-  a storage error, its engine rejecting the value as out of range.
-
-One gap is shared rather than divergent: a float literal whose fraction is a bare
-trailing zero, such as `1.0`, cannot be written — it parses as a property access and is
-rejected — so an equality across the integer/float divide written as `1 = 1.0` is
-inexpressible on both adapters alike. `1.5` is unaffected.
+  one element type only; a map literal, or a list mixing element types, comes back in the
+  adapter's own shape, its temporals as the stored text. The conformance suite pins that
+  shape.
+- **An empty leading `OPTIONAL MATCH`.** When it matches nothing, the query returns no
+  row rather than one row of nulls.
+- **A float literal with a bare trailing zero.** A literal such as `1.0` cannot be
+  written — it parses as a property access and is rejected — so an equality across the
+  integer/float divide written as `1 = 1.0` is inexpressible. `1.5` is unaffected.
 
 ---
 
 # Part 2 — The PostgreSQL adapter (non-normative)
 
-> Everything below describes how the **PostgreSQL** adapter — the default deployment —
-> satisfies Part 1. It is illustration, not contract. No name, convention or structure in
+> Everything below describes how the **PostgreSQL** adapter — the one `DB_BACKEND`
+> selects — satisfies Part 1. It is illustration, not contract. No name, convention or structure in
 > this part is part of the port, and a different adapter is free to share none of it.
 
 ## How ontologies are isolated
@@ -919,8 +693,8 @@ translation reports as the same conflict the service raises; that the name prope
 ## Naming transformations
 
 There is no naming transformation. A type key never becomes a table, column or index
-name — it is a value in a `type_key` column. Both reserved key sets are therefore empty:
-no key can collide with an adapter object.
+name — it is a value in a `type_key` column, so no key can collide with an adapter
+object.
 
 The one mechanical naming rule covers the dynamically created tables: a search
 generation's entry table is `se_<id>`, where `<id>` is the generation's 32-hex-character
@@ -1072,8 +846,8 @@ creation; a failed or interrupted build leaves nothing behind, so no failed-inde
 exists or is needed.
 
 Search behaviour: the similarity returned is `1 − cosine_distance / 2` — algebraically
-identical to the Neo4j adapter's cosine index score, the same 0-to-1 scale, pinned by a
-fixed-vector conformance case. Every vector query runs as a strict-order iterative scan,
+the pinned `(1 + cosine) / 2`, on its 0-to-1 scale, held by a fixed-vector conformance
+case. Every vector query runs as a strict-order iterative scan,
 so a result limit counts rows that passed the filters, delivered in exact distance
 order. Saved-query discovery applies its minimum score after the limit.
 
@@ -1093,162 +867,6 @@ which is the behaviour the shared documentation states.
 
 ---
 
-# Part 3 — The Neo4j adapter (non-normative)
-
-> Everything below describes how the **Neo4j** adapter satisfies Part 1. It is
-> illustration, not contract. No name, convention or structure in this part is part of
-> the port, and a different adapter is free to share none of it.
-
-## Capped at one ontology
-
-The Neo4j adapter implements the full port but its registry holds **at most one
-ontology**: the first create succeeds, a second is rejected as a domain conflict, and
-deleting the one ontology returns the adapter to zero — after which a create works
-again. With a single ontology, the label derivation and Cypher below are exactly what a
-single-database deployment implies, and no per-ontology qualification exists anywhere.
-The adapter passes the contract conformance tier; the multi-ontology tier does not run
-against it.
-
-The registry entry lives on a single internal node labelled `_OntologyRegistry` —
-underscore-internal, like every physical name no key can produce. Registry create
-pre-checks the cap, creates the fixed saved-query vector index when an embedding width is
-given (index DDL cannot share a transaction with data writes in this engine; a mid-way
-failure leaves nothing observable through the port), then writes the registry node with a
-single-statement conditional create as the in-transaction backstop. Registry delete
-wipes the whole graph — schema nodes, instance nodes, chunks, and the registry node —
-and drops every vector index, so no width or filter-property imprint of the deleted
-schema survives; the boot-time constraints stay.
-
-## Logical to physical mapping
-
-Schema objects are nodes, joined by relationships:
-
-| Logical | Node label | Joined by |
-|---|---|---|
-| Lens | `Ontology` — a physical name exempt from the vocabulary lock ([decisions.md](decisions.md#ontologies)) | `INCLUDES_TYPE` to a type node, carrying the optional property allowlist |
-| Entity type | `EntityType` | `HAS_PROPERTY` to its property nodes; its name property's key as the node property `nameProperty` |
-| Relation type | `RelationType` | `HAS_PROPERTY`, plus `RELATES_FROM` and `RELATES_TO` to its endpoint entity types |
-| Property definition | `PropertyDefinition` | — |
-| Agent configuration | `AiAgentConfig` | `HAS_AI_AGENT` from its lens |
-| Saved query | `SavedQuery` | `HAS_SAVED_QUERY` from its lens |
-
-The adapter stores no retrievers. Deleting a lens also removes any
-`_RetrieverConfig` node its `_HAS_RETRIEVER` relationship reaches.
-
-Instance data lives in the same database, distinguished by underscore-prefixed internal
-names:
-
-| Logical | Physical |
-|---|---|
-| Entity | A node with the marker label `_Entity` plus its type label |
-| Relation | A native relationship between two entity nodes |
-| Chunk | A node with the marker label `_Chunk` plus a virtual label per document property, linked from its entity by `_HAS_CHUNK` |
-
-## Naming transformations
-
-Entity type keys become PascalCase labels: `research_paper` becomes `ResearchPaper`.
-Relation type keys become upper snake case relationship types: `works_for` becomes
-`WORKS_FOR`. A document property's chunks get a virtual label built from both keys —
-entity type `person` with document property `bio` yields `PersonDocumentBio`.
-
-These transformations are what generate the adapter's reserved key sets. An entity type
-key is reserved when its PascalCase form is one of the six schema node labels, giving
-`ontology`, `entity_type`, `relation_type`, `property_definition`, `ai_agent_config` and
-`saved_query` — the first of those derives from the kept `Ontology` lens label. A
-relation type key is reserved when its upper-snake form is one of the six schema
-relationship types, giving `includes_type`, `has_property`, `relates_from`,
-`relates_to`, `has_ai_agent` and `has_saved_query`. The internal names `_RetrieverConfig`, `_HAS_RETRIEVER`, `_Entity`,
-`_Chunk`, `_HAS_CHUNK` and `_OntologyRegistry` need no reservation, since no valid key
-can produce a leading underscore.
-
-## How instance data is stored
-
-Entity properties are stored as native node properties, not as a serialized blob, so that
-the engine's own filtering, ordering and indexing apply directly. The data types map
-one-to-one: string, integer, float, boolean, date and datetime to their native
-counterparts, and a document property to a string.
-
-Relations are native relationships rather than intermediate nodes. That choice buys
-natural traversal patterns, the engine's optimised relationship storage, and compatibility
-with its graph algorithms and visualization tooling — at the cost noted under engine
-constraints below. A path condition is an existential pattern predicate: one relationship
-of the type from the listed node, in the resolved direction, to the related node, with the
-comparison on that node's properties — or, for a property of the relation itself, on the
-relationship's properties, the related node left anonymous.
-
-Chunks are separate nodes rather than a nested structure, because each needs its own
-vector and its own place in a vector index. Deleting an entity removes its chunk nodes in
-the same statement.
-
-## Index inventory
-
-Created at startup, unconditionally:
-
-| Kind | On | Purpose |
-|---|---|---|
-| Uniqueness constraint | `Ontology` internal id, key, name | Lens identity |
-| Uniqueness constraint | `EntityType` internal id, key | Entity type key uniqueness |
-| Uniqueness constraint | `RelationType` internal id, key | Relation type key uniqueness |
-| Uniqueness constraint | `PropertyDefinition` internal id | Property identity |
-| Uniqueness constraint | `AiAgentConfig` internal id | Agent identity |
-| Uniqueness constraint | `SavedQuery` internal id | Saved-query identity |
-| Uniqueness constraint | `_Entity` instance id | Instance identity |
-| Index | `_Entity` type key | Every listing filters on it |
-
-The Neo4j adapter carries no storage version: every startup creates the objects above
-if absent, and gives every entity type node without `nameProperty` its name property by
-the derivation the `5.0` transfer import uses
-([capabilities/transfer.md](capabilities/transfer.md#the-format-version)) — creating a
-`string` property where a type has none, with property creation order as the declaration
-order. That is its whole upgrade path. Nothing in the graph enforces the name property;
-the service's checks are its only guard.
-
-With the registry capped at one ontology, per-database uniqueness and per-ontology
-uniqueness are the same thing.
-
-Created only when an embedding provider is configured — the fixed pair at registry
-create, the dynamic ones as the schema changes shape:
-
-| Vector index | On | Filterable in-index |
-|---|---|---|
-| One per entity type | The type's own label | All of the type's non-document property keys |
-| One across all entity types | The `_Entity` marker label | — |
-| One per document property | That property's virtual chunk label | — |
-| One for saved queries | `SavedQuery` | The owning lens key |
-
-All use cosine similarity. The per-entity-type indexes are rebuilt whenever the type's
-property set changes, so their in-index filter list stays in step with the schema. A
-document property's chunk index is created the moment the property is added and dropped
-when the property or its type is removed.
-
-## Engine constraints worth knowing
-
-**Indexed string values have a size ceiling.** Because a per-type vector index stores the
-type's property values as filter metadata, indexed string values are subject to the
-engine's indexed-property size limit of 32766 bytes. Writes exceeding it are rejected with
-a validation error before persistence, phrased without naming the engine. Document
-property values are exempt — they are never part of an entity's embedding or its filter
-metadata. The same mechanism is why a saved query carries its owning lens key as a
-node property: the vector index can filter on node properties but not across
-relationships, so the key is denormalized onto the node.
-
-**The in-index filter sees the indexed node alone.** A vector search's WHERE can name
-properties of the node being searched and nothing beyond it — no pattern, no neighbouring
-node. Path conditions on semantic search are therefore declared unsupported and rejected
-above the port; the entity list evaluates them as a graph traversal. A plain filter on the
-passage search is applied after the index lookup, by matching the chunk's parent entity
-and evaluating the conditions on it, so a filtered passage page may come back short.
-
-**Community Edition has no relationship property indexes.** Looking up a relation by its
-id therefore scans the relationships of that type. Acceptable at expected volumes; a
-secondary lookup structure would be the remedy if it stops being.
-
-**A failed index is silently useless.** Before recreating a vector index the adapter
-checks for an index left in a failed state and drops it first, since a create-if-absent
-would otherwise skip over it forever.
-
----
-
 # Implementing a new adapter
 
 Provide, in this order:
@@ -1256,9 +874,8 @@ Provide, in this order:
 1. **Connection lifecycle, physical isolation and physical naming.** Decide how an
    ontology's data is kept apart from its neighbours', and how a type key becomes a
    physical object, before writing a single query — every later decision depends on
-   both. Derive and declare the two reserved key sets from the naming transformation
-   immediately. If the isolation mapping cannot hold more than one ontology, cap the
-   registry as a domain conflict rather than pretending.
+   both. Choose a naming that no valid key can turn into a collision with your own
+   storage objects.
 2. **Error translation.** Build the single choke point through which all database access
    passes, before any operation exists to bypass it.
 3. **The registry.** Create with atomic provisioning, list, read, rename, delete as one
@@ -1271,19 +888,17 @@ Provide, in this order:
 6. **The data side.** Entities, relations, traversal.
 7. **Filters, sorts and text search.** The predicate builder, shared by listing and by
    filtered vector search.
-8. **Search** — either the search-index store with its queue, wake-ups and retrievers,
-   or own search
-   storage with its chunks, vectors and vector indexes — and the saved-query vector
-   index, including width reconciliation.
+8. **Search** — the search-index store with its queue, wake-ups and retrievers — and the
+   saved-query vector index, including width reconciliation.
 9. **Query compilation.** Last, because it needs the naming transformation from step 1 and
    nothing else.
 
 Three traps, each of which produces a system that passes casual testing and fails later:
 
-**Reserved keys derive from *your* physical naming.** They are not a fixed list to be
-copied from another adapter. Work out every key whose transformed form could collide with
-your own storage objects, and declare exactly those. Declare too few and a user can create
-a type that overwrites your schema; declare too many and you reject keys for no reason.
+**Collisions derive from *your* physical naming.** Nothing above the port knows your
+storage objects, so nothing there rejects a key that would collide with one. Work out
+whether any valid key's transformed form could, and choose a naming where none can —
+otherwise a user can create a type that overwrites your schema.
 
 **A vector index fixes its width when it is created.** Creating-if-absent will not widen
 one, and the stale index reports itself as healthy. Reconcile widths on every create path,

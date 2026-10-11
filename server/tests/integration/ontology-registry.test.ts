@@ -5,10 +5,6 @@
  * delete, recreate after delete), both server-wide uniqueness
  * dimensions, the 59-char key cap at its physical edge, and zero
  * ontologies as a valid served state.
- *
- * Contract tier — runs on every adapter. Only the cases that hold
- * several ontologies at once are multi-ontology tier (`tiers.ts`); the
- * Neo4j-specific cap behaviour lives in `neo4j/registry-cap.test.ts`.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -17,7 +13,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
 import { closeStores, getOntologyRegistry, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
-import { supportsMultipleOntologies } from "./tiers.js";
 
 type Row = Record<string, unknown>;
 
@@ -78,7 +73,7 @@ describe("ontology registry", () => {
       expect(list.json()).toEqual([created]);
     });
 
-    it.skipIf(!supportsMultipleOntologies)("several ontologies may all lack a display name", async () => {
+    it("several ontologies may all lack a display name", async () => {
       const first = await createOntology({ key: "first" });
       const second = await createOntology({ key: "second" });
       expect(first.displayName).toBeNull();
@@ -155,7 +150,7 @@ describe("ontology registry", () => {
       expect(res.json().displayName).toBe("Customer Relations");
     });
 
-    it.skipIf(!supportsMultipleOntologies)("a display name held by another ontology answers 409", async () => {
+    it("a display name held by another ontology answers 409", async () => {
       await createOntology({ key: "crm", displayName: "Customer Relations" });
       await createOntology({ key: "hr", displayName: "Human Resources" });
       const res = await app.inject({
@@ -225,7 +220,7 @@ describe("ontology registry", () => {
       expect(await registry.getOntologyByDisplayName("Nope")).toBeNull();
     });
 
-    it.skipIf(!supportsMultipleOntologies)("listOntologies orders by key", async () => {
+    it("listOntologies orders by key", async () => {
       const registry = getOntologyRegistry();
       await registry.createOntology(ID_B, "zeta", null, null);
       await registry.createOntology(ID_A, "alpha", null, null);

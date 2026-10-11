@@ -37,7 +37,7 @@ describe("config env overrides", () => {
   it("takes every value from the environment", () => {
     const settings = loadSettings({
       DB_BACKEND: "other",
-      DB_URI: "bolt://db:7777",
+      DB_URI: "postgresql://db:7777/onto",
       DB_USER: "admin",
       DB_PASSWORD: "secret",
       PORT: "9001",
@@ -59,7 +59,7 @@ describe("config env overrides", () => {
     });
 
     expect(settings.DB_BACKEND).toBe("other");
-    expect(settings.DB_URI).toBe("bolt://db:7777");
+    expect(settings.DB_URI).toBe("postgresql://db:7777/onto");
     expect(settings.DB_USER).toBe("admin");
     expect(settings.DB_PASSWORD).toBe("secret");
     expect(settings.PORT).toBe(9001);

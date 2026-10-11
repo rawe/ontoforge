@@ -176,15 +176,6 @@ describe("retriever threads", () => {
     expect(missing.statusCode).toBe(404);
     expect(missing.json().error.details).toEqual({ code: "THREAD_NOT_FOUND" });
   });
-
-  it("reading answers FEATURE_DISABLED on an adapter without search indices", async () => {
-    pipeline.requireRetrievers.mockRejectedValueOnce(
-      new ValidationError("Search indices are not supported by the active storage adapter", { code: "FEATURE_DISABLED" }),
-    );
-    const response = await app.inject({ method: "GET", url: `${BASE}/ai/assistants/retrievers/find/threads/any` });
-    expect(response.statusCode).toBe(422);
-    expect(response.json().error.details).toEqual({ code: "FEATURE_DISABLED" });
-  });
 });
 
 describe("retriever retrieve route", () => {

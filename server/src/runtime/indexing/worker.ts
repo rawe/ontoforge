@@ -1,8 +1,8 @@
 /**
  * The search worker: builds search entries from the queue.
  *
- * It runs in every server process whose adapter stores search indices
- * (`startSearchWorker`, from `main.ts`); several processes share the
+ * It runs in every server process (`startSearchWorker`, from
+ * `main.ts`); several processes share the
  * queue safely. One pass (`drainOnce`) visits every ontology:
  *
  * 1. Claim a batch under a lease — keyword items first, they need no
@@ -36,7 +36,6 @@ import {
   getRuntimeStore,
   getSearchIndexStore,
   subscribeSearchWork,
-  supportsSearchIndices,
   type ClaimedSearchQueueItem,
   type RuntimeStore,
   type SearchEntryWrite,
@@ -132,10 +131,9 @@ export function searchEntryRates(): Record<SearchRepresentation, EntryRate> {
 /**
  * One pass: per ontology one claimed batch processed, then its finished
  * builds switched in. The count of queue items processed (completed or
- * failed). Nothing when the adapter stores no search indices.
+ * failed).
  */
 export async function drainOnce(options: SearchWorkOptions = {}): Promise<number> {
-  if (!(await supportsSearchIndices())) return 0;
   const resolved = resolve(options);
   const keys =
     options.ontologyKey !== undefined
@@ -564,10 +562,9 @@ class SearchWorker {
 
 let worker: SearchWorker | null = null;
 
-/** Start this process's worker, when the adapter stores search indices.
- * Startup only; a second call is a no-op. */
+/** Start this process's worker. Startup only; a second call is a no-op. */
 export async function startSearchWorker(): Promise<void> {
-  if (worker !== null || !(await supportsSearchIndices())) return;
+  if (worker !== null) return;
   worker = new SearchWorker();
   worker.start();
 }

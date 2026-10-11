@@ -3,9 +3,6 @@
  * saved-query description embedded as written — searchable immediately,
  * without a rebuild.
  * SKIPPED when Ollama or the model is unavailable.
- *
- * The physical vector-index assertions over the same import live in
- * `neo4j/transfer.test.ts`.
  */
 
 import { readFileSync } from "node:fs";

@@ -1,13 +1,10 @@
 /**
  * Small shared pieces of the Studio Search area: status chip, kind and
- * representation badges, and the not-supported state for adapters without
- * search indices.
+ * representation badges, and the managed-index switch.
  */
 
-import { LoaderCircle, SearchX } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { LoaderCircle } from 'lucide-react'
 import { toast } from 'sonner'
-import { useFeatures } from '@/api/hooks'
 import type { useSwitchManagedIndex } from '@/api/searchIndexHooks'
 import type {
   IndexKind,
@@ -15,10 +12,8 @@ import type {
   SearchIndexDefinition,
   SearchIndexRecord,
 } from '@/api/types'
-import { EmptyState } from '@/components/EmptyState'
 import { Badge } from '@/components/ui/badge'
 import { toastError } from '@/components/studio/lib'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -101,32 +96,6 @@ export function RepresentationBadges({ definition }: { definition: SearchIndexDe
       ))}
     </span>
   )
-}
-
-/**
- * Renders its children only when the server supports search indices; a
- * not-supported state when the features report says it does not.
- */
-export function SearchFeatureGate({ children }: { children: ReactNode }) {
-  const features = useFeatures()
-  if (features.data?.searchIndices === false) {
-    return (
-      <EmptyState
-        icon={SearchX}
-        title="Search indices are not available"
-        description="This server's storage adapter does not support search indices."
-      />
-    )
-  }
-  if (features.isPending) {
-    return (
-      <div className="space-y-4 p-6">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-40 rounded-xl" />
-      </div>
-    )
-  }
-  return <>{children}</>
 }
 
 /** On/off switch of one managed index; writes `disabledIndices`. */

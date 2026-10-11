@@ -236,21 +236,6 @@ describe("reads", () => {
     expect((await app.inject({ url: `${INDICES}/nope` })).statusCode).toBe(404);
     expect((await app.inject({ url: `${INDICES}/nope/status` })).statusCode).toBe(404);
   });
-
-  it("answers FEATURE_DISABLED on an adapter without search indices", async () => {
-    for (const [method, url] of [
-      ["GET", INDICES],
-      ["POST", `${INDICES}/preview`],
-      ["POST", INDICES],
-      ["GET", `${INDICES}/x`],
-      ["DELETE", `${INDICES}/x`],
-      ["POST", `${INDICES}/x/rebuild`],
-    ] as const) {
-      const res = await app.inject({ method, url, ...(method === "POST" ? { payload: EMPLOYMENT } : {}) });
-      expect(res.statusCode, `${method} ${url}`).toBe(422);
-      expect(res.json().error.details).toEqual({ code: "FEATURE_DISABLED" });
-    }
-  });
 });
 
 describe("create", () => {
@@ -598,19 +583,6 @@ describe("lens index inclusions", () => {
     await app.inject({ method: "DELETE", url: `${LENS_INDICES}/employment` });
     expect(invalidate).toHaveBeenCalledTimes(2);
     invalidate.mockRestore();
-  });
-
-  it("answers FEATURE_DISABLED on an adapter without search indices", async () => {
-    withLens(["person"]);
-    for (const [method, url] of [
-      ["GET", LENS_INDICES],
-      ["POST", LENS_INDICES],
-      ["DELETE", `${LENS_INDICES}/employment`],
-    ] as const) {
-      const res = await app.inject({ method, url, ...(method === "POST" ? { payload: { key: "employment" } } : {}) });
-      expect(res.statusCode, `${method} ${url}`).toBe(422);
-      expect(res.json().error.details).toEqual({ code: "FEATURE_DISABLED" });
-    }
   });
 });
 

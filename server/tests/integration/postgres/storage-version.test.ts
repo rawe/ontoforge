@@ -22,7 +22,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { initSchema, SAVED_QUERY_INDEX } from "../../../src/adapters/postgres/ddl.js";
 import { runQuery, withTransaction } from "../../../src/adapters/postgres/errors.js";
 import { STORAGE_VERSION } from "../../../src/adapters/postgres/storageVersion.js";
-import { settings } from "../../../src/config.js";
 import {
   closeStores,
   getModelingStore,
@@ -243,7 +242,7 @@ function withoutProviderIndex(of: Layout): Layout {
   return { ...of, indexes: of.indexes.filter((index) => index.indexname !== SAVED_QUERY_INDEX) };
 }
 
-describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL storage version", () => {
+describe("PostgreSQL storage version", () => {
   beforeAll(async () => {
     await initStores();
   });

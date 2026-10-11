@@ -1,4 +1,3 @@
-import { settings } from "../../src/config.js";
 /**
  * Runtime isolation between ontologies: the same type key, lens key, and
  * saved-query key exist independently in two ontologies, and every
@@ -8,10 +7,6 @@ import { settings } from "../../src/config.js";
  * `/api/ontologies/:key/runtime/lenses/:lensKey`, an unknown ontology
  * answers 404 before any lens logic, the old `/api/runtime` tree is
  * gone, and the feature report lives at `/api/server/features`.
- *
- * The twin-ontology isolation describe is multi-ontology tier
- * (`tiers.ts`); the runtime-surface pins run over a single ontology and
- * stay contract tier.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -23,7 +18,6 @@ import { closeStores, initStores } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { createOntology, defineEntityProperty, modelPrefix, runtimePrefix } from "./fixture.js";
 import { wipeDatabase } from "./reset.js";
-import { supportsMultipleOntologies } from "./tiers.js";
 
 let app: FastifyInstance;
 
@@ -108,7 +102,7 @@ beforeEach(async () => {
   invalidateLoadedSchemaCache();
 });
 
-describe.skipIf(!supportsMultipleOntologies)("the same names in two ontologies stay disjoint", () => {
+describe("the same names in two ontologies stay disjoint", () => {
   beforeEach(async () => {
     await buildTwinOntologies();
   });
@@ -273,7 +267,7 @@ describe.skipIf(!supportsMultipleOntologies)("the same names in two ontologies s
   });
 });
 
-// Contract tier: everything below runs over a single ontology.
+// Everything below runs over a single ontology.
 describe("the runtime surface itself", () => {
   beforeEach(async () => {
     await createOntology(app, "crm");
@@ -329,8 +323,7 @@ describe("the runtime surface itself", () => {
       ai: false,
       decisions: false,
       searchStrategies:
-        settings.DB_BACKEND === "postgres" ? ["keyword", "keyword-any", "keyword-all"] : [],
-      searchIndices: settings.DB_BACKEND === "postgres",
+        ["keyword", "keyword-any", "keyword-all"],
     });
   });
 });

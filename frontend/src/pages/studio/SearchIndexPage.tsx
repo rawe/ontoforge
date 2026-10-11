@@ -5,7 +5,6 @@ import { useSearchIndex } from '@/api/searchIndexHooks'
 import { EmptyState } from '@/components/EmptyState'
 import { IndexDesigner } from '@/components/search/IndexDesigner'
 import { ManagedIndexView } from '@/components/search/ManagedIndexView'
-import { SearchFeatureGate } from '@/components/search/shared'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -17,18 +16,14 @@ export function SearchIndexPage() {
   const { ontologyKey, key } = useParams<{ ontologyKey: string; key: string }>()
   const [searchParams] = useSearchParams()
   if (ontologyKey === undefined) return null
-  return (
-    <SearchFeatureGate>
-      {key === undefined ? (
-        <IndexDesigner
-          ontologyKey={ontologyKey}
-          saved={null}
-          initialEntityType={searchParams.get('entityType') ?? undefined}
-        />
-      ) : (
-        <SavedIndex ontologyKey={ontologyKey} indexKey={key} />
-      )}
-    </SearchFeatureGate>
+  return key === undefined ? (
+    <IndexDesigner
+      ontologyKey={ontologyKey}
+      saved={null}
+      initialEntityType={searchParams.get('entityType') ?? undefined}
+    />
+  ) : (
+    <SavedIndex ontologyKey={ontologyKey} indexKey={key} />
   )
 }
 

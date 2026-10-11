@@ -13,9 +13,9 @@
  * enforces the closed OQL surface fail-closed: write operations, CALL,
  * and every construct or function the grammar parses but the enumeration
  * in `docs/capabilities/oql.md` ("Supported surface") does not name are
- * rejected at validation, identically on every backend. The result of
- * `parseAndValidate` is a `ValidatedQuery` that a database adapter
- * compiles to its native dialect (e.g. `adapters/neo4j/oqlCompiler.ts`).
+ * rejected at validation, before the query reaches storage. The result
+ * of `parseAndValidate` is a `ValidatedQuery` that the database adapter
+ * compiles to its native dialect (`adapters/postgres/oql/`).
  *
  * Every rejection carries self-correction hints naming the valid
  * candidates — contractual, not incidental: the primary caller composing
@@ -130,11 +130,6 @@ export interface Analysis {
   /** Bare variables used as ORDER BY sort keys (checked against the
    * node/relationship variables in `validate()`). */
   orderBySymbols: string[];
-  /** Names of `$parameters` used as SKIP/LIMIT operands. The Neo4j
-   * adapter must send exactly these as driver integers — a plain JS
-   * number crosses the wire as a Float, which the server rejects as a
-   * paging count. */
-  skipLimitParams: Set<string>;
 }
 
 /** True if any node variable appears without a label and is never bound
@@ -186,7 +181,6 @@ class Collector extends CypherParserListener {
     functionCalls: new Set(),
     inlineMaps: [],
     orderBySymbols: [],
-    skipLimitParams: new Set(),
   };
 
   /** Nesting depth of aggregate function invocations (nested-aggregate check). */
@@ -592,7 +586,6 @@ class Collector extends CypherParserListener {
   private checkSkipLimitOperand(ctx: ExpressionContext): void {
     const shape = classifyExpression(ctx);
     if (shape.kind === "parameter") {
-      this.analysis.skipLimitParams.add(shape.name);
       return;
     }
     if (!(shape.kind === "constant" && isIntegerLiteral(shape.text))) {
@@ -1056,7 +1049,7 @@ export function validate(analysis: Analysis, schema: SchemaCacheValue): string[]
       // The variable declares no type anywhere: a relationship pattern
       // written without a type, a projection alias, or an unbound name.
       // Nothing can check the property against the lens, so the access
-      // is rejected on every backend. (A variable whose declared type
+      // is rejected. (A variable whose declared type
       // is itself invalid, and an unlabeled node variable, already
       // carry their own rejection above.)
       errors.push(

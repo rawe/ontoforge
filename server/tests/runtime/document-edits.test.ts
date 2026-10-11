@@ -1,28 +1,18 @@
 /**
- * Partial document writes: str_replace, replace_range, chunk re-sync and
- * embedding reuse, including the code-point (emoji) scenarios.
+ * Partial document writes: str_replace and replace_range, including the
+ * code-point (emoji) scenarios.
  */
 
 import type { FastifyInstance } from "fastify";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { settings } from "../../src/config.js";
 import { setEmbeddingProvider, type EmbeddingProvider } from "../../src/core/embedding.js";
-import { chunkDocument } from "../../src/runtime/search/document.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
-import type { OwnSearchRuntimeStore } from "../../src/core/ownSearch.js";
-import { syncDocumentChunks } from "../../src/runtime/service.js";
 import {
-  asRuntimeStore,
   createMockRuntimeStore,
   makeEntity,
   type MockRuntimeStore,
 } from "./helpers.js";
-
-const BIO = Array.from(
-  { length: 10 },
-  (_, i) => `Paragraph ${i}: ` + "lorem ipsum dolor sit amet. ".repeat(10),
-).join("\n\n"); // ~2900 chars, every paragraph marker unique
 
 type Row = Record<string, unknown>;
 
@@ -334,105 +324,5 @@ describe("context window", () => {
     expect(body.contextOffset).toBe(300);
     expect(body.context).toBe("x".repeat(200) + "HIT" + "y".repeat(200));
     expect(body.context.length).toBe(403);
-  });
-});
-
-describe("chunk re-sync + embedding reuse", () => {
-  it("an edit re-syncs the property's chunks", async () => {
-    setEmbeddingProvider(mockProvider());
-    mockEdit(makeEntity({ name: "Ada", bio: BIO }));
-
-    const res = await patchDoc({
-      op: "str_replace",
-      oldString: "Paragraph 3:",
-      newString: "Chapter 3 —",
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(holder.store.deleteChunksForEntityProperty).toHaveBeenCalledTimes(1);
-    expect(holder.store.createDocumentChunks).toHaveBeenCalledTimes(1);
-    const rows = holder.store.createDocumentChunks.mock.calls[0]![3] as Row[];
-    const newValue = BIO.replace("Paragraph 3:", "Chapter 3 —");
-    const expected = chunkDocument(
-      newValue,
-      settings.DOCUMENT_CHUNK_SIZE,
-      settings.DOCUMENT_CHUNK_OVERLAP,
-    );
-    expect(rows.map((r) => r.text)).toEqual(expected.map((c) => c.text));
-  });
-
-  it("an edit without a provider refreshes chunk text", async () => {
-    mockEdit(makeEntity({ name: "Ada", bio: "Hello world" }));
-
-    const res = await patchDoc({ op: "str_replace", oldString: "world", newString: "docs" });
-
-    expect(res.statusCode).toBe(200);
-    // Value + length still written; chunks untouched without a provider.
-    expect((holder.store.updateEntity.mock.calls[0]![2] as Row).bio).toBe("Hello docs");
-    expect(holder.store.deleteChunksForEntityProperty).toHaveBeenCalled();
-    expect(holder.store.createDocumentChunks).toHaveBeenCalled();
-    for (const chunk of holder.store.createDocumentChunks.mock.calls[0]![3] as Row[]) expect(chunk).not.toHaveProperty("_embedding");
-  });
-
-  it("re-embeds unchanged chunks whose stored vector is of another model's width", async () => {
-    // The rebuild case: the text never changes, so reuse-by-text alone
-    // would keep every stale vector and regenerate nothing.
-    const chunks = chunkDocument(BIO, settings.DOCUMENT_CHUNK_SIZE, settings.DOCUMENT_CHUNK_OVERLAP);
-    const reuseMap: Record<string, number[]> = {};
-    for (const chunk of chunks) {
-      reuseMap[chunk.text] = Array.from({ length: 4 }, () => 0.5);
-    }
-    const provider = mockProvider();
-    setEmbeddingProvider(provider);
-    holder.store.getChunkEmbeddingsForEntityProperty.mockResolvedValue(reuseMap);
-
-    await syncDocumentChunks(asRuntimeStore(holder.store) as OwnSearchRuntimeStore, "person", "ent-1", { bio: BIO });
-
-    expect(provider.embed).toHaveBeenCalledTimes(chunks.length);
-    const rows = holder.store.createDocumentChunks.mock.calls[0]![3] as Row[];
-    for (const row of rows) {
-      expect(row._embedding).toEqual(Array.from({ length: 8 }, () => 0.1));
-    }
-  });
-
-  it("sync reuses embeddings for unchanged chunk texts", async () => {
-    // Only chunks whose text changed are re-embedded; the rest reuse
-    // stored vectors.
-    const chunks = chunkDocument(BIO, settings.DOCUMENT_CHUNK_SIZE, settings.DOCUMENT_CHUNK_OVERLAP);
-    expect(chunks.length).toBeGreaterThanOrEqual(2);
-
-    // Pretend every chunk except the first already has a stored embedding.
-    const reuseMap: Record<string, number[]> = {};
-    for (const chunk of chunks.slice(1)) {
-      reuseMap[chunk.text] = Array.from({ length: 8 }, () => 0.5);
-    }
-    const provider = mockProvider();
-    setEmbeddingProvider(provider);
-    holder.store.getChunkEmbeddingsForEntityProperty.mockResolvedValue(reuseMap);
-
-    await syncDocumentChunks(asRuntimeStore(holder.store) as OwnSearchRuntimeStore, "person", "ent-1", { bio: BIO });
-
-    // Exactly one embedding call — for the one chunk not in the reuse map.
-    expect(provider.embed).toHaveBeenCalledTimes(1);
-    expect(provider.embed).toHaveBeenCalledWith(chunks[0]!.text);
-    const rows = holder.store.createDocumentChunks.mock.calls[0]![3] as Row[];
-    expect(rows[0]!._embedding).toEqual(Array.from({ length: 8 }, () => 0.1));
-    for (const row of rows.slice(1)) {
-      expect(row._embedding).toEqual(Array.from({ length: 8 }, () => 0.5));
-    }
-  });
-
-  it("a nulled value deletes chunks and creates none", async () => {
-    setEmbeddingProvider(mockProvider());
-    await syncDocumentChunks(asRuntimeStore(holder.store) as OwnSearchRuntimeStore, "person", "ent-1", { bio: null });
-    expect(holder.store.deleteChunksForEntityProperty).toHaveBeenCalledTimes(1);
-    expect(holder.store.createDocumentChunks).not.toHaveBeenCalled();
-  });
-
-  it("an emptied value deletes chunks and creates none", async () => {
-    setEmbeddingProvider(mockProvider());
-    await syncDocumentChunks(asRuntimeStore(holder.store) as OwnSearchRuntimeStore, "person", "ent-1", { bio: "" });
-    expect(holder.store.deleteChunksForEntityProperty).toHaveBeenCalledTimes(1);
-    expect(holder.store.createDocumentChunks).not.toHaveBeenCalled();
   });
 });

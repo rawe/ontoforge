@@ -6,11 +6,10 @@
  * syntactic check first — exactly the format the server itself generates,
  * lowercase hyphenated 8-4-4-4-12 — and off-format input short-circuits
  * to the method's not-found shape without touching the database. This
- * reproduces the reference adapter's observable not-found behaviour
- * (where ids are compared as strings) and keeps 22P02 unreachable from
+ * keeps ids opaque strings to the caller and 22P02 unreachable from
  * caller input: PostgreSQL's own more lenient uuid parsing (uppercase,
- * braces, no hyphens) would otherwise FIND rows where a string
- * comparison answers not-found.
+ * braces, no hyphens) would otherwise FIND rows under an id the server
+ * never issued.
  */
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";

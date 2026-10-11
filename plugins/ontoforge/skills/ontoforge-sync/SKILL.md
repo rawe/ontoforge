@@ -160,9 +160,7 @@ an embedding provider, `disabled` when switched off); one index is rebuilt from 
 with `POST /api/ontologies/{ontologyKey}/model/search-indices/{indexKey}/rebuild`.
 
 This script rebuilds what lies outside the search indices: the saved-query description
-vectors and the width of their vector index. On Neo4j, which has no search indices and
-computes its own search data with each write, it also rebuilds every entity's vector and
-every document's chunks. Run it after changing the embedding model, once per ontology. It
+vectors and the width of their vector index. Run it after changing the embedding model, once per ontology. It
 covers the whole ontology, so no lens is involved.
 
 ```bash
@@ -176,7 +174,7 @@ node scripts/rebuild-search-data.mjs [--ontology <key>] [--base-url <url>]
 
 **API used**: `POST /api/ontologies/{ontologyKey}/model/rebuild-search-data`
 
-Streams progress to stderr. On completion, prints a per-group summary. It runs without an
+Streams progress to stderr. On completion, prints a summary. It runs without an
 embedding provider and reports the vectors as skipped.
 
 ## Ordering Rules
@@ -186,10 +184,9 @@ embedding provider and reports the vectors as skipped.
 2. **Schema before data.** The schema defines entity types and relation types. Data
    cannot be imported until the schema exists.
 3. **Entities before relations.** The data import script handles this automatically.
-4. **Search follows the data import on its own.** On PostgreSQL the search indices build
-   the imported entities' entries in the background, and search answers from them as they
-   become ready; on Neo4j each write computes its entity's search data. No rebuild is
-   needed.
+4. **Search follows the data import on its own.** The search indices build the imported
+   entities' entries in the background, and search answers from them as they become
+   ready. No rebuild is needed.
 5. **A clear key space for a schema import.** The import API does not overwrite or merge.
    If the target ontology already holds a type, lens or custom search index with the same key, the import
    fails with a 409 Conflict naming every clash. Import into a bare ontology, or delete

@@ -14,8 +14,8 @@
  * excludes the row. The substring
  * idiom is `position(lower($v) in lower(props->>$k)) > 0`: no ILIKE, no
  * escape helper, no wildcard bug class; an empty search string matches
- * every row and a missing property yields NULL and excludes the row,
- * matching Cypher `CONTAINS`. Existence is jsonb key presence, `props ?
+ * every row and a missing property yields NULL and excludes the row.
+ * Existence is jsonb key presence, `props ?
  * $k` — the service stores no nulls, so a stored key is a present value
  * — and relation existence is an `EXISTS` / `NOT EXISTS` over the
  * relation table with no value compared. The sort direction is a build-time literal

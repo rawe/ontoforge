@@ -18,24 +18,6 @@ services:
       retries: 5
       start_period: 30s
 
-  # Neo4j — the alternative adapter. Uncomment to run OntoForge on Neo4j and
-  # set the ontoforge-server service's DB_* environment to the Neo4j values.
-  # neo4j:
-  #   image: neo4j:2026.02.2
-  #   ports:
-  #     - "7474:7474"
-  #     - "7687:7687"
-  #   environment:
-  #     NEO4J_AUTH: neo4j/changeme
-  #   volumes:
-  #     - neo4j-data:/data
-  #   healthcheck:
-  #     test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "changeme", "RETURN 1"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
-  #     start_period: 30s
-
   ontoforge-server:
     image: ghcr.io/rawe/ontoforge-server:${VERSION:-latest}
     ports:
@@ -101,5 +83,4 @@ services:
 
 volumes:
   postgres-data:
-  neo4j-data:
   # ollama-data:

@@ -50,22 +50,14 @@ which is a valid state the server serves from.
 Before every test run, the team lead executes:
 
 ```bash
-# 1. Wipe the database (PostgreSQL, the default): drop every ontology
-#    namespace, then empty the registry
+# 1. Wipe the database: drop every ontology namespace, then empty the
+#    registry
 docker compose exec postgres psql -U postgres -d ontoforge -c \
   "DO \$\$ DECLARE ns text; BEGIN
      FOR ns IN SELECT nspname FROM pg_namespace WHERE nspname LIKE 'ont\_%' LOOP
        EXECUTE format('DROP SCHEMA %I CASCADE', ns);
      END LOOP;
    END \$\$; TRUNCATE public.ontology"
-
-# For a run flipped to Neo4j, wipe it instead with (deleting every node
-# includes the internal registry node, returning the adapter to zero
-# ontologies):
-# curl -s -X POST http://localhost:7474/db/neo4j/tx/commit \
-#   -H "Content-Type: application/json" \
-#   -u neo4j:ontoforge_dev \
-#   -d '{"statements":[{"statement":"MATCH (n) DETACH DELETE n"}]}'
 
 # 2. Verify server is up and running latest code
 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/docs

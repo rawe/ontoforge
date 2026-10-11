@@ -226,8 +226,7 @@ The response carries `query`, `mode` and `hits`; each hit carries `entity`,
 The default search is the index search's counterpart for callers who name types rather
 than indices: it searches only default and passage indices, so it never ranks a relation
 entry, and it offers search kinds, keyword strategies and per-index match evidence that
-the index search does not. On an adapter without search indices only the default search
-exists; the index search and the catalog are refused as a disabled feature.
+the index search does not.
 
 ### The search catalog
 
@@ -266,8 +265,7 @@ German, English. Changing it builds a new keyword generation of every index in t
 keyword entries need no embedding calls — and the previous generations keep answering
 until their successors are ready ([search-indices.md](search-indices.md#lifecycle)).
 Transfer carries the set, and import replaces the target's with it
-([transfer.md](transfer.md)). On an adapter without search indices there is no set to
-read or change: the search settings answer `FEATURE_DISABLED`.
+([transfer.md](transfer.md)).
 
 ## Rebuild
 
@@ -307,9 +305,7 @@ embedding call fails is counted as failed. A run with no provider fails nothing,
 skip flag is what distinguishes it from a complete run.
 
 So rebuild repairs a drifted width of the saved-query description index and descriptions
-that were never embedded. An adapter that stores no search indices keeps search data of
-its own, which the same operation rebuilds
-([../storage-adapters.md](../storage-adapters.md#own-search-storage)).
+that were never embedded.
 
 ## Vector index width drift
 

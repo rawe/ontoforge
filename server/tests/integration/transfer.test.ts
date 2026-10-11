@@ -17,9 +17,7 @@
  *   real, but not deterministic.
  * - The fixture spells an unscoped lens as `"includes": null`; this
  *   export omits the key entirely, per the docs' "absent entirely".
- * - Index inclusions are sorted; an adapter without search indices keeps
- *   none (they import as nothing and export as `[]`), so its comparison
- *   leaves them out.
+ * - Index inclusions are sorted.
  */
 
 import { readFileSync } from "node:fs";
@@ -32,7 +30,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
-import { keepsOwnSearchStorage, supportsMultipleOntologies } from "./tiers.js";
 
 type Row = Record<string, unknown>;
 
@@ -43,11 +40,9 @@ const EXPORT_FIXTURE_6 = readFixture("export-6.0.json");
 
 /** Order-normalize a payload and drop `includes: null` (the fixture's
  * spelling of "absent" — this export omits the key). Index inclusions
- * come in the database's collation order; an adapter without search
- * indices exports neither them nor the search-index part. */
+ * come in the database's collation order. */
 function normalize(payload: Row): Row {
   const clone = JSON.parse(JSON.stringify(payload)) as Row;
-  if (keepsOwnSearchStorage) delete clone.searchIndices;
   const byKey = (a: Row, b: Row) => String(a.key).localeCompare(String(b.key));
   for (const et of (clone.entityTypes as Row[]) ?? []) {
     (et.properties as Row[]).sort(byKey);
@@ -56,14 +51,7 @@ function normalize(payload: Row): Row {
     (rt.properties as Row[]).sort(byKey);
   }
   for (const lens of (clone.lenses as Row[]) ?? []) {
-    // An adapter without search indices exports neither inclusions nor
-    // retrievers.
-    if (keepsOwnSearchStorage) {
-      delete lens.indexInclusions;
-      delete (lens.assistants as Row).retrievers;
-    } else {
-      (lens.indexInclusions as string[] | undefined)?.sort();
-    }
+    (lens.indexInclusions as string[] | undefined)?.sort();
     if (lens.includes === null) {
       delete lens.includes;
     } else if (lens.includes) {
@@ -161,14 +149,13 @@ describe("round-trip against a stored export document", () => {
   it("the export document carries no ontology identity", async () => {
     await importInto("test_ont", EXPORT_FIXTURE);
     const exported = await exportFrom("test_ont");
-    // An adapter without search indices writes no search-index part.
     expect(Object.keys(exported).sort()).toEqual([
       "entityTypes",
       "formatVersion",
       "keywordLanguages",
       "lenses",
       "relationTypes",
-      ...(keepsOwnSearchStorage ? [] : ["searchIndices"]),
+      "searchIndices",
     ]);
   });
 });
@@ -199,13 +186,13 @@ describe("older format versions", () => {
     expected.keywordLanguages = ["german"];
     // hr_view does not show person's document property: no passage index.
     const hrView = (expected.lenses as Row[]).find((lens) => lens.key === "hr_view")!;
-    if (!keepsOwnSearchStorage) hrView.indexInclusions = ["company~default", "person~default"];
+    hrView.indexInclusions = ["company~default", "person~default"];
     expect(normalize(await exportFrom("test_ont"))).toEqual(expected);
   });
 });
 
 describe("transfer between ontologies", () => {
-  it.skipIf(!supportsMultipleOntologies)("one ontology's export imports into another, bare or populated", async () => {
+  it("one ontology's export imports into another, bare or populated", async () => {
     await createOntology("target_ont");
     await importInto("test_ont", EXPORT_FIXTURE);
 
@@ -246,7 +233,7 @@ describe("transfer between ontologies", () => {
     expect((sourceTypes.json() as Row[]).map((et) => et.key)).toEqual(["company", "person"]);
   });
 
-  it.skipIf(!supportsMultipleOntologies)("conflicts fail all-or-nothing against the target ontology's keys", async () => {
+  it("conflicts fail all-or-nothing against the target ontology's keys", async () => {
     await createOntology("target_ont");
     await importInto("test_ont", EXPORT_FIXTURE);
     const exported = await exportFrom("test_ont");

@@ -320,7 +320,7 @@ Every lens has an implicit retriever, keyed `_default`. It is not stored and can
 be created, replaced, deleted, copied, moved, exported or imported; no stored key can
 begin with an underscore, so it can never be shadowed. Modeling does not know it: it is
 not listed, read or written there. The runtime list names it first, as `Default`, marked
-built in. It exists wherever the adapter stores search indices, and both
+built in. Both
 [answering a question](#answering-a-question) and [retrieve](#retrieve) serve it.
 
 Its configuration is derived from the lens for every question, deterministically — the
@@ -371,12 +371,6 @@ configuration shape — not what they reference, so an exported retriever that b
 still imports and is reported invalid there — and writes them last, once the indices
 exist. A `5.0` payload's
 `retrievers` are converted.
-
-## Adapters without search indices
-
-Retrievers search search indices, so they exist only where the storage adapter
-stores them. Elsewhere every retriever operation is refused as a disabled feature,
-export carries no `retrievers`, and import checks them and keeps none.
 
 ## Through the interfaces
 

@@ -1,15 +1,13 @@
 /**
- * OQL parsing/validation (`core/oql`), the Neo4j compiler, and the query
- * endpoint. Ported from `tests/runtime/test_cypher.py` (all scenarios),
- * plus the extra spec-mandated cases: exact hint lists, collect-all with
- * mixed categories, labelless-variable edge cases, backtick-quoted names,
- * and rewrite-leaves-the-rest-intact assertions.
+ * OQL parsing/validation (`core/oql`) and the query endpoint. Ported
+ * from `tests/runtime/test_cypher.py`, plus the extra spec-mandated
+ * cases: exact hint lists, collect-all with mixed categories,
+ * labelless-variable edge cases and backtick-quoted names.
  */
 
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ValidationError } from "../../src/core/exceptions.js";
 import {
   SYSTEM_PROPERTIES,
   analyze,
@@ -18,9 +16,7 @@ import {
   parse,
   parseAndValidate,
   validate,
-  type ValidatedQuery,
 } from "../../src/core/oql/index.js";
-import { compileQuery, validateAndCompile } from "../../src/adapters/neo4j/oqlCompiler.js";
 import { invalidateLoadedSchemaCache, type SchemaCacheValue } from "../../src/runtime/schemaCache.js";
 import { createMockRuntimeStore, makeEntity, type MockRuntimeStore } from "./helpers.js";
 
@@ -195,18 +191,11 @@ describe("analysis", () => {
     expect(analysis.propertyAccesses).toContainEqual({ variable: "p", propertyName: "name" });
   });
 
-  it("records the names of $parameters used as SKIP/LIMIT operands", () => {
+  it("accepts $parameters as SKIP/LIMIT operands", () => {
     const analysis = analyzeQuery(
       "MATCH (p:person) RETURN p.name AS name SKIP $offset LIMIT $page_size",
     );
-    expect(analysis.skipLimitParams).toEqual(new Set(["offset", "page_size"]));
-  });
-
-  it("records no SKIP/LIMIT operand for literals or parameters used elsewhere", () => {
-    const analysis = analyzeQuery(
-      "MATCH (p:person) WHERE p.age > $min_age RETURN p.name AS name SKIP 1 LIMIT 2",
-    );
-    expect(analysis.skipLimitParams).toEqual(new Set());
+    expect(analysis.unsupported.has("skip-limit")).toBe(false);
   });
 });
 
@@ -798,139 +787,6 @@ describe("ValidatedQuery contract", () => {
   it("the carried tree is the tree the analysis was collected from", () => {
     const validated = parseAndValidate("MATCH (p:person) RETURN p", schema());
     expect(analyze(validated.tree).allLabels).toEqual(validated.analysis.allLabels);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Rewriting
-// ---------------------------------------------------------------------------
-
-function compileText(query: string): string {
-  const { tokenStream, tree } = parse(query);
-  const validated: ValidatedQuery = {
-    text: "",
-    tokenStream,
-    tree,
-    analysis: analyze(tree),
-    schema: schema(),
-  };
-  return compileQuery(validated);
-}
-
-describe("rewriting", () => {
-  it("rewrites entity labels", () => {
-    const result = compileText("MATCH (p:person) RETURN p");
-    expect(result).toContain(":Person)");
-    expect(result).not.toContain(":person)");
-  });
-
-  it("rewrites relation types", () => {
-    const result = compileText("MATCH (p:person)-[r:works_for]->(c:company) RETURN p, c");
-    expect(result).toContain(":WORKS_FOR]");
-    expect(result).toContain(":Person)");
-    expect(result).toContain(":Company)");
-  });
-
-  it("preserves query structure", () => {
-    const result = compileText("MATCH (p:person) WHERE p.name = 'Alice' RETURN p LIMIT 10");
-    expect(result).toContain("WHERE p.name = 'Alice'");
-    expect(result).toContain("LIMIT 10");
-  });
-
-  it("multi-word entity pascal case", () => {
-    const s: SchemaCacheValue = {
-      lensId: "t",
-      lensKey: "t",
-      lensName: "T",
-      lensDescription: null,
-      entityTypes: {
-        research_paper: {
-          key: "research_paper",
-          displayName: "Research Paper",
-          description: null,
-          properties: {},
-        },
-      },
-      relationTypes: {},
-    };
-    const result = validateAndCompile("MATCH (r:research_paper) RETURN r", s);
-    expect(result).toContain(":ResearchPaper)");
-  });
-
-  // -- spec-mandated: everything but the type-key tokens is untouched --
-
-  it("rewrites exactly the type-key tokens and nothing else", () => {
-    const query =
-      "MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name = 'Alice' " +
-      "RETURN p.name AS person, r, c ORDER BY p.name SKIP 5 LIMIT 10";
-    const result = compileText(query);
-    // Only the label/type tokens change — the alias `person`, the property
-    // accesses, whitespace, and clause text all pass through intact.
-    expect(result).toBe(
-      "MATCH (p:Person)-[r:WORKS_FOR]->(c:Company) WHERE p.name = 'Alice' " +
-        "RETURN p.name AS person, r, c ORDER BY p.name SKIP 5 LIMIT 10",
-    );
-  });
-
-  it("rewrites backtick-quoted type keys", () => {
-    const result = compileText("MATCH (p:`person`) RETURN p");
-    expect(result).toContain(":Person)");
-    expect(result).not.toContain("`person`");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// validateAndCompile (end-to-end)
-// ---------------------------------------------------------------------------
-
-describe("validateAndCompile", () => {
-  it("full pipeline", () => {
-    const result = validateAndCompile(
-      "MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name = 'Alice' RETURN p, r, c LIMIT 10",
-      schema(),
-    );
-    expect(result).toContain(":Person)");
-    expect(result).toContain(":WORKS_FOR]");
-    expect(result).toContain(":Company)");
-  });
-
-  it("raises on write", () => {
-    expect(() => validateAndCompile("CREATE (n:person {name: 'Bob'})", schema())).toThrowError(
-      ValidationError,
-    );
-  });
-
-  it("raises on unknown label", () => {
-    expect(() => validateAndCompile("MATCH (n:animal) RETURN n", schema())).toThrowError(
-      ValidationError,
-    );
-  });
-
-  it("OPTIONAL MATCH supported", () => {
-    const result = validateAndCompile(
-      "MATCH (p:person) OPTIONAL MATCH (p)-[r:works_for]->(c:company) RETURN p, r, c",
-      schema(),
-    );
-    expect(result).toContain("OPTIONAL MATCH");
-    expect(result).toContain(":Person)");
-  });
-
-  it("WITH clause supported", () => {
-    const result = validateAndCompile(
-      "MATCH (p:person) WITH p MATCH (p)-[r:works_for]->(c:company) RETURN p, c",
-      schema(),
-    );
-    expect(result).toContain("WITH p");
-  });
-
-  it("ORDER BY / LIMIT / SKIP", () => {
-    const result = validateAndCompile(
-      "MATCH (p:person) RETURN p ORDER BY p.name SKIP 5 LIMIT 10",
-      schema(),
-    );
-    expect(result).toContain("ORDER BY");
-    expect(result).toContain("SKIP 5");
-    expect(result).toContain("LIMIT 10");
   });
 });
 

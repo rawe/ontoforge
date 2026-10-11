@@ -70,8 +70,8 @@ let pool: pg.Pool | null = null;
 
 /**
  * Create the process-lifetime pool from the config surface and verify
- * connectivity (the mirror of the Neo4j adapter's `verifyConnectivity` —
- * the one sanctioned translation site outside the doors).
+ * connectivity (the one sanctioned translation site outside the
+ * doors).
  *
  * The DSN is parsed once into a fully discrete `pg` config — never
  * `connectionString` plus discrete credentials mixed, whose merge
@@ -288,8 +288,8 @@ export async function withTransaction<T>(
   });
 }
 
-/** Log a driver failure and return the `StoreError` that replaces it
- * (parity with the Neo4j adapter's `toStoreError`): SQLSTATE, constraint
+/** Log a driver failure and return the `StoreError` that replaces it:
+ * SQLSTATE, constraint
  * name, driver message, and stack go to the server log against the
  * generated `errorId`; the client message stays the generic default. */
 export function toStoreError(exc: unknown): StoreError {

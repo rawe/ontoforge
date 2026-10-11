@@ -103,7 +103,7 @@ async function entries(generationId: string): Promise<Row[]> {
   return result.rows;
 }
 
-describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL search pipeline", () => {
+describe("PostgreSQL search pipeline", () => {
   let modeling: ModelingStore;
   let runtime: RuntimeStore;
   let store: SearchIndexStore;
@@ -211,7 +211,7 @@ describe.skipIf(settings.DB_BACKEND !== "postgres")("PostgreSQL search pipeline"
     };
     // PostgreSQL text cannot hold NUL: the insert fails inside the transaction.
     await expect(
-      runtime.createEntity("person", plan.entityParts[0]!.entityId, { name: "A\u0000B" }, {}, null, plan),
+      runtime.createEntity("person", plan.entityParts[0]!.entityId, { name: "A\u0000B" }, {}, plan),
     ).rejects.toThrow();
     await expect(
       runtime.createRelation("works_for", randomUUID(), ada, randomUUID(), {}, {}, {

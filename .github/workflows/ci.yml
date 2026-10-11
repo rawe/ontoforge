@@ -4,10 +4,8 @@
 #   - Server: typecheck, unit tests, container image build (no push)
 #   - Frontend: lint, production build
 #
-# Everything here is adapter-agnostic on purpose: no step assumes a
-# particular storage backend. Integration tests and their Neo4j service
-# container are disabled below — see the comments at each site. They remain
-# part of the test suite and are run locally.
+# No step needs a database. Integration tests are disabled below — see the
+# comment at the step. They remain part of the test suite and are run locally.
 
 name: CI
 
@@ -20,31 +18,6 @@ jobs:
   server:
     name: Server
     runs-on: ubuntu-latest
-
-    # DISABLED — Neo4j service container.
-    #
-    # Booting a Neo4j container here hard-wires CI to one specific storage
-    # adapter. Storage sits behind an exchangeable persistence port, so a
-    # pipeline that can only verify Neo4j would have to grow a service block
-    # per adapter and would silently privilege one of them. Re-enable only as
-    # part of an adapter-agnostic strategy (e.g. a matrix over adapters, or a
-    # port-conformance suite each adapter runs against its own backing store).
-    #
-    # Cost while enabled: ~40s to pull and healthcheck the container.
-    #
-    # services:
-    #   neo4j:
-    #     image: neo4j:2026.02.2
-    #     ports:
-    #       - 7687:7687
-    #     env:
-    #       NEO4J_AUTH: neo4j/ontoforge_dev
-    #     options: >-
-    #       --health-cmd "cypher-shell -u neo4j -p ontoforge_dev 'RETURN 1'"
-    #       --health-interval 10s
-    #       --health-timeout 5s
-    #       --health-retries 10
-    #       --health-start-period 30s
 
     steps:
       - name: Checkout repository
@@ -69,10 +42,9 @@ jobs:
         working-directory: server
         run: npm test
 
-      # DISABLED — integration tests, together with the Neo4j service
-      # container above. The suite drives the real database through the
-      # adapter, so it cannot run without one and is adapter-specific by
-      # nature. Run it locally against docker-compose Neo4j:
+      # DISABLED — integration tests. The suite drives the real database
+      # through the adapter, so it cannot run without one. Run it locally
+      # against the docker-compose PostgreSQL:
       #
       #   docker compose up -d && cd server && npm run test:integration
       #

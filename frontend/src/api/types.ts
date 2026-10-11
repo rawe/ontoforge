@@ -20,8 +20,6 @@ export interface Features {
   searchStrategies: SearchStrategy[]
   semanticSearch: boolean
   ai: boolean
-  /** The storage adapter supports search indices (the Studio Search area). */
-  searchIndices: boolean
 }
 
 export type DataType =
@@ -208,7 +206,7 @@ export interface SearchHit {
    */
   relativeScore: number
   matches: SearchMatch[]
-  /** The entry the hit was found by. Absent from servers without search indices. */
+  /** The entry the hit was found by. */
   matched?: Matched
 }
 

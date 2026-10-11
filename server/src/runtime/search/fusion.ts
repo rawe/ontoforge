@@ -1,12 +1,8 @@
 declare const scoreKind: unique symbol;
-/** The kinds a ranking score can have. A ranking holds exactly one kind, assigned once
- * where the runtime reads the storage port's rows; scores are compared only within one
- * ranking and never combined across kinds. A sum of two kinds is a plain number and fits
- * no typed slot. */
+/** The kinds a match measurement can have. Scores are compared only within one
+ * ranking and never combined across kinds. */
 export type SemanticSimilarity = number & { readonly [scoreKind]: "semanticSimilarity" };
 export type KeywordScore = number & { readonly [scoreKind]: "keywordScore" };
-export type FusionScore = number & { readonly [scoreKind]: "fusionScore" };
-export type RankingScore = SemanticSimilarity | KeywordScore | FusionScore;
 
 export interface SearchEvidence {
   /** Original normalized cosine measurement; not confidence or a fused score. */
@@ -19,96 +15,6 @@ export interface SearchEvidence {
    * A number exactly when keywordMatch is true, null exactly when it is null. */
   keywordScore: KeywordScore | null;
 }
-export const emptyEvidence = (): SearchEvidence => ({
-  semanticSimilarity: null,
-  keywordMatch: null,
-  keywordScore: null,
-});
-
-/** Source measurements merge only for identical units, before passage collapse. */
-function mergeEvidence(a?: SearchEvidence, b?: SearchEvidence): SearchEvidence | undefined {
-  if (!a) return b;
-  if (!b) return a;
-  return {
-    semanticSimilarity: a.semanticSimilarity ?? b.semanticSimilarity,
-    keywordMatch: a.keywordMatch ?? b.keywordMatch,
-    keywordScore: a.keywordScore ?? b.keywordScore,
-  };
-}
-/** An ordered list whose position is the rank; all fusion ever reads. */
-export interface Ordered<T> {
-  key: string;
-  value: T;
-  evidence?: SearchEvidence;
-}
-/** A ranking ordered by one score kind. Source rankings keep their measurement here,
- * duplicating evidence, because the similarity floor and the single-strategy relative
- * score read it from the ranking. */
-export interface Ranked<T, Kind extends RankingScore> extends Ordered<T> {
-  score: Kind;
-}
-/** Source rows take their kind here, per the port contract of the method that returned
- * them; the measurement is both the ranking score and the evidence. */
-export function semanticRow<T>(key: string, value: T, score: unknown): Ranked<T, SemanticSimilarity> {
-  const similarity = score as SemanticSimilarity;
-  return {
-    key,
-    score: similarity,
-    value,
-    evidence: { semanticSimilarity: similarity, keywordMatch: null, keywordScore: null },
-  };
-}
-/** Rank fusion operates on the same unit in every input. Stable ties retain input order. */
-export function fuse<T>(
-  rankings: Ordered<T>[][],
-  merge: (a: T, b: T) => T = (a) => a,
-  mode: "sum" | "max" = "sum",
-): Ranked<T, FusionScore>[] {
-  const result = new Map<string, Ranked<T, FusionScore>>();
-  for (const ranking of rankings) {
-    const seen = new Set<string>();
-    ranking.forEach((row, index) => {
-      if (seen.has(row.key)) return;
-      seen.add(row.key);
-      const prior = result.get(row.key);
-      const contribution = 1 / (60 + index + 1);
-      const evidence = mergeEvidence(prior?.evidence, row.evidence);
-      // Arithmetic on a brand yields a plain number; this is the one place a fusion score is made.
-      const score = (
-        mode === "max"
-          ? Math.max(prior?.score ?? 0, contribution)
-          : (prior?.score ?? 0) + contribution
-      ) as FusionScore;
-      result.set(row.key, {
-        key: row.key,
-        score,
-        value: prior ? merge(prior.value, row.value) : row.value,
-        ...(evidence ? { evidence } : {}),
-      });
-    });
-  }
-  return [...result.values()].sort((a, b) => b.score - a.score);
-}
 export function relativeScore(score: number, best: number): number {
   return best > 0 ? Math.max(0, Math.min(1, score / best)) : 1;
-}
-
-/** Unknown measurements leave the whole tied group in stable input order. */
-export function refineTies<T, Kind extends RankingScore>(
-  ranking: Ranked<T, Kind>[],
-  measurement: (value: T) => number | null,
-): Ranked<T, Kind>[] {
-  const result: Ranked<T, Kind>[] = [];
-  for (let start = 0; start < ranking.length;) {
-    let end = start + 1;
-    while (end < ranking.length && ranking[end]!.score === ranking[start]!.score) end++;
-    const group = ranking.slice(start, end).map((row) => ({
-      row, measurement: measurement(row.value),
-    }));
-    if (group.every((item) => item.measurement !== null && Number.isFinite(item.measurement)))
-      group.sort((a, b) => b.measurement! - a.measurement!);
-    result.push(...group.map((item) => item.row));
-    start = end;
-  }
-  return result;
 }

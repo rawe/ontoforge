@@ -38,11 +38,10 @@ export const searchKeys = {
 }
 
 /** Managed + custom indices; polls while any of them is building or stale. */
-export function useSearchIndices(ontologyKey: string, enabled = true) {
+export function useSearchIndices(ontologyKey: string) {
   return useQuery({
     queryKey: searchKeys.list(ontologyKey),
     queryFn: () => model.listSearchIndices(ontologyKey),
-    enabled,
     refetchInterval: (query) => (anyBusy(query.state.data) ? STATUS_POLL_MS : false),
   })
 }

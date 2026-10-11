@@ -1,6 +1,5 @@
 import { Plus } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { useFeatures } from '@/api/hooks'
 import { useSearchIndices } from '@/api/searchIndexHooks'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -8,8 +7,7 @@ import { KindBadge, StatusChip } from './shared'
 
 /**
  * "Search indices" section of the entity type page: the indices rooted
- * on the type, with links to the designer. Hidden when the server has no
- * search indices.
+ * on the type, with links to the designer.
  */
 export function EntityTypeIndices({
   ontologyKey,
@@ -18,9 +16,7 @@ export function EntityTypeIndices({
   ontologyKey: string
   entityTypeKey: string
 }) {
-  const supported = useFeatures().data?.searchIndices === true
-  const { data: records } = useSearchIndices(ontologyKey, supported)
-  if (!supported) return null
+  const { data: records } = useSearchIndices(ontologyKey)
 
   const rooted = (records ?? []).filter((r) => r.definition.entityType === entityTypeKey)
   const base = `/o/${ontologyKey}/studio/search`

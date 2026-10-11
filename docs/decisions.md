@@ -31,8 +31,7 @@ rather than fetched as a service.
 
 **Vocabulary** — *Ontology* is the isolated unit of one schema, its lenses, and its
 instance data; *Schema* is one ontology's type-set; *Lens* is a named view over one
-ontology's schema. No interface name may use "ontology" in the old sense (lens); old
-spellings do not survive. Physical database names are exempt.
+ontology's schema.
 
 **Ontology identity** — an ontology is addressed by an immutable `lower_snake_case`
 key, unique server-wide, with a mutable display name, also unique server-wide.
@@ -130,8 +129,7 @@ starting against one database upgrade it once: the upgrade holds a database-wide
 reads the version again under it. The server logs every upgrade it runs and never backs
 up storage itself. The release defines the storage layout — tables, columns, fixed
 indexes — and only a storage-version upgrade changes it; the two exceptions are the vector
-indexes the search-data rebuild drops and builds again — and, on an adapter with its own
-search storage, those schema changes create and drop — and the entry storage of each
+indexes the search-data rebuild drops and builds again, and the entry storage of each
 search-index generation, which the generation's lifecycle creates and drops. Within a major release line upgrade steps only add — tables, columns with a
 default, indexes — so servers of the
 previous release keep working during a rolling update; renaming, removing or rewriting
@@ -141,11 +139,6 @@ major line ended on. Storage from before the storage version existed counts as v
 the 5.x line ended there, so 6.0 upgrades it. Older storage stops the server with the instruction to upgrade
 through the last release of the previous major line first. Storage newer than the code
 also stops the server, untouched.
-
-**Neo4j ontology cap** — the Neo4j adapter supports at most one ontology; a second
-create is rejected as a domain condition. Multi-ontology conformance is a separate
-suite tier that only multi-capable adapters run. Deliberation:
-[adr/0017](adr/0017-postgres-namespace-per-ontology.md).
 
 **Filters, sorts and searches cross the port as structured values.**
 Never as query text or fragments. A fragment crossing the port would put query syntax in
@@ -164,13 +157,6 @@ Any storage failure surfaces as a single storage error carrying a generated id. 
 original is logged against that id, because a driver message names the vendor and its
 physical objects — and without the id a reported failure could not be traced back at all.
 
-**Adapters declare the type keys they reserve; the service enforces them.**
-A key whose physical form would collide with the adapter's own schema objects is rejected
-on every write path, with an error naming neither the vendor nor the physical name.
-Encoding those names above the port would tie database-agnostic code to one database;
-enforcing them inside the adapter would deliver the error from the wrong layer and make
-every future adapter reimplement it.
-
 **Adapters declare whether search evaluates relation conditions; the service
 enforces it.**
 A query path or a relation existence test on search resolves and crosses the port only
@@ -182,19 +168,12 @@ an adapter cannot evaluate inside its vector query must be refused before the se
 runs — evaluating it afterwards would make the limit count unfiltered hits — and encoding
 the capability above the port would tie database-agnostic code to one database.
 
-**Adapters are peers under one contract; one is the default deployment.**
-The port contract and the conformance suite define behaviour — no adapter is the
-reference implementation. Every shipped adapter is fully supported, each with its own
-physical mapping described in [storage-adapters.md](storage-adapters.md). Which adapter
-is the default, and what each specializes in, is deployment surface recorded there and
-in the repository README, not here. A new adapter is still built only when a deployment
-needs one.
-
-**Oversized-string ceiling is adapter-specific.** The 32766-byte oversized-string
-rejection is a Neo4j index limit, not a system rule; it applies only on the Neo4j
-adapter, below the port. PostgreSQL accepts such values. No ceiling exists above
-the port — deployments are adapter-bound for life, so no deployment ever sees
-both behaviours.
+**PostgreSQL is the only storage adapter; the persistence port remains the seam.**
+Everything OntoForge stores goes through the port to one adapter, PostgreSQL, which
+`DB_BACKEND` selects as its only value. The port carries only what that adapter needs.
+Every feature is built and tested once, against one reference implementation; the port
+keeps storage details out of the services and keeps another database possible later.
+Deliberation: [adr/0025](adr/0025-postgresql-only-storage.md).
 
 **PostgreSQL instance mapping: two generic jsonb tables.** The PostgreSQL adapter
 stores all instance data in two generic tables — `entity` and `relation`, with `uuid`
@@ -234,10 +213,6 @@ generation.** A generation fills a table of its own, is indexed there and is att
 partition when it becomes active; a retired one is detached and dropped whole. Building
 beside the serving generation and switching in one step never rewrites the entries
 search is reading.
-
-**Documentation above the port describes the behaviour of the default
-deployment.** Adapter-specific deviations are documented with that adapter in
-storage-adapters.md, never as hedges in the shared documents.
 
 ## Interfaces
 
@@ -337,9 +312,7 @@ the entity ranks best, semantic on equal ranks. Resolve equal scores by the best
 similarity only if every tied entity has one; otherwise, and among equal similarities, by
 entity id. Being found by several indices — own fields and a document, say — never adds
 up, so an entity is not favoured because its type has a document property, and no
-missing measurement is treated as negative evidence. The Neo4j adapter stores no search
-indices and ranks per kind instead; when both kinds run there over more than one searched
-type, it takes the best reciprocal kind rank. Deliberation:
+missing measurement is treated as negative evidence. Deliberation:
 [adr/0020](adr/0020-search-ranking-and-evidence.md).
 
 **Keyword content contains values, not schema labels.** An entry's keyword text holds
@@ -396,22 +369,14 @@ added compound or other dictionary, so a deployment needs no custom database ima
 
 **A schema edit never writes instance data.** Managed search indices follow the schema
 asynchronously: a changed derived definition builds a new generation in the background,
-and the previous one serves until it is ready. An adapter's own search storage
-([storage-adapters.md](storage-adapters.md#own-search-storage)) is not refreshed at all:
-deleting a string property leaves its values inside every entity's stored vector until a
-rebuild recomposes it, since a vector does not record which property a word came from.
-Cleaning up at deletion time was rejected: it would turn a schema edit into a write over
-all instance data, a bulk re-embedding that a server with no provider could not perform
-at all.
+and the previous one serves until it is ready. Cleaning up at deletion time was rejected:
+it would turn a schema edit into a write over all instance data.
 
-**One rebuild covers every vector and passage stored outside search indices, and it
-needs no provider.** On an adapter that stores search indices that is the saved-query
-description vectors and their index alone; search indices keep themselves current and
-are not part of it. On an adapter with its own search storage it also covers every
-entity's vector and every document's chunks. Without an embedding provider the operation
-still runs: it skips the vectors, the vector indexes and the saved-query descriptions —
-re-chunking documents where it has any, which calls no model — and reports that skip in
-its summary rather than counting it as failure.
+**One rebuild covers every vector stored outside search indices, and it needs no
+provider.** That is the saved-query description vectors and their index alone; search
+indices keep themselves current and are not part of it. Without an embedding provider the
+operation still runs: it skips the vectors, the vector indexes and the saved-query
+descriptions, and reports that skip in its summary rather than counting it as failure.
 
 **The list filters and the search ranks.** Neither server operation falls back to the
 other. Cross-type search ranks each searched type's own indices over an exact searched
@@ -608,8 +573,7 @@ independent identity; moving within the same ontology keeps it and is atomic. Ne
 overwrites a target key, and both validate the target lens. Cross-ontology portability is
 an explicit JSON copy validated in the target, never a shared live definition. Retrievers
 travel with their lens in design transfer and are deleted with it. Storage carries no
-vectors, snapshots, credentials or conversation state. Only an adapter that stores search
-indices keeps retrievers.
+vectors, snapshots, credentials or conversation state.
 
 **A retriever finds through search indices and embeds nothing of its own.** Its
 configuration references indices, optionally narrowed to their relation groups; a fact of
@@ -691,26 +655,12 @@ and third phase the ontology has no semantic index — a rebuild that dies in be
 leaves them absent and its vectors of mixed width, which the next completed rebuild
 repairs.
 
-**A stored chunk vector is reused only at the configured provider's width.** In an
-adapter's own search storage, reuse is keyed by content — an unchanged document chunk
-keeps its vector — but a vector of any other width came from a different model and no
-index of the current width can be built over it, so it is always recomputed. Without
-this, a rebuild after a model switch would regenerate nothing for document chunks: their
-text is unchanged, so every one of them would be reused. Search-index entries need no
-such rule: an entry's text hash covers the model.
-
 **A failed index ensure never stops the boot.** Startup reports the ontology it could not
 bring into line, in API vocabulary, and carries on with the rest. The state that makes an
 ensure fail is an unfinished rebuild, and refusing to start would take away the server
 the operator needs in order to finish it.
 
 ## Scope
-
-**Hard cut** — the multi-ontology system replaces the single-schema system with no
-migration and no compatibility: it begins on a fresh database (no data migration
-from single-ontology deployments), old REST/MCP paths are removed without aliases,
-no default ontology exists, and it ships as a major version bump. Deliberation:
-[adr/0018](adr/0018-multi-ontology-hard-cut.md).
 
 **Transfer scope** — export and import carry one ontology's design: schema, lenses,
 and their agents, saved queries and retrievers, the keyword language set, and the custom

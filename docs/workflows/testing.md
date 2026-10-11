@@ -20,11 +20,8 @@ require no infrastructure — but they still read `env/test.env`, because some a
 the capability flags are false, which only holds with no provider configured.
 
 **Database integration tests** (`tests/integration/`, excluding `decision/`) hit real
-services and run serially — they wipe the database between files. The integration suite *is* the conformance suite: the
-same tests run against whichever adapter `DB_BACKEND` selects, and nothing is renamed
-per backend. It carries two tiers (`tests/integration/tiers.ts`): the contract tier
-every adapter runs, and a multi-ontology tier — cases that need several ontologies at
-once — that skips on adapters capped at one ontology (Neo4j). The embedding suite (`tests/integration/embedding/`) and the AI suite
+services and run serially — they wipe the database between files. The integration suite *is* the conformance suite of the
+persistence port: it runs against the adapter `DB_BACKEND` selects. The embedding suite (`tests/integration/embedding/`) and the AI suite
 (`tests/integration/ai/`) are separate because they configure live providers, while the
 plain integration suite's feature-disabled assertions depend on running with *no*
 provider configured. Where the plain suite needs semantic entries — search-index storage,
@@ -54,16 +51,13 @@ The provider contract and configuration template are described in
 
 ## Integration Test Requirements
 
-### The two databases
+### The database
 
-The dev compose file carries both databases. PostgreSQL — the default — starts with:
+The dev compose file carries PostgreSQL. It starts with:
 
 ```bash
 docker compose up -d
 ```
-
-Neo4j is commented out in the compose file; uncomment its service temporarily to test
-against it. Both adapters are exercised on fresh test data.
 
 ### The test database
 
@@ -75,20 +69,7 @@ All three point at `ontoforge_test` in the dev compose container, a database of 
 The suite-level hard reset drops and recreates it, so it is created on the first run and
 your development database is never touched.
 
-### Selecting the adapter
-
-- **PostgreSQL (the default):** what the three test presets configure.
-- **Neo4j:** change the four `DB_*` values in the test preset you are running, or copy it
-  to an uncommitted `env/*.local.env` and name that file:
-
-  ```
-  DB_BACKEND=neo4j
-  DB_URI=bolt://localhost:7687
-  DB_USER=neo4j
-  DB_PASSWORD=ontoforge_dev
-  ```
-
-Run the embedding suite on both adapters whenever search behaviour is touched.
+Run the embedding suite whenever search behaviour is touched.
 
 ### Ollama (Embedding)
 
@@ -159,11 +140,9 @@ npm run test:integration:ai
 
 - Place in `tests/integration/` — plain suite, or `embedding/` / `ai/` when the test
   configures a live provider
-- Adapter-specific tests live in per-adapter folders beside the shared files —
-  `tests/integration/neo4j/`, `tests/integration/postgres/` and
-  `tests/integration/embedding/neo4j/`, gated so they skip when the other backend is
-  selected, and the adapter-internal unit folders `tests/adapters/neo4j/` and
-  `tests/adapters/postgres/`, which mock the drivers and run under any backend. The
+- Adapter-specific tests live in an adapter folder beside the shared files —
+  `tests/integration/postgres/` — and in the adapter-internal unit folder
+  `tests/adapters/postgres/`, which mocks the driver. The
   store-error and vector-drift tests among them
   deliberately reach past the persistence port: inducing a genuine driver failure means
   putting the database into a state the code never produces on its own.

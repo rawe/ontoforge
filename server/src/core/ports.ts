@@ -32,25 +32,18 @@
  *    not anticipate — is raised as `StoreError`, whose message carries no
  *    storage detail. The adapter logs what it withheld against the error's
  *    `errorId`, which is what reaches the client.
- * 5. Adapters declare the type keys they cannot store — keys whose physical
- *    form would collide with the adapter's own storage objects — through
- *    `reservedEntityTypeKeys()` and `reservedRelationTypeKeys()` on the
- *    modeling store. They return plain type keys, never physical names, so
- *    the modeling service can reject a colliding key without knowing why it
- *    collides. An adapter with no such collisions returns empty sets.
- * 6. Adapters declare whether their search evaluates relation
+ * 5. Adapters declare whether their search evaluates relation
  *    conditions — path conditions and relation existence — through
  *    `supportsSearchPathConditions()` on the runtime store, and the
  *    runtime service enforces the declaration: on an adapter declaring
  *    none, a query path or a relation existence test on search is
  *    rejected above the port, naming the entity list as the alternative.
  *
- * The `ModelingStore` and `RuntimeStore` interfaces below, together with
- * the conformance suite, are the authoritative contract — adapters are
- * peers under it; none is the reference implementation. An adapter
- * implements both interfaces (the Neo4j adapter does so in
- * `adapters/neo4j/modelingStore.ts` and `adapters/neo4j/runtimeStore.ts`)
- * and its package is registered as one thunk line in `ADAPTERS`.
+ * The `ModelingStore`, `RuntimeStore` and `SearchIndexStore` interfaces
+ * below, together with the conformance suite, are the authoritative
+ * contract. The adapter implements them (the PostgreSQL adapter in
+ * `adapters/postgres/`) and its package is registered as one thunk line
+ * in `ADAPTERS`.
  */
 
 import type { KeywordLanguageSet } from "./keywordLanguage.js";
@@ -159,39 +152,16 @@ export type FilterCondition =
   | PathExistenceCondition
   | RelationExistenceCondition;
 
-/** One stored type whose key the active adapter now reserves. */
-export interface ReservedTypeKeyInUse {
-  kind: TypeKind;
-  key: string;
-}
-
 /**
  * The modeling side of the persistence port: schema persistence.
  *
  * Capability grouping follows `docs/storage-adapters.md` ("The two store
- * surfaces"); the section comments below mirror it. The optional methods
- * marked "own search storage" are present exactly when the adapter stores
- * no search indices (`core/ownSearch.ts`).
+ * surfaces"); the section comments below mirror it.
  */
 export interface ModelingStore {
-  /** The search-index store of the same ontology. Present exactly when the
-   * adapter stores search indices (`supportsSearchIndices()`): the
-   * modeling service keeps the managed indices in step with the schema
-   * through it. */
-  searchIndices?(): SearchIndexStore;
-
-  // ------------------------------------------------------------------
-  // Reserved keys
-  // ------------------------------------------------------------------
-
-  /** Entity type keys this adapter cannot store (contract rule 5). */
-  reservedEntityTypeKeys(): ReadonlySet<string>;
-
-  /** Relation type keys this adapter cannot store (contract rule 5). */
-  reservedRelationTypeKeys(): ReadonlySet<string>;
-
-  /** Stored types with a now-reserved key, as `{kind, key}` rows. */
-  findReservedTypeKeysInUse(): Promise<ReservedTypeKeyInUse[]>;
+  /** The search-index store of the same ontology: the modeling service
+   * keeps the managed indices in step with the schema through it. */
+  searchIndices(): SearchIndexStore;
 
   // ------------------------------------------------------------------
   // Lenses
@@ -365,14 +335,6 @@ export interface ModelingStore {
   ): Promise<number>;
 
   // ------------------------------------------------------------------
-  // Document-property cleanup (own search storage)
-  // ------------------------------------------------------------------
-
-  /** Delete every chunk of one (entity type, document property) pair.
-   * Invoked when the property, or its owning type, is removed. */
-  deleteChunksForTypeProperty?(entityTypeKey: string, propertyKey: string): Promise<void>;
-
-  // ------------------------------------------------------------------
   // Full schema (get_schema now; validation and export later)
   // ------------------------------------------------------------------
 
@@ -432,38 +394,14 @@ export interface ModelingStore {
 
   setSavedQueryEmbedding(savedQueryId: string, embedding: number[]): Promise<void>;
 
-  /** Own search storage. */
-  getEntityTypesWithProperties?(): Promise<Row[]>;
-
-  /** Own search storage: store one entity's semantic vector (null: none). */
-  setEntityEmbedding?(entityId: string, embedding: number[] | null): Promise<void>;
-
   // ------------------------------------------------------------------
-  // Vector-index DDL (own search storage)
+  // Vector-index lifecycle
   // ------------------------------------------------------------------
-
-  createVectorIndex?(
-    entityTypeKey: string,
-    dimensions: number,
-    filterProperties?: string[] | null,
-  ): Promise<void>;
-
-  dropVectorIndex?(entityTypeKey: string): Promise<void>;
-
-  rebuildVectorIndex?(entityTypeKey: string, dimensions: number): Promise<void>;
-
-  createDocumentVectorIndex?(
-    entityTypeKey: string,
-    propertyKey: string,
-    dimensions: number,
-  ): Promise<void>;
-
-  dropDocumentVectorIndex?(entityTypeKey: string, propertyKey: string): Promise<void>;
 
   /**
    * Drop every semantic index whose width no longer matches the model —
-   * on an adapter that stores search indices, the saved-query index alone
-   * (search-index generations record their own model and width).
+   * the saved-query index alone (search-index generations record their
+   * own model and width).
    *
    * The rebuild's first phase, and the only place drift is repaired
    * rather than reported. It has to come first: an index fixes its width
@@ -476,8 +414,8 @@ export interface ModelingStore {
 
   /**
    * Build every semantic index the schema calls for and does not have,
-   * at `dimensions` — as above, the saved-query index alone where search
-   * indices are stored. An index whose width has drifted is REPORTED and
+   * at `dimensions` — as above, the saved-query index alone. An index
+   * whose width has drifted is REPORTED and
    * left alone — repair belongs to the rebuild, through the method above.
    */
   ensureVectorIndexes(dimensions: number): Promise<void>;
@@ -489,19 +427,16 @@ export interface ModelingStore {
  * Capability grouping follows `docs/storage-adapters.md` ("The two store
  * surfaces"); the section comments below mirror it.
  *
- * Filter-taking methods (`listEntities`, `listRelations`, and the two
- * property and document rankings) receive
- * parsed, coerced `FilterCondition`s built by the service — filter
+ * Filter-taking methods (`listEntities`, `listRelations`, and the
+ * search-index ranking) receive parsed, coerced `FilterCondition`s built by the service — filter
  * validation happens above the port, so adapters receive only valid
  * input and raise no validation errors. A path or relation existence
  * condition reaches a search only where the adapter declares support
- * (contract rule 6). Three reads carry the property definitions for row
+ * (contract rule 5). Three reads carry the property definitions for row
  * decoding — `getEntityById`, `getEntitiesByIds`, and `getNeighbors` (an
  * adapter whose storage is self-describing may ignore them); listing
  * paths carry them for the same reason. `getEntity` and `getRelation`
- * carry none. The optional methods marked "own search storage" are
- * present exactly when the adapter stores no search indices
- * (`core/ownSearch.ts`).
+ * carry none.
  */
 export interface SearchedType {
   entityTypeKey: string;
@@ -530,12 +465,11 @@ export interface RuntimeStore {
 
   /** Whether this adapter's search evaluates relation conditions — path
    * conditions and relation existence — in both rankings, entities and
-   * document passages (contract rule 6). Declared as a plain flag so the
+   * document passages (contract rule 5). Declared as a plain flag so the
    * service can reject such a filter on search without knowing why the
    * adapter cannot evaluate it. */
   supportsSearchPathConditions(): boolean;
-  /** Whether search can rank by keyword — through the search indices on
-   * an adapter that stores them. */
+  /** Whether search can rank by keyword — through the search indices. */
   supportsKeywordRanking(): boolean;
 
   // ------------------------------------------------------------------
@@ -544,8 +478,8 @@ export interface RuntimeStore {
 
   /** Unfiltered: the adapter never applies the inclusions. Null when no
    * lens has the key. Contract: `docs/storage-adapters.md`, "Schema reading".
-   * An adapter that stores search indices adds `searchIndexInclusions`,
-   * the keys of the indices the lens includes. */
+   * Carries `searchIndexInclusions`, the keys of the indices the lens
+   * includes. */
   getFullSchemaWithLensInclusions(lensKey: string): Promise<Row | null>;
 
   getAgentConfigs(lensKey: string): Promise<Row[]>;
@@ -553,37 +487,19 @@ export interface RuntimeStore {
   getSavedQueries(lensKey: string): Promise<Row[]>;
 
   // ------------------------------------------------------------------
-  // Vector-index metadata validation (own search storage)
-  // ------------------------------------------------------------------
-
-  /** Reject property values the adapter's vector-index filter metadata
-   * cannot hold. Synchronous; raises the domain `ValidationError`. An
-   * adapter without such limits implements it as a no-op. */
-  validateVectorIndexedProperties?(
-    entityTypeKey: string,
-    properties: Row,
-    filterProperties: string[],
-    entityId?: string | null,
-  ): void;
-
-  // ------------------------------------------------------------------
   // Search indices
   // ------------------------------------------------------------------
 
-  /** The search-index store of the same ontology. Present exactly when the
-   * adapter stores search indices (`supportsSearchIndices()`). */
-  searchIndices?(): SearchIndexStore;
+  /** The search-index store of the same ontology. */
+  searchIndices(): SearchIndexStore;
 
   // ------------------------------------------------------------------
   // Entity instances
   //
   // Each write takes an optional `search` plan: the search work the write
-  // causes (`core/searchDependencies.ts`). An adapter that stores search
-  // indices applies it in the write's own transaction, so the work is
-  // queued exactly when the write commits; one that does not ignores it.
-  // The `embedding` is the entity's semantic vector on an adapter with
-  // its own search storage; an adapter that stores search indices never
-  // receives one and ignores it.
+  // causes (`core/searchDependencies.ts`). The adapter applies it in the
+  // write's own transaction, so the work is queued exactly when the write
+  // commits.
   // ------------------------------------------------------------------
 
   createEntity(
@@ -591,7 +507,6 @@ export interface RuntimeStore {
     entityId: string,
     properties: Row,
     propertyDefs: Record<string, PropertyDef>,
-    embedding?: number[] | null,
     search?: SearchWritePlan | null,
   ): Promise<Row>;
 
@@ -625,8 +540,6 @@ export interface RuntimeStore {
     setProperties: Row,
     removeProperties: string[],
     propertyDefs: Record<string, PropertyDef>,
-    embedding?: number[] | null,
-    hasEmbeddingUpdate?: boolean,
     search?: SearchWritePlan | null,
   ): Promise<Row | null>;
 
@@ -642,31 +555,8 @@ export interface RuntimeStore {
   ): Promise<Record<string, Row>>;
 
   // ------------------------------------------------------------------
-  // Document chunks (own search storage)
+  // Saved-query discovery
   // ------------------------------------------------------------------
-
-  getChunkEmbeddingsForEntityProperty?(
-    entityId: string,
-    propertyKey: string,
-  ): Promise<Record<string, number[]>>;
-
-  deleteChunksForEntityProperty?(entityId: string, propertyKey: string): Promise<void>;
-
-  createDocumentChunks?(
-    entityId: string,
-    entityTypeKey: string,
-    propertyKey: string,
-    chunks: Row[],
-  ): Promise<void>;
-
-  // ------------------------------------------------------------------
-  // Semantic search
-  // ------------------------------------------------------------------
-
-  /** Own search storage. Semantic score is the original (1 + cosine) / 2
-   * similarity, not confidence. */
-  propertySearchSemantic?(searchedTypes: SearchedType[], queryEmbedding: number[], limit: number): Promise<Row[]>;
-  documentSearchSemantic?(searchedProperties: SearchedProperty[], queryEmbedding: number[], limit: number): Promise<Row[]>;
 
   /** Rank SavedQuery descriptions for one lens by vector similarity. */
   searchSavedQueries(
@@ -963,8 +853,7 @@ export interface SearchWritePlan {
 
 /**
  * The search-index side of the persistence port: index definitions, their
- * generations and the entries a generation holds. Only adapters that
- * declare `supportsSearchIndices()` implement it.
+ * generations and the entries a generation holds.
  *
  * A generation is one build of one representation of one index. It fills
  * beside the active one, and `finishGeneration` makes it the active one in
@@ -1283,17 +1172,13 @@ export interface OntologyRegistry {
  */
 export interface AdapterModule {
   supportsKeywordRanking(): boolean;
-  /** Whether this adapter stores search indices. */
-  supportsSearchIndices(): boolean;
   initAdapter(): Promise<void>;
   createModelingStore(ontologyKey: string): ModelingStore;
   createRuntimeStore(ontologyKey: string): RuntimeStore;
-  /** Present exactly when `supportsSearchIndices()` is true. */
-  createSearchIndexStore?(ontologyKey: string): SearchIndexStore;
-  /** Present exactly when `supportsSearchIndices()` is true: call
-   * `onWake` with the ontology key whenever search work was queued in any
-   * server process on this database. */
-  subscribeSearchWork?(onWake: (ontologyKey: string) => void): Promise<SearchWorkSubscription>;
+  createSearchIndexStore(ontologyKey: string): SearchIndexStore;
+  /** Call `onWake` with the ontology key whenever search work was queued
+   * in any server process on this database. */
+  subscribeSearchWork(onWake: (ontologyKey: string) => void): Promise<SearchWorkSubscription>;
   createRegistry(): OntologyRegistry;
   closeStores(): Promise<void>;
   ensureSemanticIndexes(dimensions: number): Promise<void>;
@@ -1305,7 +1190,6 @@ export interface AdapterModule {
  * module and driver ever load.
  */
 const ADAPTERS: Record<string, () => Promise<AdapterModule>> = {
-  neo4j: () => import("../adapters/neo4j/index.js"),
   postgres: () => import("../adapters/postgres/index.js"),
 };
 
@@ -1376,25 +1260,18 @@ export async function getRuntimeStore(ontologyKey: string): Promise<RuntimeStore
   return adapter.createRuntimeStore(ontologyKey);
 }
 
-/** A search-index store bound to one ontology. Unknown key -> not found.
- * Callers check `supportsSearchIndices()` first; asking an adapter that
- * stores none is a programming error. */
+/** A search-index store bound to one ontology. Unknown key -> not found. */
 export async function getSearchIndexStore(ontologyKey: string): Promise<SearchIndexStore> {
   const adapter = requireAdapter();
-  if (adapter.createSearchIndexStore === undefined) {
-    throw new Error("The active adapter does not store search indices");
-  }
   await requireOntology(ontologyKey);
   return adapter.createSearchIndexStore(ontologyKey);
 }
 
-/** Subscribe to search-work wake-ups; null when the active adapter
- * stores no search indices. */
+/** Subscribe to search-work wake-ups. */
 export async function subscribeSearchWork(
   onWake: (ontologyKey: string) => void,
-): Promise<SearchWorkSubscription | null> {
-  const adapter = requireAdapter();
-  return adapter.subscribeSearchWork === undefined ? null : adapter.subscribeSearchWork(onWake);
+): Promise<SearchWorkSubscription> {
+  return requireAdapter().subscribeSearchWork(onWake);
 }
 
 export function getOntologyRegistry(): OntologyRegistry {
@@ -1413,10 +1290,4 @@ async function declaringAdapter(): Promise<AdapterModule> {
 /** Server-level declaration, available even before an ontology exists. */
 export async function supportsKeywordRanking(): Promise<boolean> {
   return (await declaringAdapter()).supportsKeywordRanking();
-}
-
-/** Server-level declaration: whether the active adapter stores search
- * indices. An adapter without them keeps its own search path. */
-export async function supportsSearchIndices(): Promise<boolean> {
-  return (await declaringAdapter()).supportsSearchIndices();
 }

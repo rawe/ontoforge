@@ -3,10 +3,9 @@
  * types, relation types, property definitions. REST and MCP are two
  * entrances to these same functions, so no rule may live in a router.
  *
- * Two seams are called on every mutating path: schema-cache invalidation
- * (`runtime/schemaCache.ts`) and the vector-index lifecycle hooks
- * (`vectorHooks.ts`). Schema changes also keep the managed search indices
- * in step (`syncSearchIndices`); a schema removal that reaches a custom
+ * Schema-cache invalidation (`runtime/schemaCache.ts`) is called on every
+ * mutating path. Schema changes also keep the managed search indices in
+ * step (`syncSearchIndices`); a schema removal that reaches a custom
  * search index follows the cascade protocol (`searchIndices.ts`).
  */
 
@@ -24,12 +23,6 @@ import {
 } from "../core/exceptions.js";
 import { RETRIEVER_CONFIG_VERSION, RetrieverConfig } from "../core/retriever.js";
 import { parseAndValidate } from "../core/oql/index.js";
-import {
-  keepsOwnSearch,
-  type OwnSearchModelingStore,
-  type OwnSearchRuntimeStore,
-} from "../core/ownSearch.js";
-import { DEFAULT_KEYWORD_LANGUAGES } from "../core/keywordLanguage.js";
 import type { ModelingStore, RuntimeStore } from "../core/ports.js";
 import {
   DATA_TYPES,
@@ -39,10 +32,8 @@ import {
   namePropertyDisplayName,
   SCHEMA_KEY_PATTERN,
   type NewPropertyDef,
-  type PropertyDef,
   type TypeKind,
 } from "../core/schemas.js";
-import { buildTextRepr } from "../runtime/search/propertyText.js";
 import { syncManagedSearchIndices } from "../runtime/indexing/managed.js";
 import {
   applyIndexCascade,
@@ -60,7 +51,6 @@ import {
 import { portable as portableRetriever } from "./retrievers.js";
 import { readSearchSettings, updateSearchSettings as changeSearchSettings } from "../runtime/indexing/settings.js";
 import { invalidateLoadedSchemaCache, loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
-import { syncDocumentChunks } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
   ExportPayload,
@@ -96,12 +86,6 @@ import type {
   StepResponseBody,
   ValidationResultBody,
 } from "./schemas.js";
-import {
-  onEntityTypeCreated,
-  onEntityTypeDeleted,
-  onEntityTypePropertyCreated,
-  onEntityTypePropertyDeleted,
-} from "./vectorHooks.js";
 
 type Row = Record<string, unknown>;
 
@@ -155,30 +139,6 @@ function toPropertyResponse(data: Row): PropertyDefinitionResponseBody {
   };
 }
 
-/** Reject an entity type key the storage adapter reserves for its own objects. */
-function rejectReservedEntityTypeKey(store: ModelingStore, key: string, context = ""): void {
-  const reserved = store.reservedEntityTypeKeys();
-  if (reserved.has(key)) {
-    throw new ValidationError(
-      `${context}Entity type key '${key}' is reserved for internal use and ` +
-        "cannot name a user-defined type. Reserved entity type keys: " +
-        [...reserved].sort().join(", "),
-    );
-  }
-}
-
-/** Reject a relation type key the storage adapter reserves for its own objects. */
-function rejectReservedRelationTypeKey(store: ModelingStore, key: string, context = ""): void {
-  const reserved = store.reservedRelationTypeKeys();
-  if (reserved.has(key)) {
-    throw new ValidationError(
-      `${context}Relation type key '${key}' is reserved for internal use and ` +
-        "cannot name a user-defined type. Reserved relation type keys: " +
-        [...reserved].sort().join(", "),
-    );
-  }
-}
-
 function toLensResponse(data: Row): LensResponseBody {
   return {
     lensId: data.lensId as string,
@@ -193,14 +153,10 @@ function toLensResponse(data: Row): LensResponseBody {
 /**
  * After a schema change: bring the managed search indices in step and
  * reconcile their generations; refresh the indices that read a type in
- * `refreshTypes` (a display name or the name property changed). Nothing
- * on an adapter without search indices.
+ * `refreshTypes` (a display name or the name property changed).
  */
 async function syncSearchIndices(store: ModelingStore, refreshTypes: string[] = []): Promise<void> {
-  const indices = store.searchIndices?.();
-  if (indices !== undefined) {
-    await syncManagedSearchIndices(indices, { refreshTypes });
-  }
+  await syncManagedSearchIndices(store.searchIndices(), { refreshTypes });
 }
 
 // --- Lens ---
@@ -277,7 +233,6 @@ export async function createEntityType(
   body: EntityTypeCreateInput,
   store: ModelingStore,
 ): Promise<EntityTypeResponseBody> {
-  rejectReservedEntityTypeKey(store, body.key);
   const existing = await store.getEntityTypeByKey(body.key);
   if (existing) {
     throw new ConflictError(`Entity type with key '${body.key}' already exists`);
@@ -291,7 +246,6 @@ export async function createEntityType(
     newNameProperty(body.nameProperty),
   );
   invalidateLoadedSchemaCache();
-  await onEntityTypeCreated(store, body.key, [body.nameProperty]);
   await syncSearchIndices(store);
   return toEntityTypeResponse(data);
 }
@@ -381,10 +335,7 @@ export async function deleteEntityType(
       `Entity type '${entityTypeId}' is referenced by one or more relation types`,
     );
   }
-  // Key and properties are needed by the vector-index hook after the
-  // delete has removed them.
   const etData = await store.getEntityType(entityTypeId);
-  const etProps = etData ? await store.listProperties(entityTypeId, "EntityType") : [];
 
   // Included by scoped lenses or read by custom search indices: the
   // cascade protocol. Indices rooted on the type go (and with them their
@@ -412,9 +363,6 @@ export async function deleteEntityType(
     throw new NotFoundError(`Entity type '${entityTypeId}' not found`);
   }
   invalidateLoadedSchemaCache();
-  if (etData) {
-    await onEntityTypeDeleted(store, etData.key as string, etProps);
-  }
   await syncSearchIndices(store);
 }
 
@@ -424,7 +372,6 @@ export async function createRelationType(
   body: RelationTypeCreateInput,
   store: ModelingStore,
 ): Promise<RelationTypeResponseBody> {
-  rejectReservedRelationTypeKey(store, body.key);
   const existing = await store.getRelationTypeByKey(body.key);
   if (existing) {
     throw new ConflictError(`Relation type with key '${body.key}' already exists`);
@@ -596,7 +543,6 @@ export async function createProperty(
   );
   invalidateLoadedSchemaCache();
   if (typeKind === "EntityType") {
-    await onEntityTypePropertyCreated(store, ownerId, data);
     await syncSearchIndices(store);
   }
   return toPropertyResponse(data);
@@ -701,9 +647,6 @@ export async function deleteProperty(
     throw new NotFoundError(`Property '${propertyId}' not found on this type`);
   }
   invalidateLoadedSchemaCache();
-  if (typeKind === "EntityType") {
-    await onEntityTypePropertyDeleted(store, ownerId, prop);
-  }
   if (typeKind === "EntityType" || indexPlan.affectedIndices.length > 0) {
     await syncSearchIndices(store);
   }
@@ -1228,32 +1171,19 @@ export async function validateAll(store: ModelingStore): Promise<ValidationResul
 
 // --- Rebuild search data ---
 
-// Page size for iterating all entities of a type during a search-data rebuild.
-const REBUILD_PAGE_SIZE = 500;
-
 /**
- * Rebuild every vector and passage the adapter stores outside search
- * indices. On an adapter with its own search storage (`keepsOwnSearch`):
- * every document property's passages and — where an embedding provider is
- * configured — each entity's vector, the passages' vectors, the saved-query
- * descriptions' vectors and the vector indexes. On an adapter that stores
- * search indices, which maintain themselves, only the saved-query
- * descriptions' vectors and their index: the stream then carries no
- * entity-type progress and the summary no entity types.
+ * Rebuild the vectors stored outside search indices, which maintain
+ * themselves: the saved-query descriptions' vectors and their index.
  *
- * It runs without a provider: passages need no inference, so the run
- * re-chunks them and skips the vector work. The summary reports that
- * omission as `embeddingsSkipped`.
+ * It runs without a provider and then writes no vectors; the summary
+ * reports that omission as `embeddingsSkipped`.
  *
  * Yields NDJSON progress lines (`docs/capabilities/search.md#rebuild`):
- * one progress record per processed item carrying the group's type key,
- * the count so far and the group total, then a final summary with
- * per-type processed/failed counts and the overall totals.
+ * one progress record per processed item carrying its group key, the
+ * count so far and the group total, then a final summary with the
+ * overall totals.
  */
-export async function* rebuildSearchData(
-  store: ModelingStore,
-  runtimeStore: RuntimeStore,
-): AsyncGenerator<string> {
+export async function* rebuildSearchData(store: ModelingStore): AsyncGenerator<string> {
   const provider = getEmbeddingProvider();
 
   // Phase one of three: drop every index whose width no longer matches
@@ -1267,17 +1197,9 @@ export async function* rebuildSearchData(
     await store.dropMismatchedVectorIndexes(provider.dimensions);
   }
 
-  // Phase two: the entities' own search storage, where the adapter has it.
-  const entities =
-    keepsOwnSearch(store) && keepsOwnSearch(runtimeStore)
-      ? yield* rebuildOwnEntityData(store, runtimeStore, provider)
-      : { typeResults: [], processed: 0, failed: 0 };
-  const typeResults = entities.typeResults;
-  let totalProcessed = entities.processed;
-  let totalFailed = entities.failed;
-
-  // Re-embed every saved-query description. Discovery ranks descriptions by
-  // vector alone, so with no provider there is nothing here to rebuild.
+  // Phase two: re-embed every saved-query description. Discovery ranks
+  // descriptions by vector alone, so with no provider there is nothing
+  // here to rebuild.
   let sqProcessed = 0;
   let sqFailed = 0;
 
@@ -1302,9 +1224,6 @@ export async function* rebuildSearchData(
       })}\n`;
     }
 
-    totalProcessed += sqProcessed;
-    totalFailed += sqFailed;
-
     // Phase three: every vector now has the provider's width, so the
     // indexes phase one dropped — and any the schema calls for and never
     // had — can be built. It comes before the summary: that line is what
@@ -1317,133 +1236,18 @@ export async function* rebuildSearchData(
   // reporting no failures nevertheless wrote no vectors.
   yield `${JSON.stringify({
     type: "summary",
-    entityTypes: typeResults,
+    entityTypes: [],
     savedQueriesProcessed: sqProcessed,
     savedQueriesFailed: sqFailed,
-    totalProcessed,
-    totalFailed,
+    totalProcessed: sqProcessed,
+    totalFailed: sqFailed,
     embeddingsSkipped: !provider,
   })}\n`;
 
   console.info(
-    `Rebuild search data complete: ${totalProcessed} processed, ${totalFailed} failed` +
+    `Rebuild search data complete: ${sqProcessed} processed, ${sqFailed} failed` +
       (provider ? "" : " (embeddings skipped: no provider)"),
   );
-}
-
-/**
- * The entity phase of a rebuild over an adapter's own search storage:
- * each entity's vector and its documents' chunks, type by type. Returns
- * the per-type results and the totals.
- */
-async function* rebuildOwnEntityData(
-  store: OwnSearchModelingStore,
-  runtimeStore: OwnSearchRuntimeStore,
-  provider: ReturnType<typeof getEmbeddingProvider>,
-): AsyncGenerator<string, { typeResults: Row[]; processed: number; failed: number }> {
-  // Discover all entity types with their property definitions.
-  const entityTypes: { key: string; properties: Record<string, PropertyDef> }[] = [];
-  for (const raw of await store.getEntityTypesWithProperties()) {
-    const props: Record<string, PropertyDef> = {};
-    for (const p of raw.properties as Row[]) {
-      props[p.key as string] = {
-        key: p.key as string,
-        displayName: (p.displayName as string | undefined) ?? (p.key as string),
-        description: (p.description as string | undefined) ?? null,
-        dataType: (p.dataType as string | undefined) ?? "string",
-        required: (p.required as boolean | undefined) ?? false,
-        defaultValue: (p.defaultValue as string | undefined) ?? null,
-      };
-    }
-    entityTypes.push({ key: raw.key as string, properties: props });
-  }
-
-  // For each entity type, iterate all entities and re-embed.
-  const typeResults: Row[] = [];
-  let totalProcessed = 0;
-  let totalFailed = 0;
-
-  for (const et of entityTypes) {
-    const etKey = et.key;
-    const propertyDefs = et.properties;
-
-    // Page through all entities of this type.
-    const records: Row[] = [];
-    let entityTotal = 0;
-    let offset = 0;
-    for (;;) {
-      const [items, total] = await runtimeStore.listEntities(
-        etKey,
-        propertyDefs,
-        [],
-        null,
-        [],
-        "_createdAt",
-        "asc",
-        REBUILD_PAGE_SIZE,
-        offset,
-      );
-      records.push(...items);
-      entityTotal = total;
-      offset += REBUILD_PAGE_SIZE;
-      if (items.length === 0 || offset >= entityTotal) {
-        break;
-      }
-    }
-
-    let processed = 0;
-    let failed = 0;
-
-    const docPropKeys = Object.entries(propertyDefs)
-      .filter(([, p]) => p.dataType === "document")
-      .map(([k]) => k);
-
-    for (const record of records) {
-      const entityId = record._id as string;
-      const userProps: Row = {};
-      for (const [k, v] of Object.entries(record)) {
-        if (!k.startsWith("_")) {
-          userProps[k] = v;
-        }
-      }
-
-      const embedding = provider
-        ? await provider.embed(buildTextRepr(etKey, userProps, propertyDefs))
-        : null;
-
-      await store.setEntityEmbedding(entityId, embedding);
-      // A null vector counts as a failure only when a provider was there to
-      // produce one. Without a provider it is the intended result: the
-      // entity's passages were rewritten, which is all this run promised.
-      if (provider && embedding === null) {
-        failed += 1;
-      } else {
-        processed += 1;
-      }
-
-      // Rebuild document chunks (delete + re-chunk + re-embed).
-      if (docPropKeys.length > 0) {
-        const docValues: Row = {};
-        for (const k of docPropKeys) {
-          docValues[k] = userProps[k] ?? null;
-        }
-        await syncDocumentChunks(runtimeStore, etKey, entityId, docValues);
-      }
-
-      yield `${JSON.stringify({
-        type: "progress",
-        entityTypeKey: etKey,
-        processed: processed + failed,
-        total: entityTotal,
-      })}\n`;
-    }
-
-    typeResults.push({ entityTypeKey: etKey, processed, failed });
-    totalProcessed += processed;
-    totalFailed += failed;
-  }
-
-  return { typeResults, processed: totalProcessed, failed: totalFailed };
 }
 
 // --- Whole-schema read (transfer format) ---
@@ -1498,7 +1302,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     properties: ((rt.properties as Row[] | undefined) ?? []).map(exportProperty),
   }));
 
-  const indices = store.searchIndices?.();
+  const indices = store.searchIndices();
   const lenses: Row[] = [];
   for (const lens of schema.lenses as Row[]) {
     const entityInclusions = (lens.entityInclusions as Row[] | undefined) ?? [];
@@ -1519,12 +1323,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
         relationTypes: relationInclusions.map(exportInclusion),
       };
     }
-    // An adapter without search indices writes none: an import into one
-    // that has them then applies the migration rule (`ExportLens`) rather
-    // than an empty list.
-    if (indices !== undefined) {
-      exported.indexInclusions = await indices.listLensIndexInclusions(lens.lensId as string);
-    }
+    exported.indexInclusions = await indices.listLensIndexInclusions(lens.lensId as string);
 
     const agentRows = await store.listAgentsForExport(lens.lensId as string);
     const assistants: Row = {
@@ -1536,12 +1335,9 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
         tools: (ag.tools as string[] | null | undefined) ?? null,
       })),
     };
-    // Retrievers search indices: an adapter without them has none.
-    if (indices !== undefined) {
-      assistants.retrievers = (await indices.listRetrievers(lens.lensId as string)).map(
-        portableRetriever,
-      );
-    }
+    assistants.retrievers = (await indices.listRetrievers(lens.lensId as string)).map(
+      portableRetriever,
+    );
     exported.assistants = assistants;
 
     const queryRows = await store.listSavedQueriesForExport(lens.lensId as string);
@@ -1561,16 +1357,12 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     lenses.push(exported);
   }
 
-  // An adapter without search indices stems in no language set; its
-  // design moves on with the set a new ontology starts with.
-  const keywordLanguages = indices === undefined
-    ? [...DEFAULT_KEYWORD_LANGUAGES]
-    : [...(await indices.getSearchSettings()).keywordLanguages];
+  const keywordLanguages = [...(await indices.getSearchSettings()).keywordLanguages];
 
   return {
     formatVersion: TRANSFER_FORMAT_VERSION,
     keywordLanguages,
-    ...(indices === undefined ? {} : { searchIndices: await exportSearchIndices(indices) }),
+    searchIndices: await exportSearchIndices(indices),
     entityTypes,
     relationTypes,
     lenses,
@@ -1612,8 +1404,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * includes the managed indices of the types it exposes — a passage index
  * only when it exposes the document property too — as the storage step's
  * upgrade does. Import provisions no entries: the generations it
- * reconciles are built by the worker. An adapter without search indices
- * checks all of it and keeps nothing of it.
+ * reconciles are built by the worker.
  */
 export async function importSchema(
   body: unknown,
@@ -1631,17 +1422,6 @@ export async function importSchema(
   // ---- Phase 1: payload-intrinsic validation (collect everything) ----
   const errors: string[] = [];
 
-  const pushReserved = (reject: () => void): void => {
-    try {
-      reject();
-    } catch (exc) {
-      if (exc instanceof ValidationError) {
-        errors.push(exc.message);
-      } else {
-        throw exc;
-      }
-    }
-  };
   const badKey = (kind: string, key: string, pattern: string): string =>
     `Import error: invalid ${kind} key '${key}'. Must match pattern: ${pattern}`;
   const longKey = (kind: string, key: string): string =>
@@ -1669,7 +1449,6 @@ export async function importSchema(
     if (et.key.length > MAX_KEY_LENGTH) {
       errors.push(longKey("entity type", et.key));
     }
-    pushReserved(() => rejectReservedEntityTypeKey(store, et.key, "Import error: "));
     for (const prop of et.properties) {
       if (!SCHEMA_KEY_PATTERN.test(prop.key)) {
         errors.push(
@@ -1694,7 +1473,6 @@ export async function importSchema(
     if (rt.key.length > MAX_KEY_LENGTH) {
       errors.push(longKey("relation type", rt.key));
     }
-    pushReserved(() => rejectReservedRelationTypeKey(store, rt.key, "Import error: "));
     // Endpoints must be present in the SAME payload — a type existing only
     // in the target would have conflicted anyway.
     if (!payloadEtKeys.has(rt.fromEntityTypeKey)) {
@@ -1936,21 +1714,6 @@ export async function importSchema(
         prop.defaultValue ?? null,
       );
     }
-    // Own search storage: vector indexes for this entity type —
-    // non-document properties become in-index filter properties; each
-    // document property gets its own chunk index. Skipped entirely without
-    // a provider.
-    if (provider && keepsOwnSearch(store)) {
-      const filterProps = properties
-        .filter((prop) => prop.dataType !== "document")
-        .map((prop) => prop.key);
-      await store.createVectorIndex(et.key, provider.dimensions, filterProps);
-      for (const prop of properties) {
-        if (prop.dataType === "document") {
-          await store.createDocumentVectorIndex(et.key, prop.key, provider.dimensions);
-        }
-      }
-    }
   }
 
   for (const rt of payload.relationTypes) {
@@ -2054,11 +1817,9 @@ export async function importSchema(
     await store.ensureSavedQueryVectorIndex(provider.dimensions);
   }
 
-  const indices = store.searchIndices?.();
-  if (indices !== undefined) {
-    const settings = await indices.getSearchSettings();
-    await indices.setSearchSettings({ ...settings, keywordLanguages });
-  }
+  const indices = store.searchIndices();
+  const settings = await indices.getSearchSettings();
+  await indices.setSearchSettings({ ...settings, keywordLanguages });
   // The managed indices derive in the sync below, which reconciles every
   // index's generations: import provisions no entries, the worker builds.
   if (payloadIndices !== undefined) {
@@ -2076,26 +1837,23 @@ export async function importSchema(
     }
   }
   invalidateLoadedSchemaCache();
-  // Retrievers last, once their indices exist; an adapter without
-  // search indices keeps none.
-  if (indices !== undefined) {
-    for (const lens of payload.lenses) {
-      for (const agent of lens.assistants.retrievers) {
-        await indices.saveRetriever(
-          lensIds.get(lens)!,
-          {
-            retrieverId: randomUUID(),
-            key: agent.key,
-            name: agent.name,
-            description: agent.description,
-            configVersion: RETRIEVER_CONFIG_VERSION,
-            config: RetrieverConfig.parse(agent.config),
-            // An upgraded agent keeps its conversion's warnings.
-            warnings: retrieverWarnings.get(retrieverWarningKey(lens.key, agent.key)) ?? [],
-          },
-          true,
-        );
-      }
+  // Retrievers last, once their indices exist.
+  for (const lens of payload.lenses) {
+    for (const agent of lens.assistants.retrievers) {
+      await indices.saveRetriever(
+        lensIds.get(lens)!,
+        {
+          retrieverId: randomUUID(),
+          key: agent.key,
+          name: agent.name,
+          description: agent.description,
+          configVersion: RETRIEVER_CONFIG_VERSION,
+          config: RetrieverConfig.parse(agent.config),
+          // An upgraded agent keeps its conversion's warnings.
+          warnings: retrieverWarnings.get(retrieverWarningKey(lens.key, agent.key)) ?? [],
+        },
+        true,
+      );
     }
   }
   return { lenses: createdLenses };

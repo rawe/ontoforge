@@ -1,4 +1,4 @@
-import { Check, Copy, Layers, Shapes, type LucideIcon } from 'lucide-react'
+import { Check, ChevronRight, Copy, Layers, Shapes, type LucideIcon } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { useServerInfo } from '@/api/hooks'
@@ -31,7 +31,7 @@ const CLIENTS: Record<ConnectClient, { label: string; file: string; where: strin
 
 const SERVER_ICONS: Record<McpServerKey, LucideIcon> = { modeling: Shapes, runtime: Layers }
 
-const BOUND_TO: Record<McpServer['boundTo'], { label: string; chip: string }> = {
+const LEVEL_CHIPS = {
   ontology: {
     label: 'Ontology',
     chip: 'border-(--tc-blue-border) bg-(--tc-blue-bg) text-(--tc-blue)',
@@ -42,20 +42,58 @@ const BOUND_TO: Record<McpServer['boundTo'], { label: string; chip: string }> = 
   },
 }
 
+function LevelChip({ level, keyName }: { level: keyof typeof LEVEL_CHIPS; keyName: string }) {
+  const { label, chip } = LEVEL_CHIPS[level]
+  return (
+    <span
+      title={`${label} ${keyName}`}
+      className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] ${chip}`}
+    >
+      <span className="shrink-0">{label} ·</span>
+      <span className="truncate font-mono">{keyName}</span>
+    </span>
+  )
+}
+
+/** What a server's URL binds it to: the ontology, or a lens within it. */
+function BoundTo({
+  boundTo,
+  ontologyKey,
+  lensKey,
+}: {
+  boundTo: McpServer['boundTo']
+  ontologyKey: string
+  lensKey: string
+}) {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1 whitespace-nowrap">
+      <LevelChip level="ontology" keyName={ontologyKey} />
+      {boundTo === 'lens' && (
+        // The arrow wraps with the lens chip, so a second line starts with it.
+        <span className="inline-flex min-w-0 max-w-full items-center gap-1">
+          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+          <LevelChip level="lens" keyName={lensKey} />
+        </span>
+      )}
+    </div>
+  )
+}
+
 /** One server: what its connection is bound to, its job, and whether it goes into the config. */
 function ServerCard({
   server,
-  boundKey,
+  ontologyKey,
+  lensKey,
   selected,
   onSelectedChange,
 }: {
   server: McpServer
-  boundKey: string
+  ontologyKey: string
+  lensKey: string
   selected: boolean
   onSelectedChange: (selected: boolean) => void
 }) {
   const Icon = SERVER_ICONS[server.key]
-  const bound = BOUND_TO[server.boundTo]
   const id = `connect-server-${server.key}`
   return (
     <label
@@ -74,11 +112,7 @@ function ServerCard({
         <span className="text-[13px] font-semibold">{server.label}</span>
         <span className="font-mono text-[11px] text-muted-foreground">{server.entryName}</span>
       </div>
-      <span
-        className={`mt-2 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] ${bound.chip}`}
-      >
-        {bound.label} · <span className="font-mono">{boundKey}</span>
-      </span>
+      <BoundTo boundTo={server.boundTo} ontologyKey={ontologyKey} lensKey={lensKey} />
       <p className="mt-2 text-[12px] font-medium">{server.job}</p>
       <p className="mt-0.5 text-[12px] text-muted-foreground">{server.covers}</p>
       <p className="mt-1 text-[11px] text-muted-foreground/80">{server.limits}</p>
@@ -154,7 +188,8 @@ export function ConnectPanel({ ontologyKey, lensKey }: { ontologyKey: string; le
           <ServerCard
             key={server.key}
             server={server}
-            boundKey={server.boundTo === 'ontology' ? ontologyKey : lensKey}
+            ontologyKey={ontologyKey}
+            lensKey={lensKey}
             selected={servers.includes(server.key)}
             onSelectedChange={(selected) => setSelected(server.key, selected)}
           />

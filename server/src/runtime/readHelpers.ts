@@ -438,3 +438,47 @@ export function parseFilterConditions(
   }
   return conditions;
 }
+
+// ---------------------------------------------------------------------------
+// Filter rules for tool descriptions
+// ---------------------------------------------------------------------------
+
+/** Each comparison suffix as a caller reads it; keyed by the port's
+ * operators, so a new operator does not compile without its wording. */
+const COMPARISON_SUFFIX_TEXT: Record<Exclude<FilterOperator, "eq">, string> = {
+  ne: "__ne (present, not equal)",
+  gt: "__gt",
+  gte: "__gte",
+  lt: "__lt",
+  lte: "__lte",
+  contains: "__contains (case-insensitive substring)",
+};
+
+/**
+ * The filter rules `parseFilterConditions` enforces, in the words of a tool
+ * description. Every tool taking `filters` includes this text rather than
+ * pointing at another tool, so it stays complete when that tool is absent
+ * (`docs/decisions.md#interfaces`). `contains` is false where substring
+ * filters are rejected (search); `relations` is false where query paths and
+ * relation subjects are not taken (relation lists).
+ */
+export function filterRules(options: { contains: boolean; relations: boolean }): string {
+  const suffixes = Object.entries(COMPARISON_SUFFIX_TEXT)
+    .filter(([op]) => options.contains || op !== "contains")
+    .map(([, text]) => text);
+  const existence = Object.keys(EXISTENCE_OPERATORS).map((op) => `__${op}`).join("/");
+  const suffixText =
+    `then an optional suffix: none (equal), ${suffixes.join(", ")}, ${existence} (true/false)`;
+  if (!options.relations) {
+    return `filters (all must hold): key is a property, ${suffixText}.`;
+  }
+  return (
+    "filters (all must hold): key is a property, a related entity's property as " +
+    "'<relation>.<property>' (\"works_for.name\"), the relation's own as " +
+    "'<relation>@<property>' (\"works_for@since\"), or a bare relation type " +
+    `("works_for", with ${existence} only); ${suffixText}, e.g. ` +
+    '"works_for@since__gte": "2021-01-01". A relation joining a type to itself needs ' +
+    "':out' (the listed entity is its source) or ':in' (its target): \"manages:in.name\". " +
+    "A relation condition holds if any one relation meets it, independently of the others."
+  );
+}

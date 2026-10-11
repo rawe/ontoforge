@@ -212,6 +212,27 @@ async function resolveOwner(
   return [owner.relationTypeId as string, typeKind];
 }
 
+/** A search index definition, as the tools that take one state it. */
+const SEARCH_INDEX_DEFINITION =
+  "definition: {key, name, description, entityType, fields, header?, relations?: " +
+  "[{relationType, direction: 'outgoing'|'incoming', fields, target: {<entityTypeKey>: " +
+  "[fields]}, label?, template?}], semantic?: {enabled, template?}, keyword?: {enabled}}. " +
+  "At most 12 fields and 4 relation groups; one entry per relation instance.";
+
+/** A search index's build status, as the tools that return one state it. */
+const SEARCH_INDEX_STATUS =
+  "Status: state (ready, building, stale, failed, disabled or unavailable); representations, " +
+  "each with representation, state, build ({done, total} of the build filling a new " +
+  "generation, null when none is), pending (queued changes not yet indexed) and failed " +
+  "(items whose retries are used up, retried by a rebuild or a new write of their entity); " +
+  "lastErrors (entityId, partKind, message, at).";
+
+/** A search index as the read tools return it. */
+const SEARCH_INDEX_RECORD =
+  "An index has key, kind (default, passage or custom), enabled (false for a switched-off " +
+  "managed index), definition, documentProperty, status, createdAt and updatedAt. " +
+  SEARCH_INDEX_STATUS;
+
 // ---------------------------------------------------------------------------
 // Server factory (stateless transport: one server per request)
 // ---------------------------------------------------------------------------
@@ -650,15 +671,15 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
 
   // --- Search indices ---
   // A definition travels in the index wire format (camelCase, as in REST
-  // and the transfer format), like `import_schema`'s payload.
+  // and the transfer format), like `import_schema`'s payload. The shape and
+  // the status fields are stated in every tool that takes or returns them.
 
   server.registerTool(
     "list_search_indices",
     {
       description:
-        "List the ontology's search index definitions — managed (default and passage, " +
-        "keys with '~', switched in search settings) and custom — with their build status " +
-        "(fields as get_search_index_status describes).",
+        "List the ontology's search indices — managed (default and passage, keys with '~', " +
+        "switched in search settings) and custom. " + SEARCH_INDEX_RECORD,
       inputSchema: {},
     },
     wrap("list_search_indices", async () => {
@@ -671,8 +692,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "get_search_index",
     {
       description:
-        "Get one search index definition with its build status (fields as " +
-        "get_search_index_status describes).",
+        "Get one search index. " + SEARCH_INDEX_RECORD,
       inputSchema: { index_key: z.string() },
     },
     wrap("get_search_index", async (args: { index_key: string }) => {
@@ -691,8 +711,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         "Validate a draft search index definition without saving it and estimate the cost of " +
         "building it (entities, entries, seconds per representation), and outline the entries " +
         "it holds per entity — their semantic and keyword text with ⟦root.x⟧, ⟦relation.x⟧, " +
-        "⟦target.x⟧ and ⟦passage⟧ standing in for the values. Returns " +
-        "{valid, issues, estimate, outline}; the key may be omitted.",
+        "⟦target.x⟧ and ⟦passage⟧ standing in for the values. " + SEARCH_INDEX_DEFINITION +
+        " The key may be omitted. Returns {valid, issues, estimate, outline}.",
       inputSchema: { definition: z.record(z.string(), z.unknown()) },
     },
     wrap("preview_search_index", async (args: { definition: Record<string, unknown> }) => {
@@ -708,11 +728,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "create_search_index",
     {
       description:
-        "Create a custom search index. definition: {key, name, description, entityType, " +
-        "fields, header?, relations?: [{relationType, direction: 'outgoing'|'incoming', " +
-        "fields, target: {<entityTypeKey>: [fields]}, label?, template?}], semantic?: " +
-        "{enabled, template?}, keyword?: {enabled}}. At most 12 fields and 4 relation " +
-        "groups; one entry per relation instance. Building starts in the background.",
+        "Create a custom search index. " + SEARCH_INDEX_DEFINITION +
+        " Building starts in the background.",
       inputSchema: { definition: z.record(z.string(), z.unknown()) },
     },
     wrap("create_search_index", async (args: { definition: Record<string, unknown> }) => {
@@ -728,9 +745,10 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "update_search_index",
     {
       description:
-        "Replace a custom search index's definition (same shape as create_search_index; the " +
-        "key cannot change). A changed definition is rebuilt in the background; the current " +
-        "entries serve until then. Managed indices can only be switched (set_search_settings).",
+        "Replace a custom search index's definition; the key cannot change. " +
+        SEARCH_INDEX_DEFINITION + " A changed definition is rebuilt in the background; the " +
+        "current entries serve until then. Managed indices can only be switched " +
+        "(set_search_settings).",
       inputSchema: { index_key: z.string(), definition: z.record(z.string(), z.unknown()) },
     },
     wrap("update_search_index", async (args: {
@@ -768,11 +786,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "get_search_index_status",
     {
       description:
-        "Get a search index's build status, per representation: state (ready, building, " +
-        "stale, failed, disabled or unavailable); build — {done, total} of the build filling " +
-        "a new generation, null when none is; pending — queued changes not yet indexed; " +
-        "failed — items whose retries are used up, retried by a rebuild or a new write of " +
-        "their entity; and the last errors.",
+        "Get a search index's build status. " + SEARCH_INDEX_STATUS,
       inputSchema: { index_key: z.string() },
     },
     wrap("get_search_index_status", async (args: { index_key: string }) => {

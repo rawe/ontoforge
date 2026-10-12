@@ -111,7 +111,19 @@ export function AiPage() {
           <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col">
             {tab === 'chat' && (
               <AssistantTab key={`${ontologyKey}/${lensKey}`} ontologyKey={ontologyKey} lensKey={lensKey} kind="agents">
-                {(agent, picker) => <AgentChat key={agent.key} ontologyKey={ontologyKey} lensKey={lensKey} agent={agent} picker={picker} />}
+                {(agent, picker) => (
+                  <AgentChat
+                    key={agent.key}
+                    ontologyKey={ontologyKey}
+                    lensKey={lensKey}
+                    agentKey={agent.key}
+                    name={agent.name}
+                    description={agent.description}
+                    blockedReason={null}
+                    remember
+                    picker={picker}
+                  />
+                )}
               </AssistantTab>
             )}
           </TabsContent>

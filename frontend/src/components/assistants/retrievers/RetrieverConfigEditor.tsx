@@ -58,7 +58,7 @@ export function RetrieverConfigEditor({ ontologyKey, config, onChange, catalog, 
       {catalog.length === 0 && <p className="text-xs text-muted-foreground">This lens offers no search index. Include indices in the Scope tab, or create them under Search.</p>}
       {unavailable.map((ref) => <div key={ref.index} className="flex items-center gap-2 rounded-lg border border-destructive/30 p-2 text-xs">
         <span className="min-w-0 flex-1 text-destructive">Index <code>{ref.index}</code> is not available in this lens. It is kept for repair.</span>
-        <Button size="sm" variant="outline" disabled={disabled} onClick={() => onChange(withoutIndex(config, ref.index, catalog))}>Remove</Button>
+        <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => onChange(withoutIndex(config, ref.index, catalog))}>Remove</Button>
       </div>)}
       {byType.map(({ type, entries }) => <div key={type} className="space-y-1.5">
         <TypeChip typeKey={type} displayName={typeName(type)} size="sm" />
@@ -101,7 +101,7 @@ export function RetrieverConfigEditor({ ontologyKey, config, onChange, catalog, 
         const choice = choices.find((c) => c.key === pathKey(filter.path))
         return <div key={i} className="space-y-2 rounded-lg border p-3">
           <div className="flex items-start gap-2"><div className="min-w-0 flex-1 text-sm font-medium">{filterLabel(filter, schema)}<p className="font-mono text-[11px] font-normal text-muted-foreground">{filter.id}</p></div>
-            <Button size="icon" variant="ghost" disabled={disabled} aria-label={`Remove filter ${filter.id}`} className="size-6" onClick={() => onChange({ ...config, filters: config.filters.filter((_, n) => n !== i) })}><Trash2 className="size-3.5" /></Button></div>
+            <Button type="button" size="icon" variant="ghost" disabled={disabled} aria-label={`Remove filter ${filter.id}`} className="size-6" onClick={() => onChange({ ...config, filters: config.filters.filter((_, n) => n !== i) })}><Trash2 className="size-3.5" /></Button></div>
           {/* Label column + full-width controls: rows stay aligned at every column width. */}
           <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 text-xs">
             <span className="text-muted-foreground">Result</span>
@@ -158,7 +158,7 @@ export function RetrieverConfigEditor({ ontologyKey, config, onChange, catalog, 
       })}
       {Object.keys(config.answerFields).filter((type) => !types.includes(type)).map((type) => <div key={type} className="flex items-center gap-2 rounded-lg border border-destructive/30 p-2 text-xs">
         <span className="min-w-0 flex-1 text-destructive">Answer fields for <code>{type}</code>, which no chosen index finds.</span>
-        <Button size="sm" variant="outline" disabled={disabled} onClick={() => { const answerFields = { ...config.answerFields }; delete answerFields[type]; onChange({ ...config, answerFields }) }}>Remove</Button>
+        <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => { const answerFields = { ...config.answerFields }; delete answerFields[type]; onChange({ ...config, answerFields }) }}>Remove</Button>
       </div>)}
     </Section>
 

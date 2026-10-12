@@ -12,7 +12,8 @@ const handleClass =
 
 /**
  * Canvas entity card: type-colored left border + dot, display label, type
- * name, document/pin indicators and a selected ring. Left handle receives connections,
+ * name, document/pin indicators, a selected ring and the evidence sidebar's
+ * selection ring while an assistant's answer highlights it. Left handle receives connections,
  * right handle starts them (drag-connect). A `flashedAt` bump in data renders
  * a one-shot ring flash ("already on canvas").
  */
@@ -30,7 +31,9 @@ function EntityNodeInner({ data, selected }: NodeProps<EntityFlowNode>) {
       style={{
         width: NODE_WIDTH,
         borderColor: color.borderVar,
-        boxShadow: `inset 3px 0 0 ${color.cssVar}`,
+        boxShadow: data.highlighted === true
+          ? `inset 3px 0 0 ${color.cssVar}, 0 0 0 3px color-mix(in oklch, var(--ring) 45%, transparent)`
+          : `inset 3px 0 0 ${color.cssVar}`,
       }}
     >
       <Handle type="target" position={Position.Left} className={handleClass} />

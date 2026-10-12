@@ -8,6 +8,9 @@
  *   of.theme                  — managed by next-themes (light|dark|system)
  *   of.sidebar                — "expanded" | "collapsed"
  *   of.explore.{ontologyKey}.{lensKey} — Explorer canvas working set
+ *   of.exploreAsk.{ontologyKey}.{lensKey} — the Explorer's ask dock:
+ *                               `{ view: open|collapsed|closed, width,
+ *                               navigator, autoAdd }`
  *   of.thread.{ontologyKey}.{lensKey}.{kind}.{assistantKey} — id of the
  *                               Workbench's current conversation thread with
  *                               that assistant (the messages stay on the server)
@@ -38,6 +41,8 @@ export const storageKeys = {
   sidebar: 'of.sidebar',
   explore: (ontologyKey: string, lensKey: string) =>
     `of.explore.${ontologyKey}.${lensKey}`,
+  exploreAsk: (ontologyKey: string, lensKey: string) =>
+    `of.exploreAsk.${ontologyKey}.${lensKey}`,
   thread: (ontologyKey: string, lensKey: string, kind: string, assistantKey: string) =>
     `of.thread.${ontologyKey}.${lensKey}.${kind}.${assistantKey}`,
   recents: (ontologyKey: string, lensKey: string) =>

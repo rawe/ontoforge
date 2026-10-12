@@ -48,10 +48,14 @@ export interface EntityNodeData extends Record<string, unknown> {
   pinned: boolean
   /** Bumped to re-trigger the "already on canvas" flash animation. */
   flashedAt: number
+  /** Shown by an assistant's answer: ringed. Derived for rendering, never stored. */
+  highlighted?: boolean
 }
 
 export interface RelationEdgeData extends Record<string, unknown> {
   relation: RelationInstance
+  /** At the highlighted node: drawn stronger. Derived for rendering, never stored. */
+  emphasised?: boolean
 }
 
 export type EntityFlowNode = Node<EntityNodeData, 'entity'>
@@ -330,6 +334,40 @@ export function placeNodes(
       taken.push(p)
     }
     y += NODE_HEIGHT + GAP_Y
+  }
+  return out
+}
+
+/**
+ * Positions for new nodes that each go next to one of their `anchors` (node
+ * ids, best first) — an existing node or one placed earlier in the same
+ * batch. Level by level, so a path grows outward from where it starts; the
+ * nodes of one level around the same anchor share its rings. Without a
+ * placed anchor a node goes near the canvas centroid. Never moves a node.
+ */
+export function placeAnchored(
+  items: readonly { id: string; level: number; anchors: readonly string[] }[],
+  nodes: readonly EntityFlowNode[],
+): XYPosition[] {
+  const known = new Map(nodes.map((n) => [n.id, n.position]))
+  const occupied = nodes.map((n) => n.position)
+  const fallback = canvasCenter(nodes)
+  const out: XYPosition[] = new Array(items.length)
+  for (const level of [...new Set(items.map((item) => item.level))].sort((a, b) => a - b)) {
+    const groups = new Map<string, number[]>()
+    items.forEach((item, i) => {
+      if (item.level !== level) return
+      const anchor = item.anchors.find((id) => known.has(id)) ?? ''
+      groups.set(anchor, [...(groups.get(anchor) ?? []), i])
+    })
+    for (const [anchor, indices] of groups) {
+      const positions = placeNodes(indices.length, anchor === '' ? fallback : known.get(anchor)!, occupied)
+      indices.forEach((index, j) => {
+        out[index] = positions[j]!
+        known.set(items[index]!.id, positions[j]!)
+      })
+      occupied.push(...positions)
+    }
   }
   return out
 }

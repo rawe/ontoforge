@@ -9,7 +9,8 @@ import type { RelationFlowEdge } from './workingSet'
 
 /**
  * Relation edge: subtle stroke + arrowhead (markerEnd set on the edge object)
- * and a small mono relation-type label. Self-referential relations render as
+ * and a small mono relation-type label; at a highlighted node, primary and
+ * thicker. Self-referential relations render as
  * a loop arcing over the node instead of the degenerate bezier.
  */
 function RelationEdgeInner({
@@ -54,7 +55,9 @@ function RelationEdgeInner({
         id={id}
         path={path}
         markerEnd={markerEnd}
-        style={{ stroke: 'var(--border)', strokeWidth: 1.5 }}
+        style={data?.emphasised === true
+          ? { stroke: 'var(--primary)', strokeWidth: 2.5 }
+          : { stroke: 'var(--border)', strokeWidth: 1.5 }}
       />
       <EdgeLabelRenderer>
         <div

@@ -214,7 +214,8 @@ Endpoint errors from the server are surfaced as form-level errors, not silent fa
 
 ### Explore
 
-The graph canvas. See [Working set](#working-set) for its model.
+The graph canvas, and beside it the ask dock, where a navigator's answers fill the canvas.
+See [Working set](#working-set) for both.
 
 ### Query
 
@@ -593,8 +594,8 @@ central idea of the screen and everything else follows from it.
 
 **Growth is incremental and explicit.** Entities arrive from the palette, from a table
 row, from an entity detail page, from a query result, from a recents chip on the empty
-canvas, all at once from a palette question's results, or by expanding a node's
-relations. A batch of results joins unanchored; entities already on the canvas flash, and
+canvas, all at once from a palette question's results, from a navigator's answer in the
+ask dock, or by expanding a node's relations. A batch of results joins unanchored; entities already on the canvas flash, and
 the hard node cap refuses a batch that would exceed it as a whole. Expansion is per relation type and per
 direction: the node panel lists every applicable relation type with its exact neighbour
 count, and clicking one pulls in the first ten neighbours; repeated clicks pull ten more,
@@ -642,6 +643,39 @@ node opens its detail page.
 links, the relation's own properties, and a delete action behind a confirmation stating
 that both entities survive. Self-referential relations draw as a loop over their node
 rather than a degenerate curve.
+
+**Asking.** With a language-model provider, an Ask button in the canvas toolbar opens a
+dock on the canvas's left edge — the right edge belongs to the node panel — holding an
+[assistant chat](#assistant-chat) with one of the lens's navigators:
+
+- **States.** Open and resizable; collapsed to a slim rail with the navigator's name and,
+  while an answer runs, a spinner; or closed. Collapsing keeps the conversation and a
+  running answer going; closing cancels the running answer, and reopening restores the
+  conversation from its thread. An open dock in a narrow window shows as its rail until
+  it is opened.
+- **Header.** A navigator picker, `Default` first; another navigator cancels a running
+  answer and shows that navigator's own conversation. Then "New conversation", collapse
+  and close.
+- **Answers** as in the chat, citations as markers. Under each, two collapsible parts:
+  *Found* — the answer's entities as compact cards grouped as in the
+  [evidence sidebar](#evidence-sidebar), each saying whether it is on the canvas — and
+  *Steps* — its pipeline as the sidebar's Steps view shows it.
+- **A click puts it there, the next click shows it.** Clicking a citation marker or a
+  found card adds an entity that is not on the canvas yet, with the answer's relations
+  between it and the canvas, and shows it; one already there is only shown: selected,
+  centred, ringed like a selected card of the sidebar's graph, its relations drawn
+  stronger. Nothing else on the canvas changes.
+- **Hover.** Pointing at a marker or a found card rings its node; pointing at a node marks
+  its citations in every answer.
+- **Adding cited entities.** A switch in the dock, off by default, adds every completed
+  answer's cited entities and the answer's relations between canvas entities, as one
+  batch, then fits the view. Duplicates flash; when the hard cap refuses the batch, the
+  answer says its entities were not added.
+
+Additions from answers follow every rule above: each entity is read again by its id and
+each relation by its id, never built from the answer's cards; new nodes go next to an
+entity they are linked to, the anchors first and then hop by hop, so paths grow outward
+from where they start. Streamed answers never redraw the canvas.
 
 **Persistence and restore.** The working set survives reloads (see
 [Local state](#local-state)). On restore, entities whose type is no longer in scope are
@@ -836,9 +870,11 @@ appear before the answer. Three views, each with its count where it has one:
 ### Assistant chat
 
 One conversation with one assistant on a server-held [thread](capabilities/threads.md),
-the same for every assistant kind — the Workbench's Assistants tabs and the retriever
-editor's test panel. The browser remembers only the current thread per ontology, lens,
-kind and assistant (not in the test panel) and restores its messages from the server.
+the same for every assistant kind — the Workbench's Assistants tabs, the retriever
+editor's test panel and, compact, the Explorer's [ask dock](#working-set), which shows a
+navigator's insight under each answer instead of in a side panel. The browser remembers
+only the current thread per ontology, lens, kind and assistant (not in the test panel) and
+restores its messages from the server.
 
 - **Empty conversation** — the assistant's name and description, and one line on what
   its kind does.
@@ -1104,7 +1140,7 @@ flicker into existence while the report is loading.
 
 | Off | What changes |
 |---|---|
-| AI | The Assistants navigation entry, the Assistants palette action, the palette's question mode and the Ask an assistant quick action are gone. The Assistants screen itself renders an explanation. |
+| AI | The Assistants navigation entry, the Assistants palette action, the palette's question mode, the Ask an assistant quick action and the Explorer's Ask button and dock are gone. The Assistants screen itself renders an explanation. |
 | No search strategies | Entity search falls back to substring matching — per type in parallel when unscoped. |
 | Semantic search | Saved-query search falls back to client-side substring filtering over the full list. The search-data rebuild is disabled and explains that there is nothing to rebuild. |
 
@@ -1198,9 +1234,10 @@ the address.
 | Theme preference | Global | — |
 | Sidebar collapsed (Workbench and Studio alike) | Global | — |
 | Explorer working set | Per ontology + lens | Bounded by the hard node cap |
+| Explorer ask dock — open, collapsed or closed, its width, its navigator, the switch that adds cited entities | Per ontology + lens | — |
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
-| Current conversation thread id (Workbench Agents, Retrievers and Navigators tabs) | Per ontology + lens + kind + assistant | One |
+| Current conversation thread id (Workbench Agents, Retrievers and Navigators tabs, Explorer ask dock) | Per ontology + lens + kind + assistant | One |
 | Agent tool-call panel switch | Global | — |
 | Retriever diagnostics switch (Workbench) | Global | — |
 | Navigator evidence sidebar switch (Workbench) | Global | — |
@@ -1315,6 +1352,7 @@ Any unrecognised address returns to the root.
 | Query editor | Cmd/Ctrl+Enter | Run |
 | Explorer | `F` | Fit the view |
 | Explorer | `P` | Pin or unpin the selection |
+| Explorer | `A` | Open or close the ask dock |
 | Explorer | Delete / Backspace | Remove selected nodes from the canvas |
 | Explorer | Shift or Cmd while clicking | Extend the selection |
 | Assistant chat | Enter | Send |

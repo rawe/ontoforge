@@ -1200,9 +1200,10 @@ the address.
 | Explorer working set | Per ontology + lens | Bounded by the hard node cap |
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
-| Current conversation thread id (Workbench Agents and Retrievers tabs) | Per ontology + lens + kind + assistant | One |
+| Current conversation thread id (Workbench Agents, Retrievers and Navigators tabs) | Per ontology + lens + kind + assistant | One |
 | Agent tool-call panel switch | Global | — |
 | Retriever diagnostics switch (Workbench) | Global | — |
+| Navigator evidence sidebar switch (Workbench) | Global | — |
 | Retriever test panel mode (Chat or Retrieve) | Global | — |
 | Retriever for palette questions | Per ontology + lens | — |
 | Schema graph node positions | Per ontology | — |

@@ -148,6 +148,11 @@ and a rejection message already says what to do instead.
 **Agents are read-only: no write tool is grantable to an agent.** An agent acts on a
 model's judgment, and a write would change data on a guess.
 
+**Every assistant kind beyond agents and retrievers is one module of the assistant-kind
+registry; its routes, storage, validation, built-in default, threads and transfer are the
+registry's, never its own.** One seam keeps every kind consistent, and a new kind is a
+module rather than a change across every layer.
+
 **Every REST assistant chat answers as one NDJSON stream, with no non-streaming mode, and a
 closed connection cancels the turn.** Tool activity is visible while the turn runs, and
 work nobody will receive stops.

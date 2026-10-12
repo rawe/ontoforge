@@ -4,7 +4,7 @@ OntoForge is a graph-native ontology studio. You design a graph schema, then use
 through generic, schema-driven APIs — no per-schema code is written or generated.
 
 One server holds many **ontologies** — totally isolated units, each with its own schema,
-lenses, saved queries, agents, retrievers and instance data. Within an ontology the system has two
+lenses, saved queries, assistants and instance data. Within an ontology the system has two
 halves. **Modeling** designs that ontology's schema. **Runtime** reads and writes its
 instance data through one lens. Both run in one server, over one database, and are
 reachable over REST, over MCP, and through a web UI.
@@ -37,6 +37,7 @@ what rules bind it, and how it is reached from every interface.
 | [oql](capabilities/oql.md) | The query language |
 | [saved-queries](capabilities/saved-queries.md) | Stored, parameterized query pipelines |
 | [agents](capabilities/agents.md) | Agents — assistants that answer by working with read-only tools: configuration, tool rules, live tool activity, the default agent |
+| [navigators](capabilities/navigators.md) | Navigators — assistants that answer by walking the lens's graph: configuration, the pipeline of a turn, what the client sees, the default navigator |
 | [retrievers](capabilities/retrievers.md) | Retrievers — assistants that answer from a lens's search indices: configuration, validation, planning, retrieval, retrieve, diagnostics, the default retriever, portable JSON |
 | [threads](capabilities/threads.md) | Server-held assistant conversations: starting, continuing and reading a thread, atomic turns, lifetime |
 | [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
@@ -160,7 +161,7 @@ Terms are used in exactly this sense throughout the documentation and the API.
 ### Schema and design
 
 **Ontology** — the independent, isolated unit: one domain's schema, its lenses, saved
-queries, agents, retrievers, and all instance data. A server holds many; nothing spans two.
+queries, assistants, and all instance data. A server holds many; nothing spans two.
 Addressed by an immutable key, unique server-wide, with a mutable display name.
 
 **Registry** — the server's flat, listable set of ontologies, addressed by key. The
@@ -390,6 +391,14 @@ is **diagnostics** — plan, results per sub-query, timings, model traces — a 
 feature, given only on request. See
 [capabilities/retrievers.md](capabilities/retrievers.md).
 
+**Navigator** — the assistant kind that answers by walking the graph: a planning model
+reads the question as what it names, what it asks for and the relations between, a walk
+follows those relations through the lens, and an answer model replies from the entities it
+met, citing each. Its insight into a run is the **trace** — the pipeline's steps as they run
+and every entity met, before the answer — part of the product for every user. Every lens
+also has an implicit **default navigator**. See
+[capabilities/navigators.md](capabilities/navigators.md).
+
 **Thread** — one conversation with one assistant, held by the server: a client sends its
 new message and the thread's id, and the server continues from the turns the thread kept.
 See [capabilities/threads.md](capabilities/threads.md).
@@ -406,7 +415,7 @@ compilation, index management, error translation, and the physical isolation bet
 ontologies. Exactly one is active.
 
 **Transfer format** — the versioned JSON representation of one ontology's design, used
-for export and import. Carries schema, lenses, agents, saved queries, retrievers, the
+for export and import. Carries schema, lenses, assistants, saved queries, the
 keyword language set, custom search indices and managed-index switches only — no
 instance data and no ontology identity. See
 [capabilities/transfer.md](capabilities/transfer.md).

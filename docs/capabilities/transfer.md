@@ -17,7 +17,7 @@ ontologies, transfer included.
 | Relation types | The same, plus the keys of the source and target entity types |
 | Property definitions | Key, display name, description, data type, required flag, default |
 | Lenses | Key, name, description, their type inclusions — absent entirely for an unscoped lens — and the keys of the search indices they include |
-| Assistants | Every assistant of every lens, one list per kind under the lens's `assistants`: its agents under `agents` — key, name, description, system prompt, tool allowlist — and its retrievers under `retrievers`, in their portable form — key, name, description, configVersion, config |
+| Assistants | Every assistant of every lens, one list per kind under the lens's `assistants`: its agents under `agents` — key, name, description, system prompt, tool allowlist — its retrievers under `retrievers` and its navigators under `navigators`, both in their portable form — key, name, description, configVersion, config |
 | Saved queries | Every saved query of every lens: key, name, description, steps, parameters |
 | Keyword language set | The languages keyword search stems in, at the top level of the payload |
 | Search indices | The custom index definitions and the managed indices switched off, at the top level of the payload |
@@ -217,7 +217,9 @@ the import. What
 an agent references is not checked: export carries every agent as stored, including one
 that became invalid, and it imports and is reported invalid on read, like any agent its
 lens cannot run ([retrievers.md](retrievers.md#validation-and-warnings)).
-Omitting `assistants`, or either of its lists, is valid.
+Navigators are checked like retrievers, against configuration version 1
+([navigators.md](navigators.md#validation)), and written last with them.
+Omitting `assistants`, or any of its lists, is valid.
 
 ### Side effects of import
 

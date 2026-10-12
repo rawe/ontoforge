@@ -387,6 +387,25 @@ run — on write, import, or copy or move into the target lens — is refused wi
 changed since it was read, is a conflict. Management calls no model. The built-in default retriever
 is not a modeling resource, as for agents.
 
+### Navigators
+
+Per-lens, addressed by lens key and assistant key. Semantics, configuration and validation:
+[capabilities/navigators.md](capabilities/navigators.md).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/lenses/{lensKey}/assistants/navigators` | List the lens's navigators, by name, each with its current validation |
+| GET | `/lenses/{lensKey}/assistants/navigators/{assistantKey}` | Read one navigator as stored, with its current validation |
+| PUT | `/lenses/{lensKey}/assistants/navigators/{assistantKey}` | Create or replace; 201 on create, 200 on replace |
+| DELETE | `/lenses/{lensKey}/assistants/navigators/{assistantKey}` | Delete the navigator; 204 |
+
+A write carries `name`, optional `description`, `configVersion: 1` and `config`; unknown
+fields are rejected. A read carries `key`, `lensKey`, `name`, `description`,
+`configVersion`, `config`, `validation: {valid, errors, warnings}`, `createdAt` and
+`updatedAt`. A configuration the lens cannot run is refused with `VALIDATION_ERROR` and the
+errors under `details.errors`. Management calls no model. The built-in default navigator is
+not a modeling resource, as for agents.
+
 ### Search settings
 
 The ontology's keyword language set and its managed-index switches. Semantics:
@@ -620,7 +639,7 @@ Requires a Decision provider, independently of AI and search.
 
 ### Assistant chat and threads
 
-Every assistant kind — `agents`, `retrievers` — converses through the same request, the
+Every assistant kind — `agents`, `retrievers`, `navigators` — converses through the same request, the
 same stream frame and the same threads. Semantics:
 [capabilities/threads.md](capabilities/threads.md). The kind's own section below lists its
 routes, its extra request fields and its own events.
@@ -649,7 +668,7 @@ line, each with a `type`. The shared events mean the same for every kind:
 | `final` | `reply` | Terminal: the complete answer |
 | `error` | `error` | Terminal: the public error object with `code`, `message` and optional `details` |
 
-A kind's own events are named `<kind>.<event>` — `agent.…`, `retriever.…`; a client may
+A kind's own events are named `<kind>.<event>` — `agent.…`, `retriever.…`, `navigator.…`; a client may
 ignore those it does not know. A writable stream has exactly one terminal `final` or
 `error`; EOF without one means an incomplete turn. A closed connection cancels the turn,
 and a cancelled or failed turn leaves nothing in its thread. Unexpected failures after
@@ -724,6 +743,42 @@ an error.
 
 A question or a retrieve needs a language-model provider; without an embedding provider it
 searches by keyword only. Neither route has an MCP equivalent.
+
+### Navigator list and chat
+
+The stored navigator runs — or, under the key `_default`, the lens's
+[default navigator](capabilities/navigators.md#the-default-navigator); a request can never
+supply or override its configuration. Semantics:
+[capabilities/navigators.md](capabilities/navigators.md#answering-a-question).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/ai/assistants/navigators` | List the lens's navigators, the default first |
+| POST | `/ai/assistants/navigators/{assistantKey}/chat` | Stream the work and the answer for one question |
+| GET | `/ai/assistants/navigators/{assistantKey}/threads/{threadId}` | Read a thread back |
+
+**List.** As for retrievers: `key`, `name`, `description` and `builtIn`, the default first,
+no configuration, no validation, no language-model provider needed.
+
+**Chat.** The [shared request](#assistant-chat-and-threads), nothing more. Without a
+language-model provider the route answers `FEATURE_DISABLED`; an unknown navigator answers
+not found, a navigator its lens can no longer run `VALIDATION_ERROR` with the errors under
+`details.errors`, an unknown or busy thread as shared — each before the stream opens. The
+response streams the shared frame — `thread`, the answer as `delta` events, one terminal
+`final` or `error` — and its own events, all in display names, never ids or keys except
+an entity's `id`:
+
+| Event `type` | Fields | Meaning |
+|---|---|---|
+| `navigator.graph` | `steps` (`id`, `label`, `description`, `model`), `edges` (`from`, `to`, optional `label`; an edge to itself is a repeat) | The pipeline, once, right after `thread` |
+| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, and when it ends `durationMs` and an optional `summary` | One step starting or ending; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn fails |
+| `navigator.entities` | `entities` — each `ref`, `id`, `type`, `typeName`, `label`, `role` (`anchor`, `reached`, `focus`), `hop`, `reason`, `fields` (`name`, `value`), `evidence` — and `links` — each `from`, `to` (refs, directed as stored), `type`, `label` | The entities met so far and the relations between them; a later card replaces an earlier one with the same `ref`, a link is identified by `from`, `type` and `to` |
+| `navigator.summary` | `modelCalls`, `durationMs`, `entities`, `evidence`, `hops`, `timings` (milliseconds per step id) | Once, before `final` |
+
+Refs are `E1`, `E2`, … in discovery order, unique within a turn. The answer cites evidence
+by ref in square brackets, one or several: `[E2]`, `[E2, E5]`.
+
+**Read a thread.** As [shared](#assistant-chat-and-threads). No MCP equivalent exists.
 
 ### AI
 

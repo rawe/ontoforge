@@ -1,6 +1,7 @@
 # Threads
 
-Every assistant — an [agent](agents.md) or a [retriever](retrievers.md) —
+Every assistant — an [agent](agents.md), a [retriever](retrievers.md) or a
+[navigator](navigators.md) —
 converses in **threads** the server holds. A client sends only its new message and, to
 continue, the thread's id; the server continues from what the thread kept. How the server
 stores threads, and the numbers below (turns kept, turns the model sees, lifetime, how

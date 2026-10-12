@@ -223,7 +223,7 @@ Two tabs — Console and Library — which both stay live, so results survive a 
 
 ### Assistants
 
-Two tabs — Agents and Retrievers. See [Assistants panel](#assistants-panel). Without a language-model
+Three tabs — Agents, Retrievers and Navigators. See [Assistants panel](#assistants-panel). Without a language-model
 provider the navigation entry is gone and the screen renders an explanation; see
 [Feature gating](#feature-gating).
 
@@ -341,8 +341,8 @@ unscoped and therefore exposes everything.
 
 Inline-editable name and description, an immutable key, a scope marker, an entry into the
 Workbench for this lens, and deletion behind a confirmation stating that the lens, its
-scope, its agents, retrievers and saved queries go — while the schema and all
-instance data stay. Five tabs:
+scope, its agents, retrievers, navigators and saved queries go — while the schema and all
+instance data stay. Six tabs:
 
 **Scope** — the [scope editor](#scope-editor).
 
@@ -355,6 +355,10 @@ at a glance. See [capabilities/agents.md](capabilities/agents.md).
 [retrievers](capabilities/retrievers.md), with a test panel beside the
 editor; see [Retriever editor](#retriever-editor). Chatting with a saved retriever
 happens in the Workbench ([Assistants panel](#assistants-panel)).
+
+**Navigators** — the authoring surface for the lens's
+[navigators](capabilities/navigators.md), with a test panel beside the editor; see
+[Navigator editor](#navigator-editor).
 
 **Saved queries** — the authoring surface for the lens's stored pipelines, and the only
 place multi-step pipelines can be built. Per query: name, derived-and-then-immutable key,
@@ -687,9 +691,9 @@ expands automatically, and runs immediately when it has no parameters.
 
 ### Assistants panel
 
-Two tabs over one lens, one per assistant kind: Agents and Retrievers. Both require a language-model
-provider; see [capabilities/agents.md](capabilities/agents.md). Both tabs
-are the same [assistant chat](#assistant-chat).
+Three tabs over one lens, one per assistant kind: Agents, Retrievers and Navigators. All
+require a language-model provider; see [capabilities/agents.md](capabilities/agents.md).
+All tabs are the same [assistant chat](#assistant-chat).
 
 A toolbar picker selects the assistant: the kind's assistants as the server lists them —
 `Default`, the built-in one, first — each with its key. The address names the chosen
@@ -717,6 +721,16 @@ is the lens's [default retriever](capabilities/retrievers.md#the-default-retriev
 diagnostics with every answer and shows them in the
 [diagnostics panel](#assistant-chat); off, none are requested. A question to a retriever
 the lens cannot run shows the server's refusal with its reasons.
+
+**Navigators** — chat with the lens's [navigators](capabilities/navigators.md); `Default`
+is the lens's [default navigator](capabilities/navigators.md#the-default-navigator). The
+empty conversation offers three example questions built from the lens — about one of its
+entities, along one of its relations, along a chain of two — which fill the input when
+clicked. Each answer cites the entities it names with small numbered markers in their
+type's color; a marker selects that entity in the [evidence sidebar](#evidence-sidebar),
+which is the side panel of this tab. A "Show evidence" switch, on by default and
+remembered, shows the sidebar. Answers restored from the server have no evidence and show
+no markers.
 
 ### Retriever editor
 
@@ -775,6 +789,52 @@ result. Both ask the saved version: a new, changed, invalid or unsupported retri
 blocks questions and says why. Without a language-model provider the panel says that the
 retriever cannot answer.
 
+### Navigator editor
+
+The Studio lens detail's Navigators tab. Its configuration semantics are owned by
+[capabilities/navigators.md](capabilities/navigators.md).
+
+**List.** A note that the built-in `Default` exists on every lens, follows every relation
+and is not editable, with a link to try it; then a card per navigator: name, key, valid
+or invalid, the description, and a one-line summary of its walk — hops, how many relation
+and anchor types, evidence cards. A card opens the navigator's editor; the address names
+it. "New navigator" opens the editor on a draft that exists only in the client until its
+first save; a key already in the lens is refused there.
+
+**Editor.** Name, a derived-and-then-permanent key and description; then **Walk** — hops
+1 to 3, the relation types the walk may follow and the entity types a mention may resolve
+to, each either every one the lens shows or a checklist with each relation's endpoints —
+and **Answer** — the number of evidence cards and the instructions. A type the lens no
+longer shows stays listed for removal. The saved navigator's validation errors appear in
+a validation panel, the server's refusal of a save next to the form. Save, Discard and
+Delete — behind a confirmation — head the form; leaving with unsaved changes asks first.
+
+**Test panel.** Beside the editor: the [assistant chat](#assistant-chat) with the
+[evidence sidebar](#evidence-sidebar) always shown and no picker. It asks the saved
+version; saving starts a new conversation, and none is restored. A new, changed or
+invalid navigator blocks questions and says why.
+
+### Evidence sidebar
+
+The side panel of a navigator's answer, filling while the question runs — the entities
+appear before the answer. Three views, each with its count where it has one:
+
+- **Entities** — the cards, grouped as anchors (named in the question), carried over
+  from the previous answer, and reached by the walk, each group explained in a line. A
+  card shows the type, the label, its ref, its distance, whether it was handed to the
+  answer as evidence, why it is there — "Lena Fischer manages Kira Novak", or that it is
+  only the closest match for a name the question used — up to six fields, and a link to
+  the entity's page. A selected card is scrolled into view and marked.
+- **Graph** — the cards as a read-only node-link view, anchors on the left and each hop a
+  column further right, borders colored by role, evidence bold and the rest faded, links
+  labelled with the relation. A click on a node selects its card; a selected card is
+  brought into view. Large graphs open on the anchors.
+- **Steps** — the navigator's pipeline as a vertical list: each step's name, whether it
+  calls the model, what it does, its live state — waiting, running, done, skipped, failed
+  or interrupted — its time, and its one-line summary; a repeated step shows its rounds,
+  and the repeat edge its reason. A footer sums up model calls, total time, entities and
+  evidence.
+
 ### Assistant chat
 
 One conversation with one assistant on a server-held [thread](capabilities/threads.md),
@@ -786,8 +846,8 @@ kind and assistant (not in the test panel) and restores its messages from the se
   its kind does.
 - **Messages** — the question in a bubble, the answer beside its kind's icon,
   rendered as Markdown; answer text appears as it streams. While an answer runs it shows
-  the elapsed seconds and what it is doing now: an agent's running tool, a retriever's
-  current step. This is its only progress sign.
+  the elapsed seconds and what it is doing now: an agent's running tool, a retriever's or
+  a navigator's current step.
 - **Input** — at most 2,000 characters, growing to a few lines; Enter sends, Shift+Enter
   adds a line, and a hint below says so and that follow-ups refer to earlier answers.
   While an answer runs, Send becomes Stop.

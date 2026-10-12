@@ -419,6 +419,17 @@ queueing transaction commits, never before. A subscription may end on its own, a
 connection for instance; it then says so and the subscriber subscribes again. Polling
 above the port covers the time without one.
 
+## The assistant store
+
+The assistant store holds the assistants of the registered kinds
+([architecture.md](architecture.md#assistant-kinds)): per lens, kind and key, a name, an
+optional description, a configuration version and the configuration as given. The store
+never interprets a configuration — the kind checks it. A save creates the assistant or
+replaces its name, description and configuration, keeping its identity and creation time;
+a create-only save refuses a taken key as a conflict, and a missing lens is not found.
+Lists are ordered by name, then key. Deleting a lens deletes its assistants. Both the
+modeling and the runtime store hand out the assistant store of their own ontology.
+
 ## Obligations beyond storage
 
 An adapter is not only a set of writes and reads. Seven responsibilities sit entirely inside
@@ -628,11 +639,12 @@ per namespace:
 | Agent | `assistant_agent` | its lens |
 | Saved query | `saved_query` | its lens, with the denormalized lens key alongside |
 | Retriever | `assistant_retriever` | its lens, with delete cascade; unique per lens and key; configuration and warnings as `jsonb` |
+| Assistant of a registered kind | `assistant` | its lens, with delete cascade; unique per lens, kind and key; configuration as `jsonb` |
 
 Every schema row carries a `uuid` primary key.
 
 Deleting a schema object cascades through the foreign keys — property definitions,
-inclusions, agents, saved queries and retrievers die with their owner. What the DDL
+inclusions, agents, saved queries, retrievers and assistants die with their owner. What the DDL
 may carry is a rule in [decisions.md](decisions.md#storage); the closed vocabularies the
 search-index tables check are index kind, representation and generation state. The uniqueness constraints on type keys act per namespace, which is
 exactly the per-ontology key scoping the contract requires.

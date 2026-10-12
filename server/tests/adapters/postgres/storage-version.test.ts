@@ -1,7 +1,7 @@
 /**
  * The storage-version decision at boot, against a scripted querier: what
- * an empty, an unversioned (5.x), an unreleased version-2, a 6.x, a
- * current, a newer and a too-old database each lead to. The real upgrade against PostgreSQL is covered by
+ * an empty, an unversioned (5.x), an unreleased version-2, a 6.x, a 7.0
+ * (version 4), a current, a newer and a too-old database each lead to. The real upgrade against PostgreSQL is covered by
  * `tests/integration/postgres/storage-version.test.ts`.
  */
 
@@ -82,7 +82,8 @@ describe("storage version at boot", () => {
     // The version table comes first: 5.x storage has none.
     expect(queries.indexOf(SERVER_DDL[0]!)).toBeLessThan(queries.indexOf("SET LOCAL search_path TO ont_a, public"));
     const bound = queries.filter((q) => q.startsWith("SET LOCAL search_path"));
-    // Step by step: the 6.0 step, then the 7.0 step, each in every namespace.
+    // Step by step: the 6.0 step, the 7.0 step, then the assistant step,
+    // each in every namespace.
     expect(bound).toEqual([
       "SET LOCAL search_path TO ont_a, public",
       "SET LOCAL search_path TO ont_b, public",
@@ -90,7 +91,11 @@ describe("storage version at boot", () => {
       "SET LOCAL search_path TO ont_a, public",
       "SET LOCAL search_path TO ont_b, public",
       "SET LOCAL search_path TO public",
+      "SET LOCAL search_path TO ont_a, public",
+      "SET LOCAL search_path TO ont_b, public",
+      "SET LOCAL search_path TO public",
     ]);
+    expect(queries.filter((q) => q.startsWith("CREATE TABLE assistant ("))).toHaveLength(2);
     expect(queries.filter((q) => q.includes("ADD COLUMN name_property"))).toHaveLength(2);
     // The registry's language goes once, after every namespace took it over.
     const dropped = queries.indexOf("ALTER TABLE public.ontology DROP COLUMN text_search_language");
@@ -101,7 +106,7 @@ describe("storage version at boot", () => {
     expect(queries.filter((q) => q.startsWith("CREATE TABLE retriever_agent"))).toHaveLength(2);
     expect(queries.filter((q) => q.includes("RENAME TO retriever_agent"))).toEqual([]);
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 1 to 4"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 1 to 5"));
   });
 
   it("upgrades storage at the unreleased version 2 by the same step, taking its retrievers over", async () => {
@@ -116,17 +121,39 @@ describe("storage version at boot", () => {
     expect(queries).toContain("ALTER TABLE retriever_config RENAME TO retriever_agent");
     expect(queries.filter((q) => q.startsWith("CREATE TABLE retriever_agent"))).toEqual([]);
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 2 to 4"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 2 to 5"));
   });
 
-  it("upgrades 6.x storage (version 3) by the 7.0 step alone, naming the assistant tables after their kind", async () => {
+  it("upgrades 6.x storage (version 3) by the 7.0 step and the assistant step, naming the assistant tables after their kind", async () => {
     const { querier, queries } = database({ version: 3, registry: true, namespaces: ["ont_a"] });
     await bringStorageUpToDate(querier, SERVER_DDL);
     expect(queries.filter((q) => q.includes("ADD COLUMN name_property"))).toEqual([]);
     expect(queries).toContain("ALTER TABLE ai_agent_config RENAME TO assistant_agent");
     expect(queries).toContain("ALTER TABLE retriever_agent RENAME TO assistant_retriever");
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 3 to 4"));
+    expect(queries.filter((q) => q.startsWith("CREATE TABLE assistant ("))).toHaveLength(1);
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 3 to 5"));
+  });
+
+  it("upgrades version-4 storage by the assistant step alone: one assistant table per namespace", async () => {
+    expect(STORAGE_VERSION).toBe(5);
+    const { querier, queries } = database({ version: 4, registry: true, namespaces: ["ont_a", "ont_b"] });
+    await bringStorageUpToDate(querier, SERVER_DDL);
+    expect(queries).not.toContain("ALTER TABLE ai_agent_config RENAME TO assistant_agent");
+    expect(queries.filter((q) => q.includes("ADD COLUMN name_property"))).toEqual([]);
+    const created = queries.filter((q) => q.startsWith("CREATE TABLE assistant ("));
+    expect(created).toHaveLength(2);
+    expect(created[0]).toContain("CONSTRAINT assistant_pk PRIMARY KEY");
+    expect(created[0]).toContain("CONSTRAINT assistant_lens_fk");
+    expect(created[0]).toContain("ON DELETE CASCADE");
+    expect(created[0]).toContain("CONSTRAINT assistant_key_unique UNIQUE (lens_id, kind, key)");
+    expect(queries.filter((q) => q.startsWith("SET LOCAL search_path"))).toEqual([
+      "SET LOCAL search_path TO ont_a, public",
+      "SET LOCAL search_path TO ont_b, public",
+      "SET LOCAL search_path TO public",
+    ]);
+    expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 4 to 5"));
   });
 
   it("refuses storage newer than the code and writes nothing", async () => {

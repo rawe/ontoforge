@@ -8,7 +8,8 @@
  * table set up, and the retired search storage dropped. Storage of the
  * 6.x line (version 3) is produced by giving the assistant tables their
  * 6.x names back; the 7.0 step names them after their kind again, every
- * agent and retriever kept. Storage at
+ * agent and retriever kept. Storage of 7.0 (version 4) is produced by
+ * dropping the `assistant` table; the step to version 5 creates it. Storage at
  * the unreleased version 2 (development storage with retrievers) is
  * produced by dropping what the current code adds and restoring the
  * per-entity search storage it retires; the same step upgrades it,
@@ -93,9 +94,16 @@ async function renameTable(
   await querier.query(`ALTER TABLE ${namespace}.${table} RENAME TO ${then}`);
 }
 
+/** Storage of 7.0 (version 4): no table for assistants of registered
+ * kinds. Records no version — `makeVersion3Layout` builds on it. */
+async function makeVersion4Layout(namespace: string): Promise<void> {
+  await runQuery(`DROP TABLE ${namespace}.assistant`);
+}
+
 /** Storage of the 6.x line (version 3): the assistant tables under their
  * 6.x names. Records no version — `makeVersion2` builds on it. */
 async function makeVersion3Layout(namespace: string): Promise<void> {
+  await makeVersion4Layout(namespace);
   await withTransaction(async (querier) => {
     await renameTable(querier, namespace, ["assistant_agent", "assistant_agent_id"], ["ai_agent_config", "agent_config_id"]);
     await renameTable(
@@ -315,7 +323,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 1 to 4 (2 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 1 to 5 (2 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     expect([await instances("ont_legacy"), await instances("ont_legacy_de")]).toEqual(before);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
@@ -405,10 +413,11 @@ describe("PostgreSQL storage version", () => {
       "kurz:dokument~default",
       "kurz:ort~default",
     ]);
-    // 5.1.0 has no retrievers: an empty retriever table.
+    // 5.1.0 has no retrievers: an empty retriever table; no assistants either.
     expect((await runQuery(`SELECT count(*)::int AS n FROM ont_legacy.assistant_retriever`)).rows).toEqual([
       { n: 0 },
     ]);
+    expect((await runQuery(`SELECT count(*)::int AS n FROM ont_legacy.assistant`)).rows).toEqual([{ n: 0 }]);
   });
 
   it("upgrades 6.x storage to exactly the layout of a fresh ontology, keeping every agent and retriever", async () => {
@@ -436,7 +445,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 3 to 4 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 3 to 5 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
@@ -449,6 +458,43 @@ describe("PostgreSQL storage version", () => {
     expect((await modeling.listAgents(lensId)).map((agent) => agent.key)).toEqual(["helper"]);
     const retriever = (await modeling.searchIndices!().getRetriever(lensId, "finder"))!;
     expect([retriever.retrieverId, retriever.config]).toEqual([retrieverId, config]);
+  });
+
+  it("upgrades 7.0 storage (version 4) by creating the assistant table, keeping every retriever", async () => {
+    expect(STORAGE_VERSION).toBe(5);
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
+    const lensId = randomUUID();
+    await withTransaction(async (querier) => {
+      await querier.query(`INSERT INTO ont_older.lens (lens_id, key, name) VALUES ($1, 'all', 'All')`, [lensId]);
+      await querier.query(
+        `INSERT INTO ont_older.assistant_retriever (assistant_retriever_id, lens_id, key, name, config_version, config)
+         VALUES ($1, $2, 'finder', 'Finder', 2, '{}'::jsonb)`,
+        [randomUUID(), lensId],
+      );
+    });
+    await makeVersion4Layout("ont_older");
+    await recordVersion(4);
+    expect((await runQuery(`SELECT to_regclass('ont_older.assistant') AS t`)).rows).toEqual([{ t: null }]);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await initSchema();
+
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 4 to 5 (1 ontologies).");
+    expect(await recordedVersion()).toBe(STORAGE_VERSION);
+    await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
+    expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
+    const retrievers = await runQuery(`SELECT key FROM ont_older.assistant_retriever`);
+    expect(retrievers.rows).toEqual([{ key: "finder" }]);
+    // The new table works through the port and goes with its lens.
+    const assistants = (await getModelingStore("older")).assistants();
+    const [saved, created] = await assistants.saveAssistant(
+      lensId,
+      { assistantId: randomUUID(), kind: "navigators", key: "walker", name: "Walker", description: null, configVersion: 1, config: { hops: 2 } },
+      false,
+    );
+    expect([saved.key, saved.config, created]).toEqual(["walker", { hops: 2 }, true]);
+    await runQuery(`DELETE FROM ont_older.lens WHERE lens_id = $1`, [lensId]);
+    expect(await assistants.listAssistants(lensId, "navigators")).toEqual([]);
   });
 
   it("upgrades version-2 storage to exactly the layout of a fresh ontology", async () => {

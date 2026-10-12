@@ -161,7 +161,8 @@
                         "tools": null
                     }
                 ],
-                "retrievers": []
+                "retrievers": [],
+                "navigators": []
             },
             "savedQueries": [
                 {
@@ -231,7 +232,8 @@
             "indexInclusions": [],
             "assistants": {
                 "agents": [],
-                "retrievers": []
+                "retrievers": [],
+                "navigators": []
             },
             "savedQueries": []
         }

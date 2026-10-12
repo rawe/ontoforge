@@ -6,15 +6,17 @@
 import { vi, type Mock } from "vitest";
 
 import type { ModelingStore } from "../../src/core/ports.js";
+import { createMockAssistantStore, type MockAssistantStore } from "../mockAssistantStore.js";
 import { createMockSearchIndexStore, type MockSearchIndexStore } from "../mockSearchIndexStore.js";
 
 export const NOW = new Date("2025-01-01T12:00:00.000Z");
 
 /** Every port method as a mock — completeness is compiler-enforced. The
- * search-index store it hands out is a mock too (`indices`). */
+ * search-index and assistant stores it hands out are mocks too (`indices`,
+ * `assistantStore`). */
 export type MockModelingStore = {
   [K in keyof ModelingStore]: Mock;
-} & { indices: MockSearchIndexStore };
+} & { indices: MockSearchIndexStore; assistantStore: MockAssistantStore };
 
 /**
  * A mock store whose reads default to "nothing stored". Tests override
@@ -22,9 +24,12 @@ export type MockModelingStore = {
  */
 export function createMockModelingStore(): MockModelingStore {
   const indices = createMockSearchIndexStore();
+  const assistantStore = createMockAssistantStore();
   return {
     indices,
+    assistantStore,
     searchIndices: vi.fn(() => indices),
+    assistants: vi.fn(() => assistantStore),
     createLens: vi.fn(),
     listLenses: vi.fn(async () => []),
     getLens: vi.fn(async () => null),

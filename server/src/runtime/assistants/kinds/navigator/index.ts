@@ -159,7 +159,9 @@ async function run(turn: Turn<NavigatorConfig>): Promise<string> {
       evidence = kept.evidence;
       if (board.size > evidence.length) notes.push(`${board.size - evidence.length} more entities were found but not shown.`);
       if (walks.length > 1) {
-        notes.push("The planned route did not reach everything asked for, so the walk also explored every relation.");
+        notes.push(walks[0]!.planned
+          ? "The planned route did not reach everything asked for, so the walk also explored every relation."
+          : "The first walk reached nothing asked for, so it went one hop further.");
       }
       await trace.entities(board.nodes().map((n) => n.card), board.links);
       return {};

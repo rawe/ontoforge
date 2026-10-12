@@ -723,10 +723,8 @@ diagnostics with every answer and shows them in the
 the lens cannot run shows the server's refusal with its reasons.
 
 **Navigators** — chat with the lens's [navigators](capabilities/navigators.md); `Default`
-is the lens's [default navigator](capabilities/navigators.md#the-default-navigator). The
-empty conversation offers three example questions built from the lens — about one of its
-entities, along one of its relations, along a chain of two — which fill the input when
-clicked. Each answer cites the entities it names with small numbered markers in their
+is the lens's [default navigator](capabilities/navigators.md#the-default-navigator). Each
+answer cites the entities it names with small numbered markers in their
 type's color; a marker selects that entity in the [evidence sidebar](#evidence-sidebar),
 which is the side panel of this tab. A "Show evidence" switch, on by default and
 remembered, shows the sidebar. Answers restored from the server have no evidence and show

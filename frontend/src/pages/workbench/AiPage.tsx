@@ -102,7 +102,6 @@ export function AiPage() {
                     description={navigator.description}
                     blockedReason={null}
                     remember
-                    schema={schema.data}
                     picker={picker}
                   />
                 )}

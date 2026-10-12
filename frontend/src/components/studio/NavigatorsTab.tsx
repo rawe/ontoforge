@@ -331,7 +331,6 @@ function NavigatorPage({ ontologyKey, lensKey, schema, aiEnabled, existingKeys, 
                 description={navigator?.description ?? null}
                 blockedReason={blockedReason}
                 remember={false}
-                schema={schema}
                 actions={chatActions}
               />}
         </section>

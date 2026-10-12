@@ -19,7 +19,6 @@ export interface GraphChatProps {
   description?: string | null
   intro: string
   placeholder: string
-  examples?: readonly string[]
   /** Why questions are blocked (unsaved, invalid); null = they run. */
   blockedReason?: string | null
   /** Remember the thread in the browser and restore it on open (the Workbench); else each mount starts a new one. */

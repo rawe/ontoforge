@@ -60,8 +60,6 @@ interface AssistantChatProps<E extends { type: string }, I> {
   /** One line under the name in the empty state, about what this kind does. */
   intro: string
   placeholder: string
-  /** Questions under the intro; picking one puts it into the input to edit and send. */
-  examples?: readonly string[]
   /** Remember the thread in the browser and restore it on open (the Workbench); else each mount starts a new one. */
   remember: boolean
   /** Why questions are blocked (unsaved, invalid, unsupported); null = they run. */
@@ -95,7 +93,7 @@ interface AssistantChatProps<E extends { type: string }, I> {
  * assistant or a new thread.
  */
 export function AssistantChat<E extends { type: string }, I>({
-  ontologyKey, lensKey, kind, assistantKey, name, description, intro, placeholder, examples, remember,
+  ontologyKey, lensKey, kind, assistantKey, name, description, intro, placeholder, remember,
   blockedReason = null, model, send, insight, renderAnswer, picker, toggle, actions,
 }: AssistantChatProps<E, I>) {
   const owner = useMemo<ThreadOwner | null>(
@@ -113,7 +111,6 @@ export function AssistantChat<E extends { type: string }, I>({
   const active = useRef<AbortController | null>(null)
   const threadId = useRef<string | null>(null)
   const scroll = useRef<HTMLDivElement>(null)
-  const textarea = useRef<HTMLTextAreaElement>(null)
   const running = turns.some((t) => t.status === 'pending')
   const canAsk = assistantKey !== null && blockedReason === null && !restoring
   const panel = insight.panel
@@ -254,17 +251,7 @@ export function AssistantChat<E extends { type: string }, I>({
                     <LoaderCircle className="size-3.5 animate-spin" /> Restoring the conversation …
                   </p>
                 ) : turns.length === 0 ? (
-                  <Intro
-                    icon={icon}
-                    name={name}
-                    description={description}
-                    intro={intro}
-                    examples={canAsk ? examples : undefined}
-                    onExample={(text) => {
-                      setInput(text)
-                      textarea.current?.focus()
-                    }}
-                  />
+                  <Intro icon={icon} name={name} description={description} intro={intro} />
                 ) : (
                   <div className="space-y-6">
                     {turns.map((turn) => (
@@ -293,7 +280,6 @@ export function AssistantChat<E extends { type: string }, I>({
                 )}
                 <form className="flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); void submit() }}>
                   <Textarea
-                    ref={textarea}
                     aria-label={`Message to ${name}`}
                     placeholder={placeholder}
                     value={input}
@@ -354,15 +340,8 @@ export function AssistantChat<E extends { type: string }, I>({
   )
 }
 
-/** The empty conversation: who answers, what it does and, when given, questions to start from. */
-function Intro({ icon, name, description, intro, examples, onExample }: {
-  icon: LucideIcon
-  name: string
-  description?: string | null
-  intro: string
-  examples?: readonly string[]
-  onExample: (text: string) => void
-}) {
+/** The empty conversation: who answers and what it does. */
+function Intro({ icon, name, description, intro }: { icon: LucideIcon; name: string; description?: string | null; intro: string }) {
   return (
     <div className="flex flex-col items-center gap-3 py-12 text-center">
       <AssistantIcon icon={icon} className="size-11 rounded-xl [&_svg]:size-5" />
@@ -371,21 +350,6 @@ function Intro({ icon, name, description, intro, examples, onExample }: {
         {description && <p className="text-[13px] text-foreground/80">{description}</p>}
         <p className="text-[13px] text-muted-foreground">{intro}</p>
       </div>
-      {examples !== undefined && examples.length > 0 && (
-        <ul aria-label="Example questions" className="flex max-w-md flex-col items-center gap-1.5">
-          {examples.map((example) => (
-            <li key={example}>
-              <button
-                type="button"
-                onClick={() => onExample(example)}
-                className="rounded-full border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                {example}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   )
 }

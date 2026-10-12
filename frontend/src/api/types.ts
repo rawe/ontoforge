@@ -257,7 +257,7 @@ export interface QueryResult {
 /* -------------------------------- runtime — AI ------------------------------- */
 
 /** An assistant kind, as it appears in `/ai/assistants/<kind>`. */
-export type AssistantKind = 'agents' | 'retrievers'
+export type AssistantKind = 'agents' | 'retrievers' | 'navigators'
 
 /** One entry of a kind's runtime list; the built-in default (`_default`) comes first. */
 export interface RuntimeAssistant {

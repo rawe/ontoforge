@@ -60,6 +60,8 @@ interface AssistantChatProps<E extends { type: string }, I> {
   /** One line under the name in the empty state, about what this kind does. */
   intro: string
   placeholder: string
+  /** Questions under the intro; picking one puts it into the input to edit and send. */
+  examples?: readonly string[]
   /** Remember the thread in the browser and restore it on open (the Workbench); else each mount starts a new one. */
   remember: boolean
   /** Why questions are blocked (unsaved, invalid, unsupported); null = they run. */
@@ -68,6 +70,11 @@ interface AssistantChatProps<E extends { type: string }, I> {
   /** Send one message and read its turn; refusals before the stream throw. */
   send: (body: ChatRequest, onEvent: (event: SharedEvent | E) => void, signal: AbortSignal) => Promise<void>
   insight: InsightView<I>
+  /**
+   * The answer text; `show` shows its turn in the side panel. Omitted:
+   * plain markdown.
+   */
+  renderAnswer?: (turn: Turn<I>, show: () => void) => ReactNode
   /** Toolbar, left: the assistant picker. */
   picker?: ReactNode
   /** Toolbar, right: the side-panel switch. */
@@ -88,8 +95,8 @@ interface AssistantChatProps<E extends { type: string }, I> {
  * assistant or a new thread.
  */
 export function AssistantChat<E extends { type: string }, I>({
-  ontologyKey, lensKey, kind, assistantKey, name, description, intro, placeholder, remember,
-  blockedReason = null, model, send, insight, picker, toggle, actions,
+  ontologyKey, lensKey, kind, assistantKey, name, description, intro, placeholder, examples, remember,
+  blockedReason = null, model, send, insight, renderAnswer, picker, toggle, actions,
 }: AssistantChatProps<E, I>) {
   const owner = useMemo<ThreadOwner | null>(
     () => (remember && assistantKey !== null ? { ontologyKey, lensKey, kind, assistantKey } : null),
@@ -106,6 +113,7 @@ export function AssistantChat<E extends { type: string }, I>({
   const active = useRef<AbortController | null>(null)
   const threadId = useRef<string | null>(null)
   const scroll = useRef<HTMLDivElement>(null)
+  const textarea = useRef<HTMLTextAreaElement>(null)
   const running = turns.some((t) => t.status === 'pending')
   const canAsk = assistantKey !== null && blockedReason === null && !restoring
   const panel = insight.panel
@@ -246,7 +254,17 @@ export function AssistantChat<E extends { type: string }, I>({
                     <LoaderCircle className="size-3.5 animate-spin" /> Restoring the conversation …
                   </p>
                 ) : turns.length === 0 ? (
-                  <Intro icon={icon} name={name} description={description} intro={intro} />
+                  <Intro
+                    icon={icon}
+                    name={name}
+                    description={description}
+                    intro={intro}
+                    examples={canAsk ? examples : undefined}
+                    onExample={(text) => {
+                      setInput(text)
+                      textarea.current?.focus()
+                    }}
+                  />
                 ) : (
                   <div className="space-y-6">
                     {turns.map((turn) => (
@@ -254,6 +272,7 @@ export function AssistantChat<E extends { type: string }, I>({
                         key={turn.id}
                         turn={turn}
                         icon={icon}
+                        answer={turn.reply && (renderAnswer?.(turn, () => setSelected(turn.id)) ?? <Markdown>{turn.reply}</Markdown>)}
                         progress={turn.status === 'pending' ? model.progress(turn.insight) : undefined}
                         insight={panel !== null && (
                           <InsightButton spec={insight.button(turn)} selected={turn.id === shown?.id} onSelect={() => setSelected(turn.id)} />
@@ -274,6 +293,7 @@ export function AssistantChat<E extends { type: string }, I>({
                 )}
                 <form className="flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); void submit() }}>
                   <Textarea
+                    ref={textarea}
                     aria-label={`Message to ${name}`}
                     placeholder={placeholder}
                     value={input}
@@ -334,8 +354,15 @@ export function AssistantChat<E extends { type: string }, I>({
   )
 }
 
-/** The empty conversation: who answers and what it does. */
-function Intro({ icon, name, description, intro }: { icon: LucideIcon; name: string; description?: string | null; intro: string }) {
+/** The empty conversation: who answers, what it does and, when given, questions to start from. */
+function Intro({ icon, name, description, intro, examples, onExample }: {
+  icon: LucideIcon
+  name: string
+  description?: string | null
+  intro: string
+  examples?: readonly string[]
+  onExample: (text: string) => void
+}) {
   return (
     <div className="flex flex-col items-center gap-3 py-12 text-center">
       <AssistantIcon icon={icon} className="size-11 rounded-xl [&_svg]:size-5" />
@@ -344,6 +371,21 @@ function Intro({ icon, name, description, intro }: { icon: LucideIcon; name: str
         {description && <p className="text-[13px] text-foreground/80">{description}</p>}
         <p className="text-[13px] text-muted-foreground">{intro}</p>
       </div>
+      {examples !== undefined && examples.length > 0 && (
+        <ul aria-label="Example questions" className="flex max-w-md flex-col items-center gap-1.5">
+          {examples.map((example) => (
+            <li key={example}>
+              <button
+                type="button"
+                onClick={() => onExample(example)}
+                className="rounded-full border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                {example}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
@@ -357,7 +399,7 @@ function AssistantIcon({ icon: Icon, className }: { icon: LucideIcon; className?
 }
 
 /** One question and its answer. */
-function TurnView<I>({ turn, icon, progress, insight }: { turn: Turn<I>; icon: LucideIcon; progress: string | undefined; insight: ReactNode }) {
+function TurnView<I>({ turn, icon, answer, progress, insight }: { turn: Turn<I>; icon: LucideIcon; answer: ReactNode; progress: string | undefined; insight: ReactNode }) {
   const ended = endText(turn)
   return (
     <article className="space-y-3">
@@ -369,7 +411,7 @@ function TurnView<I>({ turn, icon, progress, insight }: { turn: Turn<I>; icon: L
       <div className="flex gap-2.5">
         <AssistantIcon icon={icon} className="mt-0.5" />
         <div className="min-w-0 flex-1 space-y-2 pt-0.5">
-          {turn.reply && <Markdown>{turn.reply}</Markdown>}
+          {answer}
           {turn.status === 'pending' && turn.startedAt !== undefined && <Working since={turn.startedAt} detail={progress} />}
           {ended !== null && (
             <p

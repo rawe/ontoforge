@@ -19,6 +19,9 @@
  *                               requests and shows diagnostics
  *   of.retrieverTestMode      — "chat" | "retrieve": the retriever
  *                               editor's test panel mode
+ *   of.graphSidebar.{kind}    — "true" | "false": the Workbench chat of a graph
+ *                               assistant kind (navigators) shows its evidence
+ *                               sidebar (default true)
  *   of.retriever.{ontologyKey}.{lensKey} — key of the palette question mode's
  *                               retriever
  *   of.schema.{ontologyKey}.positions — schema graph node positions,
@@ -44,6 +47,7 @@ export const storageKeys = {
   chatToolCalls: 'of.chatToolCalls',
   retrieverDiagnostics: 'of.retrieverDiagnostics',
   retrieverTestMode: 'of.retrieverTestMode',
+  graphSidebar: (kind: string) => `of.graphSidebar.${kind}`,
   retriever: (ontologyKey: string, lensKey: string) =>
     `of.retriever.${ontologyKey}.${lensKey}`,
   schemaPositions: (ontologyKey: string) => `of.schema.${ontologyKey}.positions`,

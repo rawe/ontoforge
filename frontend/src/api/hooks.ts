@@ -7,6 +7,7 @@ import * as model from './model'
 import * as registry from './registry'
 import * as server from './server'
 import * as runtime from './runtime'
+import { listNavigators } from './navigators'
 import { listRetrievers } from './retrievers'
 import { qk } from './queryKeys'
 import type { AssistantKind, EntityInstance, Matched } from './types'
@@ -120,6 +121,16 @@ export function useRetrievers(ontologyKey: string, lensKey: string) {
   return useQuery({
     queryKey: qk.retrievers(ontologyKey, lensKey),
     queryFn: () => listRetrievers(ontologyKey, lensKey),
+    enabled: ontologyKey !== '' && lensKey !== '',
+    retry: false,
+  })
+}
+
+/** Navigators of a lens (modeling API, by lens key) with configuration and validation — the Studio's list. */
+export function useNavigators(ontologyKey: string, lensKey: string) {
+  return useQuery({
+    queryKey: qk.navigators(ontologyKey, lensKey),
+    queryFn: () => listNavigators(ontologyKey, lensKey),
     enabled: ontologyKey !== '' && lensKey !== '',
     retry: false,
   })

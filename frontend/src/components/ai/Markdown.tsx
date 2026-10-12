@@ -1,6 +1,6 @@
 import { Check, Copy } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components, type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -53,8 +53,15 @@ function extractText(node: ReactNode): string {
 /**
  * Markdown renderer for AI answers/chat: GFM (tables, strikethrough, task
  * lists), mono code with copy buttons, compact data-dense typography.
+ * `plugins` (remark) and `components` add to these, e.g. to render an
+ * assistant's citations.
  */
-export function Markdown({ children, className }: { children: string; className?: string }) {
+export function Markdown({ children, className, plugins, components }: {
+  children: string
+  className?: string
+  plugins?: Options['remarkPlugins']
+  components?: Components
+}) {
   return (
     <div
       className={cn(
@@ -69,8 +76,9 @@ export function Markdown({ children, className }: { children: string; className?
       )}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, ...(plugins ?? [])]}
         components={{
+          ...components,
           pre: ({ children }) => <>{children}</>,
           code: ({ children, className: codeClass, ...props }) => {
             // Block code arrives with a language- class or contains newlines.

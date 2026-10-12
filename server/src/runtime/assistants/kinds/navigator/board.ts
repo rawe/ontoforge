@@ -18,7 +18,7 @@ export interface BoardNode {
 
 export class Board {
   private readonly byId = new Map<string, BoardNode>();
-  private readonly linkKeys = new Set<string>();
+  private readonly linkIds = new Set<string>();
   readonly links: CardLink[] = [];
 
   constructor(private readonly lens: SchemaCacheValue) {}
@@ -83,12 +83,11 @@ export class Board {
     return node;
   }
 
-  /** Records a relation between two board entities, once. */
-  link(from: string, to: string, type: string): void {
-    const key = `${from}|${type}|${to}`;
-    if (this.linkKeys.has(key)) return;
-    this.linkKeys.add(key);
-    this.links.push({ from, to, type, label: relationLabel(this.lens, type) });
+  /** Records a stored relation between two board entities, once per relation id. */
+  link(id: string, from: string, to: string, type: string): void {
+    if (this.linkIds.has(id)) return;
+    this.linkIds.add(id);
+    this.links.push({ id, from, to, type, label: relationLabel(this.lens, type) });
   }
 
   /** The links among evidence entities. */

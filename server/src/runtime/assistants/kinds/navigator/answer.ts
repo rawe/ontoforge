@@ -43,7 +43,9 @@ export function answerInput(
   }
   parts.push(evidence.length > 0 ? `ENTITIES:\n${evidence.map(cardLine).join("\n")}` : "ENTITIES: none were found.");
   const links = board.evidenceLinks();
-  if (links.length > 0) parts.push(`RELATIONS:\n${links.map((link) => linkLine(board, link)).join("\n")}`);
+  // Two stored relations of one type between the same pair read as one sentence.
+  const sentences = [...new Set(links.map((link) => linkLine(board, link)))];
+  if (sentences.length > 0) parts.push(`RELATIONS:\n${sentences.join("\n")}`);
   if (notes.length > 0) parts.push(`NOTES:\n${notes.map((n) => `- ${n}`).join("\n")}`);
   parts.push(`QUESTION: ${question}`);
   return parts.join("\n\n");

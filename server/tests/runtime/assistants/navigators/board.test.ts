@@ -66,16 +66,19 @@ describe("Board", () => {
     expect(anchor.parent).toBeNull();
   });
 
-  it("records each relation once, labelled as a phrase", () => {
+  it("records each stored relation once, by its id, labelled as a phrase", () => {
     const board = new Board(LENS);
-    board.link("E1", "E2", "works_on");
-    board.link("E1", "E2", "works_on");
-    board.link("E2", "E1", "works_on");
-    board.link("E1", "E2", "has_kpi");
+    board.link("r1", "E1", "E2", "works_on");
+    board.link("r1", "E1", "E2", "works_on");
+    board.link("r2", "E2", "E1", "works_on");
+    board.link("r3", "E1", "E2", "has_kpi");
+    // A second stored relation of the same type between the same pair is a link of its own.
+    board.link("r4", "E1", "E2", "works_on");
     expect(board.links).toEqual([
-      { from: "E1", to: "E2", type: "works_on", label: "works on" },
-      { from: "E2", to: "E1", type: "works_on", label: "works on" },
-      { from: "E1", to: "E2", type: "has_kpi", label: "has KPI" },
+      { id: "r1", from: "E1", to: "E2", type: "works_on", label: "works on" },
+      { id: "r2", from: "E2", to: "E1", type: "works_on", label: "works on" },
+      { id: "r3", from: "E1", to: "E2", type: "has_kpi", label: "has KPI" },
+      { id: "r4", from: "E1", to: "E2", type: "works_on", label: "works on" },
     ]);
   });
 
@@ -84,9 +87,9 @@ describe("Board", () => {
     board.add(lena, "anchor", 0, "", null)!.card.evidence = true;
     board.add(kira, "reached", 1, "", "E1")!.card.evidence = true;
     board.add(apollo, "reached", 2, "", "E2");
-    board.link("E1", "E2", "manages");
-    board.link("E2", "E3", "works_on");
-    expect(board.evidenceLinks()).toEqual([{ from: "E1", to: "E2", type: "manages", label: "manages" }]);
+    board.link("r1", "E1", "E2", "manages");
+    board.link("r2", "E2", "E3", "works_on");
+    expect(board.evidenceLinks()).toEqual([{ id: "r1", from: "E1", to: "E2", type: "manages", label: "manages" }]);
   });
 
   it("cards carry at most six fields, each value cut to 200 characters", () => {

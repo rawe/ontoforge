@@ -32,9 +32,9 @@ describe("answerInput", () => {
     const kira = b.add(entity("kira-uuid", "person", "Kira Novak"), "reached", 1, "Lena Vogt manages Kira Novak", "E1")!;
     const apollo = b.add(entity("apollo-uuid", "project", "Apollo", { status: "active" }), "reached", 2, "Kira Novak works on Apollo", "E2")!;
     b.add(entity("zeus-uuid", "project", "Zeus"), "reached", 2, "x", "E2");
-    b.link("E1", "E2", "manages");
-    b.link("E2", "E3", "works_on");
-    b.link("E2", "E4", "works_on");
+    b.link("r1", "E1", "E2", "manages");
+    b.link("r2", "E2", "E3", "works_on");
+    b.link("r3", "E2", "E4", "works_on");
     for (const node of [lena, kira, apollo]) node.card.evidence = true;
     return { b, evidence: [lena, kira, apollo] };
   }

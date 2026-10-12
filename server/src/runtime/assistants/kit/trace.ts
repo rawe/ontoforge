@@ -38,6 +38,8 @@ export interface EntityCard {
 
 /** A relation between two cards, directed as stored. */
 export interface CardLink {
+  /** The stored relation's id; a link's identity. */
+  id: string;
   from: string;
   to: string;
   type: string;

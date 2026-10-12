@@ -42,8 +42,8 @@ describe("followPath", () => {
     expect(apollo.parent).toBe(board.node("kira")!.card.ref);
     expect(board.node("kira")!.card).toMatchObject({ hop: 1, reason: "Lena Vogt manages Kira Novak" });
     // Links point as stored: from the relation's source.
-    expect(board.links).toContainEqual({ from: "E1", to: "E2", type: "manages", label: "manages" });
-    expect(board.links).toContainEqual({ from: "E2", to: "E4", type: "works_on", label: "works on" });
+    expect(board.links).toContainEqual({ id: "manages:lena:kira", from: "E1", to: "E2", type: "manages", label: "manages" });
+    expect(board.links).toContainEqual({ id: "works_on:kira:apollo", from: "E2", to: "E4", type: "works_on", label: "works on" });
     // No other relation type was followed: no team, no skill.
     expect(board.nodes().some((n) => n.card.type === "team" || n.card.type === "skill")).toBe(false);
   });
@@ -58,7 +58,7 @@ describe("followPath", () => {
       expect(labels(board).sort(), direction).toEqual(["Kira Novak", "Lena Vogt", "Tom Berg"]);
       expect(reader.calls.neighbors, direction).toHaveLength(1);
       expect(board.node("lena")!.card.reason).toBe("Lena Vogt manages Kira Novak");
-      expect(board.links).toContainEqual({ from: board.node("lena")!.card.ref, to: "E1", type: "manages", label: "manages" });
+      expect(board.links).toContainEqual({ id: "manages:lena:kira", from: board.node("lena")!.card.ref, to: "E1", type: "manages", label: "manages" });
     }
   });
 
@@ -397,7 +397,7 @@ describe("focus", () => {
     const { board, anchors } = anchored(reader, "lena");
     await explore(reader, board, LENS, anchors, ALL_RELATIONS, new Set(["person"]), 1);
     // Both reports are hop 1 with one link each; an extra link makes Omar better connected.
-    board.link(board.node("omar")!.card.ref, board.node("lena")!.card.ref, "has_kpi");
+    board.link("extra", board.node("omar")!.card.ref, board.node("lena")!.card.ref, "has_kpi");
     const { evidence } = focus(board, new Set(["person"]), 10);
     expect(evidence.map((n) => n.card.label)).toEqual(["Lena Vogt", "Omar Haddad", "Kira Novak"]);
   });

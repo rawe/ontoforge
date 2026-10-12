@@ -772,7 +772,7 @@ an entity's `id`:
 |---|---|---|
 | `navigator.graph` | `steps` (`id`, `label`, `description`, `model`), `edges` (`from`, `to`, optional `label`; an edge to itself is a repeat) | The pipeline, once, right after `thread` |
 | `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, and when it ends `durationMs` and an optional `summary` | One step starting or ending; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn fails |
-| `navigator.entities` | `entities` — each `ref`, `id`, `type`, `typeName`, `label`, `role` (`anchor`, `reached`, `focus`), `hop`, `reason`, `fields` (`name`, `value`), `evidence` — and `links` — each `from`, `to` (refs, directed as stored), `type`, `label` | The entities met so far and the relations between them; a later card replaces an earlier one with the same `ref`, a link is identified by `from`, `type` and `to` |
+| `navigator.entities` | `entities` — each `ref`, `id`, `type`, `typeName`, `label`, `role` (`anchor`, `reached`, `focus`), `hop`, `reason`, `fields` (`name`, `value`), `evidence` — and `links` — each `id` (the stored relation's id), `from`, `to` (refs, directed as stored), `type`, `label` | The entities met so far and the relations between them; a later card replaces an earlier one with the same `ref`, a link is identified by its `id` |
 | `navigator.summary` | `modelCalls`, `durationMs`, `entities`, `evidence`, `hops`, `timings` (milliseconds per step id) | Once, before `final` |
 
 Refs are `E1`, `E2`, … in discovery order, unique within a turn. The answer cites evidence

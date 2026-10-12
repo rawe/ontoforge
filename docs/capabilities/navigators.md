@@ -150,8 +150,9 @@ A turn streams its work before its answer, in display names only:
   its role — anchor, reached by the walk, or carried over from the previous answer — its
   distance from the nearest anchor, why it is there ("Lena Fischer manages Kira Novak", or
   "Closest match for “Nordwind Robotics” — not the same name"), and whether it is evidence;
-  and the relations between them. They are sent after the anchors, after each walk and
-  after the focus, each time replacing what the client had under the same refs.
+  and the relations between them, each naming the stored relation it stands for. They are
+  sent after the anchors, after each walk and after the focus, each time replacing what the
+  client had under the same refs.
 - **A summary** — model calls, duration, entities met, evidence, hops — once, before the
   end of the turn.
 

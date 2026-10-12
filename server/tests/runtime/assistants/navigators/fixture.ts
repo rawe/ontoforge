@@ -69,7 +69,11 @@ export interface Edge {
   type: string;
   from: string;
   to: string;
+  /** The stored relation's id; `type:from:to` when not given. */
+  id?: string;
 }
+
+export const edgeId = (edge: Edge): string => edge.id ?? `${edge.type}:${edge.from}:${edge.to}`;
 
 /** Lena manages Kira and Omar, Kira manages Tom; Kira works on Apollo,
  * Omar on Zeus; Kira is in Platform, Omar in Data; Apollo requires
@@ -147,10 +151,10 @@ export class FakeReader implements GraphReader {
     this.calls.neighbors.push([type, id, limit]);
     const out: Neighbor[] = [];
     for (const edge of this.edges) {
-      if (edge.from === id) out.push({ relation: { _relationTypeKey: edge.type, direction: "outgoing" }, entity: this.byId.get(edge.to)! });
+      if (edge.from === id) out.push({ relation: { _id: edgeId(edge), _relationTypeKey: edge.type, direction: "outgoing" }, entity: this.byId.get(edge.to)! });
     }
     for (const edge of this.edges) {
-      if (edge.to === id) out.push({ relation: { _relationTypeKey: edge.type, direction: "incoming" }, entity: this.byId.get(edge.from)! });
+      if (edge.to === id) out.push({ relation: { _id: edgeId(edge), _relationTypeKey: edge.type, direction: "incoming" }, entity: this.byId.get(edge.from)! });
     }
     return out.slice(0, limit);
   }

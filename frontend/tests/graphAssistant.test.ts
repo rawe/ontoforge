@@ -38,7 +38,7 @@ test('the reader passes the four graph events of its kind through', async () => 
     THREAD, GRAPH,
     { type: 'navigator.step', id: 'walk', status: 'running', round: 1 },
     { type: 'navigator.step', id: 'walk', status: 'done', round: 1, durationMs: 42, summary: 'Hop 1: 14 entities' },
-    { type: 'navigator.entities', entities: [card('E1', { role: 'anchor', hop: 0 })], links: [{ from: 'E1', to: 'E2', type: 'works_on', label: 'works on' }] },
+    { type: 'navigator.entities', entities: [card('E1', { role: 'anchor', hop: 0 })], links: [{ id: 'r1', from: 'E1', to: 'E2', type: 'works_on', label: 'works on' }] },
     { type: 'navigator.summary', modelCalls: 2, durationMs: 3120, entities: 23, evidence: 11, hops: 2, timings: { walk: 61 } },
     FINAL,
   ]
@@ -58,7 +58,8 @@ for (const [name, event] of [
   ['a graph step without label', { type: 'navigator.graph', steps: [{ id: 'a' }], edges: [] }],
   ['a card without ref', { type: 'navigator.entities', entities: [{ ...card('E1'), ref: undefined }] }],
   ['a card with a numeric field value', { type: 'navigator.entities', entities: [card('E1', { fields: [{ name: 'Level', value: 6 as unknown as string }] })] }],
-  ['a link without target', { type: 'navigator.entities', entities: [], links: [{ from: 'E1' }] }],
+  ['a link without target', { type: 'navigator.entities', entities: [], links: [{ id: 'r1', from: 'E1' }] }],
+  ['a link without id', { type: 'navigator.entities', entities: [], links: [{ from: 'E1', to: 'E2' }] }],
   ['a summary with a string count', { type: 'navigator.summary', modelCalls: '2' }],
   ['an undotted unknown event', { type: 'graph', steps: [], edges: [] }],
 ] as const) {
@@ -114,19 +115,25 @@ test('a failed or stopped turn interrupts the running steps and keeps the finish
   }
 })
 
-test('entities upsert by ref in place; links dedupe by from + type + to', () => {
+test('entities upsert by ref in place; links upsert by id', () => {
   const turn = fold([
-    { type: 'navigator.entities', entities: [card('E1', { role: 'anchor' }), card('E2')], links: [{ from: 'E1', to: 'E2', type: 'works_on', label: 'works on' }] },
+    { type: 'navigator.entities', entities: [card('E1', { role: 'anchor' }), card('E2')], links: [{ id: 'r1', from: 'E1', to: 'E2', type: 'works_on', label: 'works on' }] },
     {
       type: 'navigator.entities',
       entities: [card('E3'), card('E2', { evidence: true, label: 'Apollo' })],
-      links: [{ from: 'E1', to: 'E2', type: 'works_on', label: 'works on' }, { from: 'E1', to: 'E2', type: 'owns', label: 'owns' }, { from: 'E2', to: 'E3', type: 'works_on', label: 'works on' }],
+      links: [
+        { id: 'r1', from: 'E1', to: 'E2', type: 'works_on', label: 'works on' },
+        { id: 'r2', from: 'E1', to: 'E2', type: 'owns', label: 'owns' },
+        { id: 'r3', from: 'E2', to: 'E3', type: 'works_on', label: 'works on' },
+        // A second stored relation of the same type between the same pair: a link of its own.
+        { id: 'r4', from: 'E1', to: 'E2', type: 'works_on', label: 'works on' },
+      ],
     },
   ])
   assert.deepEqual(turn.insight.entities.map((c) => [c.ref, c.label, c.evidence]), [
     ['E1', 'Label E1', false], ['E2', 'Apollo', true], ['E3', 'Label E3', false],
   ])
-  assert.deepEqual(turn.insight.links.map((l) => `${l.from}-${l.type}-${l.to}`), ['E1-works_on-E2', 'E1-owns-E2', 'E2-works_on-E3'])
+  assert.deepEqual(turn.insight.links.map((l) => `${l.from}-${l.type}-${l.to}`), ['E1-works_on-E2', 'E1-owns-E2', 'E2-works_on-E3', 'E1-works_on-E2'])
   assert.equal(graphTurns.hasInsight(turn.insight), true)
   assert.equal(graphTurns.hasInsight(graphTurns.empty()), false)
 })

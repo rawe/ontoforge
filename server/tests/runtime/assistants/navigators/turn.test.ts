@@ -157,10 +157,10 @@ describe("a navigator turn", () => {
       ["E1", "Lena Vogt", 0], ["E2", "Kira Novak", 1], ["E3", "Omar Haddad", 1], ["E4", "Apollo", 2], ["E5", "Zeus", 2],
     ]);
     expect(sidebar[1]!.links).toEqual([
-      { from: "E1", to: "E2", type: "manages", label: "manages" },
-      { from: "E1", to: "E3", type: "manages", label: "manages" },
-      { from: "E2", to: "E4", type: "works_on", label: "works on" },
-      { from: "E3", to: "E5", type: "works_on", label: "works on" },
+      { id: "manages:lena:kira", from: "E1", to: "E2", type: "manages", label: "manages" },
+      { id: "manages:lena:omar", from: "E1", to: "E3", type: "manages", label: "manages" },
+      { id: "works_on:kira:apollo", from: "E2", to: "E4", type: "works_on", label: "works on" },
+      { id: "works_on:omar:zeus", from: "E3", to: "E5", type: "works_on", label: "works on" },
     ]);
     // After focus: evidence marked.
     expect(lastCards(events).every((c) => c.evidence)).toBe(true);

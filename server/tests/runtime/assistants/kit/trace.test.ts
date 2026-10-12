@@ -71,11 +71,11 @@ describe("Trace", () => {
     await t.step("answer", async () => undefined);
     t.modelCalls += 2;
     const card = { ref: "E1", id: "x", type: "person", typeName: "Person", label: "Lena", role: "anchor" as const, hop: 0, reason: "r", fields: [], evidence: true };
-    await t.entities([card], [{ from: "E1", to: "E1", type: "manages", label: "manages" }]);
+    await t.entities([card], [{ id: "r1", from: "E1", to: "E1", type: "manages", label: "manages" }]);
     await t.delta("Hi");
     await t.summary({ entities: 1, evidence: 1, hops: 0 });
     expect(events.slice(2)).toEqual([
-      { type: "navigator.entities", entities: [card], links: [{ from: "E1", to: "E1", type: "manages", label: "manages" }] },
+      { type: "navigator.entities", entities: [card], links: [{ id: "r1", from: "E1", to: "E1", type: "manages", label: "manages" }] },
       { type: "delta", text: "Hi" },
       {
         type: "navigator.summary",

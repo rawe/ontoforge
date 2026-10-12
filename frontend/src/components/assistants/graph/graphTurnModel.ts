@@ -37,12 +37,10 @@ export interface GraphInsight {
   steps: StepRun[]
   /** Cards in discovery order; a later card with the same ref replaces the earlier one in place. */
   entities: EntityCard[]
-  /** Unique by from + type + to. */
+  /** Unique by id. */
   links: EntityLink[]
   summary: GraphSummary | null
 }
-
-const linkKey = (link: EntityLink) => `${link.from}\u0000${link.type ?? link.label ?? ''}\u0000${link.to}`
 
 /** Replace items with the same key in place, append new ones. */
 function upsert<T>(current: readonly T[], next: readonly T[], key: (item: T) => string): T[] {
@@ -86,7 +84,7 @@ export const graphTurns: TurnModel<GraphEvent, GraphInsight> = {
       return {
         ...insight,
         entities: upsert(insight.entities, event.entities, (card) => card.ref),
-        links: upsert(insight.links, event.links ?? [], linkKey),
+        links: upsert(insight.links, event.links ?? [], (link) => link.id),
       }
     }
     if (isGraphEvent(event, 'summary')) return { ...insight, summary: event }

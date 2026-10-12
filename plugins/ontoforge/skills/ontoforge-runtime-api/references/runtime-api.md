@@ -413,7 +413,7 @@ responses before the stream opens.
 | `retriever.diagnostics` | `plan`, `results`, `limitations`, `searchCalls`, `timings`, `modelIO`, `llmCalls` | Only when requested |
 | `navigator.graph` | `steps`, `edges` | The pipeline, once, after `thread` |
 | `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, `durationMs` and `summary` on end | Progress, in plain words |
-| `navigator.entities` | `entities` (each `ref`, `id`, `type`, `typeName`, `label`, `role`, `hop`, `reason`, `fields`, `evidence`), `links` (`from`, `to`, `type`, `label`) | Entities met so far; replace cards by `ref` |
+| `navigator.entities` | `entities` (each `ref`, `id`, `type`, `typeName`, `label`, `role`, `hop`, `reason`, `fields`, `evidence`), `links` (`id` of the stored relation, `from`, `to`, `type`, `label`) | Entities met so far; replace cards by `ref`, links by `id` |
 | `navigator.summary` | `modelCalls`, `durationMs`, `entities`, `evidence`, `hops`, `timings` | Once, before `final` |
 
 Ignore kind events you do not know. A stream ends with exactly one `final` or `error`;

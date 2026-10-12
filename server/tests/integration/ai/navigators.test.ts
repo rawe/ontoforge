@@ -53,6 +53,9 @@ async function ask(message: string, threadId?: string): Promise<{ reply: string;
   return { reply: events.at(-1)!.reply as string, events, threadId: events[0]!.threadId as string };
 }
 
+/** The stored relations by id: type and endpoint entity ids. */
+const relations = new Map<string, { type: string; from: string; to: string }>();
+
 /** The sidebar as the client keeps it: cards upserted by ref. */
 function sidebar(events: Row[]): Map<string, Row> {
   const cards = new Map<string, Row>();
@@ -107,8 +110,10 @@ beforeAll(async () => {
   ] as const) {
     ids[key] = (await post(`${RUNTIME}/entities/${type}`, { name }))._id;
   }
-  const relate = (type: string, from: string, to: string) =>
-    post(`${RUNTIME}/relations/${type}`, { fromEntityId: ids[from], toEntityId: ids[to] });
+  const relate = async (type: string, from: string, to: string) => {
+    const relation = await post(`${RUNTIME}/relations/${type}`, { fromEntityId: ids[from], toEntityId: ids[to] });
+    relations.set(String(relation._id), { type, from: ids[from]!, to: ids[to]! });
+  };
   await relate("manages", "lena", "kira");
   await relate("manages", "lena", "omar");
   await relate("works_on", "kira", "apollo");
@@ -156,6 +161,14 @@ describe("navigator with a real model", () => {
     const firstDelta = events.findIndex((e) => e.type === "delta");
     expect(events.findIndex((e) => e.type === "navigator.entities")).toBeLessThan(firstDelta);
     expect(events.at(-2)).toMatchObject({ modelCalls: 2 });
+    // Each link names the stored relation it stands for, directed as stored.
+    const links = (events.filter((e) => e.type === "navigator.entities").at(-1)!.links as Row[]);
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(relations.get(link.id as string), JSON.stringify(link)).toEqual({
+        type: link.type, from: cards.get(link.from as string)!.id, to: cards.get(link.to as string)!.id,
+      });
+    }
     // The answer cites evidence refs.
     const cited = [...reply.matchAll(/\[(E\d+)/g)].map((m) => m[1]!);
     expect(cited.length).toBeGreaterThan(0);

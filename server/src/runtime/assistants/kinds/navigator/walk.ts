@@ -227,7 +227,7 @@ async function hop(
       const reached = board.add(entity, "reached", depth, reason, parent.ref);
       if (reached === null) continue;
       if (known === undefined) state.walked++;
-      board.link(outgoing ? parent.ref : reached.card.ref, outgoing ? reached.card.ref : parent.ref, relationType);
+      board.link(String(relation._id), outgoing ? parent.ref : reached.card.ref, outgoing ? reached.card.ref : parent.ref, relationType);
       state.followed.add(phrase);
       if (reached.card.id !== parent.id) next.set(reached.card.id, reached);
     }

@@ -47,6 +47,8 @@ export interface EntityCard {
 }
 /** A relation between two cards, directed as stored. */
 export interface EntityLink {
+  /** The stored relation's id; a link's identity. */
+  id: string
   from: string
   to: string
   type?: string
@@ -119,7 +121,7 @@ const validCard = (c: unknown) => record(c) &&
 
 const validEntities = (e: Record<string, unknown>) =>
   Array.isArray(e.entities) && e.entities.every(validCard) &&
-  optional(e.links, (l) => Array.isArray(l) && l.every((x) => record(x) && text(x.from) && text(x.to) && optional(x.type, text) && optional(x.label, text)))
+  optional(e.links, (l) => Array.isArray(l) && l.every((x) => record(x) && text(x.id) && text(x.from) && text(x.to) && optional(x.type, text) && optional(x.label, text)))
 
 const validSummary = (e: Record<string, unknown>) =>
   ['modelCalls', 'durationMs', 'entities', 'evidence', 'hops'].every((key) => optional(e[key], number)) &&

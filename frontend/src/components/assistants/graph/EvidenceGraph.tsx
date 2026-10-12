@@ -136,10 +136,10 @@ export function EvidenceGraph({ entities, links, selected, onSelect }: {
     position: positions.get(card.ref)!,
     data: { card, selected: card.ref === selected, dimmed: anyEvidence && card.evidence !== true },
   })), [entities, positions, selected, anyEvidence])
-  const edges = useMemo<Edge[]>(() => shown.map((link, i) => {
+  const edges = useMemo<Edge[]>(() => shown.map((link) => {
     const touches = selected !== null && (link.from === selected || link.to === selected)
     return {
-      id: `${link.from}-${link.type ?? link.label ?? ''}-${link.to}-${i}`,
+      id: link.id,
       source: link.from,
       target: link.to,
       label: touches || shown.length <= LABELED_LINKS ? link.label ?? link.type : undefined,

@@ -2,10 +2,12 @@
  * Chat with an assistant of any kind, under
  * `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/ai/assistants/<kind>`:
  * one message per request (`{message, threadId?}`), its NDJSON stream read
- * by one reader for the shared events — `thread` first, `delta`, one
- * terminal `final` or `error` — with the kind's own events
+ * by one reader for the shared events — `thread` first, `delta`,
+ * `entities`, one terminal `final` or `error` — with the kind's own events
  * (`<kind>.<event>`) checked by the kind, and a thread read back.
  */
+import { record } from './checks.ts'
+import { checkEntities, type EntitiesEvent } from './entities.ts'
 import { ApiError, parseError, request } from './http.ts'
 import type { AssistantKind, AssistantThread } from './types.ts'
 
@@ -15,6 +17,7 @@ export interface StreamError { code: string; message: string; details?: Record<s
 export type SharedEvent =
   | { type: 'thread'; threadId: string }
   | { type: 'delta'; text: string }
+  | EntitiesEvent
   | { type: 'final'; reply: string }
   | { type: 'error'; error: StreamError }
 
@@ -73,13 +76,11 @@ export async function readNdjsonStream(
   }
 }
 
-const record = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
 /**
  * One assistant turn: `thread` exactly once and first, `delta` text that the
- * `final` reply must match, one terminal `final` or `error`; every other
- * event goes to the kind's reader. Each checked event reaches `onEvent`.
+ * `final` reply must match, `entities` whose links join cards of this
+ * turn, one terminal `final` or `error`; every other event goes to the
+ * kind's reader. Each checked event reaches `onEvent`.
  */
 export async function readAssistantStream<K>(
   response: Response,
@@ -89,6 +90,7 @@ export async function readAssistantStream<K>(
 ) {
   let thread = false
   let streamed = ''
+  const refs = new Set<string>()
   await readNdjsonStream(response, (e) => {
     signal?.throwIfAborted()
     let terminal = false
@@ -104,6 +106,9 @@ export async function readAssistantStream<K>(
         if (typeof e.text !== 'string') throw new Error('Invalid answer text')
         streamed += e.text
         event = e as SharedEvent
+        break
+      case 'entities':
+        event = checkEntities(e, refs)
         break
       case 'final':
         if (typeof e.reply !== 'string' || (streamed && streamed !== e.reply)) throw new Error('Invalid final answer')

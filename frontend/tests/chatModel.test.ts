@@ -83,7 +83,7 @@ test('restoredTurns pairs each question with the answer after it', () => {
 
 test('inspectedTurn picks the chosen turn, else the latest with insight', () => {
   const call: ToolCall = { callId: 'c', tool: 'search', args: {}, status: 'completed' }
-  const turn = (id: string, insight: ToolCall[]): Turn<ToolCall[]> => ({ id, question: id, reply: '', status: 'complete', insight })
+  const turn = (id: string, insight: ToolCall[]): Turn<ToolCall[]> => ({ id, question: id, reply: '', status: 'complete', entities: [], links: [], insight })
   const turns = [turn('a', [call]), turn('b', [call]), turn('c', [])]
   assert.equal(inspectedTurn(turns, null, agentTurns.hasInsight)?.id, 'b')
   assert.equal(inspectedTurn(turns, 'a', agentTurns.hasInsight)?.id, 'a')

@@ -83,6 +83,12 @@ validation/not-found failures remain visible while the model corrects them. The 
 answer appears once, complete, after tool work finishes; a turn using no tools still
 produces an answer. The wire contract lives in [interfaces](../interfaces.md#ai).
 
+Beside a successful result of an entity tool — reading, listing, searching entities or
+document passages, or an entity's neighbours — the turn reports the entities it returned
+that the lens shows, as [every assistant does](threads.md#the-entities-a-turn-met), with
+the relations a neighbour read returned. Other tools report none, and the tool's own
+activity is the same either way.
+
 A fatal failure keeps the results already reported in the stream, ends the turn with an
 error, and leaves nothing of the turn in its thread. Disconnect cancels further model and
 tool work, and the turn with it; cancellation of already-running operations is best

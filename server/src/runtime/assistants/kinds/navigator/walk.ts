@@ -15,8 +15,8 @@
 
 import type { Row } from "../../../../core/ports.js";
 import type { SchemaCacheValue } from "../../../schemaCache.js";
-import { entityLabel } from "../../kit/cards.js";
-import { Board, relationLabel, type BoardNode } from "./board.js";
+import { entityLabel, relationLabel } from "../../entities.js";
+import { Board, type BoardNode } from "./board.js";
 import type { Intent, PathStep } from "./understand.js";
 import type { GraphReader } from "./reader.js";
 

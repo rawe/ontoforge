@@ -1,6 +1,7 @@
 import {
   Eraser,
   Maximize,
+  MessagesSquare,
   Network,
   Pin,
   Search,
@@ -18,7 +19,6 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { getTypeColor } from '@/lib/typeColors'
 import { cn } from '@/lib/utils'
 import { WARN_NODES } from './workingSet'
@@ -94,14 +94,14 @@ export function CanvasToolbar({
               <Button
                 variant={ask.open ? 'secondary' : 'ghost'}
                 size="icon-sm"
-                aria-label="Ask a navigator"
+                aria-label="Ask an assistant"
                 aria-pressed={ask.open}
                 onClick={ask.onToggle}
               >
-                <ASSISTANT_KINDS.navigators.icon className="size-4" />
+                <MessagesSquare className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Ask a navigator (A)</TooltipContent>
+            <TooltipContent>Ask an assistant (A)</TooltipContent>
           </Tooltip>
         )}
         {iconButton('Fit view (F)', <Maximize className="size-4" />, onFit, empty)}

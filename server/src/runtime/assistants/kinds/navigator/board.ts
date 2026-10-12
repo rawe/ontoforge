@@ -7,19 +7,27 @@
 
 import type { Row } from "../../../../core/ports.js";
 import type { SchemaCacheValue } from "../../../schemaCache.js";
-import { entityFields, entityLabel } from "../../kit/cards.js";
-import type { CardLink, EntityCard } from "../../kit/trace.js";
+import { entityCard, EntityRefs, relationLabel, type EntityCard, type EntityLink } from "../../entities.js";
+
+/** A card of the walk: the shared card with where the walk met it. */
+export type WalkCard = EntityCard & {
+  role: "anchor" | "reached" | "focus";
+  /** Distance from the nearest anchor. */
+  hop: number;
+  reason: string;
+};
 
 export interface BoardNode {
-  card: EntityCard;
+  card: WalkCard;
   /** The ref of the entity this one was reached from; none for an anchor or focus. */
   parent: string | null;
 }
 
 export class Board {
   private readonly byId = new Map<string, BoardNode>();
+  private readonly refs = new EntityRefs();
   private readonly linkIds = new Set<string>();
-  readonly links: CardLink[] = [];
+  readonly links: EntityLink[] = [];
 
   constructor(private readonly lens: SchemaCacheValue) {}
 
@@ -46,7 +54,7 @@ export class Board {
    */
   add(
     entity: Row,
-    role: EntityCard["role"],
+    role: WalkCard["role"],
     hop: number,
     reason: string,
     parent: string | null,
@@ -65,18 +73,7 @@ export class Board {
       return known;
     }
     const node: BoardNode = {
-      card: {
-        ref: `E${this.byId.size + 1}`,
-        id,
-        type: typeKey,
-        typeName: type.displayName,
-        label: entityLabel(entity, type),
-        role,
-        hop,
-        reason,
-        fields: entityFields(entity, type),
-        evidence: false,
-      },
+      card: { ...entityCard(this.refs.ref(typeKey, id), entity, typeKey, type, false), role, hop, reason },
       parent,
     };
     this.byId.set(id, node);
@@ -91,18 +88,8 @@ export class Board {
   }
 
   /** The links among evidence entities. */
-  evidenceLinks(): CardLink[] {
+  evidenceLinks(): EntityLink[] {
     const evidence = new Set(this.nodes().filter((n) => n.card.evidence).map((n) => n.card.ref));
     return this.links.filter((link) => evidence.has(link.from) && evidence.has(link.to));
   }
-}
-
-/** A relation type's display name as a phrase: "Works On" → "works on";
- * acronyms stay ("Has KPI" → "has KPI"). */
-export function relationLabel(lens: SchemaCacheValue, type: string): string {
-  const name = lens.relationTypes[type]?.displayName ?? type;
-  return name
-    .split(" ")
-    .map((word) => (word.length > 1 && word === word.toUpperCase() ? word : word.toLowerCase()))
-    .join(" ");
 }

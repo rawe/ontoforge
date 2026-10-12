@@ -158,6 +158,11 @@ closed connection cancels the turn.** Tool activity is visible while the turn ru
 work nobody will receive stops.
 → [adr/0021](adr/0021-rest-chat-tool-streaming.md)
 
+**Every assistant kind streams the entities its turn met as the one shared `entities`
+event; a kind's own events and its tool events never carry entity cards.** Chat, citations
+and the Explorer then treat every assistant alike, and tool activity stays generic.
+→ [adr/0027](adr/0027-one-shared-entities-event.md)
+
 ## Schema and data
 
 **A schema edit never writes instance data.** Cleaning up instance data on a schema change

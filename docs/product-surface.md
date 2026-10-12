@@ -214,7 +214,7 @@ Endpoint errors from the server are surfaced as form-level errors, not silent fa
 
 ### Explore
 
-The graph canvas, and beside it the ask dock, where a navigator's answers fill the canvas.
+The graph canvas, and beside it the ask dock, where an assistant's answers fill the canvas.
 See [Working set](#working-set) for both.
 
 ### Query
@@ -594,7 +594,7 @@ central idea of the screen and everything else follows from it.
 
 **Growth is incremental and explicit.** Entities arrive from the palette, from a table
 row, from an entity detail page, from a query result, from a recents chip on the empty
-canvas, all at once from a palette question's results, from a navigator's answer in the
+canvas, all at once from a palette question's results, from an assistant's answer in the
 ask dock, or by expanding a node's relations. A batch of results joins unanchored; entities already on the canvas flash, and
 the hard node cap refuses a batch that would exceed it as a whole. Expansion is per relation type and per
 direction: the node panel lists every applicable relation type with its exact neighbour
@@ -646,16 +646,21 @@ rather than a degenerate curve.
 
 **Asking.** With a language-model provider, an Ask button in the canvas toolbar opens a
 dock on the canvas's left edge — the right edge belongs to the node panel — holding an
-[assistant chat](#assistant-chat) with one of the lens's navigators:
+[assistant chat](#assistant-chat) with one of the lens's assistants — any agent, retriever
+or navigator:
 
 - **Open or closed.** Open, it is resizable. Closing cancels a running answer; reopening
   restores the conversation from its thread.
-- **Header.** A navigator picker, `Default` first; another navigator cancels a running
-  answer and shows that navigator's own conversation. Then "New conversation" and close.
-- **Answers** as in the chat, citations as markers. Under each, two collapsible parts:
-  *Found* — the answer's entities as compact cards grouped as in the
-  [evidence sidebar](#evidence-sidebar), each saying whether it is on the canvas — and
-  *Steps* — its pipeline as the sidebar's Steps view shows it.
+- **Header.** An assistant picker grouped by kind — navigators, retrievers, agents —
+  each kind's `Default` first; another assistant cancels a running answer and shows that
+  assistant's own conversation, the same thread as its Workbench tab. Then "New
+  conversation" and close.
+- **Answers** as in the chat, a navigator's citations as markers. Under each, collapsible
+  parts: *Found* — the [entities the answer met](capabilities/threads.md#the-entities-a-turn-met)
+  as compact cards, a navigator's grouped as in the [evidence sidebar](#evidence-sidebar),
+  each saying whether it is on the canvas and linking to the entity's page — and what the
+  kind did: a navigator's *Steps* as the sidebar's Steps view shows them, an agent's tool
+  calls as its tool-call panel shows them; a retriever has no such part.
 - **A click puts it there, the next click shows it.** Clicking a citation marker or a
   found card adds an entity that is not on the canvas yet, with the answer's relations
   between it and the canvas, and shows it; one already there is only shown: selected,
@@ -663,15 +668,15 @@ dock on the canvas's left edge — the right edge belongs to the node panel — 
   stronger. Nothing else on the canvas changes.
 - **Hover.** Pointing at a marker or a found card rings its node; pointing at a node marks
   its citations in every answer.
-- **Adding cited entities.** A switch in the dock, off by default, adds every completed
-  answer's cited entities and the answer's relations between canvas entities, as one
+- **Adding cited entities.** For a navigator — the only kind whose answers cite — a switch
+  in the dock, off by default, adds every completed answer's cited entities and the answer's relations between canvas entities, as one
   batch, then fits the view. Duplicates flash; when the hard cap refuses the batch, the
   answer says its entities were not added.
 
 Additions from answers follow every rule above: each entity is read again by its id and
 each relation by its id, never built from the answer's cards; new nodes go next to an
-entity they are linked to, the anchors first and then hop by hop, so paths grow outward
-from where they start. Streamed answers never redraw the canvas.
+entity they are linked to — a navigator's anchors first and then hop by hop, so paths grow
+outward from where they start. Streamed answers never redraw the canvas.
 
 **Persistence and restore.** The working set survives reloads (see
 [Local state](#local-state)). On restore, entities whose type is no longer in scope are
@@ -731,7 +736,10 @@ assistant, so it survives a reload; without one — or with one the lens does no
 `Default` is shown and the address updated to name it. Each assistant has its own
 conversation, restored from the server when it is picked.
 
-**Agents** — tool calls stream into a **tool-call panel** that follows the running answer:
+**Agents** — the side panel has two tabs: *Entities*, the cards of the
+[entities the answer met](capabilities/threads.md#the-entities-a-turn-met), each linking to
+the entity's page, and *Tool calls*. Tool calls stream into a **tool-call panel** that
+follows the running answer:
 each call in order, with a readable name, a one-line summary of what it asked for, its
 state, and its time inside the tool. Calls start collapsed and open by hand. An open call
 shows its arguments and its result in a form fitting the result — a table for query rows,
@@ -740,16 +748,19 @@ and direction, document text — linking entities to their pages, with the raw r
 click away; a tool that answers with an error shows it highlighted. The panel heads with
 the question, the number of calls, the time spent inside tools — parallel calls once, said
 so when calls overlapped, the model's thinking not at all — and how long the answer took.
-Each answer's tool-calls button shows the count. A "Show tool calls" switch, remembered per
-browser and on by default, shows the panel and the buttons; off hides both. Tool calls live
+Each answer's button shows the count of calls and of entities. A "Show details" switch,
+remembered per browser and on by default, shows the panel and the buttons; off hides both. Tool calls live
 as long as the open chat: answers restored from the server have none, and the panel says
 so. A failed or stopped answer marks its unfinished calls interrupted.
 
 **Retrievers** — chat with the lens's [retrievers](capabilities/retrievers.md); `Default`
-is the lens's [default retriever](capabilities/retrievers.md#the-default-retriever). A
-"Show diagnostics" switch, off by default and remembered, requests
+is the lens's [default retriever](capabilities/retrievers.md#the-default-retriever). The
+side panel shows the cards of the
+[results the answer was given](capabilities/threads.md#the-entities-a-turn-met), each linking
+to the entity's page. A "Show diagnostics" switch, off by default and remembered, requests
 diagnostics with every answer and shows them in the
-[diagnostics panel](#assistant-chat); off, none are requested. A question to a retriever
+[diagnostics panel](#assistant-chat), a second tab beside the entities; off, none are
+requested. A question to a retriever
 the lens cannot run shows the server's refusal with its reasons.
 
 **Navigators** — chat with the lens's [navigators](capabilities/navigators.md); `Default`
@@ -867,8 +878,8 @@ appear before the answer. Three views, each with its count where it has one:
 
 One conversation with one assistant on a server-held [thread](capabilities/threads.md),
 the same for every assistant kind — the Workbench's Assistants tabs, the retriever
-editor's test panel and, compact, the Explorer's [ask dock](#working-set), which shows a
-navigator's insight under each answer instead of in a side panel. The browser remembers
+editor's test panel and, compact, the Explorer's [ask dock](#working-set), which shows an
+answer's entities and its kind's insight under it instead of in a side panel. The browser remembers
 only the current thread per ontology, lens, kind and assistant (not in the test panel) and
 restores its messages from the server.
 
@@ -1230,11 +1241,11 @@ the address.
 | Theme preference | Global | — |
 | Sidebar collapsed (Workbench and Studio alike) | Global | — |
 | Explorer working set | Per ontology + lens | Bounded by the hard node cap |
-| Explorer ask dock — open or closed, its width, its navigator, the switch that adds cited entities | Per ontology + lens | — |
+| Explorer ask dock — open or closed, its width, its assistant (kind and key), the switch that adds cited entities | Per ontology + lens | — |
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
 | Current conversation thread id (Workbench Agents, Retrievers and Navigators tabs, Explorer ask dock) | Per ontology + lens + kind + assistant | One |
-| Agent tool-call panel switch | Global | — |
+| Agent details panel switch | Global | — |
 | Retriever diagnostics switch (Workbench) | Global | — |
 | Navigator evidence sidebar switch (Workbench) | Global | — |
 | Retriever test panel mode (Chat or Retrieve) | Global | — |

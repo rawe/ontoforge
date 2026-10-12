@@ -42,6 +42,20 @@ work is its tool calls and their results; they stay in the thread with the turn.
 A retriever's thread also keeps what a follow-up question may refer to
 ([retrievers.md](retrievers.md#follow-up-questions)).
 
+## The entities a turn met
+
+Every assistant reports the entities its turn met the same way, beside its own work: each
+real entity the lens shows, with a ref it keeps for the turn (`E1`, `E2`, …), its type,
+label and a few visible fields, whether it was handed to the model that wrote
+the answer — its **evidence** — and the stored relations between them. A client can open
+each one. Which entities an assistant reports is its own: an
+[agent](agents.md#live-tool-activity) the entities its entity tools returned, a
+[retriever](retrievers.md#evidence-and-the-answer) the results its answer was given, a
+[navigator](navigators.md#what-the-client-sees) everything its walk met. Only a
+navigator's answer cites them by ref. An entity reported again replaces what was reported
+for its ref. They belong to the turn's stream only: a thread
+does not keep them.
+
 ## Lifetime
 
 A thread expires after a period without a turn, and a server holds a bounded number of

@@ -12,8 +12,10 @@
  * verified results, which a follow-up may refer to.
  *
  * Chat stream events: `retriever.phase` (start/end of plan, retrieve,
- * answer), `delta` (answer text), `retriever.diagnostics` (on request),
- * then the transport's `final` or `error`.
+ * answer), the shared `entities` (`../entities.ts`: the results handed to
+ * the answer model, before it streams), `delta` (answer text),
+ * `retriever.diagnostics` (on request), then the transport's `final` or
+ * `error`.
  *
  * Retrieve runs the first two phases only (`retrieveQuestion`): one
  * planning call without a conversation, then retrieval; it returns the
@@ -55,6 +57,7 @@ import {
   searchIndexCatalog,
   type SearchMode,
 } from "../../search/indexSearch.js";
+import { entitiesEvent } from "../entities.js";
 import { checkRetrieverConfig } from "./config.js";
 import {
   DEFAULT_RETRIEVER_DESCRIPTION,
@@ -82,6 +85,7 @@ import {
   answerSearches,
   boundContext,
   diagnosticResults,
+  entityCards,
   filterValues,
   resultIds,
   retrieve,
@@ -468,6 +472,8 @@ export async function chat(
       const t = performance.now();
       const context = boundContext(retrieval, plan, scope.lens, retriever.config);
       timings.context = performance.now() - t;
+      // The results the answer model gets, as cards, before it streams.
+      if (context.included.length > 0) await emit(entitiesEvent(entityCards(context.included, scope.lens), []));
       timings.search = retrieval.searchMs;
       searchCalls = retrieval.searchCalls;
       await report({

@@ -1,12 +1,13 @@
 import { Waypoints } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import type { ChatRequest, SharedEvent } from '@/api/chatStream'
+import type { GraphEvent } from '@/api/graphEvents'
 import type { AssistantKind } from '@/api/types'
 import { AssistantChat, InsightToggle } from '@/components/assistants/chat/AssistantChat'
+import { hasDetail } from '@/components/assistants/chat/chatModel'
+import { CitedAnswer } from '@/components/assistants/entities/CitedAnswer'
 import { readString, storageKeys, writeString } from '@/lib/storage'
-import { CitedAnswer } from './CitedAnswer'
 import { EvidenceSidebar, type SidebarView } from './EvidenceSidebar'
-import type { GraphEvent } from './graphEvents'
 import { graphTurns } from './graphTurnModel'
 
 export interface GraphChatProps {
@@ -68,7 +69,7 @@ export function GraphChat({ kind, sidebar, send, ...chat }: GraphChatProps) {
       renderAnswer={(turn, show) => (
         <CitedAnswer
           text={turn.reply}
-          entities={turn.insight.entities}
+          entities={turn.entities}
           selected={selectedIn(turn.id)}
           onSelect={(ref) => {
             setSelection({ turnId: turn.id, ref })
@@ -101,9 +102,9 @@ export function GraphChat({ kind, sidebar, send, ...chat }: GraphChatProps) {
             }
           : null,
         button: (turn) => {
-          const { entities } = turn.insight
-          if (!graphTurns.hasInsight(turn.insight)) return null
-          const evidence = entities.filter((card) => card.evidence === true).length
+          const { entities } = turn
+          if (!hasDetail(turn, graphTurns.hasInsight)) return null
+          const evidence = entities.filter((card) => card.evidence).length
           return {
             icon: Waypoints,
             label: entities.length === 0 ? 'Evidence'

@@ -9,14 +9,14 @@
  *   of.sidebar                — "expanded" | "collapsed"
  *   of.explore.{ontologyKey}.{lensKey} — Explorer canvas working set
  *   of.exploreAsk.{ontologyKey}.{lensKey} — the Explorer's ask dock:
- *                               `{ open, width, assistant, autoAdd }`
+ *                               `{ open, width, kind, assistant, autoAdd }`
  *   of.thread.{ontologyKey}.{lensKey}.{kind}.{assistantKey} — id of the
  *                               Workbench's current conversation thread with
  *                               that assistant (the messages stay on the server)
  *   of.recents.{ontologyKey}.{lensKey} — last 10 opened entities (`lib/recents.ts`)
  *   of.queryHistory.{ontologyKey}.{lensKey} — last 10 run OQL queries
  *   of.chatToolCalls          — "true" | "false": Workbench agent chat shows its
- *                               tool calls in a side panel (default true)
+ *                               entities and tool calls in a side panel (default true)
  *   of.retrieverDiagnostics   — "true" | "false": Workbench retriever chat
  *                               requests and shows diagnostics
  *   of.retrieverTestMode      — "chat" | "retrieve": the retriever

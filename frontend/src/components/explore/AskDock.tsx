@@ -1,60 +1,70 @@
-import { Check, ChevronRight, LoaderCircle, MessageSquarePlus, Plus, X } from 'lucide-react'
+import { Check, ChevronRight, LoaderCircle, MessageSquarePlus, MessagesSquare, Plus, X } from 'lucide-react'
 import { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { chatErrorText, type ChatRequest, type SharedEvent } from '@/api/chatStream'
+import { chatErrorText } from '@/api/chatStream'
+import type { EntityCard } from '@/api/entities'
 import { useAssistants } from '@/api/hooks'
 import type { AssistantKind, RuntimeAssistant } from '@/api/types'
 import { Composer, InsightToggle, Intro, NewConversationDialog, TurnView } from '@/components/assistants/chat/AssistantChat'
-import { DEFAULT_ASSISTANT, formatDuration, type Turn } from '@/components/assistants/chat/chatModel'
+import { DEFAULT_ASSISTANT, type Turn } from '@/components/assistants/chat/chatModel'
 import type { ThreadOwner } from '@/components/assistants/chat/threadStore'
 import { useAssistantConversation } from '@/components/assistants/chat/useAssistantConversation'
-import { CitedAnswer } from '@/components/assistants/graph/CitedAnswer'
-import { EntityCardList, StepList } from '@/components/assistants/graph/EvidenceSidebar'
-import type { EntityCard, GraphEvent } from '@/components/assistants/graph/graphEvents'
-import { graphTurns, type GraphInsight } from '@/components/assistants/graph/graphTurnModel'
+import { CitedAnswer } from '@/components/assistants/entities/CitedAnswer'
+import { EntityCardList } from '@/components/assistants/entities/EntityCardList'
 import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { MAX_WIDTH, MIN_WIDTH, type useAskDock } from './useAskDock'
+import { ASK_KIND_ORDER, MAX_WIDTH, MIN_WIDTH, chooseAssistant, choiceValue, parseChoice } from './askDockModel'
+import { ASK_KINDS } from './askKinds'
+import type { useAskDock } from './useAskDock'
 
 /* ----------------------------------- dock ---------------------------------- */
 
-/** What one answer found, as the canvas needs it. */
-export type Answer = Pick<GraphInsight, 'entities' | 'links'>
+/** What one answer met, as the canvas needs it. */
+export type Answer = Pick<Turn<unknown>, 'entities' | 'links'>
 
 interface AskDockProps {
   ontologyKey: string
   lensKey: string
-  kind: AssistantKind
   dock: ReturnType<typeof useAskDock>
-  send: (assistantKey: string, body: ChatRequest, onEvent: (event: SharedEvent | GraphEvent) => void, signal: AbortSignal) => Promise<void>
   /** Entity ids on the canvas. */
   onCanvas: ReadonlySet<string>
-  /** The entity the canvas points at — hovered or highlighted; its citations are marked. */
+  /** The entity the canvas points at — hovered or highlighted; its citations and cards are marked. */
   pointed: string | null
   /** A click on an entity of an answer: added when not on the canvas, else shown there. */
   onEntity: (card: EntityCard, answer: Answer) => void
   /** The entity of an answer under the pointer, null when none is. */
   onHover: (entityId: string | null) => void
-  /** An answer completed with auto-add on; resolves whether its entities were refused by the cap. */
-  onAnswer: (turn: Turn<GraphInsight>) => Promise<'added' | 'refused'>
+  /** An answer that cites completed with auto-add on; resolves whether its entities were refused by the cap. */
+  onAnswer: (turn: Pick<Turn<unknown>, 'reply' | 'entities' | 'links'>) => Promise<'added' | 'refused'>
 }
+
+/** The assistants listed first-to-last in the picker: the kind's `Default` first. */
+const defaultFirst = (list: readonly RuntimeAssistant[]) =>
+  [...list].sort((a, b) => Number(b.key === DEFAULT_ASSISTANT) - Number(a.key === DEFAULT_ASSISTANT))
 
 /**
  * The Explorer's ask dock on the canvas's left edge, resizable: a
- * conversation with one assistant of the lens whose answers fill the canvas.
- * The chat's state lives here, so streamed answers never render the canvas.
+ * conversation with one assistant of the lens — of any kind — whose
+ * answers fill the canvas. The chat's state lives here, so streamed
+ * answers never render the canvas.
  */
 export const AskDock = memo(function AskDock({ dock, ...props }: AskDockProps) {
-  const { ontologyKey, lensKey, kind } = props
-  const assistants = useAssistants(ontologyKey, lensKey, kind)
-  const list = assistants.data
-  const assistant = list === undefined ? undefined
-    : list.find((a) => a.key === dock.settings.assistant) ?? list.find((a) => a.key === DEFAULT_ASSISTANT) ?? list[0]
+  const { ontologyKey, lensKey } = props
+  const queries: Record<AssistantKind, ReturnType<typeof useAssistants>> = {
+    navigators: useAssistants(ontologyKey, lensKey, 'navigators'),
+    retrievers: useAssistants(ontologyKey, lensKey, 'retrievers'),
+    agents: useAssistants(ontologyKey, lensKey, 'agents'),
+  }
+  const settled = ASK_KIND_ORDER.every((kind) => !queries[kind].isPending)
+  const lists: Partial<Record<AssistantKind, RuntimeAssistant[]>> = {}
+  for (const kind of ASK_KIND_ORDER) if (queries[kind].data !== undefined) lists[kind] = defaultFirst(queries[kind].data)
+  const choice = settled ? chooseAssistant(lists, { kind: dock.settings.kind, key: dock.settings.assistant }) : undefined
+  const assistant = choice ? lists[choice.kind]?.find((a) => a.key === choice.key) : undefined
+  const failed = ASK_KIND_ORDER.filter((kind) => queries[kind].error)
   const [width, setWidth] = useState<number | null>(null)
-  const { one, icon: Icon } = ASSISTANT_KINDS[kind]
 
   const resize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -75,20 +85,40 @@ export const AskDock = memo(function AskDock({ dock, ...props }: AskDockProps) {
     window.addEventListener('pointerup', up)
   }
 
-  const picker = list === undefined ? <Skeleton className="h-7 w-40" /> : (
-    <Select value={assistant?.key} onValueChange={dock.setAssistant}>
-      <SelectTrigger size="sm" aria-label={one} className="h-7 min-w-0 flex-1 text-[13px]">
+  const picker = choice === undefined ? <Skeleton className="h-7 w-40" /> : (
+    <Select
+      value={choice === null ? undefined : choiceValue(choice)}
+      onValueChange={(value) => {
+        const next = parseChoice(value)
+        if (next !== null) dock.setAssistant(next)
+      }}
+    >
+      <SelectTrigger size="sm" aria-label="Assistant" className="h-7 min-w-0 flex-1 text-[13px]">
         <SelectValue>{assistant?.name}</SelectValue>
       </SelectTrigger>
       <SelectContent position="popper" align="start">
-        {list.map((a) => (
-          <SelectItem key={a.key} value={a.key} className="text-[13px]">
-            <span className="flex items-baseline gap-2">
-              {a.name}
-              <span className="font-mono text-[10.5px] text-muted-foreground">{a.key}</span>
-            </span>
-          </SelectItem>
-        ))}
+        {ASK_KIND_ORDER.map((kind) => {
+          const list = lists[kind]
+          const { many, icon: Icon } = ASSISTANT_KINDS[kind]
+          if (list?.length === 0) return null
+          return (
+            <SelectGroup key={kind}>
+              <SelectLabel className="flex items-center gap-1.5 capitalize">
+                <Icon className="size-3.5" /> {many}
+              </SelectLabel>
+              {list === undefined
+                ? <p className="px-1.5 pb-1 text-xs text-destructive">Could not load {many}.</p>
+                : list.map((a) => (
+                    <SelectItem key={a.key} value={choiceValue({ kind, key: a.key })} className="text-[13px]">
+                      <span className="flex items-baseline gap-2">
+                        {a.name}
+                        <span className="font-mono text-[10.5px] text-muted-foreground">{a.key}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+            </SelectGroup>
+          )
+        })}
       </SelectContent>
     </Select>
   )
@@ -96,29 +126,31 @@ export const AskDock = memo(function AskDock({ dock, ...props }: AskDockProps) {
 
   return (
     <aside
-      aria-label={`${one} dock`}
+      aria-label="Ask dock"
       style={{ width: width ?? dock.width }}
       className="relative flex h-full shrink-0 flex-col border-r bg-background"
     >
-      {assistants.error || (list !== undefined && assistant === undefined) ? (
+      {choice === null ? (
         <>
           <div className="flex min-h-11 items-center gap-1.5 border-b px-3 py-2">
-            <Icon className="size-4 shrink-0 text-muted-foreground" />
-            <span className="flex-1 text-[13px] font-medium">{one}</span>
+            <MessagesSquare className="size-4 shrink-0 text-muted-foreground" />
+            <span className="flex-1 text-[13px] font-medium">Ask</span>
             {close}
           </div>
           <div className="p-4 text-[13px]">
-            {assistants.error ? <>
-              <p role="alert">Could not load {ASSISTANT_KINDS[kind].many}: {chatErrorText(assistants.error, 'request failed')}</p>
-              <Button variant="outline" size="sm" className="mt-3" onClick={() => void assistants.refetch()}>Reload</Button>
-            </> : <p className="text-muted-foreground">This lens has no {ASSISTANT_KINDS[kind].many}.</p>}
+            {failed.length > 0 ? <>
+              <p role="alert">Could not load the assistants: {chatErrorText(queries[failed[0]!].error, 'request failed')}</p>
+              <Button variant="outline" size="sm" className="mt-3" onClick={() => failed.forEach((kind) => void queries[kind].refetch())}>Reload</Button>
+            </> : <p className="text-muted-foreground">This lens has no assistants.</p>}
           </div>
         </>
       ) : (
         <AskConversation
           // Another assistant: its own conversation; a running answer is cancelled.
-          key={assistant?.key ?? 'loading'}
+          key={choice === undefined ? 'loading' : choiceValue(choice)}
           {...props}
+          kind={choice?.kind ?? dock.settings.kind}
+          assistantKey={choice?.key ?? null}
           assistant={assistant ?? null}
           picker={picker}
           close={close}
@@ -137,11 +169,6 @@ export const AskDock = memo(function AskDock({ dock, ...props }: AskDockProps) {
   )
 })
 
-function KindIcon({ kind }: { kind: AssistantKind }) {
-  const Icon = ASSISTANT_KINDS[kind].icon
-  return <Icon className="mx-1 size-4 shrink-0 text-muted-foreground" />
-}
-
 function IconButton({ label, onClick, disabled, children }: { label: string; onClick: () => void; disabled?: boolean; children: ReactNode }) {
   return (
     <Tooltip>
@@ -158,7 +185,9 @@ function IconButton({ label, onClick, disabled, children }: { label: string; onC
 /* ------------------------------- conversation ------------------------------ */
 
 type AskConversationProps = Omit<AskDockProps, 'dock'> & {
-  /** Null while the list loads: nothing can be asked yet. */
+  kind: AssistantKind
+  /** Null while the lists load: nothing can be asked yet. */
+  assistantKey: string | null
   assistant: RuntimeAssistant | null
   picker: ReactNode
   close: ReactNode
@@ -166,11 +195,13 @@ type AskConversationProps = Omit<AskDockProps, 'dock'> & {
   onAutoAdd: (on: boolean) => void
 }
 
+/** One conversation with the chosen assistant; its kind's entry says how to ask and what to show. */
 function AskConversation({
-  ontologyKey, lensKey, kind, send, assistant, picker, close, autoAdd, onAutoAdd,
+  ontologyKey, lensKey, kind, assistantKey, assistant, picker, close, autoAdd, onAutoAdd,
   onCanvas, pointed, onEntity, onHover, onAnswer,
 }: AskConversationProps) {
-  const assistantKey = assistant?.key ?? null
+  // Fixed for a mount: another assistant remounts.
+  const spec = ASK_KINDS[kind]
   const owner = useMemo<ThreadOwner | null>(
     () => (assistantKey === null ? null : { ontologyKey, lensKey, kind, assistantKey }),
     [ontologyKey, lensKey, kind, assistantKey],
@@ -180,11 +211,12 @@ function AskConversation({
   const [confirmNew, setConfirmNew] = useState(false)
   const conversation = useAssistantConversation({
     owner,
-    model: graphTurns,
-    send: (body, onEvent, signal) => (assistantKey === null ? Promise.resolve() : send(assistantKey, body, onEvent, signal)),
+    model: spec.model,
+    send: (body, onEvent, signal) =>
+      (assistantKey === null ? Promise.resolve() : spec.send(ontologyKey, lensKey, assistantKey, body, onEvent, signal)),
     blocked: assistantKey === null,
     onComplete: (turn) => {
-      if (!autoAdd) return
+      if (!autoAdd || !spec.cites) return
       void onAnswer(turn).then((result) => {
         if (result === 'refused') setRefused((current) => new Set(current).add(turn.id))
       })
@@ -192,6 +224,7 @@ function AskConversation({
   })
   const { turns, running, restoring, notice } = conversation
   const { icon, one } = ASSISTANT_KINDS[kind]
+  const name = assistant?.name ?? one
   const scroll = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (scroll.current !== null) scroll.current.scrollTop = scroll.current.scrollHeight
@@ -207,14 +240,17 @@ function AskConversation({
         </IconButton>
         {close}
       </div>
-      <div className="border-b px-3 py-1.5">
-        <InsightToggle
-          label="Add cited entities to the canvas"
-          title="When an answer completes, put the entities it cites on the canvas, with the relations between them"
-          checked={autoAdd}
-          onChange={onAutoAdd}
-        />
-      </div>
+      {/* Only kinds whose answers cite have something to add on their own. */}
+      {spec.cites && (
+        <div className="border-b px-3 py-1.5">
+          <InsightToggle
+            label="Add cited entities to the canvas"
+            title="When an answer completes, put the entities it cites on the canvas, with the relations between them"
+            checked={autoAdd}
+            onChange={onAutoAdd}
+          />
+        </div>
+      )}
 
       <div ref={scroll} className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
         {notice !== null && (
@@ -227,33 +263,33 @@ function AskConversation({
         ) : turns.length === 0 ? (
           <Intro
             icon={icon}
-            name={assistant?.name ?? one}
+            name={name}
             description={assistant?.description}
-            intro="Ask how things are connected. Click an entity the answer names to put it on the canvas; click it again to find it there."
+            intro="Ask about the data of this lens. Click an entity an answer met to put it on the canvas; click it again to find it there."
           />
         ) : (
           <div className="space-y-5">
             {turns.map((turn) => {
-              const answer = turn.insight
-              const pointedRef = pointed === null ? null : answer.entities.find((card) => card.id === pointed)?.ref ?? null
+              const pointedRef = pointed === null ? null : turn.entities.find((card) => card.id === pointed)?.ref ?? null
               const select = (ref: string) => {
-                const card = answer.entities.find((c) => c.ref === ref)
-                if (card !== undefined) onEntity(card, answer)
+                const card = turn.entities.find((c) => c.ref === ref)
+                if (card !== undefined) onEntity(card, turn)
               }
-              const hover = (ref: string | null) => onHover(ref === null ? null : answer.entities.find((c) => c.ref === ref)?.id ?? null)
+              const hover = (ref: string | null) => onHover(ref === null ? null : turn.entities.find((c) => c.ref === ref)?.id ?? null)
               return (
                 <TurnView
                   key={turn.id}
                   turn={turn}
                   icon={icon}
                   answer={turn.reply && (
-                    <CitedAnswer text={turn.reply} entities={answer.entities} selected={pointedRef} onSelect={select} onHover={hover} />
+                    <CitedAnswer text={turn.reply} entities={turn.entities} selected={pointedRef} onSelect={select} onHover={hover} />
                   )}
-                  progress={turn.status === 'pending' ? graphTurns.progress(answer) : undefined}
+                  progress={turn.status === 'pending' ? spec.model.progress(turn.insight) : undefined}
                   insight={
                     <AnswerDetails
                       ontologyKey={ontologyKey}
                       lensKey={lensKey}
+                      kind={kind}
                       turn={turn}
                       refused={refused.has(turn.id)}
                       onCanvas={onCanvas}
@@ -270,34 +306,37 @@ function AskConversation({
       </div>
 
       <div className="border-t px-3 pt-3 pb-2.5">
-        <Composer
-          name={assistant?.name ?? one}
-          placeholder="Ask how things are connected…"
-          conversation={conversation}
-          disabled={assistantKey === null}
-        />
+        <Composer name={name} placeholder="Ask about your data…" conversation={conversation} disabled={assistantKey === null} />
       </div>
       <NewConversationDialog open={confirmNew} onOpenChange={setConfirmNew} onConfirm={conversation.startOver} />
     </div>
   )
 }
 
-/** Under an answer: the canvas's refusal, what it found and its steps — each collapsible. */
-function AnswerDetails({ ontologyKey, lensKey, turn, refused, onCanvas, pointed, onSelect, onHover }: {
+function KindIcon({ kind }: { kind: AssistantKind }) {
+  const Icon = ASSISTANT_KINDS[kind].icon
+  return <Icon className="mx-1 size-4 shrink-0 text-muted-foreground" />
+}
+
+/** Under an answer: the canvas's refusal, the entities it met and what its kind did — each collapsible. */
+function AnswerDetails({ ontologyKey, lensKey, kind, turn, refused, onCanvas, pointed, onSelect, onHover }: {
   ontologyKey: string
   lensKey: string
-  turn: Turn<GraphInsight>
+  kind: AssistantKind
+  turn: Turn<unknown>
   refused: boolean
   onCanvas: ReadonlySet<string>
   pointed: string | null
   onSelect: (ref: string) => void
   onHover: (ref: string | null) => void
 }) {
-  const [open, setOpen] = useState<'found' | 'steps' | null>(null)
-  const { entities, summary } = turn.insight
-  if (!graphTurns.hasInsight(turn.insight)) return null
+  const [open, setOpen] = useState<'found' | 'details' | null>(null)
+  const { entities } = turn
+  const { details } = ASK_KINDS[kind]
+  const label = details?.label(turn) ?? null
+  if (entities.length === 0 && label === null && !refused) return null
   const placed = entities.filter((card) => onCanvas.has(card.id)).length
-  const toggle = (section: 'found' | 'steps') => setOpen((current) => (current === section ? null : section))
+  const toggle = (section: 'found' | 'details') => setOpen((current) => (current === section ? null : section))
   return (
     <div className="space-y-1.5">
       {refused && (
@@ -306,16 +345,17 @@ function AnswerDetails({ ontologyKey, lensKey, turn, refused, onCanvas, pointed,
         </p>
       )}
       <div className="flex flex-wrap gap-1">
-        <SectionButton open={open === 'found'} onClick={() => toggle('found')}>
-          Found {entities.length}
-          {entities.length > 0 && <span className="text-muted-foreground/70">· {placed} on canvas</span>}
-        </SectionButton>
-        <SectionButton open={open === 'steps'} onClick={() => toggle('steps')}>
-          Steps
-          {summary?.durationMs !== undefined && <span className="text-muted-foreground/70">· {formatDuration(summary.durationMs)}</span>}
-        </SectionButton>
+        {entities.length > 0 && (
+          <SectionButton open={open === 'found'} onClick={() => toggle('found')}>
+            Found {entities.length}
+            <span className="text-muted-foreground/70">· {placed} on canvas</span>
+          </SectionButton>
+        )}
+        {label !== null && (
+          <SectionButton open={open === 'details'} onClick={() => toggle('details')}>{label}</SectionButton>
+        )}
       </div>
-      {open === 'found' && (
+      {open === 'found' && entities.length > 0 && (
         <EntityCardList
           ontologyKey={ontologyKey}
           lensKey={lensKey}
@@ -329,7 +369,7 @@ function AnswerDetails({ ontologyKey, lensKey, turn, refused, onCanvas, pointed,
             : <span title="Click to add it to the canvas" className="flex shrink-0 items-center gap-0.5 text-[10.5px] text-primary"><Plus className="size-3" /> Add</span>}
         />
       )}
-      {open === 'steps' && <div className="rounded-lg border p-3"><StepList turn={turn} /></div>}
+      {open === 'details' && label !== null && details?.content(turn, { ontologyKey, lensKey })}
     </div>
   )
 }

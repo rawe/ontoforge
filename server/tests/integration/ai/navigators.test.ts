@@ -59,7 +59,7 @@ const relations = new Map<string, { type: string; from: string; to: string }>();
 /** The sidebar as the client keeps it: cards upserted by ref. */
 function sidebar(events: Row[]): Map<string, Row> {
   const cards = new Map<string, Row>();
-  for (const event of events.filter((e) => e.type === "navigator.entities")) {
+  for (const event of events.filter((e) => e.type === "entities")) {
     for (const card of event.entities as Row[]) cards.set(card.ref as string, card);
   }
   return cards;
@@ -159,10 +159,10 @@ describe("navigator with a real model", () => {
     const done = events.filter((e) => e.type === "navigator.step" && e.status === "done").map((e) => e.id);
     expect(done).toEqual(expect.arrayContaining(["understand", "anchor", "walk", "focus", "answer"]));
     const firstDelta = events.findIndex((e) => e.type === "delta");
-    expect(events.findIndex((e) => e.type === "navigator.entities")).toBeLessThan(firstDelta);
+    expect(events.findIndex((e) => e.type === "entities")).toBeLessThan(firstDelta);
     expect(events.at(-2)).toMatchObject({ modelCalls: 2 });
     // Each link names the stored relation it stands for, directed as stored.
-    const links = (events.filter((e) => e.type === "navigator.entities").at(-1)!.links as Row[]);
+    const links = (events.filter((e) => e.type === "entities").at(-1)!.links as Row[]);
     expect(links.length).toBeGreaterThan(0);
     for (const link of links) {
       expect(relations.get(link.id as string), JSON.stringify(link)).toEqual({

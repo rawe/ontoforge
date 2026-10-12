@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { EntityCard, EntityLink } from '../src/components/assistants/graph/graphEvents.ts'
+import type { EntityCard, EntityLink } from '../src/api/entities.ts'
 import { citedCards, mapBounded, planAdd, relationsToFetch } from '../src/components/explore/answerCanvas.ts'
 
 const card = (ref: string, id: string, patch: Partial<EntityCard> = {}): EntityCard => ({
-  ref, id, type: 'person', typeName: 'Person', label: id, role: 'reached', hop: 1, evidence: true, ...patch,
+  ref, id, type: 'person', typeName: 'Person', label: id, fields: [], role: 'reached', hop: 1, evidence: true, ...patch,
 })
 const link = (id: string, from: string, to: string, type = 'works_on'): EntityLink => ({ id, from, to, type, label: type })
 
@@ -51,6 +51,17 @@ test('anchors and carried-over entities are level 0 whatever their hop', () => {
   const plan = planAdd([card('E2', 'r', { hop: 1 }), focus], { entities: [focus, card('E2', 'r', { hop: 1 })], links: [] }, new Set(), 0, 300)
   assert.deepEqual(plan.fresh.map((p) => [p.card.id, p.level]), [['f', 0], ['r', 1]])
   assert.deepEqual(plan.fresh[1]!.anchors, [])
+})
+
+test('cards without role or hop (agents, retrievers) are level 0, next to an entity they are linked to', () => {
+  const plain = (ref: string, id: string) => card(ref, id, { role: undefined, hop: undefined })
+  const beacon = plain('E1', 'beacon')
+  const ana = plain('E2', 'ana')
+  const lone = plain('E3', 'lone')
+  const answer = { entities: [beacon, ana, lone], links: [link('r1', 'E2', 'E1')] }
+  const plan = planAdd([ana, lone], answer, new Set(['beacon']), 1, 300)
+  assert.deepEqual(plan.fresh.map((p) => [p.card.id, p.level, p.anchors]), [['ana', 0, ['beacon']], ['lone', 0, []]])
+  assert.deepEqual(plan.present, [])
 })
 
 test('the cap refuses a batch as a whole; one exactly at the cap fits; present ones never count', () => {

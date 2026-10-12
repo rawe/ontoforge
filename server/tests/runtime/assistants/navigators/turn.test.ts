@@ -71,7 +71,7 @@ const steps = (events: StreamEvent[]) =>
 const stepDone = (events: StreamEvent[], id: string, round = 1) =>
   events.find((e) => e.type === "navigator.step" && e.id === id && e.round === round && e.status !== "running")!;
 const lastCards = (events: StreamEvent[]) =>
-  events.filter((e) => e.type === "navigator.entities").at(-1)!.entities as Card[];
+  events.filter((e) => e.type === "entities").at(-1)!.entities as Card[];
 const understandInput = (call = -1) => fake.invoke.mock.calls.at(call)![0][1].content as string;
 const answerInput = (call = -1) => fake.stream.mock.calls.at(call)![0][1].content as string;
 
@@ -99,9 +99,9 @@ describe("a navigator turn", () => {
     expect(events.map((e) => (e.type === "navigator.step" ? `step ${e.id}:${e.status}` : e.type))).toEqual([
       "navigator.graph",
       "step understand:running", "step understand:done",
-      "step anchor:running", "step anchor:done", "navigator.entities",
-      "step walk:running", "step walk:done", "navigator.entities",
-      "step focus:running", "step focus:done", "navigator.entities",
+      "step anchor:running", "step anchor:done", "entities",
+      "step walk:running", "step walk:done", "entities",
+      "step focus:running", "step focus:done", "entities",
       "step answer:running", "delta", "delta", "step answer:done",
       "navigator.summary",
     ]);
@@ -142,8 +142,8 @@ describe("a navigator turn", () => {
 
   it("streams the cards before the answer: anchors first, then upserts with links and evidence", async () => {
     const { events } = await turn("Which projects do Lena's reports work on?");
-    const sidebar = events.filter((e) => e.type === "navigator.entities");
-    expect(events.findIndex((e) => e.type === "navigator.entities")).toBeLessThan(events.findIndex((e) => e.type === "delta"));
+    const sidebar = events.filter((e) => e.type === "entities");
+    expect(events.findIndex((e) => e.type === "entities")).toBeLessThan(events.findIndex((e) => e.type === "delta"));
     // After anchor: the anchor alone, not yet evidence.
     expect(sidebar[0]!.entities).toEqual([{
       ref: "E1", id: "lena", type: "person", typeName: "Person", label: "Lena Vogt", role: "anchor", hop: 0,
@@ -199,7 +199,7 @@ describe("a navigator turn", () => {
     expect(stepDone(events, "anchor").summary).toBe("Nothing found for “Zed” · Nothing matches the topic “Who is Zed?”");
     expect(stepDone(events, "walk").summary).toBe("Nothing to walk from");
     expect(stepDone(events, "focus").summary).toBe("Nothing to focus on");
-    expect(events.filter((e) => e.type === "navigator.entities")).toHaveLength(1);
+    expect(events.filter((e) => e.type === "entities")).toHaveLength(1);
     expect(answerInput()).toContain("ENTITIES: none were found.");
     expect(answerInput()).toContain("- No entity of the question was found in the graph.");
     expect(events.at(-1)).toMatchObject({ type: "navigator.summary", modelCalls: 2, entities: 0, evidence: 0, hops: 0 });
@@ -254,7 +254,7 @@ describe("widening the walk", () => {
     expect(stepDone(events, "walk", 2).summary).toBe("Explored 2 hops: 7 entities · reached Project at hop 2");
     expect(answerInput()).toContain("- The planned route did not reach everything asked for, so the walk also explored every relation.");
     // Entities after each walk round.
-    expect(events.filter((e) => e.type === "navigator.entities")).toHaveLength(4);
+    expect(events.filter((e) => e.type === "entities")).toHaveLength(4);
   });
 
   it("a planned path that misses one of the target types is widened too", async () => {
@@ -342,7 +342,7 @@ describe("follow-ups on a thread", () => {
     expect(input).toContain("ENTITIES OF THE PREVIOUS ANSWER: Kira Novak (person); Apollo (project); Omar Haddad (person); Zeus (project)");
     // They are re-read and become focus cards; refs start again at E1.
     expect(reader.calls.entity).toEqual([["person", "kira"], ["project", "apollo"], ["person", "omar"], ["project", "zeus"]]);
-    const anchored = events.find((e) => e.type === "navigator.entities")!.entities as Card[];
+    const anchored = events.find((e) => e.type === "entities")!.entities as Card[];
     expect(anchored.map((c) => [c.ref, c.label, c.role, c.hop, c.reason])).toEqual([
       ["E1", "Kira Novak", "focus", 0, "From the previous answer"],
       ["E2", "Apollo", "focus", 0, "From the previous answer"],

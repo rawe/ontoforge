@@ -1,14 +1,14 @@
 /**
- * What the Explorer does with the entities a graph assistant's answer
- * found: which of them a click or an auto-add puts on the canvas, in which
- * order and next to which node, and which of the answer's relations then
+ * What the Explorer does with the entities an assistant's answer met:
+ * which of them a click or an auto-add puts on the canvas, in which order
+ * and next to which node, and which of the answer's relations then
  * become edges. Cards and links only name entities and relations — the
  * canvas reads every one of them itself before showing it.
  *
  * No React, no I/O — unit-tested with `node --test`.
  */
-import type { EntityCard, EntityLink } from '../assistants/graph/graphEvents.ts'
-import { citations } from '../assistants/graph/graphTurnModel.ts'
+import type { EntityCard, EntityLink } from '../../api/entities.ts'
+import { citations } from '../assistants/entities/entityModel.ts'
 
 /** The evidence cards an answer cites, in order of first citation. */
 export function citedCards(reply: string, entities: readonly EntityCard[]): EntityCard[] {
@@ -22,7 +22,7 @@ export function citedCards(reply: string, entities: readonly EntityCard[]): Enti
 /** One entity to add: its placement level and the entities it is placed next to, best first. */
 export interface PlannedEntity {
   card: EntityCard
-  /** 0 for anchors and carried-over entities, else the hop. */
+  /** 0 for anchors, carried-over entities and cards without a hop (kinds that do not walk), else the hop. */
   level: number
   /** Entity ids of the cards it is linked to, nearer to the anchors first. */
   anchors: string[]

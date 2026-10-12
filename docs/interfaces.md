@@ -665,8 +665,15 @@ line, each with a `type`. The shared events mean the same for every kind:
 |---|---|---|
 | `thread` | `threadId` | Always first: the thread this turn runs on |
 | `delta` | `text` | A fragment of the answer, for kinds that stream their answer |
+| `entities` | `entities` — each `ref`, `id`, `type`, `typeName`, `label`, `fields` (`name`, `value`), `evidence`, and as the kind sends them `reason`, `role`, `hop` — and `links` — each `id` (the stored relation's id), `from`, `to` (refs, directed as stored), `type`, `label` | The entities the turn met and the stored relations between them; a later card replaces an earlier one with the same `ref`, a link is identified by its `id` |
 | `final` | `reply` | Terminal: the complete answer |
 | `error` | `error` | Terminal: the public error object with `code`, `message` and optional `details` |
+
+Refs are `E1`, `E2`, … in the order the turn met the entities, unique within a turn; an
+entity keeps its ref for the turn. `id` and `type` are the entity's id and type key, so a
+client reads the entity through the runtime; `evidence` says the entity was handed to the
+model that wrote the answer. A link's ends are cards of the same turn. Which entities a
+kind sends is in its section below.
 
 A kind's own events are named `<kind>.<event>` — `agent.…`, `retriever.…`, `navigator.…`; a client may
 ignore those it does not know. A writable stream has exactly one terminal `final` or
@@ -709,7 +716,9 @@ default retriever with nothing to search `VALIDATION_ERROR`, an unknown or busy 
 shared — each before the stream opens.
 
 The response streams the [shared frame](#assistant-chat-and-threads): `thread`, the answer
-as `delta` events, then one terminal `final` or `error`. Its own events:
+as `delta` events, then one terminal `final` or `error`. Before the answer, when results
+reached the answer model, one `entities` event carries them, all evidence, without links —
+with or without diagnostics. Its own events:
 `retriever.phase` (`phase` `plan`, `retrieve` or `answer`, `status` `start` or `end`, an
 end with `durationMs`), and — only with `diagnostics` true — `retriever.diagnostics`
 events, which carry:
@@ -765,18 +774,17 @@ language-model provider the route answers `FEATURE_DISABLED`; an unknown navigat
 not found, a navigator its lens can no longer run `VALIDATION_ERROR` with the errors under
 `details.errors`, an unknown or busy thread as shared — each before the stream opens. The
 response streams the shared frame — `thread`, the answer as `delta` events, one terminal
-`final` or `error` — and its own events, all in display names, never ids or keys except
-an entity's `id`:
+`final` or `error` — the `entities` met after the anchors, after each walk and after the
+focus, with each card's `reason`, `role` (`anchor`, `reached`, `focus`) and `hop` — and
+its own events, all in display names, never ids or keys:
 
 | Event `type` | Fields | Meaning |
 |---|---|---|
 | `navigator.graph` | `steps` (`id`, `label`, `description`, `model`), `edges` (`from`, `to`, optional `label`; an edge to itself is a repeat) | The pipeline, once, right after `thread` |
 | `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, and when it ends `durationMs` and an optional `summary` | One step starting or ending; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn fails |
-| `navigator.entities` | `entities` — each `ref`, `id`, `type`, `typeName`, `label`, `role` (`anchor`, `reached`, `focus`), `hop`, `reason`, `fields` (`name`, `value`), `evidence` — and `links` — each `id` (the stored relation's id), `from`, `to` (refs, directed as stored), `type`, `label` | The entities met so far and the relations between them; a later card replaces an earlier one with the same `ref`, a link is identified by its `id` |
 | `navigator.summary` | `modelCalls`, `durationMs`, `entities`, `evidence`, `hops`, `timings` (milliseconds per step id) | Once, before `final` |
 
-Refs are `E1`, `E2`, … in discovery order, unique within a turn. The answer cites evidence
-by ref in square brackets, one or several: `[E2]`, `[E2, E5]`.
+The answer cites evidence by ref in square brackets, one or several: `[E2]`, `[E2, E5]`.
 
 **Read a thread.** As [shared](#assistant-chat-and-threads). No MCP equivalent exists.
 
@@ -805,6 +813,11 @@ response-mode option.
 |---|---|---|
 | `agent.tool_call` | `callId`, `tool`, `args` | One invocation begins, including schema-invalid arguments |
 | `agent.tool_result` | `callId`, `result` | That invocation completes; result retains its native JSON structure |
+
+After a successful result of `get_entity`, `list_entities`, `get_neighbors`, `search` or
+`search_documents`, an `entities` event carries the lens's entities it returned that the
+turn had not sent yet, all evidence, and for `get_neighbors` the relations to them. Other
+tools send none; the tool events are the same either way.
 
 Call IDs are unique within a turn. Calls precede their results, and parallel results arrive
 as each completes. An unknown agent, an unavailable provider and an unknown or busy thread

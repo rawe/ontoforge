@@ -23,9 +23,8 @@ import {
 } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import type { ChatRequest, SharedEvent } from '@/api/chatStream'
+import type { EntityCard } from '@/api/entities'
 import { useFeatures } from '@/api/hooks'
-import { chatNavigator } from '@/api/navigators'
 import * as runtime from '@/api/runtime'
 import type {
   EntityInstance,
@@ -34,8 +33,6 @@ import type {
   RuntimeSchema,
 } from '@/api/types'
 import type { Turn } from '@/components/assistants/chat/chatModel'
-import type { EntityCard, GraphEvent } from '@/components/assistants/graph/graphEvents'
-import type { GraphInsight } from '@/components/assistants/graph/graphTurnModel'
 import { EmptyState } from '@/components/EmptyState'
 import { TypeDot } from '@/components/TypeChip'
 import { Button } from '@/components/ui/button'
@@ -401,9 +398,8 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
 
   /** Auto-add: a completed answer's cited entities and the relations between canvas entities, as one batch. */
   const addAnswer = useCallback(
-    async (turn: Turn<GraphInsight>): Promise<'added' | 'refused'> => {
-      const answer = turn.insight
-      const cited = citedCards(turn.reply, answer.entities)
+    async (answer: Pick<Turn<unknown>, 'reply' | 'entities' | 'links'>): Promise<'added' | 'refused'> => {
+      const cited = citedCards(answer.reply, answer.entities)
       if (cited.length === 0) return 'added'
       const current = wsRef.current.nodes
       const plan = planAdd(cited, answer, new Set(current.map((n) => n.id)), current.length, MAX_NODES)
@@ -427,12 +423,6 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
       return 'added'
     },
     [ontologyKey, lensKey, addEntities, addAnswerEdges, reactFlow, fitOptions],
-  )
-
-  const sendToNavigator = useCallback(
-    (key: string, body: ChatRequest, onEvent: (event: SharedEvent | GraphEvent) => void, signal: AbortSignal) =>
-      chatNavigator(ontologyKey, lensKey, key, body, onEvent, signal),
-    [ontologyKey, lensKey],
   )
 
   /* ------------------------------ ?focus param ------------------------------- */
@@ -678,9 +668,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
         <AskDock
           ontologyKey={ontologyKey}
           lensKey={lensKey}
-          kind="navigators"
           dock={dock}
-          send={sendToNavigator}
           onCanvas={onCanvas}
           pointed={hoveredNode ?? highlighted}
           onEntity={showAnswerEntity}

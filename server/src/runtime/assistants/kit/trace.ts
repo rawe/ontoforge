@@ -5,8 +5,8 @@
  * - `<event>.graph` — the kind's topology, once, first;
  * - `<event>.step` — a step `running`, then `done`, `skipped` or `failed`,
  *   with a plain summary and its duration; `round` counts repeats;
- * - `<event>.entities` — entity cards and the links between them, upserted
- *   by ref, before the answer;
+ * - the shared `entities` event (`../entities.ts`) — entity cards and the
+ *   links between them, upserted by ref, before the answer;
  * - `<event>.summary` — model calls, duration and counts, once, last;
  * - the answer as the shared `delta` events.
  *
@@ -14,37 +14,10 @@
  */
 
 import type { StreamEvent } from "../../chatStream.js";
+import { entitiesEvent, type EntityCard, type EntityLink } from "../entities.js";
 import type { Topology } from "./kind.js";
 
 export type StepStatus = "running" | "done" | "skipped" | "failed";
-
-/** One entity as the client shows it. */
-export interface EntityCard {
-  /** `E1`, `E2`, … in discovery order; unique within a turn. */
-  ref: string;
-  id: string;
-  type: string;
-  typeName: string;
-  label: string;
-  role: "anchor" | "reached" | "focus";
-  /** Distance from the nearest anchor. */
-  hop: number;
-  /** Why the entity is here, in plain words. */
-  reason: string;
-  fields: { name: string; value: string }[];
-  /** Handed to the answer model; only evidence can be cited. */
-  evidence: boolean;
-}
-
-/** A relation between two cards, directed as stored. */
-export interface CardLink {
-  /** The stored relation's id; a link's identity. */
-  id: string;
-  from: string;
-  to: string;
-  type: string;
-  label: string;
-}
 
 /** What a step reports while it runs. */
 export interface StepReport {
@@ -106,8 +79,8 @@ export class Trace {
     return this.emit({ type: "delta", text });
   }
 
-  entities(entities: EntityCard[], links: CardLink[]): Promise<void> {
-    return this.emit({ type: `${this.event}.entities`, entities, links });
+  entities(entities: EntityCard[], links: EntityLink[]): Promise<void> {
+    return this.emit(entitiesEvent(entities, links));
   }
 
   summary(counts: Record<string, number>): Promise<void> {

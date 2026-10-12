@@ -146,8 +146,8 @@ A turn streams its work before its answer, in display names only:
 - **Each step** — when it starts and how it ends (done, skipped or failed), how long it
   took, a one-line summary in plain words — "Path manages → member of: 6 entities ·
   reached Person at hop 2" — and, for the walk, which round.
-- **The entities** — each with a ref unique in the turn, its type, label, up to six fields,
-  its role — anchor, reached by the walk, or carried over from the previous answer — its
+- **The entities** — [as every assistant reports them](threads.md#the-entities-a-turn-met):
+  each with a ref unique in the turn, its type, label, up to six fields, its role — anchor, reached by the walk, or carried over from the previous answer — its
   distance from the nearest anchor, why it is there ("Lena Fischer manages Kira Novak", or
   "Closest match for “Nordwind Robotics” — not the same name"), and whether it is evidence;
   and the relations between them, each naming the stored relation it stands for. They are

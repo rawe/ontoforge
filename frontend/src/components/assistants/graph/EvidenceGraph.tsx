@@ -18,8 +18,8 @@ import {
 import '@xyflow/react/dist/style.css'
 import { getTypeColor } from '@/lib/typeColors'
 import { cn } from '@/lib/utils'
-import type { EntityCard, EntityLink } from './graphEvents'
-import { roleInfo } from './graphTurnModel'
+import type { EntityCard, EntityLink } from '@/api/entities'
+import { roleInfo } from '@/components/assistants/entities/entityModel'
 
 const NODE_WIDTH = 164
 const NODE_HEIGHT = 42
@@ -36,7 +36,7 @@ function CardNodeView({ data }: NodeProps<CardNode>) {
       className={cn('cursor-pointer rounded-lg bg-card px-2.5 py-1.5', dimmed && 'opacity-55')}
       style={{
         width: NODE_WIDTH,
-        border: `${card.evidence ? 2 : 1}px ${card.evidence || !dimmed ? 'solid' : 'dashed'} ${roleInfo(card.role).color}`,
+        border: `${card.evidence ? 2 : 1}px ${card.evidence || !dimmed ? 'solid' : 'dashed'} ${roleInfo(card.role ?? '').color}`,
         boxShadow: selected ? '0 0 0 3px color-mix(in oklch, var(--ring) 45%, transparent)' : undefined,
       }}
     >

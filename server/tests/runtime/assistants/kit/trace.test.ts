@@ -75,7 +75,7 @@ describe("Trace", () => {
     await t.delta("Hi");
     await t.summary({ entities: 1, evidence: 1, hops: 0 });
     expect(events.slice(2)).toEqual([
-      { type: "navigator.entities", entities: [card], links: [{ id: "r1", from: "E1", to: "E1", type: "manages", label: "manages" }] },
+      { type: "entities", entities: [card], links: [{ id: "r1", from: "E1", to: "E1", type: "manages", label: "manages" }] },
       { type: "delta", text: "Hi" },
       {
         type: "navigator.summary",

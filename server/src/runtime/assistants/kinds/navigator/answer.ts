@@ -4,7 +4,7 @@
  * and the rule to cite every entity named.
  */
 
-import type { CardLink } from "../../kit/trace.js";
+import type { EntityLink } from "../../entities.js";
 import type { Board, BoardNode } from "./board.js";
 
 export const ANSWER = `You answer questions about a knowledge graph. A graph walk collected the ENTITIES and RELATIONS below; they are your only source.
@@ -23,7 +23,7 @@ function cardLine(node: BoardNode): string {
   return `[${ref}] ${typeName} "${label}"${why}${facts ? ` — ${facts}` : ""}`;
 }
 
-function linkLine(board: Board, link: CardLink): string {
+function linkLine(board: Board, link: EntityLink): string {
   const from = board.byRef(link.from)!.card;
   const to = board.byRef(link.to)!.card;
   return `${from.label} [${from.ref}] ${link.label} ${to.label} [${to.ref}]`;

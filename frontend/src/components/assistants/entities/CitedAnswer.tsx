@@ -3,8 +3,8 @@ import type { Components } from 'react-markdown'
 import { Markdown } from '@/components/ai/Markdown'
 import { getTypeColor } from '@/lib/typeColors'
 import { cn } from '@/lib/utils'
-import type { EntityCard } from './graphEvents'
-import { citations } from './graphTurnModel'
+import type { EntityCard } from '@/api/entities'
+import { citations } from './entityModel'
 
 /** The markdown tree, as far as citations need it. */
 interface MdNode {
@@ -39,7 +39,7 @@ function remarkCitations(entities: readonly EntityCard[]) {
 
 /** One citation: a compact numbered marker in its type's color — the answer
  * names the entity right before it; the label shows on hover. Selects the
- * card in the sidebar. */
+ * card in the side panel. */
 function CitationChip({ card, selected, onSelect, onHover }: {
   card: EntityCard
   selected: boolean
@@ -68,8 +68,9 @@ function CitationChip({ card, selected, onSelect, onHover }: {
 }
 
 /**
- * A graph kind's answer: markdown whose `[E2]` / `[E2, E5]` citations of
- * evidence cards are chips; other refs stay plain text.
+ * An answer: markdown whose `[E2]` / `[E2, E5]` citations of evidence
+ * cards are chips; other refs stay plain text, and an answer without
+ * citations renders as plain markdown.
  */
 export function CitedAnswer({ text, entities, selected, onSelect, onHover }: {
   text: string

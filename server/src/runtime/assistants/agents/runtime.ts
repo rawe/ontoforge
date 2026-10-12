@@ -44,6 +44,7 @@ import { DEFAULT_AGENT_CONFIG, getAiModel, type AgentConfig } from "../../../cor
 import { getEmbeddingProvider } from "../../../core/embedding.js";
 import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
 import type { RuntimeStore } from "../../../core/ports.js";
+import type { StreamEvent } from "../../chatStream.js";
 import { loadSchema, type SchemaCacheValue } from "../../schemaCache.js";
 import * as service from "../../service.js";
 import { TURNS_THE_MODEL_SEES, type GraphThread } from "../../threads/threadStore.js";
@@ -62,6 +63,8 @@ import {
   TOOL_SEARCH_SAVED_QUERIES,
   TOOL_SEARCH,
 } from "../../toolNames.js";
+import { entitiesEvent } from "../entities.js";
+import { TurnEntities } from "./entities.js";
 
 type Row = Record<string, unknown>;
 
@@ -395,27 +398,31 @@ const AGENT_TOOL_DEFS_BY_NAME: ReadonlyMap<string, AgentToolDef> = new Map(
 /** Every instantiable tool name. */
 export const ALL_TOOL_NAMES: ReadonlySet<string> = new Set(AGENT_TOOL_DEFS_BY_NAME.keys());
 
-/**
- * Instantiate the named tools bound to one lens. A tool
- * failure that is a not-found or validation error becomes the tool's
- * result (`{"error": message}`) so the model self-corrects; model-supplied
- * arguments that fail the tool's schema are fed back the same way.
- * Anything else is rethrown and aborts the run.
- */
 export type ToolEvent =
   | { type: "agent.tool_call"; callId: string; tool: string; args: Row }
   | { type: "agent.tool_result"; callId: string; result: unknown };
 
 export interface ChatExecution {
   signal?: AbortSignal;
-  onToolEvent?: (event: ToolEvent) => Promise<void>;
+  /** The tool events, and the shared `entities` event after an entity tool's result. */
+  onToolEvent?: (event: StreamEvent) => Promise<void>;
 }
 
+/**
+ * Instantiate the named tools bound to one lens. A tool
+ * failure that is a not-found or validation error becomes the tool's
+ * result (`{"error": message}`) so the model self-corrects; model-supplied
+ * arguments that fail the tool's schema are fed back the same way.
+ * Anything else is rethrown and aborts the run. With the turn's `entities`,
+ * a result that shows entities not sent yet is followed by the shared
+ * `entities` event (`./entities.ts`); an `{error}` result shows none.
+ */
 export function buildTools(
   lensKey: string,
   store: RuntimeStore,
   toolNames: string[],
   execution: ChatExecution = {},
+  entities?: TurnEntities,
 ): StructuredToolInterface[] {
   return toolNames.flatMap((name) => {
     const def = AGENT_TOOL_DEFS_BY_NAME.get(name);
@@ -464,6 +471,13 @@ export function buildTools(
       }
       execution.signal?.throwIfAborted();
       await execution.onToolEvent?.({ type: "agent.tool_result", callId, result });
+      if (entities !== undefined) {
+        const found = entities.unsent(name, args, result);
+        if (found.entities.length > 0 || found.links.length > 0) {
+          execution.signal?.throwIfAborted();
+          await execution.onToolEvent?.(entitiesEvent(found.entities, found.links));
+        }
+      }
       return isToolCall ? output : output.content;
     };
     return [structured];
@@ -632,7 +646,7 @@ export async function runAgentChat(
 
   const toolNames = resolveChatToolNames(agentConfig, store);
   const model = requireModel();
-  const tools = buildTools(lensKey, store, toolNames, execution);
+  const tools = buildTools(lensKey, store, toolNames, execution, new TurnEntities(loaded.scoped));
 
   const reply = await runReactAgent(model, systemPrompt, tools, message, thread, execution.signal);
   execution.signal?.throwIfAborted();

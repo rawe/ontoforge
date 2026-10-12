@@ -27,6 +27,8 @@ import {
   createMockRuntimeStore,
   makeEntity,
   makeFullSchema,
+  makeRelation,
+  makeScopedSchema,
   makeUnscopedSchema,
   rankedEntry,
   withManagedIndices,
@@ -636,5 +638,149 @@ describe("without a language-model provider", () => {
   it("an unknown lens still answers not-found before the provider check", async () => {
     store.getFullSchemaWithLensInclusions.mockResolvedValue(null);
     await expect(aiChat("missing", "hi", asRuntimeStore(store))).rejects.toThrow(NotFoundError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The shared entities event
+// ---------------------------------------------------------------------------
+
+describe("entities event", () => {
+  /** One turn with the default agent on a new thread, with every event it streamed, in order. */
+  async function eventsOf(lensKey: string, message = "who?") {
+    const events: Row[] = [];
+    await runAgentChat(DEFAULT_AGENT_CONFIG, lensKey, message, asRuntimeStore(store), await newThread(), {
+      onToolEvent: async (event) => { events.push(structuredClone(event)); },
+    });
+    return events;
+  }
+
+  const entityEvents = (events: Row[]) => events.filter((e) => e.type === "entities");
+  const cardsOf = (events: Row[]) => entityEvents(events).flatMap((e) => e.entities as Row[]);
+
+  it("follows the tool_result of an entity tool, which stays unchanged", async () => {
+    const alice = makeEntity({ name: "Alice", age: 30 }, "person", "p1");
+    store.getEntity.mockResolvedValue(alice);
+    const fake = installFake([
+      toolCallMessage("get_entity", { entity_type_key: "person", entity_id: "p1" }),
+      new AIMessage("Alice is 30."),
+    ]);
+
+    const events = await eventsOf("full_lens");
+
+    expect(events.map((e) => e.type)).toEqual(["agent.tool_call", "agent.tool_result", "entities"]);
+    const result = events[1]!.result as Row;
+    expect(result).toEqual(alice);
+    expect(events[2]).toEqual({
+      type: "entities",
+      entities: [{
+        ref: "E1", id: "p1", type: "person", typeName: "Person", label: "Alice",
+        fields: [{ name: "Age", value: "30" }], evidence: true,
+      }],
+      links: [],
+    });
+    // The model's tool message is the plain result, without cards.
+    const toolMessage = fake.calls[1]!.find((m) => m instanceof ToolMessage)!;
+    expect(String(toolMessage.content)).toBe(JSON.stringify(result));
+  });
+
+  it("keeps refs stable across parallel calls and repeated entities, sending each card once", async () => {
+    const rows: Record<string, Row> = {
+      p1: makeEntity({ name: "Alice" }, "person", "p1"),
+      p2: makeEntity({ name: "Bob" }, "person", "p2"),
+      p3: makeEntity({ name: "Cleo" }, "person", "p3"),
+    };
+    store.getEntity.mockImplementation(async (_type: string, id: string) => rows[id] ?? null);
+    store.listEntities.mockResolvedValue([[rows.p2, rows.p1, rows.p3], 3]);
+    installFake([
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { name: "get_entity", args: { entity_type_key: "person", entity_id: "p1" }, id: "c1", type: "tool_call" },
+          { name: "get_entity", args: { entity_type_key: "person", entity_id: "p2" }, id: "c2", type: "tool_call" },
+        ],
+      }),
+      toolCallMessage("list_entities", { entity_type_key: "person" }, "c3"),
+      toolCallMessage("get_entity", { entity_type_key: "person", entity_id: "p1" }, "c4"),
+      new AIMessage("three people"),
+    ]);
+
+    const events = await eventsOf("full_lens");
+
+    // The repeated get_entity sends nothing new.
+    expect(entityEvents(events)).toHaveLength(3);
+    const cards = cardsOf(events);
+    expect(cards.map((c) => c.ref).sort()).toEqual(["E1", "E2", "E3"]);
+    const refOf = Object.fromEntries(cards.map((c) => [c.id, c.ref]));
+    expect(new Set([refOf.p1, refOf.p2])).toEqual(new Set(["E1", "E2"]));
+    // The list met p1 and p2 again: only p3 is new, with the next ref.
+    expect(entityEvents(events)[2]!.entities).toEqual([expect.objectContaining({ id: "p3", ref: "E3" })]);
+  });
+
+  it("links neighbours as stored and skips entity types the lens does not show", async () => {
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
+    invalidateLoadedSchemaCache();
+    store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }, "person", "p1"));
+    store.getNeighbors.mockResolvedValue([
+      { relation: { ...makeRelation({}, { relationId: "r1" }), direction: "outgoing" },
+        entity: makeEntity({ name: "Acme" }, "company", "c1") },
+      { relation: { ...makeRelation({}, { relationId: "r2" }), direction: "incoming" },
+        entity: makeEntity({ name: "Bob" }, "person", "p2") },
+      // A department leaks through an in-lens relation: no card, no link.
+      { relation: { ...makeRelation({}, { relationId: "r3" }), direction: "outgoing" },
+        entity: makeEntity({ name: "Sales", code: "S" }, "department", "d1") },
+    ]);
+    installFake([
+      toolCallMessage("get_neighbors", { entity_type_key: "person", entity_id: "p1" }),
+      new AIMessage("Alice works for Acme."),
+    ]);
+
+    const events = await eventsOf("hr_view");
+
+    // The tool result still carries the leaked neighbour, unchanged.
+    const result = events.find((e) => e.type === "agent.tool_result")!.result as Row;
+    expect((result.neighbors as Row[]).map((n) => (n.entity as Row)._id)).toEqual(["c1", "p2", "d1"]);
+    const [event] = entityEvents(events);
+    expect((event!.entities as Row[]).map((c) => [c.ref, c.id])).toEqual([["E1", "p1"], ["E2", "c1"], ["E3", "p2"]]);
+    expect(event!.links).toEqual([
+      { id: "r1", from: "E1", to: "E2", type: "works_for", label: "works for" },
+      { id: "r2", from: "E3", to: "E1", type: "works_for", label: "works for" },
+    ]);
+  });
+
+  it("search hits become cards", async () => {
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithDocument());
+    invalidateLoadedSchemaCache();
+    setEmbeddingProvider(fakeEmbedding);
+    withManagedIndices(store, PERSON_INDEX_SCHEMA, fakeEmbedding.modelId, (query) =>
+      query.generationId === "person~bio/semantic" ? [rankedEntry("ent-1", 0.9, { startChar: 0, charLength: 5, text: "Alice" })] : [],
+    );
+    store.getEntitiesByIds.mockResolvedValue({ "ent-1": makeEntity({ name: "Alice", bio: "Alice joined." }) });
+    installFake([toolCallMessage("search_documents", { query: "joined" }), new AIMessage("Alice.")]);
+
+    const events = await eventsOf("full_lens");
+
+    // The document property is no field.
+    expect(cardsOf(events)).toEqual([{
+      ref: "E1", id: "ent-1", type: "person", typeName: "Person", label: "Alice", fields: [], evidence: true,
+    }]);
+  });
+
+  it("non-entity tools and failed calls send nothing", async () => {
+    store.getEntity.mockImplementation(async (_type: string, id: string) =>
+      id === "ent-1" ? makeEntity({ name: "Alice", bio: "Alice joined." }) : null);
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithDocument());
+    invalidateLoadedSchemaCache();
+    installFake([
+      toolCallMessage("get_schema", {}, "c1"),
+      toolCallMessage("get_document", { entity_type_key: "person", entity_id: "ent-1", property_key: "bio" }, "c2"),
+      toolCallMessage("get_entity", { entity_type_key: "person", entity_id: "gone" }, "c3"),
+      toolCallMessage("list_entities", { entity_type_key: "person", filters: { anyOf: [] } }, "c4"),
+      new AIMessage("nothing"),
+    ]);
+
+    const events = await eventsOf("full_lens");
+
+    expect(events.map((e) => e.type)).toEqual(Array(4).fill(["agent.tool_call", "agent.tool_result"]).flat());
   });
 });

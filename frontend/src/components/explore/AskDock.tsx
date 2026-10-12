@@ -1,4 +1,4 @@
-import { Check, ChevronRight, LoaderCircle, MessageSquarePlus, PanelLeftClose, Plus, X } from 'lucide-react'
+import { Check, ChevronRight, LoaderCircle, MessageSquarePlus, Plus, X } from 'lucide-react'
 import { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { chatErrorText, type ChatRequest, type SharedEvent } from '@/api/chatStream'
 import { useAssistants } from '@/api/hooks'
@@ -43,11 +43,9 @@ interface AskDockProps {
 }
 
 /**
- * The Explorer's ask dock on the canvas's left edge: a conversation with
- * one assistant of the lens whose answers fill the canvas. Open (resizable),
- * or collapsed to a rail that keeps the conversation — and a running answer
- * — alive. The chat's state lives here, so streamed answers never render
- * the canvas.
+ * The Explorer's ask dock on the canvas's left edge, resizable: a
+ * conversation with one assistant of the lens whose answers fill the canvas.
+ * The chat's state lives here, so streamed answers never render the canvas.
  */
 export const AskDock = memo(function AskDock({ dock, ...props }: AskDockProps) {
   const { ontologyKey, lensKey, kind } = props
@@ -55,10 +53,8 @@ export const AskDock = memo(function AskDock({ dock, ...props }: AskDockProps) {
   const list = assistants.data
   const assistant = list === undefined ? undefined
     : list.find((a) => a.key === dock.settings.assistant) ?? list.find((a) => a.key === DEFAULT_ASSISTANT) ?? list[0]
-  const [running, setRunning] = useState(false)
   const [width, setWidth] = useState<number | null>(null)
   const { one, icon: Icon } = ASSISTANT_KINDS[kind]
-  const collapsed = dock.view === 'collapsed'
 
   const resize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -96,70 +92,48 @@ export const AskDock = memo(function AskDock({ dock, ...props }: AskDockProps) {
       </SelectContent>
     </Select>
   )
-  const frame = (
-    <>
-      <IconButton label="Collapse" onClick={dock.collapse}><PanelLeftClose className="size-3.5" /></IconButton>
-      <IconButton label="Close" onClick={dock.close}><X className="size-3.5" /></IconButton>
-    </>
-  )
+  const close = <IconButton label="Close" onClick={dock.close}><X className="size-3.5" /></IconButton>
 
   return (
-    <>
-      {collapsed && (
-        <button
-          type="button"
-          onClick={dock.open}
-          aria-label={`Open the ${one.toLowerCase()} dock`}
-          title={assistant === undefined ? one : `${one}: ${assistant.name}`}
-          className="flex h-full w-10 shrink-0 flex-col items-center gap-3 border-r bg-card/95 py-3 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-        >
-          <Icon className="size-4 shrink-0" />
-          {running && <LoaderCircle aria-label="Answering" className="size-3.5 shrink-0 animate-spin text-primary" />}
-          <span className="min-h-0 truncate text-xs font-medium [writing-mode:vertical-rl]">{assistant?.name ?? one}</span>
-        </button>
-      )}
-      <aside
-        aria-label={`${one} dock`}
-        hidden={collapsed}
-        style={{ width: width ?? dock.width }}
-        className="relative flex h-full shrink-0 flex-col border-r bg-background"
-      >
-        {assistants.error || (list !== undefined && assistant === undefined) ? (
-          <>
-            <div className="flex min-h-11 items-center gap-1.5 border-b px-3 py-2">
-              <Icon className="size-4 shrink-0 text-muted-foreground" />
-              <span className="flex-1 text-[13px] font-medium">{one}</span>
-              {frame}
-            </div>
-            <div className="p-4 text-[13px]">
-              {assistants.error ? <>
-                <p role="alert">Could not load {ASSISTANT_KINDS[kind].many}: {chatErrorText(assistants.error, 'request failed')}</p>
-                <Button variant="outline" size="sm" className="mt-3" onClick={() => void assistants.refetch()}>Reload</Button>
-              </> : <p className="text-muted-foreground">This lens has no {ASSISTANT_KINDS[kind].many}.</p>}
-            </div>
-          </>
-        ) : (
-          <AskConversation
-            // Another assistant: its own conversation; a running answer is cancelled.
-            key={assistant?.key ?? 'loading'}
-            {...props}
-            assistant={assistant ?? null}
-            picker={picker}
-            frame={frame}
-            autoAdd={dock.settings.autoAdd}
-            onAutoAdd={dock.setAutoAdd}
-            onRunning={setRunning}
-          />
-        )}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize"
-          onPointerDown={resize}
-          className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize transition-colors hover:bg-primary/20"
+    <aside
+      aria-label={`${one} dock`}
+      style={{ width: width ?? dock.width }}
+      className="relative flex h-full shrink-0 flex-col border-r bg-background"
+    >
+      {assistants.error || (list !== undefined && assistant === undefined) ? (
+        <>
+          <div className="flex min-h-11 items-center gap-1.5 border-b px-3 py-2">
+            <Icon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="flex-1 text-[13px] font-medium">{one}</span>
+            {close}
+          </div>
+          <div className="p-4 text-[13px]">
+            {assistants.error ? <>
+              <p role="alert">Could not load {ASSISTANT_KINDS[kind].many}: {chatErrorText(assistants.error, 'request failed')}</p>
+              <Button variant="outline" size="sm" className="mt-3" onClick={() => void assistants.refetch()}>Reload</Button>
+            </> : <p className="text-muted-foreground">This lens has no {ASSISTANT_KINDS[kind].many}.</p>}
+          </div>
+        </>
+      ) : (
+        <AskConversation
+          // Another assistant: its own conversation; a running answer is cancelled.
+          key={assistant?.key ?? 'loading'}
+          {...props}
+          assistant={assistant ?? null}
+          picker={picker}
+          close={close}
+          autoAdd={dock.settings.autoAdd}
+          onAutoAdd={dock.setAutoAdd}
         />
-      </aside>
-    </>
+      )}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize"
+        onPointerDown={resize}
+        className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize transition-colors hover:bg-primary/20"
+      />
+    </aside>
   )
 })
 
@@ -187,14 +161,13 @@ type AskConversationProps = Omit<AskDockProps, 'dock'> & {
   /** Null while the list loads: nothing can be asked yet. */
   assistant: RuntimeAssistant | null
   picker: ReactNode
-  frame: ReactNode
+  close: ReactNode
   autoAdd: boolean
   onAutoAdd: (on: boolean) => void
-  onRunning: (running: boolean) => void
 }
 
 function AskConversation({
-  ontologyKey, lensKey, kind, send, assistant, picker, frame, autoAdd, onAutoAdd, onRunning,
+  ontologyKey, lensKey, kind, send, assistant, picker, close, autoAdd, onAutoAdd,
   onCanvas, pointed, onEntity, onHover, onAnswer,
 }: AskConversationProps) {
   const assistantKey = assistant?.key ?? null
@@ -223,10 +196,6 @@ function AskConversation({
   useEffect(() => {
     if (scroll.current !== null) scroll.current.scrollTop = scroll.current.scrollHeight
   }, [turns])
-  useEffect(() => {
-    onRunning(running)
-  }, [running, onRunning])
-  useEffect(() => () => onRunning(false), [onRunning])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -236,7 +205,7 @@ function AskConversation({
         <IconButton label="New conversation" disabled={running || turns.length === 0} onClick={() => setConfirmNew(true)}>
           <MessageSquarePlus className="size-3.5" />
         </IconButton>
-        {frame}
+        {close}
       </div>
       <div className="border-b px-3 py-1.5">
         <InsightToggle

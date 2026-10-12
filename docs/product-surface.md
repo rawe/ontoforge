@@ -648,14 +648,10 @@ rather than a degenerate curve.
 dock on the canvas's left edge — the right edge belongs to the node panel — holding an
 [assistant chat](#assistant-chat) with one of the lens's navigators:
 
-- **States.** Open and resizable; collapsed to a slim rail with the navigator's name and,
-  while an answer runs, a spinner; or closed. Collapsing keeps the conversation and a
-  running answer going; closing cancels the running answer, and reopening restores the
-  conversation from its thread. An open dock in a narrow window shows as its rail until
-  it is opened.
+- **Open or closed.** Open, it is resizable. Closing cancels a running answer; reopening
+  restores the conversation from its thread.
 - **Header.** A navigator picker, `Default` first; another navigator cancels a running
-  answer and shows that navigator's own conversation. Then "New conversation", collapse
-  and close.
+  answer and shows that navigator's own conversation. Then "New conversation" and close.
 - **Answers** as in the chat, citations as markers. Under each, two collapsible parts:
   *Found* — the answer's entities as compact cards grouped as in the
   [evidence sidebar](#evidence-sidebar), each saying whether it is on the canvas — and
@@ -1234,7 +1230,7 @@ the address.
 | Theme preference | Global | — |
 | Sidebar collapsed (Workbench and Studio alike) | Global | — |
 | Explorer working set | Per ontology + lens | Bounded by the hard node cap |
-| Explorer ask dock — open, collapsed or closed, its width, its navigator, the switch that adds cited entities | Per ontology + lens | — |
+| Explorer ask dock — open or closed, its width, its navigator, the switch that adds cited entities | Per ontology + lens | — |
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
 | Current conversation thread id (Workbench Agents, Retrievers and Navigators tabs, Explorer ask dock) | Per ontology + lens + kind + assistant | One |

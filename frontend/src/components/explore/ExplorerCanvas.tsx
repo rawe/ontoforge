@@ -674,7 +674,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
 
   return (
     <div ref={rootRef} className="flex h-full w-full">
-      {!askOff && dock.view !== 'closed' && (
+      {!askOff && dock.settings.open && (
         <AskDock
           ontologyKey={ontologyKey}
           lensKey={lensKey}
@@ -737,7 +737,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
               return next
             })
           }
-          ask={askOff ? undefined : { open: dock.view !== 'closed', onToggle: dock.toggle }}
+          ask={askOff ? undefined : { open: dock.settings.open, onToggle: dock.toggle }}
         />
 
         {!hydrated && (

@@ -9,8 +9,7 @@
  *   of.sidebar                — "expanded" | "collapsed"
  *   of.explore.{ontologyKey}.{lensKey} — Explorer canvas working set
  *   of.exploreAsk.{ontologyKey}.{lensKey} — the Explorer's ask dock:
- *                               `{ view: open|collapsed|closed, width,
- *                               navigator, autoAdd }`
+ *                               `{ open, width, assistant, autoAdd }`
  *   of.thread.{ontologyKey}.{lensKey}.{kind}.{assistantKey} — id of the
  *                               Workbench's current conversation thread with
  *                               that assistant (the messages stay on the server)

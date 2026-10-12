@@ -1,7 +1,7 @@
 import { AlertCircle, LoaderCircle, MessageSquarePlus, SendHorizonal, Square, type LucideIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { chatErrorText, threadError, type ChatRequest, type SharedEvent } from '@/api/chatStream'
+import type { ChatRequest, SharedEvent } from '@/api/chatStream'
 import type { AssistantKind } from '@/api/types'
 import { Markdown } from '@/components/ai/Markdown'
 import {
@@ -20,20 +20,15 @@ import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { ASSISTANT_KINDS } from '../kinds'
 import {
-  EXPIRED_TEXT,
   MAX_MESSAGE,
-  applyEvent,
   elapsedSeconds,
   endText,
-  failTurn,
   inspectedTurn,
-  pendingTurn,
-  restoredTurns,
-  stopTurn,
   type Turn,
   type TurnModel,
 } from './chatModel'
-import { forgetThread, rememberThread, rememberedThread, restoreThread, type ThreadOwner } from './threadStore'
+import type { ThreadOwner } from './threadStore'
+import { useAssistantConversation } from './useAssistantConversation'
 
 /** How a kind shows what it reported about each answer. */
 export interface InsightView<I> {
@@ -100,113 +95,26 @@ export function AssistantChat<E extends { type: string }, I>({
     () => (remember && assistantKey !== null ? { ontologyKey, lensKey, kind, assistantKey } : null),
     [remember, ontologyKey, lensKey, kind, assistantKey],
   )
-  const [turns, setTurns] = useState<Turn<I>[]>([])
-  // Until the remembered thread is read back, nothing can be sent.
-  const [restoring, setRestoring] = useState(owner !== null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [input, setInput] = useState('')
   const [confirmNew, setConfirmNew] = useState(false)
   // The answer the panel shows; null follows the latest with insight.
   const [selected, setSelected] = useState<string | null>(null)
-  const active = useRef<AbortController | null>(null)
-  const threadId = useRef<string | null>(null)
+  const conversation = useAssistantConversation({
+    owner, model, send, blocked: assistantKey === null || blockedReason !== null, onSent: () => setSelected(null),
+  })
+  const { turns, restoring, notice, running } = conversation
   const scroll = useRef<HTMLDivElement>(null)
-  const running = turns.some((t) => t.status === 'pending')
-  const canAsk = assistantKey !== null && blockedReason === null && !restoring
   const panel = insight.panel
   const icon = ASSISTANT_KINDS[kind].icon
   const shown = inspectedTurn(turns, selected, model.hasInsight)
 
-  useEffect(() => () => {
-    const request = active.current
-    active.current = null
-    request?.abort()
-  }, [])
   useEffect(() => {
     if (scroll.current !== null) scroll.current.scrollTop = scroll.current.scrollHeight
   }, [turns])
-  // The owner is fixed for a mount.
-  useEffect(() => {
-    if (owner === null) return
-    const controller = new AbortController()
-    restoreThread(owner, controller.signal).then(
-      (restored) => {
-        if (controller.signal.aborted) return
-        threadId.current = restored.threadId
-        setTurns(restoredTurns(restored.messages, model.empty, () => crypto.randomUUID()))
-        if (restored.expired) setNotice(EXPIRED_TEXT)
-        setRestoring(false)
-      },
-      (error: unknown) => {
-        if (controller.signal.aborted) return
-        // Keep the remembered thread: the next message continues it.
-        threadId.current = rememberedThread(owner)
-        setNotice(`Could not restore the conversation: ${chatErrorText(error, 'request failed')}`)
-        setRestoring(false)
-      },
-    )
-    return () => controller.abort()
-  }, [owner, model])
-
-  async function submit() {
-    const question = input.trim()
-    if (!question || !canAsk || assistantKey === null || active.current !== null) return
-    const controller = new AbortController()
-    active.current = controller
-    let turn = pendingTurn(crypto.randomUUID(), question, model.empty(), Date.now())
-    const previous = turns
-    const save = () => { if (active.current === controller) setTurns([...previous, turn]) }
-    setInput('')
-    setNotice(null)
-    setSelected(null)
-    save()
-    const onEvent = (event: SharedEvent | E) => {
-      if (active.current !== controller || controller.signal.aborted) return
-      if (event.type === 'thread') {
-        threadId.current = (event as SharedEvent & { type: 'thread' }).threadId
-        if (owner !== null) rememberThread(owner, threadId.current)
-      }
-      turn = applyEvent(model, turn, event, Date.now())
-      save()
-    }
-    try {
-      await send({ message: question, threadId: threadId.current ?? undefined }, onEvent, controller.signal)
-    } catch (error) {
-      if (active.current !== controller) return
-      if (controller.signal.aborted) {
-        turn = stopTurn(model, turn, Date.now())
-      } else if (threadError(error) === 'THREAD_NOT_FOUND') {
-        // The thread expired: start over, the question back in the input.
-        active.current = null
-        threadId.current = null
-        if (owner !== null) forgetThread(owner)
-        setTurns([])
-        setNotice(EXPIRED_TEXT)
-        setInput(question)
-        return
-      } else {
-        turn = failTurn(model, turn, chatErrorText(error), Date.now())
-      }
-      save()
-    } finally {
-      if (active.current === controller) active.current = null
-    }
-  }
 
   /** "New conversation": the thread stays on the server until it expires. */
   function startOver() {
-    threadId.current = null
-    if (owner !== null) forgetThread(owner)
-    setTurns([])
-    setNotice(null)
+    conversation.startOver()
     setSelected(null)
-  }
-
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault()
-      void submit()
-    }
   }
 
   const newConversation = turns.length > 0 && (
@@ -278,29 +186,7 @@ export function AssistantChat<E extends { type: string }, I>({
                     {blockedReason}
                   </p>
                 )}
-                <form className="flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); void submit() }}>
-                  <Textarea
-                    aria-label={`Message to ${name}`}
-                    placeholder={placeholder}
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={onKeyDown}
-                    rows={1}
-                    maxLength={MAX_MESSAGE}
-                    disabled={running || restoring || assistantKey === null}
-                    className="max-h-36 min-h-9 resize-none py-[7px] text-[13px] leading-5 md:text-[13px]"
-                  />
-                  {running ? (
-                    <Button key="stop" type="button" variant="outline" size="lg" className="w-[4.75rem]" onClick={() => active.current?.abort()}>
-                      <Square className="size-3 fill-current" /> Stop
-                    </Button>
-                  ) : (
-                    <Button key="send" type="submit" size="lg" className="w-[4.75rem]" disabled={!canAsk || input.trim() === ''}>
-                      <SendHorizonal className="size-3.5" /> Send
-                    </Button>
-                  )}
-                </form>
-                <p className="mt-1.5 text-[11px] text-muted-foreground">Enter sends · Shift+Enter adds a line · Follow-ups refer to earlier answers</p>
+                <Composer name={name} placeholder={placeholder} conversation={conversation} disabled={assistantKey === null} />
               </div>
             </div>
           </section>
@@ -324,24 +210,75 @@ export function AssistantChat<E extends { type: string }, I>({
         </div>
       </div>
 
-      <AlertDialog open={confirmNew} onOpenChange={setConfirmNew}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Start a new conversation?</AlertDialogTitle>
-            <AlertDialogDescription>The current one can no longer be opened here.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={startOver}>New conversation</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <NewConversationDialog open={confirmNew} onOpenChange={setConfirmNew} onConfirm={startOver} />
     </div>
   )
 }
 
+/** "New conversation", confirmed. */
+export function NewConversationDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Start a new conversation?</AlertDialogTitle>
+          <AlertDialogDescription>The current one can no longer be opened here.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm}>New conversation</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+/** The message input: Enter sends, Shift+Enter adds a line; while an answer runs, Send becomes Stop. */
+export function Composer({ name, placeholder, conversation, disabled }: {
+  name: string
+  placeholder: string
+  conversation: Pick<ReturnType<typeof useAssistantConversation>, 'input' | 'setInput' | 'submit' | 'stop' | 'running' | 'restoring' | 'canAsk'>
+  /** Nothing to ask yet (no assistant). */
+  disabled: boolean
+}) {
+  const { input, setInput, submit, stop, running, restoring, canAsk } = conversation
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      void submit()
+    }
+  }
+  return (
+    <>
+      <form className="flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); void submit() }}>
+        <Textarea
+          aria-label={`Message to ${name}`}
+          placeholder={placeholder}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={onKeyDown}
+          rows={1}
+          maxLength={MAX_MESSAGE}
+          disabled={running || restoring || disabled}
+          className="max-h-36 min-h-9 resize-none py-[7px] text-[13px] leading-5 md:text-[13px]"
+        />
+        {running ? (
+          <Button key="stop" type="button" variant="outline" size="lg" className="w-[4.75rem]" onClick={stop}>
+            <Square className="size-3 fill-current" /> Stop
+          </Button>
+        ) : (
+          <Button key="send" type="submit" size="lg" className="w-[4.75rem]" disabled={!canAsk || input.trim() === ''}>
+            <SendHorizonal className="size-3.5" /> Send
+          </Button>
+        )}
+      </form>
+      <p className="mt-1.5 text-[11px] text-muted-foreground">Enter sends · Shift+Enter adds a line · Follow-ups refer to earlier answers</p>
+    </>
+  )
+}
+
 /** The empty conversation: who answers and what it does. */
-function Intro({ icon, name, description, intro }: { icon: LucideIcon; name: string; description?: string | null; intro: string }) {
+export function Intro({ icon, name, description, intro }: { icon: LucideIcon; name: string; description?: string | null; intro: string }) {
   return (
     <div className="flex flex-col items-center gap-3 py-12 text-center">
       <AssistantIcon icon={icon} className="size-11 rounded-xl [&_svg]:size-5" />
@@ -363,7 +300,7 @@ function AssistantIcon({ icon: Icon, className }: { icon: LucideIcon; className?
 }
 
 /** One question and its answer. */
-function TurnView<I>({ turn, icon, answer, progress, insight }: { turn: Turn<I>; icon: LucideIcon; answer: ReactNode; progress: string | undefined; insight: ReactNode }) {
+export function TurnView<I>({ turn, icon, answer, progress, insight }: { turn: Turn<I>; icon: LucideIcon; answer: ReactNode; progress: string | undefined; insight: ReactNode }) {
   const ended = endText(turn)
   return (
     <article className="space-y-3">

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import {
   ArrowUpRight, Circle, CircleCheck, CircleDashed, CircleMinus, CircleSlash, CircleX, LoaderCircle, Repeat, Sparkles,
 } from 'lucide-react'
@@ -31,7 +31,6 @@ interface EvidenceSidebarProps {
  */
 export function EvidenceSidebar({ ontologyKey, lensKey, turn, view, onView, selected, onSelect }: EvidenceSidebarProps) {
   const { insight } = turn
-  const evidence = insight.entities.filter((card) => card.evidence === true).length
   return (
     <Tabs value={view} onValueChange={(value) => onView(value as SidebarView)} className="flex min-h-0 flex-1 flex-col gap-0">
       <div className="border-b px-3 py-2">
@@ -44,34 +43,7 @@ export function EvidenceSidebar({ ontologyKey, lensKey, turn, view, onView, sele
         </TabsList>
       </div>
       <TabsContent value="entities" className="min-h-0 flex-1 overflow-y-auto p-3">
-        {insight.entities.length === 0 ? <Waiting turn={turn} /> : (
-          <div className="space-y-4">
-            <p className="text-xs text-muted-foreground">
-              {insight.entities.length} {insight.entities.length === 1 ? 'entity' : 'entities'}
-              {evidence > 0 && <> · <span className="font-medium text-foreground">{evidence} evidence</span> handed to the answer</>}
-            </p>
-            {groupByRole(insight.entities).map(({ role, cards }) => (
-              <section key={role} className="space-y-2">
-                <h3 className="flex items-baseline gap-1.5 text-xs font-medium">
-                  <span aria-hidden className="size-2 shrink-0 translate-y-px rounded-full" style={{ background: roleInfo(role).color }} />
-                  {roleInfo(role).title}
-                  <span className="tabular-nums text-muted-foreground">{cards.length}</span>
-                  {roleInfo(role).hint && <span className="font-normal text-muted-foreground">· {roleInfo(role).hint}</span>}
-                </h3>
-                {cards.map((card) => (
-                  <CardView
-                    key={card.ref}
-                    href={`/o/${ontologyKey}/w/${lensKey}/e/${encodeURIComponent(card.type)}/${encodeURIComponent(card.id)}`}
-                    card={card}
-                    selected={card.ref === selected}
-                    dimmed={evidence > 0 && card.evidence !== true}
-                    onSelect={onSelect}
-                  />
-                ))}
-              </section>
-            ))}
-          </div>
-        )}
+        <EntityCardList ontologyKey={ontologyKey} lensKey={lensKey} turn={turn} selected={selected} onSelect={onSelect} />
       </TabsContent>
       <TabsContent value="graph" className="flex min-h-0 flex-1 flex-col">
         {insight.entities.length === 0 ? <div className="p-3"><Waiting turn={turn} /></div> : <>
@@ -82,9 +54,64 @@ export function EvidenceSidebar({ ontologyKey, lensKey, turn, view, onView, sele
         </>}
       </TabsContent>
       <TabsContent value="steps" className="min-h-0 flex-1 overflow-y-auto p-3">
-        <Steps turn={turn} />
+        <StepList turn={turn} />
       </TabsContent>
     </Tabs>
+  )
+}
+
+/**
+ * An answer's cards grouped by role, with how many are evidence. `compact`
+ * leaves out the fields and the count line (the Explorer's ask dock);
+ * `aside` adds something after each card's label; `onHover` reports the
+ * card under the pointer.
+ */
+export function EntityCardList({ ontologyKey, lensKey, turn, selected, onSelect, compact = false, aside, onHover }: {
+  ontologyKey: string
+  lensKey: string
+  turn: Turn<GraphInsight>
+  /** The selected card's ref in this answer, if any. */
+  selected: string | null
+  onSelect: (ref: string) => void
+  compact?: boolean
+  aside?: (card: EntityCard) => ReactNode
+  onHover?: (ref: string | null) => void
+}) {
+  const { entities } = turn.insight
+  if (entities.length === 0) return <Waiting turn={turn} />
+  const evidence = entities.filter((card) => card.evidence === true).length
+  return (
+    <div className={compact ? 'space-y-3' : 'space-y-4'}>
+      {!compact && (
+        <p className="text-xs text-muted-foreground">
+          {entities.length} {entities.length === 1 ? 'entity' : 'entities'}
+          {evidence > 0 && <> · <span className="font-medium text-foreground">{evidence} evidence</span> handed to the answer</>}
+        </p>
+      )}
+      {groupByRole(entities).map(({ role, cards }) => (
+        <section key={role} className={compact ? 'space-y-1.5' : 'space-y-2'}>
+          <h3 className="flex items-baseline gap-1.5 text-xs font-medium">
+            <span aria-hidden className="size-2 shrink-0 translate-y-px rounded-full" style={{ background: roleInfo(role).color }} />
+            {roleInfo(role).title}
+            <span className="tabular-nums text-muted-foreground">{cards.length}</span>
+            {roleInfo(role).hint && <span className={cn('font-normal text-muted-foreground', compact && 'truncate')}>· {roleInfo(role).hint}</span>}
+          </h3>
+          {cards.map((card) => (
+            <CardView
+              key={card.ref}
+              href={`/o/${ontologyKey}/w/${lensKey}/e/${encodeURIComponent(card.type)}/${encodeURIComponent(card.id)}`}
+              card={card}
+              selected={card.ref === selected}
+              dimmed={evidence > 0 && card.evidence !== true}
+              onSelect={onSelect}
+              compact={compact}
+              aside={aside?.(card)}
+              onHover={onHover}
+            />
+          ))}
+        </section>
+      ))}
+    </div>
   )
 }
 
@@ -97,24 +124,30 @@ function Waiting({ turn }: { turn: Turn<GraphInsight> }) {
 }
 
 /** One card; selecting it (here, by a citation or in the graph) scrolls it into view. */
-function CardView({ card, href, selected, dimmed, onSelect }: {
+function CardView({ card, href, selected, dimmed, onSelect, compact, aside, onHover }: {
   card: EntityCard
   href: string
   selected: boolean
   dimmed: boolean
   onSelect: (ref: string) => void
+  compact: boolean
+  aside: ReactNode
+  onHover?: (ref: string | null) => void
 }) {
   const element = useRef<HTMLElement>(null)
   useEffect(() => {
     if (selected) element.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [selected])
-  const fields = (card.fields ?? []).slice(0, 6)
+  const fields = compact ? [] : (card.fields ?? []).slice(0, 6)
   return (
     <article
       ref={element}
       onClick={() => onSelect(card.ref)}
+      onMouseEnter={onHover && (() => onHover(card.ref))}
+      onMouseLeave={onHover && (() => onHover(null))}
       className={cn(
-        'rounded-lg border bg-card px-3 py-2 text-xs transition-[opacity,box-shadow]',
+        'rounded-lg border bg-card text-xs transition-[opacity,box-shadow]',
+        compact ? 'cursor-pointer px-2.5 py-1.5' : 'px-3 py-2',
         card.evidence && 'border-l-2 border-l-primary',
         dimmed && !selected && 'opacity-60 hover:opacity-100',
         selected && 'ring-2 ring-ring/60',
@@ -130,6 +163,7 @@ function CardView({ card, href, selected, dimmed, onSelect }: {
         >
           {card.label}
         </button>
+        {aside}
         <Link
           to={href}
           onClick={(e) => e.stopPropagation()}
@@ -145,7 +179,7 @@ function CardView({ card, href, selected, dimmed, onSelect }: {
         {card.hop !== undefined && card.hop > 0 && <span>· {card.hop} {card.hop === 1 ? 'hop' : 'hops'} away</span>}
         {card.evidence && <span className="font-medium text-primary">· Evidence</span>}
       </p>
-      {card.reason && <p className="mt-1 text-muted-foreground">{card.reason}</p>}
+      {card.reason && <p className={cn('mt-1 text-muted-foreground', compact && 'line-clamp-2')}>{card.reason}</p>}
       {fields.length > 0 && (
         <dl className="mt-1.5 grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-2.5 gap-y-0.5 text-[11px]">
           {fields.map((field) => (
@@ -192,7 +226,7 @@ function StatusIcon({ state, className }: { state: keyof typeof STATUS; classNam
 }
 
 /** The pipeline, top to bottom: each step's live state, what it did per round, and how long it took. */
-function Steps({ turn }: { turn: Turn<GraphInsight> }) {
+export function StepList({ turn }: { turn: Turn<GraphInsight> }) {
   const { insight } = turn
   const ended = turn.status !== 'pending'
   // Steps the pipeline does not list (should not happen) still show, after it.

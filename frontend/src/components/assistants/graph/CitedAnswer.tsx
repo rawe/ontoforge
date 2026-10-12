@@ -40,12 +40,19 @@ function remarkCitations(entities: readonly EntityCard[]) {
 /** One citation: a compact numbered marker in its type's color — the answer
  * names the entity right before it; the label shows on hover. Selects the
  * card in the sidebar. */
-function CitationChip({ card, selected, onSelect }: { card: EntityCard; selected: boolean; onSelect: (ref: string) => void }) {
+function CitationChip({ card, selected, onSelect, onHover }: {
+  card: EntityCard
+  selected: boolean
+  onSelect: (ref: string) => void
+  onHover?: (ref: string | null) => void
+}) {
   const color = getTypeColor(card.type)
   return (
     <button
       type="button"
       onClick={() => onSelect(card.ref)}
+      onMouseEnter={onHover && (() => onHover(card.ref))}
+      onMouseLeave={onHover && (() => onHover(null))}
       aria-pressed={selected}
       aria-label={`Evidence ${card.ref}: ${card.label}, ${card.typeName}`}
       title={`${card.typeName}: ${card.label}`}
@@ -64,12 +71,14 @@ function CitationChip({ card, selected, onSelect }: { card: EntityCard; selected
  * A graph kind's answer: markdown whose `[E2]` / `[E2, E5]` citations of
  * evidence cards are chips; other refs stay plain text.
  */
-export function CitedAnswer({ text, entities, selected, onSelect }: {
+export function CitedAnswer({ text, entities, selected, onSelect, onHover }: {
   text: string
   entities: readonly EntityCard[]
   /** The selected card's ref in this answer, if any. */
   selected: string | null
   onSelect: (ref: string) => void
+  /** The card whose citation is under the pointer, null when none is. */
+  onHover?: (ref: string | null) => void
 }) {
   const plugins = useMemo(() => [remarkCitations(entities)], [entities])
   const components = useMemo<Components>(() => ({
@@ -77,9 +86,9 @@ export function CitedAnswer({ text, entities, selected, onSelect }: {
       const ref = node?.properties?.dataCite
       const card = typeof ref === 'string' ? entities.find((e) => e.ref === ref) : undefined
       if (card === undefined) return <span {...props}>{children}</span>
-      return <CitationChip card={card} selected={selected === card.ref} onSelect={onSelect} />
+      return <CitationChip card={card} selected={selected === card.ref} onSelect={onSelect} onHover={onHover} />
     },
-  }), [entities, selected, onSelect])
+  }), [entities, selected, onSelect, onHover])
   // A restored answer has no cards: its citations would only be noise.
   const shown = entities.length === 0 ? text.replace(/ ?\[E\d+(?:\s*,\s*E\d+)*\]/g, '') : text
   return <Markdown plugins={plugins} components={components}>{shown}</Markdown>

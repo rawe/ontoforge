@@ -9,6 +9,7 @@ import { deleteNavigator, saveNavigator, type Navigator } from '@/api/navigators
 import { qk } from '@/api/queryKeys'
 import type { Lens, RuntimeSchema } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
+import { AssistantExplainerButton } from '@/components/assistants/explainers/AssistantExplainer'
 import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { NavigatorChat } from '@/components/assistants/navigators/NavigatorChat'
 import { NavigatorEditor } from '@/components/assistants/navigators/NavigatorEditor'
@@ -110,7 +111,10 @@ export function NavigatorsTab({ ontologyKey, lens }: { ontologyKey: string; lens
           relations a few hops outward and answer only from the entities they found, citing each one. Chat with them in the
           Workbench (Assistants → Navigators).
         </p>
-        <Button size="sm" onClick={() => select(NEW)}><Plus className="size-3.5" /> New navigator</Button>
+        <div className="flex gap-2">
+          <AssistantExplainerButton kind="navigators" labeled />
+          <Button size="sm" onClick={() => select(NEW)}><Plus className="size-3.5" /> New navigator</Button>
+        </div>
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
         <div className="rounded-xl border border-dashed p-4">
@@ -245,6 +249,7 @@ function NavigatorPage({ ontologyKey, lensKey, schema, aiEnabled, existingKeys, 
           <ChevronLeft className="size-3.5" /> All navigators
         </Button>
         <h2 className="text-[14px] font-semibold">{title}</h2>
+        <AssistantExplainerButton kind="navigators" className="-ml-1.5" />
         {!isNew && <Badge variant="outline" className="font-mono text-[11px]" title="Immutable key">{key}</Badge>}
         <span className={`text-xs ${isNew || dirty ? 'text-(--tc-amber)' : !navigator.validation.valid ? 'text-destructive' : 'text-muted-foreground'}`}>
           {isNew ? 'Not saved yet' : dirty ? 'Unsaved changes' : !navigator.validation.valid ? 'Invalid in this lens' : 'Saved'}

@@ -6,6 +6,7 @@ import * as model from '@/api/model'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import { AGENT_TOOL_NAMES, type Agent, type Lens } from '@/api/types'
+import { AssistantExplainerButton } from '@/components/assistants/explainers/AssistantExplainer'
 import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { EmptyState } from '@/components/EmptyState'
 import {
@@ -109,7 +110,10 @@ function AgentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isEdit ? `Edit agent "${agent.key}"` : 'New agent'}</DialogTitle>
+          <div className="flex items-center gap-1">
+            <DialogTitle>{isEdit ? `Edit agent "${agent.key}"` : 'New agent'}</DialogTitle>
+            <AssistantExplainerButton kind="agents" />
+          </div>
           <DialogDescription>
             Agents are AI personas for this lens, with their own system prompt and
             tool access.
@@ -244,9 +248,9 @@ export function AgentsTab({ ontologyKey, lens }: { ontologyKey: string; lens: Le
       <div className="mb-3 flex items-center gap-2">
         <h3 className="text-[13px] font-semibold">Agents</h3>
         <span className="text-[13px] text-muted-foreground">{agents?.length ?? 0}</span>
+        <AssistantExplainerButton kind="agents" labeled className="ml-auto" />
         <Button
           size="sm"
-          className="ml-auto"
           onClick={() => {
             setEditing(null)
             setDialogOpen(true)

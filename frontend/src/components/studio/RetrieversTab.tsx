@@ -9,6 +9,7 @@ import { qk } from '@/api/queryKeys'
 import { importRetriever, saveRetriever, type Retriever } from '@/api/retrievers'
 import type { Lens, RuntimeSchema, SearchCatalogEntry, ValidationError } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
+import { AssistantExplainerButton } from '@/components/assistants/explainers/AssistantExplainer'
 import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { RetrieverChat } from '@/components/assistants/retrievers/RetrieverChat'
 import { RetrieverConfigEditor } from '@/components/assistants/retrievers/RetrieverConfigEditor'
@@ -88,6 +89,7 @@ export function RetrieversTab({ ontologyKey, lens }: { ontologyKey: string; lens
     <div className="flex flex-wrap items-start gap-3">
       <p className="max-w-2xl flex-1 text-[13px] text-muted-foreground">Retrievers answer questions over this lens's search indices: a planner picks indices, relation groups and filters per question, an answer model writes the reply from the found entities. Chat with them in the Workbench (Assistants → Retrievers).</p>
       <div className="flex gap-2">
+        <AssistantExplainerButton kind="retrievers" labeled />
         <Button size="sm" variant="outline" onClick={() => setDialog('import')}><FileUp className="size-3.5" /> Import</Button>
         <Button size="sm" onClick={() => setDialog('new')}><Plus className="size-3.5" /> New retriever</Button>
       </div>
@@ -206,6 +208,7 @@ function RetrieverEditor({ ontologyKey, lensKey, existingKeys, catalog, schema, 
     <div className="flex flex-wrap items-center gap-2">
       <Button variant="ghost" size="sm" className="-ml-2 h-7 gap-1 text-xs text-muted-foreground" onClick={close}><ChevronLeft className="size-3.5" /> All retrievers</Button>
       <h2 className="text-[14px] font-semibold">{title}</h2>
+      <AssistantExplainerButton kind="retrievers" className="-ml-1.5" />
       <Badge variant="outline" className="font-mono text-[11px]" title="Immutable key">{key}</Badge>
       <span className={`text-xs ${isNew || dirty ? 'text-(--tc-amber)' : agent && !agent.validation.valid ? 'text-destructive' : 'text-muted-foreground'}`}>
         {isNew ? 'Not saved yet' : dirty ? 'Unsaved changes' : !agent.validation.valid ? 'Invalid in this lens' : 'Saved'}</span>

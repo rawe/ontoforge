@@ -361,6 +361,12 @@ happens in the Workbench ([Assistants panel](#assistants-panel)).
 [navigators](capabilities/navigators.md), with a test panel beside the editor; see
 [Navigator editor](#navigator-editor).
 
+A help button on the Agents, Retrievers and Navigators tabs, and beside the title of each
+of their editors, explains how that kind works. It shows the steps of one run, with the language-model calls set apart
+from the steps that only read the lens. One example run plays step by step over the same
+example graph and question for all three kinds, beside a run log and the settings that
+steer each step. A switch shows the other two kinds.
+
 **Saved queries** — the authoring surface for the lens's stored pipelines, and the only
 place multi-step pipelines can be built. Per query: name, derived-and-then-immutable key,
 description, an ordered list of steps, and a parameter list. A step is either a query step
@@ -785,9 +791,7 @@ unique in the lens — and opens the editor on a draft that exists only in the c
 its first save. "Import" creates a new retriever from an exported JSON, from a file or pasted;
 it never replaces a retriever with the same key.
 
-**Editor.** A draft that only a Save writes, in four sections, under a collapsed
-explanation of how a question becomes results — plan, narrow, rank entries, fuse and,
-for chat, answer — naming the settings that steer each step, each a jump to its section:
+**Editor.** A draft that only a Save writes, in four sections:
 
 - **Search indices** — the indices of the lens's
   [search catalog](capabilities/search.md#the-search-catalog), grouped by entity type,

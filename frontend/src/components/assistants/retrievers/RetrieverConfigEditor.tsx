@@ -9,7 +9,6 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { IndexAnatomy } from './IndexAnatomy'
-import { RetrievalPipeline, SECTION_IDS } from './RetrievalPipeline'
 import {
   MAX_ANSWER_FIELDS, MAX_ANSWER_FIELD_CHARACTERS, MIN_ANSWER_FIELD_CHARACTERS,
   answerFieldOptions, filterChoices, filterFieldOptions, filterLabel, groupRelationTypes, newFilter, pathKey, resultTypes,
@@ -30,8 +29,8 @@ interface ConfigEditorProps {
   issues: ValidationError[]
 }
 
-function Section({ id, title, description, issues, children }: { id: string; title: string; description: string; issues: ValidationError[]; children: ReactNode }) {
-  return <section id={id} className="scroll-mt-4 space-y-3 rounded-xl border bg-card p-4">
+function Section({ title, description, issues, children }: { title: string; description: string; issues: ValidationError[]; children: ReactNode }) {
+  return <section className="space-y-3 rounded-xl border bg-card p-4">
     <div><h3 className="text-[13px] font-semibold">{title}</h3><p className="mt-0.5 text-xs text-muted-foreground">{description}</p></div>
     {children}
     {issues.length > 0 && <ul className="space-y-0.5 text-xs text-destructive">{issues.map((issue, i) => <li key={i}>{issue.message}</li>)}</ul>}
@@ -55,8 +54,7 @@ export function RetrieverConfigEditor({ ontologyKey, config, onChange, catalog, 
   const setFilter = (i: number, filter: RetrieverFilter) => onChange({ ...config, filters: config.filters.map((f, j) => (j === i ? filter : f)) })
 
   return <div className="grid gap-4">
-    <RetrievalPipeline />
-    <Section id={SECTION_IDS.indices} title="Search indices" description="What a question can search. Hits are always entities of an index's type; the planner picks indices and relation groups per question by their names and descriptions — and only what an index's entries hold can match." issues={at(issues, 'indices')}>
+    <Section title="Search indices" description="What a question can search. Hits are always entities of an index's type; the planner picks indices and relation groups per question by their names and descriptions — and only what an index's entries hold can match." issues={at(issues, 'indices')}>
       {catalog.length === 0 && <p className="text-xs text-muted-foreground">This lens offers no search index. Include indices in the Scope tab, or create them under Search.</p>}
       {unavailable.map((ref) => <div key={ref.index} className="flex items-center gap-2 rounded-lg border border-destructive/30 p-2 text-xs">
         <span className="min-w-0 flex-1 text-destructive">Index <code>{ref.index}</code> is not available in this lens. It is kept for repair.</span>
@@ -97,7 +95,7 @@ export function RetrieverConfigEditor({ ontologyKey, config, onChange, catalog, 
       </div>)}
     </Section>
 
-    <Section id={SECTION_IDS.filters} title="Filters" description="Hard conditions: a value the question names must match exactly — on the result's own field or on an entity up to two relations away. A filter alone filters nothing; a question that names a value activates it." issues={at(issues, 'filters')}>
+    <Section title="Filters" description="Hard conditions: a value the question names must match exactly — on the result's own field or on an entity up to two relations away. A filter alone filters nothing; a question that names a value activates it." issues={at(issues, 'filters')}>
       {config.filters.map((filter, i) => {
         const choices = filterChoices(schema, filter.entityType)
         const choice = choices.find((c) => c.key === pathKey(filter.path))
@@ -143,7 +141,7 @@ export function RetrieverConfigEditor({ ontologyKey, config, onChange, catalog, 
           </select></label>}
     </Section>
 
-    <Section id={SECTION_IDS.answerFields} title="Answer fields" description={`Per result type, the values passed to the response model as evidence (at most ${MAX_ANSWER_FIELDS}); long values, documents included, are truncated. What is searched comes from the indices.`} issues={at(issues, 'answerFields')}>
+    <Section title="Answer fields" description={`Per result type, the values passed to the response model as evidence (at most ${MAX_ANSWER_FIELDS}); long values, documents included, are truncated. What is searched comes from the indices.`} issues={at(issues, 'answerFields')}>
       {types.length === 0 && <p className="text-xs text-muted-foreground">Choose an index first; its entity type gets answer fields.</p>}
       {types.map((type) => {
         const visible = schema.entityTypes.find((t) => t.key === type)
@@ -164,7 +162,7 @@ export function RetrieverConfigEditor({ ontologyKey, config, onChange, catalog, 
       </div>)}
     </Section>
 
-    <Section id={SECTION_IDS.answer} title="Answer" description="How strict the search is and how much of each value the answer may read." issues={[...at(issues, 'threshold'), ...at(issues, 'answerFieldCharacters')]}>
+    <Section title="Answer" description="How strict the search is and how much of each value the answer may read." issues={[...at(issues, 'threshold'), ...at(issues, 'answerFieldCharacters')]}>
       <label className="block space-y-2 text-sm"><span className="font-medium">Similarity threshold: {config.threshold.toFixed(2)}</span>
         <input className="w-full accent-primary" type="range" min="-1" max="1" step="0.05" disabled={disabled} value={config.threshold} onChange={(e) => onChange({ ...config, threshold: Number(e.target.value) })} />
         <span className="block space-y-1 text-xs text-muted-foreground">

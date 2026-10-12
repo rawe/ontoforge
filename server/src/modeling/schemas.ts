@@ -4,6 +4,7 @@
  * explicit `null`.
  */
 
+import { ASSISTANT_KIND_KEYS, type AssistantKindKey } from "../core/assistant.js";
 import { KeywordLanguage, KeywordLanguageSetSchema } from "../core/keywordLanguage.js";
 
 import { z } from "zod";
@@ -339,10 +340,19 @@ export const ExportRetriever = z.object({
 });
 export type ExportRetrieverInput = z.infer<typeof ExportRetriever>;
 
+/** One assistant of a registered kind in its portable form. Kept as
+ * stored: a version this release cannot run travels too. */
+export const ExportAssistant = ExportRetriever;
+
+const registeredKindLists = Object.fromEntries(
+  ASSISTANT_KIND_KEYS.map((kind) => [kind, z.array(ExportAssistant).default([])]),
+) as Record<AssistantKindKey, z.ZodDefault<z.ZodArray<typeof ExportAssistant>>>;
+
 /** A lens's assistants, one list per kind; each entry in its portable form. */
 export const ExportAssistants = z.object({
   agents: z.array(ExportAgent).default([]),
   retrievers: z.array(ExportRetriever).default([]),
+  ...registeredKindLists,
 });
 
 export const ExportLens = z.object({
@@ -354,7 +364,7 @@ export const ExportLens = z.object({
   // the managed indices of the types it exposes, as a lens upgraded by
   // the storage step does.
   indexInclusions: z.array(z.string()).optional(),
-  assistants: ExportAssistants.default({ agents: [], retrievers: [] }),
+  assistants: ExportAssistants.default(ExportAssistants.parse({})),
   savedQueries: z.array(ExportSavedQuery).default([]),
 });
 

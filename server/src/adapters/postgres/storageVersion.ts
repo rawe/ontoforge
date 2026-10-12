@@ -47,7 +47,7 @@ import { quoteIdent } from "./oql/bindings.js";
 import { readTypesWithProperties } from "./schemaRead.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 4;
+export const STORAGE_VERSION = 5;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 1;
@@ -449,6 +449,26 @@ const STEPS: Step[] = [
       `ALTER TABLE assistant_retriever RENAME CONSTRAINT retriever_agent_lens_fk TO assistant_retriever_lens_fk`,
       `ALTER TABLE assistant_retriever RENAME CONSTRAINT retriever_agent_key_unique TO assistant_retriever_key_unique`,
       renameNotNullConstraints("assistant_retriever"),
+    ],
+  },
+  {
+    // 7.x: assistants of registered kinds.
+    to: 5,
+    actions: [
+      `CREATE TABLE assistant (
+  assistant_id   uuid        CONSTRAINT assistant_pk PRIMARY KEY,
+  lens_id        uuid        NOT NULL CONSTRAINT assistant_lens_fk
+                             REFERENCES lens (lens_id) ON DELETE CASCADE,
+  kind           text        NOT NULL,
+  key            text        NOT NULL,
+  name           text        NOT NULL,
+  description    text,
+  config_version integer     NOT NULL,
+  config         jsonb       NOT NULL,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT assistant_key_unique UNIQUE (lens_id, kind, key)
+)`,
     ],
   },
 ];

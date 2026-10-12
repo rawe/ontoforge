@@ -21,7 +21,9 @@ import {
   StoreError,
   ValidationError,
 } from "../core/exceptions.js";
+import { ASSISTANT_KIND_KEYS } from "../core/assistant.js";
 import { RETRIEVER_CONFIG_VERSION, RetrieverConfig } from "../core/retriever.js";
+import { assistantKind } from "../runtime/assistants/kinds/index.js";
 import { parseAndValidate } from "../core/oql/index.js";
 import type { ModelingStore, RuntimeStore } from "../core/ports.js";
 import {
@@ -48,6 +50,7 @@ import {
   planIndexCascade,
   requireSearchIndices,
 } from "./searchIndices.js";
+import { portableAssistant } from "./assistants.js";
 import { portable as portableRetriever } from "./retrievers.js";
 import { readSearchSettings, updateSearchSettings as changeSearchSettings } from "../runtime/indexing/settings.js";
 import { invalidateLoadedSchemaCache, loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
@@ -1338,6 +1341,11 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     assistants.retrievers = (await indices.listRetrievers(lens.lensId as string)).map(
       portableRetriever,
     );
+    for (const kind of ASSISTANT_KIND_KEYS) {
+      assistants[kind] = (await store.assistants().listAssistants(lens.lensId as string, kind)).map(
+        portableAssistant,
+      );
+    }
     exported.assistants = assistants;
 
     const queryRows = await store.listSavedQueriesForExport(lens.lensId as string);
@@ -1529,6 +1537,29 @@ export async function importSchema(
           `Import error: retriever '${retriever.key}' has no valid configuration of version ` +
             `${RETRIEVER_CONFIG_VERSION}`,
         );
+      }
+    }
+  }
+
+  // Assistants of registered kinds: shape only, as for retrievers.
+  for (const lens of payload.lenses) {
+    for (const key of ASSISTANT_KIND_KEYS) {
+      const kind = assistantKind(key);
+      const noun = kind.noun.toLowerCase();
+      const seen = new Set<string>();
+      for (const assistant of lens.assistants[key]) {
+        if (seen.has(assistant.key)) errors.push(`Import error: duplicate ${noun} '${assistant.key}' in lens '${lens.key}'`);
+        seen.add(assistant.key);
+        if (!LENS_RESOURCE_KEY_PATTERN.test(assistant.key)) errors.push(badKey(noun, assistant.key, resourceKeyPattern));
+        if (assistant.key.length > MAX_KEY_LENGTH) errors.push(longKey(noun, assistant.key));
+        if (assistant.name.length === 0 || assistant.name.length > 200) {
+          errors.push(`Import error: ${noun} '${assistant.key}' needs a name of 1 to 200 characters`);
+        }
+        if (assistant.configVersion !== kind.configVersion || !kind.config.safeParse(assistant.config).success) {
+          errors.push(
+            `Import error: ${noun} '${assistant.key}' has no valid configuration of version ${kind.configVersion}`,
+          );
+        }
       }
     }
   }
@@ -1837,7 +1868,7 @@ export async function importSchema(
     }
   }
   invalidateLoadedSchemaCache();
-  // Retrievers last, once their indices exist.
+  // Retrievers and assistants of registered kinds last, once their indices exist.
   for (const lens of payload.lenses) {
     for (const retriever of lens.assistants.retrievers) {
       await indices.saveRetriever(
@@ -1854,6 +1885,24 @@ export async function importSchema(
         },
         true,
       );
+    }
+    for (const key of ASSISTANT_KIND_KEYS) {
+      const kind = assistantKind(key);
+      for (const assistant of lens.assistants[key]) {
+        await store.assistants().saveAssistant(
+          lensIds.get(lens)!,
+          {
+            assistantId: randomUUID(),
+            kind: key,
+            key: assistant.key,
+            name: assistant.name,
+            description: assistant.description,
+            configVersion: kind.configVersion,
+            config: kind.config.parse(assistant.config),
+          },
+          true,
+        );
+      }
     }
   }
   return { lenses: createdLenses };

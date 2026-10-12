@@ -47,6 +47,7 @@
  */
 
 import type { KeywordLanguageSet } from "./keywordLanguage.js";
+import type { AssistantKindKey, AssistantRecord, AssistantWrite } from "./assistant.js";
 import type { RetrieverRecord, RetrieverWrite } from "./retriever.js";
 
 import { settings } from "../config.js";
@@ -162,6 +163,9 @@ export interface ModelingStore {
   /** The search-index store of the same ontology: the modeling service
    * keeps the managed indices in step with the schema through it. */
   searchIndices(): SearchIndexStore;
+
+  /** The assistant store of the same ontology: assistants of registered kinds. */
+  assistants(): AssistantStore;
 
   // ------------------------------------------------------------------
   // Lenses
@@ -492,6 +496,9 @@ export interface RuntimeStore {
 
   /** The search-index store of the same ontology. */
   searchIndices(): SearchIndexStore;
+
+  /** The assistant store of the same ontology. */
+  assistants(): AssistantStore;
 
   // ------------------------------------------------------------------
   // Entity instances
@@ -861,6 +868,27 @@ export interface SearchWritePlan {
  * writes go to a generation by id wherever it is in that lifecycle, and
  * are refused (false) once it is no longer building or ready.
  */
+/**
+ * Assistants of registered kinds (`core/assistant.ts`), lens-local:
+ * keyed by lens, kind and key, deleted with their lens. The store keeps
+ * the configuration as given; every kind checks its own.
+ */
+export interface AssistantStore {
+  /** The lens's assistants of one kind, by name then key. */
+  listAssistants(lensId: string, kind: AssistantKindKey): Promise<AssistantRecord[]>;
+
+  getAssistant(lensId: string, kind: AssistantKindKey, key: string): Promise<AssistantRecord | null>;
+
+  /** Create, or replace name, description and configuration of the
+   * assistant with this kind and key (its id and creation time stay).
+   * `createOnly`: an existing key is a `ConflictError`. The lens missing is
+   * a `NotFoundError`. True in the pair when the assistant was created. */
+  saveAssistant(lensId: string, assistant: AssistantWrite, createOnly: boolean): Promise<[AssistantRecord, boolean]>;
+
+  /** False when the lens has no assistant of this kind and key. */
+  deleteAssistant(lensId: string, kind: AssistantKindKey, key: string): Promise<boolean>;
+}
+
 export interface SearchIndexStore {
   /** The ontology this store is bound to. */
   readonly ontologyKey: string;

@@ -3,8 +3,9 @@
  * Lens keys are unique only within their ontology, so every per-lens key is
  * qualified by ontology + lens:
  *
- *   of.lastLens.{ontologyKey} — key of that ontology's last-used lens; feeds
- *                               the ontology switcher's workbench landing
+ *   of.lastLens.{ontologyKey} — key of that ontology's last-used lens; picks
+ *                               the Workbench lens of the surface switch and
+ *                               the ontology switcher
  *   of.theme                  — managed by next-themes (light|dark|system)
  *   of.sidebar                — "expanded" | "collapsed"
  *   of.explore.{ontologyKey}.{lensKey} — Explorer canvas working set

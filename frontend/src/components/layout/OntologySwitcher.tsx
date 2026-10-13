@@ -1,9 +1,8 @@
-import { useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { Check, ChevronsUpDown, Settings2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useOntologies } from '@/api/hooks'
-import * as model from '@/api/model'
-import { qk } from '@/api/queryKeys'
+import { workbenchLanding } from '@/components/layout/surfaceTargets'
 import { Logo } from '@/components/Logo'
 import {
   DropdownMenu,
@@ -13,41 +12,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { readString, remove, storageKeys } from '@/lib/storage'
 import { cn } from '@/lib/utils'
 
 /**
- * Workbench landing for an ontology switch: the ontology's remembered
- * last-used lens if it still exists, otherwise its Studio. A remembered
- * key that no longer resolves is forgotten rather than retried.
- */
-async function workbenchTarget(
-  queryClient: QueryClient,
-  ontologyKey: string,
-): Promise<string> {
-  const studio = `/o/${ontologyKey}/studio`
-  let lensKeys: string[]
-  try {
-    const lenses = await queryClient.fetchQuery({
-      queryKey: qk.lenses(ontologyKey),
-      queryFn: () => model.listLenses(ontologyKey),
-    })
-    lensKeys = lenses.map((l) => l.key)
-  } catch {
-    return studio
-  }
-  const remembered = readString(storageKeys.lastLens(ontologyKey))
-  if (remembered !== null) {
-    if (lensKeys.includes(remembered)) return `/o/${ontologyKey}/w/${remembered}`
-    remove(storageKeys.lastLens(ontologyKey))
-  }
-  return studio
-}
-
-/**
  * Ontology switcher — atop the sidebar of both surfaces. Switching keeps
- * the surface: Studio → the other ontology's Studio; Workbench → that
- * ontology's last-used lens, or its Studio if it has none.
+ * the surface: Studio → the other ontology's Studio; Workbench → the lens
+ * `workbenchLanding` picks, or the Studio's lens list if it has none.
  */
 export function OntologySwitcher({
   ontologyKey,
@@ -68,7 +38,9 @@ export function OntologySwitcher({
       void navigate(`/o/${key}/studio`)
       return
     }
-    void workbenchTarget(queryClient, key).then((target) => navigate(target))
+    void workbenchLanding(queryClient, key)
+      .catch(() => `/o/${key}/studio`)
+      .then((target) => navigate(target))
   }
 
   return (

@@ -1,10 +1,12 @@
 import { SearchX } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, Outlet, useParams } from 'react-router-dom'
-import { useRuntimeSchema } from '@/api/hooks'
+import { useLenses, useOntologies, useRuntimeSchema } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { EmptyState } from '@/components/EmptyState'
 import { Sidebar } from '@/components/layout/Sidebar'
+import { STUDIO_ICON } from '@/components/layout/surfaceTargets'
+import { useDocumentTitle } from '@/components/layout/useDocumentTitle'
 import { SearchPalette } from '@/components/palette/SearchPalette'
 import { QuickAddDialog } from '@/components/quickadd/QuickAddDialog'
 import { Button } from '@/components/ui/button'
@@ -17,6 +19,14 @@ export function WorkbenchLayout() {
   const [paletteOpen, setPaletteOpen] = useState(false)
 
   const notFound = schema.error instanceof ApiError && schema.error.status === 404
+  // The lens list tells an unknown ontology (404) from an unknown lens in it.
+  const lenses = useLenses(notFound ? ontologyKey : undefined)
+  const ontologyMissing = lenses.error instanceof ApiError && lenses.error.status === 404
+  const { data: ontologies } = useOntologies()
+  const ontologyName = ontologies?.find((o) => o.key === ontologyKey)?.displayName ?? ontologyKey
+  useDocumentTitle(
+    schema.data === undefined ? undefined : `${schema.data.lens.name} · Workbench · ${ontologyName}`,
+  )
 
   // Remember the lens only once its schema loaded; the not-found state forgets the remembered lens.
   const loaded = schema.data !== undefined
@@ -48,21 +58,31 @@ export function WorkbenchLayout() {
   if (ontologyKey === undefined || lensKey === undefined) return null
 
   if (notFound) {
-    // The 404 covers both an unknown ontology and an unknown lens in it.
+    // Wait for the lens list before telling the ontology from the lens apart.
+    if (lenses.isPending) return null
     return (
       <div className="flex h-dvh items-center justify-center">
         <EmptyState
           icon={SearchX}
-          title="Lens not found"
-          description={`No lens with key "${lensKey}" exists in ontology "${ontologyKey}" on this server.`}
+          title={ontologyMissing ? 'Ontology not found' : 'Lens not found'}
+          description={
+            ontologyMissing
+              ? `No ontology with key "${ontologyKey}" exists on this server.`
+              : `Ontology "${ontologyKey}" has no lens with key "${lensKey}".`
+          }
           action={
-            <Button
-              asChild
-              size="sm"
-              onClick={() => remove(storageKeys.lastLens(ontologyKey))}
-            >
-              <Link to="/">Go to ontologies</Link>
-            </Button>
+            <div className="flex flex-wrap justify-center gap-2">
+              {!ontologyMissing && (
+                <Button asChild size="sm">
+                  <Link to={`/o/${ontologyKey}/studio/lenses`}>
+                    <STUDIO_ICON className="size-3.5" /> Open its lenses in the Studio
+                  </Link>
+                </Button>
+              )}
+              <Button asChild size="sm" variant={ontologyMissing ? 'default' : 'outline'}>
+                <Link to="/">Go to ontologies</Link>
+              </Button>
+            </div>
           }
         />
       </div>

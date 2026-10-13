@@ -6,19 +6,18 @@ import {
   Plus,
   Search,
   Settings2,
-  Shapes,
   Sparkles,
   SquareTerminal,
   Waypoints,
 } from 'lucide-react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useFeatures, useLenses, useRuntimeSchema } from '@/api/hooks'
 import { OntologySwitcher } from '@/components/layout/OntologySwitcher'
 import { useSidebarCollapsed } from '@/components/layout/sidebarCollapsed'
 import { NavItem, SidebarToggle } from '@/components/layout/SidebarItems'
+import { SurfaceToggle } from '@/components/layout/SurfaceToggle'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { TypeDot } from '@/components/TypeChip'
-import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -96,9 +95,12 @@ function LensSwitcher({
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => navigate('/')} className="gap-2">
+        <DropdownMenuItem
+          onSelect={() => navigate(`/o/${ontologyKey}/studio/lenses`)}
+          className="gap-2"
+        >
           <Settings2 className="size-4" />
-          Manage…
+          Manage lenses…
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -131,9 +133,15 @@ export function Sidebar({
         collapsed ? 'w-13' : 'w-60',
       )}
     >
-      <div className={cn('flex flex-col gap-1 p-2', collapsed && 'px-1.5')}>
+      <div className={cn('flex flex-col gap-1.5 p-2', collapsed && 'px-1.5')}>
         <OntologySwitcher
           ontologyKey={ontologyKey}
+          surface="workbench"
+          collapsed={collapsed}
+        />
+        <SurfaceToggle
+          ontologyKey={ontologyKey}
+          lensKey={lensKey}
           surface="workbench"
           collapsed={collapsed}
         />
@@ -267,20 +275,6 @@ export function Sidebar({
       >
         <SidebarToggle />
         <ThemeToggle />
-        {!collapsed && <span className="flex-1" />}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size={collapsed ? 'icon-sm' : 'sm'} asChild>
-              <NavLink to={`/o/${ontologyKey}/studio`} aria-label="Open Studio">
-                <Shapes className="size-4" />
-                {!collapsed && 'Studio'}
-              </NavLink>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side={collapsed ? 'right' : 'top'}>
-            Schema Studio
-          </TooltipContent>
-        </Tooltip>
       </div>
     </aside>
   )

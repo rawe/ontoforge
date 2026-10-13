@@ -29,6 +29,7 @@ import { deleteEntity, listEntities, type ListEntitiesParams } from '@/api/runti
 import type { EntityInstance, SchemaProperty } from '@/api/types'
 import { DocumentViewerDialog, type DocumentViewerTarget } from '@/components/DocumentViewerDialog'
 import { EmptyState } from '@/components/EmptyState'
+import { TypeNotInLens } from '@/components/home/TypeNotInLens'
 import { PageHeader } from '@/components/PageHeader'
 import { TypeChip } from '@/components/TypeChip'
 import { openQuickAdd } from '@/components/quickadd/quickAddBus'
@@ -439,16 +440,12 @@ export function TypeTablePage() {
 
   if (schema.data !== undefined && type === undefined) {
     return (
-      <EmptyState
-        icon={SearchX}
-        title="Unknown entity type"
-        description={`This lens has no entity type "${typeKey}" in scope.`}
-        action={
-          <Button asChild size="sm" variant="outline">
-            <Link to={`/o/${ontologyKey}/w/${lensKey}`}>Back to overview</Link>
-          </Button>
-        }
-      />
+      <div className="mx-auto max-w-xl px-6 py-16">
+        <TypeNotInLens ontologyKey={ontologyKey} lensKey={lensKey} typeKey={typeKey} />
+        <Button asChild size="sm" variant="link" className="mt-2 px-0">
+          <Link to={`/o/${ontologyKey}/w/${lensKey}`}>Back to overview</Link>
+        </Button>
+      </div>
     )
   }
   if (type === undefined) return null

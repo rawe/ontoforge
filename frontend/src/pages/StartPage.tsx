@@ -9,6 +9,7 @@ import { useLenses, useOntologies } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
 import type { Ontology } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
+import { STUDIO_ICON } from '@/components/layout/surfaceTargets'
 import { Logo } from '@/components/Logo'
 import { deriveKey, isValidSchemaKey, toastError } from '@/components/studio/lib'
 import { KeyField } from '@/components/studio/shared'
@@ -294,7 +295,16 @@ function OntologyCard({ ontology }: { ontology: Ontology }) {
         </p>
         {lenses === undefined && <Skeleton className="mt-1.5 h-6 w-28 rounded-md" />}
         {lenses !== undefined && lenses.length === 0 && (
-          <p className="mt-1.5 text-[13px] text-muted-foreground">No lenses yet.</p>
+          <p className="mt-1.5 text-[13px] text-muted-foreground">
+            No lenses yet.{' '}
+            <Link
+              to={`/o/${ontology.key}/studio/lenses`}
+              className="text-foreground underline-offset-4 hover:underline"
+            >
+              Create a lens
+            </Link>{' '}
+            to open the Workbench.
+          </p>
         )}
         {lenses !== undefined && lenses.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -313,7 +323,9 @@ function OntologyCard({ ontology }: { ontology: Ontology }) {
       </div>
       <div className="mt-4">
         <Button asChild variant="outline" size="sm">
-          <Link to={`/o/${ontology.key}/studio`}>Open Studio</Link>
+          <Link to={`/o/${ontology.key}/studio`}>
+            <STUDIO_ICON className="size-3.5" /> Open Studio
+          </Link>
         </Button>
       </div>
 

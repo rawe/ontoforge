@@ -8,6 +8,7 @@ import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
 import { EmptyState } from '@/components/EmptyState'
+import { TypeNotInLens } from '@/components/home/TypeNotInLens'
 import { PageHeader } from '@/components/PageHeader'
 import { TypeChip } from '@/components/TypeChip'
 import {
@@ -110,20 +111,23 @@ export function EntityDetailPage() {
   if (ontologyKey === undefined || lensKey === undefined || typeKey === undefined || id === undefined)
     return null
 
-  const notFound =
-    (entityQuery.error instanceof ApiError && entityQuery.error.status === 404) ||
-    (schema.data !== undefined && entityType === undefined)
+  if (schema.data !== undefined && entityType === undefined) {
+    return (
+      <div className="mx-auto max-w-xl px-6 py-24">
+        <TypeNotInLens ontologyKey={ontologyKey} lensKey={lensKey} typeKey={typeKey} />
+        <Button asChild size="sm" variant="link" className="mt-2 px-0">
+          <Link to={`/o/${ontologyKey}/w/${lensKey}`}>Back to overview</Link>
+        </Button>
+      </div>
+    )
+  }
 
-  if (notFound) {
+  if (entityQuery.error instanceof ApiError && entityQuery.error.status === 404) {
     return (
       <EmptyState
         icon={SearchX}
         title="Entity not found"
-        description={
-          entityType === undefined && schema.data !== undefined
-            ? `Entity type "${typeKey}" is not part of this lens's scope.`
-            : 'This entity does not exist (anymore) in this lens.'
-        }
+        description="This entity does not exist (anymore) in this lens."
         action={
           <Button variant="outline" size="sm" asChild>
             <Link to={`/o/${ontologyKey}/w/${lensKey}`}>Back to overview</Link>

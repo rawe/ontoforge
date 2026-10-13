@@ -8,7 +8,6 @@ import {
   MessageCircleQuestion,
   Moon,
   Search,
-  Shapes,
   Sparkles,
   SquareTerminal,
   Waypoints,
@@ -34,6 +33,7 @@ import {
   resultEntities,
 } from '@/components/assistants/retrievers/retrieveModel'
 import { useRetrieve } from '@/components/assistants/retrievers/useRetrieve'
+import { STUDIO_ICON, useStudioTarget } from '@/components/layout/surfaceTargets'
 import { TypeChip, TypeDot } from '@/components/TypeChip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { readString, storageKeys, writeString } from '@/lib/storage'
@@ -237,6 +237,8 @@ function PaletteContent({
   /* --------------------------------- actions --------------------------------- */
 
   const close = () => onOpenChange(false)
+  // "Open Studio" leads where the sidebar's switch does: this page's Studio equivalent.
+  const studio = useStudioTarget(ontologyKey, lensKey)
   const go = (to: string) => {
     close()
     navigate(to)
@@ -278,8 +280,8 @@ function PaletteContent({
     {
       id: 'studio',
       label: 'Open Studio',
-      icon: Shapes,
-      run: () => go(`/o/${ontologyKey}/studio`),
+      icon: STUDIO_ICON,
+      run: () => go(studio.to),
       keywords: 'schema modeling',
     },
     {

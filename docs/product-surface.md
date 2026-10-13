@@ -29,7 +29,8 @@ The address is the only source of truth for both — nothing else decides what i
 screen; there is no separate settings area.
 
 - A card per ontology: display name and key, its lenses as direct links into the
-  Workbench, an "Open Studio" action, and a ⋯ menu with Rename and Delete. Rename
+  Workbench (or, with none, a link to create one in the Studio), an "Open Studio"
+  action, and a ⋯ menu with Rename and Delete. Rename
   changes the display name only. Delete asks for confirmation stating the hard cascade —
   schema, lenses and all data go — because the API itself has no guard.
 - "+ New ontology" creates one: a key (proposed from the display name until the key
@@ -53,9 +54,36 @@ screen; there is no separate settings area.
 
 The two never mix. Nothing in the Workbench edits the schema, a lens, a search index or a
 retriever — it only uses them; nothing in the Studio touches instance data. Each surface
-has its own shell, and each links to the other: the Workbench sidebar has a Studio entry,
-the Studio sidebar returns to the ontology's last-used lens (or the start page when none
-is remembered).
+has its own shell, and the [surface switch](#the-surface-switch) leads from any page of
+one to its equivalent on the other.
+
+### The surface switch
+
+A two-part "Studio | Workbench" control beneath the ontology switcher, in the same place
+in both sidebars; the current surface is filled, the other names on hover where it leads.
+The switch and every entry that opens a surface carry that surface's one icon; links to a
+particular lens carry the lens icon.
+
+| From the Workbench | Leads to the Studio's |
+|---|---|
+| A type table or an entity of that type | Schema graph, that entity type selected |
+| Query | Lens detail of the current lens, Saved queries tab |
+| Assistants | Lens detail, the tab of the open assistant kind |
+| Home, Explore | Lens detail, Scope tab |
+
+| From the Studio | Leads to the Workbench's |
+|---|---|
+| Lens detail | That lens: Saved queries → Query's library, an assistant tab → that kind in Assistants, any other tab → Home |
+| Schema, an entity type selected | That type's table in the target lens; the lens's Home with a notice when the type is not in its scope |
+| Anything else | Home of the target lens |
+
+The **target lens** is the ontology's remembered last-used lens, else its first unscoped
+lens, else its first lens. With no lens at all the Workbench part shows as unavailable and
+leads to the Studio's lens list.
+
+An entity type the lens does not show — reached by the switch, or by the address of its
+table or of one of its entities — is named as such, with links to the same type in each of the ontology's lenses that show it and to the
+lens's scope in the Studio.
 
 ### The two switchers
 
@@ -63,20 +91,22 @@ Two stacked dropdowns in the sidebar, one per containment level — never a comb
 
 - The **ontology switcher** sits atop the sidebar of both surfaces. Switching keeps the
   surface: from a Studio it goes to the other ontology's Studio; from a Workbench it
-  goes to the target ontology's remembered last-used lens — validated against that
-  ontology's actual lenses, a stale remembered key being forgotten rather than retried —
-  and to its Studio when no remembered lens survives that check.
-- The **lens switcher** sits below it in the Workbench only, listing only the current
-  ontology's lenses. Choosing one records it as that ontology's last-used lens.
+  goes to the target ontology's target lens (see above) — a stale remembered key being
+  forgotten rather than retried — and to its Studio's lens list when it has no lens.
+  Its "Manage…" entry leads to the start page.
+- The **lens switcher** sits beneath the surface switch in the Workbench only, listing
+  only the current ontology's lenses. Choosing one records it as that ontology's last-used
+  lens. Its "Manage lenses…" entry leads to the Studio's lens list.
 
 A lens becomes the last-used one only once the Workbench has loaded its schema. A
 remembered lens that answers not found, or is no longer among the ontology's lenses, is
-forgotten; the Studio's way back then leads to the start page.
-- Both dropdowns end in a "Manage…" entry leading to the start page.
+forgotten.
 
-Navigating to an unknown ontology — in the Workbench or the Studio — or to an unknown
-lens shows a dedicated not-found state which forgets the remembered lens and offers the
-start page; it never silently redirects.
+Navigating to an unknown ontology — in the Workbench or the Studio — shows a dedicated
+not-found state offering the start page; an unknown lens shows one which forgets the
+remembered lens and offers the ontology's lens list in the Studio as well as the start
+page. Neither silently redirects. The browser tab names the surface: the lens, "Workbench"
+and the ontology in the Workbench, "Studio" and the ontology in the Studio.
 Per-lens client state (see [Local state](#local-state)) is keyed by ontology plus lens,
 so switching either never leaks a working set, a chat or a query history across a
 boundary — not even between same-keyed lenses of two ontologies.
@@ -88,11 +118,11 @@ boundary — not even between same-keyed lenses of two ontologies.
 ### Shell
 
 A collapsible sidebar (collapse state persists) carrying: the ontology switcher, the
-lens switcher beneath it, a search
+surface switch and the lens switcher beneath it, a search
 trigger, a create-entity trigger, fixed entries for Home, Explore, Query and — when
 available — Assistants, then a data section listing every entity type the lens exposes, each with
-its type colour. Below: a theme control cycling system → light → dark, and the Studio
-link. Every screen renders through the lens's schema; there is no hand-written per-type
+its type colour. Below: the collapse control and a theme control cycling system → light →
+dark. Every screen renders through the lens's schema; there is no hand-written per-type
 interface anywhere, so adding an entity type immediately produces a table, a form, a
 detail page, palette coverage and canvas support for it.
 
@@ -115,7 +145,7 @@ An overview of one lens.
 - A card offering AI-client connection details.
 
 Two dedicated states replace the body: when the lens exposes no entity types at all, an
-explanation pointing at the scope editor; when it exposes types but holds no instances, a
+explanation linking to the lens's scope in the Studio; when it exposes types but holds no instances, a
 two-step guide — create the first entity from the first type's table, or connect an AI
 client through its MCP configuration.
 
@@ -233,9 +263,9 @@ provider the navigation entry is gone and the screen renders an explanation; see
 ## Studio screens
 
 The Studio is scoped wholesale to one ontology: its sidebar carries the ontology
-switcher, its navigation covers Schema, Lenses, Search and Transfer, and everything it
-reads and writes belongs to the current ontology. Its footer holds the theme control, the
-collapse control and the way back to the Workbench. Like the Workbench sidebar, it
+switcher and the surface switch beneath it, its navigation covers Schema, Lenses, Search
+and Transfer, and everything it reads and writes belongs to the current ontology. Its
+footer holds the theme control and the collapse control. Like the Workbench sidebar, it
 collapses to an icon rail whose entries name themselves on hover; both sidebars share one
 collapse preference.
 
@@ -341,7 +371,7 @@ unscoped and therefore exposes everything.
 ### Lens detail
 
 Inline-editable name and description, an immutable key, a scope marker, an entry into the
-Workbench for this lens, and deletion behind a confirmation stating that the lens, its
+Workbench for this lens (on the page matching the open tab, as the surface switch does), and deletion behind a confirmation stating that the lens, its
 scope, its agents, retrievers, navigators and saved queries go — while the schema and all
 instance data stay. Six tabs:
 
@@ -1301,8 +1331,8 @@ the address.
 
 Per-lens state is keyed by ontology **and** lens because lens keys are unique only
 within their ontology — two ontologies' `default` lenses must never share a canvas or a
-chat. The remembered last-used lens exists per ontology, and only to feed the ontology
-switcher's Workbench landing and the Studio's way back; nothing at the root consumes it.
+chat. The remembered last-used lens exists per ontology, and only to pick the target lens of
+the surface switch and the ontology switcher; nothing at the root consumes it.
 
 The working set stores only identifiers, type keys, positions and pin flags — entities and
 relations are re-fetched on restore, so a stale canvas can never display stale property

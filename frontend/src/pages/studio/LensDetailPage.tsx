@@ -1,11 +1,13 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, ExternalLink, Layers, Plug, SquareTerminal, Trash2 } from 'lucide-react'
+import { ChevronLeft, Layers, Plug, SquareTerminal, Trash2 } from 'lucide-react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
 import { useLenses } from '@/api/hooks'
 import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { EmptyState } from '@/components/EmptyState'
+import { workbenchLensPage } from '@/components/layout/surfaceSwitch'
+import { WORKBENCH_ICON } from '@/components/layout/surfaceTargets'
 import { AgentsTab } from '@/components/studio/AgentsTab'
 import { ConnectTab } from '@/components/studio/ConnectTab'
 import { NavigatorsTab } from '@/components/studio/NavigatorsTab'
@@ -117,8 +119,8 @@ export function LensDetailPage() {
           <ScopeBadge ontologyKey={ontologyKey} lensId={lens.lensId} />
           <div className="ml-auto flex items-center gap-2">
             <Button variant="outline" size="sm" asChild>
-              <Link to={`/o/${ontologyKey}/w/${lens.key}`}>
-                <ExternalLink className="size-3.5" /> Open in Workbench
+              <Link to={workbenchLensPage(ontologyKey, lens.key, tab)}>
+                <WORKBENCH_ICON className="size-3.5" /> Open in Workbench
               </Link>
             </Button>
             <AlertDialog>

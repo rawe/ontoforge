@@ -1,5 +1,5 @@
 import { Box, Cable } from 'lucide-react'
-import { useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useFeatures, useLenses, useLensScope, useRuntimeSchema } from '@/api/hooks'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
@@ -7,9 +7,11 @@ import { GuidedEmptyState } from '@/components/home/GuidedEmptyState'
 import { McpConnectDialog } from '@/components/home/McpConnectDialog'
 import { QuickActions } from '@/components/home/QuickActions'
 import { RecentlyUpdated } from '@/components/home/RecentlyUpdated'
+import { TypeNotInLens } from '@/components/home/TypeNotInLens'
 import { SavedQueriesSection } from '@/components/home/SavedQueriesSection'
 import { TypesGrid } from '@/components/home/TypesGrid'
 import { useTypeCounts } from '@/components/home/useTypeCounts'
+import { STUDIO_ICON, type OutOfScopeState } from '@/components/layout/surfaceTargets'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -20,10 +22,12 @@ export function HomePage() {
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const { data: features } = useFeatures()
   const { data: lenses } = useLenses(ontologyKey)
-  const scope = useLensScope(
-    ontologyKey,
-    lenses?.find((o) => o.key === lensKey)?.lensId,
-  )
+  const lensId = lenses?.find((o) => o.key === lensKey)?.lensId
+  const scope = useLensScope(ontologyKey, lensId)
+  // Set by the Studio's switch when the selected type is not in this lens.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const outOfScope = (location.state as OutOfScopeState | null)?.outOfScope
   const counts = useTypeCounts(ontologyKey, lensKey, schema.data?.entityTypes ?? [])
 
   if (schema.isPending) {
@@ -66,11 +70,30 @@ export function HomePage() {
         }
       />
 
+      {outOfScope !== undefined && (
+        <TypeNotInLens
+          ontologyKey={ontologyKey}
+          lensKey={lensKey}
+          typeKey={outOfScope}
+          onDismiss={() => void navigate(location.pathname, { replace: true, state: null })}
+          className="mx-6 mt-6"
+        />
+      )}
+
       {entityTypes.length === 0 ? (
         <EmptyState
           icon={Box}
           title="Nothing in scope"
           description="This lens exposes no entity types. Adjust its scope in the Studio to get started."
+          action={
+            lensId !== undefined && (
+              <Button asChild size="sm">
+                <Link to={`/o/${ontologyKey}/studio/lenses/${lensId}`}>
+                  <STUDIO_ICON className="size-3.5" /> Edit scope in Studio
+                </Link>
+              </Button>
+            )
+          }
         />
       ) : isEmpty ? (
         <GuidedEmptyState

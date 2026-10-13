@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { queryOptions, useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { displayLabel, nameProperties } from '@/lib/displayLabel'
 import { matchedViaText } from '@/lib/matchedVia'
@@ -50,15 +50,16 @@ export function useLenses(ontologyKey: string | undefined) {
 /**
  * Scope includes of a lens (modeling API). `scoped` is true when any
  * include exists. The runtime schema carries no scope information — use
- * this hook for scoped/unscoped decisions.
+ * this hook for scoped/unscoped decisions. The query options are shared
+ * with the lens pick of the Studio ↔ Workbench switch.
  */
-export function useLensScope(ontologyKey: string | undefined, lensId: string | undefined) {
-  return useQuery({
-    queryKey: qk.model(ontologyKey ?? '', 'lenses', lensId ?? '', 'includes'),
+export function lensScopeQuery(ontologyKey: string, lensId: string) {
+  return queryOptions({
+    queryKey: qk.model(ontologyKey, 'lenses', lensId, 'includes'),
     queryFn: async () => {
       const [entityTypes, relationTypes] = await Promise.all([
-        model.listScopeEntityTypes(ontologyKey!, lensId!),
-        model.listScopeRelationTypes(ontologyKey!, lensId!),
+        model.listScopeEntityTypes(ontologyKey, lensId),
+        model.listScopeRelationTypes(ontologyKey, lensId),
       ])
       return {
         entityTypes,
@@ -66,6 +67,12 @@ export function useLensScope(ontologyKey: string | undefined, lensId: string | u
         scoped: entityTypes.length + relationTypes.length > 0,
       }
     },
+  })
+}
+
+export function useLensScope(ontologyKey: string | undefined, lensId: string | undefined) {
+  return useQuery({
+    ...lensScopeQuery(ontologyKey ?? '', lensId ?? ''),
     enabled:
       ontologyKey !== undefined &&
       ontologyKey !== '' &&
@@ -75,13 +82,19 @@ export function useLensScope(ontologyKey: string | undefined, lensId: string | u
 }
 
 /** Runtime schema for one lens — the lens the workbench renders through. */
+export function runtimeSchemaQuery(ontologyKey: string, lensKey: string) {
+  return queryOptions({
+    queryKey: qk.schema(ontologyKey, lensKey),
+    queryFn: () => runtime.getSchema(ontologyKey, lensKey),
+  })
+}
+
 export function useRuntimeSchema(
   ontologyKey: string | undefined,
   lensKey: string | undefined,
 ) {
   return useQuery({
-    queryKey: qk.schema(ontologyKey ?? '', lensKey ?? ''),
-    queryFn: () => runtime.getSchema(ontologyKey!, lensKey!),
+    ...runtimeSchemaQuery(ontologyKey ?? '', lensKey ?? ''),
     enabled:
       ontologyKey !== undefined &&
       ontologyKey !== '' &&

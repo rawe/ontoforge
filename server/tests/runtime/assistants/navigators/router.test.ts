@@ -15,6 +15,7 @@ import { createMockRuntimeStore, makeFullSchema, NOW, type MockRuntimeStore } fr
 
 const stores = vi.hoisted(() => ({ runtime: null as unknown, modeling: null as unknown }));
 const model = vi.hoisted(() => ({ requireLanguageModel: vi.fn() }));
+const run = vi.hoisted(() => vi.fn());
 vi.mock("../../../../src/core/ports.js", async (original) => ({
   ...(await original<Record<string, unknown>>()),
   getRuntimeStore: async () => stores.runtime,
@@ -24,21 +25,28 @@ vi.mock("../../../../src/runtime/assistants/kit/model.js", async (original) => (
   ...(await original<Record<string, unknown>>()),
   requireLanguageModel: model.requireLanguageModel,
 }));
+vi.mock("../../../../src/runtime/assistants/navigators/index.js", async (original) => ({
+  ...(await original<Record<string, unknown>>()),
+  run,
+}));
 
-import { navigator } from "../../../../src/runtime/assistants/kinds/navigator/index.js";
+import {
+  NAVIGATOR_DEFAULT_DESCRIPTION,
+  NAVIGATOR_TOPOLOGY,
+  type NavigatorTurn,
+} from "../../../../src/runtime/assistants/navigators/index.js";
 
 const RUNTIME = "/api/ontologies/one/runtime/lenses/main/ai/assistants/navigators";
 const MODEL = "/api/ontologies/one/model/lenses/main/assistants/navigators";
 const DEFAULTS = { hops: 2, relationTypes: null, anchorTypes: null, maxEntities: 40, instructions: null };
 const record = (key: string, config: unknown, extra: Record<string, unknown> = {}) => ({
-  assistantId: `id-${key}`, kind: "navigators", key, name: key[0]!.toUpperCase() + key.slice(1), description: null,
+  navigatorId: `id-${key}`, key, name: key[0]!.toUpperCase() + key.slice(1), description: null,
   configVersion: 1, config, createdAt: NOW, updatedAt: NOW, ...extra,
 });
 
 let app: FastifyInstance;
 let runtime: MockRuntimeStore;
 let modeling: MockModelingStore;
-const run = vi.spyOn(navigator, "run");
 
 beforeAll(async () => {
   const { createApp } = await import("../../../../src/app.js");
@@ -54,12 +62,12 @@ beforeEach(() => {
     lensKey === "main" ? makeFullSchema({ lensKey: "main" }) : null);
   modeling = createMockModelingStore();
   modeling.getLensByKey.mockImplementation(async (key: string) => (key === "main" ? { lensId: "lens-1", key } : null));
-  // Modeling's assistants are the runtime's: one store per ontology.
-  (modeling as unknown as { assistantStore: unknown }).assistantStore = runtime.assistantStore;
-  modeling.assistants.mockReturnValue(runtime.assistantStore);
+  // Modeling's navigators are the runtime's: one store per ontology.
+  (modeling as unknown as { navigatorStore: unknown }).navigatorStore = runtime.navigatorStore;
+  modeling.navigators.mockReturnValue(runtime.navigatorStore);
   stores.runtime = runtime;
   stores.modeling = modeling;
-  run.mockImplementation(async (turn) => {
+  run.mockImplementation(async (turn: NavigatorTurn) => {
     await turn.trace.delta("Answer");
     return "Answer";
   });
@@ -69,17 +77,17 @@ const lines = (body: string) => body.trim().split("\n").map((line) => JSON.parse
 
 describe("runtime list", () => {
   it("names the default first, built in, then the stored navigators — no model needed", async () => {
-    runtime.assistantStore.listAssistants.mockResolvedValue([record("walker", { hops: 9 })]);
+    runtime.navigatorStore.listNavigators.mockResolvedValue([record("walker", { hops: 9 })]);
     const response = await app.inject({ method: "GET", url: RUNTIME });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual([
-      { key: "_default", name: "Default", description: navigator.defaultDescription, builtIn: true },
+      { key: "_default", name: "Default", description: NAVIGATOR_DEFAULT_DESCRIPTION, builtIn: true },
       { key: "walker", name: "Walker", description: null, builtIn: false },
     ]);
     expect(model.requireLanguageModel).not.toHaveBeenCalled();
   });
 
-  it("an unknown lens is not found; an unregistered kind has no route", async () => {
+  it("an unknown lens is not found; an unknown assistant kind has no route", async () => {
     expect((await app.inject({ method: "GET", url: RUNTIME.replace("/main/", "/nope/") })).statusCode).toBe(404);
     const unknown = await app.inject({ method: "GET", url: RUNTIME.replace("navigators", "analysts") });
     expect(unknown.statusCode).toBe(404);
@@ -97,7 +105,7 @@ describe("runtime chat", () => {
     expect(response.headers["content-type"]).toContain("application/json");
     expect(response.json().error.details.code).toBe("FEATURE_DISABLED");
     expect(runtime.getFullSchemaWithLensInclusions).not.toHaveBeenCalled();
-    expect(runtime.assistantStore.getAssistant).not.toHaveBeenCalled();
+    expect(runtime.navigatorStore.getNavigator).not.toHaveBeenCalled();
     expect(run).not.toHaveBeenCalled();
   });
 
@@ -120,7 +128,7 @@ describe("runtime chat", () => {
   });
 
   it("a stored navigator the lens can no longer run answers 422 with every error before the stream", async () => {
-    runtime.assistantStore.getAssistant.mockResolvedValue(record("walker", { relationTypes: ["ghost"], anchorTypes: ["robot"] }));
+    runtime.navigatorStore.getNavigator.mockResolvedValue(record("walker", { relationTypes: ["ghost"], anchorTypes: ["robot"] }));
     const response = await app.inject({ method: "POST", url: `${RUNTIME}/walker/chat`, payload: { message: "Who?" } });
     expect(response.statusCode).toBe(422);
     expect(response.headers["content-type"]).toContain("application/json");
@@ -132,28 +140,28 @@ describe("runtime chat", () => {
   });
 
   it("runs the stored navigator and keeps the stream contract: thread, graph, …, final", async () => {
-    runtime.assistantStore.getAssistant.mockResolvedValue(record("walker", { hops: 3 }));
+    runtime.navigatorStore.getNavigator.mockResolvedValue(record("walker", { hops: 3 }));
     const response = await app.inject({ method: "POST", url: `${RUNTIME}/walker/chat`, payload: { message: "Who?" } });
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toBe("application/x-ndjson");
     const events = lines(response.body);
     expect(events).toEqual([
       { type: "thread", threadId: expect.any(String) },
-      { type: "navigator.graph", ...navigator.topology },
+      { type: "navigator.graph", ...NAVIGATOR_TOPOLOGY },
       { type: "delta", text: "Answer" },
       { type: "final", reply: "Answer" },
     ]);
-    const turn = run.mock.calls[0]![0];
+    const turn = run.mock.calls[0]![0] as NavigatorTurn;
     expect([turn.key, turn.config, turn.lensKey, turn.message]).toEqual(["walker", { ...DEFAULTS, hops: 3 }, "main", "Who?"]);
     expect(turn.thread.threadId).toBe(events[0]!.threadId);
-    expect(runtime.assistantStore.getAssistant).toHaveBeenCalledWith("lens-1", "navigators", "walker");
+    expect(runtime.navigatorStore.getNavigator).toHaveBeenCalledWith("lens-1", "walker");
   });
 
   it("runs the built-in default without reading the store", async () => {
     const response = await app.inject({ method: "POST", url: `${RUNTIME}/_default/chat`, payload: { message: "Who?" } });
     expect(lines(response.body).at(-1)).toEqual({ type: "final", reply: "Answer" });
-    expect(run.mock.calls[0]![0].config).toEqual(DEFAULTS);
-    expect(runtime.assistantStore.getAssistant).not.toHaveBeenCalled();
+    expect((run.mock.calls[0]![0] as NavigatorTurn).config).toEqual(DEFAULTS);
+    expect(runtime.navigatorStore.getNavigator).not.toHaveBeenCalled();
   });
 
   it("refuses a configuration, unknown fields, an empty message and one over 2,000 characters", async () => {
@@ -189,7 +197,7 @@ describe("runtime threads", () => {
     const threadId = await started();
     const again = await app.inject({ method: "POST", url: `${RUNTIME}/_default/chat`, payload: { message: "And?", threadId } });
     expect(lines(again.body)[0]).toEqual({ type: "thread", threadId });
-    runtime.assistantStore.getAssistant.mockResolvedValue(record("walker", {}));
+    runtime.navigatorStore.getNavigator.mockResolvedValue(record("walker", {}));
     for (const [key, id] of [["_default", "no-such-thread"], ["walker", threadId]] as const) {
       const response = await app.inject({ method: "POST", url: `${RUNTIME}/${key}/chat`, payload: { message: "And?", threadId: id } });
       expect(response.statusCode).toBe(404);
@@ -229,8 +237,8 @@ describe("modeling CRUD", () => {
     ({ name: "Walker", description: "Walks", configVersion: 1, config, ...extra });
 
   it("PUT creates (201) with the configuration parsed and stored as version 1", async () => {
-    runtime.assistantStore.saveAssistant.mockImplementation(async (_lensId: string, assistant: Record<string, unknown>) =>
-      [{ ...assistant, createdAt: NOW, updatedAt: NOW }, true]);
+    runtime.navigatorStore.saveNavigator.mockImplementation(async (_lensId: string, navigator: Record<string, unknown>) =>
+      [{ ...navigator, createdAt: NOW, updatedAt: NOW }, true]);
     const response = await app.inject({ method: "PUT", url: `${MODEL}/walker`, payload: write({ hops: 1, relationTypes: ["works_for"] }) });
     expect(response.statusCode, response.body).toBe(201);
     expect(response.json()).toEqual({
@@ -244,14 +252,14 @@ describe("modeling CRUD", () => {
       createdAt: NOW.toISOString(),
       updatedAt: NOW.toISOString(),
     });
-    const [lensId, saved, createOnly] = runtime.assistantStore.saveAssistant.mock.calls[0]!;
+    const [lensId, saved, createOnly] = runtime.navigatorStore.saveNavigator.mock.calls[0]!;
     expect([lensId, createOnly]).toEqual(["lens-1", false]);
-    expect(saved).toMatchObject({ kind: "navigators", key: "walker", configVersion: 1, config: { ...DEFAULTS, hops: 1, relationTypes: ["works_for"] } });
+    expect(saved).toMatchObject({ key: "walker", configVersion: 1, config: { ...DEFAULTS, hops: 1, relationTypes: ["works_for"] } });
   });
 
   it("PUT replaces (200)", async () => {
-    runtime.assistantStore.saveAssistant.mockImplementation(async (_lensId: string, assistant: Record<string, unknown>) =>
-      [{ ...assistant, createdAt: NOW, updatedAt: NOW }, false]);
+    runtime.navigatorStore.saveNavigator.mockImplementation(async (_lensId: string, navigator: Record<string, unknown>) =>
+      [{ ...navigator, createdAt: NOW, updatedAt: NOW }, false]);
     const response = await app.inject({ method: "PUT", url: `${MODEL}/walker`, payload: write() });
     expect(response.statusCode).toBe(200);
     expect(response.json().description).toBe("Walks");
@@ -274,7 +282,7 @@ describe("modeling CRUD", () => {
     const shape = await app.inject({ method: "PUT", url: `${MODEL}/walker`, payload: write({ hops: 4, maxEntities: 100 }) });
     expect(shape.statusCode).toBe(422);
     expect(shape.json().error.details.errors).toHaveLength(2);
-    expect(runtime.assistantStore.saveAssistant).not.toHaveBeenCalled();
+    expect(runtime.navigatorStore.saveNavigator).not.toHaveBeenCalled();
   });
 
   it("PUT refuses the built-in key, a leading underscore and malformed keys", async () => {
@@ -298,11 +306,11 @@ describe("modeling CRUD", () => {
       const response = await app.inject({ method: "PUT", url: `${MODEL}/walker`, payload });
       expect(response.statusCode, JSON.stringify(payload).slice(0, 80)).toBe(422);
     }
-    expect(runtime.assistantStore.saveAssistant).not.toHaveBeenCalled();
+    expect(runtime.navigatorStore.saveNavigator).not.toHaveBeenCalled();
   });
 
   it("GET reports validation on every read: a stored navigator the lens cannot run stays readable", async () => {
-    runtime.assistantStore.listAssistants.mockResolvedValue([
+    runtime.navigatorStore.listNavigators.mockResolvedValue([
       record("broken", { relationTypes: ["ghost"] }),
       record("old", { hops: 2 }, { configVersion: 7 }),
       record("walker", { hops: 2 }),
@@ -317,7 +325,7 @@ describe("modeling CRUD", () => {
     // Kept as stored.
     expect(list.json()[1].config).toEqual({ hops: 2 });
 
-    runtime.assistantStore.getAssistant.mockResolvedValueOnce(record("broken", { relationTypes: ["ghost"] }));
+    runtime.navigatorStore.getNavigator.mockResolvedValueOnce(record("broken", { relationTypes: ["ghost"] }));
     const one = await app.inject({ method: "GET", url: `${MODEL}/broken` });
     expect(one.json()).toMatchObject({ key: "broken", lensKey: "main", validation: { valid: false } });
     expect((await app.inject({ method: "GET", url: `${MODEL}/ghost` })).statusCode).toBe(404);
@@ -325,9 +333,9 @@ describe("modeling CRUD", () => {
   });
 
   it("DELETE answers 204, or 404 for an unknown navigator or lens", async () => {
-    runtime.assistantStore.deleteAssistant.mockResolvedValueOnce(true);
+    runtime.navigatorStore.deleteNavigator.mockResolvedValueOnce(true);
     expect((await app.inject({ method: "DELETE", url: `${MODEL}/walker` })).statusCode).toBe(204);
-    expect(runtime.assistantStore.deleteAssistant).toHaveBeenCalledWith("lens-1", "navigators", "walker");
+    expect(runtime.navigatorStore.deleteNavigator).toHaveBeenCalledWith("lens-1", "walker");
     const missing = await app.inject({ method: "DELETE", url: `${MODEL}/walker` });
     expect(missing.statusCode).toBe(404);
     expect(missing.json().error.message).toBe("Navigator 'walker' not found");

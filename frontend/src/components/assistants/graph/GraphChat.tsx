@@ -44,6 +44,10 @@ export interface GraphChatProps {
 export function GraphChat({ kind, sidebar, send, ...chat }: GraphChatProps) {
   const [switchedOn, setSwitchedOn] = useState(() => readString(storageKeys.graphSidebar(kind)) !== 'false')
   const shown = sidebar === 'always' || switchedOn
+  const switchSidebar = (on: boolean) => {
+    setSwitchedOn(on)
+    writeString(storageKeys.graphSidebar(kind), String(on))
+  }
   const [view, setView] = useState<SidebarView>('entities')
   // The selected card: its answer and ref (refs restart with every answer).
   const [selection, setSelection] = useState<{ turnId: string; ref: string } | null>(null)
@@ -60,10 +64,7 @@ export function GraphChat({ kind, sidebar, send, ...chat }: GraphChatProps) {
             label="Show evidence"
             title="Show each answer's entities, graph and steps in a sidebar, as it runs"
             checked={switchedOn}
-            onChange={(checked) => {
-              setSwitchedOn(checked)
-              writeString(storageKeys.graphSidebar(kind), String(checked))
-            }}
+            onChange={switchSidebar}
           />
         : undefined}
       renderAnswer={(turn, show) => (
@@ -73,7 +74,7 @@ export function GraphChat({ kind, sidebar, send, ...chat }: GraphChatProps) {
           selected={selectedIn(turn.id)}
           onSelect={(ref) => {
             setSelection({ turnId: turn.id, ref })
-            setSwitchedOn(true)
+            if (!shown) switchSidebar(true)
             if (view === 'steps') setView('entities')
             show()
           }}

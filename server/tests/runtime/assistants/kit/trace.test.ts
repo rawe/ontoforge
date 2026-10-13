@@ -1,8 +1,8 @@
 /**
- * The live trace every kind of the seam streams: the topology first, a
+ * The live trace of a fixed pipeline: the topology first, a
  * step `running` then `done` / `failed` with duration, summary and round,
  * skips, entities, the answer as shared deltas, and the summary with the
- * model calls — all prefixed with the kind's event noun.
+ * model calls — all prefixed with the assistant's event noun.
  */
 
 import { describe, expect, it } from "vitest";
@@ -16,7 +16,7 @@ function trace(signal = new AbortController().signal) {
 }
 
 describe("Trace", () => {
-  it("announces the topology under the kind's event noun", async () => {
+  it("announces the topology under the event noun", async () => {
     const { events, trace: t } = trace();
     await t.graph({ steps: [{ id: "a", label: "A", description: "Does a", model: false }], edges: [{ from: "a", to: "a", label: "again" }] });
     expect(events).toEqual([{

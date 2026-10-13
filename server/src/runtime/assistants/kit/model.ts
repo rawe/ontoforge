@@ -1,9 +1,11 @@
 /**
- * The language model as the kinds of the seam call it: never retried, one
- * JSON call for a step that decides (structured output — Anthropic's own
- * output format, the OpenAI-compatible `response_format` elsewhere; never
- * a forced tool choice, which current Claude models reject), and one
- * streamed call for the answer.
+ * The language model as the assistants call it: the one FEATURE_DISABLED
+ * refusal every assistant route gives without a configured model; and, for
+ * a fixed pipeline, a turn's model never retried, one JSON call for a step
+ * that decides (structured output — Anthropic's own output format, the
+ * OpenAI-compatible `response_format` elsewhere; never a forced tool
+ * choice, which current Claude models reject), and one streamed call for
+ * the answer.
  */
 
 import type { ChatAnthropic } from "@langchain/anthropic";
@@ -20,10 +22,12 @@ function disabled(): ValidationError {
   return new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", { code: "FEATURE_DISABLED" });
 }
 
-/** A configured language model, else the FEATURE_DISABLED refusal — before
- * anything is read or streamed. */
-export function requireLanguageModel(): void {
-  if (getAiModel() === null) throw disabled();
+/** The configured language model, else the FEATURE_DISABLED refusal —
+ * before anything is read or streamed. */
+export function requireLanguageModel(): BaseChatModel {
+  const model = getAiModel();
+  if (model === null) throw disabled();
+  return model;
 }
 
 /** A model instance for one turn, never retried. */

@@ -1,6 +1,6 @@
 ---
 name: ontoforge-sync
-description: "Export and import one OntoForge ontology's design and instance data. Use when the user wants to snapshot or restore an ontology — its schema, lenses, agents and saved queries, and/or its entities and relations — as JSON files."
+description: "Export and import one OntoForge ontology's design and instance data. Use when the user wants to snapshot or restore an ontology — its schema, lenses, assistants and saved queries, and/or its entities and relations — as JSON files."
 ---
 
 # Goal
@@ -35,7 +35,7 @@ server and names both inputs. List the server's ontologies with
 
 ## Ontologies and lenses
 
-An **ontology** is the isolated unit: one schema, its lenses, its agents, its saved
+An **ontology** is the isolated unit: one schema, its lenses, its assistants, its saved
 queries and all of its instance data. Nothing spans two ontologies.
 
 A **lens** is a named view over one ontology's schema. Instance data is only reachable
@@ -53,8 +53,8 @@ All paths below are relative to this skill directory (`scripts/`).
 ### Export Schema
 
 Export one ontology's design — entity types, relation types, properties, the keyword
-language set, custom search indices, lenses with their inclusions, agents, retrievers
-and saved queries — to a single JSON file.
+language set, custom search indices, lenses with their inclusions, agents, retrievers,
+navigators and saved queries — to a single JSON file.
 
 ```bash
 node scripts/export-schema.mjs [-o <output>] [--ontology <key>] [--base-url <url>]
@@ -298,7 +298,7 @@ Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
       "key": "my_lens",
       "name": "My Lens",
       "indexInclusions": [],
-      "assistants": { "agents": [], "retrievers": [] },
+      "assistants": { "agents": [], "retrievers": [], "navigators": [] },
       "savedQueries": []
     }
   ]
@@ -318,9 +318,10 @@ Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
   `indexInclusions` lists the search indices a scoped lens searches, by key; an unscoped
   lens searches every index and lists none.
 - `assistants` — the lens's assistants, one list per kind: `agents`, each with `key`,
-  `name`, `description`, `systemPrompt` and `tools`, and `retrievers`, the retrievers,
-  each with `key`, `name`, `description`, `configVersion` (2) and `config`.
-  Optional, and so is each list.
+  `name`, `description`, `systemPrompt` and `tools`; `retrievers`, the retrievers,
+  each with `key`, `name`, `description`, `configVersion` (2) and `config`; and
+  `navigators`, the navigators, each with `key`, `name`, `description`, `configVersion` (1)
+  and `config`. Optional, and so is each list.
 
 The format version decides how import reads the file: `7.0` (or none) is the current
 format. Two older versions are upgraded on the way in: `6.0` — lens `aiAgents` and

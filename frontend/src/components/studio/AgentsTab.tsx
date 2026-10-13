@@ -29,7 +29,7 @@ const PARAM = 'agent'
 
 /**
  * Lens detail → Agents: the lens's agents (list, with the built-in Default),
- * the editor of one (`?agent=<key>`, `?agent=new` for a draft,
+ * the editor of one (`?agent=<key>`, `?agent=_new` for a draft,
  * `?agent=_default` for the Default's read-only page) and its test chat.
  */
 export function AgentsTab({ ontologyKey, lens }: { ontologyKey: string; lens: Lens }) {

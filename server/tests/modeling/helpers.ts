@@ -6,17 +6,17 @@
 import { vi, type Mock } from "vitest";
 
 import type { ModelingStore } from "../../src/core/ports.js";
-import { createMockAssistantStore, type MockAssistantStore } from "../mockAssistantStore.js";
+import { createMockNavigatorStore, type MockNavigatorStore } from "../mockNavigatorStore.js";
 import { createMockSearchIndexStore, type MockSearchIndexStore } from "../mockSearchIndexStore.js";
 
 export const NOW = new Date("2025-01-01T12:00:00.000Z");
 
 /** Every port method as a mock — completeness is compiler-enforced. The
- * search-index and assistant stores it hands out are mocks too (`indices`,
- * `assistantStore`). */
+ * search-index and navigator stores it hands out are mocks too (`indices`,
+ * `navigatorStore`). */
 export type MockModelingStore = {
   [K in keyof ModelingStore]: Mock;
-} & { indices: MockSearchIndexStore; assistantStore: MockAssistantStore };
+} & { indices: MockSearchIndexStore; navigatorStore: MockNavigatorStore };
 
 /**
  * A mock store whose reads default to "nothing stored". Tests override
@@ -24,12 +24,12 @@ export type MockModelingStore = {
  */
 export function createMockModelingStore(): MockModelingStore {
   const indices = createMockSearchIndexStore();
-  const assistantStore = createMockAssistantStore();
+  const navigatorStore = createMockNavigatorStore();
   return {
     indices,
-    assistantStore,
+    navigatorStore,
     searchIndices: vi.fn(() => indices),
-    assistants: vi.fn(() => assistantStore),
+    navigators: vi.fn(() => navigatorStore),
     createLens: vi.fn(),
     listLenses: vi.fn(async () => []),
     getLens: vi.fn(async () => null),

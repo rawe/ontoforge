@@ -16,7 +16,7 @@ import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import { getModelingStore, getRuntimeStore } from "../core/ports.js";
-import { assistantModelingRouter } from "./assistantRouter.js";
+import { navigatorModelingRouter } from "./navigatorRouter.js";
 import { retrieverModelingRouter } from "./retrieverRouter.js";
 import {
   AgentConfigResponse,
@@ -88,7 +88,7 @@ const CascadeQuery = z.object({
 /** Routes mounted at `/api/ontologies/:ontologyKey/model`. */
 export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
   await app.register(retrieverModelingRouter);
-  await app.register(assistantModelingRouter);
+  await app.register(navigatorModelingRouter);
   // --- Lenses ---
 
   app.post(

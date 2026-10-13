@@ -47,7 +47,7 @@
  */
 
 import type { KeywordLanguageSet } from "./keywordLanguage.js";
-import type { AssistantKindKey, AssistantRecord, AssistantWrite } from "./assistant.js";
+import type { NavigatorRecord, NavigatorWrite } from "./navigator.js";
 import type { RetrieverRecord, RetrieverWrite } from "./retriever.js";
 
 import { settings } from "../config.js";
@@ -164,8 +164,8 @@ export interface ModelingStore {
    * keeps the managed indices in step with the schema through it. */
   searchIndices(): SearchIndexStore;
 
-  /** The assistant store of the same ontology: assistants of registered kinds. */
-  assistants(): AssistantStore;
+  /** The navigator store of the same ontology. */
+  navigators(): NavigatorStore;
 
   // ------------------------------------------------------------------
   // Lenses
@@ -497,8 +497,8 @@ export interface RuntimeStore {
   /** The search-index store of the same ontology. */
   searchIndices(): SearchIndexStore;
 
-  /** The assistant store of the same ontology. */
-  assistants(): AssistantStore;
+  /** The navigator store of the same ontology. */
+  navigators(): NavigatorStore;
 
   // ------------------------------------------------------------------
   // Entity instances
@@ -869,24 +869,24 @@ export interface SearchWritePlan {
  * are refused (false) once it is no longer building or ready.
  */
 /**
- * Assistants of registered kinds (`core/assistant.ts`), lens-local:
- * keyed by lens, kind and key, deleted with their lens. The store keeps
- * the configuration as given; every kind checks its own.
+ * Navigators (`core/navigator.ts`), lens-local: keyed by lens and key,
+ * deleted with their lens. The store keeps the configuration as given;
+ * the navigator's runtime checks it.
  */
-export interface AssistantStore {
-  /** The lens's assistants of one kind, by name then key. */
-  listAssistants(lensId: string, kind: AssistantKindKey): Promise<AssistantRecord[]>;
+export interface NavigatorStore {
+  /** The lens's navigators, by name then key. */
+  listNavigators(lensId: string): Promise<NavigatorRecord[]>;
 
-  getAssistant(lensId: string, kind: AssistantKindKey, key: string): Promise<AssistantRecord | null>;
+  getNavigator(lensId: string, key: string): Promise<NavigatorRecord | null>;
 
   /** Create, or replace name, description and configuration of the
-   * assistant with this kind and key (its id and creation time stay).
-   * `createOnly`: an existing key is a `ConflictError`. The lens missing is
-   * a `NotFoundError`. True in the pair when the assistant was created. */
-  saveAssistant(lensId: string, assistant: AssistantWrite, createOnly: boolean): Promise<[AssistantRecord, boolean]>;
+   * navigator with this key (its id and creation time stay). `createOnly`:
+   * an existing key is a `ConflictError`. The lens missing is a
+   * `NotFoundError`. True in the pair when the navigator was created. */
+  saveNavigator(lensId: string, navigator: NavigatorWrite, createOnly: boolean): Promise<[NavigatorRecord, boolean]>;
 
-  /** False when the lens has no assistant of this kind and key. */
-  deleteAssistant(lensId: string, kind: AssistantKindKey, key: string): Promise<boolean>;
+  /** False when the lens has no navigator of this key. */
+  deleteNavigator(lensId: string, key: string): Promise<boolean>;
 }
 
 export interface SearchIndexStore {

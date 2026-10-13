@@ -4,7 +4,7 @@
  * and the rule to cite every entity named.
  */
 
-import type { EntityLink } from "../../entities.js";
+import type { EntityLink } from "../entities.js";
 import type { Board, BoardNode } from "./board.js";
 
 export const ANSWER = `You answer questions about a knowledge graph. A graph walk collected the ENTITIES and RELATIONS below; they are your only source.

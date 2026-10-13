@@ -793,10 +793,9 @@ describe("navigators", () => {
   it("export carries each lens's navigators in their portable form, as stored", async () => {
     withSearchIndices();
     const now = new Date("2026-10-12T00:00:00Z");
-    holder.store.assistantStore.listAssistants.mockImplementation(async (_lensId: string, kind: string) =>
-      kind === "navigators"
-        ? [{ assistantId: "a", kind, key: "walker", name: "Walker", description: "d", configVersion: 1, config: { hops: 3, ghost: true }, createdAt: now, updatedAt: now }]
-        : []);
+    holder.store.navigatorStore.listNavigators.mockResolvedValue([
+      { navigatorId: "a", key: "walker", name: "Walker", description: "d", configVersion: 1, config: { hops: 3, ghost: true }, createdAt: now, updatedAt: now },
+    ]);
     holder.store.getFullSchema.mockResolvedValue({
       entityTypes: [],
       relationTypes: [],
@@ -806,23 +805,22 @@ describe("navigators", () => {
     expect(res.json().lenses[0].assistants.navigators).toEqual([
       { key: "walker", name: "Walker", description: "d", configVersion: 1, config: { hops: 3, ghost: true } },
     ]);
-    expect(holder.store.assistantStore.listAssistants).toHaveBeenCalledWith("lens-1", "navigators");
+    expect(holder.store.navigatorStore.listNavigators).toHaveBeenCalledWith("lens-1");
   });
 
   it("stores each navigator create-only, its configuration parsed with defaults; references are not checked", async () => {
     withSearchIndices();
     holder.store.createLens.mockResolvedValue(LENS_DATA);
-    holder.store.assistantStore.saveAssistant.mockResolvedValue([{}, true]);
+    holder.store.navigatorStore.saveNavigator.mockResolvedValue([{}, true]);
     const res = await postImport(payload([navigator("walker"), navigator("ghostly", { relationTypes: ["ghost"] })]));
     expect(res.statusCode, res.body).toBe(201);
     const lensId = holder.store.createLens.mock.calls[0]![0] as string;
-    const calls = holder.store.assistantStore.saveAssistant.mock.calls;
+    const calls = holder.store.navigatorStore.saveNavigator.mock.calls;
     expect(calls.map((call) => [call[0], (call[1] as { key: string }).key, call[2]])).toEqual([
       [lensId, "walker", true],
       [lensId, "ghostly", true],
     ]);
     expect(calls[0]![1]).toMatchObject({
-      kind: "navigators",
       name: "Walker",
       configVersion: 1,
       config: { hops: 3, relationTypes: null, anchorTypes: null, maxEntities: 40, instructions: null },
@@ -834,7 +832,7 @@ describe("navigators", () => {
     holder.store.createLens.mockResolvedValue(LENS_DATA);
     const res = await postImport({ ...payload([]), lenses: [{ key: "all", name: "All" }] });
     expect(res.statusCode, res.body).toBe(201);
-    expect(holder.store.assistantStore.saveAssistant).not.toHaveBeenCalled();
+    expect(holder.store.navigatorStore.saveNavigator).not.toHaveBeenCalled();
   });
 
   it("collects every bad key, name and configuration; writes nothing", async () => {
@@ -860,7 +858,7 @@ describe("navigators", () => {
       "Import error: navigator 'extra' has no valid configuration of version 1",
     ]));
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
-    expect(holder.store.assistantStore.saveAssistant).not.toHaveBeenCalled();
+    expect(holder.store.navigatorStore.saveNavigator).not.toHaveBeenCalled();
   });
 });
 

@@ -11,8 +11,10 @@
  *   of.exploreAsk.{ontologyKey}.{lensKey} — the Explorer's ask dock:
  *                               `{ open, width, kind, assistant, autoAdd }`
  *   of.thread.{ontologyKey}.{lensKey}.{kind}.{assistantKey} — id of the
- *                               Workbench's current conversation thread with
- *                               that assistant (the messages stay on the server)
+ *                               current conversation thread with that
+ *                               assistant, shared by the Workbench and the
+ *                               Explorer's ask dock (the messages stay on the
+ *                               server)
  *   of.recents.{ontologyKey}.{lensKey} — last 10 opened entities (`lib/recents.ts`)
  *   of.queryHistory.{ontologyKey}.{lensKey} — last 10 run OQL queries
  *   of.chatToolCalls          — "true" | "false": Workbench agent chat shows its

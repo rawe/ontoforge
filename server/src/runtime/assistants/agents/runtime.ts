@@ -40,7 +40,7 @@ import {
 import { createAgent, createMiddleware } from "langchain";
 import { z } from "zod";
 
-import { DEFAULT_AGENT_CONFIG, getAiModel, type AgentConfig } from "../../../core/ai.js";
+import { DEFAULT_AGENT_CONFIG, type AgentConfig } from "../../../core/ai.js";
 import { getEmbeddingProvider } from "../../../core/embedding.js";
 import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
 import type { RuntimeStore } from "../../../core/ports.js";
@@ -63,7 +63,9 @@ import {
   TOOL_SEARCH_SAVED_QUERIES,
   TOOL_SEARCH,
 } from "../../toolNames.js";
+import type { RuntimeAssistant } from "../assistant.js";
 import { entitiesEvent } from "../entities.js";
+import { requireLanguageModel } from "../kit/model.js";
 import { TurnEntities } from "./entities.js";
 
 type Row = Record<string, unknown>;
@@ -488,17 +490,6 @@ export function buildTools(
 // Agent runner
 // ---------------------------------------------------------------------------
 
-/** The active model, or the FEATURE_DISABLED rejection. */
-function requireModel(): BaseChatModel {
-  const model = getAiModel();
-  if (model === null) {
-    throw new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", {
-      code: "FEATURE_DISABLED",
-    });
-  }
-  return model;
-}
-
 /** Flatten a message's content to plain text. */
 function messageText(message: BaseMessage | undefined): string {
   if (message === undefined) {
@@ -645,7 +636,7 @@ export async function runAgentChat(
   }
 
   const toolNames = resolveChatToolNames(agentConfig, store);
-  const model = requireModel();
+  const model = requireLanguageModel();
   const tools = buildTools(lensKey, store, toolNames, execution, new TurnEntities(loaded.scoped));
 
   const reply = await runReactAgent(model, systemPrompt, tools, message, thread, execution.signal);
@@ -660,21 +651,13 @@ export async function prepareChat(lensKey: string, store: RuntimeStore, agentKey
   const loaded = await loadSchema(lensKey, store);
   const config = agentKey === DEFAULT_AGENT_CONFIG.key ? DEFAULT_AGENT_CONFIG : loaded.agentConfigs[agentKey];
   if (!config) throw new NotFoundError(`Agent '${agentKey}' not found`);
-  requireModel();
+  requireLanguageModel();
   return config;
 }
 
 // ---------------------------------------------------------------------------
 // Agent list
 // ---------------------------------------------------------------------------
-
-/** One runtime list item, the same for every assistant kind. */
-export interface RuntimeAssistant {
-  key: string;
-  name: string;
-  description: string | null;
-  builtIn: boolean;
-}
 
 /** Every agent of a lens, the built-in default first. Needs no model. */
 export async function listRuntimeAgents(lensKey: string, store: RuntimeStore): Promise<RuntimeAssistant[]> {

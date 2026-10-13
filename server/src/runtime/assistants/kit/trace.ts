@@ -1,8 +1,9 @@
 /**
- * The live trace every kind of the seam streams (`kind.ts`). Event shapes
- * are the same for every kind, prefixed with its event noun:
+ * The live trace of an assistant that runs a fixed pipeline of steps — a
+ * navigator (`../navigators/`). Event shapes are fixed, prefixed with the
+ * assistant's event noun:
  *
- * - `<event>.graph` — the kind's topology, once, first;
+ * - `<event>.graph` — the pipeline's topology, once, first;
  * - `<event>.step` — a step `running`, then `done`, `skipped` or `failed`,
  *   with a plain summary and its duration; `round` counts repeats;
  * - the shared `entities` event (`../entities.ts`) — entity cards and the
@@ -15,7 +16,27 @@
 
 import type { StreamEvent } from "../../chatStream.js";
 import { entitiesEvent, type EntityCard, type EntityLink } from "../entities.js";
-import type { Topology } from "./kind.js";
+
+/** One step of a pipeline, as the client draws it. */
+export interface StepDef {
+  id: string;
+  label: string;
+  description: string;
+  /** Whether the step calls the language model. */
+  model: boolean;
+}
+
+/** One edge of the pipeline; an edge to itself is a repeat. */
+export interface EdgeDef {
+  from: string;
+  to: string;
+  label?: string;
+}
+
+export interface Topology {
+  steps: StepDef[];
+  edges: EdgeDef[];
+}
 
 export type StepStatus = "running" | "done" | "skipped" | "failed";
 

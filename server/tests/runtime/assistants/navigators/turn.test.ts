@@ -14,16 +14,16 @@ vi.mock("../../../../src/config.js", () => ({
   settings: { AI_PROVIDER: "fake", AI_MODEL: "test", AI_BASE_URL: "http://unused" },
 }));
 vi.mock("../../../../src/core/ai.js", () => ({ createAiModel: vi.fn(() => fake), getAiModel: vi.fn(() => null) }));
-vi.mock("../../../../src/runtime/assistants/kinds/navigator/reader.js", () => ({ lensReader: () => graph.reader }));
+vi.mock("../../../../src/runtime/assistants/navigators/reader.js", () => ({ lensReader: () => graph.reader }));
 
 import { settings } from "../../../../src/config.js";
 import { createAiModel } from "../../../../src/core/ai.js";
 import type { RuntimeStore } from "../../../../src/core/ports.js";
-import { ANSWER } from "../../../../src/runtime/assistants/kinds/navigator/answer.js";
-import { deriveNavigator, type NavigatorConfig } from "../../../../src/runtime/assistants/kinds/navigator/config.js";
-import { navigator } from "../../../../src/runtime/assistants/kinds/navigator/index.js";
-import type { Intent } from "../../../../src/runtime/assistants/kinds/navigator/understand.js";
-import { runTurn } from "../../../../src/runtime/assistants/kit/runtime.js";
+import { ANSWER } from "../../../../src/runtime/assistants/navigators/answer.js";
+import { deriveNavigator, type NavigatorConfig } from "../../../../src/runtime/assistants/navigators/config.js";
+import { NAVIGATOR_TOPOLOGY } from "../../../../src/runtime/assistants/navigators/index.js";
+import type { Intent } from "../../../../src/runtime/assistants/navigators/understand.js";
+import { runNavigatorTurn } from "../../../../src/runtime/assistants/navigators/runtime.js";
 import type { StreamEvent } from "../../../../src/runtime/chatStream.js";
 import type { LoadedSchema } from "../../../../src/runtime/schemaCache.js";
 import { MemoryThreadStore } from "../../../../src/runtime/threads/memoryThreadStore.js";
@@ -57,7 +57,7 @@ async function turn(
     config: { ...deriveNavigator(), ...options.config },
     loaded: { scoped: LENS, full: LENS } as unknown as LoadedSchema,
   };
-  const { reply } = await runTurn(navigator, runnable, "org", {} as RuntimeStore, message, thread, {
+  const { reply } = await runNavigatorTurn(runnable, "org", {} as RuntimeStore, message, thread, {
     signal: options.signal ?? new AbortController().signal,
     // As the stream does: each event as it was when emitted.
     onToolEvent: async (event) => { events.push(structuredClone(event)); },
@@ -105,7 +105,7 @@ describe("a navigator turn", () => {
       "step answer:running", "delta", "delta", "step answer:done",
       "navigator.summary",
     ]);
-    expect(events[0]).toEqual({ type: "navigator.graph", ...navigator.topology });
+    expect(events[0]).toEqual({ type: "navigator.graph", ...NAVIGATOR_TOPOLOGY });
     expect(reply).toBe("Kira Novak [E2] works on Apollo [E4]; Omar Haddad [E3] on Zeus [E5].");
     expect(events.filter((e) => e.type === "delta").map((e) => e.text).join("")).toBe(reply);
 
@@ -217,7 +217,7 @@ describe("a navigator turn", () => {
     fake.invoke.mockRejectedValueOnce(new Error("overloaded"));
     const events: StreamEvent[] = [];
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    await expect(runTurn(navigator, { key: "_default", config: deriveNavigator(), loaded: { scoped: LENS, full: LENS } as unknown as LoadedSchema },
+    await expect(runNavigatorTurn({ key: "_default", config: deriveNavigator(), loaded: { scoped: LENS, full: LENS } as unknown as LoadedSchema },
       "org", {} as RuntimeStore, "Who?", await newThread(), { signal: new AbortController().signal, onToolEvent: async (e) => { events.push(e); } }))
       .rejects.toThrow("The language model failed (navigator_intent); no automatic retry.");
     expect(steps(events)).toEqual(["understand:running:1", "understand:failed:1"]);

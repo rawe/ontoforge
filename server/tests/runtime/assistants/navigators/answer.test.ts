@@ -6,8 +6,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import { ANSWER, answerInput, citedRefs } from "../../../../src/runtime/assistants/kinds/navigator/answer.js";
-import { Board } from "../../../../src/runtime/assistants/kinds/navigator/board.js";
+import { ANSWER, answerInput, citedRefs } from "../../../../src/runtime/assistants/navigators/answer.js";
+import { Board } from "../../../../src/runtime/assistants/navigators/board.js";
 import { entity, LENS } from "./fixture.js";
 
 describe("citedRefs", () => {

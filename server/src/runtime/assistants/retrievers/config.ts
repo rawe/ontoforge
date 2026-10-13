@@ -15,8 +15,8 @@
  * type — has 1..12 visible answer fields.
  */
 
+import { configIssues } from "../../../core/configIssues.js";
 import {
-  configIssues,
   RETRIEVER_CONFIG_VERSION,
   RetrieverConfig,
   type FilterHop,

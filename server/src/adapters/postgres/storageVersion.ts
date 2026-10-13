@@ -47,7 +47,7 @@ import { quoteIdent } from "./oql/bindings.js";
 import { readTypesWithProperties } from "./schemaRead.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 5;
+export const STORAGE_VERSION = 6;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 1;
@@ -452,7 +452,7 @@ const STEPS: Step[] = [
     ],
   },
   {
-    // 7.x: assistants of registered kinds.
+    // 7.0: the navigator table; step 6 gives it its name.
     to: 5,
     actions: [
       `CREATE TABLE assistant (
@@ -469,6 +469,20 @@ const STEPS: Step[] = [
   updated_at     timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT assistant_key_unique UNIQUE (lens_id, kind, key)
 )`,
+    ],
+  },
+  {
+    // 7.0: the navigator table is named after its kind.
+    to: 6,
+    actions: [
+      `ALTER TABLE assistant RENAME TO assistant_navigator`,
+      `ALTER TABLE assistant_navigator RENAME COLUMN assistant_id TO assistant_navigator_id`,
+      `ALTER TABLE assistant_navigator RENAME CONSTRAINT assistant_pk TO assistant_navigator_pk`,
+      `ALTER TABLE assistant_navigator RENAME CONSTRAINT assistant_lens_fk TO assistant_navigator_lens_fk`,
+      `ALTER TABLE assistant_navigator DROP CONSTRAINT assistant_key_unique`,
+      `ALTER TABLE assistant_navigator DROP COLUMN kind`,
+      `ALTER TABLE assistant_navigator ADD CONSTRAINT assistant_navigator_key_unique UNIQUE (lens_id, key)`,
+      renameNotNullConstraints("assistant_navigator"),
     ],
   },
 ];

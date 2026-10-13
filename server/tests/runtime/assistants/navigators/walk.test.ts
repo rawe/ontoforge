@@ -7,9 +7,9 @@
 
 import { describe, expect, it } from "vitest";
 
-import { Board, type BoardNode } from "../../../../src/runtime/assistants/kinds/navigator/board.js";
-import type { Intent } from "../../../../src/runtime/assistants/kinds/navigator/understand.js";
-import { anchor, explore, focus, followPath } from "../../../../src/runtime/assistants/kinds/navigator/walk.js";
+import { Board, type BoardNode } from "../../../../src/runtime/assistants/navigators/board.js";
+import type { Intent } from "../../../../src/runtime/assistants/navigators/understand.js";
+import { anchor, explore, focus, followPath } from "../../../../src/runtime/assistants/navigators/walk.js";
 import type { Row } from "../../../../src/core/ports.js";
 import { entity, FakeReader, LENS, orgReader, type Edge } from "./fixture.js";
 

@@ -217,19 +217,18 @@ export function ontologyDdlStatements(): string[] {
   CONSTRAINT assistant_retriever_key_unique UNIQUE (lens_id, key)
 )`,
 
-  `CREATE TABLE IF NOT EXISTS assistant (
-  assistant_id   uuid        CONSTRAINT assistant_pk PRIMARY KEY,
-  lens_id        uuid        NOT NULL CONSTRAINT assistant_lens_fk
-                             REFERENCES lens (lens_id) ON DELETE CASCADE,
-  kind           text        NOT NULL,   -- a registered kind's route segment
-  key            text        NOT NULL,
-  name           text        NOT NULL,
-  description    text,
-  config_version integer     NOT NULL,
-  config         jsonb       NOT NULL,
-  created_at     timestamptz NOT NULL DEFAULT now(),
-  updated_at     timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT assistant_key_unique UNIQUE (lens_id, kind, key)   -- upsert arbiter
+  `CREATE TABLE IF NOT EXISTS assistant_navigator (
+  assistant_navigator_id uuid        CONSTRAINT assistant_navigator_pk PRIMARY KEY,
+  lens_id                uuid        NOT NULL CONSTRAINT assistant_navigator_lens_fk
+                                     REFERENCES lens (lens_id) ON DELETE CASCADE,
+  key                    text        NOT NULL,
+  name                   text        NOT NULL,
+  description            text,
+  config_version         integer     NOT NULL,
+  config                 jsonb       NOT NULL,
+  created_at             timestamptz NOT NULL DEFAULT now(),
+  updated_at             timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT assistant_navigator_key_unique UNIQUE (lens_id, key)   -- upsert arbiter
 )`,
 
   // --- Instance side -----------------------------------------------------

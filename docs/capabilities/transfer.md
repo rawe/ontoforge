@@ -24,7 +24,7 @@ ontologies, transfer included.
 
 Assistants and saved queries are nested inside the lens they belong to, because that
 is where they belong ([agents.md](agents.md), [saved-queries.md](saved-queries.md),
-[retrievers.md](retrievers.md)).
+[retrievers.md](retrievers.md), [navigators.md](navigators.md)).
 
 > **Instance data is not part of the format.** No entities, no relations, no document
 > content, no chunks, no embedding vectors. Exporting a design and importing it elsewhere
@@ -163,7 +163,7 @@ or deleting and recreating the whole ontology and importing into it bare.
 
 ### Identifiers are regenerated, keys are preserved
 
-Every imported object — type, property, lens, agent, saved query, retriever,
+Every imported object — type, property, lens, agent, saved query, retriever, navigator,
 search index — receives a freshly generated internal identifier. Nothing in the payload carries
 one, and nothing from the source ontology's identifiers survives.
 

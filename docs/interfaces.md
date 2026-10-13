@@ -38,8 +38,8 @@ data through one lens — never both.
 
 Modeling REST does **not** nest types under a lens. Entity types, relation types and
 their properties are resources of the ontology, at the top level of its modeling
-surface. Scope inclusions, agent configurations, saved queries and retrievers
-are addressed per lens.
+surface. Scope inclusions, agent configurations, saved queries, retrievers and
+navigators are addressed per lens.
 
 ### What a path segment identifies
 
@@ -50,7 +50,7 @@ This is the single most common source of mistakes against the modeling surface.
 | Registry | Ontology key |
 | Runtime REST, everywhere | Keys — ontology key, lens key, type key, property key; instance ids for entities and relations |
 | Modeling REST — lenses, entity types, relation types, properties, inclusions | **Internal identifiers**, not keys |
-| Modeling REST — agent configs, saved queries, retrievers | Lens key and the resource key |
+| Modeling REST — agent configs, saved queries, retrievers, navigators | Lens key and the resource key |
 | Modeling REST — search indices | Index key — managed keys included, which carry `~` |
 | Both MCP servers | Keys only |
 
@@ -185,8 +185,8 @@ configured answers `VALIDATION_ERROR` with
 semantic search and saved-query search, and on AI execution and entity identity
 comparison alike. A client can therefore
 tell a switched-off capability from a rejected request. Model-free operations remain
-available: agent discovery and retriever management do not require a
-language-model provider; execution requirements are listed with the routes below. Agent
+available: agent discovery, retriever management and navigator management do not
+require a language-model provider; execution requirements are listed with the routes below. Agent
 chat requires a language-model provider
 ([capabilities/agents.md](capabilities/agents.md)).
 
@@ -487,7 +487,7 @@ touch search indices. After an embedding-provider switch it is run once per onto
 [capabilities/search.md](capabilities/search.md#rebuild).
 
 Transfer carries the design only — schema, lenses, agents, saved queries, retrievers,
-search indices; no instance
+navigators, search indices; no instance
 data and no ontology identity — see
 [capabilities/transfer.md](capabilities/transfer.md) and
 [capabilities/search.md](capabilities/search.md).
@@ -781,7 +781,7 @@ its own events, all in display names, never ids or keys:
 | Event `type` | Fields | Meaning |
 |---|---|---|
 | `navigator.graph` | `steps` (`id`, `label`, `description`, `model`), `edges` (`from`, `to`, optional `label`; an edge to itself is a repeat) | The pipeline, once, right after `thread` |
-| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, and when it ends `durationMs` and an optional `summary` | One step starting or ending; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn fails |
+| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, and when it ends `durationMs` and an optional `summary` | One step starting or ending; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary and no duration |
 | `navigator.summary` | `modelCalls`, `durationMs`, `entities`, `evidence`, `hops`, `timings` (milliseconds per step id) | Once, before `final` |
 
 The answer cites evidence by ref in square brackets, one or several: `[E2]`, `[E2, E5]`.
@@ -862,7 +862,7 @@ exist; its tools answer not-found tool errors otherwise.
 | Tool | Purpose |
 |---|---|
 | `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation |
-| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries and retrievers. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
+| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries, retrievers and navigators. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
 | `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`) |
 | `update_entity_type` | Change display name, description or name property (`name_property`); the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |

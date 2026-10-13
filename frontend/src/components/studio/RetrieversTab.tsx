@@ -38,7 +38,7 @@ const PARAM = 'retriever'
 
 /**
  * Lens detail → Retrievers: the lens's retrievers (list, with the built-in
- * Default), the editor of one (`?retriever=<key>`, `?retriever=new` for a
+ * Default), the editor of one (`?retriever=<key>`, `?retriever=_new` for a
  * draft, `?retriever=_default` for the Default's read-only page) and its test panel.
  */
 export function RetrieversTab({ ontologyKey, lens }: { ontologyKey: string; lens: Lens }) {
@@ -326,6 +326,7 @@ function RetrieverPage({
         onSaved(saved)
       }
     } catch (error) {
+      setFailed('save')
       if (error instanceof ApiError && error.fieldErrors !== undefined) {
         setSaveIssues(Object.entries(error.fieldErrors).map(([path, message]) => ({ path, message })))
       }

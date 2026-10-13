@@ -413,7 +413,7 @@ responses before the stream opens.
 | `retriever.phase` | `phase` (`plan`, `retrieve`, `answer`), `status` (`start`, `end`), `durationMs` on end | Progress |
 | `retriever.diagnostics` | `plan`, `results`, `limitations`, `searchCalls`, `timings`, `modelIO`, `llmCalls` | Only when requested |
 | `navigator.graph` | `steps`, `edges` | The pipeline, once, after `thread` |
-| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, `durationMs` and `summary` on end | Progress, in plain words |
+| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, `durationMs` and optional `summary` on end | Progress, in plain words; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary and no duration |
 | `navigator.summary` | `modelCalls`, `durationMs`, `entities`, `evidence`, `hops`, `timings` | Once, before `final` |
 
 Ignore kind events you do not know. A stream ends with exactly one `final` or `error`;

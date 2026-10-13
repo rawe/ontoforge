@@ -13,9 +13,9 @@
  *   best connected to them and the paths that lead there, bounded.
  */
 
-import type { Row } from "../../../../core/ports.js";
-import type { SchemaCacheValue } from "../../../schemaCache.js";
-import { entityLabel, relationLabel } from "../../entities.js";
+import type { Row } from "../../../core/ports.js";
+import type { SchemaCacheValue } from "../../schemaCache.js";
+import { entityLabel, relationLabel } from "../entities.js";
 import { Board, type BoardNode } from "./board.js";
 import type { Intent, PathStep } from "./understand.js";
 import type { GraphReader } from "./reader.js";

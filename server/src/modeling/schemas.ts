@@ -4,7 +4,6 @@
  * explicit `null`.
  */
 
-import { ASSISTANT_KIND_KEYS, type AssistantKindKey } from "../core/assistant.js";
 import { KeywordLanguage, KeywordLanguageSetSchema } from "../core/keywordLanguage.js";
 
 import { z } from "zod";
@@ -340,19 +339,21 @@ export const ExportRetriever = z.object({
 });
 export type ExportRetrieverInput = z.infer<typeof ExportRetriever>;
 
-/** One assistant of a registered kind in its portable form. Kept as
- * stored: a version this release cannot run travels too. */
-export const ExportAssistant = ExportRetriever;
-
-const registeredKindLists = Object.fromEntries(
-  ASSISTANT_KIND_KEYS.map((kind) => [kind, z.array(ExportAssistant).default([])]),
-) as Record<AssistantKindKey, z.ZodDefault<z.ZodArray<typeof ExportAssistant>>>;
+/** One navigator in its portable form. Kept as stored: a version this
+ * release cannot run travels too. */
+export const ExportNavigator = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  configVersion: z.number(),
+  config: z.unknown(),
+});
 
 /** A lens's assistants, one list per kind; each entry in its portable form. */
 export const ExportAssistants = z.object({
   agents: z.array(ExportAgent).default([]),
   retrievers: z.array(ExportRetriever).default([]),
-  ...registeredKindLists,
+  navigators: z.array(ExportNavigator).default([]),
 });
 
 export const ExportLens = z.object({

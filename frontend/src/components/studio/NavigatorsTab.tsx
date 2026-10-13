@@ -27,7 +27,7 @@ const PARAM = 'navigator'
 
 /**
  * Lens detail → Navigators: the lens's navigators (list, with the built-in
- * Default), the editor of one (`?navigator=<key>`, `?navigator=new` for a
+ * Default), the editor of one (`?navigator=<key>`, `?navigator=_new` for a
  * draft, `?navigator=_default` for the Default's read-only page) and its test chat.
  */
 export function NavigatorsTab({ ontologyKey, lens }: { ontologyKey: string; lens: Lens }) {

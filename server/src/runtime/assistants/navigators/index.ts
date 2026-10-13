@@ -14,31 +14,75 @@
  * lens only (`walk.ts`). Every entity met is streamed to the client before
  * the answer, which cites them by ref. The thread keeps the conversation
  * and the entities the last answer cited, where a follow-up may start.
+ *
+ * A turn's working values (history, intent, anchors, walks, evidence,
+ * reply) live in the closure of `run`, which compiles its graph per turn,
+ * so the graph only sequences the steps and checkpoints the thread.
  */
 
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import { HumanMessage } from "@langchain/core/messages";
 import { Annotation, END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
 
-import type { AssistantKind, Turn } from "../../kit/kind.js";
-import { decide, streamAnswer, turnModel } from "../../kit/model.js";
-import { TURNS_THE_MODEL_SEES } from "../../../threads/threadStore.js";
-import { lastTurns, trimTurns } from "../../../threads/turns.js";
+import type { RuntimeStore } from "../../../core/ports.js";
+import type { LoadedSchema } from "../../schemaCache.js";
+import { TURNS_THE_MODEL_SEES, type GraphThread } from "../../threads/threadStore.js";
+import { lastTurns, trimTurns } from "../../threads/turns.js";
+import { decide, streamAnswer, turnModel } from "../kit/model.js";
+import type { Topology, Trace } from "../kit/trace.js";
 import { ANSWER, answerInput, citedRefs } from "./answer.js";
 import { Board, type BoardNode } from "./board.js";
-import {
-  allowedAnchors,
-  allowedRelations,
-  checkNavigator,
-  deriveNavigator,
-  NAVIGATOR_CONFIG_VERSION,
-  NavigatorConfig,
-} from "./config.js";
+import { allowedAnchors, allowedRelations, type NavigatorConfig } from "./config.js";
 import { lensReader } from "./reader.js";
 import {
   intentSchema, intentSummary, parseIntent, pathText, schemaText, understandInput, UNDERSTAND, type Intent,
 } from "./understand.js";
 import { anchor, explore, focus, followPath, type FocusEntity, type WalkResult } from "./walk.js";
+
+/** The event prefix and the noun: `navigator.graph`, `navigator.step`,
+ * `navigator.summary`. */
+export const NAVIGATOR_EVENT = "navigator";
+
+/** The built-in default's runtime list description. */
+export const NAVIGATOR_DEFAULT_DESCRIPTION =
+  "Walks the lens's graph: finds what the question names, follows every relation the lens shows up to two hops, and answers citing what it found.";
+
+/** The steps of a turn, announced before it runs. */
+export const NAVIGATOR_TOPOLOGY: Topology = {
+  steps: [
+    { id: "understand", label: "Understand", model: true,
+      description: "Reads the question: what to look for, where to start, which relations matter." },
+    { id: "anchor", label: "Anchor", model: false,
+      description: "Finds the entities the question names, through the lens's search." },
+    { id: "walk", label: "Walk", model: false,
+      description: "Follows the planned path from the anchors hop by hop — or explores every relation outward." },
+    { id: "focus", label: "Focus", model: false,
+      description: "Keeps what answers the question and the paths that lead there." },
+    { id: "answer", label: "Answer", model: true,
+      description: "Writes the answer from the focused entities only, citing them." },
+  ],
+  edges: [
+    { from: "understand", to: "anchor" },
+    { from: "anchor", to: "walk" },
+    { from: "walk", to: "focus" },
+    { from: "walk", to: "walk", label: "widen: not everything asked for was reached" },
+    { from: "focus", to: "answer" },
+  ],
+};
+
+/** What one turn runs with. */
+export interface NavigatorTurn {
+  /** The navigator's key, `_default` for the derived one. */
+  key: string;
+  config: NavigatorConfig;
+  lensKey: string;
+  store: RuntimeStore;
+  loaded: LoadedSchema;
+  message: string;
+  thread: GraphThread;
+  signal: AbortSignal;
+  trace: Trace;
+}
 
 /** Turns of the conversation the model calls see — fewer than the thread
  * keeps; a follow-up rarely needs more. */
@@ -65,7 +109,8 @@ function historyOf(messages: BaseMessage[]): Message[] {
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-async function run(turn: Turn<NavigatorConfig>): Promise<string> {
+/** Runs one turn on its thread and returns the answer. */
+export async function run(turn: NavigatorTurn): Promise<string> {
   const { config, loaded, message, signal, trace, thread } = turn;
   const lens = loaded.scoped;
   const reader = lensReader(turn.lensKey, turn.store);
@@ -223,37 +268,3 @@ async function run(turn: Turn<NavigatorConfig>): Promise<string> {
   });
   return reply;
 }
-
-export const navigator: AssistantKind<NavigatorConfig> = {
-  kind: "navigators",
-  event: "navigator",
-  noun: "Navigator",
-  configVersion: NAVIGATOR_CONFIG_VERSION,
-  config: NavigatorConfig,
-  check: checkNavigator,
-  derive: deriveNavigator,
-  defaultDescription:
-    "Walks the lens's graph: finds what the question names, follows every relation the lens shows up to two hops, and answers citing what it found.",
-  topology: {
-    steps: [
-      { id: "understand", label: "Understand", model: true,
-        description: "Reads the question: what to look for, where to start, which relations matter." },
-      { id: "anchor", label: "Anchor", model: false,
-        description: "Finds the entities the question names, through the lens's search." },
-      { id: "walk", label: "Walk", model: false,
-        description: "Follows the planned path from the anchors hop by hop — or explores every relation outward." },
-      { id: "focus", label: "Focus", model: false,
-        description: "Keeps what answers the question and the paths that lead there." },
-      { id: "answer", label: "Answer", model: true,
-        description: "Writes the answer from the focused entities only, citing them." },
-    ],
-    edges: [
-      { from: "understand", to: "anchor" },
-      { from: "anchor", to: "walk" },
-      { from: "walk", to: "focus" },
-      { from: "walk", to: "walk", label: "widen: not everything asked for was reached" },
-      { from: "focus", to: "answer" },
-    ],
-  },
-  run,
-};

@@ -14,7 +14,7 @@ import {
   schemaText,
   understandInput,
   type Intent,
-} from "../../../../src/runtime/assistants/kinds/navigator/understand.js";
+} from "../../../../src/runtime/assistants/navigators/understand.js";
 import { LENS } from "./fixture.js";
 
 const RELATIONS = new Set(["manages", "works_on", "member_of", "requires"]);

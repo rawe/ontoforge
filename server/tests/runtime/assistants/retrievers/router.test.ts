@@ -26,6 +26,10 @@ vi.mock("../../../../src/core/ports.js", async (original) => ({
   getRuntimeStore: async () => runtime,
 }));
 vi.mock("../../../../src/runtime/assistants/retrievers/runtime.js", () => pipeline);
+vi.mock("../../../../src/runtime/assistants/kit/model.js", async (original) => ({
+  ...(await original<Record<string, unknown>>()),
+  requireLanguageModel: pipeline.requireLanguageModel,
+}));
 
 const BASE = "/api/ontologies/one/runtime/lenses/main";
 const agent = { key: "find", config: { indices: [] } };

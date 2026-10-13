@@ -13,8 +13,7 @@ import {
   deriveNavigator,
   NAVIGATOR_CONFIG_VERSION,
   NavigatorConfig,
-} from "../../../../src/runtime/assistants/kinds/navigator/config.js";
-import { navigator } from "../../../../src/runtime/assistants/kinds/navigator/index.js";
+} from "../../../../src/runtime/assistants/navigators/config.js";
 import { LENS } from "./fixture.js";
 
 const DEFAULTS = { hops: 2, relationTypes: null, anchorTypes: null, maxEntities: 40, instructions: null };
@@ -22,7 +21,6 @@ const DEFAULTS = { hops: 2, relationTypes: null, anchorTypes: null, maxEntities:
 describe("navigator configuration", () => {
   it("is version 1 and fills every default", () => {
     expect(NAVIGATOR_CONFIG_VERSION).toBe(1);
-    expect(navigator.configVersion).toBe(1);
     expect(NavigatorConfig.parse({})).toEqual(DEFAULTS);
   });
 
@@ -82,8 +80,7 @@ describe("checkNavigator", () => {
 describe("the derived default", () => {
   it("is the defaults, valid against any lens", () => {
     expect(deriveNavigator()).toEqual(DEFAULTS);
-    expect(navigator.derive(LENS)).toEqual(DEFAULTS);
-    expect(checkNavigator(navigator.derive(LENS), LENS)).toEqual([]);
+    expect(checkNavigator(deriveNavigator(), LENS)).toEqual([]);
   });
 
   it("walks every relation and anchors every entity type the lens shows", () => {

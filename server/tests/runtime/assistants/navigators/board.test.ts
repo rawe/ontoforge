@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 
 import { relationLabel } from "../../../../src/runtime/assistants/entities.js";
-import { Board } from "../../../../src/runtime/assistants/kinds/navigator/board.js";
+import { Board } from "../../../../src/runtime/assistants/navigators/board.js";
 import type { SchemaCacheValue } from "../../../../src/runtime/schemaCache.js";
 import { entity, LENS } from "./fixture.js";
 

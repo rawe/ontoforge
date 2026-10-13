@@ -486,8 +486,8 @@ Three operations, each with its own explanation. See
 [capabilities/transfer.md](capabilities/transfer.md).
 
 - **Export** — downloads the ontology's whole design — entity types, relation types,
-  properties, search indices, keyword languages, lenses, agents, retrievers and saved
-  queries — as a JSON file named after the ontology key ("Download `<ontologyKey>`.json").
+  properties, search indices, keyword languages, lenses, agents, retrievers, navigators
+  and saved queries — as a JSON file named after the ontology key ("Download `<ontologyKey>`.json").
 - **Import** — takes a JSON file and writes it into the current ontology. It reports
   malformed JSON before sending anything, and on a
   key conflict explains that pre-existing objects with the same keys block the import and

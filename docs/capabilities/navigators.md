@@ -19,9 +19,9 @@ Vocabulary: [../README.md](../README.md#glossary). The rules these follow:
 
 A navigator belongs to exactly one lens of one ontology. Its key is unique among the
 lens's navigators and follows the lens-resource [key](../README.md) rule, at most 64
-characters. It carries a name (1 to 200 characters), an optional description, a
-configuration version, the configuration and timestamps. This release writes and runs
-configuration version 1.
+characters. It carries a name (1 to 200 characters), an optional description (a save
+accepts up to 4,000 characters), a configuration version, the configuration and timestamps. This release
+writes and runs configuration version 1.
 
 A save creates the navigator or replaces its name, description and configuration; its
 identity and creation time stay. Saving changes nothing else. Deleting a navigator removes
@@ -32,8 +32,8 @@ it alone; deleting its lens deletes its navigators.
 | Field | Meaning |
 |---|---|
 | `hops` | How far an exploring walk goes from an anchor, 1 to 3, default 2 |
-| `relationTypes` | The relation types a walk may follow, or `null` for every one the lens shows |
-| `anchorTypes` | The entity types a mention may resolve to, or `null` for every one the lens shows |
+| `relationTypes` | The relation types a walk may follow, 1 to 100, or `null` for every one the lens shows |
+| `anchorTypes` | The entity types a mention may resolve to, 1 to 100, or `null` for every one the lens shows |
 | `maxEntities` | The evidence entities the answer model receives at most, 10 to 80, default 40 |
 | `instructions` | Up to 4,000 characters of further guidance for the answer — tone, focus, format — or `null` |
 
@@ -61,7 +61,8 @@ two model calls, and neither is retried. Cancelling the request stops further wo
 
 The first model call reads the question against the lens's schema — each entity type
 with its display name and description, each relation type the navigator may follow with its
-endpoints — the recent conversation, and the entities the previous answer cited. It
+endpoints — the last four turns of the conversation, each message shortened to 600
+characters, and the entities the previous answer cited. It
 returns, as structured output:
 
 - **mentions** — the concrete things the question names (names, titles, codes, values),
@@ -88,9 +89,11 @@ The entities the walk starts from:
   used instead.
 - A question that refers back starts from the previous answer's entities, read again so
   that entities deleted since, or no longer shown, drop out.
-- A question with neither starts from the best matches of its topic, documents included.
+- When neither yields an entity, the walk starts from the best matches of the question's
+  topic, documents included.
 
-Only entity types in `anchorTypes` are anchored.
+Mentions and the topic anchor only entity types in `anchorTypes`; the previous answer's
+entities are taken whatever their type.
 
 ### Walk
 
@@ -108,9 +111,11 @@ From the anchors, along the relation types the navigator may follow and the lens
   explores every allowed relation — one hop further than the first when that first walk
   explored. The answer is told.
 
-Only entities of types the lens exposes are taken, with what the lens shows of them. A walk
-reads at most 40 relations per entity, expands at most 60 entities per hop and collects at
-most 400; when it is cut, the answer is told that only the closest part was read.
+Only entities of types the lens exposes are taken, with what the lens shows of them. Each
+walk reads at most 40 relations per entity, expands at most 60 entities per hop and adds at
+most 400 entities, so a turn that widens can hold more. When the hop or the walk limit cuts
+a walk, the answer is told that only the closest part was read; the limit per entity cuts
+without a note.
 
 ### Focus
 
@@ -123,9 +128,10 @@ fit are counted, and the answer is told how many more were found.
 
 The second model call answers from the evidence alone: each entity as its type's display
 name, its label and up to six visible fields, the relations between evidence entities as
-sentences in display names, and the notes the turn collected. It never sees ids, keys or
-scores. It cites every entity it names by the entity's ref — `[E2]` — names an entity only
-when its relations and fields support what is asked, says plainly when the evidence does
+sentences in display names, and the notes the turn collected; the same four turns of
+conversation come along as context, not evidence. It never sees ids, keys or scores. It
+cites every entity it names by the entity's ref — `[E2]` — names an entity only when its
+relations and fields support what is asked, says plainly when the evidence does
 not answer the question, and answers in the language of the question. The navigator's
 `instructions` are appended to its own. The answer streams as it is written.
 
@@ -139,13 +145,14 @@ navigator's current configuration.
 
 ## What the client sees
 
-A turn streams its work before its answer, in display names only:
+A turn streams its work before its answer:
 
 - **The pipeline** — its steps, which of them call the model, and the edges between them,
   once, first.
-- **Each step** — when it starts and how it ends (done, skipped or failed), how long it
-  took, a one-line summary in plain words — "Path manages → member of: 6 entities ·
-  reached Person at hop 2" — and, for the walk, which round.
+- **Each step** — when it starts and how it ends (done or failed), how long it took, a
+  one-line summary in plain words and display names only — "Path manages → member of: 6
+  entities · reached Person at hop 2" — and, for the walk, which round. A step the turn
+  does not need arrives once, as skipped, with a summary and no duration.
 - **The entities** — [as every assistant reports them](threads.md#the-entities-a-turn-met):
   each with a ref unique in the turn, its type, label, up to six fields, its role — anchor, reached by the walk, or carried over from the previous answer — its
   distance from the nearest anchor, why it is there ("Lena Fischer manages Kira Novak", or

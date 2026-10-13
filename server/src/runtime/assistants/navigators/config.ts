@@ -6,7 +6,7 @@
 
 import { z } from "zod";
 
-import type { SchemaCacheValue } from "../../../schemaCache.js";
+import type { SchemaCacheValue } from "../../schemaCache.js";
 
 export const NAVIGATOR_CONFIG_VERSION = 1;
 

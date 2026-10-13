@@ -43,11 +43,9 @@ import {
 } from "@langchain/langgraph";
 
 import { settings } from "../../../config.js";
-import { createAiModel, getAiModel } from "../../../core/ai.js";
 import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
 import type { RuntimeStore } from "../../../core/ports.js";
 import type { RetrieverConfig } from "../../../core/retriever.js";
-import type { RuntimeAssistant } from "../agents/runtime.js";
 import type { StreamExecution } from "../../chatStream.js";
 import { loadSchema } from "../../schemaCache.js";
 import {
@@ -57,7 +55,9 @@ import {
   searchIndexCatalog,
   type SearchMode,
 } from "../../search/indexSearch.js";
+import type { RuntimeAssistant } from "../assistant.js";
 import { entitiesEvent } from "../entities.js";
+import { turnModel } from "../kit/model.js";
 import { checkRetrieverConfig } from "./config.js";
 import {
   DEFAULT_RETRIEVER_DESCRIPTION,
@@ -151,16 +151,6 @@ export async function listRuntimeRetrievers(lensKey: string, store: RuntimeStore
   ];
 }
 
-/** A configured language model, else the FEATURE_DISABLED refusal — as on
- * the other AI routes, before anything is read or streamed. */
-export function requireLanguageModel(): void {
-  if (getAiModel() === null) {
-    throw new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", {
-      code: "FEATURE_DISABLED",
-    });
-  }
-}
-
 /** The lens the retriever routes need — what the list needs, so reading
  * a thread needs no language model. An unknown lens → not found. */
 export async function requireRetrievers(lensKey: string, store: RuntimeStore): Promise<void> {
@@ -238,15 +228,11 @@ const State = Annotation.Root({
 /** The configured model, never retried, and its JSON-mode planning view:
  * JSON mode applies only to planning; the answer model streams plain text. */
 function models() {
-  const provider = settings.AI_PROVIDER;
-  if (!provider) {
-    throw new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", { code: "FEATURE_DISABLED" });
-  }
-  const model = createAiModel(provider, settings.AI_MODEL, settings.AI_BASE_URL, { maxRetries: 0 });
+  const model = turnModel();
   // Anthropic takes the plan schema as its own output format; every other
   // provider keeps the OpenAI-compatible response format.
   const plannerModel: Runnable<BaseLanguageModelInput, AIMessageChunk> =
-    provider === "anthropic"
+    settings.AI_PROVIDER === "anthropic"
       ? (model as ChatAnthropic).withConfig({
           outputConfig: { format: { type: "json_schema", schema: PLANNER_RESPONSE_FORMAT.json_schema.schema } },
         })

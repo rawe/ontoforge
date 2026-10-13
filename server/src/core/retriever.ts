@@ -94,10 +94,3 @@ export interface RetrieverWrite {
 export function similarityFloor(threshold: number): number {
   return (1 + threshold) / 2;
 }
-
-/** Parse issues as readable strings: `path: message`. */
-export function configIssues(error: z.ZodError): string[] {
-  return error.issues.map((issue) =>
-    issue.path.length > 0 ? `${issue.path.join(".")}: ${issue.message}` : issue.message,
-  );
-}

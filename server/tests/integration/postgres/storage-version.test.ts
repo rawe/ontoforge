@@ -8,8 +8,10 @@
  * table set up, and the retired search storage dropped. Storage of the
  * 6.x line (version 3) is produced by giving the assistant tables their
  * 6.x names back; the 7.0 step names them after their kind again, every
- * agent and retriever kept. Storage of 7.0 (version 4) is produced by
- * dropping the `assistant` table; the step to version 5 creates it. Storage at
+ * agent and retriever kept. Storage at version 5 is produced by putting
+ * the `assistant` table of step 5 in place of the navigator table; the
+ * step to version 6 names it after its kind, every navigator kept. Storage
+ * at version 4 has neither table; the steps to 5 and 6 create it. Storage at
  * the unreleased version 2 (development storage with retrievers) is
  * produced by dropping what the current code adds and restoring the
  * per-entity search storage it retires; the same step upgrades it,
@@ -94,10 +96,30 @@ async function renameTable(
   await querier.query(`ALTER TABLE ${namespace}.${table} RENAME TO ${then}`);
 }
 
-/** Storage of 7.0 (version 4): no table for assistants of registered
- * kinds. Records no version — `makeVersion3Layout` builds on it. */
+/** Storage at version 5: the navigators in the `assistant` table, with a
+ * `kind` column, as step 5 creates it. Records no version. */
+async function makeVersion5Layout(namespace: string): Promise<void> {
+  await makeVersion4Layout(namespace);
+  await runQuery(`CREATE TABLE ${namespace}.assistant (
+  assistant_id   uuid        CONSTRAINT assistant_pk PRIMARY KEY,
+  lens_id        uuid        NOT NULL CONSTRAINT assistant_lens_fk
+                             REFERENCES ${namespace}.lens (lens_id) ON DELETE CASCADE,
+  kind           text        NOT NULL,
+  key            text        NOT NULL,
+  name           text        NOT NULL,
+  description    text,
+  config_version integer     NOT NULL,
+  config         jsonb       NOT NULL,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT assistant_key_unique UNIQUE (lens_id, kind, key)
+)`);
+}
+
+/** Storage at version 4: no table for navigators. Records no version —
+ * `makeVersion3Layout` builds on it. */
 async function makeVersion4Layout(namespace: string): Promise<void> {
-  await runQuery(`DROP TABLE ${namespace}.assistant`);
+  await runQuery(`DROP TABLE ${namespace}.assistant_navigator`);
 }
 
 /** Storage of the 6.x line (version 3): the assistant tables under their
@@ -323,7 +345,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 1 to 5 (2 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 1 to 6 (2 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     expect([await instances("ont_legacy"), await instances("ont_legacy_de")]).toEqual(before);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
@@ -417,7 +439,7 @@ describe("PostgreSQL storage version", () => {
     expect((await runQuery(`SELECT count(*)::int AS n FROM ont_legacy.assistant_retriever`)).rows).toEqual([
       { n: 0 },
     ]);
-    expect((await runQuery(`SELECT count(*)::int AS n FROM ont_legacy.assistant`)).rows).toEqual([{ n: 0 }]);
+    expect((await runQuery(`SELECT count(*)::int AS n FROM ont_legacy.assistant_navigator`)).rows).toEqual([{ n: 0 }]);
   });
 
   it("upgrades 6.x storage to exactly the layout of a fresh ontology, keeping every agent and retriever", async () => {
@@ -445,7 +467,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 3 to 5 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 3 to 6 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
@@ -460,8 +482,8 @@ describe("PostgreSQL storage version", () => {
     expect([retriever.retrieverId, retriever.config]).toEqual([retrieverId, config]);
   });
 
-  it("upgrades 7.0 storage (version 4) by creating the assistant table, keeping every retriever", async () => {
-    expect(STORAGE_VERSION).toBe(5);
+  it("upgrades 7.0 storage (version 4) by creating the navigator table, keeping every retriever", async () => {
+    expect(STORAGE_VERSION).toBe(6);
     await getOntologyRegistry().createOntology(ID_A, "older", null, null);
     const lensId = randomUUID();
     await withTransaction(async (querier) => {
@@ -474,27 +496,64 @@ describe("PostgreSQL storage version", () => {
     });
     await makeVersion4Layout("ont_older");
     await recordVersion(4);
-    expect((await runQuery(`SELECT to_regclass('ont_older.assistant') AS t`)).rows).toEqual([{ t: null }]);
+    expect((await runQuery(`SELECT to_regclass('ont_older.assistant_navigator') AS t`)).rows).toEqual([{ t: null }]);
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 4 to 5 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 4 to 6 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
     const retrievers = await runQuery(`SELECT key FROM ont_older.assistant_retriever`);
     expect(retrievers.rows).toEqual([{ key: "finder" }]);
     // The new table works through the port and goes with its lens.
-    const assistants = (await getModelingStore("older")).assistants();
-    const [saved, created] = await assistants.saveAssistant(
+    const navigators = (await getModelingStore("older")).navigators();
+    const [saved, created] = await navigators.saveNavigator(
       lensId,
-      { assistantId: randomUUID(), kind: "navigators", key: "walker", name: "Walker", description: null, configVersion: 1, config: { hops: 2 } },
+      { navigatorId: randomUUID(), key: "walker", name: "Walker", description: null, configVersion: 1, config: { hops: 2 } },
       false,
     );
     expect([saved.key, saved.config, created]).toEqual(["walker", { hops: 2 }, true]);
     await runQuery(`DELETE FROM ont_older.lens WHERE lens_id = $1`, [lensId]);
-    expect(await assistants.listAssistants(lensId, "navigators")).toEqual([]);
+    expect(await navigators.listNavigators(lensId)).toEqual([]);
+  });
+
+  it("upgrades version-5 storage by naming the navigator table after its kind, keeping every navigator", async () => {
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
+    await makeVersion5Layout("ont_older");
+    const lensId = randomUUID();
+    const navigatorId = randomUUID();
+    await withTransaction(async (querier) => {
+      await querier.query(`INSERT INTO ont_older.lens (lens_id, key, name) VALUES ($1, 'all', 'All')`, [lensId]);
+      await querier.query(
+        `INSERT INTO ont_older.assistant (assistant_id, lens_id, kind, key, name, description, config_version, config)
+         VALUES ($1, $2, 'navigators', 'walker', 'Walker', 'Walks', 1, '{"hops": 3}'::jsonb)`,
+        [navigatorId, lensId],
+      );
+    });
+    await recordVersion(5);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await initSchema();
+
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 5 to 6 (1 ontologies).");
+    expect(await recordedVersion()).toBe(STORAGE_VERSION);
+    expect((await runQuery(`SELECT to_regclass('ont_older.assistant') AS t`)).rows).toEqual([{ t: null }]);
+    await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
+    expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
+    // The navigator is kept and reads through the port.
+    const navigators = (await getModelingStore("older")).navigators();
+    const kept = (await navigators.getNavigator(lensId, "walker"))!;
+    expect([kept.navigatorId, kept.name, kept.description, kept.configVersion, kept.config]).toEqual([
+      navigatorId, "Walker", "Walks", 1, { hops: 3 },
+    ]);
+    // One key per lens.
+    await expect(navigators.saveNavigator(
+      lensId,
+      { navigatorId: randomUUID(), key: "walker", name: "Again", description: null, configVersion: 1, config: {} },
+      true,
+    )).rejects.toThrow("Navigator 'walker' already exists in the target lens");
   });
 
   it("upgrades version-2 storage to exactly the layout of a fresh ontology", async () => {

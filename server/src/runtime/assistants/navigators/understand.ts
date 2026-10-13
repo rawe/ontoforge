@@ -7,8 +7,8 @@
  * checked again, never trusted.
  */
 
-import type { SchemaCacheValue } from "../../../schemaCache.js";
-import type { JsonSchema } from "../../kit/model.js";
+import type { SchemaCacheValue } from "../../schemaCache.js";
+import type { JsonSchema } from "../kit/model.js";
 import type { FocusEntity } from "./walk.js";
 
 /** One hop of a planned path: a relation type, and which end the walk is at. */

@@ -7,7 +7,7 @@
 
 import type { Row } from "../../../../src/core/ports.js";
 import type { SchemaCacheValue } from "../../../../src/runtime/schemaCache.js";
-import type { GraphReader, Neighbor, SearchHitRow } from "../../../../src/runtime/assistants/kinds/navigator/reader.js";
+import type { GraphReader, Neighbor, SearchHitRow } from "../../../../src/runtime/assistants/navigators/reader.js";
 
 const property = (key: string, displayName: string, dataType = "string") => ({
   key,

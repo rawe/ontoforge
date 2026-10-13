@@ -5,9 +5,9 @@
  * answer model may cite.
  */
 
-import type { Row } from "../../../../core/ports.js";
-import type { SchemaCacheValue } from "../../../schemaCache.js";
-import { entityCard, EntityRefs, relationLabel, type EntityCard, type EntityLink } from "../../entities.js";
+import type { Row } from "../../../core/ports.js";
+import type { SchemaCacheValue } from "../../schemaCache.js";
+import { entityCard, EntityRefs, relationLabel, type EntityCard, type EntityLink } from "../entities.js";
 
 /** A card of the walk: the shared card with where the walk met it. */
 export type WalkCard = EntityCard & {

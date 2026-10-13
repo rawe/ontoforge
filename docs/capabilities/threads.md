@@ -39,8 +39,9 @@ work is its tool calls and their results; they stay in the thread with the turn.
   turns' tool calls and results. A thread keeps a bounded number of turns; older ones are
   removed.
 
-A retriever's thread also keeps what a follow-up question may refer to
-([retrievers.md](retrievers.md#follow-up-questions)).
+A retriever's and a navigator's thread also keep what a follow-up question may refer to
+([retrievers.md](retrievers.md#follow-up-questions),
+[navigators.md](navigators.md#follow-up-questions)).
 
 ## The entities a turn met
 

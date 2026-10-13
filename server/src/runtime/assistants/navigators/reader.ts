@@ -5,10 +5,10 @@
  * already scoped to the lens; tests substitute their own.
  */
 
-import { NotFoundError, ValidationError } from "../../../../core/exceptions.js";
-import type { Row, RuntimeStore } from "../../../../core/ports.js";
-import { search, type SearchRequest } from "../../../search/entry.js";
-import { getEntity, getNeighbors, listEntities } from "../../../service.js";
+import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
+import type { Row, RuntimeStore } from "../../../core/ports.js";
+import { search, type SearchRequest } from "../../search/entry.js";
+import { getEntity, getNeighbors, listEntities } from "../../service.js";
 
 export interface SearchHitRow {
   entity: Row;

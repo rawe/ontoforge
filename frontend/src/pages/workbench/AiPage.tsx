@@ -4,16 +4,18 @@ import { useFeatures, useRuntimeSchema } from '@/api/hooks'
 import { AgentChat } from '@/components/assistants/agents/AgentChat'
 import { AssistantTab } from '@/components/assistants/chat/AssistantTab'
 import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
+import { NavigatorChat } from '@/components/assistants/navigators/NavigatorChat'
 import { RetrieverTab } from '@/components/assistants/retrievers/RetrieverTab'
 import { EmptyState } from '@/components/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-const TABS = ['chat', 'retriever'] as const
+const TABS = ['chat', 'retriever', 'navigator'] as const
 type TabKey = (typeof TABS)[number]
 
 /**
- * `/o/:ontologyKey/w/:lensKey/ai` — Assistants, with tabs Agents (`chat`) | Retrievers (`retriever`).
+ * `/o/:ontologyKey/w/:lensKey/ai` — Assistants, with tabs Agents (`chat`) | Retrievers (`retriever`)
+ * | Navigators (`navigator`).
  * The active tab lives in `?tab=`, the chosen assistant of that kind in
  * `?assistant=<key>`; an unknown tab falls back to chat. Leaving a tab
  * cancels its running turn.
@@ -70,6 +72,10 @@ export function AiPage() {
             <ASSISTANT_KINDS.retrievers.icon className="size-3.5" />
             Retrievers
           </TabsTrigger>
+          <TabsTrigger value="navigator" className="gap-1.5 px-2.5 text-[13px]">
+            <ASSISTANT_KINDS.navigators.icon className="size-3.5" />
+            Navigators
+          </TabsTrigger>
         </TabsList>
       </header>
 
@@ -83,10 +89,41 @@ export function AiPage() {
           <TabsContent value="retriever" className="flex min-h-0 flex-1 flex-col">
             {tab === 'retriever' && <RetrieverTab key={`${ontologyKey}/${lensKey}`} ontologyKey={ontologyKey} lensKey={lensKey} />}
           </TabsContent>
+          <TabsContent value="navigator" className="flex min-h-0 flex-1 flex-col">
+            {tab === 'navigator' && (
+              <AssistantTab key={`${ontologyKey}/${lensKey}`} ontologyKey={ontologyKey} lensKey={lensKey} kind="navigators">
+                {(navigator, picker) => (
+                  <NavigatorChat
+                    key={navigator.key}
+                    ontologyKey={ontologyKey}
+                    lensKey={lensKey}
+                    navigatorKey={navigator.key}
+                    name={navigator.name}
+                    description={navigator.description}
+                    blockedReason={null}
+                    remember
+                    picker={picker}
+                  />
+                )}
+              </AssistantTab>
+            )}
+          </TabsContent>
           <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col">
             {tab === 'chat' && (
               <AssistantTab key={`${ontologyKey}/${lensKey}`} ontologyKey={ontologyKey} lensKey={lensKey} kind="agents">
-                {(agent, picker) => <AgentChat key={agent.key} ontologyKey={ontologyKey} lensKey={lensKey} agent={agent} picker={picker} />}
+                {(agent, picker) => (
+                  <AgentChat
+                    key={agent.key}
+                    ontologyKey={ontologyKey}
+                    lensKey={lensKey}
+                    agentKey={agent.key}
+                    name={agent.name}
+                    description={agent.description}
+                    blockedReason={null}
+                    remember
+                    picker={picker}
+                  />
+                )}
               </AssistantTab>
             )}
           </TabsContent>

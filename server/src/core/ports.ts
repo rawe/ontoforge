@@ -47,6 +47,7 @@
  */
 
 import type { KeywordLanguageSet } from "./keywordLanguage.js";
+import type { NavigatorRecord, NavigatorWrite } from "./navigator.js";
 import type { RetrieverRecord, RetrieverWrite } from "./retriever.js";
 
 import { settings } from "../config.js";
@@ -162,6 +163,9 @@ export interface ModelingStore {
   /** The search-index store of the same ontology: the modeling service
    * keeps the managed indices in step with the schema through it. */
   searchIndices(): SearchIndexStore;
+
+  /** The navigator store of the same ontology. */
+  navigators(): NavigatorStore;
 
   // ------------------------------------------------------------------
   // Lenses
@@ -492,6 +496,9 @@ export interface RuntimeStore {
 
   /** The search-index store of the same ontology. */
   searchIndices(): SearchIndexStore;
+
+  /** The navigator store of the same ontology. */
+  navigators(): NavigatorStore;
 
   // ------------------------------------------------------------------
   // Entity instances
@@ -861,6 +868,27 @@ export interface SearchWritePlan {
  * writes go to a generation by id wherever it is in that lifecycle, and
  * are refused (false) once it is no longer building or ready.
  */
+/**
+ * Navigators (`core/navigator.ts`), lens-local: keyed by lens and key,
+ * deleted with their lens. The store keeps the configuration as given;
+ * the navigator's runtime checks it.
+ */
+export interface NavigatorStore {
+  /** The lens's navigators, by name then key. */
+  listNavigators(lensId: string): Promise<NavigatorRecord[]>;
+
+  getNavigator(lensId: string, key: string): Promise<NavigatorRecord | null>;
+
+  /** Create, or replace name, description and configuration of the
+   * navigator with this key (its id and creation time stay). `createOnly`:
+   * an existing key is a `ConflictError`. The lens missing is a
+   * `NotFoundError`. True in the pair when the navigator was created. */
+  saveNavigator(lensId: string, navigator: NavigatorWrite, createOnly: boolean): Promise<[NavigatorRecord, boolean]>;
+
+  /** False when the lens has no navigator of this key. */
+  deleteNavigator(lensId: string, key: string): Promise<boolean>;
+}
+
 export interface SearchIndexStore {
   /** The ontology this store is bound to. */
   readonly ontologyKey: string;

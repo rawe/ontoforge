@@ -23,10 +23,10 @@ to it begins when its first lens is created.
 data. It cannot define a type, override a property, or rename anything. Its entire
 content is a set of declarations about types that exist independently of it.
 
-Three things do belong to a lens, keyed within it, exported with it and deleted with
-it: **agent configurations** ([agents.md](agents.md)) and **saved queries**
-([saved-queries.md](saved-queries.md)) and **retrievers**
-([retrievers.md](retrievers.md)). They are lens-local because they are
+Four things do belong to a lens, keyed within it, exported with it and deleted with
+it: **agent configurations** ([agents.md](agents.md)), **saved queries**
+([saved-queries.md](saved-queries.md)), **retrievers** ([retrievers.md](retrievers.md))
+and **navigators** ([navigators.md](navigators.md)). They are lens-local because they are
 written in terms of what that lens exposes.
 
 Deleting a lens deletes those configurations and nothing else. Types, property definitions

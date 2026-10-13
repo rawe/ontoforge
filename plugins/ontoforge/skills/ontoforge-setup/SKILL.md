@@ -17,7 +17,7 @@ The Docker Compose stack consists of three core services:
 - **ontoforge-server** — Backend: REST API and MCP servers. All environment variables documented below apply to this service.
 - **ontoforge-ui** — Frontend: web UI served on port 3000. Requires `BACKEND_URL` pointing to the backend's Docker-internal URL so nginx can proxy `/api` and `/mcp` requests.
 
-Semantic search is optional and supports two embedding providers: **Ollama** (local) or an **OpenAI-compatible** API. AI-powered runtime (assistants: chat with agents and retrievers) is also optional and requires a model with tool calling support. Both features can use Ollama or an OpenAI-compatible API; AI-powered runtime can also use Anthropic's API. When using Ollama, an optional **ollama** service can be added to the compose stack.
+Semantic search is optional and supports two embedding providers: **Ollama** (local) or an **OpenAI-compatible** API. AI-powered runtime (assistants: chat with agents, retrievers and navigators) is also optional and requires a model with tool calling support. Both features can use Ollama or an OpenAI-compatible API; AI-powered runtime can also use Anthropic's API. When using Ollama, an optional **ollama** service can be added to the compose stack.
 
 ## Templates
 

@@ -13,6 +13,7 @@ import type {
   SearchIndexRecord,
 } from "../../src/core/ports.js";
 import { deriveManagedIndices, type SearchIndexSchema } from "../../src/core/searchIndex.js";
+import { createMockNavigatorStore, type MockNavigatorStore } from "../mockNavigatorStore.js";
 import { createMockSearchIndexStore, type MockSearchIndexStore } from "../mockSearchIndexStore.js";
 
 export const NOW = new Date("2025-01-01T12:00:00.000Z");
@@ -172,18 +173,22 @@ export function makeRelation(
 
 /** Every port method as a mock — completeness is compiler-enforced. The
  * one non-method member, the store's ontology binding, stays a value; the
- * search-index store it hands out is a mock too (`indices`). */
+ * search-index and navigator stores it hands out are mocks too (`indices`,
+ * `navigatorStore`). */
 export type MockRuntimeStore = {
   [K in Exclude<keyof RuntimeStore, "ontologyKey">]: Mock;
-} & { ontologyKey: string; indices: MockSearchIndexStore };
+} & { ontologyKey: string; indices: MockSearchIndexStore; navigatorStore: MockNavigatorStore };
 
 /** A mock store whose reads default to "nothing stored". */
 export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeStore {
   const indices = createMockSearchIndexStore(ontologyKey);
+  const navigatorStore = createMockNavigatorStore();
   return {
     ontologyKey,
     indices,
+    navigatorStore,
     searchIndices: vi.fn(() => indices),
+    navigators: vi.fn(() => navigatorStore),
     supportsKeywordRanking: vi.fn(() => false),
     supportsSearchPathConditions: vi.fn(() => false),
     getFullSchemaWithLensInclusions: vi.fn(async () => null),
@@ -203,6 +208,7 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     updateRelation: vi.fn(async () => null),
     deleteRelation: vi.fn(async () => false),
     getNeighbors: vi.fn(async () => []),
+    distinctEntityValues: vi.fn(async () => []),
     executeOql: vi.fn(async () => [[], []]),
   };
 }

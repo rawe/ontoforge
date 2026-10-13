@@ -1,7 +1,8 @@
 /**
  * The retriever pipeline with a fake model and a mocked search
  * engine: exactly planner + answer model, the stream's events and
- * diagnostics shapes (contract), planner failures before any answer,
+ * diagnostics shapes (contract), the cards of the results the answer model
+ * gets, planner failures before any answer,
  * cancellation, turns on a thread (what the models see, what the thread
  * keeps), follow-up references, and the one repeated plan for a follow-up
  * whose first plan searched nothing.
@@ -169,9 +170,72 @@ describe("retriever pipeline", () => {
     });
   });
 
-  it("without diagnostics streams progress and the answer only", async () => {
+  it("without diagnostics streams progress, the entities and the answer only", async () => {
     const { events } = await run("Everyone in Berlin", false);
-    expect(new Set(events.map((e) => e.type))).toEqual(new Set(["retriever.phase", "delta"]));
+    expect(new Set(events.map((e) => e.type))).toEqual(new Set(["retriever.phase", "entities", "delta"]));
+  });
+
+  describe("the entities event", () => {
+    const record = {
+      key: "person~default",
+      definition: { key: "person~default", entityType: "person", fields: ["name"], header: null, relations: [] },
+    } as unknown as SearchIndexRecord;
+    const found = (entityId: string) => ({ entityId, entityType: "person", score: 1, matched: { index: record, entry: { text: "Person" } }, indices: [] });
+    const PEOPLE: Record<string, Record<string, unknown>> = {
+      ada: { _id: "ada", name: "Ada", email: "a@x" },
+      // Alone over the answer context's budget: skipped.
+      big: { _id: "big", name: "Big", email: "x".repeat(9000) },
+      eve: { _id: "eve", name: "Eve", email: "e@x" },
+    };
+    // Fields long enough that one person overflows the context.
+    const config = { ...CONFIG, answerFieldCharacters: 20_000 };
+    const wide: RunnableRetriever = { ...agent, config, scope: { ...agent.scope, config, records: [record] } };
+
+    beforeEach(() => {
+      fake.invoke.mockResolvedValue(planned([sub({ query: "people", filters: [] })]));
+      engine.rankThroughIndices.mockResolvedValue([found("ada"), found("big"), found("eve")]);
+      (store.getEntitiesByIds as ReturnType<typeof vi.fn>).mockImplementationOnce(async (ids: string[]) =>
+        Object.fromEntries(ids.map((id) => [id, PEOPLE[id]])),
+      );
+    });
+
+    it("carries exactly the results handed to the answer model, before the answer, with diagnostics off", async () => {
+      const { events } = await run("Who are the people?", false, undefined, undefined, wide);
+      const entities = events.filter((e) => e.type === "entities");
+      expect(entities).toEqual([
+        {
+          type: "entities",
+          entities: [
+            { ref: "E1", id: "ada", type: "person", typeName: "Person", label: "Ada", fields: [{ name: "Email", value: "a@x" }], evidence: true },
+            { ref: "E2", id: "eve", type: "person", typeName: "Person", label: "Eve", fields: [{ name: "Email", value: "e@x" }], evidence: true },
+          ],
+          links: [],
+        },
+      ]);
+      expect(events.indexOf(entities[0]!)).toBeLessThan(events.findIndex((e) => e.type === "delta"));
+      expect(events.indexOf(entities[0]!)).toBeLessThan(events.findIndex((e) => e.type === "retriever.phase" && e.phase === "answer"));
+      const answerInput = JSON.parse(fake.stream.mock.calls[0]![0][1].content);
+      expect(answerInput.results.map((result: { label: string }) => result.label)).toEqual(["Ada", "Eve"]);
+    });
+
+    it("shows only what the lens shows", async () => {
+      const person = SCHEMA.entityTypes.person!;
+      const hiding = { ...SCHEMA, entityTypes: { ...SCHEMA.entityTypes, person: { ...person, properties: { name: person.properties.name! } } } };
+      const lens = { ...LENS, scoped: hiding };
+      const loaded = { scoped: hiding, full: SCHEMA } as unknown as LoadedSchema;
+      const hidden: RunnableRetriever = { ...wide, scope: { ...wide.scope, lens, loaded } };
+      const { events } = await run("Who are the people?", false, undefined, undefined, hidden);
+      const cards = events.find((e) => e.type === "entities")!.entities as { id: string; fields: unknown[] }[];
+      // Big's hidden email no longer overflows the context.
+      expect(cards.map((card) => [card.id, card.fields])).toEqual([["ada", []], ["big", []], ["eve", []]]);
+    });
+
+    it("is not sent when nothing reaches the answer model", async () => {
+      engine.rankThroughIndices.mockResolvedValue([]);
+      const { events } = await run("Who are the people?", true, undefined, undefined, wide);
+      expect(events.some((e) => e.type === "entities")).toBe(false);
+      expect(fake.stream).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("shows the planner's output before a parse failure and never calls the answer model", async () => {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Export one ontology's design (schema, lenses, agents, saved queries) to a
+// Export one ontology's design (schema, lenses, assistants, saved queries) to a
 // JSON file. Instance data is not part of the transfer format — use
 // export-data.mjs for that.
 

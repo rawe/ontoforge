@@ -267,7 +267,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         "Get the current state of the ontology's schema. Returns all entity types, " +
         "relation types, and their properties, the keyword language set, the search " +
         "indices (custom definitions and switched-off managed indices) and the lenses with " +
-        "their type and search-index inclusions, assistants (agents and retrievers) and saved queries.",
+        "their type and search-index inclusions, assistants (agents, retrievers and navigators) and saved queries.",
       inputSchema: {},
     },
     wrap("get_schema", async () => {
@@ -595,7 +595,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       description:
         `Export the full schema in the OntoForge v${TRANSFER_FORMAT_VERSION} transfer format ` +
         "(JSON), including the keyword language set, the search indices and each lens's " +
-        "assistants (agents and retrievers) and saved queries.",
+        "assistants (agents, retrievers and navigators) and saved queries.",
       inputSchema: {},
     },
     wrap("export_schema", async () => {

@@ -1,14 +1,15 @@
 /**
  * Pure turn handling of the assistant chat, for every assistant kind: a
  * turn is one question and its answer; the shared stream events (`thread`,
- * `delta`, `final`, `error`) build the answer, and the kind folds its own
- * events into the turn's `insight` (what its side panel shows) through a
- * `TurnModel`. Timing is the client clock — the stream carries none.
+ * `delta`, `entities`, `final`, `error`) build the answer and the entities
+ * it met, and the kind folds its own events into the turn's `insight`
+ * (what its side panel shows) through a `TurnModel`. Timing is the client clock — the stream carries none.
  *
  * No React, no I/O — unit-tested with `node --test`.
  */
 
 import type { SharedEvent } from '@/api/chatStream'
+import type { EntityCard, EntityLink } from '@/api/entities'
 import type { ChatMessage } from '@/api/types'
 
 /** The key of the built-in assistant every kind lists first. */
@@ -27,6 +28,10 @@ export interface Turn<I> {
   error?: string
   /** A failed turn the user stopped. */
   stopped?: boolean
+  /** The entities the answer met, in the order it met them — none for a restored one. */
+  entities: EntityCard[]
+  /** Stored relations between them, unique by id. */
+  links: EntityLink[]
   /** What the kind reported about this answer — empty for a restored one. */
   insight: I
   /** Read back from the server's thread, not asked in this view. */
@@ -44,7 +49,7 @@ export interface TurnModel<E, I> {
   apply: (insight: I, event: E, now: number) => I
   /** The turn ended unfinished at `now` (failed or stopped). */
   end?: (insight: I, now: number) => I
-  /** Whether the side panel has something to show for this answer. */
+  /** Whether the insight has something for the side panel (the turn's entities count too — `hasDetail`). */
   hasInsight: (insight: I) => boolean
   /** The live detail of a running turn: what it is doing right now. */
   progress: (insight: I) => string | undefined
@@ -57,12 +62,28 @@ export const STOPPED_TEXT = 'Stopped. This answer is not part of the conversatio
 /** The longest question every kind accepts. */
 export const MAX_MESSAGE = 2000
 
-const SHARED: ReadonlySet<string> = new Set(['thread', 'delta', 'final', 'error'])
+const SHARED: ReadonlySet<string> = new Set(['thread', 'delta', 'entities', 'final', 'error'])
 const isShared = (event: { type: string }): event is SharedEvent => SHARED.has(event.type)
 
 /** A new, pending turn, sent at `now`. */
 export function pendingTurn<I>(id: string, question: string, insight: I, now: number): Turn<I> {
-  return { id, question, reply: '', status: 'pending', insight, startedAt: now }
+  return { id, question, reply: '', status: 'pending', entities: [], links: [], insight, startedAt: now }
+}
+
+/** Replace items with the same key in place, append new ones. */
+function upsert<T>(current: readonly T[], next: readonly T[], key: (item: T) => string): T[] {
+  const result = [...current]
+  const at = new Map(result.map((item, i) => [key(item), i]))
+  for (const item of next) {
+    const i = at.get(key(item))
+    if (i === undefined) {
+      at.set(key(item), result.length)
+      result.push(item)
+    } else {
+      result[i] = item
+    }
+  }
+  return result
 }
 
 /** The turn after one stream event at `now`; the kind's events go to its model. */
@@ -78,6 +99,12 @@ export function applyEvent<E extends { type: string }, I>(
       return turn
     case 'delta':
       return { ...turn, reply: turn.reply + event.text }
+    case 'entities':
+      return {
+        ...turn,
+        entities: upsert(turn.entities, event.entities, (card) => card.ref),
+        links: upsert(turn.links, event.links, (link) => link.id),
+      }
     case 'final':
       return { ...turn, reply: event.reply, status: 'complete', finishedAt: now }
     case 'error':
@@ -109,19 +136,23 @@ export function endText(turn: Pick<Turn<unknown>, 'status' | 'error' | 'stopped'
 export function restoredTurns<I>(messages: readonly ChatMessage[], empty: () => I, newId: () => string): Turn<I>[] {
   const turns: Turn<I>[] = []
   for (const message of messages) {
-    if (message.role === 'user') turns.push({ id: newId(), question: message.content, reply: '', status: 'complete', insight: empty(), restored: true })
+    if (message.role === 'user') turns.push({ id: newId(), question: message.content, reply: '', status: 'complete', entities: [], links: [], insight: empty(), restored: true })
     else if (turns.length > 0) turns[turns.length - 1]!.reply = message.content
   }
   return turns
 }
 
-/** The turn the side panel shows: the chosen one, else the latest with insight. */
+/** Whether the side panel has something to show for the turn: entities, or the kind's insight. */
+export const hasDetail = <I>(turn: Turn<I>, hasInsight: (insight: I) => boolean) =>
+  turn.entities.length > 0 || hasInsight(turn.insight)
+
+/** The turn the side panel shows: the chosen one, else the latest with something to show. */
 export function inspectedTurn<I>(
   turns: readonly Turn<I>[],
   selectedId: string | null,
   hasInsight: (insight: I) => boolean,
 ): Turn<I> | undefined {
-  const withInsight = turns.filter((t) => hasInsight(t.insight))
+  const withInsight = turns.filter((t) => hasDetail(t, hasInsight))
   return withInsight.find((t) => t.id === selectedId) ?? withInsight.at(-1)
 }
 

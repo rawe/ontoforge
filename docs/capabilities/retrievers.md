@@ -229,6 +229,10 @@ added best first up to 8,000 characters; results that do not fit are omitted and
 as an unassessed remainder, never as further matches. Scores never reach the answer
 model.
 
+Before the answer, the turn reports the results that reached the answer model — not the
+omitted ones — as [every assistant reports its entities](threads.md#the-entities-a-turn-met),
+whether or not the question asked for diagnostics.
+
 The answer model replies in the language of the user's current question, from this
 evidence alone: the conversation only tells it what the question refers to and is never
 evidence. It names an entity only when the evidence supports every fact asked for; a

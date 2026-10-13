@@ -1,267 +1,490 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, FileUp, Plus } from 'lucide-react'
-import { useBlocker, useSearchParams } from 'react-router-dom'
+import { Copy, FileUp } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useFeatures, useRetrievers, useRuntimeSchema, useSearchCatalog } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
-import { importRetriever, saveRetriever, type Retriever } from '@/api/retrievers'
+import { deleteRetriever, importRetriever, saveRetriever, type Retriever } from '@/api/retrievers'
 import type { Lens, RuntimeSchema, SearchCatalogEntry, ValidationError } from '@/api/types'
-import { EmptyState } from '@/components/EmptyState'
-import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { RetrieverChat } from '@/components/assistants/retrievers/RetrieverChat'
 import { RetrieverConfigEditor } from '@/components/assistants/retrievers/RetrieverConfigEditor'
 import { RetrieverRetrieve } from '@/components/assistants/retrievers/RetrieverRetrieve'
-import { ImportDialog, NameKeyDialog, RetrieverMore, RetrieverSaveBar } from '@/components/assistants/retrievers/RetrieverManagement'
+import { ImportDialog, NameKeyDialog, RetrieverMore } from '@/components/assistants/retrievers/RetrieverManagement'
 import { errorText } from '@/components/assistants/retrievers/errorText'
 import {
-  retrieverExecution, asIssues, draftOf, draftProblems, emptyConfig, isSupportedRetriever, sameDraft, toInput, type RetrieverDraft,
+  retrieverExecution, asIssues, draftOf, draftProblems, isSupportedRetriever, sameDraft, toInput, type RetrieverDraft,
 } from '@/components/assistants/retrievers/retrieverModel'
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Textarea } from '@/components/ui/textarea'
 import { readString, storageKeys, writeString } from '@/lib/storage'
 import { cn } from '@/lib/utils'
+import { AssistantActionBar } from './assistants/AssistantActionBar'
+import { AssistantCard, AssistantValidityBadges, AssistantWarningsBadge } from './assistants/AssistantCard'
+import { AssistantDefaultPage, AssistantEditorPage } from './assistants/AssistantEditorPage'
+import { AssistantIdentitySection } from './assistants/AssistantIdentitySection'
+import { AssistantList, AssistantLoadError, AssistantLoading, AssistantNotFound } from './assistants/AssistantList'
+import { AssistantTestPanel } from './assistants/AssistantTestPanel'
+import {
+  ASSISTANT_DEFAULT, ASSISTANT_NEW, assistantErrorLines, assistantKeyError, assistantStatus,
+} from './assistants/assistantModel'
+import { useAssistantLeaveGuard } from './assistants/useAssistantLeaveGuard'
+import { isValidLensResourceKey } from './lib'
 import { ValidationPanel } from './ValidationPanel'
 
 const TAB = 'retriever-agents'
+const PARAM = 'retriever'
 
 /**
- * Lens detail → Retrievers: the lens's retrievers (list), the editor of
- * one (`?agent=<key>`) and its test panel. A new retriever is a draft until
- * its first Save.
+ * Lens detail → Retrievers: the lens's retrievers (list, with the built-in
+ * Default), the editor of one (`?retriever=<key>`, `?retriever=_new` for a
+ * draft, `?retriever=_default` for the Default's read-only page) and its test panel.
  */
 export function RetrieversTab({ ontologyKey, lens }: { ontologyKey: string; lens: Lens }) {
   const features = useFeatures().data
   const [searchParams, setSearchParams] = useSearchParams()
-  const selectedKey = searchParams.get('agent')
-  const [creating, setCreating] = useState<{ name: string; key: string } | null>(null)
-  const [dialog, setDialog] = useState<'new' | 'import' | null>(null)
-  const agents = useRetrievers(ontologyKey, lens.key)
+  const selectedKey = searchParams.get(PARAM)
+  const [importing, setImporting] = useState(false)
+  const retrievers = useRetrievers(ontologyKey, lens.key)
   const catalog = useSearchCatalog(ontologyKey, lens.key)
   const schema = useRuntimeSchema(ontologyKey, lens.key)
   const queryClient = useQueryClient()
-  const existingKeys = agents.data?.map((a) => a.key) ?? []
 
-  const select = (key: string | null) => {
-    setCreating(null)
-    setSearchParams(key === null ? { tab: TAB } : { tab: TAB, agent: key }, { replace: true })
-  }
+  const select = (key: string | null) =>
+    setSearchParams(key === null ? { tab: TAB } : { tab: TAB, [PARAM]: key }, { replace: true })
   // The Workbench's runtime list follows the modeling list.
   const refresh = () => Promise.all([qk.retrievers(ontologyKey, lens.key), qk.assistants(ontologyKey, lens.key, 'retrievers')]
     .map((queryKey) => queryClient.invalidateQueries({ queryKey })))
 
-  if (agents.isPending || catalog.isPending || schema.isPending) {
-    return <div className="space-y-3"><Skeleton className="h-8 w-64" /><Skeleton className="h-40 rounded-xl" /></div>
-  }
-  const loadError = agents.error ?? catalog.error ?? schema.error
-  if (loadError || !agents.data || !catalog.data || !schema.data) {
-    return <div className="text-sm"><p role="alert" className="text-destructive">Could not load retrievers: {errorText(loadError)}</p>
-      <Button variant="outline" size="sm" className="mt-3" onClick={() => { void agents.refetch(); void catalog.refetch(); void schema.refetch() }}>Reload</Button></div>
+  if (retrievers.isPending || catalog.isPending || schema.isPending) return <AssistantLoading />
+  if (retrievers.error || catalog.error || schema.error || !retrievers.data || !catalog.data || !schema.data) {
+    return (
+      <AssistantLoadError
+        kind="retrievers"
+        error={retrievers.error ?? catalog.error ?? schema.error}
+        onReload={() => { void retrievers.refetch(); void catalog.refetch(); void schema.refetch() }}
+      />
+    )
   }
 
-  const common = { ontologyKey, lensKey: lens.key, existingKeys, catalog: catalog.data, schema: schema.data, aiEnabled: features?.ai !== false }
-  if (creating !== null) {
-    return <RetrieverEditor key={`new:${creating.key}`} {...common} agent={null} identity={creating}
-      onSaved={(saved) => void refresh().then(() => select(saved.key))} onClose={() => select(null)} />
+  const aiEnabled = features?.ai !== false
+  const existingKeys = retrievers.data.map((r) => r.key)
+  if (selectedKey === ASSISTANT_DEFAULT) {
+    return (
+      <AssistantDefaultPage
+        kind="retrievers"
+        onBack={() => select(null)}
+        onNew={() => select(ASSISTANT_NEW)}
+        test={
+          <RetrieverTestPanel
+            ontologyKey={ontologyKey}
+            lensKey={lens.key}
+            aiEnabled={aiEnabled}
+            catalog={catalog.data}
+            schema={schema.data}
+            retrieverKey={ASSISTANT_DEFAULT}
+            name="Default"
+            description={null}
+            blockedReason={null}
+            hints={{
+              chat: 'Ask the built-in default and inspect how each answer was found.',
+              retrieve: 'Ask the built-in default for the entities it finds, without an answer.',
+            }}
+          />
+        }
+      />
+    )
+  }
+
+  const common = {
+    ontologyKey, lensKey: lens.key, existingKeys, catalog: catalog.data, schema: schema.data, aiEnabled, onClose: () => select(null),
+  }
+  if (selectedKey === ASSISTANT_NEW) {
+    return <RetrieverPage key={ASSISTANT_NEW} {...common} retriever={null} onSaved={(saved) => void refresh().then(() => select(saved.key))} />
   }
   if (selectedKey !== null) {
-    const agent = agents.data.find((a) => a.key === selectedKey)
-    if (agent === undefined) {
-      return <EmptyState icon={ASSISTANT_KINDS.retrievers.icon} title="Retriever not found" description={`This lens has no retriever ${selectedKey}. It may have been deleted or moved.`}
-        action={<Button variant="outline" onClick={() => select(null)}>All retrievers</Button>} />
-    }
-    return <RetrieverEditor key={`${agent.key}:${agent.updatedAt}`} {...common} agent={agent} identity={null}
-      onSaved={(saved) => { queryClient.setQueryData<Retriever[]>(qk.retrievers(ontologyKey, lens.key), (list) => list?.map((a) => (a.key === saved.key ? saved : a))); void refresh() }}
-      onCopied={(copy) => void refresh().then(() => select(copy.key))}
-      onDeleted={() => void refresh().then(() => select(null))} onClose={() => select(null)} />
+    const retriever = retrievers.data.find((r) => r.key === selectedKey)
+    if (retriever === undefined) return <AssistantNotFound kind="retrievers" assistantKey={selectedKey} onBack={() => select(null)} />
+    return (
+      <RetrieverPage
+        key={`${retriever.key}:${retriever.updatedAt}`}
+        {...common}
+        retriever={retriever}
+        onSaved={(saved) => {
+          queryClient.setQueryData<Retriever[]>(qk.retrievers(ontologyKey, lens.key), (list) => list?.map((r) => (r.key === saved.key ? saved : r)))
+          void refresh()
+        }}
+        onCopied={(copy) => void refresh().then(() => select(copy.key))}
+        onDeleted={() => {
+          queryClient.setQueryData<Retriever[]>(qk.retrievers(ontologyKey, lens.key), (list) => list?.filter((r) => r.key !== retriever.key))
+          select(null)
+          void refresh()
+        }}
+      />
+    )
   }
 
-  return <div className="space-y-4">
-    <div className="flex flex-wrap items-start gap-3">
-      <p className="max-w-2xl flex-1 text-[13px] text-muted-foreground">Retrievers answer questions over this lens's search indices: a planner picks indices, relation groups and filters per question, an answer model writes the reply from the found entities. Chat with them in the Workbench (Assistants → Retrievers).</p>
-      <div className="flex gap-2">
-        <Button size="sm" variant="outline" onClick={() => setDialog('import')}><FileUp className="size-3.5" /> Import</Button>
-        <Button size="sm" onClick={() => setDialog('new')}><Plus className="size-3.5" /> New retriever</Button>
-      </div>
-    </div>
-    {agents.data.length === 0 ? <EmptyState icon={ASSISTANT_KINDS.retrievers.icon} title="No retrievers yet" description="Create one, choose the indices it searches, save it and test it here." />
-      : <div className="grid gap-3 lg:grid-cols-2">{agents.data.map((agent) => <RetrieverCard key={agent.key} agent={agent} catalog={catalog.data} onOpen={() => select(agent.key)} />)}</div>}
-    {dialog === 'new' && <NameKeyDialog open title="New retriever" description="Name and key; then choose its indices and save it." confirmLabel="Continue"
-      initialName="" existingKeys={existingKeys} busy={false} error="" onCancel={() => setDialog(null)} onConfirm={(name, key) => { setDialog(null); setCreating({ name, key }) }} />}
-    <ImportDialog open={dialog === 'import'} ontologyKey={ontologyKey} lensKey={lens.key} existingKeys={existingKeys} onClose={() => setDialog(null)}
-      onImported={(agent) => { setDialog(null); toast.success(`Retriever "${agent.name}" imported`); void refresh().then(() => select(agent.key)) }} />
-  </div>
+  return (
+    <>
+      <AssistantList
+        kind="retrievers"
+        count={retrievers.data.length}
+        extras={<Button size="sm" variant="outline" onClick={() => setImporting(true)}><FileUp className="size-3.5" /> Import</Button>}
+        emptyText="Create one, choose the indices it searches, save it and test it here."
+        onNew={() => select(ASSISTANT_NEW)}
+        onOpenDefault={() => select(ASSISTANT_DEFAULT)}
+      >
+        {retrievers.data.map((retriever) => (
+          <AssistantCard
+            key={retriever.key}
+            name={retriever.name}
+            assistantKey={retriever.key}
+            badges={isSupportedRetriever(retriever)
+              ? <AssistantValidityBadges valid={retriever.validation.valid} warnings={retriever.validation.warnings.length} />
+              : <><Badge variant="destructive">unsupported</Badge><AssistantWarningsBadge warnings={retriever.validation.warnings.length} /></>}
+            description={retriever.description}
+            summary={isSupportedRetriever(retriever) ? searchesLine(retriever, catalog.data) : undefined}
+            onOpen={() => select(retriever.key)}
+          />
+        ))}
+      </AssistantList>
+      <ImportDialog
+        open={importing}
+        ontologyKey={ontologyKey}
+        lensKey={lens.key}
+        existingKeys={existingKeys}
+        onClose={() => setImporting(false)}
+        onImported={(retriever) => {
+          setImporting(false)
+          toast.success(`Retriever "${retriever.name}" imported`)
+          void refresh().then(() => select(retriever.key))
+        }}
+      />
+    </>
+  )
 }
 
-function RetrieverCard({ agent, catalog, onOpen }: { agent: Retriever; catalog: SearchCatalogEntry[]; onOpen: () => void }) {
-  const supported = isSupportedRetriever(agent)
-  const names = supported ? agent.config.indices.map((ref) => catalog.find((c) => c.key === ref.index)?.name ?? ref.index) : []
-  return <button type="button" onClick={onOpen} className="rounded-xl border bg-card p-4 text-left transition-colors hover:bg-muted/40">
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-[13px] font-semibold">{agent.name}</span>
-      <Badge variant="outline" className="font-mono text-[11px]">{agent.key}</Badge>
-      {!supported ? <Badge variant="destructive">unsupported</Badge> : !agent.validation.valid ? <Badge variant="destructive">invalid</Badge>
-        : <Badge variant="outline" className="border-(--tc-emerald-border) text-(--tc-emerald)">valid</Badge>}
-      {agent.validation.warnings.length > 0 && <Badge variant="outline" className="border-(--tc-amber-border) text-(--tc-amber)">{agent.validation.warnings.length} warning{agent.validation.warnings.length === 1 ? '' : 's'}</Badge>}
-    </div>
-    {agent.description && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{agent.description}</p>}
-    {supported && <p className="mt-2 text-xs text-muted-foreground">{names.length ? `Searches ${names.join(', ')}` : 'No index'} · {agent.config.filters.length} filter{agent.config.filters.length === 1 ? '' : 's'}</p>}
-  </button>
+/** The card's summary: the indices a supported retriever searches and how many filters it has. */
+function searchesLine(retriever: Retriever, catalog: SearchCatalogEntry[]): string {
+  const names = retriever.config.indices.map((ref) => catalog.find((c) => c.key === ref.index)?.name ?? ref.index)
+  const filters = retriever.config.filters.length
+  return `${names.length ? `Searches ${names.join(', ')}` : 'No index'} · ${filters} filter${filters === 1 ? '' : 's'}`
 }
 
-interface RetrieverEditorProps {
+type TestMode = 'chat' | 'retrieve'
+
+interface RetrieverTestPanelProps {
+  ontologyKey: string
+  lensKey: string
+  aiEnabled: boolean
+  catalog: SearchCatalogEntry[]
+  schema: RuntimeSchema
+  /** The saved retriever's key (or `_default`); null while new. */
+  retrieverKey: string | null
+  name: string
+  description: string | null
+  blockedReason: string | null
+  /** The header sentence per mode. */
+  hints: Record<TestMode, string>
+  /** Remounts the chat and the retrieve when the saved version changes. */
+  savedVersion?: string
+}
+
+/** The Test panel of a retriever: Chat or Retrieve against the saved version, the mode remembered in the browser. */
+function RetrieverTestPanel({
+  ontologyKey, lensKey, aiEnabled, catalog, schema, retrieverKey, name, description, blockedReason, hints, savedVersion,
+}: RetrieverTestPanelProps) {
+  const [mode, setMode] = useState<TestMode>(() => (readString(storageKeys.retrieverTestMode) === 'retrieve' ? 'retrieve' : 'chat'))
+  const choose = (next: TestMode) => { setMode(next); writeString(storageKeys.retrieverTestMode, next) }
+  return (
+    <AssistantTestPanel
+      kind="retrievers"
+      aiEnabled={aiEnabled}
+      hint={hints[mode]}
+      extras={
+        <div role="radiogroup" aria-label="Test mode" className="inline-flex rounded-md border p-0.5 text-xs">
+          {(['chat', 'retrieve'] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="radio"
+              aria-checked={mode === option}
+              onClick={() => choose(option)}
+              className={cn('rounded px-2 py-0.5', mode === option ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground')}
+            >
+              {option === 'chat' ? 'Chat' : 'Retrieve'}
+            </button>
+          ))}
+        </div>
+      }
+    >
+      {(actions) => mode === 'retrieve'
+        ? (
+          <RetrieverRetrieve
+            key={savedVersion}
+            ontologyKey={ontologyKey}
+            lensKey={lensKey}
+            agentKey={retrieverKey}
+            blockedReason={blockedReason}
+            catalog={catalog}
+            schema={schema}
+          />
+        )
+        : (
+          <RetrieverChat
+            key={savedVersion}
+            ontologyKey={ontologyKey}
+            lensKey={lensKey}
+            retrieverKey={retrieverKey}
+            name={name}
+            description={description}
+            blockedReason={blockedReason}
+            diagnostics="always"
+            remember={false}
+            catalog={catalog}
+            schema={schema}
+            actions={actions}
+          />
+        )}
+    </AssistantTestPanel>
+  )
+}
+
+interface RetrieverPageProps {
   ontologyKey: string
   lensKey: string
   existingKeys: string[]
   catalog: SearchCatalogEntry[]
   schema: RuntimeSchema
   aiEnabled: boolean
-  /** The saved retriever; null for a new one (then `identity` names it). */
-  agent: Retriever | null
-  identity: { name: string; key: string } | null
-  onSaved: (agent: Retriever) => void
-  onCopied?: (agent: Retriever) => void
+  /** The saved retriever; null for a new one. */
+  retriever: Retriever | null
+  onSaved: (retriever: Retriever) => void
+  onCopied?: (retriever: Retriever) => void
   onDeleted?: () => void
   onClose: () => void
 }
 
 /**
- * Draft + Save editor of one retriever with its test panel. Remount
- * it (React `key`) to re-seed the draft from a newer saved version.
+ * Draft + Save editor of one retriever with its test panel. Remount it
+ * (React `key`) to re-seed the draft from a newer saved version.
  */
-function RetrieverEditor({ ontologyKey, lensKey, existingKeys, catalog, schema, aiEnabled, agent, identity, onSaved, onCopied, onDeleted, onClose }: RetrieverEditorProps) {
-  const isNew = agent === null
-  const key = agent?.key ?? identity?.key ?? ''
-  const baseline = useMemo<RetrieverDraft>(() => (agent ? draftOf(agent) : { name: identity?.name ?? '', description: '', config: emptyConfig() }), [agent, identity])
-  const [draft, setDraft] = useState(baseline)
+function RetrieverPage({
+  ontologyKey, lensKey, existingKeys, catalog, schema, aiEnabled, retriever, onSaved, onCopied, onDeleted, onClose,
+}: RetrieverPageProps) {
+  const isNew = retriever === null
+  const baseline = useMemo(() => draftOf(retriever), [retriever])
+  const [draft, setDraft] = useState<RetrieverDraft>(baseline)
+  const [key, setKey] = useState(retriever?.key ?? '')
   const [repairApplied, setRepairApplied] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [saveError, setSaveError] = useState('')
+  const [saveErrors, setSaveErrors] = useState<string[]>([])
+  const [failed, setFailed] = useState<'save' | 'delete'>('save')
   const [saveIssues, setSaveIssues] = useState<ValidationError[]>([])
   const [copyOpen, setCopyOpen] = useState(false)
   const [copyError, setCopyError] = useState('')
-  // The test chat's "New conversation" goes into the Test header.
-  const [chatActions, setChatActions] = useState<HTMLElement | null>(null)
-  const unsupported = agent !== null && !isSupportedRetriever(agent)
+
+  const unsupported = retriever !== null && !isSupportedRetriever(retriever)
   const showEditor = !unsupported || repairApplied
-  const dirty = !sameDraft(draft, baseline) || repairApplied
+  const dirty = !sameDraft(draft, baseline) || repairApplied || (isNew && key !== '')
   const problems = draftProblems(draft.config, catalog, schema)
   const issues = [...saveIssues, ...problems.filter((p) => !saveIssues.some((s) => s.path === p.path))]
-  const canSave = showEditor && problems.length === 0 && draft.name.trim() !== ''
-  const execution = retrieverExecution(agent, dirty)
-  // The test panel's mode, remembered beside the diagnostics preference.
-  const [testMode, setTestMode] = useState<'chat' | 'retrieve'>(() => (readString(storageKeys.retrieverTestMode) === 'retrieve' ? 'retrieve' : 'chat'))
-  const chooseTestMode = (mode: 'chat' | 'retrieve') => { setTestMode(mode); writeString(storageKeys.retrieverTestMode, mode) }
+  // Whether the draft could be stored at all — by Save, or as a copy.
+  const storable = showEditor && problems.length === 0 && draft.name.trim() !== '' && !busy
+  const keyValid = !isNew || (isValidLensResourceKey(key) && assistantKeyError(key, existingKeys, 'Retriever') === undefined)
+  const canSave = (dirty || isNew) && storable && keyValid
+  const execution = retrieverExecution(retriever, dirty)
+  const title = draft.name.trim() || retriever?.name || 'New retriever'
+  const { leave, dialog } = useAssistantLeaveGuard(dirty, title)
 
-  /* --------------------------- leave protection --------------------------- */
-  // Tabs, the retriever list and other pages are navigations; unsaved drafts ask first.
-  const leaving = useRef(false)
-  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
-    dirty && !leaving.current && (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search))
-  const leave = (run: () => void) => { leaving.current = true; run() }
-  // Back to the list is no navigation for a new draft, so it asks here too.
-  const [confirmClose, setConfirmClose] = useState(false)
-  const close = () => (dirty ? setConfirmClose(true) : onClose())
-
-  const edit = (patch: Partial<RetrieverDraft>) => { setDraft((d) => ({ ...d, ...patch })); setSaveIssues([]); setSaveError('') }
-  const discard = () => { setDraft(baseline); setRepairApplied(false); setSaveIssues([]); setSaveError('') }
+  const edit = (patch: Partial<RetrieverDraft>) => {
+    setDraft((d) => ({ ...d, ...patch }))
+    setSaveIssues([])
+    setSaveErrors([])
+  }
+  const discard = () => {
+    setDraft(baseline)
+    setRepairApplied(false)
+    setSaveIssues([])
+    setSaveErrors([])
+  }
 
   async function save() {
-    setBusy(true); setSaveError(''); setSaveIssues([])
+    setBusy(true)
+    setSaveErrors([])
+    setSaveIssues([])
     try {
       if (isNew) {
+        // Create-only: a taken key is refused, never replaced.
         const created = await importRetriever(ontologyKey, lensKey, { key, ...toInput(draft) })
         toast.success(`Retriever "${created.name}" created`)
         leave(() => onSaved(created))
       } else {
         const saved = await saveRetriever(ontologyKey, lensKey, key, toInput(draft))
-        toast.success('Retriever saved')
+        toast.success(`Retriever "${saved.name}" saved`)
         onSaved(saved)
       }
     } catch (error) {
-      if (error instanceof ApiError && error.fieldErrors !== undefined) setSaveIssues(Object.entries(error.fieldErrors).map(([path, message]) => ({ path, message })))
-      setSaveError(errorText(error))
-    } finally { setBusy(false) }
+      setFailed('save')
+      if (error instanceof ApiError && error.fieldErrors !== undefined) {
+        setSaveIssues(Object.entries(error.fieldErrors).map(([path, message]) => ({ path, message })))
+      }
+      setSaveErrors(assistantErrorLines(error))
+    } finally {
+      setBusy(false)
+    }
   }
+
   async function saveAsCopy(name: string, copyKey: string) {
-    setBusy(true); setCopyError('')
+    setBusy(true)
+    setCopyError('')
     try {
       const copy = await importRetriever(ontologyKey, lensKey, { key: copyKey, ...toInput({ ...draft, name }) })
       toast.success(`Saved as "${copy.name}"`)
       setCopyOpen(false)
       leave(() => onCopied?.(copy))
-    } catch (error) { setCopyError(errorText(error)) } finally { setBusy(false) }
+    } catch (error) {
+      setCopyError(errorText(error))
+    } finally {
+      setBusy(false)
+    }
   }
 
-  const title = draft.name.trim() || agent?.name || key
-  return <div className="space-y-4">
-    <div className="flex flex-wrap items-center gap-2">
-      <Button variant="ghost" size="sm" className="-ml-2 h-7 gap-1 text-xs text-muted-foreground" onClick={close}><ChevronLeft className="size-3.5" /> All retrievers</Button>
-      <h2 className="text-[14px] font-semibold">{title}</h2>
-      <Badge variant="outline" className="font-mono text-[11px]" title="Immutable key">{key}</Badge>
-      <span className={`text-xs ${isNew || dirty ? 'text-(--tc-amber)' : agent && !agent.validation.valid ? 'text-destructive' : 'text-muted-foreground'}`}>
-        {isNew ? 'Not saved yet' : dirty ? 'Unsaved changes' : !agent.validation.valid ? 'Invalid in this lens' : 'Saved'}</span>
-    </div>
+  async function remove() {
+    if (retriever === null) return
+    setBusy(true)
+    try {
+      await deleteRetriever(ontologyKey, lensKey, retriever.key)
+      toast.success(`Retriever "${retriever.name}" deleted`)
+      leave(() => onDeleted?.())
+    } catch (error) {
+      setFailed('delete')
+      setSaveErrors(assistantErrorLines(error))
+      setBusy(false)
+    }
+  }
 
-    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-      <div className="grid min-w-0 gap-4">
-        <RetrieverSaveBar isNew={isNew} dirty={dirty} canSave={canSave} busy={busy} onSave={() => void save()} onDiscard={discard} onSaveAsCopy={() => { setCopyError(''); setCopyOpen(true) }} />
-        {saveError && <p role="alert" className="whitespace-pre-wrap break-words text-xs text-destructive">{saveError}</p>}
-        {agent && (!agent.validation.valid || agent.validation.warnings.length > 0) &&
-          <ValidationPanel result={{ valid: agent.validation.valid, errors: asIssues(agent.validation.errors), warnings: asIssues(agent.validation.warnings) }} />}
-        {unsupported && !repairApplied && <p role="alert" className="text-xs text-destructive">Unsupported configuration version or shape (version {agent.configVersion}). It is preserved under More → Configuration JSON, where you can export it or apply a version 2 configuration.</p>}
-
-        <section className="grid gap-3 rounded-xl border bg-card p-4">
-          <div className="grid gap-1.5"><Label htmlFor="agent-name">Name</Label><Input id="agent-name" value={draft.name} disabled={busy} onChange={(e) => edit({ name: e.target.value })} /></div>
-          <div className="grid gap-1.5"><Label htmlFor="agent-description">Description</Label><Textarea id="agent-description" rows={2} value={draft.description} disabled={busy} onChange={(e) => edit({ description: e.target.value })} />
-            <p className="text-xs text-muted-foreground">What this retriever answers. Stores configuration only — no conversations or vectors.</p></div>
-        </section>
-
-        {showEditor && <RetrieverConfigEditor ontologyKey={ontologyKey} config={draft.config} onChange={(config) => edit({ config })} catalog={catalog} schema={schema} disabled={busy} issues={issues} />}
-
-        {agent && <RetrieverMore ontologyKey={ontologyKey} lensKey={lensKey} agent={agent} config={draft.config} unsupported={unsupported && !repairApplied} disabled={busy} onBusy={setBusy}
-          onDeleted={() => leave(() => onDeleted?.())} onConfig={(config) => { edit({ config }); if (unsupported) setRepairApplied(true) }} />}
+  return (
+    <AssistantEditorPage
+      kind="retrievers"
+      title={title}
+      assistantKey={retriever?.key ?? null}
+      status={assistantStatus({ isNew, dirty, invalid: retriever !== null && !retriever.validation.valid })}
+      onBack={onClose}
+      test={
+        <RetrieverTestPanel
+          ontologyKey={ontologyKey}
+          lensKey={lensKey}
+          aiEnabled={aiEnabled}
+          catalog={catalog}
+          schema={schema}
+          retrieverKey={retriever?.key ?? null}
+          name={retriever?.name ?? title}
+          description={retriever?.description ?? null}
+          blockedReason={execution.mode === 'blocked' ? execution.reason : null}
+          hints={{
+            chat: 'Ask the saved version and inspect how each answer was found. Saving starts a new conversation.',
+            retrieve: 'Ask the saved version for the entities it finds, without an answer. Saving clears the result.',
+          }}
+          savedVersion={retriever ? `${retriever.key}:${retriever.updatedAt}` : ASSISTANT_NEW}
+        />
+      }
+    >
+      <div className="grid gap-4">
+        <form className="grid gap-4" onSubmit={(e) => { e.preventDefault(); if (canSave) void save() }}>
+          <AssistantActionBar
+            kind="retrievers"
+            isNew={isNew}
+            dirty={dirty}
+            canSave={canSave}
+            busy={busy}
+            name={retriever?.name ?? ''}
+            errors={saveErrors}
+          failed={failed}
+            extras={!isNew && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={!storable}
+                title="Save the current configuration as a new retriever; this one stays as saved"
+                onClick={() => { setCopyError(''); setCopyOpen(true) }}
+              >
+                <Copy className="size-3.5" /> Save as copy
+              </Button>
+            )}
+            onDiscard={discard}
+            onDelete={() => void remove()}
+          />
+          {retriever && (!retriever.validation.valid || retriever.validation.warnings.length > 0) && (
+            <ValidationPanel result={{
+              valid: retriever.validation.valid,
+              errors: asIssues(retriever.validation.errors),
+              warnings: asIssues(retriever.validation.warnings),
+            }} />
+          )}
+          {unsupported && !repairApplied && (
+            <p role="alert" className="text-xs text-destructive">
+              Unsupported configuration version or shape (version {retriever.configVersion}). It is preserved under More → Configuration JSON,
+              where you can export it or apply a version 2 configuration.
+            </p>
+          )}
+          <AssistantIdentitySection
+            kind="retrievers"
+            isNew={isNew}
+            name={draft.name}
+            assistantKey={key}
+            description={draft.description}
+            existingKeys={existingKeys}
+            disabled={busy}
+            namePlaceholder="Person skills"
+            descriptionHint="What this retriever answers. Stores configuration only — no conversations or vectors."
+            onName={(name) => edit({ name })}
+            onKey={setKey}
+            onDescription={(description) => edit({ description })}
+          />
+          {showEditor && (
+            <RetrieverConfigEditor
+              ontologyKey={ontologyKey}
+              config={draft.config}
+              onChange={(config) => edit({ config })}
+              catalog={catalog}
+              schema={schema}
+              disabled={busy}
+              issues={issues}
+            />
+          )}
+        </form>
+        {retriever && (
+          <RetrieverMore
+            ontologyKey={ontologyKey}
+            lensKey={lensKey}
+            agent={retriever}
+            config={draft.config}
+            unsupported={unsupported && !repairApplied}
+            disabled={busy}
+            onBusy={setBusy}
+            onMoved={() => leave(() => onDeleted?.())}
+            onConfig={(config) => { edit({ config }); if (unsupported) setRepairApplied(true) }}
+          />
+        )}
       </div>
-
-      <section aria-label="Test" className="flex h-[85dvh] min-h-[640px] min-w-0 flex-col overflow-hidden rounded-xl border bg-card xl:sticky xl:top-4">
-        <div className="border-b px-4 py-3"><div className="flex items-center justify-between gap-3"><h3 className="text-[13px] font-semibold">Test</h3>
-          <div className="flex items-center gap-2"><div ref={setChatActions} className="flex items-center" />
-          <div role="radiogroup" aria-label="Test mode" className="inline-flex rounded-md border p-0.5 text-xs">
-            {(['chat', 'retrieve'] as const).map((mode) => <button key={mode} type="button" role="radio" aria-checked={testMode === mode} onClick={() => chooseTestMode(mode)}
-              className={cn('rounded px-2 py-0.5', testMode === mode ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground')}>{mode === 'chat' ? 'Chat' : 'Retrieve'}</button>)}
-          </div></div></div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{testMode === 'chat'
-            ? 'Ask the saved version and inspect how each answer was found. Saving starts a new conversation.'
-            : 'Ask the saved version for the entities it finds, without an answer. Saving clears the result.'}</p></div>
-        {!aiEnabled ? <p className="p-4 text-xs text-muted-foreground">This server has no AI provider configured; retrievers cannot answer here.</p>
-          : testMode === 'retrieve' ? <RetrieverRetrieve key={agent ? `${agent.key}:${agent.updatedAt}` : 'new'} ontologyKey={ontologyKey} lensKey={lensKey}
-            agentKey={agent?.key ?? null} blockedReason={execution.mode === 'blocked' ? execution.reason : null}
-            catalog={catalog} schema={schema} />
-          : <RetrieverChat key={agent ? `${agent.key}:${agent.updatedAt}` : 'new'} ontologyKey={ontologyKey} lensKey={lensKey}
-            retrieverKey={agent?.key ?? null} name={agent?.name ?? title} description={agent?.description ?? null}
-            blockedReason={execution.mode === 'blocked' ? execution.reason : null} diagnostics="always" remember={false}
-            catalog={catalog} schema={schema} actions={chatActions} />}
-      </section>
-    </div>
-
-    {copyOpen && agent && <NameKeyDialog open title={`Save ${agent.name} as copy`} description="Saves the current configuration, unsaved changes included, as a new retriever. The original stays as last saved."
-      confirmLabel="Save copy" initialName={`${draft.name.trim() || agent.name} copy`} existingKeys={existingKeys} busy={busy} error={copyError}
-      onCancel={() => setCopyOpen(false)} onConfirm={(name, copyKey) => void saveAsCopy(name, copyKey)} />}
-    <AlertDialog open={blocker.state === 'blocked' || confirmClose}>
-      <AlertDialogContent>
-        <AlertDialogHeader><AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
-          <AlertDialogDescription>{title} has unsaved changes. Leaving discards them.</AlertDialogDescription></AlertDialogHeader>
-        <AlertDialogFooter><AlertDialogCancel onClick={() => { setConfirmClose(false); blocker.reset?.() }}>Keep editing</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={() => { if (confirmClose) { setConfirmClose(false); leave(onClose) } else blocker.proceed?.() }}>Discard and leave</AlertDialogAction></AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  </div>
+      {copyOpen && retriever && (
+        <NameKeyDialog
+          open
+          title={`Save ${retriever.name} as copy`}
+          description="Saves the current configuration, unsaved changes included, as a new retriever. The original stays as last saved."
+          confirmLabel="Save copy"
+          initialName={`${draft.name.trim() || retriever.name} copy`}
+          existingKeys={existingKeys}
+          busy={busy}
+          error={copyError}
+          onCancel={() => setCopyOpen(false)}
+          onConfirm={(name, copyKey) => void saveAsCopy(name, copyKey)}
+        />
+      )}
+      {dialog}
+    </AssistantEditorPage>
+  )
 }

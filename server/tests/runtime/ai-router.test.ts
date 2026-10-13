@@ -269,10 +269,15 @@ for (const route of ["/_default/chat", "/my-agent/chat"]) {
       const fast = await client.next();
       expect(fast).toEqual({ type: "agent.tool_result", callId: calls.find((e) => e.args.entity_id === "fast").callId,
         result: { _id: "fast", name: "Zoë", age: null } });
+      // Each entity result is followed by its card, refs in the order results arrive.
+      expect(await client.next()).toEqual({ type: "entities", links: [], entities: [
+        { ref: "E1", id: "fast", type: "person", typeName: "Person", label: "Zoë", fields: [], evidence: true },
+      ] });
       slow.resolve({ _id: "slow", name: "Later" });
       const later = await client.next();
       expect(later.type).toBe("agent.tool_result");
       expect(later.result).toEqual({ _id: "slow", name: "Later" });
+      expect((await client.next()).entities).toEqual([expect.objectContaining({ ref: "E2", id: "slow", label: "Later" })]);
       final.resolve();
       expect(await client.next()).toEqual({ type: "final", reply: "Complete answer" });
       expect((await client.reader.read()).done).toBe(true);

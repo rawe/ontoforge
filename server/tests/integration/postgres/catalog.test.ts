@@ -29,6 +29,7 @@ const ALL_TABLES = [
   "property_def",
   "lens_includes",
   "assistant_agent",
+  "assistant_navigator",
   "saved_query",
   "entity",
   "relation",
@@ -47,6 +48,7 @@ const EXPECTED_CONSTRAINTS: Record<string, string> = {
   relation_type_pk: "p",
   property_def_pk: "p",
   assistant_agent_pk: "p",
+  assistant_navigator_pk: "p",
   saved_query_pk: "p",
   entity_pk: "p",
   relation_pk: "p",
@@ -60,6 +62,7 @@ const EXPECTED_CONSTRAINTS: Record<string, string> = {
   lens_includes_entity_unique: "u",
   lens_includes_relation_unique: "u",
   assistant_agent_key_unique: "u",
+  assistant_navigator_key_unique: "u",
   saved_query_key_unique: "u",
   relation_type_source_fk: "f",
   relation_type_target_fk: "f",
@@ -70,6 +73,7 @@ const EXPECTED_CONSTRAINTS: Record<string, string> = {
   lens_includes_entity_type_fk: "f",
   lens_includes_relation_type_fk: "f",
   assistant_agent_lens_fk: "f",
+  assistant_navigator_lens_fk: "f",
   saved_query_lens_fk: "f",
   relation_from_fk: "f",
   relation_to_fk: "f",
@@ -166,6 +170,24 @@ describe("PostgreSQL physical catalog", () => {
 
   it("provisioning created the ontology tables, the named constraints, and the fixed indexes", async () => {
     await assertCatalogComplete();
+  });
+
+  it("the navigator table names its NOT NULL constraints after table and column", async () => {
+    const result = await runQuery(
+      `SELECT con.conname AS name FROM pg_constraint con
+        WHERE con.conrelid = $1::regclass AND con.contype = 'n' ORDER BY con.conname`,
+      [`${NAMESPACE}.assistant_navigator`],
+    );
+    expect(result.rows.map((row) => row.name)).toEqual([
+      "assistant_navigator_assistant_navigator_id_not_null",
+      "assistant_navigator_config_not_null",
+      "assistant_navigator_config_version_not_null",
+      "assistant_navigator_created_at_not_null",
+      "assistant_navigator_key_not_null",
+      "assistant_navigator_lens_id_not_null",
+      "assistant_navigator_name_not_null",
+      "assistant_navigator_updated_at_not_null",
+    ]);
   });
 
   it("boot only creates the server-wide home: public holds the registry and the storage version, no ontology tables", async () => {

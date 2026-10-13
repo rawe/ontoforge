@@ -8,6 +8,7 @@ import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { EmptyState } from '@/components/EmptyState'
 import { AgentsTab } from '@/components/studio/AgentsTab'
 import { ConnectTab } from '@/components/studio/ConnectTab'
+import { NavigatorsTab } from '@/components/studio/NavigatorsTab'
 import { RetrieversTab } from '@/components/studio/RetrieversTab'
 import { ScopeTab } from '@/components/studio/ScopeTab'
 import { SavedQueriesTab } from '@/components/studio/SavedQueriesTab'
@@ -30,10 +31,10 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-const TABS = ['scope', 'agents', 'retriever-agents', 'queries', 'connect'] as const
+const TABS = ['scope', 'agents', 'retriever-agents', 'navigators', 'queries', 'connect'] as const
 type Tab = (typeof TABS)[number]
 
-/** `/o/:ontologyKey/studio/lenses/:id` — scope editor, agents, retrievers, saved queries, connect. */
+/** `/o/:ontologyKey/studio/lenses/:id` — scope editor, agents, retrievers, navigators, saved queries, connect. */
 export function LensDetailPage() {
   const { ontologyKey, id } = useParams<{ ontologyKey: string; id: string }>()
   const navigate = useNavigate()
@@ -130,7 +131,7 @@ export function LensDetailPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete "{lens.name}"?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This deletes the lens, its scope, agents, retrievers and saved queries.
+                    This deletes the lens, its scope, agents, retrievers, navigators and saved queries.
                     The ontology's schema and instance data are not affected. This
                     cannot be undone.
                   </AlertDialogDescription>
@@ -176,6 +177,9 @@ export function LensDetailPage() {
             <TabsTrigger value="retriever-agents">
               <ASSISTANT_KINDS.retrievers.icon className="size-3.5" /> Retrievers
             </TabsTrigger>
+            <TabsTrigger value="navigators">
+              <ASSISTANT_KINDS.navigators.icon className="size-3.5" /> Navigators
+            </TabsTrigger>
             <TabsTrigger value="queries">
               <SquareTerminal className="size-3.5" /> Saved queries
             </TabsTrigger>
@@ -191,6 +195,9 @@ export function LensDetailPage() {
           </TabsContent>
           <TabsContent value="retriever-agents">
             <RetrieversTab ontologyKey={ontologyKey} lens={lens} />
+          </TabsContent>
+          <TabsContent value="navigators">
+            <NavigatorsTab ontologyKey={ontologyKey} lens={lens} />
           </TabsContent>
           <TabsContent value="queries">
             <SavedQueriesTab ontologyKey={ontologyKey} lens={lens} />

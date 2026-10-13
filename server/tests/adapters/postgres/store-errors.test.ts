@@ -336,3 +336,16 @@ describe("retriever constraints preserve domain errors", () => {
     expect(await translated(dbError("23503", "assistant_retriever_lens_fk"))).toBeInstanceOf(NotFoundError);
   });
 });
+
+describe("navigator constraints preserve domain errors", () => {
+  it("maps a concurrent key collision to ConflictError", async () => {
+    const error = await translated(dbError("23505", "assistant_navigator_key_unique"));
+    expect(error).toBeInstanceOf(ConflictError);
+    expect((error as Error).message).toBe("Navigator key already exists in the target lens");
+  });
+  it("maps a vanished lens to NotFoundError", async () => {
+    const error = await translated(dbError("23503", "assistant_navigator_lens_fk"));
+    expect(error).toBeInstanceOf(NotFoundError);
+    expect((error as Error).message).toBe("Lens not found");
+  });
+});

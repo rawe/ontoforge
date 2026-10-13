@@ -12,8 +12,10 @@
  * verified results, which a follow-up may refer to.
  *
  * Chat stream events: `retriever.phase` (start/end of plan, retrieve,
- * answer), `delta` (answer text), `retriever.diagnostics` (on request),
- * then the transport's `final` or `error`.
+ * answer), the shared `entities` (`../entities.ts`: the results handed to
+ * the answer model, before it streams), `delta` (answer text),
+ * `retriever.diagnostics` (on request), then the transport's `final` or
+ * `error`.
  *
  * Retrieve runs the first two phases only (`retrieveQuestion`): one
  * planning call without a conversation, then retrieval; it returns the
@@ -41,11 +43,9 @@ import {
 } from "@langchain/langgraph";
 
 import { settings } from "../../../config.js";
-import { createAiModel, getAiModel } from "../../../core/ai.js";
 import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
 import type { RuntimeStore } from "../../../core/ports.js";
 import type { RetrieverConfig } from "../../../core/retriever.js";
-import type { RuntimeAssistant } from "../agents/runtime.js";
 import type { StreamExecution } from "../../chatStream.js";
 import { loadSchema } from "../../schemaCache.js";
 import {
@@ -55,6 +55,9 @@ import {
   searchIndexCatalog,
   type SearchMode,
 } from "../../search/indexSearch.js";
+import type { RuntimeAssistant } from "../assistant.js";
+import { entitiesEvent } from "../entities.js";
+import { turnModel } from "../kit/model.js";
 import { checkRetrieverConfig } from "./config.js";
 import {
   DEFAULT_RETRIEVER_DESCRIPTION,
@@ -82,6 +85,7 @@ import {
   answerSearches,
   boundContext,
   diagnosticResults,
+  entityCards,
   filterValues,
   resultIds,
   retrieve,
@@ -145,16 +149,6 @@ export async function listRuntimeRetrievers(lensKey: string, store: RuntimeStore
     { key: DEFAULT_RETRIEVER_KEY, name: DEFAULT_RETRIEVER_NAME, description: DEFAULT_RETRIEVER_DESCRIPTION, builtIn: true },
     ...stored.map((retriever) => ({ key: retriever.key, name: retriever.name, description: retriever.description, builtIn: false })),
   ];
-}
-
-/** A configured language model, else the FEATURE_DISABLED refusal — as on
- * the other AI routes, before anything is read or streamed. */
-export function requireLanguageModel(): void {
-  if (getAiModel() === null) {
-    throw new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", {
-      code: "FEATURE_DISABLED",
-    });
-  }
 }
 
 /** The lens the retriever routes need — what the list needs, so reading
@@ -234,15 +228,11 @@ const State = Annotation.Root({
 /** The configured model, never retried, and its JSON-mode planning view:
  * JSON mode applies only to planning; the answer model streams plain text. */
 function models() {
-  const provider = settings.AI_PROVIDER;
-  if (!provider) {
-    throw new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", { code: "FEATURE_DISABLED" });
-  }
-  const model = createAiModel(provider, settings.AI_MODEL, settings.AI_BASE_URL, { maxRetries: 0 });
+  const model = turnModel();
   // Anthropic takes the plan schema as its own output format; every other
   // provider keeps the OpenAI-compatible response format.
   const plannerModel: Runnable<BaseLanguageModelInput, AIMessageChunk> =
-    provider === "anthropic"
+    settings.AI_PROVIDER === "anthropic"
       ? (model as ChatAnthropic).withConfig({
           outputConfig: { format: { type: "json_schema", schema: PLANNER_RESPONSE_FORMAT.json_schema.schema } },
         })
@@ -468,6 +458,8 @@ export async function chat(
       const t = performance.now();
       const context = boundContext(retrieval, plan, scope.lens, retriever.config);
       timings.context = performance.now() - t;
+      // The results the answer model gets, as cards, before it streams.
+      if (context.included.length > 0) await emit(entitiesEvent(entityCards(context.included, scope.lens), []));
       timings.search = retrieval.searchMs;
       searchCalls = retrieval.searchCalls;
       await report({

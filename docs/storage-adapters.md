@@ -50,7 +50,7 @@ key, the optional display name and timestamps. Six operations:
 | Read by key | One row, or an absent result. |
 | Read by display name | One row, or an absent result — display names are unique server-wide, and the pre-write conflict check needs the lookup. |
 | Rename | Set the display name; the key never changes. Absent result when not found. |
-| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, retrievers, instances, and every search index. False when not found. |
+| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, retrievers, navigators, instances, and every search index. False when not found. |
 
 The registry — not the database's own catalog — is the authoritative list of ontologies.
 The store must enforce server-wide uniqueness of the ontology key and the display name;
@@ -419,6 +419,17 @@ queueing transaction commits, never before. A subscription may end on its own, a
 connection for instance; it then says so and the subscriber subscribes again. Polling
 above the port covers the time without one.
 
+## The navigator store
+
+The navigator store holds an ontology's [navigators](capabilities/navigators.md): per lens
+and key, a name, an optional description, a configuration version and the configuration as
+given. The store never interprets a configuration — the navigator's check does. A save
+creates the navigator or replaces its name, description and configuration, keeping its
+identity and creation time; a create-only save refuses a taken key as a conflict, and a
+missing lens is not found. Lists are ordered by name, then key. Deleting a lens deletes its
+navigators. Both the modeling and the runtime store hand out the navigator store of their
+own ontology.
+
 ## Obligations beyond storage
 
 An adapter is not only a set of writes and reads. Seven responsibilities sit entirely inside
@@ -607,7 +618,7 @@ namespace and every ontology creation fail.
 
 **Registry create** is one transaction:
 the registry row first — so a concurrent same-key create dies on the named constraint as
-a conflict — then the fresh namespace, the fifteen tables below with the search settings
+a conflict — then the fresh namespace, the sixteen tables below with the search settings
 row and, when an embedding width is given, the fixed saved-query vector index inside it. **Registry delete** is one
 transaction: the registry row out, the namespace dropped in one cascade. A bound store applies its
 ontology's namespace to the search path per statement, inside the shared transaction
@@ -620,7 +631,7 @@ per namespace:
 
 | Logical | Table | Joined by |
 |---|---|---|
-| Lens | `lens` | referenced by its inclusions, agents, saved queries and retrievers |
+| Lens | `lens` | referenced by its inclusions, agents, saved queries, retrievers and navigators |
 | Entity type | `entity_type` | referenced by its property definitions and inclusions; its name property's key in `name_property`, a reference to `property_def` by entity type and key, checked at commit |
 | Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions |
 | Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
@@ -628,11 +639,12 @@ per namespace:
 | Agent | `assistant_agent` | its lens |
 | Saved query | `saved_query` | its lens, with the denormalized lens key alongside |
 | Retriever | `assistant_retriever` | its lens, with delete cascade; unique per lens and key; configuration and warnings as `jsonb` |
+| Navigator | `assistant_navigator` | its lens, with delete cascade; unique per lens and key; configuration as `jsonb` |
 
 Every schema row carries a `uuid` primary key.
 
 Deleting a schema object cascades through the foreign keys — property definitions,
-inclusions, agents, saved queries and retrievers die with their owner. What the DDL
+inclusions, agents, saved queries, retrievers and navigators die with their owner. What the DDL
 may carry is a rule in [decisions.md](decisions.md#storage); the closed vocabularies the
 search-index tables check are index kind, representation and generation state. The uniqueness constraints on type keys act per namespace, which is
 exactly the per-ontology key scoping the contract requires.
@@ -838,8 +850,8 @@ Provide, in this order:
 4. **Constraints and indexes.** Everything under the uniqueness obligation — the
    server-wide part at initialization, the per-ontology part at registry create.
 5. **The schema side.** Lenses, types, properties, inclusions, full-schema retrieval,
-   agents and saved queries. Nothing on the data side is useful until the schema can be
-   read back.
+   agents, saved queries and the navigator store. Nothing on the data side is useful
+   until the schema can be read back.
 6. **The data side.** Entities, relations, traversal.
 7. **Filters, sorts and text search.** The predicate builder, shared by listing and by
    filtered vector search.

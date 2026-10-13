@@ -34,6 +34,7 @@ import {
   type NewPropertyDef,
   type TypeKind,
 } from "../core/schemas.js";
+import { NAVIGATOR_CONFIG_VERSION, NavigatorConfig } from "../runtime/assistants/navigators/config.js";
 import { syncManagedSearchIndices } from "../runtime/indexing/managed.js";
 import {
   applyIndexCascade,
@@ -48,6 +49,7 @@ import {
   planIndexCascade,
   requireSearchIndices,
 } from "./searchIndices.js";
+import { portableNavigator } from "./navigators.js";
 import { portable as portableRetriever } from "./retrievers.js";
 import { readSearchSettings, updateSearchSettings as changeSearchSettings } from "../runtime/indexing/settings.js";
 import { invalidateLoadedSchemaCache, loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
@@ -1338,6 +1340,9 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     assistants.retrievers = (await indices.listRetrievers(lens.lensId as string)).map(
       portableRetriever,
     );
+    assistants.navigators = (await store.navigators().listNavigators(lens.lensId as string)).map(
+      portableNavigator,
+    );
     exported.assistants = assistants;
 
     const queryRows = await store.listSavedQueriesForExport(lens.lensId as string);
@@ -1528,6 +1533,29 @@ export async function importSchema(
         errors.push(
           `Import error: retriever '${retriever.key}' has no valid configuration of version ` +
             `${RETRIEVER_CONFIG_VERSION}`,
+        );
+      }
+    }
+  }
+
+  // Navigators: shape only, as for retrievers.
+  for (const lens of payload.lenses) {
+    const seen = new Set<string>();
+    for (const navigator of lens.assistants.navigators) {
+      if (seen.has(navigator.key)) errors.push(`Import error: duplicate navigator '${navigator.key}' in lens '${lens.key}'`);
+      seen.add(navigator.key);
+      if (!LENS_RESOURCE_KEY_PATTERN.test(navigator.key)) errors.push(badKey("navigator", navigator.key, resourceKeyPattern));
+      if (navigator.key.length > MAX_KEY_LENGTH) errors.push(longKey("navigator", navigator.key));
+      if (navigator.name.length === 0 || navigator.name.length > 200) {
+        errors.push(`Import error: navigator '${navigator.key}' needs a name of 1 to 200 characters`);
+      }
+      if (
+        navigator.configVersion !== NAVIGATOR_CONFIG_VERSION ||
+        !NavigatorConfig.safeParse(navigator.config).success
+      ) {
+        errors.push(
+          `Import error: navigator '${navigator.key}' has no valid configuration of version ` +
+            `${NAVIGATOR_CONFIG_VERSION}`,
         );
       }
     }
@@ -1837,7 +1865,7 @@ export async function importSchema(
     }
   }
   invalidateLoadedSchemaCache();
-  // Retrievers last, once their indices exist.
+  // Retrievers last, once their indices exist; navigators beside them.
   for (const lens of payload.lenses) {
     for (const retriever of lens.assistants.retrievers) {
       await indices.saveRetriever(
@@ -1851,6 +1879,20 @@ export async function importSchema(
           config: RetrieverConfig.parse(retriever.config),
           // An upgraded retriever keeps its conversion's warnings.
           warnings: retrieverWarnings.get(retrieverWarningKey(lens.key, retriever.key)) ?? [],
+        },
+        true,
+      );
+    }
+    for (const navigator of lens.assistants.navigators) {
+      await store.navigators().saveNavigator(
+        lensIds.get(lens)!,
+        {
+          navigatorId: randomUUID(),
+          key: navigator.key,
+          name: navigator.name,
+          description: navigator.description,
+          configVersion: NAVIGATOR_CONFIG_VERSION,
+          config: NavigatorConfig.parse(navigator.config),
         },
         true,
       );

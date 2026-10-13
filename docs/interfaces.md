@@ -38,8 +38,8 @@ data through one lens — never both.
 
 Modeling REST does **not** nest types under a lens. Entity types, relation types and
 their properties are resources of the ontology, at the top level of its modeling
-surface. Scope inclusions, agent configurations, saved queries and retrievers
-are addressed per lens.
+surface. Scope inclusions, agent configurations, saved queries, retrievers and
+navigators are addressed per lens.
 
 ### What a path segment identifies
 
@@ -50,7 +50,7 @@ This is the single most common source of mistakes against the modeling surface.
 | Registry | Ontology key |
 | Runtime REST, everywhere | Keys — ontology key, lens key, type key, property key; instance ids for entities and relations |
 | Modeling REST — lenses, entity types, relation types, properties, inclusions | **Internal identifiers**, not keys |
-| Modeling REST — agent configs, saved queries, retrievers | Lens key and the resource key |
+| Modeling REST — agent configs, saved queries, retrievers, navigators | Lens key and the resource key |
 | Modeling REST — search indices | Index key — managed keys included, which carry `~` |
 | Both MCP servers | Keys only |
 
@@ -185,8 +185,8 @@ configured answers `VALIDATION_ERROR` with
 semantic search and saved-query search, and on AI execution and entity identity
 comparison alike. A client can therefore
 tell a switched-off capability from a rejected request. Model-free operations remain
-available: agent discovery and retriever management do not require a
-language-model provider; execution requirements are listed with the routes below. Agent
+available: agent discovery, retriever management and navigator management do not
+require a language-model provider; execution requirements are listed with the routes below. Agent
 chat requires a language-model provider
 ([capabilities/agents.md](capabilities/agents.md)).
 
@@ -387,6 +387,25 @@ run — on write, import, or copy or move into the target lens — is refused wi
 changed since it was read, is a conflict. Management calls no model. The built-in default retriever
 is not a modeling resource, as for agents.
 
+### Navigators
+
+Per-lens, addressed by lens key and assistant key. Semantics, configuration and validation:
+[capabilities/navigators.md](capabilities/navigators.md).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/lenses/{lensKey}/assistants/navigators` | List the lens's navigators, by name, each with its current validation |
+| GET | `/lenses/{lensKey}/assistants/navigators/{assistantKey}` | Read one navigator as stored, with its current validation |
+| PUT | `/lenses/{lensKey}/assistants/navigators/{assistantKey}` | Create or replace; 201 on create, 200 on replace |
+| DELETE | `/lenses/{lensKey}/assistants/navigators/{assistantKey}` | Delete the navigator; 204 |
+
+A write carries `name`, optional `description`, `configVersion: 1` and `config`; unknown
+fields are rejected. A read carries `key`, `lensKey`, `name`, `description`,
+`configVersion`, `config`, `validation: {valid, errors, warnings}`, `createdAt` and
+`updatedAt`. A configuration the lens cannot run is refused with `VALIDATION_ERROR` and the
+errors under `details.errors`. Management calls no model. The built-in default navigator is
+not a modeling resource, as for agents.
+
 ### Search settings
 
 The ontology's keyword language set and its managed-index switches. Semantics:
@@ -468,7 +487,7 @@ touch search indices. After an embedding-provider switch it is run once per onto
 [capabilities/search.md](capabilities/search.md#rebuild).
 
 Transfer carries the design only — schema, lenses, agents, saved queries, retrievers,
-search indices; no instance
+navigators, search indices; no instance
 data and no ontology identity — see
 [capabilities/transfer.md](capabilities/transfer.md) and
 [capabilities/search.md](capabilities/search.md).
@@ -620,7 +639,7 @@ Requires a Decision provider, independently of AI and search.
 
 ### Assistant chat and threads
 
-Every assistant kind — `agents`, `retrievers` — converses through the same request, the
+Every assistant kind — `agents`, `retrievers`, `navigators` — converses through the same request, the
 same stream frame and the same threads. Semantics:
 [capabilities/threads.md](capabilities/threads.md). The kind's own section below lists its
 routes, its extra request fields and its own events.
@@ -646,10 +665,17 @@ line, each with a `type`. The shared events mean the same for every kind:
 |---|---|---|
 | `thread` | `threadId` | Always first: the thread this turn runs on |
 | `delta` | `text` | A fragment of the answer, for kinds that stream their answer |
+| `entities` | `entities` — each `ref`, `id`, `type`, `typeName`, `label`, `fields` (`name`, `value`), `evidence`, and as the kind sends them `reason`, `role`, `hop` — and `links` — each `id` (the stored relation's id), `from`, `to` (refs, directed as stored), `type`, `label` | The entities the turn met and the stored relations between them; a later card replaces an earlier one with the same `ref`, a link is identified by its `id` |
 | `final` | `reply` | Terminal: the complete answer |
 | `error` | `error` | Terminal: the public error object with `code`, `message` and optional `details` |
 
-A kind's own events are named `<kind>.<event>` — `agent.…`, `retriever.…`; a client may
+Refs are `E1`, `E2`, … in the order the turn met the entities, unique within a turn; an
+entity keeps its ref for the turn. `id` and `type` are the entity's id and type key, so a
+client reads the entity through the runtime; `evidence` says the entity was handed to the
+model that wrote the answer. A link's ends are cards of the same turn. Which entities a
+kind sends is in its section below.
+
+A kind's own events are named `<kind>.<event>` — `agent.…`, `retriever.…`, `navigator.…`; a client may
 ignore those it does not know. A writable stream has exactly one terminal `final` or
 `error`; EOF without one means an incomplete turn. A closed connection cancels the turn,
 and a cancelled or failed turn leaves nothing in its thread. Unexpected failures after
@@ -690,7 +716,9 @@ default retriever with nothing to search `VALIDATION_ERROR`, an unknown or busy 
 shared — each before the stream opens.
 
 The response streams the [shared frame](#assistant-chat-and-threads): `thread`, the answer
-as `delta` events, then one terminal `final` or `error`. Its own events:
+as `delta` events, then one terminal `final` or `error`. Before the answer, when results
+reached the answer model, one `entities` event carries them, all evidence, without links —
+with or without diagnostics. Its own events:
 `retriever.phase` (`phase` `plan`, `retrieve` or `answer`, `status` `start` or `end`, an
 end with `durationMs`), and — only with `diagnostics` true — `retriever.diagnostics`
 events, which carry:
@@ -725,6 +753,41 @@ an error.
 A question or a retrieve needs a language-model provider; without an embedding provider it
 searches by keyword only. Neither route has an MCP equivalent.
 
+### Navigator list and chat
+
+The stored navigator runs — or, under the key `_default`, the lens's
+[default navigator](capabilities/navigators.md#the-default-navigator); a request can never
+supply or override its configuration. Semantics:
+[capabilities/navigators.md](capabilities/navigators.md#answering-a-question).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/ai/assistants/navigators` | List the lens's navigators, the default first |
+| POST | `/ai/assistants/navigators/{assistantKey}/chat` | Stream the work and the answer for one question |
+| GET | `/ai/assistants/navigators/{assistantKey}/threads/{threadId}` | Read a thread back |
+
+**List.** As for retrievers: `key`, `name`, `description` and `builtIn`, the default first,
+no configuration, no validation, no language-model provider needed.
+
+**Chat.** The [shared request](#assistant-chat-and-threads), nothing more. Without a
+language-model provider the route answers `FEATURE_DISABLED`; an unknown navigator answers
+not found, a navigator its lens can no longer run `VALIDATION_ERROR` with the errors under
+`details.errors`, an unknown or busy thread as shared — each before the stream opens. The
+response streams the shared frame — `thread`, the answer as `delta` events, one terminal
+`final` or `error` — the `entities` met after the anchors, after each walk and after the
+focus, with each card's `reason`, `role` (`anchor`, `reached`, `focus`) and `hop` — and
+its own events, all in display names, never ids or keys:
+
+| Event `type` | Fields | Meaning |
+|---|---|---|
+| `navigator.graph` | `steps` (`id`, `label`, `description`, `model`), `edges` (`from`, `to`, optional `label`; an edge to itself is a repeat) | The pipeline, once, right after `thread` |
+| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, and when it ends `durationMs` and an optional `summary` | One step starting or ending; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary and no duration |
+| `navigator.summary` | `modelCalls`, `durationMs`, `entities`, `evidence`, `hops`, `timings` (milliseconds per step id) | Once, before `final` |
+
+The answer cites evidence by ref in square brackets, one or several: `[E2]`, `[E2, E5]`.
+
+**Read a thread.** As [shared](#assistant-chat-and-threads). No MCP equivalent exists.
+
 ### AI
 
 Semantics: [capabilities/agents.md](capabilities/agents.md). Chat requires a
@@ -750,6 +813,11 @@ response-mode option.
 |---|---|---|
 | `agent.tool_call` | `callId`, `tool`, `args` | One invocation begins, including schema-invalid arguments |
 | `agent.tool_result` | `callId`, `result` | That invocation completes; result retains its native JSON structure |
+
+After a successful result of `get_entity`, `list_entities`, `get_neighbors`, `search` or
+`search_documents`, an `entities` event carries the lens's entities it returned that the
+turn had not sent yet, all evidence, and for `get_neighbors` the relations to them. Other
+tools send none; the tool events are the same either way.
 
 Call IDs are unique within a turn. Calls precede their results, and parallel results arrive
 as each completes. An unknown agent, an unavailable provider and an unknown or busy thread
@@ -794,7 +862,7 @@ exist; its tools answer not-found tool errors otherwise.
 | Tool | Purpose |
 |---|---|
 | `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation |
-| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries and retrievers. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
+| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries, retrievers and navigators. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
 | `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`) |
 | `update_entity_type` | Change display name, description or name property (`name_property`); the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |

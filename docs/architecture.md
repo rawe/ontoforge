@@ -75,8 +75,9 @@ never looks inside one.
 definitions and settings, cascade rules, schema validation, transfer, search-data rebuild.
 
 **Runtime** owns one ontology's instance data: entity and relation lifecycle, traversal,
-documents, search, search indexing, query execution, saved-query pipelines, agents and
-retrievers, and the [thread store](#thread-store) holding their conversations.
+documents, search, search indexing, query execution, saved-query pipelines, the
+[assistants](#assistant-kinds) — agents, retrievers and navigators — and the
+[thread store](#thread-store) holding their conversations.
 
 **Server** carries the deployment's capability report — which optional providers this
 deployment has. It belongs to neither modeling nor runtime and is the only surface that
@@ -93,7 +94,7 @@ reads through the port. This keeps the schema a *value* to runtime rather than a
 it calls, which is what makes the schema cache possible. Runtime uses core alone. The
 other three may use runtime as well as core: modeling where it needs runtime's own view —
 assembling a lens's schema, deriving the managed search indices of a changed schema, and
-validating agent configurations and retrievers against what runtime offers;
+validating agent configurations, retrievers and navigators against what runtime offers;
 registry to clear the schema cache when an ontology is deleted; server to report which
 search strategies the deployment offers.
 
@@ -118,7 +119,7 @@ agent ever spans two. The architecture makes that structural rather than checked
 The registry — not any storage catalog — is the authoritative list of ontologies. Zero
 ontologies is a valid server state: a fresh server starts empty, nothing is auto-created
 at boot, and the last ontology is deletable. Deleting an ontology is one hard cascade
-over everything it contains — schema, lenses, saved queries, agents, retrievers,
+over everything it contains — schema, lenses, saved queries, assistants,
 instance data and search indices.
 
 ## Logical data model
@@ -150,8 +151,9 @@ Per ontology. "Unique" here always means unique within the owning ontology.
 | Agent config | lens + `key` | name, description, system prompt, tool allowlist |
 | Saved query | lens + `key` | name, description, ordered steps, parameters, bindings |
 | Retriever | lens + `key` | name, description, configuration version, configuration, conversion warnings |
+| Navigator | lens + `key` | name, description, configuration version, configuration |
 
-Inclusions, agent configs, saved queries and retrievers are the four things
+Inclusions, agent configs, saved queries, retrievers and navigators are the five things
 that belong *to a lens*. Types, properties and search indices never do. The same type key, and the same
 lens key, can exist independently in two ontologies.
 
@@ -249,7 +251,7 @@ cascades: a deleted ontology, lens or assistant leaves its threads to retention.
 
 **State.** The store keeps a thread's conversation state after the latest step of its last
 run, never earlier steps, plus — while a turn runs — the state the turn started from. A
-thread keeps at most 25 turns; older ones are removed. The model sees the last 8.
+thread keeps at most 25 turns; older ones are removed. The model sees at most the last 8.
 
 **One run per thread, atomic turns.** A run holds the thread's run lock; a run on a thread
 that is still running is refused, never queued. A cancelled or failed turn returns the
@@ -264,6 +266,23 @@ on every read and write of the store — no background job.
 Like the schema cache, the thread store is **per process**: threads live in the server's
 memory, a restart loses them all, and multiple instances do not share them. A client
 continuing a lost thread is told it is not found and starts a new one.
+
+## Assistant kinds
+
+Agents, retrievers and navigators are each built end to end on their own: each kind has
+its modeling and runtime routes under `assistants/<kind>`, its own storage, its own check
+of a configuration, its built-in default and its place in transfer under the lens's
+`assistants`. Every kind shares the
+[thread store](#thread-store), the chat request and stream frame, and the one `entities`
+event ([decisions.md](decisions.md#interfaces)). Runtime's assistant kit holds the
+kind-neutral helpers: the live trace of a fixed pipeline's steps, and the model calls —
+structured output for a decision, a stream for the answer.
+
+The [navigator](capabilities/navigators.md)'s turn is a fixed LangGraph pipeline. It
+announces its steps when the turn starts and traces each as it runs, in events prefixed
+with the navigator's name, and streams the entities its answer may use before the answer
+as the shared `entities` event ([interfaces.md](interfaces.md#assistant-chat-and-threads)).
+Its model calls are never retried.
 
 ## Request lifecycle
 

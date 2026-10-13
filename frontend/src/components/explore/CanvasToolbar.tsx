@@ -1,6 +1,7 @@
 import {
   Eraser,
   Maximize,
+  MessagesSquare,
   Network,
   Pin,
   Search,
@@ -38,10 +39,12 @@ interface CanvasToolbarProps {
   onRelayout: () => void
   onClear: (mode: 'all' | 'unpinned') => void
   onToggleType: (typeKey: string) => void
+  /** The ask dock's button; absent without a language model. */
+  ask?: { open: boolean; onToggle: () => void }
 }
 
 /**
- * Top-left canvas overlay: search/add, fit view, explicit re-layout, clear
+ * Top-left canvas overlay: search/add, the ask dock, fit view, explicit re-layout, clear
  * (unpinned/all, confirmed), a node-count badge (warn look above the soft
  * cap) and per-type show/hide filter chips.
  */
@@ -54,6 +57,7 @@ export function CanvasToolbar({
   onRelayout,
   onClear,
   onToggleType,
+  ask,
 }: CanvasToolbarProps) {
   const [clearOpen, setClearOpen] = useState(false)
   const empty = nodeCount === 0
@@ -84,6 +88,22 @@ export function CanvasToolbar({
     <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-380px)] flex-col items-start gap-2">
       <div className="flex items-center gap-0.5 rounded-xl border bg-card/95 p-1 shadow-md backdrop-blur-sm">
         {iconButton('Search & add entities', <Search className="size-4" />, onSearch)}
+        {ask !== undefined && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={ask.open ? 'secondary' : 'ghost'}
+                size="icon-sm"
+                aria-label="Ask an assistant"
+                aria-pressed={ask.open}
+                onClick={ask.onToggle}
+              >
+                <MessagesSquare className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Ask an assistant (A)</TooltipContent>
+          </Tooltip>
+        )}
         {iconButton('Fit view (F)', <Maximize className="size-4" />, onFit, empty)}
         {iconButton('Re-layout all', <Network className="size-4" />, onRelayout, empty)}
         {iconButton(

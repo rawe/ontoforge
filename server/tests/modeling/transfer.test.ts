@@ -235,7 +235,7 @@ describe("export", () => {
     const lens = res.json().lenses[0];
     expect("includes" in lens).toBe(false);
     expect(lens.indexInclusions).toEqual([]);
-    expect(lens.assistants).toEqual({ agents: [], retrievers: [] });
+    expect(lens.assistants).toEqual({ agents: [], retrievers: [], navigators: [] });
     expect(lens.savedQueries).toEqual([]);
   });
 
@@ -686,7 +686,7 @@ describe("retrievers", () => {
       lenses: [{ lensId: "lens-1", key: "all", name: "All", entityInclusions: [], relationInclusions: [] }],
     });
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
-    expect(res.json().lenses[0].assistants).toEqual({ agents: [], retrievers: [agent(2, CONFIG)] });
+    expect(res.json().lenses[0].assistants).toEqual({ agents: [], retrievers: [agent(2, CONFIG)], navigators: [] });
   });
 
   it("stores each agent create-only after the indices; references are not checked", async () => {
@@ -776,6 +776,89 @@ describe("retrievers", () => {
     ]);
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
     expect(indices.saveRetriever).not.toHaveBeenCalled();
+  });
+});
+
+describe("navigators", () => {
+  const person = entityType("person", "Person");
+  const navigator = (key: string, config: unknown = { hops: 3 }, configVersion = 1, name = "Walker") =>
+    ({ key, name, description: null, configVersion, config });
+  const payload = (navigators: unknown[]) => ({
+    formatVersion: "7.0",
+    entityTypes: [person],
+    relationTypes: [],
+    lenses: [{ key: "all", name: "All", assistants: { navigators } }],
+  });
+
+  it("export carries each lens's navigators in their portable form, as stored", async () => {
+    withSearchIndices();
+    const now = new Date("2026-10-12T00:00:00Z");
+    holder.store.navigatorStore.listNavigators.mockResolvedValue([
+      { navigatorId: "a", key: "walker", name: "Walker", description: "d", configVersion: 1, config: { hops: 3, ghost: true }, createdAt: now, updatedAt: now },
+    ]);
+    holder.store.getFullSchema.mockResolvedValue({
+      entityTypes: [],
+      relationTypes: [],
+      lenses: [{ lensId: "lens-1", key: "all", name: "All", entityInclusions: [], relationInclusions: [] }],
+    });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(res.json().lenses[0].assistants.navigators).toEqual([
+      { key: "walker", name: "Walker", description: "d", configVersion: 1, config: { hops: 3, ghost: true } },
+    ]);
+    expect(holder.store.navigatorStore.listNavigators).toHaveBeenCalledWith("lens-1");
+  });
+
+  it("stores each navigator create-only, its configuration parsed with defaults; references are not checked", async () => {
+    withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    holder.store.navigatorStore.saveNavigator.mockResolvedValue([{}, true]);
+    const res = await postImport(payload([navigator("walker"), navigator("ghostly", { relationTypes: ["ghost"] })]));
+    expect(res.statusCode, res.body).toBe(201);
+    const lensId = holder.store.createLens.mock.calls[0]![0] as string;
+    const calls = holder.store.navigatorStore.saveNavigator.mock.calls;
+    expect(calls.map((call) => [call[0], (call[1] as { key: string }).key, call[2]])).toEqual([
+      [lensId, "walker", true],
+      [lensId, "ghostly", true],
+    ]);
+    expect(calls[0]![1]).toMatchObject({
+      name: "Walker",
+      configVersion: 1,
+      config: { hops: 3, relationTypes: null, anchorTypes: null, maxEntities: 40, instructions: null },
+    });
+  });
+
+  it("a lens without navigators imports and stores none", async () => {
+    withSearchIndices();
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport({ ...payload([]), lenses: [{ key: "all", name: "All" }] });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(holder.store.navigatorStore.saveNavigator).not.toHaveBeenCalled();
+  });
+
+  it("collects every bad key, name and configuration; writes nothing", async () => {
+    withSearchIndices();
+    const res = await postImport(payload([
+      navigator("walker"),
+      navigator("walker"),
+      navigator("Bad-Key"),
+      navigator("_default"),
+      navigator("nameless", {}, 1, ""),
+      navigator("old", {}, 2),
+      navigator("far", { hops: 4 }),
+      navigator("extra", { ghost: true }),
+    ]));
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.errors).toEqual(expect.arrayContaining([
+      "Import error: duplicate navigator 'walker' in lens 'all'",
+      expect.stringContaining("Import error: invalid navigator key 'Bad-Key'"),
+      expect.stringContaining("Import error: invalid navigator key '_default'"),
+      "Import error: navigator 'nameless' needs a name of 1 to 200 characters",
+      "Import error: navigator 'old' has no valid configuration of version 1",
+      "Import error: navigator 'far' has no valid configuration of version 1",
+      "Import error: navigator 'extra' has no valid configuration of version 1",
+    ]));
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(holder.store.navigatorStore.saveNavigator).not.toHaveBeenCalled();
   });
 });
 

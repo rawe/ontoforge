@@ -1,8 +1,9 @@
 /**
  * AI runtime routes, mounted at
  * `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey` alongside the
- * runtime router: the agent list, chat and thread read, and the retriever
- * routes (`assistants/retrievers/router.ts`), each under `/ai/assistants/<kind>`.
+ * runtime router: the agent list, chat and thread read, the retriever
+ * routes (`assistants/retrievers/router.ts`) and the navigator routes
+ * (`assistants/navigators/router.ts`), each under `/ai/assistants/<kind>`.
  * Every request binds a runtime store to the ontology its path names.
  * Routers parse and shape only; the rules live in `assistants/agents/runtime.ts` and
  * `threads/access.ts`.
@@ -18,6 +19,7 @@ import { z } from "zod";
 import { getRuntimeStore } from "../core/ports.js";
 import * as agents from "./assistants/agents/runtime.js";
 import { ChatPayload, sendChatStream, threadBinding } from "./chatStream.js";
+import { navigatorRuntimeRouter } from "./assistants/navigators/router.js";
 import { retrieverRuntimeRouter } from "./assistants/retrievers/router.js";
 import { loadSchema } from "./schemaCache.js";
 import { openThread, readThread } from "./threads/access.js";
@@ -31,6 +33,7 @@ const ThreadParams = AssistantParams.extend({ threadId: z.string() });
  * every chat runs on a thread of the server's one thread store. */
 export const aiRouter: FastifyPluginAsyncZod<{ threads: ThreadStore }> = async (app, { threads }) => {
   await app.register(retrieverRuntimeRouter, { threads });
+  await app.register(navigatorRuntimeRouter, { threads });
 
   // --- Agents: the list, chat and threads (the built-in default is `_default`) ---
 

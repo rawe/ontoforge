@@ -16,6 +16,7 @@
  *   ['assistants', ontologyKey, lensKey, kind]       runtime assistant list of a kind
  *   ['model', ontologyKey, ...]                      modeling sub-keys
  *   ['model', ontologyKey, 'retrievers', lensKey]  retrievers of a lens
+ *   ['model', ontologyKey, 'navigators', lensKey]  navigators of a lens
  *
  * Every ontology-scoped key carries the ontology key, so the same lens
  * key in two ontologies never shares a cache entry. Mutations invalidate
@@ -72,4 +73,7 @@ export const qk = {
   /** Under `model`: every modeling mutation (scope, schema) refreshes their validation. */
   retrievers: (ontologyKey: string, lensKey: string) =>
     ['model', ontologyKey, 'retrievers', lensKey] as const,
+  /** Under `model`, like retrievers: their validation follows the lens. */
+  navigators: (ontologyKey: string, lensKey: string) =>
+    ['model', ontologyKey, 'navigators', lensKey] as const,
 } as const

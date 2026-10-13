@@ -2,7 +2,8 @@
  * Retrieval of a plan over a mocked search engine: what each search is
  * asked (indices, relations per index, the threshold as `(1 + t) / 2`,
  * entity restrictions from filters), how sub-queries fuse per entity,
- * listing without a query, and the evidence and diagnostics shapes.
+ * listing without a query, the evidence and diagnostics shapes, and the
+ * cards of the results handed to the answer model.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +19,7 @@ import {
   boundContext,
   CONTEXT_CHARACTERS,
   diagnosticResults,
+  entityCards,
   filterValues,
   fuseRankings,
   retrieve,
@@ -144,6 +146,7 @@ describe("sub-query search", () => {
         label: "Ada",
         fields: { name: "Ada", email: "ada@acme.test" },
         matches: [{ subQuery: 0, matched: expect.objectContaining({ index: "person_employment" }), text: "Employment Role: CTO Company: ACME", conditions: [] }],
+        entity: { _id: "ada", name: "Ada", email: "ada@acme.test" },
       },
     ]);
   });
@@ -335,14 +338,40 @@ describe("fusion and context", () => {
       label: null,
       fields: { name: "n".repeat(400) },
       matches: [{ subQuery: 0, matched: null, text: null, conditions: [] }],
+      entity: { _id: `e${i}`, name: "n".repeat(400) },
     }));
     const plan: Plan = { subQueries: [subQuery({})], unsupportedReason: null };
     const context = boundContext({ items, limitations: [], searchCalls: 0, searchMs: 0, cutFields: [] }, plan, LENS, CONFIG);
     expect(JSON.stringify({ results: context.results }).length).toBeLessThanOrEqual(CONTEXT_CHARACTERS);
     expect(context.results.length + context.omitted).toBe(40);
     expect(context.omitted).toBeGreaterThan(0);
+    expect(context.included.map((item) => item.entityId)).toEqual(items.slice(0, context.results.length).map((item) => item.entityId));
     expect(context.limitations.at(-1)).toContain(`${context.omitted} technically selected candidates were omitted`);
     expect(context.results[0]).toEqual({ type: "Person", label: null, fields: { Name: "n".repeat(400) }, matches: [{ search: "CTO at ACME" }] });
+  });
+
+  it("reports the items that fit, a small one after a skipped big one too, and makes them the turn's evidence cards", () => {
+    const item = (id: string, name: string) => ({
+      entityId: id,
+      entityType: "person",
+      label: name.slice(0, 20),
+      fields: { name },
+      matches: [{ subQuery: 0, matched: null, text: null, conditions: [] }],
+      entity: { _id: id, name, email: `${id}@acme.test`, bio: "[document]" },
+    });
+    const items = [item("ada", "Ada"), item("big", "b".repeat(CONTEXT_CHARACTERS)), item("eve", "Eve")];
+    const plan: Plan = { subQueries: [subQuery({})], unsupportedReason: null };
+    const context = boundContext({ items, limitations: [], searchCalls: 0, searchMs: 0, cutFields: [] }, plan, LENS, CONFIG);
+    expect(context.omitted).toBe(1);
+    expect(context.results.map((result) => result.label)).toEqual(["Ada", "Eve"]);
+    expect(context.included.map((included) => included.entityId)).toEqual(["ada", "eve"]);
+    // The model's context is what it was: the included items stay out of it.
+    expect(Object.keys(context.results[0]!)).toEqual(["type", "label", "fields", "matches"]);
+    // Document properties are no card fields.
+    expect(entityCards(context.included, LENS)).toEqual([
+      { ref: "E1", id: "ada", type: "person", typeName: "Person", label: "Ada", fields: [{ name: "Email", value: "ada@acme.test" }], evidence: true },
+      { ref: "E2", id: "eve", type: "person", typeName: "Person", label: "Eve", fields: [{ name: "Email", value: "eve@acme.test" }], evidence: true },
+    ]);
   });
 
   it("gives the answer model display names and plain conditions: no entity ids, keys, filter ids or paths", async () => {

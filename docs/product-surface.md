@@ -214,7 +214,8 @@ Endpoint errors from the server are surfaced as form-level errors, not silent fa
 
 ### Explore
 
-The graph canvas. See [Working set](#working-set) for its model.
+The graph canvas, and beside it the ask dock, where an assistant's answers fill the canvas.
+See [Working set](#working-set) for both.
 
 ### Query
 
@@ -223,7 +224,7 @@ Two tabs — Console and Library — which both stay live, so results survive a 
 
 ### Assistants
 
-Two tabs — Agents and Retrievers. See [Assistants panel](#assistants-panel). Without a language-model
+Three tabs — Agents, Retrievers and Navigators. See [Assistants panel](#assistants-panel). Without a language-model
 provider the navigation entry is gone and the screen renders an explanation; see
 [Feature gating](#feature-gating).
 
@@ -341,20 +342,28 @@ unscoped and therefore exposes everything.
 
 Inline-editable name and description, an immutable key, a scope marker, an entry into the
 Workbench for this lens, and deletion behind a confirmation stating that the lens, its
-scope, its agents, retrievers and saved queries go — while the schema and all
-instance data stay. Five tabs:
+scope, its agents, retrievers, navigators and saved queries go — while the schema and all
+instance data stay. Six tabs:
 
 **Scope** — the [scope editor](#scope-editor).
 
-**Agents** — create, edit and delete the lens's agents: name, derived-and-then-immutable
-key, description, system prompt, and either all tools or an explicit checklist of the
-read-only runtime tools (at least one required). The list shows each agent's tool posture
-at a glance. See [capabilities/agents.md](capabilities/agents.md).
+**Agents** — the authoring surface for the lens's [agents](capabilities/agents.md#agents),
+with a test panel beside the editor; see [Agent editor](#agent-editor).
 
 **Retrievers** — the authoring surface for the lens's
 [retrievers](capabilities/retrievers.md), with a test panel beside the
-editor; see [Retriever editor](#retriever-editor). Chatting with a saved retriever
-happens in the Workbench ([Assistants panel](#assistants-panel)).
+editor; see [Retriever editor](#retriever-editor).
+
+**Navigators** — the authoring surface for the lens's
+[navigators](capabilities/navigators.md), with a test panel beside the editor; see
+[Navigator editor](#navigator-editor).
+
+The three tabs share one frame — list, editor page, the built-in default's page and test
+panel; see [Assistant management](#assistant-management). A help button in each list's
+header, and beside the title of each editor and default page, explains how that kind
+works. It shows the steps of one run, with the language-model calls set apart from the steps that only read the lens. One example run plays step by step over the same
+example graph and question for all three kinds, beside a run log and the settings that
+steer each step. A switch shows the other two kinds.
 
 **Saved queries** — the authoring surface for the lens's stored pipelines, and the only
 place multi-step pipelines can be built. Per query: name, derived-and-then-immutable key,
@@ -477,8 +486,8 @@ Three operations, each with its own explanation. See
 [capabilities/transfer.md](capabilities/transfer.md).
 
 - **Export** — downloads the ontology's whole design — entity types, relation types,
-  properties, search indices, keyword languages, lenses, agents, retrievers and saved
-  queries — as a JSON file named after the ontology key ("Download `<ontologyKey>`.json").
+  properties, search indices, keyword languages, lenses, agents, retrievers, navigators
+  and saved queries — as a JSON file named after the ontology key ("Download `<ontologyKey>`.json").
 - **Import** — takes a JSON file and writes it into the current ontology. It reports
   malformed JSON before sending anything, and on a
   key conflict explains that pre-existing objects with the same keys block the import and
@@ -589,8 +598,8 @@ central idea of the screen and everything else follows from it.
 
 **Growth is incremental and explicit.** Entities arrive from the palette, from a table
 row, from an entity detail page, from a query result, from a recents chip on the empty
-canvas, all at once from a palette question's results, or by expanding a node's
-relations. A batch of results joins unanchored; entities already on the canvas flash, and
+canvas, all at once from a palette question's results, from an assistant's answer in the
+ask dock, or by expanding a node's relations. A batch of results joins unanchored; entities already on the canvas flash, and
 the hard node cap refuses a batch that would exceed it as a whole. Expansion is per relation type and per
 direction: the node panel lists every applicable relation type with its exact neighbour
 count, and clicking one pulls in the first ten neighbours; repeated clicks pull ten more,
@@ -638,6 +647,40 @@ node opens its detail page.
 links, the relation's own properties, and a delete action behind a confirmation stating
 that both entities survive. Self-referential relations draw as a loop over their node
 rather than a degenerate curve.
+
+**Asking.** With a language-model provider, an Ask button in the canvas toolbar opens a
+dock on the canvas's left edge — the right edge belongs to the node panel — holding an
+[assistant chat](#assistant-chat) with one of the lens's assistants — any agent, retriever
+or navigator:
+
+- **Open or closed.** Open, it is resizable. Closing cancels a running answer; reopening
+  restores the conversation from its thread.
+- **Header.** An assistant picker grouped by kind — navigators, retrievers, agents —
+  each kind's `Default` first; another assistant cancels a running answer and shows that
+  assistant's own conversation, the same thread as its Workbench tab. Then "New
+  conversation" and close.
+- **Answers** as in the chat, a navigator's citations as markers. Under each, collapsible
+  parts: *Found* — the [entities the answer met](capabilities/threads.md#the-entities-a-turn-met)
+  as compact cards, a navigator's grouped as in the [evidence sidebar](#evidence-sidebar),
+  each saying whether it is on the canvas and linking to the entity's page — and what the
+  kind did: a navigator's *Steps* as the sidebar's Steps view shows them, an agent's tool
+  calls as its tool-call panel shows them; a retriever has no such part.
+- **A click puts it there, the next click shows it.** Clicking a citation marker or a
+  found card adds an entity that is not on the canvas yet, with the answer's relations
+  between it and the canvas, and shows it; one already there is only shown: selected,
+  centred, ringed like a selected card of the sidebar's graph, its relations drawn
+  stronger. Nothing else on the canvas changes.
+- **Hover.** Pointing at a marker or a found card rings its node; pointing at a node marks
+  its citations in every answer.
+- **Adding cited entities.** For a navigator — the only kind whose answers cite — a switch
+  in the dock, off by default, adds every completed answer's cited entities and the answer's relations between canvas entities, as one
+  batch, then fits the view. Duplicates flash; when the hard cap refuses the batch, the
+  answer says its entities were not added.
+
+Additions from answers follow every rule above: each entity is read again by its id and
+each relation by its id, never built from the answer's cards; new nodes go next to an
+entity they are linked to — a navigator's anchors first and then hop by hop, so paths grow
+outward from where they start. Streamed answers never redraw the canvas.
 
 **Persistence and restore.** The working set survives reloads (see
 [Local state](#local-state)). On restore, entities whose type is no longer in scope are
@@ -687,9 +730,9 @@ expands automatically, and runs immediately when it has no parameters.
 
 ### Assistants panel
 
-Two tabs over one lens, one per assistant kind: Agents and Retrievers. Both require a language-model
-provider; see [capabilities/agents.md](capabilities/agents.md). Both tabs
-are the same [assistant chat](#assistant-chat).
+Three tabs over one lens, one per assistant kind: Agents, Retrievers and Navigators. All
+require a language-model provider; see [capabilities/agents.md](capabilities/agents.md).
+All tabs are the same [assistant chat](#assistant-chat).
 
 A toolbar picker selects the assistant: the kind's assistants as the server lists them —
 `Default`, the built-in one, first — each with its key. The address names the chosen
@@ -697,7 +740,10 @@ assistant, so it survives a reload; without one — or with one the lens does no
 `Default` is shown and the address updated to name it. Each assistant has its own
 conversation, restored from the server when it is picked.
 
-**Agents** — tool calls stream into a **tool-call panel** that follows the running answer:
+**Agents** — the side panel has two tabs: *Entities*, the cards of the
+[entities the answer met](capabilities/threads.md#the-entities-a-turn-met), each linking to
+the entity's page, and *Tool calls*. Tool calls stream into a **tool-call panel** that
+follows the running answer:
 each call in order, with a readable name, a one-line summary of what it asked for, its
 state, and its time inside the tool. Calls start collapsed and open by hand. An open call
 shows its arguments and its result in a form fitting the result — a table for query rows,
@@ -706,35 +752,97 @@ and direction, document text — linking entities to their pages, with the raw r
 click away; a tool that answers with an error shows it highlighted. The panel heads with
 the question, the number of calls, the time spent inside tools — parallel calls once, said
 so when calls overlapped, the model's thinking not at all — and how long the answer took.
-Each answer's tool-calls button shows the count. A "Show tool calls" switch, remembered per
-browser and on by default, shows the panel and the buttons; off hides both. Tool calls live
+Each answer's button shows the count of calls and of entities. A "Show details" switch,
+remembered per browser and on by default, shows the panel and the buttons; off hides both. Tool calls live
 as long as the open chat: answers restored from the server have none, and the panel says
 so. A failed or stopped answer marks its unfinished calls interrupted.
 
 **Retrievers** — chat with the lens's [retrievers](capabilities/retrievers.md); `Default`
-is the lens's [default retriever](capabilities/retrievers.md#the-default-retriever). A
-"Show diagnostics" switch, off by default and remembered, requests
+is the lens's [default retriever](capabilities/retrievers.md#the-default-retriever). The
+side panel shows the cards of the
+[results the answer was given](capabilities/threads.md#the-entities-a-turn-met), each linking
+to the entity's page. A "Show diagnostics" switch, off by default and remembered, requests
 diagnostics with every answer and shows them in the
-[diagnostics panel](#assistant-chat); off, none are requested. A question to a retriever
+[diagnostics panel](#assistant-chat), a second tab beside the entities; off, none are
+requested. A question to a retriever
 the lens cannot run shows the server's refusal with its reasons.
+
+**Navigators** — chat with the lens's [navigators](capabilities/navigators.md); `Default`
+is the lens's [default navigator](capabilities/navigators.md#the-default-navigator). Each
+answer cites the entities it names with small numbered markers in their
+type's color; a marker selects that entity in the [evidence sidebar](#evidence-sidebar),
+which is the side panel of this tab. A "Show evidence" switch, on by default and
+remembered, shows the sidebar. Answers restored from the server have no evidence and show
+no markers.
+
+### Assistant management
+
+The frame the Studio lens detail's Agents, Retrievers and Navigators tabs share. What an
+assistant is configured with, and how its kind lists and tests it, is the kind's own: see
+[Agent editor](#agent-editor), [Retriever editor](#retriever-editor) and
+[Navigator editor](#navigator-editor).
+
+**List.** A header with the kind's name, how many assistants the lens defines, the help
+button and "New …". First the built-in `Default` — a dashed card with its key, marked
+built in, and one sentence on what it is and that it cannot be edited; then a card per
+assistant: name, key, the kind's badges, the description and, where the kind has one, a
+summary line. With none defined, a card beside the default's offers "New …". A card opens
+the assistant's editor, the default's card its read-only page.
+
+**Editor.** A page with a title row — back to the list, the name as typed, the help
+button, the key once saved, and the status: "Not saved yet", "Unsaved changes", "Invalid
+in this lens" for a kind the lens validates, or "Saved" — and the form beside the test
+panel. The address names the open assistant, so it can be linked; a key the lens does not
+have shows a not-found state with the way back. "New …" opens a draft that exists only in
+the client until its first save. The form is a draft that only a save writes:
+
+- **Action bar** — heads the form: "Create …" or Save, enabled once the draft is changed
+  and valid; Discard changes; the kind's extras; and Delete, behind a confirmation. A
+  refused save lists its reasons below the bar under "Not saved:".
+- **Identity** — Name, Key and Description. A new assistant's key follows the name until
+  edited, and is refused when the lens has it already or it exceeds 64 characters; once
+  saved it is permanent.
+- The kind's own sections follow.
+
+Leaving the editor with unsaved changes — by the back action, another tab or another
+page — asks first.
+
+**Default page.** The built-in default's read-only page: the same title row with "Built
+in" as status, its sentence and "New …" in place of the form, and the test panel asking
+the default.
+
+**Test panel.** Beside the form: a header with the kind's controls and one line on what it
+asks, then the kind's [assistant chat](#assistant-chat) with no picker. It asks the saved
+version; saving starts a new conversation, and none is restored. A new or changed
+assistant blocks questions and says why; a kind may block more. Without a
+language-model provider the panel says that the kind cannot answer.
+
+### Agent editor
+
+The Studio lens detail's Agents tab, in the [shared frame](#assistant-management). Its
+configuration semantics are owned by [capabilities/agents.md](capabilities/agents.md#agents).
+
+**List.** Each card shows the agent's tool posture: all tools, or how many.
+
+**Editor.** After the identity, **Behaviour**: the system prompt, and either all tools or
+an explicit checklist of the read-only runtime tools, at least one required. An agent is
+never invalid in its lens.
+
+**Test panel.** The agent's side panel — entities and tool calls, as in the
+[Assistants panel](#assistants-panel) — is always shown.
 
 ### Retriever editor
 
-The Studio lens detail's Retrievers tab.
+The Studio lens detail's Retrievers tab, in the [shared frame](#assistant-management).
 Its configuration semantics are owned by
 [capabilities/retrievers.md](capabilities/retrievers.md).
 
-**List.** A card per retriever: name, key, a badge for valid, invalid or unsupported, the
-number of warnings, the description, and which indices it searches with its filter count.
-A card opens the retriever's editor; the address names the open retriever, so it can be linked.
-"New retriever" asks for a name and a derived-but-editable key — permanent and
-unique in the lens — and opens the editor on a draft that exists only in the client until
-its first save. "Import" creates a new retriever from an exported JSON, from a file or pasted;
-it never replaces a retriever with the same key.
+**List.** Each card shows valid, invalid or unsupported, the number of warnings, and which
+indices it searches with its filter count. "Import", in the header, creates a new
+retriever from an exported JSON, from a file or pasted; it never replaces a retriever with
+the same key.
 
-**Editor.** A draft that only a Save writes, in four sections, under a collapsed
-explanation of how a question becomes results — plan, narrow, rank entries, fuse and,
-for chat, answer — naming the settings that steer each step, each a jump to its section:
+**Editor.** After the identity, four sections:
 
 - **Search indices** — the indices of the lens's
   [search catalog](capabilities/search.md#the-search-catalog), grouped by entity type,
@@ -755,39 +863,77 @@ for chat, answer — naming the settings that steer each step, each a jump to it
   to sub-queries no filter or previous reference restricts, never to keyword matches, and dependent on the
   embedding model; and the maximum characters per answer field.
 
-Name and description sit above. A save bar states whether the retriever is new, changed or
-saved and offers Save, Discard and Save as copy — which stores the current state, unsaved
-changes included, as a new retriever under a new name and key while the original stays as
-last saved. The saved retriever's validation errors and warnings appear in a validation panel,
-the draft's own problems next to their section. Leaving the editor with unsaved changes —
-by the back action, another tab or another page — asks first. Rarer operations sit under
-More: export of the saved version as JSON, copy or move to another lens of the ontology
-under the same key, the configuration as editable JSON applied to the draft, and
-deletion. A retriever whose configuration has an unsupported version or shape opens with
-More expanded, where it can be exported or replaced by a version 2 configuration.
+The action bar adds Save as copy, which asks for a name and key and stores the current
+state, unsaved changes included, as a new retriever while the original stays as last
+saved. The saved retriever's validation errors and warnings appear in a validation panel
+below the bar, the draft's own problems next to their section. Rarer operations sit under
+More, below the form: export of the saved version as JSON, copy or move to another lens of
+the ontology under the same key, and the configuration as editable JSON applied to the
+draft. A retriever whose configuration has an unsupported version or shape shows no
+sections and opens with More expanded, where it can be exported or replaced by a version 2
+configuration.
 
-**Test panel.** Beside the editor, with a Chat / Retrieve switch whose position is
-remembered. Chat is the [assistant chat](#assistant-chat) with diagnostics
-always on and no picker; saving starts a new conversation, and none is restored. Retrieve asks one
-question, sent on Enter or with Ask, and shows only the found entities, as the palette's
-[question mode](#question-mode) does, without "Show all in Explorer"; saving clears the
-result. Both ask the saved version: a new, changed, invalid or unsupported retriever
-blocks questions and says why. Without a language-model provider the panel says that the
-retriever cannot answer.
+**Test panel.** A Chat / Retrieve switch in the header, its position remembered. Chat is
+the chat with diagnostics always on. Retrieve asks one question, sent on Enter or with
+Ask, and shows only the found entities, as the palette's [question mode](#question-mode)
+does, without "Show all in Explorer"; saving clears the result. An invalid or unsupported
+retriever also blocks questions.
+
+### Navigator editor
+
+The Studio lens detail's Navigators tab, in the [shared frame](#assistant-management). Its
+configuration semantics are owned by
+[capabilities/navigators.md](capabilities/navigators.md).
+
+**List.** Each card shows valid or invalid, the number of warnings, and a one-line summary
+of its walk — hops, how many relation and anchor types, evidence cards.
+
+**Editor.** After the identity, **Walk** — hops 1 to 3, the relation types the walk may
+follow and the entity types a mention may resolve to, each either every one the lens shows
+or a checklist with each relation's endpoints — and **Answer** — the number of evidence
+cards and the instructions. A type the lens no longer shows stays listed for removal. The
+saved navigator's validation errors and warnings appear in a validation panel below the
+action bar.
+
+**Test panel.** The chat with the [evidence sidebar](#evidence-sidebar) always shown. An
+invalid navigator also blocks questions.
+
+### Evidence sidebar
+
+The side panel of a navigator's answer, filling while the question runs — the entities
+appear before the answer. Three views, each with its count where it has one:
+
+- **Entities** — the cards, grouped as anchors (named in the question), carried over
+  from the previous answer, and reached by the walk, each group explained in a line. A
+  card shows the type, the label, its ref, its distance, whether it was handed to the
+  answer as evidence, why it is there — "Lena Fischer manages Kira Novak", or that it is
+  only the closest match for a name the question used — up to six fields, and a link to
+  the entity's page. A selected card is scrolled into view and marked.
+- **Graph** — the cards as a read-only node-link view, anchors on the left and each hop a
+  column further right, borders colored by role, evidence bold and the rest faded, links
+  labelled with the relation. A click on a node selects its card; a selected card is
+  brought into view. Large graphs open on the anchors.
+- **Steps** — the navigator's pipeline as a vertical list: each step's name, whether it
+  calls the model, what it does, its live state — waiting, running, done, skipped, failed
+  or interrupted — its time, and its one-line summary; a repeated step shows its rounds,
+  and the repeat edge its reason. A footer sums up model calls, total time, entities and
+  evidence.
 
 ### Assistant chat
 
 One conversation with one assistant on a server-held [thread](capabilities/threads.md),
-the same for every assistant kind — the Workbench's Assistants tabs and the retriever
-editor's test panel. The browser remembers only the current thread per ontology, lens,
-kind and assistant (not in the test panel) and restores its messages from the server.
+the same for every assistant kind — the Workbench's Assistants tabs, the test panels of
+the Studio's [assistant editors](#assistant-management) and, compact, the Explorer's [ask dock](#working-set), which shows an
+answer's entities and its kind's insight under it instead of in a side panel. The browser remembers
+only the current thread per ontology, lens, kind and assistant (not in a test panel) and
+restores its messages from the server.
 
 - **Empty conversation** — the assistant's name and description, and one line on what
   its kind does.
 - **Messages** — the question in a bubble, the answer beside its kind's icon,
   rendered as Markdown; answer text appears as it streams. While an answer runs it shows
-  the elapsed seconds and what it is doing now: an agent's running tool, a retriever's
-  current step. This is its only progress sign.
+  the elapsed seconds and what it is doing now: an agent's running tool, a retriever's or
+  a navigator's current step.
 - **Input** — at most 2,000 characters, growing to a few lines; Enter sends, Shift+Enter
   adds a line, and a hint below says so and that follow-ups refer to earlier answers.
   While an answer runs, Send becomes Stop.
@@ -1046,7 +1192,7 @@ flicker into existence while the report is loading.
 
 | Off | What changes |
 |---|---|
-| AI | The Assistants navigation entry, the Assistants palette action, the palette's question mode and the Ask an assistant quick action are gone. The Assistants screen itself renders an explanation. |
+| AI | The Assistants navigation entry, the Assistants palette action, the palette's question mode, the Ask an assistant quick action and the Explorer's Ask button and dock are gone. The Assistants screen itself renders an explanation. |
 | No search strategies | Entity search falls back to substring matching — per type in parallel when unscoped. |
 | Semantic search | Saved-query search falls back to client-side substring filtering over the full list. The search-data rebuild is disabled and explains that there is nothing to rebuild. |
 
@@ -1140,11 +1286,13 @@ the address.
 | Theme preference | Global | — |
 | Sidebar collapsed (Workbench and Studio alike) | Global | — |
 | Explorer working set | Per ontology + lens | Bounded by the hard node cap |
+| Explorer ask dock — open or closed, its width, its assistant (kind and key), the switch that adds cited entities | Per ontology + lens | — |
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
-| Current conversation thread id (Workbench Agents and Retrievers tabs) | Per ontology + lens + kind + assistant | One |
-| Agent tool-call panel switch | Global | — |
+| Current conversation thread id (Workbench Agents, Retrievers and Navigators tabs, Explorer ask dock) | Per ontology + lens + kind + assistant | One |
+| Agent details panel switch (Workbench) | Global | — |
 | Retriever diagnostics switch (Workbench) | Global | — |
+| Navigator evidence sidebar switch (Workbench) | Global | — |
 | Retriever test panel mode (Chat or Retrieve) | Global | — |
 | Retriever for palette questions | Per ontology + lens | — |
 | Schema graph node positions | Per ontology | — |
@@ -1200,8 +1348,8 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/studio/entity-types/{id}` · `.../relation-types/{id}` | Redirects to that type's page in the classic view; an unknown identifier shows the not-found state |
 | `/o/{ontologyKey}/studio/lenses` | The lens list |
 | `/o/{ontologyKey}/studio/lenses/{id}` | A lens, Scope tab |
-| `/o/{ontologyKey}/studio/lenses/{id}?tab=agents` · `?tab=retriever-agents` · `?tab=queries` · `?tab=connect` | The other lens tabs |
-| `/o/{ontologyKey}/studio/lenses/{id}?tab=retriever-agents&agent={agentKey}` | That retriever's editor and test panel |
+| `/o/{ontologyKey}/studio/lenses/{id}?tab=agents` · `?tab=retriever-agents` · `?tab=navigators` · `?tab=queries` · `?tab=connect` | The other lens tabs |
+| `/o/{ontologyKey}/studio/lenses/{id}?tab=agents&agent={key}` · `?tab=retriever-agents&retriever={key}` · `?tab=navigators&navigator={key}` | That assistant's editor and test panel — `_new` for a new draft, `_default` for the built-in default's read-only page |
 | `/o/{ontologyKey}/studio/search` | The search index list |
 | `/o/{ontologyKey}/studio/search?tab=settings` | The search settings |
 | `/o/{ontologyKey}/studio/search/new` | The index designer on a new custom index |
@@ -1256,6 +1404,7 @@ Any unrecognised address returns to the root.
 | Query editor | Cmd/Ctrl+Enter | Run |
 | Explorer | `F` | Fit the view |
 | Explorer | `P` | Pin or unpin the selection |
+| Explorer | `A` | Open or close the ask dock |
 | Explorer | Delete / Backspace | Remove selected nodes from the canvas |
 | Explorer | Shift or Cmd while clicking | Extend the selection |
 | Assistant chat | Enter | Send |

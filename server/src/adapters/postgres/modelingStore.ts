@@ -30,12 +30,13 @@
 
 import { toSql } from "pgvector";
 
-import type { ModelingStore, Row, SearchIndexStore } from "../../core/ports.js";
+import type { ModelingStore, NavigatorStore, Row, SearchIndexStore } from "../../core/ports.js";
 import type { NewPropertyDef, TypeKind } from "../../core/schemas.js";
 import * as vectorDdl from "./ddl.js";
 import { runQuery, withTransaction, type DbResult, type IsolationLevel, type Querier } from "./errors.js";
 import { camelizeRow, camelizeRows, isUuid } from "./rows.js";
 import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
+import { PostgresNavigatorStore } from "./navigatorStore.js";
 import { PostgresSearchIndexStore } from "./searchIndexStore.js";
 
 // Read column lists — the port-visible shape of each object; owner ids,
@@ -140,6 +141,13 @@ export class PostgresModelingStore implements ModelingStore {
       throw new Error("An unbound modeling store has no search indices");
     }
     return new PostgresSearchIndexStore(this.namespace, this.ontologyKey);
+  }
+
+  navigators(): NavigatorStore {
+    if (this.namespace === undefined) {
+      throw new Error("An unbound modeling store has no navigators");
+    }
+    return new PostgresNavigatorStore(this.namespace);
   }
 
   /** Door one, carrying this store's binding. */

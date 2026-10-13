@@ -339,10 +339,21 @@ export const ExportRetriever = z.object({
 });
 export type ExportRetrieverInput = z.infer<typeof ExportRetriever>;
 
+/** One navigator in its portable form. Kept as stored: a version this
+ * release cannot run travels too. */
+export const ExportNavigator = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  configVersion: z.number(),
+  config: z.unknown(),
+});
+
 /** A lens's assistants, one list per kind; each entry in its portable form. */
 export const ExportAssistants = z.object({
   agents: z.array(ExportAgent).default([]),
   retrievers: z.array(ExportRetriever).default([]),
+  navigators: z.array(ExportNavigator).default([]),
 });
 
 export const ExportLens = z.object({
@@ -354,7 +365,7 @@ export const ExportLens = z.object({
   // the managed indices of the types it exposes, as a lens upgraded by
   // the storage step does.
   indexInclusions: z.array(z.string()).optional(),
-  assistants: ExportAssistants.default({ agents: [], retrievers: [] }),
+  assistants: ExportAssistants.default(ExportAssistants.parse({})),
   savedQueries: z.array(ExportSavedQuery).default([]),
 });
 

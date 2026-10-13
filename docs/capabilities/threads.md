@@ -1,6 +1,7 @@
 # Threads
 
-Every assistant — an [agent](agents.md) or a [retriever](retrievers.md) —
+Every assistant — an [agent](agents.md), a [retriever](retrievers.md) or a
+[navigator](navigators.md) —
 converses in **threads** the server holds. A client sends only its new message and, to
 continue, the thread's id; the server continues from what the thread kept. How the server
 stores threads, and the numbers below (turns kept, turns the model sees, lifetime, how
@@ -38,8 +39,23 @@ work is its tool calls and their results; they stay in the thread with the turn.
   turns' tool calls and results. A thread keeps a bounded number of turns; older ones are
   removed.
 
-A retriever's thread also keeps what a follow-up question may refer to
-([retrievers.md](retrievers.md#follow-up-questions)).
+A retriever's and a navigator's thread also keep what a follow-up question may refer to
+([retrievers.md](retrievers.md#follow-up-questions),
+[navigators.md](navigators.md#follow-up-questions)).
+
+## The entities a turn met
+
+Every assistant reports the entities its turn met the same way, beside its own work: each
+real entity the lens shows, with a ref it keeps for the turn (`E1`, `E2`, …), its type,
+label and a few visible fields, whether it was handed to the model that wrote
+the answer — its **evidence** — and the stored relations between them. A client can open
+each one. Which entities an assistant reports is its own: an
+[agent](agents.md#live-tool-activity) the entities its entity tools returned, a
+[retriever](retrievers.md#evidence-and-the-answer) the results its answer was given, a
+[navigator](navigators.md#what-the-client-sees) everything its walk met. Only a
+navigator's answer cites them by ref. An entity reported again replaces what was reported
+for its ref. They belong to the turn's stream only: a thread
+does not keep them.
 
 ## Lifetime
 

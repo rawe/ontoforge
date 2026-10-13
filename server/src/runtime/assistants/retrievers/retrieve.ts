@@ -23,6 +23,7 @@ import {
   type FilterHop,
 } from "../../../core/retriever.js";
 import { readsHiddenProperties, RRF_K } from "../../../core/searchQuery.js";
+import { entityCard, EntityRefs, type EntityCard } from "../entities.js";
 import { filterEntityProperties } from "../../readHelpers.js";
 import type { LoadedSchema } from "../../schemaCache.js";
 import { describeMatches, rankThroughIndices, type EngineHit, type Matched } from "../../search/indexSearch.js";
@@ -84,6 +85,8 @@ export interface RetrievedItem {
   /** The retriever's answer fields of the entity's type, cut to length. */
   fields: Row;
   matches: SubQueryMatch[];
+  /** The entity as the lens shows it, for its card. */
+  entity: Row;
 }
 
 export interface Retrieval {
@@ -460,6 +463,7 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
       label: typeof name === "string" && name !== "" ? name : null,
       fields,
       matches: matchesOf.get(item.entityId) ?? [],
+      entity,
     });
   }
   retrieval.cutFields = [...truncated].sort();
@@ -498,6 +502,8 @@ export interface ResponseContext {
   /** Results that did not fit. */
   omitted: number;
   limitations: string[];
+  /** The items behind `results`, in the same order; never handed to the model. */
+  included: RetrievedItem[];
 }
 
 /** What a matched index entry is, in plain words. */
@@ -529,7 +535,8 @@ export function boundContext(
   lens: RetrieverLens,
   config: Pick<RetrieverConfig, "answerFieldCharacters">,
 ): ResponseContext {
-  const context: ResponseContext = { results: [], omitted: 0, limitations: [...retrieval.limitations] };
+  const context: Omit<ResponseContext, "included"> = { results: [], omitted: 0, limitations: [...retrieval.limitations] };
+  const included: RetrievedItem[] = [];
   if (retrieval.cutFields.length > 0) {
     context.limitations.push(
       `Answer fields cut to ${config.answerFieldCharacters} characters: ${retrieval.cutFields.join(", ")}.`,
@@ -560,6 +567,8 @@ export function boundContext(
     if (JSON.stringify(context).length > CONTEXT_CHARACTERS - 400) {
       context.results.pop();
       context.omitted += 1;
+    } else {
+      included.push(item);
     }
   }
   if (context.omitted > 0) {
@@ -569,7 +578,19 @@ export function boundContext(
         "additional matches. The response may be incomplete.",
     );
   }
-  return context;
+  return { ...context, included };
+}
+
+/** The cards of the items handed to the answer model, in their order: all
+ * evidence, refs `E1`… of this turn. */
+export function entityCards(items: readonly RetrievedItem[], lens: RetrieverLens): EntityCard[] {
+  const refs = new EntityRefs();
+  return items.flatMap((item) => {
+    const type = lens.scoped.entityTypes[item.entityType];
+    return type === undefined
+      ? []
+      : [entityCard(refs.ref(item.entityType, item.entityId), item.entity, item.entityType, type, true)];
+  });
 }
 
 /** The plan's searches as the answer model gets them: each query ("" for

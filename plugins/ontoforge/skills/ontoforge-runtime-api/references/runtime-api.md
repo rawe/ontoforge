@@ -367,8 +367,10 @@ Runtime runs them; the modeling surface defines them.
 ## AI Endpoints
 
 Assistants live under `/ai/assistants/<kind>`, where `<kind>` is `agents` (the model works
-step by step with read-only tools) or `retrievers` (a fixed pipeline searches the lens's
-search indices and answers from what it found). Every kind has the same three routes;
+step by step with read-only tools), `retrievers` (a fixed pipeline searches the lens's
+search indices and answers from what it found) or `navigators` (a fixed pipeline walks the
+lens's graph from what the question names and answers citing the entities it met). Every
+kind has the same three routes;
 retrievers add a fourth. Assistants are configured on the modeling surface; runtime lists
 and runs them.
 
@@ -402,13 +404,17 @@ responses before the stream opens.
 | Event `type` | Fields | Meaning |
 |---|---|---|
 | `thread` | `threadId` | Always first: the thread this turn runs on; keep it to continue |
-| `delta` | `text` | A fragment of the answer (retrievers only) |
+| `delta` | `text` | A fragment of the answer (retrievers and navigators) |
 | `final` | `reply` | Terminal: the complete answer |
 | `error` | `error` | Terminal: the error object with `code`, `message`, optional `details` |
+| `entities` | `entities` (each `ref`, `id`, `type`, `typeName`, `label`, `fields`, `evidence`; a navigator adds `role`, `hop`, `reason`), `links` (`id` of the stored relation, `from`, `to`, `type`, `label`) | The entities the turn met, every kind; replace cards by `ref`, links by `id`; read an entity by `type` + `id` |
 | `agent.tool_call` | `callId`, `tool`, `args` | An agent's tool invocation begins |
 | `agent.tool_result` | `callId`, `result` | That invocation completes |
 | `retriever.phase` | `phase` (`plan`, `retrieve`, `answer`), `status` (`start`, `end`), `durationMs` on end | Progress |
 | `retriever.diagnostics` | `plan`, `results`, `limitations`, `searchCalls`, `timings`, `modelIO`, `llmCalls` | Only when requested |
+| `navigator.graph` | `steps`, `edges` | The pipeline, once, after `thread` |
+| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, `durationMs` and optional `summary` on end | Progress, in plain words; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary and no duration |
+| `navigator.summary` | `modelCalls`, `durationMs`, `entities`, `evidence`, `hops`, `timings` | Once, before `final` |
 
 Ignore kind events you do not know. A stream ends with exactly one `final` or `error`;
 EOF without one is an incomplete turn. Closing the connection cancels the turn, and a
@@ -421,14 +427,17 @@ agent may be granted exactly twelve runtime tools: `get_schema`, `list_entities`
 `get_entity`, `get_document`, `list_relations`, `get_neighbors`, `search`,
 `search_documents`, `execute_query`, `list_saved_queries`, `run_saved_query`,
 `search_saved_queries`. Every write tool is outside that set, and so is the read-only
-`get_relation`.
+`get_relation`. After an entity tool's result (`get_entity`, `list_entities`,
+`get_neighbors`, `search`, `search_documents`), an `entities` event carries the entities it
+returned that the turn had not sent yet.
 
 ### Retrievers
 
 A retriever's chat body may add `diagnostics` (default `false`) to receive
 `retriever.diagnostics`; the request cannot change the retriever's configuration. A
 stored retriever the lens can no longer run answers `422 VALIDATION_ERROR` with the
-errors under `details.errors`.
+errors under `details.errors`. Before the answer, an `entities` event carries the results
+the answer model was given.
 
 - `POST /ai/assistants/retrievers/{assistantKey}/retrieve`
   The entities one query finds, without an answer. Request body: `query` (1–2,000
@@ -438,6 +447,14 @@ errors under `details.errors`.
   answer. No results is not an error.
 
 Without an embedding provider a retriever searches by keyword only.
+
+### Navigators
+
+A navigator's answer cites the entities it names by ref — `[E2]`, `[E2, E5]` — matching
+the `ref` of an `entities` card with `evidence: true`; resolve a ref to its card's
+`id` to read the entity. A stored navigator the lens can no longer run answers
+`422 VALIDATION_ERROR` with the errors under `details.errors`. A follow-up on the same
+thread may refer to the entities the previous answer cited ("which of them…").
 
 ### What needs a provider
 

@@ -155,7 +155,8 @@ Place it where the bundle starts — that directory becomes the bundle root.
 
 Both keys belong in this file because they are per-bundle state: everyone working on
 the bundle syncs to the same ontology through the same lens. The server URL is not
-part of it — that is per-developer, and comes from `ONTOFORGE_BASE_URL`.
+part of it — that is per-developer, and comes from the plugin's
+[connection settings](../../../CONNECTION.md).
 
 ## 8. Confirm the setup
 

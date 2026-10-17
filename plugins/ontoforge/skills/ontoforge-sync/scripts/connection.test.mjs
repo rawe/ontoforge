@@ -45,6 +45,7 @@ function run(baseUrl, path, env) {
       console.log('error', err.message);
     }`;
   const clean = { ...process.env };
+  delete clean.ONTOFORGE_BASE_URL;
   delete clean.ONTOFORGE_API_TOKEN;
   delete clean.ONTOFORGE_ENV_FILE;
   return new Promise((done) =>
@@ -95,6 +96,55 @@ test('refuses a redirect while a token is set', async () => {
   const { stdout } = await run(srv.baseUrl, '/moved', { ONTOFORGE_API_TOKEN: TOKEN });
   srv.server.close();
   assert.match(stdout, /302 redirect refused/);
+});
+
+function resolve(flag, env) {
+  const script = `
+    import { resolveBaseUrl } from ${JSON.stringify(join(here, 'connection.mjs'))};
+    try {
+      console.log('url', resolveBaseUrl(${JSON.stringify(flag)}));
+    } catch (err) {
+      console.log('error', err.message);
+    }`;
+  const clean = { ...process.env };
+  delete clean.ONTOFORGE_BASE_URL;
+  delete clean.ONTOFORGE_API_TOKEN;
+  delete clean.ONTOFORGE_ENV_FILE;
+  return new Promise((done) =>
+    execFile(
+      process.execPath,
+      ['--input-type=module', '-e', script],
+      { env: { ...clean, ...env } },
+      (_, stdout, stderr) => done({ stdout, stderr }),
+    ),
+  );
+}
+
+test('base URL: flag, then ONTOFORGE_ENV_FILE, then ONTOFORGE_BASE_URL, then localhost', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ontoforge-url-'));
+  const profile = join(dir, 'remote.env');
+  writeFileSync(profile, `ONTOFORGE_BASE_URL=https://remote.example/\nONTOFORGE_API_TOKEN=${TOKEN}\n`);
+  const env = { ONTOFORGE_BASE_URL: 'http://env.example' };
+
+  const local = await resolve(undefined, {});
+  assert.match(local.stdout, /url http:\/\/localhost:8000/);
+  assert.match(local.stderr, /Server: http:\/\/localhost:8000 \(from default, the local server\)/);
+  assert.match((await resolve(undefined, env)).stdout, /url http:\/\/env\.example/);
+  const fromFile = await resolve(undefined, { ...env, ONTOFORGE_ENV_FILE: profile });
+  assert.match(fromFile.stdout, /url https:\/\/remote\.example$/m);
+  assert.ok(!(fromFile.stdout + fromFile.stderr).includes(TOKEN));
+  assert.match((await resolve('http://flag.example', { ...env, ONTOFORGE_ENV_FILE: profile })).stdout, /url http:\/\/flag\.example/);
+  assert.match((await resolve('ftp://x', {})).stdout, /error base URL must be http or https/);
+});
+
+test('a profile with only a base URL leaves the token to ONTOFORGE_API_TOKEN', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ontoforge-url-'));
+  const profile = join(dir, 'open.env');
+  writeFileSync(profile, 'ONTOFORGE_BASE_URL=http://127.0.0.1:1\n');
+  const srv = await startServer();
+  const { stdout } = await run(srv.baseUrl, '/x', { ONTOFORGE_ENV_FILE: profile, ONTOFORGE_API_TOKEN: TOKEN });
+  srv.server.close();
+  assert.match(stdout, /status 200/);
 });
 
 test('every skill carries the same connection.mjs', () => {

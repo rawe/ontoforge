@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { mergeConfig } from './codec.mjs';
-import { serverFetch } from './connection.mjs';
+import { resolveBaseUrl, serverFetch } from './connection.mjs';
 
 export const CONFIG_FILENAME = 'okf.config.json';
 
@@ -34,13 +34,12 @@ export function parseCliArgs(boolDefs = {}) {
   return { flags, positional };
 }
 
-/** The OntoForge server URL. Per-developer, so it never lives in the bundle. */
+/**
+ * The OntoForge server, resolved as connection.mjs describes. Per-developer,
+ * so it never lives in the bundle.
+ */
 export function getBaseUrl() {
-  const url = process.env.ONTOFORGE_BASE_URL;
-  if (!url) {
-    throw new Error('ONTOFORGE_BASE_URL is not set — point it at your OntoForge server');
-  }
-  return url.replace(/\/+$/, '');
+  return resolveBaseUrl();
 }
 
 /**

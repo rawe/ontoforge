@@ -11,15 +11,16 @@ An application needs four values, all configuration, none hard-coded:
 
 | Value | Default variable | Notes |
 |---|---|---|
-| Base URL | `ONTOFORGE_BASE_URL` | The address the API is served at (e.g. `https://api.ontoforge.example.com`) |
+| Base URL | `ONTOFORGE_BASE_URL` | The address the API is served at; default `http://localhost:8000`, the local server |
 | Ontology key | `ONTOFORGE_ONTOLOGY` | No default on the server |
 | Lens key | `ONTOFORGE_LENS` | No default on the server |
 | Token | `ONTOFORGE_API_TOKEN` | Only when authentication is enabled |
 
-When authentication is enabled, every request — REST and MCP alike — needs
+These are the plugin's [connection](../../../CONNECTION.md) variables. Server and token
+are independent: a local or a remote server, either with or without authentication
+enabled. When it is enabled, every request — REST and MCP alike — needs
 `Authorization: Bearer <token>`, and is answered `401` without a matching one. The same
-application therefore runs with authentication enabled (token set) or not (no token set)
-without a code change.
+application therefore runs in all four cases without a code change.
 
 Use the variable names above unless the application already has a configuration
 mechanism — a settings module, a secret manager, a framework's config files — in which

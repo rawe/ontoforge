@@ -3,7 +3,8 @@
 //
 // Configuration comes from the application, never from this file:
 //   const client = createClient(configFromEnv());
-// configFromEnv() reads ONTOFORGE_BASE_URL, ONTOFORGE_ONTOLOGY, ONTOFORGE_LENS and
+// configFromEnv() reads ONTOFORGE_ONTOLOGY and ONTOFORGE_LENS, ONTOFORGE_BASE_URL
+// (default http://localhost:8000, the local server; set it for a remote one) and
 // the optional ONTOFORGE_API_TOKEN. Pass an object of your own instead when the
 // application keeps its configuration elsewhere (a secret manager, a config file).
 //
@@ -29,10 +30,10 @@ export class OntoForgeError extends Error {
 }
 
 export function configFromEnv(env = process.env) {
-  const missing = ['ONTOFORGE_BASE_URL', 'ONTOFORGE_ONTOLOGY', 'ONTOFORGE_LENS'].filter((k) => !env[k]);
+  const missing = ['ONTOFORGE_ONTOLOGY', 'ONTOFORGE_LENS'].filter((k) => !env[k]);
   if (missing.length) throw new Error(`missing configuration: ${missing.join(', ')}`);
   return {
-    baseUrl: env.ONTOFORGE_BASE_URL,
+    baseUrl: env.ONTOFORGE_BASE_URL || 'http://localhost:8000',
     ontology: env.ONTOFORGE_ONTOLOGY,
     lens: env.ONTOFORGE_LENS,
     token: env.ONTOFORGE_API_TOKEN || undefined,

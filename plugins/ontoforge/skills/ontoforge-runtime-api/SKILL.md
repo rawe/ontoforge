@@ -1,6 +1,6 @@
 ---
 name: ontoforge-runtime-api
-description: "Use when the user builds an application, service, integration, script or frontend on top of an OntoForge server, or needs curl calls, API clients, request payloads, query parameters or endpoint selection for the runtime REST API under /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}. Covers Bearer token authentication when it is enabled. Does not cover schema design on the modeling API or managing ontologies."
+description: "Use when the user builds an application, service, integration, script or frontend on top of an OntoForge server, or needs curl calls, API clients, request payloads, query parameters or endpoint selection for the runtime REST API under /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}. Covers local and remote servers, with Bearer token authentication when it is enabled. Does not cover schema design on the modeling API or managing ontologies."
 ---
 
 # Goal
@@ -42,34 +42,32 @@ the only registry and modeling calls this skill makes.
 
 ## Connecting
 
-When authentication is enabled on the server, every API request needs
-`Authorization: Bearer <token>`. Without it enabled the header is left out; everything
-else is identical.
+The server may be local — the Docker Compose setup at `http://localhost:8000` — or remote,
+at a base URL the user is given; either may have authentication enabled, and then every
+request needs `Authorization: Bearer <token>`. Which server and which token is the
+plugin's [connection contract](../../CONNECTION.md), including how the token is handled
+without ever being read or printed. Follow it for every call you make yourself.
 
-**The token is the user's secret, never yours.**
+What you build follows the same contract, so it runs against a local and a remote server
+without a code change:
 
-- Never ask the user to paste the token into the conversation, never read a file that
-  holds it (`.env`, a token file, a secret manager export), and never print, echo or
-  write its value — not into code, tests, fixtures, commit messages or docs.
-- To find out whether a token is configured, test for presence only:
-  `[ -n "$ONTOFORGE_API_TOKEN" ]`.
-- Generated code reads the token from the application's configuration at run time —
-  `ONTOFORGE_API_TOKEN` in the environment by default, or whatever mechanism the
-  application already uses. Ship a `.env.example` (or the equivalent) with an empty
-  placeholder, make sure the real file is gitignored, and tell the user where to put the
-  value.
-- For a `curl` example, reference the variable, never a literal:
-  `-H "Authorization: Bearer $ONTOFORGE_API_TOKEN"`.
-- To run what you built with authentication enabled, rely on the variable already being set
-  in the environment you run in. If it is not, ask the user to set it before starting the
-  assistant — do not work around its absence.
+- Generated code reads `ONTOFORGE_BASE_URL` (default `http://localhost:8000`) and, when
+  set, `ONTOFORGE_API_TOKEN` from the application's configuration at run time — or the
+  application's own configuration mechanism, when it has one. Never a literal.
+- Ship a `.env.example` (or the equivalent) with an empty token placeholder, make sure the
+  real file is gitignored, and tell the user where to put the value.
+- In a `curl` example, reference the variables, never values:
+  `"$ONTOFORGE_BASE_URL/..."` and `-H "Authorization: Bearer $ONTOFORGE_API_TOKEN"`.
+- To run what you built against a server with authentication enabled, rely on the token
+  already being set in the environment you run in. If it is not, ask the user to set it
+  before starting the assistant — do not work around its absence.
 
 A `401` means the token is missing or wrong. It carries no OntoForge error envelope.
 
 ## Workflow
 
-1. Resolve the base URL, the ontology key and the lens key, and whether authentication
-   is enabled.
+1. Resolve the server — local or remote — the ontology key and the lens key, and whether
+   authentication is enabled.
 2. Read the live deployment: `GET /api/server/info` (version) and
    `GET /api/server/features` (search strategies, AI, decisions). Build nothing on search,
    saved-query discovery, AI or decisions that the probe says is absent.

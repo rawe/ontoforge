@@ -9,14 +9,13 @@
 //   node ontoforge-doc.mjs upload   <file> --type <key> (--id <uuid> | --where <field>=<value>) [--property <field>]
 //   node ontoforge-doc.mjs download <file> --type <key> (--id <uuid> | --where <field>=<value>) [--property <field>]
 //
-// Server from ONTOFORGE_BASE_URL (default http://localhost:8000), ontology and
-// lens from --ontology/--lens or ONTOFORGE_ONTOLOGY/ONTOFORGE_LENS, the optional
-// Bearer token as connection.mjs describes.
+// Server and optional Bearer token as connection.mjs describes, ontology and
+// lens from --ontology/--lens or ONTOFORGE_ONTOLOGY/ONTOFORGE_LENS.
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { serverFetch } from './connection.mjs';
+import { resolveBaseUrl, serverFetch } from './connection.mjs';
 
 const VALUE_FLAGS = ['type', 'id', 'where', 'property', 'ontology', 'lens'];
 
@@ -25,8 +24,9 @@ const USAGE = `Usage:
   ontoforge-doc.mjs download <file> --type <key> (--id <uuid> | --where <field>=<value>) [--property <field>]
 
 Further options: --ontology <key> --lens <key>
-Environment: ONTOFORGE_BASE_URL, ONTOFORGE_ONTOLOGY, ONTOFORGE_LENS,
-  ONTOFORGE_API_TOKEN or ONTOFORGE_ENV_FILE (only with authentication enabled)`;
+Environment: ONTOFORGE_ONTOLOGY, ONTOFORGE_LENS; the server from ONTOFORGE_BASE_URL
+  (default http://localhost:8000) and, with authentication enabled, the token from
+  ONTOFORGE_API_TOKEN — or both from the file ONTOFORGE_ENV_FILE names`;
 
 function die(message) {
   console.error(`Error: ${message}`);
@@ -58,13 +58,16 @@ function parseArgs(argv) {
  * hard stop rather than a guess.
  */
 function resolveConfig(flags) {
-  const baseUrl = (
-    process.env.ONTOFORGE_BASE_URL || 'http://localhost:8000'
-  ).replace(/\/+$/, '');
   const ontology = flags.ontology || process.env.ONTOFORGE_ONTOLOGY;
   const lens = flags.lens || process.env.ONTOFORGE_LENS;
   if (!ontology) die('no ontology — pass --ontology <key> or set ONTOFORGE_ONTOLOGY');
   if (!lens) die('no lens — pass --lens <key> or set ONTOFORGE_LENS');
+  let baseUrl;
+  try {
+    baseUrl = resolveBaseUrl();
+  } catch (err) {
+    die(err.message);
+  }
   return {
     baseUrl,
     prefixPath: `/api/ontologies/${encodeURIComponent(ontology)}/runtime/lenses/${encodeURIComponent(lens)}`,

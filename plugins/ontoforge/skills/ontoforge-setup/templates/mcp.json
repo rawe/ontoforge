@@ -2,11 +2,17 @@
   "mcpServers": {
     "ontoforge-modeling": {
       "type": "http",
-      "url": "http://localhost:8000/mcp/ontologies/my_ontology/model"
+      "url": "${ONTOFORGE_BASE_URL:-http://localhost:8000}/mcp/ontologies/my_ontology/model",
+      "headers": {
+        "Authorization": "Bearer ${ONTOFORGE_API_TOKEN:-}"
+      }
     },
     "ontoforge-runtime": {
       "type": "http",
-      "url": "http://localhost:8000/mcp/ontologies/my_ontology/runtime/lenses/my_lens"
+      "url": "${ONTOFORGE_BASE_URL:-http://localhost:8000}/mcp/ontologies/my_ontology/runtime/lenses/my_lens",
+      "headers": {
+        "Authorization": "Bearer ${ONTOFORGE_API_TOKEN:-}"
+      }
     }
   }
 }

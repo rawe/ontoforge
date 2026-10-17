@@ -1,6 +1,6 @@
 ---
 name: ontoforge-sync
-description: "Export and import one OntoForge ontology's design and instance data, with or without authentication enabled. Use when the user wants to snapshot, restore, clone or move an ontology — its schema, lenses, assistants and saved queries, and/or its entities and relations — as JSON files."
+description: "Export and import one OntoForge ontology's design and instance data, on a local or a remote server, with or without authentication enabled. Use when the user wants to snapshot, restore, clone or move an ontology — its schema, lenses, assistants and saved queries, and/or its entities and relations — as JSON files."
 ---
 
 # Goal
@@ -12,19 +12,26 @@ dedicated scripts, and must be imported in that order.
 ## Prerequisites
 
 - **Node.js 18+** (uses built-in `fetch`, no external dependencies)
-- **OntoForge server running** at the configured base URL
+- **A reachable OntoForge server**, local or remote — see Connection
 - **An ontology to work against.** Nothing is auto-created and there is no default
   ontology — the key is a required input for every script.
 
-## Environment
+## Connection
 
-All scripts resolve the server URL in this order:
+The server and, when authentication is enabled, the token follow the plugin's connection
+contract in [CONNECTION.md](../../CONNECTION.md) — read it before working against a remote
+server or one that needs a token. In short: `--base-url`, else `ONTOFORGE_BASE_URL` from
+the file `ONTOFORGE_ENV_FILE` names, else the `ONTOFORGE_BASE_URL` variable, else the local
+server at `http://localhost:8000`; the token from that file or `ONTOFORGE_API_TOKEN`. Each
+script prints the server it uses first — check it before an import.
 
-1. `--base-url <URL>` flag
-2. `ONTOFORGE_BASE_URL` environment variable
-3. Default: `http://localhost:8000`
+The token stays inside the scripts. For the few calls no script covers — listing,
+creating or deleting an ontology — use `curl` with
+`-H "Authorization: Bearer $ONTOFORGE_API_TOKEN"`, the variable and never its value.
 
-and the ontology key in this order:
+## Ontology key
+
+Every script resolves the ontology key in this order:
 
 1. `--ontology <key>` flag
 2. `ONTOFORGE_ONTOLOGY` environment variable
@@ -33,32 +40,6 @@ There is no default ontology. A script with no key resolved stops before calling
 server and names both inputs. List the server's ontologies with
 `GET /api/ontologies`; create one with `POST /api/ontologies`. Ontology keys match
 `^[a-z][a-z0-9_]*$`: `poc_copy`, never `poc-copy`.
-
-## Authentication
-
-When authentication is enabled on the server, every request needs
-`Authorization: Bearer <token>`. Every script in this plugin finds the token itself, in
-this order:
-
-1. the file `ONTOFORGE_ENV_FILE` names — a `KEY=value` file with an
-   `ONTOFORGE_API_TOKEN` line, or a file holding only the token
-2. the `ONTOFORGE_API_TOKEN` environment variable
-
-With neither, requests go out without the header. When a token is used, the first output line names its source. A `401` stops the script with a message
-saying whether the token was missing or rejected.
-
-Keep the token inside the scripts:
-
-- Let a script make every API call. For the few calls no script covers — listing,
-  creating or deleting an ontology — use `curl` with
-  `-H "Authorization: Bearer $ONTOFORGE_API_TOKEN"`, the variable and never its value.
-- Hand over a token file by path: `ONTOFORGE_ENV_FILE=<path> node scripts/...`. The path
-  is all you handle; the file's content stays unread.
-- To check the environment variable, test for presence only:
-  `[ -n "$ONTOFORGE_API_TOKEN" ]`.
-- On a token error, ask the user where the token lives: an environment variable set
-  before the assistant started, or a file path for `ONTOFORGE_ENV_FILE`. Rerun with their
-  answer. Never ask for the value itself.
 
 ## Ontologies and lenses
 
@@ -90,8 +71,8 @@ node scripts/export-schema.mjs [-o <output>] [--ontology <key>] [--base-url <url
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `-o, --output` | `./ontoforge/schema.json` | Output file path |
-| `--ontology` | see Environment | Ontology key |
-| `--base-url` | see Environment | OntoForge server URL |
+| `--ontology` | see Ontology key | Ontology key |
+| `--base-url` | see Connection | OntoForge server URL |
 
 **API used**: `GET /api/ontologies/{ontologyKey}/model/export`
 
@@ -110,8 +91,8 @@ node scripts/import-schema.mjs <file> [--ontology <key>] [--base-url <url>]
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `<file>` | yes | Path to a transfer-format JSON file |
-| `--ontology` | see Environment | Ontology key |
-| `--base-url` | no | OntoForge server URL |
+| `--ontology` | see Ontology key | Ontology key |
+| `--base-url` | no, see Connection | OntoForge server URL |
 
 **API used**: `POST /api/ontologies/{ontologyKey}/model/import`
 
@@ -138,9 +119,9 @@ node scripts/export-data.mjs [-o <output>] [--ontology <key>] [--lens <key>] [--
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `-o, --output` | `./ontoforge/data.json` | Output file path |
-| `--ontology` | see Environment | Ontology key |
+| `--ontology` | see Ontology key | Ontology key |
 | `--lens` | auto-detected | Lens key the data is read through |
-| `--base-url` | see Environment | OntoForge server URL |
+| `--base-url` | see Connection | OntoForge server URL |
 
 If `--lens` is omitted, the script uses an unscoped lens of that ontology and reports
 which one; without an unscoped lens it stops. A scoped lens, named with `--lens`, exports
@@ -164,9 +145,9 @@ node scripts/import-data.mjs <file> [--ontology <key>] [--lens <key>] [--base-ur
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `<file>` | yes | Path to data JSON file |
-| `--ontology` | see Environment | Ontology key |
+| `--ontology` | see Ontology key | Ontology key |
 | `--lens` | no (auto-detected) | Lens key the data is written through |
-| `--base-url` | no | OntoForge server URL |
+| `--base-url` | no, see Connection | OntoForge server URL |
 
 The import creates all entities first (building a map from old IDs to new IDs), then
 creates all relations using the remapped IDs. Relations referencing unknown entities are
@@ -198,8 +179,8 @@ node scripts/rebuild-search-data.mjs [--ontology <key>] [--base-url <url>]
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `--ontology` | see Environment | Ontology key |
-| `--base-url` | no | OntoForge server URL |
+| `--ontology` | see Ontology key | Ontology key |
+| `--base-url` | no, see Connection | OntoForge server URL |
 
 **API used**: `POST /api/ontologies/{ontologyKey}/model/rebuild-search-data`
 
@@ -223,23 +204,29 @@ embedding provider and reports the vectors as skipped.
 
 ## Typical Workflows
 
+The examples run against whichever server the connection resolves to. `$OF` stands for
+that server in the `curl` calls; with authentication enabled, add
+`-H "Authorization: Bearer $ONTOFORGE_API_TOKEN"` to each.
+
+```bash
+OF=${ONTOFORGE_BASE_URL:-http://localhost:8000}
+```
+
 ### Bootstrap a new project from an existing design
 
 ```bash
-# 1. Start OntoForge
-docker compose up -d
+# 1. Have a server: start the local one (docker compose up -d, see ontoforge-setup),
+#    or point ONTOFORGE_BASE_URL at the remote one
 
-# 2. Wait for PostgreSQL to be ready (health check)
-
-# 3. Create the ontology — nothing is auto-created
-curl -X POST http://localhost:8000/api/ontologies \
+# 2. Create the ontology — nothing is auto-created
+curl -X POST "$OF/api/ontologies" \
   -H 'Content-Type: application/json' \
   -d '{"key":"my_ontology","displayName":"My Ontology"}'
 
-# 4. Import the design
+# 3. Import the design
 node scripts/import-schema.mjs ./ontoforge/schema.json --ontology my_ontology
 
-# 5. Optionally import seed data — search indices then build in the background
+# 4. Optionally import seed data — search indices then build in the background
 node scripts/import-data.mjs ./ontoforge/data.json --ontology my_ontology
 ```
 
@@ -261,10 +248,27 @@ node scripts/export-data.mjs -o ./ontoforge/data.json
 
 ```bash
 node scripts/export-schema.mjs --ontology source -o /tmp/design.json
-curl -X POST http://localhost:8000/api/ontologies \
+curl -X POST "$OF/api/ontologies" \
   -H 'Content-Type: application/json' -d '{"key":"clone"}'
 node scripts/import-schema.mjs /tmp/design.json --ontology clone
 ```
+
+### Copy an ontology from a remote server to the local one
+
+A connection profile names the remote server for the export only; the import, without
+it, goes to the local server.
+
+```bash
+export ONTOFORGE_ONTOLOGY=my_ontology
+ONTOFORGE_ENV_FILE=~/.config/ontoforge/remote.env node scripts/export-schema.mjs -o /tmp/design.json
+ONTOFORGE_ENV_FILE=~/.config/ontoforge/remote.env node scripts/export-data.mjs -o /tmp/data.json
+curl -X POST http://localhost:8000/api/ontologies \
+  -H 'Content-Type: application/json' -d '{"key":"my_ontology"}'
+node scripts/import-schema.mjs /tmp/design.json --base-url http://localhost:8000
+node scripts/import-data.mjs /tmp/data.json --base-url http://localhost:8000
+```
+
+`--base-url` pins the local server even when `ONTOFORGE_BASE_URL` is set in the shell.
 
 ## File Formats
 
@@ -389,6 +393,6 @@ properties are exported with their full content, not as size stubs.
 
 ## Related Skills
 
-- **ontoforge-setup** — Bootstrap a project with Docker Compose, environment variables, and MCP configuration.
+- **ontoforge-setup** — Run OntoForge locally with Docker Compose, or connect a project to a remote server; environment variables and MCP configuration.
 - **ontoforge-runtime-api** — Build against the OntoForge runtime REST API.
 - **ontoforge-okf** — Sync individual Markdown documents with entities, one file per entity.

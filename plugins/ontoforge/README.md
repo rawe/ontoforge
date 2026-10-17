@@ -1,6 +1,6 @@
 # OntoForge Plugin
 
-A plugin for AI coding assistants (Claude Code and OpenAI Codex) that provides OntoForge skills for ontology schema management, project setup and building applications on the runtime API — with or without authentication enabled.
+A plugin for AI coding assistants (Claude Code and OpenAI Codex) that provides OntoForge skills for ontology schema management, project setup and building applications on the runtime API — against a local or a remote server, with or without authentication enabled.
 
 ## Ontologies and lenses
 
@@ -8,15 +8,16 @@ One OntoForge server holds many **ontologies** — isolated units, each with its
 
 Every skill here works against one ontology at a time, and every skill that touches instance data also names a lens. Neither has a default, so both are explicit inputs — a flag or an environment variable for `ontoforge-sync`, `okf.config.json` for `ontoforge-okf`, and the mount URL for the MCP servers `ontoforge-setup` configures.
 
-## Authentication
+## Connection
 
-When authentication is enabled on the server, every request needs `Authorization: Bearer <token>`. Every skill supports it:
+Every skill works against a **local** OntoForge — the one `ontoforge-setup` runs with Docker Compose at `http://localhost:8000` — or a **remote** one at a base URL you are given. Separately, the server may have authentication enabled, and then needs a Bearer token. Two variables cover all four combinations:
 
-- **Scripts** (`ontoforge-sync`, `ontoforge-okf`, `ontoforge-document`) send the token when `ONTOFORGE_API_TOKEN` is set, or when `ONTOFORGE_ENV_FILE` names a file holding it, and nothing otherwise. The token is sent only to the base URL, never printed.
-- **MCP configuration** from `ontoforge-setup` reads the base URL and token from the environment the MCP client starts in (`templates/mcp.auth.json`).
-- **Applications** built with `ontoforge-runtime-api` read the token from their own configuration at run time.
+| | No authentication | Authentication enabled |
+|---|---|---|
+| Local | nothing to set | `ONTOFORGE_API_TOKEN` |
+| Remote | `ONTOFORGE_BASE_URL` | `ONTOFORGE_BASE_URL` and `ONTOFORGE_API_TOKEN` |
 
-Across all of them the assistant never reads, prints or writes the token's value: it tests for presence, hands over file paths, and references the variable in commands and code. Set the variable before starting the assistant, e.g. `ONTOFORGE_API_TOKEN=$(<your secret source>) claude`.
+Scripts also accept both from a connection profile named by `ONTOFORGE_ENV_FILE`, and print the server they use first. The MCP configuration and the applications built with `ontoforge-runtime-api` read the same variables. The assistant never reads, prints or writes the token's value. The full contract — resolution order, profiles, token handling — is [CONNECTION.md](CONNECTION.md).
 
 ## Skills
 
@@ -52,13 +53,13 @@ Upload a file's contents verbatim into a `document` property of an existing enti
 
 ### ontoforge-setup
 
-Bootstrap a project with OntoForge: Docker Compose, environment variables, and MCP configuration.
+Set up a project to work with OntoForge in one of two modes: **local** — run OntoForge with Docker Compose — or **remote** — connect to an existing server at a base URL. Both end in the same MCP configuration.
 
 When invoked, the skill interactively gathers requirements and generates:
 
-1. **`docker-compose.yml`** — PostgreSQL (the database used by OntoForge's default storage adapter), OntoForge server, and OntoForge UI, with optional Ollama for local embeddings.
-2. **`.mcp.json`** — Claude Code MCP configuration pointing to the OntoForge modeling and runtime servers.
-3. **`.env`** (optional) — Environment variables for secrets and local overrides.
+1. **`docker-compose.yml`** (local mode) — PostgreSQL (the database used by OntoForge's default storage adapter), OntoForge server, and OntoForge UI, with optional Ollama for local embeddings.
+2. **`.env`** (local mode, optional) — the server's environment variables for secrets and local overrides.
+3. **`.mcp.json`** (both modes) — Claude Code MCP configuration pointing to the OntoForge modeling and runtime servers, local by default, any server when `ONTOFORGE_BASE_URL` is set.
 
 The skill uses bundled templates as starting points and adapts them based on user input. It never invents environment variables — only the ones recognized by OntoForge are used.
 
@@ -86,13 +87,12 @@ plugins/ontoforge/
 
 ## Templates
 
-The setup skill ships three templates under `skills/ontoforge-setup/templates/`:
+The setup skill ships two templates under `skills/ontoforge-setup/templates/`:
 
 | File | Contents |
 | --- | --- |
 | `docker-compose.yml` | Full OntoForge stack (PostgreSQL + server + UI) with commented embedding and Ollama config |
-| `mcp.json` | MCP server entries for modeling and runtime |
-| `mcp.auth.json` | The same entries with authentication enabled, URL and Bearer token from the environment |
+| `mcp.json` | MCP server entries for modeling and runtime; base URL and Bearer token from the environment, local server without a token by default |
 
 The runtime skill ships `skills/ontoforge-runtime-api/templates/ontoforge-client.mjs`, a starting point for application code.
 

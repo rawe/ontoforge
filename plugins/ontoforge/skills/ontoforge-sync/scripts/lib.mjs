@@ -1,7 +1,7 @@
 // Shared utilities for OntoForge CLI scripts.
 // Requires Node.js 18+ (built-in fetch, no external dependencies).
 
-import { serverFetch } from './connection.mjs';
+import { resolveBaseUrl, serverFetch } from './connection.mjs';
 
 /**
  * Parse CLI arguments.
@@ -26,14 +26,13 @@ export function parseCliArgs(flagDefs = {}) {
   return { flags, positional };
 }
 
-/**
- * Resolve the OntoForge server base URL.
- * Priority: --base-url flag > ONTOFORGE_BASE_URL env > http://localhost:8000
- */
+/** The OntoForge server, resolved as connection.mjs describes. */
 export function getBaseUrl(flags) {
-  const url =
-    flags.baseUrl || process.env.ONTOFORGE_BASE_URL || 'http://localhost:8000';
-  return url.replace(/\/+$/, '');
+  try {
+    return resolveBaseUrl(flags.baseUrl);
+  } catch (err) {
+    die(err.message);
+  }
 }
 
 /**

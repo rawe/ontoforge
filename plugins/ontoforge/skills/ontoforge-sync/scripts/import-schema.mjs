@@ -60,7 +60,8 @@ try {
       `no ontology "${ontologyKey}" on ${baseUrl} — import writes into an ` +
         'existing ontology and never creates one. Create it first: ' +
         `curl -X POST ${baseUrl}/api/ontologies -H 'Content-Type: application/json' ` +
-        `-d '{"key":"${ontologyKey}"}'`,
+        `-d '{"key":"${ontologyKey}"}'` +
+        ' (with authentication enabled, add -H "Authorization: Bearer $ONTOFORGE_API_TOKEN")',
     );
   }
   die(err.message);

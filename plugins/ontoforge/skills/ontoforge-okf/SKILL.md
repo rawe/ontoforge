@@ -24,7 +24,7 @@ The concept ID alone identifies a document. Push and pull resolve it the same wa
 ## Prerequisites
 
 - **Node.js 18+** — built-in `fetch`, no dependencies
-- **`ONTOFORGE_BASE_URL`** naming a running OntoForge server. It is per-developer, so it stays out of the bundle
+- **A reachable OntoForge server**, local or remote, and its token when authentication is enabled — both per-developer, so they stay out of the bundle. They follow the plugin's [connection contract](../../CONNECTION.md): `ONTOFORGE_BASE_URL` (default: the local server at `http://localhost:8000`), `ONTOFORGE_API_TOKEN`, or both from the file `ONTOFORGE_ENV_FILE` names
 - **`okf.config.json` at the bundle root**, naming the ontology and the lens, and mapping every `type` value to an entity type
 - **Entity types** carrying a concept-ID property and a document property, visible through that lens
 
@@ -36,8 +36,9 @@ A bundle is bound to exactly one **ontology** — the isolated unit holding a sc
 all its instance data — and reads and writes its entities through exactly one **lens** of
 that ontology, a named view over the ontology's schema. Both keys live in
 `okf.config.json`, because they are per-bundle state rather than per-developer: everyone
-working on the same bundle syncs to the same place. Only the server URL is per-developer,
-and it stays in `ONTOFORGE_BASE_URL`.
+working on the same bundle syncs to the same place. Only the server and its token are
+per-developer, and they stay in the connection settings — so the same bundle syncs to a
+local server for one developer and a remote one for another.
 
 The lens decides what the scripts can see. An unscoped lens exposes the whole schema; a
 scoped lens must expose every mapped entity type, the concept-ID property and the
@@ -101,5 +102,5 @@ Covers config validation, frontmatter parsing, payload mapping, serialization or
 ## Related Skills
 
 - **ontoforge-sync** — export and import one ontology's design and instance data as JSON.
-- **ontoforge-setup** — bootstrap a project with Docker Compose and MCP configuration.
+- **ontoforge-setup** — Run OntoForge locally with Docker Compose, or connect a project to a remote server; environment variables and MCP configuration.
 - **ontoforge-runtime-api** — build against the OntoForge runtime REST API.

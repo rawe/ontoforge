@@ -24,13 +24,16 @@ includes its type can see it.
 An unknown ontology key answers not found before the lens is considered; an unknown lens
 key answers not found within the ontology.
 
-The one runtime-relevant route outside this prefix is the feature probe, which describes
-the deployment rather than any ontology: `GET /api/server/features`.
+Two runtime-relevant routes sit outside this prefix and describe the deployment rather
+than any ontology: `GET /api/server/info` and `GET /api/server/features`.
+
+When authentication is enabled, every request — these two included — also carries
+`Authorization: Bearer <token>`. See [building-apps.md](building-apps.md#connecting).
 
 ## Core Rules
 
 - Base path: `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`
-- Feature probe: `GET /api/server/features`
+- Deployment reads: `GET /api/server/info`, `GET /api/server/features`
 - Everything on this surface is addressed by **keys** — ontology key, lens key, type key,
   property key — plus instance ids for entities and relations. Internal identifiers
   appear on the modeling surface, never here
@@ -364,6 +367,25 @@ Runtime runs them; the modeling surface defines them.
   { "params": { "city": "Berlin" } }
   ```
 
+## Entity Identity Comparison
+
+- `POST /decisions/compare-entities`
+  Judges whether two partial property snapshots of one entity type describe the same
+  real-world entity. Read-only: it finds no candidates, reads no instance data and
+  merges nothing.
+  Request body — exactly these three fields:
+  ```json
+  { "entityTypeKey": "person",
+    "left":  { "name": "Ann Lee", "email": "ann@example.com" },
+    "right": { "name": "A. Lee", "email": null } }
+  ```
+  Snapshot values are JSON scalars or `null` (unknown, not disagreement); unknown,
+  system, `document` and lens-hidden properties are rejected. Answers `decision`
+  (`same`, `different` or `insufficient` — a normal outcome), `probabilities` (keys
+  `same`, `different`, `insufficient`), `confidence` and `truncatedFields`.
+  Needs a Decision provider (`decisions` in the feature probe), independently of AI and
+  search; without one it answers `FEATURE_DISABLED`. There is no MCP tool.
+
 ## AI Endpoints
 
 Assistants live under `/ai/assistants/<kind>`, where `<kind>` is `agents` (the model works
@@ -461,10 +483,15 @@ thread may refer to the entities the previous answer cited ("which of them…").
 Chat and retrieve need a language-model provider (`ai` in the feature probe). Listing and
 reading a thread run no model and answer normally without one.
 
-## Feature Discovery
+## Deployment Reads
+
+Both describe the deployment, not any ontology — they take no ontology and no lens.
+
+- `GET /api/server/info`
+  Response fields: `baseUrl` (the public address clients reach the server at, or null
+  when none is configured), `version` (the server's release version)
 
 - `GET /api/server/features`
-  Describes the deployment, not any ontology — it takes no ontology and no lens.
   Response fields: `semanticSearch`, `searchStrategies`, `ai`, `decisions`
 
 Semantic search and the AI routes depend on external providers and are unavailable unless
@@ -495,7 +522,7 @@ one of the six.
 
 The one narrowing that matters on this surface is `FEATURE_DISABLED`. A request for an
 unavailable search strategy, search without any available strategy, or saved-query
-discovery or AI without the required provider
+discovery, AI or entity identity comparison without the required provider
 answers `422 VALIDATION_ERROR` with `details: {"code": "FEATURE_DISABLED"}`, which is what
 separates it from an ordinary rejected request on the same route:
 
@@ -541,7 +568,7 @@ Reasonable things to look for that are absent — do not generate calls for them
 
 1. Resolve the **ontology key** and the **lens key** — both are required, and neither has
    a default
-2. Probe `GET /api/server/features` before using search or any AI route
+2. Probe `GET /api/server/features` before using search, any AI route or decisions
 3. Read the schema endpoints if the type or property shape is not already known
 4. Choose the narrowest runtime endpoint that solves the task
 5. Generate the request with exact path params, query params and JSON body

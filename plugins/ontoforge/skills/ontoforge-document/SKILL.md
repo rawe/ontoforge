@@ -13,7 +13,7 @@ are the payload.
 ## Prerequisites
 
 - Node.js 18 or newer
-- a running OntoForge server
+- a reachable OntoForge server, local or remote (see below)
 - **the entity already exists.** The script creates none: that would mean
   filling required properties, and that is not its job. New entities are created
   in the UI, over MCP or over REST.
@@ -25,13 +25,17 @@ node <skill>/scripts/ontoforge-doc.mjs upload   <file> --type <key> (--id <uuid>
 node <skill>/scripts/ontoforge-doc.mjs download <file> --type <key> (--id <uuid> | --where <field>=<value>) [--property <field>]
 ```
 
-Server, ontology and lens come from the environment or from flags:
+Ontology and lens come from the environment or from flags:
 
 | Environment | Flag | Default |
 |---|---|---|
-| `ONTOFORGE_BASE_URL` | – | `http://localhost:8000` |
 | `ONTOFORGE_ONTOLOGY` | `--ontology` | required |
 | `ONTOFORGE_LENS` | `--lens` | required |
+
+The server — local or remote — and, when authentication is enabled, the token follow the
+plugin's [connection contract](../../CONNECTION.md): `ONTOFORGE_BASE_URL` (default: the
+local server at `http://localhost:8000`), `ONTOFORGE_API_TOKEN`, or both from the file
+`ONTOFORGE_ENV_FILE` names. The script prints the server it uses first.
 
 With both variables in the environment the call stays short. Otherwise pass
 `--ontology` and `--lens` per call — that way the script is bound to no

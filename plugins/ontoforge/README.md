@@ -1,12 +1,23 @@
 # OntoForge Plugin
 
-A plugin for AI coding assistants (Claude Code and OpenAI Codex) that provides OntoForge skills for ontology schema management and project setup.
+A plugin for AI coding assistants (Claude Code and OpenAI Codex) that provides OntoForge skills for ontology schema management, project setup and building applications on the runtime API — against a local or a remote server, with or without authentication enabled.
 
 ## Ontologies and lenses
 
 One OntoForge server holds many **ontologies** — isolated units, each with its own schema, lenses, saved queries, agents and instance data. Nothing spans two. A **lens** is a named view over one ontology's schema; instance data is read and written through one.
 
 Every skill here works against one ontology at a time, and every skill that touches instance data also names a lens. Neither has a default, so both are explicit inputs — a flag or an environment variable for `ontoforge-sync`, `okf.config.json` for `ontoforge-okf`, and the mount URL for the MCP servers `ontoforge-setup` configures.
+
+## Connection
+
+Every skill works against a **local** OntoForge — the one `ontoforge-setup` runs with Docker Compose at `http://localhost:8000` — or a **remote** one at a base URL you are given. Separately, the server may have authentication enabled, and then needs a Bearer token. Two variables cover all four combinations:
+
+| | No authentication | Authentication enabled |
+|---|---|---|
+| Local | nothing to set | `ONTOFORGE_API_TOKEN` |
+| Remote | `ONTOFORGE_BASE_URL` | `ONTOFORGE_BASE_URL` and `ONTOFORGE_API_TOKEN` |
+
+Scripts also accept both from a connection profile named by `ONTOFORGE_ENV_FILE`, and print the server they use first. The MCP configuration and the applications built with `ontoforge-runtime-api` read the same variables. The assistant never reads, prints or writes the token's value. The full contract — resolution order, profiles, token handling — is [CONNECTION.md](CONNECTION.md).
 
 ## Skills
 
@@ -42,19 +53,19 @@ Upload a file's contents verbatim into a `document` property of an existing enti
 
 ### ontoforge-setup
 
-Bootstrap a project with OntoForge: Docker Compose, environment variables, and MCP configuration.
+Set up a project to work with OntoForge in one of two modes: **local** — run OntoForge with Docker Compose — or **remote** — connect to an existing server at a base URL. Both end in the same MCP configuration.
 
 When invoked, the skill interactively gathers requirements and generates:
 
-1. **`docker-compose.yml`** — PostgreSQL (the database used by OntoForge's default storage adapter), OntoForge server, and OntoForge UI, with optional Ollama for local embeddings.
-2. **`.mcp.json`** — Claude Code MCP configuration pointing to the OntoForge modeling and runtime servers.
-3. **`.env`** (optional) — Environment variables for secrets and local overrides.
+1. **`docker-compose.yml`** (local mode) — PostgreSQL (the database used by OntoForge's default storage adapter), OntoForge server, and OntoForge UI, with optional Ollama for local embeddings.
+2. **`.env`** (local mode, optional) — the server's environment variables for secrets and local overrides.
+3. **`.mcp.json`** (both modes) — Claude Code MCP configuration pointing to the OntoForge modeling and runtime servers, local by default, any server when `ONTOFORGE_BASE_URL` is set.
 
 The skill uses bundled templates as starting points and adapts them based on user input. It never invents environment variables — only the ones recognized by OntoForge are used.
 
 ### ontoforge-runtime-api
 
-Help an agent build `curl` calls, clients, and integrations against the OntoForge runtime REST API under `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`. The skill stays runtime-only — it covers neither the modeling surface nor the ontology registry — and bundles a reference covering the endpoint contract, the filter and projection syntax, the error envelope, and what the surface deliberately does not offer.
+Help an agent build applications, `curl` calls, clients and integrations against the OntoForge runtime REST API under `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`. It bundles the endpoint contract (filter and projection syntax, streams, the error envelope, what the surface does not offer), an app-building guide (configuration and the token, typing from the lens schema, paging, chat streams, browser apps) and a dependency-free client module to copy into an application. Beyond runtime it makes only the two lookups that find the keys: listing ontologies and listing an ontology's lenses.
 
 ## Installation
 
@@ -76,12 +87,23 @@ plugins/ontoforge/
 
 ## Templates
 
-The plugin ships two templates under `skills/ontoforge-setup/templates/`:
+The setup skill ships two templates under `skills/ontoforge-setup/templates/`:
 
 | File | Contents |
 | --- | --- |
 | `docker-compose.yml` | Full OntoForge stack (PostgreSQL + server + UI) with commented embedding and Ollama config |
-| `mcp.json` | MCP server entries for modeling and runtime |
+| `mcp.json` | MCP server entries for modeling and runtime; base URL and Bearer token from the environment, local server without a token by default |
+
+The runtime skill ships `skills/ontoforge-runtime-api/templates/ontoforge-client.mjs`, a starting point for application code.
+
+## Tests
+
+```bash
+node --test plugins/ontoforge/skills/ontoforge-sync/scripts/connection.test.mjs
+node --test plugins/ontoforge/skills/ontoforge-okf/scripts/codec.test.mjs
+```
+
+`connection.mjs` is copied into every skill that has scripts, so each skill stays self-contained; the connection test fails when the copies differ.
 
 ## Environment Variables
 

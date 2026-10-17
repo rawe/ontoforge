@@ -1,12 +1,22 @@
 # OntoForge Plugin
 
-A plugin for AI coding assistants (Claude Code and OpenAI Codex) that provides OntoForge skills for ontology schema management and project setup.
+A plugin for AI coding assistants (Claude Code and OpenAI Codex) that provides OntoForge skills for ontology schema management, project setup and building applications on the runtime API — with or without authentication enabled.
 
 ## Ontologies and lenses
 
 One OntoForge server holds many **ontologies** — isolated units, each with its own schema, lenses, saved queries, agents and instance data. Nothing spans two. A **lens** is a named view over one ontology's schema; instance data is read and written through one.
 
 Every skill here works against one ontology at a time, and every skill that touches instance data also names a lens. Neither has a default, so both are explicit inputs — a flag or an environment variable for `ontoforge-sync`, `okf.config.json` for `ontoforge-okf`, and the mount URL for the MCP servers `ontoforge-setup` configures.
+
+## Authentication
+
+When authentication is enabled on the server, every request needs `Authorization: Bearer <token>`. Every skill supports it:
+
+- **Scripts** (`ontoforge-sync`, `ontoforge-okf`, `ontoforge-document`) send the token when `ONTOFORGE_API_TOKEN` is set, or when `ONTOFORGE_ENV_FILE` names a file holding it, and nothing otherwise. The token is sent only to the base URL, never printed.
+- **MCP configuration** from `ontoforge-setup` reads the base URL and token from the environment the MCP client starts in (`templates/mcp.auth.json`).
+- **Applications** built with `ontoforge-runtime-api` read the token from their own configuration at run time.
+
+Across all of them the assistant never reads, prints or writes the token's value: it tests for presence, hands over file paths, and references the variable in commands and code. Set the variable before starting the assistant, e.g. `ONTOFORGE_API_TOKEN=$(<your secret source>) claude`.
 
 ## Skills
 
@@ -54,7 +64,7 @@ The skill uses bundled templates as starting points and adapts them based on use
 
 ### ontoforge-runtime-api
 
-Help an agent build `curl` calls, clients, and integrations against the OntoForge runtime REST API under `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`. The skill stays runtime-only — it covers neither the modeling surface nor the ontology registry — and bundles a reference covering the endpoint contract, the filter and projection syntax, the error envelope, and what the surface deliberately does not offer.
+Help an agent build applications, `curl` calls, clients and integrations against the OntoForge runtime REST API under `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`. It bundles the endpoint contract (filter and projection syntax, streams, the error envelope, what the surface does not offer), an app-building guide (configuration and the token, typing from the lens schema, paging, chat streams, browser apps) and a dependency-free client module to copy into an application. Beyond runtime it makes only the two lookups that find the keys: listing ontologies and listing an ontology's lenses.
 
 ## Installation
 
@@ -76,12 +86,24 @@ plugins/ontoforge/
 
 ## Templates
 
-The plugin ships two templates under `skills/ontoforge-setup/templates/`:
+The setup skill ships three templates under `skills/ontoforge-setup/templates/`:
 
 | File | Contents |
 | --- | --- |
 | `docker-compose.yml` | Full OntoForge stack (PostgreSQL + server + UI) with commented embedding and Ollama config |
 | `mcp.json` | MCP server entries for modeling and runtime |
+| `mcp.auth.json` | The same entries with authentication enabled, URL and Bearer token from the environment |
+
+The runtime skill ships `skills/ontoforge-runtime-api/templates/ontoforge-client.mjs`, a starting point for application code.
+
+## Tests
+
+```bash
+node --test plugins/ontoforge/skills/ontoforge-sync/scripts/connection.test.mjs
+node --test plugins/ontoforge/skills/ontoforge-okf/scripts/codec.test.mjs
+```
+
+`connection.mjs` is copied into every skill that has scripts, so each skill stays self-contained; the connection test fails when the copies differ.
 
 ## Environment Variables
 

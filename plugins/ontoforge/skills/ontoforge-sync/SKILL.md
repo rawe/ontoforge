@@ -1,6 +1,6 @@
 ---
 name: ontoforge-sync
-description: "Export and import one OntoForge ontology's design and instance data. Use when the user wants to snapshot or restore an ontology — its schema, lenses, assistants and saved queries, and/or its entities and relations — as JSON files."
+description: "Export and import one OntoForge ontology's design and instance data, with or without authentication enabled. Use when the user wants to snapshot, restore, clone or move an ontology — its schema, lenses, assistants and saved queries, and/or its entities and relations — as JSON files."
 ---
 
 # Goal
@@ -31,7 +31,34 @@ and the ontology key in this order:
 
 There is no default ontology. A script with no key resolved stops before calling the
 server and names both inputs. List the server's ontologies with
-`GET /api/ontologies`; create one with `POST /api/ontologies`.
+`GET /api/ontologies`; create one with `POST /api/ontologies`. Ontology keys match
+`^[a-z][a-z0-9_]*$`: `poc_copy`, never `poc-copy`.
+
+## Authentication
+
+When authentication is enabled on the server, every request needs
+`Authorization: Bearer <token>`. Every script in this plugin finds the token itself, in
+this order:
+
+1. the file `ONTOFORGE_ENV_FILE` names — a `KEY=value` file with an
+   `ONTOFORGE_API_TOKEN` line, or a file holding only the token
+2. the `ONTOFORGE_API_TOKEN` environment variable
+
+With neither, requests go out without the header. When a token is used, the first output line names its source. A `401` stops the script with a message
+saying whether the token was missing or rejected.
+
+Keep the token inside the scripts:
+
+- Let a script make every API call. For the few calls no script covers — listing,
+  creating or deleting an ontology — use `curl` with
+  `-H "Authorization: Bearer $ONTOFORGE_API_TOKEN"`, the variable and never its value.
+- Hand over a token file by path: `ONTOFORGE_ENV_FILE=<path> node scripts/...`. The path
+  is all you handle; the file's content stays unread.
+- To check the environment variable, test for presence only:
+  `[ -n "$ONTOFORGE_API_TOKEN" ]`.
+- On a token error, ask the user where the token lives: an environment variable set
+  before the assistant started, or a file path for `ONTOFORGE_ENV_FILE`. Rerun with their
+  answer. Never ask for the value itself.
 
 ## Ontologies and lenses
 
@@ -143,7 +170,9 @@ node scripts/import-data.mjs <file> [--ontology <key>] [--lens <key>] [--base-ur
 
 The import creates all entities first (building a map from old IDs to new IDs), then
 creates all relations using the remapped IDs. Relations referencing unknown entities are
-skipped with a warning. If `--lens` is omitted, the script uses an unscoped lens and stops
+skipped with a warning. The import is not all-or-nothing: when it stops midway the
+ontology is half-filled — ask the user, then delete the ontology, recreate it and rerun
+from the schema import. If `--lens` is omitted, the script uses an unscoped lens and stops
 when the ontology has none. The lens must expose every type and property the file
 carries — a scoped lens rejects what it hides.
 

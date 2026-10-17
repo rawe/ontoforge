@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { mergeConfig } from './codec.mjs';
+import { serverFetch } from './connection.mjs';
 
 export const CONFIG_FILENAME = 'okf.config.json';
 
@@ -58,17 +59,9 @@ export function runtimePath(config) {
  * Make an API request. Throws on non-2xx responses.
  */
 export async function api(baseUrl, path, options = {}) {
-  const url = `${baseUrl}${path}`;
   const headers = { ...options.headers };
   if (options.body) headers['Content-Type'] = 'application/json';
-  let res;
-  try {
-    res = await fetch(url, { ...options, headers });
-  } catch {
-    throw new Error(
-      `Cannot connect to ${baseUrl}. Is the OntoForge server running?`,
-    );
-  }
+  const res = await serverFetch(baseUrl, path, { ...options, headers });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(

@@ -1,6 +1,6 @@
 ---
 name: ontoforge-setup
-description: "Bootstrap a project with OntoForge. Use when the user wants to set up OntoForge in a new or existing project — Docker Compose, environment variables, and MCP configuration."
+description: "Bootstrap a project with OntoForge. Use when the user wants to set up OntoForge in a new or existing project — Docker Compose, environment variables, and MCP configuration — or to connect a project to an existing OntoForge server, including one with authentication enabled that needs a Bearer token."
 ---
 
 # Goal
@@ -24,7 +24,9 @@ Semantic search is optional and supports two embedding providers: **Ollama** (lo
 The following templates are bundled with this plugin:
 
 - **Docker Compose**: `templates/docker-compose.yml`
-- **MCP configuration**: `templates/mcp.json`
+- **MCP configuration**: `templates/mcp.json` — a local server without authentication
+- **MCP configuration with authentication enabled**: `templates/mcp.auth.json` — base URL
+  and Bearer token read from the environment when the MCP client starts
 
 Read these templates as the starting point. Adapt them to the user's needs and write the result into the user's project.
 
@@ -72,6 +74,22 @@ Read the template from `templates/mcp.json` and adapt it:
 - Adjust the host/port if the user changed defaults.
 
 Write the result as `.mcp.json` in the project root. If a `.mcp.json` already exists, merge the `mcpServers` entries into it — do not overwrite existing servers.
+
+### Connecting to an existing server
+
+When the user already has an OntoForge server, skip the Docker Compose step and write only
+the MCP configuration. When authentication is enabled on the server, every request needs
+`Authorization: Bearer <token>`; use `templates/mcp.auth.json` instead of
+`templates/mcp.json`:
+
+- Replace `my_ontology` and `my_lens` as above. Keep `${ONTOFORGE_BASE_URL}` and
+  `${ONTOFORGE_API_TOKEN}` as they are: the MCP client expands them from the environment
+  it starts in, so the file holds no secret and can be committed.
+- `ONTOFORGE_BASE_URL` is the address the API is served at (e.g.
+  `https://api.ontoforge.example.com`).
+- Never ask for, read or write the token's value. Tell the user to set
+  `ONTOFORGE_API_TOKEN` (from their secret manager or a local file of their own) before
+  starting the assistant, e.g. `ONTOFORGE_API_TOKEN=$(<their source>) claude`.
 
 ### 4. Generate .env (optional)
 

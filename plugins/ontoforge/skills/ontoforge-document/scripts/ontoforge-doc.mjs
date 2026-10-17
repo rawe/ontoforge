@@ -10,10 +10,13 @@
 //   node ontoforge-doc.mjs download <file> --type <key> (--id <uuid> | --where <field>=<value>) [--property <field>]
 //
 // Server from ONTOFORGE_BASE_URL (default http://localhost:8000), ontology and
-// lens from --ontology/--lens or ONTOFORGE_ONTOLOGY/ONTOFORGE_LENS.
+// lens from --ontology/--lens or ONTOFORGE_ONTOLOGY/ONTOFORGE_LENS, the optional
+// Bearer token as connection.mjs describes.
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+
+import { serverFetch } from './connection.mjs';
 
 const VALUE_FLAGS = ['type', 'id', 'where', 'property', 'ontology', 'lens'];
 
@@ -22,7 +25,8 @@ const USAGE = `Usage:
   ontoforge-doc.mjs download <file> --type <key> (--id <uuid> | --where <field>=<value>) [--property <field>]
 
 Further options: --ontology <key> --lens <key>
-Environment: ONTOFORGE_BASE_URL, ONTOFORGE_ONTOLOGY, ONTOFORGE_LENS`;
+Environment: ONTOFORGE_BASE_URL, ONTOFORGE_ONTOLOGY, ONTOFORGE_LENS,
+  ONTOFORGE_API_TOKEN or ONTOFORGE_ENV_FILE (only with authentication enabled)`;
 
 function die(message) {
   console.error(`Error: ${message}`);
@@ -63,7 +67,7 @@ function resolveConfig(flags) {
   if (!lens) die('no lens — pass --lens <key> or set ONTOFORGE_LENS');
   return {
     baseUrl,
-    prefix: `${baseUrl}/api/ontologies/${encodeURIComponent(ontology)}/runtime/lenses/${encodeURIComponent(lens)}`,
+    prefixPath: `/api/ontologies/${encodeURIComponent(ontology)}/runtime/lenses/${encodeURIComponent(lens)}`,
   };
 }
 
@@ -73,9 +77,9 @@ async function api(cfg, path, options = {}) {
   if (options.body) headers['Content-Type'] = 'application/json';
   let res;
   try {
-    res = await fetch(`${cfg.prefix}${path}`, { ...options, headers });
-  } catch {
-    die(`cannot connect to ${cfg.baseUrl} — is the OntoForge server running?`);
+    res = await serverFetch(cfg.baseUrl, `${cfg.prefixPath}${path}`, { ...options, headers });
+  } catch (err) {
+    die(err.message);
   }
   if (!res.ok) {
     die(`${options.method || 'GET'} ${path} -> ${res.status}: ${await res.text()}`);

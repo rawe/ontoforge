@@ -3,6 +3,7 @@
 // saved-query description vectors and their vector index. Search indices
 // rebuild themselves.
 
+import { serverFetch } from './connection.mjs';
 import { die, getBaseUrl, getOntologyKey, modelPath, parseCliArgs } from './lib.mjs';
 
 const { flags } = parseCliArgs({
@@ -16,9 +17,9 @@ const path = `${modelPath(ontologyKey)}/rebuild-search-data`;
 
 let res;
 try {
-  res = await fetch(`${baseUrl}${path}`, { method: 'POST' });
-} catch {
-  die(`Cannot connect to ${baseUrl}. Is the OntoForge server running?`);
+  res = await serverFetch(baseUrl, path, { method: 'POST' });
+} catch (err) {
+  die(err.message);
 }
 
 if (!res.ok) {

@@ -25,6 +25,7 @@ The concept ID alone identifies a document. Push and pull resolve it the same wa
 
 - **Node.js 18+** — built-in `fetch`, no dependencies
 - **`ONTOFORGE_BASE_URL`** naming a running OntoForge server. It is per-developer, so it stays out of the bundle
+- **Only with authentication enabled:** `ONTOFORGE_API_TOKEN`, or `ONTOFORGE_ENV_FILE` naming a file that holds it. Per-developer like the URL, and the token is handled as the `ontoforge-sync` skill's *Authentication* section says
 - **`okf.config.json` at the bundle root**, naming the ontology and the lens, and mapping every `type` value to an entity type
 - **Entity types** carrying a concept-ID property and a document property, visible through that lens
 

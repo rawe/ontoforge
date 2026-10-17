@@ -32,6 +32,7 @@ Server, ontology and lens come from the environment or from flags:
 | `ONTOFORGE_BASE_URL` | – | `http://localhost:8000` |
 | `ONTOFORGE_ONTOLOGY` | `--ontology` | required |
 | `ONTOFORGE_LENS` | `--lens` | required |
+| `ONTOFORGE_API_TOKEN` or `ONTOFORGE_ENV_FILE` | – | none; only with authentication enabled, and the token is handled as the `ontoforge-sync` skill's *Authentication* section says |
 
 With both variables in the environment the call stays short. Otherwise pass
 `--ontology` and `--lens` per call — that way the script is bound to no

@@ -1,6 +1,8 @@
 // Shared utilities for OntoForge CLI scripts.
 // Requires Node.js 18+ (built-in fetch, no external dependencies).
 
+import { serverFetch } from './connection.mjs';
+
 /**
  * Parse CLI arguments.
  * @param {Object<string, string[]>} flagDefs - Flag name to aliases map
@@ -67,17 +69,9 @@ export function runtimePath(ontologyKey, lensKey) {
  * Make an API request. Throws on non-2xx responses.
  */
 export async function api(baseUrl, path, options = {}) {
-  const url = `${baseUrl}${path}`;
   const headers = { ...options.headers };
   if (options.body) headers['Content-Type'] = 'application/json';
-  let res;
-  try {
-    res = await fetch(url, { ...options, headers });
-  } catch {
-    throw new Error(
-      `Cannot connect to ${baseUrl}. Is the OntoForge server running?`,
-    );
-  }
+  const res = await serverFetch(baseUrl, path, { ...options, headers });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(

@@ -101,7 +101,7 @@ export const HAS_CHILDREN_MESSAGE = "This entity has children; delete them first
 /** Every parent relation of the FULL schema, as relation type key →
  * parent end: the parent rules hold across all of them, whatever the
  * lens shows. Empty when the ontology flags none. */
-function parentReadings(schema: SchemaCacheValue): Record<string, ParentEnd> {
+export function parentReadings(schema: SchemaCacheValue): Record<string, ParentEnd> {
   const readings: Record<string, ParentEnd> = {};
   for (const rt of Object.values(schema.relationTypes)) {
     if (rt.parent !== null) {

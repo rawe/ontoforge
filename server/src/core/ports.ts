@@ -1174,7 +1174,9 @@ export interface ChangesetStore {
   /** Inside a bound store only: the ontology's commit lock, a
    * transaction-scoped advisory lock taken with try semantics, then the
    * row `FOR UPDATE NOWAIT`. Either one held elsewhere is a
-   * `ConflictError`. Null when the changeset is gone. */
+   * `ConflictError`. Null when the changeset is gone. From here on, the
+   * transaction waits at most 5 s for a row another transaction holds;
+   * a longer wait is a `ConflictError`. */
   lockForCommit(id: string): Promise<ChangesetRecord | null>;
 
   /** Delete the journal and the changeset. */

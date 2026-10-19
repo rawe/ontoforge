@@ -10,7 +10,8 @@
  *   unstage bumps the version, so a seq is never reused, not even after
  *   the last write is unstaged.
  * - The journal dies with its changeset (`ON DELETE CASCADE`).
- * - `lockForCommit` runs only inside a bound store. The commit lock is a
+ * - `lockForCommit` runs only inside a bound store. It first bounds the
+ *   transaction's lock waits (`lock_timeout`, 5 s). The commit lock is a
  *   transaction-scoped advisory lock keyed by the namespace, so it holds
  *   across server instances and dies with the transaction.
  */
@@ -39,6 +40,10 @@ const WRITE_COLS = `seq, operation, arguments, minted_id, type_key, target_id, b
 
 /** The version bump and last change of every mutation. */
 const BUMP = `version = c.version + 1, last_change_at = now()`;
+
+/** How long a commit waits for a row another transaction holds (V26);
+ * past it, 55P03 is a `ConflictError`. */
+const COMMIT_LOCK_TIMEOUT = "5s";
 
 /** The answer of `lockForCommit` when another commit holds the lock. */
 const COMMIT_RUNNING = "Another commit is running; try again";
@@ -326,6 +331,7 @@ export class PostgresChangesetStore implements ChangesetStore {
     if (!isUuid(id)) {
       return null;
     }
+    await this.bound.query(`SET LOCAL lock_timeout = '${COMMIT_LOCK_TIMEOUT}'`);
     const lock = await this.bound.query(
       `SELECT pg_try_advisory_xact_lock(hashtextextended('ontoforge.commit.' || current_schema(), 0)) AS taken`,
     );

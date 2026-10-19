@@ -5,7 +5,8 @@
  * (`anchorRouter.ts`, whose hooks check the anchor first).
  *
  * The staged write routes under `/:changesetId/` have the paths and bodies
- * of the six write routes of `router.ts` and answer 202 `{seq, id}`. No
+ * of the six write routes of `router.ts` and answer 202 `{seq, id}`.
+ * `POST /:changesetId/commit` persists them all or nothing. No
  * read route is mounted under a changeset: reads never see staged data.
  * Routers parse and shape only; every rule lives in `changesets.ts`.
  */
@@ -26,6 +27,9 @@ const RelationParams = RelationTypeParams.extend({ relationId: z.string() });
 const WriteParams = ChangesetParams.extend({ seq: z.coerce.number().int().min(1) });
 
 const StartPayload = z.strictObject({ note: z.string().nullish() }).nullish();
+
+/** The version the caller looked at; without it, any version commits. */
+const CommitPayload = z.strictObject({ expectedVersion: z.number().int().min(1).optional() }).nullish();
 
 /** The writes of a changeset by seq: default 100, at most 500 (R7). */
 const PageQuery = z.looseObject({
@@ -106,6 +110,19 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
       );
       return reply.status(204).send();
     },
+  );
+
+  app.post(
+    "/:changesetId/commit",
+    { schema: { tags: ["runtime"], params: ChangesetParams, body: CommitPayload } },
+    async (request) =>
+      changesets.commitChangeset(
+        request.params.lensKey,
+        anchorOf(request.params),
+        request.params.changesetId,
+        request.body?.expectedVersion,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
   );
 
   // --- Staged writes: the paths and bodies of the immediate writes ---

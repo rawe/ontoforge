@@ -30,6 +30,15 @@
  * - **Expiry (V24, R3).** A live changeset idle for 7 days is gone: checked
  *   on every access, where it is deleted and answers not found, and swept
  *   on start.
+ * - **Commit (D3, V1 B).** Before BEGIN, holding nothing: the schema, the
+ *   changeset and the search context are loaded. Then one transaction on
+ *   one connection: the commit lock and the changeset row (V12), the
+ *   version check (V40), the replay of the journal by seq through the
+ *   store's own write methods with their search work (V20, V23), commit
+ *   validation, the journal deleted, COMMIT. Any failure rolls all of it
+ *   back; a rejection (422) then refreshes the last change and keeps the
+ *   version (R6). At most two commits run at once in one process (V26,
+ *   R5).
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -40,9 +49,12 @@ import type {
   ChangesetRecord,
   ChangesetWriteRecord,
   NewChangesetWrite,
+  ParentLink,
   RuntimeStore,
+  SearchWritePlan,
 } from "../core/ports.js";
-import type { PropertyDef } from "../core/schemas.js";
+import type { ParentEnd, PropertyDef } from "../core/schemas.js";
+import { planSearchWrite, type SearchChange } from "../core/searchDependencies.js";
 import { AnchorGuard } from "./anchorGuard.js";
 import { cpLength } from "./codePoints.js";
 import {
@@ -57,7 +69,8 @@ import {
   type UpdateArgs,
 } from "./prepare.js";
 import { documentPropertyKeys } from "./readHelpers.js";
-import { loadSchema, type LoadedSchema } from "./schemaCache.js";
+import { loadSchema, loadSearchContext, type LoadedSchema, type SearchContext } from "./schemaCache.js";
+import { parentReadings } from "./service.js";
 
 type Row = Record<string, unknown>;
 
@@ -467,4 +480,289 @@ export async function discardChangeset(
   if (record.submittedAt === null && (await changesets.discard(record.id))) return;
   if ((await changesets.get(record.id, loaded.scoped.lensId, anchorKey)) === null) throw notFound(changesetId);
   throw new ConflictError(`Changeset '${changesetId}' is submitted; unsubmit it first`);
+}
+
+// ---------------------------------------------------------------------------
+// Commit
+// ---------------------------------------------------------------------------
+
+/** At most this many commits run at once in one process (V26, R5). */
+export const MAX_RUNNING_COMMITS = 2;
+/** A rejection names at most this many violations (V21). */
+export const MAX_VIOLATIONS = 100;
+/** The journal is replayed in pages of this many writes. */
+const REPLAY_PAGE = 500;
+
+let runningCommits = 0;
+
+/** One reason a commit is rejected, on the staged write it concerns. */
+export interface Violation {
+  seq: number;
+  kind: string;
+  message: string;
+}
+
+/** What the replay leaves for commit validation. */
+export interface Replay {
+  /** The staged writes replayed. */
+  replayed: number;
+  /** The seqs of staged deletes that found nothing: done (V20). */
+  alreadyGone: number[];
+  /** Each staged entity delete's children over the parent relations,
+   * read with the entity locked, just before its delete. */
+  deletedChildren: { seq: number; entityId: string; children: ParentLink[] }[];
+  /** The write that could not be replayed; nothing after it ran. */
+  fault: Violation | null;
+}
+
+/** The answer of a commit. */
+export interface CommitAnswer {
+  committed: number;
+  alreadyGone: number[];
+}
+
+/** A staged write that cannot be replayed; its message names only what
+ * the caller sent. */
+class ReplayFault extends Error {}
+
+/** Thrown inside the commit transaction to roll it back with these. */
+class CommitRejected extends Error {
+  constructor(readonly violations: Violation[]) {
+    super("Commit rejected");
+  }
+}
+
+function faultOn(errors: FieldErrors): void {
+  const fields = Object.entries(errors);
+  if (fields.length > 0) {
+    throw new ReplayFault(
+      `Instance validation failed: ${fields.map(([key, message]) => `${key}: ${message}`).join("; ")}`,
+    );
+  }
+}
+
+/** One staged write, replayed through the store's write method with its
+ * search work, as the immediate write runs it. */
+async function replayOne(
+  loaded: LoadedSchema,
+  plan: (change: SearchChange) => SearchWritePlan | null,
+  readings: Record<string, ParentEnd>,
+  write: ChangesetWriteRecord,
+  bound: RuntimeStore,
+  replay: Replay,
+): Promise<void> {
+  const args = write.arguments;
+  const properties = (args.properties ?? {}) as Row;
+  switch (write.operation) {
+    case "create_entity": {
+      const parentRelation = (args.parentRelation ?? null) as ParentRelationInput | null;
+      const { errors, write: prepared } = prepareCreateEntity(loaded, write.typeKey, properties, parentRelation, {
+        entityId: write.mintedId!,
+        relationId: (args.relationId as string | null) ?? randomUUID(),
+      });
+      faultOn(errors);
+      const e = prepared.entity;
+      if (prepared.parent === null) {
+        await bound.createEntity(e.entityTypeKey, e.entityId, e.properties, e.propertyDefs, plan(e.change));
+        return;
+      }
+      const r = prepared.parent.relation;
+      await bound.createEntityWithParent(
+        {
+          entityTypeKey: e.entityTypeKey,
+          entityId: e.entityId,
+          properties: e.properties,
+          propertyDefs: e.propertyDefs,
+          search: plan(e.change),
+        },
+        {
+          relationTypeKey: r.relationTypeKey,
+          relationId: r.relationId,
+          fromEntityId: r.fromEntityId,
+          toEntityId: r.toEntityId,
+          properties: r.properties,
+          propertyDefs: r.propertyDefs,
+          search: plan(r.change),
+        },
+      );
+      return;
+    }
+    case "update_entity": {
+      const { errors, write: prepared } = prepareUpdateEntity(loaded, write.typeKey, write.targetId!, properties);
+      faultOn(errors);
+      if (prepared === null) return;
+      const updated = await bound.updateEntity(
+        prepared.entityTypeKey,
+        prepared.entityId,
+        prepared.setProperties,
+        prepared.removeProperties,
+        prepared.propertyDefs,
+        plan(prepared.change),
+      );
+      if (updated === null) throw new ReplayFault(`Entity '${write.targetId}' not found`);
+      return;
+    }
+    case "delete_entity": {
+      const prepared = prepareDeleteEntity(loaded, write.typeKey, write.targetId!);
+      // Delete capture: X locked, so no child can attach until COMMIT, and
+      // its children recorded before the cascade erases them.
+      const children = await bound.childrenOf([prepared.entityId], readings, true);
+      replay.deletedChildren.push({ seq: write.seq, entityId: prepared.entityId, children });
+      if (!(await bound.deleteEntity(prepared.entityTypeKey, prepared.entityId, plan(prepared.change)))) {
+        replay.alreadyGone.push(write.seq);
+      }
+      return;
+    }
+    case "create_relation": {
+      const { errors, write: prepared } = prepareCreateRelation(
+        loaded,
+        write.typeKey,
+        args.fromEntityId as string,
+        args.toEntityId as string,
+        properties,
+        write.mintedId!,
+      );
+      faultOn(errors);
+      await bound.createRelation(
+        prepared.relationTypeKey,
+        prepared.relationId,
+        prepared.fromEntityId,
+        prepared.toEntityId,
+        prepared.properties,
+        prepared.propertyDefs,
+        plan(prepared.change),
+      );
+      return;
+    }
+    case "update_relation": {
+      const { errors, write: prepared } = prepareUpdateRelation(loaded, write.typeKey, write.targetId!, properties);
+      faultOn(errors);
+      if (prepared === null) return;
+      const updated = await bound.updateRelation(
+        prepared.relationTypeKey,
+        prepared.relationId,
+        prepared.setProperties,
+        prepared.removeProperties,
+        prepared.propertyDefs,
+        plan(prepared.change),
+      );
+      if (updated === null) throw new ReplayFault(`Relation '${write.targetId}' not found`);
+      return;
+    }
+    case "delete_relation": {
+      const prepared = prepareDeleteRelation(loaded, write.typeKey, write.targetId!);
+      if (!(await bound.deleteRelation(prepared.relationTypeKey, prepared.relationId, plan(prepared.change)))) {
+        replay.alreadyGone.push(write.seq);
+      }
+      return;
+    }
+    default:
+      throw new ReplayFault(`Unknown operation '${write.operation}'`);
+  }
+}
+
+/**
+ * Step 2 of the commit (V20): replay the journal by seq on the bound
+ * store, each write through its `prepare…` and the store's write method,
+ * its search work queued in the same transaction (V23). A staged entity
+ * delete first locks the entity and records its children; a delete that
+ * finds nothing is done, and noted. No savepoints: the first write that
+ * fails ends the replay as its `fault` (an unknown id, a reference to an
+ * entity that does not exist, a value the lens no longer accepts). Any
+ * other error, a lock wait past the timeout among them, is thrown.
+ */
+export async function replayJournal(
+  loaded: LoadedSchema,
+  search: SearchContext,
+  changesetId: string,
+  bound: RuntimeStore,
+): Promise<Replay> {
+  const replay: Replay = { replayed: 0, alreadyGone: [], deletedChildren: [], fault: null };
+  const plan = (change: SearchChange): SearchWritePlan | null => planSearchWrite(search.dependencies, change);
+  const readings = parentReadings(loaded.full);
+  const changesets = bound.changesets();
+  for (let offset = 0; ; offset += REPLAY_PAGE) {
+    const writes = await changesets.page(changesetId, offset, REPLAY_PAGE);
+    for (const write of writes) {
+      try {
+        await replayOne(loaded, plan, readings, write, bound, replay);
+      } catch (error) {
+        if (error instanceof ReplayFault || error instanceof NotFoundError) {
+          replay.fault = { seq: write.seq, kind: "replay", message: error.message };
+          return replay;
+        }
+        throw error;
+      }
+      replay.replayed += 1;
+    }
+    if (writes.length < REPLAY_PAGE) return replay;
+  }
+}
+
+/** Step 3 of the commit: the rules over the end state, in the service on
+ * the bound store's neutral reads. None yet. */
+async function commitViolations(): Promise<Violation[]> {
+  return [];
+}
+
+/** The 422 of a rejected commit: the first violations and their total. */
+function rejection(violations: Violation[]): ValidationError {
+  return new ValidationError("The commit was rejected; nothing was persisted", {
+    violations: violations.slice(0, MAX_VIOLATIONS),
+    total: violations.length,
+  });
+}
+
+/**
+ * Commit a changeset: everything it stages, or nothing (D3). With
+ * `expectedVersion`, a changeset changed since (V40) is a 409. Another
+ * commit on the ontology, a change running on the changeset, a third
+ * commit in this process, or a row held past the lock timeout are 409s
+ * too, with nothing persisted. A rejection is a 422 whose
+ * `details.violations` name the seqs; the changeset stays as it was.
+ * Committed, the changeset is gone.
+ */
+export async function commitChangeset(
+  lensKey: string,
+  anchorKey: string | null,
+  changesetId: string,
+  expectedVersion: number | undefined,
+  store: RuntimeStore,
+): Promise<CommitAnswer> {
+  if (runningCommits >= MAX_RUNNING_COMMITS) {
+    throw new ConflictError("Too many commits are running; try again");
+  }
+  runningCommits += 1;
+  try {
+    // 0a: before BEGIN, holding nothing. Nothing inside reaches the pool.
+    const loaded = await loadSchema(lensKey, store);
+    const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+    const search = await loadSearchContext(store.ontologyKey, store.searchIndices());
+    try {
+      return await store.transaction(async (bound) => {
+        // 1: the commit lock and the row, then the version.
+        const locked = await bound.changesets().lockForCommit(record.id);
+        if (locked === null) throw notFound(changesetId);
+        if (expectedVersion !== undefined && locked.version !== expectedVersion) {
+          throw new ConflictError(
+            `Changeset '${changesetId}' changed since you looked: version ${locked.version}, not ${expectedVersion}`,
+          );
+        }
+        // 2: the replay; 3: commit validation.
+        const replay = await replayJournal(loaded, search, record.id, bound);
+        if (replay.fault !== null) throw new CommitRejected([replay.fault]);
+        const violations = await commitViolations();
+        if (violations.length > 0) throw new CommitRejected(violations);
+        // 4: the journal goes with the changeset; COMMIT on return.
+        await bound.changesets().deleteWithJournal(record.id);
+        return { committed: replay.replayed, alreadyGone: replay.alreadyGone };
+      });
+    } catch (error) {
+      if (!(error instanceof CommitRejected)) throw error;
+      await store.changesets().touch(record.id);
+      throw rejection(error.violations);
+    }
+  } finally {
+    runningCommits -= 1;
+  }
 }

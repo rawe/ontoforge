@@ -53,7 +53,7 @@ import type { RetrieverRecord, RetrieverWrite } from "./retriever.js";
 import { settings } from "../config.js";
 import { NotFoundError } from "./exceptions.js";
 import type { ValidatedQuery } from "./oql/index.js";
-import type { NewPropertyDef, PropertyDef, TypeKind } from "./schemas.js";
+import type { NewPropertyDef, ParentEnd, PropertyDef, TypeKind } from "./schemas.js";
 import type {
   SearchIndexDefinition,
   SearchIndexKind,
@@ -232,6 +232,8 @@ export interface ModelingStore {
   // Relation types
   // ------------------------------------------------------------------
 
+  /** Relation type rows carry `parent`, the parent end, or null for an
+   * ordinary relation type. */
   createRelationType(
     relationTypeId: string,
     key: string,
@@ -239,6 +241,7 @@ export interface ModelingStore {
     description: string | null,
     sourceEntityTypeKey: string,
     targetEntityTypeKey: string,
+    parent: ParentEnd | null,
   ): Promise<Row>;
 
   listRelationTypes(): Promise<Row[]>;
@@ -247,10 +250,13 @@ export interface ModelingStore {
 
   getRelationTypeByKey(key: string): Promise<Row | null>;
 
+  /** Null leaves a field unchanged; `clearParent` sets `parent` to null. */
   updateRelationType(
     relationTypeId: string,
     displayName: string | null,
     description: string | null,
+    parent: ParentEnd | null,
+    clearParent: boolean,
   ): Promise<Row | null>;
 
   deleteRelationType(relationTypeId: string): Promise<boolean>;

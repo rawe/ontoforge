@@ -44,10 +44,10 @@ import { deriveManagedIndices, type SearchIndexSchema } from "../../core/searchI
 import type { Querier } from "./errors.js";
 import { searchPathStatement } from "./errors.js";
 import { quoteIdent } from "./oql/bindings.js";
-import { readTypesWithProperties } from "./schemaRead.js";
+import { camelizeRow } from "./rows.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 6;
+export const STORAGE_VERSION = 7;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 1;
@@ -67,6 +67,46 @@ interface Step {
   to: number;
   actions: Action[];
   serverStatements?: string[];
+}
+
+/**
+ * Every entity type and relation type with its property rows attached,
+ * all ordered by key, as the 6.0 step reads them. Frozen with the step:
+ * the live schema read (`schemaRead.ts`) follows the current layout,
+ * which storage at this step does not have yet.
+ */
+async function readTypesAtVersion3(
+  querier: Querier,
+): Promise<{ entityTypes: Row[]; relationTypes: Row[] }> {
+  const ets = await querier.query(
+    `SELECT entity_type_id, key, display_name, description, name_property, created_at, updated_at
+     FROM entity_type ORDER BY key`,
+  );
+  const rts = await querier.query(
+    `SELECT relation_type_id, key, display_name, description, created_at, updated_at,
+            source_entity_type_key AS source_key, target_entity_type_key AS target_key
+     FROM relation_type ORDER BY key`,
+  );
+  const props = await querier.query(
+    `SELECT property_id, key, display_name, description, data_type, required, default_value,
+            entity_type_id, relation_type_id
+     FROM property_def ORDER BY key`,
+  );
+  const propsByOwner = new Map<string, Row[]>();
+  for (const raw of props.rows) {
+    const { entityTypeId, relationTypeId, ...property } = camelizeRow(raw);
+    const ownerId = (entityTypeId ?? relationTypeId) as string;
+    propsByOwner.set(ownerId, [...(propsByOwner.get(ownerId) ?? []), property]);
+  }
+  const withProperties = (idKey: string) => (raw: Row) => {
+    const type = camelizeRow(raw);
+    type["properties"] = propsByOwner.get(type[idKey] as string) ?? [];
+    return type;
+  };
+  return {
+    entityTypes: ets.rows.map(withProperties("entityTypeId")),
+    relationTypes: rts.rows.map(withProperties("relationTypeId")),
+  };
 }
 
 /**
@@ -119,7 +159,7 @@ async function backfillNameProperties(querier: Querier): Promise<void> {
  * then reconciles their generations, which queues the full backfill.
  */
 async function writeManagedSearchIndices(querier: Querier): Promise<void> {
-  const { entityTypes, relationTypes } = await readTypesWithProperties(querier, false);
+  const { entityTypes, relationTypes } = await readTypesAtVersion3(querier);
   const properties = (rows: unknown) =>
     Object.fromEntries(
       (rows as Row[]).map((p) => [
@@ -250,7 +290,7 @@ async function convertRetrievers(querier: Querier): Promise<void> {
     )
   ).rows;
   if (agents.length === 0) return;
-  const { entityTypes } = await readTypesWithProperties(querier, false);
+  const { entityTypes } = await readTypesAtVersion3(querier);
   const dataTypes = new Map<string, string>();
   for (const et of entityTypes) {
     for (const property of et["properties"] as Row[]) {
@@ -483,6 +523,21 @@ const STEPS: Step[] = [
       `ALTER TABLE assistant_navigator DROP COLUMN kind`,
       `ALTER TABLE assistant_navigator ADD CONSTRAINT assistant_navigator_key_unique UNIQUE (lens_id, key)`,
       renameNotNullConstraints("assistant_navigator"),
+    ],
+  },
+  {
+    // Parent relations and anchors: the parent end of a relation type, and
+    // the anchor table.
+    to: 7,
+    actions: [
+      `ALTER TABLE relation_type ADD COLUMN parent text`,
+      `CREATE TABLE anchor (
+  key             text        CONSTRAINT anchor_pk PRIMARY KEY,
+  entity_type_key text,
+  entity_id       uuid,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+)`,
     ],
   },
 ];

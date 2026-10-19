@@ -208,6 +208,7 @@ function relationTypeDefToExport(rtDef: RelationTypeDef): Row {
     description: rtDef.description,
     fromEntityTypeKey: rtDef.fromEntityTypeKey,
     toEntityTypeKey: rtDef.toEntityTypeKey,
+    parent: rtDef.parent,
     properties: Object.values(rtDef.properties).map(propertyToExport),
   };
 }

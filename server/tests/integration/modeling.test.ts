@@ -174,6 +174,77 @@ describe("relation type round trip", () => {
     expect(deleted.statusCode).toBe(204);
   });
 
+  it("the parent end: set on create, kept when omitted, cleared by null, shown by the runtime schema", async () => {
+    await createEntityType("customer", "Customer");
+    await createEntityType("project", "Project");
+    const lens = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/test_ont/model/lenses",
+      payload: { key: "all", name: "All" },
+    });
+    expect(lens.statusCode, lens.body).toBe(201);
+    const runtimeParent = async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/ontologies/test_ont/runtime/lenses/all/schema/relation-types/has_project",
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      return res.json().parent as unknown;
+    };
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/test_ont/model/relation-types",
+      payload: {
+        key: "has_project",
+        displayName: "Has Project",
+        sourceEntityTypeKey: "customer",
+        targetEntityTypeKey: "project",
+        parent: "source",
+      },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const id = created.json().relationTypeId as string;
+    expect(created.json().parent).toBe("source");
+    const url = `/api/ontologies/test_ont/model/relation-types/${id}`;
+    expect((await app.inject({ method: "GET", url })).json().parent).toBe("source");
+    expect(await runtimeParent()).toBe("source");
+
+    // Omitted: unchanged.
+    const renamed = await app.inject({ method: "PUT", url, payload: { displayName: "Owns" } });
+    expect(renamed.json()).toMatchObject({ displayName: "Owns", parent: "source" });
+
+    // Flipped, then cleared by an explicit null; each change reaches the
+    // runtime schema at once.
+    const flipped = await app.inject({ method: "PUT", url, payload: { parent: "target" } });
+    expect(flipped.json().parent).toBe("target");
+    expect(await runtimeParent()).toBe("target");
+    const cleared = await app.inject({ method: "PUT", url, payload: { parent: null } });
+    expect(cleared.json()).toMatchObject({ displayName: "Owns", parent: null });
+    expect(await runtimeParent()).toBeNull();
+    const list = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/model/relation-types" });
+    expect(list.json()[0].parent).toBeNull();
+
+    const invalid = await app.inject({ method: "PUT", url, payload: { parent: "middle" } });
+    expect(invalid.statusCode).toBe(422);
+  });
+
+  it("a relation type created without a parent end reads parent null", async () => {
+    await createEntityType("person", "Person");
+    await createEntityType("company", "Company");
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/test_ont/model/relation-types",
+      payload: {
+        key: "works_for",
+        displayName: "Works For",
+        sourceEntityTypeKey: "person",
+        targetEntityTypeKey: "company",
+      },
+    });
+    expect(created.json().parent).toBeNull();
+  });
+
   it("creation requires both endpoints to exist", async () => {
     await createEntityType("person", "Person");
     const res = await app.inject({

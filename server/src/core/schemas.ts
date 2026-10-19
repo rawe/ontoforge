@@ -1,7 +1,7 @@
 /**
  * Core schema vocabulary shared by modeling and runtime: the data-type
- * enumeration, the key patterns, the owner-kind discriminator, and the
- * property-definition shape.
+ * enumeration, the key patterns, the owner-kind discriminator, the parent
+ * ends, and the property-definition shape.
  */
 
 /** The seven data types a property definition can declare. */
@@ -57,6 +57,13 @@ export const MAX_ONTOLOGY_KEY_LENGTH = 59;
  * `entity_type`/`relation_type` are a separate, fixed spelling.
  */
 export type TypeKind = "EntityType" | "RelationType";
+
+/** The ends a relation type can name as its parent end: the entity at that
+ * end is the parent of the entity at the other. A relation type without
+ * one is an ordinary relation type. */
+export const PARENT_ENDS = ["source", "target"] as const;
+
+export type ParentEnd = (typeof PARENT_ENDS)[number];
 
 /** One property definition as the runtime consumes it. */
 export interface PropertyDef {

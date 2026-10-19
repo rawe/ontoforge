@@ -8,7 +8,13 @@ import { KeywordLanguage, KeywordLanguageSetSchema } from "../core/keywordLangua
 
 import { z } from "zod";
 
-import { DATA_TYPES, DEFAULT_NAME_PROPERTY, SCHEMA_KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
+import {
+  DATA_TYPES,
+  DEFAULT_NAME_PROPERTY,
+  MAX_KEY_LENGTH,
+  PARENT_ENDS,
+  SCHEMA_KEY_PATTERN,
+} from "../core/schemas.js";
 import { SearchIndexDefinition } from "../core/searchIndex.js";
 
 // --- Lens ---
@@ -110,11 +116,15 @@ export const RelationTypeCreate = z.object({
   description: z.string().nullable().optional(),
   sourceEntityTypeKey: z.string(),
   targetEntityTypeKey: z.string(),
+  /** The parent end; absent or null makes an ordinary relation type. */
+  parent: z.enum(PARENT_ENDS).nullable().optional(),
 });
 
+/** An explicit null `parent` clears it; an omitted one leaves it unchanged. */
 export const RelationTypeUpdate = z.object({
   displayName: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
+  parent: z.enum(PARENT_ENDS).nullable().optional(),
 });
 
 export const RelationTypeResponse = z.object({
@@ -124,6 +134,8 @@ export const RelationTypeResponse = z.object({
   description: z.string().nullable(),
   sourceEntityTypeKey: z.string(),
   targetEntityTypeKey: z.string(),
+  /** The parent end; null for an ordinary relation type. */
+  parent: z.enum(PARENT_ENDS).nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });

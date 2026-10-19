@@ -197,6 +197,80 @@ describe("relation type CRUD", () => {
   });
 });
 
+describe("the parent end", () => {
+  it("create passes parent to the store and returns it", async () => {
+    holder.store.getEntityTypeByKey
+      .mockResolvedValueOnce(SOURCE_ET)
+      .mockResolvedValueOnce(TARGET_ET);
+    holder.store.createRelationType.mockResolvedValue({ ...RT_DATA, parent: "target" });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/onto/model/relation-types",
+      payload: { ...CREATE_PAYLOAD, parent: "target" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().parent).toBe("target");
+    expect(holder.store.createRelationType).toHaveBeenCalledWith(
+      expect.any(String),
+      "works_for",
+      "Works For",
+      null,
+      "person",
+      "company",
+      "target",
+    );
+  });
+
+  it("create without parent stores null; reads return null when unset", async () => {
+    holder.store.getEntityTypeByKey
+      .mockResolvedValueOnce(SOURCE_ET)
+      .mockResolvedValueOnce(TARGET_ET);
+    holder.store.createRelationType.mockResolvedValue({ ...RT_DATA, parent: null });
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/onto/model/relation-types",
+      payload: CREATE_PAYLOAD,
+    });
+    expect(created.json().parent).toBeNull();
+    expect(holder.store.createRelationType.mock.calls[0]![6]).toBeNull();
+
+    holder.store.getRelationType.mockResolvedValue({ ...RT_DATA, parent: null });
+    const read = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/relation-types/rt-1" });
+    expect(read.json().parent).toBeNull();
+    holder.store.listRelationTypes.mockResolvedValue([{ ...RT_DATA, parent: "source" }]);
+    const list = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/relation-types" });
+    expect(list.json()[0].parent).toBe("source");
+  });
+
+  it.each([
+    ["sets it", { parent: "source" }, "source", false],
+    ["clears it on an explicit null", { parent: null }, null, true],
+    ["leaves it unchanged when omitted", { displayName: "Owns" }, null, false],
+  ])("update %s", async (_case, payload, parent, clearParent) => {
+    holder.store.updateRelationType.mockResolvedValue({ ...RT_DATA, parent: null });
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/ontologies/onto/model/relation-types/rt-1",
+      payload,
+    });
+    expect(res.statusCode).toBe(200);
+    const call = holder.store.updateRelationType.mock.calls[0]!;
+    expect([call[3], call[4]]).toEqual([parent, clearParent]);
+  });
+
+  it.each([["POST"], ["PUT"]] as const)("%s rejects a parent other than source or target with 422", async (method) => {
+    const res = await app.inject({
+      method,
+      url: `/api/ontologies/onto/model/relation-types${method === "PUT" ? "/rt-1" : ""}`,
+      payload: method === "PUT" ? { parent: "middle" } : { ...CREATE_PAYLOAD, parent: "middle" },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
+    expect(holder.store.createRelationType).not.toHaveBeenCalled();
+    expect(holder.store.updateRelationType).not.toHaveBeenCalled();
+  });
+});
+
 describe("key pattern", () => {
   it.each([["WorksFor"], ["_works_for"], ["1works"]])(
     "rejects the invalid key %s with 422 VALIDATION_ERROR",

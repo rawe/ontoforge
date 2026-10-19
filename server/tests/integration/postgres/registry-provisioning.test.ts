@@ -29,6 +29,7 @@ const ALL_TABLES = [
   "assistant_navigator",
   "entity",
   "relation",
+  "anchor",
   "search_settings",
   "search_index",
   "search_generation",

@@ -31,7 +31,7 @@
 import { toSql } from "pgvector";
 
 import type { ModelingStore, NavigatorStore, Row, SearchIndexStore } from "../../core/ports.js";
-import type { NewPropertyDef, TypeKind } from "../../core/schemas.js";
+import type { NewPropertyDef, ParentEnd, TypeKind } from "../../core/schemas.js";
 import * as vectorDdl from "./ddl.js";
 import { runQuery, withTransaction, type DbResult, type IsolationLevel, type Querier } from "./errors.js";
 import { camelizeRow, camelizeRows, isUuid } from "./rows.js";
@@ -46,7 +46,7 @@ const ENTITY_TYPE_COLS =
   "entity_type_id, key, display_name, description, name_property, created_at, updated_at";
 const RELATION_TYPE_COLS =
   "relation_type_id, key, display_name, description, " +
-  "source_entity_type_key, target_entity_type_key, created_at, updated_at";
+  "source_entity_type_key, target_entity_type_key, parent, created_at, updated_at";
 const PROPERTY_COLS =
   "property_id, key, display_name, description, data_type, required, default_value, " +
   "created_at, updated_at";
@@ -351,14 +351,15 @@ export class PostgresModelingStore implements ModelingStore {
     description: string | null,
     sourceEntityTypeKey: string,
     targetEntityTypeKey: string,
+    parent: ParentEnd | null,
   ): Promise<Row> {
     const result = await this.query(
       `INSERT INTO relation_type
          (relation_type_id, key, display_name, description,
-          source_entity_type_key, target_entity_type_key)
-       VALUES ($1, $2, $3, $4, $5, $6)
+          source_entity_type_key, target_entity_type_key, parent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING ${RELATION_TYPE_COLS}`,
-      [relationTypeId, key, displayName, description, sourceEntityTypeKey, targetEntityTypeKey],
+      [relationTypeId, key, displayName, description, sourceEntityTypeKey, targetEntityTypeKey, parent],
     );
     return camelizeRow(result.rows[0]!);
   }
@@ -393,6 +394,8 @@ export class PostgresModelingStore implements ModelingStore {
     relationTypeId: string,
     displayName: string | null,
     description: string | null,
+    parent: ParentEnd | null,
+    clearParent: boolean,
   ): Promise<Row | null> {
     if (!isUuid(relationTypeId)) {
       return null;
@@ -401,7 +404,11 @@ export class PostgresModelingStore implements ModelingStore {
     const sets = buildUpdateSets(params, [
       ["display_name", displayName],
       ["description", description],
+      ["parent", clearParent ? null : parent],
     ]);
+    if (clearParent) {
+      sets.push("parent = NULL");
+    }
     const result = await this.query(
       `UPDATE relation_type SET ${sets.join(", ")}
        WHERE relation_type_id = $1 RETURNING ${RELATION_TYPE_COLS}`,

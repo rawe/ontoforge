@@ -26,7 +26,7 @@
 import type { AgentConfig, SavedQueryConfig, SavedQueryParameter, StepConfig } from "../core/ai.js";
 import { NotFoundError } from "../core/exceptions.js";
 import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../core/ports.js";
-import type { PropertyDef } from "../core/schemas.js";
+import type { ParentEnd, PropertyDef } from "../core/schemas.js";
 import {
   deriveSearchDependencies,
   type SearchDependencies,
@@ -47,6 +47,8 @@ export interface RelationTypeDef {
   description: string | null;
   fromEntityTypeKey: string;
   toEntityTypeKey: string;
+  /** The parent end; null for an ordinary relation type. */
+  parent: ParentEnd | null;
   properties: Record<string, PropertyDef>;
 }
 
@@ -299,6 +301,7 @@ function buildTypesFromRaw(
       description: (rt.description as string | undefined) ?? null,
       fromEntityTypeKey: rt.sourceKey as string,
       toEntityTypeKey: rt.targetKey as string,
+      parent: (rt.parent as ParentEnd | null | undefined) ?? null,
       properties: toPropertyDefs(rt.properties as Row[] | undefined),
     };
   }

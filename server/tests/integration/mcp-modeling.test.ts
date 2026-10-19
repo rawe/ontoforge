@@ -241,6 +241,33 @@ describe("schema lifecycle over MCP (keys, never ids)", () => {
       description: "Employment",
     });
     expect(json(rtUpdated).description).toBe("Employment");
+    expect(json(rtUpdated).parent).toBeNull();
+
+    // The parent end: set, kept when omitted, cleared by null.
+    const flagged = await call(client, "update_relation_type", {
+      relation_type_key: "works_for",
+      parent: "target",
+    });
+    expect(json(flagged).parent).toBe("target");
+    const kept = await call(client, "update_relation_type", {
+      relation_type_key: "works_for",
+      display_name: "Works For",
+    });
+    expect(json(kept).parent).toBe("target");
+    const cleared = await call(client, "update_relation_type", {
+      relation_type_key: "works_for",
+      parent: null,
+    });
+    expect(json(cleared).parent).toBeNull();
+    const created = await call(client, "create_relation_type", {
+      key: "manages",
+      display_name: "Manages",
+      source_entity_type_key: "person",
+      target_entity_type_key: "person",
+      parent: "source",
+    });
+    expect(json(created).parent).toBe("source");
+    await call(client, "delete_relation_type", { relation_type_key: "manages" });
 
     // Properties via the type_kind discriminator.
     const nameProp = await call(client, "add_property", {

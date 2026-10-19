@@ -32,6 +32,7 @@ import {
   namePropertyDisplayName,
   SCHEMA_KEY_PATTERN,
   type NewPropertyDef,
+  type ParentEnd,
   type TypeKind,
 } from "../core/schemas.js";
 import { NAVIGATOR_CONFIG_VERSION, NavigatorConfig } from "../runtime/assistants/navigators/config.js";
@@ -122,6 +123,7 @@ function toRelationTypeResponse(data: Row): RelationTypeResponseBody {
     description: optString(data.description),
     sourceEntityTypeKey: data.sourceEntityTypeKey as string,
     targetEntityTypeKey: data.targetEntityTypeKey as string,
+    parent: (data.parent as ParentEnd | null | undefined) ?? null,
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
   };
@@ -395,6 +397,7 @@ export async function createRelationType(
     body.description ?? null,
     body.sourceEntityTypeKey,
     body.targetEntityTypeKey,
+    body.parent ?? null,
   );
   invalidateLoadedSchemaCache();
   return toRelationTypeResponse(data);
@@ -424,10 +427,14 @@ export async function updateRelationType(
   store: ModelingStore,
 ): Promise<RelationTypeResponseBody> {
   const before = await store.getRelationType(relationTypeId);
+  // An explicitly null parent clears it, as a property's default; omitted
+  // (`undefined`) means unchanged.
   const data = await store.updateRelationType(
     relationTypeId,
     body.displayName ?? null,
     body.description ?? null,
+    body.parent ?? null,
+    body.parent === null,
   );
   if (!data) {
     throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
@@ -1753,6 +1760,7 @@ export async function importSchema(
       rt.description ?? null,
       rt.fromEntityTypeKey,
       rt.toEntityTypeKey,
+      null,
     );
     for (const prop of rt.properties) {
       await store.createProperty(

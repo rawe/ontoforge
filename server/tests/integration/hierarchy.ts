@@ -107,3 +107,15 @@ export async function requirePhaseOnHasTask(app: FastifyInstance): Promise<void>
     required: true,
   });
 }
+
+/** Add the lens `delivery`: customer and task, with `has_subtask`; the
+ * middle level, project, is hidden. */
+export async function addLensHidingProject(app: FastifyInstance): Promise<void> {
+  const model = modelPrefix(HIERARCHY_ONTOLOGY_KEY);
+  const lens = await post(app, `${model}/lenses`, { key: "delivery", name: "Delivery" });
+  const lensId = lens.lensId as string;
+  for (const key of ["customer", "task"]) {
+    await post(app, `${model}/lenses/${lensId}/includes/entity-types`, { key });
+  }
+  await post(app, `${model}/lenses/${lensId}/includes/relation-types`, { key: "has_subtask" });
+}

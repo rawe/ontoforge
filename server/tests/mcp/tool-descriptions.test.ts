@@ -75,6 +75,14 @@ describe("tool descriptions", () => {
     expect(runtime.get("create_relation")).toContain("one of its descendants");
   });
 
+  it("get_path states the path's shape and the lens cut", () => {
+    const text = runtime.get("get_path")!;
+    for (const part of ["[{type, id, name}]", "root first", "ending with the entity", "cannot see"]) {
+      expect(text).toContain(part);
+    }
+    expect(agent.has("get_path")).toBe(false);
+  });
+
   it("create_entity states the create with a parent relation", () => {
     const text = runtime.get("create_entity")!;
     for (const part of ["'parent_relation'", "'type'", "'parent_id'", "'properties'", "child end", "parent end"]) {

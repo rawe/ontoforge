@@ -343,6 +343,18 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
+  app.get(
+    "/entities/:entityTypeKey/:entityId/path",
+    { schema: { tags: ["runtime"], params: EntityParams } },
+    async (request) =>
+      service.getPath(
+        request.params.lensKey,
+        request.params.entityTypeKey,
+        request.params.entityId,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
+  );
+
   // --- Document properties ---
 
   app.get(

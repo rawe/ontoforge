@@ -6,8 +6,8 @@
  * Covers the URL-only ontology + lens binding (no header, no environment
  * fallback), ontology isolation between two bound clients, the
  * limit/offset CLAMPING that diverges by design from REST's rejection,
- * the entity tool round trip, and the parent rules and the create with a
- * parent relation through the tools.
+ * the entity tool round trip, and the parent rules, the create with a
+ * parent relation and the path read through the tools.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -21,7 +21,7 @@ import { wipeDatabase } from "./reset.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture, defineEntityProperty } from "./fixture.js";
-import { buildHierarchy, HIERARCHY_ONTOLOGY_KEY, requirePhaseOnHasTask } from "./hierarchy.js";
+import { addLensHidingProject, buildHierarchy, HIERARCHY_ONTOLOGY_KEY, requirePhaseOnHasTask } from "./hierarchy.js";
 
 interface ToolCallResult {
   content: { type: string; text: string }[];
@@ -205,7 +205,7 @@ describe("ontology isolation", () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the twenty-two runtime tools", async () => {
+  it("lists exactly the runtime tools", async () => {
     const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
     try {
       const tools = await client.listTools();
@@ -219,6 +219,7 @@ describe("tool surface", () => {
         "get_document",
         "get_entity",
         "get_neighbors",
+        "get_path",
         "get_relation",
         "get_schema",
         "list_entities",
@@ -966,6 +967,52 @@ describe("create_entity with a parent relation", () => {
       expect(plain.isError, text(plain)).toBeFalsy();
     } finally {
       await client.close();
+    }
+  });
+});
+
+describe("get_path", () => {
+  it("gives the path read's answers, through a lens hiding the middle level too", async () => {
+    const ids = await buildHierarchy(app);
+    await addLensHidingProject(app);
+    const mount = `${baseUrl}/mcp/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses`;
+    const all = await connectClient(`${mount}/all`);
+    const delivery = await connectClient(`${mount}/delivery`);
+    try {
+      const deep = await call(all, "get_path", { entity_type_key: "task", entity_id: ids.T1a });
+      expect(deep.isError, text(deep)).toBeFalsy();
+      expect(JSON.parse(text(deep))).toEqual([
+        { type: "customer", id: ids.ACME, name: "ACME" },
+        { type: "project", id: ids.P1, name: "P1" },
+        { type: "task", id: ids.T1, name: "T1" },
+        { type: "task", id: ids.T1a, name: "T1a" },
+      ]);
+
+      const root = await call(all, "get_path", { entity_type_key: "customer", entity_id: ids.ACME });
+      expect(JSON.parse(text(root))).toEqual([{ type: "customer", id: ids.ACME, name: "ACME" }]);
+
+      const cut = await call(delivery, "get_path", { entity_type_key: "task", entity_id: ids.T1a });
+      expect(JSON.parse(text(cut))).toEqual([
+        { type: "task", id: ids.T1, name: "T1" },
+        { type: "task", id: ids.T1a, name: "T1a" },
+      ]);
+
+      const hidden = await call(delivery, "get_path", { entity_type_key: "project", entity_id: ids.P1 });
+      expect(hidden.isError).toBe(true);
+      expect(text(hidden)).toContain("Entity type 'project' not found");
+
+      const unknown = await call(all, "get_path", {
+        entity_type_key: "task",
+        entity_id: "00000000-0000-4000-8000-000000000000",
+      });
+      expect(unknown.isError).toBe(true);
+      expect(text(unknown)).toContain("Entity '00000000-0000-4000-8000-000000000000' not found");
+
+      const entity = json(await call(all, "get_entity", { entity_type_key: "task", entity_id: ids.T1a }));
+      expect(Object.keys(entity).sort()).toEqual(["_createdAt", "_entityTypeKey", "_id", "_updatedAt", "name"]);
+    } finally {
+      await all.close();
+      await delivery.close();
     }
   });
 });

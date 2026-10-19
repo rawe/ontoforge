@@ -602,6 +602,59 @@ export async function getEntity(
   return applyFieldProjection(filtered, fields, ENTITY_ALWAYS_FIELDS);
 }
 
+/** One step of an entity's path. `name` is the value of the type's name
+ * property; null when it is unset or the lens hides it. */
+export interface PathStep {
+  type: string;
+  id: string;
+  name: string | null;
+}
+
+/**
+ * The entity's path through the lens: root first, ending with the entity.
+ * The walk follows every parent relation of the FULL schema; the lens then
+ * cuts it, so the path starts below the nearest ancestor whose type the
+ * lens hides and never names a hidden entity. A root's path is itself
+ * alone. A hidden type or an unknown entity is not found, as `getEntity`.
+ *
+ * On data the accepted race left with two parents the walk is no chain:
+ * the path then lists every visible ancestor the walk reaches, in the
+ * walk's deterministic order reversed, and reports no error.
+ *
+ * Two statements: the walk, then one batch read for the names.
+ */
+export async function getPath(
+  lensKey: string,
+  entityTypeKey: string,
+  entityId: string,
+  store: RuntimeStore,
+): Promise<PathStep[]> {
+  const loaded = await loadSchema(lensKey, store);
+  const visibleTypes = loaded.scoped.entityTypes;
+  if (!(entityTypeKey in visibleTypes)) {
+    throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
+  }
+
+  // Nearest first: keep the ancestors below the first hidden one.
+  const ancestors = await store.getAncestors(entityId, parentReadings(loaded.full));
+  const hidden = ancestors.findIndex((ancestor) => !(ancestor.type in visibleTypes));
+  const visible = hidden === -1 ? ancestors : ancestors.slice(0, hidden);
+  const steps = [...visible.reverse(), { type: entityTypeKey, id: entityId }];
+
+  // The name property is a string, which decodes without definitions.
+  const rows = await store.getEntitiesByIds(steps.map((step) => step.id), {});
+  const entity = rows[entityId];
+  if (entity === undefined || entity._entityTypeKey !== entityTypeKey) {
+    throw new NotFoundError(`Entity '${entityId}' not found`);
+  }
+
+  return steps.map((step) => {
+    const nameProperty = visibleTypes[step.type]?.nameProperty ?? null;
+    const value = nameProperty === null ? undefined : rows[step.id]?.[nameProperty];
+    return { type: step.type, id: step.id, name: typeof value === "string" ? value : null };
+  });
+}
+
 /**
  * Partial update: validate against the scoped properties, NO default
  * re-application. Null removes an optional property (and is rejected on a

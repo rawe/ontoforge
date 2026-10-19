@@ -252,6 +252,31 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
   );
 
   server.registerTool(
+    "get_path",
+    {
+      description:
+        "Read where an entity sits in its hierarchy: its path over the parent " +
+        "relations as [{type, id, name}], root first and ending with the entity " +
+        "itself. A root's path is the entity alone. The path starts below the " +
+        "nearest ancestor this connection cannot see, so it names only visible " +
+        "entities. name is null when the entity has no name value.",
+      inputSchema: {
+        entity_type_key: z.string(),
+        entity_id: z.string(),
+      },
+    },
+    wrap("get_path", async (args: { entity_type_key: string; entity_id: string }) => {
+      const result = await service.getPath(
+        lensKey,
+        args.entity_type_key,
+        args.entity_id,
+        await getRuntimeStore(ontologyKey),
+      );
+      return jsonResult(result);
+    }),
+  );
+
+  server.registerTool(
     "get_document",
     {
       description:

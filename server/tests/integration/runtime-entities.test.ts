@@ -2,8 +2,8 @@
  * Session-04 integration suite — runtime schema introspection and entity
  * CRUD against the docker-compose PostgreSQL, through
  * scoped and unscoped lenses built via the modeling API, the create with
- * a parent relation, and the leaf-only delete wherever a parent relation
- * is flagged.
+ * a parent relation, the leaf-only delete wherever a parent relation
+ * is flagged, and the path read.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -16,6 +16,7 @@ import { wipeDatabase } from "./reset.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture } from "./fixture.js";
 import {
+  addLensHidingProject,
   buildHierarchy,
   HIERARCHY_ONTOLOGY_KEY,
   requirePhaseOnHasTask,
@@ -884,5 +885,96 @@ describe("create with a parent relation", () => {
       url: `${runtime}/all/relations/has_task?toEntityId=${res.json()._id as string}`,
     });
     expect(listed.json().total).toBe(0);
+  });
+});
+
+describe("the path read", () => {
+  let ids: HierarchyIds;
+  const runtime = `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses`;
+
+  beforeEach(async () => {
+    ids = await buildHierarchy(app);
+    await addLensHidingProject(app);
+  });
+
+  function path(lens: string, type: string, id: string) {
+    return app.inject({ method: "GET", url: `${runtime}/${lens}/entities/${type}/${id}/path` });
+  }
+
+  async function pathOf(lens: string, type: string, id: string): Promise<Row[]> {
+    const res = await path(lens, type, id);
+    expect(res.statusCode, res.body).toBe(200);
+    return res.json() as Row[];
+  }
+
+  it("a deep entity over a self-relation chain: root first, ending with the entity", async () => {
+    expect(await pathOf("all", "task", ids.T1a)).toEqual([
+      { type: "customer", id: ids.ACME, name: "ACME" },
+      { type: "project", id: ids.P1, name: "P1" },
+      { type: "task", id: ids.T1, name: "T1" },
+      { type: "task", id: ids.T1a, name: "T1a" },
+    ]);
+  });
+
+  it("an up-pointing parent relation is walked from its target", async () => {
+    expect(await pathOf("all", "milestone", ids.M1)).toEqual([
+      { type: "customer", id: ids.ACME, name: "ACME" },
+      { type: "project", id: ids.P1, name: "P1" },
+      { type: "milestone", id: ids.M1, name: "M1" },
+    ]);
+  });
+
+  it("a root's path is the entity alone; an ordinary relation is no parent", async () => {
+    expect(await pathOf("all", "customer", ids.ACME)).toEqual([
+      { type: "customer", id: ids.ACME, name: "ACME" },
+    ]);
+    expect(await pathOf("all", "person", ids.Ben)).toEqual([{ type: "person", id: ids.Ben, name: "Ben" }]);
+  });
+
+  it("a lens hiding the middle level: the path starts below the hidden ancestor", async () => {
+    // delivery hides project: neither P1 nor ACME above it is named.
+    const res = await path("delivery", "task", ids.T1a);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toEqual([
+      { type: "task", id: ids.T1, name: "T1" },
+      { type: "task", id: ids.T1a, name: "T1a" },
+    ]);
+    expect(res.body).not.toContain(ids.P1);
+    expect(res.body).not.toContain(ids.ACME);
+    expect(await pathOf("delivery", "customer", ids.ACME)).toEqual([
+      { type: "customer", id: ids.ACME, name: "ACME" },
+    ]);
+    // portfolio sees the whole path above a milestone.
+    expect((await pathOf("portfolio", "milestone", ids.M1)).map((step) => step.id)).toEqual([
+      ids.ACME,
+      ids.P1,
+      ids.M1,
+    ]);
+  });
+
+  it("not found for an unknown or hidden entity, as the entity read", async () => {
+    const cases: [string, string, string, string][] = [
+      ["all", "task", "00000000-0000-4000-8000-000000000000", "Entity '00000000-0000-4000-8000-000000000000' not found"],
+      ["all", "task", "not-a-uuid", "Entity 'not-a-uuid' not found"],
+      ["all", "customer", ids.P1, `Entity '${ids.P1}' not found`],
+      ["portfolio", "task", ids.T1, "Entity type 'task' not found"],
+      ["delivery", "project", ids.P1, "Entity type 'project' not found"],
+    ];
+    for (const [lens, type, id, message] of cases) {
+      const res = await path(lens, type, id);
+      const read = await app.inject({ method: "GET", url: `${runtime}/${lens}/entities/${type}/${id}` });
+      expect(res.statusCode, `${lens} ${type} ${id}`).toBe(404);
+      expect(res.json().error.message).toBe(message);
+      expect(res.json()).toEqual(read.json());
+    }
+  });
+
+  it("entity reads are unchanged: no path on them", async () => {
+    const res = await app.inject({ method: "GET", url: `${runtime}/all/entities/task/${ids.T1a}` });
+    expect(Object.keys(res.json() as Row).sort()).toEqual(["_createdAt", "_entityTypeKey", "_id", "_updatedAt", "name"]);
+    const listed = await app.inject({ method: "GET", url: `${runtime}/all/entities/task` });
+    for (const item of listed.json().items as Row[]) {
+      expect(Object.keys(item).sort()).toEqual(["_createdAt", "_entityTypeKey", "_id", "_updatedAt", "name"]);
+    }
   });
 });

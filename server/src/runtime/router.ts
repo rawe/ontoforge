@@ -28,10 +28,10 @@ import * as service from "./service.js";
 // Every params schema carries the mount prefix's own parameters —
 // `ontologyKey` binds the store, `lensKey` names the lens. The anchored
 // mirror (`anchorRouter.ts`) extends each with its `anchorKey`.
-const LensParams = z.object({ ontologyKey: z.string(), lensKey: z.string() });
+export const LensParams = z.object({ ontologyKey: z.string(), lensKey: z.string() });
 
 /** The anchor key on the anchored mirror; null on the plain lens. */
-function anchorOf(params: object): string | null {
+export function anchorOf(params: object): string | null {
   return "anchorKey" in params && typeof params.anchorKey === "string" ? params.anchorKey : null;
 }
 const TypeKeyParams = LensParams.extend({ key: z.string() });
@@ -87,12 +87,12 @@ const IndexSearchPayload = z.strictObject({
 
 /** Arbitrary property payloads: shape is decided by the schema at runtime,
  * so the only static rule is "a JSON object". */
-const PropertyPayload = z.record(z.string(), z.unknown());
+export const PropertyPayload = z.record(z.string(), z.unknown());
 
 /** An entity create: the flat property map, plus the optional parent
  * relation the entity is created under. Property keys are lower snake
  * case, so `parentRelation` cannot collide with one. */
-const EntityCreatePayload = z.looseObject({
+export const EntityCreatePayload = z.looseObject({
   parentRelation: z
     .object({
       type: z.string(),
@@ -147,7 +147,7 @@ const RelationParams = RelationTypeParams.extend({ relationId: z.string() });
 
 /** Relation creation names its two endpoints; everything else in the body
  * is a property value. */
-const RelationCreatePayload = z.looseObject({
+export const RelationCreatePayload = z.looseObject({
   fromEntityId: z.string(),
   toEntityId: z.string(),
 });

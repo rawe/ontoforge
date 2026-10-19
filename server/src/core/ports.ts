@@ -1144,8 +1144,9 @@ export interface ChangesetStore {
   /** The staged create that minted `mintedId`; null when none did. */
   findMinted(id: string, mintedId: string): Promise<ChangesetWriteRecord | null>;
 
-  /** Append one write as the last seq plus one; its seq, or null when
-   * the changeset is gone. */
+  /** Append one write; its seq, or null when the changeset is gone. A
+   * seq is higher than every seq the changeset had before, so an
+   * unstaged seq is never reused. */
   append(id: string, write: NewChangesetWrite): Promise<number | null>;
 
   /** False when no write has this seq. */
@@ -1158,7 +1159,8 @@ export interface ChangesetStore {
   /** Back to live, with the note given. Null when the changeset is gone. */
   unsubmit(id: string, note: string): Promise<ChangesetRecord | null>;
 
-  /** The changeset and its journal; false when it is gone. */
+  /** The changeset and its journal, while live; false when it is gone
+   * or submitted. */
   discard(id: string): Promise<boolean>;
 
   /** Refresh the last change only, keeping the version; skipped while

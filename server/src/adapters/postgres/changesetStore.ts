@@ -6,6 +6,9 @@
  *   `FOR UPDATE NOWAIT` in its own transaction (or the bound one): a row
  *   held by a commit or another mutation answers a `ConflictError` at
  *   once. `touch` and `sweep` skip a held row instead.
+ * - A seq is the changeset's version at the append: every append and
+ *   unstage bumps the version, so a seq is never reused, not even after
+ *   the last write is unstaged.
  * - The journal dies with its changeset (`ON DELETE CASCADE`).
  * - `lockForCommit` runs only inside a bound store. The commit lock is a
  *   transaction-scoped advisory lock keyed by the namespace, so it holds
@@ -220,8 +223,11 @@ export class PostgresChangesetStore implements ChangesetStore {
       const result = await querier.query(
         `INSERT INTO changeset_write
                 (changeset_id, seq, operation, arguments, minted_id, type_key, target_id, base)
-         SELECT $1, COALESCE(max(seq), 0) + 1, $2::text, $3::jsonb, $4::uuid, $5::text, $6::uuid, $7::jsonb
-           FROM changeset_write WHERE changeset_id = $1
+         SELECT $1,
+                GREATEST(c.version,
+                         COALESCE((SELECT max(seq) FROM changeset_write WHERE changeset_id = $1), 0) + 1),
+                $2::text, $3::jsonb, $4::uuid, $5::text, $6::uuid, $7::jsonb
+           FROM changeset c WHERE c.changeset_id = $1
          RETURNING seq`,
         [
           id,
@@ -281,8 +287,11 @@ export class PostgresChangesetStore implements ChangesetStore {
 
   async discard(id: string): Promise<boolean> {
     const deleted = await this.mutate(id, async (querier) => {
-      await querier.query(`DELETE FROM changeset WHERE changeset_id = $1`, [id]);
-      return true;
+      const result = await querier.query(
+        `DELETE FROM changeset WHERE changeset_id = $1 AND submitted_at IS NULL`,
+        [id],
+      );
+      return result.rowCount > 0;
     });
     return deleted === true;
   }

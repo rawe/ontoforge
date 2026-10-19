@@ -325,7 +325,7 @@ describe("ChangesetStore", () => {
     expect(await changesets.append(randomUUID(), write("create_entity", "task"))).toBeNull();
   });
 
-  it("unstage removes one write by seq and bumps the version; an unknown seq changes nothing", async () => {
+  it("unstage removes one write by seq and bumps the version; an unknown seq changes nothing; no seq is reused", async () => {
     const cs = await started();
     const changesets = store.changesets();
     for (let i = 0; i < 3; i++) await changesets.append(cs.id, write("create_entity", "task"));
@@ -342,7 +342,11 @@ describe("ChangesetStore", () => {
     expect((await read(cs.id)).version).toBe(after.version);
     expect(await changesets.unstage(randomUUID(), 1)).toBe(false);
 
-    expect(await changesets.append(cs.id, write("create_entity", "task"))).toBe(4);
+    // The seq is the version at the append: unstaging the last write
+    // frees no seq for the next one.
+    expect(await changesets.unstage(cs.id, 3)).toBe(true);
+    expect(await changesets.append(cs.id, write("create_entity", "task"))).toBe(after.version + 1);
+    expect((await changesets.page(cs.id, 0, 10)).map((w) => w.seq)).toEqual([1, after.version + 1]);
   });
 
   it("submit is a compare-and-set on the version; unsubmit returns to live with the note", async () => {
@@ -439,6 +443,20 @@ describe("ChangesetStore", () => {
     await changesets.deleteWithJournal(b.id);
     expect(await changesets.get(b.id, lenses.all!, null)).toBeNull();
     expect(await sql(`SELECT 1 FROM changeset_write`)).toEqual([]);
+  });
+
+  it("discard deletes a live changeset only: a submitted one stays, with its journal", async () => {
+    const changesets = store.changesets();
+    const cs = await started();
+    await changesets.append(cs.id, write("create_entity", "task"));
+    const submitted = await changesets.submit(cs.id, (await read(cs.id)).version, "go");
+
+    expect(await changesets.discard(cs.id)).toBe(false);
+    expect(await read(cs.id)).toMatchObject({ version: submitted!.version, writeCount: 1 });
+
+    await changesets.unsubmit(cs.id, "back");
+    expect(await changesets.discard(cs.id)).toBe(true);
+    expect(await changesets.get(cs.id, lenses.all!, null)).toBeNull();
   });
 
   it("while another connection holds the row, every mutation is a ConflictError at once", async () => {

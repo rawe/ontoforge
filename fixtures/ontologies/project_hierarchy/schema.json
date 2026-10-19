@@ -1,0 +1,264 @@
+{
+  "formatVersion": "7.0",
+  "keywordLanguages": [
+    "german",
+    "english"
+  ],
+  "searchIndices": {
+    "custom": [],
+    "disabled": []
+  },
+  "entityTypes": [
+    {
+      "key": "customer",
+      "displayName": "Customer",
+      "description": null,
+      "nameProperty": "name",
+      "properties": [
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": null,
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "milestone",
+      "displayName": "Milestone",
+      "description": null,
+      "nameProperty": "name",
+      "properties": [
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": null,
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "person",
+      "displayName": "Person",
+      "description": null,
+      "nameProperty": "name",
+      "properties": [
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": null,
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "project",
+      "displayName": "Project",
+      "description": null,
+      "nameProperty": "name",
+      "properties": [
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": null,
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "status",
+      "displayName": "Status",
+      "description": null,
+      "nameProperty": "name",
+      "properties": [
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": null,
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "task",
+      "displayName": "Task",
+      "description": null,
+      "nameProperty": "name",
+      "properties": [
+        {
+          "key": "name",
+          "displayName": "Name",
+          "description": null,
+          "dataType": "string",
+          "required": false,
+          "defaultValue": null
+        }
+      ]
+    }
+  ],
+  "relationTypes": [
+    {
+      "key": "assigned_to",
+      "displayName": "Assigned To",
+      "description": null,
+      "fromEntityTypeKey": "task",
+      "toEntityTypeKey": "person",
+      "parent": null,
+      "properties": []
+    },
+    {
+      "key": "belongs_to",
+      "displayName": "Belongs To",
+      "description": null,
+      "fromEntityTypeKey": "milestone",
+      "toEntityTypeKey": "project",
+      "parent": "target",
+      "properties": []
+    },
+    {
+      "key": "has_project",
+      "displayName": "Has Project",
+      "description": null,
+      "fromEntityTypeKey": "customer",
+      "toEntityTypeKey": "project",
+      "parent": "source",
+      "properties": []
+    },
+    {
+      "key": "has_status",
+      "displayName": "Has Status",
+      "description": null,
+      "fromEntityTypeKey": "task",
+      "toEntityTypeKey": "status",
+      "parent": null,
+      "properties": []
+    },
+    {
+      "key": "has_subtask",
+      "displayName": "Has Subtask",
+      "description": null,
+      "fromEntityTypeKey": "task",
+      "toEntityTypeKey": "task",
+      "parent": "source",
+      "properties": []
+    },
+    {
+      "key": "has_task",
+      "displayName": "Has Task",
+      "description": null,
+      "fromEntityTypeKey": "project",
+      "toEntityTypeKey": "task",
+      "parent": "source",
+      "properties": [
+        {
+          "key": "phase",
+          "displayName": "Phase",
+          "description": null,
+          "dataType": "string",
+          "required": true,
+          "defaultValue": null
+        }
+      ]
+    },
+    {
+      "key": "manages",
+      "displayName": "Manages",
+      "description": null,
+      "fromEntityTypeKey": "person",
+      "toEntityTypeKey": "person",
+      "parent": "source",
+      "properties": []
+    },
+    {
+      "key": "mentors",
+      "displayName": "Mentors",
+      "description": null,
+      "fromEntityTypeKey": "person",
+      "toEntityTypeKey": "person",
+      "parent": null,
+      "properties": []
+    }
+  ],
+  "lenses": [
+    {
+      "key": "all",
+      "name": "All",
+      "description": null,
+      "indexInclusions": [],
+      "assistants": {
+        "agents": [],
+        "retrievers": [],
+        "navigators": []
+      },
+      "savedQueries": []
+    },
+    {
+      "key": "no_projects",
+      "name": "No Projects",
+      "description": null,
+      "includes": {
+        "entityTypes": [
+          {
+            "key": "customer",
+            "properties": null
+          },
+          {
+            "key": "milestone",
+            "properties": null
+          },
+          {
+            "key": "task",
+            "properties": null
+          }
+        ],
+        "relationTypes": []
+      },
+      "indexInclusions": [],
+      "assistants": {
+        "agents": [],
+        "retrievers": [],
+        "navigators": []
+      },
+      "savedQueries": []
+    },
+    {
+      "key": "portfolio",
+      "name": "Portfolio",
+      "description": null,
+      "includes": {
+        "entityTypes": [
+          {
+            "key": "customer",
+            "properties": null
+          },
+          {
+            "key": "milestone",
+            "properties": null
+          },
+          {
+            "key": "project",
+            "properties": null
+          }
+        ],
+        "relationTypes": []
+      },
+      "indexInclusions": [],
+      "assistants": {
+        "agents": [],
+        "retrievers": [],
+        "navigators": []
+      },
+      "savedQueries": []
+    }
+  ]
+}

@@ -82,19 +82,41 @@ export function shortId(id: string): string {
   return id.length > 8 ? `${id.slice(0, 8)}…` : id
 }
 
+/** Whether a review value is a document stub `{document: true, length}`. */
+function isDocumentStub(value: JsonValue | undefined): boolean {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) && value.document === true
+}
+
 /** A stored or staged value, as the change column shows it. */
 export function valueText(value: JsonValue | undefined): string {
   if (value === undefined || value === null) return 'empty'
   if (typeof value === 'string') return `"${value}"`
-  if (typeof value === 'object' && !Array.isArray(value) && value.document === true) {
-    // The review read stubs document values, as the entity reads do.
-    return `document (${String(value.length)} characters)`
-  }
-  if (typeof value === 'object' && !Array.isArray(value) && typeof value.sha256 === 'string') {
-    // A document in `before` is the hash it was staged against.
-    return 'document'
+  if (isDocumentStub(value)) {
+    // The review read stubs document values, as the entity reads do; a
+    // write staged without a recorded length has none.
+    const length = (value as Record<string, JsonValue>).length
+    return typeof length === 'number' ? `document (${length} characters)` : 'document'
   }
   return typeof value === 'object' ? JSON.stringify(value) : String(value)
+}
+
+/**
+ * The document properties a create or update of an entity sets, in the
+ * order it sends them: each can be read as staged text. A staged null
+ * removes the text and has nothing to read, and neither has an entity a
+ * later write of `writes` (the page shown) deletes: a commit leaves no text.
+ */
+export function stagedDocumentKeys(write: StagedWriteView, writes: readonly StagedWriteView[] = []): string[] {
+  if (write.type === null || write.id === null) return []
+  if (write.operation !== 'create_entity' && write.operation !== 'update_entity') return []
+  const deletedLater = writes.some(
+    (other) =>
+      other.seq > write.seq && other.operation === 'delete_entity' && other.type === write.type && other.id === write.id,
+  )
+  if (deletedLater) return []
+  return Object.entries(write.after ?? {})
+    .filter(([, value]) => isDocumentStub(value))
+    .map(([key]) => key)
 }
 
 const valuesText = (values: Readonly<Record<string, JsonValue>>) =>
@@ -142,13 +164,7 @@ export function changeText(write: StagedWriteView): string {
   }
   const parts = Object.keys(after).length === 0 ? [] : [valuesText(after)]
   if (write.operation === 'create_entity' && write.parent !== null && write.parent !== undefined) {
-    const relation = write.arguments.parentRelation
-    const properties =
-      relation !== null && typeof relation === 'object' && !Array.isArray(relation) &&
-      relation.properties !== null && typeof relation.properties === 'object' &&
-      !Array.isArray(relation.properties)
-        ? relation.properties
-        : {}
+    const properties = write.parent.properties
     const under = `under ${endText(write.parent)}`
     parts.push(Object.keys(properties).length === 0 ? under : `${under} (${valuesText(properties)})`)
   }

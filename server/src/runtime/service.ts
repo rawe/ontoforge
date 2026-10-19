@@ -628,8 +628,14 @@ export async function getDocument(
     store,
   );
 
-  const content = limit === null ? cpSlice(value, offset) : cpSlice(value, offset, offset + limit);
+  return documentSlice(propertyKey, value, offset, limit);
+}
 
+/** A document's text as the document read answers it: the slice from
+ * `offset`, `limit` characters long (code points) or to the end, with its
+ * length and the whole text's. Past-end offsets yield empty content. */
+export function documentSlice(propertyKey: string, value: string, offset: number, limit: number | null): Row {
+  const content = limit === null ? cpSlice(value, offset) : cpSlice(value, offset, offset + limit);
   return {
     propertyKey,
     content,

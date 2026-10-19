@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FileStack,
+  FileText,
   Loader2,
   Trash2,
   Undo2,
@@ -16,7 +17,8 @@ import { useChangeset, useChangesets, useRuntimeSchema } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
-import type { ChangesetViolation, StagedWriteView } from '@/api/types'
+import type { ChangesetViolation, JsonValue, StagedWriteView } from '@/api/types'
+import { DocumentViewerDialog, type DocumentViewerTarget } from '@/components/DocumentViewerDialog'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { TypeChip } from '@/components/TypeChip'
@@ -30,6 +32,7 @@ import {
   operationLabel,
   operationsSummary,
   shortId,
+  stagedDocumentKeys,
   targetText,
   violationLine,
   violationsNote,
@@ -81,7 +84,8 @@ function Disabled({ reason, children }: { reason: string; children: ReactNode })
 /**
  * `/o/:ontologyKey/w/:lensKey/changesets/:changesetId` — one changeset's
  * review through the current lens: its writes by seq with names, before →
- * after and markers. Commit sends the version shown; Unsubmit sends a note;
+ * after and markers; a document change opens its staged text in the
+ * document viewer. Commit sends the version shown; Unsubmit sends a note;
  * Discard and Unstage work only on a draft.
  */
 export function ChangesetDetailPage() {
@@ -103,6 +107,7 @@ export function ChangesetDetailPage() {
   const [unsubmitOpen, setUnsubmitOpen] = useState(false)
   const [note, setNote] = useState('')
   const [discardOpen, setDiscardOpen] = useState(false)
+  const [docTarget, setDocTarget] = useState<DocumentViewerTarget | null>(null)
 
   const listUrl = `/o/${ontologyKey}/w/${lensKey}/changesets`
   // The list and every page of this changeset's read share the list's key.
@@ -256,6 +261,38 @@ export function ChangesetDetailPage() {
     }
     const relationType = schema.data?.relationTypes.find((t) => t.key === write.type)
     return <span className="text-[12.5px]">{relationType?.displayName ?? write.type}</span>
+  }
+
+  /** The staged document properties of a write, each a button opening its staged text;
+   * none when a later write on the page deletes the entity. */
+  const documentButtons = (write: StagedWriteView) => {
+    const entityType = schema.data?.entityTypes.find((t) => t.key === write.type)
+    const buttons = stagedDocumentKeys(write, changeset.writes).flatMap((key) => {
+      const property = entityType?.properties.find((p) => p.key === key)
+      if (property === undefined) return []
+      const stub = write.after?.[key] as Record<string, JsonValue>
+      return [
+        <Button
+          key={key}
+          variant="outline"
+          size="xs"
+          aria-label={`View the staged ${property.displayName} of #${write.seq}`}
+          onClick={() =>
+            setDocTarget({
+              entityTypeKey: write.type!,
+              entityId: write.id!,
+              entityLabel: targetText(write),
+              property,
+              length: typeof stub.length === 'number' ? stub.length : 0,
+            })
+          }
+        >
+          <FileText className="size-3" />
+          View {property.displayName}
+        </Button>,
+      ]
+    })
+    return buttons.length === 0 ? null : <div className="mt-1 flex flex-wrap gap-1">{buttons}</div>
   }
 
   const discardButton = (
@@ -412,6 +449,7 @@ export function ChangesetDetailPage() {
                       </TableCell>
                       <TableCell className="whitespace-normal">
                         <div className="text-[13px] break-words">{changeText(write)}</div>
+                        {documentButtons(write)}
                         {write.markers.length > 0 && (
                           <div className="mt-1 flex flex-wrap gap-1">
                             {write.markers.map((marker, i) => (
@@ -478,6 +516,14 @@ export function ChangesetDetailPage() {
           </>
         )}
       </div>
+
+      <DocumentViewerDialog
+        ontologyKey={ontologyKey}
+        lensKey={lensKey}
+        changesetId={changeset.id}
+        target={docTarget}
+        onClose={() => setDocTarget(null)}
+      />
 
       <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
         <AlertDialogContent>

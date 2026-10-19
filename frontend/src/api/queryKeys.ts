@@ -18,6 +18,8 @@
  *   ['anchors', ontologyKey, lensKey, anchorKey]     one anchor through a lens (mount root)
  *   ['changesets', ontologyKey, lensKey]             the lens's changesets
  *   ['changesets', ontologyKey, lensKey, id, params] one changeset's review read (a page of writes)
+ *   ['changesets', ontologyKey, lensKey, id, ['document', typeKey, entityId, propertyKey]]
+ *                                                    the staged text of one document property
  *   ['assistants', ontologyKey, lensKey, kind]       runtime assistant list of a kind
  *   ['model', ontologyKey, ...]                      modeling sub-keys
  *   ['model', ontologyKey, 'retrievers', lensKey]  retrievers of a lens

@@ -11,6 +11,7 @@ import {
   operationsSummary,
   shortId,
   sortChangesets,
+  stagedDocumentKeys,
   stateLabel,
   submittedCount,
   targetText,
@@ -44,7 +45,6 @@ const write = (over: Partial<StagedWriteView>): StagedWriteView => ({
   operation: 'update_entity',
   type: 'project',
   id: 'p-2000000-0000',
-  arguments: {},
   createdAt: '2026-10-19T10:00:00.000Z',
   before: null,
   current: null,
@@ -142,7 +142,12 @@ test('changeText: before → after for updates, set values for creates, — for 
   // A target gone since staging keeps its before.
   assert.equal(changeText(write({ before: { name: 'P2' }, after: { name: 'x' } })), 'name: "P2" → "x"')
   assert.equal(
-    changeText(write({ before: { body: { sha256: 'ab' } }, current: { body: { document: true, length: 3 } }, after: { body: { document: true, length: 5 } } })),
+    changeText(write({ before: { body: { document: true, length: 3 } }, current: { body: { document: true, length: 3 } }, after: { body: { document: true, length: 5 } } })),
+    'body: document (3 characters) → document (5 characters)',
+  )
+  // A write staged without a recorded length.
+  assert.equal(
+    changeText(write({ before: { body: { document: true, length: null } }, after: { body: { document: true, length: 5 } } })),
     'body: document → document (5 characters)',
   )
   assert.equal(
@@ -150,8 +155,7 @@ test('changeText: before → after for updates, set values for creates, — for 
       write({
         operation: 'create_entity',
         after: { name: 'T9' },
-        parent: { id: 'p1', name: 'P1' },
-        arguments: { properties: { name: 'T9' }, parentRelation: { type: 'has_task', parentId: 'p1', properties: { phase: 'build' } } },
+        parent: { id: 'p1', name: 'P1', properties: { phase: 'build' } },
       }),
     ),
     'name: "T9" · under P1 (phase: "build")',
@@ -161,8 +165,7 @@ test('changeText: before → after for updates, set values for creates, — for 
       write({
         operation: 'create_entity',
         after: { name: 'P4' },
-        parent: { id: 'acme', name: 'ACME' },
-        arguments: { parentRelation: { type: 'has_project', parentId: 'acme' } },
+        parent: { id: 'acme', name: 'ACME', properties: {} },
       }),
     ),
     'name: "P4" · under ACME',
@@ -185,22 +188,50 @@ test('changeText: a drifted update also shows the current value of each key that
     ),
     'name: "P3 Renamed" → "P3 Second" (now "P3 Renamed from human"); code: "X" → "Y"',
   )
-  // A document's before is a hash: on drift its current value is shown.
+  // A document on drift: its current length.
   assert.equal(
     changeText(
       write({
-        before: { body: { sha256: 'ab' } },
+        before: { body: { document: true, length: 3 } },
         current: { body: { document: true, length: 9 } },
         after: { body: { document: true, length: 5 } },
         markers: drift,
       }),
     ),
-    'body: document → document (5 characters) (now document (9 characters))',
+    'body: document (3 characters) → document (5 characters) (now document (9 characters))',
   )
   // Without a drift marker the current value is not shown.
   assert.equal(
     changeText(write({ before: { name: 'A' }, current: { name: 'B' }, after: { name: 'C' } })),
     'name: "A" → "C"',
+  )
+})
+
+test('stagedDocumentKeys: the document properties an entity create or update sets', () => {
+  const doc = (length: number) => ({ document: true, length })
+  assert.deepEqual(
+    stagedDocumentKeys(write({ after: { name: 'T1', notes: doc(12), summary: doc(3) }, before: { name: 'x', notes: doc(4), summary: doc(1) } })),
+    ['notes', 'summary'],
+  )
+  assert.deepEqual(stagedDocumentKeys(write({ operation: 'create_entity', after: { name: 'T9', notes: doc(5) } })), ['notes'])
+  // A staged null removes the text: nothing to read.
+  assert.deepEqual(stagedDocumentKeys(write({ after: { notes: null } })), [])
+  assert.deepEqual(stagedDocumentKeys(write({ operation: 'delete_entity' })), [])
+  assert.deepEqual(stagedDocumentKeys(write({ operation: 'update_relation', after: { notes: doc(5) } })), [])
+  assert.deepEqual(stagedDocumentKeys(write({ type: null, id: null, after: null })), [])
+  // A later write that deletes the entity: a commit leaves no text to read.
+  const update = write({ seq: 2, after: { notes: doc(5) } })
+  const deleted = write({ seq: 4, operation: 'delete_entity' })
+  assert.deepEqual(stagedDocumentKeys(update, [update, deleted]), [])
+  // A delete of another entity, of another type, or before the write does not count.
+  assert.deepEqual(
+    stagedDocumentKeys(update, [
+      write({ seq: 1, operation: 'delete_entity' }),
+      update,
+      write({ seq: 5, operation: 'delete_entity', id: 'other' }),
+      write({ seq: 6, operation: 'delete_entity', type: 'task' }),
+    ]),
+    ['notes'],
   )
 })
 

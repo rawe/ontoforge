@@ -240,14 +240,14 @@ describe("the six staged writes", () => {
     expect((await call("GET", `${url}?limit=501`)).status).toBe(422);
   });
 
-  it("before holds exactly the patched keys: absent stays absent, a document is its hash", async () => {
+  it("before holds exactly the patched keys: absent stays absent, a document is its hash and length", async () => {
     const cs = (await start()).id as string;
     const url = `${ALL}/changesets/${cs}`;
     await call("PATCH", `${url}/entities/project/${ids.P1}`, { name: "P1 New", body: "new plan" });
     await call("PATCH", `${url}/entities/project/${ids.P2}`, { body: "first plan" });
     const rows = await journal(cs);
     const hash = createHash("sha256").update("the plan").digest("hex");
-    expect(rows[0]!.before).toEqual({ name: "P1", body: { sha256: hash } });
+    expect(rows[0]!.before).toEqual({ name: "P1", body: { sha256: hash, length: "the plan".length } });
     expect(rows[0]!.arguments).toEqual({ properties: { name: "P1 New", body: "new plan" } });
     // P2 holds no body: the key is absent from before, not null.
     expect(rows[1]!.before).toEqual({});

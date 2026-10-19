@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { ConflictError, ValidationError } from "../../src/core/exceptions.js";
 import type { AnchorRecord, ChangesetRecord, ChangesetWriteRecord, ParentLink } from "../../src/core/ports.js";
-import { commitChangeset, documentHash, lockFreePass } from "../../src/runtime/changesets.js";
+import { commitChangeset, recordedDocument, lockFreePass } from "../../src/runtime/changesets.js";
 import { invalidateLoadedSchemaCache, invalidateSearchContext, loadSchema } from "../../src/runtime/schemaCache.js";
 import {
   NOW,
@@ -296,10 +296,30 @@ describe("the lock-free pass (step 0b)", () => {
       });
       store.getFullSchemaWithLensInclusions.mockResolvedValue(full);
       stored[PAT]!.bio = "old text";
-      const write = row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { bio: "new" } }, before: { bio: documentHash("old text") } });
+      const write = row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { bio: "new" } }, before: { bio: recordedDocument("old text") } });
       expect((await pass([write])).faults).toEqual([]);
       invalidateLoadedSchemaCache();
       stored[PAT]!.bio = "other text";
+      expect((await pass([write])).faults.map((f) => f.kind)).toEqual(["drift"]);
+    });
+
+    it("a document is compared by its hash alone: a before recorded without a length still matches", async () => {
+      const full = schema();
+      full.entityTypes.find((et: Row) => et.key === "person").properties.push({
+        key: "bio",
+        displayName: "Bio",
+        dataType: "document",
+        required: false,
+        defaultValue: null,
+      });
+      store.getFullSchemaWithLensInclusions.mockResolvedValue(full);
+      stored[PAT]!.bio = "old text";
+      const { sha256 } = recordedDocument("old text");
+      const write = row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { bio: "new" } }, before: { bio: { sha256 } } });
+      expect((await pass([write])).faults).toEqual([]);
+      invalidateLoadedSchemaCache();
+      // The same length, another text: drift.
+      stored[PAT]!.bio = "new text";
       expect((await pass([write])).faults.map((f) => f.kind)).toEqual(["drift"]);
     });
   });

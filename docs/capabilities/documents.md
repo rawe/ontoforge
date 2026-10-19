@@ -85,6 +85,9 @@ The operation is not found when the entity or the entity type does not exist, wh
 property is not exposed by the lens, or when it exists but is not a `document` — a
 non-document property is never readable this way.
 
+A [changeset](changesets.md#the-review) reads the text it stages for a document the same
+way, in slices.
+
 ### Partial writes
 
 Two operations edit in place. Writing the whole value through an ordinary entity create or

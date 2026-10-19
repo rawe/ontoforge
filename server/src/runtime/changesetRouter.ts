@@ -7,10 +7,12 @@
  * The staged write routes under `/:changesetId/` have the paths and bodies
  * of the six write routes of `router.ts` and answer 202 `{seq, id}`.
  * `GET /` lists the lens's changesets (an anchored URL: its anchor's),
- * `GET /:changesetId` is the review read, `POST /:changesetId/submit` and
- * `/unsubmit` hand it over and back, and `POST /:changesetId/commit`
- * persists it all or nothing. No entity or relation read route is mounted
- * under a changeset: reads never see staged data.
+ * `GET /:changesetId` is the review read, and `GET /:changesetId/entities/
+ * …/documents/:propertyKey` the staged text of one document property, with
+ * the document read's paging; `POST /:changesetId/submit` and `/unsubmit`
+ * hand it over and back, and `POST /:changesetId/commit` persists it all or
+ * nothing. No entity or relation read route is mounted under a changeset:
+ * reads never see staged data.
  * Routers parse and shape only; every rule lives in `changesets.ts`.
  */
 
@@ -20,11 +22,19 @@ import { z } from "zod";
 
 import { getRuntimeStore } from "../core/ports.js";
 import * as changesets from "./changesets.js";
-import { EntityCreatePayload, LensParams, PropertyPayload, RelationCreatePayload, anchorOf } from "./router.js";
+import {
+  DocumentReadQuery,
+  EntityCreatePayload,
+  LensParams,
+  PropertyPayload,
+  RelationCreatePayload,
+  anchorOf,
+} from "./router.js";
 
 const ChangesetParams = LensParams.extend({ changesetId: z.string() });
 const EntityTypeParams = ChangesetParams.extend({ entityTypeKey: z.string() });
 const EntityParams = EntityTypeParams.extend({ entityId: z.string() });
+const DocumentParams = EntityParams.extend({ propertyKey: z.string() });
 const RelationTypeParams = ChangesetParams.extend({ relationTypeKey: z.string() });
 const RelationParams = RelationTypeParams.extend({ relationId: z.string() });
 const WriteParams = ChangesetParams.extend({ seq: z.coerce.number().int().min(1) });
@@ -97,6 +107,23 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.changesetId,
         request.query.offset,
         request.query.limit,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.get(
+    "/:changesetId/entities/:entityTypeKey/:entityId/documents/:propertyKey",
+    { schema: { tags: ["runtime"], params: DocumentParams, querystring: DocumentReadQuery } },
+    async (request) =>
+      changesets.getStagedDocument(
+        request.params.lensKey,
+        anchorOf(request.params),
+        request.params.changesetId,
+        request.params.entityTypeKey,
+        request.params.entityId,
+        request.params.propertyKey,
+        request.query.offset,
+        request.query.limit ?? null,
         await getRuntimeStore(request.params.ontologyKey),
       ),
   );

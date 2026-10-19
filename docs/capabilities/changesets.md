@@ -108,7 +108,7 @@ total.
 | `anchor_gone`, `anchor_dangling` | The changeset's anchor was deleted, is dangling, or points at an entity the lens hides; seq 0, the whole changeset |
 
 The first five are the lock-free pass's, and they are also what submit and every read of
-a changeset report. A violation names only what the write sent and the lens shows — never
+a changeset's writes report. A violation names only what the write sent and the lens shows — never
 a hidden type, a child, or another anchor's key. The parent rules are the immediate write's, judged
 once over the end state, so a plan may pass through states that break them.
 
@@ -171,13 +171,19 @@ discarded, so one that vanished was committed — or its lens was deleted.
   counts per operation, and the type keys it names that the lens shows, with a count of
   the others;
 - **the writes by seq**, paged, each with the names of what it touches, an update's
-  before, current and after values of the keys it sends, a create's values, and the
-  lock-free pass's faults on it as markers: `drift`, `dangling`, `missing`, `not_visible`,
-  `replay`.
+  before, current and after values of the keys it sends, a create's values and its parent
+  with the parent relation's values, and the lock-free pass's faults on it as markers:
+  `drift`, `dangling`, `missing`, `not_visible`, `replay`;
+- **the staged text of a document property**: the text a commit would leave, from the
+  last staged write of the changeset that sets it — a create or an update, of an entity
+  the changeset creates too — whole or by character range, as a
+  [document is read](documents.md#reading-a-slice). When no staged write sets it, or a later
+  one deletes the entity, it is not found.
 
-A write whose type the lens no longer shows is reduced to its seq, operation, time and
-markers; a property the lens hides is left out; a document value is shown by its length,
-and in before by its hash.
+A write is shown by what it changes, not by the arguments it was staged with. A write
+whose type the lens no longer shows is reduced to its seq, operation, time and markers; a
+type or property the lens hides is left out, and its staged text is not found; a document
+value is shown only by its length.
 
 ## Staged-only
 
@@ -203,8 +209,8 @@ Staged-only guards against mistakes, not against a determined client. It has two
 - **At most two commits run at once in one server process**; a third answers a conflict
   at once, holding nothing.
 
-Each staged update reads its target once. Submit and every read of a changeset run the
-lock-free pass over the whole changeset, with no lock. A commit holds one database
+Each staged update reads its target once. Submit and every read of a changeset's writes
+run the lock-free pass over the whole changeset, with no lock. A commit holds one database
 connection for its whole run, and every row it touches waits as long.
 
 ## Not possible
@@ -223,7 +229,7 @@ connection for its whole run, and every row it touches waits as long.
 
 | | REST | MCP | Web UI |
 |---|---|---|---|
-| Start, list, read, unstage, submit, unsubmit, commit, discard | routes under `changesets` of a runtime mount | eight changeset tools | the Workbench's Changesets page: list, review, unstage, unsubmit, commit, discard |
+| Start, list, read, unstage, submit, unsubmit, commit, discard | routes under `changesets` of a runtime mount | nine changeset tools | the Workbench's Changesets page: list, review with the staged text of a document, unstage, unsubmit, commit, discard |
 | Stage | the write routes under one changeset | the six write tools with `changeset_id` | — |
 | Staged-only | the anchor's maintenance | a staged-only anchored mount | the switch on the Workbench's Anchors page |
 

@@ -226,6 +226,7 @@ describe("tool surface", () => {
         "get_path",
         "get_relation",
         "get_schema",
+        "get_staged_document",
         "list_changesets",
         "list_entities",
         "list_relations",

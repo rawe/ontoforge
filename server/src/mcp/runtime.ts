@@ -17,8 +17,9 @@
  *
  * Changesets: the six entity and relation write tools take an optional
  * `changeset_id` that stages the write instead (`runtime/changesets.ts`,
- * the same functions as REST); eight tools start, list, read, unstage,
- * submit, unsubmit, commit and discard a changeset. None is grantable to
+ * the same functions as REST); nine tools start, list, read, unstage,
+ * submit, unsubmit, commit and discard a changeset and read its staged
+ * document text. None is grantable to
  * an agent (`toolNames.ts`). On a staged-only anchor (V9, V29) the six
  * write tools require `changeset_id`, and `commit_changeset`,
  * `edit_document` and `write_document` are not registered (R13);
@@ -1117,7 +1118,7 @@ const LOCK_FREE_CHECKS =
   "type and accepts every value";
 
 /**
- * The eight changeset tools (V33): the same service functions as the REST
+ * The nine changeset tools (V33): the same service functions as the REST
  * routes, through this mount's lens and anchor. Staged-only, no
  * `commit_changeset` (V9).
  */
@@ -1182,16 +1183,18 @@ function registerChangesetTools(
         "Read a changeset and one page of its staged writes by seq: offset (default 0) and " +
         `limit (default 100, 1–500). Returns ${CHANGESET_FIELDS}, offset, limit and writes. ` +
         "Each write has seq (seqs may skip numbers), operation, type, id (the id a create " +
-        "minted, or the target), arguments (as staged) and createdAt; entity writes add name, " +
-        "a create its parent {id, name}; relation writes add from and to {id, name}; before (an " +
-        "update's stored values of the keys it sets, as they were when it was staged; a document " +
-        "as its hash {sha256}), current (those values now; null when the target is gone), both " +
+        "minted, or the target) and createdAt; entity writes add name, a create its parent " +
+        "{id, name, properties} (properties: those of the parent relation it creates); relation " +
+        "writes add from and to {id, name}; before (an " +
+        "update's stored values of the keys it sets, as they were when it was staged), current " +
+        "(those values now; null when the target is gone), both " +
         "null when the target is created in this changeset; after (the values it sets), and " +
         "markers [{kind, message}]: what would reject the commit now, the hierarchy rules aside: " +
         "drift (current differs from before), missing (its target is gone), dangling (an id " +
         "neither stored nor created in this changeset), not_visible (this lens no longer shows " +
-        "its type), replay (a value this lens no longer accepts). Document values in current and " +
-        "after show as {document: true, length}. Everything is shown through this lens as it is now: what it hides is " +
+        "its type), replay (a value this lens no longer accepts). Document values in before, " +
+        "current and after show as {document: true, length}; get_staged_document reads the " +
+        "staged text. Everything is shown through this lens as it is now: what it hides is " +
         "left out, and a write of a type it no longer shows keeps only seq, operation, " +
         "createdAt and markers." +
         (stagedOnly ? "" : " To commit exactly what you read, pass version as expected_version to commit_changeset.") +
@@ -1212,6 +1215,55 @@ function registerChangesetTools(
             args.changeset_id,
             Math.max(0, Math.trunc(args.offset ?? 0)),
             clamp(Math.trunc(args.limit ?? 100), 1, 500),
+            await openStore(),
+          ),
+        ),
+    ),
+  );
+
+  server.registerTool(
+    "get_staged_document",
+    {
+      description:
+        "Read the text a commit of a changeset would leave in one document property, as set by " +
+        "the last write staged in it that sets that property: a create of the entity (one " +
+        "created in this changeset included) or an update of it. A staged document value is " +
+        "always the whole new text; a staged null reads as empty. get_changeset shows document " +
+        "values only as {document: true, length}. 'offset' and 'limit' are character-based, as " +
+        "in get_document; omit both to read the whole text. Returns propertyKey, content, " +
+        "offset, length (of content) and totalLength. Not found when no staged write of this " +
+        "changeset sets that property, when a later staged write deletes the entity, or when " +
+        "this lens does not show the entity type or the property." +
+        reach(anchored),
+      inputSchema: {
+        changeset_id: z.string(),
+        entity_type_key: z.string(),
+        entity_id: z.string(),
+        property_key: z.string(),
+        offset: z.number().optional(),
+        limit: z.number().optional(),
+      },
+    },
+    wrap(
+      "get_staged_document",
+      async (args: {
+        changeset_id: string;
+        entity_type_key: string;
+        entity_id: string;
+        property_key: string;
+        offset?: number | undefined;
+        limit?: number | undefined;
+      }) =>
+        jsonResult(
+          await changesets.getStagedDocument(
+            lensKey,
+            anchorKey,
+            args.changeset_id,
+            args.entity_type_key,
+            args.entity_id,
+            args.property_key,
+            Math.max(0, args.offset ?? 0),
+            args.limit === undefined || args.limit === null ? null : Math.max(1, args.limit),
             await openStore(),
           ),
         ),

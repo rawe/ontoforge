@@ -104,7 +104,7 @@ export const EntityCreatePayload = z.looseObject({
 
 const DocumentParams = EntityParams.extend({ propertyKey: z.string() });
 
-const DocumentReadQuery = z.looseObject({
+export const DocumentReadQuery = z.looseObject({
   offset: z.coerce.number().int().min(0).default(0),
   limit: z.coerce.number().int().min(1).optional(),
 });

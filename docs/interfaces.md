@@ -585,6 +585,7 @@ Semantics: [capabilities/changesets.md](capabilities/changesets.md).
 | POST | `/changesets` | Start a changeset, with an optional `note`; 201 | — |
 | GET | `/changesets` | List the changesets this URL reaches | — |
 | GET | `/changesets/{changesetId}` | Read a changeset with its staged writes by seq | `offset`, `limit` |
+| GET | `/changesets/{changesetId}/entities/{entityTypeKey}/{entityId}/documents/{propertyKey}` | Read the text a commit would leave in a document property, whole or by character range | `offset`, `limit` |
 | DELETE | `/changesets/{changesetId}` | Discard a draft changeset; 204 | — |
 | DELETE | `/changesets/{changesetId}/writes/{seq}` | Unstage one write; 204 | — |
 | POST | `/changesets/{changesetId}/submit` | Submit, with an optional `note` | — |
@@ -592,7 +593,8 @@ Semantics: [capabilities/changesets.md](capabilities/changesets.md).
 | POST | `/changesets/{changesetId}/commit` | Commit, with an optional `expectedVersion` | — |
 | POST, PATCH, DELETE | `/changesets/{changesetId}/entities/…` · `/changesets/{changesetId}/relations/…` | Stage the entity or relation write of the same path and body; 202 `{seq, id}` | — |
 
-`limit` is 1–500, default 100. Start, submit and unsubmit answer the changeset; commit
+`limit` of the changeset read is 1–500, default 100; the staged document read pages and
+answers as the document read does. Start, submit and unsubmit answer the changeset; commit
 answers `{committed, alreadyGone}`, the number of writes and the seqs of deletes whose
 target was already gone. Every unknown changeset — committed, discarded, expired, never
 started, or bound to another lens or anchor — is `RESOURCE_NOT_FOUND`. A refusal by state
@@ -1040,6 +1042,7 @@ Everything a client can do to instance data through one lens.
 | `start_changeset` | Start a changeset, with an optional `note` |
 | `list_changesets` | The changesets this mount reaches |
 | `get_changeset` | A changeset with its staged writes by seq |
+| `get_staged_document` | The text a commit would leave in a document property, whole or by character range |
 | `unstage` | Remove one staged write, by `seq` |
 | `submit_changeset` | Submit a changeset, with an optional `note` |
 | `unsubmit_changeset` | Unsubmit a changeset, with a required `note` |
@@ -1051,14 +1054,16 @@ and `delete_relation` take an optional `changeset_id`: with it the write is stag
 that changeset and answers `{seq, id}`. `edit_document` and `write_document` cannot stage:
 given a `changeset_id`, they refuse with a validation error and write nothing. Every
 changeset tool but `start_changeset` and `list_changesets` takes `changeset_id`;
-`get_changeset` takes `offset` and `limit`, which it clamps into range. The changeset tools
+`get_changeset` takes `offset` and `limit`, which it clamps into range, and
+`get_staged_document` takes those of `get_document`. The changeset tools
 answer what the REST routes answer, and `unstage` and `discard_changeset` a message.
 
 An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
 `get_entity`, `get_document`, `list_relations`, `get_neighbors`, `search`,
 `search_documents`, `execute_query`, `list_saved_queries`, `run_saved_query`,
 `search_saved_queries`. Every write tool is outside that set, and so are the read-only
-`get_relation`, `get_path`, `get_anchor`, `list_changesets` and `get_changeset` — being
+`get_relation`, `get_path`, `get_anchor`, `list_changesets`, `get_changeset` and
+`get_staged_document` — being
 read-only is not sufficient to be grantable. The two search tools
 return the REST envelope and take no strategy and no `min_similarity`; they apply the
 fixed floor of [capabilities/search.md](capabilities/search.md#similarity-floor) whenever

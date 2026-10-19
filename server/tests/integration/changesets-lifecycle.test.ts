@@ -8,8 +8,6 @@
  * after, markers, and nothing a scoped lens hides.
  */
 
-import { createHash } from "node:crypto";
-
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -349,7 +347,7 @@ describe("the review read (V41)", () => {
     expect(bySeq[1].markers).toEqual([
       { kind: "drift", message: `Entity '${e.P2}' changed since this write was staged; unstage and restage it` },
     ]);
-    expect(bySeq[3]).toMatchObject({ id: t9, name: "T9", parent: { id: p5, name: null }, after: { name: "T9" } });
+    expect(bySeq[3]).toMatchObject({ id: t9, name: "T9", parent: { id: p5, name: null, properties: { phase: "plan" } }, after: { name: "T9" } });
     expect(bySeq[3].markers).toEqual([
       { kind: "dangling", message: `Entity '${p5}' is neither stored nor created by a write in this changeset` },
     ]);
@@ -367,7 +365,7 @@ describe("the review read (V41)", () => {
     expect(bySeq[6].markers.map((m: Row) => m.kind)).toEqual(["missing"]);
     expect(bySeq[7]).toMatchObject({
       name: "T2",
-      before: { notes: { sha256: createHash("sha256").update("Notes of T2", "utf8").digest("hex") } },
+      before: { notes: { document: true, length: "Notes of T2".length } },
       current: { notes: { document: true, length: "Notes of T2".length } },
       after: { notes: { document: true, length: "New notes".length } },
     });

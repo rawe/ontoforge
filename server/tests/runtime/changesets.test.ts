@@ -363,11 +363,12 @@ describe("updates and deletes: the target and the before", () => {
     expect(removal.before).toEqual({});
   });
 
-  it("a document value in before is its hash", async () => {
-    store.getEntity.mockResolvedValue(makeEntity({ name: "N", body: "old text" }, "note", P1));
+  it("a document value in before is its hash and its length in characters", async () => {
+    store.getEntity.mockResolvedValue(makeEntity({ name: "N", body: "old text 😀" }, "note", P1));
     await stageOn({ operation: "update_entity", typeKey: "note", id: P1, properties: { body: "new text" } });
-    const hash = createHash("sha256").update("old text").digest("hex");
-    expect(appended()).toMatchObject({ arguments: { properties: { body: "new text" } }, before: { body: { sha256: hash } } });
+    const hash = createHash("sha256").update("old text 😀").digest("hex");
+    expect(appended()).toMatchObject({ arguments: { properties: { body: "new text" } } });
+    expect(appended().before).toEqual({ body: { sha256: hash, length: 10 } });
   });
 
   it("a relation update reads its target; the endpoint keys are dropped as on the immediate write", async () => {
@@ -448,7 +449,6 @@ describe("read, unstage, discard", () => {
         operation: "create_entity",
         type: "person",
         id: P1,
-        arguments: { properties: { name: "A" } },
         createdAt: NOW,
         name: "A",
         parent: null,
@@ -462,7 +462,6 @@ describe("read, unstage, discard", () => {
         operation: "delete_entity",
         type: "company",
         id: ACME,
-        arguments: {},
         createdAt: NOW,
         name: null,
         before: null,

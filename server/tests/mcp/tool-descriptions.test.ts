@@ -135,6 +135,7 @@ describe("tool descriptions", () => {
     "start_changeset",
     "list_changesets",
     "get_changeset",
+    "get_staged_document",
     "unstage",
     "submit_changeset",
     "unsubmit_changeset",
@@ -189,8 +190,36 @@ describe("tool descriptions", () => {
     expect(parameters("submit_changeset").required).toEqual(["changeset_id"]);
     expect(parameters("commit_changeset").required).toEqual(["changeset_id"]);
     expect(parameters("get_changeset").required).toEqual(["changeset_id"]);
+    expect(parameters("get_staged_document").required).toEqual([
+      "changeset_id",
+      "entity_type_key",
+      "entity_id",
+      "property_key",
+    ]);
+    expect(Object.keys(parameters("get_staged_document").properties ?? {})).toEqual([
+      "changeset_id",
+      "entity_type_key",
+      "entity_id",
+      "property_key",
+      "offset",
+      "limit",
+    ]);
     expect(parameters("unstage").required).toEqual(["changeset_id", "seq"]);
     expect(parameters("start_changeset").required ?? []).toEqual([]);
+  });
+
+  it("get_changeset shows no staged arguments, stubs documents and points to get_staged_document", () => {
+    for (const map of [runtime, anchored, stagedOnly]) {
+      const text = map.get("get_changeset")!;
+      expect(text).not.toMatch(/argument|sha256|hash/);
+      expect(text).toContain("{id, name, properties}");
+      expect(text).toContain("Document values in before, current and after show as {document: true, length}");
+      expect(text).toContain("get_staged_document reads the staged text");
+      const staged = map.get("get_staged_document")!;
+      for (const part of ["last write staged", "'offset' and 'limit' are character-based", "totalLength", "Not found when no staged write", "a later staged write deletes the entity"]) {
+        expect(staged).toContain(part);
+      }
+    }
   });
 
   it("commit_changeset says how to tell the outcome after a lost response", () => {

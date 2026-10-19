@@ -28,8 +28,8 @@
  * - **Before (V10).** A staged update of a stored target records the
  *   stored values of exactly its patched keys as its `before`, raw: an
  *   absent key stays absent, distinct from null, and a document value is
- *   kept as its hash. Drift is the stored values now (`current`) differing
- *   from it.
+ *   kept as its hash and its length. Drift is the stored values now
+ *   (`current`) differing from it, a document by its hash.
  * - **Expiry (V24, R3).** A draft changeset idle for 7 days is gone: checked
  *   on every access, where it is deleted and answers not found, and swept
  *   on start and on list. A submitted changeset never expires.
@@ -42,8 +42,11 @@
  *   discard are 409s, decided in the store's own statement; unsubmit (a
  *   note is required, R14) makes it a draft again, and commit is the
  *   approval. A rejected commit leaves it as it was (R6).
- * - **Review (V41).** The list and the read apply the lens as it is now:
- *   a type, property or name the lens hides is never shown.
+ * - **Review (V41).** The list and the reads apply the lens as it is now:
+ *   a type, property or name the lens hides is never shown. The review
+ *   read shows no staged arguments and stubs every document value; the
+ *   staged document read returns the text the last staged write of a
+ *   document property sets.
  * - **Commit (D3, V1 B).** Before BEGIN, holding nothing: the schema, the
  *   changeset and the search context are loaded, and the lock-free pass
  *   (V19) runs; any fault it finds rejects here. Then one transaction on
@@ -88,7 +91,7 @@ import {
 } from "./prepare.js";
 import { documentPropertyKeys, stubDocumentProperties } from "./readHelpers.js";
 import { loadSchema, loadSearchContext, type LoadedSchema, type SearchContext } from "./schemaCache.js";
-import { parentReadings } from "./service.js";
+import { documentSlice, parentReadings } from "./service.js";
 
 type Row = Record<string, unknown>;
 
@@ -135,6 +138,12 @@ export interface EndView {
   name: string | null;
 }
 
+/** A create's parent: the parent entity, and the values the parent
+ * relation is created with. */
+export interface ParentView extends EndView {
+  properties: Row;
+}
+
 /** A fault the lock-free pass finds on a staged write (V19). */
 export interface Marker {
   kind: string;
@@ -153,19 +162,16 @@ export interface StagedWriteView {
   type: string | null;
   /** The id a create minted, or the target of an update or delete. */
   id: string | null;
-  /** The payload, as sent, after coercion; what the lens hides is left out. */
-  arguments: Row;
   createdAt: Date;
   /** Entity writes: the target's name. */
   name?: string | null;
   /** A create's parent, when it has one the lens shows. */
-  parent?: EndView | null;
+  parent?: ParentView | null;
   /** Relation writes: the two ends. */
   from?: EndView | null;
   to?: EndView | null;
   /** Updates of a stored target: the stored values of the patched keys as
-   * they were when it was staged, null for a key the target lacked; a
-   * document value is its hash. */
+   * they were when it was staged, null for a key the target lacked. */
   before: Row | null;
   /** Updates of a stored target: the stored values of the patched keys
    * now; null when the target is gone. Drift is `current` ≠ `before`. */
@@ -339,18 +345,18 @@ function patchOf(write: UpdateArgs): Row {
   );
 }
 
-/** How a document value is kept in a staged update's `before`: its hash,
- * not its text. */
-export function documentHash(text: string): Row {
-  return { sha256: createHash("sha256").update(text, "utf8").digest("hex") };
+/** How a document value is kept in a staged update's `before`: its hash
+ * and its length in characters, not its text. */
+export function recordedDocument(text: string): Row {
+  return { sha256: createHash("sha256").update(text, "utf8").digest("hex"), length: cpLength(text) };
 }
 
 /**
  * The stored values of exactly `keys` as a staged update records them in
  * its `before` and drift compares them (V10): raw as the store reads them
  * without definitions. A key the target does not hold stays absent,
- * distinct from a stored null; a document value is its hash
- * (`documentHash`).
+ * distinct from a stored null; a document value is its hash and length
+ * (`recordedDocument`).
  */
 export function recordedValues(stored: Row, keys: string[], propertyDefs: Record<string, PropertyDef>): Row {
   const documents = documentPropertyKeys(propertyDefs);
@@ -358,7 +364,7 @@ export function recordedValues(stored: Row, keys: string[], propertyDefs: Record
   for (const key of keys) {
     if (!Object.hasOwn(stored, key)) continue;
     const value = stored[key];
-    values[key] = documents.has(key) && typeof value === "string" ? documentHash(value) : value;
+    values[key] = documents.has(key) && typeof value === "string" ? recordedDocument(value) : value;
   }
   return values;
 }
@@ -544,6 +550,67 @@ export async function getChangeset(
   const record = await loadChangeset(loaded, anchorKey, changesetId, store);
   const writes = await store.changesets().page(record.id, offset, limit);
   return { ...toView(record), offset, limit, writes: await reviewPage(loaded, record.id, writes, store) };
+}
+
+/**
+ * The text a commit of this changeset would leave in one document
+ * property: the value the last staged write setting it sets (a create or
+ * an update of that entity, an entity this changeset creates included),
+ * sliced as the document read slices (`documentSlice`). A null set is the
+ * empty text. Through the lens as every review read: a type or property it
+ * hides is not found, and so is a property no staged write sets, or one of
+ * an entity a later staged write deletes (ids are final: nothing re-creates
+ * it).
+ */
+export async function getStagedDocument(
+  lensKey: string,
+  anchorKey: string | null,
+  changesetId: string,
+  entityTypeKey: string,
+  entityId: string,
+  propertyKey: string,
+  offset: number,
+  limit: number | null,
+  store: RuntimeStore,
+): Promise<Row> {
+  const loaded = await loadSchema(lensKey, store);
+  const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+  const type = loaded.scoped.entityTypes[entityTypeKey];
+  if (type === undefined) throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
+  if (type.properties[propertyKey]?.dataType !== "document") {
+    throw new NotFoundError(`Document property '${propertyKey}' not found on entity type '${entityTypeKey}'`);
+  }
+
+  let staged: { value: unknown } | null = null;
+  let deleted = false;
+  for (let at = 0; ; at += REPLAY_PAGE) {
+    const page = await store.changesets().page(record.id, at, REPLAY_PAGE);
+    for (const write of page) {
+      if (write.typeKey !== entityTypeKey) continue;
+      const sets =
+        (write.operation === "create_entity" && write.mintedId === entityId) ||
+        (write.operation === "update_entity" && write.targetId === entityId);
+      const properties = (write.arguments.properties ?? {}) as Row;
+      if (sets && Object.hasOwn(properties, propertyKey)) {
+        staged = { value: properties[propertyKey] };
+        deleted = false;
+      } else if (write.operation === "delete_entity" && write.targetId === entityId) {
+        deleted = true;
+      }
+    }
+    if (page.length < REPLAY_PAGE) break;
+  }
+  if (staged !== null && deleted) {
+    throw new NotFoundError(
+      `Changeset '${changesetId}' deletes entity '${entityId}': a commit leaves no '${propertyKey}'`,
+    );
+  }
+  if (staged === null) {
+    throw new NotFoundError(
+      `No staged write of changeset '${changesetId}' sets '${propertyKey}' of entity '${entityId}'`,
+    );
+  }
+  return documentSlice(propertyKey, typeof staged.value === "string" ? staged.value : "", offset, limit);
 }
 
 /**
@@ -1025,13 +1092,31 @@ function valueFaults(loaded: LoadedSchema, write: ChangesetWriteRecord): string 
   }
 }
 
+/** Whether `value` is a document as `recordedDocument` keeps it. */
+function isRecordedDocument(value: unknown): value is Row {
+  return typeof value === "object" && value !== null && typeof (value as Row).sha256 === "string";
+}
+
+/** Recorded values as drift compares them: a document by its hash alone. */
+function byHash(values: Row | null, documents: Set<string>): Row | null {
+  if (values === null) return null;
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [
+      key,
+      documents.has(key) && isRecordedDocument(value) ? value.sha256 : value,
+    ]),
+  );
+}
+
 /** Whether the stored values of a staged update's patched keys now differ
  * from its `before` (V10): raw, absent distinct from null, a document by
  * its hash. */
 function drifted(loaded: LoadedSchema, write: ChangesetWriteRecord, stored: Row): boolean {
   const types = write.operation === "update_entity" ? loaded.full.entityTypes : loaded.full.relationTypes;
+  const defs = types[write.typeKey]?.properties ?? {};
   const keys = Object.keys((write.arguments.properties ?? {}) as Row);
-  return !isDeepStrictEqual(write.before, recordedValues(stored, keys, types[write.typeKey]?.properties ?? {}));
+  const documents = documentPropertyKeys(defs);
+  return !isDeepStrictEqual(byHash(write.before, documents), byHash(recordedValues(stored, keys, defs), documents));
 }
 
 function driftFault(write: ChangesetWriteRecord): Violation {
@@ -1143,31 +1228,18 @@ function shownValues(values: Row, properties: Record<string, PropertyDef>): Row 
   return stubDocumentProperties(shown, properties);
 }
 
-/** The arguments of a staged write with what the lens hides left out: its
- * hidden properties, and a parent relation the lens no longer shows. */
-function shownArguments(loaded: LoadedSchema, write: ChangesetWriteRecord, properties: Record<string, PropertyDef>): Row {
-  const args = write.arguments;
-  const shown: Row = { ...args };
-  if (args.properties !== undefined) {
-    shown.properties = Object.fromEntries(
-      Object.entries(args.properties as Row).filter(([key]) => Object.hasOwn(properties, key)),
-    );
-  }
-  const parent = args.parentRelation as ParentRelationInput | null | undefined;
-  if (parent) {
-    const rt = loaded.scoped.relationTypes[parent.type];
-    shown.parentRelation =
-      rt === undefined
-        ? null
-        : {
-            ...parent,
-            properties: Object.fromEntries(
-              Object.entries(parent.properties ?? {}).filter(([key]) => Object.hasOwn(rt.properties, key)),
-            ),
-          };
-    if (rt === undefined) delete shown.relationId;
-  }
-  return shown;
+/** A staged update's recorded values of `keys` as the review shows them:
+ * null for a key the target lacked, a document as the read stub with the
+ * length it was recorded with (null when it was recorded without one). */
+function recordedView(recorded: Row, keys: string[], properties: Record<string, PropertyDef>): Row {
+  const documents = documentPropertyKeys(properties);
+  return Object.fromEntries(
+    keys.map((key) => {
+      const value = recorded[key] ?? null;
+      if (!documents.has(key) || !isRecordedDocument(value)) return [key, value];
+      return [key, { document: true, length: typeof value.length === "number" ? value.length : null }];
+    }),
+  );
 }
 
 /**
@@ -1176,9 +1248,10 @@ function shownArguments(loaded: LoadedSchema, write: ChangesetWriteRecord, prope
  * lock-free pass, which runs over the whole journal because a write's ids
  * may be minted anywhere in it. The stored entities the page names come in
  * one batched read; a stored relation target is read once per write.
- * Through the lens:
- * a hidden type keeps only seq, operation and markers, and hidden
- * properties and names are not returned.
+ * The staged arguments are not shown, and every document value is a stub
+ * (`getStagedDocument` reads the staged text). Through the lens: a hidden
+ * type keeps only seq, operation and markers, and hidden properties and
+ * names are not returned.
  */
 async function reviewPage(
   loaded: LoadedSchema,
@@ -1240,7 +1313,6 @@ async function reviewPage(
       operation: write.operation,
       type: null,
       id: null,
-      arguments: {},
       createdAt: write.createdAt,
       before: null,
       current: null,
@@ -1252,7 +1324,6 @@ async function reviewPage(
     const id = (write.mintedId ?? write.targetId)!;
     view.type = write.typeKey;
     view.id = id;
-    view.arguments = shownArguments(loaded, write, type.properties);
     const staged = (write.arguments.properties ?? {}) as Row;
     if (write.operation.startsWith("create_") || write.operation.startsWith("update_")) {
       view.after = shownValues(staged, type.properties);
@@ -1261,8 +1332,7 @@ async function reviewPage(
       // A stored target: its values as staged against, and its values now,
       // unless it is gone (or now of another type).
       const keys = Object.keys(staged).filter((key) => Object.hasOwn(type.properties, key));
-      const recorded = write.before;
-      view.before = Object.fromEntries(keys.map((key) => [key, recorded[key] ?? null]));
+      view.before = recordedView(write.before, keys, type.properties);
       const stored = isEntity
         ? rows[id]?._entityTypeKey === write.typeKey
           ? rows[id]
@@ -1275,8 +1345,12 @@ async function reviewPage(
     if (isEntity) {
       view.name = nameOf(id);
       const parent = write.arguments.parentRelation as ParentRelationInput | null | undefined;
+      const relationType = parent ? lens.relationTypes[parent.type] : undefined;
       if (write.operation === "create_entity") {
-        view.parent = parent && lens.relationTypes[parent.type] !== undefined ? end(parent.parentId) : null;
+        view.parent =
+          parent && relationType !== undefined
+            ? { ...end(parent.parentId), properties: shownValues(parent.properties ?? {}, relationType.properties) }
+            : null;
       }
     } else {
       const ends = relationEnds.get(write.seq);

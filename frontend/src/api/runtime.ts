@@ -384,6 +384,21 @@ export const unsubmitChangeset = (
     body: { note },
   })
 
+/** The text a commit would leave in a document property: from the last
+ * staged write of the changeset that sets it; 404 when none does. */
+export const getStagedDocument = (
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string,
+  entityTypeKey: string,
+  id: string,
+  propertyKey: string,
+  params?: GetDocumentParams,
+) =>
+  request<DocumentContentResponse>(
+    `${changesetsBase(ontologyKey, lensKey)}/${changesetId}/entities/${entityTypeKey}/${id}/documents/${propertyKey}${buildQuery(params)}`,
+  )
+
 /** Draft only; a submitted changeset answers 409. */
 export const discardChangeset = (ontologyKey: string, lensKey: string, changesetId: string) =>
   request<undefined>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}`, {

@@ -41,6 +41,7 @@ const CHANGESET_TOOLS = [
   "start_changeset",
   "list_changesets",
   "get_changeset",
+  "get_staged_document",
   "unstage",
   "submit_changeset",
   "unsubmit_changeset",
@@ -124,7 +125,7 @@ afterAll(async () => {
 describe("the tool surface (V33, V4)", () => {
   beforeAll(fresh, 60_000);
 
-  it("lists the eight changeset tools and an optional changeset_id on the six stageable tools only", async () => {
+  it("lists the nine changeset tools and an optional changeset_id on the six stageable tools only", async () => {
     for (const anchorKey of [null, "agent-a"]) {
       if (anchorKey !== null) await pointAnchor(anchorKey, "project", e.P1);
       const { tools } = await (await connect(anchorKey)).listTools();

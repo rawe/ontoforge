@@ -315,7 +315,10 @@ shows them now. The page reviews, commits and discards; it stages nothing.
   `from → to` for a relation, a short id when the lens shows no name — and the change:
   `key: before → after` for an update, with the current value on drift, the values and
   the parent for a create. A marker chip with its message tints the row. A write the lens
-  no longer shows says so; a document value shows its length.
+  no longer shows says so; a document value shows its length, and a View action opens the
+  staged text, as a commit would leave it, in the
+  [document viewer](#document-viewer-and-editor) — absent when a later write on the page
+  deletes the entity.
 - **Commit** sends the version on the screen. When the changeset changed since, it says so
   and reloads the review; any other conflict shows its message and reloads too. A rejected
   commit lists its violations in a panel, which on a submitted changeset offers to unsubmit
@@ -1295,8 +1298,9 @@ Document properties never appear inline anywhere — every read carries a size s
 client renders it as a size badge. Two surfaces open them.
 
 The **viewer** is a read-only overlay that fetches the full content on open and renders it
-as Markdown. It is reachable from a table cell, from the Explorer's node panel, and from
-the entity detail row, and is the same overlay in all three.
+as Markdown. It is reachable from a table cell, from the Explorer's node panel, from the
+entity detail row, and from a changeset's review, where it shows the staged text; it is the
+same overlay in all four.
 
 The **editor** is a large two-tab surface — write as Markdown, preview as rendered — that
 loads the current content, edits it as one whole string, and saves it as an ordinary

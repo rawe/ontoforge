@@ -248,6 +248,11 @@ export interface ChangesetEnd {
   name: string | null
 }
 
+/** A create's parent: the parent entity and the parent relation's properties. */
+export interface ChangesetParent extends ChangesetEnd {
+  properties: Record<string, JsonValue>
+}
+
 /** A fault the lock-free pass finds on a staged write: drift, dangling, not_visible, missing, replay. */
 export interface ChangesetMarker {
   kind: string
@@ -271,17 +276,18 @@ export interface StagedWriteView {
   operation: StagedOperation
   type: string | null
   id: string | null
-  arguments: Record<string, JsonValue>
   createdAt: string
   /** Entity writes: the target's name. */
   name?: string | null
   /** A create's parent. */
-  parent?: ChangesetEnd | null
+  parent?: ChangesetParent | null
   /** Relation writes: the two ends. */
   from?: ChangesetEnd | null
   to?: ChangesetEnd | null
   /** Updates of a stored target: the stored values of the patched keys when
-   * it was staged; a document value is its hash `{sha256}`. */
+   * it was staged. Document values, here as in `current` and `after`, are
+   * stubs `{document: true, length}`; the length is null on a write staged
+   * without one. */
   before: Record<string, JsonValue> | null
   /** Updates of a stored target: those values now; null when it is gone.
    * Drift is `current` ≠ `before`. */

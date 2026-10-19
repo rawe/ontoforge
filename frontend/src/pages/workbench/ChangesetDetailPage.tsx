@@ -23,6 +23,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { TypeChip } from '@/components/TypeChip'
 import { ChangesetStateChip } from '@/components/changesets/ChangesetStateChip'
+import { ChangesetExplainerButton } from '@/components/changesets/explainer/ChangesetExplainer'
 import {
   changeText,
   isCommittedDataKey,
@@ -315,6 +316,7 @@ export function ChangesetDetailPage() {
         title={`Changeset ${shortId(changeset.id)}`}
         meta={
           <>
+            <ChangesetExplainerButton className="-ml-2" />
             <ChangesetStateChip state={changeset.state} />
             {changeset.anchor !== null && (
               <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px]">

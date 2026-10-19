@@ -303,7 +303,11 @@ The Studio manages no anchors: its Connect tab links here.
 ### Changesets
 
 The lens's [changesets](capabilities/changesets.md), anchored ones included, as the lens
-shows them now. The page reviews, commits and discards; it stages nothing.
+shows them now. The page reviews, commits and discards; it stages nothing. A help button
+beside the title of the list and of each review explains the workflow: the states and who
+may take each way between them, a client or a person, with who does what and how the note
+changes. One example changeset plays step by step through it, beside the calls each step
+makes.
 
 - **The list:** one row per changeset — its state, note, anchor, number of writes, the
   types it names (two, then a count, and how many the lens no longer shows) and its age —

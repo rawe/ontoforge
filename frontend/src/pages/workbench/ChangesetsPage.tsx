@@ -4,6 +4,7 @@ import { useChangesets, useRuntimeSchema } from '@/api/hooks'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { ChangesetStateChip } from '@/components/changesets/ChangesetStateChip'
+import { ChangesetExplainerButton } from '@/components/changesets/explainer/ChangesetExplainer'
 import { sortChangesets, typesText, writesText } from '@/components/changesets/changesets'
 import { absoluteTime, relativeTime } from '@/components/table/format'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -20,7 +21,8 @@ import { cn } from '@/lib/utils'
 /**
  * `/o/:ontologyKey/w/:lensKey/changesets` — the lens's changesets, submitted
  * first: state, note, anchor, writes, types and age. Everything is read
- * through the current lens; a row opens the changeset's review.
+ * through the current lens; a row opens the changeset's review. A "?" beside
+ * the title explains the workflow.
  */
 export function ChangesetsPage() {
   const { ontologyKey, lensKey } = useParams<{ ontologyKey: string; lensKey: string }>()
@@ -40,6 +42,7 @@ export function ChangesetsPage() {
     <div>
       <PageHeader
         title="Changesets"
+        meta={<ChangesetExplainerButton className="-ml-2" />}
         description="Staged writes planned through this lens. Review one, then commit it or send it back."
       />
 

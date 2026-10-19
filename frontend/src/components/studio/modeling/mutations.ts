@@ -17,6 +17,7 @@ import { qk } from '@/api/queryKeys'
 import type {
   EntityType,
   EntityTypeInput,
+  ParentEnd,
   PropertyDefinition,
   PropertyInput,
   PropertyUpdate,
@@ -25,6 +26,7 @@ import type {
 } from '@/api/types'
 import { invalidateModeling, toastError } from '../lib'
 import { useCascadeGuard } from './cascadeContext'
+import { parentViolationsOf } from './errors'
 import type { TypeKind } from './useModelSchema'
 
 /**
@@ -90,6 +92,26 @@ export function useUpdateType(ontologyKey: string, kind: TypeKind, typeId: strin
       toast.success('Saved')
     },
     onError: toastError,
+  })
+}
+
+/**
+ * Set, flip or clear (`null`) a relation type's parent end. A refusal for
+ * broken parent rules is not toasted: the caller shows its report from the
+ * mutation's error (`parentViolationsOf`).
+ */
+export function useSetParent(ontologyKey: string, relationTypeId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (parent: ParentEnd | null) =>
+      model.updateRelationType(ontologyKey, relationTypeId, { parent }),
+    onSuccess: (saved) => {
+      invalidateModeling(queryClient)
+      toast.success(saved.parent === null ? 'Parent relation cleared' : 'Parent end saved')
+    },
+    onError: (error) => {
+      if (parentViolationsOf(error) === null) toastError(error)
+    },
   })
 }
 

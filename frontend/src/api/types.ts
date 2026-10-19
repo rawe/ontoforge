@@ -334,6 +334,9 @@ export interface EntityType {
   updatedAt: string
 }
 
+/** The end of a parent relation that holds the parent. */
+export type ParentEnd = 'source' | 'target'
+
 export interface RelationType {
   relationTypeId: string
   key: string
@@ -341,8 +344,19 @@ export interface RelationType {
   description: string | null
   sourceEntityTypeKey: string
   targetEntityTypeKey: string
+  /** The parent end; null for an ordinary relation type. */
+  parent: ParentEnd | null
   createdAt: string
   updatedAt: string
+}
+
+/** One broken parent rule in a refused flag write (409 `details.violations`). */
+export interface ParentViolation {
+  rule: 'two_parents' | 'cycle'
+  /** Every entity that breaks the rule. */
+  count: number
+  /** The first five of them. */
+  entities: { type: string; id: string }[]
 }
 
 export interface PropertyDefinition {
@@ -551,6 +565,8 @@ export interface EntityTypeUpdate {
 export interface RelationTypeUpdate {
   displayName?: string
   description?: string
+  /** Set or flip the parent end; null clears it. */
+  parent?: ParentEnd | null
 }
 
 /** Create body of a property. The server stores defaults as strings. */

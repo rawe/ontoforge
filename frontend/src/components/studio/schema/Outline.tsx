@@ -5,7 +5,8 @@
  * type selects and reveals it; clicking a property also opens and flashes its
  * row in the inspector or on the classic page. `/` focuses the search from
  * anywhere on the page. Type rows show their lint issue count, property rows
- * an amber dot. Collapses to a thin rail, stored per ontology.
+ * an amber dot; a parent relation type's row carries the violet parent dot.
+ * Collapses to a thin rail, stored per ontology.
  */
 
 import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
@@ -246,6 +247,14 @@ function OutlinePanel({
               undefined,
               <span className="grid min-w-0 gap-0.5">
                 <span className="flex min-w-0 items-center gap-1.5">
+                  {r.parent !== null && (
+                    <span
+                      className="size-2 shrink-0 rounded-full bg-(--tc-violet)"
+                      role="img"
+                      aria-label={`Parent relation, parent end: ${r.parent}`}
+                      title={`Parent relation — the ${r.parent} (${r.parent === 'source' ? r.sourceEntityTypeKey : r.targetEntityTypeKey}) is the parent`}
+                    />
+                  )}
                   <span className="truncate font-medium">{r.displayName}</span>
                   <span className="truncate font-mono text-[10px] text-muted-foreground">{r.key}</span>
                 </span>

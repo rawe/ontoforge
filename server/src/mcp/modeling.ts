@@ -374,7 +374,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         "Add a new relation type connecting two entity types. Source and target are " +
         "specified by entity type key. parent ('source' or 'target') makes it a parent " +
         "relation: the entity at that end is the parent of the entity at the other. " +
-        "Omit it for an ordinary relation type.",
+        "Omit it for an ordinary relation type. A parent end is refused when relations " +
+        "already stored under the key would give an entity two parents or form a cycle.",
       inputSchema: {
         key: z.string(),
         display_name: z.string(),
@@ -411,7 +412,9 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       description:
         "Update a relation type's display name, description or parent end. Source/target " +
         "endpoints are immutable. parent 'source' or 'target' sets the parent end, null " +
-        "clears it (an ordinary relation type again), and omitting it leaves it unchanged.",
+        "clears it (an ordinary relation type again), and omitting it leaves it unchanged. " +
+        "Setting or changing it is refused when the stored relations would then give an " +
+        "entity two parents or form a cycle; clearing it is never refused.",
       inputSchema: {
         relation_type_key: z.string(),
         display_name: z.string().optional(),

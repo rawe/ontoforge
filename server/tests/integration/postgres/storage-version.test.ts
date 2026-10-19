@@ -625,8 +625,8 @@ describe("PostgreSQL storage version", () => {
     const modeling = await getModelingStore("older");
     const kept = (await modeling.getRelationTypeByKey("has_project"))!;
     expect(kept.parent).toBeNull();
-    const flagged = await modeling.updateRelationType(kept.relationTypeId as string, null, null, "source", false);
-    expect(flagged!.parent).toBe("source");
+    const flagged = await modeling.setRelationTypeParent(kept.relationTypeId as string, "source");
+    expect(flagged).toMatchObject({ row: { parent: "source" } });
   });
 
   it("upgrades version-2 storage to exactly the layout of a fresh ontology", async () => {

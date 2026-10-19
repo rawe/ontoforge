@@ -292,6 +292,9 @@ export const ExportRelationType = z.object({
   description: z.string().nullable().optional(),
   fromEntityTypeKey: z.string(),
   toEntityTypeKey: z.string(),
+  /** The parent end; absent (a payload written before it existed) or null
+   * for an ordinary relation type. */
+  parent: z.enum(PARENT_ENDS).nullable().optional(),
   properties: z.array(ExportProperty).default([]),
 });
 

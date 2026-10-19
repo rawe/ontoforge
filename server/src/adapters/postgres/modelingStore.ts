@@ -6,8 +6,10 @@
  * - Every method is a single statement through the `runQuery` door; the
  *   exceptions are `getFullSchema`, whose coherent-snapshot obligation
  *   is honoured with one REPEATABLE READ transaction through
- *   `withTransaction`, and `createEntityType`, which writes the type and
- *   its name property in one transaction.
+ *   `withTransaction`, `createEntityType`, which writes the type and
+ *   its name property in one transaction, and the parent flag writes
+ *   (`createRelationType`, `setRelationTypeParent`), which count the
+ *   parent-rule violators and then write, or refuse, in one transaction.
  * - Deletes are one `DELETE` each, `rowCount > 0` as the boolean —
  *   `ON DELETE CASCADE` carries the fan-out (property definitions,
  *   inclusions, agents, saved queries), and the endpoint FKs' `ON DELETE RESTRICT` backs the
@@ -30,7 +32,15 @@
 
 import { toSql } from "pgvector";
 
-import type { ModelingStore, NavigatorStore, Row, SearchIndexStore } from "../../core/ports.js";
+import type {
+  ModelingStore,
+  NavigatorStore,
+  ParentFlagWrite,
+  ParentRule,
+  ParentViolation,
+  Row,
+  SearchIndexStore,
+} from "../../core/ports.js";
 import type { NewPropertyDef, ParentEnd, TypeKind } from "../../core/schemas.js";
 import * as vectorDdl from "./ddl.js";
 import { runQuery, withTransaction, type DbResult, type IsolationLevel, type Querier } from "./errors.js";
@@ -125,6 +135,72 @@ async function insertProperty(
     ],
   );
   return camelizeRow(result.rows[0]!);
+}
+
+/** The most violators of one parent rule a refusal names. */
+const VIOLATORS_SHOWN = 5;
+
+/**
+ * The violators of the parent rules under a reading of the stored
+ * relations: every stored parent relation, with each key of `readings`
+ * replacing its stored flag. Each relation row of a parent relation is an
+ * edge from child to parent. An entity with more than one edge has two
+ * parents; an entity whose upward walk reaches itself is on a cycle. The
+ * walk stops at a node already on its path, so it ends on any data, and
+ * it starts only at entities that are a parent too, since a cycle passes
+ * through no leaf. The first violators of each rule carry their type
+ * from `entity`; only rules with violators come back.
+ */
+async function parentViolations(
+  querier: Querier,
+  readings: Record<string, ParentEnd>,
+): Promise<ParentViolation[]> {
+  const keys = Object.keys(readings);
+  const result = await querier.query(
+    `WITH RECURSIVE reading (type_key, parent) AS (
+       SELECT key, parent FROM relation_type
+        WHERE parent IS NOT NULL AND NOT (key = ANY($1::text[]))
+       UNION ALL
+       SELECT * FROM unnest($1::text[], $2::text[])
+     ),
+     edge (child_id, parent_id) AS (
+       SELECT CASE WHEN g.parent = 'source' THEN r.to_id ELSE r.from_id END,
+              CASE WHEN g.parent = 'source' THEN r.from_id ELSE r.to_id END
+         FROM relation r JOIN reading g ON g.type_key = r.type_key
+     ),
+     walk (start_id, node_id, path) AS (
+       SELECT child_id, parent_id, ARRAY[child_id] FROM edge
+        WHERE child_id IN (SELECT parent_id FROM edge)
+       UNION ALL
+       SELECT w.start_id, e.parent_id, w.path || w.node_id
+         FROM walk w JOIN edge e ON e.child_id = w.node_id
+        WHERE NOT (w.node_id = ANY(w.path))
+     ),
+     violator (rank, rule, id) AS (
+       SELECT 1, 'two_parents'::text, child_id FROM edge GROUP BY child_id HAVING count(*) > 1
+       UNION ALL
+       SELECT DISTINCT 2, 'cycle'::text, start_id FROM walk WHERE node_id = start_id
+     )
+     SELECT rule, total, type_key, id FROM (
+       SELECT v.rank, v.rule, v.id, e.type_key,
+              count(*) OVER (PARTITION BY v.rank) AS total,
+              row_number() OVER (PARTITION BY v.rank ORDER BY e.type_key, v.id) AS n
+         FROM violator v JOIN entity e ON e.id = v.id
+     ) ranked
+     WHERE n <= $3
+     ORDER BY rank, n`,
+    [keys, keys.map((key) => readings[key]!), VIOLATORS_SHOWN],
+  );
+  const violations: ParentViolation[] = [];
+  for (const row of result.rows) {
+    let violation = violations.at(-1);
+    if (violation === undefined || violation.rule !== row.rule) {
+      violation = { rule: row.rule as ParentRule, count: Number(row.total), entities: [] };
+      violations.push(violation);
+    }
+    violation.entities.push({ type: row.type_key as string, id: row.id as string });
+  }
+  return violations;
 }
 
 export class PostgresModelingStore implements ModelingStore {
@@ -352,16 +428,24 @@ export class PostgresModelingStore implements ModelingStore {
     sourceEntityTypeKey: string,
     targetEntityTypeKey: string,
     parent: ParentEnd | null,
-  ): Promise<Row> {
-    const result = await this.query(
-      `INSERT INTO relation_type
-         (relation_type_id, key, display_name, description,
-          source_entity_type_key, target_entity_type_key, parent)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING ${RELATION_TYPE_COLS}`,
-      [relationTypeId, key, displayName, description, sourceEntityTypeKey, targetEntityTypeKey, parent],
-    );
-    return camelizeRow(result.rows[0]!);
+  ): Promise<ParentFlagWrite> {
+    return this.tx(async (querier) => {
+      if (parent !== null) {
+        const violations = await parentViolations(querier, { [key]: parent });
+        if (violations.length > 0) {
+          return { violations };
+        }
+      }
+      const result = await querier.query(
+        `INSERT INTO relation_type
+           (relation_type_id, key, display_name, description,
+            source_entity_type_key, target_entity_type_key, parent)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING ${RELATION_TYPE_COLS}`,
+        [relationTypeId, key, displayName, description, sourceEntityTypeKey, targetEntityTypeKey, parent],
+      );
+      return { row: camelizeRow(result.rows[0]!) };
+    });
   }
 
   async listRelationTypes(): Promise<Row[]> {
@@ -394,8 +478,6 @@ export class PostgresModelingStore implements ModelingStore {
     relationTypeId: string,
     displayName: string | null,
     description: string | null,
-    parent: ParentEnd | null,
-    clearParent: boolean,
   ): Promise<Row | null> {
     if (!isUuid(relationTypeId)) {
       return null;
@@ -404,17 +486,52 @@ export class PostgresModelingStore implements ModelingStore {
     const sets = buildUpdateSets(params, [
       ["display_name", displayName],
       ["description", description],
-      ["parent", clearParent ? null : parent],
     ]);
-    if (clearParent) {
-      sets.push("parent = NULL");
-    }
     const result = await this.query(
       `UPDATE relation_type SET ${sets.join(", ")}
        WHERE relation_type_id = $1 RETURNING ${RELATION_TYPE_COLS}`,
       params,
     );
     return firstRowOrNull(result.rows);
+  }
+
+  /** One transaction: the type's key, the violators under the new
+   * reading, then the update unless there are any. Clearing skips the
+   * count. No lock: a racing relation write is accepted (A3). */
+  async setRelationTypeParent(
+    relationTypeId: string,
+    parent: ParentEnd | null,
+  ): Promise<ParentFlagWrite | null> {
+    if (!isUuid(relationTypeId)) {
+      return null;
+    }
+    return this.tx(async (querier) => {
+      if (parent !== null) {
+        const found = await querier.query(
+          `SELECT key FROM relation_type WHERE relation_type_id = $1`,
+          [relationTypeId],
+        );
+        const key = found.rows[0]?.key as string | undefined;
+        if (key === undefined) {
+          return null;
+        }
+        const violations = await parentViolations(querier, { [key]: parent });
+        if (violations.length > 0) {
+          return { violations };
+        }
+      }
+      const result = await querier.query(
+        `UPDATE relation_type SET parent = $2, updated_at = now()
+         WHERE relation_type_id = $1 RETURNING ${RELATION_TYPE_COLS}`,
+        [relationTypeId, parent],
+      );
+      const row = firstRowOrNull(result.rows);
+      return row === null ? null : { row };
+    });
+  }
+
+  async findParentViolations(readings: Record<string, ParentEnd>): Promise<ParentViolation[]> {
+    return parentViolations({ query: (text, params) => this.query(text, params) }, readings);
   }
 
   /** One `DELETE`: property definitions and inclusions go via CASCADE. */

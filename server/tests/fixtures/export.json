@@ -89,6 +89,7 @@
             "description": "Employment relationship",
             "fromEntityTypeKey": "person",
             "toEntityTypeKey": "company",
+            "parent": null,
             "properties": [
                 {
                     "key": "role",

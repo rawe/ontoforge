@@ -153,6 +153,24 @@ export type FilterCondition =
   | PathExistenceCondition
   | RelationExistenceCondition;
 
+/** A parent rule the stored relations can break: an entity with more
+ * than one parent relation, or an entity on a cycle (a self-loop
+ * included). */
+export type ParentRule = "two_parents" | "cycle";
+
+/** The violators of one parent rule: their count and the first five,
+ * ordered by type and id. */
+export interface ParentViolation {
+  rule: ParentRule;
+  count: number;
+  entities: { type: string; id: string }[];
+}
+
+/** A flag write's outcome: the relation type row written, or the
+ * violations that refused it, with nothing written. Only rules with
+ * violators appear, `two_parents` first. */
+export type ParentFlagWrite = { row: Row } | { violations: ParentViolation[] };
+
 /**
  * The modeling side of the persistence port: schema persistence.
  *
@@ -233,7 +251,11 @@ export interface ModelingStore {
   // ------------------------------------------------------------------
 
   /** Relation type rows carry `parent`, the parent end, or null for an
-   * ordinary relation type. */
+   * ordinary relation type. With a parent end, the create checks the
+   * relation rows already stored under the key (deleting a relation type
+   * keeps its instances) in its own transaction, before the insert: any
+   * violator of the parent rules, read across every parent relation,
+   * refuses it and nothing is written. */
   createRelationType(
     relationTypeId: string,
     key: string,
@@ -242,7 +264,7 @@ export interface ModelingStore {
     sourceEntityTypeKey: string,
     targetEntityTypeKey: string,
     parent: ParentEnd | null,
-  ): Promise<Row>;
+  ): Promise<ParentFlagWrite>;
 
   listRelationTypes(): Promise<Row[]>;
 
@@ -250,14 +272,30 @@ export interface ModelingStore {
 
   getRelationTypeByKey(key: string): Promise<Row | null>;
 
-  /** Null leaves a field unchanged; `clearParent` sets `parent` to null. */
+  /** Null leaves a field unchanged. The parent end is written by
+   * `setRelationTypeParent`. */
   updateRelationType(
     relationTypeId: string,
     displayName: string | null,
     description: string | null,
-    parent: ParentEnd | null,
-    clearParent: boolean,
   ): Promise<Row | null>;
+
+  /** The flag write. Setting or flipping the parent end counts, in one
+   * transaction, the violators of the parent rules across every parent
+   * relation under the new reading, then updates, or refuses and writes
+   * nothing. Null clears the flag and is never refused. Null result: no
+   * such relation type. */
+  setRelationTypeParent(
+    relationTypeId: string,
+    parent: ParentEnd | null,
+  ): Promise<ParentFlagWrite | null>;
+
+  /** The violators of the parent rules in the stored relation rows, read
+   * across the stored parent relations together with `readings`
+   * (relation type key → parent end; a reading replaces the stored flag
+   * of its key). Empty when there are none. Import's validation pre-pass
+   * runs it before any write. */
+  findParentViolations(readings: Record<string, ParentEnd>): Promise<ParentViolation[]>;
 
   deleteRelationType(relationTypeId: string): Promise<boolean>;
 

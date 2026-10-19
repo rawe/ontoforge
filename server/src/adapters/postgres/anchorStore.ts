@@ -5,7 +5,7 @@
  */
 
 import type { AnchorEntity, AnchorRecord, AnchorStore, Row } from "../../core/ports.js";
-import { runQuery, type DbResult } from "./errors.js";
+import { runQuery, type DbResult, type Querier } from "./errors.js";
 
 /** The anchor columns of `a` and whether the join found its entity. */
 const JOINED = `a.key, a.entity_type_key, a.entity_id, e.id IS NOT NULL AS entity_found`;
@@ -22,9 +22,16 @@ function toAnchor(row: Row): AnchorRecord {
 }
 
 export class PostgresAnchorStore implements AnchorStore {
-  constructor(private readonly namespace: string) {}
+  /** `bound`: the connection of the runtime store's transaction. */
+  constructor(
+    private readonly namespace: string,
+    private readonly bound?: Querier,
+  ) {}
 
   private query(text: string, params?: unknown[]): Promise<DbResult> {
+    if (this.bound !== undefined) {
+      return this.bound.query(text, params);
+    }
     return runQuery(text, params, this.namespace);
   }
 

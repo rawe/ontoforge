@@ -40,14 +40,22 @@
  *   guard.
  * - The create with a parent relation writes both rows and their search
  *   work in one transaction.
+ * - `transaction` hands its work a store bound to one connection: the two
+ *   doors, and the anchor and changeset stores' doors, take the bound
+ *   querier instead of the pool. The neutral reads (`parentsOf`,
+ *   `childrenOf`, `lockTargets`) serve commit validation; `lockTargets`
+ *   and a locking `childrenOf` hold their rows only inside a transaction.
  */
 
 
 import type { ValidatedQuery } from "../../core/oql/index.js";
 import type {
   AnchorStore,
+  ChangesetStore,
   FilterCondition,
+  LockedTarget,
   NavigatorStore,
+  ParentLink,
   Row,
   RuntimeStore,
   SearchIndexStore,
@@ -58,6 +66,7 @@ import { SAVED_QUERY_INDEX } from "./ddl.js";
 import {
   runArrayQuery,
   runQuery,
+  withBoundTransaction,
   withTransaction,
   type DbResult,
   type IsolationLevel,
@@ -74,6 +83,7 @@ import { fromJson, toJson } from "./json.js";
 import { camelizeRow, isUuid } from "./rows.js";
 import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
 import { PostgresAnchorStore } from "./anchorStore.js";
+import { PostgresChangesetStore } from "./changesetStore.js";
 import { PostgresNavigatorStore } from "./navigatorStore.js";
 import { applySearchWritePlan, PostgresSearchIndexStore } from "./searchIndexStore.js";
 import { distance, minScoreFloor, similarity, vectorParams, vectorSearch } from "./search.js";
@@ -133,23 +143,42 @@ function propsJson(properties: Row, propertyDefs: PropertyDefs): string {
 
 export class PostgresRuntimeStore implements RuntimeStore {
   /** Bound to one ontology and its namespace; unbound (tests only) runs
-   * against the connection's default namespace. */
+   * against the connection's default namespace. `bound`: the connection
+   * of the transaction `transaction` opened. */
   constructor(
     public readonly ontologyKey: string = "",
     private readonly namespace?: string,
+    private readonly bound?: Querier,
   ) {}
 
   /** Door one, carrying this store's binding. */
   private query(text: string, params?: unknown[]): Promise<DbResult> {
+    if (this.bound !== undefined) {
+      return this.bound.query(text, params);
+    }
     return runQuery(text, params, this.namespace);
   }
 
-  /** Door two, carrying this store's binding. */
+  /** Door two, carrying this store's binding. A bound store is already
+   * inside its transaction, which cannot change its isolation. */
   private tx<T>(
     work: (querier: Querier) => Promise<T>,
     isolation: IsolationLevel = "READ COMMITTED",
   ): Promise<T> {
+    if (this.bound !== undefined) {
+      if (isolation !== "READ COMMITTED") {
+        throw new Error(`A bound store cannot open a ${isolation} transaction`);
+      }
+      return work(this.bound);
+    }
     return withTransaction(work, isolation, this.namespace);
+  }
+
+  transaction<T>(work: (store: RuntimeStore) => Promise<T>): Promise<T> {
+    return withBoundTransaction(
+      (querier) => work(new PostgresRuntimeStore(this.ontologyKey, this.namespace, querier)),
+      this.namespace,
+    );
   }
 
   /**
@@ -201,7 +230,14 @@ export class PostgresRuntimeStore implements RuntimeStore {
     if (this.namespace === undefined) {
       throw new Error("An unbound runtime store has no anchors");
     }
-    return new PostgresAnchorStore(this.namespace);
+    return new PostgresAnchorStore(this.namespace, this.bound);
+  }
+
+  changesets(): ChangesetStore {
+    if (this.namespace === undefined) {
+      throw new Error("An unbound runtime store has no changesets");
+    }
+    return new PostgresChangesetStore(this.namespace, this.bound);
   }
 
   // ------------------------------------------------------------------
@@ -782,6 +818,97 @@ export class PostgresRuntimeStore implements RuntimeStore {
       };
     });
   }
+
+  // ------------------------------------------------------------------
+  // Neutral reads for commit validation
+  // ------------------------------------------------------------------
+
+  async parentsOf(ids: string[], readings: Record<string, ParentEnd>): Promise<ParentLink[]> {
+    const validIds = ids.filter(isUuid);
+    const [sourceKeys, targetKeys] = splitReadings(readings);
+    if (validIds.length === 0 || sourceKeys.length + targetKeys.length === 0) {
+      return [];
+    }
+    const result = await this.query(
+      `SELECT ${LINK_COLS} FROM relation
+        WHERE (to_id = ANY($1::uuid[]) AND type_key = ANY($2::text[]))
+           OR (from_id = ANY($1::uuid[]) AND type_key = ANY($3::text[]))
+        ORDER BY child_id, type_key, id`,
+      [validIds, sourceKeys, targetKeys],
+    );
+    return result.rows.map(toParentLink);
+  }
+
+  /** With `lock`: the entities first, then the relations, each in id
+   * order, in one transaction. */
+  async childrenOf(
+    ids: string[],
+    readings: Record<string, ParentEnd>,
+    lock = false,
+  ): Promise<ParentLink[]> {
+    const validIds = ids.filter(isUuid);
+    const [sourceKeys, targetKeys] = splitReadings(readings);
+    if (validIds.length === 0 || (!lock && sourceKeys.length + targetKeys.length === 0)) {
+      return [];
+    }
+    const children = `SELECT ${LINK_COLS} FROM relation
+        WHERE (from_id = ANY($1::uuid[]) AND type_key = ANY($2::text[]))
+           OR (to_id = ANY($1::uuid[]) AND type_key = ANY($3::text[]))`;
+    const params = [validIds, sourceKeys, targetKeys];
+    if (!lock) {
+      const result = await this.query(`${children} ORDER BY parent_id, type_key, id`, params);
+      return result.rows.map(toParentLink);
+    }
+    return this.tx(async (querier) => {
+      await querier.query(`SELECT id FROM entity WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`, [
+        validIds,
+      ]);
+      if (sourceKeys.length + targetKeys.length === 0) {
+        return [];
+      }
+      const result = await querier.query(`${children} ORDER BY id FOR UPDATE`, params);
+      return result.rows.map(toParentLink);
+    });
+  }
+
+  /** Entities first, then relations, each in id order. */
+  async lockTargets(ids: string[]): Promise<LockedTarget[]> {
+    const validIds = ids.filter(isUuid);
+    if (validIds.length === 0) {
+      return [];
+    }
+    return this.tx(async (querier) => {
+      const targets: LockedTarget[] = [];
+      for (const [kind, table] of [
+        ["entity", "entity"],
+        ["relation", "relation"],
+      ] as const) {
+        const result = await querier.query(
+          `SELECT id, type_key, props FROM ${table} WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
+          [validIds],
+        );
+        for (const row of result.rows) {
+          targets.push({ id: row.id as string, kind, typeKey: row.type_key as string, props: row.props as Row });
+        }
+      }
+      return targets;
+    });
+  }
+}
+
+/** A parent relation's columns, its parent and child end resolved by
+ * whether its type's parent is the source end (`$2`). */
+const LINK_COLS = `id, type_key,
+        CASE WHEN type_key = ANY($2::text[]) THEN from_id ELSE to_id END AS parent_id,
+        CASE WHEN type_key = ANY($2::text[]) THEN to_id ELSE from_id END AS child_id`;
+
+function toParentLink(row: Row): ParentLink {
+  return {
+    relationType: row.type_key as string,
+    relationId: row.id as string,
+    parentId: row.parent_id as string,
+    childId: row.child_id as string,
+  };
 }
 
 /** The relation type keys of the readings whose parent is the source

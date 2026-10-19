@@ -24,6 +24,7 @@ import {
   initPool,
   runQuery,
   toStoreError,
+  withBoundTransaction,
   withTransaction,
 } from "../../../src/adapters/postgres/errors.js";
 import { ConflictError, NotFoundError, StoreError } from "../../../src/core/exceptions.js";
@@ -204,6 +205,27 @@ describe("the truth table: 23505 named uniques", () => {
   });
 });
 
+describe("55P03 lock_not_available", () => {
+  it("a NOWAIT or lock_timeout failure → ConflictError (409), naming nothing stored", async () => {
+    const error = await translated(dbError("55P03"));
+    expect(error).toBeInstanceOf(ConflictError);
+    expect((error as ConflictError).message).toBe("Another operation holds this data; try again");
+  });
+
+  it("inside a transaction it rolls back, never commits", async () => {
+    fakeDb.onQuery = async (sql) => {
+      if (sql.includes("NOWAIT")) throw dbError("55P03");
+      return { rows: [], rowCount: 0 };
+    };
+    const promise = withTransaction(async (querier) => {
+      await querier.query("SELECT 1 FROM changeset FOR UPDATE NOWAIT");
+    });
+    await expect(promise).rejects.toBeInstanceOf(ConflictError);
+    expect(fakeDb.queries.map((q) => q.sql)).toContain("ROLLBACK");
+    expect(fakeDb.queries.map((q) => q.sql)).not.toContain("COMMIT");
+  });
+});
+
 describe("everything else becomes StoreError", () => {
   it.each([
     ["22P02 invalid text representation (a bug above the isUuid guard)", "22P02"],
@@ -303,6 +325,35 @@ describe("door two: withTransaction", () => {
   });
 });
 
+describe("door two, bound: withBoundTransaction", () => {
+  it("runs the work on one connection, BEGIN…COMMIT", async () => {
+    const result = await withBoundTransaction(async (querier) => {
+      await querier.query("SELECT 2");
+      return "done";
+    });
+    expect(result).toBe("done");
+    expect(fakeDb.queries.map((q) => q.sql)).toEqual(["BEGIN", "SELECT 2", "COMMIT"]);
+  });
+
+  it.each([
+    ["door one", () => runQuery("SELECT 3")],
+    ["a nested transaction", () => withTransaction(async () => undefined)],
+    ["a nested bound transaction", () => withBoundTransaction(async () => undefined)],
+  ])("a pool checkout inside it (%s) fails loudly and rolls back", async (_label, checkout) => {
+    const promise = withBoundTransaction(async () => {
+      await checkout();
+    });
+    await expect(promise).rejects.toThrow("Pool checkout inside a bound transaction");
+    const sql = fakeDb.queries.map((q) => q.sql);
+    expect(sql).toEqual(["BEGIN", "ROLLBACK"]);
+  });
+
+  it("the pool is free again once the work settled", async () => {
+    await withBoundTransaction(async () => undefined);
+    await expect(runQuery("SELECT 4")).resolves.toBeDefined();
+  });
+});
+
 describe("bypass prevention", () => {
   it("no adapter module imports the driver outside the door module", () => {
     // `errors.ts` owns the pool and the translation; a query module that
@@ -345,6 +396,14 @@ describe("navigator constraints preserve domain errors", () => {
   });
   it("maps a vanished lens to NotFoundError", async () => {
     const error = await translated(dbError("23503", "assistant_navigator_lens_fk"));
+    expect(error).toBeInstanceOf(NotFoundError);
+    expect((error as Error).message).toBe("Lens not found");
+  });
+});
+
+describe("changeset constraints preserve domain errors", () => {
+  it("maps a lens deleted under a start to NotFoundError", async () => {
+    const error = await translated(dbError("23503", "changeset_lens_fk"));
     expect(error).toBeInstanceOf(NotFoundError);
     expect((error as Error).message).toBe("Lens not found");
   });

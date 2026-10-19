@@ -68,7 +68,7 @@ beforeEach(() => {
     }
     return null;
   });
-  anchors = { "agent-a": { key: "agent-a", entity: { type: "person", id: ID }, entityFound: true } };
+  anchors = { "agent-a": { key: "agent-a", entity: { type: "person", id: ID }, entityFound: true, stagedOnly: false } };
   holder.store.anchorStore.getAnchor.mockImplementation(async (key: string) => anchors[key] ?? null);
   for (const spy of Object.values(writes)) spy.mockReset().mockResolvedValue({});
 });
@@ -141,6 +141,7 @@ describe("the anchor through the lens", () => {
     expect(res.json()).toEqual({
       key: "agent-a",
       state: "anchored",
+      stagedOnly: false,
       visible: true,
       entity: { type: "person", id: ID, name: "Ann" },
       path: [{ type: "person", id: ID, name: "Ann" }],
@@ -149,18 +150,18 @@ describe("the anchor through the lens", () => {
 
   it("the lens hides the entity's type: not visible, no entity, no path, no path read", async () => {
     const res = await root("no_person");
-    expect(res.json()).toEqual({ key: "agent-a", state: "anchored", visible: false, entity: null, path: [] });
+    expect(res.json()).toEqual({ key: "agent-a", state: "anchored", stagedOnly: false, visible: false, entity: null, path: [] });
     expect(holder.store.getAncestors).not.toHaveBeenCalled();
   });
 
   it("unanchored and dangling: visible, no entity, no path", async () => {
-    anchors["agent-u"] = { key: "agent-u", entity: null, entityFound: false };
-    anchors["agent-d"] = { key: "agent-d", entity: { type: "person", id: ID }, entityFound: false };
+    anchors["agent-u"] = { key: "agent-u", entity: null, entityFound: false, stagedOnly: true };
+    anchors["agent-d"] = { key: "agent-d", entity: { type: "person", id: ID }, entityFound: false, stagedOnly: false };
     expect((await root("all", "agent-u")).json()).toEqual({
-      key: "agent-u", state: "unanchored", visible: true, entity: null, path: [],
+      key: "agent-u", state: "unanchored", stagedOnly: true, visible: true, entity: null, path: [],
     });
     expect((await root("all", "agent-d")).json()).toEqual({
-      key: "agent-d", state: "dangling", visible: true, entity: null, path: [],
+      key: "agent-d", state: "dangling", stagedOnly: false, visible: true, entity: null, path: [],
     });
   });
 });
@@ -254,6 +255,7 @@ describe("the anchored MCP server", () => {
       expect(JSON.parse(result.content[0]!.text)).toEqual({
         key: "agent-a",
         state: "anchored",
+        stagedOnly: false,
         visible: true,
         entity: { type: "person", id: ID, name: "Ann" },
         path: [{ type: "person", id: ID, name: "Ann" }],

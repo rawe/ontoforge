@@ -42,6 +42,8 @@ const modelingTools = await listTools(createModelingMcpServer("onto"));
 const runtimeTools = await listTools(createRuntimeMcpServer("onto", "all"));
 const runtime = descriptions(runtimeTools);
 const anchored = descriptions(await listTools(createRuntimeMcpServer("onto", "all", "agent-a")));
+const stagedOnlyTools = await listTools(createRuntimeMcpServer("onto", "all", "agent-s", true));
+const stagedOnly = descriptions(stagedOnlyTools);
 const modeling = descriptions(modelingTools);
 const agent = new Map(
   buildTools("all", {} as RuntimeStore, [...ALL_TOOL_NAMES]).map((tool) => [
@@ -54,6 +56,9 @@ const all = [
   ...[...anchored]
     .filter(([name, text]) => runtime.get(name) !== text)
     .map(([name, text]) => [`anchored ${name}`, text] as const),
+  ...[...stagedOnly]
+    .filter(([name, text]) => anchored.get(name) !== text)
+    .map(([name, text]) => [`staged-only ${name}`, text] as const),
   ...[...modeling].map(([name, text]) => [`modeling ${name}`, text] as const),
   ...[...agent].map(([name, text]) => [`agent ${name}`, text] as const),
 ];
@@ -91,12 +96,14 @@ describe("tool descriptions", () => {
 
   it("get_anchor carries the agreed text, on the anchored mount only", () => {
     expect(anchored.get("get_anchor")).toBe(
-      "Read where this connection is anchored. Returns key, state, visible, entity and path. " +
-        "state 'anchored': writes to the anchored entity's hierarchy are held to that entity and " +
-        "its descendants; other types are written as usual. 'unanchored': no restriction. " +
-        "'dangling': the entity was deleted, and every write is refused until a person " +
-        "re-anchors. visible false: this lens does not show the entity, and every write is " +
-        "refused. path lists the entity's visible ancestors, root first, ending with the " +
+      "Read where this connection is anchored. Returns key, state, stagedOnly, visible, entity " +
+        "and path. state 'anchored': writes to the anchored entity's hierarchy are held to that " +
+        "entity and its descendants; other types are written as usual. 'unanchored': no " +
+        "restriction. 'dangling': the entity was deleted, and every write is refused until a " +
+        "person re-anchors. visible false: this lens does not show the entity, and every write " +
+        "is refused. stagedOnly true: this connection only stages, whatever the state: every " +
+        "write needs 'changeset_id', and it cannot commit; submit the changeset so a person can " +
+        "review and commit it. path lists the entity's visible ancestors, root first, ending with the " +
         "entity. Read-only: a person sets the anchor and may change it at any time, so read " +
         "it again after a refusal.",
     );
@@ -198,6 +205,33 @@ describe("tool descriptions", () => {
     expect(anchored.get("start_changeset")).toContain("carries this connection's anchor");
     expect(anchored.get("list_changesets")).toContain("started through this anchor");
     expect(runtime.get("start_changeset")).not.toContain("carries this connection's anchor");
+  });
+
+  it("a staged-only mount requires changeset_id and offers no commit or document edit (V29, R13)", () => {
+    const params = (name: string) => stagedOnlyTools.find((tool) => tool.name === name)!.inputSchema as {
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+    for (const name of STAGEABLE) {
+      expect(params(name).required, name).toContain("changeset_id");
+      const text = stagedOnly.get(name)!;
+      expect(text, name).toContain("This connection only stages: 'changeset_id' is required");
+      expect(text, name).toContain("a dangling anchor refuses staging");
+    }
+    for (const name of ["commit_changeset", "edit_document", "write_document"]) {
+      expect(stagedOnly.has(name), name).toBe(false);
+    }
+    const names = [...stagedOnly.keys()].sort();
+    expect(names).toEqual(
+      [...anchored.keys()].filter((name) => !["commit_changeset", "edit_document", "write_document"].includes(name)).sort(),
+    );
+    // No description names a tool this mount does not offer.
+    for (const [name, text] of stagedOnly) {
+      expect(text, name).not.toMatch(/commit_changeset|edit_document|write_document/);
+    }
+    expect(stagedOnly.get("submit_changeset")).toContain("This connection cannot commit");
+    expect(stagedOnly.get("unsubmit_changeset")).not.toContain("committed again");
+    expect(stagedOnly.get("get_anchor")).toBe(anchored.get("get_anchor"));
   });
 
   it("no changeset tool is grantable to an agent", () => {

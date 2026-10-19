@@ -1055,6 +1055,9 @@ export interface AnchorRecord {
   entity: AnchorEntity | null;
   /** Whether an entity of that id and type is stored; false when unanchored. */
   entityFound: boolean;
+  /** Every write through the anchor's URL needs a changeset, and its
+   * commit is refused there (V9). */
+  stagedOnly: boolean;
 }
 
 /**
@@ -1069,8 +1072,9 @@ export interface AnchorStore {
   getAnchor(key: string): Promise<AnchorRecord | null>;
 
   /** Create the anchor, or re-point it (null unanchors); the record as
-   * written, read with the join. */
-  saveAnchor(key: string, entity: AnchorEntity | null): Promise<AnchorRecord>;
+   * written, read with the join. `stagedOnly` undefined keeps the stored
+   * flag, and a new anchor's is false. */
+  saveAnchor(key: string, entity: AnchorEntity | null, stagedOnly?: boolean): Promise<AnchorRecord>;
 
   /** False when no anchor has this key. */
   deleteAnchor(key: string): Promise<boolean>;

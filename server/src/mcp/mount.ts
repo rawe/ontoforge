@@ -15,6 +15,8 @@
  *   - Runtime: `/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey`.
  *   - Anchored runtime: the runtime mount plus `/anchors/:anchorKey`, which
  *     adds `get_anchor` and binds the anchor the write tools are held to.
+ *     The anchor record is read before the server is built: a staged-only
+ *     anchor gets the staged-only tool set (`createRuntimeMcpServer`).
  *
  * Transport is Streamable HTTP, STATELESS, with plain JSON responses
  * (no SSE), per `docs/decisions.md#interfaces`: a fresh server +
@@ -26,6 +28,8 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
+import { NotFoundError } from "../core/exceptions.js";
+import { getRuntimeStore } from "../core/ports.js";
 import { createModelingMcpServer } from "./modeling.js";
 import { createRuntimeMcpServer } from "./runtime.js";
 
@@ -60,6 +64,19 @@ async function handleMcpRequest(
         }),
       );
     }
+  }
+}
+
+/** Whether the anchor of an anchored mount is staged-only, read once per
+ * request. An unknown ontology or anchor is not: the normal tool set is
+ * built, and every call answers not found. */
+async function isStagedOnly(ontologyKey: string, anchorKey: string): Promise<boolean> {
+  try {
+    const record = await (await getRuntimeStore(ontologyKey)).anchors().getAnchor(anchorKey);
+    return record?.stagedOnly === true;
+  } catch (error) {
+    if (error instanceof NotFoundError) return false;
+    throw error;
   }
 }
 
@@ -108,7 +125,8 @@ export function mountMcp(app: FastifyInstance): void {
       if (ontologyKey === "" || lensKey === "" || anchorKey === "") {
         return reply.callNotFound();
       }
-      await handleMcpRequest(createRuntimeMcpServer(ontologyKey, lensKey, anchorKey), request, reply);
+      const stagedOnly = await isStagedOnly(ontologyKey, anchorKey);
+      await handleMcpRequest(createRuntimeMcpServer(ontologyKey, lensKey, anchorKey, stagedOnly), request, reply);
     },
   });
 }

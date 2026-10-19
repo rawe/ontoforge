@@ -64,7 +64,7 @@ describe("maintenance", () => {
   it("PUT creates and re-points with 200, GET reads, the list lists, DELETE removes", async () => {
     const created = await put("agent-a", { type: "project", id: ids.P1 });
     expect(created.statusCode, created.body).toBe(200);
-    expect(created.json()).toEqual({ key: "agent-a", entity: { type: "project", id: ids.P1 }, state: "anchored" });
+    expect(created.json()).toEqual({ key: "agent-a", entity: { type: "project", id: ids.P1 }, state: "anchored", stagedOnly: false });
 
     const repointed = await put("agent-a", { type: "project", id: ids.P2 });
     expect(repointed.statusCode, repointed.body).toBe(200);
@@ -72,12 +72,12 @@ describe("maintenance", () => {
 
     const read = await get("agent-a");
     expect(read.statusCode).toBe(200);
-    expect(read.json()).toEqual({ key: "agent-a", entity: { type: "project", id: ids.P2 }, state: "anchored" });
+    expect(read.json()).toEqual({ key: "agent-a", entity: { type: "project", id: ids.P2 }, state: "anchored", stagedOnly: false });
 
     expect((await put("agent-b", null)).statusCode).toBe(200);
     expect(await list()).toEqual([
-      { key: "agent-a", entity: { type: "project", id: ids.P2 }, state: "anchored" },
-      { key: "agent-b", entity: null, state: "unanchored" },
+      { key: "agent-a", entity: { type: "project", id: ids.P2 }, state: "anchored", stagedOnly: false },
+      { key: "agent-b", entity: null, state: "unanchored", stagedOnly: false },
     ]);
 
     const deleted = await app.inject({ method: "DELETE", url: `${anchors()}/agent-a` });
@@ -93,8 +93,33 @@ describe("maintenance", () => {
     await put("agent-a", { type: "project", id: ids.P1 });
     const res = await put("agent-a", null);
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ key: "agent-a", entity: null, state: "unanchored" });
+    expect(res.json()).toEqual({ key: "agent-a", entity: null, state: "unanchored", stagedOnly: false });
     expect((await get("agent-a")).json().state).toBe("unanchored");
+  });
+
+  it("stagedOnly: stored by PUT, reported by GET and the list, kept by a PUT without it (V43)", async () => {
+    const putBody = (key: string, payload: Row) => app.inject({ method: "PUT", url: `${anchors()}/${key}`, payload });
+    const flagged = await putBody("agent-s", { entity: { type: "project", id: ids.P1 }, stagedOnly: true });
+    expect(flagged.statusCode, flagged.body).toBe(200);
+    expect(flagged.json()).toEqual({ key: "agent-s", entity: { type: "project", id: ids.P1 }, state: "anchored", stagedOnly: true });
+    expect((await get("agent-s")).json().stagedOnly).toBe(true);
+    // Re-pointed and unanchored without the field: the flag stays.
+    expect((await put("agent-s", { type: "project", id: ids.P2 })).json().stagedOnly).toBe(true);
+    expect((await put("agent-s", null)).json()).toEqual({ key: "agent-s", entity: null, state: "unanchored", stagedOnly: true });
+    // A new anchor without the field is not staged-only.
+    await put("agent-a", { type: "project", id: ids.P1 });
+    expect(await list()).toEqual([
+      { key: "agent-a", entity: { type: "project", id: ids.P1 }, state: "anchored", stagedOnly: false },
+      { key: "agent-s", entity: null, state: "unanchored", stagedOnly: true },
+    ]);
+    // An unknown field and a non-boolean are refused, and nothing changes.
+    for (const payload of [{ entity: null, stagedOnly: true, lens: "all" }, { entity: null, stagedOnly: "no" }]) {
+      expect((await putBody("agent-s", payload)).statusCode).toBe(422);
+    }
+    expect((await get("agent-s")).json().stagedOnly).toBe(true);
+    // Lifted with false.
+    expect((await putBody("agent-s", { entity: null, stagedOnly: false })).json().stagedOnly).toBe(false);
+    expect((await get("agent-s")).json().stagedOnly).toBe(false);
   });
 
   it("an entity that is not stored is a 422 field error, and nothing is written", async () => {
@@ -147,6 +172,7 @@ describe("dangling", () => {
       key: "agent-a",
       entity: { type: "task", id: ids.T1a },
       state: "dangling",
+      stagedOnly: false,
     });
     expect((await list())[0]!.state).toBe("dangling");
     // Re-pointing it heals it.
@@ -177,7 +203,7 @@ describe("dangling", () => {
       url: `${model}/entity-types/${type.json().entityTypeId as string}?cascade=true`,
     });
     expect(deleted.statusCode, deleted.body).toBe(204);
-    expect((await get("agent-a", o)).json()).toEqual({ key: "agent-a", entity: { type: "thing", id }, state: "dangling" });
+    expect((await get("agent-a", o)).json()).toEqual({ key: "agent-a", entity: { type: "thing", id }, state: "dangling", stagedOnly: false });
   });
 });
 
@@ -210,6 +236,7 @@ describe("the anchored REST mirror", () => {
     expect(res.json()).toEqual({
       key: "agent-a",
       state: "anchored",
+      stagedOnly: false,
       visible: true,
       entity: { type: "project", id: ids.P1, name: "P1" },
       path: [
@@ -225,6 +252,7 @@ describe("the anchored REST mirror", () => {
     expect((await root("delivery", "agent-a")).json()).toEqual({
       key: "agent-a",
       state: "anchored",
+      stagedOnly: false,
       visible: true,
       entity: { type: "task", id: ids.T1a, name: "T1a" },
       path: [
@@ -237,19 +265,19 @@ describe("the anchored REST mirror", () => {
   it("a lens hiding the anchored entity: not visible, no entity, no path", async () => {
     await put("agent-a", { type: "task", id: ids.T1 });
     const res = await root("portfolio", "agent-a");
-    expect(res.json()).toEqual({ key: "agent-a", state: "anchored", visible: false, entity: null, path: [] });
+    expect(res.json()).toEqual({ key: "agent-a", state: "anchored", stagedOnly: false, visible: false, entity: null, path: [] });
     expect(res.body).not.toContain(ids.T1);
   });
 
   it("unanchored and dangling: visible, no entity, no path", async () => {
     await put("agent-u", null);
     expect((await root("all", "agent-u")).json()).toEqual({
-      key: "agent-u", state: "unanchored", visible: true, entity: null, path: [],
+      key: "agent-u", state: "unanchored", stagedOnly: false, visible: true, entity: null, path: [],
     });
     await put("agent-d", { type: "task", id: ids.T1a });
     await app.inject({ method: "DELETE", url: `${runtimePrefix(HIERARCHY_ONTOLOGY_KEY, "all")}/entities/task/${ids.T1a}` });
     expect((await root("all", "agent-d")).json()).toEqual({
-      key: "agent-d", state: "dangling", visible: true, entity: null, path: [],
+      key: "agent-d", state: "dangling", stagedOnly: false, visible: true, entity: null, path: [],
     });
   });
 

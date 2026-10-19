@@ -31,6 +31,9 @@
  * - **Expiry (V24, R3).** A live changeset idle for 7 days is gone: checked
  *   on every access, where it is deleted and answers not found, and swept
  *   on start and on list. A submitted changeset never expires.
+ * - **Staged-only (V9 a).** Through a staged-only anchor's URL every
+ *   immediate write is a 409 (`AnchorGuard.open`) and so is commit; stage,
+ *   unstage, submit, unsubmit, discard, list and read work as anywhere.
  * - **Lifecycle (V7, V38).** Submit freezes a live changeset and hands it
  *   over with a note, after the lock-free pass (V5 d) and a compare-and-set
  *   on the version the pass saw (V40). While submitted, stage, unstage and
@@ -498,7 +501,7 @@ export async function stage(
   const changeset = await loadChangeset(loaded, anchorKey, changesetId, store);
   if (changeset.submittedAt !== null) throw isSubmitted(changesetId);
   // Dangling, or at an entity the lens hides: refused as every v1 write.
-  await AnchorGuard.open(anchorKey, loaded, store);
+  await AnchorGuard.checkStaging(anchorKey, loaded, store);
 
   const row = await journalRow(loaded, changeset.id, write, store);
   if (changeset.writeCount >= MAX_STAGED_WRITES) {
@@ -1618,7 +1621,8 @@ function rejection(violations: Violation[]): ValidationError {
 }
 
 /**
- * Commit a changeset: everything it stages, or nothing (D3). With
+ * Commit a changeset: everything it stages, or nothing (D3). Through a
+ * staged-only anchor's URL it is a 409, whatever the changeset (V9). With
  * `expectedVersion`, a changeset changed since (V40) is a 409. Another
  * commit on the ontology, a change running on the changeset, a third
  * commit in this process, or a row held past the lock timeout are 409s
@@ -1633,6 +1637,11 @@ export async function commitChangeset(
   expectedVersion: number | undefined,
   store: RuntimeStore,
 ): Promise<CommitAnswer> {
+  if (anchorKey !== null && (await store.anchors().getAnchor(anchorKey))?.stagedOnly === true) {
+    throw new ConflictError(
+      `Anchor '${anchorKey}' is staged-only: this connection cannot commit; submit the changeset for review`,
+    );
+  }
   if (runningCommits >= MAX_RUNNING_COMMITS) {
     throw new ConflictError("Too many commits are running; try again");
   }

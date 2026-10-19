@@ -36,9 +36,8 @@ else about it is considered.
 
 The registry addresses ontologies by key. Below one ontology, the modeling surface
 addresses the schema; the runtime surface addresses instance data and carries the lens
-key as a second path parameter. One request addresses either the schema or instance
-data through one lens — never both. Anchor maintenance is the one runtime surface without
-a lens; an anchored mount carries the anchor key as a third path parameter.
+key as a second path parameter, and an anchored mount the anchor key as a third. How the
+address keeps ontologies apart: [architecture.md](architecture.md#ontology-isolation).
 
 Modeling REST does **not** nest types under a lens. Entity types, relation types and
 their properties are resources of the ontology, at the top level of its modeling

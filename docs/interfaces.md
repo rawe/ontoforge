@@ -858,7 +858,7 @@ lens. Semantics: [capabilities/anchors.md](capabilities/anchors.md).
 | DELETE | `/{anchorKey}` | Delete an anchor; 204 |
 
 `entity` is `{type, id}` or null, `state` is `anchored`, `unanchored` or `dangling`. A key
-that breaks the lens-resource rule is a `VALIDATION_ERROR` with a message only; an entity
+that breaks the anchor key rule is a `VALIDATION_ERROR` with a message only; an entity
 type or entity that is not stored is a field error on `entity.type` or `entity.id`. An
 unknown anchor is not found on read and delete.
 

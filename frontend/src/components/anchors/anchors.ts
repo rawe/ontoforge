@@ -9,12 +9,12 @@ import type { Anchor, AnchorView, PathStep } from '../../api/types.ts'
 import { mcpUrl } from '../connect/connectSnippet.ts'
 import { MCP_SERVERS } from '../connect/mcpServers.ts'
 import { formatPath, stepLabel } from '../entity/hierarchy.ts'
-import { LENS_RESOURCE_KEY_PATTERN, MAX_KEY_LENGTH } from '../studio/modeling/schemaKeys.ts'
+import { ANCHOR_KEY_PATTERN, MAX_KEY_LENGTH } from '../studio/modeling/schemaKeys.ts'
 
 /** What is wrong with a new anchor's key, or null when it is fine. Mirrors the server's rule. */
 export function anchorKeyProblem(key: string, existingKeys: readonly string[]): string | null {
   if (key === '') return 'A key is required.'
-  if (!LENS_RESOURCE_KEY_PATTERN.test(key)) {
+  if (!ANCHOR_KEY_PATTERN.test(key)) {
     return 'Lowercase letters, digits, underscores and hyphens only; must start with a letter.'
   }
   if (key.length > MAX_KEY_LENGTH) return `At most ${MAX_KEY_LENGTH} characters.`

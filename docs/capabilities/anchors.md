@@ -26,7 +26,7 @@ mount lists, reads, searches and queries exactly as the plain lens does.
 
 An anchor maps its key to an entity — its type key and id — or to nothing.
 
-- **Key.** It follows the lens-resource [key](../README.md) rule, at most 64 characters,
+- **Key.** It follows the anchor [key](../README.md) rule, at most 64 characters,
   and cannot be renamed. A key that breaks the rule is refused.
 - **It belongs to the ontology.** It names no lens: the same anchor can be used through
   any lens, and what that lens shows decides only what the mount can see.

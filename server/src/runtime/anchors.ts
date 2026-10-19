@@ -14,12 +14,12 @@ import { z } from "zod";
 
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import type { AnchorRecord, RuntimeStore } from "../core/ports.js";
-import { LENS_RESOURCE_KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
+import { ANCHOR_KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
 import { anchorState } from "./anchorGuard.js";
 import { loadSchema, loadSearchContext, type EntityTypeDef } from "./schemaCache.js";
 import { getPath } from "./service.js";
 
-const Key = z.string().regex(LENS_RESOURCE_KEY_PATTERN).max(MAX_KEY_LENGTH);
+const Key = z.string().regex(ANCHOR_KEY_PATTERN).max(MAX_KEY_LENGTH);
 
 export const ANCHOR_STATES = ["anchored", "unanchored", "dangling"] as const;
 export type AnchorState = (typeof ANCHOR_STATES)[number];
@@ -61,11 +61,11 @@ function toResponse(record: AnchorRecord, entityTypes: Record<string, EntityType
   return { key: record.key, entity: record.entity, state: anchorState(record, entityTypes) };
 }
 
-/** A storable key: the lens-resource rule. */
+/** A storable key: the anchor key rule. */
 export function anchorKeyError(key: string): string | null {
   return Key.safeParse(key).success
     ? null
-    : `Invalid anchor key '${key}'. Must match pattern ${LENS_RESOURCE_KEY_PATTERN.source} ` +
+    : `Invalid anchor key '${key}'. Must match pattern ${ANCHOR_KEY_PATTERN.source} ` +
         `and be at most ${MAX_KEY_LENGTH} characters`;
 }
 

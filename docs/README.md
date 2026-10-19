@@ -202,10 +202,10 @@ of its level:
 - **Schema keys** — ontologies, types, properties, lenses, search indices — match
   `^[a-z][a-z0-9_]*$`: lower snake case, starting with a letter. They appear as OQL
   identifiers, where `-` would read as minus, and in storage names.
-- **Lens-resource keys** — saved queries, agents, retrievers and navigators, and also
-  anchors, which belong to the ontology rather than to a lens — match
+- **Lens-resource keys** — saved queries, agents, retrievers and navigators — match
   `^[a-z][a-z0-9_-]*$`: the schema rule plus `-`. They travel only in URLs, JSON and tool
   arguments.
+- **Anchor keys** match `^[a-z][a-z0-9_-]*$`.
 
 ### Lenses
 

@@ -284,7 +284,7 @@ entity the lens hides. A note under the table says the URLs use the current lens
 anchors belong to the ontology, and that every change takes effect on the next call.
 
 - **New anchor** asks for a key — part of the MCP URL, validated live against the
-  lens-resource key rule and the existing keys, permanent — and either an entity, picked
+  anchor key rule and the existing keys, permanent — and either an entity, picked
   by type and search with each result's hierarchy path shown, or no entity at all.
 - **Per row:** copy the anchored MCP URL; anchor an unanchored one or re-anchor a dangling
   one, with no further question; re-point an anchored one, confirming with both hierarchy

@@ -17,12 +17,15 @@ import type { TypeKind } from './useModelSchema'
 export const SCHEMA_KEY_PATTERN = /^[a-z][a-z0-9_]*$/
 
 /**
- * Key rule of the lens-resource level — saved queries, assistants of every
- * kind, anchors: the schema rule plus `-`. These keys travel only in URLs,
+ * Key rule of the lens-resource level — saved queries and assistants of
+ * every kind: the schema rule plus `-`. These keys travel only in URLs,
  * JSON and tool arguments, never into OQL or storage names, so a hyphen is
  * harmless. Mirrors the server's `LENS_RESOURCE_KEY_PATTERN`.
  */
 export const LENS_RESOURCE_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/
+
+/** Key rule of anchors. Mirrors the server's `ANCHOR_KEY_PATTERN`. */
+export const ANCHOR_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/
 
 /** Mirrors the server's `MAX_KEY_LENGTH`. */
 export const MAX_KEY_LENGTH = 64

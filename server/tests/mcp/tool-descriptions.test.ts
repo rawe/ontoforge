@@ -49,7 +49,9 @@ const agent = new Map(
 );
 const all = [
   ...[...runtime].map(([name, text]) => [`runtime ${name}`, text] as const),
-  ...[...anchored].filter(([name]) => !runtime.has(name)).map(([name, text]) => [`anchored ${name}`, text] as const),
+  ...[...anchored]
+    .filter(([name, text]) => runtime.get(name) !== text)
+    .map(([name, text]) => [`anchored ${name}`, text] as const),
   ...[...modeling].map(([name, text]) => [`modeling ${name}`, text] as const),
   ...[...agent].map(([name, text]) => [`agent ${name}`, text] as const),
 ];
@@ -106,6 +108,15 @@ describe("tool descriptions", () => {
       expect(text).toContain(part);
     }
     expect(text).toContain("stored together or not at all");
+  });
+
+  it("create_entity states the anchored create, on the anchored mount only", () => {
+    const text = anchored.get("create_entity")!;
+    expect(text.startsWith(runtime.get("create_entity")!)).toBe(true);
+    for (const part of ["anchored connection", "'parent_relation'", "one of its descendants", "other types"]) {
+      expect(text).toContain(part);
+    }
+    expect(runtime.get("create_entity")).not.toContain("anchored");
   });
 
   it("the search-index tools state the status fields", () => {

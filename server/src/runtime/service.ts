@@ -14,7 +14,8 @@
  *   applied; a hidden property in the payload is an unknown property.
  *
  * The seven write functions take the anchor key of an anchored mount as
- * their last argument, for the write guard; null on the plain lens mount.
+ * their last argument; null on the plain lens mount. On an anchored call
+ * they consult the write guard (`anchorGuard.ts`) before the write.
  */
 
 import { randomUUID } from "node:crypto";
@@ -26,6 +27,7 @@ import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core
 import type { RuntimeStore, SearchWritePlan } from "../core/ports.js";
 import type { ParentEnd, PropertyDef } from "../core/schemas.js";
 import { planSearchWrite, type SearchChange } from "../core/searchDependencies.js";
+import { AnchorGuard } from "./anchorGuard.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
 import { isQueryPath } from "./queryPaths.js";
 import {
@@ -432,7 +434,9 @@ async function validateParentRelation(
  * With `parentRelation`, the entity is created together with the relation
  * that names its parent (`validateParentRelation`): one 422 carries the
  * faults of both, and both rows are written in one transaction. The
- * response is the entity alone, as without it.
+ * response is the entity alone, as without it. On an anchored call, an
+ * entity of the anchor's hierarchy must name a covered parent this way
+ * (`AnchorGuard.checkCreate`); its faults join the others.
  */
 export async function createEntity(
   lensKey: string,
@@ -447,12 +451,14 @@ export async function createEntity(
   if (scopedEt === undefined) {
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
   }
+  const guard = await AnchorGuard.open(anchorKey, loaded, store);
 
   const [coerced, errors] = validateProperties(body, scopedEt.properties, entityTypeKey);
   const parentWrite =
     parentRelation === null
       ? null
       : await validateParentRelation(loaded, entityTypeKey, parentRelation, errors, store);
+  await guard?.checkCreate(entityTypeKey, parentRelation, errors);
   if (Object.keys(errors).length > 0) {
     throw new ValidationError("Instance validation failed", { fields: errors });
   }
@@ -663,7 +669,8 @@ export async function getPath(
  * Partial update: validate against the scoped properties, NO default
  * re-application. Null removes an optional property (and is rejected on a
  * required one); a payload that changes nothing returns the current state
- * without advancing `_updatedAt`.
+ * without advancing `_updatedAt`. On an anchored call, an entity of the
+ * anchor's hierarchy outside the anchored subtree is refused on `entityId`.
  */
 export async function updateEntity(
   lensKey: string,
@@ -678,8 +685,13 @@ export async function updateEntity(
   if (scopedEt === undefined) {
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
   }
+  const guard = await AnchorGuard.open(anchorKey, loaded, store);
 
   const [coerced, errors] = validateProperties(body, scopedEt.properties, entityTypeKey, true);
+  const outside = (await guard?.entityError(entityTypeKey, entityId)) ?? null;
+  if (outside !== null) {
+    errors.entityId = outside;
+  }
   if (Object.keys(errors).length > 0) {
     throw new ValidationError("Instance validation failed", { fields: errors });
   }
@@ -739,7 +751,10 @@ export async function updateEntity(
  * data. Wherever the ontology flags a parent relation, only a leaf may go:
  * an entity with children over any parent relation of the full schema is
  * refused (409), through every lens, before the delete. Otherwise the
- * cascade is silent: nothing warns, nothing refuses.
+ * cascade is silent: nothing warns, nothing refuses. On an anchored call
+ * the guard refuses first (`AnchorGuard.checkDelete`): outside the
+ * anchored subtree, then anchored (422 on `entityId`); "has children"
+ * comes last.
  */
 export async function deleteEntity(
   lensKey: string,
@@ -753,15 +768,17 @@ export async function deleteEntity(
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
   }
 
+  const guard = await AnchorGuard.open(anchorKey, loaded, store);
+
   const readings = parentReadings(loaded.full);
-  if (Object.keys(readings).length > 0) {
-    // A missing entity stays not-found, whatever its id has below it.
-    if ((await store.getEntity(entityTypeKey, entityId)) === null) {
-      throw new NotFoundError(`Entity '${entityId}' not found`);
-    }
-    if (await store.hasChildren(entityId, readings)) {
-      throw new ConflictError(HAS_CHILDREN_MESSAGE);
-    }
+  const flagged = Object.keys(readings).length > 0;
+  // A missing entity stays not-found, whatever its id has below it.
+  if (flagged && (await store.getEntity(entityTypeKey, entityId)) === null) {
+    throw new NotFoundError(`Entity '${entityId}' not found`);
+  }
+  await guard?.checkDelete(entityTypeKey, entityId);
+  if (flagged && (await store.hasChildren(entityId, readings))) {
+    throw new ConflictError(HAS_CHILDREN_MESSAGE);
   }
 
   const deleted = await store.deleteEntity(
@@ -949,6 +966,8 @@ function applyReplaceRange(
  * `[offset, offset+length)` with `content` (insert with length 0, append
  * at `offset == totalLength`). The changed value is persisted whole and the
  * property's search data follows: the search indices queue its passages.
+ * On an anchored call, an entity of the anchor's hierarchy outside the
+ * anchored subtree is refused on `entityId`.
  */
 export async function editDocument(
   lensKey: string,
@@ -966,6 +985,7 @@ export async function editDocument(
     propertyKey,
     store,
   );
+  await (await AnchorGuard.open(anchorKey, loaded, store))?.checkEntity(entityTypeKey, entityId);
 
   const [newValue, offset, length, replacements] =
     body.op === "str_replace" ? applyStrReplace(value, body) : applyReplaceRange(value, body);
@@ -1057,8 +1077,10 @@ async function checkParentRules(
  * and their entity types equal the relation type's declared source/target —
  * checked against the FULL schema, not the lens, so a narrow lens cannot
  * create an edge that is invalid under a wider one. For a parent relation
- * type the parent rules follow (`checkParentRules`). Endpoint and rule
- * errors are collected alongside property errors in ONE response.
+ * type the parent rules follow (`checkParentRules`). On an anchored call
+ * the guard checks the ends and refuses a standalone parent relation of the
+ * anchor's hierarchy (`AnchorGuard.checkRelationCreate`). Endpoint, guard
+ * and rule errors are collected alongside property errors in ONE response.
  */
 export async function createRelation(
   lensKey: string,
@@ -1074,6 +1096,7 @@ export async function createRelation(
   if (scopedRt === undefined) {
     throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
   }
+  const guard = await AnchorGuard.open(anchorKey, loaded, store);
 
   const [coerced, errors] = validateProperties(userProps, scopedRt.properties, relationTypeKey);
 
@@ -1108,6 +1131,8 @@ export async function createRelation(
   if (toError !== null) {
     errors.toEntityId = toError;
   }
+
+  await guard?.checkRelationCreate(fullRtForValidation, fromEntityId, toEntityId, errors);
 
   if (fullRtForValidation.parent !== null) {
     await checkParentRules(fullRtForValidation.parent, fromEntityId, toEntityId, loaded.full, errors, store);
@@ -1192,7 +1217,8 @@ export async function getRelation(
 /**
  * Partial update of relation properties. ENDPOINTS ARE IMMUTABLE: payload
  * keys `fromEntityId` / `toEntityId` are dropped SILENTLY — no error — and
- * properties in the same payload still apply.
+ * properties in the same payload still apply. On an anchored call the
+ * guard may refuse it on `relationId` (`AnchorGuard.relationError`).
  */
 export async function updateRelation(
   lensKey: string,
@@ -1207,6 +1233,7 @@ export async function updateRelation(
   if (scopedRt === undefined) {
     throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
   }
+  const guard = await AnchorGuard.open(anchorKey, loaded, store);
 
   const properties: Row = { ...body };
   delete properties.fromEntityId;
@@ -1218,6 +1245,11 @@ export async function updateRelation(
     relationTypeKey,
     true,
   );
+  const refused =
+    (await guard?.relationError(loaded.full.relationTypes[relationTypeKey] ?? scopedRt, relationId, "update")) ?? null;
+  if (refused !== null) {
+    errors.relationId = refused;
+  }
   if (Object.keys(errors).length > 0) {
     throw new ValidationError("Instance validation failed", { fields: errors });
   }
@@ -1257,7 +1289,8 @@ export async function updateRelation(
   return filterRelationProperties(relation, scopedRt);
 }
 
-/** Delete a relation; neither endpoint is touched. */
+/** Delete a relation; neither endpoint is touched. On an anchored call the
+ * guard may refuse it on `relationId` (`AnchorGuard.checkRelationDelete`). */
 export async function deleteRelation(
   lensKey: string,
   relationTypeKey: string,
@@ -1266,9 +1299,12 @@ export async function deleteRelation(
   anchorKey: string | null = null,
 ): Promise<void> {
   const loaded = await loadSchema(lensKey, store);
-  if (!(relationTypeKey in loaded.scoped.relationTypes)) {
+  const scopedRt = loaded.scoped.relationTypes[relationTypeKey];
+  if (scopedRt === undefined) {
     throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
   }
+  const guard = await AnchorGuard.open(anchorKey, loaded, store);
+  await guard?.checkRelationDelete(loaded.full.relationTypes[relationTypeKey] ?? scopedRt, relationId);
 
   const deleted = await store.deleteRelation(
     relationTypeKey,

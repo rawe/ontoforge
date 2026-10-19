@@ -160,7 +160,14 @@ export function createRuntimeMcpServer(
         "the parent, which must exist with the entity type at the parent end; " +
         "'properties' are the relation's own, held to the same rules as entity " +
         "properties. Its faults are reported together with the entity's, and the " +
-        "entity and its parent relation are stored together or not at all.",
+        "entity and its parent relation are stored together or not at all." +
+        (anchorKey === null
+          ? ""
+          : " On this anchored connection, an entity of a type in the anchored entity's " +
+            "hierarchy must be created with 'parent_relation', and its parent must be the " +
+            "anchored entity or one of its descendants; a hierarchy type this lens shows no " +
+            "parent relation into cannot be created here. Entities of other types are " +
+            "created as usual, 'parent_relation' optional."),
       inputSchema: {
         entity_type_key: z.string(),
         properties: z.record(z.string(), z.unknown()),

@@ -15,6 +15,7 @@ import { z } from "zod";
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import type { AnchorRecord, RuntimeStore } from "../core/ports.js";
 import { LENS_RESOURCE_KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
+import { anchorState } from "./anchorGuard.js";
 import { loadSchema, loadSearchContext, type EntityTypeDef } from "./schemaCache.js";
 import { getPath } from "./service.js";
 
@@ -57,12 +58,7 @@ async function fullEntityTypes(store: RuntimeStore): Promise<Record<string, Enti
 }
 
 function toResponse(record: AnchorRecord, entityTypes: Record<string, EntityTypeDef>): AnchorResponse {
-  const { entity } = record;
-  let state: AnchorState = "unanchored";
-  if (entity !== null) {
-    state = record.entityFound && Object.hasOwn(entityTypes, entity.type) ? "anchored" : "dangling";
-  }
-  return { key: record.key, entity, state };
+  return { key: record.key, entity: record.entity, state: anchorState(record, entityTypes) };
 }
 
 /** A storable key: the lens-resource rule. */

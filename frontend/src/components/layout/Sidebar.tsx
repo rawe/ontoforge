@@ -128,7 +128,8 @@ export function Sidebar({
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const anchors = useAnchors(ontologyKey)
   const dangling = danglingCount(anchors.data ?? [])
-  const changesets = useChangesets(ontologyKey, lensKey)
+  // Only once the lens resolved: an unknown lens gets no changesets request (and no 404).
+  const changesets = useChangesets(ontologyKey, schema.data !== undefined ? lensKey : undefined)
   const submitted = submittedCount(changesets.data ?? [])
 
   const base = `/o/${ontologyKey}/w/${lensKey}`

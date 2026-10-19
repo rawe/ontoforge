@@ -101,6 +101,18 @@ describe("the anchored REST mirror", () => {
     expect(spy.mock.calls[0]!.at(-1)).toBeNull();
   });
 
+  it("no document edit route is mounted under a changeset: 404 and nothing written (F7)", async () => {
+    for (const base of [PLAIN, ANCHORED]) {
+      const res = await app.inject({
+        method: "PATCH",
+        url: `${base}/changesets/${OTHER}/entities/person/${ID}/documents/bio`,
+        payload: { op: "str_replace", oldString: "a", newString: "b" },
+      });
+      expect(res.statusCode, base).toBe(404);
+    }
+    expect(writes.editDocument).not.toHaveBeenCalled();
+  });
+
   it("an unknown anchor is not found on a read, a write and the root; nothing is written or created", async () => {
     for (const [method, path] of [
       ["GET", ""],
@@ -224,6 +236,29 @@ describe("the anchored MCP server", () => {
       await plain.close();
     }
   });
+
+  it.each(WRITE_TOOLS.filter(([name]) => name === "edit_document" || name === "write_document"))(
+    "%s refuses any changeset_id and writes nothing, on both mounts (F7)",
+    async (name, args, spy) => {
+      for (const anchorKey of [null, "agent-a"]) {
+        const client = await connect(anchorKey);
+        try {
+          for (const changesetId of [ID, "", null]) {
+            const result = await call(client, name, { ...args, changeset_id: changesetId });
+            expect(result.isError, String(changesetId)).toBe(true);
+            expect(result.content[0]!.text).toBe(
+              `Error executing tool ${name}: changeset_id is not accepted: ${name} always writes ` +
+                "immediately and cannot be staged; to stage a document change, pass the whole new " +
+                "value to update_entity with 'changeset_id'",
+            );
+          }
+        } finally {
+          await client.close();
+        }
+      }
+      expect(spy).not.toHaveBeenCalled();
+    },
+  );
 
   it("an unknown anchor fails every tool, after an unknown lens", async () => {
     const unknownAnchor = await connect("nope");

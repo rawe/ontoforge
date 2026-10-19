@@ -1048,10 +1048,11 @@ Everything a client can do to instance data through one lens.
 
 `create_entity`, `update_entity`, `delete_entity`, `create_relation`, `update_relation`
 and `delete_relation` take an optional `changeset_id`: with it the write is staged into
-that changeset and answers `{seq, id}`. Every changeset tool but `start_changeset` and
-`list_changesets` takes `changeset_id`; `get_changeset` takes `offset` and `limit`, which
-it clamps into range. The changeset tools answer what the REST routes answer, and
-`unstage` and `discard_changeset` a message.
+that changeset and answers `{seq, id}`. `edit_document` and `write_document` cannot stage:
+given a `changeset_id`, they refuse with a validation error and write nothing. Every
+changeset tool but `start_changeset` and `list_changesets` takes `changeset_id`;
+`get_changeset` takes `offset` and `limit`, which it clamps into range. The changeset tools
+answer what the REST routes answer, and `unstage` and `discard_changeset` a message.
 
 An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
 `get_entity`, `get_document`, `list_relations`, `get_neighbors`, `search`,

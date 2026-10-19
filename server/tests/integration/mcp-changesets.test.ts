@@ -6,7 +6,9 @@
  * unsubmit, unstage, commit, discard) with the same answers and errors as
  * REST, a write without `changeset_id` staying immediate, and the anchored
  * mount's binding: a changeset carries its anchor, another anchor does not
- * reach it, and the commit holds it to the anchor.
+ * reach it, and the commit holds it to the anchor. `edit_document` and
+ * `write_document` refuse a `changeset_id`, and REST has no document edit
+ * route under a changeset.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -381,5 +383,65 @@ describe("the anchored mount (V8, V17, V21, V42)", () => {
     expect((await ok(plain, "get_changeset", { changeset_id: cs })).anchor).toBe("agent-b");
     expect(await refused(plain, "commit_changeset", { changeset_id: cs })).toContain("anchor_gone");
     expect((await ok(plain, "get_entity", { entity_type_key: "project", entity_id: e.P3 })).name).toBe("P3");
+  });
+});
+
+describe("the document edit tools refuse a changeset_id (F7)", () => {
+  beforeAll(async () => {
+    await fresh();
+    await pointAnchor("agent-a", "project", e.P1);
+  }, 60_000);
+
+  const notes = async (id: string): Promise<string> =>
+    (await rest("GET", `${ALL}/entities/task/${id}/documents/notes`)).body.content as string;
+
+  it("refuses with a validation error on both mounts; nothing is written or staged", async () => {
+    for (const anchorKey of [null, "agent-a"]) {
+      const client = await connect(anchorKey);
+      const cs = (await ok(client, "start_changeset")).id as string;
+      for (const [name, args] of [
+        ["edit_document", { old_string: "Notes", new_string: "Changed" }],
+        ["write_document", { offset: 0, length: 0, content: "Changed " }],
+      ] as const) {
+        const message = await refused(client, name, {
+          entity_type_key: "task",
+          entity_id: e.T1,
+          property_key: "notes",
+          ...args,
+          changeset_id: cs,
+        });
+        expect(message).toBe(
+          `Error executing tool ${name}: changeset_id is not accepted: ${name} always writes ` +
+            "immediately and cannot be staged; to stage a document change, pass the whole new " +
+            "value to update_entity with 'changeset_id'",
+        );
+      }
+      expect(await notes(e.T1)).toBe("Notes of T1");
+      expect(await ok(client, "get_changeset", { changeset_id: cs })).toMatchObject({ version: 1, writeCount: 0 });
+    }
+  });
+
+  it("without changeset_id the document edit stays immediate", async () => {
+    const client = await connect();
+    await ok(client, "edit_document", {
+      entity_type_key: "task",
+      entity_id: e.T2,
+      property_key: "notes",
+      old_string: "Notes",
+      new_string: "Edited notes",
+    });
+    expect(await notes(e.T2)).toBe("Edited notes of T2");
+  });
+
+  it("REST mounts no document edit route under a changeset: 404 and nothing written", async () => {
+    const cs = (await rest("POST", `${ALL}/changesets`)).body.id as string;
+    const res = await rest("PATCH", `${ALL}/changesets/${cs}/entities/task/${e.T3}/documents/notes`, {
+      op: "str_replace",
+      oldString: "Notes",
+      newString: "Changed",
+    });
+    expect(res.status).toBe(404);
+    expect(await notes(e.T3)).toBe("Notes of T3");
+    expect((await rest("GET", `${ALL}/changesets/${cs}`)).body).toMatchObject({ version: 1, writeCount: 0 });
   });
 });

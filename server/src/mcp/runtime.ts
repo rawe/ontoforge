@@ -21,7 +21,8 @@
  * submit, unsubmit, commit and discard a changeset. None is grantable to
  * an agent (`toolNames.ts`). On a staged-only anchor (V9, V29) the six
  * write tools require `changeset_id`, and `commit_changeset`,
- * `edit_document` and `write_document` are not registered (R13).
+ * `edit_document` and `write_document` are not registered (R13);
+ * elsewhere those two refuse a `changeset_id` rather than drop it.
  */
 
 import {
@@ -37,6 +38,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { valueToText } from "../core/dataTypes.js";
+import { ValidationError } from "../core/exceptions.js";
 import { getRuntimeStore, type RuntimeStore } from "../core/ports.js";
 import { getAnchorView, readMountAnchor } from "../runtime/anchors.js";
 import { filterRules } from "../runtime/readHelpers.js";
@@ -130,6 +132,18 @@ function stagedMode(kind: "create" | "update" | "delete", anchored: boolean, sta
       ? " The hold to the anchored entity is checked at commit; a dangling anchor refuses staging."
       : "")
   );
+}
+
+/** The document edit tools cannot stage (V2). Their schemas keep unknown
+ * keys, so a 'changeset_id' is refused here instead of dropped: a write
+ * meant for a changeset never happens now. */
+function refuseChangesetId(tool: string, args: object): void {
+  if ("changeset_id" in args) {
+    throw new ValidationError(
+      `changeset_id is not accepted: ${tool} always writes immediately and cannot be staged; ` +
+        "to stage a document change, pass the whole new value to update_entity with 'changeset_id'",
+    );
+  }
 }
 
 /**
@@ -494,16 +508,17 @@ export function createRuntimeMcpServer(
           "longer string with surrounding context, or set replace_all to true to " +
           "replace every occurrence. Returns the new totalLength, the edited " +
           "range, and ~200 chars of context around the edit for verification. It always " +
-          "writes immediately and cannot be staged into a changeset; to stage a document " +
-          "change, pass the whole new value to update_entity with 'changeset_id'.",
-        inputSchema: {
+          "writes immediately and cannot be staged into a changeset: a 'changeset_id' is " +
+          "refused and nothing is written; to stage a document change, pass the whole new " +
+          "value to update_entity with 'changeset_id'.",
+        inputSchema: z.looseObject({
           entity_type_key: z.string(),
           entity_id: z.string(),
           property_key: z.string(),
           old_string: z.string(),
           new_string: z.string(),
           replace_all: z.boolean().optional(),
-        },
+        }),
       },
       wrap(
         "edit_document",
@@ -515,6 +530,7 @@ export function createRuntimeMcpServer(
           new_string: string;
           replace_all?: boolean | undefined;
         }) => {
+          refuseChangesetId("edit_document", args);
           const result = await service.editDocument(
             lensKey,
             args.entity_type_key,
@@ -545,9 +561,10 @@ export function createRuntimeMcpServer(
           "'expect' (the text currently in the range) to fail safely if the " +
           "document changed since it was read. Returns the new totalLength, the " +
           "edited range, and ~200 chars of context around the edit. It always writes " +
-          "immediately and cannot be staged into a changeset; to stage a document change, " +
-          "pass the whole new value to update_entity with 'changeset_id'.",
-        inputSchema: {
+          "immediately and cannot be staged into a changeset: a 'changeset_id' is refused and " +
+          "nothing is written; to stage a document change, pass the whole new value to " +
+          "update_entity with 'changeset_id'.",
+        inputSchema: z.looseObject({
           entity_type_key: z.string(),
           entity_id: z.string(),
           property_key: z.string(),
@@ -555,7 +572,7 @@ export function createRuntimeMcpServer(
           length: z.number(),
           content: z.string(),
           expect: z.string().optional(),
-        },
+        }),
       },
       wrap(
         "write_document",
@@ -568,6 +585,7 @@ export function createRuntimeMcpServer(
           content: string;
           expect?: string | undefined;
         }) => {
+          refuseChangesetId("write_document", args);
           const result = await service.editDocument(
             lensKey,
             args.entity_type_key,

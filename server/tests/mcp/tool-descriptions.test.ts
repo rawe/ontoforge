@@ -171,10 +171,11 @@ describe("tool descriptions", () => {
     }
   });
 
-  it("the document edit tools take no changeset_id and say they cannot be staged", () => {
+  it("the document edit tools take no changeset_id and say they cannot be staged and refuse one", () => {
     for (const name of ["edit_document", "write_document"]) {
       expect(parameters(name).properties, name).not.toHaveProperty("changeset_id");
       expect(runtime.get(name), name).toContain("always writes immediately and cannot be staged");
+      expect(runtime.get(name), name).toContain("a 'changeset_id' is refused and nothing is written");
       expect(runtime.get(name), name).toContain("whole new value to update_entity with 'changeset_id'");
     }
   });

@@ -133,7 +133,7 @@ export interface ChangesetView {
 /** One end of a staged write: a relation end or a create's parent. */
 export interface EndView {
   id: string;
-  /** Its name through the lens: live when stored, staged when a create of
+  /** Its name through the lens: the stored name when stored, staged when a create of
    * this changeset mints it; null when the lens shows none. */
   name: string | null;
 }

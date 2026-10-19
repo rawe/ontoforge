@@ -918,7 +918,7 @@ connection carries state.
 |---|---|---|
 | Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
 | Bound to | One ontology | One ontology and one lens |
-| Tools | 45 | 31; 32 on an anchored mount, 29 on a staged-only one |
+| Tools | 45 | 33; 34 on an anchored mount, 31 on a staged-only one |
 
 ### How a mount is bound
 

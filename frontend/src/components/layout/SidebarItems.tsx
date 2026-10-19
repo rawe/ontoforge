@@ -15,8 +15,11 @@ interface NavItemProps {
   icon?: ComponentType<{ className?: string }>
   leading?: ReactNode
   end?: boolean
-  /** A red count after the label (a dot when collapsed), such as "1 dangling"; hidden at 0. */
-  alert?: { count: number; label: string }
+  /**
+   * A count after the label (a dot when collapsed), such as "1 dangling"; hidden at 0.
+   * Red by default; `neutral` for what waits rather than what is wrong.
+   */
+  alert?: { count: number; label: string; tone?: 'alert' | 'neutral' }
 }
 
 export function NavItem({ to, label, collapsed, icon: Icon, leading, end, alert }: NavItemProps) {
@@ -43,11 +46,19 @@ export function NavItem({ to, label, collapsed, icon: Icon, leading, end, alert 
       {!collapsed && <span className="truncate">{label}</span>}
       {alert !== undefined && alert.count > 0 &&
         (collapsed ? (
-          <span className="absolute top-1 right-2 size-1.5 rounded-full bg-destructive" />
+          <span
+            className={cn(
+              'absolute top-1 right-2 size-1.5 rounded-full',
+              alert.tone === 'neutral' ? 'bg-foreground/60' : 'bg-destructive',
+            )}
+          />
         ) : (
           <span
             title={alert.label}
-            className="ml-auto rounded-full bg-destructive px-1.5 text-[10.5px] leading-4 font-semibold text-white"
+            className={cn(
+              'ml-auto rounded-full px-1.5 text-[10.5px] leading-4 font-semibold',
+              alert.tone === 'neutral' ? 'bg-foreground/10 text-foreground' : 'bg-destructive text-white',
+            )}
           >
             {alert.count}
             <span className="sr-only"> {alert.label}</span>

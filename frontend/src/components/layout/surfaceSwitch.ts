@@ -8,7 +8,7 @@
  *   /w/{lens}/query                    that lens, Saved queries tab
  *   /w/{lens}/ai[?tab=…]               that lens, the matching assistant tab
  *   /w/{lens}/anchors                  that lens, Connect tab
- *   /w/{lens} · /explore               that lens, Scope tab
+ *   /w/{lens} · /explore · /changesets that lens, Scope tab
  *
  *   Studio                             Workbench
  *   /lenses/{id}[?tab=…]               that lens, the matching page

@@ -2,6 +2,7 @@ import {
   Anchor,
   Check,
   ChevronsUpDown,
+  FileStack,
   Layers,
   LayoutDashboard,
   Plus,
@@ -12,8 +13,9 @@ import {
   Waypoints,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { useAnchors, useFeatures, useLenses, useRuntimeSchema } from '@/api/hooks'
+import { useAnchors, useChangesets, useFeatures, useLenses, useRuntimeSchema } from '@/api/hooks'
 import { danglingCount } from '@/components/anchors/anchors'
+import { submittedCount } from '@/components/changesets/changesets'
 import { OntologySwitcher } from '@/components/layout/OntologySwitcher'
 import { useSidebarCollapsed } from '@/components/layout/sidebarCollapsed'
 import { NavItem, SidebarToggle } from '@/components/layout/SidebarItems'
@@ -126,6 +128,8 @@ export function Sidebar({
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const anchors = useAnchors(ontologyKey)
   const dangling = danglingCount(anchors.data ?? [])
+  const changesets = useChangesets(ontologyKey, lensKey)
+  const submitted = submittedCount(changesets.data ?? [])
 
   const base = `/o/${ontologyKey}/w/${lensKey}`
 
@@ -240,6 +244,13 @@ export function Sidebar({
           icon={Anchor}
           collapsed={collapsed}
           alert={{ count: dangling, label: 'dangling' }}
+        />
+        <NavItem
+          to={`${base}/changesets`}
+          label="Changesets"
+          icon={FileStack}
+          collapsed={collapsed}
+          alert={{ count: submitted, label: 'submitted', tone: 'neutral' }}
         />
       </nav>
 

@@ -283,7 +283,7 @@ function AnchorFlow({
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>
           {creating
-            ? "Hold an agent's writes to one entity and its descendants."
+            ? "Hold an agent's writes in one entity's hierarchy to that entity and its descendants."
             : 'Its next call works under the entity you pick.'}
         </DialogDescription>
       </DialogHeader>

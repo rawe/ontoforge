@@ -113,7 +113,7 @@ export function AnchorsPage() {
     <div>
       <PageHeader
         title="Anchors"
-        description="Hold an agent's writes to one entity and its descendants."
+        description="Hold an agent's writes in one entity's hierarchy to that entity and its descendants."
         actions={
           <Button size="sm" disabled={schema.data === undefined} onClick={() => setPointTarget({ mode: 'create' })}>
             <Plus className="size-3.5" />

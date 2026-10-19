@@ -126,7 +126,7 @@ test('the Connect Anchor select: an option label and the line under it, per stat
   assert.equal(anchorOptionLabel(unanchored, undefined), 'agent-u · unanchored')
   assert.equal(anchorOptionLabel(dangling, undefined), 'agent-d · dangling')
 
-  assert.equal(anchorWritesLine(anchored, view), 'Writes only to P1 and its descendants.')
+  assert.equal(anchorWritesLine(anchored, view), 'Hierarchy writes only under P1; other types are free.')
   assert.equal(anchorWritesLine(anchored, undefined), null)
   assert.equal(
     anchorWritesLine(anchored, hidden),

@@ -150,5 +150,5 @@ export function anchorWritesLine(anchor: Anchor, view: AnchorView | undefined): 
   if (!view.visible || view.entity === null) {
     return 'This lens hides its entity: every write through it is refused.'
   }
-  return `Writes only to ${stepLabel(view.entity)} and its descendants.`
+  return `Hierarchy writes only under ${stepLabel(view.entity)}; other types are free.`
 }

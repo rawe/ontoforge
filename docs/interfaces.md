@@ -20,8 +20,11 @@ response bodies are reproduced here.
 | `/api/server` | Server — deployment capability reads |
 | `/api/ontologies/{ontologyKey}/model` | Modeling REST — one ontology's schema and per-lens configuration |
 | `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` | Runtime REST — one ontology's instance data through one lens |
+| `/api/ontologies/{ontologyKey}/runtime/anchors` | Anchor maintenance — one ontology's anchors, without a lens |
+| `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/anchors/{anchorKey}` | Anchored runtime REST — the runtime routes through one lens, writes held by one anchor |
 | `/mcp/ontologies/{ontologyKey}/model` | Modeling MCP server, bound to one ontology |
 | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` | Runtime MCP server, bound to one ontology and one lens |
+| `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/anchors/{anchorKey}` | Anchored runtime MCP server, bound to one ontology, one lens and one anchor |
 
 Every ontology-scoped request names its ontology in the path, and an ontology is always
 spelled `ontologies/<key>`, a lens always `lenses/<key>` — uniformly across REST, MCP
@@ -34,7 +37,8 @@ else about it is considered.
 The registry addresses ontologies by key. Below one ontology, the modeling surface
 addresses the schema; the runtime surface addresses instance data and carries the lens
 key as a second path parameter. One request addresses either the schema or instance
-data through one lens — never both.
+data through one lens — never both. Anchor maintenance is the one runtime surface without
+a lens; an anchored mount carries the anchor key as a third path parameter.
 
 Modeling REST does **not** nest types under a lens. Entity types, relation types and
 their properties are resources of the ontology, at the top level of its modeling
@@ -48,7 +52,7 @@ This is the single most common source of mistakes against the modeling surface.
 | Surface | Addressed by |
 |---|---|
 | Registry | Ontology key |
-| Runtime REST, everywhere | Keys — ontology key, lens key, type key, property key; instance ids for entities and relations |
+| Runtime REST, everywhere | Keys — ontology key, lens key, anchor key, type key, property key; instance ids for entities and relations |
 | Modeling REST — lenses, entity types, relation types, properties, inclusions | **Internal identifiers**, not keys |
 | Modeling REST — agent configs, saved queries, retrievers, navigators | Lens key and the resource key |
 | Modeling REST — search indices | Index key — managed keys included, which carry `~` |
@@ -177,7 +181,10 @@ defined in [architecture.md](architecture.md#error-model). Nothing is added per 
 
 MCP reports the same failures as tool errors. Because a tool error is a single string, the
 per-field detail that REST returns under `details.fields` is flattened into the message
-text, so a model still sees every offending field in one response.
+text, so a model still sees every offending field in one response. A refused parent flag
+carries its violation list under `details.violations`
+([architecture.md](architecture.md#error-model)); MCP reports its message, which states
+the count per rule.
 
 Requesting an unavailable search strategy or a capability whose provider is not
 configured answers `VALIDATION_ERROR` with
@@ -278,11 +285,15 @@ schema; see the addressing note above before using it. Semantics:
 
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
-| POST | `/relation-types` | Create a relation type; endpoints are named by entity type key and are fixed | — |
-| GET | `/relation-types` | List the ontology's relation types | — |
+| POST | `/relation-types` | Create a relation type; endpoints are named by entity type key and are fixed; `parent` optionally names the parent end | — |
+| GET | `/relation-types` | List the ontology's relation types, each with its `parent` | — |
 | GET | `/relation-types/{relationTypeId}` | Read one relation type | — |
-| PUT | `/relation-types/{relationTypeId}` | Update display name or description | — |
+| PUT | `/relation-types/{relationTypeId}` | Update display name, description or parent end (`parent`; null clears it) | — |
 | DELETE | `/relation-types/{relationTypeId}` | Delete a relation type and its properties | `cascade` |
+
+Setting or changing `parent`, on create or update, is refused with `RESOURCE_CONFLICT` and
+`details.violations` when the stored relations break the parent rules; nothing of the
+request is then written ([capabilities/schema-modeling.md](capabilities/schema-modeling.md#parent-relations)).
 
 ### Property definitions
 
@@ -518,11 +529,20 @@ Semantics: [capabilities/instance-data.md](capabilities/instance-data.md).
 
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
-| POST | `/entities/{entityTypeKey}` | Create an entity | — |
+| POST | `/entities/{entityTypeKey}` | Create an entity, optionally with its parent relation (`parentRelation`) | — |
 | GET | `/entities/{entityTypeKey}` | List entities of one type | `limit`, `offset`, `sort`, `order`, `q`, `fields`, `filter.*` |
 | GET | `/entities/{entityTypeKey}/{entityId}` | Read one entity | `fields` |
+| GET | `/entities/{entityTypeKey}/{entityId}/path` | The entity's hierarchy path through the lens | — |
 | PATCH | `/entities/{entityTypeKey}/{entityId}` | Partial update; an explicit null clears a property | — |
-| DELETE | `/entities/{entityTypeKey}/{entityId}` | Delete an entity and every relation attached to it | — |
+| DELETE | `/entities/{entityTypeKey}/{entityId}` | Delete an entity and every relation attached to it; refused for an entity with children | — |
+
+`parentRelation` sits beside the property values in the flat create body as
+`{type, parentId, properties}`: the parent relation type's key, the parent's id and the
+relation's own properties, optional. The create answers the entity alone; faults come
+under `parentRelation.*` with the entity's own. The path answers
+`[{type, id, name}]`, root first and ending with the entity; an unknown, hidden or
+wrong-type entity is not found, as on the read. Deleting an entity that still has children
+answers `RESOURCE_CONFLICT`. Rules: [capabilities/instance-data.md](capabilities/instance-data.md#hierarchies).
 
 ### Documents
 
@@ -825,6 +845,36 @@ are rejected before streaming, using the ordinary HTTP error response. Disconnec
 further agent work, with best-effort cancellation of running operations. Reading a thread
 needs no provider, as the list does.
 
+## Anchors
+
+Prefix `/api/ontologies/{ontologyKey}/runtime/anchors`. One ontology's anchors, without a
+lens. Semantics: [capabilities/anchors.md](capabilities/anchors.md).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/` | List the anchors, by key, each `{key, entity, state}` |
+| GET | `/{anchorKey}` | Read one anchor |
+| PUT | `/{anchorKey}` | Create or re-point an anchor; the body is `{entity: {type, id}}`, or `{entity: null}` to unanchor; 200 with the record either way |
+| DELETE | `/{anchorKey}` | Delete an anchor; 204 |
+
+`entity` is `{type, id}` or null, `state` is `anchored`, `unanchored` or `dangling`. A key
+that breaks the lens-resource rule is a `VALIDATION_ERROR` with a message only; an entity
+type or entity that is not stored is a field error on `entity.type` or `entity.id`. An
+unknown anchor is not found on read and delete.
+
+### Anchored mounts
+
+`/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/anchors/{anchorKey}` mirrors the
+[runtime REST](#runtime-rest) routes from schema introspection to saved queries, the path
+read included; the AI and entity identity comparison routes are not mirrored. Its root,
+`GET` on the prefix itself, answers what `get_anchor` answers:
+`{key, state, visible, entity, path}`, `entity` and every path step as `{type, id, name}`.
+Every request checks the ontology, then the lens, then the anchor, after its own shape:
+an unknown anchor is not found on reads too. Writes are held by the
+[write guard](capabilities/anchors.md#the-write-guard): its refusals are field errors, and
+a dangling anchor or an anchored entity the lens hides answers `RESOURCE_CONFLICT` to
+every write. The MCP equivalent is the [anchored runtime mount](#how-a-mount-is-bound).
+
 ## MCP
 
 Two servers, mounted in the same process as REST and calling the same services directly.
@@ -836,7 +886,7 @@ connection carries state.
 |---|---|---|
 | Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
 | Bound to | One ontology | One ontology and one lens |
-| Tools | 45 | 22 |
+| Tools | 45 | 23, and 24 on an anchored mount |
 
 ### How a mount is bound
 
@@ -852,10 +902,17 @@ creating under an arbitrary key, renaming, deleting — is REST and web UI only,
 carve-out: the modeling mount's `ensure_ontology` tool, which acts only on the mount's
 own binding.
 
+A runtime mount URL may add `/anchors/{anchorKey}`: the mount is then also bound to that
+anchor, gains `get_anchor`, and holds its writes by the anchor's
+[write guard](capabilities/anchors.md#the-write-guard). Its tools are otherwise the
+runtime tools, and `create_entity`'s description adds the anchored rule. No mount creates
+an anchor.
+
 The modeling mount serves requests even when its ontology does not exist yet — that is
 what lets `ensure_ontology` provision it; until then every other tool answers a
 not-found tool error. The runtime mount requires both its ontology and its lens to
-exist; its tools answer not-found tool errors otherwise.
+exist, and an anchored mount its anchor as well; its tools answer not-found tool errors
+otherwise, reads included.
 
 ### Modeling tools
 
@@ -866,8 +923,8 @@ exist; its tools answer not-found tool errors otherwise.
 | `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`) |
 | `update_entity_type` | Change display name, description or name property (`name_property`); the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |
-| `create_relation_type` | Add a relation type between two entity types |
-| `update_relation_type` | Change display name or description; endpoints are immutable |
+| `create_relation_type` | Add a relation type between two entity types, optionally naming its parent end (`parent`) |
+| `update_relation_type` | Change display name, description or parent end (`parent`; null clears it); endpoints are immutable |
 | `delete_relation_type` | Remove a relation type and its properties |
 | `add_property` | Define a property on an entity type or a relation type |
 | `update_property` | Change a property's metadata; key and data type are immutable |
@@ -922,15 +979,17 @@ Everything a client can do to instance data through one lens.
 
 | Tool | Purpose |
 |---|---|
+| `get_anchor` | Anchored mounts only: where the connection is anchored — key, state, visible, entity and path |
 | `get_schema` | The scoped schema, as REST `/schema` returns it — the lens's key, name and description; types, properties, required flags, name properties |
-| `create_entity` | Create an entity |
+| `create_entity` | Create an entity, optionally with its parent relation (`parent_relation`: `type`, `parent_id`, `properties`) |
 | `list_entities` | List entities with search, filters, sorting, paging and projection |
 | `get_entity` | Read one entity by id |
+| `get_path` | An entity's hierarchy path through the lens, root first |
 | `get_document` | Read a document property, whole or by character range |
 | `update_entity` | Partial update; a null clears a property |
 | `edit_document` | Change part of a document by exact string replacement |
 | `write_document` | Overwrite a character range of a document; also inserts and appends |
-| `delete_entity` | Delete an entity and its relations |
+| `delete_entity` | Delete an entity and its relations; refused for an entity with children |
 | `create_relation` | Connect two entities |
 | `list_relations` | List relations, optionally by source or target |
 | `get_relation` | Read one relation by id |
@@ -949,8 +1008,9 @@ Everything a client can do to instance data through one lens.
 An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
 `get_entity`, `get_document`, `list_relations`, `get_neighbors`, `search`,
 `search_documents`, `execute_query`, `list_saved_queries`, `run_saved_query`,
-`search_saved_queries`. Every write tool is outside that set, and so is the read-only
-`get_relation` — being read-only is not sufficient to be grantable. The two search tools
+`search_saved_queries`. Every write tool is outside that set, and so are the read-only
+`get_relation`, `get_path` and `get_anchor` — being read-only is not sufficient to be
+grantable. The two search tools
 return the REST envelope and take no strategy and no `min_similarity`; they apply the
 fixed floor of [capabilities/search.md](capabilities/search.md#similarity-floor) whenever
 the default strategy ranks semantically, echoed as `minSimilarity`. MCP also accepts
@@ -974,7 +1034,7 @@ Reasonable things to look for that are absent everywhere — REST, MCP and the w
 |---|---|
 | Health or readiness endpoint | Nothing for an orchestrator to probe; liveness must be inferred from a real request |
 | Data-wipe endpoint | Instance data is removed one entity or relation at a time; deleting the whole ontology is the only bulk removal |
-| Bulk or batch write | Every create and update is a single object; import covers the design, not data |
+| Bulk or batch write | Every create and update is a single object, except a create with a parent relation, which writes one entity and its one relation, on every mount; import covers the design, not data |
 | Instance-data export | Transfer moves the design only; data leaves through queries or listing |
 | Single-property read on modeling | List the owning type's properties |
 | Cross-lens read | No route or tool sees two lenses at once |

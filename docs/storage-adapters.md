@@ -50,7 +50,7 @@ key, the optional display name and timestamps. Six operations:
 | Read by key | One row, or an absent result. |
 | Read by display name | One row, or an absent result — display names are unique server-wide, and the pre-write conflict check needs the lookup. |
 | Rename | Set the display name; the key never changes. Absent result when not found. |
-| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, retrievers, navigators, instances, and every search index. False when not found. |
+| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, retrievers, navigators, instances, anchors, and every search index. False when not found. |
 
 The registry — not the database's own catalog — is the authoritative list of ontologies.
 The store must enforce server-wide uniqueness of the ontology key and the display name;
@@ -146,9 +146,23 @@ Update name and description. Delete.
 **Type management.** Entity types: create with id, key, display name, description; list;
 read by id; read by key; update display name and description; delete. Relation types: the
 same, plus the source and target entity type keys supplied at creation and never
-updatable, and returned on every read. One extra predicate is required on the entity type
+updatable, and an optional parent end, source or target, written by the flag write below;
+all three are returned on every read. One extra predicate is required on the entity type
 side: whether any relation type currently names a given entity type as an endpoint. It
 backs the rule that an entity type in use cannot be deleted.
+
+**The parent flag.** A relation type's parent end is written on create and by its own flag
+write, which sets, changes or clears it. Both check the parent rules
+([capabilities/schema-modeling.md](capabilities/schema-modeling.md#parent-relations))
+against the stored relations, in one transaction, before they write. The reading is every
+stored parent relation — relation type key to parent end — with the written key's new end
+in place of its stored one. Under it they count the entities that are the child end of
+more than one stored relation, and the entities on a cycle, a self-loop included; when either count is
+not zero they return each broken rule with its count and its first five entities, ordered
+by type and id, and write nothing. Clearing counts nothing and is never refused. The count
+must end on any stored data, cycles included, and takes no lock. A read-only variant
+counts the same for a given set of readings and writes nothing; import's validation runs
+it before any write.
 
 **Property management.** A property definition is owned by exactly one type, addressed by
 the owner's internal id plus the owner-kind discriminator. Create with id, key, display
@@ -233,6 +247,23 @@ set/remove split as entities. Delete. List, taking the same filter, sort, pagina
 count contract as entity listing, plus optional endpoint filters — restrict to relations
 leaving a given entity, or arriving at one, or both. Every relation read returns its two
 endpoint ids alongside its properties; endpoints are never updatable.
+
+**Hierarchy.** Three operations serve the parent relations. Each read takes the parent
+relations to follow as readings — relation type key to parent end — and with none answers
+without touching storage; so does an id that cannot be an instance id.
+
+- **The ancestor walk.** An entity's parent, the parent's parent and so on up to a
+  hierarchy root, nearest first, each as type key and id, the entity itself never
+  included and a root answering an empty list. Each ancestor appears once, at its nearest
+  level; on data with two parents one level can hold several, ordered by type and id. The
+  walk must end on any stored data, cycles included.
+- **The children lookup.** Whether the entity is the parent end of at least one relation
+  of the readings.
+- **The create with a parent relation.** One write of an entity and the relation that
+  names its parent, each with its own search write plan, in one transaction: the entity
+  and its plan first, then the relation and its plan. A parent that vanished in between
+  fails the whole write as not found, and nothing is written. It takes no lock: nothing
+  can reference the new entity before commit.
 
 **Traversal.** Given an entity id, a direction of incoming, outgoing or both, an optional
 relation type key filter, a limit, and property definitions keyed by type key — the same
@@ -418,6 +449,17 @@ whenever search work was queued in any server process on the same database — a
 queueing transaction commits, never before. A subscription may end on its own, a lost
 connection for instance; it then says so and the subscriber subscribes again. Polling
 above the port covers the time without one.
+
+## The anchor store
+
+The anchor store holds an ontology's [anchors](capabilities/anchors.md): per key, the
+entity it points at — its type key and id — or none, and timestamps. List, ordered by key;
+read by key, absent when unknown; save, an upsert that creates the anchor or re-points it
+and returns the record as written; delete, false when the key is absent. Every record read
+also says whether its entity is still stored under that type key. The store never checks
+the pointer on save and never decides a state — the service does — so a deleted entity
+leaves its anchors in place. The runtime store hands out the anchor store of its own
+ontology. Anchors are not part of any export read, and registry delete removes them.
 
 ## The navigator store
 
@@ -610,7 +652,8 @@ anything is written. Older storage holds the registry table against concurrent c
 runs each missing upgrade step inside every `ont_*` namespace — then the step's
 server-wide statements, if it has any, once in `public` — and records the new version
 last. The upgrade is logged, and the server never backs up storage itself. The steps and
-both version constants live in the storage-version module beside the DDL. Before that
+both version constants live in the storage-version module beside the DDL; the current
+storage version is 7. Before that
 transaction the adapter logs the pgvector version — the installed one, or the one the
 extension would install — and warns when it predates 0.7, which has no
 `halfvec`: the search entry table cannot then be created, so an upgrade of an existing
@@ -618,7 +661,7 @@ namespace and every ontology creation fail.
 
 **Registry create** is one transaction:
 the registry row first — so a concurrent same-key create dies on the named constraint as
-a conflict — then the fresh namespace, the sixteen tables below with the search settings
+a conflict — then the fresh namespace, the seventeen tables below with the search settings
 row and, when an embedding width is given, the fixed saved-query vector index inside it. **Registry delete** is one
 transaction: the registry row out, the namespace dropped in one cascade. A bound store applies its
 ontology's namespace to the search path per statement, inside the shared transaction
@@ -633,7 +676,7 @@ per namespace:
 |---|---|---|
 | Lens | `lens` | referenced by its inclusions, agents, saved queries, retrievers and navigators |
 | Entity type | `entity_type` | referenced by its property definitions and inclusions; its name property's key in `name_property`, a reference to `property_def` by entity type and key, checked at commit |
-| Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions |
+| Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions; its parent end in the nullable `parent` column, `source` or `target`, with no check |
 | Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
 | Scope inclusion | `lens_includes` | its lens plus exactly one of three columns — entity type, relation type or search index; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array. Search-index rows reach the runtime schema read as index keys; the type-inclusion reads skip them |
 | Agent | `assistant_agent` | its lens |
@@ -681,7 +724,7 @@ it starts (below). The deliberation behind this mapping is
 [adr/0015](adr/0015-generic-jsonb-instance-tables.md); the binding rule is in
 [decisions.md](decisions.md#storage).
 
-The silent-cascade contract on entity deletion is translated into foreign keys:
+The cascade contract on entity deletion is translated into foreign keys:
 relations reference their two endpoint entities with cascading deletes. Deleting an
 entity removes its relations in either direction in the same statement, and a dangling
 endpoint is unrepresentable. The
@@ -700,6 +743,24 @@ the related row's properties; the endpoint indexes serve it. For a property of t
 relation itself the subquery joins no entity row: the predicate is evaluated on the
 relation row's own properties. A relation existence condition is the same subquery
 without a join and without a predicate, under `EXISTS` or `NOT EXISTS`.
+
+The hierarchy reads use no index beyond those four. The ancestor walk is one recursive
+statement: each level is a `LATERAL` union of two probes, on the target entity for
+`source` readings and on the source entity for `target` readings, and a path array stops
+a branch at an entity already on it. The children lookup is two `EXISTS` probes on the
+same columns. The parent flag's count is one statement: the relation rows of the reading as
+child-to-parent edges, `two_parents` grouping them by child, `cycle` a recursive walk up
+from every entity that is also a parent, with the same path-array guard. The create with a
+parent relation inserts the entity, applies its plan, inserts the relation and applies its
+plan, in one transaction; the relation's foreign key holds the parent.
+
+## How anchors are stored
+
+One table per namespace, `anchor`: the key as primary key, the entity type key, the
+entity id and timestamps. It carries no foreign key to `entity` and no check, so deleting
+an entity leaves the row, and the record then reads as no longer stored. Every read is the
+row left-joined to `entity` on id and type key. A save is one `INSERT … ON CONFLICT DO
+UPDATE … RETURNING`, read back through the same join, setting `updated_at` on a re-point.
 
 ## How search indices are stored
 
@@ -852,7 +913,8 @@ Provide, in this order:
 5. **The schema side.** Lenses, types, properties, inclusions, full-schema retrieval,
    agents, saved queries and the navigator store. Nothing on the data side is useful
    until the schema can be read back.
-6. **The data side.** Entities, relations, traversal.
+6. **The data side.** Entities, relations, traversal, the hierarchy operations and the
+   anchor store.
 7. **Filters, sorts and text search.** The predicate builder, shared by listing and by
    filtered vector search.
 8. **Search** — the search-index store with its queue, wake-ups and retrievers — and the

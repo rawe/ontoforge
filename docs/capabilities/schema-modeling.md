@@ -24,7 +24,7 @@ and no generated code.
 | Object | Identity | Fixed at creation | Editable afterwards |
 |---|---|---|---|
 | Entity type | key, unique within the ontology | key | display name, description, name property |
-| Relation type | key, unique within the ontology | key, source entity type, target entity type | display name, description |
+| Relation type | key, unique within the ontology | key, source entity type, target entity type | display name, description, parent end |
 | Property definition | key, unique within its owning type | key, data type, owning type | display name, description, required flag, default |
 
 Every type carries a mandatory display name and an optional description. Both are
@@ -40,8 +40,10 @@ something a reader would otherwise assume:
   property holds one scalar; a "many" is modelled as a relation.
 - No uniqueness, range, pattern or cross-property constraints. `required` is the
   only constraint a property definition can express.
-- No cardinality on relation types. Any number of relations of a type may connect
-  any pair of endpoint-compatible entities.
+- No cardinality on relation types beyond the [parent rules](#parent-relations): any
+  number of relations of a type may connect any pair of endpoint-compatible entities,
+  except that across all parent relations an entity has at most one parent and no
+  hierarchy closes a cycle.
 - No computed, derived or server-generated user properties.
 - No renaming. A key, a data type and a relation type's endpoints are permanent;
   changing any of them means creating a new object.
@@ -70,8 +72,9 @@ than rejected.
 
 Updates are sparse: a field omitted from an update body is left unchanged. One
 consequence is that a description cannot be cleared, only replaced, because an
-explicit null is indistinguishable from omission. A property's default value is
-the single exception — sending it explicitly as null clears it.
+explicit null is indistinguishable from omission. A property's default value and a
+relation type's parent end are the two exceptions — sending either explicitly as null
+clears it.
 
 ### The name property
 
@@ -95,6 +98,42 @@ may have no name. Relation types have none.
 
 A lens that hides the name property shows its type without one
 ([ontology-lenses.md](ontology-lenses.md)).
+
+### Parent relations
+
+A relation type may name one of its ends as the **parent end**: `parent` is `source` or
+`target`, or null for an ordinary relation type. The flag sits beside the endpoints, so a
+self-relation such as `manages` (person → person) is unambiguous: with `source`, the
+manager is the parent. A `has_project` from customer to project reads `source`; an
+`owned_by` or `located_in` that points up reads `target`.
+
+The relations of every parent relation together form the ontology's hierarchy, under two
+**parent rules**:
+
+- **At most one parent per entity**, across all parent relations, not per relation type.
+- **No cycles.** A self-loop is a cycle.
+
+Entities without a parent are hierarchy roots, and are allowed. A parent relation is
+otherwise an ordinary relation type: it has properties, it is listed, read and traversed
+like any other, and a lens includes or hides it the same way. How the rules bind instance
+writes — relation creates, the create with a parent relation, leaf-only deletes — is in
+[instance-data.md](instance-data.md#hierarchies); how they bind an anchor, in
+[anchors.md](anchors.md).
+
+**The flag can be set, changed and cleared** at any time, on create and on update, and
+every read of a relation type returns it. Setting it, flipping it, or creating a relation
+type with it checks the relations already stored under every parent relation, with the
+new reading in place of the old: when they break a parent rule, the change is refused with
+a conflict and nothing is written. No consent overrides the refusal — the data must be
+repaired first. The refusal lists each broken rule with its count of offending entities
+and the first five of them, ordered by type and id
+([../architecture.md](../architecture.md#error-model)). A relation type that does not exist
+yet can still have stored relations, because deleting a relation type keeps its instances
+([below](#deletion)). Clearing the flag, or deleting a flagged relation type, is never
+refused; an update repeating the stored flag is not a change and checks nothing.
+
+This check is the one schema edit that reads instance data. It reads to refuse and never
+writes ([../decisions.md](../decisions.md#schema-and-data)).
 
 ### Data types
 
@@ -279,7 +318,8 @@ type against the enumeration, so an invalid data type can reach storage that no
 interactive path would have accepted ([transfer.md](transfer.md)).
 
 Neither operation inspects instance data. Entities stranded by a deleted type are
-invisible to both.
+invisible to both, and so are relations that break the parent rules; only a
+[flag change](#parent-relations) reports those.
 
 ## Through the interfaces
 
@@ -290,7 +330,8 @@ The same service enforces every rule above regardless of entrance, including the
 cascade protocol. One detail does not survive the crossing: the structured lists of
 affected lens and index keys reach a REST caller in the error body, while an MCP caller
 receives only the refusal message — which names the affected custom indices, but not the
-lenses — and must ask which lenses include the type.
+lenses — and must ask which lenses include the type. A refused parent flag likewise
+reaches MCP as its message, with the count per rule but without the listed entities.
 
 | Operation group | REST | Modeling MCP | Web UI |
 |---|---|---|---|

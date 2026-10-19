@@ -42,6 +42,7 @@ what rules bind it, and how it is reached from every interface.
 | [threads](capabilities/threads.md) | Server-held assistant conversations: starting, continuing and reading a thread, atomic turns, lifetime |
 | [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
 | [transfer](capabilities/transfer.md) | Schema export and import |
+| [anchors](capabilities/anchors.md) | Anchors — named records holding an MCP client's writes within one entity's subtree: the record and its states, maintenance, anchored mounts, the write guard |
 
 ## Internal provider interfaces
 
@@ -193,7 +194,7 @@ only. Reads return a size stub rather than the content, so that listing entities
 cheap. See [capabilities/documents.md](capabilities/documents.md).
 
 **Key** — the stable, human-readable identifier of an ontology, type, property, lens,
-search index, saved query, agent, retriever or navigator. Keys are what every interface speaks.
+search index, saved query, agent, retriever, navigator or anchor. Keys are what every interface speaks.
 They are never database identifiers, and they are never exposed as UUIDs. Every key is
 unique within its owner; only ontology keys are unique server-wide. A key follows the rule
 of its level:
@@ -201,7 +202,8 @@ of its level:
 - **Schema keys** — ontologies, types, properties, lenses, search indices — match
   `^[a-z][a-z0-9_]*$`: lower snake case, starting with a letter. They appear as OQL
   identifiers, where `-` would read as minus, and in storage names.
-- **Lens-resource keys** — saved queries, agents, retrievers and navigators — match
+- **Lens-resource keys** — saved queries, agents, retrievers and navigators, and also
+  anchors, which belong to the ontology rather than to a lens — match
   `^[a-z][a-z0-9_-]*$`: the schema rule plus `-`. They travel only in URLs, JSON and tool
   arguments.
 
@@ -235,6 +237,36 @@ begin with an underscore, so the two namespaces cannot collide.
 
 **Chunk** — an internal fragment of a document property, so that search can match and
 return a passage rather than a whole document. Not addressable directly.
+
+### Hierarchies and anchors
+
+**Parent relation** — a relation type that names one of its ends, source or target, as
+the parent end. Its relations form a hierarchy: across all parent relations of an
+ontology, every entity has at most one parent, and there are no cycles. Otherwise an
+ordinary relation type. See
+[capabilities/schema-modeling.md](capabilities/schema-modeling.md#parent-relations).
+
+**Hierarchy root** — an entity without a parent. Qualified, because a search index's root
+is an entity type.
+
+**Hierarchy path** — the entities from a hierarchy root down to one entity, root first and
+ending with the entity, as one lens shows them. Qualified, because a query path is a
+filter key. See [capabilities/instance-data.md](capabilities/instance-data.md#the-path-read).
+
+**Anchor** — a named record of an ontology that a person points at one entity, or at none:
+anchored, unanchored or dangling. An MCP client connected through an anchored mount has
+its writes to the anchor's hierarchy held to the anchored subtree. Not authentication, and
+not a navigator's anchor, which is an entity a question names. See
+[capabilities/anchors.md](capabilities/anchors.md).
+
+**Anchored subtree** — the anchored entity and its descendants: the entities an anchor
+covers.
+
+**Anchor's hierarchy** — the entity types joined by parent relations to the anchored
+entity's type, with those parent relations. Writes to every other type are not held.
+
+**MCP client** — an AI client outside the server, connected to one of its MCP mounts and
+acting on its own judgment. Not an agent, which is an assistant the server runs.
 
 ### Using the graph
 

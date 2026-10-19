@@ -6,7 +6,9 @@ is reachable, the property definitions decide what is valid. Nothing is written 
 
 ## What it does
 
-One entity or one relation per call. There is no batch write and no transaction spanning
+One entity or one relation per call, with one exception: a
+[create with a parent relation](#the-create-with-a-parent-relation) writes one entity and
+one relation together, on every mount. There is no batch write and no transaction spanning
 calls.
 
 Reads come in four shapes: one instance by id, a filtered and paginated list of one type,
@@ -39,12 +41,17 @@ id, and takes three things with it:
    [document passages](documents.md) among them — and those of the relations deleted with
    it.
 
-Nothing warns first and nothing is refused: the runtime cascade is silent, unlike the
-schema cascade protocol in [schema-modeling.md](schema-modeling.md). A caller that needs to
-know what would be lost must traverse first.
+Wherever the schema flags a parent relation, an entity that still has children is not
+deleted at all, for any client and through any lens
+([Leaf-only deletes](#leaf-only-deletes)). Otherwise nothing warns first and nothing is
+refused: the runtime cascade is silent, unlike the schema cascade protocol in
+[schema-modeling.md](schema-modeling.md). A caller that needs to know what would be lost
+must traverse first.
 
 Addressing an entity whose type the lens does not expose fails exactly as addressing a
-missing entity does: not found. A lens never reports that something exists but is hidden.
+missing entity does: not found. A lens never reports that something exists but is hidden,
+with one bit of exception: refusing to delete an entity with children reveals that a
+child exists — never its type, id or count — even when the lens hides it.
 
 ## Relations
 
@@ -52,7 +59,9 @@ A relation is created against one relation type with two endpoint ids and, optio
 property values. Both endpoints must already exist, and each endpoint's entity type must
 equal the relation type's declared source and target — checked against the full schema, not
 the lens, so a narrow lens cannot create an edge that is invalid under a wider one.
-Endpoint errors are collected alongside property errors and reported together.
+Endpoint errors are collected alongside property errors and reported together. A
+relation of a parent relation is also checked against the
+[parent rules](#the-parent-rules), for every client, in the service.
 
 **Endpoints are immutable.** An update that carries endpoint ids ignores them silently
 rather than rejecting the request; properties in the same payload still apply. Repointing a
@@ -71,6 +80,72 @@ searchable: an entity ranks by its relation entries too, and the
 hit names the relation that matched and the entity at its other end
 ([search.md](search.md#index-search)). Relations themselves are reachable by listing, by
 traversal and by [OQL](oql.md).
+
+## Hierarchies
+
+A relation type flagged with a parent end is a parent relation
+([schema-modeling.md](schema-modeling.md#parent-relations)); together, the relations of
+every parent relation of the ontology form its hierarchy. The parent rules and leaf-only
+deletes bind every client through every lens, and follow every parent relation of the full
+schema whatever the lens shows
+([ontology-lenses.md](ontology-lenses.md#the-lensfull-schema-asymmetry)). An
+[anchored mount](anchors.md) holds a client's writes further.
+
+### The parent rules
+
+A relation create of a parent relation is checked once, in the service, against the cached
+schema, with its other faults:
+
+- **A child that already has a parent** is refused on the child end — `toEntityId` for a
+  `source` parent end, `fromEntityId` for a `target` one — whichever parent relation gave
+  it that parent.
+- **A parent that is the child itself, or one of its descendants,** is refused on the
+  parent end: the relation would close a cycle.
+
+Neither refusal names the existing parent. An end that already has an endpoint error is
+not checked again. Updating a parent relation changes only its properties, so nothing is
+checked; deleting one makes the child a hierarchy root, which may then take a new parent
+— except on an anchored mount, which refuses it for the anchor's hierarchy. The checks
+lock nothing; the race this leaves is in [anchors.md](anchors.md#accepted-races).
+
+### The create with a parent relation
+
+An entity create may carry `parentRelation`: the key of a parent relation whose child end
+is the new entity's type, the parent's id, and optionally the relation's own properties.
+The new entity and that relation are written in one transaction, or not at all; the
+relation runs from parent to child for a `source` parent end and from child to parent for
+a `target` one. The response is the created entity.
+
+It is validated exactly as a relation create, with every fault collected together with
+the entity's own under `parentRelation.type`, `parentRelation.parentId` and
+`parentRelation.properties.<key>`: the relation type must be visible through the lens,
+must be a parent relation, and must have the entity's type at its child end; the parent
+must exist with the type of the parent end, checked against the full schema; the relation's
+properties follow the write rules. The parent rules need no check, since a new entity has
+neither a parent nor a descendant. A malformed `parentRelation` is rejected as a request
+of the wrong shape. Without it, the new entity is a hierarchy root; an anchored mount
+requires it for the types of the anchor's hierarchy ([anchors.md](anchors.md#what-is-held)).
+
+### Leaf-only deletes
+
+An entity that still has children — it is the parent end of at least one relation of any
+parent relation — cannot be deleted: the refusal is a conflict, "This entity has children;
+delete them first", naming no type, id or count, and nothing is deleted. A hierarchy is
+therefore deleted bottom-up. A leaf is deleted as any entity is, with its relations. In an
+ontology without a parent relation nothing is checked.
+
+### The path read
+
+The path of one entity is its [hierarchy path](../README.md#hierarchies-and-anchors): the
+entity's ancestors, root first, followed by the entity itself, each as its type key, id and
+name. A hierarchy root's path is the entity alone. Through a lens the path starts below
+the nearest ancestor whose type the lens hides, so it never names a hidden entity or one
+above it. `name` is the value of the type's name property, and null when unset or hidden by
+the lens. An entity of a type the lens hides, a missing entity, or an id of another type is
+not found, as on the entity read. On data that the accepted race left with two parents,
+the path lists every visible ancestor the walk reaches.
+
+Entity reads themselves carry no path.
 
 ## Validation
 
@@ -337,10 +412,13 @@ ontology names disjoint data that no operation here can reach.
 | Entity lifecycle | create, list, read, update, delete under the entity route family | `create_entity`, `list_entities`, `get_entity`, `update_entity`, `delete_entity` |
 | Relation lifecycle | same five under the relation route family | `create_relation`, `list_relations`, `get_relation`, `update_relation`, `delete_relation` |
 | Traversal | neighbours of one entity | `get_neighbors` |
+| Path | the path of one entity | `get_path` |
 
 REST carries filters as `filter.<property>` query parameters and repeats `fields` per
 value; MCP takes a filters object and a list, with the same keys and the same operator
-suffixes. Both reach the same service, so every rule above holds identically. MCP clamps
+suffixes. The parent relation of a create is `parentRelation` in the REST body and
+`parent_relation`, with `parent_id`, as the MCP argument; MCP names a fault by the REST
+key. Both reach the same service, so every rule above holds identically. MCP clamps
 `limit` and `offset` into range instead of rejecting them, where REST rejects out-of-range
 values.
 

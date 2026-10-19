@@ -4,6 +4,9 @@
  * (on the parent end), collected with the other field errors; an entity
  * delete refuses an entity with children wherever the ontology flags a
  * parent relation. Both read every parent relation of the FULL schema.
+ * An entity create with a parent relation validates the relation like a
+ * relation create, under `parentRelation.*`, and writes both in one port
+ * call.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -300,5 +303,203 @@ describe("entity delete: leaves only, wherever a parent relation is flagged", ()
     expect(res.statusCode).toBe(204);
     expect(holder.store.getEntity).not.toHaveBeenCalled();
     expect(holder.store.hasChildren).not.toHaveBeenCalled();
+  });
+});
+
+describe("entity create with a parent relation", () => {
+  /** `withParents`, with a required and a defaulted property on `manages`. */
+  function withRelationProperties(options?: Parameters<typeof makeFullSchema>[0]): Row {
+    const schema = withParents(options);
+    const manages = (schema.relationTypes as Row[]).find((rt) => rt.key === "manages")!;
+    manages.properties = [
+      { key: "level", displayName: "Level", dataType: "integer", required: true, defaultValue: null },
+      { key: "rank", displayName: "Rank", dataType: "integer", required: false, defaultValue: "0" },
+    ];
+    return schema;
+  }
+
+  function createEntity(lensKey: string, entityTypeKey: string, payload: Row) {
+    return app.inject({
+      method: "POST",
+      url: `/api/ontologies/test_ont/runtime/lenses/${lensKey}/entities/${entityTypeKey}`,
+      payload,
+    });
+  }
+
+  /** The port answers with the entity it was handed, and its relation. */
+  function echoWrite(): void {
+    holder.store.createEntityWithParent.mockImplementation(async (entity: Row, relation: Row) => ({
+      entity: makeEntity(entity.properties as Row, entity.entityTypeKey as string, entity.entityId as string),
+      relation: makeRelation(relation.properties as Row, {
+        relationTypeKey: relation.relationTypeKey as string,
+        relationId: relation.relationId as string,
+        fromEntityId: relation.fromEntityId as string,
+        toEntityId: relation.toEntityId as string,
+      }),
+    }));
+  }
+
+  it("a parent at the source end: one port call, the new entity as the target, the entity answered", async () => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(withRelationProperties());
+    holder.store.getEntityById.mockResolvedValueOnce(makeEntity({ name: "Lea" }, "person", "lea"));
+    echoWrite();
+
+    const res = await createEntity("hr_view", "person", {
+      name: "Ben",
+      parentRelation: { type: "manages", parentId: "lea", properties: { level: "2" } },
+    });
+
+    expect(res.statusCode, res.body).toBe(201);
+    expect(holder.store.createEntity).not.toHaveBeenCalled();
+    expect(holder.store.createEntityWithParent).toHaveBeenCalledTimes(1);
+    const [entity, relation] = holder.store.createEntityWithParent.mock.calls[0]! as [Row, Row];
+    expect(entity).toMatchObject({ entityTypeKey: "person", properties: { name: "Ben", active: true } });
+    expect(relation).toMatchObject({
+      relationTypeKey: "manages",
+      fromEntityId: "lea",
+      toEntityId: entity.entityId,
+      // Coerced, with the default from the full schema.
+      properties: { level: 2, rank: 0 },
+    });
+    expect(relation.relationId).not.toBe(entity.entityId);
+    expect("search" in entity && "search" in relation).toBe(true);
+    // The response is the entity alone, as without a parent relation.
+    expect(res.json()).toMatchObject({ _id: entity.entityId, name: "Ben" });
+    expect(res.json()).not.toHaveProperty("parentRelation");
+    // A brand-new child has no parent and no descendants: no walk.
+    expect(holder.store.getAncestors).not.toHaveBeenCalled();
+  });
+
+  it("a parent at the target end: the new entity is the source", async () => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(withParents());
+    holder.store.getEntityById.mockResolvedValueOnce(makeEntity({ name: "Acme" }, "company", "acme"));
+    echoWrite();
+
+    const res = await createEntity("hr_view", "department", {
+      name: "Sales",
+      parentRelation: { type: "belongs_to", parentId: "acme" },
+    });
+
+    expect(res.statusCode, res.body).toBe(201);
+    const [entity, relation] = holder.store.createEntityWithParent.mock.calls[0]! as [Row, Row];
+    expect(relation).toMatchObject({ relationTypeKey: "belongs_to", fromEntityId: entity.entityId, toEntityId: "acme" });
+  });
+
+  it("entity and relation faults are collected in one 422, and nothing is written", async () => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(withRelationProperties());
+    holder.store.getEntityById.mockResolvedValueOnce(null);
+
+    const res = await createEntity("hr_view", "person", {
+      age: "old",
+      parentRelation: { type: "manages", parentId: "ghost", properties: { rank: "high", extra: "x" } },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.fields).toEqual({
+      name: "Required property missing",
+      age: expect.any(String),
+      "parentRelation.parentId": "Parent entity 'ghost' not found",
+      "parentRelation.properties.level": "Required property missing",
+      "parentRelation.properties.rank": expect.stringContaining("integer"),
+      "parentRelation.properties.extra": "Unknown property: not defined in type 'manages'",
+    });
+    expect(holder.store.createEntityWithParent).not.toHaveBeenCalled();
+    expect(holder.store.createEntity).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an unknown relation type", "nope", "Relation type 'nope' not found"],
+    ["an ordinary relation type", "works_for", "Relation type 'works_for' is not a parent relation"],
+    [
+      "a parent relation whose child end is another type",
+      "belongs_to",
+      "Relation type 'belongs_to' places 'department' under a parent, not 'person'",
+    ],
+  ])("%s: 422 on parentRelation.type", async (_name, type, message) => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(withParents());
+
+    const res = await createEntity("hr_view", "person", {
+      name: "Ben",
+      parentRelation: { type, parentId: "x" },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.fields).toEqual({ "parentRelation.type": message });
+    expect(holder.store.getEntityById).not.toHaveBeenCalled();
+    expect(holder.store.createEntityWithParent).not.toHaveBeenCalled();
+  });
+
+  it("a relation type the lens hides is not found", async () => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(
+      withParents({
+        entityInclusions: [{ key: "person", properties: null }],
+        relationInclusions: [{ key: "works_for", properties: null }],
+      }),
+    );
+
+    const res = await createEntity("hr_view", "person", {
+      name: "Ben",
+      parentRelation: { type: "manages", parentId: "lea" },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.fields).toEqual({ "parentRelation.type": "Relation type 'manages' not found" });
+  });
+
+  it("a parent of another type: 422 on parentRelation.parentId", async () => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(withParents());
+    holder.store.getEntityById.mockResolvedValueOnce(makeEntity({ name: "Acme" }, "company", "acme"));
+
+    const res = await createEntity("hr_view", "person", {
+      name: "Ben",
+      parentRelation: { type: "manages", parentId: "acme" },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.fields).toEqual({
+      "parentRelation.parentId": "Parent entity type mismatch: expected 'person', got 'company'",
+    });
+  });
+
+  it("a parent whose type the lens hides is checked against the full schema, as a relation create's ends are", async () => {
+    // The relation type is included explicitly, its parent end's type is not.
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(
+      withParents({
+        entityInclusions: [{ key: "department", properties: null }],
+        relationInclusions: [{ key: "belongs_to", properties: null }],
+      }),
+    );
+    holder.store.getEntityById.mockResolvedValueOnce(makeEntity({ name: "Acme" }, "company", "acme"));
+    echoWrite();
+
+    const res = await createEntity("hr_view", "department", {
+      name: "Sales",
+      parentRelation: { type: "belongs_to", parentId: "acme" },
+    });
+
+    expect(res.statusCode, res.body).toBe(201);
+    expect(holder.store.createEntityWithParent).toHaveBeenCalledTimes(1);
+  });
+
+  it("a malformed parentRelation fails request validation", async () => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(withParents());
+
+    const res = await createEntity("hr_view", "person", { name: "Ben", parentRelation: { type: "manages" } });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
+    expect(holder.store.createEntityWithParent).not.toHaveBeenCalled();
+  });
+
+  it("without parentRelation the create is unchanged", async () => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(withParents());
+    holder.store.createEntity.mockResolvedValue(makeEntity({ name: "Ben" }));
+
+    const res = await createEntity("hr_view", "person", { name: "Ben" });
+
+    expect(res.statusCode).toBe(201);
+    expect(holder.store.createEntity).toHaveBeenCalledTimes(1);
+    expect(holder.store.createEntityWithParent).not.toHaveBeenCalled();
+    expect(holder.store.getEntityById).not.toHaveBeenCalled();
   });
 });

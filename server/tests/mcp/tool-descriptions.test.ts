@@ -75,6 +75,14 @@ describe("tool descriptions", () => {
     expect(runtime.get("create_relation")).toContain("one of its descendants");
   });
 
+  it("create_entity states the create with a parent relation", () => {
+    const text = runtime.get("create_entity")!;
+    for (const part of ["'parent_relation'", "'type'", "'parent_id'", "'properties'", "child end", "parent end"]) {
+      expect(text).toContain(part);
+    }
+    expect(text).toContain("stored together or not at all");
+  });
+
   it("the search-index tools state the status fields", () => {
     for (const name of ["list_search_indices", "get_search_index", "get_search_index_status"]) {
       expect(modeling.get(name)).toContain("lastErrors (entityId, partKind, message, at)");

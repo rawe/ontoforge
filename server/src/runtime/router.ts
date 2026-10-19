@@ -80,6 +80,19 @@ const IndexSearchPayload = z.strictObject({
  * so the only static rule is "a JSON object". */
 const PropertyPayload = z.record(z.string(), z.unknown());
 
+/** An entity create: the flat property map, plus the optional parent
+ * relation the entity is created under. Property keys are lower snake
+ * case, so `parentRelation` cannot collide with one. */
+const EntityCreatePayload = z.looseObject({
+  parentRelation: z
+    .object({
+      type: z.string(),
+      parentId: z.string(),
+      properties: z.record(z.string(), z.unknown()).optional(),
+    })
+    .optional(),
+});
+
 const DocumentParams = EntityParams.extend({ propertyKey: z.string() });
 
 const DocumentReadQuery = z.looseObject({
@@ -255,13 +268,15 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
 
   app.post(
     "/entities/:entityTypeKey",
-    { schema: { tags: ["runtime"], params: EntityTypeParams, body: PropertyPayload } },
+    { schema: { tags: ["runtime"], params: EntityTypeParams, body: EntityCreatePayload } },
     async (request, reply) => {
+      const { parentRelation, ...properties } = request.body;
       const result = await service.createEntity(
         request.params.lensKey,
         request.params.entityTypeKey,
-        request.body,
+        properties,
         await getRuntimeStore(request.params.ontologyKey),
+        parentRelation ?? null,
       );
       return reply.status(201).send(result);
     },

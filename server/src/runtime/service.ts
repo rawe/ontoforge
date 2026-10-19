@@ -302,16 +302,141 @@ export interface PaginatedResult {
 }
 
 /**
+ * The endpoint check of a relation write: the entity exists and has the
+ * declared type, against the FULL schema, not the lens, so a narrow lens
+ * cannot create an edge that is invalid under a wider one. The defs
+ * passed along describe the declared type — the row decoder's best guide
+ * for the entity the id is expected to name. Null when the end is fine.
+ */
+async function endpointError(
+  store: RuntimeStore,
+  fullSchema: SchemaCacheValue,
+  entityId: string,
+  expectedType: string,
+  label: "Source" | "Target" | "Parent",
+): Promise<string | null> {
+  const entity = await store.getEntityById(entityId, fullSchema.entityTypes[expectedType]?.properties ?? {});
+  if (entity === null) {
+    return `${label} entity '${entityId}' not found`;
+  }
+  if (entity._entityTypeKey !== expectedType) {
+    return `${label} entity type mismatch: expected '${expectedType}', got '${entity._entityTypeKey}'`;
+  }
+  return null;
+}
+
+/** The parent relation a create names for its new entity:
+ * `parentRelation` on REST, `parent_relation` on MCP. */
+export interface ParentRelationInput {
+  /** The parent relation type's key. */
+  type: string;
+  /** The parent's id; its type follows from the relation type's parent end. */
+  parentId: string;
+  /** The relation's own properties. */
+  properties?: Row | undefined;
+}
+
+/** A validated parent relation, ready for `createEntityWithParent`. */
+interface ParentRelationWrite {
+  relationTypeKey: string;
+  parentEnd: ParentEnd;
+  parentId: string;
+  properties: Row;
+  propertyDefs: Record<string, PropertyDef>;
+}
+
+/**
+ * Validate the parent relation of a create exactly like a relation create,
+ * collecting its faults into `errors` under `parentRelation.*`, beside the
+ * entity's own field errors:
+ *
+ * - `parentRelation.type`: the relation type is visible through the lens,
+ *   is a parent relation, and its child end is the new entity's type;
+ * - `parentRelation.parentId`: the parent exists and has the parent end's
+ *   type, checked as a relation create checks its ends (`endpointError`);
+ * - `parentRelation.properties.<key>`: the relation's properties, against
+ *   the SCOPED definitions, with defaults from the FULL schema.
+ *
+ * The parent rules need no check: the child is brand new, so it has no
+ * parent yet and no descendants that could close a cycle.
+ *
+ * Returns null when a fault leaves nothing to write.
+ */
+async function validateParentRelation(
+  loaded: LoadedSchema,
+  entityTypeKey: string,
+  input: ParentRelationInput,
+  errors: Record<string, string>,
+  store: RuntimeStore,
+): Promise<ParentRelationWrite | null> {
+  const scopedRt = loaded.scoped.relationTypes[input.type];
+  if (scopedRt === undefined) {
+    errors["parentRelation.type"] = `Relation type '${input.type}' not found`;
+    return null;
+  }
+
+  const [coerced, propertyErrors] = validateProperties(input.properties ?? {}, scopedRt.properties, input.type);
+  for (const [key, message] of Object.entries(propertyErrors)) {
+    errors[`parentRelation.properties.${key}`] = message;
+  }
+  const fullRt = loaded.full.relationTypes[input.type] ?? scopedRt;
+  for (const [propKey, propDef] of Object.entries(fullRt.properties)) {
+    if (!(propKey in coerced) && propDef.defaultValue !== null) {
+      try {
+        coerced[propKey] = coerceValue(propDef.defaultValue, propDef.dataType, propKey);
+      } catch (error) {
+        if (!(error instanceof CoercionError)) throw error;
+        // Skip defaults that fail coercion.
+      }
+    }
+  }
+
+  const parentEnd = fullRt.parent;
+  if (parentEnd === null) {
+    errors["parentRelation.type"] = `Relation type '${input.type}' is not a parent relation`;
+    return null;
+  }
+  const [childType, parentType] =
+    parentEnd === "source"
+      ? [fullRt.toEntityTypeKey, fullRt.fromEntityTypeKey]
+      : [fullRt.fromEntityTypeKey, fullRt.toEntityTypeKey];
+  if (childType !== entityTypeKey) {
+    errors["parentRelation.type"] =
+      `Relation type '${input.type}' places '${childType}' under a parent, not '${entityTypeKey}'`;
+    return null;
+  }
+
+  const parentError = await endpointError(store, loaded.full, input.parentId, parentType, "Parent");
+  if (parentError !== null) {
+    errors["parentRelation.parentId"] = parentError;
+  }
+
+  return {
+    relationTypeKey: input.type,
+    parentEnd,
+    parentId: input.parentId,
+    properties: coerced,
+    propertyDefs: fullRt.properties,
+  };
+}
+
+/**
  * Create an entity: validate against the SCOPED properties, apply defaults
  * from the FULL schema (a default that fails coercion here is skipped
  * silently — the second documented bad-default failure mode), maintain
  * document length bookkeeping, filter the response to the lens.
+ *
+ * With `parentRelation`, the entity is created together with the relation
+ * that names its parent (`validateParentRelation`): one 422 carries the
+ * faults of both, and both rows are written in one transaction. The
+ * response is the entity alone, as without it.
  */
 export async function createEntity(
   lensKey: string,
   entityTypeKey: string,
   body: Row,
   store: RuntimeStore,
+  parentRelation: ParentRelationInput | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
   const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
@@ -320,6 +445,10 @@ export async function createEntity(
   }
 
   const [coerced, errors] = validateProperties(body, scopedEt.properties, entityTypeKey);
+  const parentWrite =
+    parentRelation === null
+      ? null
+      : await validateParentRelation(loaded, entityTypeKey, parentRelation, errors, store);
   if (Object.keys(errors).length > 0) {
     throw new ValidationError("Instance validation failed", { fields: errors });
   }
@@ -357,14 +486,37 @@ export async function createEntity(
     }
   }
 
-  const entity = await store.createEntity(
-    entityTypeKey,
-    entityId,
-    coerced,
-    fullEt?.properties ?? {},
-    await searchPlan(store, { kind: "entityCreated", entityType: entityTypeKey, entityId }),
-  );
+  const entitySearch = await searchPlan(store, { kind: "entityCreated", entityType: entityTypeKey, entityId });
+  if (parentWrite === null) {
+    const entity = await store.createEntity(entityTypeKey, entityId, coerced, fullEt?.properties ?? {}, entitySearch);
+    return filterEntityProperties(entity, scopedEt);
+  }
 
+  const relationId = randomUUID();
+  const [fromEntityId, toEntityId] =
+    parentWrite.parentEnd === "source" ? [parentWrite.parentId, entityId] : [entityId, parentWrite.parentId];
+  const { entity } = await store.createEntityWithParent(
+    {
+      entityTypeKey,
+      entityId,
+      properties: coerced,
+      propertyDefs: fullEt?.properties ?? {},
+      search: entitySearch,
+    },
+    {
+      relationTypeKey: parentWrite.relationTypeKey,
+      relationId,
+      fromEntityId,
+      toEntityId,
+      properties: parentWrite.properties,
+      propertyDefs: parentWrite.propertyDefs,
+      search: await searchPlan(store, {
+        kind: "relationCreated",
+        relationType: parentWrite.relationTypeKey,
+        relationId,
+      }),
+    },
+  );
   return filterEntityProperties(entity, scopedEt);
 }
 
@@ -880,31 +1032,20 @@ export async function createRelation(
   }
 
   // Endpoint validation against the FULL schema's declared source/target.
-  // The defs passed along describe the declared endpoint type — the row
-  // decoder's best guide for the entity the id is expected to name.
   const fullRtForValidation = fullRt ?? scopedRt;
-  const fromEntity = await store.getEntityById(
+  const fromError = await endpointError(
+    store,
+    loaded.full,
     fromEntityId,
-    loaded.full.entityTypes[fullRtForValidation.fromEntityTypeKey]?.properties ?? {},
+    fullRtForValidation.fromEntityTypeKey,
+    "Source",
   );
-  if (fromEntity === null) {
-    errors.fromEntityId = `Source entity '${fromEntityId}' not found`;
-  } else if (fromEntity._entityTypeKey !== fullRtForValidation.fromEntityTypeKey) {
-    errors.fromEntityId =
-      `Source entity type mismatch: expected '${fullRtForValidation.fromEntityTypeKey}', ` +
-      `got '${fromEntity._entityTypeKey}'`;
+  if (fromError !== null) {
+    errors.fromEntityId = fromError;
   }
-
-  const toEntity = await store.getEntityById(
-    toEntityId,
-    loaded.full.entityTypes[fullRtForValidation.toEntityTypeKey]?.properties ?? {},
-  );
-  if (toEntity === null) {
-    errors.toEntityId = `Target entity '${toEntityId}' not found`;
-  } else if (toEntity._entityTypeKey !== fullRtForValidation.toEntityTypeKey) {
-    errors.toEntityId =
-      `Target entity type mismatch: expected '${fullRtForValidation.toEntityTypeKey}', ` +
-      `got '${toEntity._entityTypeKey}'`;
+  const toError = await endpointError(store, loaded.full, toEntityId, fullRtForValidation.toEntityTypeKey, "Target");
+  if (toError !== null) {
+    errors.toEntityId = toError;
   }
 
   if (fullRtForValidation.parent !== null) {

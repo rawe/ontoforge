@@ -708,6 +708,30 @@ export interface RuntimeStore {
   /** The children lookup: whether the entity is the parent end of at
    * least one relation of `readings`. */
   hasChildren(entityId: string, readings: Record<string, ParentEnd>): Promise<boolean>;
+
+  /** The create with a parent relation: the entity, then the relation
+   * that names its parent, in one transaction, each with its own search
+   * work as `createEntity` and `createRelation` apply it. The service has
+   * validated both; the relation's FK holds the parent, so a parent that
+   * vanished meanwhile fails the whole write and nothing is stored. */
+  createEntityWithParent(
+    entity: {
+      entityTypeKey: string;
+      entityId: string;
+      properties: Row;
+      propertyDefs: Record<string, PropertyDef>;
+      search?: SearchWritePlan | null;
+    },
+    relation: {
+      relationTypeKey: string;
+      relationId: string;
+      fromEntityId: string;
+      toEntityId: string;
+      properties: Row;
+      propertyDefs: Record<string, PropertyDef>;
+      search?: SearchWritePlan | null;
+    },
+  ): Promise<{ entity: Row; relation: Row }>;
 }
 
 // ---------------------------------------------------------------------------

@@ -212,6 +212,7 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     executeOql: vi.fn(async () => [[], []]),
     getAncestors: vi.fn(async () => []),
     hasChildren: vi.fn(async () => false),
+    createEntityWithParent: vi.fn(),
   };
 }
 

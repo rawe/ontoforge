@@ -38,6 +38,8 @@
  * - The hierarchy reads follow only the parent relations the caller
  *   names; the ancestor walk is one recursive statement with a cycle
  *   guard.
+ * - The create with a parent relation writes both rows and their search
+ *   work in one transaction.
  */
 
 
@@ -81,6 +83,15 @@ const NO_DEFS: PropertyDefs = {};
 // Read column lists.
 const ENTITY_COLS = "id, type_key, props, created_at, updated_at";
 const RELATION_COLS = "id, type_key, from_id, to_id, props, created_at, updated_at";
+
+// The two instance inserts, shared by the single creates and the create
+// with a parent relation.
+const INSERT_ENTITY = `INSERT INTO entity (id, type_key, props)
+       VALUES ($1, $2, $3::jsonb)
+       RETURNING ${ENTITY_COLS}`;
+const INSERT_RELATION = `INSERT INTO relation (id, type_key, from_id, to_id, props)
+       VALUES ($1, $2, $3, $4, $5::jsonb)
+       RETURNING ${RELATION_COLS}`;
 
 /** Only saved queries the index can hold: an un-embedded description is
  * invisible to discovery. The predicate says so explicitly, because a
@@ -287,9 +298,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     search?: SearchWritePlan | null,
   ): Promise<Row> {
     const result = await this.write(
-      `INSERT INTO entity (id, type_key, props)
-       VALUES ($1, $2, $3::jsonb)
-       RETURNING ${ENTITY_COLS}`,
+      INSERT_ENTITY,
       [entityId, entityTypeKey, propsJson(properties, propertyDefs)],
       search,
     );
@@ -476,9 +485,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     search?: SearchWritePlan | null,
   ): Promise<Row> {
     const result = await this.write(
-      `INSERT INTO relation (id, type_key, from_id, to_id, props)
-       VALUES ($1, $2, $3, $4, $5::jsonb)
-       RETURNING ${RELATION_COLS}`,
+      INSERT_RELATION,
       [relationId, relationTypeKey, fromEntityId, toEntityId, propsJson(properties, propertyDefs)],
       search,
     );
@@ -717,6 +724,54 @@ export class PostgresRuntimeStore implements RuntimeStore {
       [entityId, sourceKeys, targetKeys],
     );
     return result.rows[0]!.has_children as boolean;
+  }
+
+  /** Both inserts in one transaction, each followed by its own search
+   * work, as `write` applies it to a single create. The relation insert
+   * fails on a vanished parent (`relation_from_fk` / `relation_to_fk`),
+   * which rolls the entity back too. */
+  async createEntityWithParent(
+    entity: {
+      entityTypeKey: string;
+      entityId: string;
+      properties: Row;
+      propertyDefs: PropertyDefs;
+      search?: SearchWritePlan | null;
+    },
+    relation: {
+      relationTypeKey: string;
+      relationId: string;
+      fromEntityId: string;
+      toEntityId: string;
+      properties: Row;
+      propertyDefs: PropertyDefs;
+      search?: SearchWritePlan | null;
+    },
+  ): Promise<{ entity: Row; relation: Row }> {
+    return this.tx(async (querier) => {
+      const entityResult = await querier.query(INSERT_ENTITY, [
+        entity.entityId,
+        entity.entityTypeKey,
+        propsJson(entity.properties, entity.propertyDefs),
+      ]);
+      if (entity.search !== null && entity.search !== undefined) {
+        await applySearchWritePlan(querier, entity.search, this.ontologyKey);
+      }
+      const relationResult = await querier.query(INSERT_RELATION, [
+        relation.relationId,
+        relation.relationTypeKey,
+        relation.fromEntityId,
+        relation.toEntityId,
+        propsJson(relation.properties, relation.propertyDefs),
+      ]);
+      if (relation.search !== null && relation.search !== undefined) {
+        await applySearchWritePlan(querier, relation.search, this.ontologyKey);
+      }
+      return {
+        entity: entityRow(entityResult.rows[0]!, entity.propertyDefs),
+        relation: relationRow(relationResult.rows[0]!, relation.propertyDefs),
+      };
+    });
   }
 }
 

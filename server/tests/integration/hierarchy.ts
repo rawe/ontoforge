@@ -93,3 +93,17 @@ export async function buildHierarchy(app: FastifyInstance): Promise<HierarchyIds
   await relate("assigned_to", ids.T1, ids.Ben);
   return ids;
 }
+
+/** Give `has_task` a required string property `phase`, as the
+ * development fixture has it. The relations already stored keep none. */
+export async function requirePhaseOnHasTask(app: FastifyInstance): Promise<void> {
+  const model = modelPrefix(HIERARCHY_ONTOLOGY_KEY);
+  const listed = await app.inject({ method: "GET", url: `${model}/relation-types` });
+  const hasTask = (listed.json() as Row[]).find((rt) => rt.key === "has_task")!;
+  await post(app, `${model}/relation-types/${hasTask.relationTypeId as string}/properties`, {
+    key: "phase",
+    displayName: "Phase",
+    dataType: "string",
+    required: true,
+  });
+}

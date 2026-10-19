@@ -1,19 +1,26 @@
 /**
  * Session-04 integration suite — runtime schema introspection and entity
  * CRUD against the docker-compose PostgreSQL, through
- * scoped and unscoped lenses built via the modeling API, and the
- * leaf-only delete wherever a parent relation is flagged.
+ * scoped and unscoped lenses built via the modeling API, the create with
+ * a parent relation, and the leaf-only delete wherever a parent relation
+ * is flagged.
  */
 
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
+import { runQuery } from "../../src/adapters/postgres/errors.js";
 import { closeStores, getRuntimeStore, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture } from "./fixture.js";
-import { buildHierarchy, HIERARCHY_ONTOLOGY_KEY, type HierarchyIds } from "./hierarchy.js";
+import {
+  buildHierarchy,
+  HIERARCHY_ONTOLOGY_KEY,
+  requirePhaseOnHasTask,
+  type HierarchyIds,
+} from "./hierarchy.js";
 
 let app: FastifyInstance;
 
@@ -716,5 +723,166 @@ describe("leaf-only delete", () => {
       url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${boss._id as string}`,
     });
     expect(res.statusCode).toBe(204);
+  });
+});
+
+describe("create with a parent relation", () => {
+  let ids: HierarchyIds;
+  const runtime = `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses`;
+
+  beforeEach(async () => {
+    ids = await buildHierarchy(app);
+    await requirePhaseOnHasTask(app);
+  });
+
+  function create(lens: string, type: string, payload: Row) {
+    return app.inject({ method: "POST", url: `${runtime}/${lens}/entities/${type}`, payload });
+  }
+
+  async function total(path: string): Promise<number> {
+    const res = await app.inject({ method: "GET", url: `${runtime}/all/${path}` });
+    expect(res.statusCode, res.body).toBe(200);
+    return res.json().total as number;
+  }
+
+  /** Entity and relation counts that a refused create must leave alone. */
+  async function counts(): Promise<number[]> {
+    return [
+      await total("entities/task"),
+      await total("entities/milestone"),
+      await total("relations/has_task"),
+      await total("relations/belongs_to"),
+    ];
+  }
+
+  it("201: the entity and its parent relation are stored, and search work is queued for both", async () => {
+    // An index that reads has_task from the project side, so the relation
+    // has search work of its own; task~default covers the new entity.
+    const index = await app.inject({
+      method: "POST",
+      url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/model/search-indices`,
+      payload: {
+        key: "project_tasks",
+        name: "Projects with their tasks",
+        description: "Projects by their tasks and phases",
+        entityType: "project",
+        fields: ["name"],
+        relations: [
+          { relationType: "has_task", direction: "outgoing", fields: ["phase"], target: { task: ["name"] } },
+        ],
+      },
+    });
+    expect(index.statusCode, index.body).toBe(201);
+
+    const res = await create("all", "task", {
+      name: "T3",
+      parentRelation: { type: "has_task", parentId: ids.P1, properties: { phase: "build" } },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    const task = res.json() as Row;
+    // The response is the entity, as without a parent relation.
+    expect(Object.keys(task).sort()).toEqual(["_createdAt", "_entityTypeKey", "_id", "_updatedAt", "name"]);
+    expect(task.name).toBe("T3");
+
+    const relations = await app.inject({
+      method: "GET",
+      url: `${runtime}/all/relations/has_task?toEntityId=${task._id as string}`,
+    });
+    const items = relations.json().items as Row[];
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ fromEntityId: ids.P1, toEntityId: task._id, phase: "build" });
+
+    const queued = await runQuery(
+      `SELECT entity_id, part_kind, part_id FROM ont_${HIERARCHY_ONTOLOGY_KEY}.search_queue`,
+    );
+    expect(queued.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ entity_id: task._id, part_kind: "entity" }),
+        expect.objectContaining({ entity_id: ids.P1, part_kind: "relation", part_id: items[0]!._id }),
+      ]),
+    );
+  });
+
+  it("an up-pointing parent relation stores the new entity as the source", async () => {
+    const res = await create("all", "milestone", {
+      name: "M2",
+      parentRelation: { type: "belongs_to", parentId: ids.P1 },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    const listed = await app.inject({
+      method: "GET",
+      url: `${runtime}/all/relations/belongs_to?fromEntityId=${res.json()._id as string}`,
+    });
+    expect(listed.json().items).toMatchObject([{ toEntityId: ids.P1 }]);
+  });
+
+  it("a missing required relation property: 422 on parentRelation.properties.phase, nothing written", async () => {
+    const before = await counts();
+    const res = await create("all", "task", {
+      name: "T3",
+      parentRelation: { type: "has_task", parentId: ids.P1 },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.fields).toEqual({
+      "parentRelation.properties.phase": "Required property missing",
+    });
+    expect(await counts()).toEqual(before);
+  });
+
+  it("relation faults are collected with the entity's own", async () => {
+    const res = await create("all", "task", {
+      colour: "red",
+      parentRelation: { type: "has_task", parentId: ids.P1, properties: { phase: "build", extra: 1 } },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(Object.keys(res.json().error.details.fields).sort()).toEqual([
+      "colour",
+      "parentRelation.properties.extra",
+    ]);
+  });
+
+  it.each([
+    ["an unknown relation type", "task", { type: "nope", parentId: "P1" }, "parentRelation.type"],
+    ["a non-parent relation", "task", { type: "assigned_to", parentId: "Ben" }, "parentRelation.type"],
+    ["a parent relation into another type", "task", { type: "has_project", parentId: "ACME" }, "parentRelation.type"],
+    ["a parent of the wrong type", "task", { type: "has_task", parentId: "ACME", properties: { phase: "x" } }, "parentRelation.parentId"],
+    ["a missing parent", "task", { type: "has_task", parentId: "missing", properties: { phase: "x" } }, "parentRelation.parentId"],
+  ] as const)("%s: 422 on %s, nothing written", async (_name, type, relation, field) => {
+    const parentId =
+      relation.parentId === "missing"
+        ? "00000000-0000-4000-8000-000000000000"
+        : ids[relation.parentId as keyof HierarchyIds];
+    const before = await counts();
+    const res = await create("all", type, { name: "X", parentRelation: { ...relation, parentId } });
+    expect(res.statusCode, res.body).toBe(422);
+    expect(Object.keys(res.json().error.details.fields)).toEqual([field]);
+    expect(await counts()).toEqual(before);
+  });
+
+  it("through a lens: a parent relation it hides is not found", async () => {
+    // portfolio hides task and has_task; has_project is visible there.
+    const ok = await create("portfolio", "project", {
+      name: "P3",
+      parentRelation: { type: "has_project", parentId: ids.ACME },
+    });
+    expect(ok.statusCode, ok.body).toBe(201);
+    const hidden = await create("portfolio", "milestone", {
+      name: "M2",
+      parentRelation: { type: "has_task", parentId: ids.P1 },
+    });
+    expect(hidden.statusCode).toBe(422);
+    expect(hidden.json().error.details.fields).toEqual({
+      "parentRelation.type": "Relation type 'has_task' not found",
+    });
+  });
+
+  it("without parentRelation the create is unchanged: a root", async () => {
+    const res = await create("all", "task", { name: "Loose" });
+    expect(res.statusCode, res.body).toBe(201);
+    const listed = await app.inject({
+      method: "GET",
+      url: `${runtime}/all/relations/has_task?toEntityId=${res.json()._id as string}`,
+    });
+    expect(listed.json().total).toBe(0);
   });
 });

@@ -115,20 +115,43 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
       description:
         "Create a new entity instance. Properties must conform to the schema — " +
         "required properties must be present, types must match the property " +
-        "definitions.",
+        "definitions. To place the new entity in a hierarchy in the same call, pass " +
+        "'parent_relation': 'type' is a parent relation type (one whose `parent` " +
+        "names the parent end) whose child end is this entity type; 'parent_id' is " +
+        "the parent, which must exist with the entity type at the parent end; " +
+        "'properties' are the relation's own, held to the same rules as entity " +
+        "properties. Its faults are reported together with the entity's, and the " +
+        "entity and its parent relation are stored together or not at all.",
       inputSchema: {
         entity_type_key: z.string(),
         properties: z.record(z.string(), z.unknown()),
+        parent_relation: z
+          .object({
+            type: z.string(),
+            parent_id: z.string(),
+            properties: z.record(z.string(), z.unknown()).optional(),
+          })
+          .optional(),
       },
     },
     wrap(
       "create_entity",
-      async (args: { entity_type_key: string; properties: Record<string, unknown> }) => {
+      async (args: {
+        entity_type_key: string;
+        properties: Record<string, unknown>;
+        parent_relation?:
+          | { type: string; parent_id: string; properties?: Record<string, unknown> | undefined }
+          | undefined;
+      }) => {
+        const parent = args.parent_relation;
         const result = await service.createEntity(
           lensKey,
           args.entity_type_key,
           args.properties,
           await getRuntimeStore(ontologyKey),
+          parent === undefined
+            ? null
+            : { type: parent.type, parentId: parent.parent_id, properties: parent.properties },
         );
         return jsonResult(result);
       },

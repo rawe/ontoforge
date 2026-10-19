@@ -6,7 +6,8 @@
  * Covers the URL-only ontology + lens binding (no header, no environment
  * fallback), ontology isolation between two bound clients, the
  * limit/offset CLAMPING that diverges by design from REST's rejection,
- * the entity tool round trip, and the parent rules through the tools.
+ * the entity tool round trip, and the parent rules and the create with a
+ * parent relation through the tools.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -20,7 +21,7 @@ import { wipeDatabase } from "./reset.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture, defineEntityProperty } from "./fixture.js";
-import { buildHierarchy, HIERARCHY_ONTOLOGY_KEY } from "./hierarchy.js";
+import { buildHierarchy, HIERARCHY_ONTOLOGY_KEY, requirePhaseOnHasTask } from "./hierarchy.js";
 
 interface ToolCallResult {
   content: { type: string; text: string }[];
@@ -910,6 +911,59 @@ describe("parent rules through the tools", () => {
         entity_id: ids.T1a,
       });
       expect(leaf.isError).toBeFalsy();
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+describe("create_entity with a parent relation", () => {
+  it("creates the entity under its parent, and refuses the faults REST refuses", async () => {
+    const ids = await buildHierarchy(app);
+    await requirePhaseOnHasTask(app);
+    const client = await connectClient(
+      `${baseUrl}/mcp/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all`,
+    );
+    try {
+      const created = await call(client, "create_entity", {
+        entity_type_key: "task",
+        properties: { name: "T3" },
+        parent_relation: { type: "has_task", parent_id: ids.P1, properties: { phase: "build" } },
+      });
+      expect(created.isError, text(created)).toBeFalsy();
+      const task = json(created);
+      expect(task.name).toBe("T3");
+      const listed = json(
+        await call(client, "list_relations", { relation_type_key: "has_task", to_entity_id: task._id }),
+      );
+      expect(listed.items).toMatchObject([{ fromEntityId: ids.P1, phase: "build" }]);
+
+      const before = json(await call(client, "list_entities", { entity_type_key: "task" })).total;
+      for (const [parentRelation, expected] of [
+        [{ type: "has_task", parent_id: ids.P1 }, "parentRelation.properties.phase: Required property missing"],
+        [{ type: "nope", parent_id: ids.P1 }, "parentRelation.type: Relation type 'nope' not found"],
+        [{ type: "assigned_to", parent_id: ids.Ben }, "parentRelation.type: Relation type 'assigned_to' is not a parent relation"],
+        [
+          { type: "has_task", parent_id: ids.ACME, properties: { phase: "x" } },
+          "parentRelation.parentId: Parent entity type mismatch: expected 'project', got 'customer'",
+        ],
+        [
+          { type: "has_task", parent_id: "00000000-0000-4000-8000-000000000000", properties: { phase: "x" } },
+          "parentRelation.parentId: Parent entity '00000000-0000-4000-8000-000000000000' not found",
+        ],
+      ] as const) {
+        const refused = await call(client, "create_entity", {
+          entity_type_key: "task",
+          properties: { name: "X" },
+          parent_relation: parentRelation,
+        });
+        expect(refused.isError).toBe(true);
+        expect(text(refused)).toContain(expected);
+      }
+      expect(json(await call(client, "list_entities", { entity_type_key: "task" })).total).toBe(before);
+
+      const plain = await call(client, "create_entity", { entity_type_key: "task", properties: { name: "Loose" } });
+      expect(plain.isError, text(plain)).toBeFalsy();
     } finally {
       await client.close();
     }

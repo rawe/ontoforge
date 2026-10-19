@@ -422,7 +422,15 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
     });
 
     it("deleting P1 has_task T3: relationId", async () => {
-      refusedOn(await agentA().deleteRelation("has_task", ids.relations["P1 has_task T3"]!), "relationId");
+      const outcome = await agentA().deleteRelation("has_task", ids.relations["P1 has_task T3"]!);
+      refusedOn(outcome, "relationId");
+      expect(outcome.text).toContain("places an entity under anchor 'agent-a'");
+    });
+
+    it("deleting P2 has_task T4 (child outside): relationId, not under the anchor", async () => {
+      const outcome = await agentA().deleteRelation("has_task", ids.relations["P2 has_task T4"]!);
+      refusedOn(outcome, "relationId");
+      expect(outcome.text).toContain("is not under anchor 'agent-a'");
     });
 
     it("updating the phase of P1 has_task T1 (child covered): updated", async () => {

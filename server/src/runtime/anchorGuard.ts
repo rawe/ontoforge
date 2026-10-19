@@ -218,10 +218,10 @@ export class AnchorGuard {
 
   /**
    * The `relationId` fault of a relation update or delete; null when
-   * allowed. A parent relation of the hierarchy may be updated when its
-   * child end is covered, and is never deleted (half a move); any other
-   * relation needs each end free or covered. A missing relation stays not
-   * found.
+   * allowed. A parent relation of the hierarchy needs its child end
+   * covered; then it may be updated, and is never deleted (half a move).
+   * Any other relation needs each end free or covered. A missing relation
+   * stays not found.
    */
   async relationError(rt: RelationTypeDef, relationId: string, op: "update" | "delete"): Promise<string | null> {
     const relation: Row | null = await this.store.getRelation(rt.key, relationId);
@@ -229,11 +229,11 @@ export class AnchorGuard {
     const from = relation.fromEntityId as string;
     const to = relation.toEntityId as string;
     if (this.isHierarchyRelation(rt)) {
-      if (op === "delete") {
-        return `Relation '${relationId}' places an entity under anchor '${this.anchorKey}' and cannot be deleted on an anchored connection`;
-      }
       const child = rt.parent === "source" ? to : from;
-      return (await this.covered(child)) ? null : this.notUnder(relationId, "Relation");
+      if (!(await this.covered(child))) return this.notUnder(relationId, "Relation");
+      return op === "delete"
+        ? `Relation '${relationId}' places an entity under anchor '${this.anchorKey}' and cannot be deleted on an anchored connection`
+        : null;
     }
     const allowed =
       (await this.endAllowed(rt.fromEntityTypeKey, from)) && (await this.endAllowed(rt.toEntityTypeKey, to));

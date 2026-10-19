@@ -6,7 +6,7 @@
  * Covers the URL-only ontology + lens binding (no header, no environment
  * fallback), ontology isolation between two bound clients, the
  * limit/offset CLAMPING that diverges by design from REST's rejection,
- * and the entity tool round trip.
+ * the entity tool round trip, and the parent rules through the tools.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -20,6 +20,7 @@ import { wipeDatabase } from "./reset.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture, defineEntityProperty } from "./fixture.js";
+import { buildHierarchy, HIERARCHY_ONTOLOGY_KEY } from "./hierarchy.js";
 
 interface ToolCallResult {
   content: { type: string; text: string }[];
@@ -868,6 +869,47 @@ describe("search indices", () => {
       const unknown = await call(client, "search_by_index", { query: "x", index: "nope" });
       expect(unknown.isError).toBe(true);
       expect(text(unknown)).toContain("nope");
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+describe("parent rules through the tools", () => {
+  it("a second parent, a cycle and a delete with children are refused as on REST", async () => {
+    const ids = await buildHierarchy(app);
+    const client = await connectClient(
+      `${baseUrl}/mcp/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all`,
+    );
+    try {
+      const second = await call(client, "create_relation", {
+        relation_type_key: "has_task",
+        from_entity_id: ids.P2,
+        to_entity_id: ids.T1,
+      });
+      expect(second.isError).toBe(true);
+      expect(text(second)).toContain(`toEntityId: Entity '${ids.T1}' already has a parent`);
+
+      const loop = await call(client, "create_relation", {
+        relation_type_key: "has_subtask",
+        from_entity_id: ids.T1a,
+        to_entity_id: ids.T1,
+      });
+      expect(loop.isError).toBe(true);
+      expect(text(loop)).toContain("would close a cycle");
+
+      const parent = await call(client, "delete_entity", {
+        entity_type_key: "project",
+        entity_id: ids.P1,
+      });
+      expect(parent.isError).toBe(true);
+      expect(text(parent)).toContain("This entity has children; delete them first");
+
+      const leaf = await call(client, "delete_entity", {
+        entity_type_key: "task",
+        entity_id: ids.T1a,
+      });
+      expect(leaf.isError).toBeFalsy();
     } finally {
       await client.close();
     }

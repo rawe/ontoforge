@@ -406,7 +406,11 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
   server.registerTool(
     "delete_entity",
     {
-      description: "Delete an entity and all its connected relations.",
+      description:
+        "Delete an entity and all its connected relations. In an ontology with parent " +
+        "relations (relation types whose `parent` names the parent end), an entity that " +
+        "still has children is refused: delete its children first, bottom-up. A leaf, " +
+        "or any entity in an ontology without parent relations, goes with its relations.",
       inputSchema: {
         entity_type_key: z.string(),
         entity_id: z.string(),
@@ -430,7 +434,11 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
     {
       description:
         "Create a relation between two entities. The entity types must match the " +
-        "relation type's source/target definition.",
+        "relation type's source/target definition. For a parent relation (a relation " +
+        "type whose `parent` names the parent end), every entity has at most one parent " +
+        "across all parent relations and the hierarchy has no cycles: the create is " +
+        "refused when the child end already has a parent, or when the parent end is the " +
+        "child itself or one of its descendants.",
       inputSchema: {
         relation_type_key: z.string(),
         from_entity_id: z.string(),

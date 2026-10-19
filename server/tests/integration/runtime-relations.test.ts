@@ -5,18 +5,22 @@
  *
  * Beyond the CRUD round trip: endpoint validation against the FULL schema,
  * lens-dropping of out-of-scope relation types, the shared direction
- * budget, both neighbour projections, and the entity-delete cascade that
- * removes relations the lens cannot see.
+ * budget, both neighbour projections, the entity-delete cascade that
+ * removes relations the lens cannot see, and the parent rules on a
+ * relation create, with the hierarchy reads beneath them.
  */
+
+import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
-import { closeStores, initStores } from "../../src/core/ports.js";
+import { closeStores, getRuntimeStore, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture, type FixtureIds } from "./fixture.js";
+import { buildHierarchy, HIERARCHY_ONTOLOGY_KEY, type HierarchyIds } from "./hierarchy.js";
 
 let app: FastifyInstance;
 let fixture: FixtureIds;
@@ -609,5 +613,203 @@ describe("entity delete cascade", () => {
       url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/company/${acme._id}`,
     });
     expect(acmeStill.statusCode).toBe(200);
+  });
+});
+
+describe("the parent rules on a relation create", () => {
+  let ids: HierarchyIds;
+
+  beforeEach(async () => {
+    ids = await buildHierarchy(app);
+  });
+
+  async function relate(
+    lens: string,
+    typeKey: string,
+    from: string,
+    to: string,
+  ): Promise<{ status: number; body: Row }> {
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/${lens}/relations/${typeKey}`,
+      payload: { fromEntityId: from, toEntityId: to },
+    });
+    return { status: res.statusCode, body: res.json() as Row };
+  }
+
+  async function task(name: string): Promise<string> {
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all/entities/task`,
+      payload: { name },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    return res.json()._id as string;
+  }
+
+  function fields(body: Row): Row {
+    return ((body.error as Row).details as Row).fields as Row;
+  }
+
+  it("a second parent through the same parent relation: 422 on the child end, naming no parent", async () => {
+    const res = await relate("all", "has_task", ids.P2, ids.T1);
+    expect(res.status).toBe(422);
+    expect(fields(res.body)).toEqual({ toEntityId: `Entity '${ids.T1}' already has a parent` });
+    expect(JSON.stringify(res.body)).not.toContain(ids.P1);
+  });
+
+  it("a second parent through another parent relation: counted across all of them", async () => {
+    const res = await relate("all", "has_subtask", ids.T2, ids.T1);
+    expect(res.status).toBe(422);
+    expect(fields(res.body)).toEqual({ toEntityId: `Entity '${ids.T1}' already has a parent` });
+  });
+
+  it("an up-pointing parent relation refuses on its source, the child end", async () => {
+    const res = await relate("all", "belongs_to", ids.M1, ids.P2);
+    expect(res.status).toBe(422);
+    expect(fields(res.body)).toEqual({ fromEntityId: `Entity '${ids.M1}' already has a parent` });
+  });
+
+  it("a cycle, direct or deeper, gives 422 on the parent end", async () => {
+    const r = await task("R");
+    const r1 = await task("R1");
+    const r2 = await task("R2");
+    expect((await relate("all", "has_subtask", r, r1)).status).toBe(201);
+    expect((await relate("all", "has_subtask", r1, r2)).status).toBe(201);
+
+    const direct = await relate("all", "has_subtask", r1, r);
+    expect(direct.status).toBe(422);
+    expect(fields(direct.body)).toEqual({
+      fromEntityId: `Entity '${r1}' cannot be the parent: this would close a cycle`,
+    });
+
+    const deeper = await relate("all", "has_subtask", r2, r);
+    expect(deeper.status).toBe(422);
+    expect(fields(deeper.body)).toEqual({
+      fromEntityId: `Entity '${r2}' cannot be the parent: this would close a cycle`,
+    });
+  });
+
+  it("a self-loop is a cycle", async () => {
+    const r = await task("R");
+    const res = await relate("all", "has_subtask", r, r);
+    expect(res.status).toBe(422);
+    expect(fields(res.body)).toEqual({
+      fromEntityId: `Entity '${r}' cannot be the parent: this would close a cycle`,
+    });
+  });
+
+  it("the rules hold through a lens that hides the other parent relations", async () => {
+    // portfolio hides task and has_task: P1 already has ACME, and a second
+    // parent through has_project is refused all the same.
+    const beta = await app.inject({
+      method: "POST",
+      url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/portfolio/entities/customer`,
+      payload: { name: "BETA" },
+    });
+    const res = await relate("portfolio", "has_project", beta.json()._id as string, ids.P1);
+    expect(res.status).toBe(422);
+    expect(fields(res.body)).toEqual({ toEntityId: `Entity '${ids.P1}' already has a parent` });
+  });
+
+  it("a child without a parent, under a parent not below it: created", async () => {
+    const r = await task("R");
+    expect((await relate("all", "has_subtask", ids.T1a, r)).status).toBe(201);
+  });
+
+  it("ordinary relations are unaffected", async () => {
+    const kim = await app.inject({
+      method: "POST",
+      url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all/entities/person`,
+      payload: { name: "Kim" },
+    });
+    // T1 already has a parent and a person; neither matters here.
+    expect((await relate("all", "assigned_to", ids.T1, kim.json()._id as string)).status).toBe(201);
+    expect((await relate("all", "assigned_to", ids.T2, ids.Ben)).status).toBe(201);
+  });
+
+  it("an ontology without flags is unchanged: two managers and a loop are fine", async () => {
+    const a = await createEntity("test_lens", "person", { name: "A" });
+    const b = await createEntity("test_lens", "person", { name: "B" });
+    const c = await createEntity("test_lens", "person", { name: "C" });
+    await createRelation("test_lens", "manages", { fromEntityId: a._id, toEntityId: c._id });
+    await createRelation("test_lens", "manages", { fromEntityId: b._id, toEntityId: c._id });
+    await createRelation("test_lens", "manages", { fromEntityId: c._id, toEntityId: a._id });
+    await createRelation("test_lens", "manages", { fromEntityId: a._id, toEntityId: a._id });
+  });
+});
+
+describe("hierarchy reads (store port)", () => {
+  let ids: HierarchyIds;
+
+  const READINGS = {
+    has_project: "source",
+    has_task: "source",
+    has_subtask: "source",
+    belongs_to: "target",
+  } as const;
+
+  beforeEach(async () => {
+    ids = await buildHierarchy(app);
+  });
+
+  it("the ancestor walk answers nearest first, across parent relations and both ends", async () => {
+    const store = await getRuntimeStore(HIERARCHY_ONTOLOGY_KEY);
+    expect(await store.getAncestors(ids.T1a, READINGS)).toEqual([
+      { type: "task", id: ids.T1 },
+      { type: "project", id: ids.P1 },
+      { type: "customer", id: ids.ACME },
+    ]);
+    expect(await store.getAncestors(ids.M1, READINGS)).toEqual([
+      { type: "project", id: ids.P1 },
+      { type: "customer", id: ids.ACME },
+    ]);
+    expect(await store.getAncestors(ids.ACME, READINGS)).toEqual([]);
+    // Only the readings passed are followed.
+    expect(await store.getAncestors(ids.T1a, { has_subtask: "source" })).toEqual([
+      { type: "task", id: ids.T1 },
+    ]);
+    expect(await store.getAncestors(ids.T1a, {})).toEqual([]);
+    expect(await store.getAncestors("not-a-uuid", READINGS)).toEqual([]);
+  });
+
+  it("the walk terminates on cyclic data", async () => {
+    // A cycle written past the service, as the accepted race can leave
+    // one: X → Y → X, plus a self-loop on Z.
+    const store = await getRuntimeStore(HIERARCHY_ONTOLOGY_KEY);
+    const x = randomUUID();
+    const y = randomUUID();
+    const z = randomUUID();
+    for (const [id, name] of [[x, "X"], [y, "Y"], [z, "Z"]]) {
+      await store.createEntity("task", id!, { name }, {});
+    }
+    await store.createRelation("has_subtask", randomUUID(), x, y, {}, {});
+    await store.createRelation("has_subtask", randomUUID(), y, x, {}, {});
+    await store.createRelation("has_subtask", randomUUID(), z, z, {}, {});
+
+    expect(await store.getAncestors(y, READINGS)).toEqual([{ type: "task", id: x }]);
+    expect(await store.getAncestors(x, READINGS)).toEqual([{ type: "task", id: y }]);
+    expect(await store.getAncestors(z, READINGS)).toEqual([]);
+
+    // The service's rules still answer over it.
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all/relations/has_subtask`,
+      payload: { fromEntityId: x, toEntityId: ids.T2 },
+    });
+    expect(res.statusCode).toBe(422);
+  });
+
+  it("the children lookup sees a child over any parent relation, at either end", async () => {
+    const store = await getRuntimeStore(HIERARCHY_ONTOLOGY_KEY);
+    expect(await store.hasChildren(ids.ACME, READINGS)).toBe(true);
+    expect(await store.hasChildren(ids.T1, READINGS)).toBe(true);
+    expect(await store.hasChildren(ids.T1a, READINGS)).toBe(false);
+    // P1's children are T1 (has_task) and M1 (belongs_to, at the target end).
+    expect(await store.hasChildren(ids.P1, { belongs_to: "target" })).toBe(true);
+    expect(await store.hasChildren(ids.P2, { belongs_to: "target" })).toBe(false);
+    // An ordinary relation is no parent relation: Ben has none.
+    expect(await store.hasChildren(ids.Ben, READINGS)).toBe(false);
+    expect(await store.hasChildren(ids.ACME, {})).toBe(false);
   });
 });

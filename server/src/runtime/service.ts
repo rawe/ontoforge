@@ -21,7 +21,7 @@ import { getEmbeddingProvider } from "../core/embedding.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core/oql/index.js";
 import type { RuntimeStore, SearchWritePlan } from "../core/ports.js";
-import type { PropertyDef } from "../core/schemas.js";
+import type { ParentEnd, PropertyDef } from "../core/schemas.js";
 import { planSearchWrite, type SearchChange } from "../core/searchDependencies.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
 import { isQueryPath } from "./queryPaths.js";
@@ -67,6 +67,28 @@ type Row = Record<string, unknown>;
 async function searchPlan(store: RuntimeStore, change: SearchChange): Promise<SearchWritePlan | null> {
   const context = await loadSearchContext(store.ontologyKey, store.searchIndices());
   return planSearchWrite(context.dependencies, change);
+}
+
+// ---------------------------------------------------------------------------
+// Parent relations
+// ---------------------------------------------------------------------------
+
+/** The refusal of an entity delete while the entity still has children.
+ * It names no type, id or count, so a lens hiding the children reveals
+ * only that one exists. */
+export const HAS_CHILDREN_MESSAGE = "This entity has children; delete them first";
+
+/** Every parent relation of the FULL schema, as relation type key →
+ * parent end: the parent rules hold across all of them, whatever the
+ * lens shows. Empty when the ontology flags none. */
+function parentReadings(schema: SchemaCacheValue): Record<string, ParentEnd> {
+  const readings: Record<string, ParentEnd> = {};
+  for (const rt of Object.values(schema.relationTypes)) {
+    if (rt.parent !== null) {
+      readings[rt.key] = rt.parent;
+    }
+  }
+  return readings;
 }
 
 // ---------------------------------------------------------------------------
@@ -504,7 +526,10 @@ export async function updateEntity(
 /**
  * Delete an entity, every relation attached to it in either direction —
  * including relations whose type the lens cannot see — and its search
- * data. The runtime cascade is silent: nothing warns, nothing refuses.
+ * data. Wherever the ontology flags a parent relation, only a leaf may go:
+ * an entity with children over any parent relation of the full schema is
+ * refused (409), through every lens, before the delete. Otherwise the
+ * cascade is silent: nothing warns, nothing refuses.
  */
 export async function deleteEntity(
   lensKey: string,
@@ -515,6 +540,17 @@ export async function deleteEntity(
   const loaded = await loadSchema(lensKey, store);
   if (!(entityTypeKey in loaded.scoped.entityTypes)) {
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
+  }
+
+  const readings = parentReadings(loaded.full);
+  if (Object.keys(readings).length > 0) {
+    // A missing entity stays not-found, whatever its id has below it.
+    if ((await store.getEntity(entityTypeKey, entityId)) === null) {
+      throw new NotFoundError(`Entity '${entityId}' not found`);
+    }
+    if (await store.hasChildren(entityId, readings)) {
+      throw new ConflictError(HAS_CHILDREN_MESSAGE);
+    }
   }
 
   const deleted = await store.deleteEntity(
@@ -761,12 +797,56 @@ export async function editDocument(
 // ---------------------------------------------------------------------------
 
 /**
+ * The parent rules for a new relation of a parent relation type, checked
+ * once, here, against the cached FULL schema — across every parent
+ * relation, whatever the lens shows. No adapter re-check and no lock: the
+ * rare race of two concurrent writes is accepted. Faults join the other
+ * field errors and never name the existing parent:
+ *
+ * - the child end already has a parent ("at most one parent");
+ * - the parent end is the child or one of its descendants (a cycle; a
+ *   self-loop is one), found as the child among the parent's ancestors.
+ *
+ * An end that already carries an endpoint error (not found, wrong type)
+ * is not checked.
+ */
+async function checkParentRules(
+  parentEnd: ParentEnd,
+  fromEntityId: string,
+  toEntityId: string,
+  fullSchema: SchemaCacheValue,
+  errors: Record<string, string>,
+  store: RuntimeStore,
+): Promise<void> {
+  const [childField, childId, parentField, parentId] =
+    parentEnd === "source"
+      ? (["toEntityId", toEntityId, "fromEntityId", fromEntityId] as const)
+      : (["fromEntityId", fromEntityId, "toEntityId", toEntityId] as const);
+  const childFound = !(childField in errors);
+  const parentFound = !(parentField in errors);
+  const readings = parentReadings(fullSchema);
+
+  if (childFound && (await store.getAncestors(childId, readings)).length > 0) {
+    errors[childField] = `Entity '${childId}' already has a parent`;
+  }
+  if (childFound && parentFound) {
+    const closesCycle =
+      parentId === childId ||
+      (await store.getAncestors(parentId, readings)).some((ancestor) => ancestor.id === childId);
+    if (closesCycle) {
+      errors[parentField] = `Entity '${parentId}' cannot be the parent: this would close a cycle`;
+    }
+  }
+}
+
+/**
  * Create a relation: validate properties against the SCOPED definitions,
  * apply defaults from the FULL schema, and check that both endpoints exist
  * and their entity types equal the relation type's declared source/target —
  * checked against the FULL schema, not the lens, so a narrow lens cannot
- * create an edge that is invalid under a wider one. Endpoint errors are
- * collected alongside property errors in ONE response.
+ * create an edge that is invalid under a wider one. For a parent relation
+ * type the parent rules follow (`checkParentRules`). Endpoint and rule
+ * errors are collected alongside property errors in ONE response.
  */
 export async function createRelation(
   lensKey: string,
@@ -825,6 +905,10 @@ export async function createRelation(
     errors.toEntityId =
       `Target entity type mismatch: expected '${fullRtForValidation.toEntityTypeKey}', ` +
       `got '${toEntity._entityTypeKey}'`;
+  }
+
+  if (fullRtForValidation.parent !== null) {
+    await checkParentRules(fullRtForValidation.parent, fromEntityId, toEntityId, loaded.full, errors, store);
   }
 
   if (Object.keys(errors).length > 0) {

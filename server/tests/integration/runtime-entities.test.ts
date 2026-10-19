@@ -1,7 +1,8 @@
 /**
  * Session-04 integration suite — runtime schema introspection and entity
  * CRUD against the docker-compose PostgreSQL, through
- * scoped and unscoped lenses built via the modeling API.
+ * scoped and unscoped lenses built via the modeling API, and the
+ * leaf-only delete wherever a parent relation is flagged.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -12,6 +13,7 @@ import { closeStores, getRuntimeStore, initStores } from "../../src/core/ports.j
 import { wipeDatabase } from "./reset.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture } from "./fixture.js";
+import { buildHierarchy, HIERARCHY_ONTOLOGY_KEY, type HierarchyIds } from "./hierarchy.js";
 
 let app: FastifyInstance;
 
@@ -616,5 +618,103 @@ describe("distinct values of a property (store port)", () => {
     expect(await store.distinctEntityValues("person", "email", 10)).toEqual(["a@x.test", "b@x.test"]);
     expect(await store.distinctEntityValues("person", "email", 1)).toEqual(["a@x.test"]);
     expect(await store.distinctEntityValues("company", "name", 10)).toEqual([]);
+  });
+});
+
+describe("leaf-only delete", () => {
+  let ids: HierarchyIds;
+
+  beforeEach(async () => {
+    ids = await buildHierarchy(app);
+  });
+
+  function remove(lens: string, path: string) {
+    return app.inject({
+      method: "DELETE",
+      url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/${lens}/${path}`,
+    });
+  }
+
+  function get(lens: string, path: string) {
+    return app.inject({
+      method: "GET",
+      url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/${lens}/${path}`,
+    });
+  }
+
+  const HAS_CHILDREN = {
+    code: "RESOURCE_CONFLICT",
+    message: "This entity has children; delete them first",
+  };
+
+  it("an entity with children: 409 with the exact text, and nothing is deleted", async () => {
+    for (const [type, id] of [
+      ["customer", ids.ACME],
+      ["project", ids.P1],
+      ["task", ids.T1],
+    ]) {
+      const res = await remove("all", `entities/${type}/${id}`);
+      expect(res.statusCode, res.body).toBe(409);
+      expect(res.json().error).toEqual(HAS_CHILDREN);
+      expect((await get("all", `entities/${type}/${id}`)).statusCode).toBe(200);
+    }
+  });
+
+  it("the same through a lens that hides the children", async () => {
+    // portfolio hides task: P2's only child, T2, is invisible there.
+    const res = await remove("portfolio", `entities/project/${ids.P2}`);
+    expect(res.statusCode, res.body).toBe(409);
+    expect(res.json().error).toEqual(HAS_CHILDREN);
+    expect(res.body).not.toContain(ids.T2);
+    expect(res.body).not.toContain("task");
+  });
+
+  it("a leaf deletes as today, its ordinary relations with it", async () => {
+    // T1a is a leaf; T2 is a leaf too, assigned to nobody. M1 is a leaf
+    // over an up-pointing parent relation.
+    expect((await remove("all", `entities/task/${ids.T1a}`)).statusCode).toBe(204);
+    expect((await remove("all", `entities/milestone/${ids.M1}`)).statusCode).toBe(204);
+    // T1 is a leaf now; its assignment to Ben goes with it.
+    expect((await remove("all", `entities/task/${ids.T1}`)).statusCode).toBe(204);
+    const assigned = await get("all", "relations/assigned_to");
+    expect(assigned.json().total).toBe(0);
+    expect((await get("all", `entities/person/${ids.Ben}`)).statusCode).toBe(200);
+  });
+
+  it("deleting a parent relation still works and makes the child a root", async () => {
+    const listed = await get("all", `relations/has_subtask?fromEntityId=${ids.T1}`);
+    const relationId = listed.json().items[0]._id as string;
+    expect((await remove("all", `relations/has_subtask/${relationId}`)).statusCode).toBe(204);
+
+    // T1a is a root: it takes a new parent. T1, childless, can go.
+    const reparent = await app.inject({
+      method: "POST",
+      url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all/relations/has_subtask`,
+      payload: { fromEntityId: ids.T2, toEntityId: ids.T1a },
+    });
+    expect(reparent.statusCode, reparent.body).toBe(201);
+    expect((await remove("all", `entities/task/${ids.T1}`)).statusCode).toBe(204);
+  });
+
+  it("a missing entity is still not found", async () => {
+    // P1's id under the wrong type: not found, though P1 has children.
+    const res = await remove("all", `entities/customer/${ids.P1}`);
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("an ontology without flags deletes as today", async () => {
+    const boss = await createPerson("test_lens", { name: "Boss" });
+    const report = await createPerson("test_lens", { name: "Report" });
+    const rel = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/relations/manages",
+      payload: { fromEntityId: boss._id, toEntityId: report._id },
+    });
+    expect(rel.statusCode, rel.body).toBe(201);
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${boss._id as string}`,
+    });
+    expect(res.statusCode).toBe(204);
   });
 });

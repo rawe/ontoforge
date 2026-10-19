@@ -683,6 +683,31 @@ export interface RuntimeStore {
     limit: number,
     propertyDefsByType: Record<string, Record<string, PropertyDef>>,
   ): Promise<Row[]>;
+
+  // ------------------------------------------------------------------
+  // Hierarchy
+  //
+  // Both reads take the parent relations to follow as `readings`
+  // (relation type key → parent end); the service passes every parent
+  // relation of the full schema. Empty readings answer without touching
+  // storage.
+  // ------------------------------------------------------------------
+
+  /** The ancestor walk: the entity's parent, its parent's parent and so
+   * on up to a root, nearest first, as `{type, id}`. The entity itself is
+   * never in it. One recursive statement with a cycle guard, so it ends on
+   * any data; each ancestor appears once, at its nearest level. On data
+   * that breaks the parent rules (the accepted race), a level can hold
+   * more than one entity, ordered by type and id. Empty for a root or an
+   * unknown id. */
+  getAncestors(
+    entityId: string,
+    readings: Record<string, ParentEnd>,
+  ): Promise<{ type: string; id: string }[]>;
+
+  /** The children lookup: whether the entity is the parent end of at
+   * least one relation of `readings`. */
+  hasChildren(entityId: string, readings: Record<string, ParentEnd>): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------

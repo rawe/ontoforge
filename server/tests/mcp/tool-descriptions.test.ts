@@ -69,6 +69,12 @@ describe("tool descriptions", () => {
     expect(runtime.get("list_relations")).toContain(filterRules({ contains: true, relations: false }));
   });
 
+  it("the write tools state the parent rules", () => {
+    expect(runtime.get("delete_entity")).toContain("delete its children first");
+    expect(runtime.get("create_relation")).toContain("already has a parent");
+    expect(runtime.get("create_relation")).toContain("one of its descendants");
+  });
+
   it("the search-index tools state the status fields", () => {
     for (const name of ["list_search_indices", "get_search_index", "get_search_index_status"]) {
       expect(modeling.get(name)).toContain("lastErrors (entityId, partKind, message, at)");

@@ -34,6 +34,10 @@
  * - `executeOql` compiles the validated query to one SQL SELECT
  *   (`oql/`) and runs it through the array-mode door; the compiled plan
  *   names the columns and drives the value conversion.
+ *
+ * - The hierarchy reads follow only the parent relations the caller
+ *   names; the ancestor walk is one recursive statement with a cycle
+ *   guard.
  */
 
 
@@ -46,7 +50,7 @@ import type {
   SearchIndexStore,
   SearchWritePlan,
 } from "../../core/ports.js";
-import type { PropertyDef } from "../../core/schemas.js";
+import type { ParentEnd, PropertyDef } from "../../core/schemas.js";
 import { SAVED_QUERY_INDEX } from "./ddl.js";
 import {
   runArrayQuery,
@@ -656,6 +660,74 @@ export class PostgresRuntimeStore implements RuntimeStore {
       propertyDefsByType,
     );
   }
+
+  // ------------------------------------------------------------------
+  // Hierarchy
+  // ------------------------------------------------------------------
+
+  /**
+   * One recursive statement. Each level is one probe per reading end on
+   * the `to_id` / `from_id` indexes: a `source` reading finds the parent
+   * at `from_id` of a row whose `to_id` is the child, a `target` reading
+   * the other way round. The cycle guard stops a branch at an entity
+   * already on its path, the start included.
+   */
+  async getAncestors(
+    entityId: string,
+    readings: Record<string, ParentEnd>,
+  ): Promise<{ type: string; id: string }[]> {
+    const [sourceKeys, targetKeys] = splitReadings(readings);
+    if (!isUuid(entityId) || sourceKeys.length + targetKeys.length === 0) {
+      return [];
+    }
+    const result = await this.query(
+      `WITH RECURSIVE walk (id, depth, path) AS (
+         SELECT $1::uuid, 0, ARRAY[$1::uuid]
+         UNION ALL
+         SELECT p.id, w.depth + 1, w.path || p.id
+           FROM walk w
+           CROSS JOIN LATERAL (
+             SELECT r.from_id AS id FROM relation r
+              WHERE r.to_id = w.id AND r.type_key = ANY($2::text[])
+             UNION ALL
+             SELECT r.to_id FROM relation r
+              WHERE r.from_id = w.id AND r.type_key = ANY($3::text[])
+           ) p
+          WHERE NOT (p.id = ANY(w.path))
+       )
+       SELECT e.type_key, w.id, min(w.depth) AS depth
+         FROM walk w JOIN entity e ON e.id = w.id
+        WHERE w.depth > 0
+        GROUP BY w.id, e.type_key
+        ORDER BY depth, e.type_key, w.id`,
+      [entityId, sourceKeys, targetKeys],
+    );
+    return result.rows.map((row) => ({ type: row.type_key as string, id: row.id as string }));
+  }
+
+  async hasChildren(entityId: string, readings: Record<string, ParentEnd>): Promise<boolean> {
+    const [sourceKeys, targetKeys] = splitReadings(readings);
+    if (!isUuid(entityId) || sourceKeys.length + targetKeys.length === 0) {
+      return false;
+    }
+    const result = await this.query(
+      `SELECT EXISTS (SELECT 1 FROM relation WHERE from_id = $1 AND type_key = ANY($2::text[]))
+           OR EXISTS (SELECT 1 FROM relation WHERE to_id = $1 AND type_key = ANY($3::text[]))
+           AS has_children`,
+      [entityId, sourceKeys, targetKeys],
+    );
+    return result.rows[0]!.has_children as boolean;
+  }
+}
+
+/** The relation type keys of the readings whose parent is the source
+ * end, and those whose parent is the target end. */
+function splitReadings(readings: Record<string, ParentEnd>): [string[], string[]] {
+  const keys = Object.keys(readings);
+  return [
+    keys.filter((key) => readings[key] === "source"),
+    keys.filter((key) => readings[key] === "target"),
+  ];
 }
 
 /** `count(*)` over one FROM/WHERE fragment; bigint arrives as text. */

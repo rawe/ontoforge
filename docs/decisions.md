@@ -108,12 +108,6 @@ other dictionary.** A deployment then needs no custom database image.
 
 ## Interfaces
 
-**Every ontology-scoped request names its ontology in the path and reaches either the design
-(modeling) or, through one lens, the lens-scoped schema and instance data (runtime), never
-both.** The address alone decides
-which ontology and which side a request reaches, so isolation and the modeling/runtime
-split need no header, default or check.
-
 **`/api/server` holds only reads that describe the deployment; no operation there is
 ontology-scoped or spans the data of several ontologies.** Every data operation belongs to
 exactly one ontology.

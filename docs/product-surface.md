@@ -283,7 +283,11 @@ hierarchy path with a link to the entity, "No restriction, like the plain lens" 
 unanchored one, the deleted entity's type and short id for a dangling one, whose row is
 marked red and says every write is refused, and "Hidden by this lens" for an anchored
 entity the lens hides. A note under the table says the URLs use the current lens, that
-anchors belong to the ontology, and that every change takes effect on the next call.
+anchors belong to the ontology, and that every change takes effect on the next call. A
+help button beside the title explains what an anchor does to a client: the hold to its
+subtree, and staged-only, where the client stages and submits and a person commits, with
+its two escapes. One example hierarchy plays step by step through it, and the help links to
+the [Changesets](#changesets) one for the workflow.
 
 - **New anchor** asks for a key — part of the MCP URL, validated live against the
   anchor key rule and the existing keys, permanent — and either an entity, picked

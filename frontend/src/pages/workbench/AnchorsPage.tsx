@@ -10,6 +10,7 @@ import type { Anchor, AnchorView } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { AnchorDialog, type AnchorDialogTarget } from '@/components/anchors/AnchorDialog'
+import { AnchorExplainerButton } from '@/components/anchors/explainer/AnchorExplainer'
 import {
   anchoredMcpUrl,
   anchorPlacement,
@@ -59,6 +60,7 @@ const STATE_CHIPS: Record<Anchor['state'], string> = {
  * `/o/:ontologyKey/w/:lensKey/anchors` — the ontology's anchors, seen through
  * the current lens: key, state, and where each points (name and path from the
  * anchored mount's root, one read per anchor). The URLs use the current lens.
+ * A "?" beside the title explains what an anchor does to a client.
  */
 export function AnchorsPage() {
   const { ontologyKey, lensKey } = useParams<{ ontologyKey: string; lensKey: string }>()
@@ -130,6 +132,7 @@ export function AnchorsPage() {
     <div>
       <PageHeader
         title="Anchors"
+        meta={<AnchorExplainerButton className="-ml-2" />}
         description="Hold an agent's writes in one entity's hierarchy to that entity and its descendants."
         actions={
           <Button size="sm" disabled={schema.data === undefined} onClick={() => setPointTarget({ mode: 'create' })}>

@@ -16,6 +16,11 @@
  * The seven write functions take the anchor key of an anchored mount as
  * their last argument; null on the plain lens mount. On an anchored call
  * they consult the write guard (`anchorGuard.ts`) before the write.
+ *
+ * Six of them (entity and relation create, update, delete) compose their
+ * write through a pure `prepare…` (`prepare.ts`), then run what reads
+ * storage here: load schema → guard → `prepare…` → reads and checks →
+ * search plan → store call.
  */
 
 import { randomUUID } from "node:crypto";
@@ -29,6 +34,17 @@ import type { ParentEnd, PropertyDef } from "../core/schemas.js";
 import { planSearchWrite, type SearchChange } from "../core/searchDependencies.js";
 import { AnchorGuard } from "./anchorGuard.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
+import {
+  prepareCreateEntity,
+  prepareCreateRelation,
+  prepareDeleteEntity,
+  prepareDeleteRelation,
+  prepareUpdateEntity,
+  prepareUpdateRelation,
+  scopedEntityType,
+  scopedRelationType,
+  type ParentRelationInput,
+} from "./prepare.js";
 import { isQueryPath } from "./queryPaths.js";
 import {
   loadSchema,
@@ -41,7 +57,6 @@ import {
 
 import {
   docLengthKey,
-  documentPropertyKeys,
   stubDocumentProperties,
   filterEntityProperties,
   filterRelationProperties,
@@ -94,79 +109,6 @@ function parentReadings(schema: SchemaCacheValue): Record<string, ParentEnd> {
     }
   }
   return readings;
-}
-
-// ---------------------------------------------------------------------------
-// Property validation
-// ---------------------------------------------------------------------------
-
-/**
- * Validate and coerce a property payload against (scoped) definitions.
- * Returns `[coerced, errors]`; in partial mode a coerced `null` means
- * "remove this property".
- */
-export function validateProperties(
-  properties: Row,
-  propertyDefs: Record<string, PropertyDef>,
-  typeKey: string,
-  partial = false,
-): [Row, Record<string, string>] {
-  const coerced: Row = {};
-  const errors: Record<string, string> = {};
-
-  for (const key of Object.keys(properties)) {
-    if (!(key in propertyDefs)) {
-      errors[key] = `Unknown property: not defined in type '${typeKey}'`;
-    }
-  }
-
-  for (const [propKey, propDef] of Object.entries(propertyDefs)) {
-    if (propKey in properties) {
-      const value = properties[propKey];
-      if (value === null || value === undefined) {
-        if (partial) {
-          if (propDef.required) {
-            errors[propKey] = "Cannot set required property to null";
-          } else {
-            coerced[propKey] = null;
-          }
-        } else {
-          if (propDef.required && propDef.defaultValue === null) {
-            errors[propKey] = "Required property missing";
-          } else if (propDef.defaultValue !== null) {
-            try {
-              coerced[propKey] = coerceValue(propDef.defaultValue, propDef.dataType, propKey);
-            } catch (error) {
-              if (!(error instanceof CoercionError)) throw error;
-              errors[propKey] = error.message;
-            }
-          }
-        }
-      } else {
-        try {
-          coerced[propKey] = coerceValue(value, propDef.dataType, propKey);
-        } catch (error) {
-          if (!(error instanceof CoercionError)) throw error;
-          errors[propKey] = error.message;
-        }
-      }
-    } else if (!partial) {
-      if (propDef.required) {
-        if (propDef.defaultValue !== null) {
-          try {
-            coerced[propKey] = coerceValue(propDef.defaultValue, propDef.dataType, propKey);
-          } catch (error) {
-            if (!(error instanceof CoercionError)) throw error;
-            errors[propKey] = error.message;
-          }
-        } else {
-          errors[propKey] = "Required property missing";
-        }
-      }
-    }
-  }
-
-  return [coerced, errors];
 }
 
 // ---------------------------------------------------------------------------
@@ -330,113 +272,19 @@ async function endpointError(
   return null;
 }
 
-/** The parent relation a create names for its new entity:
- * `parentRelation` on REST, `parent_relation` on MCP. */
-export interface ParentRelationInput {
-  /** The parent relation type's key. */
-  type: string;
-  /** The parent's id; its type follows from the relation type's parent end. */
-  parentId: string;
-  /** The relation's own properties. */
-  properties?: Row | undefined;
-}
-
-/** A validated parent relation, ready for `createEntityWithParent`. */
-interface ParentRelationWrite {
-  relationTypeKey: string;
-  parentEnd: ParentEnd;
-  parentId: string;
-  properties: Row;
-  propertyDefs: Record<string, PropertyDef>;
-}
-
 /**
- * Validate the parent relation of a create exactly like a relation create,
- * collecting its faults into `errors` under `parentRelation.*`, beside the
- * entity's own field errors:
- *
- * - `parentRelation.type`: the relation type is visible through the lens,
- *   is a parent relation, and its child end is the new entity's type;
- * - `parentRelation.parentId`: the parent exists and has the parent end's
- *   type, checked as a relation create checks its ends (`endpointError`);
- * - `parentRelation.properties.<key>`: the relation's properties, against
- *   the SCOPED definitions, with defaults from the FULL schema.
- *
- * The parent rules need no check: the child is brand new, so it has no
- * parent yet and no descendants that could close a cycle.
- *
- * Returns null when a fault leaves nothing to write.
- */
-async function validateParentRelation(
-  loaded: LoadedSchema,
-  entityTypeKey: string,
-  input: ParentRelationInput,
-  errors: Record<string, string>,
-  store: RuntimeStore,
-): Promise<ParentRelationWrite | null> {
-  const scopedRt = loaded.scoped.relationTypes[input.type];
-  if (scopedRt === undefined) {
-    errors["parentRelation.type"] = `Relation type '${input.type}' not found`;
-    return null;
-  }
-
-  const [coerced, propertyErrors] = validateProperties(input.properties ?? {}, scopedRt.properties, input.type);
-  for (const [key, message] of Object.entries(propertyErrors)) {
-    errors[`parentRelation.properties.${key}`] = message;
-  }
-  const fullRt = loaded.full.relationTypes[input.type] ?? scopedRt;
-  for (const [propKey, propDef] of Object.entries(fullRt.properties)) {
-    if (!(propKey in coerced) && propDef.defaultValue !== null) {
-      try {
-        coerced[propKey] = coerceValue(propDef.defaultValue, propDef.dataType, propKey);
-      } catch (error) {
-        if (!(error instanceof CoercionError)) throw error;
-        // Skip defaults that fail coercion.
-      }
-    }
-  }
-
-  const parentEnd = fullRt.parent;
-  if (parentEnd === null) {
-    errors["parentRelation.type"] = `Relation type '${input.type}' is not a parent relation`;
-    return null;
-  }
-  const [childType, parentType] =
-    parentEnd === "source"
-      ? [fullRt.toEntityTypeKey, fullRt.fromEntityTypeKey]
-      : [fullRt.fromEntityTypeKey, fullRt.toEntityTypeKey];
-  if (childType !== entityTypeKey) {
-    errors["parentRelation.type"] =
-      `Relation type '${input.type}' places '${childType}' under a parent, not '${entityTypeKey}'`;
-    return null;
-  }
-
-  const parentError = await endpointError(store, loaded.full, input.parentId, parentType, "Parent");
-  if (parentError !== null) {
-    errors["parentRelation.parentId"] = parentError;
-  }
-
-  return {
-    relationTypeKey: input.type,
-    parentEnd,
-    parentId: input.parentId,
-    properties: coerced,
-    propertyDefs: fullRt.properties,
-  };
-}
-
-/**
- * Create an entity: validate against the SCOPED properties, apply defaults
- * from the FULL schema (a default that fails coercion here is skipped
- * silently — the second documented bad-default failure mode), maintain
- * document length bookkeeping, filter the response to the lens.
+ * Create an entity (`prepareCreateEntity`): validate against the SCOPED
+ * properties, apply defaults from the FULL schema, maintain document
+ * length bookkeeping, filter the response to the lens.
  *
  * With `parentRelation`, the entity is created together with the relation
- * that names its parent (`validateParentRelation`): one 422 carries the
- * faults of both, and both rows are written in one transaction. The
- * response is the entity alone, as without it. On an anchored call, an
- * entity of the anchor's hierarchy must name a covered parent this way
- * (`AnchorGuard.checkCreate`); its faults join the others.
+ * that names its parent: one 422 carries the faults of both, and both rows
+ * are written in one transaction. Its parent end is checked here as a
+ * relation create checks its ends (`endpointError`), under
+ * `parentRelation.parentId`. The response is the entity alone, as without
+ * it. On an anchored call, an entity of the anchor's hierarchy must name a
+ * covered parent this way (`AnchorGuard.checkCreate`); its faults join the
+ * others.
  */
 export async function createEntity(
   lensKey: string,
@@ -447,84 +295,49 @@ export async function createEntity(
   anchorKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
-  const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
-  if (scopedEt === undefined) {
-    throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
-  }
+  const scopedEt = scopedEntityType(loaded, entityTypeKey);
   const guard = await AnchorGuard.open(anchorKey, loaded, store);
 
-  const [coerced, errors] = validateProperties(body, scopedEt.properties, entityTypeKey);
-  const parentWrite =
-    parentRelation === null
-      ? null
-      : await validateParentRelation(loaded, entityTypeKey, parentRelation, errors, store);
+  const { errors, write } = prepareCreateEntity(loaded, entityTypeKey, body, parentRelation, {
+    entityId: randomUUID(),
+    relationId: randomUUID(),
+  });
+  if (write.parent !== null) {
+    const { parentId, parentType } = write.parent;
+    const parentError = await endpointError(store, loaded.full, parentId, parentType, "Parent");
+    if (parentError !== null) {
+      errors["parentRelation.parentId"] = parentError;
+    }
+  }
   await guard?.checkCreate(entityTypeKey, parentRelation, errors);
   if (Object.keys(errors).length > 0) {
     throw new ValidationError("Instance validation failed", { fields: errors });
   }
 
-  // Defaults from the full schema for properties not supplied — including
-  // properties the lens hides. Coercion failures are swallowed: validation
-  // has already passed, so the property is skipped.
-  const fullEt = loaded.full.entityTypes[entityTypeKey];
-  if (fullEt !== undefined) {
-    for (const [propKey, propDef] of Object.entries(fullEt.properties)) {
-      if (!(propKey in coerced) && propDef.defaultValue !== null) {
-        try {
-          coerced[propKey] = coerceValue(propDef.defaultValue, propDef.dataType, propKey);
-        } catch (error) {
-          if (!(error instanceof CoercionError)) throw error;
-          // Skip defaults that fail coercion.
-        }
-      }
-    }
-  }
-
-  const entityId = randomUUID();
-
-  // Document properties: store character counts alongside the values.
-  const docKeys = fullEt !== undefined ? documentPropertyKeys(fullEt.properties) : new Set<string>();
-  const docValues: Row = {};
-  for (const [k, v] of Object.entries(coerced)) {
-    if (docKeys.has(k)) {
-      docValues[k] = v;
-    }
-  }
-  for (const [k, v] of Object.entries(docValues)) {
-    if (v !== null && v !== undefined) {
-      coerced[docLengthKey(k)] = cpLength(v as string);
-    }
-  }
-
-  const entitySearch = await searchPlan(store, { kind: "entityCreated", entityType: entityTypeKey, entityId });
-  if (parentWrite === null) {
-    const entity = await store.createEntity(entityTypeKey, entityId, coerced, fullEt?.properties ?? {}, entitySearch);
+  const e = write.entity;
+  const entitySearch = await searchPlan(store, e.change);
+  if (write.parent === null) {
+    const entity = await store.createEntity(e.entityTypeKey, e.entityId, e.properties, e.propertyDefs, entitySearch);
     return filterEntityProperties(entity, scopedEt);
   }
 
-  const relationId = randomUUID();
-  const [fromEntityId, toEntityId] =
-    parentWrite.parentEnd === "source" ? [parentWrite.parentId, entityId] : [entityId, parentWrite.parentId];
+  const r = write.parent.relation;
   const { entity } = await store.createEntityWithParent(
     {
-      entityTypeKey,
-      entityId,
-      properties: coerced,
-      propertyDefs: fullEt?.properties ?? {},
+      entityTypeKey: e.entityTypeKey,
+      entityId: e.entityId,
+      properties: e.properties,
+      propertyDefs: e.propertyDefs,
       search: entitySearch,
     },
     {
-      relationTypeKey: parentWrite.relationTypeKey,
-      relationId,
-      fromEntityId,
-      toEntityId,
-      properties: parentWrite.properties,
-      propertyDefs: parentWrite.propertyDefs,
-      search: await searchPlan(store, {
-        kind: "relationCreated",
-        relationType: parentWrite.relationTypeKey,
-        relationId,
-      }),
+      relationTypeKey: r.relationTypeKey,
+      relationId: r.relationId,
+      fromEntityId: r.fromEntityId,
+      toEntityId: r.toEntityId,
+      properties: r.properties,
+      propertyDefs: r.propertyDefs,
+      search: await searchPlan(store, r.change),
     },
   );
   return filterEntityProperties(entity, scopedEt);
@@ -666,11 +479,12 @@ export async function getPath(
 }
 
 /**
- * Partial update: validate against the scoped properties, NO default
- * re-application. Null removes an optional property (and is rejected on a
- * required one); a payload that changes nothing returns the current state
- * without advancing `_updatedAt`. On an anchored call, an entity of the
- * anchor's hierarchy outside the anchored subtree is refused on `entityId`.
+ * Partial update (`prepareUpdateEntity`): validate against the scoped
+ * properties, NO default re-application. Null removes an optional property
+ * (and is rejected on a required one); a payload that changes nothing
+ * returns the current state without advancing `_updatedAt`. On an anchored
+ * call, an entity of the anchor's hierarchy outside the anchored subtree is
+ * refused on `entityId`.
  */
 export async function updateEntity(
   lensKey: string,
@@ -681,13 +495,10 @@ export async function updateEntity(
   anchorKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
-  const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
-  if (scopedEt === undefined) {
-    throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
-  }
+  const scopedEt = scopedEntityType(loaded, entityTypeKey);
   const guard = await AnchorGuard.open(anchorKey, loaded, store);
 
-  const [coerced, errors] = validateProperties(body, scopedEt.properties, entityTypeKey, true);
+  const { errors, write } = prepareUpdateEntity(loaded, entityTypeKey, entityId, body);
   const outside = (await guard?.entityError(entityTypeKey, entityId)) ?? null;
   if (outside !== null) {
     errors.entityId = outside;
@@ -696,47 +507,17 @@ export async function updateEntity(
     throw new ValidationError("Instance validation failed", { fields: errors });
   }
 
-  const setProps: Row = {};
-  const removeProps: string[] = [];
-  for (const [k, v] of Object.entries(coerced)) {
-    if (v === null) {
-      removeProps.push(k);
-    } else {
-      setProps[k] = v;
-    }
-  }
-
-  if (Object.keys(setProps).length === 0 && removeProps.length === 0) {
+  if (write === null) {
     return getEntity(lensKey, entityTypeKey, entityId, store);
   }
 
-  const fullEt = loaded.full.entityTypes[entityTypeKey];
-
-  // Document properties: maintain stored lengths for changed values.
-  const docKeys = fullEt !== undefined ? documentPropertyKeys(fullEt.properties) : new Set<string>();
-  for (const k of docKeys) {
-    if (k in coerced) {
-      const v = coerced[k];
-      if (typeof v === "string") {
-        setProps[docLengthKey(k)] = cpLength(v);
-      } else {
-        removeProps.push(docLengthKey(k));
-      }
-    }
-  }
-
   const entity = await store.updateEntity(
-    entityTypeKey,
-    entityId,
-    setProps,
-    removeProps,
-    fullEt?.properties ?? {},
-    await searchPlan(store, {
-      kind: "entityUpdated",
-      entityType: entityTypeKey,
-      entityId,
-      changedKeys: Object.keys(coerced),
-    }),
+    write.entityTypeKey,
+    write.entityId,
+    write.setProperties,
+    write.removeProperties,
+    write.propertyDefs,
+    await searchPlan(store, write.change),
   );
   if (entity === null) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
@@ -764,12 +545,10 @@ export async function deleteEntity(
   anchorKey: string | null = null,
 ): Promise<void> {
   const loaded = await loadSchema(lensKey, store);
-  if (!(entityTypeKey in loaded.scoped.entityTypes)) {
-    throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
-  }
-
+  scopedEntityType(loaded, entityTypeKey);
   const guard = await AnchorGuard.open(anchorKey, loaded, store);
 
+  const write = prepareDeleteEntity(loaded, entityTypeKey, entityId);
   const readings = parentReadings(loaded.full);
   const flagged = Object.keys(readings).length > 0;
   // A missing entity stays not-found, whatever its id has below it.
@@ -781,11 +560,7 @@ export async function deleteEntity(
     throw new ConflictError(HAS_CHILDREN_MESSAGE);
   }
 
-  const deleted = await store.deleteEntity(
-    entityTypeKey,
-    entityId,
-    await searchPlan(store, { kind: "entityDeleted", entityType: entityTypeKey, entityId }),
-  );
+  const deleted = await store.deleteEntity(write.entityTypeKey, write.entityId, await searchPlan(store, write.change));
   if (!deleted) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
   }
@@ -1072,11 +847,12 @@ async function checkParentRules(
 }
 
 /**
- * Create a relation: validate properties against the SCOPED definitions,
- * apply defaults from the FULL schema, and check that both endpoints exist
- * and their entity types equal the relation type's declared source/target —
- * checked against the FULL schema, not the lens, so a narrow lens cannot
- * create an edge that is invalid under a wider one. For a parent relation
+ * Create a relation (`prepareCreateRelation`): validate properties against
+ * the SCOPED definitions, apply defaults from the FULL schema, and check
+ * that both endpoints exist and their entity types equal the relation
+ * type's declared source/target — checked against the FULL schema, not the
+ * lens, so a narrow lens cannot create an edge that is invalid under a
+ * wider one. For a parent relation
  * type the parent rules follow (`checkParentRules`). On an anchored call
  * the guard checks the ends and refuses a standalone parent relation of the
  * anchor's hierarchy (`AnchorGuard.checkRelationCreate`). Endpoint, guard
@@ -1092,31 +868,20 @@ export async function createRelation(
   anchorKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
-  const scopedRt = loaded.scoped.relationTypes[relationTypeKey];
-  if (scopedRt === undefined) {
-    throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
-  }
+  const scopedRt = scopedRelationType(loaded, relationTypeKey);
   const guard = await AnchorGuard.open(anchorKey, loaded, store);
 
-  const [coerced, errors] = validateProperties(userProps, scopedRt.properties, relationTypeKey);
-
-  // Defaults from the full schema for properties not supplied.
-  const fullRt = loaded.full.relationTypes[relationTypeKey];
-  if (fullRt !== undefined) {
-    for (const [propKey, propDef] of Object.entries(fullRt.properties)) {
-      if (!(propKey in coerced) && propDef.defaultValue !== null) {
-        try {
-          coerced[propKey] = coerceValue(propDef.defaultValue, propDef.dataType, propKey);
-        } catch (error) {
-          if (!(error instanceof CoercionError)) throw error;
-          // Skip defaults that fail coercion.
-        }
-      }
-    }
-  }
+  const { errors, write } = prepareCreateRelation(
+    loaded,
+    relationTypeKey,
+    fromEntityId,
+    toEntityId,
+    userProps,
+    randomUUID(),
+  );
 
   // Endpoint validation against the FULL schema's declared source/target.
-  const fullRtForValidation = fullRt ?? scopedRt;
+  const fullRtForValidation = loaded.full.relationTypes[relationTypeKey] ?? scopedRt;
   const fromError = await endpointError(
     store,
     loaded.full,
@@ -1142,16 +907,14 @@ export async function createRelation(
     throw new ValidationError("Instance validation failed", { fields: errors });
   }
 
-  const relationId = randomUUID();
-
   const relation = await store.createRelation(
-    relationTypeKey,
-    relationId,
-    fromEntityId,
-    toEntityId,
-    coerced,
-    fullRtForValidation.properties,
-    await searchPlan(store, { kind: "relationCreated", relationType: relationTypeKey, relationId }),
+    write.relationTypeKey,
+    write.relationId,
+    write.fromEntityId,
+    write.toEntityId,
+    write.properties,
+    write.propertyDefs,
+    await searchPlan(store, write.change),
   );
 
   return filterRelationProperties(relation, scopedRt);
@@ -1215,10 +978,11 @@ export async function getRelation(
 }
 
 /**
- * Partial update of relation properties. ENDPOINTS ARE IMMUTABLE: payload
- * keys `fromEntityId` / `toEntityId` are dropped SILENTLY — no error — and
- * properties in the same payload still apply. On an anchored call the
- * guard may refuse it on `relationId` (`AnchorGuard.relationError`).
+ * Partial update of relation properties (`prepareUpdateRelation`).
+ * ENDPOINTS ARE IMMUTABLE: payload keys `fromEntityId` / `toEntityId` are
+ * dropped SILENTLY — no error — and properties in the same payload still
+ * apply. On an anchored call the guard may refuse it on `relationId`
+ * (`AnchorGuard.relationError`).
  */
 export async function updateRelation(
   lensKey: string,
@@ -1229,22 +993,10 @@ export async function updateRelation(
   anchorKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
-  const scopedRt = loaded.scoped.relationTypes[relationTypeKey];
-  if (scopedRt === undefined) {
-    throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
-  }
+  const scopedRt = scopedRelationType(loaded, relationTypeKey);
   const guard = await AnchorGuard.open(anchorKey, loaded, store);
 
-  const properties: Row = { ...body };
-  delete properties.fromEntityId;
-  delete properties.toEntityId;
-
-  const [coerced, errors] = validateProperties(
-    properties,
-    scopedRt.properties,
-    relationTypeKey,
-    true,
-  );
+  const { errors, write } = prepareUpdateRelation(loaded, relationTypeKey, relationId, body);
   const refused =
     (await guard?.relationError(loaded.full.relationTypes[relationTypeKey] ?? scopedRt, relationId, "update")) ?? null;
   if (refused !== null) {
@@ -1254,34 +1006,17 @@ export async function updateRelation(
     throw new ValidationError("Instance validation failed", { fields: errors });
   }
 
-  const setProps: Row = {};
-  const removeProps: string[] = [];
-  for (const [k, v] of Object.entries(coerced)) {
-    if (v === null) {
-      removeProps.push(k);
-    } else {
-      setProps[k] = v;
-    }
-  }
-
-  if (Object.keys(setProps).length === 0 && removeProps.length === 0) {
+  if (write === null) {
     return getRelation(lensKey, relationTypeKey, relationId, store);
   }
 
-  const fullRt = loaded.full.relationTypes[relationTypeKey];
-
   const relation = await store.updateRelation(
-    relationTypeKey,
-    relationId,
-    setProps,
-    removeProps,
-    fullRt?.properties ?? scopedRt.properties,
-    await searchPlan(store, {
-      kind: "relationUpdated",
-      relationType: relationTypeKey,
-      relationId,
-      changedKeys: Object.keys(coerced),
-    }),
+    write.relationTypeKey,
+    write.relationId,
+    write.setProperties,
+    write.removeProperties,
+    write.propertyDefs,
+    await searchPlan(store, write.change),
   );
   if (relation === null) {
     throw new NotFoundError(`Relation '${relationId}' not found`);
@@ -1299,17 +1034,15 @@ export async function deleteRelation(
   anchorKey: string | null = null,
 ): Promise<void> {
   const loaded = await loadSchema(lensKey, store);
-  const scopedRt = loaded.scoped.relationTypes[relationTypeKey];
-  if (scopedRt === undefined) {
-    throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
-  }
+  const scopedRt = scopedRelationType(loaded, relationTypeKey);
   const guard = await AnchorGuard.open(anchorKey, loaded, store);
   await guard?.checkRelationDelete(loaded.full.relationTypes[relationTypeKey] ?? scopedRt, relationId);
 
+  const write = prepareDeleteRelation(loaded, relationTypeKey, relationId);
   const deleted = await store.deleteRelation(
-    relationTypeKey,
-    relationId,
-    await searchPlan(store, { kind: "relationDeleted", relationType: relationTypeKey, relationId }),
+    write.relationTypeKey,
+    write.relationId,
+    await searchPlan(store, write.change),
   );
   if (!deleted) {
     throw new NotFoundError(`Relation '${relationId}' not found`);

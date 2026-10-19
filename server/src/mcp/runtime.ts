@@ -139,7 +139,9 @@ export function createRuntimeMcpServer(
       description:
         "Understand the lens before creating data. Shows available entity types, " +
         "relation types, and their property definitions including data types and " +
-        "required flags. Call this first.",
+        "required flags. A relation type's `parent` names the end (`source` or " +
+        "`target`) whose entity is the parent of the entity at the other end; null " +
+        "means an ordinary relation. Call this first.",
       inputSchema: {},
     },
     wrap("get_schema", async () => {

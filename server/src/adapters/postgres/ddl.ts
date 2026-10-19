@@ -266,8 +266,42 @@ export function ontologyDdlStatements(): string[] {
   entity_type_key text,       -- this and entity_id NULL: unanchored
   entity_id       uuid,
   created_at      timestamptz NOT NULL DEFAULT now(),
-  updated_at      timestamptz NOT NULL DEFAULT now()
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  staged_only     boolean     NOT NULL DEFAULT false   -- writes only through a changeset
 )`,
+
+  // --- Changesets --------------------------------------------------------
+
+  // Staged writes of one lens, persisted together by a commit. Dies with
+  // its lens; no FK to anchor: an anchor delete leaves the changeset.
+  `CREATE TABLE IF NOT EXISTS changeset (
+  changeset_id   uuid        CONSTRAINT changeset_pk PRIMARY KEY,
+  lens_id        uuid        NOT NULL CONSTRAINT changeset_lens_fk
+                             REFERENCES lens (lens_id) ON DELETE CASCADE,
+  anchor_key     text,       -- NULL: the plain lens
+  version        integer     NOT NULL,
+  note           text,
+  submitted_at   timestamptz,            -- NULL: live
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  last_change_at timestamptz NOT NULL DEFAULT now()
+)`,
+  `CREATE INDEX IF NOT EXISTS changeset_lens_id_idx ON changeset (lens_id)`,
+
+  // The journal: one row per staged write, replayed by seq.
+  `CREATE TABLE IF NOT EXISTS changeset_write (
+  changeset_id uuid        NOT NULL CONSTRAINT changeset_write_changeset_fk
+                           REFERENCES changeset (changeset_id) ON DELETE CASCADE,
+  seq          integer     NOT NULL,
+  operation    text        NOT NULL,
+  arguments    jsonb       NOT NULL,   -- as sent, after coercion
+  minted_id    uuid,                   -- the id a staged create got
+  type_key     text        NOT NULL,
+  target_id    uuid,
+  base         jsonb,                  -- a staged update's stored values of its patched keys
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT changeset_write_pk PRIMARY KEY (changeset_id, seq)
+)`,
+  `CREATE INDEX IF NOT EXISTS changeset_write_minted_id_idx ON changeset_write (changeset_id, minted_id)`,
 
   // --- Search indices ----------------------------------------------------
 

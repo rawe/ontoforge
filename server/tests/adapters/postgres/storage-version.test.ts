@@ -1,7 +1,7 @@
 /**
  * The storage-version decision at boot, against a scripted querier: what
  * an empty, an unversioned (5.x), an unreleased version-2, a 6.x, a 7.0
- * (version 4, 5 or 6), a current, a newer and a too-old database each lead to. The real upgrade against PostgreSQL is covered by
+ * (version 4, 5 or 6), a version-7, a current, a newer and a too-old database each lead to. The real upgrade against PostgreSQL is covered by
  * `tests/integration/postgres/storage-version.test.ts`.
  */
 
@@ -46,6 +46,17 @@ function database(state: {
   return { querier, queries };
 }
 
+/** Step 8 in one namespace: the changeset tables with their indexes, then
+ * the staged-only flag. */
+const step8 = (namespace: string) => [
+  `SET LOCAL search_path TO ${namespace}, public`,
+  expect.stringMatching(/^CREATE TABLE changeset \(/),
+  "CREATE INDEX changeset_lens_id_idx ON changeset (lens_id)",
+  expect.stringMatching(/^CREATE TABLE changeset_write \(/),
+  "CREATE INDEX changeset_write_minted_id_idx ON changeset_write (changeset_id, minted_id)",
+  "ALTER TABLE anchor ADD COLUMN staged_only boolean NOT NULL DEFAULT false",
+];
+
 const writes = (queries: string[]) => queries.filter((q) => /^(INSERT|DELETE|CREATE|LOCK TABLE)/.test(q));
 
 beforeEach(() => {
@@ -83,8 +94,9 @@ describe("storage version at boot", () => {
     expect(queries.indexOf(SERVER_DDL[0]!)).toBeLessThan(queries.indexOf("SET LOCAL search_path TO ont_a, public"));
     const bound = queries.filter((q) => q.startsWith("SET LOCAL search_path"));
     // Step by step: the 6.0 step, the 7.0 step, the assistant step, the
-    // navigator step, then the parent-and-anchor step, each in every namespace.
-    expect(bound).toEqual(Array.from({ length: 5 }, () => [
+    // navigator step, the parent-and-anchor step, then the changeset step,
+    // each in every namespace.
+    expect(bound).toEqual(Array.from({ length: 6 }, () => [
       "SET LOCAL search_path TO ont_a, public",
       "SET LOCAL search_path TO ont_b, public",
       "SET LOCAL search_path TO public",
@@ -100,7 +112,7 @@ describe("storage version at boot", () => {
     expect(queries.filter((q) => q.startsWith("CREATE TABLE retriever_agent"))).toHaveLength(2);
     expect(queries.filter((q) => q.includes("RENAME TO retriever_agent"))).toEqual([]);
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 1 to 7"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 1 to 8"));
   });
 
   it("upgrades storage at the unreleased version 2 by the same step, taking its retrievers over", async () => {
@@ -115,7 +127,7 @@ describe("storage version at boot", () => {
     expect(queries).toContain("ALTER TABLE retriever_config RENAME TO retriever_agent");
     expect(queries.filter((q) => q.startsWith("CREATE TABLE retriever_agent"))).toEqual([]);
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 2 to 7"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 2 to 8"));
   });
 
   it("upgrades 6.x storage (version 3) by the 7.0 step and the assistant step, naming the assistant tables after their kind", async () => {
@@ -126,7 +138,7 @@ describe("storage version at boot", () => {
     expect(queries).toContain("ALTER TABLE retriever_agent RENAME TO assistant_retriever");
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
     expect(queries.filter((q) => q.startsWith("CREATE TABLE assistant ("))).toHaveLength(1);
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 3 to 7"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 3 to 8"));
   });
 
   it("upgrades version-4 storage by the assistant step and the navigator step: one assistant table per namespace", async () => {
@@ -141,13 +153,13 @@ describe("storage version at boot", () => {
     expect(created[0]).toContain("ON DELETE CASCADE");
     expect(created[0]).toContain("CONSTRAINT assistant_key_unique UNIQUE (lens_id, kind, key)");
     expect(queries.filter((q) => q === "ALTER TABLE assistant RENAME TO assistant_navigator")).toHaveLength(2);
-    expect(queries.filter((q) => q.startsWith("SET LOCAL search_path"))).toEqual(Array.from({ length: 3 }, () => [
+    expect(queries.filter((q) => q.startsWith("SET LOCAL search_path"))).toEqual(Array.from({ length: 4 }, () => [
       "SET LOCAL search_path TO ont_a, public",
       "SET LOCAL search_path TO ont_b, public",
       "SET LOCAL search_path TO public",
     ]).flat());
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 4 to 7"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 4 to 8"));
   });
 
   it("upgrades version-5 storage by the navigator step: the assistant table becomes the navigator table", async () => {
@@ -160,11 +172,10 @@ describe("storage version at boot", () => {
       "ALTER TABLE assistant_navigator ADD CONSTRAINT assistant_navigator_key_unique UNIQUE (lens_id, key)",
     );
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 5 to 7"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 5 to 8"));
   });
 
-  it("upgrades version-6 storage by step 7 alone, in every namespace, the number last", async () => {
-    expect(STORAGE_VERSION).toBe(7);
+  it("upgrades version-6 storage by step 7, then step 8, each in every namespace, the number last", async () => {
     const { querier, queries } = database({ version: 6, registry: true, namespaces: ["ont_a", "ont_b"] });
     await bringStorageUpToDate(querier, SERVER_DDL);
     const firstStep = queries.indexOf("SET LOCAL search_path TO ont_a, public");
@@ -178,6 +189,9 @@ describe("storage version at boot", () => {
       ...step7("ont_a"),
       ...step7("ont_b"),
       "SET LOCAL search_path TO public",
+      ...step8("ont_a"),
+      ...step8("ont_b"),
+      "SET LOCAL search_path TO public",
       "DELETE FROM public.storage_version",
       "INSERT INTO public.storage_version (version) VALUES ($1)",
     ]);
@@ -186,7 +200,36 @@ describe("storage version at boot", () => {
     expect(anchor).toContain("entity_id       uuid");
     // No FK to entity, no CHECK.
     expect(anchor).not.toMatch(/REFERENCES|CHECK/);
-    expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 6 to 7 (2 ontologies).");
+    expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 6 to 8 (2 ontologies).");
+  });
+
+  it("upgrades version-7 storage by step 8 alone, in every namespace, the number last", async () => {
+    expect(STORAGE_VERSION).toBe(8);
+    const { querier, queries } = database({ version: 7, registry: true, namespaces: ["ont_a", "ont_b"] });
+    await bringStorageUpToDate(querier, SERVER_DDL);
+    const firstStep = queries.indexOf("SET LOCAL search_path TO ont_a, public");
+    const ran = queries.slice(firstStep).filter((q) => q !== "SELECT namespace FROM public.ontology ORDER BY key");
+    expect(ran).toEqual([
+      ...step8("ont_a"),
+      ...step8("ont_b"),
+      "SET LOCAL search_path TO public",
+      "DELETE FROM public.storage_version",
+      "INSERT INTO public.storage_version (version) VALUES ($1)",
+    ]);
+    const changeset = queries.find((q) => q.startsWith("CREATE TABLE changeset ("))!;
+    expect(changeset).toContain("CONSTRAINT changeset_pk PRIMARY KEY");
+    expect(changeset).toMatch(/CONSTRAINT changeset_lens_fk\s+REFERENCES lens \(lens_id\) ON DELETE CASCADE/);
+    const journal = queries.find((q) => q.startsWith("CREATE TABLE changeset_write ("))!;
+    expect(journal).toMatch(
+      /CONSTRAINT changeset_write_changeset_fk\s+REFERENCES changeset \(changeset_id\) ON DELETE CASCADE/,
+    );
+    expect(journal).toContain("CONSTRAINT changeset_write_pk PRIMARY KEY (changeset_id, seq)");
+    // One FK each, no FK to anchor, no CHECK.
+    for (const table of [changeset, journal]) {
+      expect(table.match(/REFERENCES/g)).toHaveLength(1);
+      expect(table).not.toMatch(/CHECK|anchor \(/);
+    }
+    expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 7 to 8 (2 ontologies).");
   });
 
   it("refuses storage newer than the code and writes nothing", async () => {

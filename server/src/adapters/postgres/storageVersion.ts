@@ -47,7 +47,7 @@ import { quoteIdent } from "./oql/bindings.js";
 import { camelizeRow } from "./rows.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 7;
+export const STORAGE_VERSION = 8;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 1;
@@ -538,6 +538,40 @@ const STEPS: Step[] = [
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now()
 )`,
+    ],
+  },
+  {
+    // Changesets: the changeset table, its journal of staged writes, and
+    // the staged-only flag of an anchor.
+    to: 8,
+    actions: [
+      `CREATE TABLE changeset (
+  changeset_id   uuid        CONSTRAINT changeset_pk PRIMARY KEY,
+  lens_id        uuid        NOT NULL CONSTRAINT changeset_lens_fk
+                             REFERENCES lens (lens_id) ON DELETE CASCADE,
+  anchor_key     text,
+  version        integer     NOT NULL,
+  note           text,
+  submitted_at   timestamptz,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  last_change_at timestamptz NOT NULL DEFAULT now()
+)`,
+      `CREATE INDEX changeset_lens_id_idx ON changeset (lens_id)`,
+      `CREATE TABLE changeset_write (
+  changeset_id uuid        NOT NULL CONSTRAINT changeset_write_changeset_fk
+                           REFERENCES changeset (changeset_id) ON DELETE CASCADE,
+  seq          integer     NOT NULL,
+  operation    text        NOT NULL,
+  arguments    jsonb       NOT NULL,
+  minted_id    uuid,
+  type_key     text        NOT NULL,
+  target_id    uuid,
+  base         jsonb,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT changeset_write_pk PRIMARY KEY (changeset_id, seq)
+)`,
+      `CREATE INDEX changeset_write_minted_id_idx ON changeset_write (changeset_id, minted_id)`,
+      `ALTER TABLE anchor ADD COLUMN staged_only boolean NOT NULL DEFAULT false`,
     ],
   },
 ];

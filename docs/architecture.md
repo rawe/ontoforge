@@ -149,7 +149,7 @@ Per ontology. "Unique" here always means unique within the owning ontology.
 |---|---|---|
 | Lens | id, unique `key`, unique name | name, description, timestamps |
 | Entity type | id, unique `key` | display name, description, name property, timestamps |
-| Relation type | id, unique `key` | display name, source and target entity type keys |
+| Relation type | id, unique `key` | display name, source and target entity type keys, parent end (optional) |
 | Property definition | id, `key` unique within its owner | data type, required, default; owned by exactly one entity type or relation type |
 | Search index | id, unique `key` | kind (default, passage or custom), root entity type, definition, timestamps |
 | Search settings | one per ontology | keyword language set, managed indices switched off |
@@ -169,6 +169,7 @@ lens key, can exist independently in two ontologies.
 |---|---|---|
 | Entity | `_id` | its type key, plus the properties its type defines |
 | Relation | `_id` | its type key, its two endpoint ids, plus its properties |
+| Anchor | unique `key` | the entity it points at (type key and id), or none |
 | Chunk | internal | fragment of one document property, with its offset and length, kept as a passage entry |
 | Search entry | internal | one indexed text of one entity in one generation of a search index — its own fields, one relation, or one chunk |
 

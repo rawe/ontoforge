@@ -72,8 +72,9 @@ import { definitionParameter } from "./searchIndexDefinition.js";
 /**
  * Flatten an error into one message string: `details.fields` and
  * `details.errors` are appended to the message so a model still sees every
- * offending field in one response. Zod issues (request-shape failures
- * inside a tool) are joined the same way.
+ * offending field in one response, and so are a rejected changeset's
+ * `details.violations` with their `total`. Zod issues (request-shape
+ * failures inside a tool) are joined the same way.
  */
 export function formatToolError(error: unknown): string {
   if (error instanceof ZodError) {
@@ -98,6 +99,13 @@ export function formatToolError(error: unknown): string {
       const errors = (details.errors as unknown[]).map(String).join("; ");
       // Some messages already carry their errors; never repeat them.
       return message.includes(errors) ? message : `${message} — ${errors}`;
+    }
+    if ("violations" in details) {
+      const violations = details.violations as { seq: number; kind: string; message: string }[];
+      const total = details.total as number;
+      const listed = violations.map((v) => `seq ${v.seq} ${v.kind}: ${v.message}`).join("; ");
+      const shown = total > violations.length ? `, the first ${violations.length} shown` : "";
+      return `${message} — ${total} violation${total === 1 ? "" : "s"}${shown}: ${listed}`;
     }
     return message;
   }

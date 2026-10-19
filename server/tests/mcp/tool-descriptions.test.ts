@@ -17,6 +17,7 @@ import { createModelingMcpServer } from "../../src/mcp/modeling.js";
 import { createRuntimeMcpServer } from "../../src/mcp/runtime.js";
 import { ALL_TOOL_NAMES, buildTools } from "../../src/runtime/assistants/agents/runtime.js";
 import { filterRules } from "../../src/runtime/readHelpers.js";
+import { VALID_AGENT_TOOLS } from "../../src/runtime/toolNames.js";
 
 interface ListedTool {
   name: string;
@@ -38,7 +39,8 @@ const descriptions = (tools: ListedTool[]) =>
   new Map(tools.map((tool) => [tool.name, tool.description ?? ""]));
 
 const modelingTools = await listTools(createModelingMcpServer("onto"));
-const runtime = descriptions(await listTools(createRuntimeMcpServer("onto", "all")));
+const runtimeTools = await listTools(createRuntimeMcpServer("onto", "all"));
+const runtime = descriptions(runtimeTools);
 const anchored = descriptions(await listTools(createRuntimeMcpServer("onto", "all", "agent-a")));
 const modeling = descriptions(modelingTools);
 const agent = new Map(
@@ -112,11 +114,98 @@ describe("tool descriptions", () => {
 
   it("create_entity states the anchored create, on the anchored mount only", () => {
     const text = anchored.get("create_entity")!;
-    expect(text.startsWith(runtime.get("create_entity")!)).toBe(true);
+    // The immediate create comes first; the staged mode follows it.
+    const immediate = (description: string) => description.slice(0, description.indexOf(" 'changeset_id'"));
+    expect(immediate(text).startsWith(immediate(runtime.get("create_entity")!))).toBe(true);
     for (const part of ["anchored connection", "'parent_relation'", "one of its descendants", "other types"]) {
       expect(text).toContain(part);
     }
     expect(runtime.get("create_entity")).not.toContain("anchored");
+  });
+
+  const STAGEABLE = ["create_entity", "update_entity", "delete_entity", "create_relation", "update_relation", "delete_relation"];
+  const CHANGESET_TOOLS = [
+    "start_changeset",
+    "list_changesets",
+    "get_changeset",
+    "unstage",
+    "submit_changeset",
+    "unsubmit_changeset",
+    "commit_changeset",
+    "discard_changeset",
+  ];
+  const parameters = (name: string) => runtimeTools.find((tool) => tool.name === name)!.inputSchema as {
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
+
+  it("the six stageable tools take an optional changeset_id and state the staged mode", () => {
+    for (const name of STAGEABLE) {
+      expect(parameters(name).properties, name).toHaveProperty("changeset_id");
+      expect(parameters(name).required ?? [], name).not.toContain("changeset_id");
+      for (const map of [runtime, anchored]) {
+        const text = map.get(name)!;
+        for (const part of ["'changeset_id'", "{seq, id}", "reads never see staged data", "id is final"]) {
+          expect(text, name).toContain(part);
+        }
+      }
+      expect(anchored.get(name), name).toContain("a dangling anchor refuses staging");
+    }
+    for (const name of ["create_entity", "create_relation"]) {
+      expect(runtime.get(name)).toContain("relation ends, parents and the hierarchy rules are checked at commit");
+    }
+    for (const name of ["update_entity", "update_relation"]) {
+      expect(runtime.get(name)).toContain("the commit is rejected");
+    }
+    for (const name of ["delete_entity", "delete_relation"]) {
+      const text = runtime.get(name)!;
+      expect(text).toContain("Staging checks the type and that the target exists");
+      expect(text.slice(text.indexOf("'changeset_id'"))).not.toMatch(/propert|current values/);
+    }
+  });
+
+  it("the document edit tools take no changeset_id and say they cannot be staged", () => {
+    for (const name of ["edit_document", "write_document"]) {
+      expect(parameters(name).properties, name).not.toHaveProperty("changeset_id");
+      expect(runtime.get(name), name).toContain("always writes immediately and cannot be staged");
+      expect(runtime.get(name), name).toContain("whole new value to update_entity with 'changeset_id'");
+    }
+  });
+
+  it("the changeset tools are listed on both mounts, with their required parameters", () => {
+    for (const name of CHANGESET_TOOLS) {
+      expect(runtime.has(name), name).toBe(true);
+      expect(anchored.has(name), name).toBe(true);
+    }
+    expect(parameters("unsubmit_changeset").required).toEqual(["changeset_id", "note"]);
+    expect(parameters("submit_changeset").required).toEqual(["changeset_id"]);
+    expect(parameters("commit_changeset").required).toEqual(["changeset_id"]);
+    expect(parameters("get_changeset").required).toEqual(["changeset_id"]);
+    expect(parameters("unstage").required).toEqual(["changeset_id", "seq"]);
+    expect(parameters("start_changeset").required ?? []).toEqual([]);
+  });
+
+  it("commit_changeset says how to tell the outcome after a lost response", () => {
+    for (const map of [runtime, anchored]) {
+      const text = map.get("commit_changeset")!;
+      expect(text).toContain("If the response is lost");
+      expect(text).toContain("reading an id a staged create minted");
+      expect(text).toContain("a submitted changeset that is no longer listed was committed");
+    }
+  });
+
+  it("the anchored mount states the anchor binding of a changeset", () => {
+    expect(anchored.get("start_changeset")).toContain("carries this connection's anchor");
+    expect(anchored.get("list_changesets")).toContain("started through this anchor");
+    expect(runtime.get("start_changeset")).not.toContain("carries this connection's anchor");
+  });
+
+  it("no changeset tool is grantable to an agent", () => {
+    for (const name of CHANGESET_TOOLS) {
+      expect(VALID_AGENT_TOOLS.has(name), name).toBe(false);
+      expect(agent.has(name), name).toBe(false);
+    }
+    expect(VALID_AGENT_TOOLS.size).toBe(12);
   });
 
   it("the search-index tools state the status fields", () => {

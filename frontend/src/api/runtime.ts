@@ -13,6 +13,8 @@ import {
 } from './chatStream'
 import { buildQuery, request, type FilterMap } from './http'
 import type {
+  Anchor,
+  AnchorView,
   AssistantKind,
   DocumentContentResponse,
   EntityInstance,
@@ -273,6 +275,28 @@ export const runSavedQuery = (
     method: 'POST',
     body: { params },
   })
+
+/* ---------------------------------- anchors ---------------------------------- */
+
+// Maintenance is lensless: anchors belong to the ontology.
+const anchorsBase = (ontologyKey: string) => `/api/ontologies/${ontologyKey}/runtime/anchors`
+
+export const listAnchors = (ontologyKey: string) => request<Anchor[]>(anchorsBase(ontologyKey))
+
+/** Create or re-point (200 both); `null` unanchors. A missing entity answers 422. */
+export const putAnchor = (
+  ontologyKey: string,
+  anchorKey: string,
+  entity: { type: string; id: string } | null,
+) =>
+  request<Anchor>(`${anchorsBase(ontologyKey)}/${anchorKey}`, { method: 'PUT', body: { entity } })
+
+export const deleteAnchor = (ontologyKey: string, anchorKey: string) =>
+  request<undefined>(`${anchorsBase(ontologyKey)}/${anchorKey}`, { method: 'DELETE' })
+
+/** The anchored mount's root: the anchor with its entity's name and path through the lens. */
+export const getAnchorView = (ontologyKey: string, lensKey: string, anchorKey: string) =>
+  request<AnchorView>(`${base(ontologyKey, lensKey)}/anchors/${anchorKey}`)
 
 /* ------------------------------------- AI ------------------------------------ */
 

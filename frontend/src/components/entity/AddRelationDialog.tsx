@@ -1,9 +1,8 @@
-import { EntitySearchRow } from '@/components/palette/EntitySearchRow'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, ChevronLeft, Loader2, Plus } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { useDisplayLabel, useFeatures } from '@/api/hooks'
+import { useDisplayLabel } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
@@ -18,7 +17,7 @@ import { TypeChip } from '@/components/TypeChip'
 import { PropertyField } from '@/components/schema/PropertyField'
 import { coerceDrafts } from '@/components/schema/propertyDraft'
 import { Button } from '@/components/ui/button'
-import { Command, CommandItem, CommandList } from '@/components/ui/command'
+import { CommandItem } from '@/components/ui/command'
 import {
   Dialog,
   DialogContent,
@@ -27,14 +26,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { EntityTargetPicker } from '@/components/entity/EntityTargetPicker'
 import { labelParentError } from '@/components/entity/hierarchy'
 import {
   invalidateNeighborhood,
 } from '@/components/entity/useNeighborCounts'
-import {
-  useDebouncedValue,
-  useEntitySearch,
-} from '@/components/palette/usePaletteSearch'
 
 export type RelationDirection = 'outgoing' | 'incoming'
 
@@ -94,7 +90,6 @@ function AddRelationFlow({
 }: Omit<AddRelationDialogProps, 'open'>) {
   const displayLabel = useDisplayLabel()
   const queryClient = useQueryClient()
-  const { data: features } = useFeatures()
   const myTypeKey = entity._entityTypeKey
 
   const options = useMemo<RelationChoice[]>(() => {
@@ -135,19 +130,6 @@ function AddRelationFlow({
 
   const step: 'type' | 'target' | 'create' | 'props' =
     choice === null ? 'type' : target === null ? (creatingNew ? 'create' : 'target') : 'props'
-
-  /* -------------------------------- searching -------------------------------- */
-
-  const debouncedQuery = useDebouncedValue(targetQuery.trim(), 250)
-  const targetSearch = useEntitySearch({
-    ontologyKey,
-    lensKey,
-    q: debouncedQuery,
-    typeKey: targetTypeKey,
-    ranked: (features?.searchStrategies.length ?? 0) > 0,
-    allTypeKeys: [],
-    enabled: step === 'target' && targetTypeKey !== undefined,
-  })
 
   /* -------------------------------- mutations -------------------------------- */
 
@@ -335,26 +317,15 @@ function AddRelationFlow({
 
         {step === 'target' && targetType !== undefined && (
           <div className="space-y-2">
-            <Command shouldFilter={false} className="rounded-lg border">
-              <div className="flex items-center gap-2 border-b px-3">
-                {targetSearch.isFetching ? (
-                  <Loader2 className="size-4 shrink-0 animate-spin opacity-50" />
-                ) : (
-                  <TypeChip
-                    typeKey={targetType.key}
-                    displayName={targetType.displayName}
-                    size="sm"
-                  />
-                )}
-                <input
-                  autoFocus
-                  value={targetQuery}
-                  onChange={(e) => setTargetQuery(e.target.value)}
-                  placeholder={`Search ${targetType.displayName}…`}
-                  className="h-9 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
-                />
-              </div>
-              <CommandList className="max-h-52">
+            <EntityTargetPicker
+              ontologyKey={ontologyKey}
+              lensKey={lensKey}
+              targetType={targetType}
+              query={targetQuery}
+              onQueryChange={setTargetQuery}
+              onPick={pickTarget}
+              disabled={pending}
+              leading={
                 <CommandItem
                   value="__create__"
                   onSelect={() => {
@@ -366,28 +337,8 @@ function AddRelationFlow({
                   <Plus className="size-4 text-muted-foreground" />
                   New connected {targetType.displayName}…
                 </CommandItem>
-                {(targetSearch.data ?? []).map(({ entity: candidate, matches, matched }) => {
-                  return (
-                    <CommandItem
-                      key={candidate._id}
-                      value={`target:${candidate._id}`}
-                      disabled={pending}
-                      onSelect={() => pickTarget(candidate)}
-                    >
-                      <EntitySearchRow entity={candidate} matches={matches} matched={matched} typeName={targetType.displayName} />
-                    </CommandItem>
-                  )
-                })}
-                {!targetSearch.isFetching &&
-                  (targetSearch.data?.length ?? 0) === 0 && (
-                    <div className="px-4 py-4 text-center text-[13px] text-muted-foreground">
-                      {debouncedQuery === ''
-                        ? `No ${targetType.displayName} entities yet.`
-                        : `No ${targetType.displayName} matches “${debouncedQuery}”.`}
-                    </div>
-                  )}
-              </CommandList>
-            </Command>
+              }
+            />
             {pending && (
               <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
                 <Loader2 className="size-3.5 animate-spin" /> Creating relation…

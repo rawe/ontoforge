@@ -1,4 +1,5 @@
 import {
+  Anchor,
   Check,
   ChevronsUpDown,
   Layers,
@@ -11,7 +12,8 @@ import {
   Waypoints,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { useFeatures, useLenses, useRuntimeSchema } from '@/api/hooks'
+import { useAnchors, useFeatures, useLenses, useRuntimeSchema } from '@/api/hooks'
+import { danglingCount } from '@/components/anchors/anchors'
 import { OntologySwitcher } from '@/components/layout/OntologySwitcher'
 import { useSidebarCollapsed } from '@/components/layout/sidebarCollapsed'
 import { NavItem, SidebarToggle } from '@/components/layout/SidebarItems'
@@ -122,6 +124,8 @@ export function Sidebar({
   const { collapsed } = useSidebarCollapsed()
   const { data: features } = useFeatures()
   const schema = useRuntimeSchema(ontologyKey, lensKey)
+  const anchors = useAnchors(ontologyKey)
+  const dangling = danglingCount(anchors.data ?? [])
 
   const base = `/o/${ontologyKey}/w/${lensKey}`
 
@@ -230,6 +234,13 @@ export function Sidebar({
         {features?.ai !== false && (
           <NavItem to={`${base}/ai`} label="Assistants" icon={Sparkles} collapsed={collapsed} />
         )}
+        <NavItem
+          to={`${base}/anchors`}
+          label="Anchors"
+          icon={Anchor}
+          collapsed={collapsed}
+          alert={{ count: dangling, label: 'dangling' }}
+        />
       </nav>
 
       <div

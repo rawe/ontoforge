@@ -14,6 +14,8 @@
  *   ['neighbors', ontologyKey, lensKey, typeKey, id, params]
  *   ['relations', ontologyKey, lensKey, typeKey, params]
  *   ['savedQueries', ontologyKey, lensKey]
+ *   ['anchors', ontologyKey]                         the ontology's anchors (lensless)
+ *   ['anchors', ontologyKey, lensKey, anchorKey]     one anchor through a lens (mount root)
  *   ['assistants', ontologyKey, lensKey, kind]       runtime assistant list of a kind
  *   ['model', ontologyKey, ...]                      modeling sub-keys
  *   ['model', ontologyKey, 'retrievers', lensKey]  retrievers of a lens
@@ -68,6 +70,12 @@ export const qk = {
     params === undefined
       ? (['relations', ontologyKey, lensKey, typeKey] as const)
       : (['relations', ontologyKey, lensKey, typeKey, params] as const),
+
+  /** With lens and key: one anchor's view through the lens, under the list's key. */
+  anchors: (ontologyKey: string, lensKey?: string, anchorKey?: string) =>
+    lensKey === undefined || anchorKey === undefined
+      ? (['anchors', ontologyKey] as const)
+      : (['anchors', ontologyKey, lensKey, anchorKey] as const),
 
   savedQueries: (ontologyKey: string, lensKey: string) =>
     ['savedQueries', ontologyKey, lensKey] as const,

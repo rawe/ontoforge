@@ -184,6 +184,31 @@ export interface PathStep {
   name: string | null
 }
 
+/* ------------------------------ runtime — anchors ----------------------------- */
+
+/** `anchored`: the entity exists; `unanchored`: no entity; `dangling`: the entity is gone. */
+export type AnchorState = 'anchored' | 'unanchored' | 'dangling'
+
+/** An anchor of the ontology, from the lensless list (no name, no path). */
+export interface Anchor {
+  key: string
+  entity: { type: string; id: string } | null
+  state: AnchorState
+}
+
+/**
+ * An anchor seen through one lens (the anchored mount's root). `visible` is
+ * false when the lens hides the anchored entity: entity null, path empty.
+ */
+export interface AnchorView {
+  key: string
+  state: AnchorState
+  visible: boolean
+  entity: PathStep | null
+  /** Root → … → the anchored entity, through the lens. */
+  path: PathStep[]
+}
+
 /** The parent relation a create names for its new entity. */
 export interface ParentRelationInput {
   type: string

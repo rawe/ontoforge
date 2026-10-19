@@ -103,6 +103,15 @@ export function useRuntimeSchema(
   })
 }
 
+/** The ontology's anchors (lensless): the Anchors page, its sidebar count, the entity chip. */
+export function useAnchors(ontologyKey: string | undefined) {
+  return useQuery({
+    queryKey: qk.anchors(ontologyKey ?? ''),
+    queryFn: () => runtime.listAnchors(ontologyKey!),
+    enabled: ontologyKey !== undefined && ontologyKey !== '',
+  })
+}
+
 /**
  * Search-index inclusions of a lens (modeling API). Separate from
  * `useLensScope`: index inclusions never make a lens scoped. The key sits

@@ -8,21 +8,18 @@ import type { NavigateFunction } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError } from '@/api/http'
 import type { DataType, JsonPrimitive } from '@/api/types'
-import { DATA_TYPES, SCHEMA_KEY_PATTERN } from './modeling/schemaKeys'
+import { DATA_TYPES, LENS_RESOURCE_KEY_PATTERN, SCHEMA_KEY_PATTERN } from './modeling/schemaKeys'
 
-// The schema key rule, key suggestions and data types live in the pure
+// The key rules, key suggestions and data types live in the pure
 // `modeling/schemaKeys.ts`; re-exported here for their existing importers.
-export { DATA_TYPES, SCHEMA_KEY_PATTERN, deriveKey } from './modeling/schemaKeys'
+export {
+  DATA_TYPES,
+  LENS_RESOURCE_KEY_PATTERN,
+  SCHEMA_KEY_PATTERN,
+  deriveKey,
+} from './modeling/schemaKeys'
 
 /* ---------------------------------- keys ----------------------------------- */
-
-/**
- * Key rule of the lens-resource level — saved queries and assistants of every
- * kind: the schema rule plus `-`. These keys travel only in URLs, JSON and
- * tool arguments, never into OQL or storage names, so a hyphen is harmless.
- * Mirrors the server's `LENS_RESOURCE_KEY_PATTERN`.
- */
-export const LENS_RESOURCE_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/
 
 export const isValidSchemaKey = (key: string) => SCHEMA_KEY_PATTERN.test(key)
 

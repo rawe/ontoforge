@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link2, Loader2, Plus, SearchX, Trash2, Waypoints } from 'lucide-react'
+import { AlertTriangle, Anchor, Link2, Loader2, Plus, SearchX, Trash2, Waypoints } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { useRuntimeSchema } from '@/api/hooks'
+import { useAnchors, useRuntimeSchema } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
@@ -11,6 +11,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { TypeNotInLens } from '@/components/home/TypeNotInLens'
 import { PageHeader } from '@/components/PageHeader'
 import { TypeChip } from '@/components/TypeChip'
+import { anchoredHereText, anchorsAt, danglingWarningText } from '@/components/anchors/anchors'
 import {
   AddRelationDialog,
   type RelationInitial,
@@ -100,6 +101,13 @@ export function EntityDetailPage() {
   // Children the lens hides are unknown here; the server's 409 covers them.
   const hasChildren = Object.values(childCounts.data ?? {}).some((n) => n > 0)
 
+  // The anchors pointing here: a chip, and a warning before a delete leaves them dangling.
+  const anchors = useAnchors(ontologyKey)
+  const anchoredHere = useMemo(
+    () => anchorsAt(anchors.data ?? [], typeKey ?? '', id ?? ''),
+    [anchors.data, typeKey, id],
+  )
+
   const pathQuery = useQuery({
     queryKey: qk.path(ontologyKey ?? '', lensKey ?? '', typeKey ?? '', id ?? ''),
     queryFn: () => runtime.getPath(ontologyKey!, lensKey!, typeKey!, id!),
@@ -138,6 +146,10 @@ export function EntityDetailPage() {
         void queryClient.invalidateQueries({
           queryKey: neighborCountsKey(ontologyKey!, lensKey!, parent.type, parent.id),
         })
+      }
+      // An anchor that pointed here is now dangling.
+      if (anchoredHere.length > 0) {
+        void queryClient.invalidateQueries({ queryKey: qk.anchors(ontologyKey!) })
       }
       toast.success('Entity deleted')
       navigate(`/o/${ontologyKey}/w/${lensKey}/t/${typeKey}`)
@@ -225,7 +237,20 @@ export function EntityDetailPage() {
           )
         }
         title={label}
-        meta={<TypeChip typeKey={typeKey} displayName={entityType.displayName} size="sm" />}
+        meta={
+          <>
+            <TypeChip typeKey={typeKey} displayName={entityType.displayName} size="sm" />
+            {anchoredHere.length > 0 && (
+              <Link
+                to={`/o/${ontologyKey}/w/${lensKey}/anchors`}
+                className="inline-flex items-center gap-1 rounded-full border border-(--tc-teal-border) bg-(--tc-teal-bg) px-2 py-0.5 text-[11px] font-medium text-(--tc-teal) hover:underline focus-visible:outline-2 focus-visible:outline-ring/60"
+              >
+                <Anchor className="size-3" />
+                {anchoredHereText(anchoredHere)}
+              </Link>
+            )}
+          </>
+        }
         description={
           <span className="font-mono text-[11.5px]">
             created {formatTimestamp(entity._createdAt)} · updated{' '}
@@ -283,6 +308,12 @@ export function EntityDetailPage() {
                     cannot be undone.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
+                {anchoredHere.length > 0 && (
+                  <p className="flex items-start gap-2 rounded-lg border border-(--tc-amber-border) bg-(--tc-amber-bg) p-3 text-[13px]">
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-(--tc-amber)" />
+                    {danglingWarningText(anchoredHere)}
+                  </p>
+                )}
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
                   <AlertDialogAction

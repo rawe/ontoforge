@@ -15,9 +15,11 @@ interface NavItemProps {
   icon?: ComponentType<{ className?: string }>
   leading?: ReactNode
   end?: boolean
+  /** A red count after the label (a dot when collapsed), such as "1 dangling"; hidden at 0. */
+  alert?: { count: number; label: string }
 }
 
-export function NavItem({ to, label, collapsed, icon: Icon, leading, end }: NavItemProps) {
+export function NavItem({ to, label, collapsed, icon: Icon, leading, end, alert }: NavItemProps) {
   // Active state is computed manually (instead of NavLink's className
   // function) because Radix's Slot (TooltipTrigger asChild) stringifies a
   // function-valued className when merging props.
@@ -29,7 +31,7 @@ export function NavItem({ to, label, collapsed, icon: Icon, leading, end }: NavI
       aria-current={isActive ? 'page' : undefined}
       aria-label={collapsed ? label : undefined}
       className={cn(
-        'flex h-7 items-center gap-2.5 rounded-md px-2 text-[13px] font-medium',
+        'relative flex h-7 items-center gap-2.5 rounded-md px-2 text-[13px] font-medium',
         'text-sidebar-foreground/65 transition-colors duration-100',
         'hover:bg-sidebar-accent/60 hover:text-sidebar-foreground',
         'focus-visible:outline-2 focus-visible:outline-ring/60',
@@ -39,6 +41,18 @@ export function NavItem({ to, label, collapsed, icon: Icon, leading, end }: NavI
     >
       {Icon !== undefined ? <Icon className="size-4 shrink-0" /> : leading}
       {!collapsed && <span className="truncate">{label}</span>}
+      {alert !== undefined && alert.count > 0 &&
+        (collapsed ? (
+          <span className="absolute top-1 right-2 size-1.5 rounded-full bg-destructive" />
+        ) : (
+          <span
+            title={alert.label}
+            className="ml-auto rounded-full bg-destructive px-1.5 text-[10.5px] leading-4 font-semibold text-white"
+          >
+            {alert.count}
+            <span className="sr-only"> {alert.label}</span>
+          </span>
+        ))}
     </Link>
   )
   if (!collapsed) return link

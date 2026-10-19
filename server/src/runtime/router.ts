@@ -2,6 +2,9 @@
  * Runtime routes, mounted at
  * `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey`.
  *
+ * The anchored mirror mounts the same routes below
+ * `…/lenses/:lensKey/anchors/:anchorKey` (`anchorRouter.ts`).
+ *
  * Every request names its ontology and lens in the path and runs against
  * a runtime store bound to that ontology — an unknown ontology key
  * answers 404 before any route logic runs. Below the lens the surface is
@@ -23,8 +26,14 @@ import { parseFilters } from "./service.js";
 import * as service from "./service.js";
 
 // Every params schema carries the mount prefix's own parameters —
-// `ontologyKey` binds the store, `lensKey` names the lens.
+// `ontologyKey` binds the store, `lensKey` names the lens. The anchored
+// mirror (`anchorRouter.ts`) extends each with its `anchorKey`.
 const LensParams = z.object({ ontologyKey: z.string(), lensKey: z.string() });
+
+/** The anchor key on the anchored mirror; null on the plain lens. */
+function anchorOf(params: object): string | null {
+  return "anchorKey" in params && typeof params.anchorKey === "string" ? params.anchorKey : null;
+}
 const TypeKeyParams = LensParams.extend({ key: z.string() });
 const EntityTypeParams = LensParams.extend({ entityTypeKey: z.string() });
 const EntityParams = EntityTypeParams.extend({ entityId: z.string() });
@@ -277,6 +286,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         properties,
         await getRuntimeStore(request.params.ontologyKey),
         parentRelation ?? null,
+        anchorOf(request.params),
       );
       return reply.status(201).send(result);
     },
@@ -326,6 +336,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.entityId,
         request.body,
         await getRuntimeStore(request.params.ontologyKey),
+        anchorOf(request.params),
       ),
   );
 
@@ -338,6 +349,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.entityTypeKey,
         request.params.entityId,
         await getRuntimeStore(request.params.ontologyKey),
+        anchorOf(request.params),
       );
       return reply.status(204).send();
     },
@@ -383,6 +395,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.propertyKey,
         request.body,
         await getRuntimeStore(request.params.ontologyKey),
+        anchorOf(request.params),
       ),
   );
 
@@ -473,6 +486,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         toEntityId,
         userProps,
         await getRuntimeStore(request.params.ontologyKey),
+        anchorOf(request.params),
       );
       return reply.status(201).send(result);
     },
@@ -521,6 +535,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.relationId,
         request.body,
         await getRuntimeStore(request.params.ontologyKey),
+        anchorOf(request.params),
       ),
   );
 
@@ -533,6 +548,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.relationTypeKey,
         request.params.relationId,
         await getRuntimeStore(request.params.ontologyKey),
+        anchorOf(request.params),
       );
       return reply.status(204).send();
     },

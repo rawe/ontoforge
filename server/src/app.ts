@@ -30,7 +30,7 @@ import { mountMcp } from "./mcp/mount.js";
 import { modelingRouter } from "./modeling/router.js";
 import { registryRouter } from "./registry/router.js";
 import { aiRouter } from "./runtime/aiRouter.js";
-import { anchorRouter } from "./runtime/anchorRouter.js";
+import { anchorRouter, anchoredRuntimeRouter } from "./runtime/anchorRouter.js";
 import { decisionRouter } from "./runtime/decisionRouter.js";
 import { runtimeRouter } from "./runtime/router.js";
 import { MemoryThreadStore } from "./runtime/threads/memoryThreadStore.js";
@@ -176,6 +176,8 @@ export async function createApp(): Promise<FastifyInstance> {
   await app.register(decisionRouter, { prefix: runtimePrefix });
   // Anchor maintenance names no lens: the first lensless runtime routes.
   await app.register(anchorRouter, { prefix: "/api/ontologies/:ontologyKey/runtime/anchors" });
+  // The anchored REST mirror: the runtime router below an anchor.
+  await app.register(anchoredRuntimeRouter, { prefix: `${runtimePrefix}/anchors/:anchorKey` });
 
   // Startup step 6: both MCP servers share the process and call the same
   // services as REST.

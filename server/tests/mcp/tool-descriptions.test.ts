@@ -39,6 +39,7 @@ const descriptions = (tools: ListedTool[]) =>
 
 const modelingTools = await listTools(createModelingMcpServer("onto"));
 const runtime = descriptions(await listTools(createRuntimeMcpServer("onto", "all")));
+const anchored = descriptions(await listTools(createRuntimeMcpServer("onto", "all", "agent-a")));
 const modeling = descriptions(modelingTools);
 const agent = new Map(
   buildTools("all", {} as RuntimeStore, [...ALL_TOOL_NAMES]).map((tool) => [
@@ -48,6 +49,7 @@ const agent = new Map(
 );
 const all = [
   ...[...runtime].map(([name, text]) => [`runtime ${name}`, text] as const),
+  ...[...anchored].filter(([name]) => !runtime.has(name)).map(([name, text]) => [`anchored ${name}`, text] as const),
   ...[...modeling].map(([name, text]) => [`modeling ${name}`, text] as const),
   ...[...agent].map(([name, text]) => [`agent ${name}`, text] as const),
 ];
@@ -81,6 +83,21 @@ describe("tool descriptions", () => {
       expect(text).toContain(part);
     }
     expect(agent.has("get_path")).toBe(false);
+  });
+
+  it("get_anchor carries the agreed text, on the anchored mount only", () => {
+    expect(anchored.get("get_anchor")).toBe(
+      "Read where this connection is anchored. Returns key, state, visible, entity and path. " +
+        "state 'anchored': writes to the anchored entity's hierarchy are held to that entity and " +
+        "its descendants; other types are written as usual. 'unanchored': no restriction. " +
+        "'dangling': the entity was deleted, and every write is refused until a person " +
+        "re-anchors. visible false: this lens does not show the entity, and every write is " +
+        "refused. path lists the entity's visible ancestors, root first, ending with the " +
+        "entity. Read-only: a person sets the anchor and may change it at any time, so read " +
+        "it again after a refusal.",
+    );
+    expect(runtime.has("get_anchor")).toBe(false);
+    expect(agent.has("get_anchor")).toBe(false);
   });
 
   it("create_entity states the create with a parent relation", () => {

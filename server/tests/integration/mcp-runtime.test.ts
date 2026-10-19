@@ -7,7 +7,8 @@
  * fallback), ontology isolation between two bound clients, the
  * limit/offset CLAMPING that diverges by design from REST's rejection,
  * the entity tool round trip, and the parent rules, the create with a
- * parent relation and the path read through the tools.
+ * parent relation and the path read through the tools; and the anchored
+ * mount `…/anchors/:anchorKey` with `get_anchor` and its not-found order.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -1013,6 +1014,128 @@ describe("get_path", () => {
     } finally {
       await all.close();
       await delivery.close();
+    }
+  });
+});
+
+describe("the anchored mount", () => {
+  const mount = (o: string, lens: string, key: string) =>
+    `${baseUrl}/mcp/ontologies/${o}/runtime/lenses/${lens}/anchors/${key}`;
+  const putAnchor = async (key: string, entity: { type: string; id: string } | null) => {
+    const res = await app.inject({
+      method: "PUT",
+      url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/anchors/${key}`,
+      payload: { entity },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+  };
+
+  it("lists the runtime tools plus get_anchor", async () => {
+    const ids = await buildHierarchy(app);
+    await putAnchor("agent-a", { type: "project", id: ids.P1 });
+    const plain = await connectClient(`${baseUrl}/mcp/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all`);
+    const anchored = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "all", "agent-a"));
+    try {
+      const plainNames = (await plain.listTools()).tools.map((tool) => tool.name);
+      const anchoredNames = (await anchored.listTools()).tools.map((tool) => tool.name);
+      expect(plainNames).not.toContain("get_anchor");
+      expect(anchoredNames.sort()).toEqual([...plainNames, "get_anchor"].sort());
+    } finally {
+      await plain.close();
+      await anchored.close();
+    }
+  });
+
+  it("get_anchor gives the anchor through the lens, and nothing when the lens hides it", async () => {
+    const ids = await buildHierarchy(app);
+    await addLensHidingProject(app);
+    await putAnchor("agent-a", { type: "project", id: ids.P1 });
+    const all = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "all", "agent-a"));
+    const delivery = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "delivery", "agent-a"));
+    try {
+      expect(json(await call(all, "get_anchor"))).toEqual({
+        key: "agent-a",
+        state: "anchored",
+        visible: true,
+        entity: { type: "project", id: ids.P1, name: "P1" },
+        path: [
+          { type: "customer", id: ids.ACME, name: "ACME" },
+          { type: "project", id: ids.P1, name: "P1" },
+        ],
+      });
+      expect(json(await call(delivery, "get_anchor"))).toEqual({
+        key: "agent-a",
+        state: "anchored",
+        visible: false,
+        entity: null,
+        path: [],
+      });
+
+      // The runtime tools work below the anchor (the guard is not here yet).
+      const listed = json(await call(all, "list_entities", { entity_type_key: "task" }));
+      expect(listed.total).toBe(3);
+    } finally {
+      await all.close();
+      await delivery.close();
+    }
+  });
+
+  it("get_anchor shows unanchored and dangling", async () => {
+    const ids = await buildHierarchy(app);
+    await putAnchor("agent-u", null);
+    await putAnchor("agent-d", { type: "task", id: ids.T1a });
+    await app.inject({ method: "DELETE", url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all/entities/task/${ids.T1a}` });
+    for (const [key, state] of [["agent-u", "unanchored"], ["agent-d", "dangling"]] as const) {
+      const client = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "all", key));
+      try {
+        expect(json(await call(client, "get_anchor"))).toEqual({ key, state, visible: true, entity: null, path: [] });
+      } finally {
+        await client.close();
+      }
+    }
+  });
+
+  it("not found in the order ontology, lens, anchor, on every tool, reads included", async () => {
+    const ids = await buildHierarchy(app);
+    await putAnchor("agent-a", { type: "project", id: ids.P1 });
+    const tools = [
+      ["get_anchor", {}],
+      ["get_schema", {}],
+      ["list_entities", { entity_type_key: "task" }],
+      ["get_path", { entity_type_key: "task", entity_id: ids.T1 }],
+      ["create_entity", { entity_type_key: "task", properties: { name: "X" } }],
+      ["delete_entity", { entity_type_key: "task", entity_id: ids.T2 }],
+    ] as const;
+    for (const [o, lens, key, message] of [
+      ["nope", "nope", "nope", "Ontology 'nope' not found"],
+      [HIERARCHY_ONTOLOGY_KEY, "nope", "nope", "Lens 'nope' not found"],
+      [HIERARCHY_ONTOLOGY_KEY, "all", "nope", "Anchor 'nope' not found"],
+    ] as const) {
+      const client = await connectClient(mount(o, lens, key));
+      try {
+        for (const [name, args] of tools) {
+          const result = await call(client, name, args);
+          expect(result.isError, `${name} on ${key}`).toBe(true);
+          expect(text(result), name).toContain(message);
+        }
+      } finally {
+        await client.close();
+      }
+    }
+    // Nothing written, no anchor created.
+    const tasks = await app.inject({ method: "GET", url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all/entities/task` });
+    expect(tasks.json().total).toBe(3);
+    const anchors = await app.inject({ method: "GET", url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/anchors` });
+    expect(anchors.json().map((anchor: { key: string }) => anchor.key)).toEqual(["agent-a"]);
+  });
+
+  it("a mount URL naming no anchor is an error", async () => {
+    for (const url of [
+      "/mcp/ontologies/test_ont/runtime/lenses/test_lens/anchors",
+      "/mcp/ontologies/test_ont/runtime/lenses/test_lens/anchors/",
+    ]) {
+      const res = await app.inject({ method: "POST", url });
+      expect(res.statusCode, url).toBe(404);
     }
   });
 });

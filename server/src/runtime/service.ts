@@ -12,6 +12,9 @@
  * - Writes validate against the LENS; defaults come from the FULL schema
  *   (`docs/decisions.md#schema-and-data`). A hidden property with a default is
  *   applied; a hidden property in the payload is an unknown property.
+ *
+ * The seven write functions take the anchor key of an anchored mount as
+ * their last argument, for the write guard; null on the plain lens mount.
  */
 
 import { randomUUID } from "node:crypto";
@@ -437,6 +440,7 @@ export async function createEntity(
   body: Row,
   store: RuntimeStore,
   parentRelation: ParentRelationInput | null = null,
+  anchorKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
   const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
@@ -667,6 +671,7 @@ export async function updateEntity(
   entityId: string,
   body: Row,
   store: RuntimeStore,
+  anchorKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
   const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
@@ -741,6 +746,7 @@ export async function deleteEntity(
   entityTypeKey: string,
   entityId: string,
   store: RuntimeStore,
+  anchorKey: string | null = null,
 ): Promise<void> {
   const loaded = await loadSchema(lensKey, store);
   if (!(entityTypeKey in loaded.scoped.entityTypes)) {
@@ -951,6 +957,7 @@ export async function editDocument(
   propertyKey: string,
   body: DocumentEditBody,
   store: RuntimeStore,
+  anchorKey: string | null = null,
 ): Promise<Row> {
   const { value, loaded } = await loadDocumentValue(
     lensKey,
@@ -1060,6 +1067,7 @@ export async function createRelation(
   toEntityId: string,
   userProps: Row,
   store: RuntimeStore,
+  anchorKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
   const scopedRt = loaded.scoped.relationTypes[relationTypeKey];
@@ -1192,6 +1200,7 @@ export async function updateRelation(
   relationId: string,
   body: Row,
   store: RuntimeStore,
+  anchorKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
   const scopedRt = loaded.scoped.relationTypes[relationTypeKey];
@@ -1254,6 +1263,7 @@ export async function deleteRelation(
   relationTypeKey: string,
   relationId: string,
   store: RuntimeStore,
+  anchorKey: string | null = null,
 ): Promise<void> {
   const loaded = await loadSchema(lensKey, store);
   if (!(relationTypeKey in loaded.scoped.relationTypes)) {

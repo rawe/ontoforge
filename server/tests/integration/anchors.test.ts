@@ -4,7 +4,10 @@
  * read, list and delete; the PUT's checks of its key and entity against
  * the full schema; the state decided on each read, dangling once the
  * entity or its type is gone; no anchors in the export; and the anchors
- * gone with their ontology.
+ * gone with their ontology. Then the anchored REST mirror
+ * `…/lenses/{lens}/anchors/{anchorKey}`: its root through the lens in
+ * every state, the runtime router below it, and not found in the order
+ * ontology, lens, anchor on every route, reads included.
  */
 
 import { randomUUID } from "node:crypto";
@@ -16,7 +19,7 @@ import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { createOntology, modelPrefix, runtimePrefix } from "./fixture.js";
-import { buildHierarchy, HIERARCHY_ONTOLOGY_KEY, type HierarchyIds } from "./hierarchy.js";
+import { addLensHidingProject, buildHierarchy, HIERARCHY_ONTOLOGY_KEY, type HierarchyIds } from "./hierarchy.js";
 import { wipeDatabase } from "./reset.js";
 
 type Row = Record<string, any>;
@@ -192,5 +195,122 @@ describe("lifecycle", () => {
     expect((await app.inject({ method: "DELETE", url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}` })).statusCode).toBe(204);
     await createOntology(app, HIERARCHY_ONTOLOGY_KEY);
     expect(await list()).toEqual([]);
+  });
+});
+
+describe("the anchored REST mirror", () => {
+  const mirror = (lens: string, key: string, o = HIERARCHY_ONTOLOGY_KEY) =>
+    `${runtimePrefix(o, lens)}/anchors/${key}`;
+  const root = (lens: string, key: string) => app.inject({ method: "GET", url: mirror(lens, key) });
+
+  it("its root gives the anchor through the lens: entity with name, and the path ending with it", async () => {
+    await put("agent-a", { type: "project", id: ids.P1 });
+    const res = await root("all", "agent-a");
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toEqual({
+      key: "agent-a",
+      state: "anchored",
+      visible: true,
+      entity: { type: "project", id: ids.P1, name: "P1" },
+      path: [
+        { type: "customer", id: ids.ACME, name: "ACME" },
+        { type: "project", id: ids.P1, name: "P1" },
+      ],
+    });
+  });
+
+  it("the path starts below the nearest hidden ancestor", async () => {
+    await addLensHidingProject(app);
+    await put("agent-a", { type: "task", id: ids.T1a });
+    expect((await root("delivery", "agent-a")).json()).toEqual({
+      key: "agent-a",
+      state: "anchored",
+      visible: true,
+      entity: { type: "task", id: ids.T1a, name: "T1a" },
+      path: [
+        { type: "task", id: ids.T1, name: "T1" },
+        { type: "task", id: ids.T1a, name: "T1a" },
+      ],
+    });
+  });
+
+  it("a lens hiding the anchored entity: not visible, no entity, no path", async () => {
+    await put("agent-a", { type: "task", id: ids.T1 });
+    const res = await root("portfolio", "agent-a");
+    expect(res.json()).toEqual({ key: "agent-a", state: "anchored", visible: false, entity: null, path: [] });
+    expect(res.body).not.toContain(ids.T1);
+  });
+
+  it("unanchored and dangling: visible, no entity, no path", async () => {
+    await put("agent-u", null);
+    expect((await root("all", "agent-u")).json()).toEqual({
+      key: "agent-u", state: "unanchored", visible: true, entity: null, path: [],
+    });
+    await put("agent-d", { type: "task", id: ids.T1a });
+    await app.inject({ method: "DELETE", url: `${runtimePrefix(HIERARCHY_ONTOLOGY_KEY, "all")}/entities/task/${ids.T1a}` });
+    expect((await root("all", "agent-d")).json()).toEqual({
+      key: "agent-d", state: "dangling", visible: true, entity: null, path: [],
+    });
+  });
+
+  it("carries the runtime router: reads, the path read and writes", async () => {
+    await put("agent-a", { type: "project", id: ids.P1 });
+    const base = mirror("all", "agent-a");
+    const listed = await app.inject({ method: "GET", url: `${base}/entities/task` });
+    expect(listed.statusCode, listed.body).toBe(200);
+    expect(listed.json().total).toBe(3);
+    const path = await app.inject({ method: "GET", url: `${base}/entities/task/${ids.T1}/path` });
+    expect(path.json().map((step: Row) => step.name)).toEqual(["ACME", "P1", "T1"]);
+    const created = await app.inject({
+      method: "POST",
+      url: `${base}/entities/task`,
+      payload: { name: "T9", parentRelation: { type: "has_task", parentId: ids.P1 } },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+  });
+
+  it("carries the runtime router only", async () => {
+    await put("agent-a", { type: "project", id: ids.P1 });
+    const plain = await app.inject({ method: "GET", url: `${runtimePrefix(HIERARCHY_ONTOLOGY_KEY, "all")}/ai/assistants/agents` });
+    expect(plain.statusCode, plain.body).toBe(200);
+    const res = await app.inject({ method: "GET", url: `${mirror("all", "agent-a")}/ai/assistants/agents` });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error.message).toBe("Not Found");
+  });
+
+  it("not found in the order ontology, lens, anchor, on every route, reads included", async () => {
+    await put("agent-a", { type: "project", id: ids.P1 });
+    const routes = [
+      ["GET", ""],
+      ["GET", "/schema"],
+      ["GET", "/entities/task"],
+      ["GET", `/entities/task/${ids.T1}`],
+      ["GET", `/entities/task/${ids.T1}/path`],
+      ["POST", "/entities/task", { name: "X" }],
+      ["PATCH", `/entities/task/${ids.T1}`, { name: "X" }],
+      ["DELETE", `/entities/task/${ids.T2}`],
+      ["POST", "/relations/assigned_to", { fromEntityId: ids.T2, toEntityId: ids.Ben }],
+    ] as const;
+    for (const [o, lens, key, message] of [
+      ["nope", "nope", "nope", "Ontology 'nope' not found"],
+      [HIERARCHY_ONTOLOGY_KEY, "nope", "nope", "Lens 'nope' not found"],
+      [HIERARCHY_ONTOLOGY_KEY, "all", "nope", "Anchor 'nope' not found"],
+    ] as const) {
+      for (const [method, path, payload] of routes) {
+        const res = await app.inject({ method, url: `${mirror(lens, key, o)}${path}`, payload });
+        expect(res.statusCode, `${method} ${path} ${res.body}`).toBe(404);
+        expect(res.json().error.message, `${method} ${path}`).toContain(message);
+      }
+    }
+    // Nothing written, no anchor created.
+    expect((await app.inject({ method: "GET", url: `${runtimePrefix(HIERARCHY_ONTOLOGY_KEY, "all")}/entities/task/${ids.T2}` })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: `${runtimePrefix(HIERARCHY_ONTOLOGY_KEY, "all")}/entities/task` })).json().total).toBe(3);
+    expect((await list()).map((a) => a.key)).toEqual(["agent-a"]);
+  });
+
+  it("the plain lens URLs are unchanged", async () => {
+    const res = await app.inject({ method: "GET", url: `${runtimePrefix(HIERARCHY_ONTOLOGY_KEY, "all")}/entities/task` });
+    expect(res.statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: `${runtimePrefix(HIERARCHY_ONTOLOGY_KEY, "all")}/anchors` })).statusCode).toBe(404);
   });
 });

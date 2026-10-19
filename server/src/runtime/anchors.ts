@@ -15,7 +15,8 @@ import { z } from "zod";
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import type { AnchorRecord, RuntimeStore } from "../core/ports.js";
 import { LENS_RESOURCE_KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
-import { loadSearchContext, type EntityTypeDef } from "./schemaCache.js";
+import { loadSchema, loadSearchContext, type EntityTypeDef } from "./schemaCache.js";
+import { getPath } from "./service.js";
 
 const Key = z.string().regex(LENS_RESOURCE_KEY_PATTERN).max(MAX_KEY_LENGTH);
 
@@ -34,6 +35,21 @@ export const AnchorResponse = z.object({
   state: z.enum(ANCHOR_STATES),
 });
 export type AnchorResponse = z.infer<typeof AnchorResponse>;
+
+const PathStep = z.object({ type: z.string(), id: z.string(), name: z.string().nullable() });
+
+/** The anchor as an anchored mount shows it (`get_anchor`, the REST
+ * mirror's root). `visible` is false only when the anchor is anchored and
+ * the lens hides the entity's type; entity null and path [] whenever
+ * there is no entity to show. */
+export const AnchorView = z.object({
+  key: z.string(),
+  state: z.enum(ANCHOR_STATES),
+  visible: z.boolean(),
+  entity: PathStep.nullable(),
+  path: z.array(PathStep),
+});
+export type AnchorView = z.infer<typeof AnchorView>;
 
 /** Every entity type of the ontology, unscoped. */
 async function fullEntityTypes(store: RuntimeStore): Promise<Record<string, EntityTypeDef>> {
@@ -96,4 +112,38 @@ export async function deleteAnchor(key: string, store: RuntimeStore): Promise<vo
   if (!(await store.anchors().deleteAnchor(key))) {
     throw new NotFoundError(`Anchor '${key}' not found`);
   }
+}
+
+/**
+ * The binding of an anchored mount, checked on every request in the
+ * not-found order ontology (the caller's `getRuntimeStore`), lens, anchor.
+ * The anchor is read fresh and never created.
+ */
+export async function readMountAnchor(lensKey: string, anchorKey: string, store: RuntimeStore): Promise<AnchorResponse> {
+  await loadSchema(lensKey, store);
+  return readAnchor(anchorKey, store);
+}
+
+/** `get_anchor`: the anchor through the lens, with the entity's name and
+ * its path (root first, ending with the entity, below the nearest hidden
+ * ancestor). */
+export async function getAnchorView(lensKey: string, anchorKey: string, store: RuntimeStore): Promise<AnchorView> {
+  const anchor = await readMountAnchor(lensKey, anchorKey, store);
+  const nothing = { key: anchor.key, entity: null, path: [] };
+  if (anchor.state !== "anchored" || anchor.entity === null) {
+    return { ...nothing, state: anchor.state, visible: true };
+  }
+  const { type, id } = anchor.entity;
+  if (!Object.hasOwn((await loadSchema(lensKey, store)).scoped.entityTypes, type)) {
+    return { ...nothing, state: "anchored", visible: false };
+  }
+  let path;
+  try {
+    path = await getPath(lensKey, type, id, store);
+  } catch (error) {
+    // Deleted between the anchor read and the path read.
+    if (error instanceof NotFoundError) return { ...nothing, state: "dangling", visible: true };
+    throw error;
+  }
+  return { key: anchor.key, state: "anchored", visible: true, entity: path[path.length - 1]!, path };
 }

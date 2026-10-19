@@ -88,7 +88,8 @@ non-document property is never readable this way.
 ### Partial writes
 
 Two operations edit in place. Writing the whole value through an ordinary entity create or
-update remains valid and does exactly what it says.
+update remains valid and does exactly what it says. A [changeset](changesets.md) stages a
+document value only that way, whole; the two operations below cannot be staged.
 
 **Exact string replacement.** Give the string to remove and the string to put in its place.
 It fails when the old string is empty, when the new string is missing or identical to the
@@ -101,7 +102,7 @@ zero inserts at the offset; an offset equal to the total length appends. It fail
 either number is negative, when the offset is past the end of the document, or when the
 range extends past the end. An optional expected string may be supplied: the current
 content of the range must equal it, or the write is refused as a conflict. That guard is
-the only compare-and-swap anywhere in the runtime, and it exists because offsets go stale —
+the only compare-and-swap on an immediate write, and it exists because offsets go stale —
 they are usually read from a search hit or an earlier slice, and the document may have
 moved underneath them.
 

@@ -69,7 +69,7 @@ particular lens carry the lens icon.
 | A type table or an entity of that type | Schema graph, that entity type selected |
 | Query | Lens detail of the current lens, Saved queries tab |
 | Assistants | Lens detail, the tab of the open assistant kind |
-| Home, Explore | Lens detail, Scope tab |
+| Home, Explore, Changesets | Lens detail, Scope tab |
 | Anchors | Lens detail of the current lens, Connect tab |
 
 | From the Studio | Leads to the Workbench's |
@@ -121,8 +121,10 @@ boundary — not even between same-keyed lenses of two ontologies.
 A collapsible sidebar (collapse state persists) carrying: the ontology switcher, the
 surface switch and the lens switcher beneath it, a search
 trigger, a create-entity trigger, fixed entries for Home, Explore, Query, Assistants when
-available, and [Anchors](#anchors), which carries the number of dangling
-anchors as a red count (a red dot when collapsed), then a data section listing every entity type the lens exposes, each with
+available, [Anchors](#anchors), which carries the number of dangling
+anchors as a red count (a red dot when collapsed), and [Changesets](#changesets), which
+carries the number of submitted changesets of the lens as a grey count (a grey dot when
+collapsed), then a data section listing every entity type the lens exposes, each with
 its type colour. Below: the collapse control and a theme control cycling system → light →
 dark. Every screen renders through the lens's schema; there is no hand-written per-type
 interface anywhere, so adding an entity type immediately produces a table, a form, a
@@ -291,8 +293,40 @@ anchors belong to the ontology, and that every change takes effect on the next c
   paths; unanchor it behind a confirmation saying its client may then write anywhere in
   the lens; show its entity in the Explorer; delete it, which needs its key typed and
   says that clients using its URL get not found.
+- **Staged only:** a switch per row, with a "staged only" chip beside the state while it
+  is on. Turning it on takes effect at once; turning it off asks first, saying the client
+  then writes immediately and can commit. It is disabled on a dangling anchor, which must
+  be re-anchored or unanchored first. Re-pointing and unanchoring keep it.
 
 The Studio manages no anchors: its Connect tab links here.
+
+### Changesets
+
+The lens's [changesets](capabilities/changesets.md), anchored ones included, as the lens
+shows them now. The page reviews, commits and discards; it stages nothing.
+
+- **The list:** one row per changeset — its state, note, anchor, number of writes, the
+  types it names (two, then a count, and how many the lens no longer shows) and its age —
+  submitted ones first and tinted, then by last change. A row opens its review. Empty, it
+  says the lens has no changesets.
+- **The review:** a header with the short id, the state, the anchor, the writes per
+  operation, the version and the times, and the note. Below, the writes by seq, a page of
+  100 at a time: the operation, the type, the target by name — "(new)" for a create,
+  `from → to` for a relation, a short id when the lens shows no name — and the change:
+  `key: before → after` for an update, the values and the parent for a create. A marker
+  chip with its message tints the row. A write the lens no longer shows says so; a document
+  value shows its length.
+- **Commit** sends the version on the screen. When the changeset changed since, it says so
+  and reloads the review; any other conflict shows its message and reloads too. A rejected
+  commit lists its violations in a panel, which on a submitted changeset offers to unsubmit
+  it at once with those violations as its note, cut to 1,000 characters. A successful one
+  returns to the list and refreshes every runtime view of the ontology.
+- **Unsubmit**, shown while submitted, asks for the required note. **Discard**, behind a
+  confirmation, and **Unstage**, per row, work on a live changeset only; while submitted
+  they are disabled, saying it is frozen.
+
+A changeset that is gone — committed, discarded or expired, or not reached through this
+lens — shows a not-found state linking to the list.
 
 ### Assistants
 
@@ -1440,6 +1474,8 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever` | The Retrievers tab |
 | `/o/{ontologyKey}/w/{lensKey}/ai?assistant={key}` · `?tab=retriever&assistant={key}` | That tab with that assistant — `_default` for the default one; the default one when the lens has no such assistant |
 | `/o/{ontologyKey}/w/{lensKey}/anchors` | The [Anchors](#anchors) page |
+| `/o/{ontologyKey}/w/{lensKey}/changesets` | The [Changesets](#changesets) list |
+| `/o/{ontologyKey}/w/{lensKey}/changesets/{changesetId}` | One changeset's review |
 | `/o/{ontologyKey}/studio` · `/o/{ontologyKey}/studio/schema` | Redirects to the schema graph |
 | `/o/{ontologyKey}/studio/schema/graph` | The [schema graph](#schema-graph), nothing selected |
 | `/o/{ontologyKey}/studio/schema/graph?sel=entity:{typeKey}` · `?sel=relation:{typeKey}` | The graph with that type selected and revealed, its inspector open |

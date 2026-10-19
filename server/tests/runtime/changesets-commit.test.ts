@@ -69,7 +69,7 @@ function row(seq: number, overrides: Partial<ChangesetWriteRecord>): ChangesetWr
     mintedId: null,
     typeKey: "person",
     targetId: null,
-    base: null,
+    before: null,
     createdAt: NOW,
     ...overrides,
   };

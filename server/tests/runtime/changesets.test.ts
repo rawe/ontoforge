@@ -1,7 +1,7 @@
 /**
  * Staging into a changeset over mocked stores: the binding and expiry of a
  * changeset, the anchor refusal, the immediate write's checks, minted ids,
- * the journal lookup of a staged create, the base of an update, the cap,
+ * the journal lookup of a staged create, the before of an update, the cap,
  * and unstage and discard.
  */
 
@@ -13,7 +13,7 @@ import { ConflictError, NotFoundError, ValidationError } from "../../src/core/ex
 import type { ChangesetRecord, ChangesetWriteRecord } from "../../src/core/ports.js";
 import {
   MAX_STAGED_WRITES,
-  baseOf,
+  recordedValues,
   discardChangeset,
   getChangeset,
   stage,
@@ -82,7 +82,7 @@ function journalRow(overrides: Partial<ChangesetWriteRecord>): ChangesetWriteRec
     mintedId: null,
     typeKey: "person",
     targetId: null,
-    base: null,
+    before: null,
     createdAt: NOW,
     ...overrides,
   };
@@ -274,7 +274,7 @@ describe("creates: minted ids", () => {
       operation: "create_entity",
       typeKey: "person",
       targetId: null,
-      base: null,
+      before: null,
       // Defaults are left to the replay: `active` was not sent.
       arguments: { properties: { name: "Ann", age: 41 }, parentRelation: null, relationId: null },
     });
@@ -325,7 +325,7 @@ describe("creates: minted ids", () => {
       operation: "create_relation",
       typeKey: "works_for",
       targetId: null,
-      base: null,
+      before: null,
       arguments: { fromEntityId: P1, toEntityId: ACME, properties: { role: "dev" } },
     });
     expect(answer.id).toBe(row.mintedId);
@@ -334,8 +334,8 @@ describe("creates: minted ids", () => {
   });
 });
 
-describe("updates and deletes: the target and the base", () => {
-  it("a stored target: one read, and the base of exactly the patched keys, absent kept absent", async () => {
+describe("updates and deletes: the target and the before", () => {
+  it("a stored target: one read, and the before of exactly the patched keys, absent kept absent", async () => {
     store.getEntity.mockResolvedValue(makeEntity({ name: "Ann", age: 41, email: null, active: true }, "person", P1));
     const answer = await stageOn({
       operation: "update_entity",
@@ -351,7 +351,7 @@ describe("updates and deletes: the target and the base", () => {
       targetId: P1,
       arguments: { properties: { age: 42, email: "a@b.c" } },
     });
-    expect(row.base).toEqual({ age: 41, email: null });
+    expect(row.before).toEqual({ age: 41, email: null });
     expect(answer).toEqual({ seq: 3, id: P1 });
     expect(store.getEntity).toHaveBeenCalledWith("person", P1);
 
@@ -360,14 +360,14 @@ describe("updates and deletes: the target and the base", () => {
     await stageOn({ operation: "update_entity", typeKey: "person", id: P1, properties: { age: null } });
     const removal = appended();
     expect(removal.arguments).toEqual({ properties: { age: null } });
-    expect(removal.base).toEqual({});
+    expect(removal.before).toEqual({});
   });
 
-  it("a document value's base is its hash", async () => {
+  it("a document value in before is its hash", async () => {
     store.getEntity.mockResolvedValue(makeEntity({ name: "N", body: "old text" }, "note", P1));
     await stageOn({ operation: "update_entity", typeKey: "note", id: P1, properties: { body: "new text" } });
     const hash = createHash("sha256").update("old text").digest("hex");
-    expect(appended()).toMatchObject({ arguments: { properties: { body: "new text" } }, base: { body: { sha256: hash } } });
+    expect(appended()).toMatchObject({ arguments: { properties: { body: "new text" } }, before: { body: { sha256: hash } } });
   });
 
   it("a relation update reads its target; the endpoint keys are dropped as on the immediate write", async () => {
@@ -381,21 +381,21 @@ describe("updates and deletes: the target and the base", () => {
     expect(appended()).toMatchObject({
       targetId: P1,
       arguments: { properties: { role: "lead" } },
-      base: { role: "dev" },
+      before: { role: "dev" },
     });
     expect(store.getRelation).toHaveBeenCalledWith("works_for", P1);
   });
 
-  it("a target minted by a staged create in the journal is accepted without a read and without a base", async () => {
+  it("a target minted by a staged create in the journal is accepted without a read and without a before", async () => {
     store.changesetStore.findMinted.mockResolvedValue(journalRow({ operation: "create_entity", mintedId: P1 }));
     await stageOn({ operation: "update_entity", typeKey: "person", id: P1, properties: { name: "B" } });
-    expect(appended()).toMatchObject({ targetId: P1, base: null });
+    expect(appended()).toMatchObject({ targetId: P1, before: null });
     expect(store.changesetStore.findMinted).toHaveBeenCalledWith(CS, P1);
     expect(store.getEntity).not.toHaveBeenCalled();
 
     store.changesetStore.append.mockClear();
     await stageOn({ operation: "delete_entity", typeKey: "person", id: P1 });
-    expect(appended()).toMatchObject({ operation: "delete_entity", targetId: P1, base: null, arguments: {} });
+    expect(appended()).toMatchObject({ operation: "delete_entity", targetId: P1, before: null, arguments: {} });
     expect(store.getEntity).not.toHaveBeenCalled();
   });
 
@@ -420,16 +420,16 @@ describe("updates and deletes: the target and the base", () => {
     expectNothingWritten();
   });
 
-  it("a delete of a stored target reads it and has no base", async () => {
+  it("a delete of a stored target reads it and has no before", async () => {
     store.getEntity.mockResolvedValue(makeEntity({ name: "Ann" }, "person", P1));
     await stageOn({ operation: "delete_entity", typeKey: "person", id: P1 });
-    expect(appended()).toMatchObject({ operation: "delete_entity", targetId: P1, base: null, mintedId: null });
+    expect(appended()).toMatchObject({ operation: "delete_entity", targetId: P1, before: null, mintedId: null });
   });
 });
 
-describe("baseOf", () => {
+describe("recordedValues", () => {
   it("keeps raw values, a stored null, and leaves absent keys out", () => {
-    expect(baseOf({ a: 1, b: null, c: { x: 1 } }, ["a", "b", "c", "d"], {})).toEqual({ a: 1, b: null, c: { x: 1 } });
+    expect(recordedValues({ a: 1, b: null, c: { x: 1 } }, ["a", "b", "c", "d"], {})).toEqual({ a: 1, b: null, c: { x: 1 } });
   });
 });
 
@@ -453,6 +453,7 @@ describe("read, unstage, discard", () => {
         name: "A",
         parent: null,
         before: null,
+        current: null,
         after: { name: "A" },
         markers: [],
       },
@@ -465,6 +466,7 @@ describe("read, unstage, discard", () => {
         createdAt: NOW,
         name: null,
         before: null,
+        current: null,
         after: null,
         markers: [],
       },

@@ -115,7 +115,8 @@ function stagedMode(kind: "create" | "update" | "delete", anchored: boolean, sta
     update:
       " It may name an id a staged create of the same changeset returned; that id is final. " +
       "Staging checks the type, the properties and that the target exists, and records the " +
-      "current values of the keys sent: if they change before the commit, the commit is rejected.",
+      "stored values of the keys sent as the write's before: if they change before the commit, " +
+      "the commit is rejected.",
     delete:
       " It may name an id a staged create of the same changeset returned; that id is final. " +
       "Staging checks the type and that the target exists; the parent rules are checked at " +
@@ -1183,13 +1184,14 @@ function registerChangesetTools(
         "Each write has seq (seqs may skip numbers), operation, type, id (the id a create " +
         "minted, or the target), arguments (as staged) and createdAt; entity writes add name, " +
         "a create its parent {id, name}; relation writes add from and to {id, name}; before (an " +
-        "update's live values of the keys it sets; null when the target is created in this " +
-        "changeset or gone), after (the staged values), and markers [{kind, message}]: what " +
-        "would reject the commit now, the hierarchy rules aside: drift (a value it replaces " +
-        "changed since staging), missing (its target is gone), dangling (an id neither stored " +
-        "nor created in this changeset), not_visible (this lens no longer shows its type), " +
-        "replay (a value this lens no longer accepts). Document values show as {document: " +
-        "true, length}. Everything is shown through this lens as it is now: what it hides is " +
+        "update's stored values of the keys it sets, as they were when it was staged; a document " +
+        "as its hash {sha256}), current (those values now; null when the target is gone), both " +
+        "null when the target is created in this changeset; after (the values it sets), and " +
+        "markers [{kind, message}]: what would reject the commit now, the hierarchy rules aside: " +
+        "drift (current differs from before), missing (its target is gone), dangling (an id " +
+        "neither stored nor created in this changeset), not_visible (this lens no longer shows " +
+        "its type), replay (a value this lens no longer accepts). Document values in current and " +
+        "after show as {document: true, length}. Everything is shown through this lens as it is now: what it hides is " +
         "left out, and a write of a type it no longer shows keeps only seq, operation, " +
         "createdAt and markers." +
         (stagedOnly ? "" : " To commit exactly what you read, pass version as expected_version to commit_changeset.") +

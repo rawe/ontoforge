@@ -110,7 +110,7 @@ function write(operation: string, typeKey: string, extra: Partial<Row> = {}) {
     mintedId: null,
     typeKey,
     targetId: null,
-    base: null,
+    before: null,
     ...extra,
   };
 }
@@ -293,11 +293,11 @@ describe("ChangesetStore", () => {
     expect(after.lastChangeAt.getTime()).toBeGreaterThan(before.lastChangeAt.getTime());
     expect(after.writeCount).toBe(1);
 
-    const base = { name: "T1", gone: null };
+    const recorded = { name: "T1", gone: null };
     expect(
       await changesets.append(
         cs.id,
-        write("update_entity", "task", { targetId: target, arguments: { name: "T1b" }, base }),
+        write("update_entity", "task", { targetId: target, arguments: { name: "T1b" }, before: recorded }),
       ),
     ).toBe(2);
     expect(await changesets.append(cs.id, write("delete_entity", "project", { targetId: ids.P2 }))).toBe(3);
@@ -310,11 +310,11 @@ describe("ChangesetStore", () => {
       mintedId: minted,
       typeKey: "task",
       targetId: null,
-      base: null,
+      before: null,
     });
-    // Plain JSON in and out: absent and null stay distinct in the base.
-    expect(page[1]).toMatchObject({ arguments: { name: "T1b" }, targetId: target, base });
-    expect(page[1]!.base).not.toHaveProperty("other");
+    // Plain JSON in and out: absent and null stay distinct in before.
+    expect(page[1]).toMatchObject({ arguments: { name: "T1b" }, targetId: target, before: recorded });
+    expect(page[1]!.before).not.toHaveProperty("other");
     expect(page[1]!.createdAt).toBeInstanceOf(Date);
     expect((await changesets.page(cs.id, 1, 1)).map((w) => w.seq)).toEqual([2]);
 

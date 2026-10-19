@@ -566,7 +566,7 @@ const STEPS: Step[] = [
   minted_id    uuid,
   type_key     text        NOT NULL,
   target_id    uuid,
-  base         jsonb,
+  before       jsonb,
   created_at   timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT changeset_write_pk PRIMARY KEY (changeset_id, seq)
 )`,

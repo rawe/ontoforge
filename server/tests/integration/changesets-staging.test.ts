@@ -55,7 +55,7 @@ async function graphCounts(): Promise<Row> {
 
 async function journal(cs: string): Promise<Row[]> {
   return sql(
-    `SELECT seq, operation, arguments, minted_id, type_key, target_id, base
+    `SELECT seq, operation, arguments, minted_id, type_key, target_id, before
        FROM changeset_write WHERE changeset_id = $1 ORDER BY seq`,
     [cs],
   );
@@ -208,20 +208,20 @@ describe("the six staged writes", () => {
       [7, "delete_relation", "assigned_to"],
     ]);
     // The create's ids are final and kept in the row; the update by the
-    // minted id has no base.
+    // minted id has no before.
     expect(rows[0]).toMatchObject({
       minted_id: t9,
       target_id: null,
-      base: null,
+      before: null,
       arguments: {
         properties: { name: "T9" },
         parentRelation: { type: "has_task", parentId: ids.P1, properties: { phase: "build" } },
         relationId: expect.any(String),
       },
     });
-    expect(rows[1]).toMatchObject({ target_id: t9, base: null, arguments: { properties: { name: "T9b" } } });
-    expect(rows[2]).toMatchObject({ target_id: ids.P2, base: { name: "P2" } });
-    expect(rows[3]).toMatchObject({ target_id: ids.T2, base: null, arguments: {} });
+    expect(rows[1]).toMatchObject({ target_id: t9, before: null, arguments: { properties: { name: "T9b" } } });
+    expect(rows[2]).toMatchObject({ target_id: ids.P2, before: { name: "P2" } });
+    expect(rows[3]).toMatchObject({ target_id: ids.T2, before: null, arguments: {} });
     expect(rows[4]).toMatchObject({ minted_id: relation.body.id, arguments: { fromEntityId: ids.T2, toEntityId: ids.Ben } });
 
     // The immediate data is unchanged.
@@ -240,17 +240,17 @@ describe("the six staged writes", () => {
     expect((await call("GET", `${url}?limit=501`)).status).toBe(422);
   });
 
-  it("the base holds exactly the patched keys: absent stays absent, a document is its hash", async () => {
+  it("before holds exactly the patched keys: absent stays absent, a document is its hash", async () => {
     const cs = (await start()).id as string;
     const url = `${ALL}/changesets/${cs}`;
     await call("PATCH", `${url}/entities/project/${ids.P1}`, { name: "P1 New", body: "new plan" });
     await call("PATCH", `${url}/entities/project/${ids.P2}`, { body: "first plan" });
     const rows = await journal(cs);
     const hash = createHash("sha256").update("the plan").digest("hex");
-    expect(rows[0]!.base).toEqual({ name: "P1", body: { sha256: hash } });
+    expect(rows[0]!.before).toEqual({ name: "P1", body: { sha256: hash } });
     expect(rows[0]!.arguments).toEqual({ properties: { name: "P1 New", body: "new plan" } });
-    // P2 holds no body: the key is absent from the base, not null.
-    expect(rows[1]!.base).toEqual({});
+    // P2 holds no body: the key is absent from before, not null.
+    expect(rows[1]!.before).toEqual({});
   });
 
   it("a missing target is 404 and a bad value 422 with the immediate write's fields; neither appends", async () => {

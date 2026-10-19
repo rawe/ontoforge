@@ -224,6 +224,9 @@ describe("storage version at boot", () => {
       /CONSTRAINT changeset_write_changeset_fk\s+REFERENCES changeset \(changeset_id\) ON DELETE CASCADE/,
     );
     expect(journal).toContain("CONSTRAINT changeset_write_pk PRIMARY KEY (changeset_id, seq)");
+    // A staged update's recorded values are its `before`.
+    expect(journal).toMatch(/^\s+before\s+jsonb,$/m);
+    expect(journal).not.toMatch(/\bbase\b/);
     // One FK each, no FK to anchor, no CHECK.
     for (const table of [changeset, journal]) {
       expect(table.match(/REFERENCES/g)).toHaveLength(1);

@@ -8,6 +8,8 @@
  * after, markers, and nothing a scoped lens hides.
  */
 
+import { createHash } from "node:crypto";
+
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -300,11 +302,11 @@ describe("the list (V17, V41)", () => {
 
     // The review read of the same changeset names no hidden type either.
     const read = (await view(cs, OPS)).body;
-    expect(read.writes[0]).toMatchObject({ seq: 1, type: null, id: null, before: null, after: null });
+    expect(read.writes[0]).toMatchObject({ seq: 1, type: null, id: null, before: null, current: null, after: null });
     expect(read.writes[0].markers).toEqual([
       { kind: "not_visible", message: "The type of this write is no longer visible through lens 'ops'" },
     ]);
-    expect(read.writes[1]).toMatchObject({ type: "customer", name: "BETA", before: { name: "BETA" }, after: { name: "BETA Ops" } });
+    expect(read.writes[1]).toMatchObject({ type: "customer", name: "BETA", before: { name: "BETA" }, current: { name: "BETA" }, after: { name: "BETA Ops" } });
     const text = JSON.stringify(read);
     for (const hidden of ["project", "P2 Ops", e.P2]) expect(text).not.toContain(hidden);
   });
@@ -313,7 +315,7 @@ describe("the list (V17, V41)", () => {
 describe("the review read (V41)", () => {
   beforeAll(fresh, 60_000);
 
-  it("names, before → after, and the drift, dangling and missing markers", async () => {
+  it("names, before, current and after, and the drift, dangling and missing markers", async () => {
     const cs = await start();
     await staged("PATCH", ALL, cs, `entities/project/${e.P2}`, { name: "P2 Website" }); // 1: drift
     const p5 = (
@@ -335,7 +337,15 @@ describe("the review read (V41)", () => {
     const bySeq = Object.fromEntries((read.writes as Row[]).map((w) => [w.seq, w]));
     expect(Object.keys(bySeq).map(Number)).toEqual([1, 3, 4, 5, 6, 7]);
 
-    expect(bySeq[1]).toMatchObject({ type: "project", id: e.P2, name: "P2 Mobile", before: { name: "P2 Mobile" }, after: { name: "P2 Website" } });
+    // Drift: current is no longer before, the value the write was staged against.
+    expect(bySeq[1]).toMatchObject({
+      type: "project",
+      id: e.P2,
+      name: "P2 Mobile",
+      before: { name: "P2" },
+      current: { name: "P2 Mobile" },
+      after: { name: "P2 Website" },
+    });
     expect(bySeq[1].markers).toEqual([
       { kind: "drift", message: `Entity '${e.P2}' changed since this write was staged; unstage and restage it` },
     ]);
@@ -348,14 +358,17 @@ describe("the review read (V41)", () => {
       from: { id: e.P1, name: "P1" },
       to: { id: e.T3, name: "T3" },
       before: { phase: "build" },
+      current: { phase: "build" },
       after: { phase: "test" },
       markers: [],
     });
-    expect(bySeq[6]).toMatchObject({ name: null, before: null, after: { name: "Ben B" } });
+    // Gone since staging: before stays, there is no current.
+    expect(bySeq[6]).toMatchObject({ name: null, before: { name: "Ben" }, current: null, after: { name: "Ben B" } });
     expect(bySeq[6].markers.map((m: Row) => m.kind)).toEqual(["missing"]);
     expect(bySeq[7]).toMatchObject({
       name: "T2",
-      before: { notes: { document: true, length: "Notes of T2".length } },
+      before: { notes: { sha256: createHash("sha256").update("Notes of T2", "utf8").digest("hex") } },
+      current: { notes: { document: true, length: "Notes of T2".length } },
       after: { notes: { document: true, length: "New notes".length } },
     });
 
@@ -371,7 +384,7 @@ describe("the review read (V41)", () => {
     await staged("PATCH", NO, cs, `entities/task/${e.T4}`, { name: "T4 b" });
     await staged("POST", NO, cs, "relations/has_subtask", { fromEntityId: e.T4, toEntityId: e.T5 });
     const read = (await view(cs, NO)).body;
-    expect(read.writes[0]).toMatchObject({ name: "T4", before: { name: "T4" }, after: { name: "T4 b" } });
+    expect(read.writes[0]).toMatchObject({ name: "T4", before: { name: "T4" }, current: { name: "T4" }, after: { name: "T4 b" } });
     expect(read.writes[1]).toMatchObject({ from: { id: e.T4, name: "T4" }, to: { id: e.T5, name: "T5" } });
     const text = JSON.stringify(read);
     for (const hidden of ["P2", "project", "phase"]) expect(text).not.toContain(hidden);

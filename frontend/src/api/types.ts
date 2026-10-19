@@ -280,8 +280,12 @@ export interface StagedWriteView {
   /** Relation writes: the two ends. */
   from?: ChangesetEnd | null
   to?: ChangesetEnd | null
-  /** Updates of a stored target: the live values of the patched keys. */
+  /** Updates of a stored target: the stored values of the patched keys when
+   * it was staged; a document value is its hash `{sha256}`. */
   before: Record<string, JsonValue> | null
+  /** Updates of a stored target: those values now; null when it is gone.
+   * Drift is `current` ≠ `before`. */
+  current: Record<string, JsonValue> | null
   /** Creates and updates: the staged values. */
   after: Record<string, JsonValue> | null
   markers: ChangesetMarker[]

@@ -40,7 +40,7 @@ const BASE_COLS = `c.changeset_id, c.lens_id, c.anchor_key, c.version, c.note, c
 const COLS = `${BASE_COLS},
        (SELECT count(*)::int FROM changeset_write w WHERE w.changeset_id = c.changeset_id) AS write_count`;
 
-const WRITE_COLS = `seq, operation, arguments, minted_id, type_key, target_id, base, created_at`;
+const WRITE_COLS = `seq, operation, arguments, minted_id, type_key, target_id, before, created_at`;
 
 /** The version bump and last change of every mutation. */
 const BUMP = `version = c.version + 1, last_change_at = now()`;
@@ -78,7 +78,7 @@ function toWrite(row: Row): ChangesetWriteRecord {
     mintedId: row.minted_id as string | null,
     typeKey: row.type_key as string,
     targetId: row.target_id as string | null,
-    base: row.base as Row | null,
+    before: row.before as Row | null,
     createdAt: row.created_at as Date,
   };
 }
@@ -231,7 +231,7 @@ export class PostgresChangesetStore implements ChangesetStore {
     return this.mutate(id, async (querier) => {
       const result = await querier.query(
         `INSERT INTO changeset_write
-                (changeset_id, seq, operation, arguments, minted_id, type_key, target_id, base)
+                (changeset_id, seq, operation, arguments, minted_id, type_key, target_id, before)
          SELECT $1,
                 GREATEST(c.version,
                          COALESCE((SELECT max(seq) FROM changeset_write WHERE changeset_id = $1), 0) + 1),
@@ -245,7 +245,7 @@ export class PostgresChangesetStore implements ChangesetStore {
           write.mintedId,
           write.typeKey,
           write.targetId,
-          write.base === null ? null : JSON.stringify(write.base),
+          write.before === null ? null : JSON.stringify(write.before),
         ],
       );
       const seq = result.rows[0]?.seq as number | undefined;

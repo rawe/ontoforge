@@ -199,7 +199,7 @@ describe("a whole round through MCP alone (V4, V7, V28)", () => {
       [6, "update_relation", "has_task"],
       [7, "delete_relation", "mentors"],
     ]);
-    expect(read.writes[2]).toMatchObject({ before: { name: "P2" }, after: { name: "P2 Website" }, markers: [] });
+    expect(read.writes[2]).toMatchObject({ before: { name: "P2" }, current: { name: "P2" }, after: { name: "P2 Website" }, markers: [] });
     const page = await ok(client, "get_changeset", { changeset_id: cs, offset: 5, limit: 1000 });
     expect(page).toMatchObject({ offset: 5, limit: 500 });
     expect(page.writes.map((w: Row) => w.seq)).toEqual([6, 7]);

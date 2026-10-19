@@ -90,6 +90,10 @@ export function valueText(value: JsonValue | undefined): string {
     // The review read stubs document values, as the entity reads do.
     return `document (${String(value.length)} characters)`
   }
+  if (typeof value === 'object' && !Array.isArray(value) && typeof value.sha256 === 'string') {
+    // A document in `before` is the hash it was staged against.
+    return 'document'
+  }
   return typeof value === 'object' ? JSON.stringify(value) : String(value)
 }
 
@@ -114,20 +118,26 @@ export function targetText(write: StagedWriteView): string {
 
 /**
  * The change column: `before → after` per key for updates (only the staged
- * value when the target was staged by this changeset or is gone), the set
- * values for creates, with a create's parent, and "—" for deletes.
+ * value when the target was created by this changeset), with the current
+ * value where it differs on a drifted write; the set values for creates,
+ * with a create's parent, and "—" for deletes.
  */
 export function changeText(write: StagedWriteView): string {
   if (write.type === null) return 'Not visible through this lens'
   if (write.operation.startsWith('delete_')) return '—'
   const after = write.after ?? {}
   if (write.operation.startsWith('update_')) {
+    const before = write.before
+    if (before === null) return valuesText(after)
+    const drifted = write.markers.some((marker) => marker.kind === 'drift')
     return Object.entries(after)
-      .map(([key, value]) =>
-        write.before === null
-          ? `${key}: ${valueText(value)}`
-          : `${key}: ${valueText(write.before[key])} → ${valueText(value)}`,
-      )
+      .map(([key, value]) => {
+        const change = `${key}: ${valueText(before[key])} → ${valueText(value)}`
+        const current = write.current?.[key]
+        return drifted && current !== undefined && JSON.stringify(current) !== JSON.stringify(before[key])
+          ? `${change} (now ${valueText(current)})`
+          : change
+      })
       .join('; ')
   }
   const parts = Object.keys(after).length === 0 ? [] : [valuesText(after)]

@@ -285,8 +285,10 @@ nothing. Committing a submitted changeset is approving it; there is no approved 
 submitted one is frozen and handed over for review. **Submit** freezes it, optionally with
 a note; **unsubmit** makes it a draft again, with a required note, whoever calls it.
 
-**Base** — the stored values of the keys a staged update sends, as they were when it was
-staged. **Drift** — a change of the base since then, which rejects the commit.
+**Before, current, after** — the three values of a staged update: **before**, the stored
+values of the keys it sends as they were when it was staged; **current**, those values
+now; **after**, the values it sets. **Drift** — current differing from before, which
+rejects the commit.
 
 **Staged-only** — an anchor's flag: through its URL every write must be staged, and a
 changeset cannot be committed.

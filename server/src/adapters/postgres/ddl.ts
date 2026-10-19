@@ -297,7 +297,7 @@ export function ontologyDdlStatements(): string[] {
   minted_id    uuid,                   -- the id a staged create got
   type_key     text        NOT NULL,
   target_id    uuid,
-  base         jsonb,                  -- a staged update's stored values of its patched keys
+  before       jsonb,                  -- a staged update's stored values of its patched keys, at staging
   created_at   timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT changeset_write_pk PRIMARY KEY (changeset_id, seq)
 )`,

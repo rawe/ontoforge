@@ -47,6 +47,7 @@ const write = (over: Partial<StagedWriteView>): StagedWriteView => ({
   arguments: {},
   createdAt: '2026-10-19T10:00:00.000Z',
   before: null,
+  current: null,
   after: null,
   markers: [],
   ...over,
@@ -133,11 +134,17 @@ test('targetText: entity names, new creates, relation ends, ids when unnamed', (
 
 test('changeText: before → after for updates, set values for creates, — for deletes', () => {
   assert.equal(
-    changeText(write({ before: { name: 'P2 Mobile' }, after: { name: 'P2 Website' } })),
-    'name: "P2 Mobile" → "P2 Website"',
+    changeText(write({ before: { name: 'P2' }, current: { name: 'P2' }, after: { name: 'P2 Website' } })),
+    'name: "P2" → "P2 Website"',
   )
-  // A target this changeset creates has no live values.
+  // A target this changeset creates has no before.
   assert.equal(changeText(write({ before: null, after: { name: 'T9 b' } })), 'name: "T9 b"')
+  // A target gone since staging keeps its before.
+  assert.equal(changeText(write({ before: { name: 'P2' }, after: { name: 'x' } })), 'name: "P2" → "x"')
+  assert.equal(
+    changeText(write({ before: { body: { sha256: 'ab' } }, current: { body: { document: true, length: 3 } }, after: { body: { document: true, length: 5 } } })),
+    'body: document → document (5 characters)',
+  )
   assert.equal(
     changeText(
       write({
@@ -163,6 +170,38 @@ test('changeText: before → after for updates, set values for creates, — for 
   assert.equal(changeText(write({ operation: 'create_relation', type: 'has_task', after: {} })), '—')
   assert.equal(changeText(write({ operation: 'delete_entity' })), '—')
   assert.equal(changeText(write({ type: null })), 'Not visible through this lens')
+})
+
+test('changeText: a drifted update also shows the current value of each key that changed', () => {
+  const drift = [{ kind: 'drift', message: "Entity 'p2' changed since this write was staged; unstage and restage it" }]
+  assert.equal(
+    changeText(
+      write({
+        before: { name: 'P3 Renamed', code: 'X' },
+        current: { name: 'P3 Renamed from human', code: 'X' },
+        after: { name: 'P3 Second', code: 'Y' },
+        markers: drift,
+      }),
+    ),
+    'name: "P3 Renamed" → "P3 Second" (now "P3 Renamed from human"); code: "X" → "Y"',
+  )
+  // A document's before is a hash: on drift its current value is shown.
+  assert.equal(
+    changeText(
+      write({
+        before: { body: { sha256: 'ab' } },
+        current: { body: { document: true, length: 9 } },
+        after: { body: { document: true, length: 5 } },
+        markers: drift,
+      }),
+    ),
+    'body: document → document (5 characters) (now document (9 characters))',
+  )
+  // Without a drift marker the current value is not shown.
+  assert.equal(
+    changeText(write({ before: { name: 'A' }, current: { name: 'B' }, after: { name: 'C' } })),
+    'name: "A" → "C"',
+  )
 })
 
 test('markerLabel names the markers', () => {

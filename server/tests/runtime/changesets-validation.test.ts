@@ -80,14 +80,14 @@ function row(seq: number, overrides: Partial<ChangesetWriteRecord>): ChangesetWr
     mintedId: null,
     typeKey: "person",
     targetId: null,
-    base: null,
+    before: null,
     createdAt: NOW,
     ...overrides,
   };
 }
 
-const rename = (seq: number, id: string, name: string, base: Row | null): ChangesetWriteRecord =>
-  row(seq, { operation: "update_entity", typeKey: "person", targetId: id, arguments: { properties: { name } }, base });
+const rename = (seq: number, id: string, name: string, before: Row | null): ChangesetWriteRecord =>
+  row(seq, { operation: "update_entity", typeKey: "person", targetId: id, arguments: { properties: { name } }, before });
 const deleteOf = (seq: number, type: string, id: string): ChangesetWriteRecord =>
   row(seq, { operation: "delete_entity", typeKey: type, targetId: id, arguments: {} });
 const relate = (seq: number, type: string, id: string, from: string, to: string): ChangesetWriteRecord =>
@@ -190,7 +190,7 @@ describe("the lock-free pass (step 0b)", () => {
     const result = await pass(
       [
         deleteOf(1, "department", D1),
-        row(2, { operation: "update_entity", typeKey: "person", targetId: GHOST, arguments: { properties: { age: 3 } }, base: {} }),
+        row(2, { operation: "update_entity", typeKey: "person", targetId: GHOST, arguments: { properties: { age: 3 } }, before: {} }),
         row(3, {
           operation: "create_entity",
           typeKey: "person",
@@ -214,7 +214,7 @@ describe("the lock-free pass (step 0b)", () => {
 
   it("replay: a value the lens no longer accepts, as the replay would meet it", async () => {
     const result = await pass([
-      row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { age: "old" } }, base: {} }),
+      row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { age: "old" } }, before: {} }),
     ]);
     expect(result.faults).toHaveLength(1);
     expect(result.faults[0]).toMatchObject({ seq: 1, kind: "replay" });
@@ -228,7 +228,7 @@ describe("the lock-free pass (step 0b)", () => {
   });
 
   it("missing: a relation update target stored at staging is gone; stored, it passes", async () => {
-    const update = row(1, { operation: "update_relation", typeKey: "works_for", targetId: R1, arguments: { properties: { role: "lead" } }, base: { role: "dev" } });
+    const update = row(1, { operation: "update_relation", typeKey: "works_for", targetId: R1, arguments: { properties: { role: "lead" } }, before: { role: "dev" } });
     expect((await pass([update])).faults).toEqual([{ seq: 1, kind: "missing", message: `Relation '${R1}' no longer exists` }]);
     store.getRelation.mockResolvedValue(makeRelation({ role: "dev" }, { relationId: R1 }));
     expect((await pass([update])).faults).toEqual([]);
@@ -279,10 +279,10 @@ describe("the lock-free pass (step 0b)", () => {
     });
 
     it("absent and null differ", async () => {
-      // Pat stores `email: null`; a base staged while the key was absent drifts.
-      const write = row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { email: "p@x" } }, base: {} });
+      // Pat stores `email: null`; a before staged while the key was absent drifts.
+      const write = row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { email: "p@x" } }, before: {} });
       expect((await pass([write])).faults.map((f) => f.kind)).toEqual(["drift"]);
-      expect((await pass([{ ...write, base: { email: null } }])).faults).toEqual([]);
+      expect((await pass([{ ...write, before: { email: null } }])).faults).toEqual([]);
     });
 
     it("a document value is compared by its hash", async () => {
@@ -296,7 +296,7 @@ describe("the lock-free pass (step 0b)", () => {
       });
       store.getFullSchemaWithLensInclusions.mockResolvedValue(full);
       stored[PAT]!.bio = "old text";
-      const write = row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { bio: "new" } }, base: { bio: documentHash("old text") } });
+      const write = row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { bio: "new" } }, before: { bio: documentHash("old text") } });
       expect((await pass([write])).faults).toEqual([]);
       invalidateLoadedSchemaCache();
       stored[PAT]!.bio = "other text";
@@ -443,7 +443,7 @@ describe("anchor coverage (V8, V42)", () => {
   });
 
   it("covered before and after: commits; the anchor is read inside the transaction", async () => {
-    journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, base: {} })]);
+    journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
     expect(await commit()).toMatchObject({ committed: 1 });
     expect(store.anchorStore.getAnchor).toHaveBeenCalledWith("agent-a");
     expect(store.anchorStore.getAnchor.mock.invocationCallOrder[0]!).toBeGreaterThan(
@@ -453,7 +453,7 @@ describe("anchor coverage (V8, V42)", () => {
 
   it("not covered before: a touched entity outside the subtree", async () => {
     parents[D1] = [link("belongs_to", R1, BETA, D1)];
-    journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, base: {} })]);
+    journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
     expect(await violations(commit())).toEqual([
       { seq: 1, kind: "not_covered", message: `Entity '${D1}' is not under anchor 'agent-a'` },
     ]);
@@ -464,7 +464,7 @@ describe("anchor coverage (V8, V42)", () => {
     stored[NEW] = makeEntity({ name: "New" }, "department", NEW);
     journal([
       department(1, NEW, BETA, R1),
-      row(2, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P" } }, base: { name: "Pat" } }),
+      row(2, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P" } }, before: { name: "Pat" } }),
     ]);
     expect(await violations(commit())).toEqual([
       { seq: 1, kind: "not_covered", message: `Entity '${NEW}' would not be under anchor 'agent-a' after the commit` },
@@ -473,7 +473,7 @@ describe("anchor coverage (V8, V42)", () => {
 
   it("a re-point since staging makes the writes outside the new subtree violations", async () => {
     store.anchorStore.getAnchor.mockResolvedValue(anchorAt({ type: "company", id: BETA }));
-    journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, base: {} })]);
+    journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
     expect(await violations(commit())).toEqual([
       { seq: 1, kind: "not_covered", message: `Entity '${D1}' is not under anchor 'agent-a'` },
     ]);
@@ -488,7 +488,7 @@ describe("anchor coverage (V8, V42)", () => {
   });
 
   it("anchor_gone, anchor_dangling, hidden: one violation on seq 0, no coverage checked", async () => {
-    journal([row(3, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P" } }, base: { name: "Pat" } })]);
+    journal([row(3, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P" } }, before: { name: "Pat" } })]);
     store.anchorStore.getAnchor.mockResolvedValue(null);
     expect(await violations(commit())).toEqual([
       { seq: 0, kind: "anchor_gone", message: "Anchor 'agent-a' no longer exists, so this changeset cannot be committed" },
@@ -514,7 +514,7 @@ describe("anchor coverage (V8, V42)", () => {
   it("an unanchored anchor guards nothing", async () => {
     store.anchorStore.getAnchor.mockResolvedValue(anchorAt(null, false));
     parents[D1] = [link("belongs_to", R1, BETA, D1)];
-    journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, base: {} })]);
+    journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
     expect(await commit()).toMatchObject({ committed: 1 });
   });
 });

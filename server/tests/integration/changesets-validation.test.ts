@@ -223,7 +223,7 @@ describe("missing and dangling: ids the journal names (V6)", () => {
 describe("drift (V10, V19)", () => {
   beforeAll(fresh, 60_000);
 
-  it("a live change of a base key rejects; unstage and restage commits", async () => {
+  it("a live change of a key in before rejects; unstage and restage commits", async () => {
     const cs = await start();
     await staged("PATCH", ALL, cs, `entities/project/${e.P2}`, { name: "P2 Website" });
     expect((await call("PATCH", `${ALL}/entities/project/${e.P2}`, { name: "P2 Mobile" })).status).toBe(200);
@@ -249,7 +249,7 @@ describe("drift (V10, V19)", () => {
     expect(await name("project", e.P1)).toBe("P1 X");
   });
 
-  it("a staged delete has no base: a live change of its target does not reject it", async () => {
+  it("a staged delete has no before: a live change of its target does not reject it", async () => {
     const cs = await start();
     await staged("DELETE", ALL, cs, `entities/task/${e.T2a}`);
     expect((await call("PATCH", `${ALL}/entities/task/${e.T2a}`, { name: "T2a renamed" })).status).toBe(200);

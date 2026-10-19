@@ -51,9 +51,9 @@ its [parent relation](instance-data.md#the-create-with-a-parent-relation).
 - **Document values only whole.** A document property is staged as a whole new value,
   through a create or an update. [Partial document writes](documents.md#partial-writes)
   cannot be staged.
-- **The base.** A staged update of a stored entity or relation records the stored values of
-  the keys it sends, an absent key distinct from null, as its base. An update of an object
-  this changeset creates has no base, and neither has a delete.
+- **Before.** A staged update of a stored entity or relation records the stored values of
+  the keys it sends, an absent key distinct from null, as its before. An update of an object
+  this changeset creates has no before, and neither has a delete.
 - **What staging checks:** that the changeset is a draft, that the URL's anchor is neither
   dangling nor at an entity the lens hides ([below](#binding)), that the type is visible
   through the lens, the property values exactly as the immediate write does — every fault
@@ -79,8 +79,8 @@ checked.
    ontology at a time: a second answers a conflict at once rather than wait. Immediate
    writes take no such lock. A changeset changed since the pass answers a conflict.
 3. **Drift and the anchor, under the lock.** Every stored target of an update or delete is
-   locked and its base compared again; on an anchored changeset the anchor is read afresh
-   and the hold judged before the replay.
+   locked and its current values compared with its before again; on an anchored changeset
+   the anchor is read afresh and the hold judged before the replay.
 4. **The replay**, by seq, through the same store writes as the immediate path, each with
    its search work. A delete whose target is already gone counts as done and is listed in
    the answer as already gone. A write that cannot be replayed stops the replay.
@@ -100,7 +100,7 @@ total.
 | `replay` | A value the lens no longer accepts, or a write that could not be replayed |
 | `missing` | The stored target of an update is gone |
 | `dangling` | An id the write names is neither stored nor created by a staged write still in the changeset |
-| `drift` | The stored values of an update's patched keys differ from its base |
+| `drift` | The current values of an update's patched keys differ from its before |
 | `has_children` | A deleted entity still has children that the changeset neither deleted nor moved |
 | `endpoint_type` | A relation end or a parent exists with the wrong entity type |
 | `two_parents`, `cycle` | A parent link the changeset creates breaks the [parent rules](instance-data.md#the-parent-rules) |
@@ -114,8 +114,9 @@ once over the end state, so a plan may pass through states that break them.
 
 ### Drift
 
-A changed base rejects the commit: a staged rename of P2 from "P2", committed after a person
-renamed P2 to "P2 Mobile", is `drift`, and nothing is persisted. A value changed and changed
+Current values that differ from before reject the commit: a staged rename of P2 has
+before "P2" and after "P2 Website"; once a person renames P2 to "P2 Mobile", its current is
+"P2 Mobile", which is `drift`, and the commit persists nothing. A value changed and changed
 back is no drift, and a key the write does not send is not compared. The fix is to unstage
 and restage every write on that object, in order. Under the lock the targets are compared
 again, so a change that lands while the commit waits is caught too.
@@ -169,12 +170,14 @@ discarded, so one that vanished was committed — or its lens was deleted.
   submitted first, then by last change, each with its state, version, note, anchor,
   counts per operation, and the type keys it names that the lens shows, with a count of
   the others;
-- **the writes by seq**, paged, each with the names of what it touches, the live values of
-  an update's keys beside the staged ones, and the lock-free pass's faults on it as
-  markers: `drift`, `dangling`, `missing`, `not_visible`, `replay`.
+- **the writes by seq**, paged, each with the names of what it touches, an update's
+  before, current and after values of the keys it sends, a create's values, and the
+  lock-free pass's faults on it as markers: `drift`, `dangling`, `missing`, `not_visible`,
+  `replay`.
 
 A write whose type the lens no longer shows is reduced to its seq, operation, time and
-markers; a property the lens hides is left out; a document value is shown by its length.
+markers; a property the lens hides is left out; a document value is shown by its length,
+and in before by its hash.
 
 ## Staged-only
 

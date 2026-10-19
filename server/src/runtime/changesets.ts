@@ -25,9 +25,11 @@
  *   ends and parent ends are not checked here.
  * - **Ids (V3).** A create mints its final id now, and with a parent
  *   relation the relation's id too; both are kept in the row.
- * - **Base (V10).** A staged update of a stored target records the stored
- *   values of exactly its patched keys, raw: an absent key stays absent,
- *   distinct from null, and a document value is kept as its hash.
+ * - **Before (V10).** A staged update of a stored target records the
+ *   stored values of exactly its patched keys as its `before`, raw: an
+ *   absent key stays absent, distinct from null, and a document value is
+ *   kept as its hash. Drift is the stored values now (`current`) differing
+ *   from it.
  * - **Expiry (V24, R3).** A draft changeset idle for 7 days is gone: checked
  *   on every access, where it is deleted and answers not found, and swept
  *   on start and on list. A submitted changeset never expires.
@@ -161,8 +163,13 @@ export interface StagedWriteView {
   /** Relation writes: the two ends. */
   from?: EndView | null;
   to?: EndView | null;
-  /** Updates of a stored target: the live values of the patched keys. */
+  /** Updates of a stored target: the stored values of the patched keys as
+   * they were when it was staged, null for a key the target lacked; a
+   * document value is its hash. */
   before: Row | null;
+  /** Updates of a stored target: the stored values of the patched keys
+   * now; null when the target is gone. Drift is `current` ≠ `before`. */
+  current: Row | null;
   /** Creates and updates: the staged values. */
   after: Row | null;
   /** The lock-free pass's faults on this write: drift, dangling, not
@@ -332,26 +339,28 @@ function patchOf(write: UpdateArgs): Row {
   );
 }
 
-/** How a document value is kept in a base: its hash, not its text. */
+/** How a document value is kept in a staged update's `before`: its hash,
+ * not its text. */
 export function documentHash(text: string): Row {
   return { sha256: createHash("sha256").update(text, "utf8").digest("hex") };
 }
 
 /**
- * The base of a staged update (V10): the stored values of exactly `keys`,
- * raw as the store reads them without definitions. A key the target does
- * not hold stays absent, distinct from a stored null; a document value is
- * its hash (`documentHash`).
+ * The stored values of exactly `keys` as a staged update records them in
+ * its `before` and drift compares them (V10): raw as the store reads them
+ * without definitions. A key the target does not hold stays absent,
+ * distinct from a stored null; a document value is its hash
+ * (`documentHash`).
  */
-export function baseOf(stored: Row, keys: string[], propertyDefs: Record<string, PropertyDef>): Row {
+export function recordedValues(stored: Row, keys: string[], propertyDefs: Record<string, PropertyDef>): Row {
   const documents = documentPropertyKeys(propertyDefs);
-  const base: Row = {};
+  const values: Row = {};
   for (const key of keys) {
     if (!Object.hasOwn(stored, key)) continue;
     const value = stored[key];
-    base[key] = documents.has(key) && typeof value === "string" ? documentHash(value) : value;
+    values[key] = documents.has(key) && typeof value === "string" ? documentHash(value) : value;
   }
-  return base;
+  return values;
 }
 
 /** Whether `id` was minted by a staged create of this kind and type that
@@ -393,7 +402,7 @@ async function journalRow(
   write: StagedWrite,
   store: RuntimeStore,
 ): Promise<NewChangesetWrite> {
-  const row = { operation: write.operation, typeKey: write.typeKey, mintedId: null, targetId: null, base: null };
+  const row = { operation: write.operation, typeKey: write.typeKey, mintedId: null, targetId: null, before: null };
   switch (write.operation) {
     case "create_entity": {
       const ids = { entityId: randomUUID(), relationId: randomUUID() };
@@ -434,7 +443,7 @@ async function journalRow(
         ...row,
         targetId: write.id,
         arguments: { properties: patch },
-        base: stored === null ? null : baseOf(stored, Object.keys(patch), defs),
+        before: stored === null ? null : recordedValues(stored, Object.keys(patch), defs),
       };
     }
     case "delete_entity": {
@@ -473,7 +482,7 @@ async function journalRow(
         ...row,
         targetId: write.id,
         arguments: { properties: patch },
-        base: stored === null ? null : baseOf(stored, Object.keys(patch), defs),
+        before: stored === null ? null : recordedValues(stored, Object.keys(patch), defs),
       };
     }
     case "delete_relation": {
@@ -520,8 +529,8 @@ export async function stage(
 
 /**
  * The review read (R7, V41): the changeset and one page of its writes by
- * seq, each with names resolved, `before` → `after`, and the markers the
- * lock-free pass finds on it.
+ * seq, each with names resolved, `before`, `current` and `after`, and
+ * the markers the lock-free pass finds on it.
  */
 export async function getChangeset(
   lensKey: string,
@@ -1016,13 +1025,13 @@ function valueFaults(loaded: LoadedSchema, write: ChangesetWriteRecord): string 
   }
 }
 
-/** Whether the stored values of a staged update's patched keys differ
- * from its base (V10): raw, absent distinct from null, a document by its
- * hash. */
+/** Whether the stored values of a staged update's patched keys now differ
+ * from its `before` (V10): raw, absent distinct from null, a document by
+ * its hash. */
 function drifted(loaded: LoadedSchema, write: ChangesetWriteRecord, stored: Row): boolean {
   const types = write.operation === "update_entity" ? loaded.full.entityTypes : loaded.full.relationTypes;
   const keys = Object.keys((write.arguments.properties ?? {}) as Row);
-  return !isDeepStrictEqual(write.base, baseOf(stored, keys, types[write.typeKey]?.properties ?? {}));
+  return !isDeepStrictEqual(write.before, recordedValues(stored, keys, types[write.typeKey]?.properties ?? {}));
 }
 
 function driftFault(write: ChangesetWriteRecord): Violation {
@@ -1048,7 +1057,7 @@ function driftFault(write: ChangesetWriteRecord): Violation {
  *   still in the journal: the target of an update minted by a create
  *   since unstaged (V6), a relation end or a parent;
  * - `drift`: a stored update target's values of the patched keys differ
- *   from the base (V10).
+ *   from its `before` (V10).
  *
  * A delete whose target is gone is no fault: the replay counts it as done
  * (V20). Submit and the review read reuse the pass.
@@ -1109,11 +1118,11 @@ export async function lockFreePass(
             : await store.getRelation(write.typeKey, target!);
         const what = kind === "entity" ? "Entity" : "Relation";
         if (current === null) {
-          // A stored target had a base at staging; a minted one had none.
-          if (write.base !== null) fault("missing", `${what} '${target}' no longer exists`);
+          // A stored target had a `before` at staging; a minted one had none.
+          if (write.before !== null) fault("missing", `${what} '${target}' no longer exists`);
           else if (kind === "entity") unknown(target!);
           else fault("dangling", `Relation '${target}' is neither stored nor created by a write in this changeset`);
-        } else if (write.base !== null && drifted(loaded, write, current)) {
+        } else if (write.before !== null && drifted(loaded, write, current)) {
           faults.push(driftFault(write));
         }
         break;
@@ -1163,10 +1172,11 @@ function shownArguments(loaded: LoadedSchema, write: ChangesetWriteRecord, prope
 
 /**
  * One page of staged writes as the review shows them (V41): names
- * resolved, `before` → `after`, and the markers of the lock-free pass,
- * which runs over the whole journal because a write's ids may be minted
- * anywhere in it. The stored entities the page names come in one batched
- * read; a stored relation target is read once per write. Through the lens:
+ * resolved, `before`, `current` and `after`, and the markers of the
+ * lock-free pass, which runs over the whole journal because a write's ids
+ * may be minted anywhere in it. The stored entities the page names come in
+ * one batched read; a stored relation target is read once per write.
+ * Through the lens:
  * a hidden type keeps only seq, operation and markers, and hidden
  * properties and names are not returned.
  */
@@ -1208,7 +1218,7 @@ async function reviewPage(
     for (const id of entityRefs(write)) ids.add(id);
     for (const id of relationEnds.get(write.seq) ?? []) ids.add(id);
   }
-  // Raw rows: the name property is a string, and `before` takes raw values.
+  // Raw rows: the name property is a string, and `current` takes raw values.
   const rows = await store.getEntitiesByIds([...ids], {});
 
   const nameOf = (id: string): string | null => {
@@ -1233,6 +1243,7 @@ async function reviewPage(
       arguments: {},
       createdAt: write.createdAt,
       before: null,
+      current: null,
       after: null,
       markers: markers.get(write.seq) ?? [],
     };
@@ -1246,17 +1257,19 @@ async function reviewPage(
     if (write.operation.startsWith("create_") || write.operation.startsWith("update_")) {
       view.after = shownValues(staged, type.properties);
     }
-    if (write.operation.startsWith("update_") && write.base !== null) {
-      // A stored target: its live values, unless it is gone (or now of
-      // another type).
-      const live = isEntity
+    if (write.operation.startsWith("update_") && write.before !== null) {
+      // A stored target: its values as staged against, and its values now,
+      // unless it is gone (or now of another type).
+      const keys = Object.keys(staged).filter((key) => Object.hasOwn(type.properties, key));
+      const recorded = write.before;
+      view.before = Object.fromEntries(keys.map((key) => [key, recorded[key] ?? null]));
+      const stored = isEntity
         ? rows[id]?._entityTypeKey === write.typeKey
           ? rows[id]
           : undefined
         : storedRelations.get(write.seq);
-      if (live !== undefined) {
-        const keys = Object.keys(staged).filter((key) => Object.hasOwn(type.properties, key));
-        view.before = shownValues(Object.fromEntries(keys.map((key) => [key, live[key] ?? null])), type.properties);
+      if (stored !== undefined) {
+        view.current = shownValues(Object.fromEntries(keys.map((key) => [key, stored[key] ?? null])), type.properties);
       }
     }
     if (isEntity) {
@@ -1286,7 +1299,7 @@ async function driftUnderLock(loaded: LoadedSchema, pass: LockFreePass, bound: R
   const locked = new Map((await bound.lockTargets(pass.targets)).map((row) => [`${row.kind} ${row.id}`, row] as const));
   const violations: Violation[] = [];
   for (const write of pass.writes) {
-    if (write.base === null || (write.operation !== "update_entity" && write.operation !== "update_relation")) continue;
+    if (write.before === null || (write.operation !== "update_entity" && write.operation !== "update_relation")) continue;
     const row = locked.get(`${write.operation === "update_entity" ? "entity" : "relation"} ${write.targetId}`);
     if (row !== undefined && row.typeKey === write.typeKey && drifted(loaded, write, row.props)) {
       violations.push(driftFault(write));

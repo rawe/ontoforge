@@ -174,7 +174,7 @@ lens key, can exist independently in two ontologies.
 | Relation | `_id` | its type key, its two endpoint ids, plus its properties |
 | Anchor | unique `key` | the entity it points at (type key and id), or none; the staged-only flag |
 | Changeset | id | its lens, the anchor key of the URL that started it (optional), version, note, submitted time (absent for a draft), timestamps |
-| Changeset write | changeset + seq | operation, its arguments, the id a create minted, type key, target id, the base of an update |
+| Changeset write | changeset + seq | operation, its arguments, the id a create minted, type key, target id, the before of an update |
 | Chunk | internal | fragment of one document property, with its offset and length, kept as a passage entry |
 | Search entry | internal | one indexed text of one entity in one generation of a search index — its own fields, one relation, or one chunk |
 

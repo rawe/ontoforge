@@ -2,7 +2,7 @@
  * The lifecycle of a changeset over mocked stores: submit (the lock-free
  * pass, the compare-and-set on the version, the anchor refusal), unsubmit
  * with its required note, the refusals while submitted, the list as the
- * lens shows it, and the review read: names, before → after and markers,
+ * lens shows it, and the review read: names, before, current and after, and markers,
  * with nothing the lens hides.
  */
 
@@ -87,14 +87,14 @@ function row(seq: number, overrides: Partial<ChangesetWriteRecord>): ChangesetWr
     mintedId: null,
     typeKey: "person",
     targetId: null,
-    base: null,
+    before: null,
     createdAt: NOW,
     ...overrides,
   };
 }
 
-const rename = (seq: number, id: string, name: string, base: Row | null): ChangesetWriteRecord =>
-  row(seq, { operation: "update_entity", typeKey: "person", targetId: id, arguments: { properties: { name } }, base });
+const rename = (seq: number, id: string, name: string, before: Row | null): ChangesetWriteRecord =>
+  row(seq, { operation: "update_entity", typeKey: "person", targetId: id, arguments: { properties: { name } }, before });
 
 let store: MockRuntimeStore;
 let stored: Record<string, Row>;
@@ -404,7 +404,7 @@ describe("list", () => {
 // ---------------------------------------------------------------------------
 
 describe("review read", () => {
-  it("names resolved, before → after for updates, and the markers of the pass, on the page", async () => {
+  it("names resolved, before, current and after for updates, and the markers of the pass, on the page", async () => {
     store.getRelation.mockImplementation(async (_type: string, id: string) =>
       id === R1 ? makeRelation({ role: "dev" }, { relationId: R1, fromEntityId: PAT, toEntityId: ACME }) : null,
     );
@@ -418,10 +418,10 @@ describe("review read", () => {
         arguments: { fromEntityId: PAT, toEntityId: NEWCO, properties: { role: "dev" } },
       }),
       rename(4, KIM, "Kim X", { name: "Kim" }),
-      row(5, { operation: "update_relation", typeKey: "works_for", targetId: R1, arguments: { properties: { role: "lead" } }, base: { role: "dev" } }),
+      row(5, { operation: "update_relation", typeKey: "works_for", targetId: R1, arguments: { properties: { role: "lead" } }, before: { role: "dev" } }),
       row(6, { operation: "create_relation", typeKey: "works_for", mintedId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", arguments: { fromEntityId: PAT, toEntityId: GHOST, properties: {} } }),
       rename(7, GONE, "x", { name: "x" }),
-      row(8, { operation: "update_entity", typeKey: "note", targetId: NOTE1, arguments: { properties: { body: "new text" } }, base: { body: documentHash("old") } }),
+      row(8, { operation: "update_entity", typeKey: "note", targetId: NOTE1, arguments: { properties: { body: "new text" } }, before: { body: documentHash("old") } }),
     ];
 
     const read = await getChangeset("full_lens", null, CS, 1, 7, on());
@@ -430,21 +430,28 @@ describe("review read", () => {
     expect(read.writes.map((w) => w.seq)).toEqual([2, 3, 4, 5, 6, 7, 8]);
     // One batched entity read for the page.
     expect(store.getEntitiesByIds.mock.calls.filter(([, defs]) => defs !== undefined).length).toBeGreaterThanOrEqual(1);
-    expect(bySeq[2]).toMatchObject({ type: "person", id: PAT, name: "Pat", before: { name: "Pat" }, after: { name: "Pat B" }, markers: [] });
+    expect(bySeq[2]).toMatchObject({ type: "person", id: PAT, name: "Pat", before: { name: "Pat" }, current: { name: "Pat" }, after: { name: "Pat B" }, markers: [] });
     // A minted end is named by its staged create, even off the page.
-    expect(bySeq[3]).toMatchObject({ from: { id: PAT, name: "Pat" }, to: { id: NEWCO, name: "Newco" }, before: null, after: { role: "dev" } });
-    expect(bySeq[4]).toMatchObject({ name: "Kim Y", before: { name: "Kim Y" }, after: { name: "Kim X" } });
+    expect(bySeq[3]).toMatchObject({ from: { id: PAT, name: "Pat" }, to: { id: NEWCO, name: "Newco" }, before: null, current: null, after: { role: "dev" } });
+    // Drift: current differs from before, the value staged against.
+    expect(bySeq[4]).toMatchObject({ name: "Kim Y", before: { name: "Kim" }, current: { name: "Kim Y" }, after: { name: "Kim X" } });
     expect(bySeq[4]!.markers).toEqual([{ kind: "drift", message: `Entity '${KIM}' changed since this write was staged; unstage and restage it` }]);
-    expect(bySeq[5]).toMatchObject({ from: { id: PAT, name: "Pat" }, to: { id: ACME, name: "Acme" }, before: { role: "dev" }, after: { role: "lead" }, markers: [] });
+    expect(bySeq[5]).toMatchObject({ from: { id: PAT, name: "Pat" }, to: { id: ACME, name: "Acme" }, before: { role: "dev" }, current: { role: "dev" }, after: { role: "lead" }, markers: [] });
     expect(bySeq[6]).toMatchObject({ to: { id: GHOST, name: null } });
     expect(bySeq[6]!.markers.map((m) => m.kind)).toEqual(["dangling"]);
-    expect(bySeq[7]).toMatchObject({ name: null, before: null });
+    // A target gone since staging keeps its before; it has no current.
+    expect(bySeq[7]).toMatchObject({ name: null, before: { name: "x" }, current: null });
     expect(bySeq[7]!.markers.map((m) => m.kind)).toEqual(["missing"]);
-    // Documents as the reads stub them.
-    expect(bySeq[8]).toMatchObject({ name: "N", before: { body: { document: true, length: 3 } }, after: { body: { document: true, length: 8 } } });
+    // Documents: before as the hash staged against, current and after as the reads stub them.
+    expect(bySeq[8]).toMatchObject({
+      name: "N",
+      before: { body: documentHash("old") },
+      current: { body: { document: true, length: 3 } },
+      after: { body: { document: true, length: 8 } },
+    });
   });
 
-  it("a create's parent is named; an update of a staged create has no before", async () => {
+  it("a create's parent is named; an update of a staged create has no before and no current", async () => {
     invalidateLoadedSchemaCache();
     const full = schema();
     full.relationTypes.find((rt: Row) => rt.key === "belongs_to").parent = "target";
@@ -459,15 +466,20 @@ describe("review read", () => {
     ];
     const read = await getChangeset("full_lens", null, CS, 0, 100, on());
     expect(read.writes[0]).toMatchObject({ name: "Ops", parent: { id: ACME, name: "Acme" }, after: { name: "Ops" } });
-    expect(read.writes[1]).toMatchObject({ name: "Ops", before: null, after: { name: "Ops 2" }, markers: [] });
+    expect(read.writes[1]).toMatchObject({ name: "Ops", before: null, current: null, after: { name: "Ops 2" }, markers: [] });
   });
 
   it("through a scoped lens nothing hidden appears: no hidden type, property, name or value", async () => {
     store.getFullSchemaWithLensInclusions.mockResolvedValue(schema(true));
+    // A last change at noon yesterday: unexpired, and its timestamp cannot
+    // contain the hidden values searched for below (":41", ":50").
+    const today = new Date();
+    const noonYesterday = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - 1, 12));
+    store.changesetStore.get.mockResolvedValue(changeset({ lastChangeAt: noonYesterday }));
     stored[DEPT] = makeEntity({ name: "Secret Dept" }, "department", DEPT);
     journal = [
       // Staged before the lens hid `age`.
-      row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P2", age: 50 } }, base: { name: "Pat", age: 41 } }),
+      row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P2", age: 50 } }, before: { name: "Pat", age: 41 } }),
       row(2, { typeKey: "department", mintedId: DEPT, arguments: { properties: { name: "Hidden New" }, parentRelation: null, relationId: null } }),
       row(3, { operation: "delete_entity", typeKey: "department", targetId: DEPT, arguments: {} }),
       row(4, { operation: "delete_entity", typeKey: "person", targetId: PAT, arguments: {} }),
@@ -476,7 +488,7 @@ describe("review read", () => {
     const read = await getChangeset("hr_view", null, CS, 0, 100, on());
     const [update, create, remove, del] = read.writes;
 
-    expect(update).toMatchObject({ type: "person", arguments: { properties: { name: "P2" } }, before: { name: "Pat" }, after: { name: "P2" } });
+    expect(update).toMatchObject({ type: "person", arguments: { properties: { name: "P2" } }, before: { name: "Pat" }, current: { name: "Pat" }, after: { name: "P2" } });
     expect(update!.markers.map((m) => m.kind)).toEqual(["not_visible"]);
     for (const hidden of [create, remove]) {
       expect(hidden).toEqual({
@@ -487,6 +499,7 @@ describe("review read", () => {
         arguments: {},
         createdAt: NOW,
         before: null,
+        current: null,
         after: null,
         markers: [{ kind: "not_visible", message: "The type of this write is no longer visible through lens 'hr_view'" }],
       });

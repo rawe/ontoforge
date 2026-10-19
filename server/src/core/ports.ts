@@ -1114,8 +1114,9 @@ export interface NewChangesetWrite {
   mintedId: string | null;
   typeKey: string;
   targetId: string | null;
-  /** A staged update's stored values of its patched keys. */
-  base: Row | null;
+  /** A staged update's stored values of its patched keys, as they were
+   * when it was staged. */
+  before: Row | null;
 }
 
 export interface ChangesetWriteRecord extends NewChangesetWrite {

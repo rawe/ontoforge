@@ -1,9 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Anchor as AnchorIcon, Copy, Loader2, MoreHorizontal, Plus, Trash2, Waypoints } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { useAnchors, useRuntimeSchema, useServerInfo } from '@/api/hooks'
+import { useAnchors, useAnchorView, useRuntimeSchema, useServerInfo } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
 import type { Anchor, AnchorView } from '@/api/types'
@@ -282,10 +282,7 @@ function AnchorRow({
   onDelete,
 }: AnchorRowProps) {
   // The list carries no name or path: the anchored mount's root reads them through the lens.
-  const view = useQuery({
-    queryKey: qk.anchors(ontologyKey, lensKey, anchor.key),
-    queryFn: () => runtime.getAnchorView(ontologyKey, lensKey, anchor.key),
-  })
+  const view = useAnchorView(ontologyKey, lensKey, anchor.key)
   const placement = view.isError
     ? { primary: view.error.message, secondary: null, tone: 'muted' as const }
     : anchorPlacement(anchor, view.data, typeName)

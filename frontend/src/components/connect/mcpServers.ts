@@ -6,6 +6,10 @@
  * Mirrors docs/interfaces.md (MCP): when a server is added, re-addressed, or
  * its tool groups change, update this list — the cards and the snippets are
  * both built from it.
+ *
+ * The runtime server can be mounted under an anchor: its URL then ends in
+ * `/anchors/{key}` and its entry is named after the anchor. The modeling
+ * server ignores the anchor.
  */
 
 export type McpServerKey = 'modeling' | 'runtime'
@@ -13,11 +17,11 @@ export type McpServerKey = 'modeling' | 'runtime'
 export interface McpServer {
   key: McpServerKey
   /** Key of the server's entry in the client config. */
-  entryName: string
+  entryName: (anchorKey: string | null) => string
   label: string
   /** What the URL binds the connection to. */
   boundTo: 'ontology' | 'lens'
-  path: (ontologyKey: string, lensKey: string) => string
+  path: (ontologyKey: string, lensKey: string, anchorKey: string | null) => string
   /** One sentence: the server's job. */
   job: string
   /** What it covers. */
@@ -29,7 +33,7 @@ export interface McpServer {
 export const MCP_SERVERS: readonly McpServer[] = [
   {
     key: 'modeling',
-    entryName: 'ontoforge-modeling',
+    entryName: () => 'ontoforge-modeling',
     label: 'Modeling',
     boundTo: 'ontology',
     path: (ontologyKey) => `/mcp/ontologies/${ontologyKey}/model`,
@@ -40,10 +44,13 @@ export const MCP_SERVERS: readonly McpServer[] = [
   },
   {
     key: 'runtime',
-    entryName: 'ontoforge-runtime',
+    entryName: (anchorKey) =>
+      anchorKey === null ? 'ontoforge-runtime' : `ontoforge-runtime-${anchorKey}`,
     label: 'Runtime',
     boundTo: 'lens',
-    path: (ontologyKey, lensKey) => `/mcp/ontologies/${ontologyKey}/runtime/lenses/${lensKey}`,
+    path: (ontologyKey, lensKey, anchorKey) =>
+      `/mcp/ontologies/${ontologyKey}/runtime/lenses/${lensKey}` +
+      (anchorKey === null ? '' : `/anchors/${anchorKey}`),
     job: 'Works with the data, as this lens shows it.',
     covers:
       'Create, read, update and delete entities and relations · search and query · run saved queries',

@@ -5,11 +5,13 @@ import {
   anchoredHereText,
   anchoredMcpUrl,
   anchorKeyProblem,
+  anchorOptionLabel,
   anchorPlacement,
   anchorsAt,
   danglingCount,
   danglingWarningText,
   repointConfirmation,
+  anchorWritesLine,
   unanchorConfirmation,
 } from '../src/components/anchors/anchors.ts'
 
@@ -110,4 +112,31 @@ test('anchoredMcpUrl extends the runtime MCP URL by the anchor', () => {
     anchoredMcpUrl(null, 'acme-ops', 'work', 'agent-a'),
     '<server-url>/mcp/ontologies/acme-ops/runtime/lenses/work/anchors/agent-a',
   )
+})
+
+test('the Connect Anchor select: an option label and the line under it, per state', () => {
+  const view: AnchorView = { key: 'agent-a', state: 'anchored', visible: true, entity: p1, path: [acme, p1] }
+  const hidden: AnchorView = { ...view, visible: false, entity: null, path: [] }
+  const goneView: AnchorView = { ...view, state: 'dangling', entity: null, path: [] }
+
+  assert.equal(anchorOptionLabel(anchored, view), 'agent-a · ACME › P1')
+  assert.equal(anchorOptionLabel(anchored, undefined), 'agent-a')
+  assert.equal(anchorOptionLabel(anchored, hidden), 'agent-a · hidden by this lens')
+  assert.equal(anchorOptionLabel(anchored, goneView), 'agent-a · dangling')
+  assert.equal(anchorOptionLabel(unanchored, undefined), 'agent-u · unanchored')
+  assert.equal(anchorOptionLabel(dangling, undefined), 'agent-d · dangling')
+
+  assert.equal(anchorWritesLine(anchored, view), 'Writes only to P1 and its descendants.')
+  assert.equal(anchorWritesLine(anchored, undefined), null)
+  assert.equal(
+    anchorWritesLine(anchored, hidden),
+    'This lens hides its entity: every write through it is refused.',
+  )
+  assert.equal(anchorWritesLine(anchored, goneView), 'Its entity was deleted: every write is refused.')
+  assert.equal(anchorWritesLine(unanchored, undefined), 'No restriction, like the plain lens.')
+  assert.equal(anchorWritesLine(dangling, undefined), 'Its entity was deleted: every write is refused.')
+  // B18: the anchor line never says "covers".
+  for (const line of [view, hidden, goneView, undefined].map((v) => anchorWritesLine(anchored, v))) {
+    assert.doesNotMatch(line ?? '', /cover/i)
+  }
 })

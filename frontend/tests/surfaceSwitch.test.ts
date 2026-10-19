@@ -27,6 +27,7 @@ test('lens-level pages open the lens, on the matching tab', () => {
   assert.equal(studioTarget(OK, `${W}/ai`, '', 'L1'), `${S}/lenses/L1?tab=agents`)
   assert.equal(studioTarget(OK, `${W}/ai`, '?tab=retriever', 'L1'), `${S}/lenses/L1?tab=retriever-agents`)
   assert.equal(studioTarget(OK, `${W}/ai`, '?tab=navigator&assistant=x', 'L1'), `${S}/lenses/L1?tab=navigators`)
+  assert.equal(studioTarget(OK, `${W}/anchors`, '', 'L1'), `${S}/lenses/L1?tab=connect`)
 })
 
 test('lens-level pages fall back to the lens list while the lens id is unknown', () => {

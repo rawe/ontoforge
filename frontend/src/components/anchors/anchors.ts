@@ -1,12 +1,12 @@
 /**
  * Pure helpers for the Workbench's Anchors page and the entity detail's anchor
  * hints: the key rule, what a row says about where an anchor points, the
- * confirmation texts and the anchored MCP URL. No React, no I/O — unit-tested
- * with `node --test`.
+ * confirmation texts, the anchored MCP URL and the Connect panel's Anchor
+ * select. No React, no I/O — unit-tested with `node --test`.
  */
 
 import type { Anchor, AnchorView, PathStep } from '../../api/types.ts'
-import { SERVER_URL_PLACEHOLDER } from '../connect/connectSnippet.ts'
+import { mcpUrl } from '../connect/connectSnippet.ts'
 import { MCP_SERVERS } from '../connect/mcpServers.ts'
 import { formatPath, stepLabel } from '../entity/hierarchy.ts'
 import { LENS_RESOURCE_KEY_PATTERN, MAX_KEY_LENGTH } from '../studio/modeling/schemaKeys.ts'
@@ -119,7 +119,7 @@ export function unanchorConfirmation(key: string, lensKey: string): string {
 /** Delete's question; typing the key enables Delete. */
 export const DELETE_CONFIRMATION = 'Clients using this URL get not found.'
 
-/** The anchored runtime MCP URL: the Connect panel's runtime URL plus `/anchors/{key}`. */
+/** The anchored runtime MCP URL: the Connect panel's runtime URL under that anchor. */
 export function anchoredMcpUrl(
   baseUrl: string | null,
   ontologyKey: string,
@@ -127,5 +127,28 @@ export function anchoredMcpUrl(
   anchorKey: string,
 ): string {
   const runtime = MCP_SERVERS.find((server) => server.key === 'runtime')!
-  return `${baseUrl ?? SERVER_URL_PLACEHOLDER}${runtime.path(ontologyKey, lensKey)}/anchors/${anchorKey}`
+  return mcpUrl(runtime, { baseUrl, ontologyKey, lensKey, anchorKey })
+}
+
+/** An Anchor select option on the Connect panel: "agent-a · ACME › P1". */
+export function anchorOptionLabel(anchor: Anchor, view: AnchorView | undefined): string {
+  if (anchor.state !== 'anchored' || view?.state === 'dangling') {
+    return `${anchor.key} · ${view?.state ?? anchor.state}`
+  }
+  if (view === undefined) return anchor.key
+  if (!view.visible) return `${anchor.key} · hidden by this lens`
+  return `${anchor.key} · ${formatPath(view.path)}`
+}
+
+/** The Connect card's line under the Anchor select: what the anchored connection may write. */
+export function anchorWritesLine(anchor: Anchor, view: AnchorView | undefined): string | null {
+  if (anchor.state === 'unanchored') return 'No restriction, like the plain lens.'
+  if (anchor.state === 'dangling' || view?.state === 'dangling') {
+    return 'Its entity was deleted: every write is refused.'
+  }
+  if (view === undefined) return null
+  if (!view.visible || view.entity === null) {
+    return 'This lens hides its entity: every write through it is refused.'
+  }
+  return `Writes only to ${stepLabel(view.entity)} and its descendants.`
 }

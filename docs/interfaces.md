@@ -512,7 +512,8 @@ answers not found within the ontology.
 
 Read-only, and already filtered to the lens. `/schema` returns the lens's key, name and
 description together with the entity types and relation types it exposes, each with its
-visible properties; a relation type also carries its parent end, or null.
+visible properties. What a relation type carries:
+[capabilities/schema-modeling.md](capabilities/schema-modeling.md).
 
 | Method | Path | Purpose |
 |---|---|---|

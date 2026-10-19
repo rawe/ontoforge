@@ -5,9 +5,9 @@ Rule: [Interfaces](../decisions.md#interfaces)
 ## Context
 
 With many isolated ontologies in one server, both MCP servers need a binding: which
-ontology, and for runtime which lens and, optionally, which anchor holding its writes, a
-connected client works in. The binding channel decides whether isolation holds by
-structure or has to be checked.
+ontology, and for runtime which lens and, optionally, which anchor, a connected client
+works in. The binding channel decides whether isolation holds by structure or has to be
+checked.
 
 ## Rejected
 
@@ -26,5 +26,4 @@ structure or has to be checked.
 - **Implicit creation when a mount URL names a missing ontology.** A typo in a client
   config would silently create a junk ontology.
 - **Implicit creation when a mount URL names a missing anchor.** A typo in a client config
-  would silently create an unanchored anchor, which holds nothing; an unknown anchor
-  fails closed instead.
+  would silently create an anchor that holds nothing.

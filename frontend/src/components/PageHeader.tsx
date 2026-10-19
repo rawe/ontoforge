@@ -8,13 +8,23 @@ interface PageHeaderProps {
   actions?: ReactNode
   /** Rendered inline after the title (badges, chips). */
   meta?: ReactNode
+  /** Rendered above the title row (an entity's path). */
+  breadcrumb?: ReactNode
   className?: string
 }
 
 /** Standard page header: title row + optional description, hairline below. */
-export function PageHeader({ title, description, actions, meta, className }: PageHeaderProps) {
+export function PageHeader({
+  title,
+  description,
+  actions,
+  meta,
+  breadcrumb,
+  className,
+}: PageHeaderProps) {
   return (
     <header className={cn('border-b px-6 py-4', className)}>
+      {breadcrumb}
       <div className="flex items-center gap-3">
         <h1 className="text-[15px] font-semibold tracking-tight">{title}</h1>
         {meta}

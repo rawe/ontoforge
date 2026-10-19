@@ -20,6 +20,8 @@ import type {
   ListResponse,
   NeighborDirection,
   NeighborsResponse,
+  ParentRelationInput,
+  PathStep,
   QueryResult,
   RelationInstance,
   RuntimeAssistant,
@@ -75,19 +77,25 @@ export const listEntities = (
     `${base(ontologyKey, lensKey)}/entities/${entityTypeKey}${buildQuery(params)}`,
   )
 
+/** With `parentRelation`, the entity and its parent relation are written in one call. */
 export const createEntity = (
   ontologyKey: string,
   lensKey: string,
   entityTypeKey: string,
   properties: Record<string, JsonValue>,
+  parentRelation?: ParentRelationInput,
 ) =>
   request<EntityInstance>(`${base(ontologyKey, lensKey)}/entities/${entityTypeKey}`, {
     method: 'POST',
-    body: properties,
+    body: parentRelation === undefined ? properties : { ...properties, parentRelation },
   })
 
 export const getEntity = (ontologyKey: string, lensKey: string, entityTypeKey: string, id: string) =>
   request<EntityInstance>(`${base(ontologyKey, lensKey)}/entities/${entityTypeKey}/${id}`)
+
+/** Root → … → the entity, through the lens: it starts below the nearest hidden ancestor. */
+export const getPath = (ontologyKey: string, lensKey: string, entityTypeKey: string, id: string) =>
+  request<PathStep[]>(`${base(ontologyKey, lensKey)}/entities/${entityTypeKey}/${id}/path`)
 
 /** Partial update; an explicit `null` removes a property. */
 export const updateEntity = (

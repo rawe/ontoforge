@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link2, Loader2, SearchX, Trash2, Waypoints } from 'lucide-react'
+import { Link2, Loader2, Plus, SearchX, Trash2, Waypoints } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -15,10 +15,19 @@ import {
   AddRelationDialog,
   type RelationInitial,
 } from '@/components/entity/AddRelationDialog'
+import { EntityBreadcrumb } from '@/components/entity/EntityBreadcrumb'
+import { hierarchyLinks, linkedTypeKey } from '@/components/entity/hierarchy'
 import { MiniMap } from '@/components/entity/MiniMap'
+import { ParentSection } from '@/components/entity/ParentSection'
 import { PropertiesCard } from '@/components/entity/PropertiesCard'
 import { RelationSection } from '@/components/entity/RelationSection'
-import { useNeighborCounts } from '@/components/entity/useNeighborCounts'
+import {
+  invalidateNeighborhood,
+  neighborCountsKey,
+  useChildCounts,
+  useNeighborCounts,
+} from '@/components/entity/useNeighborCounts'
+import { openQuickAdd } from '@/components/quickadd/quickAddBus'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,6 +41,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { displayLabel } from '@/lib/displayLabel'
 import { recordRecent } from '@/lib/recents'
 
@@ -77,6 +87,25 @@ export function EntityDetailPage() {
 
   const counts = useNeighborCounts(ontologyKey ?? '', lensKey ?? '', entity, relationTypes)
 
+  // The parent relations' sections lead; the ordinary ones follow.
+  const hierarchy = useMemo(
+    () => hierarchyLinks(relationTypes, typeKey ?? ''),
+    [relationTypes, typeKey],
+  )
+  const ordinaryTypes = useMemo(
+    () => relationTypes.filter((rt) => rt.parent === null),
+    [relationTypes],
+  )
+  const childCounts = useChildCounts(ontologyKey ?? '', lensKey ?? '', entity, hierarchy.children)
+  // Children the lens hides are unknown here; the server's 409 covers them.
+  const hasChildren = Object.values(childCounts.data ?? {}).some((n) => n > 0)
+
+  const pathQuery = useQuery({
+    queryKey: qk.path(ontologyKey ?? '', lensKey ?? '', typeKey ?? '', id ?? ''),
+    queryFn: () => runtime.getPath(ontologyKey!, lensKey!, typeKey!, id!),
+    enabled: entity !== undefined,
+  })
+
   // Record the visit for the palette's recents list.
   useEffect(() => {
     if (ontologyKey !== undefined && lensKey !== undefined && entity !== undefined) {
@@ -100,10 +129,24 @@ export function EntityDetailPage() {
         queryKey: qk.entities(ontologyKey!, lensKey!, typeKey!),
       })
       queryClient.removeQueries({ queryKey: qk.entity(ontologyKey!, lensKey!, typeKey!, id!) })
+      // The parent's children changed (only its own queries: this entity's would 404).
+      const parent = pathQuery.data?.at(-2)
+      if (parent !== undefined) {
+        void queryClient.invalidateQueries({
+          queryKey: qk.neighbors(ontologyKey!, lensKey!, parent.type, parent.id),
+        })
+        void queryClient.invalidateQueries({
+          queryKey: neighborCountsKey(ontologyKey!, lensKey!, parent.type, parent.id),
+        })
+      }
       toast.success('Entity deleted')
       navigate(`/o/${ontologyKey}/w/${lensKey}/t/${typeKey}`)
     },
     onError: (err) => {
+      // A 409 "has children": a child appeared since the counts were read.
+      if (err instanceof ApiError && err.status === 409) {
+        invalidateNeighborhood(queryClient, ontologyKey!, lensKey!, typeKey!, id!)
+      }
       toast.error(err instanceof Error ? err.message : 'Failed to delete entity')
     },
   })
@@ -176,6 +219,11 @@ export function EntityDetailPage() {
   return (
     <div>
       <PageHeader
+        breadcrumb={
+          pathQuery.data !== undefined && (
+            <EntityBreadcrumb ontologyKey={ontologyKey} lensKey={lensKey} path={pathQuery.data} />
+          )
+        }
         title={label}
         meta={<TypeChip typeKey={typeKey} displayName={entityType.displayName} size="sm" />}
         description={
@@ -202,16 +250,31 @@ export function EntityDetailPage() {
               </Link>
             </Button>
             <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="destructive" size="sm" disabled={deleteMutation.isPending}>
-                  {deleteMutation.isPending ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="size-3.5" />
-                  )}
-                  Delete
-                </Button>
-              </AlertDialogTrigger>
+              {hasChildren ? (
+                // A disabled button fires no pointer events: the wrapper carries the tooltip.
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0} aria-label="Delete its children first">
+                      <Button variant="destructive" size="sm" disabled>
+                        <Trash2 className="size-3.5" />
+                        Delete
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Delete its children first</TooltipContent>
+                </Tooltip>
+              ) : (
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" size="sm" disabled={deleteMutation.isPending}>
+                    {deleteMutation.isPending ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="size-3.5" />
+                    )}
+                    Delete
+                  </Button>
+                </AlertDialogTrigger>
+              )}
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete “{label}”?</AlertDialogTitle>
@@ -244,18 +307,69 @@ export function EntityDetailPage() {
               No relation types apply to {entityType.displayName}.
             </section>
           ) : (
-            relationTypes.map((rt) => (
-              <RelationSection
-                key={rt.key}
-                ontologyKey={ontologyKey}
-                lensKey={lensKey}
-                entity={entity}
-                relationType={rt}
-                entityTypes={schema.data!.entityTypes}
-                count={counts.data?.[rt.key]}
-                onAdd={(initial) => setAddRelation({ open: true, initial })}
-              />
-            ))
+            <>
+              {hierarchy.parents.length > 0 && (
+                <ParentSection
+                  ontologyKey={ontologyKey}
+                  lensKey={lensKey}
+                  entity={entity}
+                  links={hierarchy.parents}
+                  entityTypes={schema.data.entityTypes}
+                  onAdd={(initial) => setAddRelation({ open: true, initial })}
+                />
+              )}
+              {hierarchy.children.map((link) => {
+                const childType = schema.data!.entityTypes.find(
+                  (t) => t.key === linkedTypeKey(link),
+                )
+                const childTypeName = childType?.displayName ?? linkedTypeKey(link)
+                return (
+                  <RelationSection
+                    key={`children:${link.relationType.key}`}
+                    ontologyKey={ontologyKey}
+                    lensKey={lensKey}
+                    entity={entity}
+                    relationType={link.relationType}
+                    entityTypes={schema.data!.entityTypes}
+                    count={childCounts.data?.[link.relationType.key]}
+                    onAdd={(initial) => setAddRelation({ open: true, initial })}
+                    childSection={{
+                      direction: link.direction,
+                      action: (
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          className="border-(--tc-violet-border) bg-(--tc-violet-bg) text-(--tc-violet) hover:bg-(--tc-violet-bg) hover:text-(--tc-violet)"
+                          onClick={() =>
+                            openQuickAdd(linkedTypeKey(link), {
+                              relationTypeKey: link.relationType.key,
+                              typeKey,
+                              id: entity._id,
+                              label,
+                            })
+                          }
+                        >
+                          <Plus className="size-3" />
+                          {childTypeName} under {label}
+                        </Button>
+                      ),
+                    }}
+                  />
+                )
+              })}
+              {ordinaryTypes.map((rt) => (
+                <RelationSection
+                  key={rt.key}
+                  ontologyKey={ontologyKey}
+                  lensKey={lensKey}
+                  entity={entity}
+                  relationType={rt}
+                  entityTypes={schema.data!.entityTypes}
+                  count={counts.data?.[rt.key]}
+                  onAdd={(initial) => setAddRelation({ open: true, initial })}
+                />
+              ))}
+            </>
           )}
 
           <MiniMap

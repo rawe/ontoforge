@@ -9,6 +9,7 @@
  *   ['schema', ontologyKey, lensKey, 'search-indices']  runtime search catalog
  *   ['entities', ontologyKey, lensKey, typeKey, params]
  *   ['entity', ontologyKey, lensKey, typeKey, id]
+ *   ['path', ontologyKey, lensKey, typeKey, id]      root → … → entity
  *   ['document', ontologyKey, lensKey, typeKey, id, propertyKey]
  *   ['neighbors', ontologyKey, lensKey, typeKey, id, params]
  *   ['relations', ontologyKey, lensKey, typeKey, params]
@@ -41,6 +42,11 @@ export const qk = {
       : (['entities', ontologyKey, lensKey, typeKey, params] as const),
   entity: (ontologyKey: string, lensKey: string, typeKey: string, id: string) =>
     ['entity', ontologyKey, lensKey, typeKey, id] as const,
+  /** Without type and id: every path of the lens (a relation change can move a subtree). */
+  path: (ontologyKey: string, lensKey: string, typeKey?: string, id?: string) =>
+    typeKey === undefined || id === undefined
+      ? (['path', ontologyKey, lensKey] as const)
+      : (['path', ontologyKey, lensKey, typeKey, id] as const),
   document: (
     ontologyKey: string,
     lensKey: string,

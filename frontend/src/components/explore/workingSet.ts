@@ -56,6 +56,8 @@ export interface RelationEdgeData extends Record<string, unknown> {
   relation: RelationInstance
   /** At the highlighted node: drawn stronger. Derived for rendering, never stored. */
   emphasised?: boolean
+  /** A parent relation: drawn violet. Derived for rendering, never stored. */
+  parent?: boolean
 }
 
 export type EntityFlowNode = Node<EntityNodeData, 'entity'>

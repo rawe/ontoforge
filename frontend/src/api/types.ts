@@ -75,6 +75,8 @@ export interface SchemaRelationType {
   description: string | null
   fromEntityTypeKey: string
   toEntityTypeKey: string
+  /** The parent end; null for an ordinary relation type. */
+  parent: ParentEnd | null
   properties: SchemaProperty[]
 }
 
@@ -173,6 +175,20 @@ export interface Neighbor {
 export interface NeighborsResponse {
   entity: EntityInstance
   neighbors: Neighbor[]
+}
+
+/** One step of an entity's path (root first); `name` is null when the lens hides it. */
+export interface PathStep {
+  type: string
+  id: string
+  name: string | null
+}
+
+/** The parent relation a create names for its new entity. */
+export interface ParentRelationInput {
+  type: string
+  parentId: string
+  properties?: Record<string, JsonValue>
 }
 
 /* ------------------------------ runtime — search ----------------------------- */

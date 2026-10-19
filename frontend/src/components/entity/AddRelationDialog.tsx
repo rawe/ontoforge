@@ -27,6 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { labelParentError } from '@/components/entity/hierarchy'
 import {
   invalidateNeighborhood,
 } from '@/components/entity/useNeighborCounts'
@@ -181,8 +182,16 @@ function AddRelationFlow({
         const fields = err.fieldErrors
         if (fields !== undefined) {
           setRelErrors(fields)
+          // A parent rule names the entity by id: "T1 already has a parent".
           const endpointError = fields.fromEntityId ?? fields.toEntityId
-          setFormError(endpointError ?? null)
+          setFormError(
+            endpointError === undefined
+              ? null
+              : labelParentError(endpointError, {
+                  [entity._id]: entityLabel,
+                  [vars.target._id]: displayLabel(vars.target),
+                }),
+          )
         } else {
           setFormError(err.message)
         }

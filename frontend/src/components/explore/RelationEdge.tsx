@@ -5,12 +5,14 @@ import {
   getBezierPath,
   type EdgeProps,
 } from '@xyflow/react'
+import { PARENT_COLOR } from '@/components/studio/graph/RelationTypeEdge'
+import { cn } from '@/lib/utils'
 import type { RelationFlowEdge } from './workingSet'
 
 /**
  * Relation edge: subtle stroke + arrowhead (markerEnd set on the edge object)
- * and a small mono relation-type label; at a highlighted node, primary and
- * thicker. Self-referential relations render as
+ * and a small mono relation-type label; a parent relation violet; at a
+ * highlighted node, primary and thicker. Self-referential relations render as
  * a loop arcing over the node instead of the degenerate bezier.
  */
 function RelationEdgeInner({
@@ -57,11 +59,16 @@ function RelationEdgeInner({
         markerEnd={markerEnd}
         style={data?.emphasised === true
           ? { stroke: 'var(--primary)', strokeWidth: 2.5 }
-          : { stroke: 'var(--border)', strokeWidth: 1.5 }}
+          : data?.parent === true
+            ? { stroke: PARENT_COLOR, strokeWidth: 2 }
+            : { stroke: 'var(--border)', strokeWidth: 1.5 }}
       />
       <EdgeLabelRenderer>
         <div
-          className="pointer-events-none absolute rounded bg-background/85 px-1 font-mono text-[9.5px] leading-4 text-muted-foreground"
+          className={cn(
+            'pointer-events-none absolute rounded bg-background/85 px-1 font-mono text-[9.5px] leading-4',
+            data?.parent === true ? 'text-(--tc-violet)' : 'text-muted-foreground',
+          )}
           style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
         >
           {data?.relation._relationTypeKey}

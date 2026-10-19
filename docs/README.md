@@ -255,8 +255,7 @@ filter key. See [capabilities/instance-data.md](capabilities/instance-data.md#th
 
 **Anchor** — a named record of an ontology that a person points at one entity, or at none:
 anchored, unanchored or dangling. An MCP client connected through an anchored mount has
-its writes to the anchor's hierarchy held to the anchored subtree. Not authentication, and
-not a navigator's anchor, which is an entity a question names. See
+its writes to the anchor's hierarchy held to the anchored subtree. Not authentication. See
 [capabilities/anchors.md](capabilities/anchors.md).
 
 **Anchored subtree** — the anchored entity and its descendants: the entities an anchor

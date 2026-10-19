@@ -13,7 +13,7 @@ structure or has to be checked.
 
 - **A per-tool ontology parameter.** Any connected client could reach and enumerate every
   ontology, which breaks isolation outright, and a future ACL would have nothing to
-  anchor on.
+  bind to.
 - **Header or environment fallback channels beside the URL.** That is three places to
   check for one fact; REST does not use header addressing either; and with per-ontology
   lens keys an environment default is not well defined.

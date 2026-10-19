@@ -118,9 +118,9 @@ served by the same process, and both address one ontology named in the path.
 | Scope | The whole ontology | Only what the lens exposes |
 | Changes | Rare, deliberate | Continuous |
 
-Runtime never edits the schema, and modeling never touches instance data. A request that
-would need both is not expressible — which is the property that makes it safe to expose
-runtime to an autonomous agent while keeping modeling under human control.
+Runtime never edits the schema, and modeling never writes instance data. That is what
+makes it safe to expose runtime to an autonomous agent while keeping modeling under human
+control.
 
 Runtime is *derived*: everything it permits follows from the schema and the lens. When
 the schema changes, runtime behaviour changes with it, with no separate configuration.

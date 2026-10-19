@@ -50,7 +50,7 @@ export const updateLens = (ontologyKey: string, lensId: string, body: LensInput)
   request<Lens>(`${base(ontologyKey)}/lenses/${lensId}`, { method: 'PUT', body })
 
 export const deleteLens = (ontologyKey: string, lensId: string) =>
-  request<undefined>(`${base(ontologyKey)}/lenses/${lensId}`, { method: 'DELETE' })
+  request<{ changesetsDeleted: number }>(`${base(ontologyKey)}/lenses/${lensId}`, { method: 'DELETE' })
 
 /* -------------------------------- entity types ------------------------------- */
 

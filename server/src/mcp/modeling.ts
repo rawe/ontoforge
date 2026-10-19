@@ -899,7 +899,9 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
   server.registerTool(
     "delete_lens",
     {
-      description: "Delete a lens. Does not affect the schema or other lenses.",
+      description:
+        "Delete a lens, with its agents, saved queries and changesets (staged writes not yet committed). " +
+        "Does not affect the schema, the instance data or other lenses. The result states how many changesets were deleted.",
       inputSchema: {
         lens_key: z.string(),
       },
@@ -907,8 +909,14 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     wrap("delete_lens", async (args: { lens_key: string }) => {
       const store = await getModelingStore(ontologyKey);
       const lens = await resolveLensByKey(store, args.lens_key);
-      await service.deleteLens(lens.lensId as string, store);
-      return textResult(`Lens '${args.lens_key}' deleted successfully.`);
+      const { changesetsDeleted } = await service.deleteLens(
+        lens.lensId as string,
+        store,
+        await getRuntimeStore(ontologyKey),
+      );
+      return textResult(
+        `Lens '${args.lens_key}' deleted successfully. Changesets deleted with it: ${changesetsDeleted}.`,
+      );
     }),
   );
 

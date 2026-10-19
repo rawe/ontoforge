@@ -6,14 +6,19 @@
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ChangesetSummary } from "../../src/core/ports.js";
+import { createMockRuntimeStore, type MockRuntimeStore } from "../runtime/helpers.js";
 import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.js";
 
-const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
+const holder: { store: MockModelingStore; runtime: MockRuntimeStore } = {
+  store: createMockModelingStore(),
+  runtime: createMockRuntimeStore(),
+};
 
 vi.mock("../../src/core/ports.js", () => ({
   getModelingStore: async () => holder.store,
   getSearchIndexStore: async () => holder.store.searchIndices(),
-  getRuntimeStore: async () => ({}),
+  getRuntimeStore: async () => holder.runtime,
 }));
 
 const LENS_DATA = {
@@ -39,6 +44,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   holder.store = createMockModelingStore();
+  holder.runtime = createMockRuntimeStore();
 });
 
 describe("lens CRUD", () => {
@@ -182,10 +188,35 @@ describe("lens CRUD", () => {
     expect(holder.store.updateLens).toHaveBeenCalledWith("lens-1", "Test Lens", null);
   });
 
-  it("delete answers 204 — always permitted, no consent step", async () => {
-    holder.store.deleteLens.mockResolvedValue(true);
+  it("delete answers 200 with the changesets it took, counted before the delete — always permitted, no consent step", async () => {
+    const summary = (id: string, submittedAt: Date | null, lastChangeAt: Date): ChangesetSummary => ({
+      id,
+      lensId: "lens-1",
+      anchorKey: null,
+      version: 1,
+      note: null,
+      submittedAt,
+      createdAt: NOW,
+      lastChangeAt,
+      writeCount: 0,
+      operations: {},
+      typeKeys: [],
+    });
+    const old = new Date(Date.now() - 8 * 24 * 3_600_000);
+    // A live one, a submitted one of any age; an expired live one is gone already.
+    holder.runtime.changesetStore.list.mockResolvedValue([
+      summary("a", null, new Date()),
+      summary("b", NOW, old),
+      summary("c", null, old),
+    ]);
+    holder.store.deleteLens.mockImplementation(async () => {
+      expect(holder.runtime.changesetStore.list).toHaveBeenCalledWith("lens-1", null);
+      return true;
+    });
     const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/lenses/lens-1" });
-    expect(res.statusCode).toBe(204);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ changesetsDeleted: 2 });
+    expect(holder.store.deleteLens).toHaveBeenCalledWith("lens-1");
   });
 
   it("delete of a missing id answers 404", async () => {

@@ -9,6 +9,10 @@
  * - A seq is the changeset's version at the append: every append and
  *   unstage bumps the version, so a seq is never reused, not even after
  *   the last write is unstaged.
+ * - The state is judged under the row lock, in the statement that writes:
+ *   append, unstage, submit and discard change a live changeset only,
+ *   unsubmit a submitted one. A submit landing between the service's read
+ *   and the write is therefore never overwritten.
  * - The journal dies with its changeset (`ON DELETE CASCADE`).
  * - `lockForCommit` runs only inside a bound store. It first bounds the
  *   transaction's lock waits (`lock_timeout`, 5 s). The commit lock is a
@@ -232,7 +236,7 @@ export class PostgresChangesetStore implements ChangesetStore {
                 GREATEST(c.version,
                          COALESCE((SELECT max(seq) FROM changeset_write WHERE changeset_id = $1), 0) + 1),
                 $2::text, $3::jsonb, $4::uuid, $5::text, $6::uuid, $7::jsonb
-           FROM changeset c WHERE c.changeset_id = $1
+           FROM changeset c WHERE c.changeset_id = $1 AND c.submitted_at IS NULL
          RETURNING seq`,
         [
           id,
@@ -244,15 +248,21 @@ export class PostgresChangesetStore implements ChangesetStore {
           write.base === null ? null : JSON.stringify(write.base),
         ],
       );
+      const seq = result.rows[0]?.seq as number | undefined;
+      if (seq === undefined) {
+        return null;
+      }
       await querier.query(`UPDATE changeset c SET ${BUMP} WHERE c.changeset_id = $1`, [id]);
-      return result.rows[0]!.seq as number;
+      return seq;
     });
   }
 
   async unstage(id: string, seq: number): Promise<boolean> {
     const removed = await this.mutate(id, async (querier) => {
       const result = await querier.query(
-        `DELETE FROM changeset_write WHERE changeset_id = $1 AND seq = $2`,
+        `DELETE FROM changeset_write w USING changeset c
+          WHERE w.changeset_id = $1 AND w.seq = $2
+            AND c.changeset_id = w.changeset_id AND c.submitted_at IS NULL`,
         [id, seq],
       );
       if (result.rowCount === 0) {
@@ -268,7 +278,7 @@ export class PostgresChangesetStore implements ChangesetStore {
     const row = await this.mutate(id, async (querier) => {
       const result = await querier.query(
         `UPDATE changeset c SET submitted_at = now(), note = $3, ${BUMP}
-          WHERE c.changeset_id = $1 AND c.version = $2
+          WHERE c.changeset_id = $1 AND c.version = $2 AND c.submitted_at IS NULL
           RETURNING ${COLS}`,
         [id, expectedVersion, note],
       );
@@ -281,11 +291,11 @@ export class PostgresChangesetStore implements ChangesetStore {
     const row = await this.mutate(id, async (querier) => {
       const result = await querier.query(
         `UPDATE changeset c SET submitted_at = NULL, note = $2, ${BUMP}
-          WHERE c.changeset_id = $1
+          WHERE c.changeset_id = $1 AND c.submitted_at IS NOT NULL
           RETURNING ${COLS}`,
         [id, note],
       );
-      return result.rows[0]!;
+      return result.rows[0] ?? null;
     });
     return row === null ? null : toChangeset(row);
   }

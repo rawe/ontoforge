@@ -36,6 +36,7 @@ import {
   type TypeKind,
 } from "../core/schemas.js";
 import { NAVIGATOR_CONFIG_VERSION, NavigatorConfig } from "../runtime/assistants/navigators/config.js";
+import { lensChangesetCount } from "../runtime/changesets.js";
 import { syncManagedSearchIndices } from "../runtime/indexing/managed.js";
 import {
   applyIndexCascade,
@@ -220,15 +221,23 @@ export async function updateLens(
 
 /**
  * Lens deletion is always permitted: it cascades to nothing but the lens's
- * own agent configurations and saved queries (handled in the store), needs
- * no consent, and leaves the schema and every instance untouched.
+ * own agent configurations, saved queries and changesets (handled in the
+ * store), needs no consent, and leaves the schema and every instance
+ * untouched. It reports how many changesets went with it (V42), counted
+ * before the delete.
  */
-export async function deleteLens(lensId: string, store: ModelingStore): Promise<void> {
+export async function deleteLens(
+  lensId: string,
+  store: ModelingStore,
+  runtime: RuntimeStore,
+): Promise<{ changesetsDeleted: number }> {
+  const changesetsDeleted = await lensChangesetCount(lensId, runtime);
   const deleted = await store.deleteLens(lensId);
   if (!deleted) {
     throw new NotFoundError(`Lens '${lensId}' not found`);
   }
   invalidateLoadedSchemaCache();
+  return { changesetsDeleted };
 }
 
 // --- Entity Type (Global) ---

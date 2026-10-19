@@ -6,8 +6,11 @@
  *
  * The staged write routes under `/:changesetId/` have the paths and bodies
  * of the six write routes of `router.ts` and answer 202 `{seq, id}`.
- * `POST /:changesetId/commit` persists them all or nothing. No
- * read route is mounted under a changeset: reads never see staged data.
+ * `GET /` lists the lens's changesets (an anchored URL: its anchor's),
+ * `GET /:changesetId` is the review read, `POST /:changesetId/submit` and
+ * `/unsubmit` hand it over and back, and `POST /:changesetId/commit`
+ * persists it all or nothing. No entity or relation read route is mounted
+ * under a changeset: reads never see staged data.
  * Routers parse and shape only; every rule lives in `changesets.ts`.
  */
 
@@ -27,6 +30,10 @@ const RelationParams = RelationTypeParams.extend({ relationId: z.string() });
 const WriteParams = ChangesetParams.extend({ seq: z.coerce.number().int().min(1) });
 
 const StartPayload = z.strictObject({ note: z.string().nullish() }).nullish();
+
+/** Submit: the note is optional (absent, the note stays); unsubmit: the
+ * service requires one (R14), so its 422 names `fields.note`. */
+const NotePayload = z.strictObject({ note: z.string().nullish() }).nullish();
 
 /** The version the caller looked at; without it, any version commits. */
 const CommitPayload = z.strictObject({ expectedVersion: z.number().int().min(1).optional() }).nullish();
@@ -70,6 +77,17 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.get(
+    "/",
+    { schema: { tags: ["runtime"], params: LensParams } },
+    async (request) =>
+      changesets.listChangesets(
+        request.params.lensKey,
+        anchorOf(request.params),
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.get(
     "/:changesetId",
     { schema: { tags: ["runtime"], params: ChangesetParams, querystring: PageQuery } },
     async (request) =>
@@ -110,6 +128,32 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
       );
       return reply.status(204).send();
     },
+  );
+
+  app.post(
+    "/:changesetId/submit",
+    { schema: { tags: ["runtime"], params: ChangesetParams, body: NotePayload } },
+    async (request) =>
+      changesets.submitChangeset(
+        request.params.lensKey,
+        anchorOf(request.params),
+        request.params.changesetId,
+        request.body?.note,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.post(
+    "/:changesetId/unsubmit",
+    { schema: { tags: ["runtime"], params: ChangesetParams, body: NotePayload } },
+    async (request) =>
+      changesets.unsubmitChangeset(
+        request.params.lensKey,
+        anchorOf(request.params),
+        request.params.changesetId,
+        request.body?.note,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
   );
 
   app.post(

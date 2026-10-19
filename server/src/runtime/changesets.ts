@@ -1,7 +1,8 @@
 /**
  * Changesets: runtime writes of one lens, staged into a journal over any
  * time and persisted together by a commit. This module starts a changeset,
- * stages writes into it, reads it, unstages one write and discards it. REST
+ * stages writes into it, lists and reads it, unstages one write, submits
+ * and unsubmits it, discards it and commits it. REST
  * (`changesetRouter.ts`) is its entrance; like the write functions of
  * `service.ts`, every function takes the lens key and the anchor key of
  * the URL (null on the plain lens) first and the store last.
@@ -29,7 +30,15 @@
  *   distinct from null, and a document value is kept as its hash.
  * - **Expiry (V24, R3).** A live changeset idle for 7 days is gone: checked
  *   on every access, where it is deleted and answers not found, and swept
- *   on start.
+ *   on start and on list. A submitted changeset never expires.
+ * - **Lifecycle (V7, V38).** Submit freezes a live changeset and hands it
+ *   over with a note, after the lock-free pass (V5 d) and a compare-and-set
+ *   on the version the pass saw (V40). While submitted, stage, unstage and
+ *   discard are 409s, decided in the store's own statement; unsubmit (a
+ *   note is required, R14) makes it live again, and commit is the
+ *   approval. A rejected commit leaves it as it was (R6).
+ * - **Review (V41).** The list and the read apply the lens as it is now:
+ *   a type, property or name the lens hides is never shown.
  * - **Commit (D3, V1 B).** Before BEGIN, holding nothing: the schema, the
  *   changeset and the search context are loaded, and the lock-free pass
  *   (V19) runs; any fault it finds rejects here. Then one transaction on
@@ -72,7 +81,7 @@ import {
   type ParentRelationInput,
   type UpdateArgs,
 } from "./prepare.js";
-import { documentPropertyKeys } from "./readHelpers.js";
+import { documentPropertyKeys, stubDocumentProperties } from "./readHelpers.js";
 import { loadSchema, loadSearchContext, type LoadedSchema, type SearchContext } from "./schemaCache.js";
 import { parentReadings } from "./service.js";
 
@@ -113,17 +122,70 @@ export interface ChangesetView {
   submittedAt: Date | null;
 }
 
-/** One staged write as the read shows it. */
+/** One end of a staged write: a relation end or a create's parent. */
+export interface EndView {
+  id: string;
+  /** Its name through the lens: live when stored, staged when a create of
+   * this changeset mints it; null when the lens shows none. */
+  name: string | null;
+}
+
+/** A fault the lock-free pass finds on a staged write (V19). */
+export interface Marker {
+  kind: string;
+  message: string;
+}
+
+/**
+ * One staged write as the review read shows it, through the lens as it is
+ * now (V41). A write whose type the lens no longer shows keeps only its
+ * seq, operation, time and markers.
+ */
 export interface StagedWriteView {
   seq: number;
   operation: string;
-  /** The entity or relation type key. */
-  type: string;
+  /** The entity or relation type key; null when the lens hides it. */
+  type: string | null;
   /** The id a create minted, or the target of an update or delete. */
   id: string | null;
-  /** The payload, as sent, after coercion. */
+  /** The payload, as sent, after coercion; what the lens hides is left out. */
   arguments: Row;
   createdAt: Date;
+  /** Entity writes: the target's name. */
+  name?: string | null;
+  /** A create's parent, when it has one the lens shows. */
+  parent?: EndView | null;
+  /** Relation writes: the two ends. */
+  from?: EndView | null;
+  to?: EndView | null;
+  /** Updates of a stored target: the live values of the patched keys. */
+  before: Row | null;
+  /** Creates and updates: the staged values. */
+  after: Row | null;
+  /** The lock-free pass's faults on this write: drift, dangling, not
+   * visible, missing, or a value the lens no longer accepts. */
+  markers: Marker[];
+}
+
+/** A changeset as the list shows it (V17, V41). */
+export interface ChangesetListItem {
+  id: string;
+  state: "live" | "submitted";
+  version: number;
+  note: string | null;
+  anchor: string | null;
+  /** The number of staged writes, as the read shows it. */
+  writeCount: number;
+  /** The staged writes per operation. */
+  operations: Record<string, number>;
+  /** The type keys the staged writes name that the lens shows, sorted. */
+  types: string[];
+  /** How many type keys the staged writes name that the lens no longer
+   * shows; they are left out of `types`. */
+  notVisible: number;
+  createdAt: Date;
+  lastChangeAt: Date;
+  submittedAt: Date | null;
 }
 
 /** The answer of a staged write (R4). */
@@ -134,6 +196,11 @@ export interface StagedAnswer {
 
 function notFound(id: string): NotFoundError {
   return new NotFoundError(`Changeset '${id}' not found`);
+}
+
+/** The 409 of stage, unstage and discard while submitted (V18, V38). */
+function isSubmitted(id: string): ConflictError {
+  return new ConflictError(`Changeset '${id}' is submitted; unsubmit it first`);
 }
 
 function toView(record: ChangesetRecord): ChangesetView {
@@ -147,17 +214,6 @@ function toView(record: ChangesetRecord): ChangesetView {
     createdAt: record.createdAt,
     lastChangeAt: record.lastChangeAt,
     submittedAt: record.submittedAt,
-  };
-}
-
-function toWriteView(write: ChangesetWriteRecord): StagedWriteView {
-  return {
-    seq: write.seq,
-    operation: write.operation,
-    type: write.typeKey,
-    id: write.mintedId ?? write.targetId,
-    arguments: write.arguments,
-    createdAt: write.createdAt,
   };
 }
 
@@ -208,6 +264,26 @@ async function loadChangeset(
   return record;
 }
 
+/** After the store refused to change a live changeset: gone is not
+ * found, submitted is the 409; otherwise null. */
+async function refusalOf(
+  loaded: LoadedSchema,
+  anchorKey: string | null,
+  id: string,
+  store: RuntimeStore,
+): Promise<Error | null> {
+  const record = await store.changesets().get(id, loaded.scoped.lensId, anchorKey);
+  if (record === null) return notFound(id);
+  return record.submittedAt === null ? null : isSubmitted(id);
+}
+
+/** An anchor key of the URL that names no anchor is not found. */
+async function checkAnchorExists(anchorKey: string | null, store: RuntimeStore): Promise<void> {
+  if (anchorKey !== null && (await store.anchors().getAnchor(anchorKey)) === null) {
+    throw new NotFoundError(`Anchor '${anchorKey}' not found`);
+  }
+}
+
 /** Start a changeset bound to the lens and to the anchor key of the URL
  * (V17). Unknown lens or anchor is not found, in that order. */
 export async function startChangeset(
@@ -217,9 +293,7 @@ export async function startChangeset(
   store: RuntimeStore,
 ): Promise<ChangesetView> {
   const loaded = await loadSchema(lensKey, store);
-  if (anchorKey !== null && (await store.anchors().getAnchor(anchorKey)) === null) {
-    throw new NotFoundError(`Anchor '${anchorKey}' not found`);
-  }
+  await checkAnchorExists(anchorKey, store);
   const valid = validNote(note);
   const changesets = store.changesets();
   await changesets.sweep(expiryCutoff());
@@ -422,6 +496,7 @@ export async function stage(
 ): Promise<StagedAnswer> {
   const loaded = await loadSchema(lensKey, store);
   const changeset = await loadChangeset(loaded, anchorKey, changesetId, store);
+  if (changeset.submittedAt !== null) throw isSubmitted(changesetId);
   // Dangling, or at an entity the lens hides: refused as every v1 write.
   await AnchorGuard.open(anchorKey, loaded, store);
 
@@ -429,8 +504,10 @@ export async function stage(
   if (changeset.writeCount >= MAX_STAGED_WRITES) {
     throw new ConflictError(`Changeset '${changesetId}' is full: at most ${MAX_STAGED_WRITES} staged writes`);
   }
+  // The store appends to a live changeset only: a submit since the read
+  // is refused here.
   const seq = await store.changesets().append(changeset.id, row);
-  if (seq === null) throw notFound(changesetId);
+  if (seq === null) throw (await refusalOf(loaded, anchorKey, changeset.id, store)) ?? notFound(changesetId);
   return { seq, id: (row.mintedId ?? row.targetId)! };
 }
 
@@ -438,7 +515,11 @@ export async function stage(
 // Read, unstage, discard
 // ---------------------------------------------------------------------------
 
-/** The changeset and one page of its writes by seq (R7). */
+/**
+ * The review read (R7, V41): the changeset and one page of its writes by
+ * seq, each with names resolved, `before` → `after`, and the markers the
+ * lock-free pass finds on it.
+ */
 export async function getChangeset(
   lensKey: string,
   anchorKey: string | null,
@@ -450,7 +531,121 @@ export async function getChangeset(
   const loaded = await loadSchema(lensKey, store);
   const record = await loadChangeset(loaded, anchorKey, changesetId, store);
   const writes = await store.changesets().page(record.id, offset, limit);
-  return { ...toView(record), offset, limit, writes: writes.map(toWriteView) };
+  return { ...toView(record), offset, limit, writes: await reviewPage(loaded, record.id, writes, store) };
+}
+
+/**
+ * The lens's changesets (V17): through the plain lens URL every one, through
+ * an anchored URL only its anchor's; submitted first, then by last change.
+ * Expired live changesets are swept first (R3). `types` applies the lens as
+ * it is now (V41).
+ */
+export async function listChangesets(
+  lensKey: string,
+  anchorKey: string | null,
+  store: RuntimeStore,
+): Promise<ChangesetListItem[]> {
+  const loaded = await loadSchema(lensKey, store);
+  await checkAnchorExists(anchorKey, store);
+  const changesets = store.changesets();
+  await changesets.sweep(expiryCutoff());
+  const lens = loaded.scoped;
+  const shown = (key: string): boolean => Object.hasOwn(lens.entityTypes, key) || Object.hasOwn(lens.relationTypes, key);
+  return (await changesets.list(lens.lensId, anchorKey)).map((summary) => {
+    const types = summary.typeKeys.filter(shown);
+    return {
+      id: summary.id,
+      state: summary.submittedAt === null ? "live" : "submitted",
+      version: summary.version,
+      note: summary.note,
+      anchor: summary.anchorKey,
+      writeCount: summary.writeCount,
+      operations: summary.operations,
+      types,
+      notVisible: summary.typeKeys.length - types.length,
+      createdAt: summary.createdAt,
+      lastChangeAt: summary.lastChangeAt,
+      submittedAt: summary.submittedAt,
+    };
+  });
+}
+
+/** How many changesets a lens delete takes with it (V42, R8), counted
+ * before the delete; an expired live changeset is gone already. */
+export async function lensChangesetCount(lensId: string, store: RuntimeStore): Promise<number> {
+  const cutoff = expiryCutoff();
+  const summaries = await store.changesets().list(lensId, null);
+  return summaries.filter((summary) => summary.submittedAt !== null || summary.lastChangeAt >= cutoff).length;
+}
+
+// ---------------------------------------------------------------------------
+// Submit, unsubmit
+// ---------------------------------------------------------------------------
+
+/**
+ * Submit a live changeset (V7, V5 d): freeze it and hand it over, with the
+ * note given (absent, the note stays). Already submitted, or an anchored
+ * changeset whose anchor is dangling or at an entity the lens hides, is a
+ * 409. The lock-free pass runs with no lock and no transaction; its faults
+ * are a 422 and the changeset stays live. Clean, a compare-and-set on the
+ * version the pass saw (V40): a change meanwhile is a 409.
+ */
+export async function submitChangeset(
+  lensKey: string,
+  anchorKey: string | null,
+  changesetId: string,
+  note: string | null | undefined,
+  store: RuntimeStore,
+): Promise<ChangesetView> {
+  const loaded = await loadSchema(lensKey, store);
+  const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+  if (record.submittedAt !== null) throw new ConflictError(`Changeset '${changesetId}' is already submitted`);
+  const valid = validNote(note);
+  if (record.anchorKey !== null) {
+    // The stored anchor, whatever URL the call came through. A deleted one
+    // is left to the commit ("anchor gone").
+    const anchor = await store.anchors().getAnchor(record.anchorKey);
+    const refusal = anchor === null ? null : anchorRefusal(record.anchorKey, anchor, loaded);
+    if (refusal !== null) throw new ConflictError(refusal);
+  }
+  const pass = await lockFreePass(loaded, record.id, store);
+  if (pass.faults.length > 0) {
+    throw violationsError("The changeset was not submitted; it stays live", pass.faults);
+  }
+  const submitted = await store.changesets().submit(record.id, record.version, valid ?? record.note);
+  if (submitted === null) {
+    if ((await store.changesets().get(record.id, loaded.scoped.lensId, anchorKey)) === null) throw notFound(changesetId);
+    throw new ConflictError(`Changeset '${changesetId}' changed during the submit; try again`);
+  }
+  return toView(submitted);
+}
+
+/**
+ * A submitted changeset back to live (V7, R14), through any URL that
+ * reaches it, a dangling anchor's included. The note is required: it
+ * replaces the stored one. A live changeset is a 409.
+ */
+export async function unsubmitChangeset(
+  lensKey: string,
+  anchorKey: string | null,
+  changesetId: string,
+  note: string | null | undefined,
+  store: RuntimeStore,
+): Promise<ChangesetView> {
+  const loaded = await loadSchema(lensKey, store);
+  const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+  const valid = validNote(note);
+  if (valid === null || valid.trim() === "") {
+    throw new ValidationError("Changeset validation failed", { fields: { note: "A note is required to unsubmit" } });
+  }
+  const notSubmitted = new ConflictError(`Changeset '${changesetId}' is not submitted`);
+  if (record.submittedAt === null) throw notSubmitted;
+  const live = await store.changesets().unsubmit(record.id, valid);
+  if (live === null) {
+    if ((await store.changesets().get(record.id, loaded.scoped.lensId, anchorKey)) === null) throw notFound(changesetId);
+    throw notSubmitted;
+  }
+  return toView(live);
 }
 
 /** Take one staged write out by seq. Writes that depend on it stay; the
@@ -464,8 +659,13 @@ export async function unstage(
 ): Promise<void> {
   const loaded = await loadSchema(lensKey, store);
   const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+  if (record.submittedAt !== null) throw isSubmitted(changesetId);
   if (!(await store.changesets().unstage(record.id, seq))) {
-    throw new NotFoundError(`Staged write ${seq} not found in changeset '${changesetId}'`);
+    // Refused by the store: gone, submitted since the read, or no such seq.
+    throw (
+      (await refusalOf(loaded, anchorKey, record.id, store)) ??
+      new NotFoundError(`Staged write ${seq} not found in changeset '${changesetId}'`)
+    );
   }
 }
 
@@ -480,10 +680,8 @@ export async function discardChangeset(
 ): Promise<void> {
   const loaded = await loadSchema(lensKey, store);
   const record = await loadChangeset(loaded, anchorKey, changesetId, store);
-  const changesets = store.changesets();
-  if (record.submittedAt === null && (await changesets.discard(record.id))) return;
-  if ((await changesets.get(record.id, loaded.scoped.lensId, anchorKey)) === null) throw notFound(changesetId);
-  throw new ConflictError(`Changeset '${changesetId}' is submitted; unsubmit it first`);
+  if (record.submittedAt === null && (await store.changesets().discard(record.id))) return;
+  throw (await refusalOf(loaded, anchorKey, record.id, store)) ?? notFound(changesetId);
 }
 
 // ---------------------------------------------------------------------------
@@ -923,6 +1121,157 @@ export async function lockFreePass(
 }
 
 // ---------------------------------------------------------------------------
+// The review read (V41)
+// ---------------------------------------------------------------------------
+
+/** The keys of `values` the lens shows, document values as the reads stub
+ * them. */
+function shownValues(values: Row, properties: Record<string, PropertyDef>): Row {
+  const shown = Object.fromEntries(Object.entries(values).filter(([key]) => Object.hasOwn(properties, key)));
+  return stubDocumentProperties(shown, properties);
+}
+
+/** The arguments of a staged write with what the lens hides left out: its
+ * hidden properties, and a parent relation the lens no longer shows. */
+function shownArguments(loaded: LoadedSchema, write: ChangesetWriteRecord, properties: Record<string, PropertyDef>): Row {
+  const args = write.arguments;
+  const shown: Row = { ...args };
+  if (args.properties !== undefined) {
+    shown.properties = Object.fromEntries(
+      Object.entries(args.properties as Row).filter(([key]) => Object.hasOwn(properties, key)),
+    );
+  }
+  const parent = args.parentRelation as ParentRelationInput | null | undefined;
+  if (parent) {
+    const rt = loaded.scoped.relationTypes[parent.type];
+    shown.parentRelation =
+      rt === undefined
+        ? null
+        : {
+            ...parent,
+            properties: Object.fromEntries(
+              Object.entries(parent.properties ?? {}).filter(([key]) => Object.hasOwn(rt.properties, key)),
+            ),
+          };
+    if (rt === undefined) delete shown.relationId;
+  }
+  return shown;
+}
+
+/**
+ * One page of staged writes as the review shows them (V41): names
+ * resolved, `before` → `after`, and the markers of the lock-free pass,
+ * which runs over the whole journal because a write's ids may be minted
+ * anywhere in it. The stored entities the page names come in one batched
+ * read; a stored relation target is read once per write. Through the lens:
+ * a hidden type keeps only seq, operation and markers, and hidden
+ * properties and names are not returned.
+ */
+async function reviewPage(
+  loaded: LoadedSchema,
+  changesetId: string,
+  writes: ChangesetWriteRecord[],
+  store: RuntimeStore,
+): Promise<StagedWriteView[]> {
+  const lens = loaded.scoped;
+  const pass = await lockFreePass(loaded, changesetId, store);
+  const markers = new Map<number, Marker[]>();
+  for (const fault of pass.faults) {
+    markers.set(fault.seq, [...(markers.get(fault.seq) ?? []), { kind: fault.kind, message: fault.message }]);
+  }
+  const mintedAs = (id: string | null, create: string): ChangesetWriteRecord | undefined => {
+    const write = id === null ? undefined : pass.minted.get(id);
+    return write?.operation === create ? write : undefined;
+  };
+
+  // The ends of each relation write: from its create, or the stored relation.
+  const relationEnds = new Map<number, [string, string]>();
+  const storedRelations = new Map<number, Row>();
+  for (const write of writes) {
+    if (!write.operation.endsWith("_relation") || lens.relationTypes[write.typeKey] === undefined) continue;
+    const create = write.operation === "create_relation" ? write : mintedAs(write.targetId, "create_relation");
+    if (create !== undefined) {
+      relationEnds.set(write.seq, [create.arguments.fromEntityId as string, create.arguments.toEntityId as string]);
+      continue;
+    }
+    const stored = await store.getRelation(write.typeKey, write.targetId!);
+    if (stored === null) continue;
+    storedRelations.set(write.seq, stored);
+    relationEnds.set(write.seq, [stored.fromEntityId as string, stored.toEntityId as string]);
+  }
+
+  const ids = new Set<string>();
+  for (const write of writes) {
+    for (const id of entityRefs(write)) ids.add(id);
+    for (const id of relationEnds.get(write.seq) ?? []) ids.add(id);
+  }
+  // Raw rows: the name property is a string, and `before` takes raw values.
+  const rows = await store.getEntitiesByIds([...ids], {});
+
+  const nameOf = (id: string): string | null => {
+    const row = rows[id];
+    const create = row === undefined ? mintedAs(id, "create_entity") : undefined;
+    const type = row !== undefined ? (row._entityTypeKey as string) : create?.typeKey;
+    const nameProperty = type === undefined ? null : (lens.entityTypes[type]?.nameProperty ?? null);
+    if (nameProperty === null) return null;
+    const value = row !== undefined ? row[nameProperty] : (create!.arguments.properties as Row | undefined)?.[nameProperty];
+    return typeof value === "string" ? value : null;
+  };
+  const end = (id: string): EndView => ({ id, name: nameOf(id) });
+
+  return writes.map((write) => {
+    const isEntity = write.operation.endsWith("_entity");
+    const type = isEntity ? lens.entityTypes[write.typeKey] : lens.relationTypes[write.typeKey];
+    const view: StagedWriteView = {
+      seq: write.seq,
+      operation: write.operation,
+      type: null,
+      id: null,
+      arguments: {},
+      createdAt: write.createdAt,
+      before: null,
+      after: null,
+      markers: markers.get(write.seq) ?? [],
+    };
+    if (type === undefined) return view;
+
+    const id = (write.mintedId ?? write.targetId)!;
+    view.type = write.typeKey;
+    view.id = id;
+    view.arguments = shownArguments(loaded, write, type.properties);
+    const staged = (write.arguments.properties ?? {}) as Row;
+    if (write.operation.startsWith("create_") || write.operation.startsWith("update_")) {
+      view.after = shownValues(staged, type.properties);
+    }
+    if (write.operation.startsWith("update_") && write.base !== null) {
+      // A stored target: its live values, unless it is gone (or now of
+      // another type).
+      const live = isEntity
+        ? rows[id]?._entityTypeKey === write.typeKey
+          ? rows[id]
+          : undefined
+        : storedRelations.get(write.seq);
+      if (live !== undefined) {
+        const keys = Object.keys(staged).filter((key) => Object.hasOwn(type.properties, key));
+        view.before = shownValues(Object.fromEntries(keys.map((key) => [key, live[key] ?? null])), type.properties);
+      }
+    }
+    if (isEntity) {
+      view.name = nameOf(id);
+      const parent = write.arguments.parentRelation as ParentRelationInput | null | undefined;
+      if (write.operation === "create_entity") {
+        view.parent = parent && lens.relationTypes[parent.type] !== undefined ? end(parent.parentId) : null;
+      }
+    } else {
+      const ends = relationEnds.get(write.seq);
+      view.from = ends === undefined ? null : end(ends[0]);
+      view.to = ends === undefined ? null : end(ends[1]);
+    }
+    return view;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Commit validation (V21, V22)
 // ---------------------------------------------------------------------------
 
@@ -1254,14 +1603,18 @@ async function commitViolations(
   return violations;
 }
 
-/** The 422 of a rejected commit: the first violations by seq and their
- * total. */
-function rejection(violations: Violation[]): ValidationError {
+/** A 422 with the first violations by seq and their total (R4). */
+function violationsError(message: string, violations: Violation[]): ValidationError {
   const bySeq = [...violations].sort((a, b) => a.seq - b.seq);
-  return new ValidationError("The commit was rejected; nothing was persisted", {
+  return new ValidationError(message, {
     violations: bySeq.slice(0, MAX_VIOLATIONS),
     total: violations.length,
   });
+}
+
+/** The 422 of a rejected commit. */
+function rejection(violations: Violation[]): ValidationError {
+  return violationsError("The commit was rejected; nothing was persisted", violations);
 }
 
 /**
@@ -1283,11 +1636,14 @@ export async function commitChangeset(
   if (runningCommits >= MAX_RUNNING_COMMITS) {
     throw new ConflictError("Too many commits are running; try again");
   }
+  const staleVersion = (version: number): ConflictError =>
+    new ConflictError(`Changeset '${changesetId}' changed since you looked: version ${version}, not ${expectedVersion}`);
   runningCommits += 1;
   try {
     // 0a: before BEGIN, holding nothing. Nothing inside reaches the pool.
     const loaded = await loadSchema(lensKey, store);
     const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+    if (expectedVersion !== undefined && record.version !== expectedVersion) throw staleVersion(record.version);
     const search = await loadSearchContext(store.ontologyKey, store.searchIndices());
     try {
       // 0b: the lock-free pass; a fault rejects with no lock taken.
@@ -1298,11 +1654,7 @@ export async function commitChangeset(
         // and drift under the lock, and the anchor read fresh.
         const locked = await bound.changesets().lockForCommit(record.id);
         if (locked === null) throw notFound(changesetId);
-        if (expectedVersion !== undefined && locked.version !== expectedVersion) {
-          throw new ConflictError(
-            `Changeset '${changesetId}' changed since you looked: version ${locked.version}, not ${expectedVersion}`,
-          );
-        }
+        if (expectedVersion !== undefined && locked.version !== expectedVersion) throw staleVersion(locked.version);
         if (locked.version !== record.version) {
           throw new ConflictError(`Changeset '${changesetId}' changed during the commit; try again`);
         }

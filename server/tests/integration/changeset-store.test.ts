@@ -459,6 +459,23 @@ describe("ChangesetStore", () => {
     expect(await changesets.get(cs.id, lenses.all!, null)).toBeNull();
   });
 
+  it("the state is judged in the writing statement: append, unstage and submit change a live changeset only, unsubmit a submitted one", async () => {
+    const changesets = store.changesets();
+    const cs = await started();
+    const seq = (await changesets.append(cs.id, write("create_entity", "task")))!;
+    const submitted = (await changesets.submit(cs.id, (await read(cs.id)).version, "go"))!;
+
+    expect(await changesets.append(cs.id, write("create_entity", "task"))).toBeNull();
+    expect(await changesets.unstage(cs.id, seq)).toBe(false);
+    expect(await changesets.submit(cs.id, submitted.version, "again")).toBeNull();
+    expect(await read(cs.id)).toMatchObject({ version: submitted.version, writeCount: 1, note: "go" });
+
+    const live = (await changesets.unsubmit(cs.id, "back"))!;
+    expect(await changesets.unsubmit(cs.id, "twice")).toBeNull();
+    expect(await read(cs.id)).toMatchObject({ version: live.version, note: "back", submittedAt: null });
+    expect(await changesets.unstage(cs.id, seq)).toBe(true);
+  });
+
   it("while another connection holds the row, every mutation is a ConflictError at once", async () => {
     const changesets = store.changesets();
     const cs = await started();

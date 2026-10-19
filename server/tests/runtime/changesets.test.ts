@@ -443,8 +443,31 @@ describe("read, unstage, discard", () => {
     expect(store.changesetStore.page).toHaveBeenCalledWith(CS, 0, 100);
     expect(read).toMatchObject({ id: CS, state: "live", version: 3, writeCount: 2, offset: 0, limit: 100 });
     expect(read.writes).toEqual([
-      { seq: 1, operation: "create_entity", type: "person", id: P1, arguments: { properties: { name: "A" } }, createdAt: NOW },
-      { seq: 4, operation: "delete_entity", type: "company", id: ACME, arguments: {}, createdAt: NOW },
+      {
+        seq: 1,
+        operation: "create_entity",
+        type: "person",
+        id: P1,
+        arguments: { properties: { name: "A" } },
+        createdAt: NOW,
+        name: "A",
+        parent: null,
+        before: null,
+        after: { name: "A" },
+        markers: [],
+      },
+      {
+        seq: 4,
+        operation: "delete_entity",
+        type: "company",
+        id: ACME,
+        arguments: {},
+        createdAt: NOW,
+        name: null,
+        before: null,
+        after: null,
+        markers: [],
+      },
     ]);
   });
 

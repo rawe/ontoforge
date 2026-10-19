@@ -658,7 +658,7 @@ describe("lens cascade", () => {
     });
 
     const deleted = await inject("DELETE", `/api/ontologies/test_ont/model/lenses/${lensId}`);
-    expect(deleted.statusCode).toBe(204);
+    expect(deleted.statusCode).toBe(200);
 
     // Recreate the same key: a fresh lens holds neither configuration.
     const recreated = await inject("POST", "/api/ontologies/test_ont/model/lenses", {

@@ -126,7 +126,7 @@ function expectNothingWritten(): void {
 }
 
 describe("start", () => {
-  it("binds the lens id and the anchor key of the URL, sweeps expired changesets, answers live", async () => {
+  it("binds the lens id and the anchor key of the URL, sweeps expired changesets, answers draft", async () => {
     store.anchorStore.getAnchor.mockResolvedValue({ key: "agent-a", entity: null, entityFound: false });
     store.changesetStore.start.mockImplementation(async (cs: Row) => changeset({ ...cs, version: 1, writeCount: 0 }));
 
@@ -138,7 +138,7 @@ describe("start", () => {
     const [input] = store.changesetStore.start.mock.calls[0]!;
     expect(input).toMatchObject({ lensId: "lens-1", anchorKey: "agent-a", note: "g1" });
     expect(input.id).toMatch(UUID);
-    expect(started).toMatchObject({ state: "live", version: 1, note: "g1", anchor: "agent-a", writeCount: 0 });
+    expect(started).toMatchObject({ state: "draft", version: 1, note: "g1", anchor: "agent-a", writeCount: 0 });
   });
 
   it("an unknown anchor is not found; a note over 1000 characters is a 422; neither starts one", async () => {
@@ -150,7 +150,7 @@ describe("start", () => {
     await expect(promise).rejects.toBeInstanceOf(ValidationError);
     await expect(promise).rejects.toMatchObject({ details: { fields: { note: expect.stringContaining("1000") } } });
     await expect(startChangeset("full_lens", null, "x".repeat(1000), asRuntimeStore(store))).resolves.toMatchObject({
-      state: "live",
+      state: "draft",
     });
     expect(store.changesetStore.start).toHaveBeenCalledTimes(1);
   });
@@ -166,7 +166,7 @@ describe("binding and expiry", () => {
     expectNothingWritten();
   });
 
-  it("an expired live changeset is swept and not found; a submitted one of the same age is kept", async () => {
+  it("an expired draft changeset is swept and not found; a submitted one of the same age is kept", async () => {
     const old = new Date(Date.now() - 8 * 24 * 3_600_000);
     store.changesetStore.get.mockResolvedValue(changeset({ lastChangeAt: old }));
     await expect(getChangeset("full_lens", null, CS, 0, 100, asRuntimeStore(store))).rejects.toThrow(
@@ -441,7 +441,7 @@ describe("read, unstage, discard", () => {
     ]);
     const read = await getChangeset("full_lens", null, CS, 0, 100, asRuntimeStore(store));
     expect(store.changesetStore.page).toHaveBeenCalledWith(CS, 0, 100);
-    expect(read).toMatchObject({ id: CS, state: "live", version: 3, writeCount: 2, offset: 0, limit: 100 });
+    expect(read).toMatchObject({ id: CS, state: "draft", version: 3, writeCount: 2, offset: 0, limit: 100 });
     expect(read.writes).toEqual([
       {
         seq: 1,
@@ -483,13 +483,13 @@ describe("read, unstage, discard", () => {
     );
   });
 
-  it("discard deletes a live changeset", async () => {
+  it("discard deletes a draft changeset", async () => {
     store.changesetStore.discard.mockResolvedValue(true);
     await discardChangeset("full_lens", null, CS, asRuntimeStore(store));
     expect(store.changesetStore.discard).toHaveBeenCalledWith(CS);
   });
 
-  it("discard refuses a submitted changeset, also one submitted after the read (the store's delete is live only)", async () => {
+  it("discard refuses a submitted changeset, also one submitted after the read (the store's delete is draft only)", async () => {
     store.changesetStore.get.mockResolvedValue(changeset({ submittedAt: NOW }));
     await expect(discardChangeset("full_lens", null, CS, asRuntimeStore(store))).rejects.toThrow(
       new ConflictError(`Changeset '${CS}' is submitted; unsubmit it first`),

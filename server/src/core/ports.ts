@@ -1089,7 +1089,7 @@ export interface ChangesetRecord {
   anchorKey: string | null;
   version: number;
   note: string | null;
-  /** Null while live. */
+  /** Null for a draft. */
   submittedAt: Date | null;
   createdAt: Date;
   lastChangeAt: Date;
@@ -1148,7 +1148,7 @@ export interface ChangesetStore {
   /** The staged create that minted `mintedId`; null when none did. */
   findMinted(id: string, mintedId: string): Promise<ChangesetWriteRecord | null>;
 
-  /** Append one write to a live changeset; its seq, or null when the
+  /** Append one write to a draft changeset; its seq, or null when the
    * changeset is gone or submitted. A seq is higher than every seq the
    * changeset had before, so an unstaged seq is never reused. */
   append(id: string, write: NewChangesetWrite): Promise<number | null>;
@@ -1156,16 +1156,16 @@ export interface ChangesetStore {
   /** False when no write has this seq, or the changeset is submitted. */
   unstage(id: string, seq: number): Promise<boolean>;
 
-  /** Compare-and-set on the version of a live changeset: sets
+  /** Compare-and-set on the version of a draft changeset: sets
    * `submittedAt` and the note. Null when the version differs, the
    * changeset is submitted, or it is gone. */
   submit(id: string, expectedVersion: number, note: string | null): Promise<ChangesetRecord | null>;
 
-  /** A submitted changeset back to live, with the note given. Null when
-   * the changeset is live or gone. */
+  /** A submitted changeset back to draft, with the note given. Null when
+   * the changeset is a draft or gone. */
   unsubmit(id: string, note: string): Promise<ChangesetRecord | null>;
 
-  /** The changeset and its journal, while live; false when it is gone
+  /** The changeset and its journal, while a draft; false when it is gone
    * or submitted. */
   discard(id: string): Promise<boolean>;
 
@@ -1173,7 +1173,7 @@ export interface ChangesetStore {
    * another transaction holds the row. */
   touch(id: string): Promise<void>;
 
-  /** Delete the live changesets of the ontology last changed before
+  /** Delete the draft changesets of the ontology last changed before
    * `olderThan`, skipping any whose row is held; how many. */
   sweep(olderThan: Date): Promise<number>;
 

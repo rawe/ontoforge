@@ -183,7 +183,7 @@ describe("through a staged-only anchored URL (REST)", () => {
     const submittedCommit = await rest("POST", `${S}/changesets/${cs}/commit`, { expectedVersion: 1 });
     expect(submittedCommit.status).toBe(409);
     expect(submittedCommit.body.error.message).toBe(NO_COMMIT("agent-s"));
-    expect((await rest("POST", `${S}/changesets/${cs}/unsubmit`, { note: "fix it" })).body.state).toBe("live");
+    expect((await rest("POST", `${S}/changesets/${cs}/unsubmit`, { note: "fix it" })).body.state).toBe("draft");
     expect((await rest("DELETE", `${S}/changesets/${cs}`)).status).toBe(204);
     expect((await rest("GET", `${S}/changesets/${cs}`)).status).toBe(404);
   });
@@ -281,7 +281,7 @@ describe("the staged-only MCP tool set (V29, R13)", () => {
     expect((await ok(client, "get_changeset", { changeset_id: cs })).writeCount).toBe(1);
     expect((await ok(client, "get_entity", { entity_type_key: "task", entity_id: e.T1 })).name).toBe("T1");
     expect((await ok(client, "submit_changeset", { changeset_id: cs })).state).toBe("submitted");
-    expect((await ok(client, "unsubmit_changeset", { changeset_id: cs, note: "again" })).state).toBe("live");
+    expect((await ok(client, "unsubmit_changeset", { changeset_id: cs, note: "again" })).state).toBe("draft");
     expect((await ok(client, "discard_changeset", { changeset_id: cs })).message).toContain("discarded");
   });
 

@@ -203,7 +203,7 @@ describe("lens CRUD", () => {
       typeKeys: [],
     });
     const old = new Date(Date.now() - 8 * 24 * 3_600_000);
-    // A live one, a submitted one of any age; an expired live one is gone already.
+    // A draft one, a submitted one of any age; an expired draft one is gone already.
     holder.runtime.changesetStore.list.mockResolvedValue([
       summary("a", null, new Date()),
       summary("b", NOW, old),

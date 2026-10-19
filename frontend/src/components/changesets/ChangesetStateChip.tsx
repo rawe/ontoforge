@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 
 const STATE_CHIPS: Record<ChangesetState, string> = {
   submitted: 'border-transparent bg-(--tc-blue-bg) text-(--tc-blue)',
-  live: 'border-border bg-muted text-muted-foreground',
+  draft: 'border-border bg-muted text-muted-foreground',
 }
 
 /** The state chip of a list row and of the detail's header. */

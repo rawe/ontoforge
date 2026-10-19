@@ -114,11 +114,11 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
   it("the whole round: submit, refused writes, a stale commit, unsubmit, restage, resubmit, commit", async () => {
     const cs = await start(ALL, "g9");
     await staged("PATCH", ALL, cs, `entities/project/${e.P2}`, { name: "P2 Website" });
-    const live = (await view(cs)).body;
+    const draft = (await view(cs)).body;
 
     const submitted = await submit(cs, "please review");
     expect(submitted.status, JSON.stringify(submitted.body)).toBe(200);
-    expect(submitted.body).toMatchObject({ state: "submitted", version: live.version + 1, note: "please review" });
+    expect(submitted.body).toMatchObject({ state: "submitted", version: draft.version + 1, note: "please review" });
     expect(Date.parse(submitted.body.submittedAt)).not.toBeNaN();
 
     // Frozen: stage, unstage, discard and a second submit are 409s.
@@ -150,7 +150,7 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
     }
     const back = await unsubmit(cs, { note: "fix T2" });
     expect(back.status, JSON.stringify(back.body)).toBe(200);
-    expect(back.body).toMatchObject({ state: "live", note: "fix T2", submittedAt: null, version: submitted.body.version + 1 });
+    expect(back.body).toMatchObject({ state: "draft", note: "fix T2", submittedAt: null, version: submitted.body.version + 1 });
     expect((await unsubmit(cs, { note: "twice" })).status).toBe(409);
 
     await staged("PATCH", ALL, cs, `entities/project/${e.P1}`, { name: "P1 Core" });
@@ -169,7 +169,7 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
     expect((await list()).map((c) => c.id)).not.toContain(cs);
   });
 
-  it("a lock-free fault refuses the submit with 422, and the changeset stays live with its version", async () => {
+  it("a lock-free fault refuses the submit with 422, and the changeset stays a draft with its version", async () => {
     const cs = await start();
     await staged("PATCH", ALL, cs, `entities/person/${e.Kim}`, { name: "Kim B" });
     expect((await call("DELETE", `${ALL}/entities/person/${e.Kim}`)).status).toBe(204);
@@ -179,10 +179,10 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
     expect(res.status).toBe(422);
     expect(res.body.error).toMatchObject({
       code: "VALIDATION_ERROR",
-      message: "The changeset was not submitted; it stays live",
+      message: "The changeset was not submitted; it stays a draft",
       details: { violations: [{ seq: 1, kind: "missing", message: `Entity '${e.Kim}' no longer exists` }], total: 1 },
     });
-    expect((await view(cs)).body).toMatchObject({ state: "live", version: before.version, note: null });
+    expect((await view(cs)).body).toMatchObject({ state: "draft", version: before.version, note: null });
   });
 
   it("a rejected commit of a submitted changeset leaves it submitted with the same version", async () => {
@@ -196,7 +196,7 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
     expect(await name("project", e.P3)).toBe("P3");
   });
 
-  it("a live changeset commits without expectedVersion", async () => {
+  it("a draft changeset commits without expectedVersion", async () => {
     const cs = await start();
     await staged("PATCH", ALL, cs, `entities/person/${e.Ana}`, { name: "Ana B" });
     expect((await commit(cs)).status).toBe(200);
@@ -226,7 +226,7 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
     expect((await submit(cs, "n")).status).toBe(200);
   });
 
-  it("a submitted changeset idle for 8 days neither expires nor is swept; a live one does", async () => {
+  it("a submitted changeset idle for 8 days neither expires nor is swept; a draft one does", async () => {
     const kept = await start();
     await submit(kept, "old but submitted");
     const gone = await start();
@@ -272,7 +272,7 @@ describe("the list (V17, V41)", () => {
       lastChangeAt: expect.any(String),
       submittedAt: expect.any(String),
     });
-    expect(all[1]).toMatchObject({ state: "live", writeCount: 0, operations: {}, types: [], anchor: null });
+    expect(all[1]).toMatchObject({ state: "draft", writeCount: 0, operations: {}, types: [], anchor: null });
 
     expect((await list(AA)).map((c) => c.id)).toEqual([anchored]);
     expect(await list(`${ALL}/anchors/agent-b`)).toEqual([]);
@@ -331,7 +331,7 @@ describe("the review read (V41)", () => {
     expect((await call("DELETE", `${ALL}/entities/person/${e.Ben}`)).status).toBe(204);
 
     const read = (await view(cs)).body;
-    expect(read).toMatchObject({ state: "live", note: null, submittedAt: null, writeCount: 6 });
+    expect(read).toMatchObject({ state: "draft", note: null, submittedAt: null, writeCount: 6 });
     const bySeq = Object.fromEntries((read.writes as Row[]).map((w) => [w.seq, w]));
     expect(Object.keys(bySeq).map(Number)).toEqual([1, 3, 4, 5, 6, 7]);
 
@@ -399,6 +399,6 @@ describe("anchors at submit (V42; the dangling row of 'Who may do what')", () =>
     }
     const back = await unsubmit(other, { note: "anchor is dangling" }, AA);
     expect(back.status, JSON.stringify(back.body)).toBe(200);
-    expect(back.body).toMatchObject({ state: "live", note: "anchor is dangling" });
+    expect(back.body).toMatchObject({ state: "draft", note: "anchor is dangling" });
   });
 });

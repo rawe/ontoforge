@@ -281,7 +281,7 @@ export function ontologyDdlStatements(): string[] {
   anchor_key     text,       -- NULL: the plain lens
   version        integer     NOT NULL,
   note           text,
-  submitted_at   timestamptz,            -- NULL: live
+  submitted_at   timestamptz,            -- NULL: draft
   created_at     timestamptz NOT NULL DEFAULT now(),
   last_change_at timestamptz NOT NULL DEFAULT now()
 )`,

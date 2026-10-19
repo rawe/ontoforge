@@ -128,9 +128,9 @@ beforeEach(async () => {
 });
 
 describe("start", () => {
-  it("answers 201: live, version, note, and no anchor on the plain lens", async () => {
+  it("answers 201: draft, version, note, and no anchor on the plain lens", async () => {
     const cs = await start(ALL, "g1");
-    expect(cs).toMatchObject({ state: "live", version: 1, note: "g1", anchor: null, writeCount: 0 });
+    expect(cs).toMatchObject({ state: "draft", version: 1, note: "g1", anchor: null, writeCount: 0 });
     expect(cs.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(await call("POST", `${ALL}/changesets`)).toMatchObject({ status: 201, body: { note: null } });
   });
@@ -230,7 +230,7 @@ describe("the six staged writes", () => {
 
     const read = await call("GET", `${url}?limit=3&offset=1`);
     expect(read.status).toBe(200);
-    expect(read.body).toMatchObject({ id: cs, state: "live", version: 8, writeCount: 7, offset: 1, limit: 3 });
+    expect(read.body).toMatchObject({ id: cs, state: "draft", version: 8, writeCount: 7, offset: 1, limit: 3 });
     expect(read.body.writes.map((w: Row) => [w.seq, w.operation, w.type, w.id])).toEqual([
       [2, "update_entity", "task", t9],
       [3, "update_entity", "project", ids.P2],
@@ -376,7 +376,7 @@ describe("unstage, discard, expiry, caps, the row lock", () => {
     expect((await call("GET", `${ALL}/changesets/${cs.id}`)).body.state).toBe("submitted");
   });
 
-  it("a live changeset idle for 8 days is 404 and its rows are gone", async () => {
+  it("a draft changeset idle for 8 days is 404 and its rows are gone", async () => {
     const cs = (await start()).id as string;
     await call("PATCH", `${ALL}/changesets/${cs}/entities/project/${ids.P1}`, { name: "a" });
     await sql(`UPDATE changeset SET last_change_at = now() - interval '8 days' WHERE changeset_id = $1`, [cs]);
@@ -388,7 +388,7 @@ describe("unstage, discard, expiry, caps, the row lock", () => {
     expect(await sql(`SELECT 1 FROM changeset_write WHERE changeset_id = $1`, [cs])).toEqual([]);
   });
 
-  it("start sweeps expired live changesets of the ontology", async () => {
+  it("start sweeps expired draft changesets of the ontology", async () => {
     const old = (await start()).id as string;
     await sql(`UPDATE changeset SET last_change_at = now() - interval '8 days' WHERE changeset_id = $1`, [old]);
     await start();

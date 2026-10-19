@@ -34,7 +34,7 @@ submitted and committed only through it, and never exported. Every read, submit 
 commit of a changeset applies the lens as it is at that moment, so a changeset never shows
 or writes what the lens hides now.
 
-Deleting a lens deletes those configurations and its changesets, live and submitted, and
+Deleting a lens deletes those configurations and its changesets, draft and submitted, and
 nothing else; it reports how many changesets went with it. Types, property definitions
 and every entity and relation survive untouched, and other lenses are unaffected.
 There is no consent step and no protection: lens deletion is always permitted,

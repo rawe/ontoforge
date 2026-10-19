@@ -82,7 +82,7 @@ function Disabled({ reason, children }: { reason: string; children: ReactNode })
  * `/o/:ontologyKey/w/:lensKey/changesets/:changesetId` — one changeset's
  * review through the current lens: its writes by seq with names, before →
  * after and markers. Commit sends the version shown; Unsubmit sends a note;
- * Discard and Unstage work only while live.
+ * Discard and Unstage work only on a draft.
  */
 export function ChangesetDetailPage() {
   const { ontologyKey, lensKey, changesetId } = useParams<{
@@ -155,7 +155,7 @@ export function ChangesetDetailPage() {
   const unsubmit = useMutation({
     mutationFn: (text: string) => runtime.unsubmitChangeset(ontologyKey!, lensKey!, changesetId!, text),
     onSuccess: () => {
-      toast.success('Unsubmitted: the changeset is live again')
+      toast.success('Unsubmitted: the changeset is a draft again')
       setUnsubmitOpen(false)
       setRejected(null)
       void reload()
@@ -503,7 +503,7 @@ export function ChangesetDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Unsubmit this changeset?</AlertDialogTitle>
             <AlertDialogDescription>
-              It goes back to live, so its writes can be changed again. The note replaces the current
+              It goes back to draft, so its writes can be changed again. The note replaces the current
               one: say what should change.
             </AlertDialogDescription>
           </AlertDialogHeader>

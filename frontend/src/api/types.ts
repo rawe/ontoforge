@@ -214,8 +214,8 @@ export interface AnchorView {
 
 /* ---------------------------- runtime — changesets --------------------------- */
 
-/** `live`: open to change; `submitted`: frozen and handed over for review. */
-export type ChangesetState = 'live' | 'submitted'
+/** `draft`: open to change; `submitted`: frozen and handed over for review. */
+export type ChangesetState = 'draft' | 'submitted'
 
 /** A changeset as every answer shows it. */
 export interface Changeset {

@@ -497,14 +497,14 @@ is never overwritten.
   list them bound the same way, submitted first, then by last change, newest first, with
   their counts per operation and the type keys they name; their staged writes by seq,
   paged; the staged create that minted a given id.
-- **Changes.** Append a staged write to a live changeset, with a seq higher than every
-  earlier one; unstage one by seq from a live changeset; submit, a compare-and-set on the
-  version of a live changeset, setting the submitted time and the note; unsubmit a
-  submitted one, with a note; discard a live one with its staged writes. Each takes the
+- **Changes.** Append a staged write to a draft changeset, with a seq higher than every
+  earlier one; unstage one by seq from a draft changeset; submit, a compare-and-set on the
+  version of a draft changeset, setting the submitted time and the note; unsubmit a
+  submitted one, with a note; discard a draft one with its staged writes. Each takes the
   changeset without waiting — one held elsewhere is a conflict at once — raises its
   version and refreshes its last change, and answers absent when the changeset is gone or
   in the other state.
-- **Upkeep.** Touch refreshes the last change alone; sweep deletes the live changesets
+- **Upkeep.** Touch refreshes the last change alone; sweep deletes the draft changesets
   unchanged since a given time. Both skip a changeset held elsewhere rather than wait or
   fail.
 - **The commit**, inside a unit of work only: take the ontology's commit lock without
@@ -824,7 +824,7 @@ on insert.
 
 Two tables per namespace. `changeset` holds one row per changeset, its `lens_id` a foreign
 key to `lens` with delete cascade, its `anchor_key` plain text with no foreign key, so an
-anchor delete leaves the row; `submitted_at` is null while live. `changeset_write` holds
+anchor delete leaves the row; `submitted_at` is null for a draft. `changeset_write` holds
 one row per staged write under the primary key `(changeset_id, seq)`, its changeset a
 foreign key with delete cascade; `arguments` and `base` are `jsonb`. Two B-tree indexes
 serve them: changesets by lens, and staged writes by changeset and minted id.

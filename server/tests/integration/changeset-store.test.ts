@@ -246,7 +246,7 @@ describe("ChangesetStore", () => {
     return (await store.changesets().get(id, lenses.all!, null))!;
   }
 
-  it("start: version 1, live, no writes, bound to its lens and anchor", async () => {
+  it("start: version 1, draft, no writes, bound to its lens and anchor", async () => {
     const cs = await started("agent-a");
     expect(cs).toMatchObject({
       lensId: lenses.all,
@@ -349,7 +349,7 @@ describe("ChangesetStore", () => {
     expect((await changesets.page(cs.id, 0, 10)).map((w) => w.seq)).toEqual([1, after.version + 1]);
   });
 
-  it("submit is a compare-and-set on the version; unsubmit returns to live with the note", async () => {
+  it("submit is a compare-and-set on the version; unsubmit returns to draft with the note", async () => {
     const cs = await started();
     const changesets = store.changesets();
     await age(cs.id);
@@ -363,8 +363,8 @@ describe("ChangesetStore", () => {
     expect(submitted!.submittedAt).toBeInstanceOf(Date);
     expect(submitted!.lastChangeAt.getTime()).toBeGreaterThan(aged.lastChangeAt.getTime());
 
-    const live = await changesets.unsubmit(cs.id, "fix T2");
-    expect(live).toMatchObject({ version: cs.version + 2, note: "fix T2", submittedAt: null });
+    const draft = await changesets.unsubmit(cs.id, "fix T2");
+    expect(draft).toMatchObject({ version: cs.version + 2, note: "fix T2", submittedAt: null });
 
     expect(await changesets.submit(randomUUID(), 1, null)).toBeNull();
     expect(await changesets.unsubmit(randomUUID(), "x")).toBeNull();
@@ -411,7 +411,7 @@ describe("ChangesetStore", () => {
     expect(after.lastChangeAt.getTime()).toBeGreaterThan(before.lastChangeAt.getTime());
   });
 
-  it("sweep deletes live changesets idle past the cutoff, with their journal; submitted ones stay", async () => {
+  it("sweep deletes draft changesets idle past the cutoff, with their journal; submitted ones stay", async () => {
     const changesets = store.changesets();
     const idle = await started();
     const fresh = await started();
@@ -445,7 +445,7 @@ describe("ChangesetStore", () => {
     expect(await sql(`SELECT 1 FROM changeset_write`)).toEqual([]);
   });
 
-  it("discard deletes a live changeset only: a submitted one stays, with its journal", async () => {
+  it("discard deletes a draft changeset only: a submitted one stays, with its journal", async () => {
     const changesets = store.changesets();
     const cs = await started();
     await changesets.append(cs.id, write("create_entity", "task"));
@@ -459,7 +459,7 @@ describe("ChangesetStore", () => {
     expect(await changesets.get(cs.id, lenses.all!, null)).toBeNull();
   });
 
-  it("the state is judged in the writing statement: append, unstage and submit change a live changeset only, unsubmit a submitted one", async () => {
+  it("the state is judged in the writing statement: append, unstage and submit change a draft changeset only, unsubmit a submitted one", async () => {
     const changesets = store.changesets();
     const cs = await started();
     const seq = (await changesets.append(cs.id, write("create_entity", "task")))!;
@@ -470,9 +470,9 @@ describe("ChangesetStore", () => {
     expect(await changesets.submit(cs.id, submitted.version, "again")).toBeNull();
     expect(await read(cs.id)).toMatchObject({ version: submitted.version, writeCount: 1, note: "go" });
 
-    const live = (await changesets.unsubmit(cs.id, "back"))!;
+    const draft = (await changesets.unsubmit(cs.id, "back"))!;
     expect(await changesets.unsubmit(cs.id, "twice")).toBeNull();
-    expect(await read(cs.id)).toMatchObject({ version: live.version, note: "back", submittedAt: null });
+    expect(await read(cs.id)).toMatchObject({ version: draft.version, note: "back", submittedAt: null });
     expect(await changesets.unstage(cs.id, seq)).toBe(true);
   });
 

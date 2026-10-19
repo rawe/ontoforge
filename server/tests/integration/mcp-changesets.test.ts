@@ -147,7 +147,7 @@ describe("a whole round through MCP alone (V4, V7, V28)", () => {
   it("starts, stages, reads, submits, unsubmits, unstages and commits, as REST does", async () => {
     const client = await connect();
     const started = await ok(client, "start_changeset", { note: "g12" });
-    expect(started).toMatchObject({ state: "live", version: 1, note: "g12", anchor: null, writeCount: 0 });
+    expect(started).toMatchObject({ state: "draft", version: 1, note: "g12", anchor: null, writeCount: 0 });
     const cs = started.id as string;
 
     const t9 = await ok(client, "create_entity", {
@@ -219,8 +219,8 @@ describe("a whole round through MCP alone (V4, V7, V28)", () => {
     // Unsubmit needs a note.
     expect(await refused(client, "unsubmit_changeset", { changeset_id: cs, note: "  " })).toContain("A note is required to unsubmit");
     expect(await refused(client, "unsubmit_changeset", { changeset_id: cs })).toContain("Invalid arguments");
-    const live = await ok(client, "unsubmit_changeset", { changeset_id: cs, note: "keep the mentoring" });
-    expect(live).toMatchObject({ state: "live", note: "keep the mentoring", submittedAt: null, version: submitted.version + 1 });
+    const draft = await ok(client, "unsubmit_changeset", { changeset_id: cs, note: "keep the mentoring" });
+    expect(draft).toMatchObject({ state: "draft", note: "keep the mentoring", submittedAt: null, version: submitted.version + 1 });
 
     expect(await ok(client, "unstage", { changeset_id: cs, seq: 7 })).toEqual({
       message: `Staged write 7 removed from changeset '${cs}'.`,
@@ -289,7 +289,7 @@ describe("the errors are REST's (R4)", () => {
     const rejected = await refused(client, "commit_changeset", { changeset_id: cs });
     expect(rejected).toContain("The commit was rejected; nothing was persisted — 1 violation: seq 1 has_children: ");
     expect((await ok(client, "get_entity", { entity_type_key: "project", entity_id: e.P2 })).name).toBe("P2");
-    expect(await ok(client, "get_changeset", { changeset_id: cs })).toMatchObject({ state: "live", version: before });
+    expect(await ok(client, "get_changeset", { changeset_id: cs })).toMatchObject({ state: "draft", version: before });
 
     expect(await refused(client, "unsubmit_changeset", { changeset_id: cs, note: "n" })).toContain(
       `Changeset '${cs}' is not submitted`,

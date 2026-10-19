@@ -25,12 +25,13 @@ data alone; a changeset's plan is seen only through the changeset's own reads
 
 | State | What it allows |
 |---|---|
-| `live` | stage, unstage, submit, commit, discard |
+| `draft` | stage, unstage, submit, commit, discard |
 | `submitted` | unsubmit, commit; it is frozen for everything else |
 
-A changeset starts live. After a commit or a discard it is gone, and every call naming it
-answers not found — the same answer as for an id that never existed, one that expired, or
-one bound elsewhere ([below](#binding)). A rejected commit leaves it exactly as it was.
+A changeset starts as a draft. After a commit or a discard it is gone, and every call
+naming it answers not found — the same answer as for an id that never existed, one that
+expired, or one bound elsewhere ([below](#binding)). A rejected commit leaves it exactly as
+it was.
 
 Every changeset has a `version`, which every change of its content or state raises: a
 staged or unstaged write, a submit, an unsubmit. A seq is higher than every seq the
@@ -53,7 +54,7 @@ its [parent relation](instance-data.md#the-create-with-a-parent-relation).
 - **The base.** A staged update of a stored entity or relation records the stored values of
   the keys it sends, an absent key distinct from null, as its base. An update of an object
   this changeset creates has no base, and neither has a delete.
-- **What staging checks:** that the changeset is live, that the URL's anchor is neither
+- **What staging checks:** that the changeset is a draft, that the URL's anchor is neither
   dangling nor at an entity the lens hides ([below](#binding)), that the type is visible
   through the lens, the property values exactly as the immediate write does — every fault
   collected, with the same field errors — and that the target of an update or delete
@@ -63,7 +64,7 @@ its [parent relation](instance-data.md#the-create-with-a-parent-relation).
   anchor. Defaults are applied at the commit, from the full schema as it is then.
 
 **Unstage** removes one staged write by its seq. Unstaging a create leaves the later writes
-that name its id [dangling](#commit-validation). **Discard** deletes a live changeset with
+that name its id [dangling](#commit-validation). **Discard** deletes a draft changeset with
 all its staged writes.
 
 ## The commit
@@ -140,7 +141,7 @@ A changeset is bound to the lens it was started through, and to the anchor of th
   commit only.
 - **An anchor deleted** makes its URL answer not found; its changesets stay reachable
   through the plain lens URL, and their commit rejects with `anchor_gone`.
-- **A lens deleted** deletes its changesets, live and submitted, and reports how many
+- **A lens deleted** deletes its changesets, draft and submitted, and reports how many
   ([ontology-lenses.md](ontology-lenses.md#what-a-lens-is)).
 
 Changesets are operational state, not design: they are not part of the
@@ -149,11 +150,11 @@ Changesets are operational state, not design: they are not part of the
 ## The review
 
 **Submit** runs the lock-free pass and, when it finds no fault, freezes the changeset and
-hands it over, with an optional note that replaces the stored one. A fault leaves it live
-and lists the violations. While submitted, staging, unstaging and discarding are refused
-as a conflict.
+hands it over, with an optional note that replaces the stored one. A fault leaves it a
+draft and lists the violations. While submitted, staging, unstaging and discarding are
+refused as a conflict.
 
-**Unsubmit** makes it live again, from whoever calls it, with a required note that
+**Unsubmit** makes it a draft again, from whoever calls it, with a required note that
 replaces the stored one — the way to send a plan back, or to turn it down before
 discarding it.
 
@@ -179,7 +180,7 @@ markers; a property the lens hides is left out; a document value is shown by its
 
 [Anchors](anchors.md#the-record) carry a staged-only flag. Through the URL of a staged-only
 anchor, every immediate write is refused as a conflict, and so is the commit; starting,
-staging, unstaging, submitting, unsubmitting, discarding a live changeset and every read
+staging, unstaging, submitting, unsubmitting, discarding a draft changeset and every read
 work. The flag holds whatever the anchor's state, unanchored and dangling included. The
 connection proposes; a person commits.
 
@@ -193,7 +194,7 @@ Staged-only guards against mistakes, not against a determined client. It has two
 ## Limits
 
 - **At most 10,000 staged writes** per changeset; the next is refused as a conflict.
-- **Expiry.** A live changeset unchanged for 7 days is deleted. Every change of it, and a
+- **Expiry.** A draft changeset unchanged for 7 days is deleted. Every change of it, and a
   rejected commit, counts as a change; a submitted changeset never expires.
 - **The note** is at most 1,000 characters.
 - **At most two commits run at once in one server process**; a third answers a conflict

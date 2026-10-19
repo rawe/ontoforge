@@ -28,17 +28,17 @@
  * - **Base (V10).** A staged update of a stored target records the stored
  *   values of exactly its patched keys, raw: an absent key stays absent,
  *   distinct from null, and a document value is kept as its hash.
- * - **Expiry (V24, R3).** A live changeset idle for 7 days is gone: checked
+ * - **Expiry (V24, R3).** A draft changeset idle for 7 days is gone: checked
  *   on every access, where it is deleted and answers not found, and swept
  *   on start and on list. A submitted changeset never expires.
  * - **Staged-only (V9 a).** Through a staged-only anchor's URL every
  *   immediate write is a 409 (`AnchorGuard.open`) and so is commit; stage,
  *   unstage, submit, unsubmit, discard, list and read work as anywhere.
- * - **Lifecycle (V7, V38).** Submit freezes a live changeset and hands it
+ * - **Lifecycle (V7, V38).** Submit freezes a draft changeset and hands it
  *   over with a note, after the lock-free pass (V5 d) and a compare-and-set
  *   on the version the pass saw (V40). While submitted, stage, unstage and
  *   discard are 409s, decided in the store's own statement; unsubmit (a
- *   note is required, R14) makes it live again, and commit is the
+ *   note is required, R14) makes it a draft again, and commit is the
  *   approval. A rejected commit leaves it as it was (R6).
  * - **Review (V41).** The list and the read apply the lens as it is now:
  *   a type, property or name the lens hides is never shown.
@@ -90,7 +90,7 @@ import { parentReadings } from "./service.js";
 
 type Row = Record<string, unknown>;
 
-/** A live changeset idle this long is gone (V24). */
+/** A draft changeset idle this long is gone (V24). */
 export const CHANGESET_IDLE_DAYS = 7;
 /** The longest note, in characters (V32). */
 export const MAX_NOTE_LENGTH = 1000;
@@ -114,7 +114,7 @@ export type StageableOperation = StagedWrite["operation"];
 /** A changeset as every answer shows it. */
 export interface ChangesetView {
   id: string;
-  state: "live" | "submitted";
+  state: "draft" | "submitted";
   version: number;
   note: string | null;
   /** The anchor key of the URL that started it; null on the plain lens. */
@@ -173,7 +173,7 @@ export interface StagedWriteView {
 /** A changeset as the list shows it (V17, V41). */
 export interface ChangesetListItem {
   id: string;
-  state: "live" | "submitted";
+  state: "draft" | "submitted";
   version: number;
   note: string | null;
   anchor: string | null;
@@ -209,7 +209,7 @@ function isSubmitted(id: string): ConflictError {
 function toView(record: ChangesetRecord): ChangesetView {
   return {
     id: record.id,
-    state: record.submittedAt === null ? "live" : "submitted",
+    state: record.submittedAt === null ? "draft" : "submitted",
     version: record.version,
     note: record.note,
     anchor: record.anchorKey,
@@ -220,7 +220,7 @@ function toView(record: ChangesetRecord): ChangesetView {
   };
 }
 
-/** Live changesets last changed before this are expired. */
+/** Draft changesets last changed before this are expired. */
 function expiryCutoff(): Date {
   return new Date(Date.now() - IDLE_MS);
 }
@@ -267,7 +267,7 @@ async function loadChangeset(
   return record;
 }
 
-/** After the store refused to change a live changeset: gone is not
+/** After the store refused to change a draft changeset: gone is not
  * found, submitted is the 409; otherwise null. */
 async function refusalOf(
   loaded: LoadedSchema,
@@ -507,7 +507,7 @@ export async function stage(
   if (changeset.writeCount >= MAX_STAGED_WRITES) {
     throw new ConflictError(`Changeset '${changesetId}' is full: at most ${MAX_STAGED_WRITES} staged writes`);
   }
-  // The store appends to a live changeset only: a submit since the read
+  // The store appends to a draft changeset only: a submit since the read
   // is refused here.
   const seq = await store.changesets().append(changeset.id, row);
   if (seq === null) throw (await refusalOf(loaded, anchorKey, changeset.id, store)) ?? notFound(changesetId);
@@ -540,7 +540,7 @@ export async function getChangeset(
 /**
  * The lens's changesets (V17): through the plain lens URL every one, through
  * an anchored URL only its anchor's; submitted first, then by last change.
- * Expired live changesets are swept first (R3). `types` applies the lens as
+ * Expired draft changesets are swept first (R3). `types` applies the lens as
  * it is now (V41).
  */
 export async function listChangesets(
@@ -558,7 +558,7 @@ export async function listChangesets(
     const types = summary.typeKeys.filter(shown);
     return {
       id: summary.id,
-      state: summary.submittedAt === null ? "live" : "submitted",
+      state: summary.submittedAt === null ? "draft" : "submitted",
       version: summary.version,
       note: summary.note,
       anchor: summary.anchorKey,
@@ -574,7 +574,7 @@ export async function listChangesets(
 }
 
 /** How many changesets a lens delete takes with it (V42, R8), counted
- * before the delete; an expired live changeset is gone already. */
+ * before the delete; an expired draft changeset is gone already. */
 export async function lensChangesetCount(lensId: string, store: RuntimeStore): Promise<number> {
   const cutoff = expiryCutoff();
   const summaries = await store.changesets().list(lensId, null);
@@ -586,11 +586,11 @@ export async function lensChangesetCount(lensId: string, store: RuntimeStore): P
 // ---------------------------------------------------------------------------
 
 /**
- * Submit a live changeset (V7, V5 d): freeze it and hand it over, with the
+ * Submit a draft changeset (V7, V5 d): freeze it and hand it over, with the
  * note given (absent, the note stays). Already submitted, or an anchored
  * changeset whose anchor is dangling or at an entity the lens hides, is a
  * 409. The lock-free pass runs with no lock and no transaction; its faults
- * are a 422 and the changeset stays live. Clean, a compare-and-set on the
+ * are a 422 and the changeset stays a draft. Clean, a compare-and-set on the
  * version the pass saw (V40): a change meanwhile is a 409.
  */
 export async function submitChangeset(
@@ -613,7 +613,7 @@ export async function submitChangeset(
   }
   const pass = await lockFreePass(loaded, record.id, store);
   if (pass.faults.length > 0) {
-    throw violationsError("The changeset was not submitted; it stays live", pass.faults);
+    throw violationsError("The changeset was not submitted; it stays a draft", pass.faults);
   }
   const submitted = await store.changesets().submit(record.id, record.version, valid ?? record.note);
   if (submitted === null) {
@@ -624,9 +624,9 @@ export async function submitChangeset(
 }
 
 /**
- * A submitted changeset back to live (V7, R14), through any URL that
+ * A submitted changeset back to draft (V7, R14), through any URL that
  * reaches it, a dangling anchor's included. The note is required: it
- * replaces the stored one. A live changeset is a 409.
+ * replaces the stored one. A draft changeset is a 409.
  */
 export async function unsubmitChangeset(
   lensKey: string,
@@ -643,12 +643,12 @@ export async function unsubmitChangeset(
   }
   const notSubmitted = new ConflictError(`Changeset '${changesetId}' is not submitted`);
   if (record.submittedAt === null) throw notSubmitted;
-  const live = await store.changesets().unsubmit(record.id, valid);
-  if (live === null) {
+  const draft = await store.changesets().unsubmit(record.id, valid);
+  if (draft === null) {
     if ((await store.changesets().get(record.id, loaded.scoped.lensId, anchorKey)) === null) throw notFound(changesetId);
     throw notSubmitted;
   }
-  return toView(live);
+  return toView(draft);
 }
 
 /** Take one staged write out by seq. Writes that depend on it stay; the
@@ -672,8 +672,8 @@ export async function unstage(
   }
 }
 
-/** Delete a live changeset and its journal. A submitted one is refused
- * (V38); the store deletes a live one only, so a submit landing after the
+/** Delete a draft changeset and its journal. A submitted one is refused
+ * (V38); the store deletes a draft one only, so a submit landing after the
  * read is refused too. */
 export async function discardChangeset(
   lensKey: string,

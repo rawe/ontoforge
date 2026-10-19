@@ -122,8 +122,8 @@ function stagedMode(kind: "create" | "update" | "delete", anchored: boolean, sta
   return (
     (stagedOnly
       ? " This connection only stages: 'changeset_id' is required, and the write is staged into " +
-        "that live changeset; nothing changes now, "
-      : " 'changeset_id' stages the write into that live changeset instead: nothing changes now, ") +
+        "that draft changeset; nothing changes now, "
+      : " 'changeset_id' stages the write into that draft changeset instead: nothing changes now, ") +
     "the answer is {seq, id}, and reads never see staged data." +
     checks +
     (anchored
@@ -1117,10 +1117,10 @@ function registerChangesetTools(
       description:
         "Start a changeset: a plan of writes to this lens's data, staged over any time and " +
         "committed later, all or nothing. note: optional, at most 1,000 characters, for whoever " +
-        `reviews the plan. Returns the changeset: ${CHANGESET_FIELDS}; state is 'live'. Next, ` +
+        `reviews the plan. Returns the changeset: ${CHANGESET_FIELDS}; state is 'draft'. Next, ` +
         "stage writes by passing its id as 'changeset_id' to create_entity, update_entity, " +
         "delete_entity, create_relation, update_relation or delete_relation; reads never see " +
-        "staged data. A changeset holds at most 10,000 writes. A live changeset left unchanged " +
+        "staged data. A changeset holds at most 10,000 writes. A draft changeset left unchanged " +
         "for 7 days expires and is deleted." +
         (anchored
           ? " It carries this connection's anchor: it is reached only through this anchor, or " +
@@ -1140,13 +1140,13 @@ function registerChangesetTools(
       description:
         "List the changesets of this lens" +
         (anchored ? " started through this anchor" : ", those started through an anchor included") +
-        ", submitted first, then by last change, newest first. Each has id, state ('live': open " +
+        ", submitted first, then by last change, newest first. Each has id, state ('draft': open " +
         "for staging; 'submitted': frozen and handed over for review), version, note, anchor " +
         "(the anchor key it was started through, or null), writeCount, operations (staged " +
         "writes per operation), types (the type keys its writes name that this lens shows), " +
         "notVisible (how many type keys its writes name that this lens no longer shows), " +
         "createdAt, lastChangeAt and submittedAt. A changeset leaves the list when it is " +
-        "committed or discarded, or when it expires after 7 days unchanged while live. A " +
+        "committed or discarded, or when it expires after 7 days unchanged as a draft. A " +
         "submitted changeset can be neither discarded nor expire, so one that left the list " +
         "was committed.",
       inputSchema: {},
@@ -1202,7 +1202,7 @@ function registerChangesetTools(
     "unstage",
     {
       description:
-        "Remove one staged write, by its seq, from a live changeset; its version goes up. " +
+        "Remove one staged write, by its seq, from a draft changeset; its version goes up. " +
         "Writes that depend on it stay staged: a write naming an id that a removed create " +
         "minted is dangling, and submit and commit reject it until it is removed too or the " +
         "create is staged again. A staged write cannot be edited: to change one, a drifted " +
@@ -1221,13 +1221,13 @@ function registerChangesetTools(
     "submit_changeset",
     {
       description:
-        "Hand a live changeset over for review: it is frozen (no staging, unstaging or " +
+        "Hand a draft changeset over for review: it is frozen (no staging, unstaging or " +
         "discarding) until it is committed or unsubmitted, and its version goes up. note: " +
         "optional, at most 1,000 characters; it replaces the stored note, and without it the " +
         "note stays. First, with no lock taken, every write is checked: " +
         LOCK_FREE_CHECKS +
         ". Any fault refuses the submit, naming its violations (total, then the first 100, " +
-        "each with seq, kind and message), and the changeset stays live. The hierarchy rules" +
+        "each with seq, kind and message), and the changeset stays a draft. The hierarchy rules" +
         (anchored ? " and the hold to the anchored entity" : "") +
         " are checked only at commit. Also refused when the changeset is already submitted, " +
         "when it changed during the submit, or when its anchor is dangling or at an entity " +
@@ -1250,14 +1250,14 @@ function registerChangesetTools(
     "unsubmit_changeset",
     {
       description:
-        "Send a submitted changeset back: it is live again with its writes kept, so it can be " +
+        "Send a submitted changeset back: it is a draft again with its writes kept, so it can be " +
         (stagedOnly
           ? "staged into, unstaged, discarded or submitted again; its version goes up. "
           : "staged into, unstaged, discarded, submitted or committed again; its version goes up. ") +
         "note: required, not blank, at most 1,000 characters; it replaces the stored note, so " +
-        "say what should change. A live changeset is refused." +
+        "say what should change. A draft changeset is refused." +
         (anchored ? " It works while the anchor is dangling." : "") +
-        ` Returns the changeset: ${CHANGESET_FIELDS}; state is 'live'.` +
+        ` Returns the changeset: ${CHANGESET_FIELDS}; state is 'draft'.` +
         reach(anchored),
       inputSchema: { changeset_id: z.string(), note: z.string() },
     },
@@ -1273,7 +1273,7 @@ function registerChangesetTools(
       "commit_changeset",
       {
         description:
-          "Persist every staged write of a changeset, live or submitted, in seq order, all or " +
+          "Persist every staged write of a changeset, draft or submitted, in seq order, all or " +
           "nothing; committing a submitted changeset approves it. expected_version: optional, the " +
           "version you reviewed; if the changeset changed since, the commit is refused and " +
           "nothing is written. Omitted, the current version commits. Checked first: " +
@@ -1286,7 +1286,7 @@ function registerChangesetTools(
             : ", and for a changeset started through an anchor, every write held to the anchored " +
               "entity and its descendants; a dangling or deleted anchor rejects it") +
           ". A rejection names its violations (total, then the first 100, each with seq, kind " +
-          "and message); nothing is persisted and the changeset stays as it was, live or submitted: unstage and restage " +
+          "and message); nothing is persisted and the changeset stays as it was, draft or submitted: unstage and restage " +
           "the faulty writes, then commit again. Refused with nothing persisted while another " +
           "commit runs on this ontology or the changeset is busy: try again. Committed, it " +
           "returns {committed, alreadyGone}, the number of writes and the seqs of deletes whose " +
@@ -1315,7 +1315,7 @@ function registerChangesetTools(
     "discard_changeset",
     {
       description:
-        "Delete a live changeset and all its staged writes; the data is not touched, and it " +
+        "Delete a draft changeset and all its staged writes; the data is not touched, and it " +
         "cannot be undone. A submitted changeset is refused until it is unsubmitted." +
         reach(anchored),
       inputSchema: { changeset_id: z.string() },

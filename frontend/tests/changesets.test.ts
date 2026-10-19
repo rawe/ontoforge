@@ -53,17 +53,17 @@ const write = (over: Partial<StagedWriteView>): StagedWriteView => ({
 })
 
 test('stateLabel names both states', () => {
-  assert.equal(stateLabel('live'), 'live')
+  assert.equal(stateLabel('draft'), 'draft')
   assert.equal(stateLabel('submitted'), 'submitted')
 })
 
 test('sortChangesets puts submitted first, then the latest change', () => {
-  const live = item('live-new', 'live', '2026-10-19T12:00:00.000Z')
-  const oldLive = item('live-old', 'live', '2026-10-19T09:00:00.000Z')
+  const draft = item('draft-new', 'draft', '2026-10-19T12:00:00.000Z')
+  const oldDraft = item('draft-old', 'draft', '2026-10-19T09:00:00.000Z')
   const sub = item('sub-old', 'submitted', '2026-10-18T09:00:00.000Z')
   const sub2 = item('sub-new', 'submitted', '2026-10-19T11:00:00.000Z')
-  const sorted = sortChangesets([oldLive, live, sub, sub2]).map((c) => c.id)
-  assert.deepEqual(sorted, ['sub-new', 'sub-old', 'live-new', 'live-old'])
+  const sorted = sortChangesets([oldDraft, draft, sub, sub2]).map((c) => c.id)
+  assert.deepEqual(sorted, ['sub-new', 'sub-old', 'draft-new', 'draft-old'])
 })
 
 test('submittedCount counts only submitted changesets: the sidebar count', () => {
@@ -71,7 +71,7 @@ test('submittedCount counts only submitted changesets: the sidebar count', () =>
   assert.equal(
     submittedCount([
       item('a', 'submitted', '2026-10-19T10:00:00.000Z'),
-      item('b', 'live', '2026-10-19T10:00:00.000Z'),
+      item('b', 'draft', '2026-10-19T10:00:00.000Z'),
       item('c', 'submitted', '2026-10-19T10:00:00.000Z'),
     ]),
     2,

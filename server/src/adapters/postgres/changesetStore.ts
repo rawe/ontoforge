@@ -10,7 +10,7 @@
  *   unstage bumps the version, so a seq is never reused, not even after
  *   the last write is unstaged.
  * - The state is judged under the row lock, in the statement that writes:
- *   append, unstage, submit and discard change a live changeset only,
+ *   append, unstage, submit and discard change a draft changeset only,
  *   unsubmit a submitted one. A submit landing between the service's read
  *   and the write is therefore never overwritten.
  * - The journal dies with its changeset (`ON DELETE CASCADE`).

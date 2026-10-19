@@ -322,7 +322,7 @@ shows them now. The page reviews, commits and discards; it stages nothing.
   it at once with those violations as its note, cut to 1,000 characters. A successful one
   returns to the list and refreshes every runtime view of the ontology.
 - **Unsubmit**, shown while submitted, asks for the required note. **Discard**, behind a
-  confirmation, and **Unstage**, per row, work on a live changeset only; while submitted
+  confirmation, and **Unstage**, per row, work on a draft changeset only; while submitted
   they are disabled, saying it is frozen.
 
 A changeset that is gone — committed, discarded or expired, or not reached through this

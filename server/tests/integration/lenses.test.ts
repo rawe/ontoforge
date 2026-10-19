@@ -190,7 +190,7 @@ describe("lens round trip", () => {
     expect(bInclusions.json()).toHaveLength(1);
   });
 
-  it("a lens delete reports the changesets it took, live and submitted; another lens's stay (V42)", async () => {
+  it("a lens delete reports the changesets it took, draft and submitted; another lens's stay (V42)", async () => {
     await createEntityType("person", "Person");
     const lens = async (key: string): Promise<string> => {
       const res = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/lenses", payload: { key, name: key } });
@@ -204,11 +204,11 @@ describe("lens round trip", () => {
       expect(res.statusCode, res.body).toBe(201);
       return res.json().id as string;
     };
-    const live = await start("ops");
+    const draft = await start("ops");
     const submitted = await start("ops");
     await app.inject({
       method: "POST",
-      url: `/api/ontologies/test_ont/runtime/lenses/ops/changesets/${live}/entities/person`,
+      url: `/api/ontologies/test_ont/runtime/lenses/ops/changesets/${draft}/entities/person`,
       payload: { name: "Staged" },
     });
     const submit = await app.inject({

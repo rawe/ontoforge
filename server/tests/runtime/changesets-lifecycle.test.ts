@@ -164,11 +164,11 @@ describe("submit", () => {
     expect(store.changesetStore.submit).not.toHaveBeenCalled();
   });
 
-  it("a lock-free fault is a 422 with the violations, and the changeset stays live", async () => {
+  it("a lock-free fault is a 422 with the violations, and the changeset stays a draft", async () => {
     journal = [rename(1, KIM, "Kim X", { name: "Kim" }), rename(2, GONE, "x", { name: "x" })];
     const error = await submitChangeset("full_lens", null, CS, "n", on()).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ValidationError);
-    expect((error as ValidationError).message).toBe("The changeset was not submitted; it stays live");
+    expect((error as ValidationError).message).toBe("The changeset was not submitted; it stays a draft");
     expect((error as ValidationError).details).toEqual({
       violations: [
         { seq: 1, kind: "drift", message: `Entity '${KIM}' changed since this write was staged; unstage and restage it` },
@@ -229,7 +229,7 @@ describe("unsubmit", () => {
     store.changesetStore.get.mockResolvedValue(changeset({ submittedAt: NOW }));
   });
 
-  it("back to live, the note replaced, on any URL, a dangling anchor's included", async () => {
+  it("back to draft, the note replaced, on any URL, a dangling anchor's included", async () => {
     store.changesetStore.get.mockResolvedValue(changeset({ submittedAt: NOW, anchorKey: "agent-a" }));
     store.anchorStore.getAnchor.mockResolvedValue(anchorAt({ type: "company", id: ACME }, false));
     store.changesetStore.unsubmit.mockResolvedValue(changeset({ version: 7, note: "fix T2", anchorKey: "agent-a" }));
@@ -237,7 +237,7 @@ describe("unsubmit", () => {
     const view = await unsubmitChangeset("full_lens", "agent-a", CS, "fix T2", on());
 
     expect(store.changesetStore.unsubmit).toHaveBeenCalledWith(CS, "fix T2");
-    expect(view).toMatchObject({ state: "live", version: 7, note: "fix T2", submittedAt: null });
+    expect(view).toMatchObject({ state: "draft", version: 7, note: "fix T2", submittedAt: null });
   });
 
   it.each([
@@ -253,7 +253,7 @@ describe("unsubmit", () => {
     expect(store.changesetStore.unsubmit).not.toHaveBeenCalled();
   });
 
-  it("a live changeset is a 409, also one unsubmitted after the read; gone is not found", async () => {
+  it("a draft changeset is a 409, also one unsubmitted after the read; gone is not found", async () => {
     store.changesetStore.get.mockResolvedValue(changeset());
     await expect(unsubmitChangeset("full_lens", null, CS, "n", on())).rejects.toThrow(
       new ConflictError(`Changeset '${CS}' is not submitted`),
@@ -378,7 +378,7 @@ describe("list", () => {
         lastChangeAt: expect.any(Date),
         submittedAt: NOW,
       },
-      expect.objectContaining({ id: "a", state: "live", writeCount: 0, operations: {}, types: [], notVisible: 0 }),
+      expect.objectContaining({ id: "a", state: "draft", writeCount: 0, operations: {}, types: [], notVisible: 0 }),
     ]);
   });
 

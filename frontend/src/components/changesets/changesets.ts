@@ -22,7 +22,7 @@ export const WRITES_PAGE_SIZE = 100
 
 /** The state chip's text. */
 export function stateLabel(state: ChangesetState): string {
-  return state === 'submitted' ? 'submitted' : 'live'
+  return state === 'submitted' ? 'submitted' : 'draft'
 }
 
 /** Submitted first (waiting for review), then the most recently changed. */

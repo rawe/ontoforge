@@ -585,7 +585,7 @@ Semantics: [capabilities/changesets.md](capabilities/changesets.md).
 | POST | `/changesets` | Start a changeset, with an optional `note`; 201 | — |
 | GET | `/changesets` | List the changesets this URL reaches | — |
 | GET | `/changesets/{changesetId}` | Read a changeset with its staged writes by seq | `offset`, `limit` |
-| DELETE | `/changesets/{changesetId}` | Discard a live changeset; 204 | — |
+| DELETE | `/changesets/{changesetId}` | Discard a draft changeset; 204 | — |
 | DELETE | `/changesets/{changesetId}/writes/{seq}` | Unstage one write; 204 | — |
 | POST | `/changesets/{changesetId}/submit` | Submit, with an optional `note` | — |
 | POST | `/changesets/{changesetId}/unsubmit` | Unsubmit, with a required `note` | — |
@@ -1044,7 +1044,7 @@ Everything a client can do to instance data through one lens.
 | `submit_changeset` | Submit a changeset, with an optional `note` |
 | `unsubmit_changeset` | Unsubmit a changeset, with a required `note` |
 | `commit_changeset` | Commit a changeset, with an optional `expected_version` |
-| `discard_changeset` | Discard a live changeset |
+| `discard_changeset` | Discard a draft changeset |
 
 `create_entity`, `update_entity`, `delete_entity`, `create_relation`, `update_relation`
 and `delete_relation` take an optional `changeset_id`: with it the write is staged into

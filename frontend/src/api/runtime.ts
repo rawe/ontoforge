@@ -372,7 +372,7 @@ export const commitChangeset = (
     body: { expectedVersion },
   })
 
-/** Back to live; the note is required and replaces the stored one. */
+/** Back to draft; the note is required and replaces the stored one. */
 export const unsubmitChangeset = (
   ontologyKey: string,
   lensKey: string,
@@ -384,13 +384,13 @@ export const unsubmitChangeset = (
     body: { note },
   })
 
-/** Live only; a submitted changeset answers 409. */
+/** Draft only; a submitted changeset answers 409. */
 export const discardChangeset = (ontologyKey: string, lensKey: string, changesetId: string) =>
   request<undefined>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}`, {
     method: 'DELETE',
   })
 
-/** Takes one staged write out, live only. */
+/** Takes one staged write out, draft only. */
 export const unstageWrite = (
   ontologyKey: string,
   lensKey: string,

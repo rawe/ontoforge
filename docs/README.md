@@ -279,11 +279,11 @@ committed changeset is gone. **Commit validation** is the rules the commit appli
 the end state before anything persists; a commit that breaks one **rejects** and persists
 nothing. Committing a submitted changeset is approving it; there is no approved state.
 
-**Discard** — deleting a live changeset with its staged writes.
+**Discard** — deleting a draft changeset with its staged writes.
 
-**Live, submitted** — a changeset's two states. A live changeset can be changed; a
+**Draft, submitted** — a changeset's two states. A draft can be changed; a
 submitted one is frozen and handed over for review. **Submit** freezes it, optionally with
-a note; **unsubmit** makes it live again, with a required note, whoever calls it.
+a note; **unsubmit** makes it a draft again, with a required note, whoever calls it.
 
 **Base** — the stored values of the keys a staged update sends, as they were when it was
 staged. **Drift** — a change of the base since then, which rejects the commit.

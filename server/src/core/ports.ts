@@ -544,6 +544,9 @@ export interface RuntimeStore {
   /** The navigator store of the same ontology. */
   navigators(): NavigatorStore;
 
+  /** The anchor store of the same ontology. */
+  anchors(): AnchorStore;
+
   // ------------------------------------------------------------------
   // Entity instances
   //
@@ -980,6 +983,40 @@ export interface NavigatorStore {
 
   /** False when the lens has no navigator of this key. */
   deleteNavigator(lensId: string, key: string): Promise<boolean>;
+}
+
+/** The entity an anchor points at: its type's key and its id. */
+export interface AnchorEntity {
+  type: string;
+  id: string;
+}
+
+/** One stored anchor, read with a join to `entity`. */
+export interface AnchorRecord {
+  key: string;
+  /** Null when unanchored. */
+  entity: AnchorEntity | null;
+  /** Whether an entity of that id and type is stored; false when unanchored. */
+  entityFound: boolean;
+}
+
+/**
+ * Anchors: named pointers at one entity each, operational state of the
+ * ontology beside its instances. The store keeps the pointer as given and
+ * never checks it; the anchor service decides the state.
+ */
+export interface AnchorStore {
+  /** Every anchor, by key. */
+  listAnchors(): Promise<AnchorRecord[]>;
+
+  getAnchor(key: string): Promise<AnchorRecord | null>;
+
+  /** Create the anchor, or re-point it (null unanchors); the record as
+   * written, read with the join. */
+  saveAnchor(key: string, entity: AnchorEntity | null): Promise<AnchorRecord>;
+
+  /** False when no anchor has this key. */
+  deleteAnchor(key: string): Promise<boolean>;
 }
 
 export interface SearchIndexStore {

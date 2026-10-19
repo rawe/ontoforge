@@ -45,6 +45,7 @@
 
 import type { ValidatedQuery } from "../../core/oql/index.js";
 import type {
+  AnchorStore,
   FilterCondition,
   NavigatorStore,
   Row,
@@ -72,6 +73,7 @@ import {
 import { fromJson, toJson } from "./json.js";
 import { camelizeRow, isUuid } from "./rows.js";
 import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
+import { PostgresAnchorStore } from "./anchorStore.js";
 import { PostgresNavigatorStore } from "./navigatorStore.js";
 import { applySearchWritePlan, PostgresSearchIndexStore } from "./searchIndexStore.js";
 import { distance, minScoreFloor, similarity, vectorParams, vectorSearch } from "./search.js";
@@ -193,6 +195,13 @@ export class PostgresRuntimeStore implements RuntimeStore {
       throw new Error("An unbound runtime store has no navigators");
     }
     return new PostgresNavigatorStore(this.namespace);
+  }
+
+  anchors(): AnchorStore {
+    if (this.namespace === undefined) {
+      throw new Error("An unbound runtime store has no anchors");
+    }
+    return new PostgresAnchorStore(this.namespace);
   }
 
   // ------------------------------------------------------------------

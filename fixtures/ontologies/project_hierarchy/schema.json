@@ -96,6 +96,14 @@
       "nameProperty": "name",
       "properties": [
         {
+          "key": "description",
+          "displayName": "Description",
+          "description": null,
+          "dataType": "document",
+          "required": false,
+          "defaultValue": null
+        },
+        {
           "key": "name",
           "displayName": "Name",
           "description": null,
@@ -223,7 +231,9 @@
         ],
         "relationTypes": []
       },
-      "indexInclusions": [],
+      "indexInclusions": [
+        "task~description"
+      ],
       "assistants": {
         "agents": [],
         "retrievers": [],

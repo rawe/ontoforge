@@ -2,7 +2,9 @@
  * The commit over mocked stores: the order of its steps, the version
  * check, the replay by seq through the store's write methods, idempotent
  * deletes, the delete capture, a replay fault rolled back as a 422, the
- * errors that stay 409s, and the process limit.
+ * errors that stay 409s, and the process limit. The stored entities the
+ * journal names answer the lock-free pass (`changesets-validation.test.ts`
+ * covers it).
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
@@ -101,6 +103,14 @@ function sixWrites(): ChangesetWriteRecord[] {
 
 let store: MockRuntimeStore;
 
+/** The entities the journals below name, as stored. */
+const STORED: Record<string, Row> = {
+  [P1]: makeEntity({ name: "Pat" }, "person", P1),
+  [ACME]: makeEntity({ name: "ACME" }, "company", ACME),
+  [D1]: makeEntity({ name: "Ops" }, "department", D1),
+  [NEW]: makeEntity({ name: "Ops" }, "department", NEW),
+};
+
 beforeEach(() => {
   invalidateLoadedSchemaCache();
   invalidateSearchContext();
@@ -115,6 +125,9 @@ beforeEach(() => {
   store.createRelation.mockResolvedValue(makeRelation());
   store.updateRelation.mockResolvedValue(makeRelation());
   store.deleteRelation.mockResolvedValue(true);
+  store.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
+    Object.fromEntries(ids.filter((id) => id in STORED).map((id) => [id, STORED[id]])),
+  );
 });
 
 function journal(writes: ChangesetWriteRecord[]): void {
@@ -161,7 +174,9 @@ describe("the steps", () => {
     const transaction = store.transaction.mock.invocationCallOrder[0]!;
     expect(store.indices.listIndices.mock.invocationCallOrder[0]!).toBeLessThan(transaction);
     expect(cs.lockForCommit).toHaveBeenCalledWith(CS);
-    expect(cs.lockForCommit.mock.invocationCallOrder[0]!).toBeLessThan(cs.page.mock.invocationCallOrder[0]!);
+    // The lock-free pass reads the journal before BEGIN; the replay after the lock.
+    expect(cs.page.mock.invocationCallOrder[0]!).toBeLessThan(transaction);
+    expect(cs.lockForCommit.mock.invocationCallOrder[0]!).toBeLessThan(cs.page.mock.invocationCallOrder.at(-1)!);
     expect(cs.deleteWithJournal).toHaveBeenCalledWith(CS);
     expect(cs.deleteWithJournal.mock.invocationCallOrder[0]!).toBeGreaterThan(
       store.deleteEntity.mock.invocationCallOrder[0]!,
@@ -178,13 +193,13 @@ describe("the steps", () => {
   it("a changeset gone by the time it is locked is 404", async () => {
     store.changesetStore.lockForCommit.mockResolvedValue(null);
     await expect(commit()).rejects.toThrow(new NotFoundError(`Changeset '${CS}' not found`));
-    expect(store.changesetStore.page).not.toHaveBeenCalled();
+    expect(writeOrder()).toEqual([]);
   });
 
   it("another commit running stays a 409, with nothing replayed and no touch", async () => {
     store.changesetStore.lockForCommit.mockRejectedValue(new ConflictError("Another commit is running; try again"));
     await expect(commit()).rejects.toThrow(ConflictError);
-    expect(store.changesetStore.page).not.toHaveBeenCalled();
+    expect(writeOrder()).toEqual([]);
     expect(store.changesetStore.touch).not.toHaveBeenCalled();
   });
 });
@@ -195,7 +210,7 @@ describe("the version check (V40)", () => {
     const error = await commit(6).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConflictError);
     expect((error as Error).message).toContain("changed since you looked");
-    expect(store.changesetStore.page).not.toHaveBeenCalled();
+    expect(writeOrder()).toEqual([]);
     expect(store.changesetStore.deleteWithJournal).not.toHaveBeenCalled();
   });
 
@@ -251,7 +266,10 @@ describe("the replay (V20)", () => {
     );
     journal(writes);
     expect(await commit()).toMatchObject({ committed: 501 });
+    // Twice: the lock-free pass, then the replay.
     expect(store.changesetStore.page.mock.calls.map((call) => call.slice(1))).toEqual([
+      [0, 500],
+      [500, 500],
       [0, 500],
       [500, 500],
     ]);
@@ -319,10 +337,13 @@ describe("a replay fault: 422, nothing persisted", () => {
     expect(store.updateEntity).not.toHaveBeenCalled();
   });
 
-  it("a type the lens no longer shows is a replay fault", async () => {
+  it("a type the lens no longer shows is found by the lock-free pass, before BEGIN", async () => {
     journal([row(2, { operation: "delete_entity", typeKey: "gone", targetId: D1, arguments: {} })]);
     const error = await rejected(commit());
-    expect(error.details!.violations).toEqual([{ seq: 2, kind: "replay", message: "Entity type 'gone' not found" }]);
+    expect(error.details!.violations).toEqual([
+      { seq: 2, kind: "not_visible", message: "The type of this write is no longer visible through lens 'full_lens'" },
+    ]);
+    expect(store.transaction).not.toHaveBeenCalled();
   });
 
   it("a lock wait past the timeout stays a 409, and is no rejection", async () => {

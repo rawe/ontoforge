@@ -2,14 +2,13 @@
  * The commit over REST, on the in-test project hierarchy
  * (`buildProjectHierarchy`): every staged operation persisted with its
  * search work, the move, the nested create, the order-free subtree delete,
- * the rollback of a replay error, the version check, and the locks: the
- * commit lock, the changeset row, a graph row held past the lock timeout,
- * and the process limit. Two small ontologies of their own give commits
+ * the rollback of a rejection after the replay, the version check, and
+ * the locks: the commit lock, the changeset row, a graph row held past the
+ * lock timeout, and the process limit. Two small ontologies of their own give commits
  * that run beside it.
  */
 
 import type { FastifyInstance } from "fastify";
-import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { runQuery } from "../../src/adapters/postgres/errors.js";
@@ -254,15 +253,15 @@ describe("a commit persists every staged write", () => {
 });
 
 describe("a rejected commit persists nothing", () => {
-  it("a replay error rolls everything back: 422 naming the seq; the version kept, the last change refreshed", async () => {
+  it("a rejection after the replay rolls everything back: 422 naming the seq; the version kept, the last change refreshed", async () => {
     await sql(`DELETE FROM search_queue`);
     const cs = await start();
     await staged("POST", ALL, cs, "entities/task", {
       name: "T10",
       parentRelation: { type: "has_task", parentId: e.P2, properties: { phase: "build" } },
     });
-    const ghost = randomUUID();
-    await staged("POST", ALL, cs, "relations/has_task", { fromEntityId: e.P2, toEntityId: ghost, phase: "x" });
+    // T6 stays under P3: a second parent, found only after the replay.
+    await staged("POST", ALL, cs, "relations/has_task", { fromEntityId: e.P2, toEntityId: e.T6, phase: "x" });
     const before = await graphCounts();
     const v = await version(cs);
     const [{ last_change_at: changedBefore }] = await sql(
@@ -275,7 +274,7 @@ describe("a rejected commit persists nothing", () => {
     expect(res.body.error).toMatchObject({
       code: "VALIDATION_ERROR",
       message: "The commit was rejected; nothing was persisted",
-      details: { violations: [{ seq: 2, kind: "replay", message: `Entity '${ghost}' not found` }], total: 1 },
+      details: { violations: [{ seq: 2, kind: "two_parents", message: `Entity '${e.T6}' already has a parent` }], total: 1 },
     });
 
     expect(await graphCounts()).toEqual(before);

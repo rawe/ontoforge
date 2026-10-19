@@ -45,7 +45,7 @@ function ends(rt: RelationTypeDef, parent: ParentEnd): { child: string; parent: 
 
 /** The hierarchy around `entityType`: its entity types, and its parent
  * relations as relation type key → parent end. */
-function hierarchyOf(entityType: string, full: SchemaCacheValue): { types: Set<string>; readings: Record<string, ParentEnd> } {
+export function hierarchyOf(entityType: string, full: SchemaCacheValue): { types: Set<string>; readings: Record<string, ParentEnd> } {
   const types = new Set([entityType]);
   const readings: Record<string, ParentEnd> = {};
   const parentRelations = Object.values(full.relationTypes).filter((rt) => rt.parent !== null);
@@ -63,6 +63,29 @@ function hierarchyOf(entityType: string, full: SchemaCacheValue): { types: Set<s
     }
   }
   return { types, readings };
+}
+
+/**
+ * Why every write through an anchor is refused: dangling, or anchored at an
+ * entity the lens hides; null when unanchored or anchored and shown. The
+ * texts name the anchor key and the lens key only.
+ */
+export function anchorRefusal(anchorKey: string, record: AnchorRecord, loaded: LoadedSchema): string | null {
+  const state = anchorState(record, loaded.full.entityTypes);
+  if (state === "unanchored") return null;
+  if (state === "dangling" || record.entity === null) {
+    return `Anchor '${anchorKey}' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it`;
+  }
+  if (!Object.hasOwn(loaded.scoped.entityTypes, record.entity.type)) {
+    return `Anchor '${anchorKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show, so every write is refused`;
+  }
+  return null;
+}
+
+/** The refusal of an entity delete on an anchored connection while any
+ * anchor points at the entity. */
+export function anchoredDeleteMessage(entityId: string): string {
+  return `Entity '${entityId}' is anchored and cannot be deleted on an anchored connection`;
 }
 
 function refuse(field: string, message: string): ValidationError {
@@ -88,18 +111,9 @@ export class AnchorGuard {
     if (anchorKey === null) return null;
     const record = await store.anchors().getAnchor(anchorKey);
     if (record === null) throw new NotFoundError(`Anchor '${anchorKey}' not found`);
-    const state = anchorState(record, loaded.full.entityTypes);
-    if (state === "unanchored") return null;
-    if (state === "dangling" || record.entity === null) {
-      throw new ConflictError(
-        `Anchor '${anchorKey}' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it`,
-      );
-    }
-    if (!Object.hasOwn(loaded.scoped.entityTypes, record.entity.type)) {
-      throw new ConflictError(
-        `Anchor '${anchorKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show, so every write is refused`,
-      );
-    }
+    const refusal = anchorRefusal(anchorKey, record, loaded);
+    if (refusal !== null) throw new ConflictError(refusal);
+    if (record.entity === null) return null;
     const { types, readings } = hierarchyOf(record.entity.type, loaded.full);
     return new AnchorGuard(anchorKey, record.entity, types, readings, loaded, store);
   }
@@ -184,7 +198,7 @@ export class AnchorGuard {
     await this.checkEntity(entityTypeKey, entityId);
     const anchors = await this.store.anchors().listAnchors();
     if (anchors.some((a) => a.entity?.id === entityId && a.entity.type === entityTypeKey)) {
-      throw refuse("entityId", `Entity '${entityId}' is anchored and cannot be deleted on an anchored connection`);
+      throw refuse("entityId", anchoredDeleteMessage(entityId));
     }
   }
 

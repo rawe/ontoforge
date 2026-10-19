@@ -31,17 +31,21 @@
  *   on every access, where it is deleted and answers not found, and swept
  *   on start.
  * - **Commit (D3, V1 B).** Before BEGIN, holding nothing: the schema, the
- *   changeset and the search context are loaded. Then one transaction on
+ *   changeset and the search context are loaded, and the lock-free pass
+ *   (V19) runs; any fault it finds rejects here. Then one transaction on
  *   one connection: the commit lock and the changeset row (V12), the
- *   version check (V40), the replay of the journal by seq through the
- *   store's own write methods with their search work (V20, V23), commit
- *   validation, the journal deleted, COMMIT. Any failure rolls all of it
- *   back; a rejection (422) then refreshes the last change and keeps the
- *   version (R6). At most two commits run at once in one process (V26,
- *   R5).
+ *   version check (V40), every stored target `FOR UPDATE` with drift
+ *   re-checked, the anchor read fresh; the replay of the journal by seq
+ *   through the store's own write methods with their search work (V20,
+ *   V23); commit validation over the end state (V21); the journal
+ *   deleted, COMMIT. Any failure rolls all of it back; a rejection (422,
+ *   the violations by seq, V22) then refreshes the last change and keeps
+ *   the version (R6). At most two commits run at once in one process
+ *   (V26, R5).
  */
 
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import { CoercionError, assertNoNulCharacter } from "../core/dataTypes.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
@@ -55,7 +59,7 @@ import type {
 } from "../core/ports.js";
 import type { ParentEnd, PropertyDef } from "../core/schemas.js";
 import { planSearchWrite, type SearchChange } from "../core/searchDependencies.js";
-import { AnchorGuard } from "./anchorGuard.js";
+import { AnchorGuard, anchorRefusal, anchoredDeleteMessage, hierarchyOf } from "./anchorGuard.js";
 import { cpLength } from "./codePoints.js";
 import {
   prepareCreateEntity,
@@ -532,13 +536,16 @@ class CommitRejected extends Error {
   }
 }
 
-function faultOn(errors: FieldErrors): void {
+/** The one-line text of a write's field errors; null when there are none. */
+function fieldFaults(errors: FieldErrors): string | null {
   const fields = Object.entries(errors);
-  if (fields.length > 0) {
-    throw new ReplayFault(
-      `Instance validation failed: ${fields.map(([key, message]) => `${key}: ${message}`).join("; ")}`,
-    );
-  }
+  if (fields.length === 0) return null;
+  return `Instance validation failed: ${fields.map(([key, message]) => `${key}: ${message}`).join("; ")}`;
+}
+
+function faultOn(errors: FieldErrors): void {
+  const message = fieldFaults(errors);
+  if (message !== null) throw new ReplayFault(message);
 }
 
 /** One staged write, replayed through the store's write method with its
@@ -699,16 +706,560 @@ export async function replayJournal(
   }
 }
 
-/** Step 3 of the commit: the rules over the end state, in the service on
- * the bound store's neutral reads. None yet. */
-async function commitViolations(): Promise<Violation[]> {
-  return [];
+// ---------------------------------------------------------------------------
+// The lock-free pass (V19)
+// ---------------------------------------------------------------------------
+
+/** Stored entities are read in batches of this many ids. */
+const READ_BATCH = 1000;
+
+/** What the lock-free pass found, and what the commit's later steps take
+ * from it. */
+export interface LockFreePass {
+  /** Every staged write, by seq. */
+  writes: ChangesetWriteRecord[];
+  /** The faults, by seq. */
+  faults: Violation[];
+  /** The targets of the staged updates and deletes that no staged create
+   * minted: the rows step 1 locks. */
+  targets: string[];
+  /** The entities the journal names that are stored, as id → type. */
+  stored: Map<string, string>;
+  /** The staged creates, by the id they minted. */
+  minted: Map<string, ChangesetWriteRecord>;
 }
 
-/** The 422 of a rejected commit: the first violations and their total. */
+/** The stored entities of `ids` (any type), as id → row, read raw in
+ * batches. */
+async function storedEntities(ids: string[], store: RuntimeStore): Promise<Map<string, Row>> {
+  const rows = new Map<string, Row>();
+  for (let i = 0; i < ids.length; i += READ_BATCH) {
+    const batch = await store.getEntitiesByIds(ids.slice(i, i + READ_BATCH), {});
+    for (const [id, row] of Object.entries(batch)) rows.set(id, row);
+  }
+  return rows;
+}
+
+/** The entity ids a staged write names: its target, its relation ends,
+ * its parent. */
+function entityRefs(write: ChangesetWriteRecord): string[] {
+  const args = write.arguments;
+  switch (write.operation) {
+    case "create_entity": {
+      const parent = args.parentRelation as ParentRelationInput | null | undefined;
+      return parent ? [parent.parentId] : [];
+    }
+    case "create_relation":
+      return [args.fromEntityId as string, args.toEntityId as string];
+    case "update_entity":
+    case "delete_entity":
+      return [write.targetId!];
+    default:
+      return [];
+  }
+}
+
+/** What of a write the lens no longer shows (V19, V41), as a text that
+ * names neither the type nor the property; null when all is shown. */
+function hiddenPart(loaded: LoadedSchema, write: ChangesetWriteRecord): string | null {
+  const lens = loaded.scoped;
+  const through = `is no longer visible through lens '${lens.lensKey}'`;
+  const type = write.operation.endsWith("_entity")
+    ? lens.entityTypes[write.typeKey]
+    : lens.relationTypes[write.typeKey];
+  if (type === undefined) return `The type of this write ${through}`;
+  const properties = Object.keys((write.arguments.properties ?? {}) as Row);
+  if (properties.some((key) => !Object.hasOwn(type.properties, key))) {
+    return `A property this write sets ${through}`;
+  }
+  const parent = write.arguments.parentRelation as ParentRelationInput | null | undefined;
+  if (parent) {
+    const rt = lens.relationTypes[parent.type];
+    if (rt === undefined || Object.keys(parent.properties ?? {}).some((key) => !Object.hasOwn(rt.properties, key))) {
+      return `The parent relation of this write ${through}`;
+    }
+  }
+  return null;
+}
+
+/** The field faults the current lens finds in a staged write's values, as
+ * its replay would meet them; null when there are none. */
+function valueFaults(loaded: LoadedSchema, write: ChangesetWriteRecord): string | null {
+  const args = write.arguments;
+  const properties = (args.properties ?? {}) as Row;
+  switch (write.operation) {
+    case "create_entity":
+      return fieldFaults(
+        prepareCreateEntity(loaded, write.typeKey, properties, (args.parentRelation ?? null) as ParentRelationInput | null, {
+          entityId: write.mintedId!,
+          relationId: (args.relationId as string | null) ?? randomUUID(),
+        }).errors,
+      );
+    case "update_entity":
+      return fieldFaults(prepareUpdateEntity(loaded, write.typeKey, write.targetId!, properties).errors);
+    case "create_relation":
+      return fieldFaults(
+        prepareCreateRelation(
+          loaded,
+          write.typeKey,
+          args.fromEntityId as string,
+          args.toEntityId as string,
+          properties,
+          write.mintedId!,
+        ).errors,
+      );
+    case "update_relation":
+      return fieldFaults(prepareUpdateRelation(loaded, write.typeKey, write.targetId!, properties).errors);
+    default:
+      return null;
+  }
+}
+
+/** Whether the stored values of a staged update's patched keys differ
+ * from its base (V10): raw, absent distinct from null, a document by its
+ * hash. */
+function drifted(loaded: LoadedSchema, write: ChangesetWriteRecord, stored: Row): boolean {
+  const types = write.operation === "update_entity" ? loaded.full.entityTypes : loaded.full.relationTypes;
+  const keys = Object.keys((write.arguments.properties ?? {}) as Row);
+  return !isDeepStrictEqual(write.base, baseOf(stored, keys, types[write.typeKey]?.properties ?? {}));
+}
+
+function driftFault(write: ChangesetWriteRecord): Violation {
+  const what = write.operation === "update_entity" ? "Entity" : "Relation";
+  return {
+    seq: write.seq,
+    kind: "drift",
+    message: `${what} '${write.targetId}' changed since this write was staged; unstage and restage it`,
+  };
+}
+
+/**
+ * The lock-free pass (V19, V5 d): one paged read of the journal and of
+ * the stored rows it names, with no lock and no transaction. Per staged
+ * write, by seq, it finds:
+ *
+ * - `not_visible`: its type, a property it sets, or its parent relation is
+ *   no longer in the lens (V41); nothing else is checked on that write;
+ * - `replay`: a value the lens no longer accepts, as the replay would
+ *   meet it;
+ * - `missing`: the target of an update, stored at staging, is gone;
+ * - `dangling`: an id it names is neither stored nor minted by a create
+ *   still in the journal: the target of an update minted by a create
+ *   since unstaged (V6), a relation end or a parent;
+ * - `drift`: a stored update target's values of the patched keys differ
+ *   from the base (V10).
+ *
+ * A delete whose target is gone is no fault: the replay counts it as done
+ * (V20). Submit and the review read reuse the pass.
+ */
+export async function lockFreePass(
+  loaded: LoadedSchema,
+  changesetId: string,
+  store: RuntimeStore,
+): Promise<LockFreePass> {
+  const writes: ChangesetWriteRecord[] = [];
+  for (let offset = 0; ; offset += REPLAY_PAGE) {
+    const page = await store.changesets().page(changesetId, offset, REPLAY_PAGE);
+    writes.push(...page);
+    if (page.length < REPLAY_PAGE) break;
+  }
+  const minted = new Map(writes.filter((w) => w.mintedId !== null).map((w) => [w.mintedId!, w] as const));
+  const mintedAs = (id: string, create: string): boolean => minted.get(id)?.operation === create;
+
+  const named = new Set(writes.flatMap(entityRefs).filter((id) => !mintedAs(id, "create_entity")));
+  const rows = await storedEntities([...named], store);
+  const stored = new Map([...rows].map(([id, row]) => [id, row._entityTypeKey as string] as const));
+
+  const faults: Violation[] = [];
+  const targets = new Set<string>();
+  for (const write of writes) {
+    const fault = (kind: string, message: string): void => {
+      faults.push({ seq: write.seq, kind, message });
+    };
+    const hidden = hiddenPart(loaded, write);
+    if (hidden !== null) {
+      fault("not_visible", hidden);
+      continue;
+    }
+    const invalid = valueFaults(loaded, write);
+    if (invalid !== null) fault("replay", invalid);
+
+    const kind = write.operation.endsWith("_entity") ? "entity" : "relation";
+    const target = write.targetId;
+    if (target !== null && !mintedAs(target, `create_${kind}`)) targets.add(target);
+    const unknown = (id: string): void =>
+      fault("dangling", `Entity '${id}' is neither stored nor created by a write in this changeset`);
+
+    switch (write.operation) {
+      case "create_entity":
+      case "create_relation":
+        for (const id of entityRefs(write)) {
+          if (!stored.has(id) && !mintedAs(id, "create_entity")) unknown(id);
+        }
+        break;
+      case "update_entity":
+      case "update_relation": {
+        if (mintedAs(target!, `create_${kind}`)) break;
+        const current =
+          kind === "entity"
+            ? stored.get(target!) === write.typeKey
+              ? rows.get(target!)!
+              : null
+            : await store.getRelation(write.typeKey, target!);
+        const what = kind === "entity" ? "Entity" : "Relation";
+        if (current === null) {
+          // A stored target had a base at staging; a minted one had none.
+          if (write.base !== null) fault("missing", `${what} '${target}' no longer exists`);
+          else if (kind === "entity") unknown(target!);
+          else fault("dangling", `Relation '${target}' is neither stored nor created by a write in this changeset`);
+        } else if (write.base !== null && drifted(loaded, write, current)) {
+          faults.push(driftFault(write));
+        }
+        break;
+      }
+    }
+  }
+  return { writes, faults, targets: [...targets], stored, minted };
+}
+
+// ---------------------------------------------------------------------------
+// Commit validation (V21, V22)
+// ---------------------------------------------------------------------------
+
+/** Step 1, after the lock: every stored target `FOR UPDATE`, and drift
+ * re-checked on the rows as locked (V19). A target gone since the pass is
+ * left to the replay. */
+async function driftUnderLock(loaded: LoadedSchema, pass: LockFreePass, bound: RuntimeStore): Promise<Violation[]> {
+  if (pass.targets.length === 0) return [];
+  const locked = new Map((await bound.lockTargets(pass.targets)).map((row) => [`${row.kind} ${row.id}`, row] as const));
+  const violations: Violation[] = [];
+  for (const write of pass.writes) {
+    if (write.base === null || (write.operation !== "update_entity" && write.operation !== "update_relation")) continue;
+    const row = locked.get(`${write.operation === "update_entity" ? "entity" : "relation"} ${write.targetId}`);
+    if (row !== undefined && row.typeKey === write.typeKey && drifted(loaded, write, row.props)) {
+      violations.push(driftFault(write));
+    }
+  }
+  return violations;
+}
+
+/** The parent links `ids` hang from, and those of their ancestors, walked
+ * up level by level over the neutral reads: child id → its links. Each id
+ * is read once, so a cycle ends the walk. */
+async function ancestry(
+  ids: string[],
+  readings: Record<string, ParentEnd>,
+  store: RuntimeStore,
+): Promise<Map<string, ParentLink[]>> {
+  const links = new Map<string, ParentLink[]>();
+  let frontier = [...new Set(ids)];
+  while (frontier.length > 0) {
+    for (const id of frontier) links.set(id, []);
+    const next = new Set<string>();
+    for (const link of await store.parentsOf(frontier, readings)) {
+      links.get(link.childId)?.push(link);
+      if (!links.has(link.parentId)) next.add(link.parentId);
+    }
+    frontier = [...next];
+  }
+  return links;
+}
+
+/** Whether `target` is `from` or one of its ancestors in `links`. */
+function reaches(links: Map<string, ParentLink[]>, from: string, target: string): boolean {
+  const seen = new Set<string>();
+  const stack = [from];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (id === target) return true;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const link of links.get(id) ?? []) stack.push(link.parentId);
+  }
+  return false;
+}
+
+/** One entity a staged write touches inside the anchor's hierarchy. */
+interface TouchedEnd {
+  id: string;
+  /** Stored before the replay. */
+  before: boolean;
+}
+
+/** What a staged write touches inside the anchor's hierarchy, and the id
+ * its violation names: its target or its minted id, never a stored end. */
+interface Touch {
+  seq: number;
+  what: "Entity" | "Relation";
+  id: string;
+  ends: TouchedEnd[];
+}
+
+/** An anchored changeset's anchor, read fresh in the transaction, and
+ * what its staged writes touch. */
+interface Coverage {
+  key: string;
+  anchorId: string;
+  readings: Record<string, ParentEnd>;
+  touches: Touch[];
+  /** The seqs already refused before the replay: one violation each. */
+  refused: Set<number>;
+}
+
+/** The entities of the anchor's hierarchy a staged write touches: an
+ * entity write its entity; a relation write both ends, a stored
+ * relation's as stored before the replay. */
+async function touchOf(
+  loaded: LoadedSchema,
+  pass: LockFreePass,
+  types: Set<string>,
+  write: ChangesetWriteRecord,
+  bound: RuntimeStore,
+): Promise<Touch> {
+  const ends: { id: string; type: string; before: boolean }[] = [];
+  const storedBefore = (id: string): boolean => pass.stored.has(id);
+  let what: Touch["what"] = "Entity";
+  if (write.operation.endsWith("_entity")) {
+    const id = (write.mintedId ?? write.targetId)!;
+    ends.push({ id, type: write.typeKey, before: write.mintedId === null && storedBefore(id) });
+  } else {
+    what = "Relation";
+    const rt = loaded.full.relationTypes[write.typeKey];
+    const mintedBy = write.targetId === null ? undefined : pass.minted.get(write.targetId);
+    const create =
+      write.operation === "create_relation" ? write : mintedBy?.operation === "create_relation" ? mintedBy : undefined;
+    let pair: [string, string, boolean, boolean] | null = null;
+    if (create !== undefined) {
+      const from = create.arguments.fromEntityId as string;
+      const to = create.arguments.toEntityId as string;
+      pair = [from, to, storedBefore(from), storedBefore(to)];
+    } else {
+      const relation = await bound.getRelation(write.typeKey, write.targetId!);
+      if (relation !== null) {
+        pair = [relation.fromEntityId as string, relation.toEntityId as string, true, true];
+      }
+    }
+    if (rt !== undefined && pair !== null) {
+      ends.push({ id: pair[0], type: rt.fromEntityTypeKey, before: pair[2] });
+      ends.push({ id: pair[1], type: rt.toEntityTypeKey, before: pair[3] });
+    }
+  }
+  return {
+    seq: write.seq,
+    what,
+    id: (write.mintedId ?? write.targetId)!,
+    ends: ends.filter((end) => types.has(end.type)).map(({ id, before }) => ({ id, before })),
+  };
+}
+
+/**
+ * Step 1, on an anchored changeset (V8, V42): the anchor read fresh, and
+ * the coverage before the replay. The anchor gone, dangling, or at an
+ * entity the lens hides is one violation on seq 0 (the changeset as a
+ * whole), and coverage is not checked. Otherwise, as v1's `AnchorGuard`
+ * holds it: every touched entity of the anchor's hierarchy stored now is
+ * covered, and no staged delete takes an entity any anchor points at.
+ */
+async function anchorBefore(
+  loaded: LoadedSchema,
+  key: string,
+  pass: LockFreePass,
+  bound: RuntimeStore,
+): Promise<{ violations: Violation[]; coverage: Coverage | null }> {
+  const record = await bound.anchors().getAnchor(key);
+  if (record === null) {
+    return {
+      violations: [{ seq: 0, kind: "anchor_gone", message: `Anchor '${key}' no longer exists, so this changeset cannot be committed` }],
+      coverage: null,
+    };
+  }
+  const refusal = anchorRefusal(key, record, loaded);
+  if (refusal !== null) return { violations: [{ seq: 0, kind: "anchor_dangling", message: refusal }], coverage: null };
+  if (record.entity === null) return { violations: [], coverage: null };
+
+  const { types, readings } = hierarchyOf(record.entity.type, loaded.full);
+  const touches: Touch[] = [];
+  for (const write of pass.writes) touches.push(await touchOf(loaded, pass, types, write, bound));
+  const coverage: Coverage = { key, anchorId: record.entity.id, readings, touches, refused: new Set() };
+
+  const before = touches.flatMap((touch) => touch.ends.filter((end) => end.before).map((end) => end.id));
+  const links = await ancestry(before, readings, bound);
+  const violations: Violation[] = [];
+  for (const touch of touches) {
+    if (touch.ends.some((end) => end.before && !reaches(links, end.id, coverage.anchorId))) {
+      violations.push({
+        seq: touch.seq,
+        kind: "not_covered",
+        message: `${touch.what} '${touch.id}' is not under anchor '${key}'`,
+      });
+    }
+  }
+  const deletes = pass.writes.filter((write) => write.operation === "delete_entity");
+  const anchored =
+    deletes.length === 0 ? new Set() : new Set((await bound.anchors().listAnchors()).map((anchor) => anchor.entity?.id));
+  for (const write of deletes) {
+    if (anchored.has(write.targetId!)) {
+      violations.push({ seq: write.seq, kind: "not_covered", message: anchoredDeleteMessage(write.targetId!) });
+    }
+  }
+  for (const violation of violations) coverage.refused.add(violation.seq);
+  return { violations, coverage };
+}
+
+/** A parent link a staged write creates. */
+interface StagedLink {
+  seq: number;
+  relationId: string;
+  parentId: string;
+  childId: string;
+}
+
+/** A relation end a staged write names, with the type its relation type
+ * requires there. */
+interface StagedEnd {
+  seq: number;
+  label: "Source" | "Target" | "Parent";
+  id: string;
+  type: string;
+  relationType: string;
+}
+
+/** The parent links and the relation ends the staged creates name. */
+function stagedLinksAndEnds(loaded: LoadedSchema, writes: ChangesetWriteRecord[]): { links: StagedLink[]; ends: StagedEnd[] } {
+  const links: StagedLink[] = [];
+  const ends: StagedEnd[] = [];
+  for (const write of writes) {
+    const args = write.arguments;
+    if (write.operation === "create_entity") {
+      const parent = args.parentRelation as ParentRelationInput | null | undefined;
+      const rt = parent ? loaded.full.relationTypes[parent.type] : undefined;
+      if (!parent || rt === undefined || rt.parent === null) continue;
+      const parentType = rt.parent === "source" ? rt.fromEntityTypeKey : rt.toEntityTypeKey;
+      ends.push({ seq: write.seq, label: "Parent", id: parent.parentId, type: parentType, relationType: rt.key });
+      links.push({ seq: write.seq, relationId: args.relationId as string, parentId: parent.parentId, childId: write.mintedId! });
+    } else if (write.operation === "create_relation") {
+      const rt = loaded.full.relationTypes[write.typeKey];
+      if (rt === undefined) continue;
+      const from = args.fromEntityId as string;
+      const to = args.toEntityId as string;
+      ends.push({ seq: write.seq, label: "Source", id: from, type: rt.fromEntityTypeKey, relationType: rt.key });
+      ends.push({ seq: write.seq, label: "Target", id: to, type: rt.toEntityTypeKey, relationType: rt.key });
+      if (rt.parent !== null) {
+        const [parentId, childId] = rt.parent === "source" ? [from, to] : [to, from];
+        links.push({ seq: write.seq, relationId: write.mintedId!, parentId, childId });
+      }
+    }
+  }
+  return { links, ends };
+}
+
+/**
+ * Step 3 (V21, V13): the rules over the end state, in the service, on the
+ * bound store's neutral reads, after the replay. Messages name only what
+ * the caller sent, the lens key and the anchor key:
+ *
+ * - `has_children`: a child recorded by a staged entity delete (the delete
+ *   capture) is neither deleted nor re-parented;
+ * - `two_parents`, `cycle`: v1's parent rules, for every parent link the
+ *   changeset creates and keeps, across every parent relation of the full
+ *   schema;
+ * - `endpoint_type`: a created relation's end, or a create's parent, is
+ *   not of the type its relation type requires;
+ * - `not_covered`: on an anchored changeset, a touched entity of the
+ *   anchor's hierarchy that exists now is not covered.
+ */
+async function commitViolations(
+  loaded: LoadedSchema,
+  pass: LockFreePass,
+  replay: Replay,
+  coverage: Coverage | null,
+  bound: RuntimeStore,
+): Promise<Violation[]> {
+  const readings = parentReadings(loaded.full);
+  const { links, ends } = stagedLinksAndEnds(loaded, pass.writes);
+  const children = replay.deletedChildren.flatMap((deleted) => deleted.children.map((child) => child.childId));
+  const touched = coverage?.touches.flatMap((touch) => touch.ends.map((end) => end.id)) ?? [];
+  const ids = new Set([...children, ...links.map((link) => link.childId), ...ends.map((end) => end.id), ...touched]);
+  const types = new Map(
+    [...(await storedEntities([...ids], bound))].map(([id, row]) => [id, row._entityTypeKey as string] as const),
+  );
+  const violations: Violation[] = [];
+
+  const remaining = children.filter((id) => types.has(id));
+  const parented = new Set((await bound.parentsOf(remaining, readings)).map((link) => link.childId));
+  for (const deleted of replay.deletedChildren) {
+    if (deleted.children.some((child) => types.has(child.childId) && !parented.has(child.childId))) {
+      violations.push({
+        seq: deleted.seq,
+        kind: "has_children",
+        message: `Entity '${deleted.entityId}' still has children; delete or re-parent them in this changeset`,
+      });
+    }
+  }
+
+  // As v1: an end of the wrong type is not judged by the parent rules.
+  const mistyped = new Set<string>();
+  for (const end of ends) {
+    const type = types.get(end.id);
+    if (type !== undefined && type !== end.type) {
+      mistyped.add(`${end.seq} ${end.id}`);
+      violations.push({
+        seq: end.seq,
+        kind: "endpoint_type",
+        message: `${end.label} entity '${end.id}' does not have the type relation type '${end.relationType}' requires`,
+      });
+    }
+  }
+
+  const kept = links.filter(
+    (link) =>
+      types.has(link.childId) &&
+      !mistyped.has(`${link.seq} ${link.childId}`) &&
+      !mistyped.has(`${link.seq} ${link.parentId}`),
+  );
+  const walk = await ancestry(
+    kept.map((link) => link.childId),
+    readings,
+    bound,
+  );
+  for (const link of kept) {
+    const own = walk.get(link.childId) ?? [];
+    if (!own.some((stored) => stored.relationId === link.relationId)) continue;
+    if (own.length > 1) {
+      violations.push({ seq: link.seq, kind: "two_parents", message: `Entity '${link.childId}' already has a parent` });
+    }
+    if (reaches(walk, link.parentId, link.childId)) {
+      violations.push({
+        seq: link.seq,
+        kind: "cycle",
+        message: `Entity '${link.parentId}' cannot be the parent: this would close a cycle`,
+      });
+    }
+  }
+
+  if (coverage !== null) {
+    const after = coverage.touches.flatMap((touch) => touch.ends.map((end) => end.id)).filter((id) => types.has(id));
+    const walkAfter = await ancestry(after, coverage.readings, bound);
+    for (const touch of coverage.touches) {
+      if (coverage.refused.has(touch.seq)) continue;
+      if (touch.ends.some((end) => types.has(end.id) && !reaches(walkAfter, end.id, coverage.anchorId))) {
+        violations.push({
+          seq: touch.seq,
+          kind: "not_covered",
+          message: `${touch.what} '${touch.id}' would not be under anchor '${coverage.key}' after the commit`,
+        });
+      }
+    }
+  }
+  return violations;
+}
+
+/** The 422 of a rejected commit: the first violations by seq and their
+ * total. */
 function rejection(violations: Violation[]): ValidationError {
+  const bySeq = [...violations].sort((a, b) => a.seq - b.seq);
   return new ValidationError("The commit was rejected; nothing was persisted", {
-    violations: violations.slice(0, MAX_VIOLATIONS),
+    violations: bySeq.slice(0, MAX_VIOLATIONS),
     total: violations.length,
   });
 }
@@ -739,8 +1290,12 @@ export async function commitChangeset(
     const record = await loadChangeset(loaded, anchorKey, changesetId, store);
     const search = await loadSearchContext(store.ontologyKey, store.searchIndices());
     try {
+      // 0b: the lock-free pass; a fault rejects with no lock taken.
+      const pass = await lockFreePass(loaded, record.id, store);
+      if (pass.faults.length > 0) throw new CommitRejected(pass.faults);
       return await store.transaction(async (bound) => {
-        // 1: the commit lock and the row, then the version.
+        // 1: the commit lock and the row, the version, then the targets
+        // and drift under the lock, and the anchor read fresh.
         const locked = await bound.changesets().lockForCommit(record.id);
         if (locked === null) throw notFound(changesetId);
         if (expectedVersion !== undefined && locked.version !== expectedVersion) {
@@ -748,10 +1303,20 @@ export async function commitChangeset(
             `Changeset '${changesetId}' changed since you looked: version ${locked.version}, not ${expectedVersion}`,
           );
         }
+        if (locked.version !== record.version) {
+          throw new ConflictError(`Changeset '${changesetId}' changed during the commit; try again`);
+        }
+        const drift = await driftUnderLock(loaded, pass, bound);
+        if (drift.length > 0) throw new CommitRejected(drift);
+        const anchor =
+          record.anchorKey === null ? null : await anchorBefore(loaded, record.anchorKey, pass, bound);
         // 2: the replay; 3: commit validation.
         const replay = await replayJournal(loaded, search, record.id, bound);
         if (replay.fault !== null) throw new CommitRejected([replay.fault]);
-        const violations = await commitViolations();
+        const violations = [
+          ...(anchor?.violations ?? []),
+          ...(await commitViolations(loaded, pass, replay, anchor?.coverage ?? null, bound)),
+        ];
         if (violations.length > 0) throw new CommitRejected(violations);
         // 4: the journal goes with the changeset; COMMIT on return.
         await bound.changesets().deleteWithJournal(record.id);

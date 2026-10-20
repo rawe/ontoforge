@@ -231,6 +231,17 @@ describe("tool descriptions", () => {
     }
   });
 
+  it("the drift guidance is stated in get_changeset and commit_changeset, with no reflex restage", () => {
+    for (const map of [runtime, anchored, stagedOnly]) {
+      expect(map.get("get_changeset")).toContain("compare them, and restage only if your change still applies");
+    }
+    for (const map of [runtime, anchored]) {
+      const text = map.get("commit_changeset")!;
+      expect(text).toContain("On drift, compare before and current in get_changeset, and restage only if your change still applies");
+      expect(text).not.toContain("unstage and restage");
+    }
+  });
+
   it("the anchored mount states the anchor binding of a changeset", () => {
     expect(anchored.get("start_changeset")).toContain("carries this connection's anchor");
     expect(anchored.get("list_changesets")).toContain("started through this anchor");

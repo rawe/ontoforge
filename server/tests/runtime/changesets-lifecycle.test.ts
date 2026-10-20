@@ -174,8 +174,8 @@ describe("submit", () => {
     expect((error as ValidationError).message).toBe("The changeset was not submitted; it stays a draft");
     expect((error as ValidationError).details).toEqual({
       violations: [
-        { seq: 1, kind: "drift", message: `Entity '${KIM}' changed since this write was staged; unstage and restage it` },
-        { seq: 2, kind: "missing", message: `Entity '${GONE}' no longer exists` },
+        { seq: 1, kind: "drift", message: "Changed since this write was staged" },
+        { seq: 2, kind: "missing", message: "Deleted since this write was staged" },
       ],
       total: 2,
     });
@@ -193,21 +193,19 @@ describe("submit", () => {
     );
   });
 
-  it("an anchored changeset whose anchor is dangling, or at an entity the lens hides, is a 409 with v1's texts", async () => {
+  it("an anchored changeset whose anchor is dangling, or at an entity the lens hides, is a 409 with no fix hint", async () => {
     store.changesetStore.get.mockResolvedValue(changeset({ anchorKey: "agent-a" }));
     store.anchorStore.getAnchor.mockResolvedValue(anchorAt({ type: "company", id: ACME }, false));
     // Through the plain lens URL too: the stored anchor counts.
     await expect(submitChangeset("full_lens", null, CS, "n", on())).rejects.toThrow(
-      new ConflictError(
-        "Anchor 'agent-a' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it",
-      ),
+      new ConflictError("Anchor 'agent-a' is dangling"),
     );
 
     invalidateLoadedSchemaCache();
     store.getFullSchemaWithLensInclusions.mockResolvedValue(schema(true));
     store.anchorStore.getAnchor.mockResolvedValue(anchorAt({ type: "department", id: DEPT }));
     await expect(submitChangeset("hr_view", "agent-a", CS, "n", on())).rejects.toThrow(
-      new ConflictError("Anchor 'agent-a' points at an entity that lens 'hr_view' does not show, so every write is refused"),
+      new ConflictError("Anchor 'agent-a' points at an entity that lens 'hr_view' does not show"),
     );
     expect(store.changesetStore.submit).not.toHaveBeenCalled();
   });
@@ -438,7 +436,7 @@ describe("review read", () => {
     expect(bySeq[3]).toMatchObject({ from: { id: PAT, name: "Pat" }, to: { id: NEWCO, name: "Newco" }, before: null, current: null, after: { role: "dev" } });
     // Drift: current differs from before, the value staged against.
     expect(bySeq[4]).toMatchObject({ name: "Kim Y", before: { name: "Kim" }, current: { name: "Kim Y" }, after: { name: "Kim X" } });
-    expect(bySeq[4]!.markers).toEqual([{ kind: "drift", message: `Entity '${KIM}' changed since this write was staged; unstage and restage it` }]);
+    expect(bySeq[4]!.markers).toEqual([{ kind: "drift", message: "Changed since this write was staged" }]);
     expect(bySeq[5]).toMatchObject({ from: { id: PAT, name: "Pat" }, to: { id: ACME, name: "Acme" }, before: { role: "dev" }, current: { role: "dev" }, after: { role: "lead" }, markers: [] });
     expect(bySeq[6]).toMatchObject({ to: { id: GHOST, name: null } });
     expect(bySeq[6]!.markers.map((m) => m.kind)).toEqual(["dangling"]);

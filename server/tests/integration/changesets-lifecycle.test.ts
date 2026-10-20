@@ -180,7 +180,7 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
     expect(res.body.error).toMatchObject({
       code: "VALIDATION_ERROR",
       message: "The changeset was not submitted; it stays a draft",
-      details: { violations: [{ seq: 1, kind: "missing", message: `Entity '${e.Kim}' no longer exists` }], total: 1 },
+      details: { violations: [{ seq: 1, kind: "missing", message: "Deleted since this write was staged" }], total: 1 },
     });
     expect((await view(cs)).body).toMatchObject({ state: "draft", version: before.version, note: null });
   });
@@ -345,11 +345,11 @@ describe("the review read (V41)", () => {
       after: { name: "P2 Website" },
     });
     expect(bySeq[1].markers).toEqual([
-      { kind: "drift", message: `Entity '${e.P2}' changed since this write was staged; unstage and restage it` },
+      { kind: "drift", message: "Changed since this write was staged" },
     ]);
     expect(bySeq[3]).toMatchObject({ id: t9, name: "T9", parent: { id: p5, name: null, properties: { phase: "plan" } }, after: { name: "T9" } });
     expect(bySeq[3].markers).toEqual([
-      { kind: "dangling", message: `Entity '${p5}' is neither stored nor created by a write in this changeset` },
+      { kind: "dangling", message: "The parent is neither stored nor created in this changeset" },
     ]);
     expect(bySeq[4]).toMatchObject({ from: { id: e.T1, name: "T1" }, to: { id: e.Kim, name: "Kim" }, markers: [] });
     expect(bySeq[5]).toMatchObject({
@@ -401,8 +401,7 @@ describe("anchors at submit (V42; the dangling row of 'Who may do what')", () =>
     expect((await submit(other, "before")).status).toBe(200);
     expect((await call("DELETE", `${ALL}/entities/task/${e.T2a}`)).status).toBe(204);
 
-    const dangling =
-      "Anchor 'agent-a' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it";
+    const dangling = "Anchor 'agent-a' is dangling";
     for (const base of [AA, ALL]) {
       const res = await submit(cs, "n", base);
       expect(res.status).toBe(409);

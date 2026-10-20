@@ -137,11 +137,14 @@ describe("opening the guard", () => {
     await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(NotFoundError);
   });
 
-  it("dangling, by a deleted entity or a deleted type: 409", async () => {
+  it("dangling, by a deleted entity or a deleted type: 409 with v1's text", async () => {
+    const dangling = new ConflictError(
+      "Anchor 'agent-a' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it",
+    );
     anchorAt({ type: "project", id: "P1" }, false);
-    await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(ConflictError);
+    await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(dangling);
     anchorAt({ type: "gone", id: "P1" }, true);
-    await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(/dangling/);
+    await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(dangling);
   });
 
   it("an anchored entity the lens hides: 409 naming only the anchor and the lens", async () => {
@@ -152,9 +155,7 @@ describe("opening the guard", () => {
     ).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConflictError);
     const message = (error as ConflictError).message;
-    expect(message).toContain("'agent-a'");
-    expect(message).toContain("'no_projects'");
-    expect(message).not.toMatch(/project'|P1/);
+    expect(message).toBe("Anchor 'agent-a' points at an entity that lens 'no_projects' does not show, so every write is refused");
   });
 });
 
@@ -211,11 +212,13 @@ describe("the staging check (R10)", () => {
     expect(await check("agent-a")).toBeNull();
   });
 
-  it("dangling, or an anchored entity the lens hides, is a 409; an unknown key is not found", async () => {
+  it("dangling, or an anchored entity the lens hides, is a 409 with no fix hint; an unknown key is not found", async () => {
     anchorAt({ type: "project", id: "P1" }, false, true);
-    expect((await check("agent-a"))!.message).toMatch(/is dangling/);
+    expect(await check("agent-a")).toEqual(new ConflictError("Anchor 'agent-a' is dangling"));
     anchorAt({ type: "project", id: "P1" }, true);
-    expect(await check("agent-a", loaded("no_projects", ["customer", "task", "milestone"]))).toBeInstanceOf(ConflictError);
+    expect(await check("agent-a", loaded("no_projects", ["customer", "task", "milestone"]))).toEqual(
+      new ConflictError("Anchor 'agent-a' points at an entity that lens 'no_projects' does not show"),
+    );
     store.anchorStore.getAnchor.mockResolvedValue(null);
     expect(await check("agent-a")).toBeInstanceOf(NotFoundError);
   });
@@ -321,8 +324,7 @@ describe("entity update, edit and delete", () => {
       ["person", "Ben"],
     ]) {
       const fields = await refusal(() => guard.checkDelete(type!, id!));
-      expect(fields.entityId).toContain("anchored");
-      expect(fields.entityId).not.toContain("agent-b");
+      expect(fields.entityId).toBe(`Entity '${id}' is anchored and cannot be deleted on an anchored connection`);
     }
     await guard.checkDelete("task", "T1a");
   });

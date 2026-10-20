@@ -224,28 +224,27 @@ describe("the lock-free pass (step 0b)", () => {
   it("missing: an update target stored at staging is gone", async () => {
     delete stored[PAT];
     const result = await pass([rename(1, PAT, "Pat M", { name: "Pat" })]);
-    expect(result.faults).toEqual([{ seq: 1, kind: "missing", message: `Entity '${PAT}' no longer exists` }]);
+    expect(result.faults).toEqual([{ seq: 1, kind: "missing", message: "Deleted since this write was staged" }]);
   });
 
   it("missing: a relation update target stored at staging is gone; stored, it passes", async () => {
     const update = row(1, { operation: "update_relation", typeKey: "works_for", targetId: R1, arguments: { properties: { role: "lead" } }, before: { role: "dev" } });
-    expect((await pass([update])).faults).toEqual([{ seq: 1, kind: "missing", message: `Relation '${R1}' no longer exists` }]);
+    expect((await pass([update])).faults).toEqual([{ seq: 1, kind: "missing", message: "Deleted since this write was staged" }]);
     store.getRelation.mockResolvedValue(makeRelation({ role: "dev" }, { relationId: R1 }));
     expect((await pass([update])).faults).toEqual([]);
     expect(store.getRelation).toHaveBeenCalledWith("works_for", R1);
   });
 
-  it("dangling: what a create since unstaged minted (V6), or an end neither stored nor minted", async () => {
+  it("dangling: what a create since unstaged minted (V6), or an end neither stored nor minted, named by its role", async () => {
     const result = await pass([
       rename(2, NEW, "x", null),
       relate(3, "works_for", NEW_REL, GHOST, ACME),
       department(4, "dddddddd-dddd-4ddd-8ddd-dddddddddddd", GHOST, R1),
     ]);
-    const text = (id: string) => `Entity '${id}' is neither stored nor created by a write in this changeset`;
     expect(result.faults).toEqual([
-      { seq: 2, kind: "dangling", message: text(NEW) },
-      { seq: 3, kind: "dangling", message: text(GHOST) },
-      { seq: 4, kind: "dangling", message: text(GHOST) },
+      { seq: 2, kind: "dangling", message: "Neither stored nor created in this changeset" },
+      { seq: 3, kind: "dangling", message: "The source end is neither stored nor created in this changeset" },
+      { seq: 4, kind: "dangling", message: "The parent is neither stored nor created in this changeset" },
     ]);
   });
 
@@ -266,7 +265,7 @@ describe("the lock-free pass (step 0b)", () => {
       stored[PAT]!.name = "Pat Mobile";
       const result = await pass([rename(1, PAT, "Pat W", { name: "Pat" })]);
       expect(result.faults).toEqual([
-        { seq: 1, kind: "drift", message: `Entity '${PAT}' changed since this write was staged; unstage and restage it` },
+        { seq: 1, kind: "drift", message: "Changed since this write was staged" },
       ]);
       stored[PAT]!.name = "Pat";
       stored[PAT]!.age = 50;
@@ -327,7 +326,7 @@ describe("the lock-free pass (step 0b)", () => {
   it("a fault rejects before BEGIN: no transaction, no commit lock; the last change is refreshed", async () => {
     delete stored[PAT];
     journal([rename(1, PAT, "Pat M", { name: "Pat" })]);
-    expect(await violations(commit())).toEqual([{ seq: 1, kind: "missing", message: `Entity '${PAT}' no longer exists` }]);
+    expect(await violations(commit())).toEqual([{ seq: 1, kind: "missing", message: "Deleted since this write was staged" }]);
     expect(store.transaction).not.toHaveBeenCalled();
     expect(store.changesetStore.lockForCommit).not.toHaveBeenCalled();
     expect(store.changesetStore.touch).toHaveBeenCalledWith(CS);
@@ -348,9 +347,7 @@ describe("step 1: under the lock", () => {
   it("locks every stored target and re-checks drift on the locked rows", async () => {
     journal([rename(1, PAT, "Pat W", { name: "Pat" }), deleteOf(2, "department", D1)]);
     store.lockTargets.mockResolvedValue([{ id: PAT, kind: "entity", typeKey: "person", props: { name: "Pat Mobile" } }]);
-    expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "drift", message: `Entity '${PAT}' changed since this write was staged; unstage and restage it` },
-    ]);
+    expect(await violations(commit())).toEqual([{ seq: 1, kind: "drift", message: "Changed since this write was staged" }]);
     expect(store.lockTargets.mock.calls[0]![0].sort()).toEqual([PAT, D1].sort());
     expect(store.lockTargets.mock.invocationCallOrder[0]!).toBeGreaterThan(
       store.changesetStore.lockForCommit.mock.invocationCallOrder[0]!,
@@ -368,12 +365,12 @@ describe("step 1: under the lock", () => {
 });
 
 describe("step 3: the end state", () => {
-  it("has_children: a recorded child neither deleted nor re-parented; the message names no child", async () => {
+  it("has_children: a recorded child neither deleted nor re-parented; the message names no entity", async () => {
     store.childrenOf.mockResolvedValue([link("belongs_to", R1, ACME, D1)]);
     journal([deleteOf(1, "company", ACME)]);
     parents[D1] = [];
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "has_children", message: `Entity '${ACME}' still has children; delete or re-parent them in this changeset` },
+      { seq: 1, kind: "has_children", message: "Still has children" },
     ]);
     expect(store.changesetStore.deleteWithJournal).not.toHaveBeenCalled();
   });
@@ -397,12 +394,22 @@ describe("step 3: the end state", () => {
     journal([relate(1, "belongs_to", NEW_REL, D1, BETA)]);
     parents[D1] = [link("belongs_to", R1, ACME, D1), link("belongs_to", NEW_REL, BETA, D1)];
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "two_parents", message: `Entity '${D1}' already has a parent` },
+      { seq: 1, kind: "two_parents", message: "The source end already has a parent" },
     ]);
 
     journal([row(1, { operation: "delete_relation", typeKey: "belongs_to", targetId: R1, arguments: {} }), relate(2, "belongs_to", NEW_REL, D1, BETA)]);
     parents[D1] = [link("belongs_to", NEW_REL, BETA, D1)];
     expect(await commit()).toMatchObject({ committed: 2 });
+  });
+
+  it("two_parents on a create: the created entity goes unnamed; a relation names its child end", async () => {
+    stored[NEW] = makeEntity({ name: "New" }, "department", NEW);
+    journal([department(1, NEW, ACME, R1), relate(2, "belongs_to", NEW_REL, NEW, BETA)]);
+    parents[NEW] = [link("belongs_to", R1, ACME, NEW), link("belongs_to", NEW_REL, BETA, NEW)];
+    expect(await violations(commit())).toEqual([
+      { seq: 1, kind: "two_parents", message: "Already has a parent" },
+      { seq: 2, kind: "two_parents", message: "The source end already has a parent" },
+    ]);
   });
 
   it("cycle: a parent link that closes a cycle, and a self-loop", async () => {
@@ -411,8 +418,8 @@ describe("step 3: the end state", () => {
     parents[KIM] = [link("reports_to", NEW_REL, PAT, KIM)];
     parents[PAT] = [link("reports_to", "r-old", KIM, PAT), link("reports_to", R1, PAT, PAT)];
     const found = await violations(commit());
-    expect(found).toContainEqual({ seq: 1, kind: "cycle", message: `Entity '${PAT}' cannot be the parent: this would close a cycle` });
-    expect(found).toContainEqual({ seq: 2, kind: "cycle", message: `Entity '${PAT}' cannot be the parent: this would close a cycle` });
+    expect(found).toContainEqual({ seq: 1, kind: "cycle", message: "This parent link would close a cycle" });
+    expect(found).toContainEqual({ seq: 2, kind: "cycle", message: "This parent link would close a cycle" });
     expect(found.filter((v) => v.seq === 1).map((v) => v.kind)).toEqual(["cycle"]);
   });
 
@@ -425,8 +432,8 @@ describe("step 3: the end state", () => {
     journal([relate(1, "works_for", NEW_REL, PAT, D1), department(2, NEW, KIM, R1)]);
     const found = await violations(commit());
     expect(found).toEqual([
-      { seq: 1, kind: "endpoint_type", message: `Target entity '${D1}' does not have the type relation type 'works_for' requires` },
-      { seq: 2, kind: "endpoint_type", message: `Parent entity '${KIM}' does not have the type relation type 'belongs_to' requires` },
+      { seq: 1, kind: "endpoint_type", message: "The target end does not have the type relation type 'works_for' requires" },
+      { seq: 2, kind: "endpoint_type", message: "The parent does not have the type relation type 'belongs_to' requires" },
     ]);
     for (const v of found) expect(v.message).not.toMatch(/department|person|company/);
   });
@@ -475,7 +482,7 @@ describe("anchor coverage (V8, V42)", () => {
     parents[D1] = [link("belongs_to", R1, BETA, D1)];
     journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "not_covered", message: `Entity '${D1}' is not under anchor 'agent-a'` },
+      { seq: 1, kind: "not_covered", message: "Not under anchor 'agent-a'" },
     ]);
   });
 
@@ -487,7 +494,7 @@ describe("anchor coverage (V8, V42)", () => {
       row(2, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P" } }, before: { name: "Pat" } }),
     ]);
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "not_covered", message: `Entity '${NEW}' would not be under anchor 'agent-a' after the commit` },
+      { seq: 1, kind: "not_covered", message: "Would not be under anchor 'agent-a' after the commit" },
     ]);
   });
 
@@ -495,7 +502,7 @@ describe("anchor coverage (V8, V42)", () => {
     store.anchorStore.getAnchor.mockResolvedValue(anchorAt({ type: "company", id: BETA }));
     journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "not_covered", message: `Entity '${D1}' is not under anchor 'agent-a'` },
+      { seq: 1, kind: "not_covered", message: "Not under anchor 'agent-a'" },
     ]);
   });
 
@@ -503,7 +510,7 @@ describe("anchor coverage (V8, V42)", () => {
     store.anchorStore.listAnchors.mockResolvedValue([anchorAt({ type: "company", id: ACME }), { key: "b", entity: { type: "department", id: D1 }, entityFound: true }]);
     journal([deleteOf(1, "department", D1)]);
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "not_covered", message: `Entity '${D1}' is anchored and cannot be deleted on an anchored connection` },
+      { seq: 1, kind: "not_covered", message: "Anchored, so it cannot be deleted on an anchored connection" },
     ]);
   });
 
@@ -526,7 +533,7 @@ describe("anchor coverage (V8, V42)", () => {
     expect(hidden).toEqual({
       seq: 0,
       kind: "anchor_dangling",
-      message: "Anchor 'agent-a' points at an entity that lens 'hr_view' does not show, so every write is refused",
+      message: "Anchor 'agent-a' points at an entity that lens 'hr_view' does not show",
     });
     expect(store.parentsOf).not.toHaveBeenCalledWith([PAT], expect.anything());
   });

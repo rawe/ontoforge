@@ -195,7 +195,7 @@ describe("missing and dangling: ids the journal names (V6)", () => {
     const cs = await start();
     await staged("PATCH", ALL, cs, `entities/person/${e.Kim}`, { name: "Kim B" });
     expect((await call("DELETE", `${ALL}/entities/person/${e.Kim}`)).status).toBe(204);
-    expect(await rejected(cs)).toEqual([{ seq: 1, kind: "missing", message: `Entity '${e.Kim}' no longer exists` }]);
+    expect(await rejected(cs)).toEqual([{ seq: 1, kind: "missing", message: "Deleted since this write was staged" }]);
 
     const control = await start();
     await staged("PATCH", ALL, control, `entities/person/${e.Ana}`, { name: "Ana B" });
@@ -209,7 +209,7 @@ describe("missing and dangling: ids the journal names (V6)", () => {
     await staged("POST", ALL, cs, "entities/task", underParent("T9", "has_task", p5, { phase: "plan" }));
     expect((await call("DELETE", `${ALL}/changesets/${cs}/writes/1`)).status).toBe(204);
     expect(await rejected(cs)).toEqual([
-      { seq: 2, kind: "dangling", message: `Entity '${p5}' is neither stored nor created by a write in this changeset` },
+      { seq: 2, kind: "dangling", message: "The parent is neither stored nor created in this changeset" },
     ]);
 
     const control = await start();
@@ -228,7 +228,7 @@ describe("drift (V10, V19)", () => {
     await staged("PATCH", ALL, cs, `entities/project/${e.P2}`, { name: "P2 Website" });
     expect((await call("PATCH", `${ALL}/entities/project/${e.P2}`, { name: "P2 Mobile" })).status).toBe(200);
     expect(await rejected(cs)).toEqual([
-      { seq: 1, kind: "drift", message: `Entity '${e.P2}' changed since this write was staged; unstage and restage it` },
+      { seq: 1, kind: "drift", message: "Changed since this write was staged" },
     ]);
     expect(await name("project", e.P2)).toBe("P2 Mobile");
 
@@ -273,7 +273,7 @@ describe("drift (V10, V19)", () => {
     const res = await running!;
     expect(res.status, JSON.stringify(res.body)).toBe(422);
     expect(res.body.error.details.violations).toEqual([
-      { seq: 1, kind: "drift", message: `Entity '${e.P3}' changed since this write was staged; unstage and restage it` },
+      { seq: 1, kind: "drift", message: "Changed since this write was staged" },
     ]);
     expect(await name("project", e.P3)).toBe("P3 Mobile");
     expect((await call("GET", `${ALL}/changesets/${cs}`)).status).toBe(200);
@@ -288,7 +288,7 @@ describe("has_children and the order-free subtree delete (V20, V21)", () => {
     await staged("DELETE", ALL, cs, `entities/project/${e.P2}`);
     const violations = await rejected(cs);
     expect(violations).toEqual([
-      { seq: 1, kind: "has_children", message: `Entity '${e.P2}' still has children; delete or re-parent them in this changeset` },
+      { seq: 1, kind: "has_children", message: "Still has children" },
     ]);
     expect(JSON.stringify(violations)).not.toMatch(new RegExp(`${e.T4}|${e.T5}|task`));
 
@@ -326,7 +326,7 @@ describe("the parent rules on the end state: two_parents, cycle", () => {
     const cs = await start();
     await staged("POST", ALL, cs, "relations/has_task", { fromEntityId: e.P2, toEntityId: e.T1, phase: "x" });
     expect(await rejected(cs)).toEqual([
-      { seq: 1, kind: "two_parents", message: `Entity '${e.T1}' already has a parent` },
+      { seq: 1, kind: "two_parents", message: "The target end already has a parent" },
     ]);
   });
 
@@ -335,7 +335,7 @@ describe("the parent rules on the end state: two_parents, cycle", () => {
     await staged("DELETE", ALL, cs, `relations/has_task/${h.relations["P1 has_task T1"]}`);
     await staged("POST", ALL, cs, "relations/has_subtask", { fromEntityId: e.T1a, toEntityId: e.T1 });
     expect(await rejected(cs)).toEqual([
-      { seq: 2, kind: "cycle", message: `Entity '${e.T1a}' cannot be the parent: this would close a cycle` },
+      { seq: 2, kind: "cycle", message: "This parent link would close a cycle" },
     ]);
   });
 
@@ -357,7 +357,7 @@ describe("endpoint_type", () => {
     await staged("POST", ALL, cs, "relations/has_task", { fromEntityId: e.P1, toEntityId: e.Lea, phase: "x" });
     const violations = await rejected(cs);
     expect(violations).toEqual([
-      { seq: 1, kind: "endpoint_type", message: `Target entity '${e.Lea}' does not have the type relation type 'has_task' requires` },
+      { seq: 1, kind: "endpoint_type", message: "The target end does not have the type relation type 'has_task' requires" },
     ]);
     expect(JSON.stringify(violations)).not.toContain("person");
     expect(JSON.stringify(violations)).not.toContain("'task'");
@@ -382,7 +382,7 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
     const cs = await start(A);
     const t = (await staged("POST", A, cs, "entities/task", underParent("T20", "has_task", e.P2, { phase: "plan" }))).id as string;
     expect(await rejected(cs, A)).toEqual([
-      { seq: 1, kind: "not_covered", message: `Entity '${t}' would not be under anchor 'agent-a' after the commit` },
+      { seq: 1, kind: "not_covered", message: "Would not be under anchor 'agent-a' after the commit" },
     ]);
 
     const control = await start(A);
@@ -404,8 +404,8 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
     await staged("DELETE", A, into, `relations/has_task/${h.relations["P2 has_task T4"]}`);
     await staged("POST", A, into, "relations/has_task", { fromEntityId: e.P1, toEntityId: e.T4, phase: "x" });
     expect(await rejected(into, A)).toEqual([
-      { seq: 1, kind: "not_covered", message: `Relation '${h.relations["P2 has_task T4"]}' is not under anchor 'agent-a'` },
-      { seq: 2, kind: "not_covered", message: expect.stringMatching(/^Relation '.+' is not under anchor 'agent-a'$/) },
+      { seq: 1, kind: "not_covered", message: "Not under anchor 'agent-a'" },
+      { seq: 2, kind: "not_covered", message: "Not under anchor 'agent-a'" },
     ]);
 
     const inside = await start(A);
@@ -433,7 +433,7 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
     expect(violation).toEqual({
       seq: 0,
       kind: "anchor_dangling",
-      message: "Anchor 'agent-c' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it",
+      message: "Anchor 'agent-c' is dangling",
     });
   });
 
@@ -449,7 +449,7 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
       {
         seq: 0,
         kind: "anchor_dangling",
-        message: "Anchor 'agent-d' points at an entity that lens 'portfolio' does not show, so every write is refused",
+        message: "Anchor 'agent-d' points at an entity that lens 'portfolio' does not show",
       },
     ]);
     expect(JSON.stringify(violations)).not.toMatch(new RegExp(`task|${e.T6}`));
@@ -497,7 +497,7 @@ describe("the violations listed, and what they name", () => {
       [2, "has_children"],
       [3, "endpoint_type"],
     ]);
-    expect(violations[0]!.message).toBe(`Entity '${e.T1}' already has a parent`);
+    expect(violations[0]!.message).toBe("The target end already has a parent");
     const text = JSON.stringify(violations);
     for (const hidden of ["project", "P1", e.P1, e.P2, e.T1a1, "milestone"]) {
       expect(text).not.toContain(hidden);

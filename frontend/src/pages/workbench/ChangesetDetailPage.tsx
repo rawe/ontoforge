@@ -391,7 +391,7 @@ export function ChangesetDetailPage() {
                 <ul className="mt-1 max-h-60 space-y-0.5 overflow-y-auto text-[12.5px]">
                   {rejected.violations.map((violation, i) => (
                     <li key={i} className="break-words">
-                      {violationLine(violation)}
+                      {violationLine(violation, changeset.writes)}
                     </li>
                   ))}
                 </ul>
@@ -401,7 +401,7 @@ export function ChangesetDetailPage() {
                   size="sm"
                   variant="outline"
                   disabled={busy}
-                  onClick={() => unsubmit.mutate(violationsNote(rejected.violations, rejected.total))}
+                  onClick={() => unsubmit.mutate(violationsNote(rejected.violations, rejected.total, changeset.writes))}
                 >
                   Unsubmit with these violations
                 </Button>

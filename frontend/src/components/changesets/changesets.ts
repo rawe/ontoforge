@@ -188,19 +188,31 @@ export function violationsOf(
   return { violations: violations as ChangesetViolation[], total }
 }
 
-/** One violation, for the panel and the note: "#15 has_children: …"; seq 0 is the whole changeset. */
-export function violationLine(violation: ChangesetViolation): string {
-  const where = violation.seq === 0 ? '' : `#${violation.seq} `
-  return `${where}${violation.kind}: ${violation.message}`
+/**
+ * One violation, for the panel and the note, named by its row among `writes`
+ * (the page shown) as the target column shows it:
+ * "#1 P2 Live: drift — Changed since this write was staged". A row not on the
+ * page, or not visible, goes unnamed; seq 0 is the whole changeset.
+ */
+export function violationLine(violation: ChangesetViolation, writes: readonly StagedWriteView[] = []): string {
+  const text = `${violation.kind} — ${violation.message}`
+  if (violation.seq === 0) return text
+  const write = writes.find((w) => w.seq === violation.seq)
+  const name = write === undefined ? '—' : targetText(write)
+  return name === '—' ? `#${violation.seq} ${text}` : `#${violation.seq} ${name}: ${text}`
 }
 
 /**
  * The note "Unsubmit with these violations" sends: a header with the total,
- * then one line per violation, cut to the note's limit.
+ * then one line per violation as the panel shows it, cut to the note's limit.
  */
-export function violationsNote(violations: readonly ChangesetViolation[], total: number): string {
+export function violationsNote(
+  violations: readonly ChangesetViolation[],
+  total: number,
+  writes: readonly StagedWriteView[] = [],
+): string {
   const header = `Commit rejected: ${total} ${total === 1 ? 'violation' : 'violations'}`
-  const lines = [header, ...violations.map(violationLine)]
+  const lines = [header, ...violations.map((violation) => violationLine(violation, writes))]
   if (total > violations.length) lines.push(`… and ${total - violations.length} more`)
   const note = lines.join('\n')
   return note.length <= MAX_NOTE_LENGTH ? note : `${note.slice(0, MAX_NOTE_LENGTH - 1)}…`

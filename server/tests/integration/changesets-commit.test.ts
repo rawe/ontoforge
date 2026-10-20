@@ -274,7 +274,7 @@ describe("a rejected commit persists nothing", () => {
     expect(res.body.error).toMatchObject({
       code: "VALIDATION_ERROR",
       message: "The commit was rejected; nothing was persisted",
-      details: { violations: [{ seq: 2, kind: "two_parents", message: `Entity '${e.T6}' already has a parent` }], total: 1 },
+      details: { violations: [{ seq: 2, kind: "two_parents", message: "The target end already has a parent" }], total: 1 },
     });
 
     expect(await graphCounts()).toEqual(before);

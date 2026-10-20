@@ -42,14 +42,14 @@ describe("formatToolError", () => {
   it("a changeset's details.violations are flattened with their total", () => {
     const error = new ValidationError("The commit was rejected; nothing was persisted", {
       violations: [
-        { seq: 1, kind: "has_children", message: "Entity 'P2' still has children" },
-        { seq: 4, kind: "drift", message: "name changed" },
+        { seq: 1, kind: "has_children", message: "Still has children" },
+        { seq: 4, kind: "drift", message: "Changed since this write was staged" },
       ],
       total: 2,
     });
     expect(formatToolError(error)).toBe(
       "The commit was rejected; nothing was persisted — 2 violations: " +
-        "seq 1 has_children: Entity 'P2' still has children; seq 4 drift: name changed",
+        "seq 1 has_children: Still has children; seq 4 drift: Changed since this write was staged",
     );
   });
 

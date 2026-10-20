@@ -309,7 +309,7 @@ describe("a replay fault: 422, nothing persisted", () => {
     const error = await rejected(commit());
     expect(error.message).toBe("The commit was rejected; nothing was persisted");
     expect(error.details).toEqual({
-      violations: [{ seq: 2, kind: "replay", message: `Entity '${P1}' not found` }],
+      violations: [{ seq: 2, kind: "replay", message: "Deleted since this write was staged" }],
       total: 1,
     });
     expect(store.createRelation).not.toHaveBeenCalled();
@@ -321,11 +321,17 @@ describe("a replay fault: 422, nothing persisted", () => {
     );
   });
 
-  it("a reference the store refuses (FK) names what was sent", async () => {
+  it("a reference the store refuses (FK) names the ends by their role, not the id", async () => {
     store.createRelation.mockRejectedValue(new NotFoundError(`Entity '${ACME}' not found`));
     journal(sixWrites());
     const error = await rejected(commit());
-    expect(error.details!.violations).toEqual([{ seq: 3, kind: "replay", message: `Entity '${ACME}' not found` }]);
+    expect(error.details!.violations).toEqual([
+      { seq: 3, kind: "replay", message: "The source or target end no longer exists" },
+    ]);
+
+    store.createEntityWithParent.mockRejectedValue(new NotFoundError(`Entity '${ACME}' not found`));
+    const parentGone = await rejected(commit());
+    expect(parentGone.details!.violations).toEqual([{ seq: 1, kind: "replay", message: "The parent no longer exists" }]);
   });
 
   it("a value the lens no longer accepts names its field", async () => {

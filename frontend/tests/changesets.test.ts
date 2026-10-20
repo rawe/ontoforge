@@ -176,7 +176,7 @@ test('changeText: before → after for updates, set values for creates, — for 
 })
 
 test('changeText: a drifted update also shows the current value of each key that changed', () => {
-  const drift = [{ kind: 'drift', message: "Entity 'p2' changed since this write was staged; unstage and restage it" }]
+  const drift = [{ kind: 'drift', message: 'Changed since this write was staged' }]
   assert.equal(
     changeText(
       write({
@@ -254,19 +254,34 @@ test('violationsOf reads a rejection, and nothing else', () => {
   assert.equal(violationsOf(undefined), null)
 })
 
-test('violationLine numbers a write; seq 0 is the whole changeset', () => {
-  assert.equal(violationLine(v(15, 'has_children', 'P2 has children')), '#15 has_children: P2 has children')
-  assert.equal(violationLine(v(0, 'anchor_gone', 'Anchor gone')), 'anchor_gone: Anchor gone')
+test('violationLine numbers a write and names its row; seq 0 is the whole changeset', () => {
+  const writes = [
+    write({ seq: 1, name: 'P2 Live' }),
+    write({ seq: 2, operation: 'create_relation', type: 'has_task', from: { id: 'p1', name: 'P1' }, to: { id: 't3', name: 'T3' } }),
+    write({ seq: 3, type: null, id: null }),
+  ]
+  assert.equal(
+    violationLine(v(1, 'drift', 'Changed since this write was staged'), writes),
+    '#1 P2 Live: drift — Changed since this write was staged',
+  )
+  assert.equal(
+    violationLine(v(2, 'two_parents', 'The target end already has a parent'), writes),
+    '#2 P1 → T3: two_parents — The target end already has a parent',
+  )
+  // Not visible, or not on the page shown: unnamed.
+  assert.equal(violationLine(v(3, 'not_visible', 'x'), writes), '#3 not_visible — x')
+  assert.equal(violationLine(v(15, 'has_children', 'Still has children')), '#15 has_children — Still has children')
+  assert.equal(violationLine(v(0, 'anchor_gone', 'Anchor gone')), 'anchor_gone — Anchor gone')
 })
 
 test('violationsNote (R12): header, one line each, the rest counted, cut to 1,000', () => {
   assert.equal(
-    violationsNote([v(1, 'has_children', "Entity 'p3' has children")], 1),
-    "Commit rejected: 1 violation\n#1 has_children: Entity 'p3' has children",
+    violationsNote([v(1, 'has_children', 'Still has children')], 1, [write({ seq: 1, operation: 'delete_entity', name: 'P3' })]),
+    'Commit rejected: 1 violation\n#1 P3: has_children — Still has children',
   )
   assert.equal(
     violationsNote([v(1, 'drift', 'a'), v(2, 'dangling', 'b')], 140),
-    'Commit rejected: 140 violations\n#1 drift: a\n#2 dangling: b\n… and 138 more',
+    'Commit rejected: 140 violations\n#1 drift — a\n#2 dangling — b\n… and 138 more',
   )
   const long = Array.from({ length: 100 }, (_, i) => v(i + 1, 'has_children', `Entity ${'x'.repeat(30)} has children`))
   const note = violationsNote(long, 100)

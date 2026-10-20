@@ -297,7 +297,7 @@ describe("drift on a document (F6)", () => {
       after: { notes: { document: true, length: chars("Planned notes of T4") } },
     });
     expect(write!.markers).toEqual([
-      { kind: "drift", message: `Entity '${e.T4}' changed since this write was staged; unstage and restage it` },
+      { kind: "drift", message: "Changed since this write was staged" },
     ]);
     const commit = await rest("POST", `${ALL}/changesets/${cs}/commit`, {});
     expect(commit.status).toBe(422);

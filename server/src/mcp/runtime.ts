@@ -1190,7 +1190,8 @@ function registerChangesetTools(
         "(those values now; null when the target is gone), both " +
         "null when the target is created in this changeset; after (the values it sets), and " +
         "markers [{kind, message}]: what would reject the commit now, the hierarchy rules aside: " +
-        "drift (current differs from before), missing (its target is gone), dangling (an id " +
+        "drift (current differs from before: compare them, and restage only if your change " +
+        "still applies), missing (its target is gone), dangling (an id " +
         "neither stored nor created in this changeset), not_visible (this lens no longer shows " +
         "its type), replay (a value this lens no longer accepts). Document values in before, " +
         "current and after show as {document: true, length}; get_staged_document reads the " +
@@ -1358,8 +1359,9 @@ function registerChangesetTools(
             : ", and for a changeset started through an anchor, every write held to the anchored " +
               "entity and its descendants; a dangling or deleted anchor rejects it") +
           ". A rejection names its violations (total, then the first 100, each with seq, kind " +
-          "and message); nothing is persisted and the changeset stays as it was, draft or submitted: unstage and restage " +
-          "the faulty writes, then commit again. Refused with nothing persisted while another " +
+          "and message); nothing is persisted and the changeset stays as it was, draft or submitted. " +
+          "On drift, compare before and current in get_changeset, and restage only if your " +
+          "change still applies. Refused with nothing persisted while another " +
           "commit runs on this ontology or the changeset is busy: try again. Committed, it " +
           "returns {committed, alreadyGone}, the number of writes and the seqs of deletes whose " +
           "target was already gone, and the changeset is gone. If the response is lost, tell the " +

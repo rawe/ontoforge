@@ -109,7 +109,8 @@ total.
 
 The first five are the lock-free pass's, and they are also what submit and every read of
 a changeset's writes report. A violation names only what the write sent and the lens shows — never
-a hidden type, a child, or another anchor's key. The parent rules are the immediate write's, judged
+an id, a hidden type, a child, or another anchor's key; its seq names the write, and the review
+read carries the ids. The parent rules are the immediate write's, judged
 once over the end state, so a plan may pass through states that break them.
 
 ### Drift
@@ -117,9 +118,9 @@ once over the end state, so a plan may pass through states that break them.
 Current values that differ from before reject the commit: a staged rename of P2 has
 before "P2" and after "P2 Website"; once a person renames P2 to "P2 Mobile", its current is
 "P2 Mobile", which is `drift`, and the commit persists nothing. A value changed and changed
-back is no drift, and a key the write does not send is not compared. The fix is to unstage
-and restage every write on that object, in order. Under the lock the targets are compared
-again, so a change that lands while the commit waits is caught too.
+back is no drift, and a key the write does not send is not compared. Compare before and
+current, and restage only if your change still applies. Under the lock the targets are
+compared again, so a change that lands while the commit waits is caught too.
 
 ### Waits
 

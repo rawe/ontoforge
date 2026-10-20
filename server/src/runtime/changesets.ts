@@ -76,7 +76,7 @@ import type {
 } from "../core/ports.js";
 import type { ParentEnd, PropertyDef } from "../core/schemas.js";
 import { planSearchWrite, type SearchChange } from "../core/searchDependencies.js";
-import { AnchorGuard, anchorRefusal, anchoredDeleteMessage, hierarchyOf } from "./anchorGuard.js";
+import { AnchorGuard, changesetAnchorRefusal, hierarchyOf } from "./anchorGuard.js";
 import { cpLength } from "./codePoints.js";
 import {
   prepareCreateEntity,
@@ -684,7 +684,7 @@ export async function submitChangeset(
     // The stored anchor, whatever URL the call came through. A deleted one
     // is left to the commit ("anchor gone").
     const anchor = await store.anchors().getAnchor(record.anchorKey);
-    const refusal = anchor === null ? null : anchorRefusal(record.anchorKey, anchor, loaded);
+    const refusal = anchor === null ? null : changesetAnchorRefusal(record.anchorKey, anchor, loaded);
     if (refusal !== null) throw new ConflictError(refusal);
   }
   const pass = await lockFreePass(loaded, record.id, store);
@@ -802,6 +802,24 @@ export interface CommitAnswer {
   alreadyGone: number[];
 }
 
+/*
+ * The texts of a staged write's markers and violations say what is wrong
+ * in words a person reads: no id and no fix. The seq names the write, so
+ * its own target goes unnamed; another entity is named by its role (the
+ * parent, the source or target end). Type, lens and anchor keys stay.
+ */
+
+const DRIFTED = "Changed since this write was staged";
+const DELETED_SINCE = "Deleted since this write was staged";
+
+/** An entity a staged write names that is neither stored nor created by
+ * a staged write still in the changeset; `role` null is its own target. */
+function neitherStored(role: string | null): string {
+  return role === null
+    ? "Neither stored nor created in this changeset"
+    : `${role} is neither stored nor created in this changeset`;
+}
+
 /** A staged write that cannot be replayed; its message names only what
  * the caller sent. */
 class ReplayFault extends Error {}
@@ -883,7 +901,7 @@ async function replayOne(
         prepared.propertyDefs,
         plan(prepared.change),
       );
-      if (updated === null) throw new ReplayFault(`Entity '${write.targetId}' not found`);
+      if (updated === null) throw new ReplayFault(DELETED_SINCE);
       return;
     }
     case "delete_entity": {
@@ -930,7 +948,7 @@ async function replayOne(
         prepared.propertyDefs,
         plan(prepared.change),
       );
-      if (updated === null) throw new ReplayFault(`Relation '${write.targetId}' not found`);
+      if (updated === null) throw new ReplayFault(DELETED_SINCE);
       return;
     }
     case "delete_relation": {
@@ -943,6 +961,17 @@ async function replayOne(
     default:
       throw new ReplayFault(`Unknown operation '${write.operation}'`);
   }
+}
+
+/** A replay fault's text. A create the store refuses as not found names
+ * an entity gone since the lock-free pass, by its role; any other fault
+ * keeps its text. */
+function replayMessage(write: ChangesetWriteRecord, error: Error): string {
+  if (error instanceof NotFoundError) {
+    if (write.operation === "create_entity") return "The parent no longer exists";
+    if (write.operation === "create_relation") return "The source or target end no longer exists";
+  }
+  return error.message;
 }
 
 /**
@@ -972,7 +1001,7 @@ export async function replayJournal(
         await replayOne(loaded, plan, readings, write, bound, replay);
       } catch (error) {
         if (error instanceof ReplayFault || error instanceof NotFoundError) {
-          replay.fault = { seq: write.seq, kind: "replay", message: error.message };
+          replay.fault = { seq: write.seq, kind: "replay", message: replayMessage(write, error) };
           return replay;
         }
         throw error;
@@ -1017,17 +1046,27 @@ async function storedEntities(ids: string[], store: RuntimeStore): Promise<Map<s
   return rows;
 }
 
+/** The entities a staged create names, each as role → id: a relation's
+ * ends, an entity's parent. */
+function createRefs(write: ChangesetWriteRecord): [string, string][] {
+  const args = write.arguments;
+  if (write.operation === "create_relation") {
+    return [
+      ["The source end", args.fromEntityId as string],
+      ["The target end", args.toEntityId as string],
+    ];
+  }
+  const parent = args.parentRelation as ParentRelationInput | null | undefined;
+  return write.operation === "create_entity" && parent ? [["The parent", parent.parentId]] : [];
+}
+
 /** The entity ids a staged write names: its target, its relation ends,
  * its parent. */
 function entityRefs(write: ChangesetWriteRecord): string[] {
-  const args = write.arguments;
   switch (write.operation) {
-    case "create_entity": {
-      const parent = args.parentRelation as ParentRelationInput | null | undefined;
-      return parent ? [parent.parentId] : [];
-    }
+    case "create_entity":
     case "create_relation":
-      return [args.fromEntityId as string, args.toEntityId as string];
+      return createRefs(write).map(([, id]) => id);
     case "update_entity":
     case "delete_entity":
       return [write.targetId!];
@@ -1120,12 +1159,7 @@ function drifted(loaded: LoadedSchema, write: ChangesetWriteRecord, stored: Row)
 }
 
 function driftFault(write: ChangesetWriteRecord): Violation {
-  const what = write.operation === "update_entity" ? "Entity" : "Relation";
-  return {
-    seq: write.seq,
-    kind: "drift",
-    message: `${what} '${write.targetId}' changed since this write was staged; unstage and restage it`,
-  };
+  return { seq: write.seq, kind: "drift", message: DRIFTED };
 }
 
 /**
@@ -1182,14 +1216,12 @@ export async function lockFreePass(
     const kind = write.operation.endsWith("_entity") ? "entity" : "relation";
     const target = write.targetId;
     if (target !== null && !mintedAs(target, `create_${kind}`)) targets.add(target);
-    const unknown = (id: string): void =>
-      fault("dangling", `Entity '${id}' is neither stored nor created by a write in this changeset`);
 
     switch (write.operation) {
       case "create_entity":
       case "create_relation":
-        for (const id of entityRefs(write)) {
-          if (!stored.has(id) && !mintedAs(id, "create_entity")) unknown(id);
+        for (const [role, id] of createRefs(write)) {
+          if (!stored.has(id) && !mintedAs(id, "create_entity")) fault("dangling", neitherStored(role));
         }
         break;
       case "update_entity":
@@ -1201,12 +1233,10 @@ export async function lockFreePass(
               ? rows.get(target!)!
               : null
             : await store.getRelation(write.typeKey, target!);
-        const what = kind === "entity" ? "Entity" : "Relation";
         if (current === null) {
           // A stored target had a `before` at staging; a minted one had none.
-          if (write.before !== null) fault("missing", `${what} '${target}' no longer exists`);
-          else if (kind === "entity") unknown(target!);
-          else fault("dangling", `Relation '${target}' is neither stored nor created by a write in this changeset`);
+          if (write.before !== null) fault("missing", DELETED_SINCE);
+          else fault("dangling", neitherStored(null));
         } else if (write.before !== null && drifted(loaded, write, current)) {
           faults.push(driftFault(write));
         }
@@ -1425,12 +1455,9 @@ interface TouchedEnd {
   before: boolean;
 }
 
-/** What a staged write touches inside the anchor's hierarchy, and the id
- * its violation names: its target or its minted id, never a stored end. */
+/** What a staged write touches inside the anchor's hierarchy. */
 interface Touch {
   seq: number;
-  what: "Entity" | "Relation";
-  id: string;
   ends: TouchedEnd[];
 }
 
@@ -1457,12 +1484,10 @@ async function touchOf(
 ): Promise<Touch> {
   const ends: { id: string; type: string; before: boolean }[] = [];
   const storedBefore = (id: string): boolean => pass.stored.has(id);
-  let what: Touch["what"] = "Entity";
   if (write.operation.endsWith("_entity")) {
     const id = (write.mintedId ?? write.targetId)!;
     ends.push({ id, type: write.typeKey, before: write.mintedId === null && storedBefore(id) });
   } else {
-    what = "Relation";
     const rt = loaded.full.relationTypes[write.typeKey];
     const mintedBy = write.targetId === null ? undefined : pass.minted.get(write.targetId);
     const create =
@@ -1485,8 +1510,6 @@ async function touchOf(
   }
   return {
     seq: write.seq,
-    what,
-    id: (write.mintedId ?? write.targetId)!,
     ends: ends.filter((end) => types.has(end.type)).map(({ id, before }) => ({ id, before })),
   };
 }
@@ -1512,7 +1535,7 @@ async function anchorBefore(
       coverage: null,
     };
   }
-  const refusal = anchorRefusal(key, record, loaded);
+  const refusal = changesetAnchorRefusal(key, record, loaded);
   if (refusal !== null) return { violations: [{ seq: 0, kind: "anchor_dangling", message: refusal }], coverage: null };
   if (record.entity === null) return { violations: [], coverage: null };
 
@@ -1529,7 +1552,7 @@ async function anchorBefore(
       violations.push({
         seq: touch.seq,
         kind: "not_covered",
-        message: `${touch.what} '${touch.id}' is not under anchor '${key}'`,
+        message: `Not under anchor '${key}'`,
       });
     }
   }
@@ -1538,26 +1561,32 @@ async function anchorBefore(
     deletes.length === 0 ? new Set() : new Set((await bound.anchors().listAnchors()).map((anchor) => anchor.entity?.id));
   for (const write of deletes) {
     if (anchored.has(write.targetId!)) {
-      violations.push({ seq: write.seq, kind: "not_covered", message: anchoredDeleteMessage(write.targetId!) });
+      violations.push({
+        seq: write.seq,
+        kind: "not_covered",
+        message: "Anchored, so it cannot be deleted on an anchored connection",
+      });
     }
   }
   for (const violation of violations) coverage.refused.add(violation.seq);
   return { violations, coverage };
 }
 
-/** A parent link a staged write creates. */
+/** A parent link a staged write creates, with the role of its child:
+ * null when the child is the entity the write creates. */
 interface StagedLink {
   seq: number;
   relationId: string;
   parentId: string;
   childId: string;
+  childRole: string | null;
 }
 
-/** A relation end a staged write names, with the type its relation type
- * requires there. */
+/** A relation end a staged write names, by its role, with the type its
+ * relation type requires there. */
 interface StagedEnd {
   seq: number;
-  label: "Source" | "Target" | "Parent";
+  role: "The source end" | "The target end" | "The parent";
   id: string;
   type: string;
   relationType: string;
@@ -1574,18 +1603,25 @@ function stagedLinksAndEnds(loaded: LoadedSchema, writes: ChangesetWriteRecord[]
       const rt = parent ? loaded.full.relationTypes[parent.type] : undefined;
       if (!parent || rt === undefined || rt.parent === null) continue;
       const parentType = rt.parent === "source" ? rt.fromEntityTypeKey : rt.toEntityTypeKey;
-      ends.push({ seq: write.seq, label: "Parent", id: parent.parentId, type: parentType, relationType: rt.key });
-      links.push({ seq: write.seq, relationId: args.relationId as string, parentId: parent.parentId, childId: write.mintedId! });
+      ends.push({ seq: write.seq, role: "The parent", id: parent.parentId, type: parentType, relationType: rt.key });
+      links.push({
+        seq: write.seq,
+        relationId: args.relationId as string,
+        parentId: parent.parentId,
+        childId: write.mintedId!,
+        childRole: null,
+      });
     } else if (write.operation === "create_relation") {
       const rt = loaded.full.relationTypes[write.typeKey];
       if (rt === undefined) continue;
       const from = args.fromEntityId as string;
       const to = args.toEntityId as string;
-      ends.push({ seq: write.seq, label: "Source", id: from, type: rt.fromEntityTypeKey, relationType: rt.key });
-      ends.push({ seq: write.seq, label: "Target", id: to, type: rt.toEntityTypeKey, relationType: rt.key });
+      ends.push({ seq: write.seq, role: "The source end", id: from, type: rt.fromEntityTypeKey, relationType: rt.key });
+      ends.push({ seq: write.seq, role: "The target end", id: to, type: rt.toEntityTypeKey, relationType: rt.key });
       if (rt.parent !== null) {
-        const [parentId, childId] = rt.parent === "source" ? [from, to] : [to, from];
-        links.push({ seq: write.seq, relationId: write.mintedId!, parentId, childId });
+        const [parentId, childId, childRole] =
+          rt.parent === "source" ? [from, to, "The target end"] : [to, from, "The source end"];
+        links.push({ seq: write.seq, relationId: write.mintedId!, parentId, childId, childRole });
       }
     }
   }
@@ -1594,8 +1630,8 @@ function stagedLinksAndEnds(loaded: LoadedSchema, writes: ChangesetWriteRecord[]
 
 /**
  * Step 3 (V21, V13): the rules over the end state, in the service, on the
- * bound store's neutral reads, after the replay. Messages name only what
- * the caller sent, the lens key and the anchor key:
+ * bound store's neutral reads, after the replay. Messages name no id,
+ * only roles, the relation type key and the anchor key:
  *
  * - `has_children`: a child recorded by a staged entity delete (the delete
  *   capture) is neither deleted nor re-parented;
@@ -1631,7 +1667,7 @@ async function commitViolations(
       violations.push({
         seq: deleted.seq,
         kind: "has_children",
-        message: `Entity '${deleted.entityId}' still has children; delete or re-parent them in this changeset`,
+        message: "Still has children",
       });
     }
   }
@@ -1645,7 +1681,7 @@ async function commitViolations(
       violations.push({
         seq: end.seq,
         kind: "endpoint_type",
-        message: `${end.label} entity '${end.id}' does not have the type relation type '${end.relationType}' requires`,
+        message: `${end.role} does not have the type relation type '${end.relationType}' requires`,
       });
     }
   }
@@ -1665,13 +1701,14 @@ async function commitViolations(
     const own = walk.get(link.childId) ?? [];
     if (!own.some((stored) => stored.relationId === link.relationId)) continue;
     if (own.length > 1) {
-      violations.push({ seq: link.seq, kind: "two_parents", message: `Entity '${link.childId}' already has a parent` });
+      const message = link.childRole === null ? "Already has a parent" : `${link.childRole} already has a parent`;
+      violations.push({ seq: link.seq, kind: "two_parents", message });
     }
     if (reaches(walk, link.parentId, link.childId)) {
       violations.push({
         seq: link.seq,
         kind: "cycle",
-        message: `Entity '${link.parentId}' cannot be the parent: this would close a cycle`,
+        message: "This parent link would close a cycle",
       });
     }
   }
@@ -1685,7 +1722,7 @@ async function commitViolations(
         violations.push({
           seq: touch.seq,
           kind: "not_covered",
-          message: `${touch.what} '${touch.id}' would not be under anchor '${coverage.key}' after the commit`,
+          message: `Would not be under anchor '${coverage.key}' after the commit`,
         });
       }
     }

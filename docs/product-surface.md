@@ -327,14 +327,16 @@ makes.
   staged text, as a commit would leave it, in the
   [document viewer](#document-viewer-and-editor) — absent when a later write on the page
   deletes the entity.
-- **Commit** sends the version on the screen. When the changeset changed since, it says so
-  and reloads the review; any other conflict shows its message and reloads too. A rejected
-  commit lists its violations in a panel, which on a submitted changeset offers to unsubmit
-  it at once with those violations as its note, cut to 1,000 characters. A successful one
-  returns to the list and refreshes every runtime view of the ontology.
-- **Unsubmit**, shown while submitted, asks for the required note. **Discard**, behind a
-  confirmation, and **Unstage**, per row, work on a draft changeset only; while submitted
-  they are disabled, saying it is frozen.
+- **Commit**, behind a confirmation naming the number of writes, sends the version on the
+  screen. When the changeset changed since, it says so and reloads the review; any other
+  conflict shows its message and reloads too. A rejected commit lists its violations in a
+  panel, which on a submitted changeset offers to unsubmit it at once with those
+  violations as its note, cut to 1,000 characters. A successful one returns to the list
+  and refreshes every runtime view of the ontology.
+- **Unsubmit** asks for the required note and works on a submitted changeset only; on a
+  draft it is disabled, saying so. **Discard**, behind a confirmation, and **Unstage**, per
+  row, work on a draft changeset only; while submitted they are disabled, saying it is
+  frozen.
 
 A changeset that is gone — committed, discarded or expired, or not reached through this
 lens — shows a not-found state linking to the list.

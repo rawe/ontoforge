@@ -67,6 +67,8 @@ import { cn } from '@/lib/utils'
 
 /** Why Unstage and Discard are off while submitted. */
 const FROZEN_REASON = 'Submitted changesets are frozen: unsubmit it first'
+/** Why Unsubmit is off on a draft. */
+const DRAFT_REASON = 'Only a submitted changeset can be unsubmitted'
 
 const errorText = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback)
 
@@ -86,7 +88,8 @@ function Disabled({ reason, children }: { reason: string; children: ReactNode })
  * `/o/:ontologyKey/w/:lensKey/changesets/:changesetId` — one changeset's
  * review through the current lens: its writes by seq with names, before →
  * after and markers; a document change opens its staged text in the
- * document viewer. Commit sends the version shown; Unsubmit sends a note;
+ * document viewer. Commit, after a confirmation, sends the version shown when
+ * it was clicked; Unsubmit sends a note and works only while submitted;
  * Discard and Unstage work only on a draft.
  */
 export function ChangesetDetailPage() {
@@ -108,6 +111,8 @@ export function ChangesetDetailPage() {
   const [unsubmitOpen, setUnsubmitOpen] = useState(false)
   const [note, setNote] = useState('')
   const [discardOpen, setDiscardOpen] = useState(false)
+  // The version shown when Commit was clicked; set while its confirmation is open.
+  const [commitVersion, setCommitVersion] = useState<number | null>(null)
   const [docTarget, setDocTarget] = useState<DocumentViewerTarget | null>(null)
 
   const listUrl = `/o/${ontologyKey}/w/${lensKey}/changesets`
@@ -143,11 +148,13 @@ export function ChangesetDetailPage() {
       if (err instanceof ApiError && err.status === 422) {
         const found = violationsOf(err.details)
         if (found !== null) {
+          setCommitVersion(null)
           setRejected(found)
           void reload()
           return
         }
       }
+      setCommitVersion(null)
       if (err instanceof ApiError && isVersionMismatch(err)) {
         toast.warning('This changeset changed since you looked. It was reloaded: review it again.')
       } else {
@@ -309,6 +316,21 @@ export function ChangesetDetailPage() {
     </Button>
   )
 
+  const unsubmitButton = (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={!submitted || busy}
+      onClick={() => {
+        setNote('')
+        setUnsubmitOpen(true)
+      }}
+    >
+      <Undo2 className="size-3.5" />
+      Unsubmit
+    </Button>
+  )
+
   return (
     <div>
       <PageHeader
@@ -341,24 +363,11 @@ export function ChangesetDetailPage() {
         }
         actions={
           <>
-            <Button size="sm" disabled={busy} onClick={() => commit.mutate(changeset.version)}>
+            <Button size="sm" disabled={busy} onClick={() => setCommitVersion(changeset.version)}>
               {commit.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
               Commit
             </Button>
-            {submitted && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={() => {
-                  setNote('')
-                  setUnsubmitOpen(true)
-                }}
-              >
-                <Undo2 className="size-3.5" />
-                Unsubmit
-              </Button>
-            )}
+            {submitted ? unsubmitButton : <Disabled reason={DRAFT_REASON}>{unsubmitButton}</Disabled>}
             {submitted ? <Disabled reason={FROZEN_REASON}>{discardButton}</Disabled> : discardButton}
           </>
         }
@@ -526,6 +535,22 @@ export function ChangesetDetailPage() {
         target={docTarget}
         onClose={() => setDocTarget(null)}
       />
+
+      <AlertDialog open={commitVersion !== null} onOpenChange={(open) => !open && setCommitVersion(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Commit {writesText(changeset.writeCount)} to the data?</AlertDialogTitle>
+            <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button disabled={commit.isPending} onClick={() => commit.mutate(commitVersion!)}>
+              {commit.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+              Commit
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
         <AlertDialogContent>

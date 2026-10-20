@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import * as model from '@/api/model'
 import { useLenses } from '@/api/hooks'
 import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
+import { lensDeletedText } from '@/components/changesets/changesets'
 import { EmptyState } from '@/components/EmptyState'
 import { workbenchLensPage } from '@/components/layout/surfaceSwitch'
 import { WORKBENCH_ICON } from '@/components/layout/surfaceTargets'
@@ -14,7 +15,7 @@ import { NavigatorsTab } from '@/components/studio/NavigatorsTab'
 import { RetrieversTab } from '@/components/studio/RetrieversTab'
 import { ScopeTab } from '@/components/studio/ScopeTab'
 import { SavedQueriesTab } from '@/components/studio/SavedQueriesTab'
-import { invalidateModeling, toastError } from '@/components/studio/lib'
+import { invalidateModeling, leaveAfterDelete, toastError } from '@/components/studio/lib'
 import { InlineText } from '@/components/studio/shared'
 import { ScopeBadge } from '@/pages/studio/LensesPage'
 import {
@@ -60,10 +61,9 @@ export function LensDetailPage() {
 
   const remove = useMutation({
     mutationFn: () => model.deleteLens(ontologyKey ?? '', id ?? ''),
-    onSuccess: () => {
-      invalidateModeling(queryClient)
-      toast.success('Lens deleted')
-      void navigate(`/o/${ontologyKey}/studio/lenses`)
+    onSuccess: ({ changesetsDeleted }) => {
+      toast.success(lensDeletedText(changesetsDeleted))
+      leaveAfterDelete(navigate, `/o/${ontologyKey}/studio/lenses`, queryClient)
     },
     onError: toastError,
   })
@@ -133,8 +133,8 @@ export function LensDetailPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete "{lens.name}"?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This deletes the lens, its scope, agents, retrievers, navigators and saved queries.
-                    The ontology's schema and instance data are not affected. This
+                    This deletes the lens, its scope, agents, retrievers, navigators, saved queries
+                    and changesets, submitted ones included. The ontology's schema and instance data are not affected. This
                     cannot be undone.
                   </AlertDialogDescription>
                 </AlertDialogHeader>

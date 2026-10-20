@@ -10,11 +10,8 @@ import type { EntityInstance, Neighbor, SchemaEntityType } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
 import type { RelationInitial } from '@/components/entity/AddRelationDialog'
 import type { HierarchyLink } from '@/components/entity/hierarchy'
-import {
-  PARENT_SECTION,
-  PARENT_TITLE,
-  relationPropsSummary,
-} from '@/components/entity/RelationSection'
+import { PARENT_SECTION, PARENT_TITLE } from '@/components/entity/RelationSection'
+import { relationPropsSummary } from '@/components/entity/relationProps'
 import { invalidateNeighborhood } from '@/components/entity/useNeighborCounts'
 import {
   AlertDialog,

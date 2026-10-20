@@ -15,6 +15,7 @@ import type {
 } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
 import type { RelationInitial } from '@/components/entity/AddRelationDialog'
+import { relationPropsSummary } from '@/components/entity/relationProps'
 import { invalidateNeighborhood } from '@/components/entity/useNeighborCounts'
 import {
   AlertDialog,
@@ -33,23 +34,6 @@ import { cn } from '@/lib/utils'
 
 const PAGE_SIZE = 10
 const MAX_LIMIT = 200
-
-/** Non-system relation props as a compact "key: value" summary. */
-export function relationPropsSummary(neighbor: Neighbor): string {
-  return Object.entries(neighbor.relation)
-    .filter(
-      ([key]) =>
-        !key.startsWith('_') &&
-        key !== 'fromEntityId' &&
-        key !== 'toEntityId' &&
-        key !== 'direction',
-    )
-    .map(
-      ([key, value]) =>
-        `${key}: ${typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value)}`,
-    )
-    .join(' · ')
-}
 
 interface RelationSectionProps {
   ontologyKey: string

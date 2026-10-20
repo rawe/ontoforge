@@ -38,6 +38,7 @@ import {
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import { settings } from "../config.js";
 import { valueToText } from "../core/dataTypes.js";
 import { ValidationError } from "../core/exceptions.js";
 import { getRuntimeStore, type RuntimeStore } from "../core/ports.js";
@@ -1140,8 +1141,9 @@ function registerChangesetTools(
         `reviews the plan. Returns the changeset: ${CHANGESET_FIELDS}; state is 'draft'. Next, ` +
         "stage writes by passing its id as 'changeset_id' to create_entity, update_entity, " +
         "delete_entity, create_relation, update_relation or delete_relation; reads never see " +
-        "staged data. A changeset holds at most 10,000 writes. A draft changeset left unchanged " +
-        "for 7 days expires and is deleted." +
+        "staged data. A changeset holds at most 10,000 writes, and at most " +
+        `${settings.CHANGESET_MAX_BYTES} bytes of them as JSON, document text included. A draft ` +
+        "changeset left unchanged for 7 days expires and is deleted." +
         (anchored
           ? " It carries this connection's anchor: it is reached only through this anchor, or " +
             "through the lens without an anchor, and its commit holds its writes to the " +

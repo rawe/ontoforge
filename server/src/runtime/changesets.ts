@@ -21,8 +21,9 @@
  *   R10); the `prepare…` of the immediate write (`prepare.ts`: the type's
  *   404 and the same 422 field errors); the target of an update or delete
  *   (minted by a staged create still in the journal, or else read once:
- *   missing is the immediate write's 404); the cap (V25, R11). Relation
- *   ends and parent ends are not checked here.
+ *   missing is the immediate write's 404); the caps on writes and bytes
+ *   (V25, R11, `writeBytes`). Relation ends and parent ends are not
+ *   checked here.
  * - **Ids (V3).** A create mints its final id now, and with a parent
  *   relation the relation's id too; both are kept in the row.
  * - **Before (V10).** A staged update of a stored target records the
@@ -65,6 +66,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
 import { CoercionError, assertNoNulCharacter } from "../core/dataTypes.js";
+import { settings } from "../config.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import type {
   ChangesetRecord,
@@ -101,6 +103,14 @@ export const CHANGESET_IDLE_DAYS = 7;
 export const MAX_NOTE_LENGTH = 1000;
 /** The most staged writes one changeset holds (V25). */
 export const MAX_STAGED_WRITES = 10_000;
+
+/** The size a staged write counts toward the byte cap
+ * (`CHANGESET_MAX_BYTES`): the UTF-8 bytes of its arguments and its
+ * before as JSON, document text included. */
+export function writeBytes(write: NewChangesetWrite): number {
+  const before = write.before === null ? 0 : Buffer.byteLength(JSON.stringify(write.before));
+  return Buffer.byteLength(JSON.stringify(write.arguments)) + before;
+}
 
 const IDLE_MS = CHANGESET_IDLE_DAYS * 24 * 3_600_000;
 
@@ -522,9 +532,14 @@ export async function stage(
   if (changeset.writeCount >= MAX_STAGED_WRITES) {
     throw new ConflictError(`Changeset '${changesetId}' is full: at most ${MAX_STAGED_WRITES} staged writes`);
   }
+  const bytes = writeBytes(row);
+  const maxBytes = settings.CHANGESET_MAX_BYTES;
+  if ((await store.changesets().stagedBytes(changeset.id)) + bytes > maxBytes) {
+    throw new ConflictError(`Changeset '${changesetId}' is full: at most ${maxBytes} bytes of staged writes`);
+  }
   // The store appends to a draft changeset only: a submit since the read
   // is refused here.
-  const seq = await store.changesets().append(changeset.id, row);
+  const seq = await store.changesets().append(changeset.id, row, bytes);
   if (seq === null) throw (await refusalOf(loaded, anchorKey, changeset.id, store)) ?? notFound(changesetId);
   return { seq, id: (row.mintedId ?? row.targetId)! };
 }

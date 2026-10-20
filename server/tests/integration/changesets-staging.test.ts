@@ -3,7 +3,7 @@
  * (`buildHierarchy`, with `has_task` requiring `phase` and a document
  * property on project): start, the six staged writes, minted ids, bases,
  * the immediate write's 404 and 422, binding to the lens and the anchor,
- * the dangling anchor, unstage, discard, expiry, the note and write caps,
+ * the dangling anchor, unstage, discard, expiry, the note, write and byte caps,
  * and a staged write while a commit holds the row.
  */
 
@@ -13,6 +13,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { runQuery } from "../../src/adapters/postgres/errors.js";
 import { createApp } from "../../src/app.js";
+import { settings } from "../../src/config.js";
 import { closeStores, getRuntimeStore, initStores, type RuntimeStore } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { defineEntityProperty, modelPrefix, runtimePrefix } from "./fixture.js";
@@ -398,8 +399,8 @@ describe("unstage, discard, expiry, caps, the row lock", () => {
   it("the cap: at 10,000 writes the next stage is 409 'full' and appends nothing", async () => {
     const cs = (await start()).id as string;
     await sql(
-      `INSERT INTO changeset_write (changeset_id, seq, operation, arguments, type_key)
-       SELECT $1, g, 'delete_entity', '{}'::jsonb, 'task' FROM generate_series(1, 10000) g`,
+      `INSERT INTO changeset_write (changeset_id, seq, operation, arguments, type_key, bytes)
+       SELECT $1, g, 'delete_entity', '{}'::jsonb, 'task', 2 FROM generate_series(1, 10000) g`,
       [cs],
     );
     const res = await call("PATCH", `${ALL}/changesets/${cs}/entities/project/${ids.P1}`, { name: "a" });
@@ -407,6 +408,38 @@ describe("unstage, discard, expiry, caps, the row lock", () => {
     expect(await sql(`SELECT count(*)::int AS n FROM changeset_write WHERE changeset_id = $1`, [cs])).toEqual([
       { n: 10000 },
     ]);
+  });
+
+  it("the byte cap: document text counts; a write past it is 409 'full' and appends nothing", async () => {
+    const cap = settings.CHANGESET_MAX_BYTES;
+    settings.CHANGESET_MAX_BYTES = 1_000_000;
+    try {
+      const cs = (await start()).id as string;
+      const url = `${ALL}/changesets/${cs}/entities/project/${ids.P1}`;
+      // 200,000 characters, 400,000 bytes as UTF-8.
+      const body = "ä".repeat(200_000);
+      expect((await call("PATCH", url, { body })).status).toBe(202);
+      const second = await call("PATCH", url, { body });
+      expect(second.status).toBe(202);
+      const res = await call("PATCH", url, { body });
+      expect(res).toMatchObject({
+        status: 409,
+        body: { error: { message: `Changeset '${cs}' is full: at most 1000000 bytes of staged writes` } },
+      });
+      const [row] = await sql(
+        `SELECT count(*)::int AS n, sum(bytes)::int AS bytes FROM changeset_write WHERE changeset_id = $1`,
+        [cs],
+      );
+      expect(row!.n).toBe(2);
+      expect(row!.bytes).toBeGreaterThan(800_000);
+      expect(row!.bytes).toBeLessThan(1_000_000);
+
+      // Unstaging frees its bytes.
+      expect((await call("DELETE", `${ALL}/changesets/${cs}/writes/${second.body.seq}`)).status).toBe(204);
+      expect((await call("PATCH", url, { body })).status).toBe(202);
+    } finally {
+      settings.CHANGESET_MAX_BYTES = cap;
+    }
   });
 
   it("a staged write while a commit holds the row is 409 at once; after release it is staged", async () => {

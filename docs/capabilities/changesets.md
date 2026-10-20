@@ -204,6 +204,10 @@ Staged-only guards against mistakes, not against a determined client. It has two
 ## Limits
 
 - **At most 10,000 staged writes** per changeset; the next is refused as a conflict.
+- **A byte cap** per changeset, set in the server's
+  [configuration](../../README.md#configuration): its staged writes count as the UTF-8
+  bytes of their JSON, document text included, and the write that would pass the cap is
+  refused as a conflict.
 - **Expiry.** A draft changeset unchanged for 7 days is deleted. Every change of it, and a
   rejected commit, counts as a change; a submitted changeset never expires.
 - **The note** is at most 1,000 characters.

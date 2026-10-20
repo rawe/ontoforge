@@ -361,7 +361,7 @@ describe("a replay fault: 422, nothing persisted", () => {
 });
 
 describe("the process limit (V26, R5)", () => {
-  it("a third concurrent commit is 409 at once; a later one runs", async () => {
+  it("a second concurrent commit is 409 at once; a later one runs", async () => {
     journal([]);
     let release!: () => void;
     const held = new Promise<void>((resolve) => (release = resolve));
@@ -370,11 +370,9 @@ describe("the process limit (V26, R5)", () => {
       return changeset();
     });
     const first = commit();
-    const second = commit();
     await expect(commit()).rejects.toThrow(new ConflictError("Too many commits are running; try again"));
     release();
     expect(await first).toEqual({ committed: 0, alreadyGone: [] });
-    expect(await second).toEqual({ committed: 0, alreadyGone: [] });
     expect(await commit()).toEqual({ committed: 0, alreadyGone: [] });
   });
 

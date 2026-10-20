@@ -58,8 +58,8 @@
  *   V23); commit validation over the end state (V21); the journal
  *   deleted, COMMIT. Any failure rolls all of it back; a rejection (422,
  *   the violations by seq, V22) then refreshes the last change and keeps
- *   the version (R6). At most two commits run at once in one process
- *   (V26, R5).
+ *   the version (R6). One commit runs at a time in one process (V26,
+ *   R5).
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -783,7 +783,7 @@ export async function discardChangeset(
 // ---------------------------------------------------------------------------
 
 /** At most this many commits run at once in one process (V26, R5). */
-export const MAX_RUNNING_COMMITS = 2;
+export const MAX_RUNNING_COMMITS = 1;
 /** A rejection names at most this many violations (V21). */
 export const MAX_VIOLATIONS = 100;
 /** The journal is replayed in pages of this many writes. */
@@ -1763,10 +1763,10 @@ function rejection(violations: Violation[]): ValidationError {
  * Commit a changeset: everything it stages, or nothing (D3). Through a
  * staged-only anchor's URL it is a 409, whatever the changeset (V9). With
  * `expectedVersion`, a changeset changed since (V40) is a 409. Another
- * commit on the ontology, a change running on the changeset, a third
- * commit in this process, or a row held past the lock timeout are 409s
- * too, with nothing persisted. A rejection is a 422 whose
- * `details.violations` name the seqs; the changeset stays as it was.
+ * commit on the ontology or in this process, a change running on the
+ * changeset, or a row held past the lock timeout are 409s too, with
+ * nothing persisted. A rejection is a 422 whose `details.violations` name
+ * the seqs; the changeset stays as it was.
  * Committed, the changeset is gone.
  */
 export async function commitChangeset(

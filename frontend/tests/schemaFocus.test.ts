@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { EntityType, RelationType } from '../src/api/types.ts'
-import { focusSet } from '../src/components/studio/schema/focus.ts'
+import { focusSet, hierarchySet } from '../src/components/studio/schema/focus.ts'
 
 const entity = (key: string): EntityType => ({
   entityTypeId: `et-${key}`,
@@ -12,13 +12,19 @@ const entity = (key: string): EntityType => ({
   createdAt: '',
   updatedAt: '',
 })
-const relation = (key: string, source: string, target: string): RelationType => ({
+const relation = (
+  key: string,
+  source: string,
+  target: string,
+  parent: RelationType['parent'] = null,
+): RelationType => ({
   relationTypeId: `rt-${key}`,
   key,
   displayName: key,
   description: null,
   sourceEntityTypeKey: source,
   targetEntityTypeKey: target,
+  parent,
   createdAt: '',
   updatedAt: '',
 })
@@ -67,4 +73,22 @@ test('no or an unknown selection gives null', () => {
   assert.equal(focusSet(schema, null), null)
   assert.equal(focusSet(schema, { kind: 'entity-types', key: 'nope' }), null)
   assert.equal(focusSet(schema, { kind: 'relation-types', key: 'nope' }), null)
+})
+
+test('the hierarchy set holds the types joined by parent relation types', () => {
+  const flagged = {
+    entityTypes: schema.entityTypes,
+    relationTypes: [
+      relation('member_of', 'person', 'team', 'target'),
+      relation('works_on', 'person', 'project'),
+      relation('requires', 'project', 'skill', 'source'),
+    ],
+  }
+  assert.deepEqual(sorted(hierarchySet(flagged)), ['et-person', 'et-project', 'et-skill', 'et-team'])
+})
+
+test('a parent self-relation keeps its one type; no parent relation keeps none', () => {
+  const loop = { entityTypes: schema.entityTypes, relationTypes: [relation('manages', 'person', 'person', 'source')] }
+  assert.deepEqual(sorted(hierarchySet(loop)), ['et-person'])
+  assert.deepEqual(sorted(hierarchySet(schema)), [])
 })

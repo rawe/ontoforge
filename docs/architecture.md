@@ -105,7 +105,13 @@ agent ever spans two. The architecture makes that structural rather than checked
 
 - **Every ontology-scoped request names its ontology in the path**, and either addresses
   that ontology's schema (modeling) or its instance data through one lens (runtime) —
-  never both. There is no other addressing channel: no header, no default, no fallback.
+  never both. Two requests cross that line by a fixed amount, each named by its own
+  address: a parent flag change, a modeling request, reads the stored relations to refuse
+  and never writes them ([capabilities/schema-modeling.md](capabilities/schema-modeling.md#parent-relations));
+  and anchor maintenance is runtime state addressed without a lens, whose put reads
+  whether the named entity exists ([capabilities/anchors.md](capabilities/anchors.md#maintenance)).
+  An anchored mount adds an anchor to a lens's address and narrows its writes, never its
+  reach. There is no other addressing channel: no header, no default, no fallback.
 - **Every persistence operation runs through a store bound to exactly one ontology.**
   The service layer obtains a modeling or runtime store *for* an ontology key; every
   method of that store resolves within the binding, and binding an unknown key fails as
@@ -120,7 +126,7 @@ The registry — not any storage catalog — is the authoritative list of ontolo
 ontologies is a valid server state: a fresh server starts empty, nothing is auto-created
 at boot, and the last ontology is deletable. Deleting an ontology is one hard cascade
 over everything it contains — schema, lenses, saved queries, assistants,
-instance data and search indices.
+instance data, anchors and search indices.
 
 ## Logical data model
 
@@ -143,7 +149,7 @@ Per ontology. "Unique" here always means unique within the owning ontology.
 |---|---|---|
 | Lens | id, unique `key`, unique name | name, description, timestamps |
 | Entity type | id, unique `key` | display name, description, name property, timestamps |
-| Relation type | id, unique `key` | display name, source and target entity type keys |
+| Relation type | id, unique `key` | display name, source and target entity type keys, parent end (optional) |
 | Property definition | id, `key` unique within its owner | data type, required, default; owned by exactly one entity type or relation type |
 | Search index | id, unique `key` | kind (default, passage or custom), root entity type, definition, timestamps |
 | Search settings | one per ontology | keyword language set, managed indices switched off |
@@ -163,6 +169,7 @@ lens key, can exist independently in two ontologies.
 |---|---|---|
 | Entity | `_id` | its type key, plus the properties its type defines |
 | Relation | `_id` | its type key, its two endpoint ids, plus its properties |
+| Anchor | unique `key` | the entity it points at (type key and id), or none |
 | Chunk | internal | fragment of one document property, with its offset and length, kept as a passage entry |
 | Search entry | internal | one indexed text of one entity in one generation of a search index — its own fields, one relation, or one chunk |
 
@@ -368,13 +375,13 @@ There are exactly six top-level codes:
 | Condition | Status | Code | `details` |
 |---|---|---|---|
 | Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — or `code` |
-| Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | — or `code` |
+| Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | —, `code` or `violations` |
 | Input rejected | 422 | `VALIDATION_ERROR` | `fields` map or `errors` list |
 | Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses`, `affectedIndices` |
 | Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
 | Malformed request body | 400 | `INVALID_JSON` | — |
 
-Two refinements:
+Three refinements:
 
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
 stays one of the six. A request for an unavailable search strategy, search with no available strategy,
@@ -384,6 +391,13 @@ An assistant thread that is unknown, expired or bound to another assistant answe
 `404 RESOURCE_NOT_FOUND` with `details.code` of `THREAD_NOT_FOUND`, and a message to a
 thread still running `409 RESOURCE_CONFLICT` with `details.code` of `THREAD_BUSY`
 ([thread store](#thread-store)).
+
+**A refused parent flag carries its violations.** A parent flag change — on create,
+update or import — that the stored relations break answers `409 RESOURCE_CONFLICT` with
+`details.violations`: one entry per broken rule, `two_parents` or `cycle`, each with the
+`count` of offending entities and up to five of them as `{type, id}`
+([capabilities/schema-modeling.md](capabilities/schema-modeling.md#parent-relations)). The
+message carries the counts, so an MCP caller sees them too.
 
 **`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
 physical objects, which must not reach a client. The adapter logs the original against a

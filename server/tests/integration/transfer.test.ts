@@ -313,6 +313,110 @@ describe("validate-then-write", () => {
   });
 });
 
+describe("the parent end", () => {
+  const MODEL = (o: string) => `/api/ontologies/${o}/model`;
+
+  async function post(url: string, payload: Row): Promise<Row> {
+    const res = await app.inject({ method: "POST", url, payload });
+    expect(res.statusCode, res.body).toBe(201);
+    return res.json() as Row;
+  }
+
+  it("export carries parent; import into a bare ontology restores it", async () => {
+    for (const key of ["customer", "project"]) {
+      await post(`${MODEL("test_ont")}/entity-types`, { key, displayName: key });
+    }
+    const relationType = (key: string, parent?: string) =>
+      post(`${MODEL("test_ont")}/relation-types`, {
+        key,
+        displayName: key,
+        sourceEntityTypeKey: "customer",
+        targetEntityTypeKey: "project",
+        parent,
+      });
+    await relationType("has_project", "source");
+    await relationType("owned_by_project", "target");
+    await relationType("sponsors");
+
+    const exported = await exportFrom("test_ont");
+    expect((exported.relationTypes as Row[]).map((rt) => [rt.key, rt.parent])).toEqual([
+      ["has_project", "source"],
+      ["owned_by_project", "target"],
+      ["sponsors", null],
+    ]);
+
+    await createOntology("target_ont");
+    const res = await importInto("target_ont", exported);
+    expect(res.statusCode, res.body).toBe(201);
+    const listed = await app.inject({ method: "GET", url: `${MODEL("target_ont")}/relation-types` });
+    expect((listed.json() as Row[]).map((rt) => [rt.key, rt.parent])).toEqual([
+      ["has_project", "source"],
+      ["owned_by_project", "target"],
+      ["sponsors", null],
+    ]);
+    expect(normalize(await exportFrom("target_ont"))).toEqual(normalize(exported));
+  });
+
+  it("import over relation rows kept from deleted types answers 409; the ontology is unchanged", async () => {
+    const model = MODEL("test_ont");
+    await post(`${model}/lenses`, { key: "all", name: "All" });
+    const task = await post(`${model}/entity-types`, { key: "task", displayName: "Task" });
+    const person = await post(`${model}/entity-types`, { key: "person", displayName: "Person" });
+    const assignedTo = await post(`${model}/relation-types`, {
+      key: "assigned_to",
+      displayName: "Assigned To",
+      sourceEntityTypeKey: "task",
+      targetEntityTypeKey: "person",
+    });
+    const runtime = "/api/ontologies/test_ont/runtime/lenses/all";
+    const t3 = await post(`${runtime}/entities/task`, { name: "T3" });
+    for (const name of ["Ana", "Ben"]) {
+      const assignee = await post(`${runtime}/entities/person`, { name });
+      await post(`${runtime}/relations/assigned_to`, { fromEntityId: t3._id, toEntityId: assignee._id });
+    }
+    // Deleting the types keeps their instances.
+    for (const url of [
+      `${model}/relation-types/${assignedTo.relationTypeId as string}`,
+      `${model}/entity-types/${task.entityTypeId as string}`,
+      `${model}/entity-types/${person.entityTypeId as string}`,
+    ]) {
+      const deleted = await app.inject({ method: "DELETE", url });
+      expect(deleted.statusCode, deleted.body).toBe(204);
+    }
+    const before = await exportFrom("test_ont");
+
+    const entityType = (key: string): Row => ({
+      key,
+      displayName: key,
+      nameProperty: "name",
+      properties: [{ key: "name", displayName: "Name", dataType: "string", required: true }],
+    });
+    const res = await importInto("test_ont", {
+      formatVersion: "7.0",
+      keywordLanguages: ["english"],
+      entityTypes: [entityType("task"), entityType("person")],
+      relationTypes: [
+        {
+          key: "assigned_to",
+          displayName: "Assigned To",
+          fromEntityTypeKey: "task",
+          toEntityTypeKey: "person",
+          parent: "target",
+          properties: [],
+        },
+      ],
+      lenses: [],
+    });
+    expect(res.statusCode, res.body).toBe(409);
+    const error = (res.json() as { error: Row }).error;
+    expect(error.code).toBe("RESOURCE_CONFLICT");
+    expect(error.details).toEqual({
+      violations: [{ rule: "two_parents", count: 1, entities: [{ type: "task", id: t3._id }] }],
+    });
+    expect(await exportFrom("test_ont")).toEqual(before);
+  });
+});
+
 describe("modeling MCP transfer pair", () => {
   // The mount is bound to the ontology its URL names (test_ont here).
   async function connect(): Promise<Client> {

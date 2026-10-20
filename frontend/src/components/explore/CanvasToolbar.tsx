@@ -41,11 +41,13 @@ interface CanvasToolbarProps {
   onToggleType: (typeKey: string) => void
   /** The ask dock's button; absent without a language model. */
   ask?: { open: boolean; onToggle: () => void }
+  /** The Hierarchy edges filter; absent when the lens has no parent relation. */
+  hierarchy?: { on: boolean; onToggle: () => void }
 }
 
 /**
  * Top-left canvas overlay: search/add, the ask dock, fit view, explicit re-layout, clear
- * (unpinned/all, confirmed), a node-count badge (warn look above the soft
+ * (unpinned/all, confirmed), the Hierarchy edges filter, a node-count badge (warn look above the soft
  * cap) and per-type show/hide filter chips.
  */
 export function CanvasToolbar({
@@ -58,6 +60,7 @@ export function CanvasToolbar({
   onClear,
   onToggleType,
   ask,
+  hierarchy,
 }: CanvasToolbarProps) {
   const [clearOpen, setClearOpen] = useState(false)
   const empty = nodeCount === 0
@@ -111,6 +114,28 @@ export function CanvasToolbar({
           <Eraser className="size-4" />,
           () => setClearOpen(true),
           empty,
+        )}
+        {hierarchy !== undefined && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-pressed={hierarchy.on}
+                onClick={hierarchy.onToggle}
+                className={cn(
+                  'ml-1 rounded-full border px-2.5 py-0.5 text-[11.5px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-ring/60',
+                  hierarchy.on
+                    ? 'border-(--tc-violet) bg-(--tc-violet-bg) text-(--tc-violet)'
+                    : 'border-(--tc-violet-border) text-(--tc-violet) hover:bg-(--tc-violet-bg)',
+                )}
+              >
+                Hierarchy edges
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {hierarchy.on ? 'Show every edge' : 'Show only the parent relations’ edges'}
+            </TooltipContent>
+          </Tooltip>
         )}
         <span
           className={cn(

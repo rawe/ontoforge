@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { ApiError } from '../src/api/http.ts'
-import { fieldErrorsOf } from '../src/components/studio/modeling/errors.ts'
+import { fieldErrorsOf, parentViolationsOf, refusalReport } from '../src/components/studio/modeling/errors.ts'
 
 const validation = (details: Record<string, unknown>) =>
   new ApiError(422, 'VALIDATION_ERROR', 'Request validation failed', details)
@@ -50,4 +50,40 @@ test('anything that is not an ApiError has no field errors', () => {
   assert.deepEqual(fieldErrorsOf(new Error('boom')), {})
   assert.deepEqual(fieldErrorsOf('boom'), {})
   assert.deepEqual(fieldErrorsOf(new ApiError(409, 'RESOURCE_CONFLICT', 'exists')), {})
+})
+
+const refused = (violations: unknown) =>
+  new ApiError(409, 'RESOURCE_CONFLICT', 'breaks the parent rules', { violations })
+
+test('parentViolationsOf reads details.violations of a 409', () => {
+  const violations = [{ rule: 'two_parents', count: 1, entities: [{ type: 'customer', id: 'c1' }] }]
+  assert.deepEqual(parentViolationsOf(refused(violations)), violations)
+})
+
+test('parentViolationsOf is null for any other error', () => {
+  assert.equal(parentViolationsOf(new ApiError(409, 'RESOURCE_CONFLICT', 'exists')), null)
+  assert.equal(parentViolationsOf(refused('nope')), null)
+  assert.equal(
+    parentViolationsOf(new ApiError(422, 'VALIDATION_ERROR', 'bad', { violations: [] })),
+    null,
+  )
+  assert.equal(parentViolationsOf(new Error('boom')), null)
+})
+
+test('refusalReport lists both rules in order, a rule without violators as none', () => {
+  const report = refusalReport([
+    { rule: 'cycle', count: 1, entities: [{ type: 'task', id: 't1' }] },
+  ])
+  assert.deepEqual(report, [
+    { rule: 'two_parents', summary: 'Two parents · none', entities: [], more: 0 },
+    { rule: 'cycle', summary: 'Cycles · 1 entity', entities: [{ type: 'task', id: 't1' }], more: 0 },
+  ])
+})
+
+test('refusalReport counts the breaking entities beyond the five listed', () => {
+  const entities = ['a', 'b', 'c', 'd', 'e'].map((id) => ({ type: 'task', id }))
+  const [twoParents] = refusalReport([{ rule: 'two_parents', count: 7, entities }])
+  assert.equal(twoParents?.summary, 'Two parents · 7 entities')
+  assert.equal(twoParents?.entities.length, 5)
+  assert.equal(twoParents?.more, 2)
 })

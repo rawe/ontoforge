@@ -39,6 +39,7 @@ const descriptions = (tools: ListedTool[]) =>
 
 const modelingTools = await listTools(createModelingMcpServer("onto"));
 const runtime = descriptions(await listTools(createRuntimeMcpServer("onto", "all")));
+const anchored = descriptions(await listTools(createRuntimeMcpServer("onto", "all", "agent-a")));
 const modeling = descriptions(modelingTools);
 const agent = new Map(
   buildTools("all", {} as RuntimeStore, [...ALL_TOOL_NAMES]).map((tool) => [
@@ -48,6 +49,9 @@ const agent = new Map(
 );
 const all = [
   ...[...runtime].map(([name, text]) => [`runtime ${name}`, text] as const),
+  ...[...anchored]
+    .filter(([name, text]) => runtime.get(name) !== text)
+    .map(([name, text]) => [`anchored ${name}`, text] as const),
   ...[...modeling].map(([name, text]) => [`modeling ${name}`, text] as const),
   ...[...agent].map(([name, text]) => [`agent ${name}`, text] as const),
 ];
@@ -67,6 +71,52 @@ describe("tool descriptions", () => {
       expect(runtime.get(name)).toContain(filterRules({ contains: false, relations: true }));
     }
     expect(runtime.get("list_relations")).toContain(filterRules({ contains: true, relations: false }));
+  });
+
+  it("the write tools state the parent rules", () => {
+    expect(runtime.get("delete_entity")).toContain("delete its children first");
+    expect(runtime.get("create_relation")).toContain("already has a parent");
+    expect(runtime.get("create_relation")).toContain("one of its descendants");
+  });
+
+  it("get_path states the path's shape and the lens cut", () => {
+    const text = runtime.get("get_path")!;
+    for (const part of ["[{type, id, name}]", "root first", "ending with the entity", "cannot see"]) {
+      expect(text).toContain(part);
+    }
+    expect(agent.has("get_path")).toBe(false);
+  });
+
+  it("get_anchor carries the agreed text, on the anchored mount only", () => {
+    expect(anchored.get("get_anchor")).toBe(
+      "Read where this connection is anchored. Returns key, state, visible, entity and path. " +
+        "state 'anchored': writes to the anchored entity's hierarchy are held to that entity and " +
+        "its descendants; other types are written as usual. 'unanchored': no restriction. " +
+        "'dangling': the entity was deleted, and every write is refused until a person " +
+        "re-anchors. visible false: this lens does not show the entity, and every write is " +
+        "refused. path lists the entity's visible ancestors, root first, ending with the " +
+        "entity. Read-only: a person sets the anchor and may change it at any time, so read " +
+        "it again after a refusal.",
+    );
+    expect(runtime.has("get_anchor")).toBe(false);
+    expect(agent.has("get_anchor")).toBe(false);
+  });
+
+  it("create_entity states the create with a parent relation", () => {
+    const text = runtime.get("create_entity")!;
+    for (const part of ["'parent_relation'", "'type'", "'parent_id'", "'properties'", "child end", "parent end"]) {
+      expect(text).toContain(part);
+    }
+    expect(text).toContain("stored together or not at all");
+  });
+
+  it("create_entity states the anchored create, on the anchored mount only", () => {
+    const text = anchored.get("create_entity")!;
+    expect(text.startsWith(runtime.get("create_entity")!)).toBe(true);
+    for (const part of ["anchored connection", "'parent_relation'", "one of its descendants", "other types"]) {
+      expect(text).toContain(part);
+    }
+    expect(runtime.get("create_entity")).not.toContain("anchored");
   });
 
   it("the search-index tools state the status fields", () => {

@@ -34,11 +34,18 @@
  * - `executeOql` compiles the validated query to one SQL SELECT
  *   (`oql/`) and runs it through the array-mode door; the compiled plan
  *   names the columns and drives the value conversion.
+ *
+ * - The hierarchy reads follow only the parent relations the caller
+ *   names; the ancestor walk is one recursive statement with a cycle
+ *   guard.
+ * - The create with a parent relation writes both rows and their search
+ *   work in one transaction.
  */
 
 
 import type { ValidatedQuery } from "../../core/oql/index.js";
 import type {
+  AnchorStore,
   FilterCondition,
   NavigatorStore,
   Row,
@@ -46,7 +53,7 @@ import type {
   SearchIndexStore,
   SearchWritePlan,
 } from "../../core/ports.js";
-import type { PropertyDef } from "../../core/schemas.js";
+import type { ParentEnd, PropertyDef } from "../../core/schemas.js";
 import { SAVED_QUERY_INDEX } from "./ddl.js";
 import {
   runArrayQuery,
@@ -66,6 +73,7 @@ import {
 import { fromJson, toJson } from "./json.js";
 import { camelizeRow, isUuid } from "./rows.js";
 import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
+import { PostgresAnchorStore } from "./anchorStore.js";
 import { PostgresNavigatorStore } from "./navigatorStore.js";
 import { applySearchWritePlan, PostgresSearchIndexStore } from "./searchIndexStore.js";
 import { distance, minScoreFloor, similarity, vectorParams, vectorSearch } from "./search.js";
@@ -77,6 +85,15 @@ const NO_DEFS: PropertyDefs = {};
 // Read column lists.
 const ENTITY_COLS = "id, type_key, props, created_at, updated_at";
 const RELATION_COLS = "id, type_key, from_id, to_id, props, created_at, updated_at";
+
+// The two instance inserts, shared by the single creates and the create
+// with a parent relation.
+const INSERT_ENTITY = `INSERT INTO entity (id, type_key, props)
+       VALUES ($1, $2, $3::jsonb)
+       RETURNING ${ENTITY_COLS}`;
+const INSERT_RELATION = `INSERT INTO relation (id, type_key, from_id, to_id, props)
+       VALUES ($1, $2, $3, $4, $5::jsonb)
+       RETURNING ${RELATION_COLS}`;
 
 /** Only saved queries the index can hold: an un-embedded description is
  * invisible to discovery. The predicate says so explicitly, because a
@@ -178,6 +195,13 @@ export class PostgresRuntimeStore implements RuntimeStore {
       throw new Error("An unbound runtime store has no navigators");
     }
     return new PostgresNavigatorStore(this.namespace);
+  }
+
+  anchors(): AnchorStore {
+    if (this.namespace === undefined) {
+      throw new Error("An unbound runtime store has no anchors");
+    }
+    return new PostgresAnchorStore(this.namespace);
   }
 
   // ------------------------------------------------------------------
@@ -283,9 +307,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     search?: SearchWritePlan | null,
   ): Promise<Row> {
     const result = await this.write(
-      `INSERT INTO entity (id, type_key, props)
-       VALUES ($1, $2, $3::jsonb)
-       RETURNING ${ENTITY_COLS}`,
+      INSERT_ENTITY,
       [entityId, entityTypeKey, propsJson(properties, propertyDefs)],
       search,
     );
@@ -472,9 +494,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
     search?: SearchWritePlan | null,
   ): Promise<Row> {
     const result = await this.write(
-      `INSERT INTO relation (id, type_key, from_id, to_id, props)
-       VALUES ($1, $2, $3, $4, $5::jsonb)
-       RETURNING ${RELATION_COLS}`,
+      INSERT_RELATION,
       [relationId, relationTypeKey, fromEntityId, toEntityId, propsJson(properties, propertyDefs)],
       search,
     );
@@ -656,6 +676,122 @@ export class PostgresRuntimeStore implements RuntimeStore {
       propertyDefsByType,
     );
   }
+
+  // ------------------------------------------------------------------
+  // Hierarchy
+  // ------------------------------------------------------------------
+
+  /**
+   * One recursive statement. Each level is one probe per reading end on
+   * the `to_id` / `from_id` indexes: a `source` reading finds the parent
+   * at `from_id` of a row whose `to_id` is the child, a `target` reading
+   * the other way round. The cycle guard stops a branch at an entity
+   * already on its path, the start included.
+   */
+  async getAncestors(
+    entityId: string,
+    readings: Record<string, ParentEnd>,
+  ): Promise<{ type: string; id: string }[]> {
+    const [sourceKeys, targetKeys] = splitReadings(readings);
+    if (!isUuid(entityId) || sourceKeys.length + targetKeys.length === 0) {
+      return [];
+    }
+    const result = await this.query(
+      `WITH RECURSIVE walk (id, depth, path) AS (
+         SELECT $1::uuid, 0, ARRAY[$1::uuid]
+         UNION ALL
+         SELECT p.id, w.depth + 1, w.path || p.id
+           FROM walk w
+           CROSS JOIN LATERAL (
+             SELECT r.from_id AS id FROM relation r
+              WHERE r.to_id = w.id AND r.type_key = ANY($2::text[])
+             UNION ALL
+             SELECT r.to_id FROM relation r
+              WHERE r.from_id = w.id AND r.type_key = ANY($3::text[])
+           ) p
+          WHERE NOT (p.id = ANY(w.path))
+       )
+       SELECT e.type_key, w.id, min(w.depth) AS depth
+         FROM walk w JOIN entity e ON e.id = w.id
+        WHERE w.depth > 0
+        GROUP BY w.id, e.type_key
+        ORDER BY depth, e.type_key, w.id`,
+      [entityId, sourceKeys, targetKeys],
+    );
+    return result.rows.map((row) => ({ type: row.type_key as string, id: row.id as string }));
+  }
+
+  async hasChildren(entityId: string, readings: Record<string, ParentEnd>): Promise<boolean> {
+    const [sourceKeys, targetKeys] = splitReadings(readings);
+    if (!isUuid(entityId) || sourceKeys.length + targetKeys.length === 0) {
+      return false;
+    }
+    const result = await this.query(
+      `SELECT EXISTS (SELECT 1 FROM relation WHERE from_id = $1 AND type_key = ANY($2::text[]))
+           OR EXISTS (SELECT 1 FROM relation WHERE to_id = $1 AND type_key = ANY($3::text[]))
+           AS has_children`,
+      [entityId, sourceKeys, targetKeys],
+    );
+    return result.rows[0]!.has_children as boolean;
+  }
+
+  /** Both inserts in one transaction, each followed by its own search
+   * work, as `write` applies it to a single create. The relation insert
+   * fails on a vanished parent (`relation_from_fk` / `relation_to_fk`),
+   * which rolls the entity back too. */
+  async createEntityWithParent(
+    entity: {
+      entityTypeKey: string;
+      entityId: string;
+      properties: Row;
+      propertyDefs: PropertyDefs;
+      search?: SearchWritePlan | null;
+    },
+    relation: {
+      relationTypeKey: string;
+      relationId: string;
+      fromEntityId: string;
+      toEntityId: string;
+      properties: Row;
+      propertyDefs: PropertyDefs;
+      search?: SearchWritePlan | null;
+    },
+  ): Promise<{ entity: Row; relation: Row }> {
+    return this.tx(async (querier) => {
+      const entityResult = await querier.query(INSERT_ENTITY, [
+        entity.entityId,
+        entity.entityTypeKey,
+        propsJson(entity.properties, entity.propertyDefs),
+      ]);
+      if (entity.search !== null && entity.search !== undefined) {
+        await applySearchWritePlan(querier, entity.search, this.ontologyKey);
+      }
+      const relationResult = await querier.query(INSERT_RELATION, [
+        relation.relationId,
+        relation.relationTypeKey,
+        relation.fromEntityId,
+        relation.toEntityId,
+        propsJson(relation.properties, relation.propertyDefs),
+      ]);
+      if (relation.search !== null && relation.search !== undefined) {
+        await applySearchWritePlan(querier, relation.search, this.ontologyKey);
+      }
+      return {
+        entity: entityRow(entityResult.rows[0]!, entity.propertyDefs),
+        relation: relationRow(relationResult.rows[0]!, relation.propertyDefs),
+      };
+    });
+  }
+}
+
+/** The relation type keys of the readings whose parent is the source
+ * end, and those whose parent is the target end. */
+function splitReadings(readings: Record<string, ParentEnd>): [string[], string[]] {
+  const keys = Object.keys(readings);
+  return [
+    keys.filter((key) => readings[key] === "source"),
+    keys.filter((key) => readings[key] === "target"),
+  ];
 }
 
 /** `count(*)` over one FROM/WHERE fragment; bigint arrives as text. */

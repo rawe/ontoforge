@@ -34,7 +34,13 @@ import {
   MAX_FILTER_HOPS,
   RETRIEVER_CONFIG_VERSION,
 } from "../core/retriever.js";
-import { LENS_RESOURCE_KEY_PATTERN, MAX_KEY_LENGTH, type TypeKind } from "../core/schemas.js";
+import {
+  LENS_RESOURCE_KEY_PATTERN,
+  MAX_KEY_LENGTH,
+  PARENT_ENDS,
+  type ParentEnd,
+  type TypeKind,
+} from "../core/schemas.js";
 import { OntologyCreate } from "../registry/schemas.js";
 import * as registryService from "../registry/service.js";
 import {
@@ -366,13 +372,17 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     {
       description:
         "Add a new relation type connecting two entity types. Source and target are " +
-        "specified by entity type key.",
+        "specified by entity type key. parent ('source' or 'target') makes it a parent " +
+        "relation: the entity at that end is the parent of the entity at the other. " +
+        "Omit it for an ordinary relation type. A parent end is refused when relations " +
+        "already stored under the key would give an entity two parents or form a cycle.",
       inputSchema: {
         key: z.string(),
         display_name: z.string(),
         source_entity_type_key: z.string(),
         target_entity_type_key: z.string(),
         description: z.string().optional(),
+        parent: z.enum(PARENT_ENDS).optional(),
       },
     },
     wrap("create_relation_type", async (args: {
@@ -381,6 +391,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       source_entity_type_key: string;
       target_entity_type_key: string;
       description?: string | undefined;
+      parent?: ParentEnd | undefined;
     }) => {
       const body = RelationTypeCreate.parse({
         key: args.key,
@@ -388,6 +399,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         description: args.description ?? null,
         sourceEntityTypeKey: args.source_entity_type_key,
         targetEntityTypeKey: args.target_entity_type_key,
+        parent: args.parent ?? null,
       });
       const result = await service.createRelationType(body, await getModelingStore(ontologyKey));
       return jsonResult(result);
@@ -398,24 +410,30 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "update_relation_type",
     {
       description:
-        "Update a relation type's display name or description. Source/target " +
-        "endpoints are immutable.",
+        "Update a relation type's display name, description or parent end. Source/target " +
+        "endpoints are immutable. parent 'source' or 'target' sets the parent end, null " +
+        "clears it (an ordinary relation type again), and omitting it leaves it unchanged. " +
+        "Setting or changing it is refused when the stored relations would then give an " +
+        "entity two parents or form a cycle; clearing it is never refused.",
       inputSchema: {
         relation_type_key: z.string(),
         display_name: z.string().optional(),
         description: z.string().optional(),
+        parent: z.enum(PARENT_ENDS).nullable().optional(),
       },
     },
     wrap("update_relation_type", async (args: {
       relation_type_key: string;
       display_name?: string | undefined;
       description?: string | undefined;
+      parent?: ParentEnd | null | undefined;
     }) => {
       const store = await getModelingStore(ontologyKey);
       const rt = await resolveRelationType(store, args.relation_type_key);
       const body = RelationTypeUpdate.parse({
         displayName: args.display_name ?? null,
         description: args.description ?? null,
+        parent: args.parent,
       });
       const result = await service.updateRelationType(rt.relationTypeId as string, body, store);
       return jsonResult(result);

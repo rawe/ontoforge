@@ -6,7 +6,9 @@
  * Covers the URL-only ontology + lens binding (no header, no environment
  * fallback), ontology isolation between two bound clients, the
  * limit/offset CLAMPING that diverges by design from REST's rejection,
- * and the entity tool round trip.
+ * the entity tool round trip, and the parent rules, the create with a
+ * parent relation and the path read through the tools; and the anchored
+ * mount `…/anchors/:anchorKey` with `get_anchor` and its not-found order.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -20,6 +22,7 @@ import { wipeDatabase } from "./reset.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { buildFixture, defineEntityProperty } from "./fixture.js";
+import { addLensHidingProject, buildHierarchy, HIERARCHY_ONTOLOGY_KEY, requirePhaseOnHasTask } from "./hierarchy.js";
 
 interface ToolCallResult {
   content: { type: string; text: string }[];
@@ -203,7 +206,7 @@ describe("ontology isolation", () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the twenty-two runtime tools", async () => {
+  it("lists exactly the runtime tools", async () => {
     const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
     try {
       const tools = await client.listTools();
@@ -217,6 +220,7 @@ describe("tool surface", () => {
         "get_document",
         "get_entity",
         "get_neighbors",
+        "get_path",
         "get_relation",
         "get_schema",
         "list_entities",
@@ -870,6 +874,268 @@ describe("search indices", () => {
       expect(text(unknown)).toContain("nope");
     } finally {
       await client.close();
+    }
+  });
+});
+
+describe("parent rules through the tools", () => {
+  it("a second parent, a cycle and a delete with children are refused as on REST", async () => {
+    const ids = await buildHierarchy(app);
+    const client = await connectClient(
+      `${baseUrl}/mcp/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all`,
+    );
+    try {
+      const second = await call(client, "create_relation", {
+        relation_type_key: "has_task",
+        from_entity_id: ids.P2,
+        to_entity_id: ids.T1,
+      });
+      expect(second.isError).toBe(true);
+      expect(text(second)).toContain(`toEntityId: Entity '${ids.T1}' already has a parent`);
+
+      const loop = await call(client, "create_relation", {
+        relation_type_key: "has_subtask",
+        from_entity_id: ids.T1a,
+        to_entity_id: ids.T1,
+      });
+      expect(loop.isError).toBe(true);
+      expect(text(loop)).toContain("would close a cycle");
+
+      const parent = await call(client, "delete_entity", {
+        entity_type_key: "project",
+        entity_id: ids.P1,
+      });
+      expect(parent.isError).toBe(true);
+      expect(text(parent)).toContain("This entity has children; delete them first");
+
+      const leaf = await call(client, "delete_entity", {
+        entity_type_key: "task",
+        entity_id: ids.T1a,
+      });
+      expect(leaf.isError).toBeFalsy();
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+describe("create_entity with a parent relation", () => {
+  it("creates the entity under its parent, and refuses the faults REST refuses", async () => {
+    const ids = await buildHierarchy(app);
+    await requirePhaseOnHasTask(app);
+    const client = await connectClient(
+      `${baseUrl}/mcp/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all`,
+    );
+    try {
+      const created = await call(client, "create_entity", {
+        entity_type_key: "task",
+        properties: { name: "T3" },
+        parent_relation: { type: "has_task", parent_id: ids.P1, properties: { phase: "build" } },
+      });
+      expect(created.isError, text(created)).toBeFalsy();
+      const task = json(created);
+      expect(task.name).toBe("T3");
+      const listed = json(
+        await call(client, "list_relations", { relation_type_key: "has_task", to_entity_id: task._id }),
+      );
+      expect(listed.items).toMatchObject([{ fromEntityId: ids.P1, phase: "build" }]);
+
+      const before = json(await call(client, "list_entities", { entity_type_key: "task" })).total;
+      for (const [parentRelation, expected] of [
+        [{ type: "has_task", parent_id: ids.P1 }, "parentRelation.properties.phase: Required property missing"],
+        [{ type: "nope", parent_id: ids.P1 }, "parentRelation.type: Relation type 'nope' not found"],
+        [{ type: "assigned_to", parent_id: ids.Ben }, "parentRelation.type: Relation type 'assigned_to' is not a parent relation"],
+        [
+          { type: "has_task", parent_id: ids.ACME, properties: { phase: "x" } },
+          "parentRelation.parentId: Parent entity type mismatch: expected 'project', got 'customer'",
+        ],
+        [
+          { type: "has_task", parent_id: "00000000-0000-4000-8000-000000000000", properties: { phase: "x" } },
+          "parentRelation.parentId: Parent entity '00000000-0000-4000-8000-000000000000' not found",
+        ],
+      ] as const) {
+        const refused = await call(client, "create_entity", {
+          entity_type_key: "task",
+          properties: { name: "X" },
+          parent_relation: parentRelation,
+        });
+        expect(refused.isError).toBe(true);
+        expect(text(refused)).toContain(expected);
+      }
+      expect(json(await call(client, "list_entities", { entity_type_key: "task" })).total).toBe(before);
+
+      const plain = await call(client, "create_entity", { entity_type_key: "task", properties: { name: "Loose" } });
+      expect(plain.isError, text(plain)).toBeFalsy();
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+describe("get_path", () => {
+  it("gives the path read's answers, through a lens hiding the middle level too", async () => {
+    const ids = await buildHierarchy(app);
+    await addLensHidingProject(app);
+    const mount = `${baseUrl}/mcp/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses`;
+    const all = await connectClient(`${mount}/all`);
+    const delivery = await connectClient(`${mount}/delivery`);
+    try {
+      const deep = await call(all, "get_path", { entity_type_key: "task", entity_id: ids.T1a });
+      expect(deep.isError, text(deep)).toBeFalsy();
+      expect(JSON.parse(text(deep))).toEqual([
+        { type: "customer", id: ids.ACME, name: "ACME" },
+        { type: "project", id: ids.P1, name: "P1" },
+        { type: "task", id: ids.T1, name: "T1" },
+        { type: "task", id: ids.T1a, name: "T1a" },
+      ]);
+
+      const root = await call(all, "get_path", { entity_type_key: "customer", entity_id: ids.ACME });
+      expect(JSON.parse(text(root))).toEqual([{ type: "customer", id: ids.ACME, name: "ACME" }]);
+
+      const cut = await call(delivery, "get_path", { entity_type_key: "task", entity_id: ids.T1a });
+      expect(JSON.parse(text(cut))).toEqual([
+        { type: "task", id: ids.T1, name: "T1" },
+        { type: "task", id: ids.T1a, name: "T1a" },
+      ]);
+
+      const hidden = await call(delivery, "get_path", { entity_type_key: "project", entity_id: ids.P1 });
+      expect(hidden.isError).toBe(true);
+      expect(text(hidden)).toContain("Entity type 'project' not found");
+
+      const unknown = await call(all, "get_path", {
+        entity_type_key: "task",
+        entity_id: "00000000-0000-4000-8000-000000000000",
+      });
+      expect(unknown.isError).toBe(true);
+      expect(text(unknown)).toContain("Entity '00000000-0000-4000-8000-000000000000' not found");
+
+      const entity = json(await call(all, "get_entity", { entity_type_key: "task", entity_id: ids.T1a }));
+      expect(Object.keys(entity).sort()).toEqual(["_createdAt", "_entityTypeKey", "_id", "_updatedAt", "name"]);
+    } finally {
+      await all.close();
+      await delivery.close();
+    }
+  });
+});
+
+describe("the anchored mount", () => {
+  const mount = (o: string, lens: string, key: string) =>
+    `${baseUrl}/mcp/ontologies/${o}/runtime/lenses/${lens}/anchors/${key}`;
+  const putAnchor = async (key: string, entity: { type: string; id: string } | null) => {
+    const res = await app.inject({
+      method: "PUT",
+      url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/anchors/${key}`,
+      payload: { entity },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+  };
+
+  it("lists the runtime tools plus get_anchor", async () => {
+    const ids = await buildHierarchy(app);
+    await putAnchor("agent-a", { type: "project", id: ids.P1 });
+    const plain = await connectClient(`${baseUrl}/mcp/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all`);
+    const anchored = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "all", "agent-a"));
+    try {
+      const plainNames = (await plain.listTools()).tools.map((tool) => tool.name);
+      const anchoredNames = (await anchored.listTools()).tools.map((tool) => tool.name);
+      expect(plainNames).not.toContain("get_anchor");
+      expect(anchoredNames.sort()).toEqual([...plainNames, "get_anchor"].sort());
+    } finally {
+      await plain.close();
+      await anchored.close();
+    }
+  });
+
+  it("get_anchor gives the anchor through the lens, and nothing when the lens hides it", async () => {
+    const ids = await buildHierarchy(app);
+    await addLensHidingProject(app);
+    await putAnchor("agent-a", { type: "project", id: ids.P1 });
+    const all = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "all", "agent-a"));
+    const delivery = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "delivery", "agent-a"));
+    try {
+      expect(json(await call(all, "get_anchor"))).toEqual({
+        key: "agent-a",
+        state: "anchored",
+        visible: true,
+        entity: { type: "project", id: ids.P1, name: "P1" },
+        path: [
+          { type: "customer", id: ids.ACME, name: "ACME" },
+          { type: "project", id: ids.P1, name: "P1" },
+        ],
+      });
+      expect(json(await call(delivery, "get_anchor"))).toEqual({
+        key: "agent-a",
+        state: "anchored",
+        visible: false,
+        entity: null,
+        path: [],
+      });
+
+      // The runtime tools work below the anchor (the guard is not here yet).
+      const listed = json(await call(all, "list_entities", { entity_type_key: "task" }));
+      expect(listed.total).toBe(3);
+    } finally {
+      await all.close();
+      await delivery.close();
+    }
+  });
+
+  it("get_anchor shows unanchored and dangling", async () => {
+    const ids = await buildHierarchy(app);
+    await putAnchor("agent-u", null);
+    await putAnchor("agent-d", { type: "task", id: ids.T1a });
+    await app.inject({ method: "DELETE", url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all/entities/task/${ids.T1a}` });
+    for (const [key, state] of [["agent-u", "unanchored"], ["agent-d", "dangling"]] as const) {
+      const client = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "all", key));
+      try {
+        expect(json(await call(client, "get_anchor"))).toEqual({ key, state, visible: true, entity: null, path: [] });
+      } finally {
+        await client.close();
+      }
+    }
+  });
+
+  it("not found in the order ontology, lens, anchor, on every tool, reads included", async () => {
+    const ids = await buildHierarchy(app);
+    await putAnchor("agent-a", { type: "project", id: ids.P1 });
+    const tools = [
+      ["get_anchor", {}],
+      ["get_schema", {}],
+      ["list_entities", { entity_type_key: "task" }],
+      ["get_path", { entity_type_key: "task", entity_id: ids.T1 }],
+      ["create_entity", { entity_type_key: "task", properties: { name: "X" } }],
+      ["delete_entity", { entity_type_key: "task", entity_id: ids.T2 }],
+    ] as const;
+    for (const [o, lens, key, message] of [
+      ["nope", "nope", "nope", "Ontology 'nope' not found"],
+      [HIERARCHY_ONTOLOGY_KEY, "nope", "nope", "Lens 'nope' not found"],
+      [HIERARCHY_ONTOLOGY_KEY, "all", "nope", "Anchor 'nope' not found"],
+    ] as const) {
+      const client = await connectClient(mount(o, lens, key));
+      try {
+        for (const [name, args] of tools) {
+          const result = await call(client, name, args);
+          expect(result.isError, `${name} on ${key}`).toBe(true);
+          expect(text(result), name).toContain(message);
+        }
+      } finally {
+        await client.close();
+      }
+    }
+    // Nothing written, no anchor created.
+    const tasks = await app.inject({ method: "GET", url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all/entities/task` });
+    expect(tasks.json().total).toBe(3);
+    const anchors = await app.inject({ method: "GET", url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/anchors` });
+    expect(anchors.json().map((anchor: { key: string }) => anchor.key)).toEqual(["agent-a"]);
+  });
+
+  it("a mount URL naming no anchor is an error", async () => {
+    for (const url of [
+      "/mcp/ontologies/test_ont/runtime/lenses/test_lens/anchors",
+      "/mcp/ontologies/test_ont/runtime/lenses/test_lens/anchors/",
+    ]) {
+      const res = await app.inject({ method: "POST", url });
+      expect(res.statusCode, url).toBe(404);
     }
   });
 });

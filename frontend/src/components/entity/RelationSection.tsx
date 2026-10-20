@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ArrowLeftRight, ArrowRight, Plus, Unlink } from 'lucide-react'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useDisplayLabel } from '@/api/hooks'
@@ -15,6 +15,7 @@ import type {
 } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
 import type { RelationInitial } from '@/components/entity/AddRelationDialog'
+import { relationPropsSummary } from '@/components/entity/relationProps'
 import { invalidateNeighborhood } from '@/components/entity/useNeighborCounts'
 import {
   AlertDialog,
@@ -29,26 +30,10 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
 
 const PAGE_SIZE = 10
 const MAX_LIMIT = 200
-
-/** Non-system relation props as a compact "key: value" summary. */
-function relationPropsSummary(neighbor: Neighbor): string {
-  return Object.entries(neighbor.relation)
-    .filter(
-      ([key]) =>
-        !key.startsWith('_') &&
-        key !== 'fromEntityId' &&
-        key !== 'toEntityId' &&
-        key !== 'direction',
-    )
-    .map(
-      ([key, value]) =>
-        `${key}: ${typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value)}`,
-    )
-    .join(' · ')
-}
 
 interface RelationSectionProps {
   ontologyKey: string
@@ -59,7 +44,17 @@ interface RelationSectionProps {
   /** Exact neighbor count for this relation type (both directions summed). */
   count: number | undefined
   onAdd: (initial: RelationInitial) => void
+  /**
+   * A parent relation's Children section: only the neighbors in `direction`
+   * (the children, also of a self-relation), titled "Children" and styled
+   * violet, with `action` in the header.
+   */
+  childSection?: { direction: 'outgoing' | 'incoming'; action: ReactNode }
 }
+
+/** The parent relations' sections: a violet bar on the left, a violet title. */
+export const PARENT_SECTION = 'border-l-[3px] border-l-(--tc-violet)'
+export const PARENT_TITLE = 'text-[13px] font-semibold text-(--tc-violet)'
 
 /**
  * One relation type's neighborhood: direction-aware heading, count badge,
@@ -74,6 +69,7 @@ export function RelationSection({
   entityTypes,
   count,
   onAdd,
+  childSection,
 }: RelationSectionProps) {
   const displayLabel = useDisplayLabel()
   const queryClient = useQueryClient()
@@ -84,7 +80,13 @@ export function RelationSection({
   const isOutgoing = relationType.fromEntityTypeKey === myTypeKey
   const isIncoming = relationType.toEntityTypeKey === myTypeKey
   const direction: NeighborDirection =
-    isOutgoing && isIncoming ? 'both' : isOutgoing ? 'outgoing' : 'incoming'
+    childSection !== undefined
+      ? childSection.direction
+      : isOutgoing && isIncoming
+        ? 'both'
+        : isOutgoing
+          ? 'outgoing'
+          : 'incoming'
 
   const params = { relationTypeKey: relationType.key, direction, limit }
   const neighbors = useQuery({
@@ -122,7 +124,7 @@ export function RelationSection({
     limit < MAX_LIMIT &&
     (remaining !== undefined ? remaining > 0 && rows.length >= limit : rows.length >= limit)
 
-  const otherTypeKey = isOutgoing
+  const otherTypeKey = direction === 'outgoing' || direction === 'both'
     ? relationType.toEntityTypeKey
     : relationType.fromEntityTypeKey
 
@@ -130,20 +132,34 @@ export function RelationSection({
     direction === 'both' ? ArrowLeftRight : direction === 'outgoing' ? ArrowRight : ArrowLeft
 
   return (
-    <section className="overflow-hidden rounded-xl border bg-card">
+    <section
+      className={cn('overflow-hidden rounded-xl border bg-card', childSection !== undefined && PARENT_SECTION)}
+    >
       <header className="flex items-center gap-2 border-b bg-muted/30 px-4 py-2">
-        <DirectionIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        <h3 className="text-[13px] font-semibold">{relationType.displayName}</h3>
-        <span className="truncate text-[12px] text-muted-foreground">
-          {direction === 'both'
-            ? `${typeNameOf(otherTypeKey)} · both directions`
-            : direction === 'outgoing'
-              ? `to ${typeNameOf(otherTypeKey)}`
-              : `from ${typeNameOf(otherTypeKey)}`}
-        </span>
+        {childSection !== undefined ? (
+          <>
+            <h3 className={PARENT_TITLE}>Children</h3>
+            <span className="truncate font-mono text-[11.5px] text-muted-foreground">
+              {relationType.key}
+            </span>
+          </>
+        ) : (
+          <>
+            <DirectionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            <h3 className="text-[13px] font-semibold">{relationType.displayName}</h3>
+            <span className="truncate text-[12px] text-muted-foreground">
+              {direction === 'both'
+                ? `${typeNameOf(otherTypeKey)} · both directions`
+                : direction === 'outgoing'
+                  ? `to ${typeNameOf(otherTypeKey)}`
+                  : `from ${typeNameOf(otherTypeKey)}`}
+            </span>
+          </>
+        )}
         <Badge variant="secondary" className="ml-auto font-mono text-[10.5px]">
           {count ?? '…'}
         </Badge>
+        {childSection?.action}
         <Button
           variant="ghost"
           size="icon-xs"
@@ -174,7 +190,7 @@ export function RelationSection({
       ) : rows.length === 0 ? (
         <div className="flex items-center justify-between px-4 py-3">
           <p className="text-[13px] text-muted-foreground">
-            No {relationType.displayName} relations yet.
+            {childSection !== undefined ? 'No children yet.' : `No ${relationType.displayName} relations yet.`}
           </p>
           <Button
             variant="outline"

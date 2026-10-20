@@ -1,0 +1,467 @@
+{
+  "formatVersion": "1.0",
+  "exportedAt": "2026-10-19T02:30:57.947Z",
+  "entities": {
+    "customer": [
+      {
+        "_id": "be8274f6-7eff-48a3-ad3a-09da5b5a8dae",
+        "_entityTypeKey": "customer",
+        "_createdAt": "2026-10-19T02:30:54.167Z",
+        "_updatedAt": "2026-10-19T02:30:54.167Z",
+        "name": "ACME"
+      },
+      {
+        "_id": "f0597f0c-7c77-4b0d-b388-74a257c8fbd5",
+        "_entityTypeKey": "customer",
+        "_createdAt": "2026-10-19T02:30:54.170Z",
+        "_updatedAt": "2026-10-19T02:30:54.170Z",
+        "name": "BETA"
+      }
+    ],
+    "milestone": [
+      {
+        "_id": "5c9e4fb8-e6b5-47bf-ba9f-df17d28ccd0e",
+        "_entityTypeKey": "milestone",
+        "_createdAt": "2026-10-19T02:30:54.213Z",
+        "_updatedAt": "2026-10-19T02:30:54.213Z",
+        "name": "M1"
+      },
+      {
+        "_id": "9ff730f6-d435-4e82-af57-72f66bd187aa",
+        "_entityTypeKey": "milestone",
+        "_createdAt": "2026-10-19T02:30:54.215Z",
+        "_updatedAt": "2026-10-19T02:30:54.215Z",
+        "name": "M2"
+      }
+    ],
+    "person": [
+      {
+        "_id": "ba87608f-2ae4-46c3-ba8a-2993d2b7d57e",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-19T02:30:54.217Z",
+        "_updatedAt": "2026-10-19T02:30:54.217Z",
+        "name": "Lea"
+      },
+      {
+        "_id": "2bba8446-dd9f-44a8-9933-0cff58ad8c3f",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-19T02:30:54.220Z",
+        "_updatedAt": "2026-10-19T02:30:54.220Z",
+        "name": "Ben"
+      },
+      {
+        "_id": "25d385a5-9bb4-4d82-9f00-2704fa24bab6",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-19T02:30:54.222Z",
+        "_updatedAt": "2026-10-19T02:30:54.222Z",
+        "name": "Kim"
+      },
+      {
+        "_id": "65a02a6c-a51f-4dde-aaf6-166b00795088",
+        "_entityTypeKey": "person",
+        "_createdAt": "2026-10-19T02:30:54.224Z",
+        "_updatedAt": "2026-10-19T02:30:54.224Z",
+        "name": "Ana"
+      }
+    ],
+    "project": [
+      {
+        "_id": "9298575f-80b5-40bb-93b2-9226fa9c0164",
+        "_entityTypeKey": "project",
+        "_createdAt": "2026-10-19T02:30:54.173Z",
+        "_updatedAt": "2026-10-19T02:30:54.173Z",
+        "name": "P1"
+      },
+      {
+        "_id": "4d09f7bc-d486-4f3a-bb23-abaf7cec3fb1",
+        "_entityTypeKey": "project",
+        "_createdAt": "2026-10-19T02:30:54.178Z",
+        "_updatedAt": "2026-10-19T02:30:54.178Z",
+        "name": "P2"
+      },
+      {
+        "_id": "cf02e8e2-fe4d-4ce5-9c80-a8fd99e14464",
+        "_entityTypeKey": "project",
+        "_createdAt": "2026-10-19T02:30:54.182Z",
+        "_updatedAt": "2026-10-19T02:30:54.182Z",
+        "name": "P3"
+      }
+    ],
+    "status": [
+      {
+        "_id": "c1c6914c-c772-48f1-8da7-543a8f145d9f",
+        "_entityTypeKey": "status",
+        "_createdAt": "2026-10-19T02:30:54.226Z",
+        "_updatedAt": "2026-10-19T02:30:54.226Z",
+        "name": "open"
+      },
+      {
+        "_id": "62f1f548-9ea9-415f-ad0a-e50ba620963d",
+        "_entityTypeKey": "status",
+        "_createdAt": "2026-10-19T02:30:54.228Z",
+        "_updatedAt": "2026-10-19T02:30:54.228Z",
+        "name": "doing"
+      },
+      {
+        "_id": "df5e8196-87ed-41ed-9d66-d3b20caedaa0",
+        "_entityTypeKey": "status",
+        "_createdAt": "2026-10-19T02:30:54.230Z",
+        "_updatedAt": "2026-10-19T02:30:54.230Z",
+        "name": "done"
+      }
+    ],
+    "task": [
+      {
+        "_id": "3ffac035-8325-40c6-8e32-15641cdd214e",
+        "_entityTypeKey": "task",
+        "_createdAt": "2026-10-19T02:30:54.185Z",
+        "_updatedAt": "2026-10-19T02:30:54.185Z",
+        "name": "T1"
+      },
+      {
+        "_id": "779a7859-2a40-4461-8223-47be24968dfb",
+        "_entityTypeKey": "task",
+        "_createdAt": "2026-10-19T02:30:54.188Z",
+        "_updatedAt": "2026-10-19T02:30:54.188Z",
+        "name": "T1a"
+      },
+      {
+        "_id": "0dab2f83-9a0f-41da-b1c1-43ca8662d45e",
+        "_entityTypeKey": "task",
+        "_createdAt": "2026-10-19T02:30:54.193Z",
+        "_updatedAt": "2026-10-19T02:30:54.193Z",
+        "name": "T1a1"
+      },
+      {
+        "_id": "b2a2a689-065b-44b7-b6a5-093772ff2a7a",
+        "_entityTypeKey": "task",
+        "_createdAt": "2026-10-19T02:30:54.195Z",
+        "_updatedAt": "2026-10-19T02:30:54.195Z",
+        "name": "T2"
+      },
+      {
+        "_id": "e27f4405-7f5e-4da5-9f00-38d99b06bae9",
+        "_entityTypeKey": "task",
+        "_createdAt": "2026-10-19T02:30:54.198Z",
+        "_updatedAt": "2026-10-19T02:30:54.198Z",
+        "name": "T2a"
+      },
+      {
+        "_id": "0f5b8d03-4154-430d-b9c6-f39e36b7baa4",
+        "_entityTypeKey": "task",
+        "_createdAt": "2026-10-19T02:30:54.201Z",
+        "_updatedAt": "2026-10-19T02:30:54.201Z",
+        "name": "T3"
+      },
+      {
+        "_id": "9734d1cd-8785-4a0d-9ecf-adddcef5cf91",
+        "_entityTypeKey": "task",
+        "_createdAt": "2026-10-19T02:30:54.204Z",
+        "_updatedAt": "2026-10-19T02:30:54.204Z",
+        "name": "T4"
+      },
+      {
+        "_id": "826970c4-41ac-423d-9276-7d6548d6e17f",
+        "_entityTypeKey": "task",
+        "_createdAt": "2026-10-19T02:30:54.208Z",
+        "_updatedAt": "2026-10-19T02:30:54.208Z",
+        "name": "T5"
+      },
+      {
+        "_id": "5b2f8906-c6dc-4068-a136-94cec79a03b5",
+        "_entityTypeKey": "task",
+        "_createdAt": "2026-10-19T02:30:54.210Z",
+        "_updatedAt": "2026-10-19T02:30:54.210Z",
+        "name": "T6"
+      }
+    ]
+  },
+  "relations": {
+    "assigned_to": [
+      {
+        "_id": "a915bf14-94b6-46dc-af72-323460d856d6",
+        "_relationTypeKey": "assigned_to",
+        "_createdAt": "2026-10-19T02:30:54.233Z",
+        "_updatedAt": "2026-10-19T02:30:54.233Z",
+        "fromEntityId": "3ffac035-8325-40c6-8e32-15641cdd214e",
+        "toEntityId": "2bba8446-dd9f-44a8-9933-0cff58ad8c3f"
+      },
+      {
+        "_id": "4784e7f8-1cbc-400a-bebb-d4835efc63d2",
+        "_relationTypeKey": "assigned_to",
+        "_createdAt": "2026-10-19T02:30:54.235Z",
+        "_updatedAt": "2026-10-19T02:30:54.235Z",
+        "fromEntityId": "b2a2a689-065b-44b7-b6a5-093772ff2a7a",
+        "toEntityId": "25d385a5-9bb4-4d82-9f00-2704fa24bab6"
+      },
+      {
+        "_id": "03a508dd-0bd3-4efe-9f9d-2363b7f9973a",
+        "_relationTypeKey": "assigned_to",
+        "_createdAt": "2026-10-19T02:30:54.237Z",
+        "_updatedAt": "2026-10-19T02:30:54.237Z",
+        "fromEntityId": "0f5b8d03-4154-430d-b9c6-f39e36b7baa4",
+        "toEntityId": "65a02a6c-a51f-4dde-aaf6-166b00795088"
+      },
+      {
+        "_id": "c302c99d-35ac-4d50-8343-d8f0efd8bb2d",
+        "_relationTypeKey": "assigned_to",
+        "_createdAt": "2026-10-19T02:30:54.239Z",
+        "_updatedAt": "2026-10-19T02:30:54.239Z",
+        "fromEntityId": "0f5b8d03-4154-430d-b9c6-f39e36b7baa4",
+        "toEntityId": "2bba8446-dd9f-44a8-9933-0cff58ad8c3f"
+      },
+      {
+        "_id": "f050babc-7001-40a9-bed4-83271f2d5a6b",
+        "_relationTypeKey": "assigned_to",
+        "_createdAt": "2026-10-19T02:30:54.242Z",
+        "_updatedAt": "2026-10-19T02:30:54.242Z",
+        "fromEntityId": "9734d1cd-8785-4a0d-9ecf-adddcef5cf91",
+        "toEntityId": "25d385a5-9bb4-4d82-9f00-2704fa24bab6"
+      },
+      {
+        "_id": "05569b11-bc50-455c-8acf-c83ee7ae2ef0",
+        "_relationTypeKey": "assigned_to",
+        "_createdAt": "2026-10-19T02:30:54.244Z",
+        "_updatedAt": "2026-10-19T02:30:54.244Z",
+        "fromEntityId": "5b2f8906-c6dc-4068-a136-94cec79a03b5",
+        "toEntityId": "65a02a6c-a51f-4dde-aaf6-166b00795088"
+      }
+    ],
+    "belongs_to": [
+      {
+        "_id": "4ef6101f-8c69-4581-9fee-5861bce71465",
+        "_relationTypeKey": "belongs_to",
+        "_createdAt": "2026-10-19T02:30:54.213Z",
+        "_updatedAt": "2026-10-19T02:30:54.213Z",
+        "fromEntityId": "5c9e4fb8-e6b5-47bf-ba9f-df17d28ccd0e",
+        "toEntityId": "9298575f-80b5-40bb-93b2-9226fa9c0164"
+      },
+      {
+        "_id": "93197735-cb76-4708-b9a1-acd8676d5c7f",
+        "_relationTypeKey": "belongs_to",
+        "_createdAt": "2026-10-19T02:30:54.215Z",
+        "_updatedAt": "2026-10-19T02:30:54.215Z",
+        "fromEntityId": "9ff730f6-d435-4e82-af57-72f66bd187aa",
+        "toEntityId": "cf02e8e2-fe4d-4ce5-9c80-a8fd99e14464"
+      }
+    ],
+    "has_project": [
+      {
+        "_id": "122ecb7c-dc80-49b5-9306-e6b4718603bc",
+        "_relationTypeKey": "has_project",
+        "_createdAt": "2026-10-19T02:30:54.173Z",
+        "_updatedAt": "2026-10-19T02:30:54.173Z",
+        "fromEntityId": "be8274f6-7eff-48a3-ad3a-09da5b5a8dae",
+        "toEntityId": "9298575f-80b5-40bb-93b2-9226fa9c0164"
+      },
+      {
+        "_id": "405c970a-d3fd-47ea-9527-2ceb7e9dc8a1",
+        "_relationTypeKey": "has_project",
+        "_createdAt": "2026-10-19T02:30:54.178Z",
+        "_updatedAt": "2026-10-19T02:30:54.178Z",
+        "fromEntityId": "be8274f6-7eff-48a3-ad3a-09da5b5a8dae",
+        "toEntityId": "4d09f7bc-d486-4f3a-bb23-abaf7cec3fb1"
+      },
+      {
+        "_id": "3e155c71-c9a1-469b-9fba-58e7be947066",
+        "_relationTypeKey": "has_project",
+        "_createdAt": "2026-10-19T02:30:54.182Z",
+        "_updatedAt": "2026-10-19T02:30:54.182Z",
+        "fromEntityId": "f0597f0c-7c77-4b0d-b388-74a257c8fbd5",
+        "toEntityId": "cf02e8e2-fe4d-4ce5-9c80-a8fd99e14464"
+      }
+    ],
+    "has_status": [
+      {
+        "_id": "77e29dce-cbe2-416a-a4f9-d37656f110d6",
+        "_relationTypeKey": "has_status",
+        "_createdAt": "2026-10-19T02:30:54.246Z",
+        "_updatedAt": "2026-10-19T02:30:54.246Z",
+        "fromEntityId": "3ffac035-8325-40c6-8e32-15641cdd214e",
+        "toEntityId": "62f1f548-9ea9-415f-ad0a-e50ba620963d"
+      },
+      {
+        "_id": "0836a7a7-5824-491b-82c3-e3fea166036d",
+        "_relationTypeKey": "has_status",
+        "_createdAt": "2026-10-19T02:30:54.248Z",
+        "_updatedAt": "2026-10-19T02:30:54.248Z",
+        "fromEntityId": "779a7859-2a40-4461-8223-47be24968dfb",
+        "toEntityId": "62f1f548-9ea9-415f-ad0a-e50ba620963d"
+      },
+      {
+        "_id": "4e5f2c0f-fb36-4996-b9b0-bbca2de7dbd5",
+        "_relationTypeKey": "has_status",
+        "_createdAt": "2026-10-19T02:30:54.251Z",
+        "_updatedAt": "2026-10-19T02:30:54.251Z",
+        "fromEntityId": "0dab2f83-9a0f-41da-b1c1-43ca8662d45e",
+        "toEntityId": "c1c6914c-c772-48f1-8da7-543a8f145d9f"
+      },
+      {
+        "_id": "3d565e7c-46a7-4f95-bb44-caa94db37abf",
+        "_relationTypeKey": "has_status",
+        "_createdAt": "2026-10-19T02:30:54.253Z",
+        "_updatedAt": "2026-10-19T02:30:54.253Z",
+        "fromEntityId": "b2a2a689-065b-44b7-b6a5-093772ff2a7a",
+        "toEntityId": "c1c6914c-c772-48f1-8da7-543a8f145d9f"
+      },
+      {
+        "_id": "62057258-3b7c-41ef-82f4-10f5f3f4947c",
+        "_relationTypeKey": "has_status",
+        "_createdAt": "2026-10-19T02:30:54.255Z",
+        "_updatedAt": "2026-10-19T02:30:54.255Z",
+        "fromEntityId": "e27f4405-7f5e-4da5-9f00-38d99b06bae9",
+        "toEntityId": "c1c6914c-c772-48f1-8da7-543a8f145d9f"
+      },
+      {
+        "_id": "ee815892-883c-45db-b14a-b9769f4b9e68",
+        "_relationTypeKey": "has_status",
+        "_createdAt": "2026-10-19T02:30:54.258Z",
+        "_updatedAt": "2026-10-19T02:30:54.258Z",
+        "fromEntityId": "0f5b8d03-4154-430d-b9c6-f39e36b7baa4",
+        "toEntityId": "df5e8196-87ed-41ed-9d66-d3b20caedaa0"
+      },
+      {
+        "_id": "cf9a6bab-abde-49ba-92f6-796fbdeba60d",
+        "_relationTypeKey": "has_status",
+        "_createdAt": "2026-10-19T02:30:54.261Z",
+        "_updatedAt": "2026-10-19T02:30:54.261Z",
+        "fromEntityId": "9734d1cd-8785-4a0d-9ecf-adddcef5cf91",
+        "toEntityId": "62f1f548-9ea9-415f-ad0a-e50ba620963d"
+      },
+      {
+        "_id": "c9ace9e0-1d66-4a92-83d0-e3b93f417231",
+        "_relationTypeKey": "has_status",
+        "_createdAt": "2026-10-19T02:30:54.264Z",
+        "_updatedAt": "2026-10-19T02:30:54.264Z",
+        "fromEntityId": "826970c4-41ac-423d-9276-7d6548d6e17f",
+        "toEntityId": "c1c6914c-c772-48f1-8da7-543a8f145d9f"
+      },
+      {
+        "_id": "7cd12f69-d5ba-440b-b0e6-606e97692f83",
+        "_relationTypeKey": "has_status",
+        "_createdAt": "2026-10-19T02:30:54.268Z",
+        "_updatedAt": "2026-10-19T02:30:54.268Z",
+        "fromEntityId": "5b2f8906-c6dc-4068-a136-94cec79a03b5",
+        "toEntityId": "df5e8196-87ed-41ed-9d66-d3b20caedaa0"
+      }
+    ],
+    "has_subtask": [
+      {
+        "_id": "6c96dc44-c700-4029-aabe-6e814d9fed99",
+        "_relationTypeKey": "has_subtask",
+        "_createdAt": "2026-10-19T02:30:54.188Z",
+        "_updatedAt": "2026-10-19T02:30:54.188Z",
+        "fromEntityId": "3ffac035-8325-40c6-8e32-15641cdd214e",
+        "toEntityId": "779a7859-2a40-4461-8223-47be24968dfb"
+      },
+      {
+        "_id": "134d0a10-d5b9-4e2b-b20a-c71fcda5aa02",
+        "_relationTypeKey": "has_subtask",
+        "_createdAt": "2026-10-19T02:30:54.193Z",
+        "_updatedAt": "2026-10-19T02:30:54.193Z",
+        "fromEntityId": "779a7859-2a40-4461-8223-47be24968dfb",
+        "toEntityId": "0dab2f83-9a0f-41da-b1c1-43ca8662d45e"
+      },
+      {
+        "_id": "97dc6275-6a4f-4946-ae95-55077d7c9acd",
+        "_relationTypeKey": "has_subtask",
+        "_createdAt": "2026-10-19T02:30:54.198Z",
+        "_updatedAt": "2026-10-19T02:30:54.198Z",
+        "fromEntityId": "b2a2a689-065b-44b7-b6a5-093772ff2a7a",
+        "toEntityId": "e27f4405-7f5e-4da5-9f00-38d99b06bae9"
+      }
+    ],
+    "has_task": [
+      {
+        "_id": "bf6dd3e9-6fba-4805-852a-e06fb718e38e",
+        "_relationTypeKey": "has_task",
+        "_createdAt": "2026-10-19T02:30:54.185Z",
+        "_updatedAt": "2026-10-19T02:30:54.185Z",
+        "fromEntityId": "9298575f-80b5-40bb-93b2-9226fa9c0164",
+        "toEntityId": "3ffac035-8325-40c6-8e32-15641cdd214e",
+        "phase": "build"
+      },
+      {
+        "_id": "6d1c8bd9-de08-414d-afbf-172a91c22751",
+        "_relationTypeKey": "has_task",
+        "_createdAt": "2026-10-19T02:30:54.195Z",
+        "_updatedAt": "2026-10-19T02:30:54.195Z",
+        "fromEntityId": "9298575f-80b5-40bb-93b2-9226fa9c0164",
+        "toEntityId": "b2a2a689-065b-44b7-b6a5-093772ff2a7a",
+        "phase": "design"
+      },
+      {
+        "_id": "4771bf6d-f700-44b1-9d8a-757e1ce8c222",
+        "_relationTypeKey": "has_task",
+        "_createdAt": "2026-10-19T02:30:54.201Z",
+        "_updatedAt": "2026-10-19T02:30:54.201Z",
+        "fromEntityId": "9298575f-80b5-40bb-93b2-9226fa9c0164",
+        "toEntityId": "0f5b8d03-4154-430d-b9c6-f39e36b7baa4",
+        "phase": "test"
+      },
+      {
+        "_id": "bfbfa055-f6af-4bcd-8e70-432480546bf5",
+        "_relationTypeKey": "has_task",
+        "_createdAt": "2026-10-19T02:30:54.204Z",
+        "_updatedAt": "2026-10-19T02:30:54.204Z",
+        "fromEntityId": "4d09f7bc-d486-4f3a-bb23-abaf7cec3fb1",
+        "toEntityId": "9734d1cd-8785-4a0d-9ecf-adddcef5cf91",
+        "phase": "build"
+      },
+      {
+        "_id": "ad23fbbe-e8f3-4342-972d-75e402f529b9",
+        "_relationTypeKey": "has_task",
+        "_createdAt": "2026-10-19T02:30:54.208Z",
+        "_updatedAt": "2026-10-19T02:30:54.208Z",
+        "fromEntityId": "4d09f7bc-d486-4f3a-bb23-abaf7cec3fb1",
+        "toEntityId": "826970c4-41ac-423d-9276-7d6548d6e17f",
+        "phase": "design"
+      },
+      {
+        "_id": "801c5d03-83fd-482f-a6e0-514859f88aa0",
+        "_relationTypeKey": "has_task",
+        "_createdAt": "2026-10-19T02:30:54.210Z",
+        "_updatedAt": "2026-10-19T02:30:54.210Z",
+        "fromEntityId": "cf02e8e2-fe4d-4ce5-9c80-a8fd99e14464",
+        "toEntityId": "5b2f8906-c6dc-4068-a136-94cec79a03b5",
+        "phase": "test"
+      }
+    ],
+    "manages": [
+      {
+        "_id": "e5c8b025-f2be-4935-8056-faaf09f8191f",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-19T02:30:54.220Z",
+        "_updatedAt": "2026-10-19T02:30:54.220Z",
+        "fromEntityId": "ba87608f-2ae4-46c3-ba8a-2993d2b7d57e",
+        "toEntityId": "2bba8446-dd9f-44a8-9933-0cff58ad8c3f"
+      },
+      {
+        "_id": "5a46b0cb-f0f5-4cfe-b030-83353e288aab",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-19T02:30:54.222Z",
+        "_updatedAt": "2026-10-19T02:30:54.222Z",
+        "fromEntityId": "ba87608f-2ae4-46c3-ba8a-2993d2b7d57e",
+        "toEntityId": "25d385a5-9bb4-4d82-9f00-2704fa24bab6"
+      },
+      {
+        "_id": "5d16d8bb-4bdd-4549-b9cf-33108bbbfab9",
+        "_relationTypeKey": "manages",
+        "_createdAt": "2026-10-19T02:30:54.224Z",
+        "_updatedAt": "2026-10-19T02:30:54.224Z",
+        "fromEntityId": "ba87608f-2ae4-46c3-ba8a-2993d2b7d57e",
+        "toEntityId": "65a02a6c-a51f-4dde-aaf6-166b00795088"
+      }
+    ],
+    "mentors": [
+      {
+        "_id": "9be84983-bec5-4c4c-ba2b-916c230de359",
+        "_relationTypeKey": "mentors",
+        "_createdAt": "2026-10-19T02:30:54.270Z",
+        "_updatedAt": "2026-10-19T02:30:54.270Z",
+        "fromEntityId": "2bba8446-dd9f-44a8-9933-0cff58ad8c3f",
+        "toEntityId": "25d385a5-9bb4-4d82-9f00-2704fa24bab6"
+      }
+    ]
+  }
+}

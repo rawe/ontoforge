@@ -13,6 +13,7 @@ import type {
   SearchIndexRecord,
 } from "../../src/core/ports.js";
 import { deriveManagedIndices, type SearchIndexSchema } from "../../src/core/searchIndex.js";
+import { createMockAnchorStore, type MockAnchorStore } from "../mockAnchorStore.js";
 import { createMockNavigatorStore, type MockNavigatorStore } from "../mockNavigatorStore.js";
 import { createMockSearchIndexStore, type MockSearchIndexStore } from "../mockSearchIndexStore.js";
 
@@ -173,22 +174,30 @@ export function makeRelation(
 
 /** Every port method as a mock — completeness is compiler-enforced. The
  * one non-method member, the store's ontology binding, stays a value; the
- * search-index and navigator stores it hands out are mocks too (`indices`,
- * `navigatorStore`). */
+ * search-index, navigator and anchor stores it hands out are mocks too
+ * (`indices`, `navigatorStore`, `anchorStore`). */
 export type MockRuntimeStore = {
   [K in Exclude<keyof RuntimeStore, "ontologyKey">]: Mock;
-} & { ontologyKey: string; indices: MockSearchIndexStore; navigatorStore: MockNavigatorStore };
+} & {
+  ontologyKey: string;
+  indices: MockSearchIndexStore;
+  navigatorStore: MockNavigatorStore;
+  anchorStore: MockAnchorStore;
+};
 
 /** A mock store whose reads default to "nothing stored". */
 export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeStore {
   const indices = createMockSearchIndexStore(ontologyKey);
   const navigatorStore = createMockNavigatorStore();
+  const anchorStore = createMockAnchorStore();
   return {
     ontologyKey,
     indices,
     navigatorStore,
+    anchorStore,
     searchIndices: vi.fn(() => indices),
     navigators: vi.fn(() => navigatorStore),
+    anchors: vi.fn(() => anchorStore),
     supportsKeywordRanking: vi.fn(() => false),
     supportsSearchPathConditions: vi.fn(() => false),
     getFullSchemaWithLensInclusions: vi.fn(async () => null),
@@ -210,6 +219,9 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     getNeighbors: vi.fn(async () => []),
     distinctEntityValues: vi.fn(async () => []),
     executeOql: vi.fn(async () => [[], []]),
+    getAncestors: vi.fn(async () => []),
+    hasChildren: vi.fn(async () => false),
+    createEntityWithParent: vi.fn(),
   };
 }
 

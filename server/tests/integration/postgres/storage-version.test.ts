@@ -8,7 +8,9 @@
  * table set up, and the retired search storage dropped. Storage of the
  * 6.x line (version 3) is produced by giving the assistant tables their
  * 6.x names back; the 7.0 step names them after their kind again, every
- * agent and retriever kept. Storage at version 5 is produced by putting
+ * agent and retriever kept. Storage at version 6 is produced by dropping
+ * the parent end of relation types and the anchor table; step 7 adds them
+ * back, every row kept. Storage at version 5 is produced by putting
  * the `assistant` table of step 5 in place of the navigator table; the
  * step to version 6 names it after its kind, every navigator kept. Storage
  * at version 4 has neither table; the steps to 5 and 6 create it. Storage at
@@ -116,9 +118,17 @@ async function makeVersion5Layout(namespace: string): Promise<void> {
 )`);
 }
 
+/** Storage at version 6: no parent end on relation types, no anchor
+ * table. Records no version — every older layout builds on it. */
+async function makeVersion6Layout(namespace: string): Promise<void> {
+  await runQuery(`ALTER TABLE ${namespace}.relation_type DROP COLUMN parent`);
+  await runQuery(`DROP TABLE ${namespace}.anchor`);
+}
+
 /** Storage at version 4: no table for navigators. Records no version —
  * `makeVersion3Layout` builds on it. */
 async function makeVersion4Layout(namespace: string): Promise<void> {
+  await makeVersion6Layout(namespace);
   await runQuery(`DROP TABLE ${namespace}.assistant_navigator`);
 }
 
@@ -345,7 +355,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 1 to 6 (2 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 1 to 7 (2 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     expect([await instances("ont_legacy"), await instances("ont_legacy_de")]).toEqual(before);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
@@ -467,7 +477,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 3 to 6 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 3 to 7 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
@@ -483,7 +493,6 @@ describe("PostgreSQL storage version", () => {
   });
 
   it("upgrades 7.0 storage (version 4) by creating the navigator table, keeping every retriever", async () => {
-    expect(STORAGE_VERSION).toBe(6);
     await getOntologyRegistry().createOntology(ID_A, "older", null, null);
     const lensId = randomUUID();
     await withTransaction(async (querier) => {
@@ -501,7 +510,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 4 to 6 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 4 to 7 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
@@ -537,7 +546,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 5 to 6 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 5 to 7 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     expect((await runQuery(`SELECT to_regclass('ont_older.assistant') AS t`)).rows).toEqual([{ t: null }]);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
@@ -554,6 +563,70 @@ describe("PostgreSQL storage version", () => {
       { navigatorId: randomUUID(), key: "walker", name: "Again", description: null, configVersion: 1, config: {} },
       true,
     )).rejects.toThrow("Navigator 'walker' already exists in the target lens");
+  });
+
+  it("upgrades version-6 storage by adding the parent end and the anchor table, keeping every row", async () => {
+    expect(STORAGE_VERSION).toBe(7);
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
+    await makeVersion6Layout("ont_older");
+    const [acme, p1, p2] = [randomUUID(), randomUUID(), randomUUID()];
+    await withTransaction(async (querier) => {
+      for (const key of ["customer", "project"]) {
+        const typeId = randomUUID();
+        await querier.query(
+          `INSERT INTO ont_older.entity_type (entity_type_id, key, display_name, name_property)
+           VALUES ($1, $2, $2, 'name')`,
+          [typeId, key],
+        );
+        await querier.query(
+          `INSERT INTO ont_older.property_def (property_id, entity_type_id, key, display_name, data_type, required)
+           VALUES ($1, $2, 'name', 'Name', 'string', false)`,
+          [randomUUID(), typeId],
+        );
+      }
+      await querier.query(
+        `INSERT INTO ont_older.relation_type
+           (relation_type_id, key, display_name, description, source_entity_type_key, target_entity_type_key)
+         VALUES ($1, 'has_project', 'Has Project', 'Ownership', 'customer', 'project')`,
+        [randomUUID()],
+      );
+      await querier.query(
+        `INSERT INTO ont_older.entity (id, type_key, props)
+         VALUES ($1, 'customer', '{"name": "ACME"}'), ($2, 'project', '{"name": "P1"}'),
+                ($3, 'project', '{"name": "P2"}')`,
+        [acme, p1, p2],
+      );
+      await querier.query(
+        `INSERT INTO ont_older.relation (id, type_key, from_id, to_id, props)
+         VALUES ($1, 'has_project', $3, $4, '{}'), ($2, 'has_project', $3, $5, '{}')`,
+        [randomUUID(), randomUUID(), acme, p1, p2],
+      );
+    });
+    await recordVersion(6);
+    const relationTypes = () =>
+      runQuery(
+        `SELECT relation_type_id, key, display_name, description, source_entity_type_key,
+                target_entity_type_key, created_at, updated_at
+           FROM ont_older.relation_type ORDER BY key`,
+      );
+    const before = { relationTypes: (await relationTypes()).rows, instances: await instances("ont_older") };
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await initSchema();
+
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 6 to 7 (1 ontologies).");
+    expect(await recordedVersion()).toBe(STORAGE_VERSION);
+    await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
+    expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
+    expect({ relationTypes: (await relationTypes()).rows, instances: await instances("ont_older") }).toEqual(before);
+    expect((await runQuery(`SELECT count(*)::int AS n FROM ont_older.anchor`)).rows).toEqual([{ n: 0 }]);
+    // The kept relation type reads through the port as an ordinary one,
+    // and takes a parent end.
+    const modeling = await getModelingStore("older");
+    const kept = (await modeling.getRelationTypeByKey("has_project"))!;
+    expect(kept.parent).toBeNull();
+    const flagged = await modeling.setRelationTypeParent(kept.relationTypeId as string, "source");
+    expect(flagged).toMatchObject({ row: { parent: "source" } });
   });
 
   it("upgrades version-2 storage to exactly the layout of a fresh ontology", async () => {

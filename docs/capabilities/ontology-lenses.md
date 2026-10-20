@@ -168,7 +168,7 @@ above.
 ## The lens/full-schema asymmetry
 
 A lens governs what a caller may name. It does not govern what the ontology
-knows. Three operations deliberately consult the full schema instead of the lens,
+knows. Four operations deliberately consult the full schema instead of the lens,
 and getting any of them wrong produces data that is valid under one lens and
 broken under another:
 
@@ -179,6 +179,15 @@ broken under another:
 - **Relation endpoint checks use the full schema.** The source and target entity
   types a new relation is validated against are the type's real endpoints, not
   whatever the lens exposes.
+- **Hierarchies follow the full schema.** The [parent rules](instance-data.md#the-parent-rules),
+  the has-children check of a [delete](instance-data.md#leaf-only-deletes), an
+  [anchor's hierarchy](anchors.md#the-anchors-hierarchy) and whether an entity is covered
+  all follow every parent relation of the ontology, those the lens hides included. A
+  narrow lens therefore cannot give an entity a second parent, close a cycle through a
+  relation it hides, or delete a parent whose children it cannot see. The lens cuts only
+  what is shown: a [path](instance-data.md#the-path-read) starts below the nearest
+  ancestor it hides, and on an anchored mount a hierarchy type into which it shows no
+  parent relation cannot be created.
 - **Search entries are composed from the full schema's properties.** A scoped
   lens's ranking can therefore be driven by text it cannot see — a result may be
   highly ranked for reasons invisible through that lens. This is inherent to

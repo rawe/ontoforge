@@ -53,7 +53,7 @@ import type { RetrieverRecord, RetrieverWrite } from "./retriever.js";
 import { settings } from "../config.js";
 import { NotFoundError } from "./exceptions.js";
 import type { ValidatedQuery } from "./oql/index.js";
-import type { NewPropertyDef, PropertyDef, TypeKind } from "./schemas.js";
+import type { NewPropertyDef, ParentEnd, PropertyDef, TypeKind } from "./schemas.js";
 import type {
   SearchIndexDefinition,
   SearchIndexKind,
@@ -153,6 +153,24 @@ export type FilterCondition =
   | PathExistenceCondition
   | RelationExistenceCondition;
 
+/** A parent rule the stored relations can break: an entity with more
+ * than one parent relation, or an entity on a cycle (a self-loop
+ * included). */
+export type ParentRule = "two_parents" | "cycle";
+
+/** The violators of one parent rule: their count and the first five,
+ * ordered by type and id. */
+export interface ParentViolation {
+  rule: ParentRule;
+  count: number;
+  entities: { type: string; id: string }[];
+}
+
+/** A flag write's outcome: the relation type row written, or the
+ * violations that refused it, with nothing written. Only rules with
+ * violators appear, `two_parents` first. */
+export type ParentFlagWrite = { row: Row } | { violations: ParentViolation[] };
+
 /**
  * The modeling side of the persistence port: schema persistence.
  *
@@ -232,6 +250,12 @@ export interface ModelingStore {
   // Relation types
   // ------------------------------------------------------------------
 
+  /** Relation type rows carry `parent`, the parent end, or null for an
+   * ordinary relation type. With a parent end, the create checks the
+   * relation rows already stored under the key (deleting a relation type
+   * keeps its instances) in its own transaction, before the insert: any
+   * violator of the parent rules, read across every parent relation,
+   * refuses it and nothing is written. */
   createRelationType(
     relationTypeId: string,
     key: string,
@@ -239,7 +263,8 @@ export interface ModelingStore {
     description: string | null,
     sourceEntityTypeKey: string,
     targetEntityTypeKey: string,
-  ): Promise<Row>;
+    parent: ParentEnd | null,
+  ): Promise<ParentFlagWrite>;
 
   listRelationTypes(): Promise<Row[]>;
 
@@ -247,11 +272,30 @@ export interface ModelingStore {
 
   getRelationTypeByKey(key: string): Promise<Row | null>;
 
+  /** Null leaves a field unchanged. The parent end is written by
+   * `setRelationTypeParent`. */
   updateRelationType(
     relationTypeId: string,
     displayName: string | null,
     description: string | null,
   ): Promise<Row | null>;
+
+  /** The flag write. Setting or flipping the parent end counts, in one
+   * transaction, the violators of the parent rules across every parent
+   * relation under the new reading, then updates, or refuses and writes
+   * nothing. Null clears the flag and is never refused. Null result: no
+   * such relation type. */
+  setRelationTypeParent(
+    relationTypeId: string,
+    parent: ParentEnd | null,
+  ): Promise<ParentFlagWrite | null>;
+
+  /** The violators of the parent rules in the stored relation rows, read
+   * across the stored parent relations together with `readings`
+   * (relation type key → parent end; a reading replaces the stored flag
+   * of its key). Empty when there are none. Import's validation pre-pass
+   * runs it before any write. */
+  findParentViolations(readings: Record<string, ParentEnd>): Promise<ParentViolation[]>;
 
   deleteRelationType(relationTypeId: string): Promise<boolean>;
 
@@ -500,6 +544,9 @@ export interface RuntimeStore {
   /** The navigator store of the same ontology. */
   navigators(): NavigatorStore;
 
+  /** The anchor store of the same ontology. */
+  anchors(): AnchorStore;
+
   // ------------------------------------------------------------------
   // Entity instances
   //
@@ -639,6 +686,55 @@ export interface RuntimeStore {
     limit: number,
     propertyDefsByType: Record<string, Record<string, PropertyDef>>,
   ): Promise<Row[]>;
+
+  // ------------------------------------------------------------------
+  // Hierarchy
+  //
+  // Both reads take the parent relations to follow as `readings`
+  // (relation type key → parent end); the service passes every parent
+  // relation of the full schema. Empty readings answer without touching
+  // storage.
+  // ------------------------------------------------------------------
+
+  /** The ancestor walk: the entity's parent, its parent's parent and so
+   * on up to a root, nearest first, as `{type, id}`. The entity itself is
+   * never in it. One recursive statement with a cycle guard, so it ends on
+   * any data; each ancestor appears once, at its nearest level. On data
+   * that breaks the parent rules (the accepted race), a level can hold
+   * more than one entity, ordered by type and id. Empty for a root or an
+   * unknown id. */
+  getAncestors(
+    entityId: string,
+    readings: Record<string, ParentEnd>,
+  ): Promise<{ type: string; id: string }[]>;
+
+  /** The children lookup: whether the entity is the parent end of at
+   * least one relation of `readings`. */
+  hasChildren(entityId: string, readings: Record<string, ParentEnd>): Promise<boolean>;
+
+  /** The create with a parent relation: the entity, then the relation
+   * that names its parent, in one transaction, each with its own search
+   * work as `createEntity` and `createRelation` apply it. The service has
+   * validated both; the relation's FK holds the parent, so a parent that
+   * vanished meanwhile fails the whole write and nothing is stored. */
+  createEntityWithParent(
+    entity: {
+      entityTypeKey: string;
+      entityId: string;
+      properties: Row;
+      propertyDefs: Record<string, PropertyDef>;
+      search?: SearchWritePlan | null;
+    },
+    relation: {
+      relationTypeKey: string;
+      relationId: string;
+      fromEntityId: string;
+      toEntityId: string;
+      properties: Row;
+      propertyDefs: Record<string, PropertyDef>;
+      search?: SearchWritePlan | null;
+    },
+  ): Promise<{ entity: Row; relation: Row }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -887,6 +983,40 @@ export interface NavigatorStore {
 
   /** False when the lens has no navigator of this key. */
   deleteNavigator(lensId: string, key: string): Promise<boolean>;
+}
+
+/** The entity an anchor points at: its type's key and its id. */
+export interface AnchorEntity {
+  type: string;
+  id: string;
+}
+
+/** One stored anchor, read with a join to `entity`. */
+export interface AnchorRecord {
+  key: string;
+  /** Null when unanchored. */
+  entity: AnchorEntity | null;
+  /** Whether an entity of that id and type is stored; false when unanchored. */
+  entityFound: boolean;
+}
+
+/**
+ * Anchors: named pointers at one entity each, operational state of the
+ * ontology beside its instances. The store keeps the pointer as given and
+ * never checks it; the anchor service decides the state.
+ */
+export interface AnchorStore {
+  /** Every anchor, by key. */
+  listAnchors(): Promise<AnchorRecord[]>;
+
+  getAnchor(key: string): Promise<AnchorRecord | null>;
+
+  /** Create the anchor, or re-point it (null unanchors); the record as
+   * written, read with the join. */
+  saveAnchor(key: string, entity: AnchorEntity | null): Promise<AnchorRecord>;
+
+  /** False when no anchor has this key. */
+  deleteAnchor(key: string): Promise<boolean>;
 }
 
 export interface SearchIndexStore {

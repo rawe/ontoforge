@@ -74,6 +74,8 @@ function between(a: Box, b: Box, offset: number, t: number) {
     const e = borderPoint(b, ca)
     return {
       path: `M ${s.x} ${s.y} L ${e.x} ${e.y}`,
+      start: s,
+      end: e,
       label: { x: s.x + (e.x - s.x) * t, y: s.y + (e.y - s.y) * t },
     }
   }
@@ -90,6 +92,8 @@ function between(a: Box, b: Box, offset: number, t: number) {
   const u = 1 - t
   return {
     path: `M ${s.x} ${s.y} Q ${cp.x} ${cp.y} ${e.x} ${e.y}`,
+    start: s,
+    end: e,
     label: {
       x: u * u * s.x + 2 * u * t * cp.x + t * t * e.x,
       y: u * u * s.y + 2 * u * t * cp.y + t * t * e.y,
@@ -108,6 +112,8 @@ function selfLoop(b: Box, k: number) {
   const c2 = { x: e.x - 44 - k * 10, y: b.y - rise }
   return {
     path: `M ${s.x} ${s.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${e.x} ${e.y}`,
+    start: s,
+    end: e,
     label: {
       x: 0.125 * s.x + 0.375 * c1.x + 0.375 * c2.x + 0.125 * e.x,
       y: 0.125 * s.y + 0.375 * c1.y + 0.375 * c2.y + 0.125 * e.y,
@@ -115,14 +121,17 @@ function selfLoop(b: Box, k: number) {
   }
 }
 
-/** SVG path and label point of an edge; `t` places the label (ignored on loops). */
+/**
+ * SVG path, its two end points (at the source and the target node) and the
+ * label point of an edge; `t` places the label (ignored on loops).
+ */
 export function edgeGeometry(
   source: Box,
   target: Box,
   self: boolean,
   shape: EdgeShape,
   t = 0.5,
-): { path: string; label: XY } {
+): { path: string; start: XY; end: XY; label: XY } {
   return self ? selfLoop(source, shape.loopIndex) : between(source, target, shape.offset, t)
 }
 

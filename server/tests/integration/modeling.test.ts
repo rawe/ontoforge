@@ -11,11 +11,13 @@
  * the removed `/api/model` tree answering 404.
  */
 
+import { randomUUID } from "node:crypto";
+
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
-import { closeStores, getModelingStore, initStores } from "../../src/core/ports.js";
+import { closeStores, getModelingStore, getRuntimeStore, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
 
 let app: FastifyInstance;
@@ -174,6 +176,77 @@ describe("relation type round trip", () => {
     expect(deleted.statusCode).toBe(204);
   });
 
+  it("the parent end: set on create, kept when omitted, cleared by null, shown by the runtime schema", async () => {
+    await createEntityType("customer", "Customer");
+    await createEntityType("project", "Project");
+    const lens = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/test_ont/model/lenses",
+      payload: { key: "all", name: "All" },
+    });
+    expect(lens.statusCode, lens.body).toBe(201);
+    const runtimeParent = async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/ontologies/test_ont/runtime/lenses/all/schema/relation-types/has_project",
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      return res.json().parent as unknown;
+    };
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/test_ont/model/relation-types",
+      payload: {
+        key: "has_project",
+        displayName: "Has Project",
+        sourceEntityTypeKey: "customer",
+        targetEntityTypeKey: "project",
+        parent: "source",
+      },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const id = created.json().relationTypeId as string;
+    expect(created.json().parent).toBe("source");
+    const url = `/api/ontologies/test_ont/model/relation-types/${id}`;
+    expect((await app.inject({ method: "GET", url })).json().parent).toBe("source");
+    expect(await runtimeParent()).toBe("source");
+
+    // Omitted: unchanged.
+    const renamed = await app.inject({ method: "PUT", url, payload: { displayName: "Owns" } });
+    expect(renamed.json()).toMatchObject({ displayName: "Owns", parent: "source" });
+
+    // Flipped, then cleared by an explicit null; each change reaches the
+    // runtime schema at once.
+    const flipped = await app.inject({ method: "PUT", url, payload: { parent: "target" } });
+    expect(flipped.json().parent).toBe("target");
+    expect(await runtimeParent()).toBe("target");
+    const cleared = await app.inject({ method: "PUT", url, payload: { parent: null } });
+    expect(cleared.json()).toMatchObject({ displayName: "Owns", parent: null });
+    expect(await runtimeParent()).toBeNull();
+    const list = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/model/relation-types" });
+    expect(list.json()[0].parent).toBeNull();
+
+    const invalid = await app.inject({ method: "PUT", url, payload: { parent: "middle" } });
+    expect(invalid.statusCode).toBe(422);
+  });
+
+  it("a relation type created without a parent end reads parent null", async () => {
+    await createEntityType("person", "Person");
+    await createEntityType("company", "Company");
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/test_ont/model/relation-types",
+      payload: {
+        key: "works_for",
+        displayName: "Works For",
+        sourceEntityTypeKey: "person",
+        targetEntityTypeKey: "company",
+      },
+    });
+    expect(created.json().parent).toBeNull();
+  });
+
   it("creation requires both endpoints to exist", async () => {
     await createEntityType("person", "Person");
     const res = await app.inject({
@@ -233,6 +306,156 @@ describe("relation type round trip", () => {
       },
     });
     expect(res.statusCode).toBe(201);
+  });
+});
+
+describe("the parent flag's data check", () => {
+  type Row = Record<string, unknown>;
+  const MODEL = "/api/ontologies/test_ont/model";
+  const RUNTIME = "/api/ontologies/test_ont/runtime/lenses/all";
+
+  beforeEach(async () => {
+    const lens = await app.inject({ method: "POST", url: `${MODEL}/lenses`, payload: { key: "all", name: "All" } });
+    expect(lens.statusCode, lens.body).toBe(201);
+  });
+
+  async function relationType(key: string, from: string, to: string, parent?: string): Promise<string> {
+    const res = await app.inject({
+      method: "POST",
+      url: `${MODEL}/relation-types`,
+      payload: { key, displayName: key, sourceEntityTypeKey: from, targetEntityTypeKey: to, parent },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    return res.json().relationTypeId as string;
+  }
+
+  async function entity(type: string, name: string): Promise<string> {
+    const res = await app.inject({ method: "POST", url: `${RUNTIME}/entities/${type}`, payload: { name } });
+    expect(res.statusCode, res.body).toBe(201);
+    return res.json()._id as string;
+  }
+
+  async function relate(type: string, fromEntityId: string, toEntityId: string): Promise<void> {
+    const res = await app.inject({
+      method: "POST",
+      url: `${RUNTIME}/relations/${type}`,
+      payload: { fromEntityId, toEntityId },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+  }
+
+  const setParent = (id: string, parent: string | null) =>
+    app.inject({ method: "PUT", url: `${MODEL}/relation-types/${id}`, payload: { parent } });
+
+  const storedParent = async (id: string): Promise<unknown> =>
+    (await app.inject({ method: "GET", url: `${MODEL}/relation-types/${id}` })).json().parent;
+
+  it("flipping onto a customer of two projects answers 409 two_parents; the flag is unchanged", async () => {
+    await createEntityType("customer", "Customer");
+    await createEntityType("project", "Project");
+    const hasProject = await relationType("has_project", "customer", "project", "source");
+    const acme = await entity("customer", "ACME");
+    await relate("has_project", acme, await entity("project", "P1"));
+    await relate("has_project", acme, await entity("project", "P2"));
+
+    const res = await setParent(hasProject, "target");
+    expect(res.statusCode, res.body).toBe(409);
+    expect(res.json().error.code).toBe("RESOURCE_CONFLICT");
+    expect(res.json().error.details).toEqual({
+      violations: [{ rule: "two_parents", count: 1, entities: [{ type: "customer", id: acme }] }],
+    });
+    expect(await storedParent(hasProject)).toBe("source");
+    // The runtime schema still reads the stored flag.
+    const runtime = await app.inject({ method: "GET", url: `${RUNTIME}/schema/relation-types/has_project` });
+    expect(runtime.json().parent).toBe("source");
+  });
+
+  it("setting the flag on clean data works; unsetting always works", async () => {
+    await createEntityType("customer", "Customer");
+    await createEntityType("project", "Project");
+    const hasProject = await relationType("has_project", "customer", "project");
+    const acme = await entity("customer", "ACME");
+    const p1 = await entity("project", "P1");
+    await relate("has_project", acme, p1);
+    await relate("has_project", acme, await entity("project", "P2"));
+
+    const set = await setParent(hasProject, "source");
+    expect(set.statusCode, set.body).toBe(200);
+    expect(set.json().parent).toBe("source");
+
+    // A relation written past the service, as the accepted race (A3) can
+    // leave one: P1 now has two parents. Unsetting is still allowed.
+    const runtimeStore = await getRuntimeStore("test_ont");
+    const beta = await entity("customer", "BETA");
+    await runtimeStore.createRelation("has_project", randomUUID(), beta, p1, {}, {});
+    const unset = await setParent(hasProject, null);
+    expect(unset.statusCode, unset.body).toBe(200);
+    expect(unset.json().parent).toBeNull();
+  });
+
+  it("counts cycles across every parent relation, a self-loop included, five entities at most", async () => {
+    await createEntityType("task", "Task");
+    await relationType("has_subtask", "task", "task", "source");
+    const partOf = await relationType("part_of", "task", "task");
+    const a = await entity("task", "A");
+    const b = await entity("task", "B");
+    const c = await entity("task", "C");
+    // A is B's parent through has_subtask; read as target, A part_of B
+    // makes B A's parent, and C part_of C is a self-loop.
+    await relate("has_subtask", a, b);
+    await relate("part_of", a, b);
+    await relate("part_of", c, c);
+    // Six more tasks with two parent relations each under the new reading.
+    const roots = [await entity("task", "R1"), await entity("task", "R2")];
+    const children: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const child = await entity("task", `X${i}`);
+      children.push(child);
+      await relate("part_of", child, roots[0]!);
+      await relate("part_of", child, roots[1]!);
+    }
+
+    const res = await setParent(partOf, "target");
+    expect(res.statusCode, res.body).toBe(409);
+    const violations = res.json().error.details.violations as Row[];
+    expect(violations.map((v) => [v.rule, v.count])).toEqual([["two_parents", 6], ["cycle", 3]]);
+    const ids = (v: Row) => (v.entities as Row[]).map((e) => e.id);
+    expect(ids(violations[0]!)).toEqual([...children].sort().slice(0, 5));
+    expect(ids(violations[1]!)).toEqual([a, b, c].sort());
+    expect((violations[1]!.entities as Row[]).every((e) => e.type === "task")).toBe(true);
+    expect(await storedParent(partOf)).toBeNull();
+  });
+
+  it("create with the flag over relation rows kept from a deleted type answers 409; nothing is created", async () => {
+    await createEntityType("task", "Task");
+    await createEntityType("person", "Person");
+    const assignedTo = await relationType("assigned_to", "task", "person");
+    const task = await entity("task", "T3");
+    await relate("assigned_to", task, await entity("person", "Ana"));
+    await relate("assigned_to", task, await entity("person", "Ben"));
+    const deleted = await app.inject({ method: "DELETE", url: `${MODEL}/relation-types/${assignedTo}` });
+    expect(deleted.statusCode, deleted.body).toBe(204);
+
+    const res = await app.inject({
+      method: "POST",
+      url: `${MODEL}/relation-types`,
+      payload: {
+        key: "assigned_to",
+        displayName: "Assigned To",
+        sourceEntityTypeKey: "task",
+        targetEntityTypeKey: "person",
+        parent: "target",
+      },
+    });
+    expect(res.statusCode, res.body).toBe(409);
+    expect(res.json().error.details).toEqual({
+      violations: [{ rule: "two_parents", count: 1, entities: [{ type: "task", id: task }] }],
+    });
+    const list = await app.inject({ method: "GET", url: `${MODEL}/relation-types` });
+    expect(list.json()).toEqual([]);
+
+    // Read with the task as the parent, the same rows are clean.
+    await relationType("assigned_to", "task", "person", "source");
   });
 });
 

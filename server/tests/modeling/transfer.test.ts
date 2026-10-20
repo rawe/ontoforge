@@ -1123,6 +1123,62 @@ describe("import conflicts", () => {
   });
 });
 
+describe("the parent end", () => {
+  const flagged = (parent?: string | null): Record<string, unknown> => {
+    const [rt] = importPayload().relationTypes as Record<string, unknown>[];
+    return importPayload({ relationTypes: [parent === undefined ? rt : { ...rt, parent }] });
+  };
+
+  it("export carries each relation type's parent end, null when unset", async () => {
+    const [rt] = FULL_SCHEMA.relationTypes;
+    holder.store.getFullSchema.mockResolvedValue({
+      ...FULL_SCHEMA,
+      relationTypes: [{ ...rt, parent: "target" }, { ...rt, key: "knows", parent: null }],
+    });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().relationTypes.map((r: { parent: unknown }) => r.parent)).toEqual(["target", null]);
+  });
+
+  it("import creates the relation type with its parent end after checking the stored relations", async () => {
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport(flagged("target"));
+    expect(res.statusCode, res.body).toBe(201);
+    expect(holder.store.findParentViolations).toHaveBeenCalledWith({ works_for: "target" });
+    expect(holder.store.createRelationType.mock.calls[0]![6]).toBe("target");
+  });
+
+  it.each([["absent", undefined], ["null", null]])(
+    "import of a payload whose parent is %s creates an ordinary relation type, unchecked",
+    async (_case, parent) => {
+      holder.store.createLens.mockResolvedValue(LENS_DATA);
+      const res = await postImport(flagged(parent));
+      expect(res.statusCode, res.body).toBe(201);
+      expect(holder.store.findParentViolations).not.toHaveBeenCalled();
+      expect(holder.store.createRelationType.mock.calls[0]![6]).toBeNull();
+    },
+  );
+
+  it("violators in the stored relations answer 409 with the violation list; nothing is written", async () => {
+    const violations = [{ rule: "two_parents", count: 1, entities: [{ type: "person", id: "p-1" }] }];
+    holder.store.findParentViolations.mockResolvedValue(violations);
+    const res = await postImport(flagged("target"));
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe("RESOURCE_CONFLICT");
+    expect(res.json().error.details).toEqual({ violations });
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(holder.store.createRelationType).not.toHaveBeenCalled();
+    expect(holder.store.createLens).not.toHaveBeenCalled();
+  });
+
+  it("rejects a parent end other than source or target with 422; nothing is written", async () => {
+    const res = await postImport(flagged("middle"));
+    expect(res.statusCode).toBe(422);
+    expect(holder.store.findParentViolations).not.toHaveBeenCalled();
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Import — validations (collected, nothing written)
 // ---------------------------------------------------------------------------

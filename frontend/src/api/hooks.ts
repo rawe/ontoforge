@@ -103,6 +103,23 @@ export function useRuntimeSchema(
   })
 }
 
+/** The ontology's anchors (lensless): the Anchors page, its sidebar count, the entity chip. */
+export function useAnchors(ontologyKey: string | undefined) {
+  return useQuery({
+    queryKey: qk.anchors(ontologyKey ?? ''),
+    queryFn: () => runtime.listAnchors(ontologyKey!),
+    enabled: ontologyKey !== undefined && ontologyKey !== '',
+  })
+}
+
+/** One anchor seen through a lens: its anchored mount's root, with name and path. */
+export function useAnchorView(ontologyKey: string, lensKey: string, anchorKey: string) {
+  return useQuery({
+    queryKey: qk.anchors(ontologyKey, lensKey, anchorKey),
+    queryFn: () => runtime.getAnchorView(ontologyKey, lensKey, anchorKey),
+  })
+}
+
 /**
  * Search-index inclusions of a lens (modeling API). Separate from
  * `useLensScope`: index inclusions never make a lens scoped. The key sits

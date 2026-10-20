@@ -35,7 +35,7 @@ export interface Target {
  * The lens the Workbench opens when the address names none (see `pickLens`);
  * null while the lenses, or the scopes that decide between them, still load.
  */
-function useTargetLens(ontologyKey: string): { lenses: Lens[] | undefined; lens: Lens | null } {
+export function useTargetLens(ontologyKey: string): { lenses: Lens[] | undefined; lens: Lens | null } {
   const { data: lenses } = useLenses(ontologyKey)
   const remembered = readString(storageKeys.lastLens(ontologyKey))
   const rememberedValid = lenses?.some((l) => l.key === remembered) ?? false

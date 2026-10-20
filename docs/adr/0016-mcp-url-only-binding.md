@@ -5,14 +5,15 @@ Rule: [Interfaces](../decisions.md#interfaces)
 ## Context
 
 With many isolated ontologies in one server, both MCP servers need a binding: which
-ontology, and for runtime which lens, a connected client works in. The binding channel
-decides whether isolation holds by structure or has to be checked.
+ontology, and for runtime which lens and, optionally, which anchor, a connected client
+works in. The binding channel decides whether isolation holds by structure or has to be
+checked.
 
 ## Rejected
 
 - **A per-tool ontology parameter.** Any connected client could reach and enumerate every
   ontology, which breaks isolation outright, and a future ACL would have nothing to
-  anchor on.
+  bind to.
 - **Header or environment fallback channels beside the URL.** That is three places to
   check for one fact; REST does not use header addressing either; and with per-ontology
   lens keys an environment default is not well defined.
@@ -24,3 +25,5 @@ decides whether isolation holds by structure or has to be checked.
   the client knows least.
 - **Implicit creation when a mount URL names a missing ontology.** A typo in a client
   config would silently create a junk ontology.
+- **Implicit creation when a mount URL names a missing anchor.** A typo in a client config
+  would silently create an anchor that holds nothing.

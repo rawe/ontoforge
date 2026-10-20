@@ -11,6 +11,8 @@
  * onto a node, itself or empty canvas. A naming popover asks for the names.
  * The outline search rings matching nodes and dims the rest; focus mode (`F`)
  * keeps the selection and its one-hop neighbours and dims everything else.
+ * The Hierarchy toggle dims the same way, keeping the parent relations and
+ * the types they join; neither moves a node.
  * Nodes carry their lint issue count.
  */
 
@@ -36,7 +38,7 @@ import {
   type Viewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { ChevronsDownUp, ChevronsUpDown, Crosshair, LayoutGrid, Maximize, Plus } from 'lucide-react'
+import { ChevronsDownUp, ChevronsUpDown, Crosshair, LayoutGrid, Maximize, Network, Plus } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -48,7 +50,7 @@ import { useCreateEntityType, useCreateRelationType } from '../modeling/mutation
 import { searchSchema } from '../modeling/search'
 import { useIssues } from '../modeling/useIssues'
 import { useModelSchema, type ModelSchema } from '../modeling/useModelSchema'
-import { focusSet } from '../schema/focus'
+import { focusSet, hierarchySet } from '../schema/focus'
 import type { SchemaSelection } from '../schema/schemaUrl'
 import { useSchemaWorkspace, type SelectOptions } from '../schema/workspaceContext'
 import {
@@ -80,7 +82,7 @@ import {
   type Collapsed,
 } from './graphStore'
 import { dagreLayout, estimateHeight, NODE_WIDTH, type Positions } from './layout'
-import { EDGE_COLOR, RelationTypeEdge, type RelationFlowEdge } from './RelationTypeEdge'
+import { EDGE_COLOR, PARENT_COLOR, RelationTypeEdge, type RelationFlowEdge } from './RelationTypeEdge'
 
 const nodeTypes = { entityType: EntityTypeNode, ghost: GhostNode }
 const edgeTypes = { relation: RelationTypeEdge }
@@ -234,6 +236,11 @@ function Canvas() {
   const focus = useMemo(
     () => (focusMode ? focusSet({ entityTypes, relationTypes }, selection) : null),
     [focusMode, entityTypes, relationTypes, selection],
+  )
+  const [hierarchyMode, setHierarchyMode] = useState(false)
+  const hierarchy = useMemo(
+    () => (hierarchyMode ? hierarchySet({ entityTypes, relationTypes }) : null),
+    [hierarchyMode, entityTypes, relationTypes],
   )
 
   // Merge the schema into the nodes whenever the entity types change. The
@@ -454,14 +461,17 @@ function Canvas() {
               onToggleCollapsed: () => toggleCollapsed(ontologyKey, n.id),
               onSelectProperty: (propertyKey) =>
                 selectHere({ kind: 'entity-types', key: et.key }, { propertyKey }),
-              dim: (focus !== null && !focus.has(n.id)) || (matches.active && !matches.entityIds.has(n.id)),
+              dim:
+                (focus !== null && !focus.has(n.id)) ||
+                (hierarchy !== null && !hierarchy.has(n.id)) ||
+                (matches.active && !matches.entityIds.has(n.id)),
               match: matches.active && matches.entityIds.has(n.id),
               issues: countByType.get(n.id) ?? 0,
             },
           },
         ]
       }),
-    [nodes, entityTypes, properties, collapsed, selectedEntityId, ontologyKey, selectHere, focus, matches, countByType],
+    [nodes, entityTypes, properties, collapsed, selectedEntityId, ontologyKey, selectHere, focus, hierarchy, matches, countByType],
   )
   const flowNodes = useMemo<AppNode[]>(
     () => (ghost === null ? entityNodes : [...entityNodes, ghost]),
@@ -480,12 +490,12 @@ function Canvas() {
       const source = idOfKey.get(r.sourceEntityTypeKey)
       const target = idOfKey.get(r.targetEntityTypeKey)
       if (source === undefined || target === undefined || !boxes.has(source) || !boxes.has(target)) return []
-      return [{ id: r.relationTypeId, source, target, label: r.key }]
+      return [{ id: r.relationTypeId, source, target, label: r.key, parent: r.parent }]
     })
     // The relation type being named, dashed, to its target or the ghost.
     if (popover !== null && popover.mode !== 'entity' && boxes.has(popover.sourceId)) {
       const target = popover.mode === 'relation' ? popover.targetId : GHOST_ID
-      if (boxes.has(target)) ends.push({ id: PENDING_EDGE_ID, source: popover.sourceId, target, label: '…' })
+      if (boxes.has(target)) ends.push({ id: PENDING_EDGE_ID, source: popover.sourceId, target, label: '…', parent: null })
     }
     const shapes = edgeSpecs(ends)
     const shaped = ends.map((e) => ({ ...e, ...shapes.get(e.id)! }))
@@ -493,11 +503,13 @@ function Canvas() {
     return shaped.map((e) => {
       const pending = e.id === PENDING_EDGE_ID
       const isSelected = !pending && selection?.kind === 'relation-types' && selection.key === e.label
-      // Dimmed unless both endpoints are in focus, and (searching) unless it or both endpoints match.
+      // Dimmed unless both endpoints are in focus, (Hierarchy) unless a parent relation,
+      // and (searching) unless it or both endpoints match.
       const match = !pending && matches.active && matches.relationIds.has(e.id)
       const dim =
         !pending &&
         ((focus !== null && !(focus.has(e.source) && focus.has(e.target))) ||
+          (hierarchy !== null && e.parent === null) ||
           (matches.active && !match && !(matches.entityIds.has(e.source) && matches.entityIds.has(e.target))))
       return {
         id: e.id,
@@ -510,7 +522,14 @@ function Canvas() {
           type: MarkerType.ArrowClosed,
           width: 16,
           height: 16,
-          color: isSelected || pending ? 'var(--primary)' : match ? 'var(--tc-amber)' : EDGE_COLOR,
+          color:
+            isSelected || pending
+              ? 'var(--primary)'
+              : match
+                ? 'var(--tc-amber)'
+                : e.parent !== null
+                  ? PARENT_COLOR
+                  : EDGE_COLOR,
         },
         data: {
           label: e.label,
@@ -520,11 +539,12 @@ function Canvas() {
           pending,
           dim,
           match,
+          parent: e.parent,
           onSelect: pending ? undefined : () => selectHere({ kind: 'relation-types', key: e.label }),
         },
       }
     })
-  }, [nodes, ghost, popover, relationTypes, idOfKey, selection, selectHere, focus, matches])
+  }, [nodes, ghost, popover, relationTypes, idOfKey, selection, selectHere, focus, hierarchy, matches])
 
   /* -------------------------------- actions -------------------------------- */
 
@@ -818,6 +838,14 @@ function Canvas() {
         >
           <Crosshair />
         </ToolButton>
+        <ToolButton
+          label={hierarchyMode ? 'Show every relation type' : 'Dim everything but the parent relations'}
+          text
+          active={hierarchyMode}
+          onClick={() => setHierarchyMode((on) => !on)}
+        >
+          <Network /> Hierarchy
+        </ToolButton>
       </div>
 
       {focusMode ? (
@@ -868,14 +896,14 @@ function Kbd({ children }: { children: ReactNode }) {
 function ToolButton({
   label,
   text = false,
-  active = false,
+  active,
   onClick,
   children,
 }: {
   label: string
   /** A button with a text label rather than an icon only. */
   text?: boolean
-  /** A toggle that is on. */
+  /** A toggle and whether it is on; absent for a plain button. */
   active?: boolean
   onClick: () => void
   children: ReactNode
@@ -888,7 +916,7 @@ function ToolButton({
           size={text ? 'sm' : 'icon-sm'}
           onClick={onClick}
           aria-label={text ? undefined : label}
-          aria-pressed={text ? undefined : active}
+          aria-pressed={active}
         >
           {children}
         </Button>

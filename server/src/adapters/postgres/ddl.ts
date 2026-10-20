@@ -110,7 +110,8 @@ export function ontologyDdlStatements(): string[] {
   target_entity_type_key text        NOT NULL CONSTRAINT relation_type_target_fk
                                      REFERENCES entity_type (key) ON DELETE RESTRICT,
   created_at             timestamptz NOT NULL DEFAULT now(),
-  updated_at             timestamptz NOT NULL DEFAULT now()
+  updated_at             timestamptz NOT NULL DEFAULT now(),
+  parent                 text        -- the parent end, 'source' or 'target'; NULL = ordinary
 )`,
 
   `CREATE TABLE IF NOT EXISTS property_def (
@@ -255,6 +256,18 @@ export function ontologyDdlStatements(): string[] {
   `CREATE INDEX IF NOT EXISTS relation_type_key_idx ON relation (type_key)`,
   `CREATE INDEX IF NOT EXISTS relation_from_id_idx  ON relation (from_id)`,
   `CREATE INDEX IF NOT EXISTS relation_to_id_idx    ON relation (to_id)`,
+
+  // --- Anchors -----------------------------------------------------------
+
+  // A named pointer at one entity, operational state beside the instances.
+  // No FK to entity: deleting the entity leaves the anchor dangling.
+  `CREATE TABLE IF NOT EXISTS anchor (
+  key             text        CONSTRAINT anchor_pk PRIMARY KEY,
+  entity_type_key text,       -- this and entity_id NULL: unanchored
+  entity_id       uuid,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+)`,
 
   // --- Search indices ----------------------------------------------------
 

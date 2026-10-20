@@ -19,6 +19,9 @@ const QueryPage = lazy(() =>
 const AiPage = lazy(() =>
   import('@/pages/workbench/AiPage').then((m) => ({ default: m.AiPage })),
 )
+const AnchorsPage = lazy(() =>
+  import('@/pages/workbench/AnchorsPage').then((m) => ({ default: m.AnchorsPage })),
+)
 const SchemaPage = lazy(() =>
   import('@/pages/studio/SchemaPage').then((m) => ({ default: m.SchemaPage })),
 )
@@ -65,6 +68,7 @@ export const router = createBrowserRouter([
       { path: 'explore', element: suspended(<ExplorePage />) },
       { path: 'query', element: suspended(<QueryPage />) },
       { path: 'ai', element: suspended(<AiPage />) },
+      { path: 'anchors', element: suspended(<AnchorsPage />) },
     ],
   },
   {

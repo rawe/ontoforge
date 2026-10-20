@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Plus } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -6,11 +6,17 @@ import { toast } from 'sonner'
 import { useDisplayLabel, useRuntimeSchema } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
-import { createEntity } from '@/api/runtime'
-import type { JsonValue } from '@/api/types'
+import { createEntity, getPath } from '@/api/runtime'
+import type { JsonValue, SchemaProperty } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
+import { formatPath, splitParentErrors } from '@/components/entity/hierarchy'
+import { invalidateNeighborhood } from '@/components/entity/useNeighborCounts'
 import { EntityForm } from '@/components/quickadd/EntityForm'
-import { QUICK_ADD_EVENT, type QuickAddDetail } from '@/components/quickadd/quickAddBus'
+import {
+  QUICK_ADD_EVENT,
+  type QuickAddDetail,
+  type QuickAddParent,
+} from '@/components/quickadd/quickAddBus'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,6 +46,8 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 
+const NO_PROPERTIES: readonly SchemaProperty[] = []
+
 /** True when the keyboard event happens somewhere typing should win. */
 function isEditableTarget(e: KeyboardEvent): boolean {
   const el = e.target
@@ -54,7 +62,9 @@ function isEditableTarget(e: KeyboardEvent): boolean {
  * Global Quick Add dialog, mounted once in WorkbenchLayout. Opens via the
  * `c` shortcut, `openQuickAdd()` (sidebar button, `?new=1` on type tables)
  * or palette action. Step 1 picks an entity type (skipped when pre-scoped),
- * step 2 is the schema-driven EntityForm.
+ * step 2 is the schema-driven EntityForm. With a fixed parent ("+ Task under
+ * P1") it shows an "Under" row and the parent relation's own properties, and
+ * sends one create with `parentRelation`.
  */
 export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
   const displayLabel = useDisplayLabel()
@@ -64,6 +74,7 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
 
   const [open, setOpen] = useState(false)
   const [typeKey, setTypeKey] = useState<string | undefined>(undefined)
+  const [parent, setParent] = useState<QuickAddParent | undefined>(undefined)
   /** Whether the type was pre-scoped (no back button to the picker). */
   const [preScoped, setPreScoped] = useState(false)
   const [createAnother, setCreateAnother] = useState(false)
@@ -76,15 +87,31 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
     mutationFn: ({
       forType,
       values,
+      under,
+      relationValues,
     }: {
       forType: string
       values: Record<string, JsonValue>
-    }) => createEntity(ontologyKey, lensKey, forType, values),
-    onSuccess: (entity, { forType }) => {
+      under: QuickAddParent | undefined
+      relationValues: Record<string, JsonValue>
+    }) =>
+      createEntity(
+        ontologyKey,
+        lensKey,
+        forType,
+        values,
+        under === undefined
+          ? undefined
+          : { type: under.relationTypeKey, parentId: under.id, properties: relationValues },
+      ),
+    onSuccess: (entity, { forType, under }) => {
       // Entity lists AND the per-type count queries share this key prefix.
       void queryClient.invalidateQueries({
         queryKey: qk.entities(ontologyKey, lensKey, forType),
       })
+      if (under !== undefined) {
+        invalidateNeighborhood(queryClient, ontologyKey, lensKey, under.typeKey, under.id)
+      }
       toast.success(`Created ${displayLabel(entity)}`, {
         action: {
           label: 'View',
@@ -109,6 +136,7 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
   const openWith = useCallback(
     (detail: QuickAddDetail) => {
       setTypeKey(detail.typeKey)
+      setParent(detail.parent)
       setPreScoped(detail.typeKey !== undefined)
       setDirty(false)
       setFormEpoch((n) => n + 1)
@@ -144,9 +172,21 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
   }, [openWith])
 
   const type = schema.data?.entityTypes.find((t) => t.key === typeKey)
+  const parentRelation =
+    parent === undefined
+      ? undefined
+      : schema.data?.relationTypes.find((rt) => rt.key === parent.relationTypeKey)
 
-  const serverErrors =
-    create.error instanceof ApiError ? create.error.fieldErrors : undefined
+  const parentPath = useQuery({
+    queryKey: qk.path(ontologyKey, lensKey, parent?.typeKey ?? '', parent?.id ?? ''),
+    queryFn: () => getPath(ontologyKey, lensKey, parent!.typeKey, parent!.id),
+    enabled: open && parent !== undefined,
+  })
+
+  const fieldErrors = create.error instanceof ApiError ? create.error.fieldErrors : undefined
+  const split =
+    parent !== undefined && fieldErrors !== undefined ? splitParentErrors(fieldErrors) : undefined
+  const serverErrors = split?.entity ?? fieldErrors
 
   const attemptClose = () => {
     if (type !== undefined && dirty && !create.isPending) {
@@ -235,12 +275,43 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
                   Required fields first — press Enter to create.
                 </DialogDescription>
               </DialogHeader>
+              {parent !== undefined && (
+                <div className="flex items-center gap-3 rounded-md border border-(--tc-violet-border) bg-(--tc-violet-bg) px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[11px] text-(--tc-violet)">
+                      Under
+                      {parentPath.data !== undefined && ` · ${formatPath(parentPath.data)}`}
+                    </p>
+                    <p className="flex items-baseline gap-2">
+                      <span className="truncate text-[13px] font-semibold">{parent.label}</span>
+                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                        via {parent.relationTypeKey}
+                      </span>
+                    </p>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">fixed</span>
+                </div>
+              )}
+              {split?.form != null && (
+                <p className="text-[13px] text-destructive">{split.form}</p>
+              )}
               <EntityForm
                 key={formEpoch}
                 entityType={type}
-                onSubmit={(values) => create.mutate({ forType: type.key, values })}
+                onSubmit={(values, relationValues) =>
+                  create.mutate({ forType: type.key, values, under: parent, relationValues })
+                }
                 submitting={create.isPending}
                 serverErrors={serverErrors}
+                relation={
+                  parent === undefined
+                    ? undefined
+                    : {
+                        relationTypeKey: parent.relationTypeKey,
+                        properties: parentRelation?.properties ?? NO_PROPERTIES,
+                        serverErrors: split?.relation,
+                      }
+                }
                 onDirtyChange={setDirty}
                 footer={
                   <DialogFooter className="mt-2 items-center sm:justify-between">

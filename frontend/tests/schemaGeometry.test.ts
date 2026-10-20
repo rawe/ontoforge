@@ -150,3 +150,18 @@ test('freeSpot returns a spot clear of every taken box when the start is taken',
     assert.equal(overlap, false)
   }
 })
+
+test('edgeGeometry returns the end points at the source and the target node', () => {
+  const a = box(0, 0)
+  const b = box(400, 0)
+  const straight = edgeGeometry(a, b, false, { offset: 0, loopIndex: 0 })
+  assert.deepEqual(straight.start, { x: 202, y: 50 })
+  assert.deepEqual(straight.end, { x: 398, y: 50 })
+  assert.ok(straight.path.startsWith('M 202 50'))
+  const curved = edgeGeometry(a, b, false, { offset: 34, loopIndex: 0 })
+  assert.ok(curved.path.startsWith(`M ${curved.start.x} ${curved.start.y}`))
+  assert.ok(curved.path.endsWith(`${curved.end.x} ${curved.end.y}`))
+  const loop = edgeGeometry(a, a, true, { offset: 0, loopIndex: 0 })
+  assert.ok(loop.path.startsWith(`M ${loop.start.x} ${loop.start.y}`))
+  assert.ok(loop.path.endsWith(`${loop.end.x} ${loop.end.y}`))
+})

@@ -4,14 +4,17 @@
  * Both servers are bound by URL, mirroring the REST tree — the URL is
  * the ONLY binding channel (`docs/decisions.md#interfaces`): no header,
  * no environment fallback, no tool parameter. A URL that names no
- * ontology (or, for runtime, no lens) answers the app's standard 404 —
- * as an unmatched route, or through the empty-segment guards below.
+ * ontology (or, for runtime, no lens; anchored, no anchor) answers the
+ * app's standard 404 — as an unmatched route, or through the
+ * empty-segment guards below.
  *
  *   - Modeling: `/mcp/ontologies/:ontologyKey/model`. The mount accepts
  *     requests even when its ontology does not exist yet — that is what
  *     lets `ensure_ontology` provision the mount's own ontology; every
  *     other tool then fails with not-found until it exists.
  *   - Runtime: `/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey`.
+ *   - Anchored runtime: the runtime mount plus `/anchors/:anchorKey`, which
+ *     adds `get_anchor` and binds the anchor the write tools are held to.
  *
  * Transport is Streamable HTTP, STATELESS, with plain JSON responses
  * (no SSE), per `docs/decisions.md#interfaces`: a fresh server +
@@ -89,6 +92,23 @@ export function mountMcp(app: FastifyInstance): void {
         return reply.callNotFound();
       }
       await handleMcpRequest(createRuntimeMcpServer(ontologyKey, lensKey), request, reply);
+    },
+  });
+
+  app.route({
+    method: ["GET", "POST", "DELETE"],
+    url: "/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey/anchors/:anchorKey",
+    schema: { hide: true },
+    handler: async (request, reply) => {
+      const { ontologyKey, lensKey, anchorKey } = request.params as {
+        ontologyKey: string;
+        lensKey: string;
+        anchorKey: string;
+      };
+      if (ontologyKey === "" || lensKey === "" || anchorKey === "") {
+        return reply.callNotFound();
+      }
+      await handleMcpRequest(createRuntimeMcpServer(ontologyKey, lensKey, anchorKey), request, reply);
     },
   });
 }

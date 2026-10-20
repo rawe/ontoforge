@@ -4,6 +4,7 @@
  */
 
 import { ApiError } from '../../../api/http.ts'
+import type { ParentViolation } from '../../../api/types.ts'
 
 /**
  * Field errors of a failed write, by field name. Service validation errors
@@ -26,4 +27,40 @@ export function fieldErrorsOf(error: unknown): Record<string, string> {
     }
   }
   return fields
+}
+
+/**
+ * The broken parent rules of a refused flag write: a 409 whose
+ * `details.violations` lists them. Null for any other error.
+ */
+export function parentViolationsOf(error: unknown): ParentViolation[] | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null
+  const violations = error.details?.violations
+  return Array.isArray(violations) ? (violations as ParentViolation[]) : null
+}
+
+const RULE_LABELS: Record<ParentViolation['rule'], string> = {
+  two_parents: 'Two parents',
+  cycle: 'Cycles',
+}
+
+export interface RefusalLine {
+  rule: ParentViolation['rule']
+  /** "Two parents · 2 entities", "Cycles · none". */
+  summary: string
+  /** The first five breaking entities. */
+  entities: ParentViolation['entities']
+  /** Breaking entities beyond the listed ones. */
+  more: number
+}
+
+/** The refusal report: one line per parent rule, in a fixed order, a rule without violators as "none". */
+export function refusalReport(violations: readonly ParentViolation[]): RefusalLine[] {
+  return (['two_parents', 'cycle'] as const).map((rule) => {
+    const v = violations.find((x) => x.rule === rule)
+    const count = v?.count ?? 0
+    const entities = v?.entities ?? []
+    const amount = count === 0 ? 'none' : `${count} ${count === 1 ? 'entity' : 'entities'}`
+    return { rule, summary: `${RULE_LABELS[rule]} · ${amount}`, entities, more: Math.max(0, count - entities.length) }
+  })
 }

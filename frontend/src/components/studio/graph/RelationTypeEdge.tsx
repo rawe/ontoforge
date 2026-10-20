@@ -7,6 +7,7 @@ import {
   type EdgeProps,
   type InternalNode,
 } from '@xyflow/react'
+import type { ParentEnd } from '@/api/types'
 import { cn } from '@/lib/utils'
 import { edgeGeometry, type Box, type EdgeShape } from './geometry'
 import { NODE_WIDTH } from './layout'
@@ -21,12 +22,16 @@ export interface RelationEdgeData extends EdgeShape, Record<string, unknown> {
   dim?: boolean
   /** Matches the outline search. */
   match?: boolean
+  /** The parent end of a parent relation; null or absent for an ordinary one. */
+  parent?: ParentEnd | null
   onSelect?: () => void
 }
 
 export type RelationFlowEdge = Edge<RelationEdgeData, 'relation'>
 
 export const EDGE_COLOR = 'color-mix(in oklab, var(--foreground) 30%, transparent)'
+/** Parent relations and the hierarchy: their edges, the parent-end dot. */
+export const PARENT_COLOR = 'var(--tc-violet)'
 
 /** A node's live box, while it is dragged too. */
 const boxOf = (n: InternalNode): Box => ({
@@ -40,7 +45,9 @@ const boxOf = (n: InternalNode): Box => ({
  * Relation type edge: floating between the two node boxes (`geometry.ts`),
  * curved apart from parallel relation types, a loop for a self-relation, and
  * the relation key as a label on a solid background. Clicking the label
- * selects the relation type, like clicking the line.
+ * selects the relation type, like clicking the line. A parent relation is
+ * violet and thicker, with a dot on its parent end; its arrowhead still
+ * points at the target.
  */
 function RelationTypeEdgeInner({ id, source, target, data, selected, markerEnd }: EdgeProps<RelationFlowEdge>) {
   const s = useInternalNode(source)
@@ -49,6 +56,10 @@ function RelationTypeEdgeInner({ id, source, target, data, selected, markerEnd }
 
   const geo = edgeGeometry(boxOf(s), boxOf(t), source === target, data, data.labelT)
   const pending = data.pending === true
+  const parent = data.parent ?? null
+  const stroke = selected || pending ? 'var(--primary)' : data.match === true ? 'var(--tc-amber)' : parent !== null ? PARENT_COLOR : EDGE_COLOR
+  const opacity = data.dim === true ? 0.12 : 1
+  const dot = parent === 'source' ? geo.start : geo.end
 
   return (
     <>
@@ -59,12 +70,15 @@ function RelationTypeEdgeInner({ id, source, target, data, selected, markerEnd }
         interactionWidth={18}
         className="of-edge-path"
         style={{
-          stroke: selected || pending ? 'var(--primary)' : data.match === true ? 'var(--tc-amber)' : EDGE_COLOR,
-          strokeWidth: selected ? 2 : 1.5,
+          stroke,
+          strokeWidth: (selected ? 2 : 1.5) + (parent !== null ? 1 : 0),
           strokeDasharray: pending ? '5 4' : undefined,
-          opacity: data.dim === true ? 0.12 : 1,
+          opacity,
         }}
       />
+      {parent !== null && (
+        <circle cx={dot.x} cy={dot.y} r={4.5} style={{ fill: stroke, opacity }} pointerEvents="none" />
+      )}
       <EdgeLabelRenderer>
         <button
           type="button"

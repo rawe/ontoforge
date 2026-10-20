@@ -75,6 +75,8 @@ export interface SchemaRelationType {
   description: string | null
   fromEntityTypeKey: string
   toEntityTypeKey: string
+  /** The parent end; null for an ordinary relation type. */
+  parent: ParentEnd | null
   properties: SchemaProperty[]
 }
 
@@ -173,6 +175,45 @@ export interface Neighbor {
 export interface NeighborsResponse {
   entity: EntityInstance
   neighbors: Neighbor[]
+}
+
+/** One step of an entity's path (root first); `name` is null when the lens hides it. */
+export interface PathStep {
+  type: string
+  id: string
+  name: string | null
+}
+
+/* ------------------------------ runtime — anchors ----------------------------- */
+
+/** `anchored`: the entity exists; `unanchored`: no entity; `dangling`: the entity is gone. */
+export type AnchorState = 'anchored' | 'unanchored' | 'dangling'
+
+/** An anchor of the ontology, from the lensless list (no name, no path). */
+export interface Anchor {
+  key: string
+  entity: { type: string; id: string } | null
+  state: AnchorState
+}
+
+/**
+ * An anchor seen through one lens (the anchored mount's root). `visible` is
+ * false when the lens hides the anchored entity: entity null, path empty.
+ */
+export interface AnchorView {
+  key: string
+  state: AnchorState
+  visible: boolean
+  entity: PathStep | null
+  /** Root → … → the anchored entity, through the lens. */
+  path: PathStep[]
+}
+
+/** The parent relation a create names for its new entity. */
+export interface ParentRelationInput {
+  type: string
+  parentId: string
+  properties?: Record<string, JsonValue>
 }
 
 /* ------------------------------ runtime — search ----------------------------- */
@@ -334,6 +375,9 @@ export interface EntityType {
   updatedAt: string
 }
 
+/** The end of a parent relation that holds the parent. */
+export type ParentEnd = 'source' | 'target'
+
 export interface RelationType {
   relationTypeId: string
   key: string
@@ -341,8 +385,19 @@ export interface RelationType {
   description: string | null
   sourceEntityTypeKey: string
   targetEntityTypeKey: string
+  /** The parent end; null for an ordinary relation type. */
+  parent: ParentEnd | null
   createdAt: string
   updatedAt: string
+}
+
+/** One broken parent rule in a refused flag write (409 `details.violations`). */
+export interface ParentViolation {
+  rule: 'two_parents' | 'cycle'
+  /** Every entity that breaks the rule. */
+  count: number
+  /** The first five of them. */
+  entities: { type: string; id: string }[]
 }
 
 export interface PropertyDefinition {
@@ -551,6 +606,8 @@ export interface EntityTypeUpdate {
 export interface RelationTypeUpdate {
   displayName?: string
   description?: string
+  /** Set or flip the parent end; null clears it. */
+  parent?: ParentEnd | null
 }
 
 /** Create body of a property. The server stores defaults as strings. */

@@ -23,7 +23,7 @@ import {
 } from "../core/exceptions.js";
 import { RETRIEVER_CONFIG_VERSION, RetrieverConfig } from "../core/retriever.js";
 import { parseAndValidate } from "../core/oql/index.js";
-import type { ModelingStore, RuntimeStore } from "../core/ports.js";
+import type { ModelingStore, ParentViolation, RuntimeStore } from "../core/ports.js";
 import {
   DATA_TYPES,
   LENS_RESOURCE_KEY_PATTERN,
@@ -32,6 +32,7 @@ import {
   namePropertyDisplayName,
   SCHEMA_KEY_PATTERN,
   type NewPropertyDef,
+  type ParentEnd,
   type TypeKind,
 } from "../core/schemas.js";
 import { NAVIGATOR_CONFIG_VERSION, NavigatorConfig } from "../runtime/assistants/navigators/config.js";
@@ -122,6 +123,7 @@ function toRelationTypeResponse(data: Row): RelationTypeResponseBody {
     description: optString(data.description),
     sourceEntityTypeKey: data.sourceEntityTypeKey as string,
     targetEntityTypeKey: data.targetEntityTypeKey as string,
+    parent: (data.parent as ParentEnd | null | undefined) ?? null,
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
   };
@@ -370,6 +372,18 @@ export async function deleteEntityType(
 
 // --- Relation Type (Global) ---
 
+/** The 409 a parent flag write refuses with (A2): the stored relations
+ * break the parent rules under the new reading. `details.violations`
+ * carries each broken rule's count and first entities; the message
+ * carries the counts. */
+function parentRulesBroken(subject: string, violations: ParentViolation[]): ConflictError {
+  const counts = violations.map((v) => `${v.rule}: ${v.count}`).join(", ");
+  return new ConflictError(
+    `${subject}: the stored relations break the parent rules (${counts})`,
+    { violations },
+  );
+}
+
 export async function createRelationType(
   body: RelationTypeCreateInput,
   store: ModelingStore,
@@ -388,16 +402,23 @@ export async function createRelationType(
     throw new ValidationError(`Target entity type '${body.targetEntityTypeKey}' not found`);
   }
   const relationTypeId = randomUUID();
-  const data = await store.createRelationType(
+  const written = await store.createRelationType(
     relationTypeId,
     body.key,
     body.displayName,
     body.description ?? null,
     body.sourceEntityTypeKey,
     body.targetEntityTypeKey,
+    body.parent ?? null,
   );
+  if ("violations" in written) {
+    throw parentRulesBroken(
+      `Relation type '${body.key}' cannot be created with parent end '${body.parent}'`,
+      written.violations,
+    );
+  }
   invalidateLoadedSchemaCache();
-  return toRelationTypeResponse(data);
+  return toRelationTypeResponse(written.row);
 }
 
 export async function listRelationTypes(
@@ -424,6 +445,24 @@ export async function updateRelationType(
   store: ModelingStore,
 ): Promise<RelationTypeResponseBody> {
   const before = await store.getRelationType(relationTypeId);
+  if (!before) {
+    throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
+  }
+  // An explicitly null parent clears it, as a property's default; omitted
+  // (`undefined`) means unchanged. The flag is written first, so a refused
+  // flag leaves the whole update unwritten.
+  if (body.parent !== undefined && body.parent !== before.parent) {
+    const written = await store.setRelationTypeParent(relationTypeId, body.parent);
+    if (written === null) {
+      throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
+    }
+    if ("violations" in written) {
+      throw parentRulesBroken(
+        `Relation type '${before.key as string}' cannot take parent end '${body.parent}'`,
+        written.violations,
+      );
+    }
+  }
   const data = await store.updateRelationType(
     relationTypeId,
     body.displayName ?? null,
@@ -433,7 +472,7 @@ export async function updateRelationType(
     throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
   }
   invalidateLoadedSchemaCache();
-  if (before !== null && before.displayName !== data.displayName) {
+  if (before.displayName !== data.displayName) {
     await syncSearchIndices(store, [data.key as string]);
   }
   return toRelationTypeResponse(data);
@@ -1301,6 +1340,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     description: optString(rt.description),
     fromEntityTypeKey: rt.sourceKey,
     toEntityTypeKey: rt.targetKey,
+    parent: (rt.parent as ParentEnd | null | undefined) ?? null,
     properties: ((rt.properties as Row[] | undefined) ?? []).map(exportProperty),
   }));
 
@@ -1385,9 +1425,12 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * into one 422, every key conflict into one 409 — and a rejected import
  * leaves the database untouched. Rule violations are reported before
  * conflicts: they are intrinsic to the payload file, while conflicts
- * depend on the target. Only a clean payload starts writing; a crash
- * mid-write can still leave partial state (accepted residual — index DDL,
- * data writes and embedding calls cannot share one transaction).
+ * depend on the target. Last, the payload's parent relations are checked
+ * against the relations stored in the target, refused with one 409 and
+ * the violation list as a flag write is. Only a clean payload starts
+ * writing; a crash mid-write can still leave partial state (accepted
+ * residual — index DDL, data writes and embedding calls cannot share one
+ * transaction).
  *
  * Every imported key is validated against the same patterns the
  * interactive paths enforce, closing the `_id`-property hole
@@ -1709,7 +1752,21 @@ export async function importSchema(
     throw new ConflictError(conflicts.join("; "));
   }
 
-  // ---- Phase 3: write (internal ids regenerated, keys preserved) ----
+  // ---- Phase 3: the parent rules over the target's stored relations ----
+  // Deleting a type keeps its instances, so relation rows may already be
+  // stored under an imported parent relation's key. They are read across
+  // the target's parent relations and the payload's together.
+  const parentReadings = Object.fromEntries(
+    payload.relationTypes.flatMap((rt) => (rt.parent ? [[rt.key, rt.parent]] : [])),
+  ) as Record<string, ParentEnd>;
+  if (Object.keys(parentReadings).length > 0) {
+    const violations = await store.findParentViolations(parentReadings);
+    if (violations.length > 0) {
+      throw parentRulesBroken("Import error: the imported parent relations are refused", violations);
+    }
+  }
+
+  // ---- Phase 4: write (internal ids regenerated, keys preserved) ----
   const provider = getEmbeddingProvider();
 
   for (const et of payload.entityTypes) {
@@ -1746,14 +1803,22 @@ export async function importSchema(
 
   for (const rt of payload.relationTypes) {
     const rtId = randomUUID();
-    await store.createRelationType(
+    const written = await store.createRelationType(
       rtId,
       rt.key,
       rt.displayName,
       rt.description ?? null,
       rt.fromEntityTypeKey,
       rt.toEntityTypeKey,
+      rt.parent ?? null,
     );
+    // Checked above; only a racing relation write can make it refuse now.
+    if ("violations" in written) {
+      throw parentRulesBroken(
+        `Import error: relation type '${rt.key}' cannot be created with parent end '${rt.parent}'`,
+        written.violations,
+      );
+    }
     for (const prop of rt.properties) {
       await store.createProperty(
         rtId,

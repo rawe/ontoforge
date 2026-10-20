@@ -3,7 +3,7 @@
  * bound by its URL (see `mcpServers.ts`).
  */
 
-import { MCP_SERVERS, type McpServerKey } from './mcpServers.ts'
+import { MCP_SERVERS, type McpServer, type McpServerKey } from './mcpServers.ts'
 
 export type ConnectClient = 'claude-code' | 'codex'
 
@@ -16,17 +16,26 @@ export interface ConnectTarget {
   baseUrl: string | null
   ontologyKey: string
   lensKey: string
+  /** The anchor the runtime server is mounted under; null for the plain lens. */
+  anchorKey: string | null
   /** The servers to include, in any order; the config lists them in `MCP_SERVERS` order. */
   servers: readonly McpServerKey[]
   /** Add an `Authorization: Bearer` header carrying the token placeholder. */
   withToken: boolean
 }
 
-function entries({ baseUrl, ontologyKey, lensKey, servers }: ConnectTarget) {
-  const base = baseUrl ?? SERVER_URL_PLACEHOLDER
-  return MCP_SERVERS.filter((server) => servers.includes(server.key)).map((server) => ({
-    name: server.entryName,
-    url: base + server.path(ontologyKey, lensKey),
+/** A server's full URL; the placeholder stands in for an unknown server address. */
+export function mcpUrl(
+  server: McpServer,
+  { baseUrl, ontologyKey, lensKey, anchorKey }: Omit<ConnectTarget, 'servers' | 'withToken'>,
+): string {
+  return (baseUrl ?? SERVER_URL_PLACEHOLDER) + server.path(ontologyKey, lensKey, anchorKey)
+}
+
+function entries(target: ConnectTarget) {
+  return MCP_SERVERS.filter((server) => target.servers.includes(server.key)).map((server) => ({
+    name: server.entryName(target.anchorKey),
+    url: mcpUrl(server, target),
   }))
 }
 

@@ -6,7 +6,8 @@
  * (`/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey`, `mount.ts`)
  * and are fixed into the server factory, so a tool can never name an
  * ontology or a lens, and can never reach across two
- * (`docs/decisions.md#interfaces`).
+ * (`docs/decisions.md#interfaces`). The anchored mount (`…/anchors/:anchorKey`)
+ * binds an anchor the same way.
  *
  * Tools call the runtime services directly, take snake_case parameters,
  * and CLAMP `limit`/`offset` into range where REST rejects out-of-range
@@ -28,7 +29,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { valueToText } from "../core/dataTypes.js";
-import { getRuntimeStore } from "../core/ports.js";
+import { getRuntimeStore, type RuntimeStore } from "../core/ports.js";
+import { getAnchorView, readMountAnchor } from "../runtime/anchors.js";
 import { filterRules } from "../runtime/readHelpers.js";
 import * as service from "../runtime/service.js";
 import { formatToolError } from "./modeling.js";
@@ -90,9 +92,46 @@ function filterText(filters: Record<string, unknown> | undefined): Record<string
   );
 }
 
-/** Build the runtime MCP server bound to one ontology and one lens. */
-export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): McpServer {
+/**
+ * Build the runtime MCP server bound to one ontology and one lens, and on
+ * the anchored mount to one anchor. Anchored, every tool first checks
+ * ontology, lens and anchor, in that order, reading the anchor fresh; the
+ * write tools pass the anchor key to the service; and `get_anchor` is
+ * added.
+ */
+export function createRuntimeMcpServer(
+  ontologyKey: string,
+  lensKey: string,
+  anchorKey: string | null = null,
+): McpServer {
   const server = new McpServer({ name: "OntoForge Runtime", version: "0.1.0" });
+
+  const openStore = async (): Promise<RuntimeStore> => {
+    const store = await getRuntimeStore(ontologyKey);
+    if (anchorKey !== null) await readMountAnchor(lensKey, anchorKey, store);
+    return store;
+  };
+
+  if (anchorKey !== null) {
+    server.registerTool(
+      "get_anchor",
+      {
+        description:
+          "Read where this connection is anchored. Returns key, state, visible, entity and " +
+          "path. state 'anchored': writes to the anchored entity's hierarchy are held to " +
+          "that entity and its descendants; other types are written as usual. " +
+          "'unanchored': no restriction. 'dangling': the entity was deleted, and every " +
+          "write is refused until a person re-anchors. visible false: this lens does not " +
+          "show the entity, and every write is refused. path lists the entity's visible " +
+          "ancestors, root first, ending with the entity. Read-only: a person sets the " +
+          "anchor and may change it at any time, so read it again after a refusal.",
+        inputSchema: {},
+      },
+      wrap("get_anchor", async () =>
+        jsonResult(await getAnchorView(lensKey, anchorKey, await getRuntimeStore(ontologyKey))),
+      ),
+    );
+  }
 
   server.registerTool(
     "get_schema",
@@ -100,11 +139,13 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
       description:
         "Understand the lens before creating data. Shows available entity types, " +
         "relation types, and their property definitions including data types and " +
-        "required flags. Call this first.",
+        "required flags. A relation type's `parent` names the end (`source` or " +
+        "`target`) whose entity is the parent of the entity at the other end; null " +
+        "means an ordinary relation. Call this first.",
       inputSchema: {},
     },
     wrap("get_schema", async () => {
-      const result = await service.getLensSchema(lensKey, await getRuntimeStore(ontologyKey));
+      const result = await service.getLensSchema(lensKey, await openStore());
       return jsonResult(result);
     }),
   );
@@ -115,20 +156,51 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
       description:
         "Create a new entity instance. Properties must conform to the schema — " +
         "required properties must be present, types must match the property " +
-        "definitions.",
+        "definitions. To place the new entity in a hierarchy in the same call, pass " +
+        "'parent_relation': 'type' is a parent relation type (one whose `parent` " +
+        "names the parent end) whose child end is this entity type; 'parent_id' is " +
+        "the parent, which must exist with the entity type at the parent end; " +
+        "'properties' are the relation's own, held to the same rules as entity " +
+        "properties. Its faults are reported together with the entity's, and the " +
+        "entity and its parent relation are stored together or not at all." +
+        (anchorKey === null
+          ? ""
+          : " On this anchored connection, an entity of a type in the anchored entity's " +
+            "hierarchy must be created with 'parent_relation', and its parent must be the " +
+            "anchored entity or one of its descendants; a hierarchy type this lens shows no " +
+            "parent relation into cannot be created here. Entities of other types are " +
+            "created as usual, 'parent_relation' optional."),
       inputSchema: {
         entity_type_key: z.string(),
         properties: z.record(z.string(), z.unknown()),
+        parent_relation: z
+          .object({
+            type: z.string(),
+            parent_id: z.string(),
+            properties: z.record(z.string(), z.unknown()).optional(),
+          })
+          .optional(),
       },
     },
     wrap(
       "create_entity",
-      async (args: { entity_type_key: string; properties: Record<string, unknown> }) => {
+      async (args: {
+        entity_type_key: string;
+        properties: Record<string, unknown>;
+        parent_relation?:
+          | { type: string; parent_id: string; properties?: Record<string, unknown> | undefined }
+          | undefined;
+      }) => {
+        const parent = args.parent_relation;
         const result = await service.createEntity(
           lensKey,
           args.entity_type_key,
           args.properties,
-          await getRuntimeStore(ontologyKey),
+          await openStore(),
+          parent === undefined
+            ? null
+            : { type: parent.type, parentId: parent.parent_id, properties: parent.properties },
+          anchorKey,
         );
         return jsonResult(result);
       },
@@ -186,7 +258,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
           args.order ?? "asc",
           args.search ?? null,
           strFilters,
-          await getRuntimeStore(ontologyKey),
+          await openStore(),
           args.fields ?? null,
         );
         return jsonResult(result);
@@ -220,12 +292,37 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
           lensKey,
           args.entity_type_key,
           args.entity_id,
-          await getRuntimeStore(ontologyKey),
+          await openStore(),
           args.fields ?? null,
         );
         return jsonResult(result);
       },
     ),
+  );
+
+  server.registerTool(
+    "get_path",
+    {
+      description:
+        "Read where an entity sits in its hierarchy: its path over the parent " +
+        "relations as [{type, id, name}], root first and ending with the entity " +
+        "itself. A root's path is the entity alone. The path starts below the " +
+        "nearest ancestor this connection cannot see, so it names only visible " +
+        "entities. name is null when the entity has no name value.",
+      inputSchema: {
+        entity_type_key: z.string(),
+        entity_id: z.string(),
+      },
+    },
+    wrap("get_path", async (args: { entity_type_key: string; entity_id: string }) => {
+      const result = await service.getPath(
+        lensKey,
+        args.entity_type_key,
+        args.entity_id,
+        await openStore(),
+      );
+      return jsonResult(result);
+    }),
   );
 
   server.registerTool(
@@ -265,7 +362,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
           args.property_key,
           offset,
           limit,
-          await getRuntimeStore(ontologyKey),
+          await openStore(),
         );
         return jsonResult(result);
       },
@@ -298,7 +395,8 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
           args.entity_type_key,
           args.entity_id,
           args.properties,
-          await getRuntimeStore(ontologyKey),
+          await openStore(),
+          anchorKey,
         );
         return jsonResult(result);
       },
@@ -345,7 +443,8 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
             newString: args.new_string,
             replaceAll: args.replace_all ?? false,
           },
-          await getRuntimeStore(ontologyKey),
+          await openStore(),
+          anchorKey,
         );
         return jsonResult(result);
       },
@@ -396,7 +495,8 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
             content: args.content,
             expect: args.expect ?? null,
           },
-          await getRuntimeStore(ontologyKey),
+          await openStore(),
+          anchorKey,
         );
         return jsonResult(result);
       },
@@ -406,7 +506,11 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
   server.registerTool(
     "delete_entity",
     {
-      description: "Delete an entity and all its connected relations.",
+      description:
+        "Delete an entity and all its connected relations. In an ontology with parent " +
+        "relations (relation types whose `parent` names the parent end), an entity that " +
+        "still has children is refused: delete its children first, bottom-up. A leaf, " +
+        "or any entity in an ontology without parent relations, goes with its relations.",
       inputSchema: {
         entity_type_key: z.string(),
         entity_id: z.string(),
@@ -417,7 +521,8 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         lensKey,
         args.entity_type_key,
         args.entity_id,
-        await getRuntimeStore(ontologyKey),
+        await openStore(),
+        anchorKey,
       );
       // This tool returns a message OBJECT, unlike the modeling delete
       // tools, which return bare strings. Wire contract — do not unify.
@@ -430,7 +535,11 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
     {
       description:
         "Create a relation between two entities. The entity types must match the " +
-        "relation type's source/target definition.",
+        "relation type's source/target definition. For a parent relation (a relation " +
+        "type whose `parent` names the parent end), every entity has at most one parent " +
+        "across all parent relations and the hierarchy has no cycles: the create is " +
+        "refused when the child end already has a parent, or when the parent end is the " +
+        "child itself or one of its descendants.",
       inputSchema: {
         relation_type_key: z.string(),
         from_entity_id: z.string(),
@@ -452,7 +561,8 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
           args.from_entity_id,
           args.to_entity_id,
           args.properties ?? {},
-          await getRuntimeStore(ontologyKey),
+          await openStore(),
+          anchorKey,
         );
         return jsonResult(result);
       },
@@ -509,7 +619,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
           args.from_entity_id ?? null,
           args.to_entity_id ?? null,
           strFilters,
-          await getRuntimeStore(ontologyKey),
+          await openStore(),
         );
         return jsonResult(result);
       },
@@ -530,7 +640,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         lensKey,
         args.relation_type_key,
         args.relation_id,
-        await getRuntimeStore(ontologyKey),
+        await openStore(),
       );
       return jsonResult(result);
     }),
@@ -560,7 +670,8 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
           args.relation_type_key,
           args.relation_id,
           args.properties,
-          await getRuntimeStore(ontologyKey),
+          await openStore(),
+          anchorKey,
         );
         return jsonResult(result);
       },
@@ -581,7 +692,8 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         lensKey,
         args.relation_type_key,
         args.relation_id,
-        await getRuntimeStore(ontologyKey),
+        await openStore(),
+        anchorKey,
       );
       return jsonResult({ message: `Relation '${args.relation_id}' deleted successfully.` });
     }),
@@ -625,7 +737,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
           args.direction ?? "both",
           args.relation_type_key ?? null,
           limit,
-          await getRuntimeStore(ontologyKey),
+          await openStore(),
           args.fields ?? null,
           args.relation_fields ?? null,
         );
@@ -656,7 +768,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
       const result = await service.executeQuery(
         lensKey,
         args.query,
-        await getRuntimeStore(ontologyKey),
+        await openStore(),
       );
       return jsonResult(result);
     }),
@@ -676,7 +788,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
       inputSchema: {},
     },
     wrap("list_search_indices", async () =>
-      jsonResult(await service.searchIndexCatalog(lensKey, await getRuntimeStore(ontologyKey))),
+      jsonResult(await service.searchIndexCatalog(lensKey, await openStore())),
     ),
   );
 
@@ -705,7 +817,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         },
       },
       wrap(name, async (args: SearchToolArgs) => {
-        const store = await getRuntimeStore(ontologyKey);
+        const store = await openStore();
         return jsonResult(
           await service.search(
             lensKey,
@@ -754,7 +866,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
       },
     },
     wrap("search_by_index", async (args: IndexSearchToolArgs) => {
-      const store = await getRuntimeStore(ontologyKey);
+      const store = await openStore();
       const minSimilarity = toolMinSimilarity(store);
       const response = await service.searchByIndices(
         lensKey,
@@ -783,7 +895,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
       inputSchema: {},
     },
     wrap("list_saved_queries", async () => {
-      const result = await service.listSavedQueries(lensKey, await getRuntimeStore(ontologyKey));
+      const result = await service.listSavedQueries(lensKey, await openStore());
       return jsonResult(result);
     }),
   );
@@ -807,7 +919,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
           lensKey,
           args.query_key,
           args.params ?? {},
-          await getRuntimeStore(ontologyKey),
+          await openStore(),
         );
         return jsonResult(result);
       },
@@ -832,7 +944,7 @@ export function createRuntimeMcpServer(ontologyKey: string, lensKey: string): Mc
         args.query,
         3,
         0.7,
-        await getRuntimeStore(ontologyKey),
+        await openStore(),
       );
       return jsonResult(result);
     }),

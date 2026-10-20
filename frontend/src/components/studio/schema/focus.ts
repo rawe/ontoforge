@@ -2,7 +2,8 @@
  * Focus mode's set of entity types — pure, unit-tested with `node --test`.
  * An entity type stays visible with its one-hop neighbours (the other
  * endpoint of every relation type touching it); a relation type with its two
- * endpoints. Everything else dims.
+ * endpoints. Everything else dims. The Hierarchy toggle dims the same way,
+ * keeping the entity types joined by parent relation types.
  */
 
 import type { ModelSchema } from '../modeling/useModelSchema'
@@ -35,4 +36,14 @@ export function focusSet(
     addEnds(r)
   }
   return ids
+}
+
+/** The entity type ids at either end of a parent relation type. */
+export function hierarchySet(schema: Pick<ModelSchema, 'entityTypes' | 'relationTypes'>): Set<string> {
+  const keys = new Set(
+    schema.relationTypes
+      .filter((r) => r.parent !== null)
+      .flatMap((r) => [r.sourceEntityTypeKey, r.targetEntityTypeKey]),
+  )
+  return new Set(schema.entityTypes.filter((t) => keys.has(t.key)).map((t) => t.entityTypeId))
 }

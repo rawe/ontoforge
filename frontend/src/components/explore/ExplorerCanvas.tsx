@@ -35,6 +35,7 @@ import type {
 import type { Turn } from '@/components/assistants/chat/chatModel'
 import { EmptyState } from '@/components/EmptyState'
 import { TypeDot } from '@/components/TypeChip'
+import { PARENT_COLOR } from '@/components/studio/graph/RelationTypeEdge'
 import { Button } from '@/components/ui/button'
 import { readRecents, type RecentEntity } from '@/lib/recents'
 import { citedCards, mapBounded, planAdd, relationsToFetch, type AddPlan } from './answerCanvas'
@@ -129,6 +130,8 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
   const containerRef = useRef<HTMLDivElement>(null)
   const [hydrated, setHydrated] = useState(false)
   const [hiddenTypes, setHiddenTypes] = useState<ReadonlySet<string>>(new Set())
+  /** The Hierarchy edges filter: only parent relations' edges show; no node moves. */
+  const [hierarchyOnly, setHierarchyOnly] = useState(false)
   const [connectPair, setConnectPair] = useState<ConnectPair | null>(null)
   const [edgePopover, setEdgePopover] = useState<{ id: string; x: number; y: number } | null>(null)
   const [relayouting, setRelayouting] = useState(false)
@@ -602,27 +605,40 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
     })
   }, [ws.nodes, hiddenTypes, highlighted])
 
+  const parentRelationKeys = useMemo(
+    () => new Set(schema.relationTypes.filter((rt) => rt.parent !== null).map((rt) => rt.key)),
+    [schema],
+  )
+
   const rfEdges = useMemo(() => {
-    if (hiddenTypes.size === 0 && highlighted === null) return ws.edges
+    if (hiddenTypes.size === 0 && highlighted === null && parentRelationKeys.size === 0) {
+      return ws.edges
+    }
     const hiddenIds = new Set(
       ws.nodes
         .filter((n) => hiddenTypes.has(n.data.entity._entityTypeKey))
         .map((n) => n.id),
     )
     return ws.edges.map((e) => {
-      const hidden = hiddenIds.has(e.source) || hiddenIds.has(e.target)
+      const parent = parentRelationKeys.has(e.data!.relation._relationTypeKey)
+      const hidden =
+        hiddenIds.has(e.source) || hiddenIds.has(e.target) || (hierarchyOnly && !parent)
       const emphasised = highlighted !== null && (e.source === highlighted || e.target === highlighted)
-      if (!hidden && !emphasised) return e
+      if (!hidden && !emphasised && !parent) return e
       return {
         ...e,
         ...(hidden && { hidden: true }),
+        ...(parent && {
+          data: { ...e.data!, parent: true },
+          markerEnd: { type: MarkerType.ArrowClosed, width: 15, height: 15, color: PARENT_COLOR },
+        }),
         ...(emphasised && {
           data: { ...e.data!, emphasised: true },
           markerEnd: { type: MarkerType.ArrowClosed, width: 15, height: 15, color: 'var(--primary)' },
         }),
       }
     })
-  }, [ws.edges, ws.nodes, hiddenTypes, highlighted])
+  }, [ws.edges, ws.nodes, hiddenTypes, highlighted, parentRelationKeys, hierarchyOnly])
 
   const selectedNodes = useMemo(() => ws.nodes.filter((n) => n.selected), [ws.nodes])
   const panelNode = selectedNodes.length === 1 ? selectedNodes[0]! : null
@@ -726,6 +742,11 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
             })
           }
           ask={askOff ? undefined : { open: dock.settings.open, onToggle: dock.toggle }}
+          hierarchy={
+            parentRelationKeys.size === 0
+              ? undefined
+              : { on: hierarchyOnly, onToggle: () => setHierarchyOnly((on) => !on) }
+          }
         />
 
         {!hydrated && (

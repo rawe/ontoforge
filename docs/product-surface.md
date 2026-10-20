@@ -70,6 +70,7 @@ particular lens carry the lens icon.
 | Query | Lens detail of the current lens, Saved queries tab |
 | Assistants | Lens detail, the tab of the open assistant kind |
 | Home, Explore | Lens detail, Scope tab |
+| Anchors | Lens detail of the current lens, Connect tab |
 
 | From the Studio | Leads to the Workbench's |
 |---|---|
@@ -119,8 +120,9 @@ boundary — not even between same-keyed lenses of two ontologies.
 
 A collapsible sidebar (collapse state persists) carrying: the ontology switcher, the
 surface switch and the lens switcher beneath it, a search
-trigger, a create-entity trigger, fixed entries for Home, Explore, Query and — when
-available — Assistants, then a data section listing every entity type the lens exposes, each with
+trigger, a create-entity trigger, fixed entries for Home, Explore, Query, Assistants when
+available, and [Anchors](#anchors), which carries the number of dangling
+anchors as a red count (a red dot when collapsed), then a data section listing every entity type the lens exposes, each with
 its type colour. Below: the collapse control and a theme control cycling system → light →
 dark. Every screen renders through the lens's schema; there is no hand-written per-type
 interface anywhere, so adding an entity type immediately produces a table, a form, a
@@ -202,8 +204,15 @@ create action) and "nothing matches" (with a clear-filters action).
 
 Header: display label, type chip, creation and update timestamps, and actions to add a
 relation, open the entity in the Explorer, and delete it behind a confirmation that states
-the relations will go with it. Opening an entity records it in the recents list used by the
-command palette and the Explorer's empty state.
+the relations will go with it. Above the label, a breadcrumb shows the entity's
+[hierarchy path](capabilities/instance-data.md#the-path-read) from the path read —
+ancestors as links, the entity itself last and muted — and nothing for a hierarchy root.
+Anchors pointing at the entity show as a chip after the type chip, linking to the
+[Anchors](#anchors) page, and the delete confirmation then warns that they will be
+dangling. Delete is disabled, saying to delete the children first, while the entity has
+children the lens shows; one whose children the lens hides gets the server's refusal as a
+message. Opening an entity records it in the recents list used by the command palette and
+the Explorer's empty state.
 
 **Properties.** Every property the lens exposes, click-to-edit in place. Editing one field
 saves that one field. Enter saves, Escape cancels, booleans save the moment they are
@@ -214,6 +223,17 @@ Empty optional properties show as a dimmed placeholder and are editable.
 Document properties render last, as collapsed rows showing a size badge. Expanding fetches
 and renders the content; a separate action opens the [document editor](#document-viewer-and-editor).
 See [capabilities/documents.md](capabilities/documents.md).
+
+**Parent and Children.** For an ontology with
+[parent relations](capabilities/schema-modeling.md#parent-relations), the hierarchy comes
+first, set apart in the parent colour. *Parent* is one section over every parent relation
+whose child end is this entity's type: the entity's parent with an unlink action, or "a
+root" when it has none, and an add action. *Children* is one section per parent relation
+whose parent end is this entity's type, with its count, its children and a
+"+ {child type} under {entity}" button. The button opens [quick add](#quick-add) with that
+type and this parent fixed, so the entity and its parent relation are created in one
+request ([capabilities/instance-data.md](capabilities/instance-data.md#the-create-with-a-parent-relation)).
+Parent relations do not appear again among the relations below.
 
 **Relations.** One section per relation type that applies to this entity's type, with a
 direction indicator, an exact neighbour count, and the neighbours themselves — each a link
@@ -240,7 +260,8 @@ into the Explorer focused on this entity.
    a failure then returns to a properties step so the attempt can be corrected and retried
    rather than lost.
 
-Endpoint errors from the server are surfaced as form-level errors, not silent failures.
+Endpoint errors from the server are surfaced as form-level errors, not silent failures; a
+second parent is named by the child's label ("T1 already has a parent").
 
 ### Explore
 
@@ -251,6 +272,27 @@ See [Working set](#working-set) for both.
 
 Two tabs — Console and Library — which both stay live, so results survive a switch. See
 [Query console](#query-console) and [Saved-query library](#saved-query-library).
+
+### Anchors
+
+The ontology's [anchors](capabilities/anchors.md), shown through the current lens: one
+row per anchor with its key, its state and where it is anchored — the anchored entity's
+hierarchy path with a link to the entity, "No restriction, like the plain lens" for an
+unanchored one, the deleted entity's type and short id for a dangling one, whose row is
+marked red and says every write is refused, and "Hidden by this lens" for an anchored
+entity the lens hides. A note under the table says the URLs use the current lens, that
+anchors belong to the ontology, and that every change takes effect on the next call.
+
+- **New anchor** asks for a key — part of the MCP URL, validated live against the
+  anchor key rule and the existing keys, permanent — and either an entity, picked
+  by type and search with each result's hierarchy path shown, or no entity at all.
+- **Per row:** copy the anchored MCP URL; anchor an unanchored one or re-anchor a dangling
+  one, with no further question; re-point an anchored one, confirming with both hierarchy
+  paths; unanchor it behind a confirmation saying its client may then write anywhere in
+  the lens; show its entity in the Explorer; delete it, which needs its key typed and
+  says that clients using its URL get not found.
+
+The Studio manages no anchors: its Connect tab links here.
 
 ### Assistants
 
@@ -324,7 +366,13 @@ the stored text returns with a hint saying so
 Immutable and labelled as such: the key, and a relation type's endpoints, shown as chips
 that jump to those entity types. On an entity type the header holds a "Name property"
 select offering the type's `string` properties, which reassigns the name property on
-change.
+change. On a relation type it holds a "Parent" select — none, the source or the target,
+named by their entity types — which sets or flips the
+[parent end](capabilities/schema-modeling.md#parent-relations) on change; clearing it asks
+for confirmation first. When the stored data refuses the change, a report replaces it:
+nothing was changed, the count per rule — two parents, cycles — with the listed entities as
+Workbench links labelled by type and short id and "and N more" beyond them, a hint to fix
+the data in the Workbench and retry, and Dismiss. The select keeps the stored value.
 
 The properties list puts the name property first, then the rest by key, with key, display
 name, data type, required flag, default and description per row. Clicking a row opens its
@@ -414,8 +462,13 @@ needs, or both. The configuration is offered in two formats, Claude Code and Cod
 address the server reports for itself ([interfaces.md](interfaces.md#server)); when it
 reports none, a visible placeholder stands in its place with a note to replace it. A
 switch adds an `Authorization: Bearer` header holding a token placeholder for servers
-reached through an access-controlled entry point. The same panel opens from the
-Workbench home's AI-clients card and empty-state guide.
+reached through an access-controlled entry point. The runtime card's Anchor select offers
+none or any of the ontology's [anchors](#anchors), each with its hierarchy path or its
+state; choosing one binds the runtime URL and the entry name to that anchor, adds it as a
+third chip after ontology and lens, and shows a line describing its state. An anchor
+deleted meanwhile falls back to none. The same panel opens from the Workbench home's
+AI-clients card and empty-state guide. In the Studio the tab also links to the
+Workbench's Anchors page.
 
 ### Search
 
@@ -609,7 +662,10 @@ reach custom indices.
 
 A global create-entity dialog, reachable by keyboard, from the sidebar, from empty states,
 and by deep link. Step one picks the entity type (skipped when the caller pre-selected
-one — in which case there is no way back to the picker). Step two is the schema-driven
+one — in which case there is no way back to the picker). Opened from a Children section,
+it also fixes the parent: an "Under" row shows the parent's hierarchy path and the parent
+relation, the relation's own properties come first in the form, and its faults land on
+those fields. Step two is the schema-driven
 form: required properties first, one input per data type, schema defaults pre-filled,
 empty optional properties omitted from the request entirely, all client-side coercion
 errors collected at once, and server field errors merged onto the matching fields. A
@@ -629,16 +685,18 @@ central idea of the screen and everything else follows from it.
 **Growth is incremental and explicit.** Entities arrive from the palette, from a table
 row, from an entity detail page, from a query result, from a recents chip on the empty
 canvas, all at once from a palette question's results, from an assistant's answer in the
-ask dock, or by expanding a node's relations. A batch of results joins unanchored; entities already on the canvas flash, and
+ask dock, or by expanding a node's relations. A batch of results is placed around the
+canvas centroid; entities already on the canvas flash, and
 the hard node cap refuses a batch that would exceed it as a whole. Expansion is per relation type and per
 direction: the node panel lists every applicable relation type with its exact neighbour
 count, and clicking one pulls in the first ten neighbours; repeated clicks pull ten more,
 up to two hundred, and stop offering more once the count is exhausted.
 
 **Layout stability is a contract.** Nothing ever repositions a node the user can already
-see. New nodes are placed on growing elliptical rings around an anchor — the expanding
-node, or the centroid of the canvas for unanchored additions — taking the first slot that
-does not collide, and falling back to stacking below the anchor on a dense canvas.
+see. New nodes are placed on growing elliptical rings around a placement origin — the
+expanding node, or the centroid of the canvas for additions without one — taking the first
+slot that does not collide, and falling back to stacking below the placement origin on a
+dense canvas.
 Dragging a node is respected permanently. A full re-layout exists but is an explicit
 action, animated so the change is legible.
 
@@ -676,7 +734,9 @@ node opens its detail page.
 **Edges.** Clicking an edge opens a small card with the relation type, both endpoints as
 links, the relation's own properties, and a delete action behind a confirmation stating
 that both entities survive. Self-referential relations draw as a loop over their node
-rather than a degenerate curve.
+rather than a degenerate curve. A parent relation's edge is drawn in the parent colour; a
+"Hierarchy edges" toggle in the toolbar, offered when the lens has a parent relation,
+hides every other edge and moves no node.
 
 **Asking.** With a language-model provider, an Ask button in the canvas toolbar opens a
 dock on the canvas's left edge — the right edge belongs to the node panel — holding an
@@ -1014,7 +1074,8 @@ key, a required marker, a tag on the name property and the data type. After six 
 rest folds behind "+N more". A node's chevron collapses its list to a property count;
 `H` collapses or expands every node, Shift+H only the selected one, and the collapsed
 lists are remembered per ontology. One edge per relation type, with an arrowhead at the
-target and the key as its label. Relation types between the same two entity types, in
+target and the key as its label; a parent relation's edge is drawn thicker in the parent
+colour, violet, with a dot on its parent end. Relation types between the same two entity types, in
 either direction, curve apart so none overlap; self-relations are loops above their node,
 nesting outward; a label slides along its edge to stay clear of nodes and earlier labels.
 A relation type whose endpoint type is missing is not drawn. The canvas follows the app's
@@ -1069,8 +1130,12 @@ While the [outline](#schema-outline)'s search is active, matching nodes are ring
 stay lit when they or both their endpoints match, the rest dims, and a pill counts the
 matching entity and relation types.
 
+**Hierarchy.** The toolbar's Hierarchy toggle dims every entity type no parent relation
+touches and every other relation type, like focus mode but without moving the view, and
+combines with focus and search. It is not remembered.
+
 **Toolbar and hints.** The toolbar offers "+ Entity type", tidy layout, fit view, hide or
-show all properties, and focus; zoom controls sit at the bottom, and a hint bar inside the
+show all properties, focus and Hierarchy; zoom controls sit at the bottom, and a hint bar inside the
 canvas lists the gestures and keys. Escape steps back in order: the drag or popover, then
 focus mode, then the selection.
 
@@ -1078,7 +1143,8 @@ focus mode, then the selection.
 
 On the left of the [Schema](#schema) screen in both views: a search box, then the entity
 types (colour, display name, key, issue count, property count) and the relation types
-(display name, key, source → target, issue count, property count), each row expandable to
+(display name, key, source → target, issue count, property count; a parent relation with
+a dot in the parent colour naming its parent end), each row expandable to
 its properties — key, name-property tag, required marker, issue marker and data type. Clicking a type selects
 and reveals it; clicking a property selects its owner with that property opened. The
 selected row scrolls into view, and a property opened elsewhere expands its owner here.
@@ -1275,6 +1341,11 @@ whenever any document column is visible, the projection is dropped entirely, tra
 saving for the guarantee that a table never pulls document bodies. Rendering defends the
 same rule independently: a document cell shows a size even if a raw value reaches it.
 
+**Having children is synthesized.** Delete is disabled on an entity detail from one relation
+list request with a page size of one per Children section, which counts only the children
+the lens shows; the server's refusal remains the rule, and a refused delete refreshes the
+counts.
+
 **Bulk delete is a client loop.** There is no bulk endpoint. Deleting a selection issues
 one request at a time, sequentially, advancing a progress indicator and counting failures.
 The outcome is reported as a partial result when some failed. The selection is cleared and
@@ -1368,6 +1439,7 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/w/{lensKey}/ai` | The Assistants panel, Agents tab; an unknown `tab` shows Agents as well |
 | `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever` | The Retrievers tab |
 | `/o/{ontologyKey}/w/{lensKey}/ai?assistant={key}` · `?tab=retriever&assistant={key}` | That tab with that assistant — `_default` for the default one; the default one when the lens has no such assistant |
+| `/o/{ontologyKey}/w/{lensKey}/anchors` | The [Anchors](#anchors) page |
 | `/o/{ontologyKey}/studio` · `/o/{ontologyKey}/studio/schema` | Redirects to the schema graph |
 | `/o/{ontologyKey}/studio/schema/graph` | The [schema graph](#schema-graph), nothing selected |
 | `/o/{ontologyKey}/studio/schema/graph?sel=entity:{typeKey}` · `?sel=relation:{typeKey}` | The graph with that type selected and revealed, its inspector open |

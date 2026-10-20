@@ -27,10 +27,9 @@ internal identifier.** A language model should never have to carry an opaque ide
 name a type; the modeling REST surface may use identifiers because its client has just
 listed what it addresses.
 
-**One key rule per level, never per resource: schema keys, lens-resource keys and anchor
-keys each have one pattern, defined once in the server and mirrored once in the client.** A
-new keyed resource takes the rule of its level, so every check, error message and tool
-description refers to one definition.
+**One key rule per level, never per resource: each level's keys have one pattern, defined
+once in the server and mirrored once in the client.** A new keyed resource takes the rule
+of its level, so every check, error message and tool description refers to one definition.
 
 **No vendor or implementation-language vocabulary anywhere a caller can see; a rejected
 value is named by its JSON type.** Naming the database or the server's language in a route,

@@ -1,7 +1,5 @@
 # Changesets stored one record per staged write, committed under a lock
 
-Rule: [Storage](../decisions.md#storage)
-
 ## Context
 
 A client plans many runtime writes, over hours or days, and hands the plan to a person who

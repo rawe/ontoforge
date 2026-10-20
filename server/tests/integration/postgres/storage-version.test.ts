@@ -731,9 +731,9 @@ describe("PostgreSQL storage version", () => {
         [anchored, plain, lensId],
       );
       await querier.query(
-        `INSERT INTO ont_fresh.changeset_write (changeset_id, seq, operation, arguments, minted_id, type_key)
-         VALUES ($1, 1, 'create_entity', '{"name": "T9"}', $3, 'task'),
-                ($2, 1, 'create_entity', '{"name": "T10"}', $4, 'task')`,
+        `INSERT INTO ont_fresh.changeset_write (changeset_id, seq, operation, arguments, minted_id, type_key, bytes)
+         VALUES ($1, 1, 'create_entity', '{"name": "T9"}', $3, 'task', 13),
+                ($2, 1, 'create_entity', '{"name": "T10"}', $4, 'task', 14)`,
         [anchored, plain, randomUUID(), randomUUID()],
       );
     });

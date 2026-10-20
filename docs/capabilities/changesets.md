@@ -204,11 +204,15 @@ Staged-only guards against mistakes, not against a determined client. It has two
 ## Limits
 
 - **At most 10,000 staged writes** per changeset; the next is refused as a conflict.
+- **A byte cap** per changeset, set in the server's
+  [configuration](../../README.md#configuration): its staged writes count as the UTF-8
+  bytes of their JSON, the arguments and the recorded value before, document text included,
+  and the write that would pass the cap is refused as a conflict.
 - **Expiry.** A draft changeset unchanged for 7 days is deleted. Every change of it, and a
   rejected commit, counts as a change; a submitted changeset never expires.
 - **The note** is at most 1,000 characters.
-- **At most two commits run at once in one server process**; a third answers a conflict
-  at once, holding nothing.
+- **One commit runs at a time in one server process**; a second answers a conflict at
+  once, holding nothing.
 
 Each staged update reads its target once. Submit and every read of a changeset's writes
 run the lock-free pass over the whole changeset, with no lock. A commit holds one database

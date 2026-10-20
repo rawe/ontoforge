@@ -599,9 +599,9 @@ answers `{committed, alreadyGone}`, the number of writes and the seqs of deletes
 target was already gone. Every unknown changeset — committed, discarded, expired, never
 started, or bound to another lens or anchor — is `RESOURCE_NOT_FOUND`. A refusal by state
 is `RESOURCE_CONFLICT`: a submitted or busy changeset, a stale `expectedVersion`, a full
-changeset, a staged-only connection, a second commit on the ontology or a third in the
-process. Staging answers the immediate write's validation errors. A submit refused by its
-faults and a rejected commit answer `VALIDATION_ERROR` with `details.violations`, each
+changeset, a staged-only connection, a second commit on the ontology or in the process.
+Staging answers the immediate write's validation errors. A submit refused by its faults
+and a rejected commit answer `VALIDATION_ERROR` with `details.violations`, each
 `{seq, kind, message}`, ordered by seq, at most 100, and `details.total`; seq 0 is the
 changeset as a whole.
 

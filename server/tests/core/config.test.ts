@@ -23,6 +23,8 @@ describe("config defaults", () => {
     expect(settings.DOCUMENT_CHUNK_SIZE).toBe(1500);
     expect(settings.DOCUMENT_CHUNK_OVERLAP).toBe(200);
 
+    expect(settings.CHANGESET_MAX_BYTES).toBe(32 * 1024 * 1024);
+
     expect(settings.AI_PROVIDER).toBeNull();
     expect(settings.AI_MODEL).toBe("");
     expect(settings.AI_BASE_URL).toBe("http://localhost:11434");
@@ -50,6 +52,7 @@ describe("config env overrides", () => {
       EMBEDDING_CONCURRENCY: "4",
       DOCUMENT_CHUNK_SIZE: "500",
       DOCUMENT_CHUNK_OVERLAP: "50",
+      CHANGESET_MAX_BYTES: "1048576",
       AI_PROVIDER: "openai",
       AI_MODEL: "gpt",
       AI_BASE_URL: "http://ai:4321/v1",
@@ -72,6 +75,7 @@ describe("config env overrides", () => {
     expect(settings.EMBEDDING_CONCURRENCY).toBe(4);
     expect(settings.DOCUMENT_CHUNK_SIZE).toBe(500);
     expect(settings.DOCUMENT_CHUNK_OVERLAP).toBe(50);
+    expect(settings.CHANGESET_MAX_BYTES).toBe(1048576);
     expect(settings.AI_PROVIDER).toBe("openai");
     expect(settings.AI_MODEL).toBe("gpt");
     expect(settings.AI_BASE_URL).toBe("http://ai:4321/v1");
@@ -91,7 +95,12 @@ describe("config env overrides", () => {
   });
 
   it("rejects zero or a negative value for a positive integer variable", () => {
-    for (const name of ["EMBEDDING_DIMENSIONS", "EMBEDDING_BATCH_SIZE", "EMBEDDING_CONCURRENCY"]) {
+    for (const name of [
+      "EMBEDDING_DIMENSIONS",
+      "EMBEDDING_BATCH_SIZE",
+      "EMBEDDING_CONCURRENCY",
+      "CHANGESET_MAX_BYTES",
+    ]) {
       expect(() => loadSettings({ [name]: "0" })).toThrow(
         new RegExp(`${name} must be a positive integer`),
       );

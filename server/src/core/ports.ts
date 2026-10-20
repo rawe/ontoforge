@@ -1149,10 +1149,15 @@ export interface ChangesetStore {
   /** The staged create that minted `mintedId`; null when none did. */
   findMinted(id: string, mintedId: string): Promise<ChangesetWriteRecord | null>;
 
-  /** Append one write to a draft changeset; its seq, or null when the
-   * changeset is gone or submitted. A seq is higher than every seq the
-   * changeset had before, so an unstaged seq is never reused. */
-  append(id: string, write: NewChangesetWrite): Promise<number | null>;
+  /** The sum of the `bytes` its staged writes were appended with; 0 when
+   * it has none or is gone. */
+  stagedBytes(id: string): Promise<number>;
+
+  /** Append one write to a draft changeset, kept with its size in `bytes`;
+   * its seq, or null when the changeset is gone or submitted. A seq is
+   * higher than every seq the changeset had before, so an unstaged seq is
+   * never reused. */
+  append(id: string, write: NewChangesetWrite, bytes: number): Promise<number | null>;
 
   /** False when no write has this seq, or the changeset is submitted. */
   unstage(id: string, seq: number): Promise<boolean>;

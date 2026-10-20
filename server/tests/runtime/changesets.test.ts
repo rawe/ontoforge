@@ -1,7 +1,7 @@
 /**
  * Staging into a changeset over mocked stores: the binding and expiry of a
  * changeset, the anchor refusal, the immediate write's checks, minted ids,
- * the journal lookup of a staged create, the before of an update, the cap,
+ * the journal lookup of a staged create, the before of an update, the caps,
  * and unstage and discard.
  */
 
@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { settings } from "../../src/config.js";
 import { ConflictError, NotFoundError, ValidationError } from "../../src/core/exceptions.js";
 import type { ChangesetRecord, ChangesetWriteRecord } from "../../src/core/ports.js";
 import {
@@ -19,6 +20,7 @@ import {
   stage,
   startChangeset,
   unstage,
+  writeBytes,
   type StagedWrite,
 } from "../../src/runtime/changesets.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
@@ -251,6 +253,41 @@ describe("staging checks", () => {
       stageOn({ operation: "create_entity", typeKey: "person", properties: { name: "A" }, parentRelation: null }),
     ).rejects.toThrow(new ConflictError(`Changeset '${CS}' is full: at most 10000 staged writes`));
     expectNothingWritten();
+  });
+
+  it("the byte cap: a write that would pass it is a 409, nothing appended; one that reaches it is staged", async () => {
+    const write: StagedWrite = {
+      operation: "create_entity",
+      typeKey: "note",
+      properties: { name: "N", body: "ä".repeat(1000) },
+      parentRelation: null,
+    };
+    await stageOn(write);
+    const [, row, bytes] = store.changesetStore.append.mock.calls[0]!;
+    // Document text counts as UTF-8: two bytes per "ä".
+    expect(bytes).toBe(writeBytes(row));
+    expect(bytes).toBeGreaterThan(2000);
+    expect(store.changesetStore.stagedBytes).toHaveBeenCalledWith(CS);
+
+    store.changesetStore.append.mockClear();
+    store.changesetStore.stagedBytes.mockResolvedValue(settings.CHANGESET_MAX_BYTES - bytes);
+    await stageOn(write);
+    expect(store.changesetStore.append).toHaveBeenCalledTimes(1);
+
+    store.changesetStore.append.mockClear();
+    store.changesetStore.stagedBytes.mockResolvedValue(settings.CHANGESET_MAX_BYTES - bytes + 1);
+    await expect(stageOn(write)).rejects.toThrow(
+      new ConflictError(`Changeset '${CS}' is full: at most ${settings.CHANGESET_MAX_BYTES} bytes of staged writes`),
+    );
+    expectNothingWritten();
+  });
+
+  it("writeBytes: the UTF-8 bytes of the arguments and the before as JSON", () => {
+    const row = { operation: "update_entity", typeKey: "person", mintedId: null, targetId: P1 };
+    expect(writeBytes({ ...row, arguments: { properties: { name: "é" } }, before: null })).toBe(
+      '{"properties":{"name":"é"}}'.length + 1,
+    );
+    expect(writeBytes({ ...row, arguments: {}, before: { name: "A" } })).toBe('{}{"name":"A"}'.length);
   });
 
   it("a changeset gone at the append is not found", async () => {

@@ -27,14 +27,15 @@ type Row = Record<string, any>;
 
 const NS = `ont_${O}`;
 const ALL = runtimePrefix(O, "all");
-const SIDE = ["side_a", "side_b"] as const;
+/** A second ontology. */
+const SIDE = "side_a";
 
 let app: FastifyInstance;
 let h: ProjectHierarchyIds;
 let e: ProjectHierarchyIds["entities"];
 let store: RuntimeStore;
-/** The one entity of each side ontology. */
-const sideThing: Record<string, string> = {};
+/** The one entity of the side ontology. */
+let sideThing: string;
 
 async function call(method: string, url: string, payload?: Row): Promise<{ status: number; body: Row }> {
   const res = await app.inject({ method: method as "GET", url, ...(payload === undefined ? {} : { payload }) });
@@ -124,14 +125,12 @@ beforeAll(async () => {
   h = await buildProjectHierarchy(app);
   e = h.entities;
   store = await getRuntimeStore(O);
-  for (const key of SIDE) {
-    await createOntology(app, key);
-    await call("POST", `${modelPrefix(key)}/entity-types`, { key: "thing", displayName: "Thing" });
-    await call("POST", `${modelPrefix(key)}/lenses`, { key: "all", name: "All" });
-    const thing = await call("POST", `${runtimePrefix(key, "all")}/entities/thing`, { name: "one" });
-    expect(thing.status, JSON.stringify(thing.body)).toBe(201);
-    sideThing[key] = thing.body._id as string;
-  }
+  await createOntology(app, SIDE);
+  await call("POST", `${modelPrefix(SIDE)}/entity-types`, { key: "thing", displayName: "Thing" });
+  await call("POST", `${modelPrefix(SIDE)}/lenses`, { key: "all", name: "All" });
+  const thing = await call("POST", `${runtimePrefix(SIDE, "all")}/entities/thing`, { name: "one" });
+  expect(thing.status, JSON.stringify(thing.body)).toBe(201);
+  sideThing = thing.body._id as string;
 }, 60_000);
 
 afterAll(async () => {
@@ -338,9 +337,9 @@ describe("locks", () => {
       expect(res.body.error.message).toBe("Another commit is running; try again");
       expect(Date.now() - began).toBeLessThan(2000);
 
-      const side = runtimePrefix(SIDE[0], "all");
+      const side = runtimePrefix(SIDE, "all");
       const sideCs = await start(side);
-      await staged("PATCH", side, sideCs, `entities/thing/${sideThing[SIDE[0]]}`, { name: "two" });
+      await staged("PATCH", side, sideCs, `entities/thing/${sideThing}`, { name: "two" });
       expect(await commit(sideCs, undefined, side)).toMatchObject({ status: 200, body: { committed: 1 } });
     } finally {
       await release();
@@ -395,31 +394,26 @@ describe("locks", () => {
     expect((await call("DELETE", `${ALL}/changesets/${cs}`)).status).toBe(204);
   }, 20_000);
 
-  it("a third concurrent commit in the process is 409 at once", async () => {
-    const holds: (() => Promise<void>)[] = [];
-    const running: Promise<{ status: number; body: Row }>[] = [];
+  it("a second concurrent commit in the process, on another ontology, is 409 at once", async () => {
+    const side = runtimePrefix(SIDE, "all");
+    const sideCs = await start(side);
+    await staged("PATCH", side, sideCs, `entities/thing/${sideThing}`, { name: "held" });
+    const release = await hold(await getRuntimeStore(SIDE), (bound) => bound.lockTargets([sideThing]));
+    let running: Promise<{ status: number; body: Row }> | undefined;
     try {
-      for (const key of SIDE) {
-        const side = runtimePrefix(key, "all");
-        const cs = await start(side);
-        await staged("PATCH", side, cs, `entities/thing/${sideThing[key]}`, { name: "held" });
-        holds.push(await hold(await getRuntimeStore(key), (bound) => bound.lockTargets([sideThing[key]!])));
-        running.push(commit(cs, undefined, side));
-      }
-      await waitingForLocks(2);
+      running = commit(sideCs, undefined, side);
+      await waitingForLocks(1);
 
       const cs = await start();
       const began = Date.now();
-      const third = await commit(cs);
-      expect(third.status).toBe(409);
-      expect(third.body.error.message).toBe("Too many commits are running; try again");
+      const second = await commit(cs);
+      expect(second.status).toBe(409);
+      expect(second.body.error.message).toBe("Too many commits are running; try again");
       expect(Date.now() - began).toBeLessThan(2000);
     } finally {
-      for (const release of holds) await release();
+      await release();
     }
-    for (const res of await Promise.all(running)) {
-      expect(res).toMatchObject({ status: 200, body: { committed: 1 } });
-    }
+    expect(await running).toMatchObject({ status: 200, body: { committed: 1 } });
     const cs = await start();
     expect(await commit(cs)).toMatchObject({ status: 200, body: { committed: 0 } });
   }, 20_000);

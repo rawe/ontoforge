@@ -227,15 +227,26 @@ export class PostgresChangesetStore implements ChangesetStore {
     return row === undefined ? null : toWrite(row);
   }
 
-  append(id: string, write: NewChangesetWrite): Promise<number | null> {
+  async stagedBytes(id: string): Promise<number> {
+    if (!isUuid(id)) {
+      return 0;
+    }
+    const result = await this.query(
+      `SELECT COALESCE(sum(bytes), 0)::float8 AS bytes FROM changeset_write WHERE changeset_id = $1`,
+      [id],
+    );
+    return result.rows[0]!.bytes as number;
+  }
+
+  append(id: string, write: NewChangesetWrite, bytes: number): Promise<number | null> {
     return this.mutate(id, async (querier) => {
       const result = await querier.query(
         `INSERT INTO changeset_write
-                (changeset_id, seq, operation, arguments, minted_id, type_key, target_id, before)
+                (changeset_id, seq, operation, arguments, minted_id, type_key, target_id, before, bytes)
          SELECT $1,
                 GREATEST(c.version,
                          COALESCE((SELECT max(seq) FROM changeset_write WHERE changeset_id = $1), 0) + 1),
-                $2::text, $3::jsonb, $4::uuid, $5::text, $6::uuid, $7::jsonb
+                $2::text, $3::jsonb, $4::uuid, $5::text, $6::uuid, $7::jsonb, $8::integer
            FROM changeset c WHERE c.changeset_id = $1 AND c.submitted_at IS NULL
          RETURNING seq`,
         [
@@ -246,6 +257,7 @@ export class PostgresChangesetStore implements ChangesetStore {
           write.typeKey,
           write.targetId,
           write.before === null ? null : JSON.stringify(write.before),
+          bytes,
         ],
       );
       const seq = result.rows[0]?.seq as number | undefined;

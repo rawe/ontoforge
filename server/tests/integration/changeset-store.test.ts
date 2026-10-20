@@ -414,6 +414,7 @@ describe("ChangesetStore", () => {
     expect((await changesets.list(lenses.all!, "agent-a")).map((cs) => cs.id)).toEqual([b.id]);
     expect(await changesets.list(lenses.all!, "agent-b")).toEqual([]);
     expect(await changesets.list(lenses.portfolio!, null)).toHaveLength(1);
+    expect(await changesets.list("not-a-uuid", null)).toEqual([]);
   });
 
   it("touch refreshes the last change only, keeping the version", async () => {

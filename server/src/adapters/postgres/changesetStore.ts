@@ -162,6 +162,9 @@ export class PostgresChangesetStore implements ChangesetStore {
 
   /** One statement: a row per changeset, operation and type key. */
   async list(lensId: string, anchorKey: string | null): Promise<ChangesetSummary[]> {
+    if (!isUuid(lensId)) {
+      return [];
+    }
     const params: unknown[] = [lensId];
     let anchor = "";
     if (anchorKey !== null) {

@@ -4,6 +4,8 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
 import { useLenses } from '@/api/hooks'
+import { qk } from '@/api/queryKeys'
+import type { Lens } from '@/api/types'
 import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { lensDeletedText } from '@/components/changesets/changesets'
 import { EmptyState } from '@/components/EmptyState'
@@ -62,6 +64,10 @@ export function LensDetailPage() {
   const remove = useMutation({
     mutationFn: () => model.deleteLens(ontologyKey ?? '', id ?? ''),
     onSuccess: ({ changesetsDeleted }) => {
+      // Drop the lens before leaving, so the lens list does not re-read its scope.
+      queryClient.setQueryData<Lens[]>(qk.lenses(ontologyKey ?? ''), (old) =>
+        old?.filter((l) => l.lensId !== id),
+      )
       toast.success(lensDeletedText(changesetsDeleted))
       leaveAfterDelete(navigate, `/o/${ontologyKey}/studio/lenses`, queryClient)
     },

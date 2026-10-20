@@ -39,6 +39,28 @@ describe("formatToolError", () => {
     expect(formatToolError(error)).toBe("Invalid configuration: first problem; second problem");
   });
 
+  it("a changeset's details.violations are flattened with their total", () => {
+    const error = new ValidationError("The commit was rejected; nothing was persisted", {
+      violations: [
+        { seq: 1, kind: "has_children", message: "Still has children" },
+        { seq: 4, kind: "drift", message: "Changed since this write was staged" },
+      ],
+      total: 2,
+    });
+    expect(formatToolError(error)).toBe(
+      "The commit was rejected; nothing was persisted — 2 violations: " +
+        "seq 1 has_children: Still has children; seq 4 drift: Changed since this write was staged",
+    );
+  });
+
+  it("violations cut at the first 100 say so", () => {
+    const violations = Array.from({ length: 100 }, (_, i) => ({ seq: i + 1, kind: "dangling", message: "x" }));
+    const one = formatToolError(new ValidationError("Rejected", { violations: violations.slice(0, 1), total: 1 }));
+    expect(one).toBe("Rejected — 1 violation: seq 1 dangling: x");
+    const cut = formatToolError(new ValidationError("Rejected", { violations, total: 250 }));
+    expect(cut.startsWith("Rejected — 250 violations, the first 100 shown: seq 1 dangling: x; ")).toBe(true);
+  });
+
   it("a multi-field zod failure surfaces every offending field in one string", () => {
     const result = PropertyDefinitionCreate.safeParse({
       key: "Bad Key",

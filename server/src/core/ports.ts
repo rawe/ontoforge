@@ -22,7 +22,11 @@
  *    driver types. The sole exception is the validated-query object from
  *    `core/oql`, which crosses the port opaque and is compiled by the
  *    adapter.
- * 2. Each method owns its connection.
+ * 2. Each method owns its connection. The one exception is the store
+ *    `RuntimeStore.transaction` hands to its work: every method of that
+ *    store, and of the anchor and changeset stores it hands out, runs on
+ *    the transaction's one connection, and a pool checkout inside it is
+ *    an assertion failure.
  * 3. Filtering, search, and sorting inputs are structured values, never
  *    query fragments.
  * 4. Driver exceptions never cross the port; adapters raise the domain
@@ -547,6 +551,22 @@ export interface RuntimeStore {
   /** The anchor store of the same ontology. */
   anchors(): AnchorStore;
 
+  /** The changeset store of the same ontology. */
+  changesets(): ChangesetStore;
+
+  // ------------------------------------------------------------------
+  // Transactions
+  // ------------------------------------------------------------------
+
+  /** Run `work` on a store bound to one transaction on one connection:
+   * COMMIT when it returns, ROLLBACK when it throws. Every read and write
+   * of the bound store, its anchor and changeset stores included, uses
+   * that connection (contract rule 2's exception). Anything that would
+   * take a second connection inside it — a nested `transaction`,
+   * `getFullSchemaWithLensInclusions` (its own REPEATABLE READ), the
+   * search-index or navigator store — is an assertion failure. */
+  transaction<T>(work: (store: RuntimeStore) => Promise<T>): Promise<T>;
+
   // ------------------------------------------------------------------
   // Entity instances
   //
@@ -735,6 +755,43 @@ export interface RuntimeStore {
       search?: SearchWritePlan | null;
     },
   ): Promise<{ entity: Row; relation: Row }>;
+
+  // ------------------------------------------------------------------
+  // Neutral reads for commit validation
+  //
+  // They take `readings` as the hierarchy reads do and evaluate no rule:
+  // the service does. Off-format ids match nothing.
+  // ------------------------------------------------------------------
+
+  /** The parent relations whose child end is one of `ids`. */
+  parentsOf(ids: string[], readings: Record<string, ParentEnd>): Promise<ParentLink[]>;
+
+  /** The parent relations whose parent end is one of `ids`. `lock` takes
+   * the entities of `ids` and the relations found `FOR UPDATE` — no child
+   * can attach until the transaction ends; it locks the entities even
+   * when `readings` is empty. */
+  childrenOf(ids: string[], readings: Record<string, ParentEnd>, lock?: boolean): Promise<ParentLink[]>;
+
+  /** The entities and relations of `ids`, taken `FOR UPDATE`, with their
+   * stored properties as stored; an unknown id is left out. */
+  lockTargets(ids: string[]): Promise<LockedTarget[]>;
+}
+
+/** One stored parent relation, read neutrally: its parent and child end. */
+export interface ParentLink {
+  relationType: string;
+  relationId: string;
+  parentId: string;
+  childId: string;
+}
+
+/** One instance locked by `lockTargets`. */
+export interface LockedTarget {
+  id: string;
+  kind: "entity" | "relation";
+  typeKey: string;
+  /** The stored properties, raw: no datetime decoding. */
+  props: Row;
 }
 
 // ---------------------------------------------------------------------------
@@ -998,6 +1055,9 @@ export interface AnchorRecord {
   entity: AnchorEntity | null;
   /** Whether an entity of that id and type is stored; false when unanchored. */
   entityFound: boolean;
+  /** Every write through the anchor's URL needs a changeset, and its
+   * commit is refused there (V9). */
+  stagedOnly: boolean;
 }
 
 /**
@@ -1012,11 +1072,122 @@ export interface AnchorStore {
   getAnchor(key: string): Promise<AnchorRecord | null>;
 
   /** Create the anchor, or re-point it (null unanchors); the record as
-   * written, read with the join. */
-  saveAnchor(key: string, entity: AnchorEntity | null): Promise<AnchorRecord>;
+   * written, read with the join. `stagedOnly` undefined keeps the stored
+   * flag, and a new anchor's is false. */
+  saveAnchor(key: string, entity: AnchorEntity | null, stagedOnly?: boolean): Promise<AnchorRecord>;
 
   /** False when no anchor has this key. */
   deleteAnchor(key: string): Promise<boolean>;
+}
+
+/** One changeset: staged writes of one lens, bound to it and to the
+ * anchor of the URL that started it. */
+export interface ChangesetRecord {
+  id: string;
+  lensId: string;
+  /** Null when started through the plain lens URL. */
+  anchorKey: string | null;
+  version: number;
+  note: string | null;
+  /** Null for a draft. */
+  submittedAt: Date | null;
+  createdAt: Date;
+  lastChangeAt: Date;
+  /** The number of staged writes. */
+  writeCount: number;
+}
+
+/** A changeset as the list shows it. */
+export interface ChangesetSummary extends ChangesetRecord {
+  /** Staged writes per operation. */
+  operations: Record<string, number>;
+  /** The type keys the staged writes name, sorted. */
+  typeKeys: string[];
+}
+
+/** One staged write as the service hands it over: plain JSON, kept as
+ * given. */
+export interface NewChangesetWrite {
+  operation: string;
+  arguments: Row;
+  /** The id a staged create minted. */
+  mintedId: string | null;
+  typeKey: string;
+  targetId: string | null;
+  /** A staged update's stored values of its patched keys, as they were
+   * when it was staged. */
+  before: Row | null;
+}
+
+export interface ChangesetWriteRecord extends NewChangesetWrite {
+  seq: number;
+  createdAt: Date;
+}
+
+/**
+ * Changesets and their journal. The store keeps what it is given and
+ * evaluates no rule; the changeset service decides. Every mutation
+ * except `touch` and `sweep` takes the changeset row `FOR UPDATE NOWAIT`
+ * — a held row is a `ConflictError`, never a wait — bumps `version` and
+ * refreshes `lastChangeAt`. Off-format ids match nothing.
+ */
+export interface ChangesetStore {
+  start(changeset: { id: string; lensId: string; anchorKey: string | null; note: string | null }): Promise<ChangesetRecord>;
+
+  /** Through its binding: null when the changeset belongs to another lens
+   * or, with an `anchorKey`, to another anchor. A null `anchorKey` (the
+   * plain lens URL) reaches every changeset of the lens. */
+  get(id: string, lensId: string, anchorKey: string | null): Promise<ChangesetRecord | null>;
+
+  /** The lens's changesets, bound as `get`; submitted first, then by
+   * last change, newest first. */
+  list(lensId: string, anchorKey: string | null): Promise<ChangesetSummary[]>;
+
+  /** The staged writes by seq. */
+  page(id: string, offset: number, limit: number): Promise<ChangesetWriteRecord[]>;
+
+  /** The staged create that minted `mintedId`; null when none did. */
+  findMinted(id: string, mintedId: string): Promise<ChangesetWriteRecord | null>;
+
+  /** Append one write to a draft changeset; its seq, or null when the
+   * changeset is gone or submitted. A seq is higher than every seq the
+   * changeset had before, so an unstaged seq is never reused. */
+  append(id: string, write: NewChangesetWrite): Promise<number | null>;
+
+  /** False when no write has this seq, or the changeset is submitted. */
+  unstage(id: string, seq: number): Promise<boolean>;
+
+  /** Compare-and-set on the version of a draft changeset: sets
+   * `submittedAt` and the note. Null when the version differs, the
+   * changeset is submitted, or it is gone. */
+  submit(id: string, expectedVersion: number, note: string | null): Promise<ChangesetRecord | null>;
+
+  /** A submitted changeset back to draft, with the note given. Null when
+   * the changeset is a draft or gone. */
+  unsubmit(id: string, note: string): Promise<ChangesetRecord | null>;
+
+  /** The changeset and its journal, while a draft; false when it is gone
+   * or submitted. */
+  discard(id: string): Promise<boolean>;
+
+  /** Refresh the last change only, keeping the version; skipped while
+   * another transaction holds the row. */
+  touch(id: string): Promise<void>;
+
+  /** Delete the draft changesets of the ontology last changed before
+   * `olderThan`, skipping any whose row is held; how many. */
+  sweep(olderThan: Date): Promise<number>;
+
+  /** Inside a bound store only: the ontology's commit lock, a
+   * transaction-scoped advisory lock taken with try semantics, then the
+   * row `FOR UPDATE NOWAIT`. Either one held elsewhere is a
+   * `ConflictError`. Null when the changeset is gone. From here on, the
+   * transaction waits at most 5 s for a row another transaction holds;
+   * a longer wait is a `ConflictError`. */
+  lockForCommit(id: string): Promise<ChangesetRecord | null>;
+
+  /** Delete the journal and the changeset. */
+  deleteWithJournal(id: string): Promise<void>;
 }
 
 export interface SearchIndexStore {

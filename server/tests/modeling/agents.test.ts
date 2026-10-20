@@ -8,6 +8,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { VALID_AGENT_TOOLS } from "../../src/runtime/toolNames.js";
+import { createMockRuntimeStore } from "../runtime/helpers.js";
 import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.js";
 
 const holder: { store: MockModelingStore } = { store: createMockModelingStore() };
@@ -15,7 +16,7 @@ const holder: { store: MockModelingStore } = { store: createMockModelingStore() 
 vi.mock("../../src/core/ports.js", () => ({
   getModelingStore: async () => holder.store,
   getSearchIndexStore: async () => holder.store.searchIndices(),
-  getRuntimeStore: async () => ({}),
+  getRuntimeStore: async () => createMockRuntimeStore(),
 }));
 
 const MOCK_LENS = {
@@ -330,6 +331,6 @@ describe("cascading delete", () => {
   it("deleting the lens deletes its agents (handled by the store)", async () => {
     holder.store.deleteLens.mockResolvedValue(true);
     const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/lenses/lens-1" });
-    expect(res.statusCode).toBe(204);
+    expect(res.statusCode).toBe(200);
   });
 });

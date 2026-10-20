@@ -30,6 +30,8 @@ const ALL_TABLES = [
   "entity",
   "relation",
   "anchor",
+  "changeset",
+  "changeset_write",
   "search_settings",
   "search_index",
   "search_generation",

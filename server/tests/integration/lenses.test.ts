@@ -134,7 +134,8 @@ describe("lens round trip", () => {
       method: "DELETE",
       url: `/api/ontologies/test_ont/model/lenses/${body.lensId}`,
     });
-    expect(deleted.statusCode).toBe(204);
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json()).toEqual({ changesetsDeleted: 0 });
     const gone = await app.inject({
       method: "GET",
       url: `/api/ontologies/test_ont/model/lenses/${body.lensId}`,
@@ -178,7 +179,7 @@ describe("lens round trip", () => {
     });
 
     const deleted = await app.inject({ method: "DELETE", url: `/api/ontologies/test_ont/model/lenses/${lensA}` });
-    expect(deleted.statusCode).toBe(204);
+    expect(deleted.statusCode).toBe(200);
 
     const et = await app.inject({ method: "GET", url: `/api/ontologies/test_ont/model/entity-types/${etId}` });
     expect(et.statusCode).toBe(200);
@@ -187,6 +188,45 @@ describe("lens round trip", () => {
       url: `/api/ontologies/test_ont/model/lenses/${lensB}/includes/entity-types`,
     });
     expect(bInclusions.json()).toHaveLength(1);
+  });
+
+  it("a lens delete reports the changesets it took, draft and submitted; another lens's stay (V42)", async () => {
+    await createEntityType("person", "Person");
+    const lens = async (key: string): Promise<string> => {
+      const res = await app.inject({ method: "POST", url: "/api/ontologies/test_ont/model/lenses", payload: { key, name: key } });
+      expect(res.statusCode).toBe(201);
+      return res.json().lensId as string;
+    };
+    const opsId = await lens("ops");
+    await lens("other");
+    const start = async (key: string): Promise<string> => {
+      const res = await app.inject({ method: "POST", url: `/api/ontologies/test_ont/runtime/lenses/${key}/changesets` });
+      expect(res.statusCode, res.body).toBe(201);
+      return res.json().id as string;
+    };
+    const draft = await start("ops");
+    const submitted = await start("ops");
+    await app.inject({
+      method: "POST",
+      url: `/api/ontologies/test_ont/runtime/lenses/ops/changesets/${draft}/entities/person`,
+      payload: { name: "Staged" },
+    });
+    const submit = await app.inject({
+      method: "POST",
+      url: `/api/ontologies/test_ont/runtime/lenses/ops/changesets/${submitted}/submit`,
+      payload: { note: "go" },
+    });
+    expect(submit.statusCode, submit.body).toBe(200);
+    const kept = await start("other");
+
+    const deleted = await app.inject({ method: "DELETE", url: `/api/ontologies/test_ont/model/lenses/${opsId}` });
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json()).toEqual({ changesetsDeleted: 2 });
+
+    const other = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/other/changesets" });
+    expect((other.json() as { id: string }[]).map((cs) => cs.id)).toEqual([kept]);
+    const again = await app.inject({ method: "DELETE", url: `/api/ontologies/test_ont/model/lenses/${opsId}` });
+    expect(again.statusCode).toBe(404);
   });
 });
 

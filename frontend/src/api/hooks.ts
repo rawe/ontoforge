@@ -120,6 +120,33 @@ export function useAnchorView(ontologyKey: string, lensKey: string, anchorKey: s
   })
 }
 
+/** The lens's changesets: the Changesets page, its detail header and the sidebar count. */
+export function useChangesets(ontologyKey: string | undefined, lensKey: string | undefined) {
+  return useQuery({
+    queryKey: qk.changesets(ontologyKey ?? '', lensKey ?? ''),
+    queryFn: () => runtime.listChangesets(ontologyKey!, lensKey!),
+    enabled: ontologyKey !== undefined && ontologyKey !== '' && lensKey !== undefined && lensKey !== '',
+  })
+}
+
+/** One changeset's review read: a page of its writes by seq, with names and markers. */
+export function useChangeset(
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string,
+  page: { offset: number; limit: number },
+  /** False once the changeset is gone (committed, discarded): no refetch into a 404. */
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: qk.changesets(ontologyKey, lensKey, changesetId, page),
+    queryFn: () => runtime.getChangeset(ontologyKey, lensKey, changesetId, page),
+    enabled,
+    // Keep the shown page while the next loads, but never another changeset's.
+    placeholderData: (previous) => (previous?.id === changesetId ? previous : undefined),
+  })
+}
+
 /**
  * Search-index inclusions of a lens (modeling API). Separate from
  * `useLensScope`: index inclusions never make a lens scoped. The key sits

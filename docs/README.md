@@ -43,6 +43,7 @@ what rules bind it, and how it is reached from every interface.
 | [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
 | [transfer](capabilities/transfer.md) | Schema export and import |
 | [anchors](capabilities/anchors.md) | Anchors — named records holding an MCP client's writes within one entity's subtree: the record and its states, maintenance, anchored mounts, the write guard |
+| [changesets](capabilities/changesets.md) | Changesets — runtime writes staged over time and committed all or nothing: staging, the commit and its validation, binding, the review, staged-only |
 
 ## Internal provider interfaces
 
@@ -263,6 +264,34 @@ covers.
 
 **Anchor's hierarchy** — the entity types joined by parent relations to the anchored
 entity's type, with those parent relations. Writes to every other type are not held.
+
+### Changesets
+
+**Changeset** — runtime writes of one lens, staged over any length of time and committed
+together, all or nothing. Bound to the lens and the anchor of the URL it was started
+through. See [capabilities/changesets.md](capabilities/changesets.md).
+
+**Staged write** — one write held in a changeset: nothing changes until the commit, and
+reads never see it. **Stage** adds one; **unstage** removes one by its seq.
+
+**Commit** — persisting a changeset's staged writes together, or none of them; a
+committed changeset is gone. **Commit validation** is the rules the commit applies to
+the end state before anything persists; a commit that breaks one **rejects** and persists
+nothing. Committing a submitted changeset is approving it; there is no approved state.
+
+**Discard** — deleting a draft changeset with its staged writes.
+
+**Draft, submitted** — a changeset's two states. A draft can be changed; a
+submitted one is frozen and handed over for review. **Submit** freezes it, optionally with
+a note; **unsubmit** makes it a draft again, with a required note, whoever calls it.
+
+**Before, current, after** — the three values of a staged update: **before**, the stored
+values of the keys it sends as they were when it was staged; **current**, those values
+now; **after**, the values it sets. **Drift** — current differing from before, which
+rejects the commit.
+
+**Staged-only** — an anchor's flag: through its URL every write must be staged, and a
+changeset cannot be committed.
 
 **MCP client** — an AI client outside the server, connected to one of its MCP mounts and
 acting on its own judgment. Not an agent, which is an assistant the server runs.

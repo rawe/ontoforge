@@ -16,6 +16,10 @@ import type {
   Anchor,
   AnchorView,
   AssistantKind,
+  Changeset,
+  ChangesetDetail,
+  ChangesetListItem,
+  CommitResult,
   DocumentContentResponse,
   EntityInstance,
   JsonValue,
@@ -283,13 +287,20 @@ const anchorsBase = (ontologyKey: string) => `/api/ontologies/${ontologyKey}/run
 
 export const listAnchors = (ontologyKey: string) => request<Anchor[]>(anchorsBase(ontologyKey))
 
-/** Create or re-point (200 both); `null` unanchors. A missing entity answers 422. */
+/**
+ * Create or re-point (200 both); `null` unanchors. A missing entity answers 422.
+ * Without `stagedOnly` the stored flag stays.
+ */
 export const putAnchor = (
   ontologyKey: string,
   anchorKey: string,
   entity: { type: string; id: string } | null,
+  stagedOnly?: boolean,
 ) =>
-  request<Anchor>(`${anchorsBase(ontologyKey)}/${anchorKey}`, { method: 'PUT', body: { entity } })
+  request<Anchor>(`${anchorsBase(ontologyKey)}/${anchorKey}`, {
+    method: 'PUT',
+    body: stagedOnly === undefined ? { entity } : { entity, stagedOnly },
+  })
 
 export const deleteAnchor = (ontologyKey: string, anchorKey: string) =>
   request<undefined>(`${anchorsBase(ontologyKey)}/${anchorKey}`, { method: 'DELETE' })
@@ -324,3 +335,83 @@ export const readAssistantThread = (
   threadId: string,
   signal?: AbortSignal,
 ) => readThread(assistantPath(ontologyKey, lensKey, kind, assistantKey), threadId, signal)
+
+/* -------------------------------- changesets -------------------------------- */
+
+// The plain lens URL: every changeset of the lens, anchored ones included.
+const changesetsBase = (ontologyKey: string, lensKey: string) =>
+  `${base(ontologyKey, lensKey)}/changesets`
+
+/** The lens's changesets, submitted first. */
+export const listChangesets = (ontologyKey: string, lensKey: string) =>
+  request<ChangesetListItem[]>(changesetsBase(ontologyKey, lensKey))
+
+/** The review read: the changeset and its writes by seq, `limit` at most 500. */
+export const getChangeset = (
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string,
+  params: { offset: number; limit: number },
+) =>
+  request<ChangesetDetail>(
+    `${changesetsBase(ontologyKey, lensKey)}/${changesetId}${buildQuery(params)}`,
+  )
+
+/**
+ * Persists every staged write or none. A changed version answers 409; a
+ * rejection answers 422 with `details.violations` and `details.total`.
+ */
+export const commitChangeset = (
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string,
+  expectedVersion: number,
+) =>
+  request<CommitResult>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}/commit`, {
+    method: 'POST',
+    body: { expectedVersion },
+  })
+
+/** Back to draft; the note is required and replaces the stored one. */
+export const unsubmitChangeset = (
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string,
+  note: string,
+) =>
+  request<Changeset>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}/unsubmit`, {
+    method: 'POST',
+    body: { note },
+  })
+
+/** The text a commit would leave in a document property: from the last
+ * staged write of the changeset that sets it; 404 when none does. */
+export const getStagedDocument = (
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string,
+  entityTypeKey: string,
+  id: string,
+  propertyKey: string,
+  params?: GetDocumentParams,
+) =>
+  request<DocumentContentResponse>(
+    `${changesetsBase(ontologyKey, lensKey)}/${changesetId}/entities/${entityTypeKey}/${id}/documents/${propertyKey}${buildQuery(params)}`,
+  )
+
+/** Draft only; a submitted changeset answers 409. */
+export const discardChangeset = (ontologyKey: string, lensKey: string, changesetId: string) =>
+  request<undefined>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}`, {
+    method: 'DELETE',
+  })
+
+/** Takes one staged write out, draft only. */
+export const unstageWrite = (
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string,
+  seq: number,
+) =>
+  request<undefined>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}/writes/${seq}`, {
+    method: 'DELETE',
+  })

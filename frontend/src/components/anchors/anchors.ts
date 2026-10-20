@@ -116,6 +116,14 @@ export function unanchorConfirmation(key: string, lensKey: string): string {
   return `${key} will be able to write anywhere in lens ${lensKey}.`
 }
 
+/** Turning staged-only off names the escape: "agent-a will write immediately again: …". */
+export function stagedOnlyOffConfirmation(key: string): string {
+  return `${key} will write immediately again: its writes no longer need a changeset, and it can commit.`
+}
+
+/** Why the staged-only switch is off on a dangling anchor: its PUT must name an existing entity. */
+export const STAGED_ONLY_DANGLING_REASON = 'Re-anchor or unanchor it first: its entity was deleted'
+
 /** Delete's question; typing the key enables Delete. */
 export const DELETE_CONFIRMATION = 'Clients using this URL get not found.'
 

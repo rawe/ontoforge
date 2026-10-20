@@ -16,6 +16,10 @@
  *   ['savedQueries', ontologyKey, lensKey]
  *   ['anchors', ontologyKey]                         the ontology's anchors (lensless)
  *   ['anchors', ontologyKey, lensKey, anchorKey]     one anchor through a lens (mount root)
+ *   ['changesets', ontologyKey, lensKey]             the lens's changesets
+ *   ['changesets', ontologyKey, lensKey, id, params] one changeset's review read (a page of writes)
+ *   ['changesets', ontologyKey, lensKey, id, ['document', typeKey, entityId, propertyKey]]
+ *                                                    the staged text of one document property
  *   ['assistants', ontologyKey, lensKey, kind]       runtime assistant list of a kind
  *   ['model', ontologyKey, ...]                      modeling sub-keys
  *   ['model', ontologyKey, 'retrievers', lensKey]  retrievers of a lens
@@ -76,6 +80,14 @@ export const qk = {
     lensKey === undefined || anchorKey === undefined
       ? (['anchors', ontologyKey] as const)
       : (['anchors', ontologyKey, lensKey, anchorKey] as const),
+
+  /** With an id: one changeset's review read, under the list's key. */
+  changesets: (ontologyKey: string, lensKey: string, changesetId?: string, params?: unknown) =>
+    changesetId === undefined
+      ? (['changesets', ontologyKey, lensKey] as const)
+      : params === undefined
+        ? (['changesets', ontologyKey, lensKey, changesetId] as const)
+        : (['changesets', ontologyKey, lensKey, changesetId, params] as const),
 
   savedQueries: (ontologyKey: string, lensKey: string) =>
     ['savedQueries', ontologyKey, lensKey] as const,

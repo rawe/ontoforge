@@ -75,8 +75,8 @@ const ANCESTORS: Record<string, string[]> = {
 
 let store: MockRuntimeStore;
 
-function anchorAt(entity: { type: string; id: string } | null, entityFound = entity !== null): void {
-  store.anchorStore.getAnchor.mockResolvedValue({ key: "agent-a", entity, entityFound });
+function anchorAt(entity: { type: string; id: string } | null, entityFound = entity !== null, stagedOnly = false): void {
+  store.anchorStore.getAnchor.mockResolvedValue({ key: "agent-a", entity, entityFound, stagedOnly });
 }
 
 async function open(lens = loaded()): Promise<AnchorGuard> {
@@ -105,7 +105,12 @@ beforeEach(() => {
 });
 
 describe("anchorState", () => {
-  const record = (entity: AnchorRecord["entity"], entityFound: boolean): AnchorRecord => ({ key: "k", entity, entityFound });
+  const record = (entity: AnchorRecord["entity"], entityFound: boolean): AnchorRecord => ({
+    key: "k",
+    entity,
+    entityFound,
+    stagedOnly: false,
+  });
   const types = loaded().full.entityTypes;
 
   it("unanchored, anchored, dangling by entity and by type", () => {
@@ -132,11 +137,14 @@ describe("opening the guard", () => {
     await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(NotFoundError);
   });
 
-  it("dangling, by a deleted entity or a deleted type: 409", async () => {
+  it("dangling, by a deleted entity or a deleted type: 409 with v1's text", async () => {
+    const dangling = new ConflictError(
+      "Anchor 'agent-a' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it",
+    );
     anchorAt({ type: "project", id: "P1" }, false);
-    await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(ConflictError);
+    await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(dangling);
     anchorAt({ type: "gone", id: "P1" }, true);
-    await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(/dangling/);
+    await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(dangling);
   });
 
   it("an anchored entity the lens hides: 409 naming only the anchor and the lens", async () => {
@@ -147,9 +155,72 @@ describe("opening the guard", () => {
     ).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConflictError);
     const message = (error as ConflictError).message;
-    expect(message).toContain("'agent-a'");
-    expect(message).toContain("'no_projects'");
-    expect(message).not.toMatch(/project'|P1/);
+    expect(message).toBe("Anchor 'agent-a' points at an entity that lens 'no_projects' does not show, so every write is refused");
+  });
+});
+
+describe("a staged-only anchor (V9, V43)", () => {
+  const STAGED_ONLY = "Anchor 'agent-a' is staged-only: this connection only stages; pass a changeset";
+  const openError = (lens = loaded()) =>
+    AnchorGuard.open("agent-a", lens, asRuntimeStore(store)).then(
+      () => null,
+      (e: unknown) => e as Error,
+    );
+
+  it("refuses every immediate write with a 409, whatever the state, before the state is judged", async () => {
+    for (const [entity, found] of [
+      [{ type: "project", id: "P1" }, true], // anchored
+      [null, false], // unanchored: no coverage, still refused
+      [{ type: "project", id: "P1" }, false], // dangling: the flag comes first
+    ] as const) {
+      anchorAt(entity, found, true);
+      const error = await openError();
+      expect(error).toBeInstanceOf(ConflictError);
+      expect(error!.message).toBe(STAGED_ONLY);
+    }
+    anchorAt({ type: "project", id: "P1" }, true, true);
+    expect((await openError(loaded("no_projects", ["customer", "task", "milestone"])))!.message).toBe(STAGED_ONLY);
+  });
+
+  it("an unknown key stays not found", async () => {
+    store.anchorStore.getAnchor.mockResolvedValue(null);
+    expect(await openError()).toBeInstanceOf(NotFoundError);
+  });
+
+  it("without the flag, the guard opens as before", async () => {
+    anchorAt({ type: "project", id: "P1" }, true, false);
+    expect(await open()).toBeInstanceOf(AnchorGuard);
+  });
+});
+
+describe("the staging check (R10)", () => {
+  const check = (anchorKey: string | null, lens = loaded()) =>
+    AnchorGuard.checkStaging(anchorKey, lens, asRuntimeStore(store)).then(
+      () => null,
+      (e: unknown) => e as Error,
+    );
+
+  it("the plain lens reads no anchor", async () => {
+    expect(await check(null)).toBeNull();
+    expect(store.anchorStore.getAnchor).not.toHaveBeenCalled();
+  });
+
+  it("staged-only, anchored or unanchored, may stage", async () => {
+    anchorAt({ type: "project", id: "P1" }, true, true);
+    expect(await check("agent-a")).toBeNull();
+    anchorAt(null, false, true);
+    expect(await check("agent-a")).toBeNull();
+  });
+
+  it("dangling, or an anchored entity the lens hides, is a 409 with no fix hint; an unknown key is not found", async () => {
+    anchorAt({ type: "project", id: "P1" }, false, true);
+    expect(await check("agent-a")).toEqual(new ConflictError("Anchor 'agent-a' is dangling"));
+    anchorAt({ type: "project", id: "P1" }, true);
+    expect(await check("agent-a", loaded("no_projects", ["customer", "task", "milestone"]))).toEqual(
+      new ConflictError("Anchor 'agent-a' points at an entity that lens 'no_projects' does not show"),
+    );
+    store.anchorStore.getAnchor.mockResolvedValue(null);
+    expect(await check("agent-a")).toBeInstanceOf(NotFoundError);
   });
 });
 
@@ -253,8 +324,7 @@ describe("entity update, edit and delete", () => {
       ["person", "Ben"],
     ]) {
       const fields = await refusal(() => guard.checkDelete(type!, id!));
-      expect(fields.entityId).toContain("anchored");
-      expect(fields.entityId).not.toContain("agent-b");
+      expect(fields.entityId).toBe(`Entity '${id}' is anchored and cannot be deleted on an anchored connection`);
     }
     await guard.checkDelete("task", "T1a");
   });

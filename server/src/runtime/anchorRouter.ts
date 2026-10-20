@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { getRuntimeStore } from "../core/ports.js";
 import * as anchors from "./anchors.js";
+import { changesetRouter } from "./changesetRouter.js";
 import { runtimeRouter } from "./router.js";
 
 const Ontology = z.object({ ontologyKey: z.string() });
@@ -54,7 +55,7 @@ export const anchorRouter: FastifyPluginAsyncZod = async (app) => {
 /**
  * The anchored REST mirror, mounted at
  * `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey/anchors/:anchorKey`:
- * the runtime router only, plus a root that mirrors `get_anchor`. Every
+ * the runtime and changeset routers, plus a root that mirrors `get_anchor`. Every
  * request first checks ontology, lens and anchor, in that order, so an
  * unknown anchor is not found on reads too.
  */
@@ -81,4 +82,5 @@ export const anchoredRuntimeRouter: FastifyPluginAsyncZod = async (app) => {
       ),
   );
   await app.register(runtimeRouter);
+  await app.register(changesetRouter, { prefix: "/changesets" });
 };

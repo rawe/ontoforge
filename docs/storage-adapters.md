@@ -50,7 +50,7 @@ key, the optional display name and timestamps. Six operations:
 | Read by key | One row, or an absent result. |
 | Read by display name | One row, or an absent result — display names are unique server-wide, and the pre-write conflict check needs the lookup. |
 | Rename | Set the display name; the key never changes. Absent result when not found. |
-| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, retrievers, navigators, instances, anchors, and every search index. False when not found. |
+| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, retrievers, navigators, instances, anchors, changesets, and every search index. False when not found. |
 
 The registry — not the database's own catalog — is the authoritative list of ontologies.
 The store must enforce server-wide uniqueness of the ontology key and the display name;
@@ -265,6 +265,14 @@ without touching storage; so does an id that cannot be an instance id.
   fails the whole write as not found, and nothing is written. It takes no lock: nothing
   can reference the new entity before commit.
 
+**Commit reads.** Three reads serve a changeset's commit validation, and none evaluates a
+rule. Two take readings as the hierarchy reads do: the parent links whose child end is one
+of a set of ids, and those whose parent end is — the latter optionally locking those
+entities and the links it finds until the transaction ends, so no child can attach
+meanwhile. The third locks the entities and relations of a set of ids until the
+transaction ends and returns their stored properties as stored; an unknown id is left
+out. An id that cannot be an instance id matches nothing.
+
 **Traversal.** Given an entity id, a direction of incoming, outgoing or both, an optional
 relation type key filter, a limit, and property definitions keyed by type key — the same
 row-conversion guide the by-id reads carry, covering whatever types the neighbourhood may
@@ -453,13 +461,59 @@ above the port covers the time without one.
 ## The anchor store
 
 The anchor store holds an ontology's [anchors](capabilities/anchors.md): per key, the
-entity it points at — its type key and id — or none, and timestamps. List, ordered by key;
-read by key, absent when unknown; save, an upsert that creates the anchor or re-points it
-and returns the record as written; delete, false when the key is absent. Every record read
-also says whether its entity is still stored under that type key. The store never checks
-the pointer on save and never decides a state — the service does — so a deleted entity
-leaves its anchors in place. The runtime store hands out the anchor store of its own
-ontology. Anchors are not part of any export read, and registry delete removes them.
+entity it points at — its type key and id — or none, the staged-only flag, and timestamps.
+List, ordered by key; read by key, absent when unknown; save, an upsert that creates the
+anchor or re-points it and returns the record as written, writing the flag when given and
+otherwise keeping it, off for a new anchor; delete, false when the key is absent. Every
+record read also says whether its entity is still stored under that type key. The store
+never checks the pointer on save and never decides a state — the service does — so a
+deleted entity leaves its anchors in place. The runtime store hands out the anchor store
+of its own ontology. Anchors are not part of any export read, and registry delete removes
+them.
+
+## Transactions
+
+The runtime store runs a unit of work on a store bound to one transaction, on one
+connection, with read-committed isolation: it commits when the work returns and rolls back
+when it throws. Every operation of that store, and of the anchor and changeset stores it
+hands out, runs on that connection — the one exception to every operation owning its
+connection. Anything that would take a second connection inside the work — a nested unit
+of work, the full-schema retrieval, the search-index or navigator store — fails as a
+programming error, so the work can never wait for a connection it holds itself. Only a
+changeset's commit uses it.
+
+## The changeset store
+
+The changeset store holds an ontology's [changesets](capabilities/changesets.md): per
+changeset its id, its lens, the anchor key of the URL that started it or none, a version, a
+note, the time it was submitted or none, and timestamps; per staged write its seq, the
+operation, its arguments, the id a create minted, the type key, the target id and an
+update's before, all kept as given. The store evaluates no rule — the service does —
+except the state a write needs, which it judges in the statement that writes, so a submit
+racing a change is never overwritten.
+
+- **Reads.** Start; read one through its binding — a changeset of another lens, or bound
+  to another anchor, is absent, and no anchor key reaches every changeset of the lens;
+  list them bound the same way, submitted first, then by last change, newest first, with
+  their counts per operation and the type keys they name; their staged writes by seq,
+  paged; the staged create that minted a given id.
+- **Changes.** Append a staged write to a draft changeset, with a seq higher than every
+  earlier one; unstage one by seq from a draft changeset; submit, a compare-and-set on the
+  version of a draft changeset, setting the submitted time and the note; unsubmit a
+  submitted one, with a note; discard a draft one with its staged writes. Each takes the
+  changeset without waiting — one held elsewhere is a conflict at once — raises its
+  version and refreshes its last change, and answers absent when the changeset is gone or
+  in the other state.
+- **Upkeep.** Touch refreshes the last change alone; sweep deletes the draft changesets
+  unchanged since a given time. Both skip a changeset held elsewhere rather than wait or
+  fail.
+- **The commit**, inside a unit of work only: take the ontology's commit lock without
+  waiting, then the changeset without waiting — either held elsewhere is a conflict — and
+  from then on wait at most five seconds for a row another transaction holds, then fail
+  as a conflict; finally delete the changeset with its staged writes.
+
+Deleting a lens deletes its changesets, deleting an anchor leaves them, and registry
+delete removes them. Changesets are not part of any export read.
 
 ## The navigator store
 
@@ -553,7 +607,8 @@ be preserved exactly. Parameters are supplied separately and bound, never splice
 driver failures and converts them, so that no route into the store can bypass the
 translation. The catch is narrow: it converts driver exceptions only, letting domain
 exceptions raised inside the same scope — and ordinary programming errors — propagate
-unchanged.
+unchanged. A lock the adapter cannot have — one taken without waiting, or one waited
+for past a bounded wait — is the conflict error, not the storage error.
 
 ## The validated query
 
@@ -653,7 +708,7 @@ runs each missing upgrade step inside every `ont_*` namespace — then the step'
 server-wide statements, if it has any, once in `public` — and records the new version
 last. The upgrade is logged, and the server never backs up storage itself. The steps and
 both version constants live in the storage-version module beside the DDL; the current
-storage version is 7. Before that
+storage version is 8. Before that
 transaction the adapter logs the pgvector version — the installed one, or the one the
 extension would install — and warns when it predates 0.7, which has no
 `halfvec`: the search entry table cannot then be created, so an upgrade of an existing
@@ -661,7 +716,7 @@ namespace and every ontology creation fail.
 
 **Registry create** is one transaction:
 the registry row first — so a concurrent same-key create dies on the named constraint as
-a conflict — then the fresh namespace, the seventeen tables below with the search settings
+a conflict — then the fresh namespace, the nineteen tables below with the search settings
 row and, when an embedding width is given, the fixed saved-query vector index inside it. **Registry delete** is one
 transaction: the registry row out, the namespace dropped in one cascade. A bound store applies its
 ontology's namespace to the search path per statement, inside the shared transaction
@@ -674,7 +729,7 @@ per namespace:
 
 | Logical | Table | Joined by |
 |---|---|---|
-| Lens | `lens` | referenced by its inclusions, agents, saved queries, retrievers and navigators |
+| Lens | `lens` | referenced by its inclusions, agents, saved queries, retrievers, navigators and changesets |
 | Entity type | `entity_type` | referenced by its property definitions and inclusions; its name property's key in `name_property`, a reference to `property_def` by entity type and key, checked at commit |
 | Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions; its parent end in the nullable `parent` column, `source` or `target`, with no check |
 | Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
@@ -687,9 +742,10 @@ per namespace:
 Every schema row carries a `uuid` primary key.
 
 Deleting a schema object cascades through the foreign keys — property definitions,
-inclusions, agents, saved queries, retrievers and navigators die with their owner. What the DDL
-may carry is a rule in [decisions.md](decisions.md#storage); the closed vocabularies the
-search-index tables check are index kind, representation and generation state. The uniqueness constraints on type keys act per namespace, which is
+inclusions, agents, saved queries, retrievers, navigators and changesets die with their
+owner. What the DDL may carry is a rule in [decisions.md](decisions.md#storage); the
+closed vocabularies the search-index tables check are index kind, representation and
+generation state. The uniqueness constraints on type keys act per namespace, which is
 exactly the per-ontology key scoping the contract requires.
 
 The name-property reference pins an entity type's name property to one of that type's own
@@ -756,11 +812,31 @@ plan, in one transaction; the relation's foreign key holds the parent.
 
 ## How anchors are stored
 
-One table per namespace, `anchor`: the key as primary key, the entity type key, the
-entity id and timestamps. It carries no foreign key to `entity` and no check, so deleting
-an entity leaves the row, and the record then reads as no longer stored. Every read is the
-row left-joined to `entity` on id and type key. A save is one `INSERT … ON CONFLICT DO
-UPDATE … RETURNING`, read back through the same join, setting `updated_at` on a re-point.
+One table per namespace, `anchor`: the key as primary key, the entity type key, the entity
+id, the boolean `staged_only` and timestamps. It carries no foreign key to `entity` and no
+check, so deleting an entity leaves the row, and the record then reads as no longer
+stored. Every read is the row left-joined to `entity` on id and type key. A save is one
+`INSERT … ON CONFLICT DO UPDATE … RETURNING`, read back through the same join, setting
+`updated_at` on a re-point; a flag not given is coalesced to the stored one, or to false
+on insert.
+
+## How changesets are stored
+
+Two tables per namespace. `changeset` holds one row per changeset, its `lens_id` a foreign
+key to `lens` with delete cascade, its `anchor_key` plain text with no foreign key, so an
+anchor delete leaves the row; `submitted_at` is null for a draft. `changeset_write` holds
+one row per staged write under the primary key `(changeset_id, seq)`, its changeset a
+foreign key with delete cascade; `arguments` and `before` are `jsonb`. Two B-tree indexes
+serve them: changesets by lens, and staged writes by changeset and minted id.
+
+Every change takes the changeset row `FOR UPDATE NOWAIT`, and states its state condition —
+`submitted_at IS NULL`, or not null for unsubmit — in the same statement; touch and sweep
+take it `FOR UPDATE SKIP LOCKED`. A seq is the changeset's version at the append, which
+every change of the changeset raises, so a seq is never reused. The commit lock is
+`pg_try_advisory_xact_lock` on a key hashed from the namespace, so it holds across server
+instances and ends with the transaction; the commit first sets `lock_timeout` to five
+seconds for its transaction. A lock that is not available, `55P03`, translates to the
+conflict error.
 
 ## How search indices are stored
 
@@ -821,10 +897,10 @@ The queue works in plain SQL on `search_queue`:
   which yields the owning end. A create's backfill is one `INSERT … SELECT` over `entity`
   by type key, in the creating transaction.
 - **A write plan runs on the write's transaction.** The runtime store opens one
-  transaction for the instance statement and its plan: after the statement, and only when
-  it touched a row, for creates and updates; before it for deletes, while the relations
-  that cascade with a deleted entity still exist — their entries and queued items are
-  found through them.
+  transaction for the instance statement and its plan — inside a changeset's commit, the
+  commit's own: after the statement, and only when it touched a row, for creates and
+  updates; before it for deletes, while the relations that cascade with a deleted entity
+  still exist — their entries and queued items are found through them.
 - **Claim** is one statement: a CTE selects the claimable rows joined to their
   generation, ordered keyword first and then by `enqueued_at`, with the limit and
   `FOR UPDATE SKIP LOCKED` on the queue rows; the `UPDATE` sets `lease_until` and returns each row's attempts
@@ -859,12 +935,13 @@ The queue works in plain SQL on `search_queue`:
 
 ## Index inventory
 
-Beyond the uniqueness constraints and the B-tree indexes above, and the search-index
-tables' own indexes, one vector index exists per namespace: an HNSW index, cosine, over
-`saved_query`'s dimensionless `embedding` column cast to the provider's width — a fixed
-name, full-table, for description search within the ontology. Registry create builds it
-when an embedding width is given, and the startup ensure when a provider is configured.
-Lens scoping is a plain query-time predicate, so the index needs no scoping of its own.
+Beyond the uniqueness constraints and the B-tree indexes above — the instance tables' four
+and the changeset tables' two — and the search-index tables' own indexes, one vector index
+exists per namespace: an HNSW index, cosine, over `saved_query`'s dimensionless
+`embedding` column cast to the provider's width — a fixed name, full-table, for
+description search within the ontology. Registry create builds it when an embedding width
+is given, and the startup ensure when a provider is configured. Lens scoping is a plain
+query-time predicate, so the index needs no scoping of its own.
 
 Its width is read back from its own indexed column type in the catalog — the `vector(D)`
 of the cast expression — and that is what width reconciliation compares, namespace by
@@ -913,8 +990,8 @@ Provide, in this order:
 5. **The schema side.** Lenses, types, properties, inclusions, full-schema retrieval,
    agents, saved queries and the navigator store. Nothing on the data side is useful
    until the schema can be read back.
-6. **The data side.** Entities, relations, traversal, the hierarchy operations and the
-   anchor store.
+6. **The data side.** Entities, relations, traversal, the hierarchy operations, the
+   commit reads, the anchor store, units of work and the changeset store.
 7. **Filters, sorts and text search.** The predicate builder, shared by listing and by
    filtered vector search.
 8. **Search** — the search-index store with its queue, wake-ups and retrievers — and the

@@ -18,6 +18,11 @@
  * Unanchored, there is no guard; dangling, or anchored at an entity the
  * lens hides, every write is refused with a 409. Refusals are 422 field
  * errors that name only what the caller sent and the anchor key.
+ *
+ * A staged-only anchor (V9 a) refuses every immediate write with a 409.
+ * The flag is read before the anchor's state is judged (V43), so it holds
+ * on an unanchored key too. Staging through the URL takes `checkStaging`
+ * instead: no flag, no coverage (R10).
  */
 
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
@@ -45,7 +50,7 @@ function ends(rt: RelationTypeDef, parent: ParentEnd): { child: string; parent: 
 
 /** The hierarchy around `entityType`: its entity types, and its parent
  * relations as relation type key → parent end. */
-function hierarchyOf(entityType: string, full: SchemaCacheValue): { types: Set<string>; readings: Record<string, ParentEnd> } {
+export function hierarchyOf(entityType: string, full: SchemaCacheValue): { types: Set<string>; readings: Record<string, ParentEnd> } {
   const types = new Set([entityType]);
   const readings: Record<string, ParentEnd> = {};
   const parentRelations = Object.values(full.relationTypes).filter((rt) => rt.parent !== null);
@@ -65,6 +70,60 @@ function hierarchyOf(entityType: string, full: SchemaCacheValue): { types: Set<s
   return { types, readings };
 }
 
+/** Why every write through an anchor is refused: dangling, or anchored at
+ * an entity the lens hides; null when unanchored or anchored and shown. */
+function anchorFault(record: AnchorRecord, loaded: LoadedSchema): "dangling" | "hidden" | null {
+  const state = anchorState(record, loaded.full.entityTypes);
+  if (state === "unanchored") return null;
+  if (state === "dangling" || record.entity === null) return "dangling";
+  return Object.hasOwn(loaded.scoped.entityTypes, record.entity.type) ? null : "hidden";
+}
+
+/** The refusal of an immediate write through an anchor (`anchorFault`). The
+ * texts name the anchor key and the lens key only. */
+export function anchorRefusal(anchorKey: string, record: AnchorRecord, loaded: LoadedSchema): string | null {
+  switch (anchorFault(record, loaded)) {
+    case "dangling":
+      return `Anchor '${anchorKey}' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it`;
+    case "hidden":
+      return `Anchor '${anchorKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show, so every write is refused`;
+    default:
+      return null;
+  }
+}
+
+/** The same refusal for a changeset's staging, submit and commit: what is
+ * wrong, with the anchor key and the lens key, and no fix. */
+export function changesetAnchorRefusal(anchorKey: string, record: AnchorRecord, loaded: LoadedSchema): string | null {
+  switch (anchorFault(record, loaded)) {
+    case "dangling":
+      return `Anchor '${anchorKey}' is dangling`;
+    case "hidden":
+      return `Anchor '${anchorKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show`;
+    default:
+      return null;
+  }
+}
+
+/** The refusal of an immediate write through a staged-only anchor. */
+export function stagedOnlyMessage(anchorKey: string): string {
+  return `Anchor '${anchorKey}' is staged-only: this connection only stages; pass a changeset`;
+}
+
+/** The anchor record of an anchored call, read fresh; an unknown key is
+ * not found. */
+async function readRecord(anchorKey: string, store: RuntimeStore): Promise<AnchorRecord> {
+  const record = await store.anchors().getAnchor(anchorKey);
+  if (record === null) throw new NotFoundError(`Anchor '${anchorKey}' not found`);
+  return record;
+}
+
+/** The refusal of an entity delete on an anchored connection while any
+ * anchor points at the entity. */
+function anchoredDeleteMessage(entityId: string): string {
+  return `Entity '${entityId}' is anchored and cannot be deleted on an anchored connection`;
+}
+
 function refuse(field: string, message: string): ValidationError {
   return new ValidationError("Instance validation failed", { fields: { [field]: message } });
 }
@@ -80,28 +139,32 @@ export class AnchorGuard {
   ) {}
 
   /**
-   * The guard of one anchored call, from the anchor read fresh now; null on
-   * the plain lens (`anchorKey` null) and when unanchored. An unknown key is
-   * not found; dangling, or an anchored entity the lens hides, is a 409.
+   * The guard of one anchored immediate write, from the anchor read fresh
+   * now; null on the plain lens (`anchorKey` null) and when unanchored. An
+   * unknown key is not found; staged-only, whatever the state, is a 409;
+   * then dangling, or an anchored entity the lens hides, is a 409.
    */
   static async open(anchorKey: string | null, loaded: LoadedSchema, store: RuntimeStore): Promise<AnchorGuard | null> {
     if (anchorKey === null) return null;
-    const record = await store.anchors().getAnchor(anchorKey);
-    if (record === null) throw new NotFoundError(`Anchor '${anchorKey}' not found`);
-    const state = anchorState(record, loaded.full.entityTypes);
-    if (state === "unanchored") return null;
-    if (state === "dangling" || record.entity === null) {
-      throw new ConflictError(
-        `Anchor '${anchorKey}' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it`,
-      );
-    }
-    if (!Object.hasOwn(loaded.scoped.entityTypes, record.entity.type)) {
-      throw new ConflictError(
-        `Anchor '${anchorKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show, so every write is refused`,
-      );
-    }
+    const record = await readRecord(anchorKey, store);
+    if (record.stagedOnly) throw new ConflictError(stagedOnlyMessage(anchorKey));
+    const refusal = anchorRefusal(anchorKey, record, loaded);
+    if (refusal !== null) throw new ConflictError(refusal);
+    if (record.entity === null) return null;
     const { types, readings } = hierarchyOf(record.entity.type, loaded.full);
     return new AnchorGuard(anchorKey, record.entity, types, readings, loaded, store);
+  }
+
+  /**
+   * Staging through an anchored URL (R10): an unknown key is not found;
+   * dangling, or an anchored entity the lens hides, is a 409, as for an
+   * immediate write but with the changeset's text. Staged-only does not
+   * apply, and coverage is a commit rule. Nothing on the plain lens.
+   */
+  static async checkStaging(anchorKey: string | null, loaded: LoadedSchema, store: RuntimeStore): Promise<void> {
+    if (anchorKey === null) return;
+    const refusal = changesetAnchorRefusal(anchorKey, await readRecord(anchorKey, store), loaded);
+    if (refusal !== null) throw new ConflictError(refusal);
   }
 
   private inHierarchy(entityType: string): boolean {
@@ -184,7 +247,7 @@ export class AnchorGuard {
     await this.checkEntity(entityTypeKey, entityId);
     const anchors = await this.store.anchors().listAnchors();
     if (anchors.some((a) => a.entity?.id === entityId && a.entity.type === entityTypeKey)) {
-      throw refuse("entityId", `Entity '${entityId}' is anchored and cannot be deleted on an anchored connection`);
+      throw refuse("entityId", anchoredDeleteMessage(entityId));
     }
   }
 

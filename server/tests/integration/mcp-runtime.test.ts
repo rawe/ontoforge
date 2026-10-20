@@ -211,18 +211,23 @@ describe("tool surface", () => {
     try {
       const tools = await client.listTools();
       expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+        "commit_changeset",
         "create_entity",
         "create_relation",
         "delete_entity",
         "delete_relation",
+        "discard_changeset",
         "edit_document",
         "execute_query",
+        "get_changeset",
         "get_document",
         "get_entity",
         "get_neighbors",
         "get_path",
         "get_relation",
         "get_schema",
+        "get_staged_document",
+        "list_changesets",
         "list_entities",
         "list_relations",
         "list_saved_queries",
@@ -232,6 +237,10 @@ describe("tool surface", () => {
         "search_by_index",
         "search_documents",
         "search_saved_queries",
+        "start_changeset",
+        "submit_changeset",
+        "unstage",
+        "unsubmit_changeset",
         "update_entity",
         "update_relation",
         "write_document",
@@ -1056,6 +1065,7 @@ describe("the anchored mount", () => {
       expect(json(await call(all, "get_anchor"))).toEqual({
         key: "agent-a",
         state: "anchored",
+        stagedOnly: false,
         visible: true,
         entity: { type: "project", id: ids.P1, name: "P1" },
         path: [
@@ -1066,6 +1076,7 @@ describe("the anchored mount", () => {
       expect(json(await call(delivery, "get_anchor"))).toEqual({
         key: "agent-a",
         state: "anchored",
+        stagedOnly: false,
         visible: false,
         entity: null,
         path: [],
@@ -1088,7 +1099,7 @@ describe("the anchored mount", () => {
     for (const [key, state] of [["agent-u", "unanchored"], ["agent-d", "dangling"]] as const) {
       const client = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "all", key));
       try {
-        expect(json(await call(client, "get_anchor"))).toEqual({ key, state, visible: true, entity: null, path: [] });
+        expect(json(await call(client, "get_anchor"))).toEqual({ key, state, stagedOnly: false, visible: true, entity: null, path: [] });
       } finally {
         await client.close();
       }

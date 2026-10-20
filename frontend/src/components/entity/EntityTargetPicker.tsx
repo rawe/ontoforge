@@ -54,7 +54,9 @@ export function EntityTargetPicker({
   })
 
   return (
-    <Command shouldFilter={false} className="rounded-lg border">
+    // h-auto: Command's size-full would take the whole height of a stretched
+    // grid item, siblings included, and run over what follows.
+    <Command shouldFilter={false} className="h-auto rounded-lg border">
       <div className="flex items-center gap-2 border-b px-3">
         {search.isFetching ? (
           <Loader2 className="size-4 shrink-0 animate-spin opacity-50" />

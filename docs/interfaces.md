@@ -183,7 +183,8 @@ per-field detail that REST returns under `details.fields` is flattened into the 
 text, so a model still sees every offending field in one response. A refused parent flag
 carries its violation list under `details.violations`
 ([architecture.md](architecture.md#error-model)); MCP reports its message, which states
-the count per rule.
+the count per rule. A rejected submit or commit of a changeset carries its own list there
+([changesets](#changesets)); MCP appends each listed violation to the message.
 
 Requesting an unavailable search strategy or a capability whose provider is not
 configured answers `VALIDATION_ERROR` with
@@ -267,7 +268,7 @@ schema; see the addressing note above before using it. Semantics:
 | GET | `/lenses` | List the ontology's lenses | — |
 | GET | `/lenses/{lensId}` | Read one lens | — |
 | PUT | `/lenses/{lensId}` | Update name or description; the key is immutable | — |
-| DELETE | `/lenses/{lensId}` | Delete a lens; the schema and its data are untouched | — |
+| DELETE | `/lenses/{lensId}` | Delete a lens with its changesets, answering `{changesetsDeleted}`; the schema and its data are untouched | — |
 | POST | `/lenses/{lensId}/validate` | Check this lens's inclusions against the schema | — |
 
 ### Entity types
@@ -575,6 +576,35 @@ against a stale offset. Insert and append are the range form with zero length.
 | PATCH | `/relations/{relationTypeKey}/{relationId}` | Partial update of properties; endpoints cannot change | — |
 | DELETE | `/relations/{relationTypeKey}/{relationId}` | Delete a relation; its endpoints are untouched | — |
 
+### Changesets
+
+Semantics: [capabilities/changesets.md](capabilities/changesets.md).
+
+| Method | Path | Purpose | Parameters |
+|---|---|---|---|
+| POST | `/changesets` | Start a changeset, with an optional `note`; 201 | — |
+| GET | `/changesets` | List the changesets this URL reaches | — |
+| GET | `/changesets/{changesetId}` | Read a changeset with its staged writes by seq | `offset`, `limit` |
+| GET | `/changesets/{changesetId}/entities/{entityTypeKey}/{entityId}/documents/{propertyKey}` | Read the text a commit would leave in a document property, whole or by character range | `offset`, `limit` |
+| DELETE | `/changesets/{changesetId}` | Discard a draft changeset; 204 | — |
+| DELETE | `/changesets/{changesetId}/writes/{seq}` | Unstage one write; 204 | — |
+| POST | `/changesets/{changesetId}/submit` | Submit, with an optional `note` | — |
+| POST | `/changesets/{changesetId}/unsubmit` | Unsubmit, with a required `note` | — |
+| POST | `/changesets/{changesetId}/commit` | Commit, with an optional `expectedVersion` | — |
+| POST, PATCH, DELETE | `/changesets/{changesetId}/entities/…` · `/changesets/{changesetId}/relations/…` | Stage the entity or relation write of the same path and body; 202 `{seq, id}` | — |
+
+`limit` of the changeset read is 1–500, default 100; the staged document read pages and
+answers as the document read does. Start, submit and unsubmit answer the changeset; commit
+answers `{committed, alreadyGone}`, the number of writes and the seqs of deletes whose
+target was already gone. Every unknown changeset — committed, discarded, expired, never
+started, or bound to another lens or anchor — is `RESOURCE_NOT_FOUND`. A refusal by state
+is `RESOURCE_CONFLICT`: a submitted or busy changeset, a stale `expectedVersion`, a full
+changeset, a staged-only connection, a second commit on the ontology or a third in the
+process. Staging answers the immediate write's validation errors. A submit refused by its
+faults and a rejected commit answer `VALIDATION_ERROR` with `details.violations`, each
+`{seq, kind, message}`, ordered by seq, at most 100, and `details.total`; seq 0 is the
+changeset as a whole.
+
 ### Search
 
 Semantics: [capabilities/search.md](capabilities/search.md).
@@ -852,9 +882,9 @@ lens. Semantics: [capabilities/anchors.md](capabilities/anchors.md).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/` | List the anchors, by key, each `{key, entity, state}` |
+| GET | `/` | List the anchors, by key, each `{key, entity, state, stagedOnly}` |
 | GET | `/{anchorKey}` | Read one anchor |
-| PUT | `/{anchorKey}` | Create or re-point an anchor; the body is `{entity: {type, id}}`, or `{entity: null}` to unanchor; 200 with the record either way |
+| PUT | `/{anchorKey}` | Create or re-point an anchor; the body is `{entity: {type, id}}`, or `{entity: null}` to unanchor, with an optional `stagedOnly` that, absent, keeps the flag; 200 with the record either way |
 | DELETE | `/{anchorKey}` | Delete an anchor; 204 |
 
 `entity` is `{type, id}` or null, `state` is `anchored`, `unanchored` or `dangling`. A key
@@ -868,12 +898,14 @@ unknown anchor is not found on read and delete.
 [runtime REST](#runtime-rest) routes from schema introspection to saved queries, the path
 read included; the AI and entity identity comparison routes are not mirrored. Its root,
 `GET` on the prefix itself, answers what `get_anchor` answers:
-`{key, state, visible, entity, path}`, `entity` and every path step as `{type, id, name}`.
+`{key, state, stagedOnly, visible, entity, path}`, `entity` and every path step as
+`{type, id, name}`.
 Every request checks the ontology, then the lens, then the anchor, after its own shape:
 an unknown anchor is not found on reads too. Writes are held by the
 [write guard](capabilities/anchors.md#the-write-guard): its refusals are field errors, and
 a dangling anchor or an anchored entity the lens hides answers `RESOURCE_CONFLICT` to
-every write. The MCP equivalent is the [anchored runtime mount](#how-a-mount-is-bound).
+every write, and a staged-only anchor to every immediate write and every commit. The MCP
+equivalent is the [anchored runtime mount](#how-a-mount-is-bound).
 
 ## MCP
 
@@ -886,7 +918,7 @@ connection carries state.
 |---|---|---|
 | Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
 | Bound to | One ontology | One ontology and one lens |
-| Tools | 45 | 23, and 24 on an anchored mount |
+| Tools | 45 | 33; 34 on an anchored mount, 31 on a staged-only one |
 
 ### How a mount is bound
 
@@ -905,7 +937,10 @@ own binding.
 A runtime mount URL may add `/anchors/{anchorKey}`: the mount is then also bound to that
 anchor, gains `get_anchor`, and holds its writes by the anchor's
 [write guard](capabilities/anchors.md#the-write-guard). Its tools are otherwise the
-runtime tools, and `create_entity`'s description adds the anchored rule. No mount creates
+runtime tools, and `create_entity`'s description adds the anchored rule. On a staged-only
+anchor's mount the six write tools require `changeset_id`, and `commit_changeset`,
+`edit_document` and `write_document` are absent
+([capabilities/anchors.md](capabilities/anchors.md#anchored-mounts)). No mount creates
 an anchor.
 
 The modeling mount serves requests even when its ontology does not exist yet — that is
@@ -944,7 +979,7 @@ otherwise, reads included.
 | `rebuild_search_index` | Start new generations of a search index and return its status |
 | `create_lens` | Create a lens |
 | `update_lens` | Change a lens's name or description |
-| `delete_lens` | Delete a lens |
+| `delete_lens` | Delete a lens with its changesets, stating how many |
 | `add_entity_type_to_lens` | Include an entity type in a lens, optionally narrowed to a property list |
 | `remove_entity_type_from_lens` | Drop an entity type from a lens |
 | `add_relation_type_to_lens` | Include a relation type in a lens, optionally narrowed to a property list |
@@ -979,7 +1014,7 @@ Everything a client can do to instance data through one lens.
 
 | Tool | Purpose |
 |---|---|
-| `get_anchor` | Anchored mounts only: where the connection is anchored — key, state, visible, entity and path |
+| `get_anchor` | Anchored mounts only: where the connection is anchored — key, state, stagedOnly, visible, entity and path |
 | `get_schema` | The scoped schema, as REST `/schema` returns it — the lens's key, name and description; types, properties, required flags, name properties |
 | `create_entity` | Create an entity, optionally with its parent relation (`parent_relation`: `type`, `parent_id`, `properties`) |
 | `list_entities` | List entities with search, filters, sorting, paging and projection |
@@ -1004,13 +1039,32 @@ Everything a client can do to instance data through one lens.
 | `list_saved_queries` | Discover saved queries and their parameters |
 | `run_saved_query` | Execute a saved query with parameter values |
 | `search_saved_queries` | Find a saved query by describing what it should do |
+| `start_changeset` | Start a changeset, with an optional `note` |
+| `list_changesets` | The changesets this mount reaches |
+| `get_changeset` | A changeset with its staged writes by seq |
+| `get_staged_document` | The text a commit would leave in a document property, whole or by character range |
+| `unstage` | Remove one staged write, by `seq` |
+| `submit_changeset` | Submit a changeset, with an optional `note` |
+| `unsubmit_changeset` | Unsubmit a changeset, with a required `note` |
+| `commit_changeset` | Commit a changeset, with an optional `expected_version` |
+| `discard_changeset` | Discard a draft changeset |
+
+`create_entity`, `update_entity`, `delete_entity`, `create_relation`, `update_relation`
+and `delete_relation` take an optional `changeset_id`: with it the write is staged into
+that changeset and answers `{seq, id}`. `edit_document` and `write_document` cannot stage:
+given a `changeset_id`, they refuse with a validation error and write nothing. Every
+changeset tool but `start_changeset` and `list_changesets` takes `changeset_id`;
+`get_changeset` takes `offset` and `limit`, which it clamps into range, and
+`get_staged_document` takes those of `get_document`. The changeset tools
+answer what the REST routes answer, and `unstage` and `discard_changeset` a message.
 
 An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
 `get_entity`, `get_document`, `list_relations`, `get_neighbors`, `search`,
 `search_documents`, `execute_query`, `list_saved_queries`, `run_saved_query`,
 `search_saved_queries`. Every write tool is outside that set, and so are the read-only
-`get_relation`, `get_path` and `get_anchor` — being read-only is not sufficient to be
-grantable. The two search tools
+`get_relation`, `get_path`, `get_anchor`, `list_changesets`, `get_changeset` and
+`get_staged_document` — being
+read-only is not sufficient to be grantable. The two search tools
 return the REST envelope and take no strategy and no `min_similarity`; they apply the
 fixed floor of [capabilities/search.md](capabilities/search.md#similarity-floor) whenever
 the default strategy ranks semantically, echoed as `minSimilarity`. MCP also accepts
@@ -1034,7 +1088,7 @@ Reasonable things to look for that are absent everywhere — REST, MCP and the w
 |---|---|
 | Health or readiness endpoint | Nothing for an orchestrator to probe; liveness must be inferred from a real request |
 | Data-wipe endpoint | Instance data is removed one entity or relation at a time; deleting the whole ontology is the only bulk removal |
-| Bulk or batch write | Every create and update is a single object, except a create with a parent relation, which writes one entity and its one relation, on every mount; import covers the design, not data |
+| Bulk or batch write | Every create and update is a single object, except a create with a parent relation, which writes one entity and its one relation, on every mount; a changeset stages one object per call and commits them together; import covers the design, not data |
 | Instance-data export | Transfer moves the design only; data leaves through queries or listing |
 | Single-property read on modeling | List the owning type's properties |
 | Cross-lens read | No route or tool sees two lenses at once |

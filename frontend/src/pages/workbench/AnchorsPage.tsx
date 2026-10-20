@@ -10,10 +10,13 @@ import type { Anchor, AnchorView } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { AnchorDialog, type AnchorDialogTarget } from '@/components/anchors/AnchorDialog'
+import { AnchorExplainerButton } from '@/components/anchors/explainer/AnchorExplainer'
 import {
   anchoredMcpUrl,
   anchorPlacement,
   DELETE_CONFIRMATION,
+  STAGED_ONLY_DANGLING_REASON,
+  stagedOnlyOffConfirmation,
   unanchorConfirmation,
 } from '@/components/anchors/anchors'
 import {
@@ -35,6 +38,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
 import {
   Table,
   TableBody,
@@ -43,6 +47,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 const STATE_CHIPS: Record<Anchor['state'], string> = {
@@ -55,6 +60,7 @@ const STATE_CHIPS: Record<Anchor['state'], string> = {
  * `/o/:ontologyKey/w/:lensKey/anchors` — the ontology's anchors, seen through
  * the current lens: key, state, and where each points (name and path from the
  * anchored mount's root, one read per anchor). The URLs use the current lens.
+ * A "?" beside the title explains what an anchor does to a client.
  */
 export function AnchorsPage() {
   const { ontologyKey, lensKey } = useParams<{ ontologyKey: string; lensKey: string }>()
@@ -65,6 +71,7 @@ export function AnchorsPage() {
 
   const [pointTarget, setPointTarget] = useState<AnchorDialogTarget | null>(null)
   const [unanchorTarget, setUnanchorTarget] = useState<Anchor | null>(null)
+  const [stagedOffTarget, setStagedOffTarget] = useState<Anchor | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Anchor | null>(null)
   const [deleteText, setDeleteText] = useState('')
   const deleteInput = useRef<HTMLInputElement>(null)
@@ -79,6 +86,18 @@ export function AnchorsPage() {
       setUnanchorTarget(null)
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to unanchor'),
+  })
+
+  // The PUT names the anchor's entity as it is: only the flag changes.
+  const stagedOnly = useMutation({
+    mutationFn: ({ anchor, on }: { anchor: Anchor; on: boolean }) =>
+      runtime.putAnchor(ontologyKey!, anchor.key, anchor.entity, on),
+    onSuccess: (saved) => {
+      void refresh()
+      toast.success(saved.stagedOnly ? `${saved.key} is staged-only` : `${saved.key} writes immediately again`)
+      setStagedOffTarget(null)
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to change staged-only'),
   })
 
   const remove = useMutation({
@@ -113,6 +132,7 @@ export function AnchorsPage() {
     <div>
       <PageHeader
         title="Anchors"
+        meta={<AnchorExplainerButton className="-ml-2" />}
         description="Hold an agent's writes in one entity's hierarchy to that entity and its descendants."
         actions={
           <Button size="sm" disabled={schema.data === undefined} onClick={() => setPointTarget({ mode: 'create' })}>
@@ -142,8 +162,9 @@ export function AnchorsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-48">Key</TableHead>
-                  <TableHead className="w-32">State</TableHead>
+                  <TableHead className="w-52">State</TableHead>
                   <TableHead>Anchored at</TableHead>
+                  <TableHead className="w-28">Staged only</TableHead>
                   <TableHead className="w-64 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -160,6 +181,10 @@ export function AnchorsPage() {
                       setPointTarget({ mode: 'point', anchor, oldPath: view?.path ?? [] })
                     }
                     onUnanchor={() => setUnanchorTarget(anchor)}
+                    stagedOnlyBusy={stagedOnly.isPending}
+                    onStagedOnly={(on) =>
+                      on ? stagedOnly.mutate({ anchor, on }) : setStagedOffTarget(anchor)
+                    }
                     onDelete={() => {
                       setDeleteText('')
                       setDeleteTarget(anchor)
@@ -207,6 +232,32 @@ export function AnchorsPage() {
             >
               {unanchor.isPending && <Loader2 className="size-3.5 animate-spin" />}
               Unanchor
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={stagedOffTarget !== null}
+        onOpenChange={(open) => !open && setStagedOffTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Turn off staged-only for {stagedOffTarget?.key}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {stagedOffTarget !== null && stagedOnlyOffConfirmation(stagedOffTarget.key)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button
+              disabled={stagedOnly.isPending}
+              onClick={() =>
+                stagedOffTarget !== null && stagedOnly.mutate({ anchor: stagedOffTarget, on: false })
+              }
+            >
+              {stagedOnly.isPending && <Loader2 className="size-3.5 animate-spin" />}
+              Turn off
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -268,6 +319,8 @@ interface AnchorRowProps {
   onCopy: () => void
   onPoint: (view: AnchorView | undefined) => void
   onUnanchor: () => void
+  stagedOnlyBusy: boolean
+  onStagedOnly: (on: boolean) => void
   onDelete: () => void
 }
 
@@ -279,6 +332,8 @@ function AnchorRow({
   onCopy,
   onPoint,
   onUnanchor,
+  stagedOnlyBusy,
+  onStagedOnly,
   onDelete,
 }: AnchorRowProps) {
   // The list carries no name or path: the anchored mount's root reads them through the lens.
@@ -302,6 +357,11 @@ function AnchorRow({
         >
           {dangling ? 'dangling' : anchor.state}
         </span>
+        {anchor.stagedOnly && (
+          <span className="ml-1 inline-flex items-center rounded-full border border-(--tc-blue-border) px-2 py-0.5 text-[11px] font-semibold text-(--tc-blue)">
+            staged only
+          </span>
+        )}
       </TableCell>
       <TableCell className="min-w-0">
         <div
@@ -325,6 +385,30 @@ function AnchorRow({
           ) : (
             <div className="truncate text-[11.5px] text-muted-foreground">{placement.secondary}</div>
           ))}
+      </TableCell>
+      <TableCell>
+        {(() => {
+          const control = (
+            <Switch
+              checked={anchor.stagedOnly}
+              disabled={dangling || stagedOnlyBusy}
+              aria-label={`Staged only for ${anchor.key}`}
+              onCheckedChange={onStagedOnly}
+            />
+          )
+          if (!dangling) return control
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* A disabled switch gets no pointer events — the span carries the tooltip. */}
+                <span tabIndex={0} className="inline-flex">
+                  {control}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{STAGED_ONLY_DANGLING_REASON}</TooltipContent>
+            </Tooltip>
+          )
+        })()}
       </TableCell>
       <TableCell>
         <div className="flex items-center justify-end gap-1.5">

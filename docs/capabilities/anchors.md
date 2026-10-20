@@ -15,12 +15,14 @@ A person keeps a set of anchors per ontology, each under its own key, and points
 at an entity, or at none. A client is then configured with an anchored mount URL naming a
 lens and an anchor. Every write through that URL is checked, in the service just before
 it is written, against the anchor as it stands at that moment, so re-pointing an anchor
-redirects every client using its URL from the next call on.
+redirects every client using its URL from the next call on. A write staged into a
+[changeset](changesets.md#binding) through that URL is held at the changeset's commit.
 
 An anchor is not authentication. A client configured with the plain lens URL is not held,
 and nothing stops a client from being given that URL instead
-([../decisions.md](../decisions.md#scope)). Reads are not narrowed either: an anchored
-mount lists, reads, searches and queries exactly as the plain lens does.
+([../decisions.md](../decisions.md#scope)); neither is its [staged-only
+flag](changesets.md#staged-only), which has two escapes. Reads are not narrowed either: an
+anchored mount lists, reads, searches and queries exactly as the plain lens does.
 
 ## The record
 
@@ -28,6 +30,10 @@ An anchor maps its key to an entity — its type key and id — or to nothing.
 
 - **Key.** It follows the anchor [key](../README.md) rule, at most 64 characters,
   and cannot be renamed. A key that breaks the rule is refused.
+- **Staged-only.** A flag, off for a new anchor. When on, every write through the
+  anchor's URL must be staged into a changeset, and no changeset can be committed through
+  it ([changesets.md](changesets.md#staged-only)). It is read before the state is judged,
+  so it holds on an unanchored or dangling anchor too.
 - **It belongs to the ontology.** It names no lens: the same anchor can be used through
   any lens, and what that lens shows decides only what the mount can see.
 - **It is operational state, not design.** Anchors are not part of the transfer format
@@ -55,10 +61,13 @@ Anchors are maintained without a lens, under the ontology's runtime prefix: list
 put and delete ([../interfaces.md](../interfaces.md#anchors)).
 
 - **Put** creates the anchor or re-points it, and answers the record with its state in
-  either case. It names an entity, which must be stored under a type of the full schema —
-  an unknown type or entity is a field error on `entity.type` or `entity.id` — or nothing,
-  which unanchors it. A delete racing the put can still leave the anchor dangling at once.
-- **Read and list** answer each record with its state; the list is ordered by key.
+  either case. It sets the staged-only flag when the body carries one, and otherwise keeps
+  it, on a re-point or an unanchor too. It names an entity, which must be stored under a
+  type of the full schema — an unknown type or entity is a field error on `entity.type` or
+  `entity.id` — or nothing, which unanchors it. A delete racing the put can still leave
+  the anchor dangling at once.
+- **Read and list** answer each record with its state and its staged-only flag; the list
+  is ordered by key.
 - **Delete** removes the record. A client still using its URL then gets not found.
 - **An unknown key is not found**, on read and delete alike. Nothing creates an anchor but
   a put — in particular not a mount URL naming a key that does not exist.
@@ -71,8 +80,9 @@ call on it checks the ontology, then the lens, then the anchor, reading the anch
 so an unknown anchor is not found on every call, reads included.
 
 **`get_anchor`**, and the REST mirror's root, tell the client where it stands: the
-anchor's key, its state, whether the lens shows its entity, the entity with its name, and
-the entity's [hierarchy path](instance-data.md#the-path-read) through the lens.
+anchor's key, its state, whether it is staged-only, whether the lens shows its entity, the
+entity with its name, and the entity's [hierarchy path](instance-data.md#the-path-read)
+through the lens.
 
 | Case | `visible` | `entity` | `path` |
 |---|---|---|---|
@@ -82,6 +92,11 @@ the entity's [hierarchy path](instance-data.md#the-path-read) through the lens.
 
 The tool is read-only, and no tool sets an anchor: a person does, and may change it at any
 time, which is why a client reads it again after a refusal.
+
+The mount of a staged-only anchor lists the six write tools with `changeset_id` required,
+and leaves out `commit_changeset`, `edit_document` and `write_document`, which could only
+be refused there; the anchor is read on every request, so turning the flag on or off
+changes the tool set from the next one.
 
 ## The write guard
 

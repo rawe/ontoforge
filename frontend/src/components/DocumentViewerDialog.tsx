@@ -29,6 +29,9 @@ interface DocumentViewerDialogProps {
   lensKey: string
   /** `null` keeps the dialog closed. */
   target: DocumentViewerTarget | null
+  /** Set: show the text a commit of this changeset would leave (its last
+   * staged write of the property) instead of the stored text. */
+  changesetId?: string
   onClose: () => void
 }
 
@@ -36,30 +39,28 @@ interface DocumentViewerDialogProps {
  * Read-only overlay for one `document` property: fetches the full content on
  * open (shared `qk.document` cache) and renders it as Markdown in a large
  * scrollable layer. Reused wherever a document stub is one click away from
- * being read — explore node panel, entity tables.
+ * being read — explore node panel, entity tables, a changeset's review
+ * (the staged text, under the changeset's key).
  */
 export function DocumentViewerDialog({
   ontologyKey,
   lensKey,
   target,
+  changesetId,
   onClose,
 }: DocumentViewerDialogProps) {
+  const typeKey = target?.entityTypeKey ?? ''
+  const entityId = target?.entityId ?? ''
+  const propertyKey = target?.property.key ?? ''
   const docQuery = useQuery({
-    queryKey: qk.document(
-      ontologyKey,
-      lensKey,
-      target?.entityTypeKey ?? '',
-      target?.entityId ?? '',
-      target?.property.key ?? '',
-    ),
+    queryKey:
+      changesetId === undefined
+        ? qk.document(ontologyKey, lensKey, typeKey, entityId, propertyKey)
+        : qk.changesets(ontologyKey, lensKey, changesetId, ['document', typeKey, entityId, propertyKey]),
     queryFn: () =>
-      runtime.getDocument(
-        ontologyKey,
-        lensKey,
-        target!.entityTypeKey,
-        target!.entityId,
-        target!.property.key,
-      ),
+      changesetId === undefined
+        ? runtime.getDocument(ontologyKey, lensKey, typeKey, entityId, propertyKey)
+        : runtime.getStagedDocument(ontologyKey, lensKey, changesetId, typeKey, entityId, propertyKey),
     enabled: target !== null,
   })
 
@@ -70,7 +71,8 @@ export function DocumentViewerDialog({
           <DialogTitle>{target?.property.displayName}</DialogTitle>
           <DialogDescription className="flex min-w-0 items-center gap-2">
             <span className="truncate">{target?.entityLabel}</span>
-            {target !== null && <DocumentBadge length={target.length} />}
+            {target !== null && <DocumentBadge length={docQuery.data?.totalLength ?? target.length} />}
+            {changesetId !== undefined && <span className="shrink-0">· staged text, as a commit would leave it</span>}
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-24 flex-1 overflow-y-auto rounded-md border bg-muted/20 px-4 py-3">

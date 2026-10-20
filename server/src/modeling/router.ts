@@ -162,13 +162,12 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         params: LensIdParams,
       },
     },
-    async (request, reply) => {
-      await service.deleteLens(
+    async (request) =>
+      service.deleteLens(
         request.params.lensId,
         await getModelingStore(request.params.ontologyKey),
-      );
-      return reply.status(204).send();
-    },
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
   );
 
   // --- Scope Management ---

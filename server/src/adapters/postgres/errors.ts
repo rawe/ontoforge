@@ -13,6 +13,10 @@
  *   `ROLLBACK` + `release()` on failure. Any method issuing two or more
  *   statements uses it, reads included; there is deliberately no bare
  *   `withClient`.
+ * - `withBoundTransaction(work)` — door two for the store a
+ *   `RuntimeStore.transaction` binds: while `work` runs, every statement
+ *   goes through its one connection, and a pool checkout is an assertion
+ *   failure, never a silent second connection.
  *
  * Besides them, `listen` holds a dedicated connection for `LISTEN` — the
  * search worker's wake-up — and issues no other statement.
@@ -34,12 +38,15 @@
  *
  * Named-constraint violations that a service pre-check already guards are
  * translated to the exact domain error the pre-check would have raised
- * had it won the race (the truth table below). Everything else becomes
- * `StoreError`: 22P02 (a bug above the `isUuid` guard, never a phantom
+ * had it won the race (the truth table below). A lock not available
+ * (55P03: NOWAIT, or `lock_timeout`) is a `ConflictError`. Everything
+ * else becomes `StoreError`: 22P02 (a bug above the `isUuid` guard, never a phantom
  * not-found), 23502/23514 (adapter bugs), 40001/40P01 (no automatic
  * retry), and the connection/resource classes 08/53/57. What was withheld
  * from the client is logged against the error's `errorId`.
  */
+
+import { AsyncLocalStorage } from "node:async_hooks";
 
 import pg from "pg";
 import type { PoolClient } from "pg";
@@ -67,6 +74,9 @@ export interface Querier {
 export type IsolationLevel = "READ COMMITTED" | "REPEATABLE READ";
 
 let pool: pg.Pool | null = null;
+
+/** Set while the work of a bound transaction runs (`withBoundTransaction`). */
+const boundWork = new AsyncLocalStorage<true>();
 
 /**
  * Create the process-lifetime pool from the config surface and verify
@@ -154,6 +164,9 @@ export async function closePool(): Promise<void> {
 }
 
 function getPool(): pg.Pool {
+  if (boundWork.getStore() === true) {
+    throw new Error("Pool checkout inside a bound transaction: every statement must use its connection");
+  }
   if (pool === null) {
     throw new Error("PostgreSQL pool not initialized");
   }
@@ -288,6 +301,20 @@ export async function withTransaction<T>(
   });
 }
 
+/**
+ * Door two for a bound store: `work` runs inside one READ COMMITTED
+ * transaction on one connection, COMMIT on return, ROLLBACK on throw.
+ * Until `work` settles, a pool checkout from its async context — a nested
+ * transaction, a door call that bypasses the querier — is an assertion
+ * failure.
+ */
+export async function withBoundTransaction<T>(
+  work: (querier: Querier) => Promise<T>,
+  namespace?: string,
+): Promise<T> {
+  return withTransaction((querier) => boundWork.run(true, () => work(querier)), "READ COMMITTED", namespace);
+}
+
 /** Log a driver failure and return the `StoreError` that replaces it:
  * SQLSTATE, constraint
  * name, driver message, and stack go to the server log against the
@@ -313,6 +340,10 @@ export function toStoreError(exc: unknown): StoreError {
 /** Translate whatever the driver threw at a door boundary. */
 function translate(exc: unknown): OntoForgeError {
   if (exc instanceof pg.DatabaseError) {
+    // lock_not_available: a NOWAIT lock, or a wait past `lock_timeout`.
+    if (exc.code === "55P03") {
+      return new ConflictError(LOCKED_MESSAGE);
+    }
     const domain = translateConstraint(exc);
     if (domain !== null) {
       return domain;
@@ -320,6 +351,9 @@ function translate(exc: unknown): OntoForgeError {
   }
   return toStoreError(exc);
 }
+
+/** The answer to a lock that could not be taken (55P03). */
+export const LOCKED_MESSAGE = "Another operation holds this data; try again";
 
 /** The insert-side FK constraints whose vanished parent is an entity. */
 const ENTITY_FKS = new Set(["relation_from_fk", "relation_to_fk"]);
@@ -351,7 +385,11 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
   const value = detailKeyValue(exc.detail) ?? "unknown";
   switch (exc.code) {
     case "23503": // insert side: the parent vanished between pre-check and INSERT
-      if (constraint === "assistant_retriever_lens_fk" || constraint === "assistant_navigator_lens_fk") {
+      if (
+        constraint === "assistant_retriever_lens_fk" ||
+        constraint === "assistant_navigator_lens_fk" ||
+        constraint === "changeset_lens_fk"
+      ) {
         return new NotFoundError("Lens not found");
       }
       if (ENTITY_FKS.has(constraint)) {

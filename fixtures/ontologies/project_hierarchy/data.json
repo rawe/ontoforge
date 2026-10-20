@@ -1,466 +1,471 @@
 {
   "formatVersion": "1.0",
-  "exportedAt": "2026-10-19T02:30:57.947Z",
+  "exportedAt": "2026-10-19T22:06:02.862Z",
   "entities": {
     "customer": [
       {
-        "_id": "be8274f6-7eff-48a3-ad3a-09da5b5a8dae",
+        "_id": "6d029f84-0b62-41d9-a419-313e8f8b4153",
         "_entityTypeKey": "customer",
-        "_createdAt": "2026-10-19T02:30:54.167Z",
-        "_updatedAt": "2026-10-19T02:30:54.167Z",
+        "_createdAt": "2026-10-19T22:04:50.556Z",
+        "_updatedAt": "2026-10-19T22:04:50.556Z",
         "name": "ACME"
       },
       {
-        "_id": "f0597f0c-7c77-4b0d-b388-74a257c8fbd5",
+        "_id": "5910441f-5065-416e-9a62-ddf2be24c5f3",
         "_entityTypeKey": "customer",
-        "_createdAt": "2026-10-19T02:30:54.170Z",
-        "_updatedAt": "2026-10-19T02:30:54.170Z",
+        "_createdAt": "2026-10-19T22:04:50.560Z",
+        "_updatedAt": "2026-10-19T22:04:50.560Z",
         "name": "BETA"
       }
     ],
     "milestone": [
       {
-        "_id": "5c9e4fb8-e6b5-47bf-ba9f-df17d28ccd0e",
+        "_id": "e3d1bd28-edad-4938-a96b-046f706fd167",
         "_entityTypeKey": "milestone",
-        "_createdAt": "2026-10-19T02:30:54.213Z",
-        "_updatedAt": "2026-10-19T02:30:54.213Z",
+        "_createdAt": "2026-10-19T22:04:50.563Z",
+        "_updatedAt": "2026-10-19T22:04:50.563Z",
         "name": "M1"
       },
       {
-        "_id": "9ff730f6-d435-4e82-af57-72f66bd187aa",
+        "_id": "5727938d-aa54-42a0-a686-d84157b45259",
         "_entityTypeKey": "milestone",
-        "_createdAt": "2026-10-19T02:30:54.215Z",
-        "_updatedAt": "2026-10-19T02:30:54.215Z",
+        "_createdAt": "2026-10-19T22:04:50.566Z",
+        "_updatedAt": "2026-10-19T22:04:50.566Z",
         "name": "M2"
       }
     ],
     "person": [
       {
-        "_id": "ba87608f-2ae4-46c3-ba8a-2993d2b7d57e",
+        "_id": "bdb180dc-8142-4e13-8e0a-885f88359556",
         "_entityTypeKey": "person",
-        "_createdAt": "2026-10-19T02:30:54.217Z",
-        "_updatedAt": "2026-10-19T02:30:54.217Z",
+        "_createdAt": "2026-10-19T22:04:50.569Z",
+        "_updatedAt": "2026-10-19T22:04:50.569Z",
         "name": "Lea"
       },
       {
-        "_id": "2bba8446-dd9f-44a8-9933-0cff58ad8c3f",
+        "_id": "e12a456e-6849-478e-a37e-0c2bfce2968b",
         "_entityTypeKey": "person",
-        "_createdAt": "2026-10-19T02:30:54.220Z",
-        "_updatedAt": "2026-10-19T02:30:54.220Z",
+        "_createdAt": "2026-10-19T22:04:50.572Z",
+        "_updatedAt": "2026-10-19T22:04:50.572Z",
         "name": "Ben"
       },
       {
-        "_id": "25d385a5-9bb4-4d82-9f00-2704fa24bab6",
+        "_id": "353df955-8283-4b60-b02e-0e30914222ba",
         "_entityTypeKey": "person",
-        "_createdAt": "2026-10-19T02:30:54.222Z",
-        "_updatedAt": "2026-10-19T02:30:54.222Z",
+        "_createdAt": "2026-10-19T22:04:50.575Z",
+        "_updatedAt": "2026-10-19T22:04:50.575Z",
         "name": "Kim"
       },
       {
-        "_id": "65a02a6c-a51f-4dde-aaf6-166b00795088",
+        "_id": "81e4103d-dbc1-414a-b8a6-c83962805a83",
         "_entityTypeKey": "person",
-        "_createdAt": "2026-10-19T02:30:54.224Z",
-        "_updatedAt": "2026-10-19T02:30:54.224Z",
+        "_createdAt": "2026-10-19T22:04:50.579Z",
+        "_updatedAt": "2026-10-19T22:04:50.579Z",
         "name": "Ana"
       }
     ],
     "project": [
       {
-        "_id": "9298575f-80b5-40bb-93b2-9226fa9c0164",
+        "_id": "bc33db9f-62ae-40d6-bc21-4d929304adfa",
         "_entityTypeKey": "project",
-        "_createdAt": "2026-10-19T02:30:54.173Z",
-        "_updatedAt": "2026-10-19T02:30:54.173Z",
+        "_createdAt": "2026-10-19T22:04:50.581Z",
+        "_updatedAt": "2026-10-19T22:04:50.581Z",
         "name": "P1"
       },
       {
-        "_id": "4d09f7bc-d486-4f3a-bb23-abaf7cec3fb1",
+        "_id": "a46e000d-fe68-4966-9ccb-a9ba77e085a9",
         "_entityTypeKey": "project",
-        "_createdAt": "2026-10-19T02:30:54.178Z",
-        "_updatedAt": "2026-10-19T02:30:54.178Z",
+        "_createdAt": "2026-10-19T22:04:50.583Z",
+        "_updatedAt": "2026-10-19T22:04:50.583Z",
         "name": "P2"
       },
       {
-        "_id": "cf02e8e2-fe4d-4ce5-9c80-a8fd99e14464",
+        "_id": "a55aaf4a-497d-4a5a-9902-ef30a3ce36f4",
         "_entityTypeKey": "project",
-        "_createdAt": "2026-10-19T02:30:54.182Z",
-        "_updatedAt": "2026-10-19T02:30:54.182Z",
+        "_createdAt": "2026-10-19T22:04:50.585Z",
+        "_updatedAt": "2026-10-19T22:04:50.585Z",
         "name": "P3"
       }
     ],
     "status": [
       {
-        "_id": "c1c6914c-c772-48f1-8da7-543a8f145d9f",
+        "_id": "70793dbf-1f50-49f7-b90a-9d7dd2a99f6f",
         "_entityTypeKey": "status",
-        "_createdAt": "2026-10-19T02:30:54.226Z",
-        "_updatedAt": "2026-10-19T02:30:54.226Z",
+        "_createdAt": "2026-10-19T22:04:50.587Z",
+        "_updatedAt": "2026-10-19T22:04:50.587Z",
         "name": "open"
       },
       {
-        "_id": "62f1f548-9ea9-415f-ad0a-e50ba620963d",
+        "_id": "6fd97c0f-a802-4eaf-a384-d98a09fde73a",
         "_entityTypeKey": "status",
-        "_createdAt": "2026-10-19T02:30:54.228Z",
-        "_updatedAt": "2026-10-19T02:30:54.228Z",
+        "_createdAt": "2026-10-19T22:04:50.589Z",
+        "_updatedAt": "2026-10-19T22:04:50.589Z",
         "name": "doing"
       },
       {
-        "_id": "df5e8196-87ed-41ed-9d66-d3b20caedaa0",
+        "_id": "5fa93d06-07f6-400c-9c1b-b6cbd3d581f0",
         "_entityTypeKey": "status",
-        "_createdAt": "2026-10-19T02:30:54.230Z",
-        "_updatedAt": "2026-10-19T02:30:54.230Z",
+        "_createdAt": "2026-10-19T22:04:50.591Z",
+        "_updatedAt": "2026-10-19T22:04:50.591Z",
         "name": "done"
       }
     ],
     "task": [
       {
-        "_id": "3ffac035-8325-40c6-8e32-15641cdd214e",
+        "_id": "d955a6c6-a6d6-437f-a42f-df6aa61bca0a",
         "_entityTypeKey": "task",
-        "_createdAt": "2026-10-19T02:30:54.185Z",
-        "_updatedAt": "2026-10-19T02:30:54.185Z",
-        "name": "T1"
+        "_createdAt": "2026-10-19T22:04:50.592Z",
+        "_updatedAt": "2026-10-19T22:05:58.784Z",
+        "name": "T1",
+        "description": "# Requirements workshop\n\nRun a two-day workshop with the customer's stakeholders to agree on the scope of the first release. The outcome is a signed-off requirements baseline that the team can plan against.\n\n## Goals\n\n- Agree on the problem statement and the target users of release 1.\n- Collect functional requirements as user stories with acceptance criteria.\n- Capture non-functional requirements: performance, availability, data retention, accessibility.\n- Identify the systems the solution must integrate with and name an owner for each.\n- Rank the backlog so that the first three sprints can be planned right after the workshop.\n\n## Participants\n\n| Role | Who | Needed on |\n|---|---|---|\n| Product owner | Customer | both days |\n| Business analysts | Customer, two people | both days |\n| Tech lead | Our team | both days |\n| UX designer | Our team | day 1 |\n| Operations contact | Customer | day 2, afternoon |\n\n## Agenda\n\n### Day 1: problem and users\n\n1. Kick-off: goals of the workshop, ground rules, timebox for each session.\n2. Current process walk-through, presented by the business analysts.\n3. Pain points, grouped and voted on by all participants.\n4. Personas and their main journeys, sketched on the whiteboard.\n5. Wrap-up: open questions are written down and each gets an owner.\n\n### Day 2: scope and priorities\n\n1. Review of the open questions from day 1.\n2. User story writing in pairs, one pair per journey.\n3. Non-functional requirements and constraints, with the operations contact.\n4. Integration inventory: interfaces, data owners, known limitations.\n5. Prioritisation with MoSCoW, then a first cut of release 1.\n6. Next steps and sign-off plan.\n\n## Preparation\n\nBefore the workshop, the business analysts send the current process documentation and any existing requirement lists. Our team reviews them and prepares a draft glossary, so that the sessions do not start from an empty page. The room needs a projector, two whiteboards and enough wall space for sticky notes; remote participants join through the usual video call, with a shared online board that mirrors the wall.\n\n## Deliverables\n\n- Workshop minutes, sent within two working days.\n- The requirements baseline as a ranked backlog, every story with acceptance criteria.\n- A list of assumptions and risks, each with an owner and a due date.\n- A glossary of the domain terms agreed during the workshop.\n\n## Risks\n\nThe main risk is that decisions are deferred because a key stakeholder is missing. If the product owner cannot attend a session, it is moved rather than held without them. A second risk is scope creep during story writing: anything that does not serve a persona's main journey goes to a parking lot and is reviewed at the end of day 2, not during the session.\n\n## Definition of done\n\nThe task is done when the product owner has signed off the baseline in writing and the team has estimated every Must-have story. Stories that cannot be estimated are split or turned into spikes before sign-off.\n"
       },
       {
-        "_id": "779a7859-2a40-4461-8223-47be24968dfb",
+        "_id": "4e0b79d7-92e3-432e-bb62-c4d364bcd292",
         "_entityTypeKey": "task",
-        "_createdAt": "2026-10-19T02:30:54.188Z",
-        "_updatedAt": "2026-10-19T02:30:54.188Z",
-        "name": "T1a"
+        "_createdAt": "2026-10-19T22:04:50.594Z",
+        "_updatedAt": "2026-10-19T22:05:58.790Z",
+        "name": "T1a",
+        "description": "# Stakeholder interviews\n\nInterview the key stakeholders one by one before the workshop, so that conflicting expectations surface early and not in front of the whole group.\n\n## Interviewees\n\n- Head of operations\n- Two team leads from the business side\n- The IT security officer\n\n## Questions\n\n1. What should the new solution change in your daily work?\n2. What would make release 1 a failure for you?\n3. Which systems and reports do you rely on today?\n4. Are there deadlines or audits we must plan around?\n\nEach interview takes 45 minutes. Notes are shared with the interviewee for correction within one day, then summarised in a single page per person for the workshop preparation.\n"
       },
       {
-        "_id": "0dab2f83-9a0f-41da-b1c1-43ca8662d45e",
+        "_id": "46496d95-d92d-4fb2-8e45-9ba4782a1244",
         "_entityTypeKey": "task",
-        "_createdAt": "2026-10-19T02:30:54.193Z",
-        "_updatedAt": "2026-10-19T02:30:54.193Z",
+        "_createdAt": "2026-10-19T22:04:50.596Z",
+        "_updatedAt": "2026-10-19T22:04:50.596Z",
         "name": "T1a1"
       },
       {
-        "_id": "b2a2a689-065b-44b7-b6a5-093772ff2a7a",
+        "_id": "0a2d0065-d12b-4896-83e4-2ba702e75f0c",
         "_entityTypeKey": "task",
-        "_createdAt": "2026-10-19T02:30:54.195Z",
-        "_updatedAt": "2026-10-19T02:30:54.195Z",
+        "_createdAt": "2026-10-19T22:04:50.598Z",
+        "_updatedAt": "2026-10-19T22:04:50.598Z",
         "name": "T2"
       },
       {
-        "_id": "e27f4405-7f5e-4da5-9f00-38d99b06bae9",
+        "_id": "51dc65ac-f835-49ff-8928-bbea5c1a0c9e",
         "_entityTypeKey": "task",
-        "_createdAt": "2026-10-19T02:30:54.198Z",
-        "_updatedAt": "2026-10-19T02:30:54.198Z",
+        "_createdAt": "2026-10-19T22:04:50.600Z",
+        "_updatedAt": "2026-10-19T22:04:50.600Z",
         "name": "T2a"
       },
       {
-        "_id": "0f5b8d03-4154-430d-b9c6-f39e36b7baa4",
+        "_id": "8616917a-7eed-4b28-9ad1-e53a82d5ed0f",
         "_entityTypeKey": "task",
-        "_createdAt": "2026-10-19T02:30:54.201Z",
-        "_updatedAt": "2026-10-19T02:30:54.201Z",
-        "name": "T3"
+        "_createdAt": "2026-10-19T22:04:50.602Z",
+        "_updatedAt": "2026-10-19T22:05:58.793Z",
+        "name": "T3",
+        "description": "# Data migration plan\n\nWrite the plan for moving the customer's existing records into the new system.\n\n## Scope\n\n- Customer master data, around 40,000 records\n- Open orders of the last 18 months\n- Attached documents, referenced by file path only\n\n## Approach\n\nThe migration runs in three rehearsals and one final run. Each rehearsal uses a fresh copy of production data and ends with a reconciliation report: record counts per table, checksums on key fields, and a sample of 50 records checked by hand.\n\n## Open points\n\n- Who on the customer side signs off the reconciliation?\n- How long may the old system stay read-only during the final run?\n\nThe plan is reviewed by both assignees before it goes to the customer.\n"
       },
       {
-        "_id": "9734d1cd-8785-4a0d-9ecf-adddcef5cf91",
+        "_id": "15c87b95-0479-410a-b5ed-769ef244ad58",
         "_entityTypeKey": "task",
-        "_createdAt": "2026-10-19T02:30:54.204Z",
-        "_updatedAt": "2026-10-19T02:30:54.204Z",
-        "name": "T4"
+        "_createdAt": "2026-10-19T22:04:50.604Z",
+        "_updatedAt": "2026-10-19T22:05:58.796Z",
+        "name": "T4",
+        "description": "# Reporting dashboard\n\nBuild the first version of the management dashboard for project two.\n\n## Content\n\n- Weekly throughput: items finished per week, last 12 weeks\n- Lead time distribution, median and 85th percentile\n- Open items by status\n\n## Notes\n\nData comes from the nightly export; no live queries against the operational database. The layout follows the customer's style guide. A short walk-through for the department heads is planned for the sprint review.\n"
       },
       {
-        "_id": "826970c4-41ac-423d-9276-7d6548d6e17f",
+        "_id": "ae0f09cb-d18d-43ce-8e1f-ececf058b1cb",
         "_entityTypeKey": "task",
-        "_createdAt": "2026-10-19T02:30:54.208Z",
-        "_updatedAt": "2026-10-19T02:30:54.208Z",
+        "_createdAt": "2026-10-19T22:04:50.606Z",
+        "_updatedAt": "2026-10-19T22:04:50.606Z",
         "name": "T5"
       },
       {
-        "_id": "5b2f8906-c6dc-4068-a136-94cec79a03b5",
+        "_id": "52935dea-0df3-4d75-9beb-b91384e327ab",
         "_entityTypeKey": "task",
-        "_createdAt": "2026-10-19T02:30:54.210Z",
-        "_updatedAt": "2026-10-19T02:30:54.210Z",
-        "name": "T6"
+        "_createdAt": "2026-10-19T22:04:50.608Z",
+        "_updatedAt": "2026-10-19T22:05:58.798Z",
+        "name": "T6",
+        "description": "# Vendor onboarding\n\nPrepare everything the new vendor needs to start work on BETA's project.\n\n## Checklist\n\n1. Sign the non-disclosure agreement and the framework contract.\n2. Create accounts for the issue tracker and the document space.\n3. Share the architecture overview and the coding guidelines.\n4. Schedule an introduction call with the tech lead.\n\n## Acceptance\n\nOnboarding is complete when the vendor has closed a first small ticket end to end, from branch to review to deployment on the test system. Any access that is still missing after the first week is escalated to the project manager.\n"
       }
     ]
   },
   "relations": {
     "assigned_to": [
       {
-        "_id": "a915bf14-94b6-46dc-af72-323460d856d6",
+        "_id": "a7ec6fbb-6348-4bc3-be56-34ce9646dc43",
         "_relationTypeKey": "assigned_to",
-        "_createdAt": "2026-10-19T02:30:54.233Z",
-        "_updatedAt": "2026-10-19T02:30:54.233Z",
-        "fromEntityId": "3ffac035-8325-40c6-8e32-15641cdd214e",
-        "toEntityId": "2bba8446-dd9f-44a8-9933-0cff58ad8c3f"
+        "_createdAt": "2026-10-19T22:04:50.611Z",
+        "_updatedAt": "2026-10-19T22:04:50.611Z",
+        "fromEntityId": "d955a6c6-a6d6-437f-a42f-df6aa61bca0a",
+        "toEntityId": "e12a456e-6849-478e-a37e-0c2bfce2968b"
       },
       {
-        "_id": "4784e7f8-1cbc-400a-bebb-d4835efc63d2",
+        "_id": "dc330936-f969-4fb2-b8f5-b00eacea3675",
         "_relationTypeKey": "assigned_to",
-        "_createdAt": "2026-10-19T02:30:54.235Z",
-        "_updatedAt": "2026-10-19T02:30:54.235Z",
-        "fromEntityId": "b2a2a689-065b-44b7-b6a5-093772ff2a7a",
-        "toEntityId": "25d385a5-9bb4-4d82-9f00-2704fa24bab6"
+        "_createdAt": "2026-10-19T22:04:50.614Z",
+        "_updatedAt": "2026-10-19T22:04:50.614Z",
+        "fromEntityId": "0a2d0065-d12b-4896-83e4-2ba702e75f0c",
+        "toEntityId": "353df955-8283-4b60-b02e-0e30914222ba"
       },
       {
-        "_id": "03a508dd-0bd3-4efe-9f9d-2363b7f9973a",
+        "_id": "fe203343-a80e-4ce5-90d6-e4c1d0d52f35",
         "_relationTypeKey": "assigned_to",
-        "_createdAt": "2026-10-19T02:30:54.237Z",
-        "_updatedAt": "2026-10-19T02:30:54.237Z",
-        "fromEntityId": "0f5b8d03-4154-430d-b9c6-f39e36b7baa4",
-        "toEntityId": "65a02a6c-a51f-4dde-aaf6-166b00795088"
+        "_createdAt": "2026-10-19T22:04:50.616Z",
+        "_updatedAt": "2026-10-19T22:04:50.616Z",
+        "fromEntityId": "8616917a-7eed-4b28-9ad1-e53a82d5ed0f",
+        "toEntityId": "81e4103d-dbc1-414a-b8a6-c83962805a83"
       },
       {
-        "_id": "c302c99d-35ac-4d50-8343-d8f0efd8bb2d",
+        "_id": "566a1b83-094a-4035-93d0-1d2aa6df1931",
         "_relationTypeKey": "assigned_to",
-        "_createdAt": "2026-10-19T02:30:54.239Z",
-        "_updatedAt": "2026-10-19T02:30:54.239Z",
-        "fromEntityId": "0f5b8d03-4154-430d-b9c6-f39e36b7baa4",
-        "toEntityId": "2bba8446-dd9f-44a8-9933-0cff58ad8c3f"
+        "_createdAt": "2026-10-19T22:04:50.619Z",
+        "_updatedAt": "2026-10-19T22:04:50.619Z",
+        "fromEntityId": "8616917a-7eed-4b28-9ad1-e53a82d5ed0f",
+        "toEntityId": "e12a456e-6849-478e-a37e-0c2bfce2968b"
       },
       {
-        "_id": "f050babc-7001-40a9-bed4-83271f2d5a6b",
+        "_id": "696cef51-d759-430b-9b1e-80db19d62e7d",
         "_relationTypeKey": "assigned_to",
-        "_createdAt": "2026-10-19T02:30:54.242Z",
-        "_updatedAt": "2026-10-19T02:30:54.242Z",
-        "fromEntityId": "9734d1cd-8785-4a0d-9ecf-adddcef5cf91",
-        "toEntityId": "25d385a5-9bb4-4d82-9f00-2704fa24bab6"
+        "_createdAt": "2026-10-19T22:04:50.621Z",
+        "_updatedAt": "2026-10-19T22:04:50.621Z",
+        "fromEntityId": "15c87b95-0479-410a-b5ed-769ef244ad58",
+        "toEntityId": "353df955-8283-4b60-b02e-0e30914222ba"
       },
       {
-        "_id": "05569b11-bc50-455c-8acf-c83ee7ae2ef0",
+        "_id": "31d2ae8a-0771-40e7-b1aa-b17dc0076700",
         "_relationTypeKey": "assigned_to",
-        "_createdAt": "2026-10-19T02:30:54.244Z",
-        "_updatedAt": "2026-10-19T02:30:54.244Z",
-        "fromEntityId": "5b2f8906-c6dc-4068-a136-94cec79a03b5",
-        "toEntityId": "65a02a6c-a51f-4dde-aaf6-166b00795088"
+        "_createdAt": "2026-10-19T22:04:50.624Z",
+        "_updatedAt": "2026-10-19T22:04:50.624Z",
+        "fromEntityId": "52935dea-0df3-4d75-9beb-b91384e327ab",
+        "toEntityId": "81e4103d-dbc1-414a-b8a6-c83962805a83"
       }
     ],
     "belongs_to": [
       {
-        "_id": "4ef6101f-8c69-4581-9fee-5861bce71465",
+        "_id": "78161df3-ad1f-4442-b7ab-5a48269a57b3",
         "_relationTypeKey": "belongs_to",
-        "_createdAt": "2026-10-19T02:30:54.213Z",
-        "_updatedAt": "2026-10-19T02:30:54.213Z",
-        "fromEntityId": "5c9e4fb8-e6b5-47bf-ba9f-df17d28ccd0e",
-        "toEntityId": "9298575f-80b5-40bb-93b2-9226fa9c0164"
+        "_createdAt": "2026-10-19T22:04:50.628Z",
+        "_updatedAt": "2026-10-19T22:04:50.628Z",
+        "fromEntityId": "e3d1bd28-edad-4938-a96b-046f706fd167",
+        "toEntityId": "bc33db9f-62ae-40d6-bc21-4d929304adfa"
       },
       {
-        "_id": "93197735-cb76-4708-b9a1-acd8676d5c7f",
+        "_id": "ec76f83e-51d2-43e2-8c33-9346b5f92be9",
         "_relationTypeKey": "belongs_to",
-        "_createdAt": "2026-10-19T02:30:54.215Z",
-        "_updatedAt": "2026-10-19T02:30:54.215Z",
-        "fromEntityId": "9ff730f6-d435-4e82-af57-72f66bd187aa",
-        "toEntityId": "cf02e8e2-fe4d-4ce5-9c80-a8fd99e14464"
+        "_createdAt": "2026-10-19T22:04:50.632Z",
+        "_updatedAt": "2026-10-19T22:04:50.632Z",
+        "fromEntityId": "5727938d-aa54-42a0-a686-d84157b45259",
+        "toEntityId": "a55aaf4a-497d-4a5a-9902-ef30a3ce36f4"
       }
     ],
     "has_project": [
       {
-        "_id": "122ecb7c-dc80-49b5-9306-e6b4718603bc",
+        "_id": "3ba11e8e-bb0a-4b6e-a883-b2ee2fc2709e",
         "_relationTypeKey": "has_project",
-        "_createdAt": "2026-10-19T02:30:54.173Z",
-        "_updatedAt": "2026-10-19T02:30:54.173Z",
-        "fromEntityId": "be8274f6-7eff-48a3-ad3a-09da5b5a8dae",
-        "toEntityId": "9298575f-80b5-40bb-93b2-9226fa9c0164"
+        "_createdAt": "2026-10-19T22:04:50.636Z",
+        "_updatedAt": "2026-10-19T22:04:50.636Z",
+        "fromEntityId": "6d029f84-0b62-41d9-a419-313e8f8b4153",
+        "toEntityId": "bc33db9f-62ae-40d6-bc21-4d929304adfa"
       },
       {
-        "_id": "405c970a-d3fd-47ea-9527-2ceb7e9dc8a1",
+        "_id": "fb122336-9473-4125-9e38-fe3b021f7f0e",
         "_relationTypeKey": "has_project",
-        "_createdAt": "2026-10-19T02:30:54.178Z",
-        "_updatedAt": "2026-10-19T02:30:54.178Z",
-        "fromEntityId": "be8274f6-7eff-48a3-ad3a-09da5b5a8dae",
-        "toEntityId": "4d09f7bc-d486-4f3a-bb23-abaf7cec3fb1"
+        "_createdAt": "2026-10-19T22:04:50.640Z",
+        "_updatedAt": "2026-10-19T22:04:50.640Z",
+        "fromEntityId": "6d029f84-0b62-41d9-a419-313e8f8b4153",
+        "toEntityId": "a46e000d-fe68-4966-9ccb-a9ba77e085a9"
       },
       {
-        "_id": "3e155c71-c9a1-469b-9fba-58e7be947066",
+        "_id": "e77e8259-e010-45d2-9098-9538419f794b",
         "_relationTypeKey": "has_project",
-        "_createdAt": "2026-10-19T02:30:54.182Z",
-        "_updatedAt": "2026-10-19T02:30:54.182Z",
-        "fromEntityId": "f0597f0c-7c77-4b0d-b388-74a257c8fbd5",
-        "toEntityId": "cf02e8e2-fe4d-4ce5-9c80-a8fd99e14464"
+        "_createdAt": "2026-10-19T22:04:50.644Z",
+        "_updatedAt": "2026-10-19T22:04:50.644Z",
+        "fromEntityId": "5910441f-5065-416e-9a62-ddf2be24c5f3",
+        "toEntityId": "a55aaf4a-497d-4a5a-9902-ef30a3ce36f4"
       }
     ],
     "has_status": [
       {
-        "_id": "77e29dce-cbe2-416a-a4f9-d37656f110d6",
+        "_id": "91bd4d7d-7576-45a7-9fcc-ed84e61556ef",
         "_relationTypeKey": "has_status",
-        "_createdAt": "2026-10-19T02:30:54.246Z",
-        "_updatedAt": "2026-10-19T02:30:54.246Z",
-        "fromEntityId": "3ffac035-8325-40c6-8e32-15641cdd214e",
-        "toEntityId": "62f1f548-9ea9-415f-ad0a-e50ba620963d"
+        "_createdAt": "2026-10-19T22:04:50.646Z",
+        "_updatedAt": "2026-10-19T22:04:50.646Z",
+        "fromEntityId": "d955a6c6-a6d6-437f-a42f-df6aa61bca0a",
+        "toEntityId": "6fd97c0f-a802-4eaf-a384-d98a09fde73a"
       },
       {
-        "_id": "0836a7a7-5824-491b-82c3-e3fea166036d",
+        "_id": "d51049d2-6d3d-49ba-914c-fdc20787d9ec",
         "_relationTypeKey": "has_status",
-        "_createdAt": "2026-10-19T02:30:54.248Z",
-        "_updatedAt": "2026-10-19T02:30:54.248Z",
-        "fromEntityId": "779a7859-2a40-4461-8223-47be24968dfb",
-        "toEntityId": "62f1f548-9ea9-415f-ad0a-e50ba620963d"
+        "_createdAt": "2026-10-19T22:04:50.648Z",
+        "_updatedAt": "2026-10-19T22:04:50.648Z",
+        "fromEntityId": "4e0b79d7-92e3-432e-bb62-c4d364bcd292",
+        "toEntityId": "6fd97c0f-a802-4eaf-a384-d98a09fde73a"
       },
       {
-        "_id": "4e5f2c0f-fb36-4996-b9b0-bbca2de7dbd5",
+        "_id": "6438d4f0-f223-4fcc-9947-42e54503ed7c",
         "_relationTypeKey": "has_status",
-        "_createdAt": "2026-10-19T02:30:54.251Z",
-        "_updatedAt": "2026-10-19T02:30:54.251Z",
-        "fromEntityId": "0dab2f83-9a0f-41da-b1c1-43ca8662d45e",
-        "toEntityId": "c1c6914c-c772-48f1-8da7-543a8f145d9f"
+        "_createdAt": "2026-10-19T22:04:50.650Z",
+        "_updatedAt": "2026-10-19T22:04:50.650Z",
+        "fromEntityId": "46496d95-d92d-4fb2-8e45-9ba4782a1244",
+        "toEntityId": "70793dbf-1f50-49f7-b90a-9d7dd2a99f6f"
       },
       {
-        "_id": "3d565e7c-46a7-4f95-bb44-caa94db37abf",
+        "_id": "f94c5b05-3e91-494d-b60c-a3364a2895de",
         "_relationTypeKey": "has_status",
-        "_createdAt": "2026-10-19T02:30:54.253Z",
-        "_updatedAt": "2026-10-19T02:30:54.253Z",
-        "fromEntityId": "b2a2a689-065b-44b7-b6a5-093772ff2a7a",
-        "toEntityId": "c1c6914c-c772-48f1-8da7-543a8f145d9f"
+        "_createdAt": "2026-10-19T22:04:50.653Z",
+        "_updatedAt": "2026-10-19T22:04:50.653Z",
+        "fromEntityId": "0a2d0065-d12b-4896-83e4-2ba702e75f0c",
+        "toEntityId": "70793dbf-1f50-49f7-b90a-9d7dd2a99f6f"
       },
       {
-        "_id": "62057258-3b7c-41ef-82f4-10f5f3f4947c",
+        "_id": "bbb95352-1410-4f27-be1b-583df85c66d8",
         "_relationTypeKey": "has_status",
-        "_createdAt": "2026-10-19T02:30:54.255Z",
-        "_updatedAt": "2026-10-19T02:30:54.255Z",
-        "fromEntityId": "e27f4405-7f5e-4da5-9f00-38d99b06bae9",
-        "toEntityId": "c1c6914c-c772-48f1-8da7-543a8f145d9f"
+        "_createdAt": "2026-10-19T22:04:50.655Z",
+        "_updatedAt": "2026-10-19T22:04:50.655Z",
+        "fromEntityId": "51dc65ac-f835-49ff-8928-bbea5c1a0c9e",
+        "toEntityId": "70793dbf-1f50-49f7-b90a-9d7dd2a99f6f"
       },
       {
-        "_id": "ee815892-883c-45db-b14a-b9769f4b9e68",
+        "_id": "12bfac68-bb9a-4ca5-ab8a-333680ba706b",
         "_relationTypeKey": "has_status",
-        "_createdAt": "2026-10-19T02:30:54.258Z",
-        "_updatedAt": "2026-10-19T02:30:54.258Z",
-        "fromEntityId": "0f5b8d03-4154-430d-b9c6-f39e36b7baa4",
-        "toEntityId": "df5e8196-87ed-41ed-9d66-d3b20caedaa0"
+        "_createdAt": "2026-10-19T22:04:50.657Z",
+        "_updatedAt": "2026-10-19T22:04:50.657Z",
+        "fromEntityId": "8616917a-7eed-4b28-9ad1-e53a82d5ed0f",
+        "toEntityId": "5fa93d06-07f6-400c-9c1b-b6cbd3d581f0"
       },
       {
-        "_id": "cf9a6bab-abde-49ba-92f6-796fbdeba60d",
+        "_id": "62aae872-652c-42dd-9116-6903388df9e8",
         "_relationTypeKey": "has_status",
-        "_createdAt": "2026-10-19T02:30:54.261Z",
-        "_updatedAt": "2026-10-19T02:30:54.261Z",
-        "fromEntityId": "9734d1cd-8785-4a0d-9ecf-adddcef5cf91",
-        "toEntityId": "62f1f548-9ea9-415f-ad0a-e50ba620963d"
+        "_createdAt": "2026-10-19T22:04:50.659Z",
+        "_updatedAt": "2026-10-19T22:04:50.659Z",
+        "fromEntityId": "15c87b95-0479-410a-b5ed-769ef244ad58",
+        "toEntityId": "6fd97c0f-a802-4eaf-a384-d98a09fde73a"
       },
       {
-        "_id": "c9ace9e0-1d66-4a92-83d0-e3b93f417231",
+        "_id": "16e3c987-fd35-471b-883e-084a7c21e911",
         "_relationTypeKey": "has_status",
-        "_createdAt": "2026-10-19T02:30:54.264Z",
-        "_updatedAt": "2026-10-19T02:30:54.264Z",
-        "fromEntityId": "826970c4-41ac-423d-9276-7d6548d6e17f",
-        "toEntityId": "c1c6914c-c772-48f1-8da7-543a8f145d9f"
+        "_createdAt": "2026-10-19T22:04:50.661Z",
+        "_updatedAt": "2026-10-19T22:04:50.661Z",
+        "fromEntityId": "ae0f09cb-d18d-43ce-8e1f-ececf058b1cb",
+        "toEntityId": "70793dbf-1f50-49f7-b90a-9d7dd2a99f6f"
       },
       {
-        "_id": "7cd12f69-d5ba-440b-b0e6-606e97692f83",
+        "_id": "b2daf0df-a9e0-4da7-beee-18a07ae44f28",
         "_relationTypeKey": "has_status",
-        "_createdAt": "2026-10-19T02:30:54.268Z",
-        "_updatedAt": "2026-10-19T02:30:54.268Z",
-        "fromEntityId": "5b2f8906-c6dc-4068-a136-94cec79a03b5",
-        "toEntityId": "df5e8196-87ed-41ed-9d66-d3b20caedaa0"
+        "_createdAt": "2026-10-19T22:04:50.663Z",
+        "_updatedAt": "2026-10-19T22:04:50.663Z",
+        "fromEntityId": "52935dea-0df3-4d75-9beb-b91384e327ab",
+        "toEntityId": "5fa93d06-07f6-400c-9c1b-b6cbd3d581f0"
       }
     ],
     "has_subtask": [
       {
-        "_id": "6c96dc44-c700-4029-aabe-6e814d9fed99",
+        "_id": "165991c3-7dd3-4376-9f10-7ce409572e8d",
         "_relationTypeKey": "has_subtask",
-        "_createdAt": "2026-10-19T02:30:54.188Z",
-        "_updatedAt": "2026-10-19T02:30:54.188Z",
-        "fromEntityId": "3ffac035-8325-40c6-8e32-15641cdd214e",
-        "toEntityId": "779a7859-2a40-4461-8223-47be24968dfb"
+        "_createdAt": "2026-10-19T22:04:50.666Z",
+        "_updatedAt": "2026-10-19T22:04:50.666Z",
+        "fromEntityId": "d955a6c6-a6d6-437f-a42f-df6aa61bca0a",
+        "toEntityId": "4e0b79d7-92e3-432e-bb62-c4d364bcd292"
       },
       {
-        "_id": "134d0a10-d5b9-4e2b-b20a-c71fcda5aa02",
+        "_id": "b78107da-b592-4af8-854f-bf1881c69b21",
         "_relationTypeKey": "has_subtask",
-        "_createdAt": "2026-10-19T02:30:54.193Z",
-        "_updatedAt": "2026-10-19T02:30:54.193Z",
-        "fromEntityId": "779a7859-2a40-4461-8223-47be24968dfb",
-        "toEntityId": "0dab2f83-9a0f-41da-b1c1-43ca8662d45e"
+        "_createdAt": "2026-10-19T22:04:50.670Z",
+        "_updatedAt": "2026-10-19T22:04:50.670Z",
+        "fromEntityId": "4e0b79d7-92e3-432e-bb62-c4d364bcd292",
+        "toEntityId": "46496d95-d92d-4fb2-8e45-9ba4782a1244"
       },
       {
-        "_id": "97dc6275-6a4f-4946-ae95-55077d7c9acd",
+        "_id": "74f76bc8-bc32-49b2-a8d8-e97450dfa97b",
         "_relationTypeKey": "has_subtask",
-        "_createdAt": "2026-10-19T02:30:54.198Z",
-        "_updatedAt": "2026-10-19T02:30:54.198Z",
-        "fromEntityId": "b2a2a689-065b-44b7-b6a5-093772ff2a7a",
-        "toEntityId": "e27f4405-7f5e-4da5-9f00-38d99b06bae9"
+        "_createdAt": "2026-10-19T22:04:50.674Z",
+        "_updatedAt": "2026-10-19T22:04:50.674Z",
+        "fromEntityId": "0a2d0065-d12b-4896-83e4-2ba702e75f0c",
+        "toEntityId": "51dc65ac-f835-49ff-8928-bbea5c1a0c9e"
       }
     ],
     "has_task": [
       {
-        "_id": "bf6dd3e9-6fba-4805-852a-e06fb718e38e",
+        "_id": "5f5ad1c2-8550-44e0-8095-b95106c55d1f",
         "_relationTypeKey": "has_task",
-        "_createdAt": "2026-10-19T02:30:54.185Z",
-        "_updatedAt": "2026-10-19T02:30:54.185Z",
-        "fromEntityId": "9298575f-80b5-40bb-93b2-9226fa9c0164",
-        "toEntityId": "3ffac035-8325-40c6-8e32-15641cdd214e",
+        "_createdAt": "2026-10-19T22:04:50.678Z",
+        "_updatedAt": "2026-10-19T22:04:50.678Z",
+        "fromEntityId": "bc33db9f-62ae-40d6-bc21-4d929304adfa",
+        "toEntityId": "d955a6c6-a6d6-437f-a42f-df6aa61bca0a",
         "phase": "build"
       },
       {
-        "_id": "6d1c8bd9-de08-414d-afbf-172a91c22751",
+        "_id": "271f0dd2-e76d-4452-9e04-bafdcf9e31a8",
         "_relationTypeKey": "has_task",
-        "_createdAt": "2026-10-19T02:30:54.195Z",
-        "_updatedAt": "2026-10-19T02:30:54.195Z",
-        "fromEntityId": "9298575f-80b5-40bb-93b2-9226fa9c0164",
-        "toEntityId": "b2a2a689-065b-44b7-b6a5-093772ff2a7a",
+        "_createdAt": "2026-10-19T22:04:50.681Z",
+        "_updatedAt": "2026-10-19T22:04:50.681Z",
+        "fromEntityId": "bc33db9f-62ae-40d6-bc21-4d929304adfa",
+        "toEntityId": "0a2d0065-d12b-4896-83e4-2ba702e75f0c",
         "phase": "design"
       },
       {
-        "_id": "4771bf6d-f700-44b1-9d8a-757e1ce8c222",
+        "_id": "813df056-a4a9-4b13-b3d9-b1a17e0d57bf",
         "_relationTypeKey": "has_task",
-        "_createdAt": "2026-10-19T02:30:54.201Z",
-        "_updatedAt": "2026-10-19T02:30:54.201Z",
-        "fromEntityId": "9298575f-80b5-40bb-93b2-9226fa9c0164",
-        "toEntityId": "0f5b8d03-4154-430d-b9c6-f39e36b7baa4",
+        "_createdAt": "2026-10-19T22:04:50.684Z",
+        "_updatedAt": "2026-10-19T22:04:50.684Z",
+        "fromEntityId": "bc33db9f-62ae-40d6-bc21-4d929304adfa",
+        "toEntityId": "8616917a-7eed-4b28-9ad1-e53a82d5ed0f",
         "phase": "test"
       },
       {
-        "_id": "bfbfa055-f6af-4bcd-8e70-432480546bf5",
+        "_id": "14844000-7aef-4274-8a36-18c465b35aee",
         "_relationTypeKey": "has_task",
-        "_createdAt": "2026-10-19T02:30:54.204Z",
-        "_updatedAt": "2026-10-19T02:30:54.204Z",
-        "fromEntityId": "4d09f7bc-d486-4f3a-bb23-abaf7cec3fb1",
-        "toEntityId": "9734d1cd-8785-4a0d-9ecf-adddcef5cf91",
+        "_createdAt": "2026-10-19T22:04:50.687Z",
+        "_updatedAt": "2026-10-19T22:04:50.687Z",
+        "fromEntityId": "a46e000d-fe68-4966-9ccb-a9ba77e085a9",
+        "toEntityId": "15c87b95-0479-410a-b5ed-769ef244ad58",
         "phase": "build"
       },
       {
-        "_id": "ad23fbbe-e8f3-4342-972d-75e402f529b9",
+        "_id": "f376b259-2403-4932-8e76-02ca83544c94",
         "_relationTypeKey": "has_task",
-        "_createdAt": "2026-10-19T02:30:54.208Z",
-        "_updatedAt": "2026-10-19T02:30:54.208Z",
-        "fromEntityId": "4d09f7bc-d486-4f3a-bb23-abaf7cec3fb1",
-        "toEntityId": "826970c4-41ac-423d-9276-7d6548d6e17f",
+        "_createdAt": "2026-10-19T22:04:50.691Z",
+        "_updatedAt": "2026-10-19T22:04:50.691Z",
+        "fromEntityId": "a46e000d-fe68-4966-9ccb-a9ba77e085a9",
+        "toEntityId": "ae0f09cb-d18d-43ce-8e1f-ececf058b1cb",
         "phase": "design"
       },
       {
-        "_id": "801c5d03-83fd-482f-a6e0-514859f88aa0",
+        "_id": "b2f20ad9-4350-4413-85a9-2c1715dfe9cb",
         "_relationTypeKey": "has_task",
-        "_createdAt": "2026-10-19T02:30:54.210Z",
-        "_updatedAt": "2026-10-19T02:30:54.210Z",
-        "fromEntityId": "cf02e8e2-fe4d-4ce5-9c80-a8fd99e14464",
-        "toEntityId": "5b2f8906-c6dc-4068-a136-94cec79a03b5",
+        "_createdAt": "2026-10-19T22:04:50.694Z",
+        "_updatedAt": "2026-10-19T22:04:50.694Z",
+        "fromEntityId": "a55aaf4a-497d-4a5a-9902-ef30a3ce36f4",
+        "toEntityId": "52935dea-0df3-4d75-9beb-b91384e327ab",
         "phase": "test"
       }
     ],
     "manages": [
       {
-        "_id": "e5c8b025-f2be-4935-8056-faaf09f8191f",
+        "_id": "e6b12194-a57c-4549-9a99-b10728e1df1c",
         "_relationTypeKey": "manages",
-        "_createdAt": "2026-10-19T02:30:54.220Z",
-        "_updatedAt": "2026-10-19T02:30:54.220Z",
-        "fromEntityId": "ba87608f-2ae4-46c3-ba8a-2993d2b7d57e",
-        "toEntityId": "2bba8446-dd9f-44a8-9933-0cff58ad8c3f"
+        "_createdAt": "2026-10-19T22:04:50.697Z",
+        "_updatedAt": "2026-10-19T22:04:50.697Z",
+        "fromEntityId": "bdb180dc-8142-4e13-8e0a-885f88359556",
+        "toEntityId": "e12a456e-6849-478e-a37e-0c2bfce2968b"
       },
       {
-        "_id": "5a46b0cb-f0f5-4cfe-b030-83353e288aab",
+        "_id": "f8307d96-2486-4ce1-8314-20b81732c538",
         "_relationTypeKey": "manages",
-        "_createdAt": "2026-10-19T02:30:54.222Z",
-        "_updatedAt": "2026-10-19T02:30:54.222Z",
-        "fromEntityId": "ba87608f-2ae4-46c3-ba8a-2993d2b7d57e",
-        "toEntityId": "25d385a5-9bb4-4d82-9f00-2704fa24bab6"
+        "_createdAt": "2026-10-19T22:04:50.699Z",
+        "_updatedAt": "2026-10-19T22:04:50.699Z",
+        "fromEntityId": "bdb180dc-8142-4e13-8e0a-885f88359556",
+        "toEntityId": "353df955-8283-4b60-b02e-0e30914222ba"
       },
       {
-        "_id": "5d16d8bb-4bdd-4549-b9cf-33108bbbfab9",
+        "_id": "33e1ceec-81cf-4b55-aa97-01996e0848de",
         "_relationTypeKey": "manages",
-        "_createdAt": "2026-10-19T02:30:54.224Z",
-        "_updatedAt": "2026-10-19T02:30:54.224Z",
-        "fromEntityId": "ba87608f-2ae4-46c3-ba8a-2993d2b7d57e",
-        "toEntityId": "65a02a6c-a51f-4dde-aaf6-166b00795088"
+        "_createdAt": "2026-10-19T22:04:50.702Z",
+        "_updatedAt": "2026-10-19T22:04:50.702Z",
+        "fromEntityId": "bdb180dc-8142-4e13-8e0a-885f88359556",
+        "toEntityId": "81e4103d-dbc1-414a-b8a6-c83962805a83"
       }
     ],
     "mentors": [
       {
-        "_id": "9be84983-bec5-4c4c-ba2b-916c230de359",
+        "_id": "9c5e7d5b-f109-4f2e-bdd2-a81c8fb65e6b",
         "_relationTypeKey": "mentors",
-        "_createdAt": "2026-10-19T02:30:54.270Z",
-        "_updatedAt": "2026-10-19T02:30:54.270Z",
-        "fromEntityId": "2bba8446-dd9f-44a8-9933-0cff58ad8c3f",
-        "toEntityId": "25d385a5-9bb4-4d82-9f00-2704fa24bab6"
+        "_createdAt": "2026-10-19T22:04:50.704Z",
+        "_updatedAt": "2026-10-19T22:04:50.704Z",
+        "fromEntityId": "e12a456e-6849-478e-a37e-0c2bfce2968b",
+        "toEntityId": "353df955-8283-4b60-b02e-0e30914222ba"
       }
     ]
   }

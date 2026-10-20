@@ -709,7 +709,7 @@ describe("lenses over MCP", () => {
     expect(text(removed)).toBe("Entity type 'person' removed from lens 'hr'.");
 
     const deleted = await call(client, "delete_lens", { lens_key: "hr" });
-    expect(text(deleted)).toBe("Lens 'hr' deleted successfully.");
+    expect(text(deleted)).toBe("Lens 'hr' deleted successfully. Changesets deleted with it: 0.");
 
     const gone = await call(client, "validate_lens", { lens_key: "hr" });
     expect(gone.isError).toBe(true);

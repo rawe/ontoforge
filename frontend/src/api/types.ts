@@ -194,6 +194,8 @@ export interface Anchor {
   key: string
   entity: { type: string; id: string } | null
   state: AnchorState
+  /** Its connection only stages: writes need a changeset, and commit is refused. */
+  stagedOnly: boolean
 }
 
 /**
@@ -203,10 +205,116 @@ export interface Anchor {
 export interface AnchorView {
   key: string
   state: AnchorState
+  stagedOnly: boolean
   visible: boolean
   entity: PathStep | null
   /** Root → … → the anchored entity, through the lens. */
   path: PathStep[]
+}
+
+/* ---------------------------- runtime — changesets --------------------------- */
+
+/** `draft`: open to change; `submitted`: frozen and handed over for review. */
+export type ChangesetState = 'draft' | 'submitted'
+
+/** A changeset as every answer shows it. */
+export interface Changeset {
+  id: string
+  state: ChangesetState
+  /** Bumped by every change; a commit names the one it looked at. */
+  version: number
+  note: string | null
+  /** The anchor of the URL that started it; null on the plain lens. */
+  anchor: string | null
+  writeCount: number
+  createdAt: string
+  lastChangeAt: string
+  submittedAt: string | null
+}
+
+/** A changeset in the lens's list: its staged writes per operation, and the types they name. */
+export interface ChangesetListItem extends Changeset {
+  operations: Record<string, number>
+  /** The type keys the lens shows, sorted. */
+  types: string[]
+  /** How many type keys the staged writes name that the lens no longer shows. */
+  notVisible: number
+}
+
+/** One end of a staged write: a relation end or a create's parent. */
+export interface ChangesetEnd {
+  id: string
+  /** Null when the lens shows no name for it. */
+  name: string | null
+}
+
+/** A create's parent: the parent entity and the parent relation's properties. */
+export interface ChangesetParent extends ChangesetEnd {
+  properties: Record<string, JsonValue>
+}
+
+/** A fault the lock-free pass finds on a staged write: drift, dangling, not_visible, missing, replay. */
+export interface ChangesetMarker {
+  kind: string
+  message: string
+}
+
+export type StagedOperation =
+  | 'create_entity'
+  | 'update_entity'
+  | 'delete_entity'
+  | 'create_relation'
+  | 'update_relation'
+  | 'delete_relation'
+
+/**
+ * One staged write as the review read shows it through the lens. A write
+ * whose type the lens no longer shows has `type` and `id` null and no values.
+ */
+export interface StagedWriteView {
+  seq: number
+  operation: StagedOperation
+  type: string | null
+  id: string | null
+  createdAt: string
+  /** Entity writes: the target's name. */
+  name?: string | null
+  /** A create's parent. */
+  parent?: ChangesetParent | null
+  /** Relation writes: the two ends. */
+  from?: ChangesetEnd | null
+  to?: ChangesetEnd | null
+  /** Updates of a stored target: the stored values of the patched keys when
+   * it was staged. Document values, here as in `current` and `after`, are
+   * stubs `{document: true, length}`; the length is null on a write staged
+   * without one. */
+  before: Record<string, JsonValue> | null
+  /** Updates of a stored target: those values now; null when it is gone.
+   * Drift is `current` ≠ `before`. */
+  current: Record<string, JsonValue> | null
+  /** Creates and updates: the staged values. */
+  after: Record<string, JsonValue> | null
+  markers: ChangesetMarker[]
+}
+
+/** The review read: the changeset and one page of its writes by seq. */
+export interface ChangesetDetail extends Changeset {
+  offset: number
+  limit: number
+  writes: StagedWriteView[]
+}
+
+/** One reason a commit was rejected; seq 0 concerns the whole changeset. */
+export interface ChangesetViolation {
+  seq: number
+  kind: string
+  message: string
+}
+
+/** A commit's answer: the writes persisted, and the deletes that found nothing. */
+export interface CommitResult {
+  committed: number
+  alreadyGone: number[]
 }
 
 /** The parent relation a create names for its new entity. */

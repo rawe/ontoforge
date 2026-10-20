@@ -29,7 +29,13 @@ it: **agent configurations** ([agents.md](agents.md)), **saved queries**
 and **navigators** ([navigators.md](navigators.md)). They are lens-local because they are
 written in terms of what that lens exposes.
 
-Deleting a lens deletes those configurations and nothing else. Types, property definitions
+A lens also holds its [changesets](changesets.md): staged writes bound to it, reached,
+submitted and committed only through it, and never exported. Every read, submit and
+commit of a changeset applies the lens as it is at that moment, so a changeset never shows
+or writes what the lens hides now.
+
+Deleting a lens deletes those configurations and its changesets, draft and submitted, and
+nothing else; it reports how many changesets went with it. Types, property definitions
 and every entity and relation survive untouched, and other lenses are unaffected.
 There is no consent step and no protection: lens deletion is always permitted,
 because nothing outside the lens depends on it. (Deleting the whole *ontology* is
@@ -281,7 +287,8 @@ record.
   record. Hiding a property does not remove it, and does not stop another lens
   from writing it.
 - Concurrent writes through different lenses to the same property are last-write-
-  wins. Nothing partitions the data by lens, so nothing detects the collision.
+  wins. Nothing partitions the data by lens, so nothing detects the collision — except
+  the [drift](changesets.md#drift) of a staged update.
 - There is no lens-scoped data deletion, and deliberately so: wiping "the lens's
   data" would destroy instances other lenses depend on. Data is removed one
   entity or relation at a time ([instance-data.md](instance-data.md)) — or all at

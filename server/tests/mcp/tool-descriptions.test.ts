@@ -17,6 +17,7 @@ import { createModelingMcpServer } from "../../src/mcp/modeling.js";
 import { createRuntimeMcpServer } from "../../src/mcp/runtime.js";
 import { ALL_TOOL_NAMES, buildTools } from "../../src/runtime/assistants/agents/runtime.js";
 import { filterRules } from "../../src/runtime/readHelpers.js";
+import { VALID_AGENT_TOOLS } from "../../src/runtime/toolNames.js";
 
 interface ListedTool {
   name: string;
@@ -38,8 +39,11 @@ const descriptions = (tools: ListedTool[]) =>
   new Map(tools.map((tool) => [tool.name, tool.description ?? ""]));
 
 const modelingTools = await listTools(createModelingMcpServer("onto"));
-const runtime = descriptions(await listTools(createRuntimeMcpServer("onto", "all")));
+const runtimeTools = await listTools(createRuntimeMcpServer("onto", "all"));
+const runtime = descriptions(runtimeTools);
 const anchored = descriptions(await listTools(createRuntimeMcpServer("onto", "all", "agent-a")));
+const stagedOnlyTools = await listTools(createRuntimeMcpServer("onto", "all", "agent-s", true));
+const stagedOnly = descriptions(stagedOnlyTools);
 const modeling = descriptions(modelingTools);
 const agent = new Map(
   buildTools("all", {} as RuntimeStore, [...ALL_TOOL_NAMES]).map((tool) => [
@@ -52,6 +56,9 @@ const all = [
   ...[...anchored]
     .filter(([name, text]) => runtime.get(name) !== text)
     .map(([name, text]) => [`anchored ${name}`, text] as const),
+  ...[...stagedOnly]
+    .filter(([name, text]) => anchored.get(name) !== text)
+    .map(([name, text]) => [`staged-only ${name}`, text] as const),
   ...[...modeling].map(([name, text]) => [`modeling ${name}`, text] as const),
   ...[...agent].map(([name, text]) => [`agent ${name}`, text] as const),
 ];
@@ -89,12 +96,14 @@ describe("tool descriptions", () => {
 
   it("get_anchor carries the agreed text, on the anchored mount only", () => {
     expect(anchored.get("get_anchor")).toBe(
-      "Read where this connection is anchored. Returns key, state, visible, entity and path. " +
-        "state 'anchored': writes to the anchored entity's hierarchy are held to that entity and " +
-        "its descendants; other types are written as usual. 'unanchored': no restriction. " +
-        "'dangling': the entity was deleted, and every write is refused until a person " +
-        "re-anchors. visible false: this lens does not show the entity, and every write is " +
-        "refused. path lists the entity's visible ancestors, root first, ending with the " +
+      "Read where this connection is anchored. Returns key, state, stagedOnly, visible, entity " +
+        "and path. state 'anchored': writes to the anchored entity's hierarchy are held to that " +
+        "entity and its descendants; other types are written as usual. 'unanchored': no " +
+        "restriction. 'dangling': the entity was deleted, and every write is refused until a " +
+        "person re-anchors. visible false: this lens does not show the entity, and every write " +
+        "is refused. stagedOnly true: this connection only stages, whatever the state: every " +
+        "write needs 'changeset_id', and it cannot commit; submit the changeset so a person can " +
+        "review and commit it. path lists the entity's visible ancestors, root first, ending with the " +
         "entity. Read-only: a person sets the anchor and may change it at any time, so read " +
         "it again after a refusal.",
     );
@@ -112,11 +121,166 @@ describe("tool descriptions", () => {
 
   it("create_entity states the anchored create, on the anchored mount only", () => {
     const text = anchored.get("create_entity")!;
-    expect(text.startsWith(runtime.get("create_entity")!)).toBe(true);
+    // The immediate create comes first; the staged mode follows it.
+    const immediate = (description: string) => description.slice(0, description.indexOf(" 'changeset_id'"));
+    expect(immediate(text).startsWith(immediate(runtime.get("create_entity")!))).toBe(true);
     for (const part of ["anchored connection", "'parent_relation'", "one of its descendants", "other types"]) {
       expect(text).toContain(part);
     }
     expect(runtime.get("create_entity")).not.toContain("anchored");
+  });
+
+  const STAGEABLE = ["create_entity", "update_entity", "delete_entity", "create_relation", "update_relation", "delete_relation"];
+  const CHANGESET_TOOLS = [
+    "start_changeset",
+    "list_changesets",
+    "get_changeset",
+    "get_staged_document",
+    "unstage",
+    "submit_changeset",
+    "unsubmit_changeset",
+    "commit_changeset",
+    "discard_changeset",
+  ];
+  const parameters = (name: string) => runtimeTools.find((tool) => tool.name === name)!.inputSchema as {
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
+
+  it("the six stageable tools take an optional changeset_id and state the staged mode", () => {
+    for (const name of STAGEABLE) {
+      expect(parameters(name).properties, name).toHaveProperty("changeset_id");
+      expect(parameters(name).required ?? [], name).not.toContain("changeset_id");
+      for (const map of [runtime, anchored]) {
+        const text = map.get(name)!;
+        for (const part of ["'changeset_id'", "{seq, id}", "reads never see staged data", "id is final"]) {
+          expect(text, name).toContain(part);
+        }
+      }
+      expect(anchored.get(name), name).toContain("a dangling anchor refuses staging");
+    }
+    for (const name of ["create_entity", "create_relation"]) {
+      expect(runtime.get(name)).toContain("relation ends, parents and the hierarchy rules are checked at commit");
+    }
+    for (const name of ["update_entity", "update_relation"]) {
+      expect(runtime.get(name)).toContain("the commit is rejected");
+    }
+    for (const name of ["delete_entity", "delete_relation"]) {
+      const text = runtime.get(name)!;
+      expect(text).toContain("Staging checks the type and that the target exists");
+      expect(text.slice(text.indexOf("'changeset_id'"))).not.toMatch(/propert|current values/);
+    }
+  });
+
+  it("the document edit tools take no changeset_id and say they cannot be staged and refuse one", () => {
+    for (const name of ["edit_document", "write_document"]) {
+      expect(parameters(name).properties, name).not.toHaveProperty("changeset_id");
+      expect(runtime.get(name), name).toContain("always writes immediately and cannot be staged");
+      expect(runtime.get(name), name).toContain("a 'changeset_id' is refused and nothing is written");
+      expect(runtime.get(name), name).toContain("whole new value to update_entity with 'changeset_id'");
+    }
+  });
+
+  it("the changeset tools are listed on both mounts, with their required parameters", () => {
+    for (const name of CHANGESET_TOOLS) {
+      expect(runtime.has(name), name).toBe(true);
+      expect(anchored.has(name), name).toBe(true);
+    }
+    expect(parameters("unsubmit_changeset").required).toEqual(["changeset_id", "note"]);
+    expect(parameters("submit_changeset").required).toEqual(["changeset_id"]);
+    expect(parameters("commit_changeset").required).toEqual(["changeset_id"]);
+    expect(parameters("get_changeset").required).toEqual(["changeset_id"]);
+    expect(parameters("get_staged_document").required).toEqual([
+      "changeset_id",
+      "entity_type_key",
+      "entity_id",
+      "property_key",
+    ]);
+    expect(Object.keys(parameters("get_staged_document").properties ?? {})).toEqual([
+      "changeset_id",
+      "entity_type_key",
+      "entity_id",
+      "property_key",
+      "offset",
+      "limit",
+    ]);
+    expect(parameters("unstage").required).toEqual(["changeset_id", "seq"]);
+    expect(parameters("start_changeset").required ?? []).toEqual([]);
+  });
+
+  it("get_changeset shows no staged arguments, stubs documents and points to get_staged_document", () => {
+    for (const map of [runtime, anchored, stagedOnly]) {
+      const text = map.get("get_changeset")!;
+      expect(text).not.toMatch(/argument|sha256|hash/);
+      expect(text).toContain("{id, name, properties}");
+      expect(text).toContain("Document values in before, current and after show as {document: true, length}");
+      expect(text).toContain("get_staged_document reads the staged text");
+      const staged = map.get("get_staged_document")!;
+      for (const part of ["last write staged", "'offset' and 'limit' are character-based", "totalLength", "Not found when no staged write", "a later staged write deletes the entity"]) {
+        expect(staged).toContain(part);
+      }
+    }
+  });
+
+  it("commit_changeset says how to tell the outcome after a lost response", () => {
+    for (const map of [runtime, anchored]) {
+      const text = map.get("commit_changeset")!;
+      expect(text).toContain("If the response is lost");
+      expect(text).toContain("reading an id a staged create minted");
+      expect(text).toContain("a submitted changeset that is no longer listed was committed");
+    }
+  });
+
+  it("the drift guidance is stated in get_changeset and commit_changeset, with no reflex restage", () => {
+    for (const map of [runtime, anchored, stagedOnly]) {
+      expect(map.get("get_changeset")).toContain("compare them, and restage only if your change still applies");
+    }
+    for (const map of [runtime, anchored]) {
+      const text = map.get("commit_changeset")!;
+      expect(text).toContain("On drift, compare before and current in get_changeset, and restage only if your change still applies");
+      expect(text).not.toContain("unstage and restage");
+    }
+  });
+
+  it("the anchored mount states the anchor binding of a changeset", () => {
+    expect(anchored.get("start_changeset")).toContain("carries this connection's anchor");
+    expect(anchored.get("list_changesets")).toContain("started through this anchor");
+    expect(runtime.get("start_changeset")).not.toContain("carries this connection's anchor");
+  });
+
+  it("a staged-only mount requires changeset_id and offers no commit or document edit (V29, R13)", () => {
+    const params = (name: string) => stagedOnlyTools.find((tool) => tool.name === name)!.inputSchema as {
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+    for (const name of STAGEABLE) {
+      expect(params(name).required, name).toContain("changeset_id");
+      const text = stagedOnly.get(name)!;
+      expect(text, name).toContain("This connection only stages: 'changeset_id' is required");
+      expect(text, name).toContain("a dangling anchor refuses staging");
+    }
+    for (const name of ["commit_changeset", "edit_document", "write_document"]) {
+      expect(stagedOnly.has(name), name).toBe(false);
+    }
+    const names = [...stagedOnly.keys()].sort();
+    expect(names).toEqual(
+      [...anchored.keys()].filter((name) => !["commit_changeset", "edit_document", "write_document"].includes(name)).sort(),
+    );
+    // No description names a tool this mount does not offer.
+    for (const [name, text] of stagedOnly) {
+      expect(text, name).not.toMatch(/commit_changeset|edit_document|write_document/);
+    }
+    expect(stagedOnly.get("submit_changeset")).toContain("This connection cannot commit");
+    expect(stagedOnly.get("unsubmit_changeset")).not.toContain("committed again");
+    expect(stagedOnly.get("get_anchor")).toBe(anchored.get("get_anchor"));
+  });
+
+  it("no changeset tool is grantable to an agent", () => {
+    for (const name of CHANGESET_TOOLS) {
+      expect(VALID_AGENT_TOOLS.has(name), name).toBe(false);
+      expect(agent.has(name), name).toBe(false);
+    }
+    expect(VALID_AGENT_TOOLS.size).toBe(12);
   });
 
   it("the search-index tools state the status fields", () => {

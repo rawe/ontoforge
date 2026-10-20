@@ -556,6 +556,6 @@ describe("cascading delete", () => {
   it("deleting the lens deletes its saved queries (handled by the store)", async () => {
     holder.store.deleteLens.mockResolvedValue(true);
     const res = await app.inject({ method: "DELETE", url: "/api/ontologies/onto/model/lenses/lens-1" });
-    expect(res.statusCode).toBe(204);
+    expect(res.statusCode).toBe(200);
   });
 });

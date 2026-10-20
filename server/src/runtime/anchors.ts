@@ -26,14 +26,19 @@ export type AnchorState = (typeof ANCHOR_STATES)[number];
 
 const AnchorEntity = z.object({ type: z.string(), id: z.string() });
 
-/** The write body of `PUT`: the entity to point at, or null to unanchor. */
-export const AnchorWriteBody = z.strictObject({ entity: AnchorEntity.nullable() });
+/** The write body of `PUT`: the entity to point at, or null to unanchor;
+ * `stagedOnly` absent keeps the stored flag (V43), false on a new anchor. */
+export const AnchorWriteBody = z.strictObject({
+  entity: AnchorEntity.nullable(),
+  stagedOnly: z.boolean().optional(),
+});
 export type AnchorWriteBody = z.infer<typeof AnchorWriteBody>;
 
 export const AnchorResponse = z.object({
   key: z.string(),
   entity: AnchorEntity.nullable(),
   state: z.enum(ANCHOR_STATES),
+  stagedOnly: z.boolean(),
 });
 export type AnchorResponse = z.infer<typeof AnchorResponse>;
 
@@ -46,6 +51,7 @@ const PathStep = z.object({ type: z.string(), id: z.string(), name: z.string().n
 export const AnchorView = z.object({
   key: z.string(),
   state: z.enum(ANCHOR_STATES),
+  stagedOnly: z.boolean(),
   visible: z.boolean(),
   entity: PathStep.nullable(),
   path: z.array(PathStep),
@@ -58,7 +64,12 @@ async function fullEntityTypes(store: RuntimeStore): Promise<Record<string, Enti
 }
 
 function toResponse(record: AnchorRecord, entityTypes: Record<string, EntityTypeDef>): AnchorResponse {
-  return { key: record.key, entity: record.entity, state: anchorState(record, entityTypes) };
+  return {
+    key: record.key,
+    entity: record.entity,
+    state: anchorState(record, entityTypes),
+    stagedOnly: record.stagedOnly,
+  };
 }
 
 /** A storable key: the anchor key rule. */
@@ -83,11 +94,12 @@ export async function readAnchor(key: string, store: RuntimeStore): Promise<Anch
 }
 
 /** Create or re-point (`PUT`, an idempotent upsert). The entity must be
- * stored, under a type of the full schema. */
+ * stored, under a type of the full schema. Without `stagedOnly` the
+ * stored flag is kept (V43). */
 export async function saveAnchor(key: string, body: AnchorWriteBody, store: RuntimeStore): Promise<AnchorResponse> {
   const keyError = anchorKeyError(key);
   if (keyError !== null) throw new ValidationError(keyError);
-  const { entity } = AnchorWriteBody.parse(body);
+  const { entity, stagedOnly } = AnchorWriteBody.parse(body);
   const entityTypes = await fullEntityTypes(store);
   if (entity !== null) {
     if (!Object.hasOwn(entityTypes, entity.type)) {
@@ -101,7 +113,7 @@ export async function saveAnchor(key: string, body: AnchorWriteBody, store: Runt
       });
     }
   }
-  return toResponse(await store.anchors().saveAnchor(key, entity), entityTypes);
+  return toResponse(await store.anchors().saveAnchor(key, entity, stagedOnly), entityTypes);
 }
 
 export async function deleteAnchor(key: string, store: RuntimeStore): Promise<void> {
@@ -125,7 +137,7 @@ export async function readMountAnchor(lensKey: string, anchorKey: string, store:
  * ancestor). */
 export async function getAnchorView(lensKey: string, anchorKey: string, store: RuntimeStore): Promise<AnchorView> {
   const anchor = await readMountAnchor(lensKey, anchorKey, store);
-  const nothing = { key: anchor.key, entity: null, path: [] };
+  const nothing = { key: anchor.key, stagedOnly: anchor.stagedOnly, entity: null, path: [] };
   if (anchor.state !== "anchored" || anchor.entity === null) {
     return { ...nothing, state: anchor.state, visible: true };
   }
@@ -141,5 +153,12 @@ export async function getAnchorView(lensKey: string, anchorKey: string, store: R
     if (error instanceof NotFoundError) return { ...nothing, state: "dangling", visible: true };
     throw error;
   }
-  return { key: anchor.key, state: "anchored", visible: true, entity: path[path.length - 1]!, path };
+  return {
+    key: anchor.key,
+    state: "anchored",
+    stagedOnly: anchor.stagedOnly,
+    visible: true,
+    entity: path[path.length - 1]!,
+    path,
+  };
 }

@@ -126,18 +126,21 @@ export async function deleteAnchor(key: string, store: RuntimeStore): Promise<vo
 /**
  * The binding of an anchored mount, checked on every request in the
  * not-found order ontology (the caller's `getRuntimeStore`), lens, anchor.
- * The anchor is read fresh and never created.
+ * The record is read fresh and never created; its write access is what
+ * the entrance checks (`writeAccess.ts`).
  */
-export async function readMountAnchor(lensKey: string, anchorKey: string, store: RuntimeStore): Promise<AnchorResponse> {
+export async function readMountRuleset(lensKey: string, anchorKey: string, store: RuntimeStore): Promise<RulesetRecord> {
   await loadSchema(lensKey, store);
-  return readAnchor(anchorKey, store);
+  const record = await store.rulesets().get(anchorKey);
+  if (record === null) throw new NotFoundError(`Anchor '${anchorKey}' not found`);
+  return record;
 }
 
 /** `get_anchor`: the anchor through the lens, with the entity's name and
  * its path (root first, ending with the entity, below the nearest hidden
  * ancestor). */
 export async function getAnchorView(lensKey: string, anchorKey: string, store: RuntimeStore): Promise<AnchorView> {
-  const anchor = await readMountAnchor(lensKey, anchorKey, store);
+  const anchor = toResponse(await readMountRuleset(lensKey, anchorKey, store), await fullEntityTypes(store));
   const nothing = { key: anchor.key, stagedOnly: anchor.stagedOnly, entity: null, path: [] };
   if (anchor.state !== "anchored" || anchor.entity === null) {
     return { ...nothing, state: anchor.state, visible: true };

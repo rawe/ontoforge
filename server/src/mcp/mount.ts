@@ -81,6 +81,9 @@ async function isStagedOnly(ontologyKey: string, anchorKey: string): Promise<boo
 }
 
 export function mountMcp(app: FastifyInstance): void {
+  // A tool with no row in the operation table fails the boot (`writeAccess.ts`).
+  createRuntimeMcpServer("boot", "boot", "boot");
+
   app.route({
     method: ["GET", "POST", "DELETE"],
     url: "/mcp/ontologies/:ontologyKey/model",

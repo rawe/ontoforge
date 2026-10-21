@@ -42,10 +42,11 @@ import { settings } from "../config.js";
 import { valueToText } from "../core/dataTypes.js";
 import { ValidationError } from "../core/exceptions.js";
 import { getRuntimeStore, type RuntimeStore } from "../core/ports.js";
-import { getAnchorView, readMountAnchor } from "../runtime/anchors.js";
+import { getAnchorView, readMountRuleset } from "../runtime/anchors.js";
 import { filterRules } from "../runtime/readHelpers.js";
 import * as changesets from "../runtime/changesets.js";
 import * as service from "../runtime/service.js";
+import { checkOperation, toolOperation, type Operation } from "../runtime/writeAccess.js";
 import { formatToolError } from "./modeling.js";
 
 interface ToolResult {
@@ -149,13 +150,26 @@ function refuseChangesetId(tool: string, args: object): void {
   }
 }
 
+/** Open the store of one tool call: on an anchored mount, after the
+ * not-found checks and the call's operation against write access. */
+type Open = () => Promise<RuntimeStore>;
+
+/** A tool's handler, given the opener of its call. */
+type ToolFactory = <Args>(
+  name: string,
+  fn: (args: Args, open: Open) => Promise<ToolResult>,
+) => (args: Args) => Promise<ToolResult>;
+
 /**
  * Build the runtime MCP server bound to one ontology and one lens, and on
  * the anchored mount to one anchor. Anchored, every tool first checks
- * ontology, lens and anchor, in that order, reading the anchor fresh; the
- * write tools pass the anchor key to the service; and `get_anchor` is
- * added. Changesets started here carry the anchor, and only the anchor's
- * are reachable, as on the anchored REST mirror.
+ * ontology, lens and anchor, in that order, reading the anchor fresh,
+ * then its operation against the ruleset's write access
+ * (`writeAccess.ts`, one read per call); the write tools pass the anchor
+ * key to the service; and `get_anchor` is added. Changesets started here
+ * carry the anchor, and only the anchor's are reachable, as on the
+ * anchored REST mirror. A tool with no row in the operation table fails
+ * the build.
  */
 export function createRuntimeMcpServer(
   ontologyKey: string,
@@ -165,15 +179,22 @@ export function createRuntimeMcpServer(
 ): McpServer {
   const server = new McpServer({ name: "OntoForge Runtime", version: "0.1.0" });
 
-  const openStore = async (): Promise<RuntimeStore> => {
+  const openStore = async (operation: Operation): Promise<RuntimeStore> => {
     const store = await getRuntimeStore(ontologyKey);
-    if (anchorKey !== null) await readMountAnchor(lensKey, anchorKey, store);
+    if (anchorKey !== null) {
+      const record = await readMountRuleset(lensKey, anchorKey, store);
+      checkOperation({ rulesetKey: anchorKey, writeAccess: record.writeAccess }, operation);
+    }
     return store;
+  };
+  const tool: ToolFactory = (name, fn) => {
+    toolOperation(name, {}); // a tool without a row throws here
+    return wrap(name, (args) => fn(args, () => openStore(toolOperation(name, args))));
   };
 
   /** Stage one write into a changeset of this lens (and anchor). */
-  const stageInto = async (changesetId: string, write: changesets.StagedWrite): Promise<ToolResult> =>
-    jsonResult(await changesets.stage(lensKey, anchorKey, changesetId, write, await openStore()));
+  const stageInto = async (open: Open, changesetId: string, write: changesets.StagedWrite): Promise<ToolResult> =>
+    jsonResult(await changesets.stage(lensKey, anchorKey, changesetId, write, await open()));
   const anchored = anchorKey !== null;
   const staged = (kind: "create" | "update" | "delete"): string => stagedMode(kind, anchored, stagedOnly);
   // Staged-only, every write names its changeset (V29).
@@ -196,7 +217,7 @@ export function createRuntimeMcpServer(
           "anchor and may change it at any time, so read it again after a refusal.",
         inputSchema: {},
       },
-      wrap("get_anchor", async () =>
+      tool("get_anchor", async () =>
         jsonResult(await getAnchorView(lensKey, anchorKey, await getRuntimeStore(ontologyKey))),
       ),
     );
@@ -213,8 +234,8 @@ export function createRuntimeMcpServer(
         "means an ordinary relation. Call this first.",
       inputSchema: {},
     },
-    wrap("get_schema", async () => {
-      const result = await service.getLensSchema(lensKey, await openStore());
+    tool("get_schema", async (_args, open) => {
+      const result = await service.getLensSchema(lensKey, await open());
       return jsonResult(result);
     }),
   );
@@ -256,7 +277,7 @@ export function createRuntimeMcpServer(
         changeset_id: changesetIdParam,
       },
     },
-    wrap(
+    tool(
       "create_entity",
       async (args: {
         entity_type_key: string;
@@ -265,14 +286,14 @@ export function createRuntimeMcpServer(
           | { type: string; parent_id: string; properties?: Record<string, unknown> | undefined }
           | undefined;
         changeset_id?: string | undefined;
-      }) => {
+      }, open) => {
         const parent = args.parent_relation;
         const parentRelation =
           parent === undefined
             ? null
             : { type: parent.type, parentId: parent.parent_id, properties: parent.properties };
         if (args.changeset_id !== undefined) {
-          return stageInto(args.changeset_id, {
+          return stageInto(open, args.changeset_id, {
             operation: "create_entity",
             typeKey: args.entity_type_key,
             properties: args.properties,
@@ -283,7 +304,7 @@ export function createRuntimeMcpServer(
           lensKey,
           args.entity_type_key,
           args.properties,
-          await openStore(),
+          await open(),
           parentRelation,
           anchorKey,
         );
@@ -314,7 +335,7 @@ export function createRuntimeMcpServer(
         fields: z.array(z.string()).optional(),
       },
     },
-    wrap(
+    tool(
       "list_entities",
       async (args: {
         entity_type_key: string;
@@ -325,7 +346,7 @@ export function createRuntimeMcpServer(
         limit?: number | undefined;
         offset?: number | undefined;
         fields?: string[] | undefined;
-      }) => {
+      }, open) => {
         const strFilters: Record<string, string> = {};
         for (const [k, v] of Object.entries(args.filters ?? {})) {
           // Filter values travel as strings, in the same spelling the write
@@ -343,7 +364,7 @@ export function createRuntimeMcpServer(
           args.order ?? "asc",
           args.search ?? null,
           strFilters,
-          await openStore(),
+          await open(),
           args.fields ?? null,
         );
         return jsonResult(result);
@@ -366,18 +387,18 @@ export function createRuntimeMcpServer(
         fields: z.array(z.string()).optional(),
       },
     },
-    wrap(
+    tool(
       "get_entity",
       async (args: {
         entity_type_key: string;
         entity_id: string;
         fields?: string[] | undefined;
-      }) => {
+      }, open) => {
         const result = await service.getEntity(
           lensKey,
           args.entity_type_key,
           args.entity_id,
-          await openStore(),
+          await open(),
           args.fields ?? null,
         );
         return jsonResult(result);
@@ -399,12 +420,12 @@ export function createRuntimeMcpServer(
         entity_id: z.string(),
       },
     },
-    wrap("get_path", async (args: { entity_type_key: string; entity_id: string }) => {
+    tool("get_path", async (args: { entity_type_key: string; entity_id: string }, open) => {
       const result = await service.getPath(
         lensKey,
         args.entity_type_key,
         args.entity_id,
-        await openStore(),
+        await open(),
       );
       return jsonResult(result);
     }),
@@ -428,7 +449,7 @@ export function createRuntimeMcpServer(
         limit: z.number().optional(),
       },
     },
-    wrap(
+    tool(
       "get_document",
       async (args: {
         entity_type_key: string;
@@ -436,7 +457,7 @@ export function createRuntimeMcpServer(
         property_key: string;
         offset?: number | undefined;
         limit?: number | undefined;
-      }) => {
+      }, open) => {
         const offset = Math.max(0, args.offset ?? 0);
         const limit =
           args.limit === undefined || args.limit === null ? null : Math.max(1, args.limit);
@@ -447,7 +468,7 @@ export function createRuntimeMcpServer(
           args.property_key,
           offset,
           limit,
-          await openStore(),
+          await open(),
         );
         return jsonResult(result);
       },
@@ -473,16 +494,16 @@ export function createRuntimeMcpServer(
         changeset_id: changesetIdParam,
       },
     },
-    wrap(
+    tool(
       "update_entity",
       async (args: {
         entity_type_key: string;
         entity_id: string;
         properties: Record<string, unknown>;
         changeset_id?: string | undefined;
-      }) => {
+      }, open) => {
         if (args.changeset_id !== undefined) {
-          return stageInto(args.changeset_id, {
+          return stageInto(open, args.changeset_id, {
             operation: "update_entity",
             typeKey: args.entity_type_key,
             id: args.entity_id,
@@ -494,7 +515,7 @@ export function createRuntimeMcpServer(
           args.entity_type_key,
           args.entity_id,
           args.properties,
-          await openStore(),
+          await open(),
           anchorKey,
         );
         return jsonResult(result);
@@ -526,7 +547,7 @@ export function createRuntimeMcpServer(
           replace_all: z.boolean().optional(),
         }),
       },
-      wrap(
+      tool(
         "edit_document",
         async (args: {
           entity_type_key: string;
@@ -535,7 +556,7 @@ export function createRuntimeMcpServer(
           old_string: string;
           new_string: string;
           replace_all?: boolean | undefined;
-        }) => {
+        }, open) => {
           refuseChangesetId("edit_document", args);
           const result = await service.editDocument(
             lensKey,
@@ -548,7 +569,7 @@ export function createRuntimeMcpServer(
               newString: args.new_string,
               replaceAll: args.replace_all ?? false,
             },
-            await openStore(),
+            await open(),
             anchorKey,
           );
           return jsonResult(result);
@@ -580,7 +601,7 @@ export function createRuntimeMcpServer(
           expect: z.string().optional(),
         }),
       },
-      wrap(
+      tool(
         "write_document",
         async (args: {
           entity_type_key: string;
@@ -590,7 +611,7 @@ export function createRuntimeMcpServer(
           length: number;
           content: string;
           expect?: string | undefined;
-        }) => {
+        }, open) => {
           refuseChangesetId("write_document", args);
           const result = await service.editDocument(
             lensKey,
@@ -604,7 +625,7 @@ export function createRuntimeMcpServer(
               content: args.content,
               expect: args.expect ?? null,
             },
-            await openStore(),
+            await open(),
             anchorKey,
           );
           return jsonResult(result);
@@ -628,9 +649,9 @@ export function createRuntimeMcpServer(
         changeset_id: changesetIdParam,
       },
     },
-    wrap("delete_entity", async (args: { entity_type_key: string; entity_id: string; changeset_id?: string | undefined }) => {
+    tool("delete_entity", async (args: { entity_type_key: string; entity_id: string; changeset_id?: string | undefined }, open) => {
       if (args.changeset_id !== undefined) {
-        return stageInto(args.changeset_id, {
+        return stageInto(open, args.changeset_id, {
           operation: "delete_entity",
           typeKey: args.entity_type_key,
           id: args.entity_id,
@@ -640,7 +661,7 @@ export function createRuntimeMcpServer(
         lensKey,
         args.entity_type_key,
         args.entity_id,
-        await openStore(),
+        await open(),
         anchorKey,
       );
       // This tool returns a message OBJECT, unlike the modeling delete
@@ -668,7 +689,7 @@ export function createRuntimeMcpServer(
         changeset_id: changesetIdParam,
       },
     },
-    wrap(
+    tool(
       "create_relation",
       async (args: {
         relation_type_key: string;
@@ -676,9 +697,9 @@ export function createRuntimeMcpServer(
         to_entity_id: string;
         properties?: Record<string, unknown> | undefined;
         changeset_id?: string | undefined;
-      }) => {
+      }, open) => {
         if (args.changeset_id !== undefined) {
-          return stageInto(args.changeset_id, {
+          return stageInto(open, args.changeset_id, {
             operation: "create_relation",
             typeKey: args.relation_type_key,
             fromEntityId: args.from_entity_id,
@@ -692,7 +713,7 @@ export function createRuntimeMcpServer(
           args.from_entity_id,
           args.to_entity_id,
           args.properties ?? {},
-          await openStore(),
+          await open(),
           anchorKey,
         );
         return jsonResult(result);
@@ -720,7 +741,7 @@ export function createRuntimeMcpServer(
         offset: z.number().optional(),
       },
     },
-    wrap(
+    tool(
       "list_relations",
       async (args: {
         relation_type_key: string;
@@ -731,7 +752,7 @@ export function createRuntimeMcpServer(
         order?: "asc" | "desc" | undefined;
         limit?: number | undefined;
         offset?: number | undefined;
-      }) => {
+      }, open) => {
         const strFilters: Record<string, string> = {};
         for (const [k, v] of Object.entries(args.filters ?? {})) {
           // Filter values travel as strings, in the same spelling the write
@@ -750,7 +771,7 @@ export function createRuntimeMcpServer(
           args.from_entity_id ?? null,
           args.to_entity_id ?? null,
           strFilters,
-          await openStore(),
+          await open(),
         );
         return jsonResult(result);
       },
@@ -766,12 +787,12 @@ export function createRuntimeMcpServer(
         relation_id: z.string(),
       },
     },
-    wrap("get_relation", async (args: { relation_type_key: string; relation_id: string }) => {
+    tool("get_relation", async (args: { relation_type_key: string; relation_id: string }, open) => {
       const result = await service.getRelation(
         lensKey,
         args.relation_type_key,
         args.relation_id,
-        await openStore(),
+        await open(),
       );
       return jsonResult(result);
     }),
@@ -791,16 +812,16 @@ export function createRuntimeMcpServer(
         changeset_id: changesetIdParam,
       },
     },
-    wrap(
+    tool(
       "update_relation",
       async (args: {
         relation_type_key: string;
         relation_id: string;
         properties: Record<string, unknown>;
         changeset_id?: string | undefined;
-      }) => {
+      }, open) => {
         if (args.changeset_id !== undefined) {
-          return stageInto(args.changeset_id, {
+          return stageInto(open, args.changeset_id, {
             operation: "update_relation",
             typeKey: args.relation_type_key,
             id: args.relation_id,
@@ -812,7 +833,7 @@ export function createRuntimeMcpServer(
           args.relation_type_key,
           args.relation_id,
           args.properties,
-          await openStore(),
+          await open(),
           anchorKey,
         );
         return jsonResult(result);
@@ -830,9 +851,9 @@ export function createRuntimeMcpServer(
         changeset_id: changesetIdParam,
       },
     },
-    wrap("delete_relation", async (args: { relation_type_key: string; relation_id: string; changeset_id?: string | undefined }) => {
+    tool("delete_relation", async (args: { relation_type_key: string; relation_id: string; changeset_id?: string | undefined }, open) => {
       if (args.changeset_id !== undefined) {
-        return stageInto(args.changeset_id, {
+        return stageInto(open, args.changeset_id, {
           operation: "delete_relation",
           typeKey: args.relation_type_key,
           id: args.relation_id,
@@ -842,7 +863,7 @@ export function createRuntimeMcpServer(
         lensKey,
         args.relation_type_key,
         args.relation_id,
-        await openStore(),
+        await open(),
         anchorKey,
       );
       return jsonResult({ message: `Relation '${args.relation_id}' deleted successfully.` });
@@ -868,7 +889,7 @@ export function createRuntimeMcpServer(
         relation_fields: z.array(z.string()).optional(),
       },
     },
-    wrap(
+    tool(
       "get_neighbors",
       async (args: {
         entity_type_key: string;
@@ -878,7 +899,7 @@ export function createRuntimeMcpServer(
         limit?: number | undefined;
         fields?: string[] | undefined;
         relation_fields?: string[] | undefined;
-      }) => {
+      }, open) => {
         const limit = clamp(args.limit ?? 50, 1, 200);
         const result = await service.getNeighbors(
           lensKey,
@@ -887,7 +908,7 @@ export function createRuntimeMcpServer(
           args.direction ?? "both",
           args.relation_type_key ?? null,
           limit,
-          await openStore(),
+          await open(),
           args.fields ?? null,
           args.relation_fields ?? null,
         );
@@ -914,11 +935,11 @@ export function createRuntimeMcpServer(
         query: z.string(),
       },
     },
-    wrap("execute_query", async (args: { query: string }) => {
+    tool("execute_query", async (args: { query: string }, open) => {
       const result = await service.executeQuery(
         lensKey,
         args.query,
-        await openStore(),
+        await open(),
       );
       return jsonResult(result);
     }),
@@ -937,8 +958,8 @@ export function createRuntimeMcpServer(
         "status (ready, building, stale, failed, unavailable; an index not yet built finds nothing).",
       inputSchema: {},
     },
-    wrap("list_search_indices", async () =>
-      jsonResult(await service.searchIndexCatalog(lensKey, await openStore())),
+    tool("list_search_indices", async (_args, open) =>
+      jsonResult(await service.searchIndexCatalog(lensKey, await open())),
     ),
   );
 
@@ -966,8 +987,8 @@ export function createRuntimeMcpServer(
           ...(document ? { property: z.string().optional() } : {}),
         },
       },
-      wrap(name, async (args: SearchToolArgs) => {
-        const store = await openStore();
+      tool(name, async (args: SearchToolArgs, open) => {
+        const store = await open();
         return jsonResult(
           await service.search(
             lensKey,
@@ -1015,8 +1036,8 @@ export function createRuntimeMcpServer(
         fields: z.array(z.string()).optional(),
       },
     },
-    wrap("search_by_index", async (args: IndexSearchToolArgs) => {
-      const store = await openStore();
+    tool("search_by_index", async (args: IndexSearchToolArgs, open) => {
+      const store = await open();
       const minSimilarity = toolMinSimilarity(store);
       const response = await service.searchByIndices(
         lensKey,
@@ -1044,8 +1065,8 @@ export function createRuntimeMcpServer(
         "with name, description, and dataType.",
       inputSchema: {},
     },
-    wrap("list_saved_queries", async () => {
-      const result = await service.listSavedQueries(lensKey, await openStore());
+    tool("list_saved_queries", async (_args, open) => {
+      const result = await service.listSavedQueries(lensKey, await open());
       return jsonResult(result);
     }),
   );
@@ -1062,14 +1083,14 @@ export function createRuntimeMcpServer(
         params: z.record(z.string(), z.unknown()).optional(),
       },
     },
-    wrap(
+    tool(
       "run_saved_query",
-      async (args: { query_key: string; params?: Record<string, unknown> | undefined }) => {
+      async (args: { query_key: string; params?: Record<string, unknown> | undefined }, open) => {
         const result = await service.executeSavedQuery(
           lensKey,
           args.query_key,
           args.params ?? {},
-          await openStore(),
+          await open(),
         );
         return jsonResult(result);
       },
@@ -1088,19 +1109,19 @@ export function createRuntimeMcpServer(
         query: z.string(),
       },
     },
-    wrap("search_saved_queries", async (args: { query: string }) => {
+    tool("search_saved_queries", async (args: { query: string }, open) => {
       const result = await service.searchSavedQueries(
         lensKey,
         args.query,
         3,
         0.7,
-        await openStore(),
+        await open(),
       );
       return jsonResult(result);
     }),
   );
 
-  registerChangesetTools(server, lensKey, anchorKey, stagedOnly, openStore);
+  registerChangesetTools(server, lensKey, anchorKey, stagedOnly, tool);
 
   return server;
 }
@@ -1131,7 +1152,7 @@ function registerChangesetTools(
   lensKey: string,
   anchorKey: string | null,
   stagedOnly: boolean,
-  openStore: () => Promise<RuntimeStore>,
+  tool: ToolFactory,
 ): void {
   const anchored = anchorKey !== null;
 
@@ -1154,8 +1175,8 @@ function registerChangesetTools(
           : " Only connections to this lens without an anchor reach it."),
       inputSchema: { note: z.string().optional() },
     },
-    wrap("start_changeset", async (args: { note?: string | undefined }) =>
-      jsonResult(await changesets.startChangeset(lensKey, anchorKey, args.note, await openStore())),
+    tool("start_changeset", async (args: { note?: string | undefined }, open) =>
+      jsonResult(await changesets.startChangeset(lensKey, anchorKey, args.note, await open())),
     ),
   );
 
@@ -1176,8 +1197,8 @@ function registerChangesetTools(
         "was committed.",
       inputSchema: {},
     },
-    wrap("list_changesets", async () =>
-      jsonResult(await changesets.listChangesets(lensKey, anchorKey, await openStore())),
+    tool("list_changesets", async (_args, open) =>
+      jsonResult(await changesets.listChangesets(lensKey, anchorKey, await open())),
     ),
   );
 
@@ -1210,9 +1231,9 @@ function registerChangesetTools(
         limit: z.number().optional(),
       },
     },
-    wrap(
+    tool(
       "get_changeset",
-      async (args: { changeset_id: string; offset?: number | undefined; limit?: number | undefined }) =>
+      async (args: { changeset_id: string; offset?: number | undefined; limit?: number | undefined }, open) =>
         jsonResult(
           await changesets.getChangeset(
             lensKey,
@@ -1220,7 +1241,7 @@ function registerChangesetTools(
             args.changeset_id,
             Math.max(0, Math.trunc(args.offset ?? 0)),
             clamp(Math.trunc(args.limit ?? 100), 1, 500),
-            await openStore(),
+            await open(),
           ),
         ),
     ),
@@ -1249,7 +1270,7 @@ function registerChangesetTools(
         limit: z.number().optional(),
       },
     },
-    wrap(
+    tool(
       "get_staged_document",
       async (args: {
         changeset_id: string;
@@ -1258,7 +1279,7 @@ function registerChangesetTools(
         property_key: string;
         offset?: number | undefined;
         limit?: number | undefined;
-      }) =>
+      }, open) =>
         jsonResult(
           await changesets.getStagedDocument(
             lensKey,
@@ -1269,7 +1290,7 @@ function registerChangesetTools(
             args.property_key,
             Math.max(0, args.offset ?? 0),
             args.limit === undefined || args.limit === null ? null : Math.max(1, args.limit),
-            await openStore(),
+            await open(),
           ),
         ),
     ),
@@ -1288,8 +1309,8 @@ function registerChangesetTools(
         reach(anchored),
       inputSchema: { changeset_id: z.string(), seq: z.number().int() },
     },
-    wrap("unstage", async (args: { changeset_id: string; seq: number }) => {
-      await changesets.unstage(lensKey, anchorKey, args.changeset_id, args.seq, await openStore());
+    tool("unstage", async (args: { changeset_id: string; seq: number }, open) => {
+      await changesets.unstage(lensKey, anchorKey, args.changeset_id, args.seq, await open());
       return jsonResult({ message: `Staged write ${args.seq} removed from changeset '${args.changeset_id}'.` });
     }),
   );
@@ -1316,9 +1337,9 @@ function registerChangesetTools(
         reach(anchored),
       inputSchema: { changeset_id: z.string(), note: z.string().optional() },
     },
-    wrap("submit_changeset", async (args: { changeset_id: string; note?: string | undefined }) =>
+    tool("submit_changeset", async (args: { changeset_id: string; note?: string | undefined }, open) =>
       jsonResult(
-        await changesets.submitChangeset(lensKey, anchorKey, args.changeset_id, args.note, await openStore()),
+        await changesets.submitChangeset(lensKey, anchorKey, args.changeset_id, args.note, await open()),
       ),
     ),
   );
@@ -1338,9 +1359,9 @@ function registerChangesetTools(
         reach(anchored),
       inputSchema: { changeset_id: z.string(), note: z.string() },
     },
-    wrap("unsubmit_changeset", async (args: { changeset_id: string; note: string }) =>
+    tool("unsubmit_changeset", async (args: { changeset_id: string; note: string }, open) =>
       jsonResult(
-        await changesets.unsubmitChangeset(lensKey, anchorKey, args.changeset_id, args.note, await openStore()),
+        await changesets.unsubmitChangeset(lensKey, anchorKey, args.changeset_id, args.note, await open()),
       ),
     ),
   );
@@ -1375,14 +1396,14 @@ function registerChangesetTools(
           reach(anchored),
         inputSchema: { changeset_id: z.string(), expected_version: z.number().int().optional() },
       },
-      wrap("commit_changeset", async (args: { changeset_id: string; expected_version?: number | undefined }) =>
+      tool("commit_changeset", async (args: { changeset_id: string; expected_version?: number | undefined }, open) =>
         jsonResult(
           await changesets.commitChangeset(
             lensKey,
             anchorKey,
             args.changeset_id,
             args.expected_version,
-            await openStore(),
+            await open(),
           ),
         ),
       ),
@@ -1398,8 +1419,8 @@ function registerChangesetTools(
         reach(anchored),
       inputSchema: { changeset_id: z.string() },
     },
-    wrap("discard_changeset", async (args: { changeset_id: string }) => {
-      await changesets.discardChangeset(lensKey, anchorKey, args.changeset_id, await openStore());
+    tool("discard_changeset", async (args: { changeset_id: string }, open) => {
+      await changesets.discardChangeset(lensKey, anchorKey, args.changeset_id, await open());
       return jsonResult({ message: `Changeset '${args.changeset_id}' discarded.` });
     }),
   );

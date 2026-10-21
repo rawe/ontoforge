@@ -1,12 +1,12 @@
 /**
- * The staged-only anchor flag (V9 a, V43) over REST and MCP, on PostgreSQL
- * with the in-test project hierarchy (`buildProjectHierarchy`, fresh per
- * test): reported by the anchor reads; through a staged-only URL every
- * immediate write and the commit are 409s while staging, submit,
- * unsubmit, discard, the list and reads work; the same on an unanchored
- * key, with no coverage rules; a dangling anchor still refuses staging;
- * the escapes (the plain lens URL commits, the PUT lifts the flag); and
- * the staged-only MCP tool set (V29, R13).
+ * Write access 'propose' over REST and MCP, on PostgreSQL with the in-test
+ * project hierarchy (`buildProjectHierarchy`, fresh per test): reported by
+ * the anchor reads; through a 'propose' ruleset's URL every immediate
+ * write and the commit are 409s while staging, submit, unsubmit, discard,
+ * the list and reads work; the same on an unanchored key, with no
+ * coverage rules; a dangling anchor still refuses staging, and write
+ * access wins over it; the escapes (the plain lens URL commits, the PUT
+ * gives full access back); and the MCP tool set at 'propose' (V29, R13).
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -34,9 +34,10 @@ interface ToolCallResult {
 
 const ALL = runtimePrefix(O, "all");
 const ANCHORS = `/api/ontologies/${O}/runtime/anchors`;
-const STAGED_ONLY = (key: string) => `Anchor '${key}' is staged-only: this connection only stages; pass a changeset`;
+const NO_WRITE = (key: string) =>
+  `Ruleset '${key}' gives write access 'propose': this connection cannot write directly; stage the write into a changeset`;
 const NO_COMMIT = (key: string) =>
-  `Anchor '${key}' is staged-only: this connection cannot commit; submit the changeset for review`;
+  `Ruleset '${key}' gives write access 'propose': this connection cannot commit; submit the changeset, and a person commits it`;
 const STAGEABLE = ["create_entity", "update_entity", "delete_entity", "create_relation", "update_relation", "delete_relation"];
 
 let app: FastifyInstance;
@@ -58,7 +59,7 @@ async function putAnchor(key: string, payload: Row): Promise<Row> {
 
 async function connect(anchorKey: string): Promise<Client> {
   const path = `/mcp/ontologies/${O}/runtime/lenses/all/anchors/${anchorKey}`;
-  const client = new Client({ name: "staged-only-tests", version: "0.0.1" });
+  const client = new Client({ name: "write-access-tests", version: "0.0.1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}${path}`)));
   clients.push(client);
   return client;
@@ -138,7 +139,7 @@ afterAll(async () => {
   await closeStores();
 });
 
-describe("the flag on the anchor reads", () => {
+describe("the level on the anchor reads", () => {
   it("the GET, the list, the mount root and get_anchor report it", async () => {
     await putAnchor("agent-s", { entity: { type: "project", id: e.P1 }, stagedOnly: true });
     await putAnchor("agent-a", { entity: { type: "project", id: e.P1 } });
@@ -154,7 +155,7 @@ describe("the flag on the anchor reads", () => {
   });
 });
 
-describe("through a staged-only anchored URL (REST)", () => {
+describe("through a 'propose' ruleset's URL (REST)", () => {
   const S = `${ALL}/anchors/agent-s`;
   beforeEach(async () => {
     await putAnchor("agent-s", { entity: { type: "project", id: e.P1 }, stagedOnly: true });
@@ -164,7 +165,7 @@ describe("through a staged-only anchored URL (REST)", () => {
     for (const [method, url, payload] of immediateWrites(S)) {
       const res = await rest(method, url, payload);
       expect(res.status, `${method} ${url}`).toBe(409);
-      expect(res.body.error.message).toBe(STAGED_ONLY("agent-s"));
+      expect(res.body.error.message).toBe(NO_WRITE("agent-s"));
     }
     const t1 = (await rest("GET", `${ALL}/entities/task/${e.T1}`)).body;
     expect(t1.name).toBe("T1");
@@ -201,7 +202,14 @@ describe("through a staged-only anchored URL (REST)", () => {
     expect((await rest("GET", `${S}/changesets/${cs}`)).status).toBe(404);
   });
 
-  it("the escapes: the plain lens URL commits it, and a PUT stagedOnly false restores immediate writes", async () => {
+  it("write access refuses before the changeset lookup: an unknown changeset's commit is its 409", async () => {
+    const commit = await rest("POST", `${S}/changesets/00000000-0000-4000-8000-000000000000/commit`, {});
+    expect(commit.status).toBe(409);
+    expect(commit.body.error.message).toBe(NO_COMMIT("agent-s"));
+    expect((await rest("POST", `${ALL}/changesets/00000000-0000-4000-8000-000000000000/commit`, {})).status).toBe(404);
+  });
+
+  it("the escapes: the plain lens URL commits it, and a PUT back to full access restores immediate writes", async () => {
     const { cs, task } = await startWithTask(S);
     expect((await rest("POST", `${S}/changesets/${cs}/submit`, {})).status).toBe(200);
     const committed = await rest("POST", `${ALL}/changesets/${cs}/commit`, {});
@@ -217,7 +225,7 @@ describe("through a staged-only anchored URL (REST)", () => {
     expect((await rest("POST", `${S}/changesets/${again}/commit`, {})).status).toBe(200);
   });
 
-  it("a dangling staged-only anchor refuses staging (R10) and still every immediate write", async () => {
+  it("a dangling anchor refuses staging (R10); write access refuses every immediate write first", async () => {
     await putAnchor("agent-s", { entity: { type: "task", id: e.T2a } });
     const { cs } = await startWithTask(S);
     expect((await rest("DELETE", `${ALL}/entities/task/${e.T2a}`)).status).toBe(204);
@@ -231,12 +239,12 @@ describe("through a staged-only anchored URL (REST)", () => {
     expect(staged.body.error.message).toMatch(/is dangling/);
     const immediate = await rest("PATCH", `${S}/entities/person/${e.Kim}`, { name: "Kim2" });
     expect(immediate.status).toBe(409);
-    expect(immediate.body.error.message).toBe(STAGED_ONLY("agent-s"));
+    expect(immediate.body.error.message).toBe(NO_WRITE("agent-s"));
     expect((await rest("DELETE", `${S}/changesets/${cs}/writes/1`)).status).toBe(204);
   });
 });
 
-describe("an unanchored staged-only key", () => {
+describe("a 'propose' ruleset without an anchor", () => {
   const U = `${ALL}/anchors/agent-u`;
   beforeEach(async () => {
     await putAnchor("agent-u", { entity: null, stagedOnly: true });
@@ -246,7 +254,7 @@ describe("an unanchored staged-only key", () => {
     for (const [method, url, payload] of immediateWrites(U)) {
       const res = await rest(method, url, payload);
       expect(res.status, `${method} ${url}`).toBe(409);
-      expect(res.body.error.message).toBe(STAGED_ONLY("agent-u"));
+      expect(res.body.error.message).toBe(NO_WRITE("agent-u"));
     }
     const { cs } = await startWithTask(U);
     // Under P2 and P3: no anchored entity to hold them to.
@@ -262,7 +270,7 @@ describe("an unanchored staged-only key", () => {
   });
 });
 
-describe("the staged-only MCP tool set (V29, R13)", () => {
+describe("the MCP tool set at 'propose' (V29, R13)", () => {
   beforeEach(async () => {
     await putAnchor("agent-s", { entity: { type: "project", id: e.P1 }, stagedOnly: true });
   });
@@ -300,7 +308,7 @@ describe("the staged-only MCP tool set (V29, R13)", () => {
     expect((await ok(client, "discard_changeset", { changeset_id: cs })).message).toContain("discarded");
   });
 
-  it("the flag is read on every request: lifted, the normal tool set is back", async () => {
+  it("write access is read on every request: back at 'full', the normal tool set is back", async () => {
     await putAnchor("agent-s", { entity: { type: "project", id: e.P1 }, stagedOnly: false });
     const { tools } = await (await connect("agent-s")).listTools();
     const names = tools.map((tool) => tool.name);

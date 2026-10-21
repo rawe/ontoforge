@@ -201,6 +201,22 @@ describe("entity CRUD through the unscoped lens", () => {
     expect(Object.keys(fields).sort()).toEqual(["active", "age", "name", "nickname"]);
   });
 
+  it("refuses an object or array for a string property; JSON text in a string stays as sent", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person",
+      payload: { name: { a: 1 }, email: [1, 2] },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.fields).toEqual({
+      name: "Expected string for 'name', got object",
+      email: "Expected string for 'email', got array",
+    });
+
+    const created = await createPerson("test_lens", { name: '{"a":1}' });
+    expect(created.name).toBe('{"a":1}');
+  });
+
   it("a garbage id answers not-found on read, update and delete", async () => {
     // Off-format ids short-circuit to not-found — indistinguishable from
     // a well-formed id that matches nothing.

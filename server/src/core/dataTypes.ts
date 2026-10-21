@@ -154,6 +154,11 @@ export function coerceValue(value: unknown, dataType: string, key: string): unkn
   switch (dataType) {
     case "string":
     case "document": {
+      // A JSON object or array is not a scalar and has no text form; a
+      // string whose text happens to be JSON is a string and stays as is.
+      if (typeof value === "object") {
+        throw new CoercionError(`Expected ${dataType} for '${key}', got ${jsonTypeName(value)}`);
+      }
       const text = valueToText(value);
       assertNoNulCharacter(text, key);
       return text;

@@ -280,6 +280,10 @@ describe("the six staged writes", () => {
     const patch = await call("PATCH", `${url}/entities/project/${ids.P1}`, { bogus: 1 });
     expect(patch.status).toBe(422);
     expect(patch.body).toEqual((await call("PATCH", `${ALL}/entities/project/${ids.P1}`, { bogus: 1 })).body);
+    expect(await call("PATCH", `${url}/entities/project/${ids.P1}`, { name: { a: 1 } })).toMatchObject({
+      status: 422,
+      body: { error: { details: { fields: { name: "Expected string for 'name', got object" } } } },
+    });
     expect((await call("DELETE", `${url}/entities/nope/${ids.P1}`)).status).toBe(404);
     expect(await journal(cs)).toEqual([]);
     expect((await call("GET", url)).body.version).toBe(1);

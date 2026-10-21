@@ -378,6 +378,31 @@ describe("the ruleset REST mirror", () => {
     expect((await list()).map((a) => a.key)).toEqual(["agent-a"]);
   });
 
+  it("an empty ruleset's URL sees only its own changesets; the plain lens sees all", async () => {
+    await putBody("agent-e", {});
+    await putBody("agent-f", {});
+    const start = async (base: string): Promise<string> => {
+      const res = await app.inject({ method: "POST", url: `${base}/changesets`, payload: {} });
+      expect(res.statusCode, res.body).toBe(201);
+      return res.json().id as string;
+    };
+    const listed = async (base: string): Promise<string[][]> =>
+      (await app.inject({ method: "GET", url: `${base}/changesets` }))
+        .json()
+        .map((c: Row) => [c.id, c.ruleset])
+        .sort();
+    const plain = runtimePrefix(HIERARCHY_ONTOLOGY_KEY, "all");
+    const own = await start(mirror("all", "agent-e"));
+    const free = await start(plain);
+    expect(await listed(mirror("all", "agent-e"))).toEqual([[own, "agent-e"]]);
+    expect(await listed(mirror("all", "agent-f"))).toEqual([]);
+    expect(await listed(plain)).toEqual([[free, null], [own, "agent-e"]].sort());
+    const read = (base: string, id: string) => app.inject({ method: "GET", url: `${base}/changesets/${id}` });
+    expect((await read(mirror("all", "agent-e"), free)).statusCode).toBe(404);
+    expect((await read(mirror("all", "agent-f"), own)).statusCode).toBe(404);
+    expect((await read(plain, own)).statusCode).toBe(200);
+  });
+
   it("the plain lens URLs are unchanged, and no /anchors route is registered", async () => {
     await put("agent-a", { type: "project", id: ids.P1 });
     const res = await app.inject({ method: "GET", url: `${runtimePrefix(HIERARCHY_ONTOLOGY_KEY, "all")}/entities/task` });

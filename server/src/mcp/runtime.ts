@@ -42,7 +42,7 @@ import { settings } from "../config.js";
 import { valueToText } from "../core/dataTypes.js";
 import { ValidationError } from "../core/exceptions.js";
 import { getRuntimeStore, type RuntimeStore } from "../core/ports.js";
-import { getAnchorView, readMountRuleset } from "../runtime/anchors.js";
+import { getRulesetView, readMountRuleset } from "../runtime/rulesets.js";
 import { filterRules } from "../runtime/readHelpers.js";
 import * as changesets from "../runtime/changesets.js";
 import * as service from "../runtime/service.js";
@@ -218,7 +218,7 @@ export function createRuntimeMcpServer(
         inputSchema: {},
       },
       tool("get_anchor", async () =>
-        jsonResult(await getAnchorView(lensKey, anchorKey, await getRuntimeStore(ontologyKey))),
+        jsonResult(await getRulesetView(lensKey, anchorKey, await getRuntimeStore(ontologyKey))),
       ),
     );
   }

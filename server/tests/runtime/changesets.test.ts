@@ -149,7 +149,7 @@ function expectNothingWritten(): void {
 }
 
 describe("start", () => {
-  it("binds the lens id and the anchor key of the URL, sweeps expired changesets, answers draft", async () => {
+  it("binds the lens id and the ruleset key of the URL, sweeps expired changesets, answers draft", async () => {
     store.rulesetStore.get.mockResolvedValue({ key: "agent-a", anchor: null, anchorFound: false });
     store.changesetStore.start.mockImplementation(async (cs: Row) => changeset({ ...cs, version: 1, writeCount: 0 }));
 
@@ -161,7 +161,7 @@ describe("start", () => {
     const [input] = store.changesetStore.start.mock.calls[0]!;
     expect(input).toMatchObject({ lensId: "lens-1", rulesetKey: "agent-a", note: "g1" });
     expect(input.id).toMatch(UUID);
-    expect(started).toMatchObject({ state: "draft", version: 1, note: "g1", anchor: "agent-a", writeCount: 0 });
+    expect(started).toMatchObject({ state: "draft", version: 1, note: "g1", ruleset: "agent-a", writeCount: 0 });
   });
 
   it("an unknown anchor is not found; a note over 1000 characters is a 422; neither starts one", async () => {

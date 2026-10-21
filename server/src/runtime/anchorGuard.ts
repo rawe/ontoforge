@@ -1,7 +1,7 @@
 /**
- * The write guard of an anchored mount (`…/anchors/:rulesetKey`): the seven
- * runtime write functions consult it on anchored calls only. It holds the
- * anchor's hierarchy to the anchored subtree; every other type is free and
+ * The anchor rule of a ruleset mount (`…/rulesets/:rulesetKey`): the seven
+ * runtime write functions consult it on ruleset calls only. It holds the
+ * anchor's hierarchy to the anchor's subtree; every other type is free and
  * is written as on the plain lens.
  *
  * - **The anchor's hierarchy**: the entity types joined by parent
@@ -12,29 +12,29 @@
  *   entity among its ancestors (the walk over the hierarchy's parent
  *   relations).
  *
- * The anchor record is read fresh and the walk runs just before the write,
+ * The ruleset is read fresh and the walk runs just before the write,
  * never inside its transaction; no guard value crosses the port and nothing
  * is locked, so a re-point or a move racing the call is accepted (A9).
- * Unanchored, there is no guard; dangling, or anchored at an entity the
- * lens hides, every write is refused with a 409. Refusals are 422 field
- * errors that name only what the caller sent and the ruleset key.
+ * Without an anchor, there is no guard; with the anchor deleted, or at an
+ * entity the lens hides, every write is refused with a 409. Refusals are
+ * 422 field errors that name only what the caller sent and the ruleset key.
  * Staging through the URL takes `checkStaging` instead: no coverage (R10).
  */
 
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import type { AnchorEntity, RulesetRecord, RuntimeStore } from "../core/ports.js";
 import type { ParentEnd } from "../core/schemas.js";
-import type { AnchorState } from "./anchors.js";
+import type { AnchorState } from "./rulesets.js";
 import type { EntityTypeDef, LoadedSchema, RelationTypeDef, SchemaCacheValue } from "./schemaCache.js";
 
 type Row = Record<string, unknown>;
 
-/** The state of an anchor record against the FULL schema's entity types:
- * no entity is `unanchored`; an entity no longer stored, or of a type no
- * longer in the schema, is `dangling`. */
-export function anchorState(record: RulesetRecord, entityTypes: Record<string, EntityTypeDef>): AnchorState {
-  if (record.anchor === null) return "unanchored";
-  return record.anchorFound && Object.hasOwn(entityTypes, record.anchor.type) ? "anchored" : "dangling";
+/** The state of a ruleset's anchor against the FULL schema's entity
+ * types: null without an anchor; an entity no longer stored, or of a type
+ * no longer in the schema, is `deleted`. */
+export function anchorState(record: RulesetRecord, entityTypes: Record<string, EntityTypeDef>): AnchorState | null {
+  if (record.anchor === null) return null;
+  return record.anchorFound && Object.hasOwn(entityTypes, record.anchor.type) ? "found" : "deleted";
 }
 
 /** The child and parent ends of a parent relation type. */
@@ -66,20 +66,20 @@ export function hierarchyOf(entityType: string, full: SchemaCacheValue): { types
   return { types, readings };
 }
 
-/** Why every write through an anchor is refused: dangling, or anchored at
- * an entity the lens hides; null when unanchored or anchored and shown. */
-function anchorFault(record: RulesetRecord, loaded: LoadedSchema): "dangling" | "hidden" | null {
-  const state = anchorState(record, loaded.full.entityTypes);
-  if (state === "unanchored") return null;
-  if (state === "dangling" || record.anchor === null) return "dangling";
+/** Why every write through a ruleset is refused: its anchor deleted, or
+ * at an entity the lens hides; null without an anchor or when it is found
+ * and shown. */
+function anchorFault(record: RulesetRecord, loaded: LoadedSchema): "deleted" | "hidden" | null {
+  if (record.anchor === null) return null;
+  if (anchorState(record, loaded.full.entityTypes) === "deleted") return "deleted";
   return Object.hasOwn(loaded.scoped.entityTypes, record.anchor.type) ? null : "hidden";
 }
 
-/** The refusal of an immediate write through an anchor (`anchorFault`). The
+/** The refusal of an immediate write through a ruleset (`anchorFault`). The
  * texts name the ruleset key and the lens key only. */
 export function anchorRefusal(rulesetKey: string, record: RulesetRecord, loaded: LoadedSchema): string | null {
   switch (anchorFault(record, loaded)) {
-    case "dangling":
+    case "deleted":
       return `Anchor '${rulesetKey}' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it`;
     case "hidden":
       return `Anchor '${rulesetKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show, so every write is refused`;
@@ -92,7 +92,7 @@ export function anchorRefusal(rulesetKey: string, record: RulesetRecord, loaded:
  * wrong, with the ruleset key and the lens key, and no fix. */
 export function changesetAnchorRefusal(rulesetKey: string, record: RulesetRecord, loaded: LoadedSchema): string | null {
   switch (anchorFault(record, loaded)) {
-    case "dangling":
+    case "deleted":
       return `Anchor '${rulesetKey}' is dangling`;
     case "hidden":
       return `Anchor '${rulesetKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show`;
@@ -101,8 +101,8 @@ export function changesetAnchorRefusal(rulesetKey: string, record: RulesetRecord
   }
 }
 
-/** The anchor record of an anchored call, read fresh; an unknown key is
- * not found. */
+/** The ruleset of a ruleset call, read fresh; an unknown key is not
+ * found. */
 async function readRecord(rulesetKey: string, store: RuntimeStore): Promise<RulesetRecord> {
   const record = await store.rulesets().get(rulesetKey);
   if (record === null) throw new NotFoundError(`Anchor '${rulesetKey}' not found`);
@@ -130,10 +130,10 @@ export class AnchorGuard {
   ) {}
 
   /**
-   * The guard of one anchored immediate write, from the anchor read fresh
-   * now; null on the plain lens (`rulesetKey` null) and when unanchored. An
-   * unknown key is not found; dangling, or an anchored entity the lens
-   * hides, is a 409.
+   * The guard of one immediate write through a ruleset, from the ruleset
+   * read fresh now; null on the plain lens (`rulesetKey` null) and without
+   * an anchor. An unknown key is not found; the anchor deleted, or at an
+   * entity the lens hides, is a 409.
    */
   static async open(rulesetKey: string | null, loaded: LoadedSchema, store: RuntimeStore): Promise<AnchorGuard | null> {
     if (rulesetKey === null) return null;
@@ -147,7 +147,7 @@ export class AnchorGuard {
 
   /**
    * Staging through a ruleset URL (R10): an unknown key is not found;
-   * dangling, or an anchored entity the lens hides, is a 409, as for an
+   * the anchor deleted, or at an entity the lens hides, is a 409, as for an
    * immediate write but with the changeset's text. Coverage is a commit
    * rule. Nothing on the plain lens.
    */

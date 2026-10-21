@@ -1,43 +1,43 @@
-/** Anchor maintenance, REST, mounted at `/api/ontologies/:ontologyKey/runtime/anchors`:
- * lensless, beside the lens mounts; and the anchored REST mirror. Every
- * rule lives in `anchors.ts`. */
+/** Ruleset maintenance, REST, mounted at `/api/ontologies/:ontologyKey/runtime/rulesets`:
+ * lensless, beside the lens mounts; and the ruleset REST mirror. Every
+ * rule lives in `rulesets.ts`. */
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import { getRuntimeStore } from "../core/ports.js";
-import * as anchors from "./anchors.js";
 import { changesetRouter } from "./changesetRouter.js";
 import { runtimeRouter } from "./router.js";
+import * as rulesets from "./rulesets.js";
 import { checkOperation, routeOperation } from "./writeAccess.js";
 
 const Ontology = z.object({ ontologyKey: z.string() });
-const Anchor = Ontology.extend({ rulesetKey: z.string() });
-const Mount = Anchor.extend({ lensKey: z.string() });
+const Ruleset = Ontology.extend({ rulesetKey: z.string() });
+const Mount = Ruleset.extend({ lensKey: z.string() });
 
-export const anchorRouter: FastifyPluginAsyncZod = async (app) => {
+export const rulesetRouter: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/",
-    { schema: { tags: ["runtime"], params: Ontology, response: { 200: z.array(anchors.AnchorResponse) } } },
-    async (request) => anchors.listAnchors(await getRuntimeStore(request.params.ontologyKey)),
+    { schema: { tags: ["runtime"], params: Ontology, response: { 200: z.array(rulesets.RulesetResponse) } } },
+    async (request) => rulesets.listRulesets(await getRuntimeStore(request.params.ontologyKey)),
   );
   app.get(
     "/:rulesetKey",
-    { schema: { tags: ["runtime"], params: Anchor, response: { 200: anchors.AnchorResponse } } },
+    { schema: { tags: ["runtime"], params: Ruleset, response: { 200: rulesets.RulesetResponse } } },
     async (request) =>
-      anchors.readAnchor(request.params.rulesetKey, await getRuntimeStore(request.params.ontologyKey)),
+      rulesets.readRuleset(request.params.rulesetKey, await getRuntimeStore(request.params.ontologyKey)),
   );
   app.put(
     "/:rulesetKey",
     {
       schema: {
         tags: ["runtime"],
-        params: Anchor,
-        body: anchors.AnchorWriteBody,
-        response: { 200: anchors.AnchorResponse },
+        params: Ruleset,
+        body: rulesets.RulesetWriteBody,
+        response: { 200: rulesets.RulesetResponse },
       },
     },
     async (request) =>
-      anchors.saveAnchor(
+      rulesets.saveRuleset(
         request.params.rulesetKey,
         request.body,
         await getRuntimeStore(request.params.ontologyKey),
@@ -45,27 +45,27 @@ export const anchorRouter: FastifyPluginAsyncZod = async (app) => {
   );
   app.delete(
     "/:rulesetKey",
-    { schema: { tags: ["runtime"], params: Anchor } },
+    { schema: { tags: ["runtime"], params: Ruleset } },
     async (request, reply) => {
-      await anchors.deleteAnchor(request.params.rulesetKey, await getRuntimeStore(request.params.ontologyKey));
+      await rulesets.deleteRuleset(request.params.rulesetKey, await getRuntimeStore(request.params.ontologyKey));
       return reply.status(204).send();
     },
   );
 };
 
 /**
- * The anchored REST mirror, mounted at
- * `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey/anchors/:rulesetKey`:
+ * The ruleset REST mirror, mounted at
+ * `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey/rulesets/:rulesetKey`:
  * the runtime and changeset routers, plus a root that mirrors `get_anchor`. Every
- * request first checks ontology, lens and anchor, in that order, so an
- * unknown anchor is not found on reads too; then the route's operation
+ * request first checks ontology, lens and ruleset, in that order, so an
+ * unknown ruleset is not found on reads too; then the route's operation
  * against the ruleset's write access (`writeAccess.ts`), before the route
  * runs.
  */
-export const anchoredRuntimeRouter: FastifyPluginAsyncZod = async (app) => {
+export const rulesetRuntimeRouter: FastifyPluginAsyncZod = async (app) => {
   /** A route's path below the mount, without a trailing slash. */
   const below = (url: string): string => url.slice(app.prefix.length).replace(/(.)\/$/, "$1") || "/";
-  // The runtime router's params schemas name no anchor, and a zod object
+  // The runtime router's params schemas name no ruleset, and a zod object
   // strips unknown keys: declare `rulesetKey` on every route, so it reaches
   // the write functions and the OpenAPI document. A route with no row in
   // the operation table fails the boot.
@@ -76,7 +76,7 @@ export const anchoredRuntimeRouter: FastifyPluginAsyncZod = async (app) => {
   });
   app.addHook("preHandler", async (request) => {
     const { ontologyKey, lensKey, rulesetKey } = request.params as z.infer<typeof Mount>;
-    const record = await anchors.readMountRuleset(lensKey, rulesetKey, await getRuntimeStore(ontologyKey));
+    const record = await rulesets.readMountRuleset(lensKey, rulesetKey, await getRuntimeStore(ontologyKey));
     checkOperation(
       { rulesetKey, writeAccess: record.writeAccess },
       routeOperation(request.method, below(request.routeOptions.url!)),
@@ -84,9 +84,9 @@ export const anchoredRuntimeRouter: FastifyPluginAsyncZod = async (app) => {
   });
   app.get(
     "/",
-    { schema: { tags: ["runtime"], params: Mount, response: { 200: anchors.AnchorView } } },
+    { schema: { tags: ["runtime"], params: Mount, response: { 200: rulesets.RulesetView } } },
     async (request) =>
-      anchors.getAnchorView(
+      rulesets.getRulesetView(
         request.params.lensKey,
         request.params.rulesetKey,
         await getRuntimeStore(request.params.ontologyKey),

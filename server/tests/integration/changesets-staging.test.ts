@@ -31,7 +31,7 @@ type Row = Record<string, any>;
 const NS = `ont_${O}`;
 const ALL = runtimePrefix(O, "all");
 const PORTFOLIO = runtimePrefix(O, "portfolio");
-const ANCHORS = `/api/ontologies/${O}/runtime/anchors`;
+const RULESETS = `/api/ontologies/${O}/runtime/rulesets`;
 
 let app: FastifyInstance;
 let ids: HierarchyIds;
@@ -80,7 +80,7 @@ function rename(id: string, name: string): Row {
 }
 
 async function putAnchor(key: string, entity: { type: string; id: string } | null): Promise<void> {
-  const res = await call("PUT", `${ANCHORS}/${key}`, { entity });
+  const res = await call("PUT", `${RULESETS}/${key}`, { anchor: entity });
   expect(res.status, JSON.stringify(res.body)).toBe(200);
 }
 
@@ -135,27 +135,27 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await sql(`DELETE FROM changeset`);
-  await call("DELETE", `${ANCHORS}/agent-a`);
-  await call("DELETE", `${ANCHORS}/agent-b`);
+  await call("DELETE", `${RULESETS}/agent-a`);
+  await call("DELETE", `${RULESETS}/agent-b`);
 });
 
 describe("start", () => {
   it("answers 201: draft, version, note, and no anchor on the plain lens", async () => {
     const cs = await start(ALL, "g1");
-    expect(cs).toMatchObject({ state: "draft", version: 1, note: "g1", anchor: null, writeCount: 0 });
+    expect(cs).toMatchObject({ state: "draft", version: 1, note: "g1", ruleset: null, writeCount: 0 });
     expect(cs.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(await call("POST", `${ALL}/changesets`)).toMatchObject({ status: 201, body: { note: null } });
   });
 
   it("through an anchored URL, the anchor is its key", async () => {
     await putAnchor("agent-a", { type: "project", id: ids.P1 });
-    const cs = await start(`${ALL}/anchors/agent-a`);
-    expect(cs.anchor).toBe("agent-a");
+    const cs = await start(`${ALL}/rulesets/agent-a`);
+    expect(cs.ruleset).toBe("agent-a");
   });
 
   it("not found in the order lens, anchor; a note of 1001 characters is 422", async () => {
     expect((await call("POST", `${runtimePrefix(O, "nope")}/changesets`)).status).toBe(404);
-    const anchor = await call("POST", `${ALL}/anchors/ghost/changesets`);
+    const anchor = await call("POST", `${ALL}/rulesets/ghost/changesets`);
     expect(anchor).toMatchObject({ status: 404, body: { error: { message: "Anchor 'ghost' not found" } } });
     const long = await call("POST", `${ALL}/changesets`, { note: "x".repeat(1001) });
     expect(long.status).toBe(422);
@@ -325,9 +325,9 @@ describe("the six staged writes", () => {
   it("the six staging routes of the immediate paths are not mounted, on either mount", async () => {
     await putAnchor("agent-a", { type: "project", id: ids.P1 });
     const plain = (await start()).id as string;
-    const anchored = (await start(`${ALL}/anchors/agent-a`)).id as string;
+    const anchored = (await start(`${ALL}/rulesets/agent-a`)).id as string;
     const relation = await relationId("assigned_to", ids.T1, ids.Ben);
-    for (const url of [`${ALL}/changesets/${plain}`, `${ALL}/anchors/agent-a/changesets/${anchored}`]) {
+    for (const url of [`${ALL}/changesets/${plain}`, `${ALL}/rulesets/agent-a/changesets/${anchored}`]) {
       for (const [method, path, payload] of [
         ["POST", "/entities/task", { name: "T9" }],
         ["PATCH", `/entities/project/${ids.P2}`, { name: "x" }],
@@ -399,21 +399,21 @@ describe("binding", () => {
     await putAnchor("agent-a", { type: "project", id: ids.P1 });
     await putAnchor("agent-b", { type: "project", id: ids.P2 });
     const plain = (await start()).id as string;
-    const anchored = (await start(`${ALL}/anchors/agent-a`)).id as string;
+    const anchored = (await start(`${ALL}/rulesets/agent-a`)).id as string;
     const notFound = (cs: string) => ({ status: 404, body: { error: { message: `Changeset '${cs}' not found` } } });
 
     expect(await call("GET", `${PORTFOLIO}/changesets/${plain}`)).toMatchObject(notFound(plain));
     expect(await stage(plain, rename(ids.P2, "x"), PORTFOLIO)).toMatchObject(notFound(plain));
-    expect(await call("GET", `${ALL}/anchors/agent-b/changesets/${anchored}`)).toMatchObject(notFound(anchored));
-    expect(await call("GET", `${ALL}/anchors/agent-a/changesets/${plain}`)).toMatchObject(notFound(plain));
-    expect((await call("GET", `${ALL}/anchors/agent-a/changesets/${anchored}`)).status).toBe(200);
+    expect(await call("GET", `${ALL}/rulesets/agent-b/changesets/${anchored}`)).toMatchObject(notFound(anchored));
+    expect(await call("GET", `${ALL}/rulesets/agent-a/changesets/${plain}`)).toMatchObject(notFound(plain));
+    expect((await call("GET", `${ALL}/rulesets/agent-a/changesets/${anchored}`)).status).toBe(200);
     expect((await call("GET", `${ALL}/changesets/${anchored}`)).status).toBe(200);
     expect(await call("GET", `${ALL}/changesets/not-a-uuid`)).toMatchObject(notFound("not-a-uuid"));
   });
 
   it("an anchored URL stages outside its anchor: coverage is a commit rule", async () => {
     await putAnchor("agent-a", { type: "project", id: ids.P1 });
-    const cs = (await start(`${ALL}/anchors/agent-a`)).id as string;
+    const cs = (await start(`${ALL}/rulesets/agent-a`)).id as string;
     const res = await stage(
       cs,
       {
@@ -422,7 +422,7 @@ describe("binding", () => {
         properties: { name: "Outside" },
         parentRelation: { type: "has_task", parentId: ids.P2, properties: { phase: "build" } },
       },
-      `${ALL}/anchors/agent-a`,
+      `${ALL}/rulesets/agent-a`,
     );
     expect(res.status).toBe(201);
   });
@@ -433,7 +433,7 @@ describe("binding", () => {
       parentRelation: { type: "has_task", parentId: ids.P2, properties: { phase: "x" } },
     })).body._id as string;
     await putAnchor("agent-a", { type: "task", id: leaf });
-    const anchored = `${ALL}/anchors/agent-a`;
+    const anchored = `${ALL}/rulesets/agent-a`;
     const base = `${anchored}/changesets`;
     const cs = (await start(anchored)).id as string;
     const l2 = { operation: "update_entity", type: "task", id: leaf, properties: { name: "L2" } };
@@ -451,10 +451,10 @@ describe("binding", () => {
 
   it("after its anchor is deleted, the plain lens URL still reaches the changeset", async () => {
     await putAnchor("agent-b", { type: "project", id: ids.P2 });
-    const cs = (await start(`${ALL}/anchors/agent-b`)).id as string;
-    expect((await call("DELETE", `${ANCHORS}/agent-b`)).status).toBe(204);
-    expect((await call("GET", `${ALL}/anchors/agent-b/changesets/${cs}`)).status).toBe(404);
-    expect(await call("GET", `${ALL}/changesets/${cs}`)).toMatchObject({ status: 200, body: { anchor: "agent-b" } });
+    const cs = (await start(`${ALL}/rulesets/agent-b`)).id as string;
+    expect((await call("DELETE", `${RULESETS}/agent-b`)).status).toBe(204);
+    expect((await call("GET", `${ALL}/rulesets/agent-b/changesets/${cs}`)).status).toBe(404);
+    expect(await call("GET", `${ALL}/changesets/${cs}`)).toMatchObject({ status: 200, body: { ruleset: "agent-b" } });
     expect((await stage(cs, rename(ids.P2, "x"))).status).toBe(201);
   });
 });

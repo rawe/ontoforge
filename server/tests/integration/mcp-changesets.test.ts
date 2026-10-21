@@ -37,7 +37,7 @@ interface ToolCallResult {
 }
 
 const ALL = runtimePrefix(O, "all");
-const ANCHORS = `/api/ontologies/${O}/runtime/anchors`;
+const RULESETS = `/api/ontologies/${O}/runtime/rulesets`;
 const STAGEABLE = ["create_entity", "update_entity", "delete_entity", "create_relation", "update_relation", "delete_relation"];
 const CHANGESET_TOOLS = [
   "start_changeset",
@@ -101,7 +101,7 @@ async function fresh(): Promise<void> {
 }
 
 async function pointAnchor(key: string, type: string, id: string): Promise<void> {
-  const res = await rest("PUT", `${ANCHORS}/${key}`, { entity: { type, id } });
+  const res = await rest("PUT", `${RULESETS}/${key}`, { anchor: { type, id } });
   expect(res.status, JSON.stringify(res.body)).toBe(200);
 }
 
@@ -152,7 +152,7 @@ describe("a whole round through MCP alone (V4, V7, V28)", () => {
   it("starts, stages, reads, submits, unsubmits, unstages and commits, as REST does", async () => {
     const client = await connect();
     const started = await ok(client, "start_changeset", { note: "g12" });
-    expect(started).toMatchObject({ state: "draft", version: 1, note: "g12", anchor: null, writeCount: 0 });
+    expect(started).toMatchObject({ state: "draft", version: 1, note: "g12", ruleset: null, writeCount: 0 });
     const cs = started.id as string;
 
     const t9 = await ok(client, "create_entity", {
@@ -358,7 +358,7 @@ describe("the anchored mount (V8, V17, V21, V42)", () => {
     const b = await connect("agent-b");
     const plain = await connect();
     const started = await ok(a, "start_changeset", { note: "through a" });
-    expect(started.anchor).toBe("agent-a");
+    expect(started.ruleset).toBe("agent-a");
     const cs = started.id as string;
 
     const notFound = `Changeset '${cs}' not found`;
@@ -369,8 +369,8 @@ describe("the anchored mount (V8, V17, V21, V42)", () => {
     ).toContain(notFound);
     expect(await ok(b, "list_changesets")).toEqual([]);
     expect((await ok(a, "list_changesets")).map((c: Row) => c.id)).toEqual([cs]);
-    expect((await ok(plain, "list_changesets")).map((c: Row) => [c.id, c.anchor])).toEqual([[cs, "agent-a"]]);
-    expect((await ok(plain, "get_changeset", { changeset_id: cs })).anchor).toBe("agent-a");
+    expect((await ok(plain, "list_changesets")).map((c: Row) => [c.id, c.ruleset])).toEqual([[cs, "agent-a"]]);
+    expect((await ok(plain, "get_changeset", { changeset_id: cs })).ruleset).toBe("agent-a");
     await ok(a, "discard_changeset", { changeset_id: cs });
   });
 
@@ -413,11 +413,11 @@ describe("the anchored mount (V8, V17, V21, V42)", () => {
     const b = await connect("agent-b");
     const cs = (await ok(b, "start_changeset")).id as string;
     await ok(b, "update_entity", { entity_type_key: "project", entity_id: e.P3, properties: { name: "P3 b" }, changeset_id: cs });
-    expect((await rest("DELETE", `${ANCHORS}/agent-b`)).status).toBe(204);
+    expect((await rest("DELETE", `${RULESETS}/agent-b`)).status).toBe(204);
 
     expect(await refused(b, "get_changeset", { changeset_id: cs })).toContain("Anchor 'agent-b' not found");
     const plain = await connect();
-    expect((await ok(plain, "get_changeset", { changeset_id: cs })).anchor).toBe("agent-b");
+    expect((await ok(plain, "get_changeset", { changeset_id: cs })).ruleset).toBe("agent-b");
     expect(await refused(plain, "commit_changeset", { changeset_id: cs })).toContain("anchor_gone");
     expect((await ok(plain, "get_entity", { entity_type_key: "project", entity_id: e.P3 })).name).toBe("P3");
   });

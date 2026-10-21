@@ -24,7 +24,7 @@ import { wipeDatabase } from "./reset.js";
 type Row = Record<string, any>;
 
 const ALL = runtimePrefix(O, "all");
-const ANCHORS = `/api/ontologies/${O}/runtime/anchors`;
+const RULESETS = `/api/ontologies/${O}/runtime/rulesets`;
 const UNKNOWN = "00000000-0000-4000-8000-000000000000";
 
 let app: FastifyInstance;
@@ -167,9 +167,9 @@ describe("one entity as the changeset leaves it", () => {
 
 describe("the anchored mirror", () => {
   it("an anchored changeset is read through its anchor and the plain lens URL, not another anchor", async () => {
-    expect((await rest("PUT", `${ANCHORS}/agent-a`, { entity: { type: "project", id: e.P1 } })).status).toBe(200);
-    expect((await rest("PUT", `${ANCHORS}/agent-b`, { entity: { type: "project", id: e.P3 } })).status).toBe(200);
-    const A = `${ALL}/anchors/agent-a`;
+    expect((await rest("PUT", `${RULESETS}/agent-a`, { anchor: { type: "project", id: e.P1 } })).status).toBe(200);
+    expect((await rest("PUT", `${RULESETS}/agent-b`, { anchor: { type: "project", id: e.P3 } })).status).toBe(200);
+    const A = `${ALL}/rulesets/agent-a`;
     const cs = await start(A);
     await staged(A, cs, { operation: "update_entity", type: "task", id: e.T5, properties: { name: "T5 b" } });
 
@@ -177,7 +177,7 @@ describe("the anchored mirror", () => {
     expect(anchored.status, JSON.stringify(anchored.body)).toBe(200);
     expect(anchored.body.entity.name).toBe("T5 b");
     expect((await entityRead(cs, "task", e.T5)).body).toEqual(anchored.body);
-    const other = await entityRead(cs, "task", e.T5, `${ALL}/anchors/agent-b`);
+    const other = await entityRead(cs, "task", e.T5, `${ALL}/rulesets/agent-b`);
     expect(other.status).toBe(404);
     expect(other.body.error.message).toBe(`Changeset '${cs}' not found`);
   });

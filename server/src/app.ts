@@ -30,10 +30,10 @@ import { mountMcp } from "./mcp/mount.js";
 import { modelingRouter } from "./modeling/router.js";
 import { registryRouter } from "./registry/router.js";
 import { aiRouter } from "./runtime/aiRouter.js";
-import { anchorRouter, anchoredRuntimeRouter } from "./runtime/anchorRouter.js";
 import { changesetRouter } from "./runtime/changesetRouter.js";
 import { decisionRouter } from "./runtime/decisionRouter.js";
 import { runtimeRouter } from "./runtime/router.js";
+import { rulesetRouter, rulesetRuntimeRouter } from "./runtime/rulesetRouter.js";
 import { MemoryThreadStore } from "./runtime/threads/memoryThreadStore.js";
 import { serverRouter } from "./server/router.js";
 
@@ -176,10 +176,10 @@ export async function createApp(): Promise<FastifyInstance> {
   // One thread store per server: every assistant conversation lives in it.
   await app.register(aiRouter, { prefix: runtimePrefix, threads: new MemoryThreadStore() });
   await app.register(decisionRouter, { prefix: runtimePrefix });
-  // Anchor maintenance names no lens: the first lensless runtime routes.
-  await app.register(anchorRouter, { prefix: "/api/ontologies/:ontologyKey/runtime/anchors" });
-  // The anchored REST mirror: the runtime and changeset routers below an anchor.
-  await app.register(anchoredRuntimeRouter, { prefix: `${runtimePrefix}/anchors/:rulesetKey` });
+  // Ruleset maintenance names no lens: the first lensless runtime routes.
+  await app.register(rulesetRouter, { prefix: "/api/ontologies/:ontologyKey/runtime/rulesets" });
+  // The ruleset REST mirror: the runtime and changeset routers below a ruleset.
+  await app.register(rulesetRuntimeRouter, { prefix: `${runtimePrefix}/rulesets/:rulesetKey` });
 
   // Startup step 6: both MCP servers share the process and call the same
   // services as REST.

@@ -92,7 +92,7 @@ afterEach(async () => {
 
 async function putAnchor(key: string, name: ProjectHierarchyName | null, type?: string): Promise<void> {
   const entity = name === null ? null : { type: type ?? (await typeOf(name)), id: id(name) };
-  const res = await app.inject({ method: "PUT", url: `/api/ontologies/${O}/runtime/anchors/${key}`, payload: { entity } });
+  const res = await app.inject({ method: "PUT", url: `/api/ontologies/${O}/runtime/rulesets/${key}`, payload: { anchor: entity } });
   expect(res.statusCode, res.body).toBe(200);
 }
 
@@ -195,7 +195,7 @@ function mcpWrites(url: string): Writes {
 }
 
 const TRANSPORTS = {
-  REST: (lens: string, anchor: string) => restWrites(`${runtimePrefix(O, lens)}/anchors/${anchor}`),
+  REST: (lens: string, anchor: string) => restWrites(`${runtimePrefix(O, lens)}/rulesets/${anchor}`),
   MCP: (lens: string, anchor: string) => mcpWrites(`${baseUrl}/mcp/ontologies/${O}/runtime/lenses/${lens}/anchors/${anchor}`),
 };
 
@@ -350,7 +350,7 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
       expect(frozen.text).toContain("anchored");
       expect(frozen.text).not.toContain("agent-b");
 
-      const res = await app.inject({ method: "DELETE", url: `/api/ontologies/${O}/runtime/anchors/agent-b` });
+      const res = await app.inject({ method: "DELETE", url: `/api/ontologies/${O}/runtime/rulesets/agent-b` });
       expect(res.statusCode).toBe(204);
       allowed(await agentA().deleteEntity("task", id("T2a")), 204);
     });

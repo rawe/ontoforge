@@ -134,7 +134,7 @@ export interface ChangesetView {
   version: number;
   note: string | null;
   /** The ruleset key of the URL that started it; null on the plain lens. */
-  anchor: string | null;
+  ruleset: string | null;
   writeCount: number;
   createdAt: Date;
   lastChangeAt: Date;
@@ -192,7 +192,7 @@ export interface ChangesetListItem {
   state: "draft" | "submitted";
   version: number;
   note: string | null;
-  anchor: string | null;
+  ruleset: string | null;
   /** The number of staged writes, as the read shows it. */
   writeCount: number;
   /** The staged writes per operation. */
@@ -230,7 +230,7 @@ function toView(record: ChangesetRecord): ChangesetView {
     state: record.submittedAt === null ? "draft" : "submitted",
     version: record.version,
     note: record.note,
-    anchor: record.rulesetKey,
+    ruleset: record.rulesetKey,
     writeCount: record.writeCount,
     createdAt: record.createdAt,
     lastChangeAt: record.lastChangeAt,
@@ -740,7 +740,7 @@ export async function listChangesets(
       state: summary.submittedAt === null ? "draft" : "submitted",
       version: summary.version,
       note: summary.note,
-      anchor: summary.rulesetKey,
+      ruleset: summary.rulesetKey,
       writeCount: summary.writeCount,
       operations: summary.operations,
       types,

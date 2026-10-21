@@ -379,7 +379,7 @@ describe("list", () => {
         state: "submitted",
         version: 5,
         note: "start note",
-        anchor: "agent-a",
+        ruleset: "agent-a",
         writeCount: 3,
         operations: { create_entity: 2, delete_entity: 1 },
         types: ["company", "person"],

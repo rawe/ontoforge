@@ -29,7 +29,7 @@ type Row = Record<string, any>;
 
 const NS = `ont_${O}`;
 const ALL = runtimePrefix(O, "all");
-const ANCHORS = `/api/ontologies/${O}/runtime/anchors`;
+const RULESETS = `/api/ontologies/${O}/runtime/rulesets`;
 
 let app: FastifyInstance;
 let h: ProjectHierarchyIds;
@@ -112,7 +112,7 @@ async function name(type: string, id: string): Promise<string | null> {
 }
 
 async function pointAnchor(key: string, type: string, id: string): Promise<void> {
-  const res = await call("PUT", `${ANCHORS}/${key}`, { entity: { type, id } });
+  const res = await call("PUT", `${RULESETS}/${key}`, { anchor: { type, id } });
   expect(res.status, JSON.stringify(res.body)).toBe(200);
 }
 
@@ -460,8 +460,8 @@ describe("endpoint_type", () => {
 });
 
 describe("anchor coverage (V8, V17, V21, V42)", () => {
-  const A = `${ALL}/anchors/agent-a`;
-  const B = `${ALL}/anchors/agent-b`;
+  const A = `${ALL}/rulesets/agent-a`;
+  const B = `${ALL}/rulesets/agent-b`;
 
   beforeAll(async () => {
     await fresh();
@@ -538,7 +538,7 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
 
   it("anchor_dangling: the anchored entity deleted after staging", async () => {
     await pointAnchor("agent-c", "task", e.T2a);
-    const C = `${ALL}/anchors/agent-c`;
+    const C = `${ALL}/rulesets/agent-c`;
     const cs = await start(C);
     await staged(C, cs, { operation: "update_entity", type: "person", id: e.Kim, properties: { name: "Kim C" } });
     expect((await call("DELETE", `${ALL}/entities/task/${e.T2a}`)).status).toBe(204);
@@ -553,7 +553,7 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
   it("anchor_dangling: re-pointed at an entity the lens hides, named by neither type nor id", async () => {
     const PORTFOLIO = runtimePrefix(O, "portfolio");
     await pointAnchor("agent-d", "project", e.P3);
-    const D = `${PORTFOLIO}/anchors/agent-d`;
+    const D = `${PORTFOLIO}/rulesets/agent-d`;
     const cs = await start(D);
     await staged(D, cs, { operation: "update_entity", type: "project", id: e.P3, properties: { name: "P3 D" } });
     await pointAnchor("agent-d", "task", e.T6);
@@ -571,7 +571,7 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
   it("anchor_gone: the anchor deleted; its changeset, reached through the plain lens URL, rejects", async () => {
     const cs = await start(B);
     await staged(B, cs, { operation: "update_entity", type: "task", id: e.T6, properties: { name: "T6 B" } });
-    expect((await call("DELETE", `${ANCHORS}/agent-b`)).status).toBe(204);
+    expect((await call("DELETE", `${RULESETS}/agent-b`)).status).toBe(204);
     expect((await call("GET", `${B}/changesets/${cs}`)).status).toBe(404);
     expect(await rejected(cs)).toEqual([
       { seq: 0, kind: "anchor_gone", message: "Anchor 'agent-b' no longer exists, so this changeset cannot be committed" },

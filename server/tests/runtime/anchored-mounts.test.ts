@@ -74,7 +74,7 @@ beforeEach(() => {
 });
 
 const PLAIN = "/api/ontologies/test_ont/runtime/lenses/all";
-const ANCHORED = `${PLAIN}/anchors/agent-a`;
+const ANCHORED = `${PLAIN}/rulesets/agent-a`;
 
 /** Every write route, with the spy it reaches. */
 const WRITE_ROUTES = [
@@ -120,7 +120,7 @@ describe("the anchored REST mirror", () => {
       ["GET", `/entities/person/${ID}/path`],
       ["POST", "/entities/person"],
     ] as const) {
-      const res = await app.inject({ method, url: `${PLAIN}/anchors/nope${path}`, payload: method === "POST" ? { name: "Ann" } : undefined });
+      const res = await app.inject({ method, url: `${PLAIN}/rulesets/nope${path}`, payload: method === "POST" ? { name: "Ann" } : undefined });
       expect(res.statusCode, path).toBe(404);
       expect(res.json().error.message).toBe("Anchor 'nope' not found");
     }
@@ -129,7 +129,7 @@ describe("the anchored REST mirror", () => {
   });
 
   it("an unknown lens is not found before the anchor", async () => {
-    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/nope/anchors/nope/entities/person" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/nope/rulesets/nope/entities/person" });
     expect(res.statusCode).toBe(404);
     expect(res.json().error.message).toContain("Lens 'nope' not found");
     expect(holder.store.rulesetStore.get).not.toHaveBeenCalled();
@@ -144,36 +144,44 @@ describe("the anchored REST mirror", () => {
 
 describe("the anchor through the lens", () => {
   const root = (lens = "all", key = "agent-a") =>
-    app.inject({ method: "GET", url: `/api/ontologies/test_ont/runtime/lenses/${lens}/anchors/${key}` });
+    app.inject({ method: "GET", url: `/api/ontologies/test_ont/runtime/lenses/${lens}/rulesets/${key}` });
 
-  it("anchored: the entity with its name, and the path ending with it", async () => {
+  it("found: the entity with its name, and the path ending with it", async () => {
     holder.store.getEntitiesByIds.mockResolvedValue({ [ID]: makeEntity({ _id: ID, name: "Ann" }) });
     const res = await root();
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json()).toEqual({
       key: "agent-a",
-      state: "anchored",
-      stagedOnly: false,
-      visible: true,
-      entity: { type: "person", id: ID, name: "Ann" },
-      path: [{ type: "person", id: ID, name: "Ann" }],
+      writeAccess: "full",
+      anchor: {
+        type: "person",
+        id: ID,
+        name: "Ann",
+        state: "found",
+        visible: true,
+        path: [{ type: "person", id: ID, name: "Ann" }],
+      },
     });
   });
 
   it("the lens hides the entity's type: not visible, no entity, no path, no path read", async () => {
     const res = await root("no_person");
-    expect(res.json()).toEqual({ key: "agent-a", state: "anchored", stagedOnly: false, visible: false, entity: null, path: [] });
+    expect(res.json()).toEqual({
+      key: "agent-a",
+      writeAccess: "full",
+      anchor: { type: null, id: null, name: null, state: "found", visible: false, path: [] },
+    });
     expect(holder.store.getAncestors).not.toHaveBeenCalled();
   });
 
-  it("unanchored and dangling: visible, no entity, no path", async () => {
+  it("no anchor: null; deleted: visible, no entity, no path", async () => {
     anchors["agent-u"] = { key: "agent-u", anchor: null, anchorFound: false, writeAccess: "propose" };
     anchors["agent-d"] = { key: "agent-d", anchor: { type: "person", id: ID }, anchorFound: false, writeAccess: "full" };
-    expect((await root("all", "agent-u")).json()).toEqual({
-      key: "agent-u", state: "unanchored", stagedOnly: true, visible: true, entity: null, path: [],
-    });
+    expect((await root("all", "agent-u")).json()).toEqual({ key: "agent-u", writeAccess: "propose", anchor: null });
     expect((await root("all", "agent-d")).json()).toEqual({
-      key: "agent-d", state: "dangling", stagedOnly: false, visible: true, entity: null, path: [],
+      key: "agent-d",
+      writeAccess: "full",
+      anchor: { type: null, id: null, name: null, state: "deleted", visible: true, path: [] },
     });
   });
 });
@@ -289,11 +297,15 @@ describe("the anchored MCP server", () => {
       const result = await call(client, "get_anchor");
       expect(JSON.parse(result.content[0]!.text)).toEqual({
         key: "agent-a",
-        state: "anchored",
-        stagedOnly: false,
-        visible: true,
-        entity: { type: "person", id: ID, name: "Ann" },
-        path: [{ type: "person", id: ID, name: "Ann" }],
+        writeAccess: "full",
+        anchor: {
+          type: "person",
+          id: ID,
+          name: "Ann",
+          state: "found",
+          visible: true,
+          path: [{ type: "person", id: ID, name: "Ann" }],
+        },
       });
     } finally {
       await client.close();

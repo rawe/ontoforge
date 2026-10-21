@@ -50,7 +50,7 @@ vi.mock("../../src/runtime/service.js", async (original) => ({
 }));
 
 const { createRuntimeMcpServer } = await import("../../src/mcp/runtime.js");
-const { anchoredRuntimeRouter } = await import("../../src/runtime/anchorRouter.js");
+const { rulesetRuntimeRouter } = await import("../../src/runtime/rulesetRouter.js");
 
 const OPERATIONS: Operation[] = ["read", "stage", "commit", "write"];
 const ID = "11111111-1111-4111-8111-111111111111";
@@ -128,7 +128,7 @@ describe("the levels and the check", () => {
 
 describe("the tables cannot drift", () => {
   it("ROUTES are exactly the routes the ruleset mirror registers (38)", async () => {
-    const prefix = "/api/ontologies/:ontologyKey/runtime/lenses/:lensKey/anchors/:rulesetKey";
+    const prefix = "/api/ontologies/:ontologyKey/runtime/lenses/:lensKey/rulesets/:rulesetKey";
     const app = Fastify();
     app.setValidatorCompiler(validatorCompiler);
     app.setSerializerCompiler(serializerCompiler);
@@ -139,7 +139,7 @@ describe("the tables cannot drift", () => {
         registered.add(`${method} ${route.url.slice(prefix.length).replace(/(.)\/$/, "$1") || "/"}`);
       }
     });
-    await app.register(anchoredRuntimeRouter, { prefix });
+    await app.register(rulesetRuntimeRouter, { prefix });
     await app.ready();
     await app.close();
     expect([...registered].sort()).toEqual(Object.keys(ROUTES).sort());
@@ -203,7 +203,7 @@ describe("the REST mirror", () => {
     await app.close();
   });
 
-  const MOUNT = "/api/ontologies/test_ont/runtime/lenses/all/anchors/agent-a";
+  const MOUNT = "/api/ontologies/test_ont/runtime/lenses/all/rulesets/agent-a";
   const CS = `/changesets/${ID}`;
 
   /** One request per row of ROUTES, with a body that passes validation. */
@@ -300,7 +300,7 @@ describe("the REST mirror", () => {
   it("an unknown ruleset is not found before write access", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/ontologies/test_ont/runtime/lenses/all/anchors/nope/entities/person",
+      url: "/api/ontologies/test_ont/runtime/lenses/all/rulesets/nope/entities/person",
       payload: { name: "Ann" },
     });
     expect(res.statusCode).toBe(404);

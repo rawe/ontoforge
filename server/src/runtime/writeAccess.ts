@@ -3,7 +3,7 @@
  * MCP tool of a ruleset mount and every route of the ruleset REST mirror
  * declares the one operation it needs, in the tables below; each level is
  * a fixed set of operations. The two entrances (the mirror's preHandler,
- * `anchorRouter.ts`; the MCP tools, `mcp/runtime.ts`) run `checkOperation`
+ * `rulesetRouter.ts`; the MCP tools, `mcp/runtime.ts`) run `checkOperation`
  * on the binding of the URL before any service is called, and nothing
  * else checks write access. A route or tool without a row fails the boot.
  *

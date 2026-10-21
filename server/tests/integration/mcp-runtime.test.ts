@@ -1056,8 +1056,8 @@ describe("the anchored mount", () => {
   const putAnchor = async (key: string, entity: { type: string; id: string } | null) => {
     const res = await app.inject({
       method: "PUT",
-      url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/anchors/${key}`,
-      payload: { entity },
+      url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/rulesets/${key}`,
+      payload: { anchor: entity },
     });
     expect(res.statusCode, res.body).toBe(200);
   };
@@ -1087,22 +1087,23 @@ describe("the anchored mount", () => {
     try {
       expect(json(await call(all, "get_anchor"))).toEqual({
         key: "agent-a",
-        state: "anchored",
-        stagedOnly: false,
-        visible: true,
-        entity: { type: "project", id: ids.P1, name: "P1" },
-        path: [
-          { type: "customer", id: ids.ACME, name: "ACME" },
-          { type: "project", id: ids.P1, name: "P1" },
-        ],
+        writeAccess: "full",
+        anchor: {
+          type: "project",
+          id: ids.P1,
+          name: "P1",
+          state: "found",
+          visible: true,
+          path: [
+            { type: "customer", id: ids.ACME, name: "ACME" },
+            { type: "project", id: ids.P1, name: "P1" },
+          ],
+        },
       });
       expect(json(await call(delivery, "get_anchor"))).toEqual({
         key: "agent-a",
-        state: "anchored",
-        stagedOnly: false,
-        visible: false,
-        entity: null,
-        path: [],
+        writeAccess: "full",
+        anchor: { type: null, id: null, name: null, state: "found", visible: false, path: [] },
       });
 
       // The runtime tools work below the anchor (the guard is not here yet).
@@ -1114,15 +1115,16 @@ describe("the anchored mount", () => {
     }
   });
 
-  it("get_anchor shows unanchored and dangling", async () => {
+  it("get_anchor shows no anchor and a deleted one", async () => {
     const ids = await buildHierarchy(app);
     await putAnchor("agent-u", null);
     await putAnchor("agent-d", { type: "task", id: ids.T1a });
     await app.inject({ method: "DELETE", url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all/entities/task/${ids.T1a}` });
-    for (const [key, state] of [["agent-u", "unanchored"], ["agent-d", "dangling"]] as const) {
+    const deleted = { type: null, id: null, name: null, state: "deleted", visible: true, path: [] };
+    for (const [key, anchor] of [["agent-u", null], ["agent-d", deleted]] as const) {
       const client = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "all", key));
       try {
-        expect(json(await call(client, "get_anchor"))).toEqual({ key, state, stagedOnly: false, visible: true, entity: null, path: [] });
+        expect(json(await call(client, "get_anchor"))).toEqual({ key, writeAccess: "full", anchor });
       } finally {
         await client.close();
       }
@@ -1159,8 +1161,8 @@ describe("the anchored mount", () => {
     // Nothing written, no anchor created.
     const tasks = await app.inject({ method: "GET", url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all/entities/task` });
     expect(tasks.json().total).toBe(3);
-    const anchors = await app.inject({ method: "GET", url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/anchors` });
-    expect(anchors.json().map((anchor: { key: string }) => anchor.key)).toEqual(["agent-a"]);
+    const rulesets = await app.inject({ method: "GET", url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/rulesets` });
+    expect(rulesets.json().map((ruleset: { key: string }) => ruleset.key)).toEqual(["agent-a"]);
   });
 
   it("a mount URL naming no anchor is an error", async () => {

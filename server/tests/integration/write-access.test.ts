@@ -1,13 +1,13 @@
 /**
- * Write access 'propose' over REST and MCP, on PostgreSQL with the in-test
- * project hierarchy (`buildProjectHierarchy`, fresh per test): reported by
- * the anchor reads; through a 'propose' ruleset's URL every immediate
- * write and the commit are 409s while staging, submit, unsubmit, discard,
- * the list and reads work; the same on an unanchored key, with no
- * coverage rules; a dangling anchor, or one the lens hides, still
- * refuses staging, and write access wins over both; the escapes (the
- * plain lens URL commits, the PUT gives full access back); and the MCP
- * tool set at 'propose' (V29, R13).
+ * Write access over REST and MCP, on PostgreSQL with the in-test project
+ * hierarchy (`buildProjectHierarchy`, fresh per test): reported by the
+ * ruleset reads; through a 'propose' ruleset's URL every immediate write
+ * and the commit are 409s while staging, submit, unsubmit, discard, the
+ * list and reads work; the same on a ruleset without an anchor, with no
+ * coverage rules; a deleted anchor, or one the lens hides, still refuses
+ * staging, and write access wins over both; the escapes (the plain lens
+ * URL commits, the PUT gives full access back); and the MCP tool set at
+ * 'propose' (V29, R13).
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -34,7 +34,7 @@ interface ToolCallResult {
 }
 
 const ALL = runtimePrefix(O, "all");
-const ANCHORS = `/api/ontologies/${O}/runtime/anchors`;
+const RULESETS = `/api/ontologies/${O}/runtime/rulesets`;
 const NO_WRITE = (key: string) =>
   `Ruleset '${key}' gives write access 'propose': this connection cannot write directly; stage the write into a changeset`;
 const NO_COMMIT = (key: string) =>
@@ -52,8 +52,8 @@ async function rest(method: string, url: string, payload?: Row): Promise<{ statu
   return { status: res.statusCode, body: res.body === "" ? {} : (res.json() as Row) };
 }
 
-async function putAnchor(key: string, payload: Row): Promise<Row> {
-  const res = await rest("PUT", `${ANCHORS}/${key}`, payload);
+async function putRuleset(key: string, payload: Row): Promise<Row> {
+  const res = await rest("PUT", `${RULESETS}/${key}`, payload);
   expect(res.status, JSON.stringify(res.body)).toBe(200);
   return res.body;
 }
@@ -140,26 +140,33 @@ afterAll(async () => {
   await closeStores();
 });
 
-describe("the level on the anchor reads", () => {
+describe("the level on the ruleset reads", () => {
   it("the GET, the list, the mount root and get_anchor report it", async () => {
-    await putAnchor("agent-s", { entity: { type: "project", id: e.P1 }, stagedOnly: true });
-    await putAnchor("agent-a", { entity: { type: "project", id: e.P1 } });
-    expect((await rest("GET", `${ANCHORS}/agent-s`)).body.stagedOnly).toBe(true);
-    expect((await rest("GET", ANCHORS)).body.map((a: Row) => [a.key, a.stagedOnly])).toEqual([
-      ["agent-a", false],
-      ["agent-s", true],
+    await putRuleset("agent-s", { anchor: { type: "project", id: e.P1 }, writeAccess: "propose" });
+    await putRuleset("agent-a", { anchor: { type: "project", id: e.P1 } });
+    await putRuleset("agent-n", { writeAccess: "none" });
+    expect((await rest("GET", `${RULESETS}/agent-s`)).body.writeAccess).toBe("propose");
+    expect((await rest("GET", RULESETS)).body.map((r: Row) => [r.key, r.writeAccess])).toEqual([
+      ["agent-a", "full"],
+      ["agent-n", "none"],
+      ["agent-s", "propose"],
     ]);
-    expect((await rest("GET", `${ALL}/anchors/agent-s`)).body).toMatchObject({ key: "agent-s", state: "anchored", stagedOnly: true });
-    expect((await rest("GET", `${ALL}/anchors/agent-a`)).body.stagedOnly).toBe(false);
-    expect(await ok(await connect("agent-s"), "get_anchor")).toMatchObject({ state: "anchored", stagedOnly: true });
-    expect((await ok(await connect("agent-a"), "get_anchor")).stagedOnly).toBe(false);
+    expect((await rest("GET", `${ALL}/rulesets/agent-s`)).body).toMatchObject({
+      key: "agent-s",
+      writeAccess: "propose",
+      anchor: { state: "found" },
+    });
+    expect((await rest("GET", `${ALL}/rulesets/agent-a`)).body.writeAccess).toBe("full");
+    expect((await rest("GET", `${ALL}/rulesets/agent-n`)).body).toEqual({ key: "agent-n", writeAccess: "none", anchor: null });
+    expect(await ok(await connect("agent-s"), "get_anchor")).toMatchObject({ writeAccess: "propose", anchor: { state: "found" } });
+    expect((await ok(await connect("agent-a"), "get_anchor")).writeAccess).toBe("full");
   });
 });
 
 describe("through a 'propose' ruleset's URL (REST)", () => {
-  const S = `${ALL}/anchors/agent-s`;
+  const S = `${ALL}/rulesets/agent-s`;
   beforeEach(async () => {
-    await putAnchor("agent-s", { entity: { type: "project", id: e.P1 }, stagedOnly: true });
+    await putRuleset("agent-s", { anchor: { type: "project", id: e.P1 }, writeAccess: "propose" });
   });
 
   it("every immediate write answers 409, and nothing is written", async () => {
@@ -187,7 +194,7 @@ describe("through a 'propose' ruleset's URL (REST)", () => {
     expect((await rest("GET", `${S}/changesets`)).body.map((c: Row) => c.id)).toEqual([cs]);
     const read = await rest("GET", `${S}/changesets/${cs}`);
     expect(read.status).toBe(200);
-    expect(read.body).toMatchObject({ anchor: "agent-s", writeCount: 2 });
+    expect(read.body).toMatchObject({ ruleset: "agent-s", writeCount: 2 });
     expect((await rest("GET", `${S}/entities/task`)).status).toBe(200);
 
     const commit = await rest("POST", `${S}/changesets/${cs}/commit`, {});
@@ -218,7 +225,7 @@ describe("through a 'propose' ruleset's URL (REST)", () => {
     expect(committed.body).toEqual({ committed: 2, alreadyGone: [] });
     expect((await rest("GET", `${ALL}/entities/task/${task}`)).body.name).toBe("T9");
 
-    expect((await putAnchor("agent-s", { entity: { type: "project", id: e.P1 }, stagedOnly: false })).stagedOnly).toBe(false);
+    expect((await putRuleset("agent-s", { anchor: { type: "project", id: e.P1 }, writeAccess: "full" })).writeAccess).toBe("full");
     const renamed = await rest("PATCH", `${S}/entities/task/${e.T1}`, { name: "T1 renamed" });
     expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
     expect(renamed.body.name).toBe("T1 renamed");
@@ -226,8 +233,8 @@ describe("through a 'propose' ruleset's URL (REST)", () => {
     expect((await rest("POST", `${S}/changesets/${again}/commit`, {})).status).toBe(200);
   });
 
-  it("a dangling anchor refuses staging (R10); write access refuses every immediate write first", async () => {
-    await putAnchor("agent-s", { entity: { type: "task", id: e.T2a } });
+  it("a deleted anchor refuses staging (R10); write access refuses every immediate write first", async () => {
+    await putRuleset("agent-s", { anchor: { type: "task", id: e.T2a } });
     const { cs } = await startWithTask(S);
     expect((await rest("DELETE", `${ALL}/entities/task/${e.T2a}`)).status).toBe(204);
     const staged = await rest("POST", `${S}/changesets/${cs}/writes`, {
@@ -245,7 +252,7 @@ describe("through a 'propose' ruleset's URL (REST)", () => {
   });
 
   it("an anchor the lens hides refuses staging; write access refuses every immediate write first", async () => {
-    const H = `${runtimePrefix(O, "no_projects")}/anchors/agent-s`;
+    const H = `${runtimePrefix(O, "no_projects")}/rulesets/agent-s`;
     const started = await rest("POST", `${H}/changesets`, {});
     expect(started.status, JSON.stringify(started.body)).toBe(201);
     const staged = await rest("POST", `${H}/changesets/${started.body.id as string}/writes`, {
@@ -264,9 +271,9 @@ describe("through a 'propose' ruleset's URL (REST)", () => {
 });
 
 describe("a 'propose' ruleset without an anchor", () => {
-  const U = `${ALL}/anchors/agent-u`;
+  const U = `${ALL}/rulesets/agent-u`;
   beforeEach(async () => {
-    await putAnchor("agent-u", { entity: null, stagedOnly: true });
+    await putRuleset("agent-u", { anchor: null, writeAccess: "propose" });
   });
 
   it("refuses immediate writes and the commit, and stages with no coverage rules", async () => {
@@ -291,7 +298,7 @@ describe("a 'propose' ruleset without an anchor", () => {
 
 describe("the MCP tool set at 'propose' (V29, R13)", () => {
   beforeEach(async () => {
-    await putAnchor("agent-s", { entity: { type: "project", id: e.P1 }, stagedOnly: true });
+    await putRuleset("agent-s", { anchor: { type: "project", id: e.P1 }, writeAccess: "propose" });
   });
 
   it("tools/list: the six write tools require changeset_id; no commit_changeset, edit_document or write_document", async () => {
@@ -328,7 +335,7 @@ describe("the MCP tool set at 'propose' (V29, R13)", () => {
   });
 
   it("write access is read on every request: back at 'full', the normal tool set is back", async () => {
-    await putAnchor("agent-s", { entity: { type: "project", id: e.P1 }, stagedOnly: false });
+    await putRuleset("agent-s", { anchor: { type: "project", id: e.P1 }, writeAccess: "full" });
     const { tools } = await (await connect("agent-s")).listTools();
     const names = tools.map((tool) => tool.name);
     for (const name of ["commit_changeset", "edit_document", "write_document"]) expect(names, name).toContain(name);

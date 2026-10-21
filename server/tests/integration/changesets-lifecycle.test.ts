@@ -27,7 +27,7 @@ type Row = Record<string, any>;
 
 const NS = `ont_${O}`;
 const ALL = runtimePrefix(O, "all");
-const ANCHORS = `/api/ontologies/${O}/runtime/anchors`;
+const RULESETS = `/api/ontologies/${O}/runtime/rulesets`;
 
 let app: FastifyInstance;
 let h: ProjectHierarchyIds;
@@ -93,7 +93,7 @@ async function name(type: string, id: string): Promise<string | null> {
 }
 
 async function pointAnchor(key: string, type: string, id: string): Promise<void> {
-  const res = await call("PUT", `${ANCHORS}/${key}`, { entity: { type, id } });
+  const res = await call("PUT", `${RULESETS}/${key}`, { anchor: { type, id } });
   expect(res.status, JSON.stringify(res.body)).toBe(200);
 }
 
@@ -257,7 +257,7 @@ describe("the list (V17, V41)", () => {
   it("per lens and per anchor, submitted first, with counts and types", async () => {
     await pointAnchor("agent-a", "project", e.P1);
     await pointAnchor("agent-b", "project", e.P3);
-    const AA = `${ALL}/anchors/agent-a`;
+    const AA = `${ALL}/rulesets/agent-a`;
     const plain = await start(ALL, "plain");
     await staged(ALL, plain, { operation: "update_entity", type: "project", id: e.P2, properties: { name: "P2 x" } });
     const anchored = await start(AA, "anchored");
@@ -284,7 +284,7 @@ describe("the list (V17, V41)", () => {
       state: "submitted",
       version: 6,
       note: "review",
-      anchor: "agent-a",
+      ruleset: "agent-a",
       writeCount: 4,
       operations: { create_entity: 1, delete_entity: 1, create_relation: 2 },
       types: ["assigned_to", "has_task", "task"],
@@ -293,12 +293,12 @@ describe("the list (V17, V41)", () => {
       lastChangeAt: expect.any(String),
       submittedAt: expect.any(String),
     });
-    expect(all[1]).toMatchObject({ state: "draft", writeCount: 0, operations: {}, types: [], anchor: null });
+    expect(all[1]).toMatchObject({ state: "draft", writeCount: 0, operations: {}, types: [], ruleset: null });
 
     expect((await list(AA)).map((c) => c.id)).toEqual([anchored]);
-    expect(await list(`${ALL}/anchors/agent-b`)).toEqual([]);
+    expect(await list(`${ALL}/rulesets/agent-b`)).toEqual([]);
     expect(await list(runtimePrefix(O, "portfolio"))).toEqual([]);
-    expect((await call("GET", `${ALL}/anchors/nope/changesets`)).status).toBe(404);
+    expect((await call("GET", `${ALL}/rulesets/nope/changesets`)).status).toBe(404);
   });
 
   it("types apply the lens as it is now: a type the lens dropped is counted, not named", async () => {
@@ -471,7 +471,7 @@ describe("anchors at submit (V42; the dangling row of 'Who may do what')", () =>
 
   it("a dangling anchor refuses submit with 409; unsubmit stays allowed", async () => {
     await pointAnchor("agent-a", "task", e.T2a);
-    const AA = `${ALL}/anchors/agent-a`;
+    const AA = `${ALL}/rulesets/agent-a`;
     const cs = await start(AA);
     await staged(AA, cs, { operation: "update_entity", type: "person", id: e.Kim, properties: { name: "Kim C" } });
     const other = await start(AA);

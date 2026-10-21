@@ -1,7 +1,7 @@
 /**
- * The write guard of an anchored mount over a mocked store: opening it
- * from the anchor record (plain lens, unanchored, unknown, dangling, hidden
- * by the lens), the anchor's hierarchy (the parent relations around the
+ * The anchor rule of a ruleset mount over a mocked store: opening it
+ * from the ruleset (plain lens, no anchor, unknown, deleted, hidden by the
+ * lens), the anchor's hierarchy (the parent relations around the
  * anchor entity's type; other trees free), "covered", and every rule of the
  * create, update, delete and relation checks with its field key.
  */
@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { ConflictError, NotFoundError, ValidationError } from "../../src/core/exceptions.js";
-import type { RulesetRecord } from "../../src/core/ports.js";
+import type { RulesetRecord, WriteAccess } from "../../src/core/ports.js";
 import { AnchorGuard, anchorState } from "../../src/runtime/anchorGuard.js";
 import type { LoadedSchema, RelationTypeDef, SchemaCacheValue } from "../../src/runtime/schemaCache.js";
 import { asRuntimeStore, createMockRuntimeStore, type MockRuntimeStore } from "./helpers.js";
@@ -75,8 +75,12 @@ const ANCESTORS: Record<string, string[]> = {
 
 let store: MockRuntimeStore;
 
-function anchorAt(entity: { type: string; id: string } | null, anchorFound = entity !== null, stagedOnly = false): void {
-  store.rulesetStore.get.mockResolvedValue({ key: "agent-a", anchor: entity, anchorFound, writeAccess: stagedOnly ? "propose" : "full" });
+function anchorAt(
+  entity: { type: string; id: string } | null,
+  anchorFound = entity !== null,
+  writeAccess: WriteAccess = "full",
+): void {
+  store.rulesetStore.get.mockResolvedValue({ key: "agent-a", anchor: entity, anchorFound, writeAccess });
 }
 
 async function open(lens = loaded()): Promise<AnchorGuard> {
@@ -113,11 +117,11 @@ describe("anchorState", () => {
   });
   const types = loaded().full.entityTypes;
 
-  it("unanchored, anchored, dangling by entity and by type", () => {
-    expect(anchorState(record(null, false), types)).toBe("unanchored");
-    expect(anchorState(record({ type: "project", id: "P1" }, true), types)).toBe("anchored");
-    expect(anchorState(record({ type: "project", id: "P1" }, false), types)).toBe("dangling");
-    expect(anchorState(record({ type: "gone", id: "P1" }, true), types)).toBe("dangling");
+  it("no anchor (null), found, deleted by entity and by type", () => {
+    expect(anchorState(record(null, false), types)).toBeNull();
+    expect(anchorState(record({ type: "project", id: "P1" }, true), types)).toBe("found");
+    expect(anchorState(record({ type: "project", id: "P1" }, false), types)).toBe("deleted");
+    expect(anchorState(record({ type: "gone", id: "P1" }, true), types)).toBe("deleted");
   });
 });
 
@@ -186,15 +190,15 @@ describe("the staging check (R10)", () => {
     expect(store.rulesetStore.get).not.toHaveBeenCalled();
   });
 
-  it("staged-only, anchored or unanchored, may stage", async () => {
-    anchorAt({ type: "project", id: "P1" }, true, true);
+  it("write access 'propose', with or without an anchor, may stage", async () => {
+    anchorAt({ type: "project", id: "P1" }, true, "propose");
     expect(await check("agent-a")).toBeNull();
-    anchorAt(null, false, true);
+    anchorAt(null, false, "propose");
     expect(await check("agent-a")).toBeNull();
   });
 
   it("dangling, or an anchored entity the lens hides, is a 409 with no fix hint; an unknown key is not found", async () => {
-    anchorAt({ type: "project", id: "P1" }, false, true);
+    anchorAt({ type: "project", id: "P1" }, false, "propose");
     expect(await check("agent-a")).toEqual(new ConflictError("Anchor 'agent-a' is dangling"));
     anchorAt({ type: "project", id: "P1" }, true);
     expect(await check("agent-a", loaded("no_projects", ["customer", "task", "milestone"]))).toEqual(

@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { useDisplayLabel } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
+import { useRuntimeWrites } from '@/api/writes'
 import type {
   EntityInstance,
   Neighbor,
@@ -94,10 +95,16 @@ export function RelationSection({
     queryFn: () => runtime.getNeighbors(ontologyKey, lensKey, myTypeKey, entity._id, params),
   })
 
+  const writes = useRuntimeWrites(ontologyKey, lensKey)
   const unlinkMutation = useMutation({
-    mutationFn: (neighbor: Neighbor) =>
-      runtime.deleteRelation(ontologyKey, lensKey, relationType.key, neighbor.relation._id),
-    onSuccess: (_res, neighbor) => {
+    mutationFn: (neighbor: Neighbor) => writes.deleteRelation(relationType.key, neighbor.relation._id),
+    onSuccess: (outcome, neighbor) => {
+      setUnlinkTarget(null)
+      // Staged: the relation stays in the live neighbourhood.
+      if (outcome.kind === 'staged') {
+        writes.toastStaged(outcome)
+        return
+      }
       invalidateNeighborhood(queryClient, ontologyKey, lensKey, myTypeKey, entity._id)
       invalidateNeighborhood(
         queryClient,
@@ -107,7 +114,6 @@ export function RelationSection({
         neighbor.entity._id,
       )
       toast.success(`Removed ${relationType.displayName} to ${displayLabel(neighbor.entity)}`)
-      setUnlinkTarget(null)
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to remove relation')

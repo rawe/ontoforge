@@ -6,6 +6,7 @@ import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
 import type { EntityInstance, SchemaProperty } from '@/api/types'
+import { useRuntimeWrites } from '@/api/writes'
 import { DocumentBadge } from '@/components/DocumentBadge'
 import { DocumentEditor, DocumentMarkdown } from '@/components/schema/DocumentEditor'
 import { Button } from '@/components/ui/button'
@@ -41,6 +42,7 @@ export function DocumentPropertyRow({
   property,
 }: DocumentPropertyRowProps) {
   const queryClient = useQueryClient()
+  const writes = useRuntimeWrites(ontologyKey, lensKey)
   const stub = entity[property.key]
   const hasValue = isDocumentStub(stub)
 
@@ -72,10 +74,15 @@ export function DocumentPropertyRow({
 
   const mutation = useMutation({
     mutationFn: (value: string | null) =>
-      runtime.updateEntity(ontologyKey, lensKey, entity._entityTypeKey, entity._id, {
-        [property.key]: value,
-      }),
-    onSuccess: (updated) => {
+      writes.setDocument(entity._entityTypeKey, entity._id, property.key, value),
+    onSuccess: (outcome) => {
+      // Staged: the dialog closes, the row keeps the stored value.
+      if (outcome.kind === 'staged') {
+        setEditOpen(false)
+        writes.toastStaged(outcome)
+        return
+      }
+      const updated = outcome.value
       queryClient.setQueryData(
         qk.entity(ontologyKey, lensKey, entity._entityTypeKey, entity._id),
         updated,

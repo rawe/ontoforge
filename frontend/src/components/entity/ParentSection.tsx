@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { useDisplayLabel } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
+import { useRuntimeWrites } from '@/api/writes'
 import type { EntityInstance, Neighbor, SchemaEntityType } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
 import type { RelationInitial } from '@/components/entity/AddRelationDialog'
@@ -71,15 +72,17 @@ export function ParentSection({
   const failed = results.find((r) => r.isError)?.error
   const rows = results.flatMap((r) => r.data?.neighbors ?? [])
 
+  const writes = useRuntimeWrites(ontologyKey, lensKey)
   const unlinkMutation = useMutation({
     mutationFn: (neighbor: Neighbor) =>
-      runtime.deleteRelation(
-        ontologyKey,
-        lensKey,
-        neighbor.relation._relationTypeKey,
-        neighbor.relation._id,
-      ),
-    onSuccess: (_res, neighbor) => {
+      writes.deleteRelation(neighbor.relation._relationTypeKey, neighbor.relation._id),
+    onSuccess: (outcome, neighbor) => {
+      setUnlinkTarget(null)
+      // Staged: the parent stays in the live neighbourhood.
+      if (outcome.kind === 'staged') {
+        writes.toastStaged(outcome)
+        return
+      }
       invalidateNeighborhood(queryClient, ontologyKey, lensKey, typeKey, entity._id)
       invalidateNeighborhood(
         queryClient,
@@ -89,7 +92,6 @@ export function ParentSection({
         neighbor.entity._id,
       )
       toast.success(`Removed the parent ${displayLabel(neighbor.entity)}`)
-      setUnlinkTarget(null)
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to remove relation')

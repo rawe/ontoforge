@@ -7,6 +7,7 @@ import { useAnchors, useRuntimeSchema } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
+import { useRuntimeWrites } from '@/api/writes'
 import { EmptyState } from '@/components/EmptyState'
 import { TypeNotInLens } from '@/components/home/TypeNotInLens'
 import { PageHeader } from '@/components/PageHeader'
@@ -130,9 +131,15 @@ export function EntityDetailPage() {
     initial?: RelationInitial
   }>({ open: false })
 
+  const writes = useRuntimeWrites(ontologyKey ?? '', lensKey ?? '')
   const deleteMutation = useMutation({
-    mutationFn: () => runtime.deleteEntity(ontologyKey!, lensKey!, typeKey!, id!),
-    onSuccess: () => {
+    mutationFn: () => writes.deleteEntity(typeKey!, id!),
+    onSuccess: (outcome) => {
+      // Staged: the entity still exists live, so the page stays.
+      if (outcome.kind === 'staged') {
+        writes.toastStaged(outcome)
+        return
+      }
       void queryClient.invalidateQueries({
         queryKey: qk.entities(ontologyKey!, lensKey!, typeKey!),
       })

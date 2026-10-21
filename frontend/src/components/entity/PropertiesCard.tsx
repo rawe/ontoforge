@@ -4,13 +4,13 @@ import { useState, type KeyboardEvent } from 'react'
 import { toast } from 'sonner'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
-import * as runtime from '@/api/runtime'
 import type {
   EntityInstance,
   JsonPrimitive,
   SchemaEntityType,
   SchemaProperty,
 } from '@/api/types'
+import { useRuntimeWrites } from '@/api/writes'
 import { DocumentPropertyRow } from '@/components/entity/DocumentPropertyRow'
 import { PropertyInput } from '@/components/schema/PropertyField'
 import {
@@ -32,16 +32,23 @@ interface PropertyRowProps {
 
 function PropertyRow({ ontologyKey, lensKey, entity, property }: PropertyRowProps) {
   const queryClient = useQueryClient()
+  const writes = useRuntimeWrites(ontologyKey, lensKey)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const mutation = useMutation({
     mutationFn: (value: JsonPrimitive | null) =>
-      runtime.updateEntity(ontologyKey, lensKey, entity._entityTypeKey, entity._id, {
-        [property.key]: value,
-      }),
-    onSuccess: (updated) => {
+      writes.updateEntity(entity._entityTypeKey, entity._id, { [property.key]: value }),
+    onSuccess: (outcome) => {
+      setEditing(false)
+      setError(null)
+      // Staged: the field closes on the stored value.
+      if (outcome.kind === 'staged') {
+        writes.toastStaged(outcome)
+        return
+      }
+      const updated = outcome.value
       queryClient.setQueryData(
         qk.entity(ontologyKey, lensKey, entity._entityTypeKey, entity._id),
         updated,
@@ -49,8 +56,6 @@ function PropertyRow({ ontologyKey, lensKey, entity, property }: PropertyRowProp
       void queryClient.invalidateQueries({
         queryKey: qk.entities(ontologyKey, lensKey, entity._entityTypeKey),
       })
-      setEditing(false)
-      setError(null)
       toast.success(`${property.displayName} saved`)
     },
     onError: (err) => {

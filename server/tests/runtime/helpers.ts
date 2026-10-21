@@ -13,6 +13,7 @@ import type {
   SearchIndexRecord,
 } from "../../src/core/ports.js";
 import { deriveManagedIndices, type SearchIndexSchema } from "../../src/core/searchIndex.js";
+import { recordedDocument } from "../../src/runtime/changesets.js";
 import { createMockAnchorStore, type MockAnchorStore } from "../mockAnchorStore.js";
 import { createMockChangesetStore, type MockChangesetStore } from "../mockChangesetStore.js";
 import { createMockNavigatorStore, type MockNavigatorStore } from "../mockNavigatorStore.js";
@@ -231,6 +232,9 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     createEntityWithParent: vi.fn(),
     parentsOf: vi.fn(async () => []),
     childrenOf: vi.fn(async () => []),
+    getEntitiesByIdsHashed: vi.fn(async () => ({})),
+    getRelationsByIds: vi.fn(async () => ({})),
+    getEntityTypes: vi.fn(async () => ({})),
     lockTargets: vi.fn(async () => []),
   };
   return store;
@@ -238,6 +242,25 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
 
 export function asRuntimeStore(mock: MockRuntimeStore): RuntimeStore {
   return mock;
+}
+
+/** `props` with each string under a document key of `typeKey` as its
+ * fingerprint, as the fingerprinting reads return it. */
+export function fingerprinted(props: Row, typeKey: string, documentKeys: Record<string, string[]>): Row {
+  const row = { ...props };
+  for (const key of documentKeys[typeKey] ?? []) {
+    if (typeof row[key] === "string") row[key] = recordedDocument(row[key] as string);
+  }
+  return row;
+}
+
+/** `getEntitiesByIdsHashed` over the entities of `rows`, by id. */
+export function hashedById(rows: Record<string, Row>, ids: string[], documentKeys: Record<string, string[]>): Record<string, Row> {
+  return Object.fromEntries(
+    ids
+      .filter((id) => id in rows)
+      .map((id) => [id, fingerprinted(rows[id]!, rows[id]!._entityTypeKey as string, documentKeys)]),
+  );
 }
 
 /**

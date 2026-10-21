@@ -25,10 +25,13 @@ export function PageHeader({
   return (
     <header className={cn('border-b px-6 py-4', className)}>
       {breadcrumb}
-      <div className="flex items-center gap-3">
+      {/* Wraps on narrow screens: the actions move below the title, still right-aligned. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <h1 className="text-[15px] font-semibold tracking-tight">{title}</h1>
         {meta}
-        {actions !== undefined && <div className="ml-auto flex items-center gap-2">{actions}</div>}
+        {actions !== undefined && (
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{actions}</div>
+        )}
       </div>
       {description !== undefined && (
         <p className="mt-0.5 max-w-2xl text-[13px] text-muted-foreground">{description}</p>

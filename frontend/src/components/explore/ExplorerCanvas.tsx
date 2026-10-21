@@ -34,9 +34,11 @@ import type {
 } from '@/api/types'
 import type { Turn } from '@/components/assistants/chat/chatModel'
 import { EmptyState } from '@/components/EmptyState'
+import { EXPLORER_LIVE_ONLY_TEXT } from '@/components/changesets/changesets'
 import { TypeDot } from '@/components/TypeChip'
 import { PARENT_COLOR } from '@/components/studio/graph/RelationTypeEdge'
 import { Button } from '@/components/ui/button'
+import { pinnedChangeset } from '@/lib/pinnedChangeset'
 import { readRecents, type RecentEntity } from '@/lib/recents'
 import { citedCards, mapBounded, planAdd, relationsToFetch, type AddPlan } from './answerCanvas'
 import { AskDock, type Answer } from './AskDock'
@@ -497,6 +499,11 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
   const onConnect = useCallback(
     (connection: Connection) => {
       if (connection.source === null || connection.target === null) return
+      // The canvas writes live only (its edges come from the written relation).
+      if (pinnedChangeset(ontologyKey, lensKey) !== null) {
+        toast.info(EXPLORER_LIVE_ONLY_TEXT)
+        return
+      }
       const source = wsRef.current.nodes.find((n) => n.id === connection.source)
       const target = wsRef.current.nodes.find((n) => n.id === connection.target)
       if (source === undefined || target === undefined) return
@@ -513,7 +520,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
       }
       setConnectPair({ source: source.data.entity, target: target.data.entity })
     },
-    [typeNameOf],
+    [typeNameOf, ontologyKey, lensKey],
   )
 
   /** Panel expansion: add neighbor nodes near the source + their edges. */

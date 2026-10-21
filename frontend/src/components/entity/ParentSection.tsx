@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { useDisplayLabel } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
+import { useRuntimeWrites } from '@/api/writes'
 import type { EntityInstance, Neighbor, SchemaEntityType } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
 import type { RelationInitial } from '@/components/entity/AddRelationDialog'
@@ -25,6 +26,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { usePinnedChangeset } from '@/lib/pinnedChangeset'
 import { cn } from '@/lib/utils'
 
 /** Enough to show a second parent, should a race have written one. */
@@ -56,6 +58,7 @@ export function ParentSection({
   const displayLabel = useDisplayLabel()
   const queryClient = useQueryClient()
   const [unlinkTarget, setUnlinkTarget] = useState<Neighbor | null>(null)
+  const staging = usePinnedChangeset(ontologyKey, lensKey) !== null
   const typeKey = entity._entityTypeKey
 
   const results = useQueries({
@@ -71,15 +74,17 @@ export function ParentSection({
   const failed = results.find((r) => r.isError)?.error
   const rows = results.flatMap((r) => r.data?.neighbors ?? [])
 
+  const writes = useRuntimeWrites(ontologyKey, lensKey)
   const unlinkMutation = useMutation({
     mutationFn: (neighbor: Neighbor) =>
-      runtime.deleteRelation(
-        ontologyKey,
-        lensKey,
-        neighbor.relation._relationTypeKey,
-        neighbor.relation._id,
-      ),
-    onSuccess: (_res, neighbor) => {
+      writes.deleteRelation(neighbor.relation._relationTypeKey, neighbor.relation._id),
+    onSuccess: (outcome, neighbor) => {
+      setUnlinkTarget(null)
+      // Staged: the parent stays in the live neighbourhood.
+      if (outcome.kind === 'staged') {
+        writes.toastStaged(outcome)
+        return
+      }
       invalidateNeighborhood(queryClient, ontologyKey, lensKey, typeKey, entity._id)
       invalidateNeighborhood(
         queryClient,
@@ -89,7 +94,6 @@ export function ParentSection({
         neighbor.entity._id,
       )
       toast.success(`Removed the parent ${displayLabel(neighbor.entity)}`)
-      setUnlinkTarget(null)
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to remove relation')
@@ -189,9 +193,10 @@ export function ParentSection({
           <AlertDialogHeader>
             <AlertDialogTitle>Remove the parent?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes the {unlinkTarget?.relation._relationTypeKey} relation
-              {unlinkTarget !== null ? ` to “${displayLabel(unlinkTarget.entity)}”` : ''}. Both
-              entities are kept.
+              {staging ? 'The removal of the ' : 'This removes the '}
+              {unlinkTarget?.relation._relationTypeKey} relation
+              {unlinkTarget !== null ? ` to “${displayLabel(unlinkTarget.entity)}”` : ''}
+              {staging ? ' is staged into the pinned changeset' : ''}. Both entities are kept.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

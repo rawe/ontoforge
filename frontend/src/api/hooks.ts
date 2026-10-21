@@ -148,6 +148,25 @@ export function useChangeset(
 }
 
 /**
+ * One entity as the pinned changeset leaves it, with its own staged writes;
+ * nothing pinned, nothing read. Under the changeset's key, so every stage and
+ * unstage refreshes it.
+ */
+export function useStagedEntity(
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string | null,
+  typeKey: string,
+  id: string,
+) {
+  return useQuery({
+    queryKey: qk.changesets(ontologyKey, lensKey, changesetId ?? '', ['entity', typeKey, id]),
+    queryFn: () => runtime.getStagedEntity(ontologyKey, lensKey, changesetId!, typeKey, id),
+    enabled: changesetId !== null,
+  })
+}
+
+/**
  * Search-index inclusions of a lens (modeling API). Separate from
  * `useLensScope`: index inclusions never make a lens scoped. The key sits
  * below the scope key, so invalidating the scope refreshes it too.

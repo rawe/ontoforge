@@ -20,6 +20,8 @@
  *   ['changesets', ontologyKey, lensKey, id, params] one changeset's review read (a page of writes)
  *   ['changesets', ontologyKey, lensKey, id, ['document', typeKey, entityId, propertyKey]]
  *                                                    the staged text of one document property
+ *   ['changesets', ontologyKey, lensKey, id, ['entity', typeKey, entityId]]
+ *                                                    one entity as the changeset leaves it
  *   ['assistants', ontologyKey, lensKey, kind]       runtime assistant list of a kind
  *   ['model', ontologyKey, ...]                      modeling sub-keys
  *   ['model', ontologyKey, 'retrievers', lensKey]  retrievers of a lens

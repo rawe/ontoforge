@@ -12,6 +12,7 @@ import type {
   SchemaRelationType,
 } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
+import { EXPLORER_LIVE_ONLY_TEXT } from '@/components/changesets/changesets'
 import { invalidateNeighborhood } from '@/components/entity/useNeighborCounts'
 import { PropertyField } from '@/components/schema/PropertyField'
 import { coerceDrafts } from '@/components/schema/propertyDraft'
@@ -24,6 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { pinnedChangeset } from '@/lib/pinnedChangeset'
 import { connectOptions, type ConnectOption } from './workingSet'
 
 export interface ConnectPair {
@@ -85,6 +87,10 @@ function ConnectFlow({
       if (!result.ok) {
         setErrors(result.errors)
         return Promise.reject(new Error('__validation__'))
+      }
+      // Live only: a changeset pinned since the dialog opened (another tab) refuses.
+      if (pinnedChangeset(ontologyKey, lensKey) !== null) {
+        return Promise.reject(new Error(EXPLORER_LIVE_ONLY_TEXT))
       }
       return runtime.createRelation(ontologyKey, lensKey, vars.option.relationType.key, {
         fromEntityId: vars.option.from._id,

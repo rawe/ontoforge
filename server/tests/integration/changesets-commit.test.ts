@@ -407,7 +407,7 @@ describe("locks", () => {
     const second = await start();
     await staged(ALL, second, { operation: "update_entity", type: "person", id: e.Lea, properties: { name: "Lea C" } });
 
-    const release = await hold(store, (bound) => bound.lockTargets([e.Ana]));
+    const release = await hold(store, (bound) => bound.lockTargets([e.Ana], {}));
     let running: Promise<{ status: number; body: Row }> | undefined;
     try {
       running = commit(cs);
@@ -438,7 +438,7 @@ describe("locks", () => {
     })).id as string;
     await staged(ALL, cs, { operation: "update_entity", type: "person", id: e.Ben, properties: { name: "Ben B" } });
     const v = await version(cs);
-    const release = await hold(store, (bound) => bound.lockTargets([e.Ben]));
+    const release = await hold(store, (bound) => bound.lockTargets([e.Ben], {}));
     try {
       const began = Date.now();
       const res = await commit(cs);
@@ -465,7 +465,7 @@ describe("locks", () => {
       id: sideThing,
       properties: { name: "held" },
     });
-    const release = await hold(await getRuntimeStore(SIDE), (bound) => bound.lockTargets([sideThing]));
+    const release = await hold(await getRuntimeStore(SIDE), (bound) => bound.lockTargets([sideThing], {}));
     let running: Promise<{ status: number; body: Row }> | undefined;
     try {
       running = commit(sideCs, undefined, side);

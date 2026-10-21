@@ -39,6 +39,9 @@ import type {
   SearchCatalogEntry,
   SearchResponse,
   SearchStrategy,
+  StagedAnswer,
+  StagedEntity,
+  StageWritePayload,
 } from './types'
 
 const base = (ontologyKey: string, lensKey: string) =>
@@ -342,6 +345,13 @@ export const readAssistantThread = (
 const changesetsBase = (ontologyKey: string, lensKey: string) =>
   `${base(ontologyKey, lensKey)}/changesets`
 
+/** A new draft changeset on the plain lens, so never held to an anchor. */
+export const startChangeset = (ontologyKey: string, lensKey: string, note?: string) =>
+  request<Changeset>(changesetsBase(ontologyKey, lensKey), {
+    method: 'POST',
+    body: note === undefined ? {} : { note },
+  })
+
 /** The lens's changesets, submitted first. */
 export const listChangesets = (ontologyKey: string, lensKey: string) =>
   request<ChangesetListItem[]>(changesetsBase(ontologyKey, lensKey))
@@ -372,6 +382,21 @@ export const commitChangeset = (
     body: { expectedVersion },
   })
 
+/**
+ * Freezes a draft for review; a fault answers 422 with `details.violations`.
+ * A note replaces the stored one; without it the stored one stays.
+ */
+export const submitChangeset = (
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string,
+  note?: string,
+) =>
+  request<Changeset>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}/submit`, {
+    method: 'POST',
+    body: note === undefined ? {} : { note },
+  })
+
 /** Back to draft; the note is required and replaces the stored one. */
 export const unsubmitChangeset = (
   ontologyKey: string,
@@ -399,6 +424,19 @@ export const getStagedDocument = (
     `${changesetsBase(ontologyKey, lensKey)}/${changesetId}/documents/${entityTypeKey}/${id}/${propertyKey}${buildQuery(params)}`,
   )
 
+/** One entity as a commit would leave it, with its own staged writes; 404
+ * when the changeset is gone or the entity is neither stored nor created by it. */
+export const getStagedEntity = (
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string,
+  entityTypeKey: string,
+  id: string,
+) =>
+  request<StagedEntity>(
+    `${changesetsBase(ontologyKey, lensKey)}/${changesetId}/entities/${entityTypeKey}/${id}`,
+  )
+
 /** Draft only; a submitted changeset answers 409. */
 export const discardChangeset = (ontologyKey: string, lensKey: string, changesetId: string) =>
   request<undefined>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}`, {
@@ -414,4 +452,16 @@ export const unstageWrite = (
 ) =>
   request<undefined>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}/writes/${seq}`, {
     method: 'DELETE',
+  })
+
+/** Appends one write to a draft; a busy changeset (another call staging) answers 409. */
+export const stageWrite = (
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string,
+  payload: StageWritePayload,
+) =>
+  request<StagedAnswer>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}/writes`, {
+    method: 'POST',
+    body: payload,
   })

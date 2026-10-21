@@ -297,6 +297,20 @@ export interface ChangesetDetail extends Changeset {
   writes: StagedWriteView[]
 }
 
+/**
+ * One entity as a commit of a changeset would leave it: the stored entity,
+ * or the one the changeset creates, with its staged creates and updates
+ * folded in by seq (no defaults yet, documents as stubs), and beside it its
+ * own staged writes as the review read shows them.
+ */
+export interface StagedEntity {
+  /** A staged create has no `_createdAt` / `_updatedAt`. */
+  entity: { _id: string; _entityTypeKey: string; [property: string]: JsonValue }
+  /** Its last staged write deletes it. */
+  deleted: boolean
+  writes: StagedWriteView[]
+}
+
 /** One reason a commit was rejected; seq 0 concerns the whole changeset. */
 export interface ChangesetViolation {
   seq: number
@@ -315,6 +329,36 @@ export interface ParentRelationInput {
   type: string
   parentId: string
   properties?: Record<string, JsonValue>
+}
+
+/**
+ * One write staged into a changeset, as the immediate write would make it;
+ * values go under `properties`, unlike the immediate routes' flat bodies.
+ */
+export type StageWritePayload =
+  | {
+      operation: 'create_entity'
+      type: string
+      properties: Record<string, JsonValue>
+      parentRelation?: ParentRelationInput
+    }
+  | { operation: 'update_entity'; type: string; id: string; properties: Record<string, JsonValue | null> }
+  | { operation: 'delete_entity'; type: string; id: string }
+  | {
+      operation: 'create_relation'
+      type: string
+      fromEntityId: string
+      toEntityId: string
+      properties: Record<string, JsonValue>
+    }
+  | { operation: 'delete_relation'; type: string; id: string }
+
+/** A staged write's answer: its seq and the minted (create) or target id;
+ * a create with a parent relation also names the relation's row. */
+export interface StagedAnswer {
+  seq: number
+  id: string
+  relation?: { seq: number; id: string }
 }
 
 /* ------------------------------ runtime — search ----------------------------- */

@@ -4,6 +4,7 @@ import { Link, Outlet, useParams } from 'react-router-dom'
 import { useLenses, useOntologies, useRuntimeSchema } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { EmptyState } from '@/components/EmptyState'
+import { ChangesetBar } from '@/components/changesets/ChangesetBar'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { STUDIO_ICON } from '@/components/layout/surfaceTargets'
 import { useDocumentTitle } from '@/components/layout/useDocumentTitle'
@@ -12,7 +13,10 @@ import { QuickAddDialog } from '@/components/quickadd/QuickAddDialog'
 import { Button } from '@/components/ui/button'
 import { remove, storageKeys, writeString } from '@/lib/storage'
 
-/** Shell for all `/o/:ontologyKey/w/:lensKey/...` routes: sidebar + scrolling content. */
+/**
+ * Shell for all `/o/:ontologyKey/w/:lensKey/...` routes: sidebar + scrolling
+ * content, under the pinned changeset's bar while one is pinned.
+ */
 export function WorkbenchLayout() {
   const { ontologyKey, lensKey } = useParams<{ ontologyKey: string; lensKey: string }>()
   const schema = useRuntimeSchema(ontologyKey, lensKey)
@@ -96,8 +100,11 @@ export function WorkbenchLayout() {
         lensKey={lensKey}
         onSearch={() => setPaletteOpen(true)}
       />
-      <main className="min-w-0 flex-1 overflow-y-auto">
-        <Outlet />
+      <main className="flex min-w-0 flex-1 flex-col">
+        <ChangesetBar ontologyKey={ontologyKey} lensKey={lensKey} />
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <Outlet />
+        </div>
       </main>
       <SearchPalette
         ontologyKey={ontologyKey}

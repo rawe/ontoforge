@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { useDisplayLabel } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
+import { useRuntimeWrites } from '@/api/writes'
 import type {
   EntityInstance,
   Neighbor,
@@ -30,6 +31,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { usePinnedChangeset } from '@/lib/pinnedChangeset'
 import { cn } from '@/lib/utils'
 
 const PAGE_SIZE = 10
@@ -75,6 +77,7 @@ export function RelationSection({
   const queryClient = useQueryClient()
   const [limit, setLimit] = useState(PAGE_SIZE)
   const [unlinkTarget, setUnlinkTarget] = useState<Neighbor | null>(null)
+  const staging = usePinnedChangeset(ontologyKey, lensKey) !== null
 
   const myTypeKey = entity._entityTypeKey
   const isOutgoing = relationType.fromEntityTypeKey === myTypeKey
@@ -94,10 +97,16 @@ export function RelationSection({
     queryFn: () => runtime.getNeighbors(ontologyKey, lensKey, myTypeKey, entity._id, params),
   })
 
+  const writes = useRuntimeWrites(ontologyKey, lensKey)
   const unlinkMutation = useMutation({
-    mutationFn: (neighbor: Neighbor) =>
-      runtime.deleteRelation(ontologyKey, lensKey, relationType.key, neighbor.relation._id),
-    onSuccess: (_res, neighbor) => {
+    mutationFn: (neighbor: Neighbor) => writes.deleteRelation(relationType.key, neighbor.relation._id),
+    onSuccess: (outcome, neighbor) => {
+      setUnlinkTarget(null)
+      // Staged: the relation stays in the live neighbourhood.
+      if (outcome.kind === 'staged') {
+        writes.toastStaged(outcome)
+        return
+      }
       invalidateNeighborhood(queryClient, ontologyKey, lensKey, myTypeKey, entity._id)
       invalidateNeighborhood(
         queryClient,
@@ -107,7 +116,6 @@ export function RelationSection({
         neighbor.entity._id,
       )
       toast.success(`Removed ${relationType.displayName} to ${displayLabel(neighbor.entity)}`)
-      setUnlinkTarget(null)
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to remove relation')
@@ -275,11 +283,12 @@ export function RelationSection({
           <AlertDialogHeader>
             <AlertDialogTitle>Remove relation?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes the {relationType.displayName} relation
+              {staging ? 'The removal of the ' : 'This removes the '}
+              {relationType.displayName} relation
               {unlinkTarget !== null
                 ? ` to “${displayLabel(unlinkTarget.entity)}”`
                 : ''}
-              . Both entities are kept.
+              {staging ? ' is staged into the pinned changeset' : ''}. Both entities are kept.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -3,15 +3,17 @@ import { AlertTriangle, Anchor, Link2, Loader2, Plus, SearchX, Trash2, Waypoints
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { useAnchors, useRuntimeSchema } from '@/api/hooks'
+import { useAnchors, useRuntimeSchema, useStagedEntity } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
+import { useRuntimeWrites } from '@/api/writes'
 import { EmptyState } from '@/components/EmptyState'
 import { TypeNotInLens } from '@/components/home/TypeNotInLens'
 import { PageHeader } from '@/components/PageHeader'
 import { TypeChip } from '@/components/TypeChip'
 import { anchoredHereText, anchorsAt, danglingWarningText } from '@/components/anchors/anchors'
+import { StagedHereStrip } from '@/components/changesets/StagedHereStrip'
 import {
   AddRelationDialog,
   type RelationInitial,
@@ -22,6 +24,7 @@ import { MiniMap } from '@/components/entity/MiniMap'
 import { ParentSection } from '@/components/entity/ParentSection'
 import { PropertiesCard } from '@/components/entity/PropertiesCard'
 import { RelationSection } from '@/components/entity/RelationSection'
+import { deletedInChangeset, stagedFields } from '@/components/entity/stagedFields'
 import {
   invalidateNeighborhood,
   neighborCountsKey,
@@ -44,6 +47,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { displayLabel } from '@/lib/displayLabel'
+import { usePinnedChangeset } from '@/lib/pinnedChangeset'
 import { recordRecent } from '@/lib/recents'
 
 const formatTimestamp = (iso: string) => {
@@ -108,6 +112,15 @@ export function EntityDetailPage() {
     [anchors.data, typeKey, id],
   )
 
+  // While a changeset is pinned: this entity as it leaves it (none on a 404: not stored, or gone).
+  const pinned = usePinnedChangeset(ontologyKey ?? '', lensKey ?? '')
+  const stagedQuery = useStagedEntity(ontologyKey ?? '', lensKey ?? '', pinned, typeKey ?? '', id ?? '')
+  const staged = pinned === null || stagedQuery.data?.writes.length === 0 ? undefined : stagedQuery.data
+  const overlay = useMemo(
+    () => (staged === undefined ? undefined : { changesetId: pinned!, fields: stagedFields(staged) }),
+    [staged, pinned],
+  )
+
   const pathQuery = useQuery({
     queryKey: qk.path(ontologyKey ?? '', lensKey ?? '', typeKey ?? '', id ?? ''),
     queryFn: () => runtime.getPath(ontologyKey!, lensKey!, typeKey!, id!),
@@ -130,9 +143,15 @@ export function EntityDetailPage() {
     initial?: RelationInitial
   }>({ open: false })
 
+  const writes = useRuntimeWrites(ontologyKey ?? '', lensKey ?? '')
   const deleteMutation = useMutation({
-    mutationFn: () => runtime.deleteEntity(ontologyKey!, lensKey!, typeKey!, id!),
-    onSuccess: () => {
+    mutationFn: () => writes.deleteEntity(typeKey!, id!),
+    onSuccess: (outcome) => {
+      // Staged: the entity still exists live, so the page stays.
+      if (outcome.kind === 'staged') {
+        writes.toastStaged(outcome)
+        return
+      }
       void queryClient.invalidateQueries({
         queryKey: qk.entities(ontologyKey!, lensKey!, typeKey!),
       })
@@ -249,6 +268,12 @@ export function EntityDetailPage() {
                 {anchoredHereText(anchoredHere)}
               </Link>
             )}
+            {staged !== undefined && deletedInChangeset(staged) && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-(--tc-amber-border) bg-(--tc-amber-bg) px-2 py-0.5 text-[11px] font-medium text-(--tc-amber)">
+                <Trash2 className="size-3" />
+                Deleted in this changeset
+              </span>
+            )}
           </>
         }
         description={
@@ -304,8 +329,9 @@ export function EntityDetailPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete “{label}”?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    The entity and all of its relations are removed permanently. This
-                    cannot be undone.
+                    {pinned === null
+                      ? 'The entity and all of its relations are removed permanently. This cannot be undone.'
+                      : 'The delete is staged into the pinned changeset: nothing is removed until it is committed.'}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 {anchoredHere.length > 0 && (
@@ -329,8 +355,18 @@ export function EntityDetailPage() {
         }
       />
 
+      {staged !== undefined && (
+        <StagedHereStrip ontologyKey={ontologyKey} lensKey={lensKey} changesetId={pinned!} writes={staged.writes} />
+      )}
+
       <div className="grid items-start gap-6 p-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        <PropertiesCard ontologyKey={ontologyKey} lensKey={lensKey} entityType={entityType} entity={entity} />
+        <PropertiesCard
+          ontologyKey={ontologyKey}
+          lensKey={lensKey}
+          entityType={entityType}
+          entity={entity}
+          staged={overlay}
+        />
 
         <div className="flex flex-col gap-4">
           {relationTypes.length === 0 ? (

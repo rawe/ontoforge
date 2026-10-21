@@ -6,9 +6,11 @@ import { toast } from 'sonner'
 import { useDisplayLabel, useRuntimeSchema } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
-import { createEntity, getPath } from '@/api/runtime'
+import { getPath } from '@/api/runtime'
 import type { JsonValue, SchemaProperty } from '@/api/types'
+import { useRuntimeWrites } from '@/api/writes'
 import { TypeChip } from '@/components/TypeChip'
+import { STAGED_ONLY_TEXT } from '@/components/changesets/changesets'
 import { formatPath, splitParentErrors } from '@/components/entity/hierarchy'
 import { invalidateNeighborhood } from '@/components/entity/useNeighborCounts'
 import { EntityForm } from '@/components/quickadd/EntityForm'
@@ -45,6 +47,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import { pinnedChangeset } from '@/lib/pinnedChangeset'
 
 const NO_PROPERTIES: readonly SchemaProperty[] = []
 
@@ -64,13 +67,16 @@ function isEditableTarget(e: KeyboardEvent): boolean {
  * or palette action. Step 1 picks an entity type (skipped when pre-scoped),
  * step 2 is the schema-driven EntityForm. With a fixed parent ("+ Task under
  * P1") it shows an "Under" row and the parent relation's own properties, and
- * sends one create with `parentRelation`.
+ * sends one create with `parentRelation`. A parent only a changeset creates
+ * (an add-child button on its review row) takes a child only while that changeset is
+ * pinned: the child is staged there.
  */
 export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
   const displayLabel = useDisplayLabel()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const schema = useRuntimeSchema(ontologyKey, lensKey)
+  const writes = useRuntimeWrites(ontologyKey, lensKey)
 
   const [open, setOpen] = useState(false)
   const [typeKey, setTypeKey] = useState<string | undefined>(undefined)
@@ -94,30 +100,38 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
       values: Record<string, JsonValue>
       under: QuickAddParent | undefined
       relationValues: Record<string, JsonValue>
-    }) =>
-      createEntity(
-        ontologyKey,
-        lensKey,
+    }) => {
+      if (under?.changesetId !== undefined && pinnedChangeset(ontologyKey, lensKey) !== under.changesetId) {
+        throw new Error(STAGED_ONLY_TEXT)
+      }
+      return writes.createEntity(
         forType,
         values,
         under === undefined
           ? undefined
           : { type: under.relationTypeKey, parentId: under.id, properties: relationValues },
-      ),
-    onSuccess: (entity, { forType, under }) => {
-      // Entity lists AND the per-type count queries share this key prefix.
-      void queryClient.invalidateQueries({
-        queryKey: qk.entities(ontologyKey, lensKey, forType),
-      })
-      if (under !== undefined) {
-        invalidateNeighborhood(queryClient, ontologyKey, lensKey, under.typeKey, under.id)
+      )
+    },
+    onSuccess: (outcome, { forType, under }) => {
+      if (outcome.kind === 'staged') {
+        // Staged: nothing live to show or view.
+        writes.toastStaged(outcome)
+      } else {
+        const entity = outcome.value
+        // Entity lists AND the per-type count queries share this key prefix.
+        void queryClient.invalidateQueries({
+          queryKey: qk.entities(ontologyKey, lensKey, forType),
+        })
+        if (under !== undefined) {
+          invalidateNeighborhood(queryClient, ontologyKey, lensKey, under.typeKey, under.id)
+        }
+        toast.success(`Created ${displayLabel(entity)}`, {
+          action: {
+            label: 'View',
+            onClick: () => navigate(`/o/${ontologyKey}/w/${lensKey}/e/${forType}/${entity._id}`),
+          },
+        })
       }
-      toast.success(`Created ${displayLabel(entity)}`, {
-        action: {
-          label: 'View',
-          onClick: () => navigate(`/o/${ontologyKey}/w/${lensKey}/e/${forType}/${entity._id}`),
-        },
-      })
       setDirty(false)
       if (createAnother) {
         setFormEpoch((n) => n + 1)
@@ -180,7 +194,8 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
   const parentPath = useQuery({
     queryKey: qk.path(ontologyKey, lensKey, parent?.typeKey ?? '', parent?.id ?? ''),
     queryFn: () => getPath(ontologyKey, lensKey, parent!.typeKey, parent!.id),
-    enabled: open && parent !== undefined,
+    // A parent only a changeset creates has no stored path.
+    enabled: open && parent !== undefined && parent.changesetId === undefined,
   })
 
   const fieldErrors = create.error instanceof ApiError ? create.error.fieldErrors : undefined
@@ -280,6 +295,7 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[11px] text-(--tc-violet)">
                       Under
+                      {parent.changesetId !== undefined && ' · new in the changeset'}
                       {parentPath.data !== undefined && ` · ${formatPath(parentPath.data)}`}
                     </p>
                     <p className="flex items-baseline gap-2">

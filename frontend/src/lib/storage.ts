@@ -18,6 +18,9 @@
  *                               server)
  *   of.recents.{ontologyKey}.{lensKey} — last 10 opened entities (`lib/recents.ts`)
  *   of.queryHistory.{ontologyKey}.{lensKey} — last 10 run OQL queries
+ *   of.changeset.{ontologyKey}.{lensKey} — id of the pinned changeset: the
+ *                               Workbench's writes stage into it instead of
+ *                               writing at once (`lib/pinnedChangeset.ts`)
  *   of.chatToolCalls          — "true" | "false": Workbench agent chat shows its
  *                               entities and tool calls in a side panel (default true)
  *   of.retrieverDiagnostics   — "true" | "false": Workbench retriever chat
@@ -51,6 +54,8 @@ export const storageKeys = {
     `of.recents.${ontologyKey}.${lensKey}`,
   queryHistory: (ontologyKey: string, lensKey: string) =>
     `of.queryHistory.${ontologyKey}.${lensKey}`,
+  changeset: (ontologyKey: string, lensKey: string) =>
+    `of.changeset.${ontologyKey}.${lensKey}`,
   chatToolCalls: 'of.chatToolCalls',
   retrieverDiagnostics: 'of.retrieverDiagnostics',
   retrieverTestMode: 'of.retrieverTestMode',

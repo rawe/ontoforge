@@ -6,6 +6,7 @@ import {
   hierarchyLinks,
   labelParentError,
   linkedTypeKey,
+  sharesLinkedType,
   splitParentErrors,
   stepLabel,
 } from '../src/components/entity/hierarchy.ts'
@@ -56,6 +57,14 @@ test('a milestone reaches its parent outgoing over an up-pointing relation; a ro
   assert.deepEqual(hierarchyLinks(schema, 'milestone').children, [])
   assert.deepEqual(hierarchyLinks(schema, 'customer').parents, [])
   assert.deepEqual(hierarchyLinks(schema, 'person'), { parents: [], children: [] })
+})
+
+test('sharesLinkedType tells when two links reach the same type', () => {
+  const twoToTask = [...schema, relation('has_backlog_task', 'project', 'task', 'source')]
+  const { children } = hierarchyLinks(twoToTask, 'project')
+  assert.deepEqual(children.map((link) => sharesLinkedType(link, children)), [true, false, true])
+  const alone = hierarchyLinks(schema, 'project').children
+  assert.deepEqual(alone.map((link) => sharesLinkedType(link, alone)), [false, false])
 })
 
 test('formatPath joins the step names root first; a missing name falls back to the short id', () => {

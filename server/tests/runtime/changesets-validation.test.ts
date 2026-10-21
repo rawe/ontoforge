@@ -16,6 +16,8 @@ import {
   NOW,
   asRuntimeStore,
   createMockRuntimeStore,
+  fingerprinted,
+  hashedById,
   makeEntity,
   makeRelation,
   makeScopedSchema,
@@ -124,16 +126,19 @@ beforeEach(() => {
     [D1]: makeEntity({ name: "Ops" }, "department", D1),
   };
   parents = { [D1]: [link("belongs_to", R1, ACME, D1)] };
-  store.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
-    Object.fromEntries(ids.filter((id) => id in stored).map((id) => [id, stored[id]])),
+  store.getEntitiesByIdsHashed.mockImplementation(async (ids: string[], documentKeys: Record<string, string[]>) =>
+    hashedById(stored, ids, documentKeys),
+  );
+  store.getEntityTypes.mockImplementation(async (ids: string[]) =>
+    Object.fromEntries(ids.filter((id) => id in stored).map((id) => [id, stored[id]!._entityTypeKey])),
   );
   store.parentsOf.mockImplementation(async (ids: string[]) => ids.flatMap((id) => parents[id] ?? []));
-  store.lockTargets.mockImplementation(async (ids: string[]) =>
+  store.lockTargets.mockImplementation(async (ids: string[], documentKeys: Record<string, string[]>) =>
     ids
       .filter((id) => id in stored)
       .map((id) => {
         const { _id, _entityTypeKey, _createdAt, _updatedAt, ...props } = stored[id]!;
-        return { id, kind: "entity", typeKey: _entityTypeKey, props };
+        return { id, kind: "entity", typeKey: _entityTypeKey, props: fingerprinted(props, _entityTypeKey as string, documentKeys) };
       }),
   );
   store.createEntity.mockResolvedValue(makeEntity());
@@ -225,9 +230,12 @@ describe("the lock-free pass (step 0b)", () => {
   it("missing: a relation update target stored at staging is gone; stored, it passes", async () => {
     const update = row(1, { operation: "update_relation", typeKey: "works_for", targetId: R1, arguments: { properties: { role: "lead" } }, before: { role: "dev" } });
     expect((await pass([update])).faults).toEqual([{ seq: 1, kind: "missing", message: "Deleted since this write was staged" }]);
-    store.getRelation.mockResolvedValue(makeRelation({ role: "dev" }, { relationId: R1 }));
+    store.getRelationsByIds.mockResolvedValue({ [R1]: makeRelation({ role: "dev" }, { relationId: R1 }) });
     expect((await pass([update])).faults).toEqual([]);
-    expect(store.getRelation).toHaveBeenCalledWith("works_for", R1);
+    expect(store.getRelationsByIds).toHaveBeenCalledWith([R1]);
+    // Of another type, it is not the target.
+    store.getRelationsByIds.mockResolvedValue({ [R1]: makeRelation({ role: "dev" }, { relationId: R1, relationTypeKey: "reports_to" }) });
+    expect((await pass([update])).faults.map((f) => f.kind)).toEqual(["missing"]);
   });
 
   it("dangling: what a create since unstaged minted (V6), or an end neither stored nor minted, named by its role", async () => {
@@ -350,6 +358,28 @@ describe("step 1: under the lock", () => {
     expect(store.updateEntity).not.toHaveBeenCalled();
   });
 
+  it("a document is re-read under the lock as its hash and length, and compared by its hash", async () => {
+    const full = schema();
+    full.entityTypes.find((et: Row) => et.key === "person").properties.push({
+      key: "bio",
+      displayName: "Bio",
+      dataType: "document",
+      required: false,
+      defaultValue: null,
+    });
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(full);
+    stored[PAT]!.bio = "old text";
+    journal([row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { bio: "new" } }, before: { bio: recordedDocument("old text") } })]);
+    // Changed after the pass, as the lock reads it.
+    store.lockTargets.mockResolvedValueOnce([
+      { id: PAT, kind: "entity", typeKey: "person", props: { name: "Pat", bio: recordedDocument("other text") } },
+    ]);
+    expect(await violations(commit())).toEqual([{ seq: 1, kind: "drift", message: "Changed since this write was staged" }]);
+    expect(store.lockTargets.mock.calls[0]![1]).toEqual({ person: ["bio"] });
+    // Unchanged, it commits.
+    expect(await commit()).toEqual({ committed: 1, alreadyGone: [] });
+  });
+
   it("a journal changed between the pass and the lock is a 409", async () => {
     journal([rename(1, PAT, "Pat W", { name: "Pat" })]);
     store.changesetStore.lockForCommit.mockResolvedValue(changeset({ version: 8 }));
@@ -379,10 +409,13 @@ describe("step 3: the end state", () => {
     store.childrenOf.mockResolvedValueOnce([link("belongs_to", R1, ACME, D1)]).mockResolvedValue([]);
     journal([deleteOf(1, "company", ACME), deleteOf(2, "department", D1)]);
     stored = { [ACME]: stored[ACME]!, [D1]: stored[D1]! };
-    store.getEntitiesByIds
-      .mockImplementationOnce(async () => ({ [ACME]: stored[ACME], [D1]: stored[D1] }))
-      .mockResolvedValue({});
+    // Both deleted by the replay: the end state's type read finds neither.
+    store.getEntityTypes.mockResolvedValue({});
+    store.getEntitiesByIdsHashed.mockClear();
     expect(await commit()).toMatchObject({ committed: 2 });
+    // The end state is read by type alone; only the pass reads properties.
+    expect(store.getEntityTypes).toHaveBeenCalled();
+    expect(store.getEntitiesByIdsHashed).toHaveBeenCalledTimes(1);
   });
 
   it("two_parents: a child given a second parent; control: the old link deleted first", async () => {

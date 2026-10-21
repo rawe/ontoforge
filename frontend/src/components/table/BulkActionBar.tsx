@@ -22,12 +22,15 @@ export function BulkActionBar({
   count,
   typeName,
   deleting,
+  staging,
   onDelete,
   onClear,
 }: {
   count: number
   typeName: string
   deleting: boolean
+  /** A changeset is pinned: the deletes are staged into it. */
+  staging: boolean
   onDelete: () => void
   onClear: () => void
 }) {
@@ -58,9 +61,18 @@ export function BulkActionBar({
                 {count === 1 ? '' : 's'}?
               </AlertDialogTitle>
               <AlertDialogDescription>
-                This permanently removes the selected {count === 1 ? 'entity' : 'entities'}{' '}
-                and all relations attached to {count === 1 ? 'it' : 'them'}. This cannot be
-                undone.
+                {staging ? (
+                  <>
+                    The {count === 1 ? 'delete is' : 'deletes are'} staged into the pinned changeset:
+                    nothing is removed until it is committed.
+                  </>
+                ) : (
+                  <>
+                    This permanently removes the selected {count === 1 ? 'entity' : 'entities'}{' '}
+                    and all relations attached to {count === 1 ? 'it' : 'them'}. This cannot be
+                    undone.
+                  </>
+                )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

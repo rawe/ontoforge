@@ -4,14 +4,16 @@ import { useState, type KeyboardEvent } from 'react'
 import { toast } from 'sonner'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
-import * as runtime from '@/api/runtime'
 import type {
   EntityInstance,
   JsonPrimitive,
   SchemaEntityType,
   SchemaProperty,
 } from '@/api/types'
+import { useRuntimeWrites } from '@/api/writes'
+import { MarkerChip } from '@/components/changesets/MarkerChip'
 import { DocumentPropertyRow } from '@/components/entity/DocumentPropertyRow'
+import type { StagedField } from '@/components/entity/stagedFields'
 import { PropertyInput } from '@/components/schema/PropertyField'
 import {
   coerceDraft,
@@ -19,6 +21,7 @@ import {
   valueToDraft,
 } from '@/components/schema/propertyDraft'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { displayLabel } from '@/lib/displayLabel'
 import { cn } from '@/lib/utils'
 
 /* ------------------------------- property row ------------------------------- */
@@ -28,20 +31,31 @@ interface PropertyRowProps {
   lensKey: string
   entity: EntityInstance
   property: SchemaProperty
+  /** Set while the pinned changeset sets this property. */
+  staged?: StagedField
 }
 
-function PropertyRow({ ontologyKey, lensKey, entity, property }: PropertyRowProps) {
+function PropertyRow({ ontologyKey, lensKey, entity, property, staged }: PropertyRowProps) {
   const queryClient = useQueryClient()
+  const writes = useRuntimeWrites(ontologyKey, lensKey)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // Edits start from, and compare with, the value shown: the staged one, else the stored one.
+  const shown = staged === undefined ? entity[property.key] : staged.value
 
   const mutation = useMutation({
     mutationFn: (value: JsonPrimitive | null) =>
-      runtime.updateEntity(ontologyKey, lensKey, entity._entityTypeKey, entity._id, {
-        [property.key]: value,
-      }),
-    onSuccess: (updated) => {
+      writes.updateEntity(entity._entityTypeKey, entity._id, { [property.key]: value }),
+    onSuccess: (outcome) => {
+      setEditing(false)
+      setError(null)
+      // Staged: the field closes on the stored value.
+      if (outcome.kind === 'staged') {
+        writes.toastStaged(outcome)
+        return
+      }
+      const updated = outcome.value
       queryClient.setQueryData(
         qk.entity(ontologyKey, lensKey, entity._entityTypeKey, entity._id),
         updated,
@@ -49,8 +63,6 @@ function PropertyRow({ ontologyKey, lensKey, entity, property }: PropertyRowProp
       void queryClient.invalidateQueries({
         queryKey: qk.entities(ontologyKey, lensKey, entity._entityTypeKey),
       })
-      setEditing(false)
-      setError(null)
       toast.success(`${property.displayName} saved`)
     },
     onError: (err) => {
@@ -64,7 +76,7 @@ function PropertyRow({ ontologyKey, lensKey, entity, property }: PropertyRowProp
 
   const startEdit = () => {
     if (mutation.isPending) return
-    setDraft(valueToDraft(property.dataType, entity[property.key]))
+    setDraft(valueToDraft(property.dataType, shown))
     setError(null)
     setEditing(true)
   }
@@ -86,7 +98,7 @@ function PropertyRow({ ontologyKey, lensKey, entity, property }: PropertyRowProp
       return
     }
     // No-op saves just close the editor.
-    if (result.value === (entity[property.key] ?? null)) {
+    if (result.value === (shown ?? null)) {
       cancel()
       return
     }
@@ -169,7 +181,21 @@ function PropertyRow({ ontologyKey, lensKey, entity, property }: PropertyRowProp
           )}
           aria-label={`Edit ${property.displayName}`}
         >
-          {rendered ?? '—'}
+          {staged === undefined ? (
+            (rendered ?? '—')
+          ) : (
+            // The staged value in the changeset's amber, the stored one struck through.
+            <>
+              <s className="text-muted-foreground">{rendered ?? '—'}</s>{' '}
+              <span className="text-(--tc-amber)">{formatValue(property.dataType, staged.value) ?? '—'}</span>
+              {staged.drift !== null && (
+                <>
+                  {' '}
+                  <MarkerChip marker={staged.drift} />
+                </>
+              )}
+            </>
+          )}
         </button>
       )}
     </div>
@@ -183,6 +209,8 @@ interface PropertiesCardProps {
   lensKey: string
   entityType: SchemaEntityType
   entity: EntityInstance
+  /** While a changeset is pinned: the properties its writes set, and its id. */
+  staged?: { changesetId: string; fields: Record<string, StagedField> }
 }
 
 /**
@@ -191,8 +219,9 @@ interface PropertiesCardProps {
  * Empty optional properties show as a dimmed "—" and are editable too.
  * Document properties render last as collapsed rows (stub badge; expanding
  * fetches and renders the Markdown, editing opens a Write/Preview dialog).
+ * A property the pinned changeset sets shows its staged value beside the stored one.
  */
-export function PropertiesCard({ ontologyKey, lensKey, entityType, entity }: PropertiesCardProps) {
+export function PropertiesCard({ ontologyKey, lensKey, entityType, entity, staged }: PropertiesCardProps) {
   const scalarProperties = entityType.properties.filter((p) => p.dataType !== 'document')
   const documentProperties = entityType.properties.filter(
     (p) => p.dataType === 'document',
@@ -215,6 +244,7 @@ export function PropertiesCard({ ontologyKey, lensKey, entityType, entity }: Pro
               lensKey={lensKey}
               entity={entity}
               property={property}
+              staged={staged?.fields[property.key]}
             />
           ))}
           {documentProperties.map((property) => (
@@ -224,6 +254,9 @@ export function PropertiesCard({ ontologyKey, lensKey, entityType, entity }: Pro
               lensKey={lensKey}
               entity={entity}
               property={property}
+              staged={staged?.fields[property.key]}
+              changesetId={staged?.changesetId}
+              entityLabel={displayLabel(entity, entityType.nameProperty)}
             />
           ))}
         </div>

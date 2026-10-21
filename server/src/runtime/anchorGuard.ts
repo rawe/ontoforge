@@ -89,13 +89,21 @@ export function anchorRefusal(rulesetKey: string, record: RulesetRecord, loaded:
 }
 
 /** The same refusal for a changeset's staging, submit and commit: what is
- * wrong, with the ruleset key and the lens key, and no fix. */
-export function changesetAnchorRefusal(rulesetKey: string, record: RulesetRecord, loaded: LoadedSchema): string | null {
+ * wrong, with the ruleset key and the lens key, and no fix; its kind is
+ * the commit's violation kind. */
+export function changesetAnchorRefusal(
+  rulesetKey: string,
+  record: RulesetRecord,
+  loaded: LoadedSchema,
+): { kind: "anchor_deleted" | "anchor_hidden"; message: string } | null {
   switch (anchorFault(record, loaded)) {
     case "deleted":
-      return `Anchor '${rulesetKey}' is dangling`;
+      return { kind: "anchor_deleted", message: `Anchor '${rulesetKey}' is dangling` };
     case "hidden":
-      return `Anchor '${rulesetKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show`;
+      return {
+        kind: "anchor_hidden",
+        message: `Anchor '${rulesetKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show`,
+      };
     default:
       return null;
   }
@@ -154,7 +162,7 @@ export class AnchorGuard {
   static async checkStaging(rulesetKey: string | null, loaded: LoadedSchema, store: RuntimeStore): Promise<void> {
     if (rulesetKey === null) return;
     const refusal = changesetAnchorRefusal(rulesetKey, await readRecord(rulesetKey, store), loaded);
-    if (refusal !== null) throw new ConflictError(refusal);
+    if (refusal !== null) throw new ConflictError(refusal.message);
   }
 
   private inHierarchy(entityType: string): boolean {

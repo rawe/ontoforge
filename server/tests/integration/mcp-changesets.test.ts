@@ -374,7 +374,7 @@ describe("the anchored mount (V8, V17, V21, V42)", () => {
     await ok(a, "discard_changeset", { changeset_id: cs });
   });
 
-  it("staging takes a write outside the anchor; the commit rejects it as not covered", async () => {
+  it("staging takes a write outside the anchor; the commit rejects it as outside the subtree", async () => {
     const a = await connect("agent-a");
     const cs = (await ok(a, "start_changeset")).id as string;
     const staged = await ok(a, "create_entity", {
@@ -386,8 +386,8 @@ describe("the anchored mount (V8, V17, V21, V42)", () => {
     expect(staged).toMatchObject({ seq: 1, relation: { seq: 2 } });
     const rejected = await refused(a, "commit_changeset", { changeset_id: cs });
     expect(rejected).toContain("The commit was rejected; nothing was persisted");
-    expect(rejected).toContain("seq 1 not_covered: ");
-    expect(rejected).toContain("seq 2 not_covered: ");
+    expect(rejected).toContain("seq 1 outside_subtree: ");
+    expect(rejected).toContain("seq 2 outside_subtree: ");
     expect(await refused(a, "get_entity", { entity_type_key: "task", entity_id: staged.id })).toContain("not found");
     await ok(a, "discard_changeset", { changeset_id: cs });
   });
@@ -404,12 +404,12 @@ describe("the anchored mount (V8, V17, V21, V42)", () => {
       await refused(d, "update_entity", { entity_type_key: "person", entity_id: e.Ana, properties: { name: "x" }, changeset_id: cs }),
     ).toContain(dangling);
     expect(await refused(d, "submit_changeset", { changeset_id: cs })).toContain(dangling);
-    expect(await refused(d, "commit_changeset", { changeset_id: cs })).toContain("anchor_dangling");
+    expect(await refused(d, "commit_changeset", { changeset_id: cs })).toContain("anchor_deleted");
     await ok(d, "unstage", { changeset_id: cs, seq: 1 });
     expect((await ok(d, "get_changeset", { changeset_id: cs })).writeCount).toBe(0);
   });
 
-  it("a deleted anchor leaves its changeset to the plain lens, whose commit answers anchor_gone", async () => {
+  it("a deleted anchor leaves its changeset to the plain lens, whose commit answers ruleset_gone", async () => {
     const b = await connect("agent-b");
     const cs = (await ok(b, "start_changeset")).id as string;
     await ok(b, "update_entity", { entity_type_key: "project", entity_id: e.P3, properties: { name: "P3 b" }, changeset_id: cs });
@@ -418,7 +418,7 @@ describe("the anchored mount (V8, V17, V21, V42)", () => {
     expect(await refused(b, "get_changeset", { changeset_id: cs })).toContain("Anchor 'agent-b' not found");
     const plain = await connect();
     expect((await ok(plain, "get_changeset", { changeset_id: cs })).ruleset).toBe("agent-b");
-    expect(await refused(plain, "commit_changeset", { changeset_id: cs })).toContain("anchor_gone");
+    expect(await refused(plain, "commit_changeset", { changeset_id: cs })).toContain("ruleset_gone");
     expect((await ok(plain, "get_entity", { entity_type_key: "project", entity_id: e.P3 })).name).toBe("P3");
   });
 });

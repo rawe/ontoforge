@@ -788,7 +788,7 @@ export async function submitChangeset(
     // is left to the commit ("anchor gone").
     const anchor = await store.rulesets().get(record.rulesetKey);
     const refusal = anchor === null ? null : changesetAnchorRefusal(record.rulesetKey, anchor, loaded);
-    if (refusal !== null) throw new ConflictError(refusal);
+    if (refusal !== null) throw new ConflictError(refusal.message);
   }
   const pass = await lockFreePass(loaded, record.id, store);
   if (pass.faults.length > 0) {
@@ -1655,8 +1655,8 @@ interface Touch {
   ends: TouchedEnd[];
 }
 
-/** An anchored changeset's anchor, read fresh in the transaction, and
- * what its staged writes touch. */
+/** The anchor of a changeset's ruleset, read fresh in the transaction,
+ * and what its staged writes touch. */
 interface Coverage {
   key: string;
   anchorId: string;
@@ -1709,12 +1709,14 @@ async function touchOf(
 }
 
 /**
- * Step 1, on an anchored changeset (V8, V42): the anchor read fresh, and
- * the coverage before the replay. The anchor gone, dangling, or at an
- * entity the lens hides is one violation on seq 0 (the changeset as a
- * whole), and coverage is not checked. Otherwise, as v1's `AnchorGuard`
- * holds it: every touched entity of the anchor's hierarchy stored now is
- * covered, and no staged delete takes an entity any anchor points at.
+ * Step 1, on a changeset started through a ruleset (V8, V42): the ruleset
+ * read fresh, and the coverage before the replay. One violation on seq 0
+ * (the changeset as a whole), and coverage is not checked, when the
+ * ruleset is gone (`ruleset_gone`), its anchor deleted (`anchor_deleted`)
+ * or at an entity the lens hides (`anchor_hidden`). Otherwise, as v1's
+ * `AnchorGuard` checks it: every touched entity of the anchor's hierarchy
+ * stored now is covered (`outside_subtree`), and no staged delete takes
+ * an entity any anchor points at (`deletes_anchor`).
  */
 async function anchorBefore(
   loaded: LoadedSchema,
@@ -1725,12 +1727,12 @@ async function anchorBefore(
   const record = await bound.rulesets().get(key);
   if (record === null) {
     return {
-      violations: [{ seq: 0, kind: "anchor_gone", message: `Anchor '${key}' no longer exists, so this changeset cannot be committed` }],
+      violations: [{ seq: 0, kind: "ruleset_gone", message: `Anchor '${key}' no longer exists, so this changeset cannot be committed` }],
       coverage: null,
     };
   }
   const refusal = changesetAnchorRefusal(key, record, loaded);
-  if (refusal !== null) return { violations: [{ seq: 0, kind: "anchor_dangling", message: refusal }], coverage: null };
+  if (refusal !== null) return { violations: [{ seq: 0, ...refusal }], coverage: null };
   if (record.anchor === null) return { violations: [], coverage: null };
 
   const { types, readings } = hierarchyOf(record.anchor.type, loaded.full);
@@ -1745,19 +1747,19 @@ async function anchorBefore(
     if (touch.ends.some((end) => end.before && !reaches(links, end.id, coverage.anchorId))) {
       violations.push({
         seq: touch.seq,
-        kind: "not_covered",
+        kind: "outside_subtree",
         message: `Not under anchor '${key}'`,
       });
     }
   }
   const deletes = pass.writes.filter((write) => write.operation === "delete_entity");
-  const anchored =
+  const anchors =
     deletes.length === 0 ? new Set() : new Set((await bound.rulesets().list()).map((ruleset) => ruleset.anchor?.id));
   for (const write of deletes) {
-    if (anchored.has(write.targetId!)) {
+    if (anchors.has(write.targetId!)) {
       violations.push({
         seq: write.seq,
-        kind: "not_covered",
+        kind: "deletes_anchor",
         message: "Anchored, so it cannot be deleted on an anchored connection",
       });
     }
@@ -1811,7 +1813,7 @@ function stagedLinksAndEnds(loaded: LoadedSchema, writes: ChangesetWriteRecord[]
 /**
  * Step 3 (V21, V13): the rules over the end state, in the service, on the
  * bound store's neutral reads, after the replay. Messages name no id,
- * only roles, the relation type key and the anchor key:
+ * only roles, the relation type key and the ruleset key:
  *
  * - `has_children`: a child recorded by a staged entity delete (the delete
  *   capture) is neither deleted nor re-parented;
@@ -1820,8 +1822,9 @@ function stagedLinksAndEnds(loaded: LoadedSchema, writes: ChangesetWriteRecord[]
  *   schema;
  * - `endpoint_type`: a created relation's end is not of the type its
  *   relation type requires;
- * - `not_covered`: on an anchored changeset, a touched entity of the
- *   anchor's hierarchy that exists now is not covered.
+ * - `outside_subtree`: on a changeset whose ruleset has an anchor, a
+ *   touched entity of the anchor's hierarchy that exists now is outside
+ *   the anchor's subtree.
  */
 async function commitViolations(
   loaded: LoadedSchema,
@@ -1898,7 +1901,7 @@ async function commitViolations(
       if (touch.ends.some((end) => types.has(end.id) && !reaches(walkAfter, end.id, coverage.anchorId))) {
         violations.push({
           seq: touch.seq,
-          kind: "not_covered",
+          kind: "outside_subtree",
           message: `Would not be under anchor '${coverage.key}' after the commit`,
         });
       }

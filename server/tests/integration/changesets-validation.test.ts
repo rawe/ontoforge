@@ -474,8 +474,8 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
     const t = (await staged(A, cs, underParent("task", "T20", "has_task", e.P2, { phase: "plan" }))).id as string;
     // The task, and its parent relation, whose parent end P2 is outside.
     expect(await rejected(cs, A)).toEqual([
-      { seq: 1, kind: "not_covered", message: "Would not be under anchor 'agent-a' after the commit" },
-      { seq: 2, kind: "not_covered", message: "Not under anchor 'agent-a'" },
+      { seq: 1, kind: "outside_subtree", message: "Would not be under anchor 'agent-a' after the commit" },
+      { seq: 2, kind: "outside_subtree", message: "Not under anchor 'agent-a'" },
     ]);
 
     const control = await start(A);
@@ -495,8 +495,8 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
       properties: { phase: "x" },
     });
     expect((await rejected(out, A)).map((v) => [v.seq, v.kind])).toEqual([
-      [1, "not_covered"],
-      [2, "not_covered"],
+      [1, "outside_subtree"],
+      [2, "outside_subtree"],
     ]);
 
     const into = await start(A);
@@ -509,8 +509,8 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
       properties: { phase: "x" },
     });
     expect(await rejected(into, A)).toEqual([
-      { seq: 1, kind: "not_covered", message: "Not under anchor 'agent-a'" },
-      { seq: 2, kind: "not_covered", message: "Not under anchor 'agent-a'" },
+      { seq: 1, kind: "outside_subtree", message: "Not under anchor 'agent-a'" },
+      { seq: 2, kind: "outside_subtree", message: "Not under anchor 'agent-a'" },
     ]);
 
     const inside = await start(A);
@@ -529,14 +529,14 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
     await staged(A, cs, underParent("task", "T22", "has_task", e.P1, { phase: "plan" }));
     await pointAnchor("agent-a", "project", e.P2);
     expect((await rejected(cs, A)).map((v) => [v.seq, v.kind])).toEqual([
-      [1, "not_covered"],
-      [2, "not_covered"],
+      [1, "outside_subtree"],
+      [2, "outside_subtree"],
     ]);
     await pointAnchor("agent-a", "project", e.P1);
     await committed(cs, A);
   });
 
-  it("anchor_dangling: the anchored entity deleted after staging", async () => {
+  it("anchor_deleted: the anchor entity deleted after staging", async () => {
     await pointAnchor("agent-c", "task", e.T2a);
     const C = `${ALL}/rulesets/agent-c`;
     const cs = await start(C);
@@ -545,12 +545,12 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
     const [violation] = await rejected(cs, C);
     expect(violation).toEqual({
       seq: 0,
-      kind: "anchor_dangling",
+      kind: "anchor_deleted",
       message: "Anchor 'agent-c' is dangling",
     });
   });
 
-  it("anchor_dangling: re-pointed at an entity the lens hides, named by neither type nor id", async () => {
+  it("anchor_hidden: re-pointed at an entity the lens hides, named by neither type nor id", async () => {
     const PORTFOLIO = runtimePrefix(O, "portfolio");
     await pointAnchor("agent-d", "project", e.P3);
     const D = `${PORTFOLIO}/rulesets/agent-d`;
@@ -561,20 +561,20 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
     expect(violations).toEqual([
       {
         seq: 0,
-        kind: "anchor_dangling",
+        kind: "anchor_hidden",
         message: "Anchor 'agent-d' points at an entity that lens 'portfolio' does not show",
       },
     ]);
     expect(JSON.stringify(violations)).not.toMatch(new RegExp(`task|${e.T6}`));
   });
 
-  it("anchor_gone: the anchor deleted; its changeset, reached through the plain lens URL, rejects", async () => {
+  it("ruleset_gone: the ruleset deleted; its changeset, reached through the plain lens URL, rejects", async () => {
     const cs = await start(B);
     await staged(B, cs, { operation: "update_entity", type: "task", id: e.T6, properties: { name: "T6 B" } });
     expect((await call("DELETE", `${RULESETS}/agent-b`)).status).toBe(204);
     expect((await call("GET", `${B}/changesets/${cs}`)).status).toBe(404);
     expect(await rejected(cs)).toEqual([
-      { seq: 0, kind: "anchor_gone", message: "Anchor 'agent-b' no longer exists, so this changeset cannot be committed" },
+      { seq: 0, kind: "ruleset_gone", message: "Anchor 'agent-b' no longer exists, so this changeset cannot be committed" },
     ]);
   });
 });

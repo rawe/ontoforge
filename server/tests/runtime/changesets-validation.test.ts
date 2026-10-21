@@ -520,7 +520,7 @@ describe("anchor coverage (V8, V42)", () => {
     parents[D1] = [link("belongs_to", R1, BETA, D1)];
     journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "not_covered", message: "Not under anchor 'agent-a'" },
+      { seq: 1, kind: "outside_subtree", message: "Not under anchor 'agent-a'" },
     ]);
   });
 
@@ -533,8 +533,8 @@ describe("anchor coverage (V8, V42)", () => {
     ]);
     // The parent relation's write touches its stored parent BETA too.
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "not_covered", message: "Would not be under anchor 'agent-a' after the commit" },
-      { seq: 2, kind: "not_covered", message: "Not under anchor 'agent-a'" },
+      { seq: 1, kind: "outside_subtree", message: "Would not be under anchor 'agent-a' after the commit" },
+      { seq: 2, kind: "outside_subtree", message: "Not under anchor 'agent-a'" },
     ]);
   });
 
@@ -542,7 +542,7 @@ describe("anchor coverage (V8, V42)", () => {
     store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "company", id: BETA }));
     journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "not_covered", message: "Not under anchor 'agent-a'" },
+      { seq: 1, kind: "outside_subtree", message: "Not under anchor 'agent-a'" },
     ]);
   });
 
@@ -550,20 +550,20 @@ describe("anchor coverage (V8, V42)", () => {
     store.rulesetStore.list.mockResolvedValue([anchorAt({ type: "company", id: ACME }), { key: "b", anchor: { type: "department", id: D1 }, anchorFound: true }]);
     journal([deleteOf(1, "department", D1)]);
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "not_covered", message: "Anchored, so it cannot be deleted on an anchored connection" },
+      { seq: 1, kind: "deletes_anchor", message: "Anchored, so it cannot be deleted on an anchored connection" },
     ]);
   });
 
-  it("anchor_gone, anchor_dangling, hidden: one violation on seq 0, no coverage checked", async () => {
+  it("ruleset_gone, anchor_deleted, anchor_hidden: one violation on seq 0, no coverage checked", async () => {
     journal([row(3, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P" } }, before: { name: "Pat" } })]);
     store.rulesetStore.get.mockResolvedValue(null);
     expect(await violations(commit())).toEqual([
-      { seq: 0, kind: "anchor_gone", message: "Anchor 'agent-a' no longer exists, so this changeset cannot be committed" },
+      { seq: 0, kind: "ruleset_gone", message: "Anchor 'agent-a' no longer exists, so this changeset cannot be committed" },
     ]);
 
     store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "company", id: ACME }, false));
     const [dangling] = await violations(commit());
-    expect(dangling).toMatchObject({ seq: 0, kind: "anchor_dangling" });
+    expect(dangling).toMatchObject({ seq: 0, kind: "anchor_deleted" });
     expect(dangling!.message).toContain("is dangling");
 
     store.getFullSchemaWithLensInclusions.mockResolvedValue(schema(true));
@@ -572,7 +572,7 @@ describe("anchor coverage (V8, V42)", () => {
     const [hidden] = await violations(commit("hr_view"));
     expect(hidden).toEqual({
       seq: 0,
-      kind: "anchor_dangling",
+      kind: "anchor_hidden",
       message: "Anchor 'agent-a' points at an entity that lens 'hr_view' does not show",
     });
     expect(store.parentsOf).not.toHaveBeenCalledWith([PAT], expect.anything());

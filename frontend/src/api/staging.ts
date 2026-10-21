@@ -1,0 +1,94 @@
+/**
+ * The pure part of the Workbench's write seam (`api/writes.ts`): a write as
+ * the immediate API takes it, the stage payload built from it, the outcome a
+ * write answers, and the queue that stages one write at a time per
+ * changeset. No React, no I/O — unit-tested with `node --test`.
+ */
+
+import type { JsonValue, ParentRelationInput, StagedAnswer, StageWritePayload } from './types.ts'
+
+/** A Workbench write with the arguments of its immediate call (flat values). */
+export type RuntimeWrite =
+  | {
+      operation: 'create_entity'
+      type: string
+      properties: Record<string, JsonValue>
+      parentRelation?: ParentRelationInput
+    }
+  | { operation: 'update_entity'; type: string; id: string; properties: Record<string, JsonValue | null> }
+  | { operation: 'delete_entity'; type: string; id: string }
+  | {
+      operation: 'create_relation'
+      type: string
+      body: { fromEntityId: string; toEntityId: string } & Record<string, JsonValue>
+    }
+  | { operation: 'delete_relation'; type: string; id: string }
+
+/** A write staged into a changeset: its seq and the minted (create) or target id. */
+export interface StagedOutcome extends StagedAnswer {
+  kind: 'staged'
+  changesetId: string
+}
+
+/** What a write through the seam answers: the immediate write's value, or where it was staged. */
+export type WriteOutcome<T> = { kind: 'written'; value: T } | StagedOutcome
+
+/** The stage body of a write: its values nested under `properties`, a parent relation carried. */
+export function stagePayload(write: RuntimeWrite): StageWritePayload {
+  switch (write.operation) {
+    case 'create_entity':
+      return write.parentRelation === undefined
+        ? { operation: write.operation, type: write.type, properties: write.properties }
+        : {
+            operation: write.operation,
+            type: write.type,
+            properties: write.properties,
+            parentRelation: write.parentRelation,
+          }
+    case 'update_entity':
+      return { operation: write.operation, type: write.type, id: write.id, properties: write.properties }
+    case 'create_relation': {
+      const { fromEntityId, toEntityId, ...properties } = write.body
+      return { operation: write.operation, type: write.type, fromEntityId, toEntityId, properties }
+    }
+    case 'delete_entity':
+    case 'delete_relation':
+      return { operation: write.operation, type: write.type, id: write.id }
+  }
+}
+
+export function stagedOutcome(changesetId: string, answer: StagedAnswer): StagedOutcome {
+  return { kind: 'staged', changesetId, ...answer }
+}
+
+/**
+ * The write that sets one document property: today the whole value (null
+ * clears it), as an entity update. Document edits go through here only, so
+ * a partial document write can replace it later.
+ */
+export function documentWrite(type: string, id: string, propertyKey: string, text: string | null): RuntimeWrite {
+  return { operation: 'update_entity', type, id, properties: { [propertyKey]: text } }
+}
+
+/** Whether a stage call's error says the changeset itself is gone (committed, discarded, expired). */
+export function isChangesetGone(error: { status: number; message: string }, changesetId: string): boolean {
+  return error.status === 404 && error.message.includes(`Changeset '${changesetId}'`)
+}
+
+/**
+ * Runs tasks one after another per key; tasks of different keys run side by
+ * side. A failed task does not stop the next one. A changeset answers 409
+ * "busy" to a second stage call while the first still runs.
+ */
+export function createSerialQueue(): <T>(key: string, task: () => Promise<T>) => Promise<T> {
+  const tails = new Map<string, Promise<unknown>>()
+  return <T>(key: string, task: () => Promise<T>) => {
+    const result = (tails.get(key) ?? Promise.resolve()).then(task)
+    const tail = result.catch(() => undefined)
+    tails.set(key, tail)
+    void tail.then(() => {
+      if (tails.get(key) === tail) tails.delete(key)
+    })
+    return result
+  }
+}

@@ -496,7 +496,8 @@ writes, so a submit racing a change is never overwritten.
   to another anchor, is absent, and no anchor key reaches every changeset of the lens;
   list them bound the same way, submitted first, then by last change, newest first, with
   their counts per operation and the type keys they name; their staged writes by seq,
-  paged; the staged create that minted a given id; the summed size of its staged writes.
+  paged; the staged create that minted a given id; the staged writes that minted or target
+  a given id, by seq; the summed size of its staged writes.
 - **Changes.** Append staged writes to a draft changeset, all or none, in order, each with
   a consecutive seq higher than every earlier one; unstage one by seq from a draft
   changeset; submit, a compare-and-set on the version of a draft changeset, setting the

@@ -180,6 +180,12 @@ discarded, so one that vanished was committed — or its lens was deleted.
   the changeset creates too — whole or by character range, as a
   [document is read](documents.md#reading-a-slice). When no staged write sets it, or a later
   one deletes the entity, it is not found.
+- **one entity as the changeset leaves it**: a stored entity, or one the changeset
+  creates, with the changeset's creates and updates of it applied by seq, before
+  defaults, and marked deleted when its last staged write deletes it; beside it those
+  writes, as the writes by seq show them, markers included. Writes of relations that name
+  it are not among them. An entity neither stored nor created by the changeset is not
+  found.
 
 A write is shown by what it changes, not by the arguments it was staged with. A write
 whose type the lens no longer shows is reduced to its seq, operation, time and markers; a
@@ -214,9 +220,10 @@ Staged-only guards against mistakes, not against a determined client. It has two
 - **One commit runs at a time in one server process**; a second answers a conflict at
   once, holding nothing.
 
-Each staged update reads its target once. Submit and every read of a changeset's writes
-run the lock-free pass over the whole changeset, with no lock. A commit holds one database
-connection for its whole run, and every row it touches waits as long.
+Each staged update reads its target once. Submit and the read of a changeset's writes
+run the lock-free pass over the whole changeset, with no lock; the read of one entity
+judges that entity's writes alone. A commit holds one database connection for its whole
+run, and every row it touches waits as long.
 
 ## Not possible
 

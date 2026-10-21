@@ -586,6 +586,7 @@ Semantics: [capabilities/changesets.md](capabilities/changesets.md).
 | GET | `/changesets` | List the changesets this URL reaches | — |
 | GET | `/changesets/{changesetId}` | Read a changeset with its staged writes by seq | `offset`, `limit` |
 | GET | `/changesets/{changesetId}/documents/{entityTypeKey}/{entityId}/{propertyKey}` | Read the text a commit would leave in a document property, whole or by character range | `offset`, `limit` |
+| GET | `/changesets/{changesetId}/entities/{entityTypeKey}/{entityId}` | Read one entity as the changeset leaves it, with its staged writes on it | — |
 | DELETE | `/changesets/{changesetId}` | Discard a draft changeset; 204 | — |
 | POST | `/changesets/{changesetId}/writes` | Stage one write, its body discriminated by `operation`; 201 `{seq, id}`, and `relation: {seq, id}` for a create with a parent relation | — |
 | DELETE | `/changesets/{changesetId}/writes/{seq}` | Unstage one write; 204 | — |
@@ -601,7 +602,9 @@ and `delete_relation` `{type, id}`; `type` is the type key, `id` the target, `pr
 the values as one object, and `parentRelation` the immediate create's.
 
 `limit` of the changeset read is 1–500, default 100; the staged document read pages and
-answers as the document read does. Start, submit and unsubmit answer the changeset; commit
+answers as the document read does. The staged entity read answers
+`{entity, deleted, writes}`: `entity` as the entity read answers it, `writes` unpaged, as
+the changeset read shows them. Start, submit and unsubmit answer the changeset; commit
 answers `{committed, alreadyGone}`, the number of writes and the seqs of deletes whose
 target was already gone. Every unknown changeset — committed, discarded, expired, never
 started, or bound to another lens or anchor — is `RESOURCE_NOT_FOUND`. A refusal by state

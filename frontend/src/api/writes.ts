@@ -110,9 +110,9 @@ export function useRuntimeWrites(ontologyKey: string, lensKey: string) {
         run(documentWrite(entityTypeKey, id, propertyKey, text), () =>
           runtime.updateEntity(ontologyKey, lensKey, entityTypeKey, id, { [propertyKey]: text }),
         ),
-      /** The staged branch's toast: "Staged #7", with a link to the changeset. */
-      toastStaged: (outcome: StagedOutcome) =>
-        toast.success(`Staged #${outcome.seq}`, {
+      /** The staged branch's toast: "Staged #7" (or `text`), with a link to the changeset. */
+      toastStaged: (outcome: StagedOutcome, text = `Staged #${outcome.seq}`) =>
+        toast.success(text, {
           action: {
             label: 'Open changeset',
             onClick: () => navigate(`/o/${ontologyKey}/w/${lensKey}/changesets/${outcome.changesetId}`),

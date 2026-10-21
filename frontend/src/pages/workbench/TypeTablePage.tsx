@@ -25,8 +25,9 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useRuntimeSchema } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
-import { deleteEntity, listEntities, type ListEntitiesParams } from '@/api/runtime'
+import { listEntities, type ListEntitiesParams } from '@/api/runtime'
 import type { EntityInstance, SchemaProperty } from '@/api/types'
+import { useRuntimeWrites, type StagedOutcome } from '@/api/writes'
 import { DocumentViewerDialog, type DocumentViewerTarget } from '@/components/DocumentViewerDialog'
 import { EmptyState } from '@/components/EmptyState'
 import { TypeNotInLens } from '@/components/home/TypeNotInLens'
@@ -34,6 +35,7 @@ import { PageHeader } from '@/components/PageHeader'
 import { TypeChip } from '@/components/TypeChip'
 import { openQuickAdd } from '@/components/quickadd/quickAddBus'
 import { BulkActionBar } from '@/components/table/BulkActionBar'
+import { bulkDeleteSummary } from '@/components/table/bulkDelete'
 import { CellValue } from '@/components/table/CellValue'
 import { ColumnVisibilityMenu } from '@/components/table/ColumnVisibilityMenu'
 import { FilterChips } from '@/components/table/FilterChips'
@@ -61,6 +63,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { displayLabel } from '@/lib/displayLabel'
 import { isDocumentStub } from '@/lib/documents'
+import { pinnedChangeset } from '@/lib/pinnedChangeset'
 
 const PAGE_SIZE = 25
 
@@ -118,6 +121,7 @@ export function TypeTablePage() {
     setSearchParams(next, { replace: true })
   }, [wantsNew, typeKey, searchParams, setSearchParams])
   const queryClient = useQueryClient()
+  const writes = useRuntimeWrites(ontologyKey ?? '', lensKey ?? '')
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const type = schema.data?.entityTypes.find((t) => t.key === typeKey)
   const nameProperty = type?.nameProperty
@@ -365,25 +369,39 @@ export function TypeTablePage() {
 
   const bulkDelete = useMutation({
     mutationFn: async (ids: string[]) => {
-      const toastId = toast.loading(`Deleting 0/${ids.length}…`)
+      const pinnedAtStart = pinnedChangeset(ontologyKey!, lensKey!)
+      const verb = pinnedAtStart === null ? 'Deleting' : 'Staging'
+      const toastId = toast.loading(`${verb} 0/${ids.length}…`)
       let failed = 0
+      let skipped = 0
+      let staged: StagedOutcome | undefined
       for (const [index, id] of ids.entries()) {
+        // A pin or leave during the run stops it: the rest would land elsewhere.
+        if (pinnedChangeset(ontologyKey!, lensKey!) !== pinnedAtStart) {
+          skipped = ids.length - index
+          break
+        }
         try {
-          await deleteEntity(ontologyKey!, lensKey!, typeKey!, id)
+          const outcome = await writes.deleteEntity(typeKey!, id)
+          if (outcome.kind === 'staged') staged = outcome
         } catch {
           failed++
         }
-        toast.loading(`Deleting ${index + 1}/${ids.length}…`, { id: toastId })
+        toast.loading(`${verb} ${index + 1}/${ids.length}…`, { id: toastId })
       }
-      if (failed > 0) {
-        toast.error(`Deleted ${ids.length - failed} of ${ids.length}; ${failed} failed`, {
-          id: toastId,
-        })
+      const summary = bulkDeleteSummary({
+        total: ids.length,
+        failed,
+        skipped,
+        staged: pinnedAtStart !== null,
+      })
+      if (!summary.ok) {
+        toast.error(summary.text, { id: toastId })
+      } else if (staged !== undefined) {
+        toast.dismiss(toastId)
+        writes.toastStaged(staged, summary.text)
       } else {
-        toast.success(
-          `Deleted ${ids.length} ${ids.length === 1 ? 'entity' : 'entities'}`,
-          { id: toastId },
-        )
+        toast.success(summary.text, { id: toastId })
       }
     },
     onSettled: () => {

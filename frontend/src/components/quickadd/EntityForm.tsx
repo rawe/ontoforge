@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import type { JsonValue, SchemaEntityType, SchemaProperty } from '@/api/types'
 import { PropertyField } from '@/components/schema/PropertyField'
 import { coerceDrafts, valueToDraft } from '@/components/schema/propertyDraft'
+import { changedProperties, editPatch } from '@/components/quickadd/entityEdit'
 
 /** Required properties first, then optionals — schema order within each group. */
 function orderedProperties(properties: readonly SchemaProperty[]): SchemaProperty[] {
@@ -14,6 +15,16 @@ function defaultDrafts(properties: readonly SchemaProperty[]): Record<string, st
   for (const p of properties) {
     drafts[p.key] = p.defaultValue === null ? '' : valueToDraft(p.dataType, p.defaultValue)
   }
+  return drafts
+}
+
+/** Drafts of an entity's values (a document's text is not loaded: its draft starts empty). */
+function valueDrafts(
+  properties: readonly SchemaProperty[],
+  values: Readonly<Record<string, JsonValue>>,
+): Record<string, string> {
+  const drafts: Record<string, string> = {}
+  for (const p of properties) drafts[p.key] = valueToDraft(p.dataType, values[p.key])
   return drafts
 }
 
@@ -44,10 +55,16 @@ interface EntityFormProps {
   idPrefix?: string
   /** The parent relation's properties of a create with a parent relation. */
   relation?: RelationFields
+  /**
+   * Edit mode: the drafts start from these values instead of the defaults,
+   * only the changed properties are checked, and `onSubmit` gets just those
+   * (a cleared one as null).
+   */
+  initialValues?: Record<string, JsonValue>
 }
 
 /**
- * Schema-driven create form for one entity type: required props first, one
+ * Schema-driven create (or, with `initialValues`, edit) form for one entity type: required props first, one
  * PropertyField per property, drafts coerced on submit (collecting all
  * errors), server field errors merged in. Enter submits (native form
  * semantics — textareas keep newline behavior).
@@ -61,6 +78,7 @@ export function EntityForm({
   footer,
   idPrefix = 'qa',
   relation,
+  initialValues,
 }: EntityFormProps) {
   const properties = useMemo(() => orderedProperties(entityType.properties), [entityType])
   const relationProperties = useMemo(
@@ -68,7 +86,10 @@ export function EntityForm({
     [relation?.properties],
   )
 
-  const initialDrafts = useMemo(() => defaultDrafts(properties), [properties])
+  const initialDrafts = useMemo(
+    () => (initialValues === undefined ? defaultDrafts(properties) : valueDrafts(properties, initialValues)),
+    [properties, initialValues],
+  )
   const initialRelationDrafts = useMemo(
     () => defaultDrafts(relationProperties),
     [relationProperties],
@@ -104,12 +125,14 @@ export function EntityForm({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
     if (submitting) return
-    const result = coerceDrafts(properties, drafts)
+    const checked =
+      initialValues === undefined ? properties : changedProperties(properties, initialDrafts, drafts)
+    const result = coerceDrafts(checked, drafts)
     const relationResult = coerceDrafts(relationProperties, relationDrafts)
     setClientErrors(result.errors)
     setRelationErrors(relationResult.errors)
     if (!result.ok || !relationResult.ok) return
-    onSubmit(result.values, relationResult.values)
+    onSubmit(initialValues === undefined ? result.values : editPatch(checked, result.values), relationResult.values)
   }
 
   const fields = (

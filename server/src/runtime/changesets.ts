@@ -539,9 +539,9 @@ export async function stage(
   }
   // The store appends to a draft changeset only: a submit since the read
   // is refused here.
-  const seq = await store.changesets().append(changeset.id, row, bytes);
-  if (seq === null) throw (await refusalOf(loaded, anchorKey, changeset.id, store)) ?? notFound(changesetId);
-  return { seq, id: (row.mintedId ?? row.targetId)! };
+  const seqs = await store.changesets().append(changeset.id, [{ write: row, bytes }]);
+  if (seqs === null) throw (await refusalOf(loaded, anchorKey, changeset.id, store)) ?? notFound(changesetId);
+  return { seq: seqs[0]!, id: (row.mintedId ?? row.targetId)! };
 }
 
 // ---------------------------------------------------------------------------

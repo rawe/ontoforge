@@ -97,7 +97,7 @@ beforeEach(() => {
   store = createMockRuntimeStore();
   store.getFullSchemaWithLensInclusions.mockResolvedValue(schema());
   store.changesetStore.get.mockResolvedValue(changeset());
-  store.changesetStore.append.mockResolvedValue(3);
+  store.changesetStore.append.mockResolvedValue([3]);
 });
 
 function stageOn(write: StagedWrite, anchorKey: string | null = null) {
@@ -107,9 +107,10 @@ function stageOn(write: StagedWrite, anchorKey: string | null = null) {
 /** The one row handed to `append`. */
 function appended(): Row {
   expect(store.changesetStore.append).toHaveBeenCalledTimes(1);
-  const [id, row] = store.changesetStore.append.mock.calls[0]!;
+  const [id, writes] = store.changesetStore.append.mock.calls[0]!;
   expect(id).toBe(CS);
-  return row;
+  expect(writes).toHaveLength(1);
+  return writes[0].write;
 }
 
 function expectNothingWritten(): void {
@@ -263,7 +264,7 @@ describe("staging checks", () => {
       parentRelation: null,
     };
     await stageOn(write);
-    const [, row, bytes] = store.changesetStore.append.mock.calls[0]!;
+    const [{ write: row, bytes }] = store.changesetStore.append.mock.calls[0]![1];
     // Document text counts as UTF-8: two bytes per "ä".
     expect(bytes).toBe(writeBytes(row));
     expect(bytes).toBeGreaterThan(2000);

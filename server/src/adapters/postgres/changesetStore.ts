@@ -6,9 +6,10 @@
  *   `FOR UPDATE NOWAIT` in its own transaction (or the bound one): a row
  *   held by a commit or another mutation answers a `ConflictError` at
  *   once. `touch` and `sweep` skip a held row instead.
- * - A seq is the changeset's version at the append: every append and
- *   unstage bumps the version, so a seq is never reused, not even after
- *   the last write is unstaged.
+ * - A seq is the changeset's version at the append: every appended write
+ *   and every unstage bumps the version, so a seq is never reused, not
+ *   even after the last write is unstaged. The writes of one append get
+ *   consecutive seqs.
  * - The state is judged under the row lock, in the statement that writes:
  *   append, unstage, submit and discard change a draft changeset only,
  *   unsubmit a submitted one. A submit landing between the service's read
@@ -241,34 +242,40 @@ export class PostgresChangesetStore implements ChangesetStore {
     return result.rows[0]!.bytes as number;
   }
 
-  append(id: string, write: NewChangesetWrite, bytes: number): Promise<number | null> {
+  append(id: string, writes: { write: NewChangesetWrite; bytes: number }[]): Promise<number[] | null> {
     return this.mutate(id, async (querier) => {
-      const result = await querier.query(
-        `INSERT INTO changeset_write
-                (changeset_id, seq, operation, arguments, minted_id, type_key, target_id, before, bytes)
-         SELECT $1,
-                GREATEST(c.version,
-                         COALESCE((SELECT max(seq) FROM changeset_write WHERE changeset_id = $1), 0) + 1),
-                $2::text, $3::jsonb, $4::uuid, $5::text, $6::uuid, $7::jsonb, $8::integer
-           FROM changeset c WHERE c.changeset_id = $1 AND c.submitted_at IS NULL
-         RETURNING seq`,
-        [
-          id,
-          write.operation,
-          JSON.stringify(write.arguments),
-          write.mintedId,
-          write.typeKey,
-          write.targetId,
-          write.before === null ? null : JSON.stringify(write.before),
-          bytes,
-        ],
-      );
-      const seq = result.rows[0]?.seq as number | undefined;
-      if (seq === undefined) {
-        return null;
+      const seqs: number[] = [];
+      for (const { write, bytes } of writes) {
+        const result = await querier.query(
+          `INSERT INTO changeset_write
+                  (changeset_id, seq, operation, arguments, minted_id, type_key, target_id, before, bytes)
+           SELECT $1,
+                  GREATEST(c.version,
+                           COALESCE((SELECT max(seq) FROM changeset_write WHERE changeset_id = $1), 0) + 1),
+                  $2::text, $3::jsonb, $4::uuid, $5::text, $6::uuid, $7::jsonb, $8::integer
+             FROM changeset c WHERE c.changeset_id = $1 AND c.submitted_at IS NULL
+           RETURNING seq`,
+          [
+            id,
+            write.operation,
+            JSON.stringify(write.arguments),
+            write.mintedId,
+            write.typeKey,
+            write.targetId,
+            write.before === null ? null : JSON.stringify(write.before),
+            bytes,
+          ],
+        );
+        const seq = result.rows[0]?.seq as number | undefined;
+        // Under the row lock the state cannot change: only the first
+        // write can find the changeset submitted.
+        if (seq === undefined) {
+          return null;
+        }
+        await querier.query(`UPDATE changeset c SET ${BUMP} WHERE c.changeset_id = $1`, [id]);
+        seqs.push(seq);
       }
-      await querier.query(`UPDATE changeset c SET ${BUMP} WHERE c.changeset_id = $1`, [id]);
-      return seq;
+      return seqs;
     });
   }
 

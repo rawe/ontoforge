@@ -181,7 +181,7 @@ describe("transaction: a store bound to one connection", () => {
       await bound.createRelation("has_task", randomUUID(), ids.P2, id, {}, {});
       await bound.anchors().saveAnchor("bound-b", { type: "task", id });
       await bound.changesets().start({ id: changesetId, lensId: lenses.all!, anchorKey: null, note: null });
-      await bound.changesets().append(changesetId, write("create_entity", "task"), 0);
+      await bound.changesets().append(changesetId, [{ write: write("create_entity", "task"), bytes: 0 }]);
       throw new Error("boom");
     });
     await expect(promise).rejects.toThrow("boom");
@@ -287,7 +287,7 @@ describe("ChangesetStore", () => {
     await age(cs.id);
     const before = await read(cs.id);
 
-    expect(await changesets.append(cs.id, write("create_entity", "task", { mintedId: minted }), 0)).toBe(1);
+    expect(await changesets.append(cs.id, [{ write: write("create_entity", "task", { mintedId: minted }), bytes: 0 }])).toEqual([1]);
     const after = await read(cs.id);
     expect(after.version).toBe(before.version + 1);
     expect(after.lastChangeAt.getTime()).toBeGreaterThan(before.lastChangeAt.getTime());
@@ -295,13 +295,11 @@ describe("ChangesetStore", () => {
 
     const recorded = { name: "T1", gone: null };
     expect(
-      await changesets.append(
-        cs.id,
-        write("update_entity", "task", { targetId: target, arguments: { name: "T1b" }, before: recorded }),
-        0,
-      ),
-    ).toBe(2);
-    expect(await changesets.append(cs.id, write("delete_entity", "project", { targetId: ids.P2 }), 0)).toBe(3);
+      await changesets.append(cs.id, [
+        { write: write("update_entity", "task", { targetId: target, arguments: { name: "T1b" }, before: recorded }), bytes: 0 },
+      ]),
+    ).toEqual([2]);
+    expect(await changesets.append(cs.id, [{ write: write("delete_entity", "project", { targetId: ids.P2 }), bytes: 0 }])).toEqual([3]);
     expect((await read(cs.id)).version).toBe(4);
 
     const page = await changesets.page(cs.id, 0, 10);
@@ -323,13 +321,50 @@ describe("ChangesetStore", () => {
     expect(await changesets.findMinted(cs.id, target)).toBeNull();
     expect(await changesets.findMinted(randomUUID(), minted)).toBeNull();
 
-    expect(await changesets.append(randomUUID(), write("create_entity", "task"), 0)).toBeNull();
+    expect(await changesets.append(randomUUID(), [{ write: write("create_entity", "task"), bytes: 0 }])).toBeNull();
+  });
+
+  it("append of several writes: in order, consecutive seqs, the version once per write, each with its own bytes", async () => {
+    const cs = await started();
+    const changesets = store.changesets();
+    await changesets.append(cs.id, [{ write: write("create_entity", "task"), bytes: 0 }]);
+    expect(await changesets.unstage(cs.id, 1)).toBe(true);
+    const before = await read(cs.id);
+
+    const seqs = await changesets.append(cs.id, [
+      { write: write("create_entity", "task"), bytes: 10 },
+      { write: write("create_relation", "has_task"), bytes: 20 },
+    ]);
+    expect(seqs).toEqual([before.version, before.version + 1]);
+    expect((await read(cs.id)).version).toBe(before.version + 2);
+    expect((await changesets.page(cs.id, 0, 10)).map((w) => [w.seq, w.operation])).toEqual([
+      [before.version, "create_entity"],
+      [before.version + 1, "create_relation"],
+    ]);
+    expect(await changesets.stagedBytes(cs.id)).toBe(30);
+    expect(await changesets.unstage(cs.id, seqs![1]!)).toBe(true);
+    expect(await changesets.stagedBytes(cs.id)).toBe(10);
+  });
+
+  it("append of several writes to a submitted changeset appends none of them", async () => {
+    const cs = await started();
+    const changesets = store.changesets();
+    await changesets.append(cs.id, [{ write: write("create_entity", "task"), bytes: 0 }]);
+    const submitted = (await changesets.submit(cs.id, (await read(cs.id)).version, "go"))!;
+
+    const pair = [
+      { write: write("create_entity", "task"), bytes: 0 },
+      { write: write("create_relation", "has_task"), bytes: 0 },
+    ];
+    expect(await changesets.append(cs.id, pair)).toBeNull();
+    expect(await read(cs.id)).toMatchObject({ version: submitted.version, writeCount: 1 });
+    expect(await changesets.append(randomUUID(), pair)).toBeNull();
   });
 
   it("unstage removes one write by seq and bumps the version; an unknown seq changes nothing; no seq is reused", async () => {
     const cs = await started();
     const changesets = store.changesets();
-    for (let i = 0; i < 3; i++) await changesets.append(cs.id, write("create_entity", "task"), 0);
+    for (let i = 0; i < 3; i++) await changesets.append(cs.id, [{ write: write("create_entity", "task"), bytes: 0 }]);
     await age(cs.id);
     const before = await read(cs.id);
 
@@ -346,7 +381,7 @@ describe("ChangesetStore", () => {
     // The seq is the version at the append: unstaging the last write
     // frees no seq for the next one.
     expect(await changesets.unstage(cs.id, 3)).toBe(true);
-    expect(await changesets.append(cs.id, write("create_entity", "task"), 0)).toBe(after.version + 1);
+    expect(await changesets.append(cs.id, [{ write: write("create_entity", "task"), bytes: 0 }])).toEqual([after.version + 1]);
     expect((await changesets.page(cs.id, 0, 10)).map((w) => w.seq)).toEqual([1, after.version + 1]);
   });
 
@@ -354,8 +389,8 @@ describe("ChangesetStore", () => {
     const cs = await started();
     const changesets = store.changesets();
     expect(await changesets.stagedBytes(cs.id)).toBe(0);
-    await changesets.append(cs.id, write("create_entity", "task"), 1_500_000_000);
-    const seq = (await changesets.append(cs.id, write("create_entity", "task"), 1_500_000_001))!;
+    await changesets.append(cs.id, [{ write: write("create_entity", "task"), bytes: 1_500_000_000 }]);
+    const seq = (await changesets.append(cs.id, [{ write: write("create_entity", "task"), bytes: 1_500_000_001 }]))![0]!;
     // A sum past the integer range still comes back as a number.
     expect(await changesets.stagedBytes(cs.id)).toBe(3_000_000_001);
     expect(await changesets.unstage(cs.id, seq)).toBe(true);
@@ -391,10 +426,10 @@ describe("ChangesetStore", () => {
     const b = await started("agent-a");
     const empty = await started(null);
     await started(null, lenses.portfolio!);
-    await changesets.append(a.id, write("create_entity", "task"), 0);
-    await changesets.append(a.id, write("create_entity", "task"), 0);
-    await changesets.append(a.id, write("delete_relation", "has_task"), 0);
-    await changesets.append(b.id, write("update_entity", "project"), 0);
+    await changesets.append(a.id, [{ write: write("create_entity", "task"), bytes: 0 }]);
+    await changesets.append(a.id, [{ write: write("create_entity", "task"), bytes: 0 }]);
+    await changesets.append(a.id, [{ write: write("delete_relation", "has_task"), bytes: 0 }]);
+    await changesets.append(b.id, [{ write: write("update_entity", "project"), bytes: 0 }]);
     const bSubmitted = await changesets.submit(b.id, (await read(b.id)).version, "go");
     expect(bSubmitted).not.toBeNull();
 
@@ -432,7 +467,7 @@ describe("ChangesetStore", () => {
     const idle = await started();
     const fresh = await started();
     const submitted = await started();
-    await changesets.append(idle.id, write("create_entity", "task"), 0);
+    await changesets.append(idle.id, [{ write: write("create_entity", "task"), bytes: 0 }]);
     await changesets.submit(submitted.id, submitted.version, null);
     await age(idle.id, "8 days");
     await age(submitted.id, "8 days");
@@ -449,8 +484,8 @@ describe("ChangesetStore", () => {
     const changesets = store.changesets();
     const a = await started();
     const b = await started();
-    await changesets.append(a.id, write("create_entity", "task"), 0);
-    await changesets.append(b.id, write("create_entity", "task"), 0);
+    await changesets.append(a.id, [{ write: write("create_entity", "task"), bytes: 0 }]);
+    await changesets.append(b.id, [{ write: write("create_entity", "task"), bytes: 0 }]);
 
     expect(await changesets.discard(a.id)).toBe(true);
     expect(await changesets.discard(a.id)).toBe(false);
@@ -464,7 +499,7 @@ describe("ChangesetStore", () => {
   it("discard deletes a draft changeset only: a submitted one stays, with its journal", async () => {
     const changesets = store.changesets();
     const cs = await started();
-    await changesets.append(cs.id, write("create_entity", "task"), 0);
+    await changesets.append(cs.id, [{ write: write("create_entity", "task"), bytes: 0 }]);
     const submitted = await changesets.submit(cs.id, (await read(cs.id)).version, "go");
 
     expect(await changesets.discard(cs.id)).toBe(false);
@@ -478,10 +513,10 @@ describe("ChangesetStore", () => {
   it("the state is judged in the writing statement: append, unstage and submit change a draft changeset only, unsubmit a submitted one", async () => {
     const changesets = store.changesets();
     const cs = await started();
-    const seq = (await changesets.append(cs.id, write("create_entity", "task"), 0))!;
+    const seq = (await changesets.append(cs.id, [{ write: write("create_entity", "task"), bytes: 0 }]))![0]!;
     const submitted = (await changesets.submit(cs.id, (await read(cs.id)).version, "go"))!;
 
-    expect(await changesets.append(cs.id, write("create_entity", "task"), 0)).toBeNull();
+    expect(await changesets.append(cs.id, [{ write: write("create_entity", "task"), bytes: 0 }])).toBeNull();
     expect(await changesets.unstage(cs.id, seq)).toBe(false);
     expect(await changesets.submit(cs.id, submitted.version, "again")).toBeNull();
     expect(await read(cs.id)).toMatchObject({ version: submitted.version, writeCount: 1, note: "go" });
@@ -495,14 +530,14 @@ describe("ChangesetStore", () => {
   it("while another connection holds the row, every mutation is a ConflictError at once", async () => {
     const changesets = store.changesets();
     const cs = await started();
-    await changesets.append(cs.id, write("create_entity", "task"), 0);
+    await changesets.append(cs.id, [{ write: write("create_entity", "task"), bytes: 0 }]);
     await age(cs.id, "8 days");
     const before = await read(cs.id);
 
     const holder = await hold(store, (bound) => bound.changesets().lockForCommit(cs.id));
     try {
       for (const mutation of [
-        () => changesets.append(cs.id, write("create_entity", "task"), 0),
+        () => changesets.append(cs.id, [{ write: write("create_entity", "task"), bytes: 0 }]),
         () => changesets.unstage(cs.id, 1),
         () => changesets.submit(cs.id, before.version, null),
         () => changesets.unsubmit(cs.id, "x"),
@@ -525,7 +560,7 @@ describe("ChangesetStore", () => {
     const after = await read(cs.id);
     expect(after.version).toBe(before.version);
     expect(after.lastChangeAt).toEqual(before.lastChangeAt);
-    expect(await changesets.append(cs.id, write("create_entity", "task"), 0)).toBe(2);
+    expect(await changesets.append(cs.id, [{ write: write("create_entity", "task"), bytes: 0 }])).toEqual([2]);
   });
 
   describe("lockForCommit", () => {
@@ -538,7 +573,7 @@ describe("ChangesetStore", () => {
 
     it("answers the changeset, or null when it is gone", async () => {
       const cs = await started();
-      await store.changesets().append(cs.id, write("create_entity", "task"), 0);
+      await store.changesets().append(cs.id, [{ write: write("create_entity", "task"), bytes: 0 }]);
       const locked = await store.transaction((bound) => bound.changesets().lockForCommit(cs.id));
       expect(locked).toMatchObject({ id: cs.id, version: 2, writeCount: 1 });
       expect(await store.transaction((bound) => bound.changesets().lockForCommit(randomUUID()))).toBeNull();
@@ -577,7 +612,7 @@ describe("ChangesetStore", () => {
 
     it("a row held by a mutation is a ConflictError too", async () => {
       const cs = await started();
-      const holder = await hold(store, (bound) => bound.changesets().append(cs.id, write("create_entity", "task"), 0));
+      const holder = await hold(store, (bound) => bound.changesets().append(cs.id, [{ write: write("create_entity", "task"), bytes: 0 }]));
       try {
         const promise = store.transaction((bound) => bound.changesets().lockForCommit(cs.id));
         expect(await settlesWithin(promise, 2_000)).toBe(true);

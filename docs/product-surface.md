@@ -364,11 +364,12 @@ every open tab follows a pin or a leave at once. While one is pinned:
 - **Every Workbench write is staged** into it instead of written — the entity page's
   edits, delete, unlinks and added relations, a target created on the way included,
   [quick add](#quick-add) with its parent relation, and a table's bulk delete — except the
-  Explorer canvas's ([Working set](#working-set)). Each answers with a toast naming its seq
-  and linking to the review; live views stay as they are.
+  Explorer canvas's ([Working set](#working-set)). Each answers with a toast naming its seq,
+  a bulk delete with one for all, linking to the review; live views stay as they are.
 - **A staged create** on the review of a draft offers "Edit values…" — the entity form
   with its staged values, staging an update of what changed — and "Add ‹child type›…" per
-  parent relation its type is the parent end of, opening quick add under it. While the
+  parent relation its type is the parent end of, naming the relation where two reach the
+  same child type, opening quick add under it. While the
   changeset is not the pinned one, the row says to work in it to extend it.
 - **A pinned changeset that is gone** is left, with a message that writes are live again.
 

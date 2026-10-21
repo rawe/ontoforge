@@ -603,7 +603,8 @@ the values as one object, and `parentRelation` the immediate create's.
 
 `limit` of the changeset read is 1–500, default 100; the staged document read pages and
 answers as the document read does. The staged entity read answers
-`{entity, deleted, writes}`: `entity` as the entity read answers it, `writes` unpaged, as
+`{entity, deleted, writes}`: `entity` as the entity read answers it, without timestamps
+for an entity the changeset creates, `writes` unpaged, as
 the changeset read shows them. Start, submit and unsubmit answer the changeset; commit
 answers `{committed, alreadyGone}`, the number of writes and the seqs of deletes whose
 target was already gone. Every unknown changeset — committed, discarded, expired, never

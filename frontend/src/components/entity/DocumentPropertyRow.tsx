@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { isDocumentStub } from '@/lib/documents'
+import { pinnedChangeset } from '@/lib/pinnedChangeset'
 
 interface DocumentPropertyRowProps {
   ontologyKey: string
@@ -109,6 +110,12 @@ export function DocumentPropertyRow({
     const value = draft.trim() === '' ? null : draft
     if (value === null && property.required) {
       setError('Required — cannot be cleared')
+      return
+    }
+    // Pinned: an unchanged value would stage an empty update row, so it just closes.
+    const stored = hasValue ? (docQuery.data?.content ?? null) : null
+    if (value === stored && pinnedChangeset(ontologyKey, lensKey) !== null) {
+      setEditOpen(false)
       return
     }
     mutation.mutate(value)

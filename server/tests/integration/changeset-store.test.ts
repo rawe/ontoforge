@@ -665,6 +665,62 @@ describe("ChangesetStore", () => {
   });
 });
 
+describe("RulesetStore", () => {
+  const P1 = () => ({ type: "project", id: ids.P1 });
+
+  beforeEach(async () => {
+    await sql(`DELETE FROM ruleset`);
+  });
+
+  it("save with an empty patch creates an empty ruleset: no anchor, write access full", async () => {
+    expect(await store.rulesets().save("agent-a", {})).toEqual({
+      key: "agent-a",
+      anchor: null,
+      anchorFound: false,
+      writeAccess: "full",
+    });
+    expect(await store.rulesets().get("agent-a")).toEqual({ key: "agent-a", anchor: null, anchorFound: false, writeAccess: "full" });
+  });
+
+  it("a patch naming write access keeps the anchor", async () => {
+    await store.rulesets().save("agent-a", { anchor: P1() });
+    expect(await store.rulesets().save("agent-a", { writeAccess: "propose" })).toEqual({
+      key: "agent-a",
+      anchor: P1(),
+      anchorFound: true,
+      writeAccess: "propose",
+    });
+  });
+
+  it("a null anchor removes it and keeps write access", async () => {
+    await store.rulesets().save("agent-a", { anchor: P1(), writeAccess: "none" });
+    expect(await store.rulesets().save("agent-a", { anchor: null })).toEqual({
+      key: "agent-a",
+      anchor: null,
+      anchorFound: false,
+      writeAccess: "none",
+    });
+  });
+
+  it("a patch naming the anchor keeps write access; an empty patch keeps both", async () => {
+    await store.rulesets().save("agent-a", { writeAccess: "propose" });
+    expect(await store.rulesets().save("agent-a", { anchor: P1() })).toMatchObject({ anchor: P1(), writeAccess: "propose" });
+    expect(await store.rulesets().save("agent-a", {})).toMatchObject({ anchor: P1(), writeAccess: "propose" });
+  });
+
+  it("a new ruleset takes the rules the patch names", async () => {
+    expect(await store.rulesets().save("agent-b", { anchor: P1(), writeAccess: "none" })).toEqual({
+      key: "agent-b",
+      anchor: P1(),
+      anchorFound: true,
+      writeAccess: "none",
+    });
+    expect((await store.rulesets().list()).map((r) => r.key)).toEqual(["agent-b"]);
+    expect(await store.rulesets().delete("agent-b")).toBe(true);
+    expect(await store.rulesets().delete("agent-b")).toBe(false);
+  });
+});
+
 describe("neutral reads", () => {
   it("parentsOf: the parent relations of the given children, at either end", async () => {
     const links = await store.parentsOf([ids.T1a, ids.M1, ids.Ben, ids.P1, "not-a-uuid"], READINGS);

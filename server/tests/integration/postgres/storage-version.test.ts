@@ -704,6 +704,17 @@ describe("PostgreSQL storage version", () => {
     expect((await runQuery(`SELECT key, write_access FROM ont_older.ruleset`)).rows).toEqual([
       { key: "agent-a", write_access: "full" },
     ]);
+    // The NOT NULL constraints carry the ruleset table's names; no CHECK.
+    const constraints = await runQuery(
+      `SELECT conname, contype FROM pg_constraint WHERE conrelid = 'ont_older.ruleset'::regclass ORDER BY conname`,
+    );
+    expect(constraints.rows).toEqual([
+      { conname: "ruleset_created_at_not_null", contype: "n" },
+      { conname: "ruleset_key_not_null", contype: "n" },
+      { conname: "ruleset_pk", contype: "p" },
+      { conname: "ruleset_updated_at_not_null", contype: "n" },
+      { conname: "ruleset_write_access_not_null", contype: "n" },
+    ]);
     const empty = await runQuery(
       `SELECT (SELECT count(*)::int FROM ont_older.changeset) AS changesets,
               (SELECT count(*)::int FROM ont_older.changeset_write) AS writes`,

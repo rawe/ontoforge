@@ -6,8 +6,9 @@ import { toast } from 'sonner'
 import { useDisplayLabel, useRuntimeSchema } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
-import { createEntity, getPath } from '@/api/runtime'
+import { getPath } from '@/api/runtime'
 import type { JsonValue, SchemaProperty } from '@/api/types'
+import { useRuntimeWrites } from '@/api/writes'
 import { TypeChip } from '@/components/TypeChip'
 import { formatPath, splitParentErrors } from '@/components/entity/hierarchy'
 import { invalidateNeighborhood } from '@/components/entity/useNeighborCounts'
@@ -71,6 +72,7 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const schema = useRuntimeSchema(ontologyKey, lensKey)
+  const writes = useRuntimeWrites(ontologyKey, lensKey)
 
   const [open, setOpen] = useState(false)
   const [typeKey, setTypeKey] = useState<string | undefined>(undefined)
@@ -95,29 +97,33 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
       under: QuickAddParent | undefined
       relationValues: Record<string, JsonValue>
     }) =>
-      createEntity(
-        ontologyKey,
-        lensKey,
+      writes.createEntity(
         forType,
         values,
         under === undefined
           ? undefined
           : { type: under.relationTypeKey, parentId: under.id, properties: relationValues },
       ),
-    onSuccess: (entity, { forType, under }) => {
-      // Entity lists AND the per-type count queries share this key prefix.
-      void queryClient.invalidateQueries({
-        queryKey: qk.entities(ontologyKey, lensKey, forType),
-      })
-      if (under !== undefined) {
-        invalidateNeighborhood(queryClient, ontologyKey, lensKey, under.typeKey, under.id)
+    onSuccess: (outcome, { forType, under }) => {
+      if (outcome.kind === 'staged') {
+        // Staged: nothing live to show or view.
+        writes.toastStaged(outcome)
+      } else {
+        const entity = outcome.value
+        // Entity lists AND the per-type count queries share this key prefix.
+        void queryClient.invalidateQueries({
+          queryKey: qk.entities(ontologyKey, lensKey, forType),
+        })
+        if (under !== undefined) {
+          invalidateNeighborhood(queryClient, ontologyKey, lensKey, under.typeKey, under.id)
+        }
+        toast.success(`Created ${displayLabel(entity)}`, {
+          action: {
+            label: 'View',
+            onClick: () => navigate(`/o/${ontologyKey}/w/${lensKey}/e/${forType}/${entity._id}`),
+          },
+        })
       }
-      toast.success(`Created ${displayLabel(entity)}`, {
-        action: {
-          label: 'View',
-          onClick: () => navigate(`/o/${ontologyKey}/w/${lensKey}/e/${forType}/${entity._id}`),
-        },
-      })
       setDirty(false)
       if (createAnother) {
         setFormEpoch((n) => n + 1)

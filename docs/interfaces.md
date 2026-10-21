@@ -585,13 +585,20 @@ Semantics: [capabilities/changesets.md](capabilities/changesets.md).
 | POST | `/changesets` | Start a changeset, with an optional `note`; 201 | — |
 | GET | `/changesets` | List the changesets this URL reaches | — |
 | GET | `/changesets/{changesetId}` | Read a changeset with its staged writes by seq | `offset`, `limit` |
-| GET | `/changesets/{changesetId}/entities/{entityTypeKey}/{entityId}/documents/{propertyKey}` | Read the text a commit would leave in a document property, whole or by character range | `offset`, `limit` |
+| GET | `/changesets/{changesetId}/documents/{entityTypeKey}/{entityId}/{propertyKey}` | Read the text a commit would leave in a document property, whole or by character range | `offset`, `limit` |
 | DELETE | `/changesets/{changesetId}` | Discard a draft changeset; 204 | — |
+| POST | `/changesets/{changesetId}/writes` | Stage one write, its body discriminated by `operation`; 201 `{seq, id}`, and `relation: {seq, id}` for a create with a parent relation | — |
 | DELETE | `/changesets/{changesetId}/writes/{seq}` | Unstage one write; 204 | — |
 | POST | `/changesets/{changesetId}/submit` | Submit, with an optional `note` | — |
 | POST | `/changesets/{changesetId}/unsubmit` | Unsubmit, with a required `note` | — |
 | POST | `/changesets/{changesetId}/commit` | Commit, with an optional `expectedVersion` | — |
-| POST, PATCH, DELETE | `/changesets/{changesetId}/entities/…` · `/changesets/{changesetId}/relations/…` | Stage the entity or relation write of the same path and body; 202 `{seq, id}` | — |
+
+A staged write's `operation` is one of six, each with its keys and no other:
+`create_entity` `{type, properties?, parentRelation?}`, `update_entity`
+`{type, id, properties?}`, `delete_entity` `{type, id}`, `create_relation`
+`{type, fromEntityId, toEntityId, properties?}`, `update_relation` `{type, id, properties?}`
+and `delete_relation` `{type, id}`; `type` is the type key, `id` the target, `properties`
+the values as one object, and `parentRelation` the immediate create's.
 
 `limit` of the changeset read is 1–500, default 100; the staged document read pages and
 answers as the document read does. Start, submit and unsubmit answer the changeset; commit
@@ -1051,7 +1058,8 @@ Everything a client can do to instance data through one lens.
 
 `create_entity`, `update_entity`, `delete_entity`, `create_relation`, `update_relation`
 and `delete_relation` take an optional `changeset_id`: with it the write is staged into
-that changeset and answers `{seq, id}`. `edit_document` and `write_document` cannot stage:
+that changeset and answers `{seq, id}`, and a `create_entity` with `parent_relation`
+`{seq, id, relation: {seq, id}}`. `edit_document` and `write_document` cannot stage:
 given a `changeset_id`, they refuse with a validation error and write nothing. Every
 changeset tool but `start_changeset` and `list_changesets` takes `changeset_id`;
 `get_changeset` takes `offset` and `limit`, which it clamps into range, and
@@ -1088,7 +1096,7 @@ Reasonable things to look for that are absent everywhere — REST, MCP and the w
 |---|---|
 | Health or readiness endpoint | Nothing for an orchestrator to probe; liveness must be inferred from a real request |
 | Data-wipe endpoint | Instance data is removed one entity or relation at a time; deleting the whole ontology is the only bulk removal |
-| Bulk or batch write | Every create and update is a single object, except a create with a parent relation, which writes one entity and its one relation, on every mount; a changeset stages one object per call and commits them together; import covers the design, not data |
+| Bulk or batch write | Every create and update is a single object, except a create with a parent relation, which writes one entity and its one relation, on every mount; a changeset stages writes call by call and commits them together; import covers the design, not data |
 | Instance-data export | Transfer moves the design only; data leaves through queries or listing |
 | Single-property read on modeling | List the owning type's properties |
 | Cross-lens read | No route or tool sees two lenses at once |

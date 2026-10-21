@@ -9,7 +9,7 @@ is reachable, the property definitions decide what is valid. Nothing is written 
 One entity or one relation per call, with one exception: a
 [create with a parent relation](#the-create-with-a-parent-relation) writes one entity and
 one relation together, on every mount. There is no batch write and no transaction spanning
-calls: a [changeset](changesets.md) stages one write per call, and its commit persists
+calls: a [changeset](changesets.md) stages writes call by call, and its commit persists
 all of them or none.
 
 Reads come in four shapes: one instance by id, a filtered and paginated list of one type,

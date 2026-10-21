@@ -321,12 +321,11 @@ makes.
   operation, the version and the times, and the note. Below, the writes by seq, a page of
   100 at a time: the operation, the type, the target by name — "(new)" for a create,
   `from → to` for a relation, a short id when the lens shows no name — and the change:
-  `key: before → after` for an update, with the current value on drift, the values and
-  the parent for a create. A marker chip with its message tints the row. A write the lens
-  no longer shows says so; a document value shows its length, and a View action opens the
-  staged text, as a commit would leave it, in the
-  [document viewer](#document-viewer-and-editor) — absent when a later write on the page
-  deletes the entity.
+  `key: before → after` for an update, with the current value on drift, the values for a
+  create. A marker chip with its message tints the row. A write the lens no longer shows
+  says so; a document value shows its length, and a View action opens the staged text, as
+  a commit would leave it, in the [document viewer](#document-viewer-and-editor) — absent
+  when a later write on the page deletes the entity.
 - **Commit**, behind a confirmation naming the number of writes, sends the version on the
   screen. When the changeset changed since, it says so and reloads the review; any other
   conflict shows its message and reloads too. A rejected commit lists its violations in a

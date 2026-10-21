@@ -12,7 +12,7 @@ Vocabulary: [../README.md](../README.md#changesets). The writes it stages:
 
 A changeset is started through a runtime mount, and each later call stages one write into
 it instead of writing: nothing changes yet, and the call answers the staged write's seq and
-the id it names. Staging holds nothing between calls; each call appends one staged write.
+the id it names. Staging holds nothing between calls; each call appends to the journal.
 The commit replays every staged write by seq in one database transaction, validates the
 end state, and persists all of it or nothing.
 
@@ -39,15 +39,15 @@ changeset had before, so it is never reused, and seqs may skip numbers.
 
 ## Staging
 
-Six writes can be staged, with the paths, bodies and arguments of their immediate
-counterparts: create, update and delete of an entity, and of a relation. A create may carry
-its [parent relation](instance-data.md#the-create-with-a-parent-relation).
+Six writes can be staged, with the values of their immediate counterparts: create, update
+and delete of an entity, and of a relation. A create may carry its
+[parent relation](instance-data.md#the-create-with-a-parent-relation): **it is staged as
+two writes**, the entity's create and then its parent relation's, by consecutive seqs; the
+relation is a staged relation like any other.
 
 - **Ids are final.** A staged create gets its id at staging, and it keeps it when
   committed. Later writes of the same changeset may name it: an update or delete of the
-  created entity, a relation to it, a create beneath it. The parent relation a staged
-  create carries gets its own id too, but no later staged write can name it; unstage and
-  restage the create instead.
+  created entity, a relation to it, a create beneath it.
 - **Document values only whole.** A document property is staged as a whole new value,
   through a create or an update. [Partial document writes](documents.md#partial-writes)
   cannot be staged.
@@ -59,7 +59,7 @@ its [parent relation](instance-data.md#the-create-with-a-parent-relation).
   through the lens, the property values exactly as the immediate write does — every fault
   collected, with the same field errors — and that the target of an update or delete
   exists, stored or created by a staged create of this changeset.
-- **What waits for the commit:** relation ends, the parent of a create, the
+- **What waits for the commit:** relation ends, the
   [parent rules](instance-data.md#the-parent-rules), leaf-only deletes and the hold of an
   anchor. Defaults are applied at the commit, from the full schema as it is then.
 
@@ -96,13 +96,13 @@ total.
 
 | Kind | When |
 |---|---|
-| `not_visible` | The write's type, a property it sets, or its parent relation is no longer visible through the lens |
+| `not_visible` | The write's type or a property it sets is no longer visible through the lens |
 | `replay` | A value the lens no longer accepts, or a write that could not be replayed |
 | `missing` | The stored target of an update is gone |
 | `dangling` | An id the write names is neither stored nor created by a staged write still in the changeset |
 | `drift` | The current values of an update's patched keys differ from its before |
 | `has_children` | A deleted entity still has children that the changeset neither deleted nor moved |
-| `endpoint_type` | A relation end or a parent exists with the wrong entity type |
+| `endpoint_type` | A relation end exists with the wrong entity type |
 | `two_parents`, `cycle` | A parent link the changeset creates breaks the [parent rules](instance-data.md#the-parent-rules) |
 | `not_covered` | On an anchored changeset, an entity outside the [anchored subtree](anchors.md#the-anchors-hierarchy), before or after the commit, or a delete of an anchored entity |
 | `anchor_gone`, `anchor_dangling` | The changeset's anchor was deleted, is dangling, or points at an entity the lens hides; seq 0, the whole changeset |
@@ -172,8 +172,8 @@ discarded, so one that vanished was committed — or its lens was deleted.
   counts per operation, and the type keys it names that the lens shows, with a count of
   the others;
 - **the writes by seq**, paged, each with the names of what it touches, an update's
-  before, current and after values of the keys it sends, a create's values and its parent
-  with the parent relation's values, and the lock-free pass's faults on it as markers:
+  before, current and after values of the keys it sends, a create's values, and the
+  lock-free pass's faults on it as markers:
   `drift`, `dangling`, `missing`, `not_visible`, `replay`;
 - **the staged text of a document property**: the text a commit would leave, from the
   last staged write of the changeset that sets it — a create or an update, of an entity
@@ -235,7 +235,7 @@ connection for its whole run, and every row it touches waits as long.
 | | REST | MCP | Web UI |
 |---|---|---|---|
 | Start, list, read, unstage, submit, unsubmit, commit, discard | routes under `changesets` of a runtime mount | nine changeset tools | the Workbench's Changesets page: list, review with the staged text of a document, unstage, unsubmit, commit, discard |
-| Stage | the write routes under one changeset | the six write tools with `changeset_id` | — |
+| Stage | `writes` of one changeset | the six write tools with `changeset_id` | — |
 | Staged-only | the anchor's maintenance | a staged-only anchored mount | the switch on the Workbench's Anchors page |
 
 Routes and tools: [../interfaces.md](../interfaces.md#changesets). An MCP mount keeps no

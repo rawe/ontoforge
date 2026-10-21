@@ -327,9 +327,8 @@ and what it refuses is in
 
 ## Changeset commits
 
-A [changeset](capabilities/changesets.md) is staged one write per call, each call
-appending one staged write and holding nothing afterwards; only its commit is
-transactional.
+A [changeset](capabilities/changesets.md) is staged call by call, each call appending
+to its journal and holding nothing afterwards; only its commit is transactional.
 
 **Where the rules run.** Every rule of a commit runs in the service, as for an immediate
 write: the lock-free pass before anything is locked, then commit validation over the end

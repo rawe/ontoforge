@@ -155,7 +155,7 @@ Sequential UI flows — each step builds on the previous:
 11. **Create lens** — Studio → Lenses, create, detail page loads
 12. **Workbench entry** — open the lens from the start page card or the lens detail, create an entity through the schema-driven form
 13. **Schema export** — trigger, verify download
-14. **Start page cards** — card shows display name + key, lens links, Open Studio; Rename changes the display name only; both switchers' "Manage…" lead to `/`
+14. **Start page cards** — card shows display name + key, lens links, Open Studio; Rename changes the display name only; the ontology switcher's "Manage…" leads to `/`, the lens switcher's "Manage lenses…" to the Studio's lens list
 15. **Second ontology isolation** — create a second ontology with the same type and lens keys; switch between them with the ontology switcher; verify disjoint data and per-ontology client state
 16. **Delete flows** — delete property, delete types, delete lens; delete an ontology behind its confirmation, verify it is gone and the other survives
 17. **Error handling** — backend down, 409 conflicts, validation errors, unknown lens address shows the not-found state

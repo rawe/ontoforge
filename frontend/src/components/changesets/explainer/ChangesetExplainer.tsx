@@ -18,17 +18,6 @@ const FACTS = [
   { label: 'A draft', value: 'expires after 7 days unchanged' },
 ]
 
-function useReducedMotion() {
-  const [reduced, setReduced] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-  useEffect(() => {
-    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const change = () => setReduced(query.matches)
-    query.addEventListener('change', change)
-    return () => query.removeEventListener('change', change)
-  }, [])
-  return reduced
-}
-
 const microLabel = 'text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'
 
 /**
@@ -69,7 +58,6 @@ function ChangesetExplainerDialog() {
 function ChangesetExplainerPanel() {
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
-  const motion = !useReducedMotion()
   const step = STORY[index]
   const previous = index > 0 ? STORY[index - 1] : null
   const last = STORY.length - 1
@@ -91,8 +79,8 @@ function ChangesetExplainerPanel() {
   const logRef = useRef<HTMLOListElement>(null)
   useEffect(() => {
     const list = logRef.current
-    if (list) list.scrollTo({ top: list.scrollHeight, behavior: motion ? 'smooth' : 'auto' })
-  }, [index, motion])
+    if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
+  }, [index])
 
   const shown = EXAMPLE.writes.filter((write) => step.writes.includes(write.seq) || step.unstaged?.includes(write.seq))
   const newNote = previous === null || previous.note !== step.note
@@ -123,7 +111,7 @@ function ChangesetExplainerPanel() {
             <li>* not through a staged-only anchor</li>
           </ul>
         </div>
-        <ChangesetExplainerFlow current={step.node} passed={passedNodes(index)} lit={step.edges} motion={motion} onSelect={go} />
+        <ChangesetExplainerFlow current={step.node} passed={passedNodes(index)} lit={step.edges} onSelect={go} />
       </section>
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">

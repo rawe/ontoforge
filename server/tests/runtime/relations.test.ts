@@ -80,9 +80,9 @@ describe("create relation", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it("endpoint type mismatch is checked against the FULL schema through a narrow lens", async () => {
-    // hr_view does not expose 'department' at all, yet the endpoint check
-    // names the full schema's declared source type in its error.
+  it("endpoint type mismatch is checked against the FULL schema through a narrow lens, and names no hidden type", async () => {
+    // hr_view does not expose 'department' at all: the endpoint check
+    // refuses the end without naming its actual type.
     holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.getEntityById
       .mockResolvedValueOnce(makeEntity({ name: "R&D" }, "department", "ent-9"))
@@ -98,8 +98,9 @@ describe("create relation", () => {
     const body = res.json();
     expect(body.error.code).toBe("VALIDATION_ERROR");
     expect(body.error.details.fields.fromEntityId).toBe(
-      "Source entity type mismatch: expected 'person', got 'department'",
+      "The source end does not have the type relation type 'works_for' requires",
     );
+    expect(res.body).not.toContain("department");
     expect(holder.store.createRelation).not.toHaveBeenCalled();
   });
 
@@ -123,9 +124,7 @@ describe("create relation", () => {
     const fields = res.json().error.details.fields;
     expect(fields.bogus).toBe("Unknown property: not defined in type 'works_for'");
     expect(fields.fromEntityId).toBe("Source entity 'no-such-entity' not found");
-    expect(fields.toEntityId).toBe(
-      "Target entity type mismatch: expected 'company', got 'person'",
-    );
+    expect(fields.toEntityId).toBe("The target end does not have the type relation type 'works_for' requires");
     expect(holder.store.createRelation).not.toHaveBeenCalled();
   });
 

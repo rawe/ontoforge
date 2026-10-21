@@ -62,6 +62,12 @@ export function writesText(count: number): string {
   return `${count.toLocaleString('en-US')} ${count === 1 ? 'write' : 'writes'}`
 }
 
+/** The lens-delete toast: "Lens deleted", "Lens deleted with 2 changesets". */
+export function lensDeletedText(changesetsDeleted: number): string {
+  if (changesetsDeleted === 0) return 'Lens deleted'
+  return `Lens deleted with ${changesetsDeleted} ${changesetsDeleted === 1 ? 'changeset' : 'changesets'}`
+}
+
 /**
  * A list row's types: at most two names, then "+N"; type keys the lens no
  * longer shows are only counted. "Project, Task, +1", "Task, 1 not visible".

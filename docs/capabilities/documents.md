@@ -32,7 +32,7 @@ are searchable by keyword only.
 property-definition rule — [schema-modeling.md](schema-modeling.md#data-types). One
 consequence beyond the schema: a saved query may not declare a `document` parameter either.
 
-**Values are text.** Anything supplied is coerced to a string, exactly as for `string`. The
+**Values are text.** A value is coerced to a string exactly as for `string`. The
 content is treated as Markdown by convention; nothing parses or validates it.
 
 **No size limit.** When embeddings are enabled, `string` values are subject to the storage

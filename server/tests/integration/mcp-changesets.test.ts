@@ -4,9 +4,10 @@
  * (`buildProjectHierarchy`, rebuilt fresh per group): the tool surface, a
  * whole round through the tools alone (start, stage, read, submit,
  * unsubmit, unstage, commit, discard) with the same answers and errors as
- * REST, a write without `changeset_id` staying immediate, and the anchored
- * mount's binding: a changeset carries its anchor, another anchor does not
- * reach it, and the commit holds it to the anchor. `edit_document` and
+ * REST, the byte cap among them, a write without `changeset_id` staying
+ * immediate, and the anchored mount's binding: a changeset carries its
+ * anchor, another anchor does not reach it, and the commit holds it to the
+ * anchor. `edit_document` and
  * `write_document` refuse a `changeset_id`, and REST has no document edit
  * route under a changeset.
  */
@@ -17,6 +18,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
+import { settings } from "../../src/config.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache, invalidateSearchContext } from "../../src/runtime/schemaCache.js";
 import { runtimePrefix } from "./fixture.js";
@@ -300,6 +302,25 @@ describe("the errors are REST's (R4)", () => {
     expect(await ok(client, "discard_changeset", { changeset_id: cs })).toEqual({ message: `Changeset '${cs}' discarded.` });
     expect(await refused(client, "discard_changeset", { changeset_id: cs })).toContain(`Changeset '${cs}' not found`);
     expect((await rest("GET", `${ALL}/changesets/${cs}`)).status).toBe(404);
+  });
+
+  it("a write past the byte cap is refused as over REST", async () => {
+    const cap = settings.CHANGESET_MAX_BYTES;
+    settings.CHANGESET_MAX_BYTES = 100;
+    try {
+      const client = await connect();
+      const cs = (await ok(client, "start_changeset")).id as string;
+      const name = "x".repeat(200);
+      const full = await rest("PATCH", `${ALL}/changesets/${cs}/entities/project/${e.P1}`, { name });
+      expect(full.status).toBe(409);
+      expect(
+        await refused(client, "update_entity", { entity_type_key: "project", entity_id: e.P1, properties: { name }, changeset_id: cs }),
+      ).toContain(full.body.error.message);
+      expect((await ok(client, "get_changeset", { changeset_id: cs })).writeCount).toBe(0);
+      await ok(client, "discard_changeset", { changeset_id: cs });
+    } finally {
+      settings.CHANGESET_MAX_BYTES = cap;
+    }
   });
 
   it("without changeset_id the write is immediate", async () => {

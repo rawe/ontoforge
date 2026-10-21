@@ -34,7 +34,7 @@ const ROUTES: Record<FlowEdgeId, { d: string; x: number; y: number; anchor?: 'st
  * with staged-only on, staged and submitted, then committed by a person. The client's lane
  * above, the person's below; the step's way lit, where it stops marked refused.
  */
-export function AnchorExplainerFlow({ step, motion }: { step: StoryStep; motion: boolean }) {
+export function AnchorExplainerFlow({ step }: { step: StoryStep }) {
   const id = useId()
   return <svg viewBox={`0 0 ${VIEW.width} ${VIEW.height}`} className="block h-auto w-full" role="img"
     aria-label="A client's write through an anchored URL: written at once through the hold, or, staged-only, staged and submitted, then reviewed and committed by a person">
@@ -59,7 +59,7 @@ export function AnchorExplainerFlow({ step, motion }: { step: StoryStep; motion:
         <path d={route.d} fill="none" strokeWidth={on ? 2 : 1.25} markerEnd={`url(#${id}-${on ? 'on' : 'off'})`}
           strokeDasharray={on ? '6 4' : undefined}
           className={cn('transition-[stroke] duration-500', on ? 'stroke-primary' : 'stroke-muted-foreground/45')}>
-          {on && motion && <animate attributeName="stroke-dashoffset" from="20" to="0" dur="0.9s" repeatCount="indefinite" />}
+          {on && <animate attributeName="stroke-dashoffset" from="20" to="0" dur="0.9s" repeatCount="indefinite" />}
         </path>
         {label && <text x={route.x} y={route.y} textAnchor={route.anchor ?? 'middle'}
           className={cn('text-[11px] transition-[fill] duration-500', on ? 'fill-primary font-medium' : 'fill-muted-foreground')}>{label}</text>}

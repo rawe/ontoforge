@@ -27,7 +27,7 @@ describe("null passes through untouched", () => {
   });
 });
 
-describe("string — accepts any JSON scalar, stringified; rejects nothing", () => {
+describe("string — accepts any JSON scalar, stringified", () => {
   it("passes strings through", () => {
     expect(coerceValue("hello", "string", "k")).toBe("hello");
   });
@@ -38,6 +38,14 @@ describe("string — accepts any JSON scalar, stringified; rejects nothing", () 
   it("stringifies booleans in JSON's spelling", () => {
     expect(coerceValue(true, "string", "k")).toBe("true");
     expect(coerceValue(false, "string", "k")).toBe("false");
+  });
+  it("rejects structured values, naming the JSON type", () => {
+    expect(rejects({ a: 1 }, "string")).toBe("Expected string for 'k', got object");
+    expect(rejects([1, 2], "string")).toBe("Expected string for 'k', got array");
+  });
+  it("keeps a string whose text is JSON untouched", () => {
+    expect(coerceValue('{"a":1}', "string", "k")).toBe('{"a":1}');
+    expect(coerceValue("[1,2]", "string", "k")).toBe("[1,2]");
   });
   it("rejects the NUL character — craftable input no adapter must be asked to store", () => {
     expect(rejects("a\u0000b", "string")).toBe(
@@ -52,6 +60,13 @@ describe("document — behaves as string at coercion time", () => {
   });
   it("stringifies numbers", () => {
     expect(coerceValue(42, "document", "k")).toBe("42");
+  });
+  it("rejects structured values, naming the JSON type", () => {
+    expect(rejects({ a: 1 }, "document")).toBe("Expected document for 'k', got object");
+    expect(rejects([1, 2], "document")).toBe("Expected document for 'k', got array");
+  });
+  it("keeps a string whose text is JSON untouched", () => {
+    expect(coerceValue('{"a":1}', "document", "k")).toBe('{"a":1}');
   });
   it("rejects the NUL character like string does", () => {
     expect(rejects("doc\u0000", "document")).toBe(

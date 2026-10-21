@@ -228,6 +228,11 @@ describe("lens round trip", () => {
     const again = await app.inject({ method: "DELETE", url: `/api/ontologies/test_ont/model/lenses/${opsId}` });
     expect(again.statusCode).toBe(404);
   });
+
+  it("a lens delete with a malformed id answers 404, like an unknown one", async () => {
+    const res = await app.inject({ method: "DELETE", url: "/api/ontologies/test_ont/model/lenses/not-a-uuid" });
+    expect(res.statusCode, res.body).toBe(404);
+  });
 });
 
 describe("inclusion lifecycle against real storage", () => {

@@ -21,8 +21,9 @@
  *   R10); the `prepare…` of the immediate write (`prepare.ts`: the type's
  *   404 and the same 422 field errors); the target of an update or delete
  *   (minted by a staged create still in the journal, or else read once:
- *   missing is the immediate write's 404); the cap (V25, R11). Relation
- *   ends and parent ends are not checked here.
+ *   missing is the immediate write's 404); the caps on writes and bytes
+ *   (V25, R11, `writeBytes`). Relation ends and parent ends are not
+ *   checked here.
  * - **Ids (V3).** A create mints its final id now, and with a parent
  *   relation the relation's id too; both are kept in the row.
  * - **Before (V10).** A staged update of a stored target records the
@@ -57,14 +58,15 @@
  *   V23); commit validation over the end state (V21); the journal
  *   deleted, COMMIT. Any failure rolls all of it back; a rejection (422,
  *   the violations by seq, V22) then refreshes the last change and keeps
- *   the version (R6). At most two commits run at once in one process
- *   (V26, R5).
+ *   the version (R6). One commit runs at a time in one process (V26,
+ *   R5).
  */
 
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
 import { CoercionError, assertNoNulCharacter } from "../core/dataTypes.js";
+import { settings } from "../config.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import type {
   ChangesetRecord,
@@ -91,7 +93,7 @@ import {
 } from "./prepare.js";
 import { documentPropertyKeys, stubDocumentProperties } from "./readHelpers.js";
 import { loadSchema, loadSearchContext, type LoadedSchema, type SearchContext } from "./schemaCache.js";
-import { documentSlice, parentReadings } from "./service.js";
+import { documentSlice, endpointTypeMessage, parentReadings, type EndRole } from "./service.js";
 
 type Row = Record<string, unknown>;
 
@@ -101,6 +103,14 @@ export const CHANGESET_IDLE_DAYS = 7;
 export const MAX_NOTE_LENGTH = 1000;
 /** The most staged writes one changeset holds (V25). */
 export const MAX_STAGED_WRITES = 10_000;
+
+/** The size a staged write counts toward the byte cap
+ * (`CHANGESET_MAX_BYTES`): the UTF-8 bytes of its arguments and its
+ * before as JSON, document text included. */
+export function writeBytes(write: NewChangesetWrite): number {
+  const before = write.before === null ? 0 : Buffer.byteLength(JSON.stringify(write.before));
+  return Buffer.byteLength(JSON.stringify(write.arguments)) + before;
+}
 
 const IDLE_MS = CHANGESET_IDLE_DAYS * 24 * 3_600_000;
 
@@ -522,9 +532,14 @@ export async function stage(
   if (changeset.writeCount >= MAX_STAGED_WRITES) {
     throw new ConflictError(`Changeset '${changesetId}' is full: at most ${MAX_STAGED_WRITES} staged writes`);
   }
+  const bytes = writeBytes(row);
+  const maxBytes = settings.CHANGESET_MAX_BYTES;
+  if ((await store.changesets().stagedBytes(changeset.id)) + bytes > maxBytes) {
+    throw new ConflictError(`Changeset '${changesetId}' is full: at most ${maxBytes} bytes of staged writes`);
+  }
   // The store appends to a draft changeset only: a submit since the read
   // is refused here.
-  const seq = await store.changesets().append(changeset.id, row);
+  const seq = await store.changesets().append(changeset.id, row, bytes);
   if (seq === null) throw (await refusalOf(loaded, anchorKey, changeset.id, store)) ?? notFound(changesetId);
   return { seq, id: (row.mintedId ?? row.targetId)! };
 }
@@ -768,7 +783,7 @@ export async function discardChangeset(
 // ---------------------------------------------------------------------------
 
 /** At most this many commits run at once in one process (V26, R5). */
-export const MAX_RUNNING_COMMITS = 2;
+export const MAX_RUNNING_COMMITS = 1;
 /** A rejection names at most this many violations (V21). */
 export const MAX_VIOLATIONS = 100;
 /** The journal is replayed in pages of this many writes. */
@@ -1586,7 +1601,7 @@ interface StagedLink {
  * relation type requires there. */
 interface StagedEnd {
   seq: number;
-  role: "The source end" | "The target end" | "The parent";
+  role: EndRole;
   id: string;
   type: string;
   relationType: string;
@@ -1681,7 +1696,7 @@ async function commitViolations(
       violations.push({
         seq: end.seq,
         kind: "endpoint_type",
-        message: `${end.role} does not have the type relation type '${end.relationType}' requires`,
+        message: endpointTypeMessage(end.role, end.relationType),
       });
     }
   }
@@ -1748,10 +1763,10 @@ function rejection(violations: Violation[]): ValidationError {
  * Commit a changeset: everything it stages, or nothing (D3). Through a
  * staged-only anchor's URL it is a 409, whatever the changeset (V9). With
  * `expectedVersion`, a changeset changed since (V40) is a 409. Another
- * commit on the ontology, a change running on the changeset, a third
- * commit in this process, or a row held past the lock timeout are 409s
- * too, with nothing persisted. A rejection is a 422 whose
- * `details.violations` name the seqs; the changeset stays as it was.
+ * commit on the ontology or in this process, a change running on the
+ * changeset, or a row held past the lock timeout are 409s too, with
+ * nothing persisted. A rejection is a 422 whose `details.violations` name
+ * the seqs; the changeset stays as it was.
  * Committed, the changeset is gone.
  */
 export async function commitChangeset(

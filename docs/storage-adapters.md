@@ -487,16 +487,16 @@ changeset's commit uses it.
 The changeset store holds an ontology's [changesets](capabilities/changesets.md): per
 changeset its id, its lens, the anchor key of the URL that started it or none, a version, a
 note, the time it was submitted or none, and timestamps; per staged write its seq, the
-operation, its arguments, the id a create minted, the type key, the target id and an
-update's before, all kept as given. The store evaluates no rule — the service does —
-except the state a write needs, which it judges in the statement that writes, so a submit
-racing a change is never overwritten.
+operation, its arguments, the id a create minted, the type key, the target id, an
+update's before and its size in bytes, all kept as given. The store evaluates no rule —
+the service does — except the state a write needs, which it judges in the statement that
+writes, so a submit racing a change is never overwritten.
 
 - **Reads.** Start; read one through its binding — a changeset of another lens, or bound
   to another anchor, is absent, and no anchor key reaches every changeset of the lens;
   list them bound the same way, submitted first, then by last change, newest first, with
   their counts per operation and the type keys they name; their staged writes by seq,
-  paged; the staged create that minted a given id.
+  paged; the staged create that minted a given id; the summed size of its staged writes.
 - **Changes.** Append a staged write to a draft changeset, with a seq higher than every
   earlier one; unstage one by seq from a draft changeset; submit, a compare-and-set on the
   version of a draft changeset, setting the submitted time and the note; unsubmit a
@@ -826,8 +826,9 @@ Two tables per namespace. `changeset` holds one row per changeset, its `lens_id`
 key to `lens` with delete cascade, its `anchor_key` plain text with no foreign key, so an
 anchor delete leaves the row; `submitted_at` is null for a draft. `changeset_write` holds
 one row per staged write under the primary key `(changeset_id, seq)`, its changeset a
-foreign key with delete cascade; `arguments` and `before` are `jsonb`. Two B-tree indexes
-serve them: changesets by lens, and staged writes by changeset and minted id.
+foreign key with delete cascade; `arguments` and `before` are `jsonb`, the size `bytes` an
+`integer`. Two B-tree indexes serve them: changesets by lens, and staged writes by
+changeset and minted id.
 
 Every change takes the changeset row `FOR UPDATE NOWAIT`, and states its state condition —
 `submitted_at IS NULL`, or not null for unsubmit — in the same statement; touch and sweep

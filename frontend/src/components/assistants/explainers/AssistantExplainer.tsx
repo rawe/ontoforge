@@ -20,17 +20,6 @@ const LOG_ICONS: Record<LogEntry['tag'], LucideIcon> = {
   model: Sparkles, tool: Wrench, search: Search, filter: Funnel, walk: Waypoints, rank: ListOrdered, keep: Layers, answer: MessageSquareText,
 }
 
-function useReducedMotion() {
-  const [reduced, setReduced] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-  useEffect(() => {
-    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const change = () => setReduced(query.matches)
-    query.addEventListener('change', change)
-    return () => query.removeEventListener('change', change)
-  }, [])
-  return reduced
-}
-
 const article = (word: string) => (/^[aeiou]/i.test(word) ? 'an' : 'a')
 const microLabel = 'text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'
 
@@ -75,7 +64,6 @@ function AssistantExplainerPanel({ initialKind }: { initialKind: AssistantKind }
   const [kind, setKind] = useState(initialKind)
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
-  const motion = !useReducedMotion()
   const explainer = EXPLAINERS[kind]
   const story = explainer.story
   const step = story[index]
@@ -101,8 +89,8 @@ function AssistantExplainerPanel({ initialKind }: { initialKind: AssistantKind }
   const logRef = useRef<HTMLOListElement>(null)
   useEffect(() => {
     const list = logRef.current
-    if (list) list.scrollTo({ top: list.scrollHeight, behavior: motion ? 'smooth' : 'auto' })
-  }, [kind, index, motion])
+    if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
+  }, [kind, index])
 
   return <div className="flex min-h-0 flex-col" onKeyDown={onKeyDown}>
     <header className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b px-6 pt-5 pb-4 pr-14">
@@ -141,7 +129,7 @@ function AssistantExplainerPanel({ initialKind }: { initialKind: AssistantKind }
           </ul>
         </div>
         <AssistantExplainerFlow explainer={explainer} current={step.node} passed={passedNodes(explainer, index)} lit={litEdges(explainer, index)}
-          motion={motion} onSelect={(node) => go(story.findIndex((s) => s.node === node))} />
+          onSelect={(node) => go(story.findIndex((s) => s.node === node))} />
       </section>
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
@@ -153,7 +141,7 @@ function AssistantExplainerPanel({ initialKind }: { initialKind: AssistantKind }
           <p className="flex items-center gap-2 self-start rounded-lg bg-muted px-3 py-2 text-[13px]">
             <MessageCircleQuestionMark className="size-4 shrink-0 text-muted-foreground" />{EXAMPLE.question}
           </p>
-          <AssistantExplainerGraph step={step} motion={motion} />
+          <AssistantExplainerGraph step={step} />
           <ul className="mt-auto flex flex-wrap gap-x-4 gap-y-1 border-t pt-3 text-[11px] text-muted-foreground">
             <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] bg-primary" />Starting point</li>
             <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-primary bg-primary/12" />Touched now</li>

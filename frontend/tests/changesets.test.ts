@@ -5,6 +5,7 @@ import {
   changeText,
   isCommittedDataKey,
   isVersionMismatch,
+  lensDeletedText,
   markerLabel,
   MAX_NOTE_LENGTH,
   operationLabel,
@@ -89,6 +90,12 @@ test('operation texts: the label, the summary by verb, the write count', () => {
   assert.equal(operationsSummary({}), '')
   assert.equal(writesText(1), '1 write')
   assert.equal(writesText(1240), '1,240 writes')
+})
+
+test('lensDeletedText names the deleted changesets only when there are any', () => {
+  assert.equal(lensDeletedText(0), 'Lens deleted')
+  assert.equal(lensDeletedText(1), 'Lens deleted with 1 changeset')
+  assert.equal(lensDeletedText(3), 'Lens deleted with 3 changesets')
 })
 
 test('typesText names two types, counts the rest, and the hidden ones', () => {

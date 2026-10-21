@@ -467,8 +467,8 @@ unscoped and therefore exposes everything.
 
 Inline-editable name and description, an immutable key, a scope marker, an entry into the
 Workbench for this lens (on the page matching the open tab, as the surface switch does), and deletion behind a confirmation stating that the lens, its
-scope, its agents, retrievers, navigators and saved queries go — while the schema and all
-instance data stay. Six tabs:
+scope, its agents, retrievers, navigators, saved queries and changesets, submitted ones
+included, go — while the schema and all instance data stay. Six tabs:
 
 **Scope** — the [scope editor](#scope-editor).
 

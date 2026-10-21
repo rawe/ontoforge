@@ -567,6 +567,7 @@ const STEPS: Step[] = [
   type_key     text        NOT NULL,
   target_id    uuid,
   before       jsonb,
+  bytes        integer     NOT NULL,
   created_at   timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT changeset_write_pk PRIMARY KEY (changeset_id, seq)
 )`,

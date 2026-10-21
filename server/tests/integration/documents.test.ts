@@ -106,6 +106,18 @@ async function readDocument(entityId: string, propertyKey: string, query = ""): 
   return res.json() as Row;
 }
 
+describe("JSON text in a document property", () => {
+  it("is stored and read back exactly as sent, object and array alike", async () => {
+    const objectText = '{\n  "title": "Plan",\n  "steps": [{"n": 1}, {"n": 2}]\n}';
+    const arrayText = '[{"a": 1}, "two", [3]]';
+    const entity = await createArticle({ title: "T", body: objectText, notes: arrayText });
+    const entityId = entity._id as string;
+
+    expect((await readDocument(entityId, "body")).content).toBe(objectText);
+    expect((await readDocument(entityId, "notes")).content).toBe(arrayText);
+  });
+});
+
 describe("slice reads", () => {
   it("pages a long document and reassembles it", async () => {
     const entity = await createArticle({ title: "T", body: BODY });

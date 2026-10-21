@@ -25,6 +25,8 @@ export interface Settings {
   SEARCH_WORKER_BATCH: number;
   SEARCH_POLL_MS: number;
 
+  CHANGESET_MAX_BYTES: number;
+
   AI_PROVIDER: string | null;
   AI_MODEL: string;
   AI_BASE_URL: string;
@@ -171,6 +173,9 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     SEARCH_MAX_ATTEMPTS: positiveInt(env, "SEARCH_MAX_ATTEMPTS", 5),
     SEARCH_WORKER_BATCH: positiveInt(env, "SEARCH_WORKER_BATCH", 64),
     SEARCH_POLL_MS: positiveInt(env, "SEARCH_POLL_MS", 5000),
+
+    // The most bytes one changeset's staged writes hold (`writeBytes`).
+    CHANGESET_MAX_BYTES: positiveInt(env, "CHANGESET_MAX_BYTES", 32 * 1024 * 1024),
 
     AI_PROVIDER: aiProvider,
     AI_MODEL: aiModel(env, aiProvider),

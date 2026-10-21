@@ -31,12 +31,11 @@ const ROUTES: Record<FlowEdgeId, { d: string; x: number; y: number }> = {
  * The changeset workflow: the client's lane above the states, the person's below, every
  * way between them named with who may take it — the current step ringed, its ways lit.
  */
-export function ChangesetExplainerFlow({ current, passed, lit, onSelect, motion }: {
+export function ChangesetExplainerFlow({ current, passed, lit, onSelect }: {
   current: FlowNodeId
   passed: Set<FlowNodeId>
   lit: FlowEdgeId[]
   onSelect: (index: number) => void
-  motion: boolean
 }) {
   const id = useId()
   const stepOf = (edge: FlowEdgeId) => STORY.findIndex((step) => step.edges.includes(edge))
@@ -64,7 +63,7 @@ export function ChangesetExplainerFlow({ current, passed, lit, onSelect, motion 
         <path d={route.d} fill="none" strokeWidth={on ? 2 : 1.25} markerEnd={`url(#${id}-${on ? 'on' : 'off'})`}
           strokeDasharray={on ? '6 4' : edge.id === 'expire' ? '3 3' : undefined}
           className={cn('transition-[stroke] duration-500', on ? 'stroke-primary' : 'stroke-muted-foreground/45')}>
-          {on && motion && <animate attributeName="stroke-dashoffset" from="20" to="0" dur="0.9s" repeatCount="indefinite" />}
+          {on && <animate attributeName="stroke-dashoffset" from="20" to="0" dur="0.9s" repeatCount="indefinite" />}
         </path>
         <text x={route.x} y={route.y} textAnchor="middle"
           className={cn('text-[12px] font-semibold transition-[fill] duration-500', on ? 'fill-primary' : 'fill-foreground/80')}>{edge.label}</text>

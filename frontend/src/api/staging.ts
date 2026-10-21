@@ -5,7 +5,13 @@
  * pinned changeset. No React, no I/O — unit-tested with `node --test`.
  */
 
-import type { JsonValue, ParentRelationInput, StagedAnswer, StageWritePayload } from './types.ts'
+import type {
+  EntityInstance,
+  JsonValue,
+  ParentRelationInput,
+  StagedAnswer,
+  StageWritePayload,
+} from './types.ts'
 
 /** A Workbench write with the arguments of its immediate call (flat values). */
 export type RuntimeWrite =
@@ -59,6 +65,15 @@ export function stagePayload(write: RuntimeWrite): StageWritePayload {
 
 export function stagedOutcome(changesetId: string, answer: StagedAnswer): StagedOutcome {
   return { kind: 'staged', changesetId, ...answer }
+}
+
+/**
+ * A display-only stand-in for an entity a changeset creates: the typed
+ * values under the minted id, so a flow can name it and link to it. Never
+ * put into a cache — reads do not see staged data.
+ */
+export function stagedEntity(type: string, id: string, properties: Record<string, JsonValue>): EntityInstance {
+  return { ...properties, _id: id, _entityTypeKey: type, _createdAt: '', _updatedAt: '' }
 }
 
 /**

@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { useDisplayLabel } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
-import * as runtime from '@/api/runtime'
+import { stagedEntity } from '@/api/staging'
 import type {
   EntityInstance,
   JsonValue,
@@ -13,6 +13,7 @@ import type {
   SchemaEntityType,
   SchemaRelationType,
 } from '@/api/types'
+import { useRuntimeWrites } from '@/api/writes'
 import { TypeChip } from '@/components/TypeChip'
 import { PropertyField } from '@/components/schema/PropertyField'
 import { coerceDrafts } from '@/components/schema/propertyDraft'
@@ -90,6 +91,7 @@ function AddRelationFlow({
 }: Omit<AddRelationDialogProps, 'open'>) {
   const displayLabel = useDisplayLabel()
   const queryClient = useQueryClient()
+  const writes = useRuntimeWrites(ontologyKey, lensKey)
   const myTypeKey = entity._entityTypeKey
 
   const options = useMemo<RelationChoice[]>(() => {
@@ -137,13 +139,20 @@ function AddRelationFlow({
     mutationFn: (vars: { target: EntityInstance; props: Record<string, JsonValue> }) => {
       const fromEntityId = choice!.direction === 'outgoing' ? entity._id : vars.target._id
       const toEntityId = choice!.direction === 'outgoing' ? vars.target._id : entity._id
-      return runtime.createRelation(ontologyKey, lensKey, choice!.relationType.key, {
+      return writes.createRelation(choice!.relationType.key, {
         fromEntityId,
         toEntityId,
         ...vars.props,
       })
     },
-    onSuccess: (created, vars) => {
+    onSuccess: (outcome, vars) => {
+      // Staged: no edge, no neighbourhood change.
+      if (outcome.kind === 'staged') {
+        writes.toastStaged(outcome)
+        onOpenChange(false)
+        return
+      }
+      const created = outcome.value
       onCreated?.(created, vars.target)
       invalidateNeighborhood(queryClient, ontologyKey, lensKey, myTypeKey, entity._id)
       invalidateNeighborhood(
@@ -184,9 +193,16 @@ function AddRelationFlow({
   })
 
   const createEntityMutation = useMutation({
-    mutationFn: (props: Record<string, JsonValue>) =>
-      runtime.createEntity(ontologyKey, lensKey, targetTypeKey!, props),
-    onSuccess: (created) => {
+    mutationFn: (props: Record<string, JsonValue>) => writes.createEntity(targetTypeKey!, props),
+    onSuccess: (outcome, props) => {
+      // Staged: continue to the relation with the minted id and the typed values.
+      if (outcome.kind === 'staged') {
+        writes.toastStaged(outcome)
+        setCreatingNew(false)
+        pickTarget(stagedEntity(targetTypeKey!, outcome.id, props))
+        return
+      }
+      const created = outcome.value
       void queryClient.invalidateQueries({
         queryKey: qk.entities(ontologyKey, lensKey, created._entityTypeKey),
       })

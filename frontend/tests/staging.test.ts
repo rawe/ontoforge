@@ -5,6 +5,7 @@ import {
   documentWrite,
   isChangesetGone,
   LEFT_CHANGESET_TEXT,
+  stagedEntity,
   stagedOutcome,
   stageIntoPinned,
   stagePayload,
@@ -65,6 +66,16 @@ test('stagedOutcome names the changeset beside the answer', () => {
     seq: 7,
     id: 'e-1',
     relation: { seq: 8, id: 'r-1' },
+  })
+})
+
+test('stagedEntity puts the typed values under the minted id and type', () => {
+  assert.deepEqual(stagedEntity('task', 'm-1', { name: 'T1', _id: 'x' }), {
+    name: 'T1',
+    _id: 'm-1',
+    _entityTypeKey: 'task',
+    _createdAt: '',
+    _updatedAt: '',
   })
 })
 

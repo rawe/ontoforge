@@ -108,7 +108,8 @@ function Disabled({ reason, children }: { reason: string; children: ReactNode })
  * required one, move it between draft and submitted; Discard and Unstage
  * work only on a draft. A draft can be pinned ("Work in this changeset"),
  * so the Workbench's writes stage into it; while it is, an entity it creates
- * offers "Edit values…" and "Add child…" on its row, both staged here.
+ * offers "Edit values…" and an add-child button per parent relation on its
+ * row, both staged here.
  */
 export function ChangesetDetailPage() {
   const { ontologyKey, lensKey, changesetId } = useParams<{

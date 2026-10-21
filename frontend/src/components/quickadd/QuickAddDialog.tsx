@@ -68,7 +68,7 @@ function isEditableTarget(e: KeyboardEvent): boolean {
  * step 2 is the schema-driven EntityForm. With a fixed parent ("+ Task under
  * P1") it shows an "Under" row and the parent relation's own properties, and
  * sends one create with `parentRelation`. A parent only a changeset creates
- * ("Add child…" on its review row) takes a child only while that changeset is
+ * (an add-child button on its review row) takes a child only while that changeset is
  * pinned: the child is staged there.
  */
 export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {

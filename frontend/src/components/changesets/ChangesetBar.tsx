@@ -4,36 +4,43 @@ import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useChangesets } from '@/api/hooks'
 import { CHANGESET_GONE_TEXT } from '@/api/writes'
-import { changesetLabel, pinnedInList, writesText } from '@/components/changesets/changesets'
+import { changesetLabel, writesText } from '@/components/changesets/changesets'
 import { Button } from '@/components/ui/button'
-import { pinnedChangedAt, pinnedChangeset, unpinChangeset, usePinnedChangeset } from '@/lib/pinnedChangeset'
+import { pinnedChangeset, unpinChangeset, usePinnedChangeset } from '@/lib/pinnedChangeset'
 
 /**
  * The strip above every Workbench page while a changeset is pinned: which
- * one, its writes, Review and Leave. A pinned changeset the list no longer
- * shows is gone: it is unpinned with a toast.
+ * one, its writes, Review and Leave. A pinned changeset the list does not
+ * show is read again; still missing from that read, it is gone: unpinned
+ * with a toast.
  */
 export function ChangesetBar({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
   const pinned = usePinnedChangeset(ontologyKey, lensKey)
   // The Sidebar reads the same list under the same key.
   const list = useChangesets(ontologyKey, pinned === null ? undefined : lensKey)
-  const found =
-    pinned === null || list.data === undefined
-      ? undefined
-      : pinnedInList(pinned, list.data, list.dataUpdatedAt, pinnedChangedAt(ontologyKey, lensKey))
-  const { refetch } = list
+  const item = list.data?.find((candidate) => candidate.id === pinned)
+  const missing = pinned !== null && list.data !== undefined && item === undefined
+  const { refetch, dataUpdatedAt: listReadAt } = list
 
   useEffect(() => {
-    if (found === 'stale') void refetch()
-    // Only while it is still the pinned one: another tab may have moved on.
-    else if (found === 'gone' && pinnedChangeset(ontologyKey, lensKey) === pinned) {
-      unpinChangeset(ontologyKey, lensKey)
-      toast.warning(CHANGESET_GONE_TEXT)
-    }
-  }, [found, pinned, ontologyKey, lensKey, refetch])
+    if (!missing) return
+    // The list shown may have been read before the pin (here or in another
+    // tab); refetch cancels a read in flight, so this one starts after it.
+    // Judged only on a read that landed: a cancelled or failed one answers
+    // the old list (a read landing later runs this again).
+    const startedAt = Date.now()
+    void refetch().then(({ data, dataUpdatedAt }) => {
+      if (data === undefined || dataUpdatedAt < startedAt) return
+      const listed = data.some((candidate) => candidate.id === pinned)
+      // Only while it is still the pinned one: another tab may have moved on.
+      if (!listed && pinnedChangeset(ontologyKey, lensKey) === pinned) {
+        unpinChangeset(ontologyKey, lensKey)
+        toast.warning(CHANGESET_GONE_TEXT)
+      }
+    })
+  }, [missing, listReadAt, pinned, ontologyKey, lensKey, refetch])
 
   if (pinned === null) return null
-  const item = typeof found === 'object' ? found : undefined
 
   return (
     <div

@@ -10,18 +10,14 @@ import { useCallback, useSyncExternalStore } from 'react'
 import { readString, remove, storageKeys, writeString } from '@/lib/storage'
 
 const listeners = new Set<() => void>()
-/** When this tab last saw each key's pin change: a list read older than that may not show it yet. */
-const changedAt = new Map<string, number>()
 
-function changed(key: string) {
-  changedAt.set(key, Date.now())
+function changed() {
   listeners.forEach((l) => l())
 }
 
 // Another tab pinned or left (key null: storage was cleared).
 function onStorage(e: StorageEvent) {
-  if (e.key === null) listeners.forEach((l) => l())
-  else if (e.key.startsWith('of.changeset.')) changed(e.key)
+  if (e.key === null || e.key.startsWith('of.changeset.')) changed()
 }
 
 function subscribe(listener: () => void) {
@@ -38,23 +34,16 @@ export function pinnedChangeset(ontologyKey: string, lensKey: string): string | 
   return readString(storageKeys.changeset(ontologyKey, lensKey))
 }
 
-/** When this tab last saw the lens's pin change (0: not since it loaded). */
-export function pinnedChangedAt(ontologyKey: string, lensKey: string): number {
-  return changedAt.get(storageKeys.changeset(ontologyKey, lensKey)) ?? 0
-}
-
 /** Pins a changeset; one pinned before is simply replaced. */
 export function pinChangeset(ontologyKey: string, lensKey: string, changesetId: string): void {
-  const key = storageKeys.changeset(ontologyKey, lensKey)
-  writeString(key, changesetId)
-  changed(key)
+  writeString(storageKeys.changeset(ontologyKey, lensKey), changesetId)
+  changed()
 }
 
 /** Leaves the pinned changeset: writes are live again. */
 export function unpinChangeset(ontologyKey: string, lensKey: string): void {
-  const key = storageKeys.changeset(ontologyKey, lensKey)
-  remove(key)
-  changed(key)
+  remove(storageKeys.changeset(ontologyKey, lensKey))
+  changed()
 }
 
 export function usePinnedChangeset(ontologyKey: string, lensKey: string): string | null {

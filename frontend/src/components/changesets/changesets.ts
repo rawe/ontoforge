@@ -1,9 +1,9 @@
 /**
  * Pure helpers for the Workbench's Changesets page: the list order and the
  * sidebar count, what a list row and a staged write's row say, the
- * violations of a rejected commit and the note built from them, and what
- * the bar knows of the pinned changeset. No React, no I/O — unit-tested
- * with `node --test`.
+ * violations of a rejected commit and the note built from them, and how
+ * the bar names the pinned changeset. No React, no I/O — unit-tested with
+ * `node --test`.
  */
 
 import type {
@@ -92,22 +92,6 @@ export function shortId(id: string): string {
 /** A changeset named in a sentence: its note, else its short id. */
 export function changesetLabel(changeset: { id: string; note: string | null }): string {
   return changeset.note ?? shortId(changeset.id)
-}
-
-/**
- * The pinned changeset in the lens's list: its item, "stale" when the list
- * was read before this tab saw the pin (read it again), or "gone" when a
- * newer list lacks it (committed, discarded or expired).
- */
-export function pinnedInList(
-  changesetId: string,
-  items: readonly ChangesetListItem[],
-  listReadAt: number,
-  pinnedAt: number,
-): ChangesetListItem | 'stale' | 'gone' {
-  const item = items.find((candidate) => candidate.id === changesetId)
-  if (item !== undefined) return item
-  return listReadAt < pinnedAt ? 'stale' : 'gone'
 }
 
 /** Whether a review value is a document stub `{document: true, length}`. */

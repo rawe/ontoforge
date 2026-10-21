@@ -207,14 +207,14 @@ describe("submit", () => {
     store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "company", id: ACME }, false));
     // Through the plain lens URL too: the stored anchor counts.
     await expect(submitChangeset("full_lens", null, CS, "n", on())).rejects.toThrow(
-      new ConflictError("Anchor 'agent-a' is dangling"),
+      new ConflictError("The anchor of ruleset 'agent-a' no longer exists"),
     );
 
     invalidateLoadedSchemaCache();
     store.getFullSchemaWithLensInclusions.mockResolvedValue(schema(true));
     store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "department", id: DEPT }));
     await expect(submitChangeset("hr_view", "agent-a", CS, "n", on())).rejects.toThrow(
-      new ConflictError("Anchor 'agent-a' points at an entity that lens 'hr_view' does not show"),
+      new ConflictError("The anchor of ruleset 'agent-a' is an entity that lens 'hr_view' does not show"),
     );
     expect(store.changesetStore.submit).not.toHaveBeenCalled();
   });
@@ -393,7 +393,7 @@ describe("list", () => {
   });
 
   it("an unknown anchor is not found", async () => {
-    await expect(listChangesets("full_lens", "nope", on())).rejects.toThrow(new NotFoundError("Anchor 'nope' not found"));
+    await expect(listChangesets("full_lens", "nope", on())).rejects.toThrow(new NotFoundError("Ruleset 'nope' not found"));
     expect(store.changesetStore.list).not.toHaveBeenCalled();
   });
 

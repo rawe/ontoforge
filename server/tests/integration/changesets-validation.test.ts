@@ -474,8 +474,8 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
     const t = (await staged(A, cs, underParent("task", "T20", "has_task", e.P2, { phase: "plan" }))).id as string;
     // The task, and its parent relation, whose parent end P2 is outside.
     expect(await rejected(cs, A)).toEqual([
-      { seq: 1, kind: "outside_subtree", message: "Would not be under anchor 'agent-a' after the commit" },
-      { seq: 2, kind: "outside_subtree", message: "Not under anchor 'agent-a'" },
+      { seq: 1, kind: "outside_subtree", message: "Would be outside the anchor subtree of ruleset 'agent-a' after the commit" },
+      { seq: 2, kind: "outside_subtree", message: "Outside the anchor subtree of ruleset 'agent-a'" },
     ]);
 
     const control = await start(A);
@@ -509,8 +509,8 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
       properties: { phase: "x" },
     });
     expect(await rejected(into, A)).toEqual([
-      { seq: 1, kind: "outside_subtree", message: "Not under anchor 'agent-a'" },
-      { seq: 2, kind: "outside_subtree", message: "Not under anchor 'agent-a'" },
+      { seq: 1, kind: "outside_subtree", message: "Outside the anchor subtree of ruleset 'agent-a'" },
+      { seq: 2, kind: "outside_subtree", message: "Outside the anchor subtree of ruleset 'agent-a'" },
     ]);
 
     const inside = await start(A);
@@ -546,7 +546,7 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
     expect(violation).toEqual({
       seq: 0,
       kind: "anchor_deleted",
-      message: "Anchor 'agent-c' is dangling",
+      message: "The anchor of ruleset 'agent-c' no longer exists",
     });
   });
 
@@ -562,7 +562,7 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
       {
         seq: 0,
         kind: "anchor_hidden",
-        message: "Anchor 'agent-d' points at an entity that lens 'portfolio' does not show",
+        message: "The anchor of ruleset 'agent-d' is an entity that lens 'portfolio' does not show",
       },
     ]);
     expect(JSON.stringify(violations)).not.toMatch(new RegExp(`task|${e.T6}`));
@@ -574,7 +574,7 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
     expect((await call("DELETE", `${RULESETS}/agent-b`)).status).toBe(204);
     expect((await call("GET", `${B}/changesets/${cs}`)).status).toBe(404);
     expect(await rejected(cs)).toEqual([
-      { seq: 0, kind: "ruleset_gone", message: "Anchor 'agent-b' no longer exists, so this changeset cannot be committed" },
+      { seq: 0, kind: "ruleset_gone", message: "Ruleset 'agent-b' no longer exists, so this changeset cannot be committed" },
     ]);
   });
 });

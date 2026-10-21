@@ -399,7 +399,7 @@ describe("the anchored mount (V8, V17, V21, V42)", () => {
     await ok(d, "update_entity", { entity_type_key: "person", entity_id: e.Kim, properties: { name: "Kim B" }, changeset_id: cs });
     expect((await rest("DELETE", `${ALL}/entities/task/${e.T2a}`)).status).toBe(204);
 
-    const dangling = "Anchor 'agent-d' is dangling";
+    const dangling = "The anchor of ruleset 'agent-d' no longer exists";
     expect(
       await refused(d, "update_entity", { entity_type_key: "person", entity_id: e.Ana, properties: { name: "x" }, changeset_id: cs }),
     ).toContain(dangling);
@@ -415,7 +415,7 @@ describe("the anchored mount (V8, V17, V21, V42)", () => {
     await ok(b, "update_entity", { entity_type_key: "project", entity_id: e.P3, properties: { name: "P3 b" }, changeset_id: cs });
     expect((await rest("DELETE", `${RULESETS}/agent-b`)).status).toBe(204);
 
-    expect(await refused(b, "get_changeset", { changeset_id: cs })).toContain("Anchor 'agent-b' not found");
+    expect(await refused(b, "get_changeset", { changeset_id: cs })).toContain("Ruleset 'agent-b' not found");
     const plain = await connect();
     expect((await ok(plain, "get_changeset", { changeset_id: cs })).ruleset).toBe("agent-b");
     expect(await refused(plain, "commit_changeset", { changeset_id: cs })).toContain("ruleset_gone");

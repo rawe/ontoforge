@@ -304,7 +304,7 @@ describe("the REST mirror", () => {
       payload: { name: "Ann" },
     });
     expect(res.statusCode).toBe(404);
-    expect(res.json().error.message).toBe("Anchor 'nope' not found");
+    expect(res.json().error.message).toBe("Ruleset 'nope' not found");
   });
 });
 

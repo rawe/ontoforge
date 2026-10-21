@@ -478,7 +478,7 @@ describe("anchors at submit (V42; the dangling row of 'Who may do what')", () =>
     expect((await submit(other, "before")).status).toBe(200);
     expect((await call("DELETE", `${ALL}/entities/task/${e.T2a}`)).status).toBe(204);
 
-    const dangling = "Anchor 'agent-a' is dangling";
+    const dangling = "The anchor of ruleset 'agent-a' no longer exists";
     for (const base of [AA, ALL]) {
       const res = await submit(cs, "n", base);
       expect(res.status).toBe(409);

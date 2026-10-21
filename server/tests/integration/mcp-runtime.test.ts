@@ -1145,7 +1145,7 @@ describe("the anchored mount", () => {
     for (const [o, lens, key, message] of [
       ["nope", "nope", "nope", "Ontology 'nope' not found"],
       [HIERARCHY_ONTOLOGY_KEY, "nope", "nope", "Lens 'nope' not found"],
-      [HIERARCHY_ONTOLOGY_KEY, "all", "nope", "Anchor 'nope' not found"],
+      [HIERARCHY_ONTOLOGY_KEY, "all", "nope", "Ruleset 'nope' not found"],
     ] as const) {
       const client = await connectClient(mount(o, lens, key));
       try {

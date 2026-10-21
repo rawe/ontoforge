@@ -86,7 +86,7 @@ function toResponse(record: RulesetRecord, entityTypes: Record<string, EntityTyp
 export function rulesetKeyError(key: string): string | null {
   return Key.safeParse(key).success
     ? null
-    : `Invalid anchor key '${key}'. Must match pattern ${RULESET_KEY_PATTERN.source} ` +
+    : `Invalid ruleset key '${key}'. Must match pattern ${RULESET_KEY_PATTERN.source} ` +
         `and be at most ${MAX_KEY_LENGTH} characters`;
 }
 
@@ -99,7 +99,7 @@ export async function listRulesets(store: RuntimeStore): Promise<RulesetResponse
 /** The ruleset read fresh, with its anchor's state now. Unknown key -> not found. */
 export async function readRuleset(key: string, store: RuntimeStore): Promise<RulesetResponse> {
   const record = await store.rulesets().get(key);
-  if (record === null) throw new NotFoundError(`Anchor '${key}' not found`);
+  if (record === null) throw new NotFoundError(`Ruleset '${key}' not found`);
   return toResponse(record, await fullEntityTypes(store));
 }
 
@@ -123,13 +123,13 @@ export async function saveRuleset(key: string, body: RulesetWriteBody, store: Ru
       fields["anchor.id"] = `Entity '${anchor.id}' of type '${anchor.type}' not found`;
     }
   }
-  if (Object.keys(fields).length > 0) throw new ValidationError("Anchor validation failed", { fields });
+  if (Object.keys(fields).length > 0) throw new ValidationError("Ruleset validation failed", { fields });
   return toResponse(await store.rulesets().save(key, { anchor, writeAccess: level }), entityTypes);
 }
 
 export async function deleteRuleset(key: string, store: RuntimeStore): Promise<void> {
   if (!(await store.rulesets().delete(key))) {
-    throw new NotFoundError(`Anchor '${key}' not found`);
+    throw new NotFoundError(`Ruleset '${key}' not found`);
   }
 }
 
@@ -142,7 +142,7 @@ export async function deleteRuleset(key: string, store: RuntimeStore): Promise<v
 export async function readMountRuleset(lensKey: string, rulesetKey: string, store: RuntimeStore): Promise<RulesetRecord> {
   await loadSchema(lensKey, store);
   const record = await store.rulesets().get(rulesetKey);
-  if (record === null) throw new NotFoundError(`Anchor '${rulesetKey}' not found`);
+  if (record === null) throw new NotFoundError(`Ruleset '${rulesetKey}' not found`);
   return record;
 }
 

@@ -122,7 +122,7 @@ describe("the anchored REST mirror", () => {
     ] as const) {
       const res = await app.inject({ method, url: `${PLAIN}/rulesets/nope${path}`, payload: method === "POST" ? { name: "Ann" } : undefined });
       expect(res.statusCode, path).toBe(404);
-      expect(res.json().error.message).toBe("Anchor 'nope' not found");
+      expect(res.json().error.message).toBe("Ruleset 'nope' not found");
     }
     expect(writes.createEntity).not.toHaveBeenCalled();
     expect(holder.store.rulesetStore.save).not.toHaveBeenCalled();
@@ -279,7 +279,7 @@ describe("the anchored MCP server", () => {
       ] as const) {
         const anchorMissing = await call(unknownAnchor, name, args);
         expect(anchorMissing.isError, name).toBe(true);
-        expect(anchorMissing.content[0]!.text).toContain("Anchor 'nope' not found");
+        expect(anchorMissing.content[0]!.text).toContain("Ruleset 'nope' not found");
         const lensMissing = await call(unknownLens, name, args);
         expect(lensMissing.content[0]!.text).toContain("Lens 'nope' not found");
       }

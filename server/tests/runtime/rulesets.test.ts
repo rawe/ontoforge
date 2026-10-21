@@ -115,7 +115,7 @@ describe("the anchor's state on every read", () => {
   it("an unknown key is not found, on read and delete", async () => {
     const read = await app.inject({ method: "GET", url: `${URL}/nope` });
     expect(read.statusCode).toBe(404);
-    expect(read.json().error.message).toBe("Anchor 'nope' not found");
+    expect(read.json().error.message).toBe("Ruleset 'nope' not found");
     const deleted = await app.inject({ method: "DELETE", url: `${URL}/nope` });
     expect(deleted.statusCode).toBe(404);
   });
@@ -244,7 +244,7 @@ describe("ruleset keys", () => {
   it.each(["Agent-A", "agent%20a", "1agent", "-agent", "a".repeat(65)])("refuses %s with 422", async (key) => {
     const res = await put(key, { anchor: null });
     expect(res.statusCode).toBe(422);
-    expect(res.json().error.message).toMatch(/^Invalid anchor key/);
+    expect(res.json().error.message).toMatch(/^Invalid ruleset key/);
     expect(holder.store.rulesetStore.save).not.toHaveBeenCalled();
   });
 });

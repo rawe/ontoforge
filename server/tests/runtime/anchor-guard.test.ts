@@ -143,7 +143,7 @@ describe("opening the guard", () => {
 
   it("dangling, by a deleted entity or a deleted type: 409 with v1's text", async () => {
     const dangling = new ConflictError(
-      "Anchor 'agent-a' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it",
+      "The anchor of ruleset 'agent-a' no longer exists, so every write is refused until a person sets a new anchor",
     );
     anchorAt({ type: "project", id: "P1" }, false);
     await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(dangling);
@@ -159,7 +159,7 @@ describe("opening the guard", () => {
     ).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConflictError);
     const message = (error as ConflictError).message;
-    expect(message).toBe("Anchor 'agent-a' points at an entity that lens 'no_projects' does not show, so every write is refused");
+    expect(message).toBe("The anchor of ruleset 'agent-a' is an entity that lens 'no_projects' does not show, so every write is refused");
   });
 });
 
@@ -173,7 +173,7 @@ describe("write access is not the guard's (writeAccess.ts)", () => {
       at(null, false);
       expect(await AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store)), writeAccess).toBeNull();
       at({ type: "project", id: "P1" }, false);
-      await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(/is dangling/);
+      await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(/no longer exists/);
     }
   });
 });
@@ -199,10 +199,10 @@ describe("the staging check (R10)", () => {
 
   it("dangling, or an anchored entity the lens hides, is a 409 with no fix hint; an unknown key is not found", async () => {
     anchorAt({ type: "project", id: "P1" }, false, "propose");
-    expect(await check("agent-a")).toEqual(new ConflictError("Anchor 'agent-a' is dangling"));
+    expect(await check("agent-a")).toEqual(new ConflictError("The anchor of ruleset 'agent-a' no longer exists"));
     anchorAt({ type: "project", id: "P1" }, true);
     expect(await check("agent-a", loaded("no_projects", ["customer", "task", "milestone"]))).toEqual(
-      new ConflictError("Anchor 'agent-a' points at an entity that lens 'no_projects' does not show"),
+      new ConflictError("The anchor of ruleset 'agent-a' is an entity that lens 'no_projects' does not show"),
     );
     store.rulesetStore.get.mockResolvedValue(null);
     expect(await check("agent-a")).toBeInstanceOf(NotFoundError);
@@ -227,7 +227,7 @@ describe("entity create", () => {
   it("a parent outside the subtree: parentRelation.parentId", async () => {
     const errors: Record<string, string> = {};
     await (await open()).checkCreate("task", { parentId: "P2" }, errors);
-    expect(errors).toEqual({ "parentRelation.parentId": "Entity 'P2' is not under anchor 'agent-a'" });
+    expect(errors).toEqual({ "parentRelation.parentId": "Entity 'P2' is outside the anchor subtree of ruleset 'agent-a'" });
   });
 
   it("no parent relation: parentRelation", async () => {
@@ -246,7 +246,7 @@ describe("entity create", () => {
   it("a type with no parent relation into it, or only hidden ones: entityTypeKey, the same text", async () => {
     const customer: Record<string, string> = {};
     await (await open()).checkCreate("customer", null, customer);
-    expect(customer).toEqual({ entityTypeKey: "Entity type 'customer' cannot be placed under anchor 'agent-a'" });
+    expect(customer).toEqual({ entityTypeKey: "Entity type 'customer' cannot be placed in the anchor subtree of ruleset 'agent-a'" });
 
     anchorAt({ type: "customer", id: "ACME" });
     const milestone: Record<string, string> = {};
@@ -255,7 +255,7 @@ describe("entity create", () => {
       { parentId: "P1" },
       milestone,
     );
-    expect(milestone).toEqual({ entityTypeKey: "Entity type 'milestone' cannot be placed under anchor 'agent-a'" });
+    expect(milestone).toEqual({ entityTypeKey: "Entity type 'milestone' cannot be placed in the anchor subtree of ruleset 'agent-a'" });
   });
 
   it("free types, another hierarchy's among them, are created as on the plain lens", async () => {
@@ -279,10 +279,10 @@ describe("entity update, edit and delete", () => {
   it("a hierarchy entity outside the subtree, above it included: entityId", async () => {
     const guard = await open();
     expect(await refusal(() => guard.checkEntity("task", "T4"))).toEqual({
-      entityId: "Entity 'T4' is not under anchor 'agent-a'",
+      entityId: "Entity 'T4' is outside the anchor subtree of ruleset 'agent-a'",
     });
     expect(await refusal(() => guard.checkEntity("customer", "ACME"))).toEqual({
-      entityId: "Entity 'ACME' is not under anchor 'agent-a'",
+      entityId: "Entity 'ACME' is outside the anchor subtree of ruleset 'agent-a'",
     });
   });
 
@@ -294,7 +294,7 @@ describe("entity update, edit and delete", () => {
   it("delete: outside wins over frozen", async () => {
     store.rulesetStore.list.mockResolvedValue([{ key: "agent-b", anchor: { type: "task", id: "T4" }, anchorFound: true }]);
     expect(await refusal(async () => (await open()).checkDelete("task", "T4"))).toEqual({
-      entityId: "Entity 'T4' is not under anchor 'agent-a'",
+      entityId: "Entity 'T4' is outside the anchor subtree of ruleset 'agent-a'",
     });
   });
 
@@ -309,7 +309,7 @@ describe("entity update, edit and delete", () => {
       ["person", "Ben"],
     ]) {
       const fields = await refusal(() => guard.checkDelete(type!, id!));
-      expect(fields.entityId).toBe(`Entity '${id}' is anchored and cannot be deleted on an anchored connection`);
+      expect(fields.entityId).toBe(`Entity '${id}' is the anchor of a ruleset and cannot be deleted on this connection`);
     }
     await guard.checkDelete("task", "T1a");
   });
@@ -336,7 +336,7 @@ describe("relation create", () => {
   it("an end outside the subtree: fromEntityId or toEntityId", async () => {
     const errors: Record<string, string> = {};
     await (await open()).checkRelationCreate(rt("assigned_to"), "T4", "Kim", errors);
-    expect(errors).toEqual({ fromEntityId: "Entity 'T4' is not under anchor 'agent-a'" });
+    expect(errors).toEqual({ fromEntityId: "Entity 'T4' is outside the anchor subtree of ruleset 'agent-a'" });
   });
 
   it("an end with an endpoint fault is not walked", async () => {
@@ -356,7 +356,7 @@ describe("relation update and delete", () => {
     relation("P1", "T1");
     expect(await guard.relationError(rt("has_task"), "r1", "update")).toBeNull();
     relation("P2", "T4");
-    expect(await guard.relationError(rt("has_task"), "r1", "update")).toBe("Relation 'r1' is not under anchor 'agent-a'");
+    expect(await guard.relationError(rt("has_task"), "r1", "update")).toBe("Relation 'r1' is outside the anchor subtree of ruleset 'agent-a'");
     // Up-pointing: the child is the source.
     relation("M1", "P1");
     expect(await guard.relationError(rt("belongs_to"), "r1", "update")).toBeNull();
@@ -374,7 +374,7 @@ describe("relation update and delete", () => {
     relation("T1", "Kim");
     expect(await guard.relationError(rt("assigned_to"), "r1", "delete")).toBeNull();
     relation("T4", "Kim");
-    expect(await guard.relationError(rt("assigned_to"), "r1", "update")).toBe("Relation 'r1' is not under anchor 'agent-a'");
+    expect(await guard.relationError(rt("assigned_to"), "r1", "update")).toBe("Relation 'r1' is outside the anchor subtree of ruleset 'agent-a'");
     relation("Lea", "Ben");
     await guard.checkRelationDelete(rt("manages"), "r1");
   });

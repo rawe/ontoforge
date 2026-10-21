@@ -301,7 +301,7 @@ async function refusalOf(
 /** A ruleset key of the URL that names no ruleset is not found. */
 async function checkRulesetExists(rulesetKey: string | null, store: RuntimeStore): Promise<void> {
   if (rulesetKey !== null && (await store.rulesets().get(rulesetKey)) === null) {
-    throw new NotFoundError(`Anchor '${rulesetKey}' not found`);
+    throw new NotFoundError(`Ruleset '${rulesetKey}' not found`);
   }
 }
 
@@ -1727,7 +1727,7 @@ async function anchorBefore(
   const record = await bound.rulesets().get(key);
   if (record === null) {
     return {
-      violations: [{ seq: 0, kind: "ruleset_gone", message: `Anchor '${key}' no longer exists, so this changeset cannot be committed` }],
+      violations: [{ seq: 0, kind: "ruleset_gone", message: `Ruleset '${key}' no longer exists, so this changeset cannot be committed` }],
       coverage: null,
     };
   }
@@ -1748,7 +1748,7 @@ async function anchorBefore(
       violations.push({
         seq: touch.seq,
         kind: "outside_subtree",
-        message: `Not under anchor '${key}'`,
+        message: `Outside the anchor subtree of ruleset '${key}'`,
       });
     }
   }
@@ -1760,7 +1760,7 @@ async function anchorBefore(
       violations.push({
         seq: write.seq,
         kind: "deletes_anchor",
-        message: "Anchored, so it cannot be deleted on an anchored connection",
+        message: "It is the anchor of a ruleset, so it cannot be deleted on this connection",
       });
     }
   }
@@ -1902,7 +1902,7 @@ async function commitViolations(
         violations.push({
           seq: touch.seq,
           kind: "outside_subtree",
-          message: `Would not be under anchor '${coverage.key}' after the commit`,
+          message: `Would be outside the anchor subtree of ruleset '${coverage.key}' after the commit`,
         });
       }
     }

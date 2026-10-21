@@ -1,8 +1,8 @@
 /**
  * The anchor rule of a ruleset mount (`…/rulesets/:rulesetKey`): the seven
- * runtime write functions consult it on ruleset calls only. It holds the
- * anchor's hierarchy to the anchor's subtree; every other type is free and
- * is written as on the plain lens.
+ * runtime write functions consult it on ruleset calls only. It keeps
+ * writes to the anchor's hierarchy inside the anchor's subtree; every other
+ * type is free and is written as on the plain lens.
  *
  * - **The anchor's hierarchy**: the entity types joined by parent
  *   relations around the anchor entity's type, over the FULL schema, and
@@ -80,9 +80,9 @@ function anchorFault(record: RulesetRecord, loaded: LoadedSchema): "deleted" | "
 export function anchorRefusal(rulesetKey: string, record: RulesetRecord, loaded: LoadedSchema): string | null {
   switch (anchorFault(record, loaded)) {
     case "deleted":
-      return `Anchor '${rulesetKey}' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it`;
+      return `The anchor of ruleset '${rulesetKey}' no longer exists, so every write is refused until a person sets a new anchor`;
     case "hidden":
-      return `Anchor '${rulesetKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show, so every write is refused`;
+      return `The anchor of ruleset '${rulesetKey}' is an entity that lens '${loaded.scoped.lensKey}' does not show, so every write is refused`;
     default:
       return null;
   }
@@ -98,11 +98,11 @@ export function changesetAnchorRefusal(
 ): { kind: "anchor_deleted" | "anchor_hidden"; message: string } | null {
   switch (anchorFault(record, loaded)) {
     case "deleted":
-      return { kind: "anchor_deleted", message: `Anchor '${rulesetKey}' is dangling` };
+      return { kind: "anchor_deleted", message: `The anchor of ruleset '${rulesetKey}' no longer exists` };
     case "hidden":
       return {
         kind: "anchor_hidden",
-        message: `Anchor '${rulesetKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show`,
+        message: `The anchor of ruleset '${rulesetKey}' is an entity that lens '${loaded.scoped.lensKey}' does not show`,
       };
     default:
       return null;
@@ -113,14 +113,14 @@ export function changesetAnchorRefusal(
  * found. */
 async function readRecord(rulesetKey: string, store: RuntimeStore): Promise<RulesetRecord> {
   const record = await store.rulesets().get(rulesetKey);
-  if (record === null) throw new NotFoundError(`Anchor '${rulesetKey}' not found`);
+  if (record === null) throw new NotFoundError(`Ruleset '${rulesetKey}' not found`);
   return record;
 }
 
-/** The refusal of an entity delete on an anchored connection while any
- * anchor points at the entity. */
-function anchoredDeleteMessage(entityId: string): string {
-  return `Entity '${entityId}' is anchored and cannot be deleted on an anchored connection`;
+/** The refusal of an entity delete through a ruleset with an anchor while
+ * any ruleset's anchor is the entity. */
+function anchorDeleteMessage(entityId: string): string {
+  return `Entity '${entityId}' is the anchor of a ruleset and cannot be deleted on this connection`;
 }
 
 function refuse(field: string, message: string): ValidationError {
@@ -184,7 +184,7 @@ export class AnchorGuard {
   }
 
   private notUnder(id: string, what: "Entity" | "Relation" = "Entity"): string {
-    return `${what} '${id}' is not under anchor '${this.rulesetKey}'`;
+    return `${what} '${id}' is outside the anchor subtree of ruleset '${this.rulesetKey}'`;
   }
 
   /**
@@ -208,11 +208,11 @@ export class AnchorGuard {
         Object.hasOwn(this.loaded.scoped.relationTypes, rt.key),
     );
     if (!placeable) {
-      errors.entityTypeKey = `Entity type '${entityTypeKey}' cannot be placed under anchor '${this.rulesetKey}'`;
+      errors.entityTypeKey = `Entity type '${entityTypeKey}' cannot be placed in the anchor subtree of ruleset '${this.rulesetKey}'`;
       return;
     }
     if (parentRelation === null) {
-      errors.parentRelation = `Required: name the parent under anchor '${this.rulesetKey}' for an entity of type '${entityTypeKey}'`;
+      errors.parentRelation = `Required: name a parent inside the anchor subtree of ruleset '${this.rulesetKey}' for an entity of type '${entityTypeKey}'`;
       return;
     }
     if ("parentRelation.type" in errors || "parentRelation.parentId" in errors) return;
@@ -245,7 +245,7 @@ export class AnchorGuard {
     await this.checkEntity(entityTypeKey, entityId);
     const rulesets = await this.store.rulesets().list();
     if (rulesets.some((r) => r.anchor?.id === entityId && r.anchor.type === entityTypeKey)) {
-      throw refuse("entityId", anchoredDeleteMessage(entityId));
+      throw refuse("entityId", anchorDeleteMessage(entityId));
     }
   }
 
@@ -263,7 +263,7 @@ export class AnchorGuard {
   ): Promise<void> {
     if (this.isHierarchyRelation(rt)) {
       errors.relationTypeKey =
-        `Relation type '${rt.key}' places entities under anchor '${this.rulesetKey}', ` +
+        `Relation type '${rt.key}' places entities in the anchor subtree of ruleset '${this.rulesetKey}', ` +
         "so create the child together with its parent relation instead";
       return;
     }
@@ -293,7 +293,7 @@ export class AnchorGuard {
       const child = rt.parent === "source" ? to : from;
       if (!(await this.covered(child))) return this.notUnder(relationId, "Relation");
       return op === "delete"
-        ? `Relation '${relationId}' places an entity under anchor '${this.rulesetKey}' and cannot be deleted on an anchored connection`
+        ? `Relation '${relationId}' places an entity in the anchor subtree of ruleset '${this.rulesetKey}' and cannot be deleted on this connection`
         : null;
     }
     const allowed =

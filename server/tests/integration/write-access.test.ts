@@ -249,7 +249,7 @@ describe("through a 'propose' ruleset's URL (REST)", () => {
       properties: { name: "Kim2" },
     });
     expect(staged.status).toBe(409);
-    expect(staged.body.error.message).toMatch(/is dangling/);
+    expect(staged.body.error.message).toMatch(/no longer exists/);
     const immediate = await rest("PATCH", `${S}/entities/person/${e.Kim}`, { name: "Kim2" });
     expect(immediate.status).toBe(409);
     expect(immediate.body.error.message).toBe(NO_WRITE("agent-s"));
@@ -267,7 +267,7 @@ describe("through a 'propose' ruleset's URL (REST)", () => {
       properties: { name: "T1x" },
     });
     expect(staged.status).toBe(409);
-    expect(staged.body.error.message).toBe("Anchor 'agent-s' points at an entity that lens 'no_projects' does not show");
+    expect(staged.body.error.message).toBe("The anchor of ruleset 'agent-s' is an entity that lens 'no_projects' does not show");
     const immediate = await rest("PATCH", `${H}/entities/task/${e.T1}`, { name: "T1x" });
     expect(immediate.status).toBe(409);
     expect(immediate.body.error.message).toBe(NO_WRITE("agent-s"));
@@ -467,6 +467,6 @@ describe("the MCP tool set at 'propose' (V29, R13)", () => {
     expect(names).toContain("commit_changeset");
     const result = await call(client, "get_anchor");
     expect(result.isError).toBe(true);
-    expect(text(result)).toContain("Anchor 'nope' not found");
+    expect(text(result)).toContain("Ruleset 'nope' not found");
   });
 });

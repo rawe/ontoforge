@@ -92,7 +92,7 @@ describe("maintenance", () => {
     expect(deleted.statusCode).toBe(204);
     const gone = await get("agent-a");
     expect(gone.statusCode).toBe(404);
-    expect(gone.json().error.message).toBe("Anchor 'agent-a' not found");
+    expect(gone.json().error.message).toBe("Ruleset 'agent-a' not found");
     expect((await app.inject({ method: "DELETE", url: `${rulesets()}/agent-a` })).statusCode).toBe(404);
     expect((await list()).map((a) => a.key)).toEqual(["agent-b"]);
   });
@@ -364,7 +364,7 @@ describe("the ruleset REST mirror", () => {
     for (const [o, lens, key, message] of [
       ["nope", "nope", "nope", "Ontology 'nope' not found"],
       [HIERARCHY_ONTOLOGY_KEY, "nope", "nope", "Lens 'nope' not found"],
-      [HIERARCHY_ONTOLOGY_KEY, "all", "nope", "Anchor 'nope' not found"],
+      [HIERARCHY_ONTOLOGY_KEY, "all", "nope", "Ruleset 'nope' not found"],
     ] as const) {
       for (const [method, path, payload] of routes) {
         const res = await app.inject({ method, url: `${mirror(lens, key, o)}${path}`, payload });

@@ -261,7 +261,7 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
     it("a task under P2: parentRelation.parentId", async () => {
       const outcome = await agentA().createEntity("task", { name: "T8" }, HAS_TASK("P2"));
       refusedOn(outcome, "parentRelation.parentId", ["P2"]);
-      expect(outcome.text).toContain(`Entity '${id("P2")}' is not under anchor 'agent-a'`);
+      expect(outcome.text).toContain(`Entity '${id("P2")}' is outside the anchor subtree of ruleset 'agent-a'`);
     });
 
     it("a task without parentRelation: parentRelation", async () => {
@@ -347,7 +347,7 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
       await putAnchor("agent-b", "T2a");
       const frozen = await agentA().deleteEntity("task", id("T2a"));
       refusedOn(frozen, "entityId", ["T2a"]);
-      expect(frozen.text).toContain("anchored");
+      expect(frozen.text).toContain("is the anchor of a ruleset");
       expect(frozen.text).not.toContain("agent-b");
 
       const res = await app.inject({ method: "DELETE", url: `/api/ontologies/${O}/runtime/rulesets/agent-b` });
@@ -359,13 +359,13 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
       await putAnchor("agent-b", "T5");
       const outcome = await agentA().deleteEntity("task", id("T5"));
       refusedOn(outcome, "entityId", ["T5"]);
-      expect(outcome.text).toContain("is not under anchor 'agent-a'");
+      expect(outcome.text).toContain("is outside the anchor subtree of ruleset 'agent-a'");
     });
 
     it("frozen wins over has children: P1 itself is refused as anchored", async () => {
       const outcome = await agentA().deleteEntity("project", id("P1"));
       refusedOn(outcome, "entityId", ["P1"]);
-      expect(outcome.text).toContain("anchored");
+      expect(outcome.text).toContain("is the anchor of a ruleset");
     });
 
     it("T1a (covered, not anchored, child T1a1): 409 has children", async () => {
@@ -424,13 +424,13 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
     it("deleting P1 has_task T3: relationId", async () => {
       const outcome = await agentA().deleteRelation("has_task", ids.relations["P1 has_task T3"]!);
       refusedOn(outcome, "relationId");
-      expect(outcome.text).toContain("places an entity under anchor 'agent-a'");
+      expect(outcome.text).toContain("places an entity in the anchor subtree of ruleset 'agent-a'");
     });
 
     it("deleting P2 has_task T4 (child outside): relationId, not under the anchor", async () => {
       const outcome = await agentA().deleteRelation("has_task", ids.relations["P2 has_task T4"]!);
       refusedOn(outcome, "relationId");
-      expect(outcome.text).toContain("is not under anchor 'agent-a'");
+      expect(outcome.text).toContain("is outside the anchor subtree of ruleset 'agent-a'");
     });
 
     it("updating the phase of P1 has_task T1 (child covered): updated", async () => {
@@ -472,7 +472,7 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
         await writes.createRelation("mentors", id("Ben"), id("Ana")),
         await writes.deleteRelation("mentors", ids.relations["Ben mentors Kim"]!),
       ]) {
-        conflict(outcome, "Anchor 'agent-a' is dangling");
+        conflict(outcome, "The anchor of ruleset 'agent-a' no longer exists");
       }
       await putAnchor("agent-a", "P1");
       allowed(await writes.updateEntity("task", id("T1"), { name: "T1!" }), 200);
@@ -494,7 +494,7 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
         url: `${modelPrefix(O)}/entity-types/${status.entityTypeId as string}?cascade=true`,
       });
       expect(res.statusCode, res.body).toBe(204);
-      conflict(await mount("all", "agent-d").createEntity("person", { name: "Neu" }), "Anchor 'agent-d' is dangling");
+      conflict(await mount("all", "agent-d").createEntity("person", { name: "Neu" }), "The anchor of ruleset 'agent-d' no longer exists");
     });
 
     it("an anchored entity the lens hides: every write a 409 naming only the anchor and the lens", async () => {
@@ -504,7 +504,7 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
         await writes.updateEntity("task", id("T1"), { name: "T1!" }),
         await writes.deleteEntity("task", id("T1a1")),
       ]) {
-        conflict(outcome, "Anchor 'agent-a'");
+        conflict(outcome, "The anchor of ruleset 'agent-a'");
         expect(outcome.text).toContain("'no_projects'");
         expect(outcome.text).not.toMatch(/'project'/);
         namesOnly(outcome, ["T1", "T1a1"]);

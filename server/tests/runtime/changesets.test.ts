@@ -167,7 +167,7 @@ describe("start", () => {
   it("an unknown anchor is not found; a note over 1000 characters is a 422; neither starts one", async () => {
     store.changesetStore.start.mockImplementation(async (cs: Row) => changeset({ ...cs, version: 1, writeCount: 0 }));
     await expect(startChangeset("full_lens", "nope", null, asRuntimeStore(store))).rejects.toThrow(
-      new NotFoundError("Anchor 'nope' not found"),
+      new NotFoundError("Ruleset 'nope' not found"),
     );
     const promise = startChangeset("full_lens", null, "x".repeat(1001), asRuntimeStore(store));
     await expect(promise).rejects.toBeInstanceOf(ValidationError);

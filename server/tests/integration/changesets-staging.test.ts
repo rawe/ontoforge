@@ -156,7 +156,7 @@ describe("start", () => {
   it("not found in the order lens, anchor; a note of 1001 characters is 422", async () => {
     expect((await call("POST", `${runtimePrefix(O, "nope")}/changesets`)).status).toBe(404);
     const anchor = await call("POST", `${ALL}/rulesets/ghost/changesets`);
-    expect(anchor).toMatchObject({ status: 404, body: { error: { message: "Anchor 'ghost' not found" } } });
+    expect(anchor).toMatchObject({ status: 404, body: { error: { message: "Ruleset 'ghost' not found" } } });
     const long = await call("POST", `${ALL}/changesets`, { note: "x".repeat(1001) });
     expect(long.status).toBe(422);
     expect(long.body.error.details.fields.note).toContain("1000");
@@ -442,7 +442,7 @@ describe("binding", () => {
     expect((await call("DELETE", `${ALL}/entities/task/${leaf}`)).status).toBe(204);
     const refused = await stage(cs, rename(ids.P2, "x"), anchored);
     expect(refused.status).toBe(409);
-    expect(refused.body.error.message).toContain("dangling");
+    expect(refused.body.error.message).toContain("no longer exists");
     expect(await journal(cs)).toHaveLength(1);
 
     expect((await call("DELETE", `${base}/${cs}/writes/1`)).status).toBe(204);

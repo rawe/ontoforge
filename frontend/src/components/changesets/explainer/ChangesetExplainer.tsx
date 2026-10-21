@@ -92,7 +92,7 @@ function ChangesetExplainerPanel() {
         <DialogTitle className="text-lg font-semibold">{TITLE}</DialogTitle>
         <DialogDescription className="max-w-3xl text-[13px] leading-relaxed">
           A changeset is a plan of writes: staged, not written, and invisible to every read until it is committed — then all of
-          them persist, or none does. A client proposes the plan; a person reviews it and decides.
+          them persist, or none does. A client or a person proposes the plan; a person reviews it and decides.
         </DialogDescription>
         <dl className="mt-1 flex flex-wrap gap-x-5 gap-y-1 text-xs">
           {FACTS.map((fact) => <div key={fact.label} className="flex gap-1.5">
@@ -237,7 +237,7 @@ function ChangesetExplainerPanel() {
             <span className="text-xs font-medium">The note</span>
             <span className="text-[11.5px] leading-snug text-muted-foreground">
               Optional at the start, at most 1,000 characters. Submit replaces it when it brings one; unsubmit requires one and
-              replaces it, so it tells the client what to change. The Workbench shows the note and sets it only by unsubmit.
+              replaces it, so it tells the client what to change. The Workbench sets it at the start, by submit and by unsubmit.
             </span>
           </div>
         </div>

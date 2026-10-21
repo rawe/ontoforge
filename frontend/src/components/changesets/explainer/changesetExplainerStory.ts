@@ -35,9 +35,9 @@ export const FLOW: { nodes: FlowNode[]; edges: FlowEdge[] } = {
     { id: 'expired', label: 'Expired', sub: '', role: 'end' },
   ],
   edges: [
-    { id: 'start', from: 'start', to: 'draft', label: 'start', who: 'client' },
-    { id: 'stage', from: 'draft', to: 'draft', label: 'stage · unstage', who: 'client · a person may unstage' },
-    { id: 'submit', from: 'draft', to: 'submitted', label: 'submit', who: 'client only' },
+    { id: 'start', from: 'start', to: 'draft', label: 'start', who: 'client or person' },
+    { id: 'stage', from: 'draft', to: 'draft', label: 'stage · unstage', who: 'client or person' },
+    { id: 'submit', from: 'draft', to: 'submitted', label: 'submit', who: 'client or person' },
     { id: 'unsubmit', from: 'submitted', to: 'draft', label: 'unsubmit + note', who: 'person or client' },
     { id: 'commit', from: 'submitted', to: 'committed', label: 'commit', who: 'person · client*' },
     { id: 'commit-draft', from: 'draft', to: 'committed', label: 'commit a draft directly', who: 'person · client*' },
@@ -57,8 +57,8 @@ export const ROLES: Record<Actor, { title: string; via: string; actions: string[
   person: {
     title: 'Person',
     via: 'in the Workbench',
-    actions: ['review', 'unstage', 'discard', 'unsubmit with a note', 'commit'],
-    hint: 'Decides. Submit is the client’s “ready for review”, not a required step: a person may commit a draft directly.',
+    actions: ['start', 'work in', 'stage', 'unstage', 'submit', 'review', 'unsubmit with a note', 'discard', 'commit'],
+    hint: 'Decides, and may propose too: working in a changeset, the Workbench’s writes stage into it. Submit is “ready for review”, not a required step: a person may commit a draft directly.',
   },
 }
 
@@ -100,14 +100,14 @@ export const STORY: StoryStep[] = [
   {
     actor: 'client', action: 'start', node: 'draft', edges: ['start'],
     title: 'A client starts a changeset',
-    body: 'Over REST or MCP, through a lens — and on an anchored URL, through its anchor: the changeset belongs to both. The note is optional; here it says what the plan is for. Every changeset starts as a draft, at version 1.',
+    body: 'Over REST or MCP, through a lens — and on an anchored URL, through its anchor: the changeset belongs to both. The note is optional; here it says what the plan is for. Every changeset starts as a draft, at version 1. A person starts one on the Workbench’s Changesets page.',
     state: 'draft', version: 1, note: 'Tidy up Apollo', writes: [], stored: STORED_BEFORE,
     log: [{ call: 'start_changeset', result: 'draft · version 1' }],
   },
   {
     actor: 'client', action: 'stage', node: 'draft', edges: ['stage'],
     title: 'It stages writes instead of writing',
-    body: 'Each write call names the changeset and is staged, not written: its values checked as an immediate write’s are, numbered by seq, and given its final id, so a later write may name what an earlier one creates. Every read still answers the stored data alone. Each staged write raises the version.',
+    body: 'Each write call names the changeset and is staged, not written: its values checked as an immediate write’s are, numbered by seq, and given its final id, so a later write may name what an earlier one creates. Every read still answers the stored data alone. Each staged write raises the version. A person who works in the changeset stages the same way from the Workbench’s pages.',
     state: 'draft', version: 4, note: 'Tidy up Apollo', writes: [1, 2, 3], stored: STORED_BEFORE,
     log: [
       { call: 'update_entity + changeset_id', result: 'staged as #1' },

@@ -28,7 +28,7 @@ const ROUTES: Record<FlowEdgeId, { d: string; x: number; y: number }> = {
 }
 
 /**
- * The changeset workflow: the client's lane above the states, the person's below, every
+ * The changeset workflow: the proposing lane above the states, the person's below, every
  * way between them named with who may take it — the current step ringed, its ways lit.
  */
 export function ChangesetExplainerFlow({ current, passed, lit, onSelect }: {
@@ -49,8 +49,8 @@ export function ChangesetExplainerFlow({ current, passed, lit, onSelect }: {
 
     <rect x={0} y={0} width={VIEW.width} height={VIEW.lane - 2} rx={12} className="fill-muted/45" />
     <rect x={0} y={VIEW.lane + 2} width={VIEW.width} height={VIEW.height - VIEW.lane - 2} rx={12} className="fill-muted/45" />
-    <text x={18} y={26} className="fill-foreground text-[11px] font-semibold tracking-wider uppercase">Client</text>
-    <text x={18} y={41} className="fill-muted-foreground text-[11px]">proposes · REST or MCP</text>
+    <text x={18} y={26} className="fill-foreground text-[11px] font-semibold tracking-wider uppercase">Client or person</text>
+    <text x={18} y={41} className="fill-muted-foreground text-[11px]">proposes · REST, MCP or the Workbench</text>
     <text x={18} y={VIEW.height - 28} className="fill-foreground text-[11px] font-semibold tracking-wider uppercase">Person</text>
     <text x={18} y={VIEW.height - 13} className="fill-muted-foreground text-[11px]">decides · in the Workbench</text>
 

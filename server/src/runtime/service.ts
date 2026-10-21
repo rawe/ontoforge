@@ -248,6 +248,20 @@ export interface PaginatedResult {
   offset: number;
 }
 
+/** A relation end, or a create's parent, by its role. */
+export type EndRole = "The source end" | "The target end" | "The parent";
+
+/**
+ * The fault of an end of the wrong type, for the immediate write and the
+ * commit's `endpoint_type` alike. It names no actual type: a lens may hide
+ * it.
+ */
+export function endpointTypeMessage(role: EndRole, relationType: string): string {
+  return `${role} does not have the type relation type '${relationType}' requires`;
+}
+
+const END_ROLES = { Source: "The source end", Target: "The target end", Parent: "The parent" } as const;
+
 /**
  * The endpoint check of a relation write: the entity exists and has the
  * declared type, against the FULL schema, not the lens, so a narrow lens
@@ -260,6 +274,7 @@ async function endpointError(
   fullSchema: SchemaCacheValue,
   entityId: string,
   expectedType: string,
+  relationType: string,
   label: "Source" | "Target" | "Parent",
 ): Promise<string | null> {
   const entity = await store.getEntityById(entityId, fullSchema.entityTypes[expectedType]?.properties ?? {});
@@ -267,7 +282,7 @@ async function endpointError(
     return `${label} entity '${entityId}' not found`;
   }
   if (entity._entityTypeKey !== expectedType) {
-    return `${label} entity type mismatch: expected '${expectedType}', got '${entity._entityTypeKey}'`;
+    return endpointTypeMessage(END_ROLES[label], relationType);
   }
   return null;
 }
@@ -304,7 +319,7 @@ export async function createEntity(
   });
   if (write.parent !== null) {
     const { parentId, parentType } = write.parent;
-    const parentError = await endpointError(store, loaded.full, parentId, parentType, "Parent");
+    const parentError = await endpointError(store, loaded.full, parentId, parentType, write.parent.relation.relationTypeKey, "Parent");
     if (parentError !== null) {
       errors["parentRelation.parentId"] = parentError;
     }
@@ -893,12 +908,20 @@ export async function createRelation(
     loaded.full,
     fromEntityId,
     fullRtForValidation.fromEntityTypeKey,
+    relationTypeKey,
     "Source",
   );
   if (fromError !== null) {
     errors.fromEntityId = fromError;
   }
-  const toError = await endpointError(store, loaded.full, toEntityId, fullRtForValidation.toEntityTypeKey, "Target");
+  const toError = await endpointError(
+    store,
+    loaded.full,
+    toEntityId,
+    fullRtForValidation.toEntityTypeKey,
+    relationTypeKey,
+    "Target",
+  );
   if (toError !== null) {
     errors.toEntityId = toError;
   }

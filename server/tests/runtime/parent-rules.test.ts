@@ -457,8 +457,30 @@ describe("entity create with a parent relation", () => {
 
     expect(res.statusCode).toBe(422);
     expect(res.json().error.details.fields).toEqual({
-      "parentRelation.parentId": "Parent entity type mismatch: expected 'person', got 'company'",
+      "parentRelation.parentId": "The parent does not have the type relation type 'manages' requires",
     });
+  });
+
+  it("a parent of another type that the lens hides: refused without naming that type", async () => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(
+      withParents({
+        entityInclusions: [{ key: "department", properties: null }],
+        relationInclusions: [{ key: "belongs_to", properties: null }],
+      }),
+    );
+    holder.store.getEntityById.mockResolvedValueOnce(makeEntity({ name: "Lea" }, "person", "lea"));
+
+    const res = await createEntity("hr_view", "department", {
+      name: "Sales",
+      parentRelation: { type: "belongs_to", parentId: "lea" },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.fields).toEqual({
+      "parentRelation.parentId": "The parent does not have the type relation type 'belongs_to' requires",
+    });
+    expect(res.body).not.toContain("person");
+    expect(holder.store.createEntityWithParent).not.toHaveBeenCalled();
   });
 
   it("a parent whose type the lens hides is checked against the full schema, as a relation create's ends are", async () => {

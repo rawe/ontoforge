@@ -7,7 +7,10 @@ import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
 import type { EntityInstance, SchemaProperty } from '@/api/types'
 import { useRuntimeWrites } from '@/api/writes'
+import { MarkerChip } from '@/components/changesets/MarkerChip'
 import { DocumentBadge } from '@/components/DocumentBadge'
+import { DocumentViewerDialog } from '@/components/DocumentViewerDialog'
+import type { StagedField } from '@/components/entity/stagedFields'
 import { DocumentEditor, DocumentMarkdown } from '@/components/schema/DocumentEditor'
 import { Button } from '@/components/ui/button'
 import {
@@ -19,7 +22,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { isDocumentStub } from '@/lib/documents'
+import { formatDocSize, isDocumentStub } from '@/lib/documents'
 import { pinnedChangeset } from '@/lib/pinnedChangeset'
 
 interface DocumentPropertyRowProps {
@@ -27,6 +30,11 @@ interface DocumentPropertyRowProps {
   lensKey: string
   entity: EntityInstance
   property: SchemaProperty
+  /** Display label of the entity, for the staged text's viewer. */
+  entityLabel: string
+  /** Set while the pinned changeset (`changesetId`) sets this property. */
+  staged?: StagedField
+  changesetId?: string
 }
 
 /**
@@ -35,34 +43,56 @@ interface DocumentPropertyRowProps {
  * badge; expanding fetches the full content via the document endpoint and
  * renders it as Markdown. Editing opens a large Write/Preview dialog that
  * loads the full document and saves the whole string via a normal PATCH.
+ * Staged in the pinned changeset, the row adds "staged · size · View" (the
+ * staged text in the viewer, read only on View) and the editor starts from
+ * the staged text.
  */
 export function DocumentPropertyRow({
   ontologyKey,
   lensKey,
   entity,
   property,
+  entityLabel,
+  staged,
+  changesetId,
 }: DocumentPropertyRowProps) {
   const queryClient = useQueryClient()
   const writes = useRuntimeWrites(ontologyKey, lensKey)
   const stub = entity[property.key]
   const hasValue = isDocumentStub(stub)
+  const stagedStub = staged !== undefined && isDocumentStub(staged.value) ? staged.value : null
 
   const [expanded, setExpanded] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const [seeded, setSeeded] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [viewing, setViewing] = useState(false)
 
   const docQuery = useQuery({
     queryKey: qk.document(ontologyKey, lensKey, entity._entityTypeKey, entity._id, property.key),
     queryFn: () =>
       runtime.getDocument(ontologyKey, lensKey, entity._entityTypeKey, entity._id, property.key),
-    enabled: hasValue && (expanded || editOpen),
+    enabled: hasValue && (expanded || (editOpen && staged === undefined)),
   })
+  // The staged text, under the viewer's key.
+  const stagedQuery = useQuery({
+    queryKey: qk.changesets(ontologyKey, lensKey, changesetId ?? '', [
+      'document',
+      entity._entityTypeKey,
+      entity._id,
+      property.key,
+    ]),
+    queryFn: () =>
+      runtime.getStagedDocument(ontologyKey, lensKey, changesetId!, entity._entityTypeKey, entity._id, property.key),
+    enabled: editOpen && stagedStub !== null && changesetId !== undefined,
+  })
+  // The text the editor starts from: the staged one, else the stored one; null when there is none.
+  const source = staged === undefined ? (hasValue ? docQuery : null) : stagedStub !== null ? stagedQuery : null
 
   // Seed the editor draft once per dialog open, as soon as content is known.
-  if (editOpen && !seeded && (!hasValue || docQuery.data !== undefined)) {
-    setDraft(docQuery.data?.content ?? '')
+  if (editOpen && !seeded && (source === null || source.data !== undefined)) {
+    setDraft(source?.data?.content ?? '')
     setSeeded(true)
   }
 
@@ -112,9 +142,9 @@ export function DocumentPropertyRow({
       setError('Required — cannot be cleared')
       return
     }
-    // Pinned: an unchanged value would stage an empty update row, so it just closes.
-    const stored = hasValue ? (docQuery.data?.content ?? null) : null
-    if (value === stored && pinnedChangeset(ontologyKey, lensKey) !== null) {
+    // Pinned: an unchanged value would stage a write that changes nothing, so it just closes.
+    const unchanged = source === null ? null : (source.data?.content ?? null)
+    if (value === unchanged && pinnedChangeset(ontologyKey, lensKey) !== null) {
       setEditOpen(false)
       return
     }
@@ -175,6 +205,26 @@ export function DocumentPropertyRow({
           </Button>
         </div>
 
+        {staged !== undefined && (
+          <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-(--tc-amber)">
+            <span>staged · {stagedStub === null ? 'removed' : formatDocSize(stagedStub.length)}</span>
+            {stagedStub !== null && (
+              <>
+                <span aria-hidden>·</span>
+                <button
+                  type="button"
+                  onClick={() => setViewing(true)}
+                  className="font-medium underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-ring/60"
+                  aria-label={`View the staged ${property.displayName}`}
+                >
+                  View
+                </button>
+              </>
+            )}
+            {staged.drift !== null && <MarkerChip marker={staged.drift} />}
+          </div>
+        )}
+
         {expanded && hasValue && (
           <div className="mt-1.5 mb-1 max-h-96 overflow-y-auto rounded-md border bg-muted/20 px-3 py-2.5">
             {docQuery.isPending ? (
@@ -201,9 +251,9 @@ export function DocumentPropertyRow({
             </DialogDescription>
           </DialogHeader>
           {!seeded ? (
-            docQuery.isError ? (
+            source?.isError ? (
               <p className="py-8 text-center text-xs text-destructive">
-                Failed to load document: {docQuery.error.message}
+                Failed to load document: {source.error.message}
               </p>
             ) : (
               <div className="flex items-center justify-center py-10">
@@ -244,6 +294,26 @@ export function DocumentPropertyRow({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {changesetId !== undefined && (
+        <DocumentViewerDialog
+          ontologyKey={ontologyKey}
+          lensKey={lensKey}
+          changesetId={changesetId}
+          target={
+            viewing && stagedStub !== null
+              ? {
+                  entityTypeKey: entity._entityTypeKey,
+                  entityId: entity._id,
+                  entityLabel,
+                  property,
+                  length: stagedStub.length,
+                }
+              : null
+          }
+          onClose={() => setViewing(false)}
+        />
+      )}
     </div>
   )
 }

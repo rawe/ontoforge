@@ -361,6 +361,63 @@ describe("drift on a document (F6)", () => {
   });
 });
 
+describe("each review page judges its own writes", () => {
+  beforeAll(fresh, 60_000);
+
+  it("every page answers as the whole read, and their markers are submit's violations: drift on a document and a relation, missing, dangling across pages", async () => {
+    const cs = await start();
+    const link = h.relations["P1 has_task T1"]!;
+    await staged(ALL, cs, { operation: "update_entity", type: "task", id: e.T1, properties: { notes: "Planned T1" } }); // 1: drift by hash
+    const t9 = await staged(ALL, cs, {
+      operation: "create_entity",
+      type: "task",
+      properties: { name: "T9", notes: PLAN },
+      parentRelation: { type: "has_task", parentId: e.P1, properties: { phase: "plan" } },
+    }); // 2, 3
+    await staged(ALL, cs, { operation: "update_relation", type: "has_task", id: link, properties: { phase: "review" } }); // 4: drift
+    await staged(ALL, cs, { operation: "update_relation", type: "has_task", id: t9.relation.id, properties: { phase: "done" } }); // 5: ends from 3
+    await staged(ALL, cs, { operation: "update_entity", type: "task", id: e.T4, properties: { name: "T4 b" } }); // 6: missing
+    const t10 = await staged(ALL, cs, { operation: "create_entity", type: "task", properties: { name: "T10" } }); // 7: unstaged below
+    await staged(ALL, cs, { operation: "update_entity", type: "task", id: t10.id, properties: { name: "T10 b" } }); // 8: dangling
+    await staged(ALL, cs, { operation: "create_relation", type: "assigned_to", fromEntityId: t10.id, toEntityId: e.Ben }); // 9: dangling
+    await staged(ALL, cs, { operation: "create_relation", type: "assigned_to", fromEntityId: t9.id, toEntityId: e.Ben }); // 10: an end minted by 2
+    await staged(ALL, cs, { operation: "update_entity", type: "task", id: e.T2, properties: { notes: "T2 again" } }); // 11: clean
+    expect((await rest("DELETE", `${ALL}/changesets/${cs}/writes/7`)).status).toBe(204);
+    // Immediate writes since: the text of T1 at the same length, the link's phase, T4 gone.
+    const edit = await rest("PATCH", `${ALL}/entities/task/${e.T1}/documents/notes`, { op: "str_replace", oldString: "Notes", newString: "Texts" });
+    expect(edit.status, JSON.stringify(edit.body)).toBe(200);
+    expect((await rest("PATCH", `${ALL}/relations/has_task/${link}`, { phase: "test" })).status).toBe(200);
+    expect((await rest("DELETE", `${ALL}/entities/task/${e.T4}`)).status).toBe(204);
+
+    const whole = (await rest("GET", `${ALL}/changesets/${cs}?limit=500`)).body.writes as Row[];
+    expect(Object.fromEntries(whole.map((w) => [w.seq, w.markers.map((m: Row) => m.kind)]))).toEqual({
+      1: ["drift"], 2: [], 3: [], 4: ["drift"], 5: [], 6: ["missing"], 8: ["dangling"], 9: ["dangling"], 10: [], 11: [],
+    });
+    expect(whole[0]).toMatchObject({
+      before: { notes: { document: true, length: chars("Notes of T1") } },
+      current: { notes: { document: true, length: chars("Texts of T1") } },
+    });
+    expect(whole[3]).toMatchObject({ before: { phase: "build" }, current: { phase: "test" }, from: { id: e.P1, name: "P1" }, to: { id: e.T1, name: "T1" } });
+    expect(whole[4]).toMatchObject({ before: null, current: null, from: { id: e.P1, name: "P1" }, to: { id: t9.id, name: "T9" } });
+    expect(whole[8]).toMatchObject({ from: { id: t9.id, name: "T9" }, to: { id: e.Ben, name: "Ben" } });
+    expect(whole[9]).toMatchObject({ current: { notes: { document: true, length: chars("Notes of T2") } } });
+
+    for (const limit of [1, 3]) {
+      for (let offset = 0; offset < whole.length; offset += 1) {
+        const page = await rest("GET", `${ALL}/changesets/${cs}?offset=${offset}&limit=${limit}`);
+        expect(page.body.writes, `offset ${offset}, limit ${limit}`).toEqual(whole.slice(offset, offset + limit));
+      }
+    }
+
+    // Submit runs the pass over the whole journal: the same faults.
+    const submit = await rest("POST", `${ALL}/changesets/${cs}/submit`, {});
+    expect(submit.status).toBe(422);
+    expect(submit.body.error.details.violations).toEqual(
+      whole.flatMap((w) => w.markers.map((m: Row) => ({ seq: w.seq, kind: m.kind, message: m.message }))),
+    );
+  });
+});
+
 describe("through the lens and the mounts (F6)", () => {
   beforeAll(fresh, 60_000);
 

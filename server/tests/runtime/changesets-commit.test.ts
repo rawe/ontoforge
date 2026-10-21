@@ -22,6 +22,7 @@ import {
   NOW,
   asRuntimeStore,
   createMockRuntimeStore,
+  hashedById,
   makeEntity,
   makeRelation,
   makeUnscopedSchema,
@@ -121,8 +122,8 @@ beforeEach(() => {
   store.createRelation.mockResolvedValue(makeRelation());
   store.updateRelation.mockResolvedValue(makeRelation());
   store.deleteRelation.mockResolvedValue(true);
-  store.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
-    Object.fromEntries(ids.filter((id) => id in STORED).map((id) => [id, STORED[id]])),
+  store.getEntitiesByIdsHashed.mockImplementation(async (ids: string[], documentKeys: Record<string, string[]>) =>
+    hashedById(STORED, ids, documentKeys),
   );
 });
 

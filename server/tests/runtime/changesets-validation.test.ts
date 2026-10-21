@@ -16,6 +16,7 @@ import {
   NOW,
   asRuntimeStore,
   createMockRuntimeStore,
+  hashedById,
   makeEntity,
   makeRelation,
   makeScopedSchema,
@@ -124,8 +125,8 @@ beforeEach(() => {
     [D1]: makeEntity({ name: "Ops" }, "department", D1),
   };
   parents = { [D1]: [link("belongs_to", R1, ACME, D1)] };
-  store.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
-    Object.fromEntries(ids.filter((id) => id in stored).map((id) => [id, stored[id]])),
+  store.getEntitiesByIdsHashed.mockImplementation(async (ids: string[], documentKeys: Record<string, string[]>) =>
+    hashedById(stored, ids, documentKeys),
   );
   store.parentsOf.mockImplementation(async (ids: string[]) => ids.flatMap((id) => parents[id] ?? []));
   store.lockTargets.mockImplementation(async (ids: string[]) =>
@@ -225,9 +226,12 @@ describe("the lock-free pass (step 0b)", () => {
   it("missing: a relation update target stored at staging is gone; stored, it passes", async () => {
     const update = row(1, { operation: "update_relation", typeKey: "works_for", targetId: R1, arguments: { properties: { role: "lead" } }, before: { role: "dev" } });
     expect((await pass([update])).faults).toEqual([{ seq: 1, kind: "missing", message: "Deleted since this write was staged" }]);
-    store.getRelation.mockResolvedValue(makeRelation({ role: "dev" }, { relationId: R1 }));
+    store.getRelationsByIds.mockResolvedValue({ [R1]: makeRelation({ role: "dev" }, { relationId: R1 }) });
     expect((await pass([update])).faults).toEqual([]);
-    expect(store.getRelation).toHaveBeenCalledWith("works_for", R1);
+    expect(store.getRelationsByIds).toHaveBeenCalledWith([R1]);
+    // Of another type, it is not the target.
+    store.getRelationsByIds.mockResolvedValue({ [R1]: makeRelation({ role: "dev" }, { relationId: R1, relationTypeKey: "reports_to" }) });
+    expect((await pass([update])).faults.map((f) => f.kind)).toEqual(["missing"]);
   });
 
   it("dangling: what a create since unstaged minted (V6), or an end neither stored nor minted, named by its role", async () => {
@@ -379,7 +383,7 @@ describe("step 3: the end state", () => {
     store.childrenOf.mockResolvedValueOnce([link("belongs_to", R1, ACME, D1)]).mockResolvedValue([]);
     journal([deleteOf(1, "company", ACME), deleteOf(2, "department", D1)]);
     stored = { [ACME]: stored[ACME]!, [D1]: stored[D1]! };
-    store.getEntitiesByIds
+    store.getEntitiesByIdsHashed
       .mockImplementationOnce(async () => ({ [ACME]: stored[ACME], [D1]: stored[D1] }))
       .mockResolvedValue({});
     expect(await commit()).toMatchObject({ committed: 2 });

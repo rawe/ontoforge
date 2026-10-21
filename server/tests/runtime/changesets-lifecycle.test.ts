@@ -17,17 +17,19 @@ import {
   getStagedDocument,
   getStagedEntity,
   listChangesets,
+  lockFreePass,
   recordedDocument,
   stage,
   submitChangeset,
   unstage,
   unsubmitChangeset,
 } from "../../src/runtime/changesets.js";
-import { invalidateLoadedSchemaCache, invalidateSearchContext } from "../../src/runtime/schemaCache.js";
+import { invalidateLoadedSchemaCache, invalidateSearchContext, loadSchema } from "../../src/runtime/schemaCache.js";
 import {
   NOW,
   asRuntimeStore,
   createMockRuntimeStore,
+  hashedById,
   makeEntity,
   makeFullSchema,
   makeRelation,
@@ -117,8 +119,11 @@ beforeEach(() => {
     [NOTE1]: makeEntity({ name: "N", body: "old" }, "note", NOTE1),
   };
   journal = [];
-  store.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
-    Object.fromEntries(ids.filter((id) => id in stored).map((id) => [id, stored[id]])),
+  store.getEntitiesByIdsHashed.mockImplementation(async (ids: string[], documentKeys: Record<string, string[]>) =>
+    hashedById(stored, ids, documentKeys),
+  );
+  store.changesetStore.findMintedAmong.mockImplementation(async (_id: string, ids: string[]) =>
+    journal.filter((write) => write.mintedId !== null && ids.includes(write.mintedId)),
   );
   store.changesetStore.page.mockImplementation(async (_id: string, offset: number, limit: number) =>
     journal.slice(offset, offset + limit),
@@ -407,9 +412,9 @@ describe("list", () => {
 
 describe("review read", () => {
   it("names resolved, before, current and after for updates, and the markers of the pass, on the page", async () => {
-    store.getRelation.mockImplementation(async (_type: string, id: string) =>
-      id === R1 ? makeRelation({ role: "dev" }, { relationId: R1, fromEntityId: PAT, toEntityId: ACME }) : null,
-    );
+    store.getRelationsByIds.mockResolvedValue({
+      [R1]: makeRelation({ role: "dev" }, { relationId: R1, fromEntityId: PAT, toEntityId: ACME }),
+    });
     journal = [
       row(1, { typeKey: "company", mintedId: NEWCO, arguments: { properties: { name: "Newco" } } }),
       rename(2, PAT, "Pat B", { name: "Pat" }),
@@ -430,8 +435,13 @@ describe("review read", () => {
     const bySeq = Object.fromEntries(read.writes.map((w) => [w.seq, w]));
 
     expect(read.writes.map((w) => w.seq)).toEqual([2, 3, 4, 5, 6, 7, 8]);
-    // One batched entity read for the page.
-    expect(store.getEntitiesByIds.mock.calls.filter(([, defs]) => defs !== undefined).length).toBeGreaterThanOrEqual(1);
+    // The page alone: one journal read, one lookup of the creates its ids
+    // name, one batched read each of its stored relations and entities.
+    expect(store.changesetStore.page).toHaveBeenCalledTimes(1);
+    expect(store.changesetStore.findMintedAmong).toHaveBeenCalledTimes(1);
+    expect(store.getRelationsByIds).toHaveBeenCalledTimes(1);
+    expect(store.getEntitiesByIdsHashed).toHaveBeenCalledTimes(1);
+    expect(store.getEntitiesByIdsHashed.mock.calls[0]![1]).toEqual({ note: ["body"] });
     expect(bySeq[2]).toMatchObject({ type: "person", id: PAT, name: "Pat", before: { name: "Pat" }, current: { name: "Pat" }, after: { name: "Pat B" }, markers: [] });
     // A minted end is named by its staged create, even off the page.
     expect(bySeq[3]).toMatchObject({ from: { id: PAT, name: "Pat" }, to: { id: NEWCO, name: "Newco" }, before: null, current: null, after: { role: "dev" } });
@@ -506,6 +516,53 @@ describe("review read", () => {
       markers: [],
     });
     expect(read.writes[2]).toMatchObject({ name: "Ops", before: null, current: null, after: { name: "Ops 2" }, markers: [] });
+  });
+
+  it("a page judges its own writes: at any offset its markers and names are the whole journal's, and the pass's", async () => {
+    const R3 = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const UNSTAGED = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    store.getRelationsByIds.mockImplementation(async (ids: string[]) =>
+      Object.fromEntries(
+        ids
+          .filter((id) => id === R1)
+          .map((id) => [id, makeRelation({ role: "dev" }, { relationId: R1, fromEntityId: PAT, toEntityId: ACME })]),
+      ),
+    );
+    journal = [
+      row(1, { typeKey: "company", mintedId: NEWCO, arguments: { properties: { name: "Newco" } } }),
+      row(2, { operation: "create_relation", typeKey: "works_for", mintedId: R2, arguments: { fromEntityId: PAT, toEntityId: NEWCO, properties: {} } }),
+      rename(3, KIM, "Kim X", { name: "Kim" }),
+      // An update of a relation a create off the page minted: its ends from that create.
+      row(4, { operation: "update_relation", typeKey: "works_for", targetId: R2, arguments: { properties: { role: "lead" } } }),
+      row(5, { operation: "create_relation", typeKey: "works_for", mintedId: R3, arguments: { fromEntityId: GHOST, toEntityId: PAT, properties: {} } }),
+      rename(6, GONE, "x", { name: "x" }),
+      row(7, { operation: "update_entity", typeKey: "note", targetId: NOTE1, arguments: { properties: { body: "new" } }, before: { body: recordedDocument("older") } }),
+      row(8, { operation: "update_relation", typeKey: "works_for", targetId: R1, arguments: { properties: { role: "lead" } }, before: { role: "boss" } }),
+      row(9, { operation: "update_entity", typeKey: "company", targetId: NEWCO, arguments: { properties: { name: "Newco 2" } } }),
+      // What a create since unstaged minted.
+      rename(10, UNSTAGED, "y", null),
+      row(11, { operation: "delete_relation", typeKey: "works_for", targetId: R2, arguments: {} }),
+    ];
+
+    const whole = await getChangeset("full_lens", null, CS, 0, 100, on());
+    const pass = await lockFreePass(await loadSchema("full_lens", on()), CS, on());
+    for (const write of whole.writes) {
+      const faults = pass.faults.filter((fault) => fault.seq === write.seq).map(({ kind, message }) => ({ kind, message }));
+      expect(write.markers).toEqual(faults);
+    }
+    expect(Object.fromEntries(whole.writes.map((w) => [w.seq, w.markers.map((m) => m.kind)]))).toEqual({
+      1: [], 2: [], 3: ["drift"], 4: [], 5: ["dangling"], 6: ["missing"], 7: ["drift"], 8: ["drift"], 9: [], 10: ["dangling"], 11: [],
+    });
+    expect(whole.writes[3]).toMatchObject({ from: { id: PAT, name: "Pat" }, to: { id: NEWCO, name: "Newco" } });
+    expect(whole.writes[6]).toMatchObject({ current: { body: { document: true, length: 3 } } });
+    expect(whole.writes[8]).toMatchObject({ name: "Newco", before: null, current: null });
+
+    for (const limit of [1, 3]) {
+      for (let offset = 0; offset < journal.length; offset += 1) {
+        const page = await getChangeset("full_lens", null, CS, offset, limit, on());
+        expect(page.writes).toEqual(whole.writes.slice(offset, offset + limit));
+      }
+    }
   });
 
   it("through a scoped lens nothing hidden appears: no hidden type, property, name or value", async () => {
@@ -686,7 +743,7 @@ describe("staged entity read", () => {
     expect(store.changesetStore.writesOn).toHaveBeenCalledWith(CS, PAT);
     expect(store.changesetStore.page).not.toHaveBeenCalled();
     expect(store.getEntity).toHaveBeenCalledTimes(1);
-    expect(store.getEntitiesByIds).not.toHaveBeenCalled();
+    expect(store.getEntitiesByIdsHashed).not.toHaveBeenCalled();
   });
 
   it("markers judged on its own writes: drift against the stored row, a value the lens no longer accepts", async () => {

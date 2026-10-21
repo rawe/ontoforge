@@ -317,6 +317,36 @@ export interface ParentRelationInput {
   properties?: Record<string, JsonValue>
 }
 
+/**
+ * One write staged into a changeset, as the immediate write would make it;
+ * values go under `properties`, unlike the immediate routes' flat bodies.
+ */
+export type StageWritePayload =
+  | {
+      operation: 'create_entity'
+      type: string
+      properties: Record<string, JsonValue>
+      parentRelation?: ParentRelationInput
+    }
+  | { operation: 'update_entity'; type: string; id: string; properties: Record<string, JsonValue | null> }
+  | { operation: 'delete_entity'; type: string; id: string }
+  | {
+      operation: 'create_relation'
+      type: string
+      fromEntityId: string
+      toEntityId: string
+      properties: Record<string, JsonValue>
+    }
+  | { operation: 'delete_relation'; type: string; id: string }
+
+/** A staged write's answer: its seq and the minted (create) or target id;
+ * a create with a parent relation also names the relation's row. */
+export interface StagedAnswer {
+  seq: number
+  id: string
+  relation?: { seq: number; id: string }
+}
+
 /* ------------------------------ runtime — search ----------------------------- */
 
 export type SearchStrategy = 'semantic' | 'keyword' | 'keyword-any' | 'keyword-all' | 'hybrid'

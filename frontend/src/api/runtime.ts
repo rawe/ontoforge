@@ -39,6 +39,8 @@ import type {
   SearchCatalogEntry,
   SearchResponse,
   SearchStrategy,
+  StagedAnswer,
+  StageWritePayload,
 } from './types'
 
 const base = (ontologyKey: string, lensKey: string) =>
@@ -342,6 +344,13 @@ export const readAssistantThread = (
 const changesetsBase = (ontologyKey: string, lensKey: string) =>
   `${base(ontologyKey, lensKey)}/changesets`
 
+/** A new draft changeset on the plain lens, so never held to an anchor. */
+export const startChangeset = (ontologyKey: string, lensKey: string, note?: string) =>
+  request<Changeset>(changesetsBase(ontologyKey, lensKey), {
+    method: 'POST',
+    body: note === undefined ? {} : { note },
+  })
+
 /** The lens's changesets, submitted first. */
 export const listChangesets = (ontologyKey: string, lensKey: string) =>
   request<ChangesetListItem[]>(changesetsBase(ontologyKey, lensKey))
@@ -370,6 +379,21 @@ export const commitChangeset = (
   request<CommitResult>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}/commit`, {
     method: 'POST',
     body: { expectedVersion },
+  })
+
+/**
+ * Freezes a draft for review; a fault answers 422 with `details.violations`.
+ * A note replaces the stored one; without it the stored one stays.
+ */
+export const submitChangeset = (
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string,
+  note?: string,
+) =>
+  request<Changeset>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}/submit`, {
+    method: 'POST',
+    body: note === undefined ? {} : { note },
   })
 
 /** Back to draft; the note is required and replaces the stored one. */
@@ -414,4 +438,16 @@ export const unstageWrite = (
 ) =>
   request<undefined>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}/writes/${seq}`, {
     method: 'DELETE',
+  })
+
+/** Appends one write to a draft; a busy changeset (another call staging) answers 409. */
+export const stageWrite = (
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string,
+  payload: StageWritePayload,
+) =>
+  request<StagedAnswer>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}/writes`, {
+    method: 'POST',
+    body: payload,
   })

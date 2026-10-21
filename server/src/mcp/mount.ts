@@ -73,7 +73,7 @@ async function handleMcpRequest(
 async function isStagedOnly(ontologyKey: string, anchorKey: string): Promise<boolean> {
   try {
     const record = await (await getRuntimeStore(ontologyKey)).rulesets().get(anchorKey);
-    return record?.writeAccess === "propose"; // bridge: removed in 05
+    return record?.writeAccess === "propose"; // bridge: removed in 07
   } catch (error) {
     if (error instanceof NotFoundError) return false;
     throw error;

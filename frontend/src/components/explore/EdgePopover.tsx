@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { useDisplayLabel } from '@/api/hooks'
 import * as runtime from '@/api/runtime'
 import type { EntityInstance, SchemaRelationType } from '@/api/types'
+import { EXPLORER_LIVE_ONLY_TEXT } from '@/components/changesets/changesets'
 import { invalidateNeighborhood } from '@/components/entity/useNeighborCounts'
 import { formatValue } from '@/components/schema/propertyDraft'
 import {
@@ -19,6 +20,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { usePinnedChangeset } from '@/lib/pinnedChangeset'
 import type { RelationFlowEdge } from './workingSet'
 
 const POPOVER_WIDTH = 300
@@ -57,6 +59,8 @@ export function EdgePopover({
   const queryClient = useQueryClient()
   const ref = useRef<HTMLDivElement>(null)
   const [confirming, setConfirming] = useState(false)
+  // The canvas deletes live only; while a changeset is pinned it does not.
+  const pinned = usePinnedChangeset(ontologyKey, lensKey) !== null
 
   const relation = edge.data?.relation
 
@@ -188,11 +192,14 @@ export function EdgePopover({
         </dl>
       )}
 
-      <div className="mt-2.5 flex justify-end border-t pt-2">
+      <div className="mt-2.5 flex items-center justify-end gap-2 border-t pt-2">
+        {pinned && (
+          <p className="mr-auto text-[11.5px] text-muted-foreground">{EXPLORER_LIVE_ONLY_TEXT}</p>
+        )}
         <Button
           variant="destructive"
           size="xs"
-          disabled={deleteMutation.isPending}
+          disabled={deleteMutation.isPending || pinned}
           onClick={() => setConfirming(true)}
         >
           {deleteMutation.isPending ? (
@@ -216,7 +223,7 @@ export function EdgePopover({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={deleteMutation.isPending}
+              disabled={deleteMutation.isPending || pinned}
               onClick={(e) => {
                 e.preventDefault()
                 deleteMutation.mutate()

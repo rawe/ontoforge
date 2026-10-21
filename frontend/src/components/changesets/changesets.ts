@@ -2,7 +2,8 @@
  * Pure helpers for the Workbench's Changesets page: the list order and the
  * sidebar count, what a list row and a staged write's row say, the
  * violations of a rejected commit and the note built from them, and how
- * the bar names the pinned changeset. No React, no I/O — unit-tested with
+ * the bar names the pinned changeset, and why the Explorer canvas does not
+ * edit while one is pinned. No React, no I/O — unit-tested with
  * `node --test`.
  */
 
@@ -20,6 +21,9 @@ export const MAX_NOTE_LENGTH = 1000
 
 /** Writes per page of the review read: the API's default. */
 export const WRITES_PAGE_SIZE = 100
+
+/** Why the Explorer canvas's connect and edge delete are off while a changeset is pinned. */
+export const EXPLORER_LIVE_ONLY_TEXT = 'Explorer edits are live only — leave the changeset to edit here'
 
 /** The state chip's text. */
 export function stateLabel(state: ChangesetState): string {

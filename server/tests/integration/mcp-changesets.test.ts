@@ -161,14 +161,15 @@ describe("a whole round through MCP alone (V4, V7, V28)", () => {
       parent_relation: { type: "has_task", parent_id: e.P1, properties: { phase: "build" } },
       changeset_id: cs,
     });
-    expect(t9).toEqual({ seq: 1, id: expect.any(String) });
+    // With a parent relation: two writes, the entity's and then the relation's.
+    expect(t9).toEqual({ seq: 1, id: expect.any(String), relation: { seq: 2, id: expect.any(String) } });
     // Reads never see staged data.
     expect(await refused(client, "get_entity", { entity_type_key: "task", entity_id: t9.id })).toContain("not found");
 
     // A staged create's id is final: later staged writes name it.
     expect(
       await ok(client, "update_entity", { entity_type_key: "task", entity_id: t9.id, properties: { name: "T9b" }, changeset_id: cs }),
-    ).toEqual({ seq: 2, id: t9.id });
+    ).toEqual({ seq: 3, id: t9.id });
     await ok(client, "update_entity", { entity_type_key: "project", entity_id: e.P2, properties: { name: "P2 Website" }, changeset_id: cs });
     await ok(client, "delete_entity", { entity_type_key: "task", entity_id: e.T4, changeset_id: cs });
     await ok(client, "create_relation", {
@@ -188,24 +189,31 @@ describe("a whole round through MCP alone (V4, V7, V28)", () => {
       relation_id: h.relations["Ben mentors Kim"],
       changeset_id: cs,
     });
-    expect(mentors).toEqual({ seq: 7, id: h.relations["Ben mentors Kim"] });
+    expect(mentors).toEqual({ seq: 8, id: h.relations["Ben mentors Kim"] });
 
     // The read and the list are REST's, field for field.
     const read = await ok(client, "get_changeset", { changeset_id: cs });
     expect(read).toEqual((await rest("GET", `${ALL}/changesets/${cs}`)).body);
     expect(read.writes.map((w: Row) => [w.seq, w.operation, w.type])).toEqual([
       [1, "create_entity", "task"],
-      [2, "update_entity", "task"],
-      [3, "update_entity", "project"],
-      [4, "delete_entity", "task"],
-      [5, "create_relation", "assigned_to"],
-      [6, "update_relation", "has_task"],
-      [7, "delete_relation", "mentors"],
+      [2, "create_relation", "has_task"],
+      [3, "update_entity", "task"],
+      [4, "update_entity", "project"],
+      [5, "delete_entity", "task"],
+      [6, "create_relation", "assigned_to"],
+      [7, "update_relation", "has_task"],
+      [8, "delete_relation", "mentors"],
     ]);
-    expect(read.writes[2]).toMatchObject({ before: { name: "P2" }, current: { name: "P2" }, after: { name: "P2 Website" }, markers: [] });
-    const page = await ok(client, "get_changeset", { changeset_id: cs, offset: 5, limit: 1000 });
-    expect(page).toMatchObject({ offset: 5, limit: 500 });
-    expect(page.writes.map((w: Row) => w.seq)).toEqual([6, 7]);
+    expect(read.writes[1]).toMatchObject({
+      id: t9.relation.id,
+      from: { id: e.P1, name: "P1" },
+      to: { id: t9.id, name: "T9" },
+      after: { phase: "build" },
+    });
+    expect(read.writes[3]).toMatchObject({ before: { name: "P2" }, current: { name: "P2" }, after: { name: "P2 Website" }, markers: [] });
+    const page = await ok(client, "get_changeset", { changeset_id: cs, offset: 6, limit: 1000 });
+    expect(page).toMatchObject({ offset: 6, limit: 500 });
+    expect(page.writes.map((w: Row) => w.seq)).toEqual([7, 8]);
     expect(await ok(client, "list_changesets")).toEqual((await rest("GET", `${ALL}/changesets`)).body);
 
     // Submit freezes it.
@@ -227,15 +235,15 @@ describe("a whole round through MCP alone (V4, V7, V28)", () => {
     const draft = await ok(client, "unsubmit_changeset", { changeset_id: cs, note: "keep the mentoring" });
     expect(draft).toMatchObject({ state: "draft", note: "keep the mentoring", submittedAt: null, version: submitted.version + 1 });
 
-    expect(await ok(client, "unstage", { changeset_id: cs, seq: 7 })).toEqual({
-      message: `Staged write 7 removed from changeset '${cs}'.`,
+    expect(await ok(client, "unstage", { changeset_id: cs, seq: 8 })).toEqual({
+      message: `Staged write 8 removed from changeset '${cs}'.`,
     });
-    expect(await refused(client, "unstage", { changeset_id: cs, seq: 7 })).toContain(`Staged write 7 not found in changeset '${cs}'`);
+    expect(await refused(client, "unstage", { changeset_id: cs, seq: 8 })).toContain(`Staged write 8 not found in changeset '${cs}'`);
 
     const again = await ok(client, "submit_changeset", { changeset_id: cs });
     expect(again).toMatchObject({ state: "submitted", note: "keep the mentoring" });
     expect(await ok(client, "commit_changeset", { changeset_id: cs, expected_version: again.version })).toEqual({
-      committed: 6,
+      committed: 7,
       alreadyGone: [],
     });
 
@@ -270,13 +278,14 @@ describe("the errors are REST's (R4)", () => {
     const cs = (await ok(client, "start_changeset")).id as string;
     const unknown = "00000000-0000-4000-8000-000000000000";
 
-    const missing = await rest("PATCH", `${ALL}/changesets/${cs}/entities/task/${unknown}`, { name: "x" });
+    const writes = `${ALL}/changesets/${cs}/writes`;
+    const missing = await rest("POST", writes, { operation: "update_entity", type: "task", id: unknown, properties: { name: "x" } });
     expect(missing.status).toBe(404);
     expect(
       await refused(client, "update_entity", { entity_type_key: "task", entity_id: unknown, properties: { name: "x" }, changeset_id: cs }),
     ).toContain(missing.body.error.message);
 
-    const bad = await rest("POST", `${ALL}/changesets/${cs}/relations/has_task`, { fromEntityId: e.P1, toEntityId: e.T1 });
+    const bad = await rest("POST", writes, { operation: "create_relation", type: "has_task", fromEntityId: e.P1, toEntityId: e.T1 });
     expect(bad.status).toBe(422);
     const badText = await refused(client, "create_relation", {
       relation_type_key: "has_task",
@@ -311,7 +320,12 @@ describe("the errors are REST's (R4)", () => {
       const client = await connect();
       const cs = (await ok(client, "start_changeset")).id as string;
       const name = "x".repeat(200);
-      const full = await rest("PATCH", `${ALL}/changesets/${cs}/entities/project/${e.P1}`, { name });
+      const full = await rest("POST", `${ALL}/changesets/${cs}/writes`, {
+        operation: "update_entity",
+        type: "project",
+        id: e.P1,
+        properties: { name },
+      });
       expect(full.status).toBe(409);
       expect(
         await refused(client, "update_entity", { entity_type_key: "project", entity_id: e.P1, properties: { name }, changeset_id: cs }),
@@ -369,10 +383,11 @@ describe("the anchored mount (V8, V17, V21, V42)", () => {
       parent_relation: { type: "has_task", parent_id: e.P2, properties: { phase: "build" } },
       changeset_id: cs,
     });
-    expect(staged.seq).toBe(1);
+    expect(staged).toMatchObject({ seq: 1, relation: { seq: 2 } });
     const rejected = await refused(a, "commit_changeset", { changeset_id: cs });
     expect(rejected).toContain("The commit was rejected; nothing was persisted");
     expect(rejected).toContain("seq 1 not_covered: ");
+    expect(rejected).toContain("seq 2 not_covered: ");
     expect(await refused(a, "get_entity", { entity_type_key: "task", entity_id: staged.id })).toContain("not found");
     await ok(a, "discard_changeset", { changeset_id: cs });
   });
@@ -457,7 +472,7 @@ describe("the document edit tools refuse a changeset_id (F7)", () => {
 
   it("REST mounts no document edit route under a changeset: 404 and nothing written", async () => {
     const cs = (await rest("POST", `${ALL}/changesets`)).body.id as string;
-    const res = await rest("PATCH", `${ALL}/changesets/${cs}/entities/task/${e.T3}/documents/notes`, {
+    const res = await rest("PATCH", `${ALL}/changesets/${cs}/documents/task/${e.T3}/notes`, {
       op: "str_replace",
       oldString: "Notes",
       newString: "Changed",

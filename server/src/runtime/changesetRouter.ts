@@ -4,39 +4,33 @@
  * below the anchored mirror at `…/anchors/:anchorKey/changesets`
  * (`anchorRouter.ts`, whose hooks check the anchor first).
  *
- * The staged write routes under `/:changesetId/` have the paths and bodies
- * of the six write routes of `router.ts` and answer 202 `{seq, id}`.
- * `GET /` lists the lens's changesets (an anchored URL: its anchor's),
- * `GET /:changesetId` is the review read, and `GET /:changesetId/entities/
- * …/documents/:propertyKey` the staged text of one document property, with
- * the document read's paging; `POST /:changesetId/submit` and `/unsubmit`
- * hand it over and back, and `POST /:changesetId/commit` persists it all or
- * nothing. No entity or relation read route is mounted under a changeset:
- * reads never see staged data.
+ * `POST /:changesetId/writes` stages one write, its body discriminated by
+ * `operation`, and answers 201 `{seq, id}` (a create with a parent
+ * relation adds `relation: {seq, id}`); `DELETE /:changesetId/writes/:seq`
+ * unstages one. `GET /` lists the lens's changesets (an anchored URL: its
+ * anchor's), `GET /:changesetId` is the review read, and `GET
+ * /:changesetId/documents/:entityTypeKey/:entityId/:propertyKey` the staged
+ * text of one document property, with the document read's paging;
+ * `POST /:changesetId/submit` and `/unsubmit` hand it over and back, and
+ * `POST /:changesetId/commit` persists it all or nothing. No entity or
+ * relation read route is mounted under a changeset: reads never see staged
+ * data.
  * Routers parse and shape only; every rule lives in `changesets.ts`.
  */
 
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import type { FastifyReply } from "fastify";
 import { z } from "zod";
 
 import { getRuntimeStore } from "../core/ports.js";
 import * as changesets from "./changesets.js";
-import {
-  DocumentReadQuery,
-  EntityCreatePayload,
-  LensParams,
-  PropertyPayload,
-  RelationCreatePayload,
-  anchorOf,
-} from "./router.js";
+import { DocumentReadQuery, LensParams, ParentRelationPayload, PropertyPayload, anchorOf } from "./router.js";
 
 const ChangesetParams = LensParams.extend({ changesetId: z.string() });
-const EntityTypeParams = ChangesetParams.extend({ entityTypeKey: z.string() });
-const EntityParams = EntityTypeParams.extend({ entityId: z.string() });
-const DocumentParams = EntityParams.extend({ propertyKey: z.string() });
-const RelationTypeParams = ChangesetParams.extend({ relationTypeKey: z.string() });
-const RelationParams = RelationTypeParams.extend({ relationId: z.string() });
+const DocumentParams = ChangesetParams.extend({
+  entityTypeKey: z.string(),
+  entityId: z.string(),
+  propertyKey: z.string(),
+});
 const WriteParams = ChangesetParams.extend({ seq: z.coerce.number().int().min(1) });
 
 const StartPayload = z.strictObject({ note: z.string().nullish() }).nullish();
@@ -54,21 +48,50 @@ const PageQuery = z.looseObject({
   limit: z.coerce.number().int().min(1).max(500).default(100),
 });
 
-type Params = z.infer<typeof ChangesetParams>;
+const Properties = PropertyPayload.default({});
 
-async function staged(
-  params: Params,
-  write: changesets.StagedWrite,
-  reply: FastifyReply,
-): Promise<FastifyReply> {
-  const answer = await changesets.stage(
-    params.lensKey,
-    anchorOf(params),
-    params.changesetId,
-    write,
-    await getRuntimeStore(params.ontologyKey),
-  );
-  return reply.status(202).send(answer);
+/** One staged write: `type` is the entity or relation type key, `id` the
+ * target of an update or delete. */
+const StagedWritePayload = z.discriminatedUnion("operation", [
+  z.strictObject({
+    operation: z.literal("create_entity"),
+    type: z.string(),
+    properties: Properties,
+    parentRelation: ParentRelationPayload.optional(),
+  }),
+  z.strictObject({ operation: z.literal("update_entity"), type: z.string(), id: z.string(), properties: Properties }),
+  z.strictObject({ operation: z.literal("delete_entity"), type: z.string(), id: z.string() }),
+  z.strictObject({
+    operation: z.literal("create_relation"),
+    type: z.string(),
+    fromEntityId: z.string(),
+    toEntityId: z.string(),
+    properties: Properties,
+  }),
+  z.strictObject({ operation: z.literal("update_relation"), type: z.string(), id: z.string(), properties: Properties }),
+  z.strictObject({ operation: z.literal("delete_relation"), type: z.string(), id: z.string() }),
+]);
+
+function stagedWrite(body: z.infer<typeof StagedWritePayload>): changesets.StagedWrite {
+  const typeKey = body.type;
+  switch (body.operation) {
+    case "create_entity":
+      return { operation: body.operation, typeKey, properties: body.properties, parentRelation: body.parentRelation ?? null };
+    case "create_relation":
+      return {
+        operation: body.operation,
+        typeKey,
+        fromEntityId: body.fromEntityId,
+        toEntityId: body.toEntityId,
+        properties: body.properties,
+      };
+    case "update_entity":
+    case "update_relation":
+      return { operation: body.operation, typeKey, id: body.id, properties: body.properties };
+    case "delete_entity":
+    case "delete_relation":
+      return { operation: body.operation, typeKey, id: body.id };
+  }
 }
 
 export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
@@ -112,7 +135,7 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.get(
-    "/:changesetId/entities/:entityTypeKey/:entityId/documents/:propertyKey",
+    "/:changesetId/documents/:entityTypeKey/:entityId/:propertyKey",
     { schema: { tags: ["runtime"], params: DocumentParams, querystring: DocumentReadQuery } },
     async (request) =>
       changesets.getStagedDocument(
@@ -139,6 +162,21 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
         await getRuntimeStore(request.params.ontologyKey),
       );
       return reply.status(204).send();
+    },
+  );
+
+  app.post(
+    "/:changesetId/writes",
+    { schema: { tags: ["runtime"], params: ChangesetParams, body: StagedWritePayload } },
+    async (request, reply) => {
+      const answer = await changesets.stage(
+        request.params.lensKey,
+        anchorOf(request.params),
+        request.params.changesetId,
+        stagedWrite(request.body),
+        await getRuntimeStore(request.params.ontologyKey),
+      );
+      return reply.status(201).send(answer);
     },
   );
 
@@ -193,99 +231,6 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.changesetId,
         request.body?.expectedVersion,
         await getRuntimeStore(request.params.ontologyKey),
-      ),
-  );
-
-  // --- Staged writes: the paths and bodies of the immediate writes ---
-
-  app.post(
-    "/:changesetId/entities/:entityTypeKey",
-    { schema: { tags: ["runtime"], params: EntityTypeParams, body: EntityCreatePayload } },
-    async (request, reply) => {
-      const { parentRelation, ...properties } = request.body;
-      return staged(
-        request.params,
-        {
-          operation: "create_entity",
-          typeKey: request.params.entityTypeKey,
-          properties,
-          parentRelation: parentRelation ?? null,
-        },
-        reply,
-      );
-    },
-  );
-
-  app.patch(
-    "/:changesetId/entities/:entityTypeKey/:entityId",
-    { schema: { tags: ["runtime"], params: EntityParams, body: PropertyPayload } },
-    async (request, reply) =>
-      staged(
-        request.params,
-        {
-          operation: "update_entity",
-          typeKey: request.params.entityTypeKey,
-          id: request.params.entityId,
-          properties: request.body,
-        },
-        reply,
-      ),
-  );
-
-  app.delete(
-    "/:changesetId/entities/:entityTypeKey/:entityId",
-    { schema: { tags: ["runtime"], params: EntityParams } },
-    async (request, reply) =>
-      staged(
-        request.params,
-        { operation: "delete_entity", typeKey: request.params.entityTypeKey, id: request.params.entityId },
-        reply,
-      ),
-  );
-
-  app.post(
-    "/:changesetId/relations/:relationTypeKey",
-    { schema: { tags: ["runtime"], params: RelationTypeParams, body: RelationCreatePayload } },
-    async (request, reply) => {
-      const { fromEntityId, toEntityId, ...properties } = request.body;
-      return staged(
-        request.params,
-        {
-          operation: "create_relation",
-          typeKey: request.params.relationTypeKey,
-          fromEntityId,
-          toEntityId,
-          properties,
-        },
-        reply,
-      );
-    },
-  );
-
-  app.patch(
-    "/:changesetId/relations/:relationTypeKey/:relationId",
-    { schema: { tags: ["runtime"], params: RelationParams, body: PropertyPayload } },
-    async (request, reply) =>
-      staged(
-        request.params,
-        {
-          operation: "update_relation",
-          typeKey: request.params.relationTypeKey,
-          id: request.params.relationId,
-          properties: request.body,
-        },
-        reply,
-      ),
-  );
-
-  app.delete(
-    "/:changesetId/relations/:relationTypeKey/:relationId",
-    { schema: { tags: ["runtime"], params: RelationParams } },
-    async (request, reply) =>
-      staged(
-        request.params,
-        { operation: "delete_relation", typeKey: request.params.relationTypeKey, id: request.params.relationId },
-        reply,
       ),
   );
 };

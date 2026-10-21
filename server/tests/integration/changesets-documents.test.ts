@@ -92,15 +92,16 @@ async function start(base = ALL): Promise<string> {
   return res.body.id as string;
 }
 
-async function staged(method: string, base: string, cs: string, path: string, payload?: Row): Promise<Row> {
-  const res = await rest(method, `${base}/changesets/${cs}/${path}`, payload);
-  expect(res.status, JSON.stringify(res.body)).toBe(202);
+/** Stage one write: its journal body, answered 201. */
+async function staged(base: string, cs: string, write: Row): Promise<Row> {
+  const res = await rest("POST", `${base}/changesets/${cs}/writes`, write);
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
   return res.body;
 }
 
 /** The staged document read of a task's notes over REST. */
 function stagedNotes(cs: string, task: string, query = "", base = ALL): Promise<{ status: number; body: Row }> {
-  return rest("GET", `${base}/changesets/${cs}/entities/task/${task}/documents/notes${query}`);
+  return rest("GET", `${base}/changesets/${cs}/documents/task/${task}/notes${query}`);
 }
 
 beforeAll(async () => {
@@ -129,25 +130,51 @@ describe("the review read and the staged document read (F6)", () => {
   beforeAll(async () => {
     await fresh();
     cs = await start();
-    await staged("PATCH", ALL, cs, `entities/task/${e.T1}`, { notes: PLAN }); // 1: a whole document
+    await staged(ALL, cs, {
+      operation: "update_entity",
+      type: "task",
+      id: e.T1,
+      properties: { notes: PLAN },
+    }); // 1: a whole document
     t9 = (
-      await staged("POST", ALL, cs, "entities/task", {
-        name: "T9",
-        notes: "Draft of T9",
+      await staged(ALL, cs, {
+        operation: "create_entity",
+        type: "task",
+        properties: { name: "T9", notes: "Draft of T9" },
         parentRelation: { type: "has_task", parentId: e.P1, properties: { phase: "plan" } },
       })
-    ).id as string; // 2: a create with a document and a parent relation
-    await staged("PATCH", ALL, cs, `entities/task/${e.T2}`, { notes: "First rewrite of T2" }); // 3
-    await staged("PATCH", ALL, cs, `entities/task/${t9}`, { notes: "Final text of T9" }); // 4: the created entity again
-    await staged("PATCH", ALL, cs, `entities/task/${e.T2}`, { notes: "Second rewrite" }); // 5: the last of two wins
-    await staged("PATCH", ALL, cs, `entities/task/${e.T5}`, { name: "T5 b" }); // 6: sets no document
+    ).id as string; // 2, 3: a create with a document, and its parent relation
+    await staged(ALL, cs, {
+      operation: "update_entity",
+      type: "task",
+      id: e.T2,
+      properties: { notes: "First rewrite of T2" },
+    }); // 4
+    await staged(ALL, cs, {
+      operation: "update_entity",
+      type: "task",
+      id: t9,
+      properties: { notes: "Final text of T9" },
+    }); // 5: the created entity again
+    await staged(ALL, cs, {
+      operation: "update_entity",
+      type: "task",
+      id: e.T2,
+      properties: { notes: "Second rewrite" },
+    }); // 6: the last of two wins
+    await staged(ALL, cs, {
+      operation: "update_entity",
+      type: "task",
+      id: e.T5,
+      properties: { name: "T5 b" },
+    }); // 7: sets no document
   }, 60_000);
 
   it("shows no arguments and every document value as a stub, over REST and MCP alike", async () => {
     const read = (await rest("GET", `${ALL}/changesets/${cs}`)).body;
-    expect(read.writeCount).toBe(6);
+    expect(read.writeCount).toBe(7);
     for (const write of read.writes as Row[]) expect(write, `seq ${write.seq}`).not.toHaveProperty("arguments");
-    const [t1, create, t2, , , t5] = read.writes as Row[];
+    const [t1, create, parent, t2, , , t5] = read.writes as Row[];
     expect(t1).toMatchObject({
       name: "T1",
       before: { notes: { document: true, length: chars("Notes of T1") } },
@@ -155,14 +182,21 @@ describe("the review read and the staged document read (F6)", () => {
       after: { notes: { document: true, length: chars(PLAN) } },
       markers: [],
     });
-    // The parent relation's own properties, which only the arguments showed before.
     expect(create).toMatchObject({
       id: t9,
       name: "T9",
-      parent: { id: e.P1, name: "P1", properties: { phase: "plan" } },
       after: { name: "T9", notes: { document: true, length: chars("Draft of T9") } },
       before: null,
       current: null,
+    });
+    expect(create).not.toHaveProperty("parent");
+    // The parent relation is a write of its own, its ends named.
+    expect(parent).toMatchObject({
+      operation: "create_relation",
+      type: "has_task",
+      from: { id: e.P1, name: "P1" },
+      to: { id: t9, name: "T9" },
+      after: { phase: "plan" },
     });
     expect(t2).toMatchObject({ after: { notes: { document: true, length: chars("First rewrite of T2") } } });
     expect(t5).toMatchObject({ after: { name: "T5 b" } });
@@ -219,9 +253,14 @@ describe("the review read and the staged document read (F6)", () => {
     expect((await stagedNotes(cs, t9)).body).toMatchObject({ content: "Final text of T9", totalLength: 16 });
     expect((await stagedNotes(cs, e.T2)).body).toMatchObject({ content: "Second rewrite", totalLength: 14 });
     // Unstaging the later write brings back the earlier one.
-    expect((await rest("DELETE", `${ALL}/changesets/${cs}/writes/5`)).status).toBe(204);
+    expect((await rest("DELETE", `${ALL}/changesets/${cs}/writes/6`)).status).toBe(204);
     expect((await stagedNotes(cs, e.T2)).body).toMatchObject({ content: "First rewrite of T2" });
-    await staged("PATCH", ALL, cs, `entities/task/${e.T2}`, { notes: "Second rewrite" });
+    await staged(ALL, cs, {
+      operation: "update_entity",
+      type: "task",
+      id: e.T2,
+      properties: { notes: "Second rewrite" },
+    });
   });
 
   it("not found when no staged write sets it, or for what is no document or no changeset", async () => {
@@ -231,10 +270,10 @@ describe("the review read and the staged document read (F6)", () => {
       expect(res.status).toBe(404);
       expect(res.body.error).toMatchObject({ code: "RESOURCE_NOT_FOUND", message: none(task) });
     }
-    const name = await rest("GET", `${ALL}/changesets/${cs}/entities/task/${e.T1}/documents/name`);
+    const name = await rest("GET", `${ALL}/changesets/${cs}/documents/task/${e.T1}/name`);
     expect(name.status).toBe(404);
     expect(name.body.error.message).toBe("Document property 'name' not found on entity type 'task'");
-    expect((await rest("GET", `${ALL}/changesets/${cs}/entities/nope/${e.T1}/documents/notes`)).body.error.message).toBe(
+    expect((await rest("GET", `${ALL}/changesets/${cs}/documents/nope/${e.T1}/notes`)).body.error.message).toBe(
       "Entity type 'nope' not found",
     );
     const gone = "00000000-0000-4000-8000-000000000000";
@@ -248,11 +287,20 @@ describe("the review read and the staged document read (F6)", () => {
 
   it("not found when a later staged write deletes the entity, over REST and MCP", async () => {
     const other = await start();
-    await staged("PATCH", ALL, other, `entities/task/${e.T1a1}`, { notes: "Doomed notes" });
-    const t10 = (await staged("POST", ALL, other, "entities/task", { name: "T10", notes: "Short-lived" })).id as string;
+    await staged(ALL, other, {
+      operation: "update_entity",
+      type: "task",
+      id: e.T1a1,
+      properties: { notes: "Doomed notes" },
+    });
+    const t10 = (await staged(ALL, other, {
+      operation: "create_entity",
+      type: "task",
+      properties: { name: "T10", notes: "Short-lived" },
+    })).id as string;
     expect((await stagedNotes(other, e.T1a1)).body.content).toBe("Doomed notes");
-    await staged("DELETE", ALL, other, `entities/task/${e.T1a1}`);
-    await staged("DELETE", ALL, other, `entities/task/${t10}`);
+    await staged(ALL, other, { operation: "delete_entity", type: "task", id: e.T1a1 });
+    await staged(ALL, other, { operation: "delete_entity", type: "task", id: t10 });
     const client = await connect();
     for (const task of [e.T1a1, t10]) {
       const message = `Changeset '${other}' deletes entity '${task}': a commit leaves no 'notes'`;
@@ -281,7 +329,12 @@ describe("drift on a document (F6)", () => {
 
   it("is still found by the hash, even at the same length; before and current are stubs", async () => {
     const cs = await start();
-    await staged("PATCH", ALL, cs, `entities/task/${e.T4}`, { notes: "Planned notes of T4" });
+    await staged(ALL, cs, {
+      operation: "update_entity",
+      type: "task",
+      id: e.T4,
+      properties: { notes: "Planned notes of T4" },
+    });
     // An immediate edit of the stored text, keeping its length: "Notes of T4" → "Texts of T4".
     const edit = await rest("PATCH", `${ALL}/entities/task/${e.T4}/documents/notes`, {
       op: "str_replace",
@@ -319,7 +372,12 @@ describe("through the lens and the mounts (F6)", () => {
     }
     const DOCS = runtimePrefix(O, "docs");
     const cs = await start(DOCS);
-    await staged("PATCH", DOCS, cs, `entities/task/${e.T1}`, { name: "T1 b", notes: "Hidden plan" });
+    await staged(DOCS, cs, {
+      operation: "update_entity",
+      type: "task",
+      id: e.T1,
+      properties: { name: "T1 b", notes: "Hidden plan" },
+    });
     expect((await stagedNotes(cs, e.T1, "", DOCS)).body.content).toBe("Hidden plan");
 
     const types = (await rest("GET", `${model}/entity-types`)).body as unknown as Row[];
@@ -377,13 +435,19 @@ describe("a staged write keeps its arguments for the commit (F6)", () => {
   it("the commit applies the staged document and the parent relation's properties", async () => {
     const cs = await start();
     const t9 = (
-      await staged("POST", ALL, cs, "entities/task", {
-        name: "T9",
-        notes: PLAN,
+      await staged(ALL, cs, {
+        operation: "create_entity",
+        type: "task",
+        properties: { name: "T9", notes: PLAN },
         parentRelation: { type: "has_task", parentId: e.P2, properties: { phase: "plan" } },
       })
     ).id as string;
-    await staged("PATCH", ALL, cs, `entities/task/${e.T1}`, { notes: "Committed notes" });
+    await staged(ALL, cs, {
+      operation: "update_entity",
+      type: "task",
+      id: e.T1,
+      properties: { notes: "Committed notes" },
+    });
     const commit = await rest("POST", `${ALL}/changesets/${cs}/commit`, {});
     expect(commit.status, JSON.stringify(commit.body)).toBe(200);
     expect((await rest("GET", `${ALL}/entities/task/${t9}/documents/notes`)).body.content).toBe(PLAN);

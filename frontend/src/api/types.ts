@@ -241,16 +241,11 @@ export interface ChangesetListItem extends Changeset {
   notVisible: number
 }
 
-/** One end of a staged write: a relation end or a create's parent. */
+/** One end of a staged relation write. */
 export interface ChangesetEnd {
   id: string
   /** Null when the lens shows no name for it. */
   name: string | null
-}
-
-/** A create's parent: the parent entity and the parent relation's properties. */
-export interface ChangesetParent extends ChangesetEnd {
-  properties: Record<string, JsonValue>
 }
 
 /** A fault the lock-free pass finds on a staged write: drift, dangling, not_visible, missing, replay. */
@@ -279,8 +274,6 @@ export interface StagedWriteView {
   createdAt: string
   /** Entity writes: the target's name. */
   name?: string | null
-  /** A create's parent. */
-  parent?: ChangesetParent | null
   /** Relation writes: the two ends. */
   from?: ChangesetEnd | null
   to?: ChangesetEnd | null

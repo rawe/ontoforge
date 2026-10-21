@@ -1153,11 +1153,11 @@ export interface ChangesetStore {
    * it has none or is gone. */
   stagedBytes(id: string): Promise<number>;
 
-  /** Append one write to a draft changeset, kept with its size in `bytes`;
-   * its seq, or null when the changeset is gone or submitted. A seq is
-   * higher than every seq the changeset had before, so an unstaged seq is
-   * never reused. */
-  append(id: string, write: NewChangesetWrite, bytes: number): Promise<number | null>;
+  /** Append writes to a draft changeset in the given order, each kept with
+   * its size in `bytes`, all or none; their seqs, consecutive, or null when
+   * the changeset is gone or submitted. A seq is higher than every seq the
+   * changeset had before, so an unstaged seq is never reused. */
+  append(id: string, writes: { write: NewChangesetWrite; bytes: number }[]): Promise<number[] | null>;
 
   /** False when no write has this seq, or the changeset is submitted. */
   unstage(id: string, seq: number): Promise<boolean>;

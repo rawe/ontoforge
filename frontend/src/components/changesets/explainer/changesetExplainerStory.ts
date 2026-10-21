@@ -66,7 +66,7 @@ export const ROLES: Record<Actor, { title: string; via: string; actions: string[
 export const EXAMPLE = {
   writes: [
     { seq: 1, op: 'update', target: 'Project Apollo', change: 'name: Apollo → Apollo Web' },
-    { seq: 2, op: 'create', target: 'Task Set up CI', change: 'beneath Apollo' },
+    { seq: 2, op: 'create', target: 'Task Set up CI', change: 'name: Set up CI' },
     { seq: 3, op: 'delete', target: 'Task Old backlog', change: '' },
   ],
 } as const
@@ -125,7 +125,7 @@ export const STORY: StoryStep[] = [
   {
     actor: 'person', action: 'review', node: 'submitted', edges: [],
     title: 'A person reviews it',
-    body: 'On the Workbench’s Changesets page, each write shows what it would change: an update’s before, current and after values, a create’s values and its parent. Markers flag what would reject a commit, such as a value changed since it was staged. Reading changes nothing: the version stays 5.',
+    body: 'On the Workbench’s Changesets page, each write shows what it would change: an update’s before, current and after values, a create’s values. Markers flag what would reject a commit, such as a value changed since it was staged. Reading changes nothing: the version stays 5.',
     state: 'submitted', version: 5, note: 'Tidy up Apollo', writes: [1, 2, 3], stored: STORED_BEFORE,
     log: [{ call: 'Workbench · review', result: '3 writes · no markers' }],
   },

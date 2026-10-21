@@ -162,6 +162,14 @@ describe("tool descriptions", () => {
     for (const name of ["create_entity", "create_relation"]) {
       expect(runtime.get(name)).toContain("relation ends, parents and the hierarchy rules are checked at commit");
     }
+    // A create with a parent relation stages two writes; only create_entity says so.
+    for (const map of [runtime, anchored, stagedOnly]) {
+      expect(map.get("create_entity")).toContain(
+        "With 'parent_relation' and 'changeset_id', two writes are staged, the entity's and then its " +
+          "parent relation's, and the answer is {seq, id, relation: {seq, id}}",
+      );
+      for (const name of STAGEABLE.slice(1)) expect(map.get(name), name).not.toContain("relation: {seq, id}");
+    }
     for (const name of ["update_entity", "update_relation"]) {
       expect(runtime.get(name)).toContain("the commit is rejected");
     }
@@ -212,7 +220,8 @@ describe("tool descriptions", () => {
     for (const map of [runtime, anchored, stagedOnly]) {
       const text = map.get("get_changeset")!;
       expect(text).not.toMatch(/argument|sha256|hash/);
-      expect(text).toContain("{id, name, properties}");
+      expect(text).toContain("entity writes add name; relation writes add from and to {id, name}");
+      expect(text).not.toContain("{id, name, properties}");
       expect(text).toContain("Document values in before, current and after show as {document: true, length}");
       expect(text).toContain("get_staged_document reads the staged text");
       const staged = map.get("get_staged_document")!;

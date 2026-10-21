@@ -43,10 +43,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 
 /** The helper schema (lens `full_lens`, id `lens-1`), with `belongs_to`
  * (department → company) as a parent relation whose parent is the target,
- * and a type `note` with a document property. */
+ * with a string property `since`, and a type `note` with a document
+ * property. */
 function schema(): Row {
   const full = makeUnscopedSchema() as Row;
-  full.relationTypes.find((rt: Row) => rt.key === "belongs_to").parent = "target";
+  const belongsTo = full.relationTypes.find((rt: Row) => rt.key === "belongs_to");
+  belongsTo.parent = "target";
+  belongsTo.properties = [
+    { key: "since", displayName: "Since", dataType: "string", required: false, defaultValue: null },
+  ];
   full.entityTypes.push({
     entityTypeId: "et-9",
     key: "note",
@@ -97,20 +102,36 @@ beforeEach(() => {
   store = createMockRuntimeStore();
   store.getFullSchemaWithLensInclusions.mockResolvedValue(schema());
   store.changesetStore.get.mockResolvedValue(changeset());
-  store.changesetStore.append.mockResolvedValue(3);
+  store.changesetStore.append.mockResolvedValue([3]);
 });
 
 function stageOn(write: StagedWrite, anchorKey: string | null = null) {
   return stage("full_lens", anchorKey, CS, write, asRuntimeStore(store));
 }
 
+/** The rows of the one `append`, each handed over with its bytes. */
+function appendedRows(): Row[] {
+  expect(store.changesetStore.append).toHaveBeenCalledTimes(1);
+  const [id, writes] = store.changesetStore.append.mock.calls[0]!;
+  expect(id).toBe(CS);
+  for (const { write, bytes } of writes) expect(bytes).toBe(writeBytes(write));
+  return writes.map((entry: Row) => entry.write);
+}
+
 /** The one row handed to `append`. */
 function appended(): Row {
-  expect(store.changesetStore.append).toHaveBeenCalledTimes(1);
-  const [id, row] = store.changesetStore.append.mock.calls[0]!;
-  expect(id).toBe(CS);
-  return row;
+  const rows = appendedRows();
+  expect(rows).toHaveLength(1);
+  return rows[0]!;
 }
+
+/** A department created under the company ACME. */
+const UNDER_ACME: StagedWrite = {
+  operation: "create_entity",
+  typeKey: "department",
+  properties: { name: "R&D" },
+  parentRelation: { type: "belongs_to", parentId: ACME, properties: { since: "2020" } },
+};
 
 function expectNothingWritten(): void {
   expect(store.changesetStore.append).not.toHaveBeenCalled();
@@ -255,6 +276,48 @@ describe("staging checks", () => {
     expectNothingWritten();
   });
 
+  it("the cap counts both rows of a create with a parent relation: one short of it, the pair is a 409", async () => {
+    store.changesetStore.get.mockResolvedValue(changeset({ writeCount: MAX_STAGED_WRITES - 1 }));
+    await expect(stageOn(UNDER_ACME)).rejects.toThrow(
+      new ConflictError(`Changeset '${CS}' is full: at most 10000 staged writes`),
+    );
+    expectNothingWritten();
+
+    await stageOn({ operation: "create_entity", typeKey: "department", properties: { name: "R&D" }, parentRelation: null });
+    expect(appended()).toMatchObject({ operation: "create_entity" });
+
+    store.changesetStore.append.mockClear();
+    store.changesetStore.append.mockResolvedValue([3, 4]);
+    store.changesetStore.get.mockResolvedValue(changeset({ writeCount: MAX_STAGED_WRITES - 2 }));
+    await stageOn(UNDER_ACME);
+    expect(appendedRows()).toHaveLength(2);
+  });
+
+  it("the byte cap sums both rows of a create with a parent relation", async () => {
+    store.changesetStore.append.mockResolvedValue([3, 4]);
+    const write: StagedWrite = {
+      ...UNDER_ACME,
+      parentRelation: { type: "belongs_to", parentId: ACME, properties: { since: "x".repeat(5000) } },
+    };
+    await stageOn(write);
+    const [entity, relation] = appendedRows();
+    const bytes = writeBytes(entity!) + writeBytes(relation!);
+    expect(writeBytes(relation!)).toBeGreaterThan(5000);
+
+    store.changesetStore.append.mockClear();
+    store.changesetStore.stagedBytes.mockResolvedValue(settings.CHANGESET_MAX_BYTES - bytes);
+    await stageOn(write);
+    expect(store.changesetStore.append).toHaveBeenCalledTimes(1);
+
+    store.changesetStore.append.mockClear();
+    // The entity's row alone would fit; the pair does not.
+    store.changesetStore.stagedBytes.mockResolvedValue(settings.CHANGESET_MAX_BYTES - bytes + 1);
+    await expect(stageOn(write)).rejects.toThrow(
+      new ConflictError(`Changeset '${CS}' is full: at most ${settings.CHANGESET_MAX_BYTES} bytes of staged writes`),
+    );
+    expectNothingWritten();
+  });
+
   it("the byte cap: a write that would pass it is a 409, nothing appended; one that reaches it is staged", async () => {
     const write: StagedWrite = {
       operation: "create_entity",
@@ -263,7 +326,7 @@ describe("staging checks", () => {
       parentRelation: null,
     };
     await stageOn(write);
-    const [, row, bytes] = store.changesetStore.append.mock.calls[0]!;
+    const [{ write: row, bytes }] = store.changesetStore.append.mock.calls[0]![1];
     // Document text counts as UTF-8: two bytes per "ä".
     expect(bytes).toBe(writeBytes(row));
     expect(bytes).toBeGreaterThan(2000);
@@ -313,28 +376,50 @@ describe("creates: minted ids", () => {
       targetId: null,
       before: null,
       // Defaults are left to the replay: `active` was not sent.
-      arguments: { properties: { name: "Ann", age: 41 }, parentRelation: null, relationId: null },
+      arguments: { properties: { name: "Ann", age: 41 } },
     });
+    expect(Object.keys(row.arguments)).toEqual(["properties"]);
     expect(row.mintedId).toMatch(UUID);
     expect(answer).toEqual({ seq: 3, id: row.mintedId });
     expect(store.createEntity).not.toHaveBeenCalled();
   });
 
-  it("with a parent relation, the relation's id is minted too; the parent end is not checked here", async () => {
-    await stageOn({
+  it("with a parent relation, two rows in one append: the entity's create, then the relation's; the parent end is not checked here", async () => {
+    store.changesetStore.append.mockResolvedValue([3, 4]);
+    const answer = await stageOn(UNDER_ACME);
+    const [entity, relation] = appendedRows();
+    expect(entity).toEqual({
       operation: "create_entity",
       typeKey: "department",
-      properties: { name: "R&D" },
-      parentRelation: { type: "belongs_to", parentId: ACME },
+      mintedId: expect.stringMatching(UUID),
+      targetId: null,
+      before: null,
+      arguments: { properties: { name: "R&D" } },
     });
-    const row = appended();
-    expect(row.arguments).toEqual({
-      properties: { name: "R&D" },
-      parentRelation: { type: "belongs_to", parentId: ACME, properties: {} },
-      relationId: expect.stringMatching(UUID),
+    // Oriented by the parent end: the parent ACME is the target.
+    expect(relation).toEqual({
+      operation: "create_relation",
+      typeKey: "belongs_to",
+      mintedId: expect.stringMatching(UUID),
+      targetId: null,
+      before: null,
+      arguments: { fromEntityId: entity!.mintedId, toEntityId: ACME, properties: { since: "2020" } },
     });
-    expect(row.arguments.relationId).not.toBe(row.mintedId);
+    expect(relation!.mintedId).not.toBe(entity!.mintedId);
+    expect(answer).toEqual({ seq: 3, id: entity!.mintedId, relation: { seq: 4, id: relation!.mintedId } });
     expect(store.getEntityById).not.toHaveBeenCalled();
+
+    // The relation's row is the one a staged create_relation of it gets.
+    store.changesetStore.append.mockClear();
+    store.changesetStore.append.mockResolvedValue([5]);
+    await stageOn({
+      operation: "create_relation",
+      typeKey: "belongs_to",
+      fromEntityId: entity!.mintedId,
+      toEntityId: ACME,
+      properties: { since: "2020" },
+    });
+    expect(JSON.stringify({ ...appended(), mintedId: null })).toBe(JSON.stringify({ ...relation, mintedId: null }));
   });
 
   it("a parent relation's faults are the immediate write's, under parentRelation.*", async () => {
@@ -488,7 +573,6 @@ describe("read, unstage, discard", () => {
         id: P1,
         createdAt: NOW,
         name: "A",
-        parent: null,
         before: null,
         current: null,
         after: { name: "A" },

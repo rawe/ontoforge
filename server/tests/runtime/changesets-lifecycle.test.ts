@@ -410,7 +410,7 @@ describe("review read", () => {
       id === R1 ? makeRelation({ role: "dev" }, { relationId: R1, fromEntityId: PAT, toEntityId: ACME }) : null,
     );
     journal = [
-      row(1, { typeKey: "company", mintedId: NEWCO, arguments: { properties: { name: "Newco" }, parentRelation: null, relationId: null } }),
+      row(1, { typeKey: "company", mintedId: NEWCO, arguments: { properties: { name: "Newco" } } }),
       rename(2, PAT, "Pat B", { name: "Pat" }),
       row(3, {
         operation: "create_relation",
@@ -475,7 +475,7 @@ describe("review read", () => {
     });
   });
 
-  it("a create's parent is named, with its relation's properties; an update of a staged create has no before and no current", async () => {
+  it("a create staged with its parent relation is two rows, the relation's ends named; an update of a staged create has no before and no current", async () => {
     invalidateLoadedSchemaCache();
     const full = schema();
     const belongsTo = full.relationTypes.find((rt: Row) => rt.key === "belongs_to");
@@ -483,59 +483,28 @@ describe("review read", () => {
     belongsTo.properties.push({ key: "since", displayName: "Since", dataType: "string", required: false, defaultValue: null });
     store.getFullSchemaWithLensInclusions.mockResolvedValue(full);
     journal = [
-      row(1, {
-        typeKey: "department",
-        mintedId: DEPT,
-        arguments: { properties: { name: "Ops" }, parentRelation: { type: "belongs_to", parentId: ACME, properties: { since: "2020" } }, relationId: R2 },
+      row(1, { typeKey: "department", mintedId: DEPT, arguments: { properties: { name: "Ops" } } }),
+      row(2, {
+        operation: "create_relation",
+        typeKey: "belongs_to",
+        mintedId: R2,
+        arguments: { fromEntityId: DEPT, toEntityId: ACME, properties: { since: "2020" } },
       }),
-      row(2, { operation: "update_entity", typeKey: "department", targetId: DEPT, arguments: { properties: { name: "Ops 2" } } }),
-      row(3, {
-        typeKey: "department",
-        mintedId: NEWCO,
-        arguments: { properties: { name: "Lab" }, parentRelation: { type: "belongs_to", parentId: ACME, properties: {} }, relationId: GHOST },
-      }),
-      row(4, { typeKey: "department", mintedId: KIM, arguments: { properties: { name: "Free" }, parentRelation: null, relationId: null } }),
+      row(3, { operation: "update_entity", typeKey: "department", targetId: DEPT, arguments: { properties: { name: "Ops 2" } } }),
     ];
     const read = await getChangeset("full_lens", null, CS, 0, 100, on());
-    expect(read.writes[0]).toMatchObject({ name: "Ops", parent: { id: ACME, name: "Acme", properties: { since: "2020" } }, after: { name: "Ops" } });
-    expect(read.writes[1]).toMatchObject({ name: "Ops", before: null, current: null, after: { name: "Ops 2" }, markers: [] });
-    expect(read.writes[2]!.parent).toEqual({ id: ACME, name: "Acme", properties: {} });
-    expect(read.writes[3]!.parent).toBeNull();
-    // The parent relation's id is not shown.
-    expect(JSON.stringify(read)).not.toContain(R2);
-  });
-
-  it("a parent relation property the lens hides is left out of the parent", async () => {
-    invalidateLoadedSchemaCache();
-    const full = makeFullSchema({
-      lensKey: "ops_view",
-      entityInclusions: [
-        { key: "department", properties: null },
-        { key: "company", properties: null },
-      ],
-      relationInclusions: [{ key: "belongs_to", properties: ["since"] }],
+    expect(read.writes[0]).toMatchObject({ operation: "create_entity", id: DEPT, name: "Ops", after: { name: "Ops" } });
+    expect(read.writes[0]).not.toHaveProperty("parent");
+    expect(read.writes[1]).toMatchObject({
+      operation: "create_relation",
+      type: "belongs_to",
+      id: R2,
+      from: { id: DEPT, name: "Ops" },
+      to: { id: ACME, name: "Acme" },
+      after: { since: "2020" },
+      markers: [],
     });
-    const belongsTo = full.relationTypes.find((rt: Row) => rt.key === "belongs_to");
-    belongsTo.parent = "target";
-    belongsTo.properties.push(
-      { key: "since", displayName: "Since", dataType: "string", required: false, defaultValue: null },
-      { key: "secret", displayName: "Secret", dataType: "string", required: false, defaultValue: null },
-    );
-    store.getFullSchemaWithLensInclusions.mockResolvedValue(full);
-    journal = [
-      row(1, {
-        typeKey: "department",
-        mintedId: DEPT,
-        arguments: {
-          properties: { name: "Ops" },
-          parentRelation: { type: "belongs_to", parentId: ACME, properties: { since: "2020", secret: "Classified" } },
-          relationId: R2,
-        },
-      }),
-    ];
-    const read = await getChangeset("ops_view", null, CS, 0, 100, on());
-    expect(read.writes[0]!.parent).toEqual({ id: ACME, name: "Acme", properties: { since: "2020" } });
-    expect(JSON.stringify(read)).not.toMatch(/secret|Classified/);
+    expect(read.writes[2]).toMatchObject({ name: "Ops", before: null, current: null, after: { name: "Ops 2" }, markers: [] });
   });
 
   it("through a scoped lens nothing hidden appears: no hidden type, property, name or value", async () => {
@@ -549,7 +518,7 @@ describe("review read", () => {
     journal = [
       // Staged before the lens hid `age`.
       row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P2", age: 50 } }, before: { name: "Pat", age: 41 } }),
-      row(2, { typeKey: "department", mintedId: DEPT, arguments: { properties: { name: "Hidden New" }, parentRelation: null, relationId: null } }),
+      row(2, { typeKey: "department", mintedId: DEPT, arguments: { properties: { name: "Hidden New" } } }),
       row(3, { operation: "delete_entity", typeKey: "department", targetId: DEPT, arguments: {} }),
       row(4, { operation: "delete_entity", typeKey: "person", targetId: PAT, arguments: {} }),
     ];
@@ -593,7 +562,7 @@ describe("staged document read", () => {
   beforeEach(() => {
     journal = [
       row(1, { operation: "update_entity", typeKey: "note", targetId: NOTE1, arguments: { properties: { body: "first" } }, before: { body: recordedDocument("old") } }),
-      row(3, { typeKey: "note", mintedId: NOTE2, arguments: { properties: { name: "New", body: text }, parentRelation: null, relationId: null } }),
+      row(3, { typeKey: "note", mintedId: NOTE2, arguments: { properties: { name: "New", body: text } } }),
       row(4, { operation: "update_entity", typeKey: "note", targetId: NOTE1, arguments: { properties: { name: "N2" } }, before: { name: "N" } }),
       row(6, { operation: "update_entity", typeKey: "note", targetId: NOTE1, arguments: { properties: { body: text } }, before: { body: recordedDocument("old") } }),
     ];

@@ -76,16 +76,24 @@ async function ok(client: Client, name: string, args: Row = {}): Promise<any> {
   return JSON.parse(text(result));
 }
 
-/** Start a changeset through `base` and stage a task under P1 into it. */
+/** The journal body of a create of a task under `parentId`. */
+function taskUnder(parentId: string, name: string): Row {
+  return {
+    operation: "create_entity",
+    type: "task",
+    properties: { name },
+    parentRelation: { type: "has_task", parentId, properties: { phase: "build" } },
+  };
+}
+
+/** Start a changeset through `base` and stage a task under P1 into it:
+ * two writes, the task's and its parent relation's. */
 async function startWithTask(base: string, name = "T9"): Promise<{ cs: string; task: string }> {
   const started = await rest("POST", `${base}/changesets`, {});
   expect(started.status, JSON.stringify(started.body)).toBe(201);
   const cs = started.body.id as string;
-  const staged = await rest("POST", `${base}/changesets/${cs}/entities/task`, {
-    name,
-    parentRelation: { type: "has_task", parentId: e.P1, properties: { phase: "build" } },
-  });
-  expect(staged.status, JSON.stringify(staged.body)).toBe(202);
+  const staged = await rest("POST", `${base}/changesets/${cs}/writes`, taskUnder(e.P1, name));
+  expect(staged.status, JSON.stringify(staged.body)).toBe(201);
   return { cs, task: staged.body.id as string };
 }
 
@@ -166,13 +174,18 @@ describe("through a staged-only anchored URL (REST)", () => {
 
   it("stage, unstage, list, read, submit, unsubmit and discard work; the commit answers 409", async () => {
     const { cs } = await startWithTask(S);
-    const update = await rest("PATCH", `${S}/changesets/${cs}/entities/project/${e.P2}`, { name: "P2 Website" });
-    expect(update.status).toBe(202);
+    const update = await rest("POST", `${S}/changesets/${cs}/writes`, {
+      operation: "update_entity",
+      type: "project",
+      id: e.P2,
+      properties: { name: "P2 Website" },
+    });
+    expect(update.status).toBe(201);
     expect((await rest("DELETE", `${S}/changesets/${cs}/writes/${update.body.seq}`)).status).toBe(204);
     expect((await rest("GET", `${S}/changesets`)).body.map((c: Row) => c.id)).toEqual([cs]);
     const read = await rest("GET", `${S}/changesets/${cs}`);
     expect(read.status).toBe(200);
-    expect(read.body).toMatchObject({ anchor: "agent-s", writeCount: 1 });
+    expect(read.body).toMatchObject({ anchor: "agent-s", writeCount: 2 });
     expect((await rest("GET", `${S}/entities/task`)).status).toBe(200);
 
     const commit = await rest("POST", `${S}/changesets/${cs}/commit`, {});
@@ -193,7 +206,7 @@ describe("through a staged-only anchored URL (REST)", () => {
     expect((await rest("POST", `${S}/changesets/${cs}/submit`, {})).status).toBe(200);
     const committed = await rest("POST", `${ALL}/changesets/${cs}/commit`, {});
     expect(committed.status, JSON.stringify(committed.body)).toBe(200);
-    expect(committed.body).toEqual({ committed: 1, alreadyGone: [] });
+    expect(committed.body).toEqual({ committed: 2, alreadyGone: [] });
     expect((await rest("GET", `${ALL}/entities/task/${task}`)).body.name).toBe("T9");
 
     expect((await putAnchor("agent-s", { entity: { type: "project", id: e.P1 }, stagedOnly: false })).stagedOnly).toBe(false);
@@ -208,7 +221,12 @@ describe("through a staged-only anchored URL (REST)", () => {
     await putAnchor("agent-s", { entity: { type: "task", id: e.T2a } });
     const { cs } = await startWithTask(S);
     expect((await rest("DELETE", `${ALL}/entities/task/${e.T2a}`)).status).toBe(204);
-    const staged = await rest("PATCH", `${S}/changesets/${cs}/entities/person/${e.Kim}`, { name: "Kim2" });
+    const staged = await rest("POST", `${S}/changesets/${cs}/writes`, {
+      operation: "update_entity",
+      type: "person",
+      id: e.Kim,
+      properties: { name: "Kim2" },
+    });
     expect(staged.status).toBe(409);
     expect(staged.body.error.message).toMatch(/is dangling/);
     const immediate = await rest("PATCH", `${S}/entities/person/${e.Kim}`, { name: "Kim2" });
@@ -233,17 +251,14 @@ describe("an unanchored staged-only key", () => {
     const { cs } = await startWithTask(U);
     // Under P2 and P3: no anchored entity to hold them to.
     for (const parent of [e.P2, e.P3]) {
-      const staged = await rest("POST", `${U}/changesets/${cs}/entities/task`, {
-        name: "Free",
-        parentRelation: { type: "has_task", parentId: parent, properties: { phase: "build" } },
-      });
-      expect(staged.status).toBe(202);
+      const staged = await rest("POST", `${U}/changesets/${cs}/writes`, taskUnder(parent, "Free"));
+      expect(staged.status).toBe(201);
     }
     expect((await rest("POST", `${U}/changesets/${cs}/commit`, {})).body.error.message).toBe(NO_COMMIT("agent-u"));
     expect((await rest("POST", `${U}/changesets/${cs}/submit`, {})).status).toBe(200);
     const committed = await rest("POST", `${ALL}/changesets/${cs}/commit`, {});
     expect(committed.status, JSON.stringify(committed.body)).toBe(200);
-    expect(committed.body.committed).toBe(3);
+    expect(committed.body.committed).toBe(6);
   });
 });
 

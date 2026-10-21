@@ -272,7 +272,7 @@ together, all or nothing. Bound to the lens and the anchor of the URL it was sta
 through. See [capabilities/changesets.md](capabilities/changesets.md).
 
 **Staged write** — one write held in a changeset: nothing changes until the commit, and
-reads never see it. **Stage** adds one; **unstage** removes one by its seq.
+reads never see it. **Stage** adds to it; **unstage** removes one by its seq.
 
 **Commit** — persisting a changeset's staged writes together, or none of them; a
 committed changeset is gone. **Commit validation** is the rules the commit applies to

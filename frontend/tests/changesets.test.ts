@@ -157,26 +157,16 @@ test('changeText: before → after for updates, set values for creates, — for 
     changeText(write({ before: { body: { document: true, length: null } }, after: { body: { document: true, length: 5 } } })),
     'body: document → document (5 characters)',
   )
-  assert.equal(
-    changeText(
-      write({
-        operation: 'create_entity',
-        after: { name: 'T9' },
-        parent: { id: 'p1', name: 'P1', properties: { phase: 'build' } },
-      }),
-    ),
-    'name: "T9" · under P1 (phase: "build")',
-  )
-  assert.equal(
-    changeText(
-      write({
-        operation: 'create_entity',
-        after: { name: 'P4' },
-        parent: { id: 'acme', name: 'ACME', properties: {} },
-      }),
-    ),
-    'name: "P4" · under ACME',
-  )
+  // A create's parent relation is its own row: a relation create from the parent to the new child.
+  const parentRow = write({
+    operation: 'create_relation',
+    type: 'has_task',
+    from: { id: 'p1', name: 'P1' },
+    to: { id: 't9', name: 'T9' },
+    after: { phase: 'build' },
+  })
+  assert.equal(targetText(parentRow), 'P1 → T9')
+  assert.equal(changeText(parentRow), 'phase: "build"')
   assert.equal(changeText(write({ operation: 'create_relation', type: 'has_task', after: {} })), '—')
   assert.equal(changeText(write({ operation: 'delete_entity' })), '—')
   assert.equal(changeText(write({ type: null })), 'Not visible through this lens')

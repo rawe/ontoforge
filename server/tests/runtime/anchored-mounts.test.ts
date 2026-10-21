@@ -105,7 +105,7 @@ describe("the anchored REST mirror", () => {
     for (const base of [PLAIN, ANCHORED]) {
       const res = await app.inject({
         method: "PATCH",
-        url: `${base}/changesets/${OTHER}/entities/person/${ID}/documents/bio`,
+        url: `${base}/changesets/${OTHER}/documents/person/${ID}/bio`,
         payload: { op: "str_replace", oldString: "a", newString: "b" },
       });
       expect(res.statusCode, base).toBe(404);

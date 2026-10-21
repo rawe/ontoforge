@@ -297,6 +297,20 @@ export interface ChangesetDetail extends Changeset {
   writes: StagedWriteView[]
 }
 
+/**
+ * One entity as a commit of a changeset would leave it: the stored entity,
+ * or the one the changeset creates, with its staged creates and updates
+ * folded in by seq (no defaults yet, documents as stubs), and beside it its
+ * own staged writes as the review read shows them.
+ */
+export interface StagedEntity {
+  /** A staged create has no `_createdAt` / `_updatedAt`. */
+  entity: { _id: string; _entityTypeKey: string; [property: string]: JsonValue }
+  /** Its last staged write deletes it. */
+  deleted: boolean
+  writes: StagedWriteView[]
+}
+
 /** One reason a commit was rejected; seq 0 concerns the whole changeset. */
 export interface ChangesetViolation {
   seq: number

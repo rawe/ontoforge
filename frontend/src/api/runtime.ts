@@ -40,6 +40,7 @@ import type {
   SearchResponse,
   SearchStrategy,
   StagedAnswer,
+  StagedEntity,
   StageWritePayload,
 } from './types'
 
@@ -421,6 +422,19 @@ export const getStagedDocument = (
 ) =>
   request<DocumentContentResponse>(
     `${changesetsBase(ontologyKey, lensKey)}/${changesetId}/documents/${entityTypeKey}/${id}/${propertyKey}${buildQuery(params)}`,
+  )
+
+/** One entity as a commit would leave it, with its own staged writes; 404
+ * when the changeset is gone or the entity is neither stored nor created by it. */
+export const getStagedEntity = (
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string,
+  entityTypeKey: string,
+  id: string,
+) =>
+  request<StagedEntity>(
+    `${changesetsBase(ontologyKey, lensKey)}/${changesetId}/entities/${entityTypeKey}/${id}`,
   )
 
 /** Draft only; a submitted changeset answers 409. */

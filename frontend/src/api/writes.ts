@@ -15,6 +15,7 @@ import * as runtime from './runtime'
 import {
   createSerialQueue,
   documentWrite,
+  GONE_CHANGESET_TEXT,
   isChangesetGone,
   stageIntoPinned,
   stagePayload,
@@ -49,6 +50,8 @@ export function useRuntimeWrites(ontologyKey: string, lensKey: string) {
         if (err instanceof ApiError && isChangesetGone(err, changesetId)) {
           unpinChangeset(ontologyKey, lensKey)
           toast.warning(CHANGESET_GONE_TEXT)
+          // The site shows this instead of the server's "Changeset '…' not found".
+          throw new ApiError(err.status, err.code, GONE_CHANGESET_TEXT, err.details)
         }
         throw err
       }

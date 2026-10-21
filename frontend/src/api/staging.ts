@@ -102,6 +102,9 @@ export async function stageIntoPinned(
   return stagedOutcome(changesetId, await stage(changesetId))
 }
 
+/** A write's error when its stage call found the pinned changeset gone; it is unpinned. */
+export const GONE_CHANGESET_TEXT = 'The changeset is gone — nothing was written. You are editing live again.'
+
 /** Whether a stage call's error says the changeset itself is gone (committed, discarded, expired). */
 export function isChangesetGone(error: { status: number; message: string }, changesetId: string): boolean {
   return error.status === 404 && error.message.includes(`Changeset '${changesetId}'`)

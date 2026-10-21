@@ -1359,10 +1359,10 @@ function recordedView(recorded: Row, keys: string[], properties: Record<string, 
  * `current` and `after`, and the markers `pass` found on them, judged with
  * the creates it holds. The stored entities the writes name come in one
  * batched read, unless `storedRows` already holds them (raw); a stored
- * relation target is read once per write. The staged arguments are not shown, and every document value is a stub
- * (`getStagedDocument` reads the staged text). Through the lens: a hidden
- * type keeps only seq, operation and markers, and hidden properties and
- * names are not returned.
+ * relation target is read once per write. The staged arguments are not
+ * shown, and every document value is a stub (`getStagedDocument` reads the
+ * staged text). Through the lens: a hidden type keeps only seq, operation
+ * and markers, and hidden properties and names are not returned.
  */
 async function reviewPage(
   loaded: LoadedSchema,

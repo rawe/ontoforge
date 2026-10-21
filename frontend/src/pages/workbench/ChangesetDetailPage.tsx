@@ -52,7 +52,7 @@ import {
   writesText,
 } from '@/components/changesets/changesets'
 import { PinChangesetButton } from '@/components/changesets/PinChangesetButton'
-import { hierarchyLinks, linkedTypeKey, type HierarchyLink } from '@/components/entity/hierarchy'
+import { hierarchyLinks, linkedTypeKey, sharesLinkedType, type HierarchyLink } from '@/components/entity/hierarchy'
 import { openQuickAdd } from '@/components/quickadd/quickAddBus'
 import { absoluteTime, relativeTime } from '@/components/table/format'
 import {
@@ -383,6 +383,9 @@ export function ChangesetDetailPage() {
       })
     const childName = (link: HierarchyLink) =>
       schema.data!.entityTypes.find((t) => t.key === linkedTypeKey(link))?.displayName ?? linkedTypeKey(link)
+    // Two parent relations to the same child type: the relation's name tells them apart.
+    const buttonName = (link: HierarchyLink) =>
+      sharesLinkedType(link, childLinks) ? `${childName(link)} (${link.relationType.displayName})` : childName(link)
     return (
       <div className="mt-1 flex flex-wrap gap-1">
         {entityType.properties.length > 0 && (
@@ -405,7 +408,7 @@ export function ChangesetDetailPage() {
             onClick={() => addChild(link)}
           >
             <Plus className="size-3" />
-            Add {childName(link)}…
+            Add {buttonName(link)}…
           </Button>
         ))}
       </div>

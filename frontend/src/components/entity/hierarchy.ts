@@ -45,6 +45,11 @@ export function linkedTypeKey(link: HierarchyLink): string {
     : link.relationType.fromEntityTypeKey
 }
 
+/** Whether another of `links` reaches the same entity type: its type alone does not tell them apart. */
+export function sharesLinkedType(link: HierarchyLink, links: readonly HierarchyLink[]): boolean {
+  return links.some((other) => other !== link && linkedTypeKey(other) === linkedTypeKey(link))
+}
+
 /** A path step's label: its name, else the truncated id (as `displayLabel`). */
 export function stepLabel(step: PathStep): string {
   return step.name !== null && step.name.trim() !== '' ? step.name : step.id.slice(0, 12)

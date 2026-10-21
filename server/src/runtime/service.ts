@@ -13,8 +13,8 @@
  *   (`docs/decisions.md#schema-and-data`). A hidden property with a default is
  *   applied; a hidden property in the payload is an unknown property.
  *
- * The seven write functions take the anchor key of an anchored mount as
- * their last argument; null on the plain lens mount. On an anchored call
+ * The seven write functions take the ruleset key of a ruleset mount as
+ * their last argument; null on the plain lens mount. On a ruleset call
  * they consult the write guard (`anchorGuard.ts`) before the write.
  *
  * Six of them (entity and relation create, update, delete) compose their
@@ -307,11 +307,11 @@ export async function createEntity(
   body: Row,
   store: RuntimeStore,
   parentRelation: ParentRelationInput | null = null,
-  anchorKey: string | null = null,
+  rulesetKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
   const scopedEt = scopedEntityType(loaded, entityTypeKey);
-  const guard = await AnchorGuard.open(anchorKey, loaded, store);
+  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
 
   const { errors, write } = prepareCreateEntity(loaded, entityTypeKey, body, parentRelation, {
     entityId: randomUUID(),
@@ -507,11 +507,11 @@ export async function updateEntity(
   entityId: string,
   body: Row,
   store: RuntimeStore,
-  anchorKey: string | null = null,
+  rulesetKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
   const scopedEt = scopedEntityType(loaded, entityTypeKey);
-  const guard = await AnchorGuard.open(anchorKey, loaded, store);
+  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
 
   const { errors, write } = prepareUpdateEntity(loaded, entityTypeKey, entityId, body);
   const outside = (await guard?.entityError(entityTypeKey, entityId)) ?? null;
@@ -557,11 +557,11 @@ export async function deleteEntity(
   entityTypeKey: string,
   entityId: string,
   store: RuntimeStore,
-  anchorKey: string | null = null,
+  rulesetKey: string | null = null,
 ): Promise<void> {
   const loaded = await loadSchema(lensKey, store);
   scopedEntityType(loaded, entityTypeKey);
-  const guard = await AnchorGuard.open(anchorKey, loaded, store);
+  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
 
   const write = prepareDeleteEntity(loaded, entityTypeKey, entityId);
   const readings = parentReadings(loaded.full);
@@ -772,7 +772,7 @@ export async function editDocument(
   propertyKey: string,
   body: DocumentEditBody,
   store: RuntimeStore,
-  anchorKey: string | null = null,
+  rulesetKey: string | null = null,
 ): Promise<Row> {
   const { value, loaded } = await loadDocumentValue(
     lensKey,
@@ -781,7 +781,7 @@ export async function editDocument(
     propertyKey,
     store,
   );
-  await (await AnchorGuard.open(anchorKey, loaded, store))?.checkEntity(entityTypeKey, entityId);
+  await (await AnchorGuard.open(rulesetKey, loaded, store))?.checkEntity(entityTypeKey, entityId);
 
   const [newValue, offset, length, replacements] =
     body.op === "str_replace" ? applyStrReplace(value, body) : applyReplaceRange(value, body);
@@ -886,11 +886,11 @@ export async function createRelation(
   toEntityId: string,
   userProps: Row,
   store: RuntimeStore,
-  anchorKey: string | null = null,
+  rulesetKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
   const scopedRt = scopedRelationType(loaded, relationTypeKey);
-  const guard = await AnchorGuard.open(anchorKey, loaded, store);
+  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
 
   const { errors, write } = prepareCreateRelation(
     loaded,
@@ -1019,11 +1019,11 @@ export async function updateRelation(
   relationId: string,
   body: Row,
   store: RuntimeStore,
-  anchorKey: string | null = null,
+  rulesetKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
   const scopedRt = scopedRelationType(loaded, relationTypeKey);
-  const guard = await AnchorGuard.open(anchorKey, loaded, store);
+  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
 
   const { errors, write } = prepareUpdateRelation(loaded, relationTypeKey, relationId, body);
   const refused =
@@ -1060,11 +1060,11 @@ export async function deleteRelation(
   relationTypeKey: string,
   relationId: string,
   store: RuntimeStore,
-  anchorKey: string | null = null,
+  rulesetKey: string | null = null,
 ): Promise<void> {
   const loaded = await loadSchema(lensKey, store);
   const scopedRt = scopedRelationType(loaded, relationTypeKey);
-  const guard = await AnchorGuard.open(anchorKey, loaded, store);
+  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
   await guard?.checkRelationDelete(loaded.full.relationTypes[relationTypeKey] ?? scopedRt, relationId);
 
   const write = prepareDeleteRelation(loaded, relationTypeKey, relationId);

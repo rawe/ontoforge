@@ -1,5 +1,5 @@
 /**
- * The write guard of an anchored mount (`…/anchors/:anchorKey`): the seven
+ * The write guard of an anchored mount (`…/anchors/:rulesetKey`): the seven
  * runtime write functions consult it on anchored calls only. It holds the
  * anchor's hierarchy to the anchored subtree; every other type is free and
  * is written as on the plain lens.
@@ -17,7 +17,7 @@
  * is locked, so a re-point or a move racing the call is accepted (A9).
  * Unanchored, there is no guard; dangling, or anchored at an entity the
  * lens hides, every write is refused with a 409. Refusals are 422 field
- * errors that name only what the caller sent and the anchor key.
+ * errors that name only what the caller sent and the ruleset key.
  * Staging through the URL takes `checkStaging` instead: no coverage (R10).
  */
 
@@ -76,26 +76,26 @@ function anchorFault(record: RulesetRecord, loaded: LoadedSchema): "dangling" | 
 }
 
 /** The refusal of an immediate write through an anchor (`anchorFault`). The
- * texts name the anchor key and the lens key only. */
-export function anchorRefusal(anchorKey: string, record: RulesetRecord, loaded: LoadedSchema): string | null {
+ * texts name the ruleset key and the lens key only. */
+export function anchorRefusal(rulesetKey: string, record: RulesetRecord, loaded: LoadedSchema): string | null {
   switch (anchorFault(record, loaded)) {
     case "dangling":
-      return `Anchor '${anchorKey}' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it`;
+      return `Anchor '${rulesetKey}' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it`;
     case "hidden":
-      return `Anchor '${anchorKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show, so every write is refused`;
+      return `Anchor '${rulesetKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show, so every write is refused`;
     default:
       return null;
   }
 }
 
 /** The same refusal for a changeset's staging, submit and commit: what is
- * wrong, with the anchor key and the lens key, and no fix. */
-export function changesetAnchorRefusal(anchorKey: string, record: RulesetRecord, loaded: LoadedSchema): string | null {
+ * wrong, with the ruleset key and the lens key, and no fix. */
+export function changesetAnchorRefusal(rulesetKey: string, record: RulesetRecord, loaded: LoadedSchema): string | null {
   switch (anchorFault(record, loaded)) {
     case "dangling":
-      return `Anchor '${anchorKey}' is dangling`;
+      return `Anchor '${rulesetKey}' is dangling`;
     case "hidden":
-      return `Anchor '${anchorKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show`;
+      return `Anchor '${rulesetKey}' points at an entity that lens '${loaded.scoped.lensKey}' does not show`;
     default:
       return null;
   }
@@ -103,9 +103,9 @@ export function changesetAnchorRefusal(anchorKey: string, record: RulesetRecord,
 
 /** The anchor record of an anchored call, read fresh; an unknown key is
  * not found. */
-async function readRecord(anchorKey: string, store: RuntimeStore): Promise<RulesetRecord> {
-  const record = await store.rulesets().get(anchorKey);
-  if (record === null) throw new NotFoundError(`Anchor '${anchorKey}' not found`);
+async function readRecord(rulesetKey: string, store: RuntimeStore): Promise<RulesetRecord> {
+  const record = await store.rulesets().get(rulesetKey);
+  if (record === null) throw new NotFoundError(`Anchor '${rulesetKey}' not found`);
   return record;
 }
 
@@ -121,7 +121,7 @@ function refuse(field: string, message: string): ValidationError {
 
 export class AnchorGuard {
   private constructor(
-    private readonly anchorKey: string,
+    private readonly rulesetKey: string,
     private readonly anchor: AnchorEntity,
     private readonly types: Set<string>,
     private readonly readings: Record<string, ParentEnd>,
@@ -131,29 +131,29 @@ export class AnchorGuard {
 
   /**
    * The guard of one anchored immediate write, from the anchor read fresh
-   * now; null on the plain lens (`anchorKey` null) and when unanchored. An
+   * now; null on the plain lens (`rulesetKey` null) and when unanchored. An
    * unknown key is not found; dangling, or an anchored entity the lens
    * hides, is a 409.
    */
-  static async open(anchorKey: string | null, loaded: LoadedSchema, store: RuntimeStore): Promise<AnchorGuard | null> {
-    if (anchorKey === null) return null;
-    const record = await readRecord(anchorKey, store);
-    const refusal = anchorRefusal(anchorKey, record, loaded);
+  static async open(rulesetKey: string | null, loaded: LoadedSchema, store: RuntimeStore): Promise<AnchorGuard | null> {
+    if (rulesetKey === null) return null;
+    const record = await readRecord(rulesetKey, store);
+    const refusal = anchorRefusal(rulesetKey, record, loaded);
     if (refusal !== null) throw new ConflictError(refusal);
     if (record.anchor === null) return null;
     const { types, readings } = hierarchyOf(record.anchor.type, loaded.full);
-    return new AnchorGuard(anchorKey, record.anchor, types, readings, loaded, store);
+    return new AnchorGuard(rulesetKey, record.anchor, types, readings, loaded, store);
   }
 
   /**
-   * Staging through an anchored URL (R10): an unknown key is not found;
+   * Staging through a ruleset URL (R10): an unknown key is not found;
    * dangling, or an anchored entity the lens hides, is a 409, as for an
    * immediate write but with the changeset's text. Coverage is a commit
    * rule. Nothing on the plain lens.
    */
-  static async checkStaging(anchorKey: string | null, loaded: LoadedSchema, store: RuntimeStore): Promise<void> {
-    if (anchorKey === null) return;
-    const refusal = changesetAnchorRefusal(anchorKey, await readRecord(anchorKey, store), loaded);
+  static async checkStaging(rulesetKey: string | null, loaded: LoadedSchema, store: RuntimeStore): Promise<void> {
+    if (rulesetKey === null) return;
+    const refusal = changesetAnchorRefusal(rulesetKey, await readRecord(rulesetKey, store), loaded);
     if (refusal !== null) throw new ConflictError(refusal);
   }
 
@@ -176,7 +176,7 @@ export class AnchorGuard {
   }
 
   private notUnder(id: string, what: "Entity" | "Relation" = "Entity"): string {
-    return `${what} '${id}' is not under anchor '${this.anchorKey}'`;
+    return `${what} '${id}' is not under anchor '${this.rulesetKey}'`;
   }
 
   /**
@@ -200,11 +200,11 @@ export class AnchorGuard {
         Object.hasOwn(this.loaded.scoped.relationTypes, rt.key),
     );
     if (!placeable) {
-      errors.entityTypeKey = `Entity type '${entityTypeKey}' cannot be placed under anchor '${this.anchorKey}'`;
+      errors.entityTypeKey = `Entity type '${entityTypeKey}' cannot be placed under anchor '${this.rulesetKey}'`;
       return;
     }
     if (parentRelation === null) {
-      errors.parentRelation = `Required: name the parent under anchor '${this.anchorKey}' for an entity of type '${entityTypeKey}'`;
+      errors.parentRelation = `Required: name the parent under anchor '${this.rulesetKey}' for an entity of type '${entityTypeKey}'`;
       return;
     }
     if ("parentRelation.type" in errors || "parentRelation.parentId" in errors) return;
@@ -255,7 +255,7 @@ export class AnchorGuard {
   ): Promise<void> {
     if (this.isHierarchyRelation(rt)) {
       errors.relationTypeKey =
-        `Relation type '${rt.key}' places entities under anchor '${this.anchorKey}', ` +
+        `Relation type '${rt.key}' places entities under anchor '${this.rulesetKey}', ` +
         "so create the child together with its parent relation instead";
       return;
     }
@@ -285,7 +285,7 @@ export class AnchorGuard {
       const child = rt.parent === "source" ? to : from;
       if (!(await this.covered(child))) return this.notUnder(relationId, "Relation");
       return op === "delete"
-        ? `Relation '${relationId}' places an entity under anchor '${this.anchorKey}' and cannot be deleted on an anchored connection`
+        ? `Relation '${relationId}' places an entity under anchor '${this.rulesetKey}' and cannot be deleted on an anchored connection`
         : null;
     }
     const allowed =

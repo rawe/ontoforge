@@ -35,7 +35,7 @@ export const SCHEMA_KEY_PATTERN = /^[a-z][a-z0-9_]*$/;
 export const LENS_RESOURCE_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/;
 
 /** Key rule of anchors: lower snake case plus `-`, starting with a letter. */
-export const ANCHOR_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/;
+export const RULESET_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/;
 
 /**
  * Maximum length for every key kind — entity type, relation type, lens,

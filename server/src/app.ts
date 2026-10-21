@@ -179,7 +179,7 @@ export async function createApp(): Promise<FastifyInstance> {
   // Anchor maintenance names no lens: the first lensless runtime routes.
   await app.register(anchorRouter, { prefix: "/api/ontologies/:ontologyKey/runtime/anchors" });
   // The anchored REST mirror: the runtime and changeset routers below an anchor.
-  await app.register(anchoredRuntimeRouter, { prefix: `${runtimePrefix}/anchors/:anchorKey` });
+  await app.register(anchoredRuntimeRouter, { prefix: `${runtimePrefix}/anchors/:rulesetKey` });
 
   // Startup step 6: both MCP servers share the process and call the same
   // services as REST.

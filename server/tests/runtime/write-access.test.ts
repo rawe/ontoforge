@@ -128,7 +128,7 @@ describe("the levels and the check", () => {
 
 describe("the tables cannot drift", () => {
   it("ROUTES are exactly the routes the ruleset mirror registers (38)", async () => {
-    const prefix = "/api/ontologies/:ontologyKey/runtime/lenses/:lensKey/anchors/:anchorKey";
+    const prefix = "/api/ontologies/:ontologyKey/runtime/lenses/:lensKey/anchors/:rulesetKey";
     const app = Fastify();
     app.setValidatorCompiler(validatorCompiler);
     app.setSerializerCompiler(serializerCompiler);

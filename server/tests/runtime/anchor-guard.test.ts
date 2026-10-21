@@ -175,8 +175,8 @@ describe("write access is not the guard's (writeAccess.ts)", () => {
 });
 
 describe("the staging check (R10)", () => {
-  const check = (anchorKey: string | null, lens = loaded()) =>
-    AnchorGuard.checkStaging(anchorKey, lens, asRuntimeStore(store)).then(
+  const check = (rulesetKey: string | null, lens = loaded()) =>
+    AnchorGuard.checkStaging(rulesetKey, lens, asRuntimeStore(store)).then(
       () => null,
       (e: unknown) => e as Error,
     );

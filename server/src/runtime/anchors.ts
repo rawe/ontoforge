@@ -14,12 +14,12 @@ import { z } from "zod";
 
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import type { RulesetRecord, RuntimeStore } from "../core/ports.js";
-import { ANCHOR_KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
+import { RULESET_KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
 import { anchorState } from "./anchorGuard.js";
 import { loadSchema, loadSearchContext, type EntityTypeDef } from "./schemaCache.js";
 import { getPath } from "./service.js";
 
-const Key = z.string().regex(ANCHOR_KEY_PATTERN).max(MAX_KEY_LENGTH);
+const Key = z.string().regex(RULESET_KEY_PATTERN).max(MAX_KEY_LENGTH);
 
 export const ANCHOR_STATES = ["anchored", "unanchored", "dangling"] as const;
 export type AnchorState = (typeof ANCHOR_STATES)[number];
@@ -76,7 +76,7 @@ function toResponse(record: RulesetRecord, entityTypes: Record<string, EntityTyp
 export function anchorKeyError(key: string): string | null {
   return Key.safeParse(key).success
     ? null
-    : `Invalid anchor key '${key}'. Must match pattern ${ANCHOR_KEY_PATTERN.source} ` +
+    : `Invalid anchor key '${key}'. Must match pattern ${RULESET_KEY_PATTERN.source} ` +
         `and be at most ${MAX_KEY_LENGTH} characters`;
 }
 

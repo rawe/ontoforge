@@ -617,8 +617,8 @@ describe("review read", () => {
 describe("staged document read", () => {
   const NOTE2 = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
   const text = "# Plan\n\nStep one 😀, step two.";
-  const read = (id: string, offset = 0, limit: number | null = null, lensKey = "full_lens", anchorKey: string | null = null) =>
-    getStagedDocument(lensKey, anchorKey, CS, "note", id, "body", offset, limit, on());
+  const read = (id: string, offset = 0, limit: number | null = null, lensKey = "full_lens", rulesetKey: string | null = null) =>
+    getStagedDocument(lensKey, rulesetKey, CS, "note", id, "body", offset, limit, on());
 
   beforeEach(() => {
     journal = [
@@ -715,8 +715,8 @@ describe("staged document read", () => {
 // ---------------------------------------------------------------------------
 
 describe("staged entity read", () => {
-  const read = (type: string, id: string, lensKey = "full_lens", anchorKey: string | null = null) =>
-    getStagedEntity(lensKey, anchorKey, CS, type, id, on());
+  const read = (type: string, id: string, lensKey = "full_lens", rulesetKey: string | null = null) =>
+    getStagedEntity(lensKey, rulesetKey, CS, type, id, on());
 
   beforeEach(() => {
     store.getEntity.mockImplementation(async (type: string, id: string) =>

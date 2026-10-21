@@ -1,14 +1,14 @@
 /**
  * Changeset routes, mounted at
  * `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey/changesets`, and
- * below the anchored mirror at `…/anchors/:anchorKey/changesets`
- * (`anchorRouter.ts`, whose hooks check the anchor first).
+ * below the ruleset mirror at `…/rulesets/:rulesetKey/changesets`
+ * (`rulesetRouter.ts`, whose hooks check the ruleset first).
  *
  * `POST /:changesetId/writes` stages one write, its body discriminated by
  * `operation`, and answers 201 `{seq, id}` (a create with a parent
  * relation adds `relation: {seq, id}`); `DELETE /:changesetId/writes/:seq`
- * unstages one. `GET /` lists the lens's changesets (an anchored URL: its
- * anchor's), `GET /:changesetId` is the review read, and `GET
+ * unstages one. `GET /` lists the lens's changesets (a ruleset URL: its
+ * ruleset's), `GET /:changesetId` is the review read, and `GET
  * /:changesetId/documents/:entityTypeKey/:entityId/:propertyKey` the staged
  * text of one document property, with the document read's paging, and
  * `GET /:changesetId/entities/:entityTypeKey/:entityId` one entity as a
@@ -24,7 +24,7 @@ import { z } from "zod";
 
 import { getRuntimeStore } from "../core/ports.js";
 import * as changesets from "./changesets.js";
-import { DocumentReadQuery, LensParams, ParentRelationPayload, PropertyPayload, anchorOf } from "./router.js";
+import { DocumentReadQuery, LensParams, ParentRelationPayload, PropertyPayload, rulesetOf } from "./router.js";
 
 const ChangesetParams = LensParams.extend({ changesetId: z.string() });
 const EntityParams = ChangesetParams.extend({ entityTypeKey: z.string(), entityId: z.string() });
@@ -99,7 +99,7 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const changeset = await changesets.startChangeset(
         request.params.lensKey,
-        anchorOf(request.params),
+        rulesetOf(request.params),
         request.body?.note,
         await getRuntimeStore(request.params.ontologyKey),
       );
@@ -113,7 +113,7 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
     async (request) =>
       changesets.listChangesets(
         request.params.lensKey,
-        anchorOf(request.params),
+        rulesetOf(request.params),
         await getRuntimeStore(request.params.ontologyKey),
       ),
   );
@@ -124,7 +124,7 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
     async (request) =>
       changesets.getChangeset(
         request.params.lensKey,
-        anchorOf(request.params),
+        rulesetOf(request.params),
         request.params.changesetId,
         request.query.offset,
         request.query.limit,
@@ -138,7 +138,7 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
     async (request) =>
       changesets.getStagedDocument(
         request.params.lensKey,
-        anchorOf(request.params),
+        rulesetOf(request.params),
         request.params.changesetId,
         request.params.entityTypeKey,
         request.params.entityId,
@@ -155,7 +155,7 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
     async (request) =>
       changesets.getStagedEntity(
         request.params.lensKey,
-        anchorOf(request.params),
+        rulesetOf(request.params),
         request.params.changesetId,
         request.params.entityTypeKey,
         request.params.entityId,
@@ -169,7 +169,7 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       await changesets.discardChangeset(
         request.params.lensKey,
-        anchorOf(request.params),
+        rulesetOf(request.params),
         request.params.changesetId,
         await getRuntimeStore(request.params.ontologyKey),
       );
@@ -183,7 +183,7 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const answer = await changesets.stage(
         request.params.lensKey,
-        anchorOf(request.params),
+        rulesetOf(request.params),
         request.params.changesetId,
         stagedWrite(request.body),
         await getRuntimeStore(request.params.ontologyKey),
@@ -198,7 +198,7 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       await changesets.unstage(
         request.params.lensKey,
-        anchorOf(request.params),
+        rulesetOf(request.params),
         request.params.changesetId,
         request.params.seq,
         await getRuntimeStore(request.params.ontologyKey),
@@ -213,7 +213,7 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
     async (request) =>
       changesets.submitChangeset(
         request.params.lensKey,
-        anchorOf(request.params),
+        rulesetOf(request.params),
         request.params.changesetId,
         request.body?.note,
         await getRuntimeStore(request.params.ontologyKey),
@@ -226,7 +226,7 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
     async (request) =>
       changesets.unsubmitChangeset(
         request.params.lensKey,
-        anchorOf(request.params),
+        rulesetOf(request.params),
         request.params.changesetId,
         request.body?.note,
         await getRuntimeStore(request.params.ontologyKey),
@@ -239,7 +239,7 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
     async (request) =>
       changesets.commitChangeset(
         request.params.lensKey,
-        anchorOf(request.params),
+        rulesetOf(request.params),
         request.params.changesetId,
         request.body?.expectedVersion,
         await getRuntimeStore(request.params.ontologyKey),

@@ -105,8 +105,8 @@ beforeEach(() => {
   store.changesetStore.append.mockResolvedValue([3]);
 });
 
-function stageOn(write: StagedWrite, anchorKey: string | null = null) {
-  return stage("full_lens", anchorKey, CS, write, asRuntimeStore(store));
+function stageOn(write: StagedWrite, rulesetKey: string | null = null) {
+  return stage("full_lens", rulesetKey, CS, write, asRuntimeStore(store));
 }
 
 /** The rows of the one `append`, each handed over with its bytes. */

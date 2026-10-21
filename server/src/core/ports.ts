@@ -786,8 +786,9 @@ export interface RuntimeStore {
   childrenOf(ids: string[], readings: Record<string, ParentEnd>, lock?: boolean): Promise<ParentLink[]>;
 
   /** The entities and relations of `ids`, taken `FOR UPDATE`, with their
-   * stored properties as stored; an unknown id is left out. */
-  lockTargets(ids: string[]): Promise<LockedTarget[]>;
+   * stored properties as stored, each document value as its fingerprint;
+   * an unknown id is left out. */
+  lockTargets(ids: string[], documentKeys: Record<string, string[]>): Promise<LockedTarget[]>;
 }
 
 /** One stored parent relation, read neutrally: its parent and child end. */
@@ -803,7 +804,8 @@ export interface LockedTarget {
   id: string;
   kind: "entity" | "relation";
   typeKey: string;
-  /** The stored properties, raw: no datetime decoding. */
+  /** The stored properties, raw: no datetime decoding; a document value
+   * as its fingerprint. */
   props: Row;
 }
 

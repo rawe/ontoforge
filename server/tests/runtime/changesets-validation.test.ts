@@ -16,6 +16,7 @@ import {
   NOW,
   asRuntimeStore,
   createMockRuntimeStore,
+  fingerprinted,
   hashedById,
   makeEntity,
   makeRelation,
@@ -129,12 +130,12 @@ beforeEach(() => {
     hashedById(stored, ids, documentKeys),
   );
   store.parentsOf.mockImplementation(async (ids: string[]) => ids.flatMap((id) => parents[id] ?? []));
-  store.lockTargets.mockImplementation(async (ids: string[]) =>
+  store.lockTargets.mockImplementation(async (ids: string[], documentKeys: Record<string, string[]>) =>
     ids
       .filter((id) => id in stored)
       .map((id) => {
         const { _id, _entityTypeKey, _createdAt, _updatedAt, ...props } = stored[id]!;
-        return { id, kind: "entity", typeKey: _entityTypeKey, props };
+        return { id, kind: "entity", typeKey: _entityTypeKey, props: fingerprinted(props, _entityTypeKey as string, documentKeys) };
       }),
   );
   store.createEntity.mockResolvedValue(makeEntity());
@@ -352,6 +353,28 @@ describe("step 1: under the lock", () => {
       store.changesetStore.lockForCommit.mock.invocationCallOrder[0]!,
     );
     expect(store.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("a document is re-read under the lock as its hash and length, and compared by its hash", async () => {
+    const full = schema();
+    full.entityTypes.find((et: Row) => et.key === "person").properties.push({
+      key: "bio",
+      displayName: "Bio",
+      dataType: "document",
+      required: false,
+      defaultValue: null,
+    });
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(full);
+    stored[PAT]!.bio = "old text";
+    journal([row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { bio: "new" } }, before: { bio: recordedDocument("old text") } })]);
+    // Changed after the pass, as the lock reads it.
+    store.lockTargets.mockResolvedValueOnce([
+      { id: PAT, kind: "entity", typeKey: "person", props: { name: "Pat", bio: recordedDocument("other text") } },
+    ]);
+    expect(await violations(commit())).toEqual([{ seq: 1, kind: "drift", message: "Changed since this write was staged" }]);
+    expect(store.lockTargets.mock.calls[0]![1]).toEqual({ person: ["bio"] });
+    // Unchanged, it commits.
+    expect(await commit()).toEqual({ committed: 1, alreadyGone: [] });
   });
 
   it("a journal changed between the pass and the lock is a 409", async () => {

@@ -307,6 +307,39 @@ describe("drift (V10, V19)", () => {
     expect(await name("project", e.P3)).toBe("P3 Mobile");
     expect((await call("GET", `${ALL}/changesets/${cs}`)).status).toBe(200);
   });
+
+  it("under the lock a document is compared by its hash: a same-length edit landing meanwhile rejects", async () => {
+    const cs = await start();
+    await staged(ALL, cs, { operation: "update_entity", type: "task", id: e.T5, properties: { notes: "Planned T5" } });
+    // "Notes of T5" → "Texts of T5", held by a second connection: the
+    // pass reads the old text, the lock the new one.
+    const release = await hold((bound) => bound.updateEntity("task", e.T5, { notes: "Texts of T5" }, [], {}));
+    let running: Promise<{ status: number; body: Row }> | undefined;
+    try {
+      running = commit(cs);
+      await waitingForLocks(1);
+    } finally {
+      await release();
+    }
+    const res = await running!;
+    expect(res.status, JSON.stringify(res.body)).toBe(422);
+    expect(res.body.error.details.violations).toEqual([
+      { seq: 1, kind: "drift", message: "Changed since this write was staged" },
+    ]);
+
+    // Control: the text as staged against, under the lock too, commits.
+    const again = await start();
+    await staged(ALL, again, { operation: "update_entity", type: "task", id: e.T5, properties: { notes: "Planned T5" } });
+    const touch = await hold((bound) => bound.updateEntity("task", e.T5, { name: "T5" }, [], {}));
+    try {
+      running = commit(again);
+      await waitingForLocks(1);
+    } finally {
+      await touch();
+    }
+    expect(await running).toMatchObject({ status: 200, body: { committed: 1 } });
+    expect((await call("GET", `${ALL}/entities/task/${e.T5}/documents/notes`)).body.content).toBe("Planned T5");
+  });
 });
 
 describe("has_children and the order-free subtree delete (V20, V21)", () => {

@@ -732,7 +732,7 @@ describe("neutral reads", () => {
   it("lockTargets: the stored props of entities and relations, FOR UPDATE", async () => {
     const link = await relationId("assigned_to", ids.T1, ids.Ben);
     const holder = await hold(store, async (bound) => {
-      const targets = await bound.lockTargets([ids.T1, link, randomUUID(), "not-a-uuid"]);
+      const targets = await bound.lockTargets([ids.T1, link, randomUUID(), "not-a-uuid"], {});
       expect(targets).toEqual([
         { id: ids.T1, kind: "entity", typeKey: "task", props: { name: "T1" } },
         { id: link, kind: "relation", typeKey: "assigned_to", props: {} },
@@ -753,7 +753,7 @@ describe("neutral reads", () => {
     expect(await drop).toBe(true);
     await store.updateEntity("task", ids.T1, { name: "T1" }, [], {});
     await store.createRelation("assigned_to", randomUUID(), ids.T1, ids.Ben, {}, {});
-    expect(await store.lockTargets([])).toEqual([]);
+    expect(await store.lockTargets([], {})).toEqual([]);
   });
 
   describe("document values as their fingerprint", () => {
@@ -782,6 +782,18 @@ describe("neutral reads", () => {
       // A key that is no document of the type is read as stored.
       expect((await store.getEntitiesByIdsHashed([ids.T1], { project: ["notes"] }))[ids.T1]).toEqual(raw[ids.T1]);
       expect(await store.getEntitiesByIdsHashed([], DOCS)).toEqual({});
+    });
+
+    it("lockTargets: a locked entity's document as its fingerprint", async () => {
+      await store.transaction(async (bound) => {
+        const [target] = await bound.lockTargets([ids.T1], DOCS);
+        expect(target).toEqual({
+          id: ids.T1,
+          kind: "entity",
+          typeKey: "task",
+          props: { name: "T1", notes: recordedDocument(TEXT), _doc_notes_length: [...TEXT].length },
+        });
+      });
     });
   });
 

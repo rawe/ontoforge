@@ -46,7 +46,7 @@
  *   `childrenOf`, `lockTargets`, `getEntitiesByIdsHashed`,
  *   `getRelationsByIds`) serve a changeset's checks and commit
  *   validation; `lockTargets` and a locking `childrenOf` hold their rows
- *   only inside a transaction. `getEntitiesByIdsHashed` fingerprints
+ *   only inside a transaction. The entity reads among them fingerprint
  *   document values in SQL, so no document text leaves the database.
  */
 
@@ -918,21 +918,22 @@ export class PostgresRuntimeStore implements RuntimeStore {
     return Object.fromEntries(result.rows.map((row) => [row.id as string, relationRow(row, NO_DEFS)]));
   }
 
-  /** Entities first, then relations, each in id order. */
-  async lockTargets(ids: string[]): Promise<LockedTarget[]> {
+  /** Entities first, then relations, each in id order. Relations hold
+   * no documents. */
+  async lockTargets(ids: string[], documentKeys: Record<string, string[]>): Promise<LockedTarget[]> {
     const validIds = ids.filter(isUuid);
     if (validIds.length === 0) {
       return [];
     }
     return this.tx(async (querier) => {
       const targets: LockedTarget[] = [];
-      for (const [kind, table] of [
-        ["entity", "entity"],
-        ["relation", "relation"],
+      for (const [kind, table, props] of [
+        ["entity", "entity", fingerprintedProps("t", "$2")],
+        ["relation", "relation", "t.props"],
       ] as const) {
         const result = await querier.query(
-          `SELECT id, type_key, props FROM ${table} WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
-          [validIds],
+          `SELECT t.id, t.type_key, ${props} FROM ${table} t WHERE t.id = ANY($1::uuid[]) ORDER BY t.id FOR UPDATE`,
+          kind === "entity" ? [validIds, JSON.stringify(documentKeys)] : [validIds],
         );
         for (const row of result.rows) {
           targets.push({ id: row.id as string, kind, typeKey: row.type_key as string, props: row.props as Row });

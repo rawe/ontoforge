@@ -1579,11 +1579,12 @@ function reviewPage(
 // ---------------------------------------------------------------------------
 
 /** Step 1, after the lock: every stored target `FOR UPDATE`, and drift
- * re-checked on the rows as locked (V19). A target gone since the pass is
- * left to the replay. */
+ * re-checked on the rows as locked (V19), documents read as hash and
+ * length. A target gone since the pass is left to the replay. */
 async function driftUnderLock(loaded: LoadedSchema, pass: LockFreePass, bound: RuntimeStore): Promise<Violation[]> {
   if (pass.targets.length === 0) return [];
-  const locked = new Map((await bound.lockTargets(pass.targets)).map((row) => [`${row.kind} ${row.id}`, row] as const));
+  const targets = await bound.lockTargets(pass.targets, documentKeysOf(loaded));
+  const locked = new Map(targets.map((row) => [`${row.kind} ${row.id}`, row] as const));
   const violations: Violation[] = [];
   for (const write of pass.writes) {
     if (write.before === null || (write.operation !== "update_entity" && write.operation !== "update_relation")) continue;

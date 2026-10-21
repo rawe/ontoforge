@@ -6,7 +6,9 @@
  * list and reads work; the same on a ruleset without an anchor, with no
  * coverage rules; a deleted anchor, or one the lens hides, still refuses
  * staging, and write access wins over both; the escapes (the plain lens
- * URL commits, the PUT gives full access back); and the MCP tool set at
+ * URL commits, the PUT gives full access back); through a 'none'
+ * ruleset's URL every write, stage and commit route is a 409 and every
+ * read answers, the changeset reads included; and the MCP tool set at
  * 'propose' (V29, R13).
  */
 
@@ -18,6 +20,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { createApp } from "../../src/app.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache, invalidateSearchContext } from "../../src/runtime/schemaCache.js";
+import { ROUTES } from "../../src/runtime/writeAccess.js";
 import { runtimePrefix } from "./fixture.js";
 import {
   buildProjectHierarchy,
@@ -39,6 +42,8 @@ const NO_WRITE = (key: string) =>
   `Ruleset '${key}' gives write access 'propose': this connection cannot write directly; stage the write into a changeset`;
 const NO_COMMIT = (key: string) =>
   `Ruleset '${key}' gives write access 'propose': this connection cannot commit; submit the changeset, and a person commits it`;
+const ONLY_READ = (key: string, verb: string) =>
+  `Ruleset '${key}' gives write access 'none': this connection cannot ${verb}; it can only read`;
 const STAGEABLE = ["create_entity", "update_entity", "delete_entity", "create_relation", "update_relation", "delete_relation"];
 
 let app: FastifyInstance;
@@ -293,6 +298,119 @@ describe("a 'propose' ruleset without an anchor", () => {
     const committed = await rest("POST", `${ALL}/changesets/${cs}/commit`, {});
     expect(committed.status, JSON.stringify(committed.body)).toBe(200);
     expect(committed.body.committed).toBe(6);
+  });
+});
+
+describe("through a 'none' ruleset's URL (REST)", () => {
+  const N = `${ALL}/rulesets/agent-n`;
+  let cs: string;
+  let task: string;
+  beforeEach(async () => {
+    // A changeset with a staged task and staged notes of T1, started while
+    // the level was full.
+    await putRuleset("agent-n", { anchor: { type: "project", id: e.P1 } });
+    ({ cs, task } = await startWithTask(N));
+    const notes = { operation: "update_entity", type: "task", id: e.T1, properties: { notes: "Staged notes" } };
+    expect((await rest("POST", `${N}/changesets/${cs}/writes`, notes)).status).toBe(201);
+    await putRuleset("agent-n", { writeAccess: "none" });
+  });
+
+  /** One request per mirror route, on the hierarchy's data. */
+  function requests(): [string, string, Row?][] {
+    const C = `/changesets/${cs}`;
+    const hasTask = h.relations["P1 has_task T1"]!;
+    const assigned = h.relations["T1 assigned_to Ben"]!;
+    return [
+      ["GET /", ""],
+      ["GET /schema", "/schema"],
+      ["GET /schema/entity-types", "/schema/entity-types"],
+      ["GET /schema/entity-types/:key", "/schema/entity-types/task"],
+      ["GET /schema/relation-types", "/schema/relation-types"],
+      ["GET /schema/relation-types/:key", "/schema/relation-types/has_task"],
+      ["GET /search", "/search?q=T1"],
+      ["GET /search-indices", "/search-indices"],
+      ["POST /search", "/search", { query: "T1" }],
+      ["POST /entities/:entityTypeKey", "/entities/person", { name: "Ann" }],
+      ["GET /entities/:entityTypeKey", "/entities/task"],
+      ["GET /entities/:entityTypeKey/:entityId", `/entities/task/${e.T1}`],
+      ["PATCH /entities/:entityTypeKey/:entityId", `/entities/task/${e.T1}`, { name: "T1 renamed" }],
+      ["DELETE /entities/:entityTypeKey/:entityId", `/entities/task/${e.T1a1}`],
+      ["GET /entities/:entityTypeKey/:entityId/path", `/entities/task/${e.T1}/path`],
+      ["GET /entities/:entityTypeKey/:entityId/documents/:propertyKey", `/entities/task/${e.T1}/documents/notes`],
+      [
+        "PATCH /entities/:entityTypeKey/:entityId/documents/:propertyKey",
+        `/entities/task/${e.T1}/documents/notes`,
+        { op: "str_replace", oldString: "Notes", newString: "Text" },
+      ],
+      ["GET /entities/:entityTypeKey/:entityId/neighbors", `/entities/task/${e.T1}/neighbors`],
+      ["POST /query", "/query", { query: "MATCH (t:task) RETURN t" }],
+      ["GET /saved-queries", "/saved-queries"],
+      ["GET /saved-queries/search", "/saved-queries/search?q=task"],
+      ["POST /saved-queries/:queryKey/run", "/saved-queries/q1/run", {}],
+      ["POST /relations/:relationTypeKey", "/relations/assigned_to", { fromEntityId: e.T2, toEntityId: e.Kim }],
+      ["GET /relations/:relationTypeKey", "/relations/has_task"],
+      ["GET /relations/:relationTypeKey/:relationId", `/relations/has_task/${hasTask}`],
+      ["PATCH /relations/:relationTypeKey/:relationId", `/relations/has_task/${hasTask}`, { phase: "test" }],
+      ["DELETE /relations/:relationTypeKey/:relationId", `/relations/assigned_to/${assigned}`],
+      ["POST /changesets", "/changesets", {}],
+      ["GET /changesets", "/changesets"],
+      ["GET /changesets/:changesetId", C],
+      ["GET /changesets/:changesetId/documents/:entityTypeKey/:entityId/:propertyKey", `${C}/documents/task/${e.T1}/notes`],
+      ["GET /changesets/:changesetId/entities/:entityTypeKey/:entityId", `${C}/entities/task/${task}`],
+      ["DELETE /changesets/:changesetId", C],
+      ["POST /changesets/:changesetId/writes", `${C}/writes`, taskUnder(e.P1, "T10")],
+      ["DELETE /changesets/:changesetId/writes/:seq", `${C}/writes/1`],
+      ["POST /changesets/:changesetId/submit", `${C}/submit`, {}],
+      ["POST /changesets/:changesetId/unsubmit", `${C}/unsubmit`, { note: "again" }],
+      ["POST /changesets/:changesetId/commit", `${C}/commit`, {}],
+    ];
+  }
+
+  /** The reads this test server cannot serve: no saved query, no
+   * embedding provider for the semantic saved-query search. */
+  const UNSERVED: Record<string, number> = {
+    "GET /saved-queries/search": 422,
+    "POST /saved-queries/:queryKey/run": 404,
+  };
+  const VERBS = { write: "write directly", stage: "start or change a changeset", commit: "commit" } as const;
+
+  it("refuses the 7 writes, the 6 stage routes and the commit with 409; the 24 reads answer", async () => {
+    const all = requests();
+    expect(all.map(([route]) => route).sort()).toEqual(Object.keys(ROUTES).sort());
+    const refused: string[] = [];
+    for (const [route, path, payload] of all) {
+      const res = await rest(route.split(" ")[0]!, `${N}${path}`, payload);
+      const operation = ROUTES[route]!;
+      if (operation === "read") {
+        expect(res.status, `${route} ${JSON.stringify(res.body)}`).toBe(UNSERVED[route] ?? 200);
+      } else {
+        expect(res.status, route).toBe(409);
+        expect(res.body.error.message, route).toBe(ONLY_READ("agent-n", VERBS[operation]));
+        refused.push(route);
+      }
+    }
+    expect(refused).toHaveLength(14);
+    expect(all.length - refused.length).toBe(24);
+    // Nothing written, nothing staged, nothing started.
+    expect((await rest("GET", `${ALL}/entities/task/${e.T1}`)).body.name).toBe("T1");
+    expect((await rest("GET", `${ALL}/entities/task/${e.T1a1}`)).status).toBe(200);
+    expect((await rest("GET", `${ALL}/entities/person`)).body.items.map((p: Row) => p.name)).not.toContain("Ann");
+    expect((await rest("GET", `${N}/changesets`)).body.map((c: Row) => [c.id, c.state, c.writeCount])).toEqual([
+      [cs, "draft", 3],
+    ]);
+  });
+
+  it("the staged entity read answers the staged task", async () => {
+    const res = await rest("GET", `${N}/changesets/${cs}/entities/task/${task}`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ deleted: false, entity: { _id: task, name: "T9" } });
+  });
+
+  it("the plain lens still stages into and commits the changeset", async () => {
+    expect((await rest("POST", `${ALL}/changesets/${cs}/writes`, taskUnder(e.P1, "T10"))).status).toBe(201);
+    const committed = await rest("POST", `${ALL}/changesets/${cs}/commit`, {});
+    expect(committed.status, JSON.stringify(committed.body)).toBe(200);
+    expect(committed.body.committed).toBe(5);
   });
 });
 

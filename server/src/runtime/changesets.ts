@@ -93,7 +93,7 @@ import {
 } from "./prepare.js";
 import { documentPropertyKeys, stubDocumentProperties } from "./readHelpers.js";
 import { loadSchema, loadSearchContext, type LoadedSchema, type SearchContext } from "./schemaCache.js";
-import { documentSlice, parentReadings } from "./service.js";
+import { documentSlice, endpointTypeMessage, parentReadings, type EndRole } from "./service.js";
 
 type Row = Record<string, unknown>;
 
@@ -1601,7 +1601,7 @@ interface StagedLink {
  * relation type requires there. */
 interface StagedEnd {
   seq: number;
-  role: "The source end" | "The target end" | "The parent";
+  role: EndRole;
   id: string;
   type: string;
   relationType: string;
@@ -1696,7 +1696,7 @@ async function commitViolations(
       violations.push({
         seq: end.seq,
         kind: "endpoint_type",
-        message: `${end.role} does not have the type relation type '${end.relationType}' requires`,
+        message: endpointTypeMessage(end.role, end.relationType),
       });
     }
   }

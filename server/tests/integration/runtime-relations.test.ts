@@ -169,9 +169,7 @@ describe("relation CRUD round trip", () => {
     });
     expect(res.statusCode).toBe(422);
     const fields = res.json().error.details.fields;
-    expect(fields.fromEntityId).toBe(
-      `Source entity type mismatch: expected 'person', got 'company'`,
-    );
+    expect(fields.fromEntityId).toBe("The source end does not have the type relation type 'works_for' requires");
     expect(fields.toEntityId).toBe("Target entity 'no-such-entity' not found");
     expect(fields.bogus).toBe("Unknown property: not defined in type 'works_for'");
   });

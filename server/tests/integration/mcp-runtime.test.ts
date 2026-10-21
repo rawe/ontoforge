@@ -979,7 +979,7 @@ describe("create_entity with a parent relation", () => {
         [{ type: "assigned_to", parent_id: ids.Ben }, "parentRelation.type: Relation type 'assigned_to' is not a parent relation"],
         [
           { type: "has_task", parent_id: ids.ACME, properties: { phase: "x" } },
-          "parentRelation.parentId: Parent entity type mismatch: expected 'project', got 'customer'",
+          "parentRelation.parentId: The parent does not have the type relation type 'has_task' requires",
         ],
         [
           { type: "has_task", parent_id: "00000000-0000-4000-8000-000000000000", properties: { phase: "x" } },

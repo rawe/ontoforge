@@ -12,8 +12,9 @@
  * /:changesetId/documents/:entityTypeKey/:entityId/:propertyKey` the staged
  * text of one document property, with the document read's paging;
  * `POST /:changesetId/submit` and `/unsubmit` hand it over and back, and
- * `POST /:changesetId/commit` persists it all or nothing. No entity or relation read route is mounted under a changeset:
- * reads never see staged data.
+ * `POST /:changesetId/commit` persists it all or nothing. No entity or
+ * relation read route is mounted under a changeset: reads never see staged
+ * data.
  * Routers parse and shape only; every rule lives in `changesets.ts`.
  */
 

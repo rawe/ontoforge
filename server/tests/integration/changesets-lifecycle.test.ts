@@ -453,7 +453,7 @@ describe("the review read (V41)", () => {
   });
 
   it("through a scoped lens: hidden names are not returned", async () => {
-    // no_projects hides project: a task's parent and a has_task end are not named.
+    // no_projects hides project: no project, its name or a has_task value is shown.
     const NO = runtimePrefix(O, "no_projects");
     const cs = await start(NO);
     await staged(NO, cs, { operation: "update_entity", type: "task", id: e.T4, properties: { name: "T4 b" } });

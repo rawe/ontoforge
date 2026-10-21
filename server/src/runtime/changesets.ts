@@ -115,7 +115,7 @@ export function writeBytes(write: NewChangesetWrite): number {
 
 const IDLE_MS = CHANGESET_IDLE_DAYS * 24 * 3_600_000;
 
-/** One stageable write (V2), as the entrances hand it over: the payload of
+/** One stageable write (V2), as the entrances hand it over: the values of
  * the matching immediate write. */
 export type StagedWrite =
   | { operation: "create_entity"; typeKey: string; properties: Row; parentRelation: ParentRelationInput | null }

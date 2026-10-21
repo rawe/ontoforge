@@ -4,7 +4,7 @@
  * with its required note, the refusals while submitted, the list as the
  * lens shows it, and the review reads: names, before, current and after, and
  * markers, with no staged arguments, documents as stubs, the staged document
- * text, and nothing the lens hides.
+ * text, one entity as the changeset leaves it, and nothing the lens hides.
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
@@ -15,6 +15,7 @@ import {
   commitChangeset,
   getChangeset,
   getStagedDocument,
+  getStagedEntity,
   listChangesets,
   recordedDocument,
   stage,
@@ -645,6 +646,141 @@ describe("staged document read", () => {
   it("through the anchored URL: bound to its anchor, and readable while submitted", async () => {
     store.changesetStore.get.mockResolvedValue(changeset({ anchorKey: "agent-a", submittedAt: NOW }));
     expect((await read(NOTE1, 0, null, "full_lens", "agent-a")).content).toBe(text);
+    expect(store.changesetStore.get).toHaveBeenCalledWith(CS, "lens-1", "agent-a");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The staged entity read
+// ---------------------------------------------------------------------------
+
+describe("staged entity read", () => {
+  const read = (type: string, id: string, lensKey = "full_lens", anchorKey: string | null = null) =>
+    getStagedEntity(lensKey, anchorKey, CS, type, id, on());
+
+  beforeEach(() => {
+    store.getEntity.mockImplementation(async (type: string, id: string) =>
+      stored[id]?._entityTypeKey === type ? stored[id] : null,
+    );
+    store.changesetStore.writesOn.mockImplementation(async (_id: string, objectId: string) =>
+      journal.filter((write) => write.mintedId === objectId || write.targetId === objectId),
+    );
+  });
+
+  it("a stored entity with its updates folded by seq, a null removing a key; its writes as the review shows them", async () => {
+    journal = [
+      rename(2, PAT, "Pat B", { name: "Pat" }),
+      rename(4, KIM, "Kim X", { name: "Kim Y" }),
+      row(5, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { age: null, email: "p@x" } }, before: { age: 41 } }),
+      rename(7, PAT, "Pat C", { name: "Pat" }),
+    ];
+
+    const view = await read("person", PAT);
+
+    expect(view.entity).toEqual({ _id: PAT, _entityTypeKey: "person", _createdAt: NOW, _updatedAt: NOW, name: "Pat C", email: "p@x" });
+    expect(view.deleted).toBe(false);
+    expect(view.writes.map((w) => w.seq)).toEqual([2, 5, 7]);
+    expect(view.writes[0]).toMatchObject({ operation: "update_entity", type: "person", id: PAT, name: "Pat", before: { name: "Pat" }, current: { name: "Pat" }, after: { name: "Pat B" }, markers: [] });
+    expect(view.writes[1]).toMatchObject({ before: { age: 41, email: null }, current: { age: 41, email: null }, after: { age: null, email: "p@x" } });
+    // One journal query and one entity read: no lock-free pass over the journal.
+    expect(store.changesetStore.writesOn).toHaveBeenCalledWith(CS, PAT);
+    expect(store.changesetStore.page).not.toHaveBeenCalled();
+    expect(store.getEntity).toHaveBeenCalledTimes(1);
+    expect(store.getEntitiesByIds).not.toHaveBeenCalled();
+  });
+
+  it("markers judged on its own writes: drift against the stored row, a value the lens no longer accepts", async () => {
+    stored[PAT] = makeEntity({ name: "Pat Changed", age: 41 }, "person", PAT);
+    journal = [
+      rename(2, PAT, "Pat B", { name: "Pat" }),
+      row(3, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { age: "old" } }, before: { age: 41 } }),
+    ];
+    const view = await read("person", PAT);
+    expect(view.writes[0]).toMatchObject({ current: { name: "Pat Changed" }, markers: [{ kind: "drift", message: "Changed since this write was staged" }] });
+    expect(view.writes[1]!.markers.map((m) => m.kind)).toEqual(["replay"]);
+  });
+
+  it("an entity this changeset creates: the create's values, no defaults applied, then its updates", async () => {
+    journal = [
+      row(3, { typeKey: "person", mintedId: GHOST, arguments: { properties: { name: "New", email: "n@x" } } }),
+      row(4, { operation: "update_entity", typeKey: "person", targetId: GHOST, arguments: { properties: { name: "Newer" } } }),
+    ];
+    const view = await read("person", GHOST);
+    // `active` has a default; the commit applies it, not this read.
+    expect(view.entity).toEqual({ _id: GHOST, _entityTypeKey: "person", name: "Newer", email: "n@x" });
+    expect(view.writes[0]).toMatchObject({ operation: "create_entity", id: GHOST, name: "New", after: { name: "New", email: "n@x" }, markers: [] });
+    expect(view.writes[1]).toMatchObject({ name: "New", before: null, current: null, after: { name: "Newer" }, markers: [] });
+  });
+
+  it("documents as stubs: a staged value measured afresh, not by the stored length", async () => {
+    stored[NOTE1] = makeEntity({ name: "N", body: "old", _doc_body_length: 3 }, "note", NOTE1);
+    journal = [row(2, { operation: "update_entity", typeKey: "note", targetId: NOTE1, arguments: { properties: { body: "new text" } }, before: { body: recordedDocument("old") } })];
+    const view = await read("note", NOTE1);
+    expect(view.entity).toMatchObject({ name: "N", body: { document: true, length: 8 } });
+    expect(view.entity).not.toHaveProperty("_doc_body_length");
+    expect(view.writes[0]).toMatchObject({ before: { body: { document: true, length: 3 } }, after: { body: { document: true, length: 8 } } });
+    expect(JSON.stringify(view)).not.toContain("new text");
+  });
+
+  it("deleted when its last staged write deletes it, the values folded still shown; a later write clears it", async () => {
+    journal = [
+      rename(2, PAT, "Pat B", { name: "Pat" }),
+      row(3, { operation: "delete_entity", typeKey: "person", targetId: PAT }),
+    ];
+    let view = await read("person", PAT);
+    expect(view).toMatchObject({ deleted: true, entity: { name: "Pat B" } });
+    expect(view.writes[1]).toMatchObject({ operation: "delete_entity", id: PAT, name: "Pat", before: null, after: null, markers: [] });
+    // As the staged document read: a write after the delete counts.
+    journal.push(rename(4, PAT, "Pat C", { name: "Pat" }));
+    view = await read("person", PAT);
+    expect(view).toMatchObject({ deleted: false, entity: { name: "Pat C" } });
+    // An entity created and deleted again in this changeset.
+    journal = [
+      row(5, { typeKey: "person", mintedId: GHOST, arguments: { properties: { name: "New" } } }),
+      row(6, { operation: "delete_entity", typeKey: "person", targetId: GHOST }),
+    ];
+    expect(await read("person", GHOST)).toMatchObject({ deleted: true, entity: { name: "New" } });
+  });
+
+  it("only the entity's own writes: a relation write the store hands back is left out", async () => {
+    journal = [
+      rename(2, PAT, "Pat B", { name: "Pat" }),
+      row(3, { operation: "delete_relation", typeKey: "works_for", targetId: PAT }),
+    ];
+    expect((await read("person", PAT)).writes.map((w) => w.seq)).toEqual([2]);
+  });
+
+  it("not found: an unknown changeset, a type the lens hides, an entity neither stored nor created by this changeset", async () => {
+    store.changesetStore.get.mockResolvedValue(null);
+    await expect(read("person", PAT)).rejects.toThrow(new NotFoundError(`Changeset '${CS}' not found`));
+    store.changesetStore.get.mockResolvedValue(changeset());
+    await expect(read("nope", PAT)).rejects.toThrow(new NotFoundError("Entity type 'nope' not found"));
+    // Stored as another type.
+    await expect(read("company", PAT)).rejects.toThrow(new NotFoundError(`Entity '${PAT}' not found`));
+    // Only an update whose create was unstaged: nothing a commit could leave.
+    journal = [row(2, { operation: "update_entity", typeKey: "person", targetId: GHOST, arguments: { properties: { name: "x" } } })];
+    await expect(read("person", GHOST)).rejects.toThrow(new NotFoundError(`Entity '${GHOST}' not found`));
+    invalidateLoadedSchemaCache();
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(schema(true));
+    await expect(read("department", DEPT, "hr_view")).rejects.toThrow(new NotFoundError("Entity type 'department' not found"));
+  });
+
+  it("through a scoped lens: no hidden property in the entity or the writes, a write setting one marked not visible", async () => {
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(schema(true));
+    journal = [
+      row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P2", age: 50 } }, before: { name: "Pat", age: 41 } }),
+    ];
+    const view = await read("person", PAT, "hr_view");
+    expect(view.entity).toEqual({ _id: PAT, _entityTypeKey: "person", _createdAt: NOW, _updatedAt: NOW, name: "P2" });
+    expect(view.writes[0]).toMatchObject({ before: { name: "Pat" }, current: { name: "Pat" }, after: { name: "P2" } });
+    expect(view.writes[0]!.markers.map((m) => m.kind)).toEqual(["not_visible"]);
+    expect(JSON.stringify(view)).not.toContain('"age"');
+  });
+
+  it("through the anchored URL: bound to its anchor, and readable while submitted", async () => {
+    store.changesetStore.get.mockResolvedValue(changeset({ anchorKey: "agent-a", submittedAt: NOW }));
+    journal = [rename(2, PAT, "Pat B", { name: "Pat" })];
+    expect((await read("person", PAT, "full_lens", "agent-a")).entity).toMatchObject({ name: "Pat B" });
     expect(store.changesetStore.get).toHaveBeenCalledWith(CS, "lens-1", "agent-a");
   });
 });

@@ -399,6 +399,35 @@ describe("ChangesetStore", () => {
     expect(await changesets.stagedBytes("not-a-uuid")).toBe(0);
   });
 
+  it("writesOn: the writes that minted an id or target it, by seq, of this changeset only", async () => {
+    const cs = await started();
+    const other = await started();
+    const changesets = store.changesets();
+    const minted = randomUUID();
+    const relation = randomUUID();
+    await changesets.append(cs.id, [
+      { write: write("create_entity", "task", { mintedId: minted }), bytes: 0 },
+      { write: write("create_relation", "has_task", { mintedId: relation, arguments: { fromEntityId: ids.P1, toEntityId: minted } }), bytes: 0 },
+    ]);
+    await changesets.append(cs.id, [{ write: write("update_entity", "project", { targetId: ids.P1 }), bytes: 0 }]);
+    await changesets.append(cs.id, [{ write: write("update_entity", "task", { targetId: minted }), bytes: 0 }]);
+    await changesets.append(cs.id, [{ write: write("delete_entity", "task", { targetId: minted }), bytes: 0 }]);
+    await changesets.append(other.id, [{ write: write("delete_entity", "task", { targetId: minted }), bytes: 0 }]);
+
+    const writes = await changesets.writesOn(cs.id, minted);
+    expect(writes.map((w) => [w.seq, w.operation])).toEqual([
+      [1, "create_entity"],
+      [4, "update_entity"],
+      [5, "delete_entity"],
+    ]);
+    // A relation naming it as an end is not among them; whole records come back.
+    expect(writes[0]).toMatchObject({ mintedId: minted, typeKey: "task", targetId: null, arguments: { name: "create_entity task" } });
+    expect((await changesets.writesOn(cs.id, ids.P1)).map((w) => w.seq)).toEqual([3]);
+    expect(await changesets.writesOn(cs.id, randomUUID())).toEqual([]);
+    expect(await changesets.writesOn(randomUUID(), minted)).toEqual([]);
+    expect(await changesets.writesOn(cs.id, "not-a-uuid")).toEqual([]);
+  });
+
   it("submit is a compare-and-set on the version; unsubmit returns to draft with the note", async () => {
     const cs = await started();
     const changesets = store.changesets();

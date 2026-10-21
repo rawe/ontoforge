@@ -265,13 +265,19 @@ without touching storage; so does an id that cannot be an instance id.
   fails the whole write as not found, and nothing is written. It takes no lock: nothing
   can reference the new entity before commit.
 
-**Commit reads.** Three reads serve a changeset's commit validation, and none evaluates a
-rule. Two take readings as the hierarchy reads do: the parent links whose child end is one
-of a set of ids, and those whose parent end is — the latter optionally locking those
-entities and the links it finds until the transaction ends, so no child can attach
-meanwhile. The third locks the entities and relations of a set of ids until the
-transaction ends and returns their stored properties as stored; an unknown id is left
-out. An id that cannot be an instance id matches nothing.
+**Commit reads.** Six reads serve a changeset's checks and its commit validation, and
+none evaluates a rule. Two take readings as the hierarchy reads do: the parent links whose
+child end is one of a set of ids, and those whose parent end is — the latter optionally
+locking those entities and the links it finds until the transaction ends, so no child can
+attach meanwhile. The third locks the entities and relations of a set of ids until the
+transaction ends and returns their stored properties as stored; the fourth returns the
+entities of a set of ids as the batch read by ids does without property definitions; the
+fifth the relations of a set of ids, of any type, as the read by type and id does. The
+third and fourth take the document property keys of each entity type and return a
+document value as its fingerprint, never its text: the hex SHA-256 of its UTF-8 bytes
+and its length in characters. The sixth returns the type key of each entity of a set of
+ids and reads none of its properties. An unknown id is left out; an id that cannot be an
+instance id matches nothing.
 
 **Traversal.** Given an entity id, a direction of incoming, outgoing or both, an optional
 relation type key filter, a limit, and property definitions keyed by type key — the same
@@ -496,8 +502,9 @@ writes, so a submit racing a change is never overwritten.
   to another anchor, is absent, and no anchor key reaches every changeset of the lens;
   list them bound the same way, submitted first, then by last change, newest first, with
   their counts per operation and the type keys they name; their staged writes by seq,
-  paged; the staged create that minted a given id; the staged writes that minted or target
-  a given id, by seq; the summed size of its staged writes.
+  paged; the staged create that minted a given id, and those that minted any of a set of
+  ids, by seq; the staged writes that minted or target a given id, by seq; the summed size
+  of its staged writes.
 - **Changes.** Append staged writes to a draft changeset, all or none, in order, each with
   a consecutive seq higher than every earlier one; unstage one by seq from a draft
   changeset; submit, a compare-and-set on the version of a draft changeset, setting the

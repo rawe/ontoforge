@@ -220,10 +220,11 @@ Staged-only guards against mistakes, not against a determined client. It has two
 - **One commit runs at a time in one server process**; a second answers a conflict at
   once, holding nothing.
 
-Each staged update reads its target once. Submit and the read of a changeset's writes
-run the lock-free pass over the whole changeset, with no lock; the read of one entity
-judges that entity's writes alone. A commit holds one database connection for its whole
-run, and every row it touches waits as long.
+Each staged update reads its target once. Submit runs the lock-free pass over the whole
+changeset, with no lock; the read of a changeset's writes judges the writes of its page
+alone, as the read of one entity judges that entity's writes. No check reads the text
+of a stored document: drift compares its hash. A commit holds one database connection
+for its whole run, and every row it touches waits as long.
 
 ## Not possible
 

@@ -16,8 +16,8 @@
  * - **Staging** (V18) is one short write per call (D2): it appends to the
  *   journal and nothing else; entities, relations and the search queue
  *   are untouched, and reads never see staged data (V16). Its checks, in
- *   order: the changeset; the anchor of the URL (dangling, or at an entity
- *   the lens hides: 409, as every v1 write; coverage is a commit rule,
+ *   order: the changeset; the anchor of the URL's ruleset (deleted, or at
+ *   an entity the lens hides: 409, as every v1 write; coverage is a commit rule,
  *   R10); the `prepare…` of the immediate write (`prepare.ts`: the type's
  *   404 and the same 422 field errors); the target of an update or delete
  *   (minted by a staged create still in the journal, or else read once:
@@ -535,7 +535,7 @@ export async function stage(
   const loaded = await loadSchema(lensKey, store);
   const changeset = await loadChangeset(loaded, rulesetKey, changesetId, store);
   if (changeset.submittedAt !== null) throw isSubmitted(changesetId);
-  // Dangling, or at an entity the lens hides: refused as every v1 write.
+  // The anchor deleted, or at an entity the lens hides: refused as every v1 write.
   await AnchorGuard.checkStaging(rulesetKey, loaded, store);
 
   const rows = await journalRows(loaded, changeset.id, write, store);
@@ -766,8 +766,8 @@ export async function lensChangesetCount(lensId: string, store: RuntimeStore): P
 
 /**
  * Submit a draft changeset (V7, V5 d): freeze it and hand it over, with the
- * note given (absent, the note stays). Already submitted, or an anchored
- * changeset whose anchor is dangling or at an entity the lens hides, is a
+ * note given (absent, the note stays). Already submitted, or a changeset
+ * whose ruleset's anchor is deleted or at an entity the lens hides, is a
  * 409. The lock-free pass runs with no lock and no transaction; its faults
  * are a 422 and the changeset stays a draft. Clean, a compare-and-set on the
  * version the pass saw (V40): a change meanwhile is a 409.
@@ -784,8 +784,8 @@ export async function submitChangeset(
   if (record.submittedAt !== null) throw new ConflictError(`Changeset '${changesetId}' is already submitted`);
   const valid = validNote(note);
   if (record.rulesetKey !== null) {
-    // The stored anchor, whatever URL the call came through. A deleted one
-    // is left to the commit ("anchor gone").
+    // The stored ruleset, whatever URL the call came through. A deleted one
+    // is left to the commit (`ruleset_gone`).
     const anchor = await store.rulesets().get(record.rulesetKey);
     const refusal = anchor === null ? null : changesetAnchorRefusal(record.rulesetKey, anchor, loaded);
     if (refusal !== null) throw new ConflictError(refusal.message);
@@ -804,7 +804,7 @@ export async function submitChangeset(
 
 /**
  * A submitted changeset back to draft (V7, R14), through any URL that
- * reaches it, a dangling anchor's included. The note is required: it
+ * reaches it, one whose anchor is deleted included. The note is required: it
  * replaces the stored one. A draft changeset is a 409.
  */
 export async function unsubmitChangeset(
@@ -831,7 +831,7 @@ export async function unsubmitChangeset(
 }
 
 /** Take one staged write out by seq. Writes that depend on it stay; the
- * commit's checks flag them (V6). Allowed on a dangling anchor. */
+ * commit's checks flag them (V6). Allowed when the anchor is deleted. */
 export async function unstage(
   lensKey: string,
   rulesetKey: string | null,
@@ -909,7 +909,7 @@ export interface CommitAnswer {
  * The texts of a staged write's markers and violations say what is wrong
  * in words a person reads: no id and no fix. The seq names the write, so
  * its own target goes unnamed; another entity is named by its role (the
- * source or target end). Type, lens and anchor keys stay.
+ * source or target end). Type, lens and ruleset keys stay.
  */
 
 const DRIFTED = "Changed since this write was staged";

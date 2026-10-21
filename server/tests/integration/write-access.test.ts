@@ -4,9 +4,10 @@
  * the anchor reads; through a 'propose' ruleset's URL every immediate
  * write and the commit are 409s while staging, submit, unsubmit, discard,
  * the list and reads work; the same on an unanchored key, with no
- * coverage rules; a dangling anchor still refuses staging, and write
- * access wins over it; the escapes (the plain lens URL commits, the PUT
- * gives full access back); and the MCP tool set at 'propose' (V29, R13).
+ * coverage rules; a dangling anchor, or one the lens hides, still
+ * refuses staging, and write access wins over both; the escapes (the
+ * plain lens URL commits, the PUT gives full access back); and the MCP
+ * tool set at 'propose' (V29, R13).
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -241,6 +242,24 @@ describe("through a 'propose' ruleset's URL (REST)", () => {
     expect(immediate.status).toBe(409);
     expect(immediate.body.error.message).toBe(NO_WRITE("agent-s"));
     expect((await rest("DELETE", `${S}/changesets/${cs}/writes/1`)).status).toBe(204);
+  });
+
+  it("an anchor the lens hides refuses staging; write access refuses every immediate write first", async () => {
+    const H = `${runtimePrefix(O, "no_projects")}/anchors/agent-s`;
+    const started = await rest("POST", `${H}/changesets`, {});
+    expect(started.status, JSON.stringify(started.body)).toBe(201);
+    const staged = await rest("POST", `${H}/changesets/${started.body.id as string}/writes`, {
+      operation: "update_entity",
+      type: "task",
+      id: e.T1,
+      properties: { name: "T1x" },
+    });
+    expect(staged.status).toBe(409);
+    expect(staged.body.error.message).toBe("Anchor 'agent-s' points at an entity that lens 'no_projects' does not show");
+    const immediate = await rest("PATCH", `${H}/entities/task/${e.T1}`, { name: "T1x" });
+    expect(immediate.status).toBe(409);
+    expect(immediate.body.error.message).toBe(NO_WRITE("agent-s"));
+    expect((await rest("GET", `${ALL}/entities/task/${e.T1}`)).body.name).toBe("T1");
   });
 });
 

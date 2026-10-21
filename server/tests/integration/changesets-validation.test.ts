@@ -61,14 +61,16 @@ async function start(base = ALL): Promise<string> {
   return res.body.id as string;
 }
 
-async function staged(method: string, base: string, cs: string, path: string, payload?: Row): Promise<Row> {
-  const res = await call(method, `${base}/changesets/${cs}/${path}`, payload);
-  expect(res.status, JSON.stringify(res.body)).toBe(202);
+/** Stage one write: its journal body, answered 201. */
+async function staged(base: string, cs: string, write: Row): Promise<Row> {
+  const res = await call("POST", `${base}/changesets/${cs}/writes`, write);
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
   return res.body;
 }
 
-function underParent(name: string, type: string, parentId: string, properties: Row = {}): Row {
-  return { name, parentRelation: { type, parentId, properties } };
+/** The journal body of a create of `entityType` under `parentId`. */
+function underParent(entityType: string, name: string, type: string, parentId: string, properties: Row = {}): Row {
+  return { operation: "create_entity", type: entityType, properties: { name }, parentRelation: { type, parentId, properties } };
 }
 
 function commit(cs: string, base = ALL): Promise<{ status: number; body: Row }> {
@@ -170,9 +172,14 @@ describe("not_visible: the lens no longer shows what a write names (V19, V41)", 
     }
     const OPS = runtimePrefix(O, "ops");
     const cs = await start(OPS);
-    await staged("PATCH", OPS, cs, `entities/project/${e.P2}`, { name: "P2 Ops" });
+    await staged(OPS, cs, { operation: "update_entity", type: "project", id: e.P2, properties: { name: "P2 Ops" } });
     const control = await start(OPS);
-    await staged("PATCH", OPS, control, `entities/customer/${e.BETA}`, { name: "BETA Ops" });
+    await staged(OPS, control, {
+      operation: "update_entity",
+      type: "customer",
+      id: e.BETA,
+      properties: { name: "BETA Ops" },
+    });
 
     const types = (await call("GET", `${model}/entity-types`)).body as unknown as Row[];
     const project = types.find((t) => t.key === "project")!.entityTypeId as string;
@@ -193,28 +200,35 @@ describe("missing and dangling: ids the journal names (V6)", () => {
 
   it("missing: an update target deleted since staging; control: a stored target commits", async () => {
     const cs = await start();
-    await staged("PATCH", ALL, cs, `entities/person/${e.Kim}`, { name: "Kim B" });
+    await staged(ALL, cs, { operation: "update_entity", type: "person", id: e.Kim, properties: { name: "Kim B" } });
     expect((await call("DELETE", `${ALL}/entities/person/${e.Kim}`)).status).toBe(204);
     expect(await rejected(cs)).toEqual([{ seq: 1, kind: "missing", message: "Deleted since this write was staged" }]);
 
     const control = await start();
-    await staged("PATCH", ALL, control, `entities/person/${e.Ana}`, { name: "Ana B" });
+    await staged(ALL, control, {
+      operation: "update_entity",
+      type: "person",
+      id: e.Ana,
+      properties: { name: "Ana B" },
+    });
     await committed(control);
     expect(await name("person", e.Ana)).toBe("Ana B");
   });
 
   it("dangling: a task under a create since unstaged; control: kept, it commits", async () => {
     const cs = await start();
-    const p5 = (await staged("POST", ALL, cs, "entities/project", underParent("P5", "has_project", e.ACME))).id as string;
-    await staged("POST", ALL, cs, "entities/task", underParent("T9", "has_task", p5, { phase: "plan" }));
+    const p5 = (await staged(ALL, cs, underParent("project", "P5", "has_project", e.ACME))).id as string;
+    await staged(ALL, cs, underParent("task", "T9", "has_task", p5, { phase: "plan" }));
     expect((await call("DELETE", `${ALL}/changesets/${cs}/writes/1`)).status).toBe(204);
+    // Seq 1 was P5's create; the parent relations into and out of P5 dangle.
     expect(await rejected(cs)).toEqual([
-      { seq: 2, kind: "dangling", message: "The parent is neither stored nor created in this changeset" },
+      { seq: 2, kind: "dangling", message: "The target end is neither stored nor created in this changeset" },
+      { seq: 4, kind: "dangling", message: "The source end is neither stored nor created in this changeset" },
     ]);
 
     const control = await start();
-    const p6 = (await staged("POST", ALL, control, "entities/project", underParent("P6", "has_project", e.ACME))).id as string;
-    const t10 = (await staged("POST", ALL, control, "entities/task", underParent("T10", "has_task", p6, { phase: "plan" }))).id as string;
+    const p6 = (await staged(ALL, control, underParent("project", "P6", "has_project", e.ACME))).id as string;
+    const t10 = (await staged(ALL, control, underParent("task", "T10", "has_task", p6, { phase: "plan" }))).id as string;
     await committed(control);
     expect(await name("task", t10)).toBe("T10");
   });
@@ -225,7 +239,12 @@ describe("drift (V10, V19)", () => {
 
   it("a live change of a key in before rejects; unstage and restage commits", async () => {
     const cs = await start();
-    await staged("PATCH", ALL, cs, `entities/project/${e.P2}`, { name: "P2 Website" });
+    await staged(ALL, cs, {
+      operation: "update_entity",
+      type: "project",
+      id: e.P2,
+      properties: { name: "P2 Website" },
+    });
     expect((await call("PATCH", `${ALL}/entities/project/${e.P2}`, { name: "P2 Mobile" })).status).toBe(200);
     expect(await rejected(cs)).toEqual([
       { seq: 1, kind: "drift", message: "Changed since this write was staged" },
@@ -233,15 +252,20 @@ describe("drift (V10, V19)", () => {
     expect(await name("project", e.P2)).toBe("P2 Mobile");
 
     expect((await call("DELETE", `${ALL}/changesets/${cs}/writes/1`)).status).toBe(204);
-    await staged("PATCH", ALL, cs, `entities/project/${e.P2}`, { name: "P2 Website" });
+    await staged(ALL, cs, {
+      operation: "update_entity",
+      type: "project",
+      id: e.P2,
+      properties: { name: "P2 Website" },
+    });
     await committed(cs);
     expect(await name("project", e.P2)).toBe("P2 Website");
   });
 
   it("control: a value changed and changed back is no drift; another key's change is none either", async () => {
     const cs = await start();
-    await staged("PATCH", ALL, cs, `entities/project/${e.P1}`, { name: "P1 X" });
-    await staged("PATCH", ALL, cs, `entities/task/${e.T1}`, { name: "T1 X" });
+    await staged(ALL, cs, { operation: "update_entity", type: "project", id: e.P1, properties: { name: "P1 X" } });
+    await staged(ALL, cs, { operation: "update_entity", type: "task", id: e.T1, properties: { name: "T1 X" } });
     expect((await call("PATCH", `${ALL}/entities/project/${e.P1}`, { name: "P1 Y" })).status).toBe(200);
     expect((await call("PATCH", `${ALL}/entities/project/${e.P1}`, { name: "P1" })).status).toBe(200);
     expect((await call("PATCH", `${ALL}/entities/task/${e.T1}`, { notes: "Changed notes" })).status).toBe(200);
@@ -251,7 +275,7 @@ describe("drift (V10, V19)", () => {
 
   it("a staged delete has no before: a live change of its target does not reject it", async () => {
     const cs = await start();
-    await staged("DELETE", ALL, cs, `entities/task/${e.T2a}`);
+    await staged(ALL, cs, { operation: "delete_entity", type: "task", id: e.T2a });
     expect((await call("PATCH", `${ALL}/entities/task/${e.T2a}`, { name: "T2a renamed" })).status).toBe(200);
     await committed(cs);
     expect(await name("task", e.T2a)).toBeNull();
@@ -259,7 +283,12 @@ describe("drift (V10, V19)", () => {
 
   it("a change landing after the commit took its lock is waited for, then compared under the lock", async () => {
     const cs = await start();
-    await staged("PATCH", ALL, cs, `entities/project/${e.P3}`, { name: "P3 Website" });
+    await staged(ALL, cs, {
+      operation: "update_entity",
+      type: "project",
+      id: e.P3,
+      properties: { name: "P3 Website" },
+    });
     // A second connection changes P3 and holds the row; the commit's pass
     // still reads the old value, then waits for the row under its lock.
     const release = await hold((bound) => bound.updateEntity("project", e.P3, { name: "P3 Mobile" }, [], {}));
@@ -285,15 +314,15 @@ describe("has_children and the order-free subtree delete (V20, V21)", () => {
 
   it("deleting a parent while a child stays rejects, naming no child; deleting the children too commits", async () => {
     const cs = await start();
-    await staged("DELETE", ALL, cs, `entities/project/${e.P2}`);
+    await staged(ALL, cs, { operation: "delete_entity", type: "project", id: e.P2 });
     const violations = await rejected(cs);
     expect(violations).toEqual([
       { seq: 1, kind: "has_children", message: "Still has children" },
     ]);
     expect(JSON.stringify(violations)).not.toMatch(new RegExp(`${e.T4}|${e.T5}|task`));
 
-    await staged("DELETE", ALL, cs, `entities/task/${e.T4}`);
-    await staged("DELETE", ALL, cs, `entities/task/${e.T5}`);
+    await staged(ALL, cs, { operation: "delete_entity", type: "task", id: e.T4 });
+    await staged(ALL, cs, { operation: "delete_entity", type: "task", id: e.T5 });
     expect(await committed(cs)).toEqual({ committed: 3, alreadyGone: [] });
     for (const [type, id] of [["project", e.P2], ["task", e.T4], ["task", e.T5]] as const) {
       expect(await name(type, id)).toBeNull();
@@ -302,15 +331,27 @@ describe("has_children and the order-free subtree delete (V20, V21)", () => {
 
   it("children first, and a child re-parented instead of deleted, both commit", async () => {
     const cs = await start();
-    await staged("DELETE", ALL, cs, `entities/task/${e.T2a}`);
-    await staged("DELETE", ALL, cs, `entities/task/${e.T2}`);
-    await staged("POST", ALL, cs, "relations/has_task", { fromEntityId: e.P3, toEntityId: e.T3, phase: "test" });
-    await staged("DELETE", ALL, cs, `entities/task/${e.T1a1}`);
-    await staged("DELETE", ALL, cs, `entities/task/${e.T1a}`);
-    await staged("DELETE", ALL, cs, `entities/milestone/${e.M1}`);
-    await staged("DELETE", ALL, cs, `relations/has_task/${h.relations["P1 has_task T1"]}`);
-    await staged("POST", ALL, cs, "relations/has_task", { fromEntityId: e.P3, toEntityId: e.T1, phase: "test" });
-    await staged("DELETE", ALL, cs, `entities/project/${e.P1}`);
+    await staged(ALL, cs, { operation: "delete_entity", type: "task", id: e.T2a });
+    await staged(ALL, cs, { operation: "delete_entity", type: "task", id: e.T2 });
+    await staged(ALL, cs, {
+      operation: "create_relation",
+      type: "has_task",
+      fromEntityId: e.P3,
+      toEntityId: e.T3,
+      properties: { phase: "test" },
+    });
+    await staged(ALL, cs, { operation: "delete_entity", type: "task", id: e.T1a1 });
+    await staged(ALL, cs, { operation: "delete_entity", type: "task", id: e.T1a });
+    await staged(ALL, cs, { operation: "delete_entity", type: "milestone", id: e.M1 });
+    await staged(ALL, cs, { operation: "delete_relation", type: "has_task", id: h.relations["P1 has_task T1"] });
+    await staged(ALL, cs, {
+      operation: "create_relation",
+      type: "has_task",
+      fromEntityId: e.P3,
+      toEntityId: e.T1,
+      properties: { phase: "test" },
+    });
+    await staged(ALL, cs, { operation: "delete_entity", type: "project", id: e.P1 });
     // T3 is re-parented before P1 goes; T1 after the move of its link.
     await committed(cs);
     expect(await name("project", e.P1)).toBeNull();
@@ -324,7 +365,13 @@ describe("the parent rules on the end state: two_parents, cycle", () => {
 
   it("two_parents: a second parent for T1", async () => {
     const cs = await start();
-    await staged("POST", ALL, cs, "relations/has_task", { fromEntityId: e.P2, toEntityId: e.T1, phase: "x" });
+    await staged(ALL, cs, {
+      operation: "create_relation",
+      type: "has_task",
+      fromEntityId: e.P2,
+      toEntityId: e.T1,
+      properties: { phase: "x" },
+    });
     expect(await rejected(cs)).toEqual([
       { seq: 1, kind: "two_parents", message: "The target end already has a parent" },
     ]);
@@ -332,8 +379,8 @@ describe("the parent rules on the end state: two_parents, cycle", () => {
 
   it("cycle: with the delete of P1 has_task T1 first, T1a has_subtask T1 is a cycle alone", async () => {
     const cs = await start();
-    await staged("DELETE", ALL, cs, `relations/has_task/${h.relations["P1 has_task T1"]}`);
-    await staged("POST", ALL, cs, "relations/has_subtask", { fromEntityId: e.T1a, toEntityId: e.T1 });
+    await staged(ALL, cs, { operation: "delete_relation", type: "has_task", id: h.relations["P1 has_task T1"] });
+    await staged(ALL, cs, { operation: "create_relation", type: "has_subtask", fromEntityId: e.T1a, toEntityId: e.T1 });
     expect(await rejected(cs)).toEqual([
       { seq: 2, kind: "cycle", message: "This parent link would close a cycle" },
     ]);
@@ -341,8 +388,8 @@ describe("the parent rules on the end state: two_parents, cycle", () => {
 
   it("control: a move that closes no cycle and leaves one parent commits", async () => {
     const cs = await start();
-    await staged("DELETE", ALL, cs, `relations/has_task/${h.relations["P1 has_task T3"]}`);
-    await staged("POST", ALL, cs, "relations/has_subtask", { fromEntityId: e.T1, toEntityId: e.T3 });
+    await staged(ALL, cs, { operation: "delete_relation", type: "has_task", id: h.relations["P1 has_task T3"] });
+    await staged(ALL, cs, { operation: "create_relation", type: "has_subtask", fromEntityId: e.T1, toEntityId: e.T3 });
     await committed(cs);
     const path = await call("GET", `${ALL}/entities/task/${e.T3}/path`);
     expect((path.body as unknown as Row[]).map((step) => step.name)).toEqual(["ACME", "P1", "T1", "T3"]);
@@ -354,7 +401,13 @@ describe("endpoint_type", () => {
 
   it("has_task with a person as the child rejects, naming no type; control: the right types commit", async () => {
     const cs = await start();
-    await staged("POST", ALL, cs, "relations/has_task", { fromEntityId: e.P1, toEntityId: e.Lea, phase: "x" });
+    await staged(ALL, cs, {
+      operation: "create_relation",
+      type: "has_task",
+      fromEntityId: e.P1,
+      toEntityId: e.Lea,
+      properties: { phase: "x" },
+    });
     const violations = await rejected(cs);
     expect(violations).toEqual([
       { seq: 1, kind: "endpoint_type", message: "The target end does not have the type relation type 'has_task' requires" },
@@ -363,7 +416,12 @@ describe("endpoint_type", () => {
     expect(JSON.stringify(violations)).not.toContain("'task'");
 
     const control = await start();
-    await staged("POST", ALL, control, "relations/assigned_to", { fromEntityId: e.T2, toEntityId: e.Kim });
+    await staged(ALL, control, {
+      operation: "create_relation",
+      type: "assigned_to",
+      fromEntityId: e.T2,
+      toEntityId: e.Kim,
+    });
     await committed(control);
   });
 });
@@ -380,45 +438,67 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
 
   it("coverage: a task under P2 through agent-a rejects; control: under P1 commits", async () => {
     const cs = await start(A);
-    const t = (await staged("POST", A, cs, "entities/task", underParent("T20", "has_task", e.P2, { phase: "plan" }))).id as string;
+    const t = (await staged(A, cs, underParent("task", "T20", "has_task", e.P2, { phase: "plan" }))).id as string;
+    // The task, and its parent relation, whose parent end P2 is outside.
     expect(await rejected(cs, A)).toEqual([
       { seq: 1, kind: "not_covered", message: "Would not be under anchor 'agent-a' after the commit" },
+      { seq: 2, kind: "not_covered", message: "Not under anchor 'agent-a'" },
     ]);
 
     const control = await start(A);
-    await staged("POST", A, control, "entities/task", underParent("T21", "has_task", e.P1, { phase: "plan" }));
-    await staged("PATCH", A, control, `entities/person/${e.Ben}`, { name: "Ben A" });
+    await staged(A, control, underParent("task", "T21", "has_task", e.P1, { phase: "plan" }));
+    await staged(A, control, { operation: "update_entity", type: "person", id: e.Ben, properties: { name: "Ben A" } });
     await committed(control, A);
   });
 
   it("before and after: moving a task out of the subtree, or into it, rejects; a move inside commits", async () => {
     const out = await start(A);
-    await staged("DELETE", A, out, `relations/has_task/${h.relations["P1 has_task T3"]}`);
-    await staged("POST", A, out, "relations/has_task", { fromEntityId: e.P2, toEntityId: e.T3, phase: "x" });
+    await staged(A, out, { operation: "delete_relation", type: "has_task", id: h.relations["P1 has_task T3"] });
+    await staged(A, out, {
+      operation: "create_relation",
+      type: "has_task",
+      fromEntityId: e.P2,
+      toEntityId: e.T3,
+      properties: { phase: "x" },
+    });
     expect((await rejected(out, A)).map((v) => [v.seq, v.kind])).toEqual([
       [1, "not_covered"],
       [2, "not_covered"],
     ]);
 
     const into = await start(A);
-    await staged("DELETE", A, into, `relations/has_task/${h.relations["P2 has_task T4"]}`);
-    await staged("POST", A, into, "relations/has_task", { fromEntityId: e.P1, toEntityId: e.T4, phase: "x" });
+    await staged(A, into, { operation: "delete_relation", type: "has_task", id: h.relations["P2 has_task T4"] });
+    await staged(A, into, {
+      operation: "create_relation",
+      type: "has_task",
+      fromEntityId: e.P1,
+      toEntityId: e.T4,
+      properties: { phase: "x" },
+    });
     expect(await rejected(into, A)).toEqual([
       { seq: 1, kind: "not_covered", message: "Not under anchor 'agent-a'" },
       { seq: 2, kind: "not_covered", message: "Not under anchor 'agent-a'" },
     ]);
 
     const inside = await start(A);
-    await staged("DELETE", A, inside, `relations/has_task/${h.relations["P1 has_task T3"]}`);
-    await staged("POST", A, inside, "relations/has_subtask", { fromEntityId: e.T2, toEntityId: e.T3 });
+    await staged(A, inside, { operation: "delete_relation", type: "has_task", id: h.relations["P1 has_task T3"] });
+    await staged(A, inside, {
+      operation: "create_relation",
+      type: "has_subtask",
+      fromEntityId: e.T2,
+      toEntityId: e.T3,
+    });
     await committed(inside, A);
   });
 
   it("a re-point between staging and commit rejects; pointed back, it commits", async () => {
     const cs = await start(A);
-    await staged("POST", A, cs, "entities/task", underParent("T22", "has_task", e.P1, { phase: "plan" }));
+    await staged(A, cs, underParent("task", "T22", "has_task", e.P1, { phase: "plan" }));
     await pointAnchor("agent-a", "project", e.P2);
-    expect((await rejected(cs, A)).map((v) => v.kind)).toEqual(["not_covered"]);
+    expect((await rejected(cs, A)).map((v) => [v.seq, v.kind])).toEqual([
+      [1, "not_covered"],
+      [2, "not_covered"],
+    ]);
     await pointAnchor("agent-a", "project", e.P1);
     await committed(cs, A);
   });
@@ -427,7 +507,7 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
     await pointAnchor("agent-c", "task", e.T2a);
     const C = `${ALL}/anchors/agent-c`;
     const cs = await start(C);
-    await staged("PATCH", C, cs, `entities/person/${e.Kim}`, { name: "Kim C" });
+    await staged(C, cs, { operation: "update_entity", type: "person", id: e.Kim, properties: { name: "Kim C" } });
     expect((await call("DELETE", `${ALL}/entities/task/${e.T2a}`)).status).toBe(204);
     const [violation] = await rejected(cs, C);
     expect(violation).toEqual({
@@ -442,7 +522,7 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
     await pointAnchor("agent-d", "project", e.P3);
     const D = `${PORTFOLIO}/anchors/agent-d`;
     const cs = await start(D);
-    await staged("PATCH", D, cs, `entities/project/${e.P3}`, { name: "P3 D" });
+    await staged(D, cs, { operation: "update_entity", type: "project", id: e.P3, properties: { name: "P3 D" } });
     await pointAnchor("agent-d", "task", e.T6);
     const violations = await rejected(cs, D);
     expect(violations).toEqual([
@@ -457,7 +537,7 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
 
   it("anchor_gone: the anchor deleted; its changeset, reached through the plain lens URL, rejects", async () => {
     const cs = await start(B);
-    await staged("PATCH", B, cs, `entities/task/${e.T6}`, { name: "T6 B" });
+    await staged(B, cs, { operation: "update_entity", type: "task", id: e.T6, properties: { name: "T6 B" } });
     expect((await call("DELETE", `${ANCHORS}/agent-b`)).status).toBe(204);
     expect((await call("GET", `${B}/changesets/${cs}`)).status).toBe(404);
     expect(await rejected(cs)).toEqual([
@@ -473,7 +553,7 @@ describe("the violations listed, and what they name", () => {
     const x = (await call("POST", `${ALL}/entities/person`, { name: "X" })).body._id as string;
     const cs = await start();
     for (let i = 0; i < 120; i++) {
-      await staged("PATCH", ALL, cs, `entities/person/${x}`, { name: `X${i}` });
+      await staged(ALL, cs, { operation: "update_entity", type: "person", id: x, properties: { name: `X${i}` } });
     }
     expect((await call("DELETE", `${ALL}/entities/person/${x}`)).status).toBe(204);
     const res = await commit(cs);
@@ -488,9 +568,9 @@ describe("the violations listed, and what they name", () => {
     // `no_projects` hides project: P1, T1's parent, is never named.
     const NP = runtimePrefix(O, "no_projects");
     const cs = await start(NP);
-    await staged("POST", NP, cs, "relations/has_subtask", { fromEntityId: e.T2a, toEntityId: e.T1 });
-    await staged("DELETE", NP, cs, `entities/task/${e.T1a}`);
-    await staged("POST", NP, cs, "relations/has_subtask", { fromEntityId: e.T3, toEntityId: e.M1 });
+    await staged(NP, cs, { operation: "create_relation", type: "has_subtask", fromEntityId: e.T2a, toEntityId: e.T1 });
+    await staged(NP, cs, { operation: "delete_entity", type: "task", id: e.T1a });
+    await staged(NP, cs, { operation: "create_relation", type: "has_subtask", fromEntityId: e.T3, toEntityId: e.M1 });
     const violations = await rejected(cs, NP);
     expect(violations.map((v) => [v.seq, v.kind])).toEqual([
       [1, "two_parents"],

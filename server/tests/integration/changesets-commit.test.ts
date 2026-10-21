@@ -60,9 +60,10 @@ async function start(base = ALL): Promise<string> {
   return res.body.id as string;
 }
 
-async function staged(method: string, base: string, cs: string, path: string, payload?: Row): Promise<Row> {
-  const res = await call(method, `${base}/changesets/${cs}/${path}`, payload);
-  expect(res.status, JSON.stringify(res.body)).toBe(202);
+/** Stage one write: its journal body, answered 201. */
+async function staged(base: string, cs: string, write: Row): Promise<Row> {
+  const res = await call("POST", `${base}/changesets/${cs}/writes`, write);
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
   return res.body;
 }
 
@@ -144,24 +145,47 @@ describe("a commit persists every staged write", () => {
     await sql(`DELETE FROM search_queue`);
     const cs = await start();
     const t9 = (
-      await staged("POST", ALL, cs, "entities/task", {
-        name: "T9",
+      await staged(ALL, cs, {
+        operation: "create_entity",
+        type: "task",
+        properties: { name: "T9" },
         parentRelation: { type: "has_task", parentId: e.P1, properties: { phase: "build" } },
       })
     ).id as string;
-    await staged("PATCH", ALL, cs, `entities/task/${t9}`, { name: "T9b" });
-    await staged("PATCH", ALL, cs, `entities/project/${e.P2}`, { name: "P2 Website" });
-    await staged("PATCH", ALL, cs, `entities/task/${e.T5}`, { notes: "A whole new text" });
-    await staged("DELETE", ALL, cs, `entities/task/${e.T4}`);
+    await staged(ALL, cs, { operation: "update_entity", type: "task", id: t9, properties: { name: "T9b" } });
+    await staged(ALL, cs, {
+      operation: "update_entity",
+      type: "project",
+      id: e.P2,
+      properties: { name: "P2 Website" },
+    });
+    await staged(ALL, cs, {
+      operation: "update_entity",
+      type: "task",
+      id: e.T5,
+      properties: { notes: "A whole new text" },
+    });
+    await staged(ALL, cs, { operation: "delete_entity", type: "task", id: e.T4 });
     const assigned = (
-      await staged("POST", ALL, cs, "relations/assigned_to", { fromEntityId: e.T2, toEntityId: e.Kim })
+      await staged(ALL, cs, {
+        operation: "create_relation",
+        type: "assigned_to",
+        fromEntityId: e.T2,
+        toEntityId: e.Kim,
+      })
     ).id as string;
-    await staged("PATCH", ALL, cs, `relations/has_task/${h.relations["P1 has_task T2"]}`, { phase: "test" });
-    await staged("DELETE", ALL, cs, `relations/mentors/${h.relations["Ben mentors Kim"]}`);
+    await staged(ALL, cs, {
+      operation: "update_relation",
+      type: "has_task",
+      id: h.relations["P1 has_task T2"],
+      properties: { phase: "test" },
+    });
+    await staged(ALL, cs, { operation: "delete_relation", type: "mentors", id: h.relations["Ben mentors Kim"] });
     expect(await sql(`SELECT 1 FROM search_queue`)).toEqual([]);
 
     const res = await commit(cs, { expectedVersion: await version(cs) });
-    expect(res).toEqual({ status: 200, body: { committed: 8, alreadyGone: [] } });
+    // The create with a parent relation is two writes.
+    expect(res).toEqual({ status: 200, body: { committed: 9, alreadyGone: [] } });
 
     expect((await call("GET", `${ALL}/entities/task/${t9}`)).body).toMatchObject({ name: "T9b" });
     expect(await pathNames("task", t9)).toEqual(["ACME", "P1", "T9b"]);
@@ -203,8 +227,14 @@ describe("a commit persists every staged write", () => {
 
   it("the move: delete the parent relation, then create the new one", async () => {
     const cs = await start();
-    await staged("DELETE", ALL, cs, `relations/has_task/${h.relations["P1 has_task T3"]}`);
-    await staged("POST", ALL, cs, "relations/has_task", { fromEntityId: e.P2, toEntityId: e.T3, phase: "test" });
+    await staged(ALL, cs, { operation: "delete_relation", type: "has_task", id: h.relations["P1 has_task T3"] });
+    await staged(ALL, cs, {
+      operation: "create_relation",
+      type: "has_task",
+      fromEntityId: e.P2,
+      toEntityId: e.T3,
+      properties: { phase: "test" },
+    });
     expect(await commit(cs)).toMatchObject({ status: 200, body: { committed: 2 } });
     expect(await pathNames("task", e.T3)).toEqual(["ACME", "P2 Website", "T3"]);
     const assigned = await call("GET", `${ALL}/relations/assigned_to?fromEntityId=${e.T3}`);
@@ -214,19 +244,24 @@ describe("a commit persists every staged write", () => {
   it("the nested create: a project, tasks under its minted id, an update of one", async () => {
     const cs = await start();
     const p4 = (
-      await staged("POST", ALL, cs, "entities/project", {
-        name: "P4",
+      await staged(ALL, cs, {
+        operation: "create_entity",
+        type: "project",
+        properties: { name: "P4" },
         parentRelation: { type: "has_project", parentId: e.ACME },
       })
     ).id as string;
     const under = (name: string) => ({
-      name,
+      operation: "create_entity",
+      type: "task",
+      properties: { name },
       parentRelation: { type: "has_task", parentId: p4, properties: { phase: "plan" } },
     });
-    const t7 = (await staged("POST", ALL, cs, "entities/task", under("T7"))).id as string;
-    const t8 = (await staged("POST", ALL, cs, "entities/task", under("T8"))).id as string;
-    await staged("PATCH", ALL, cs, `entities/task/${t7}`, { name: "T7b" });
-    expect(await commit(cs)).toMatchObject({ status: 200, body: { committed: 4 } });
+    const t7 = (await staged(ALL, cs, under("T7"))).id as string;
+    const t8 = (await staged(ALL, cs, under("T8"))).id as string;
+    await staged(ALL, cs, { operation: "update_entity", type: "task", id: t7, properties: { name: "T7b" } });
+    // Each create with a parent relation is two writes.
+    expect(await commit(cs)).toMatchObject({ status: 200, body: { committed: 7 } });
     expect(await pathNames("task", t7)).toEqual(["ACME", "P4", "T7b"]);
     expect(await pathNames("task", t8)).toEqual(["ACME", "P4", "T8"]);
   });
@@ -234,7 +269,7 @@ describe("a commit persists every staged write", () => {
   it("the subtree delete in any order, parent first", async () => {
     const cs = await start();
     for (const name of ["T1", "T1a", "T1a1"] as const) {
-      await staged("DELETE", ALL, cs, `entities/task/${e[name]}`);
+      await staged(ALL, cs, { operation: "delete_entity", type: "task", id: e[name] });
     }
     expect(await commit(cs)).toEqual({ status: 200, body: { committed: 3, alreadyGone: [] } });
     for (const name of ["T1", "T1a", "T1a1"] as const) {
@@ -245,7 +280,7 @@ describe("a commit persists every staged write", () => {
   it("a delete of what is already gone counts as done, and is listed", async () => {
     const x = (await call("POST", `${ALL}/entities/person`, { name: "X" })).body._id as string;
     const cs = await start();
-    await staged("DELETE", ALL, cs, `entities/person/${x}`);
+    await staged(ALL, cs, { operation: "delete_entity", type: "person", id: x });
     expect((await call("DELETE", `${ALL}/entities/person/${x}`)).status).toBe(204);
     expect(await commit(cs)).toEqual({ status: 200, body: { committed: 1, alreadyGone: [1] } });
   });
@@ -255,12 +290,20 @@ describe("a rejected commit persists nothing", () => {
   it("a rejection after the replay rolls everything back: 422 naming the seq; the version kept, the last change refreshed", async () => {
     await sql(`DELETE FROM search_queue`);
     const cs = await start();
-    await staged("POST", ALL, cs, "entities/task", {
-      name: "T10",
+    await staged(ALL, cs, {
+      operation: "create_entity",
+      type: "task",
+      properties: { name: "T10" },
       parentRelation: { type: "has_task", parentId: e.P2, properties: { phase: "build" } },
     });
     // T6 stays under P3: a second parent, found only after the replay.
-    await staged("POST", ALL, cs, "relations/has_task", { fromEntityId: e.P2, toEntityId: e.T6, phase: "x" });
+    await staged(ALL, cs, {
+      operation: "create_relation",
+      type: "has_task",
+      fromEntityId: e.P2,
+      toEntityId: e.T6,
+      properties: { phase: "x" },
+    });
     const before = await graphCounts();
     const v = await version(cs);
     const [{ last_change_at: changedBefore }] = await sql(
@@ -273,7 +316,7 @@ describe("a rejected commit persists nothing", () => {
     expect(res.body.error).toMatchObject({
       code: "VALIDATION_ERROR",
       message: "The commit was rejected; nothing was persisted",
-      details: { violations: [{ seq: 2, kind: "two_parents", message: "The target end already has a parent" }], total: 1 },
+      details: { violations: [{ seq: 3, kind: "two_parents", message: "The target end already has a parent" }], total: 1 },
     });
 
     expect(await graphCounts()).toEqual(before);
@@ -289,7 +332,7 @@ describe("a rejected commit persists nothing", () => {
 
   it("a stale expectedVersion is 409; none commits", async () => {
     const cs = await start();
-    await staged("PATCH", ALL, cs, `entities/person/${e.Lea}`, { name: "Lea M" });
+    await staged(ALL, cs, { operation: "update_entity", type: "person", id: e.Lea, properties: { name: "Lea M" } });
     const v = await version(cs);
     const stale = await commit(cs, { expectedVersion: v - 1 });
     expect(stale.status).toBe(409);
@@ -316,7 +359,12 @@ describe("a rejected commit persists nothing", () => {
       expect((await call("PUT", `${anchors}/${key}`, { entity: { type: "project", id } })).status).toBe(200);
     }
     const cs = await start(`${ALL}/anchors/agent-a`);
-    await staged("PATCH", `${ALL}/anchors/agent-a`, cs, `entities/task/${e.T5}`, { name: "T5b" });
+    await staged(`${ALL}/anchors/agent-a`, cs, {
+      operation: "update_entity",
+      type: "task",
+      id: e.T5,
+      properties: { name: "T5b" },
+    });
     expect((await commit(cs, undefined, `${ALL}/anchors/agent-b`)).status).toBe(404);
     expect(await commit(cs, undefined, `${ALL}/anchors/agent-a`)).toMatchObject({ status: 200, body: { committed: 1 } });
     await call("DELETE", `${anchors}/agent-a`);
@@ -328,7 +376,7 @@ describe("locks", () => {
   it("another commit on the ontology is 409 at once; another ontology commits", async () => {
     const other = await start();
     const cs = await start();
-    await staged("PATCH", ALL, cs, `entities/person/${e.Kim}`, { name: "Kim B" });
+    await staged(ALL, cs, { operation: "update_entity", type: "person", id: e.Kim, properties: { name: "Kim B" } });
     const release = await hold(store, (bound) => bound.changesets().lockForCommit(other));
     try {
       const began = Date.now();
@@ -339,7 +387,12 @@ describe("locks", () => {
 
       const side = runtimePrefix(SIDE, "all");
       const sideCs = await start(side);
-      await staged("PATCH", side, sideCs, `entities/thing/${sideThing}`, { name: "two" });
+      await staged(side, sideCs, {
+        operation: "update_entity",
+        type: "thing",
+        id: sideThing,
+        properties: { name: "two" },
+      });
       expect(await commit(sideCs, undefined, side)).toMatchObject({ status: 200, body: { committed: 1 } });
     } finally {
       await release();
@@ -350,16 +403,21 @@ describe("locks", () => {
 
   it("while a commit runs, a staged write to it and a second commit are 409; it then commits", async () => {
     const cs = await start();
-    await staged("PATCH", ALL, cs, `entities/person/${e.Ana}`, { name: "Ana B" });
+    await staged(ALL, cs, { operation: "update_entity", type: "person", id: e.Ana, properties: { name: "Ana B" } });
     const second = await start();
-    await staged("PATCH", ALL, second, `entities/person/${e.Lea}`, { name: "Lea C" });
+    await staged(ALL, second, { operation: "update_entity", type: "person", id: e.Lea, properties: { name: "Lea C" } });
 
     const release = await hold(store, (bound) => bound.lockTargets([e.Ana]));
     let running: Promise<{ status: number; body: Row }> | undefined;
     try {
       running = commit(cs);
       await waitingForLocks(1);
-      const stage = await call("PATCH", `${ALL}/changesets/${cs}/entities/person/${e.Ben}`, { name: "x" });
+      const stage = await call("POST", `${ALL}/changesets/${cs}/writes`, {
+        operation: "update_entity",
+        type: "person",
+        id: e.Ben,
+        properties: { name: "x" },
+      });
       expect(stage.status).toBe(409);
       expect(stage.body.error.message).toBe(`Changeset '${cs}' is busy; try again`);
       expect(await commit(second)).toMatchObject({ status: 409 });
@@ -373,8 +431,12 @@ describe("locks", () => {
 
   it("a wait on a held graph row past 5 s is 409, with nothing persisted", async () => {
     const cs = await start();
-    const created = (await staged("POST", ALL, cs, "entities/person", { name: "Zed" })).id as string;
-    await staged("PATCH", ALL, cs, `entities/person/${e.Ben}`, { name: "Ben B" });
+    const created = (await staged(ALL, cs, {
+      operation: "create_entity",
+      type: "person",
+      properties: { name: "Zed" },
+    })).id as string;
+    await staged(ALL, cs, { operation: "update_entity", type: "person", id: e.Ben, properties: { name: "Ben B" } });
     const v = await version(cs);
     const release = await hold(store, (bound) => bound.lockTargets([e.Ben]));
     try {
@@ -397,7 +459,12 @@ describe("locks", () => {
   it("a second concurrent commit in the process, on another ontology, is 409 at once", async () => {
     const side = runtimePrefix(SIDE, "all");
     const sideCs = await start(side);
-    await staged("PATCH", side, sideCs, `entities/thing/${sideThing}`, { name: "held" });
+    await staged(side, sideCs, {
+      operation: "update_entity",
+      type: "thing",
+      id: sideThing,
+      properties: { name: "held" },
+    });
     const release = await hold(await getRuntimeStore(SIDE), (bound) => bound.lockTargets([sideThing]));
     let running: Promise<{ status: number; body: Row }> | undefined;
     try {

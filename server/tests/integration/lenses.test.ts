@@ -206,11 +206,12 @@ describe("lens round trip", () => {
     };
     const draft = await start("ops");
     const submitted = await start("ops");
-    await app.inject({
+    const staged = await app.inject({
       method: "POST",
-      url: `/api/ontologies/test_ont/runtime/lenses/ops/changesets/${draft}/entities/person`,
-      payload: { name: "Staged" },
+      url: `/api/ontologies/test_ont/runtime/lenses/ops/changesets/${draft}/writes`,
+      payload: { operation: "create_entity", type: "person", properties: { name: "Staged" } },
     });
+    expect(staged.statusCode, staged.body).toBe(201);
     const submit = await app.inject({
       method: "POST",
       url: `/api/ontologies/test_ont/runtime/lenses/ops/changesets/${submitted}/submit`,

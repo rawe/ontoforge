@@ -89,17 +89,18 @@ const IndexSearchPayload = z.strictObject({
  * so the only static rule is "a JSON object". */
 export const PropertyPayload = z.record(z.string(), z.unknown());
 
+/** The parent relation an entity is created under. */
+export const ParentRelationPayload = z.object({
+  type: z.string(),
+  parentId: z.string(),
+  properties: z.record(z.string(), z.unknown()).optional(),
+});
+
 /** An entity create: the flat property map, plus the optional parent
  * relation the entity is created under. Property keys are lower snake
  * case, so `parentRelation` cannot collide with one. */
-export const EntityCreatePayload = z.looseObject({
-  parentRelation: z
-    .object({
-      type: z.string(),
-      parentId: z.string(),
-      properties: z.record(z.string(), z.unknown()).optional(),
-    })
-    .optional(),
+const EntityCreatePayload = z.looseObject({
+  parentRelation: ParentRelationPayload.optional(),
 });
 
 const DocumentParams = EntityParams.extend({ propertyKey: z.string() });
@@ -147,7 +148,7 @@ const RelationParams = RelationTypeParams.extend({ relationId: z.string() });
 
 /** Relation creation names its two endpoints; everything else in the body
  * is a property value. */
-export const RelationCreatePayload = z.looseObject({
+const RelationCreatePayload = z.looseObject({
   fromEntityId: z.string(),
   toEntityId: z.string(),
 });

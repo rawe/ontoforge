@@ -239,7 +239,10 @@ export function createRuntimeMcpServer(
             "anchored entity or one of its descendants; a hierarchy type this lens shows no " +
             "parent relation into cannot be created here. Entities of other types are " +
             "created as usual, 'parent_relation' optional.") +
-        staged("create"),
+        staged("create") +
+        " With 'parent_relation' and 'changeset_id', two writes are staged, the entity's and then " +
+        "its parent relation's, and the answer is {seq, id, relation: {seq, id}}; the relation is a " +
+        "staged relation like any other, which later writes may name.",
       inputSchema: {
         entity_type_key: z.string(),
         properties: z.record(z.string(), z.unknown()),
@@ -1185,8 +1188,7 @@ function registerChangesetTools(
         "Read a changeset and one page of its staged writes by seq: offset (default 0) and " +
         `limit (default 100, 1–500). Returns ${CHANGESET_FIELDS}, offset, limit and writes. ` +
         "Each write has seq (seqs may skip numbers), operation, type, id (the id a create " +
-        "minted, or the target) and createdAt; entity writes add name, a create its parent " +
-        "{id, name, properties} (properties: those of the parent relation it creates); relation " +
+        "minted, or the target) and createdAt; entity writes add name; relation " +
         "writes add from and to {id, name}; before (an " +
         "update's stored values of the keys it sets, as they were when it was staged), current " +
         "(those values now; null when the target is gone), both " +

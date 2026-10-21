@@ -26,6 +26,7 @@ import { toast } from 'sonner'
 import { useRuntimeSchema } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
 import { listEntities, type ListEntitiesParams } from '@/api/runtime'
+import { GONE_CHANGESET_TEXT } from '@/api/staging'
 import type { EntityInstance, SchemaProperty } from '@/api/types'
 import { useRuntimeWrites, type StagedOutcome } from '@/api/writes'
 import { DocumentViewerDialog, type DocumentViewerTarget } from '@/components/DocumentViewerDialog'
@@ -376,6 +377,7 @@ export function TypeTablePage() {
       let failed = 0
       let skipped = 0
       let staged: StagedOutcome | undefined
+      let gone = false
       for (const [index, id] of ids.entries()) {
         // A pin or leave during the run stops it: the rest would land elsewhere.
         if (pinnedChangeset(ontologyKey!, lensKey!) !== pinnedAtStart) {
@@ -385,8 +387,9 @@ export function TypeTablePage() {
         try {
           const outcome = await writes.deleteEntity(typeKey!, id)
           if (outcome.kind === 'staged') staged = outcome
-        } catch {
+        } catch (err) {
           failed++
+          gone ||= err instanceof Error && err.message === GONE_CHANGESET_TEXT
         }
         toast.loading(`${verb} ${index + 1}/${ids.length}…`, { id: toastId })
       }
@@ -396,7 +399,9 @@ export function TypeTablePage() {
         skipped,
         staged: pinnedAtStart !== null,
       })
-      if (!summary.ok) {
+      if (gone) {
+        toast.error(GONE_CHANGESET_TEXT, { id: toastId })
+      } else if (!summary.ok) {
         toast.error(summary.text, { id: toastId })
       } else if (staged !== undefined) {
         toast.dismiss(toastId)

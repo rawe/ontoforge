@@ -29,10 +29,6 @@ import { storageKeys } from '@/lib/storage'
 
 export type { StagedOutcome, WriteOutcome } from './staging'
 
-/** Said when the pinned changeset turns out to be gone; it is unpinned. */
-export const CHANGESET_GONE_TEXT =
-  'The changeset is gone (committed, discarded or expired) — you are editing live again'
-
 // One stage call at a time per lens, across every component: a changeset
 // answers 409 "busy" to a second call while the first still runs.
 const enqueue = createSerialQueue()
@@ -49,8 +45,8 @@ export function useRuntimeWrites(ontologyKey: string, lensKey: string) {
       } catch (err) {
         if (err instanceof ApiError && isChangesetGone(err, changesetId)) {
           unpinChangeset(ontologyKey, lensKey)
-          toast.warning(CHANGESET_GONE_TEXT)
-          // The site shows this instead of the server's "Changeset '…' not found".
+          // The site shows this, as its toast or its field's error, instead of the
+          // server's "Changeset '…' not found".
           throw new ApiError(err.status, err.code, GONE_CHANGESET_TEXT, err.details)
         }
         throw err

@@ -10,9 +10,9 @@ Vocabulary: [../README.md](../README.md#changesets). The writes it stages:
 
 ## What it does
 
-A changeset is started through a runtime mount, and each later call stages one write into
-it instead of writing: nothing changes yet, and the call answers the staged write's seq and
-the id it names. Staging holds nothing between calls; each call appends to the journal.
+A changeset is started through a runtime mount, and each later call stages its write into
+it instead of writing: nothing changes yet, and the call answers the seq and id of what it
+staged. Staging holds nothing between calls; each call appends to the journal.
 The commit replays every staged write by seq in one database transaction, validates the
 end state, and persists all of it or nothing.
 

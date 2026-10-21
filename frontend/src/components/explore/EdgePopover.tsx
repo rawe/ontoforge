@@ -20,7 +20,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { usePinnedChangeset } from '@/lib/pinnedChangeset'
+import { pinnedChangeset, usePinnedChangeset } from '@/lib/pinnedChangeset'
 import type { RelationFlowEdge } from './workingSet'
 
 const POPOVER_WIDTH = 300
@@ -84,7 +84,10 @@ export function EdgePopover({
 
   const deleteMutation = useMutation({
     mutationFn: () =>
-      runtime.deleteRelation(ontologyKey, lensKey, relation!._relationTypeKey, relation!._id),
+      // Read again at the write: a pin from another tab may not have rendered yet.
+      pinnedChangeset(ontologyKey, lensKey) !== null
+        ? Promise.reject(new Error(EXPLORER_LIVE_ONLY_TEXT))
+        : runtime.deleteRelation(ontologyKey, lensKey, relation!._relationTypeKey, relation!._id),
     onSuccess: () => {
       if (sourceEntity !== undefined) {
         invalidateNeighborhood(

@@ -92,13 +92,12 @@ const deleteOf = (seq: number, type: string, id: string): ChangesetWriteRecord =
   row(seq, { operation: "delete_entity", typeKey: type, targetId: id, arguments: {} });
 const relate = (seq: number, type: string, id: string, from: string, to: string): ChangesetWriteRecord =>
   row(seq, { operation: "create_relation", typeKey: type, mintedId: id, arguments: { fromEntityId: from, toEntityId: to, properties: {} } });
-const department = (seq: number, id: string, parentId: string, relationId: string): ChangesetWriteRecord =>
-  row(seq, {
-    operation: "create_entity",
-    typeKey: "department",
-    mintedId: id,
-    arguments: { properties: { name: "New" }, parentRelation: { type: "belongs_to", parentId, properties: {} }, relationId },
-  });
+/** A department created under `parentId`, as staging expands it: the
+ * entity's create at `seq`, its `belongs_to` relation at `seq + 1`. */
+const department = (seq: number, id: string, parentId: string, relationId: string): ChangesetWriteRecord[] => [
+  row(seq, { operation: "create_entity", typeKey: "department", mintedId: id, arguments: { properties: { name: "New" } } }),
+  relate(seq + 1, "belongs_to", relationId, id, parentId),
+];
 
 let store: MockRuntimeStore;
 /** The entities as stored, by id. */
@@ -173,30 +172,26 @@ describe("the lock-free pass (step 0b)", () => {
   it("a clean journal has no faults, and names the stored targets to lock", async () => {
     const result = await pass([
       rename(1, PAT, "Pat M", { name: "Pat" }),
-      department(2, NEW, ACME, NEW_REL),
-      rename(3, NEW, "x", null),
-      deleteOf(4, "department", D1),
-      relate(5, "works_for", R1, PAT, ACME),
-      row(6, { operation: "update_relation", typeKey: "works_for", targetId: R1, arguments: { properties: { role: "x" } } }),
+      ...department(2, NEW, ACME, NEW_REL),
+      rename(4, NEW, "x", null),
+      deleteOf(5, "department", D1),
+      relate(6, "works_for", R1, PAT, ACME),
+      row(7, { operation: "update_relation", typeKey: "works_for", targetId: R1, arguments: { properties: { role: "x" } } }),
     ]);
     expect(result.faults).toEqual([]);
     expect(result.targets.sort()).toEqual([D1, PAT].sort());
     expect(result.stored.get(PAT)).toBe("person");
-    expect([...result.minted.keys()]).toEqual([NEW, R1]);
+    expect([...result.minted.keys()]).toEqual([NEW, NEW_REL, R1]);
   });
 
-  it("not_visible: a hidden type, property or parent relation, named by neither; nothing else checked", async () => {
+  it("not_visible: a hidden type or property, named by neither; nothing else checked", async () => {
     store.getFullSchemaWithLensInclusions.mockResolvedValue(schema(true));
     const result = await pass(
       [
         deleteOf(1, "department", D1),
         row(2, { operation: "update_entity", typeKey: "person", targetId: GHOST, arguments: { properties: { age: 3 } }, before: {} }),
-        row(3, {
-          operation: "create_entity",
-          typeKey: "person",
-          mintedId: NEW,
-          arguments: { properties: { name: "N" }, parentRelation: { type: "belongs_to", parentId: GHOST }, relationId: NEW_REL },
-        }),
+        // A parent relation's write: its end GHOST is not judged.
+        relate(3, "belongs_to", NEW_REL, D1, GHOST),
         rename(4, PAT, "Pat M", { name: "Pat" }),
       ],
       "hr_view",
@@ -205,7 +200,7 @@ describe("the lock-free pass (step 0b)", () => {
     expect(result.faults).toEqual([
       { seq: 1, kind: "not_visible", message: `The type of this write ${through}` },
       { seq: 2, kind: "not_visible", message: `A property this write sets ${through}` },
-      { seq: 3, kind: "not_visible", message: `The parent relation of this write ${through}` },
+      { seq: 3, kind: "not_visible", message: `The type of this write ${through}` },
     ]);
     for (const fault of result.faults) {
       expect(fault.message).not.toMatch(/department|age|belongs_to/);
@@ -239,18 +234,18 @@ describe("the lock-free pass (step 0b)", () => {
     const result = await pass([
       rename(2, NEW, "x", null),
       relate(3, "works_for", NEW_REL, GHOST, ACME),
-      department(4, "dddddddd-dddd-4ddd-8ddd-dddddddddddd", GHOST, R1),
+      ...department(4, "dddddddd-dddd-4ddd-8ddd-dddddddddddd", GHOST, R1),
     ]);
     expect(result.faults).toEqual([
       { seq: 2, kind: "dangling", message: "Neither stored nor created in this changeset" },
       { seq: 3, kind: "dangling", message: "The source end is neither stored nor created in this changeset" },
-      { seq: 4, kind: "dangling", message: "The parent is neither stored nor created in this changeset" },
+      { seq: 5, kind: "dangling", message: "The target end is neither stored nor created in this changeset" },
     ]);
   });
 
   it("control: ends and parents minted by a create still in the journal resolve", async () => {
     const result = await pass([
-      row(1, { operation: "create_entity", typeKey: "person", mintedId: NEW, arguments: { properties: { name: "N" }, parentRelation: null, relationId: null } }),
+      row(1, { operation: "create_entity", typeKey: "person", mintedId: NEW, arguments: { properties: { name: "N" } } }),
       relate(2, "reports_to", NEW_REL, NEW, PAT),
     ]);
     expect(result.faults).toEqual([]);
@@ -402,13 +397,13 @@ describe("step 3: the end state", () => {
     expect(await commit()).toMatchObject({ committed: 2 });
   });
 
-  it("two_parents on a create: the created entity goes unnamed; a relation names its child end", async () => {
+  it("two_parents on a create staged with its parent relation: each relation names its child end", async () => {
     stored[NEW] = makeEntity({ name: "New" }, "department", NEW);
-    journal([department(1, NEW, ACME, R1), relate(2, "belongs_to", NEW_REL, NEW, BETA)]);
+    journal([...department(1, NEW, ACME, R1), relate(3, "belongs_to", NEW_REL, NEW, BETA)]);
     parents[NEW] = [link("belongs_to", R1, ACME, NEW), link("belongs_to", NEW_REL, BETA, NEW)];
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "two_parents", message: "Already has a parent" },
       { seq: 2, kind: "two_parents", message: "The source end already has a parent" },
+      { seq: 3, kind: "two_parents", message: "The source end already has a parent" },
     ]);
   });
 
@@ -428,12 +423,12 @@ describe("step 3: the end state", () => {
     expect(await commit()).toMatchObject({ committed: 2 });
   });
 
-  it("endpoint_type: a relation end or a parent of another type, the type not named", async () => {
-    journal([relate(1, "works_for", NEW_REL, PAT, D1), department(2, NEW, KIM, R1)]);
+  it("endpoint_type: a relation end of another type, a create's parent relation's too, the type not named", async () => {
+    journal([relate(1, "works_for", NEW_REL, PAT, D1), ...department(2, NEW, KIM, R1)]);
     const found = await violations(commit());
     expect(found).toEqual([
       { seq: 1, kind: "endpoint_type", message: "The target end does not have the type relation type 'works_for' requires" },
-      { seq: 2, kind: "endpoint_type", message: "The parent does not have the type relation type 'belongs_to' requires" },
+      { seq: 3, kind: "endpoint_type", message: "The target end does not have the type relation type 'belongs_to' requires" },
     ]);
     for (const v of found) expect(v.message).not.toMatch(/department|person|company/);
   });
@@ -490,11 +485,13 @@ describe("anchor coverage (V8, V42)", () => {
     parents[NEW] = [link("belongs_to", R1, BETA, NEW)];
     stored[NEW] = makeEntity({ name: "New" }, "department", NEW);
     journal([
-      department(1, NEW, BETA, R1),
-      row(2, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P" } }, before: { name: "Pat" } }),
+      ...department(1, NEW, BETA, R1),
+      row(3, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P" } }, before: { name: "Pat" } }),
     ]);
+    // The parent relation's write touches its stored parent BETA too.
     expect(await violations(commit())).toEqual([
       { seq: 1, kind: "not_covered", message: "Would not be under anchor 'agent-a' after the commit" },
+      { seq: 2, kind: "not_covered", message: "Not under anchor 'agent-a'" },
     ]);
   });
 

@@ -82,11 +82,7 @@ function sixWrites(): ChangesetWriteRecord[] {
       operation: "create_entity",
       typeKey: "department",
       mintedId: NEW,
-      arguments: {
-        properties: { name: "Ops" },
-        parentRelation: { type: "belongs_to", parentId: ACME, properties: {} },
-        relationId: NEW_REL,
-      },
+      arguments: { properties: { name: "Ops" } },
     }),
     row(2, { operation: "update_entity", typeKey: "person", targetId: P1, arguments: { properties: { age: 41 } } }),
     row(3, {
@@ -226,7 +222,7 @@ describe("the replay (V20)", () => {
     journal(sixWrites());
     await commit();
     expect(writeOrder()).toEqual([
-      "createEntityWithParent",
+      "createEntity",
       "updateEntity",
       "createRelation",
       "updateRelation",
@@ -234,9 +230,7 @@ describe("the replay (V20)", () => {
       "deleteEntity",
     ]);
 
-    const [entity, relation] = store.createEntityWithParent.mock.calls[0]!;
-    expect(entity).toMatchObject({ entityTypeKey: "department", entityId: NEW, properties: { name: "Ops" } });
-    expect(relation).toMatchObject({ relationTypeKey: "belongs_to", relationId: NEW_REL, fromEntityId: NEW, toEntityId: ACME });
+    expect(store.createEntity.mock.calls[0]!.slice(0, 3)).toEqual(["department", NEW, { name: "Ops" }]);
     expect(store.updateEntity.mock.calls[0]!.slice(0, 4)).toEqual(["person", P1, { age: 41 }, []]);
     expect(store.createRelation.mock.calls[0]!.slice(0, 5)).toEqual(["works_for", R1, P1, ACME, { role: "dev" }]);
     expect(store.updateRelation.mock.calls[0]!.slice(0, 4)).toEqual(["works_for", R1, { role: "lead" }, []]);
@@ -244,9 +238,26 @@ describe("the replay (V20)", () => {
     expect(store.deleteEntity.mock.calls[0]!.slice(0, 2)).toEqual(["department", D1]);
   });
 
+  it("a create staged with a parent relation replays as its two writes: the entity's create, then the relation's", async () => {
+    journal([
+      row(1, { operation: "create_entity", typeKey: "department", mintedId: NEW, arguments: { properties: { name: "Ops" } } }),
+      row(2, {
+        operation: "create_relation",
+        typeKey: "belongs_to",
+        mintedId: NEW_REL,
+        arguments: { fromEntityId: NEW, toEntityId: ACME, properties: {} },
+      }),
+    ]);
+    expect(await commit()).toEqual({ committed: 2, alreadyGone: [] });
+    expect(writeOrder()).toEqual(["createEntity", "createRelation"]);
+    expect(store.createEntity.mock.calls[0]!.slice(0, 2)).toEqual(["department", NEW]);
+    expect(store.createRelation.mock.calls[0]!.slice(0, 4)).toEqual(["belongs_to", NEW_REL, NEW, ACME]);
+    expect(store.createEntityWithParent).not.toHaveBeenCalled();
+  });
+
   it("applies the full schema's defaults again, and removes a key staged as null", async () => {
     journal([
-      row(1, { operation: "create_entity", typeKey: "person", mintedId: NEW, arguments: { properties: { name: "Ann" }, parentRelation: null, relationId: null } }),
+      row(1, { operation: "create_entity", typeKey: "person", mintedId: NEW, arguments: { properties: { name: "Ann" } } }),
       row(2, { operation: "update_entity", typeKey: "person", targetId: P1, arguments: { properties: { email: null } } }),
     ]);
     await commit();
@@ -329,9 +340,20 @@ describe("a replay fault: 422, nothing persisted", () => {
       { seq: 3, kind: "replay", message: "The source or target end no longer exists" },
     ]);
 
-    store.createEntityWithParent.mockRejectedValue(new NotFoundError(`Entity '${ACME}' not found`));
+    // A parent gone is the parent relation's end gone.
+    journal([
+      row(1, { operation: "create_entity", typeKey: "department", mintedId: NEW, arguments: { properties: { name: "Ops" } } }),
+      row(2, {
+        operation: "create_relation",
+        typeKey: "belongs_to",
+        mintedId: NEW_REL,
+        arguments: { fromEntityId: NEW, toEntityId: ACME, properties: {} },
+      }),
+    ]);
     const parentGone = await rejected(commit());
-    expect(parentGone.details!.violations).toEqual([{ seq: 1, kind: "replay", message: "The parent no longer exists" }]);
+    expect(parentGone.details!.violations).toEqual([
+      { seq: 2, kind: "replay", message: "The source or target end no longer exists" },
+    ]);
   });
 
   it("a value the lens no longer accepts names its field", async () => {

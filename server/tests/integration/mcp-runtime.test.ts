@@ -600,6 +600,29 @@ describe("entity tools", () => {
     }
   });
 
+  it("an object or array for a string property is a validation failure, never stored", async () => {
+    const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
+    try {
+      const result = await call(client, "create_entity", {
+        entity_type_key: "person",
+        properties: { name: { a: 1 }, email: [1, 2] },
+      });
+      expect(result.isError).toBe(true);
+      const message = text(result);
+      expect(message).toContain("Expected string for 'name', got object");
+      expect(message).toContain("Expected string for 'email', got array");
+
+      const created = await call(client, "create_entity", {
+        entity_type_key: "person",
+        properties: { name: "[1,2]" },
+      });
+      expect(created.isError, text(created)).toBeFalsy();
+      expect(json(created).name).toBe("[1,2]");
+    } finally {
+      await client.close();
+    }
+  });
+
   it("relation tools round-trip create, list, get, update, delete", async () => {
     const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
     try {

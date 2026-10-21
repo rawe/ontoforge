@@ -17,7 +17,7 @@ import { useChangeset, useChangesets, useRuntimeSchema } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
-import type { ChangesetViolation, JsonValue, StagedWriteView } from '@/api/types'
+import type { ChangesetViolation, JsonValue, StagedOperation, StagedWriteView } from '@/api/types'
 import { DocumentViewerDialog, type DocumentViewerTarget } from '@/components/DocumentViewerDialog'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
@@ -303,6 +303,23 @@ export function ChangesetDetailPage() {
     return buttons.length === 0 ? null : <div className="mt-1 flex flex-wrap gap-1">{buttons}</div>
   }
 
+  const plainChange = (write: StagedWriteView) => <div className="text-[13px] break-words">{changeText(write)}</div>
+  const entityChange = (write: StagedWriteView) => (
+    <>
+      {plainChange(write)}
+      {documentButtons(write)}
+    </>
+  )
+  /** What a write's change cell shows, by its operation. */
+  const changeViews: Record<StagedOperation, (write: StagedWriteView) => ReactNode> = {
+    create_entity: entityChange,
+    update_entity: entityChange,
+    delete_entity: plainChange,
+    create_relation: plainChange,
+    update_relation: plainChange,
+    delete_relation: plainChange,
+  }
+
   const discardButton = (
     <Button
       size="sm"
@@ -459,8 +476,7 @@ export function ChangesetDetailPage() {
                         {targetText(write)}
                       </TableCell>
                       <TableCell className="whitespace-normal">
-                        <div className="text-[13px] break-words">{changeText(write)}</div>
-                        {documentButtons(write)}
+                        {changeViews[write.operation](write)}
                         {write.markers.length > 0 && (
                           <div className="mt-1 flex flex-wrap gap-1">
                             {write.markers.map((marker, i) => (

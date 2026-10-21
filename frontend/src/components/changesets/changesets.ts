@@ -148,7 +148,7 @@ export function targetText(write: StagedWriteView): string {
  * The change column: `before → after` per key for updates (only the staged
  * value when the target was created by this changeset), with the current
  * value where it differs on a drifted write; the set values for creates,
- * with a create's parent, and "—" for deletes.
+ * and "—" for deletes.
  */
 export function changeText(write: StagedWriteView): string {
   if (write.type === null) return 'Not visible through this lens'
@@ -168,13 +168,7 @@ export function changeText(write: StagedWriteView): string {
       })
       .join('; ')
   }
-  const parts = Object.keys(after).length === 0 ? [] : [valuesText(after)]
-  if (write.operation === 'create_entity' && write.parent !== null && write.parent !== undefined) {
-    const properties = write.parent.properties
-    const under = `under ${endText(write.parent)}`
-    parts.push(Object.keys(properties).length === 0 ? under : `${under} (${valuesText(properties)})`)
-  }
-  return parts.length === 0 ? '—' : parts.join(' · ')
+  return Object.keys(after).length === 0 ? '—' : valuesText(after)
 }
 
 /** A marker chip's text. */

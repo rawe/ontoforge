@@ -396,7 +396,7 @@ export const getStagedDocument = (
   params?: GetDocumentParams,
 ) =>
   request<DocumentContentResponse>(
-    `${changesetsBase(ontologyKey, lensKey)}/${changesetId}/entities/${entityTypeKey}/${id}/documents/${propertyKey}${buildQuery(params)}`,
+    `${changesetsBase(ontologyKey, lensKey)}/${changesetId}/documents/${entityTypeKey}/${id}/${propertyKey}${buildQuery(params)}`,
   )
 
 /** Draft only; a submitted changeset answers 409. */

@@ -47,14 +47,14 @@ function database(state: {
 }
 
 /** Step 8 in one namespace: the changeset tables with their indexes, then
- * the staged-only flag. */
+ * the write access of a ruleset. */
 const step8 = (namespace: string) => [
   `SET LOCAL search_path TO ${namespace}, public`,
   expect.stringMatching(/^CREATE TABLE changeset \(/),
   "CREATE INDEX changeset_lens_id_idx ON changeset (lens_id)",
   expect.stringMatching(/^CREATE TABLE changeset_write \(/),
   "CREATE INDEX changeset_write_minted_id_idx ON changeset_write (changeset_id, minted_id)",
-  "ALTER TABLE anchor ADD COLUMN staged_only boolean NOT NULL DEFAULT false",
+  "ALTER TABLE ruleset ADD COLUMN write_access text NOT NULL DEFAULT 'full'",
 ];
 
 const writes = (queries: string[]) => queries.filter((q) => /^(INSERT|DELETE|CREATE|LOCK TABLE)/.test(q));
@@ -94,7 +94,7 @@ describe("storage version at boot", () => {
     expect(queries.indexOf(SERVER_DDL[0]!)).toBeLessThan(queries.indexOf("SET LOCAL search_path TO ont_a, public"));
     const bound = queries.filter((q) => q.startsWith("SET LOCAL search_path"));
     // Step by step: the 6.0 step, the 7.0 step, the assistant step, the
-    // navigator step, the parent-and-anchor step, then the changeset step,
+    // navigator step, the parent-and-ruleset step, then the changeset step,
     // each in every namespace.
     expect(bound).toEqual(Array.from({ length: 6 }, () => [
       "SET LOCAL search_path TO ont_a, public",
@@ -183,7 +183,7 @@ describe("storage version at boot", () => {
     const step7 = (namespace: string) => [
       `SET LOCAL search_path TO ${namespace}, public`,
       "ALTER TABLE relation_type ADD COLUMN parent text",
-      expect.stringMatching(/^CREATE TABLE anchor \(/),
+      expect.stringMatching(/^CREATE TABLE ruleset \(/),
     ];
     expect(ran).toEqual([
       ...step7("ont_a"),
@@ -195,11 +195,11 @@ describe("storage version at boot", () => {
       "DELETE FROM public.storage_version",
       "INSERT INTO public.storage_version (version) VALUES ($1)",
     ]);
-    const anchor = queries.find((q) => q.startsWith("CREATE TABLE anchor"))!;
-    expect(anchor).toContain("entity_type_key text");
-    expect(anchor).toContain("entity_id       uuid");
+    const ruleset = queries.find((q) => q.startsWith("CREATE TABLE ruleset"))!;
+    expect(ruleset).toContain("anchor_type_key text");
+    expect(ruleset).toContain("anchor_id       uuid");
     // No FK to entity, no CHECK.
-    expect(anchor).not.toMatch(/REFERENCES|CHECK/);
+    expect(ruleset).not.toMatch(/REFERENCES|CHECK/);
     expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 6 to 8 (2 ontologies).");
   });
 
@@ -227,10 +227,10 @@ describe("storage version at boot", () => {
     // A staged update's recorded values are its `before`.
     expect(journal).toMatch(/^\s+before\s+jsonb,$/m);
     expect(journal).not.toMatch(/\bbase\b/);
-    // One FK each, no FK to anchor, no CHECK.
+    // One FK each, no FK to ruleset, no CHECK.
     for (const table of [changeset, journal]) {
       expect(table.match(/REFERENCES/g)).toHaveLength(1);
-      expect(table).not.toMatch(/CHECK|anchor \(/);
+      expect(table).not.toMatch(/CHECK|ruleset \(/);
     }
     expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 7 to 8 (2 ontologies).");
   });

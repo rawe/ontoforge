@@ -41,7 +41,7 @@
  * - The create with a parent relation writes both rows and their search
  *   work in one transaction.
  * - `transaction` hands its work a store bound to one connection: the two
- *   doors, and the anchor and changeset stores' doors, take the bound
+ *   doors, and the ruleset and changeset stores' doors, take the bound
  *   querier instead of the pool. The neutral reads (`parentsOf`,
  *   `childrenOf`, `lockTargets`, `getEntitiesByIdsHashed`,
  *   `getRelationsByIds`, `getEntityTypes`) serve a changeset's checks and commit
@@ -53,13 +53,13 @@
 
 import type { ValidatedQuery } from "../../core/oql/index.js";
 import type {
-  AnchorStore,
   ChangesetStore,
   FilterCondition,
   LockedTarget,
   NavigatorStore,
   ParentLink,
   Row,
+  RulesetStore,
   RuntimeStore,
   SearchIndexStore,
   SearchWritePlan,
@@ -85,9 +85,9 @@ import {
 import { fromJson, toJson } from "./json.js";
 import { camelizeRow, isUuid } from "./rows.js";
 import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
-import { PostgresAnchorStore } from "./anchorStore.js";
 import { PostgresChangesetStore } from "./changesetStore.js";
 import { PostgresNavigatorStore } from "./navigatorStore.js";
+import { PostgresRulesetStore } from "./rulesetStore.js";
 import { applySearchWritePlan, PostgresSearchIndexStore } from "./searchIndexStore.js";
 import { distance, minScoreFloor, similarity, vectorParams, vectorSearch } from "./search.js";
 
@@ -249,11 +249,11 @@ export class PostgresRuntimeStore implements RuntimeStore {
     return new PostgresNavigatorStore(this.namespace);
   }
 
-  anchors(): AnchorStore {
+  rulesets(): RulesetStore {
     if (this.namespace === undefined) {
-      throw new Error("An unbound runtime store has no anchors");
+      throw new Error("An unbound runtime store has no rulesets");
     }
-    return new PostgresAnchorStore(this.namespace, this.bound);
+    return new PostgresRulesetStore(this.namespace, this.bound);
   }
 
   changesets(): ChangesetStore {

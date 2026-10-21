@@ -9,9 +9,9 @@
  * 6.x line (version 3) is produced by giving the assistant tables their
  * 6.x names back; the 7.0 step names them after their kind again, every
  * agent and retriever kept. Storage at version 7 is produced by dropping
- * the changeset tables and the staged-only flag of anchors; step 8 adds
+ * the changeset tables and the write access of rulesets; step 8 adds
  * them back, every row kept. Storage at version 6 is produced by dropping
- * the parent end of relation types and the anchor table; step 7 adds them
+ * the parent end of relation types and the ruleset table; step 7 adds them
  * back, every row kept. Storage at version 5 is produced by putting
  * the `assistant` table of step 5 in place of the navigator table; the
  * step to version 6 names it after its kind, every navigator kept. Storage
@@ -121,20 +121,20 @@ async function makeVersion5Layout(namespace: string): Promise<void> {
 )`);
 }
 
-/** Storage at version 7: no changeset tables, no staged-only flag on
- * anchors. Records no version — every older layout builds on it. */
+/** Storage at version 7: no changeset tables, no write access on
+ * rulesets. Records no version — every older layout builds on it. */
 async function makeVersion7Layout(namespace: string): Promise<void> {
   await runQuery(`DROP TABLE ${namespace}.changeset_write`);
   await runQuery(`DROP TABLE ${namespace}.changeset`);
-  await runQuery(`ALTER TABLE ${namespace}.anchor DROP COLUMN staged_only`);
+  await runQuery(`ALTER TABLE ${namespace}.ruleset DROP COLUMN write_access`);
 }
 
-/** Storage at version 6: no parent end on relation types, no anchor
+/** Storage at version 6: no parent end on relation types, no ruleset
  * table. Records no version — every older layout builds on it. */
 async function makeVersion6Layout(namespace: string): Promise<void> {
   await makeVersion7Layout(namespace);
   await runQuery(`ALTER TABLE ${namespace}.relation_type DROP COLUMN parent`);
-  await runQuery(`DROP TABLE ${namespace}.anchor`);
+  await runQuery(`DROP TABLE ${namespace}.ruleset`);
 }
 
 /** Storage at version 4: no table for navigators. Records no version —
@@ -577,7 +577,7 @@ describe("PostgreSQL storage version", () => {
     )).rejects.toThrow("Navigator 'walker' already exists in the target lens");
   });
 
-  it("upgrades version-6 storage by adding the parent end and the anchor table, keeping every row", async () => {
+  it("upgrades version-6 storage by adding the parent end and the ruleset table, keeping every row", async () => {
     await getOntologyRegistry().createOntology(ID_A, "older", null, null);
     await makeVersion6Layout("ont_older");
     const [acme, p1, p2] = [randomUUID(), randomUUID(), randomUUID()];
@@ -630,7 +630,7 @@ describe("PostgreSQL storage version", () => {
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
     expect({ relationTypes: (await relationTypes()).rows, instances: await instances("ont_older") }).toEqual(before);
-    expect((await runQuery(`SELECT count(*)::int AS n FROM ont_older.anchor`)).rows).toEqual([{ n: 0 }]);
+    expect((await runQuery(`SELECT count(*)::int AS n FROM ont_older.ruleset`)).rows).toEqual([{ n: 0 }]);
     // The kept relation type reads through the port as an ordinary one,
     // and takes a parent end.
     const modeling = await getModelingStore("older");
@@ -640,7 +640,7 @@ describe("PostgreSQL storage version", () => {
     expect(flagged).toMatchObject({ row: { parent: "source" } });
   });
 
-  it("upgrades version-7 storage by adding the changeset tables and the staged-only flag, keeping every row", async () => {
+  it("upgrades version-7 storage by adding the changeset tables and the write access, keeping every row", async () => {
     expect(STORAGE_VERSION).toBe(8);
     await getOntologyRegistry().createOntology(ID_A, "older", null, null);
     await makeVersion7Layout("ont_older");
@@ -677,7 +677,7 @@ describe("PostgreSQL storage version", () => {
       );
       await querier.query(`INSERT INTO ont_older.lens (lens_id, key, name) VALUES ($1, 'all', 'All')`, [lensId]);
       await querier.query(
-        `INSERT INTO ont_older.anchor (key, entity_type_key, entity_id) VALUES ('agent-a', 'project', $1)`,
+        `INSERT INTO ont_older.ruleset (key, anchor_type_key, anchor_id) VALUES ('agent-a', 'project', $1)`,
         [p1],
       );
     });
@@ -685,8 +685,8 @@ describe("PostgreSQL storage version", () => {
     const kept = async () => ({
       relationTypes: (await runQuery(`SELECT key, parent FROM ont_older.relation_type`)).rows,
       lenses: (await runQuery(`SELECT lens_id, key FROM ont_older.lens`)).rows,
-      anchors: (
-        await runQuery(`SELECT key, entity_type_key, entity_id, created_at, updated_at FROM ont_older.anchor`)
+      rulesets: (
+        await runQuery(`SELECT key, anchor_type_key, anchor_id, created_at, updated_at FROM ont_older.ruleset`)
       ).rows,
       instances: await instances("ont_older"),
     });
@@ -700,33 +700,33 @@ describe("PostgreSQL storage version", () => {
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
     expect(await kept()).toEqual(before);
-    // The existing anchor is not staged-only; the new tables start empty.
-    expect((await runQuery(`SELECT key, staged_only FROM ont_older.anchor`)).rows).toEqual([
-      { key: "agent-a", staged_only: false },
+    // The existing ruleset has write access full; the new tables start empty.
+    expect((await runQuery(`SELECT key, write_access FROM ont_older.ruleset`)).rows).toEqual([
+      { key: "agent-a", write_access: "full" },
     ]);
     const empty = await runQuery(
       `SELECT (SELECT count(*)::int FROM ont_older.changeset) AS changesets,
               (SELECT count(*)::int FROM ont_older.changeset_write) AS writes`,
     );
     expect(empty.rows).toEqual([{ changesets: 0, writes: 0 }]);
-    // The anchor still reads through the port.
-    const anchor = (await (await getRuntimeStore("older")).anchors().getAnchor("agent-a"))!;
-    expect(anchor).toMatchObject({ key: "agent-a" });
+    // The ruleset still reads through the port.
+    const ruleset = (await (await getRuntimeStore("older")).rulesets().get("agent-a"))!;
+    expect(ruleset).toMatchObject({ key: "agent-a", anchor: { type: "project", id: p1 }, writeAccess: "full" });
   });
 
-  it("a lens delete removes its changesets and their writes; an anchor delete leaves them", async () => {
+  it("a lens delete removes its changesets and their writes; a ruleset delete leaves them", async () => {
     await getOntologyRegistry().createOntology(ID_A, "fresh", null, null);
     const [lensId, p1, anchored, plain] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
     await withTransaction(async (querier) => {
       await querier.query(`INSERT INTO ont_fresh.lens (lens_id, key, name) VALUES ($1, 'all', 'All')`, [lensId]);
       await querier.query(`INSERT INTO ont_fresh.entity (id, type_key) VALUES ($1, 'project')`, [p1]);
       await querier.query(
-        `INSERT INTO ont_fresh.anchor (key, entity_type_key, entity_id, staged_only)
-         VALUES ('agent-a', 'project', $1, true)`,
+        `INSERT INTO ont_fresh.ruleset (key, anchor_type_key, anchor_id, write_access)
+         VALUES ('agent-a', 'project', $1, 'propose')`,
         [p1],
       );
       await querier.query(
-        `INSERT INTO ont_fresh.changeset (changeset_id, lens_id, anchor_key, version)
+        `INSERT INTO ont_fresh.changeset (changeset_id, lens_id, ruleset_key, version)
          VALUES ($1, $3, 'agent-a', 1), ($2, $3, NULL, 1)`,
         [anchored, plain, lensId],
       );
@@ -745,7 +745,7 @@ describe("PostgreSQL storage version", () => {
         )
       ).rows[0];
 
-    expect(await (await getRuntimeStore("fresh")).anchors().deleteAnchor("agent-a")).toBe(true);
+    expect(await (await getRuntimeStore("fresh")).rulesets().delete("agent-a")).toBe(true);
     expect(await counts()).toEqual({ changesets: 2, writes: 2 });
 
     expect(await (await getModelingStore("fresh")).deleteLens(lensId)).toBe(true);

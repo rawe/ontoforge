@@ -13,7 +13,7 @@
 import { z } from "zod";
 
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
-import type { AnchorRecord, RuntimeStore } from "../core/ports.js";
+import type { RulesetRecord, RuntimeStore } from "../core/ports.js";
 import { ANCHOR_KEY_PATTERN, MAX_KEY_LENGTH } from "../core/schemas.js";
 import { anchorState } from "./anchorGuard.js";
 import { loadSchema, loadSearchContext, type EntityTypeDef } from "./schemaCache.js";
@@ -63,12 +63,12 @@ async function fullEntityTypes(store: RuntimeStore): Promise<Record<string, Enti
   return (await loadSearchContext(store.ontologyKey, store.searchIndices())).schema.entityTypes;
 }
 
-function toResponse(record: AnchorRecord, entityTypes: Record<string, EntityTypeDef>): AnchorResponse {
+function toResponse(record: RulesetRecord, entityTypes: Record<string, EntityTypeDef>): AnchorResponse {
   return {
     key: record.key,
-    entity: record.entity,
+    entity: record.anchor,
     state: anchorState(record, entityTypes),
-    stagedOnly: record.stagedOnly,
+    stagedOnly: record.writeAccess === "propose", // bridge: removed in 05
   };
 }
 
@@ -81,14 +81,14 @@ export function anchorKeyError(key: string): string | null {
 }
 
 export async function listAnchors(store: RuntimeStore): Promise<AnchorResponse[]> {
-  const records = await store.anchors().listAnchors();
+  const records = await store.rulesets().list();
   const entityTypes = await fullEntityTypes(store);
   return records.map((record) => toResponse(record, entityTypes));
 }
 
 /** The anchor read fresh, with its state now. Unknown key -> not found. */
 export async function readAnchor(key: string, store: RuntimeStore): Promise<AnchorResponse> {
-  const record = await store.anchors().getAnchor(key);
+  const record = await store.rulesets().get(key);
   if (record === null) throw new NotFoundError(`Anchor '${key}' not found`);
   return toResponse(record, await fullEntityTypes(store));
 }
@@ -113,11 +113,12 @@ export async function saveAnchor(key: string, body: AnchorWriteBody, store: Runt
       });
     }
   }
-  return toResponse(await store.anchors().saveAnchor(key, entity, stagedOnly), entityTypes);
+  const writeAccess = stagedOnly === undefined ? undefined : stagedOnly ? "propose" : "full"; // bridge: removed in 05
+  return toResponse(await store.rulesets().save(key, { anchor: entity, writeAccess }), entityTypes);
 }
 
 export async function deleteAnchor(key: string, store: RuntimeStore): Promise<void> {
-  if (!(await store.anchors().deleteAnchor(key))) {
+  if (!(await store.rulesets().delete(key))) {
     throw new NotFoundError(`Anchor '${key}' not found`);
   }
 }

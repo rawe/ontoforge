@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { ConflictError, NotFoundError, ValidationError } from "../../src/core/exceptions.js";
-import type { AnchorRecord } from "../../src/core/ports.js";
+import type { RulesetRecord } from "../../src/core/ports.js";
 import { AnchorGuard, anchorState } from "../../src/runtime/anchorGuard.js";
 import type { LoadedSchema, RelationTypeDef, SchemaCacheValue } from "../../src/runtime/schemaCache.js";
 import { asRuntimeStore, createMockRuntimeStore, type MockRuntimeStore } from "./helpers.js";
@@ -75,8 +75,8 @@ const ANCESTORS: Record<string, string[]> = {
 
 let store: MockRuntimeStore;
 
-function anchorAt(entity: { type: string; id: string } | null, entityFound = entity !== null, stagedOnly = false): void {
-  store.anchorStore.getAnchor.mockResolvedValue({ key: "agent-a", entity, entityFound, stagedOnly });
+function anchorAt(entity: { type: string; id: string } | null, anchorFound = entity !== null, stagedOnly = false): void {
+  store.rulesetStore.get.mockResolvedValue({ key: "agent-a", anchor: entity, anchorFound, writeAccess: stagedOnly ? "propose" : "full" });
 }
 
 async function open(lens = loaded()): Promise<AnchorGuard> {
@@ -105,11 +105,11 @@ beforeEach(() => {
 });
 
 describe("anchorState", () => {
-  const record = (entity: AnchorRecord["entity"], entityFound: boolean): AnchorRecord => ({
+  const record = (anchor: RulesetRecord["anchor"], anchorFound: boolean): RulesetRecord => ({
     key: "k",
-    entity,
-    entityFound,
-    stagedOnly: false,
+    anchor,
+    anchorFound,
+    writeAccess: "full",
   });
   const types = loaded().full.entityTypes;
 
@@ -124,7 +124,7 @@ describe("anchorState", () => {
 describe("opening the guard", () => {
   it("the plain lens has no guard and reads no anchor", async () => {
     expect(await AnchorGuard.open(null, loaded(), asRuntimeStore(store))).toBeNull();
-    expect(store.anchorStore.getAnchor).not.toHaveBeenCalled();
+    expect(store.rulesetStore.get).not.toHaveBeenCalled();
   });
 
   it("unanchored has no guard: the plain lens", async () => {
@@ -133,7 +133,7 @@ describe("opening the guard", () => {
   });
 
   it("an unknown key is not found", async () => {
-    store.anchorStore.getAnchor.mockResolvedValue(null);
+    store.rulesetStore.get.mockResolvedValue(null);
     await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(NotFoundError);
   });
 
@@ -183,7 +183,7 @@ describe("a staged-only anchor (V9, V43)", () => {
   });
 
   it("an unknown key stays not found", async () => {
-    store.anchorStore.getAnchor.mockResolvedValue(null);
+    store.rulesetStore.get.mockResolvedValue(null);
     expect(await openError()).toBeInstanceOf(NotFoundError);
   });
 
@@ -202,7 +202,7 @@ describe("the staging check (R10)", () => {
 
   it("the plain lens reads no anchor", async () => {
     expect(await check(null)).toBeNull();
-    expect(store.anchorStore.getAnchor).not.toHaveBeenCalled();
+    expect(store.rulesetStore.get).not.toHaveBeenCalled();
   });
 
   it("staged-only, anchored or unanchored, may stage", async () => {
@@ -219,7 +219,7 @@ describe("the staging check (R10)", () => {
     expect(await check("agent-a", loaded("no_projects", ["customer", "task", "milestone"]))).toEqual(
       new ConflictError("Anchor 'agent-a' points at an entity that lens 'no_projects' does not show"),
     );
-    store.anchorStore.getAnchor.mockResolvedValue(null);
+    store.rulesetStore.get.mockResolvedValue(null);
     expect(await check("agent-a")).toBeInstanceOf(NotFoundError);
   });
 });
@@ -307,16 +307,16 @@ describe("entity update, edit and delete", () => {
   });
 
   it("delete: outside wins over frozen", async () => {
-    store.anchorStore.listAnchors.mockResolvedValue([{ key: "agent-b", entity: { type: "task", id: "T4" }, entityFound: true }]);
+    store.rulesetStore.list.mockResolvedValue([{ key: "agent-b", anchor: { type: "task", id: "T4" }, anchorFound: true }]);
     expect(await refusal(async () => (await open()).checkDelete("task", "T4"))).toEqual({
       entityId: "Entity 'T4' is not under anchor 'agent-a'",
     });
   });
 
   it("delete: an entity any anchor points at is frozen, a free one too", async () => {
-    store.anchorStore.listAnchors.mockResolvedValue([
-      { key: "agent-a", entity: { type: "project", id: "P1" }, entityFound: true },
-      { key: "agent-b", entity: { type: "person", id: "Ben" }, entityFound: true },
+    store.rulesetStore.list.mockResolvedValue([
+      { key: "agent-a", anchor: { type: "project", id: "P1" }, anchorFound: true },
+      { key: "agent-b", anchor: { type: "person", id: "Ben" }, anchorFound: true },
     ]);
     const guard = await open();
     for (const [type, id] of [

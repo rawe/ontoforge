@@ -231,7 +231,7 @@ function toView(record: ChangesetRecord): ChangesetView {
     state: record.submittedAt === null ? "draft" : "submitted",
     version: record.version,
     note: record.note,
-    anchor: record.anchorKey,
+    anchor: record.rulesetKey,
     writeCount: record.writeCount,
     createdAt: record.createdAt,
     lastChangeAt: record.lastChangeAt,
@@ -301,7 +301,7 @@ async function refusalOf(
 
 /** An anchor key of the URL that names no anchor is not found. */
 async function checkAnchorExists(anchorKey: string | null, store: RuntimeStore): Promise<void> {
-  if (anchorKey !== null && (await store.anchors().getAnchor(anchorKey)) === null) {
+  if (anchorKey !== null && (await store.rulesets().get(anchorKey)) === null) {
     throw new NotFoundError(`Anchor '${anchorKey}' not found`);
   }
 }
@@ -319,7 +319,7 @@ export async function startChangeset(
   const valid = validNote(note);
   const changesets = store.changesets();
   await changesets.sweep(expiryCutoff());
-  const record = await changesets.start({ id: randomUUID(), lensId: loaded.scoped.lensId, anchorKey, note: valid });
+  const record = await changesets.start({ id: randomUUID(), lensId: loaded.scoped.lensId, rulesetKey: anchorKey, note: valid });
   return toView(record);
 }
 
@@ -741,7 +741,7 @@ export async function listChangesets(
       state: summary.submittedAt === null ? "draft" : "submitted",
       version: summary.version,
       note: summary.note,
-      anchor: summary.anchorKey,
+      anchor: summary.rulesetKey,
       writeCount: summary.writeCount,
       operations: summary.operations,
       types,
@@ -784,11 +784,11 @@ export async function submitChangeset(
   const record = await loadChangeset(loaded, anchorKey, changesetId, store);
   if (record.submittedAt !== null) throw new ConflictError(`Changeset '${changesetId}' is already submitted`);
   const valid = validNote(note);
-  if (record.anchorKey !== null) {
+  if (record.rulesetKey !== null) {
     // The stored anchor, whatever URL the call came through. A deleted one
     // is left to the commit ("anchor gone").
-    const anchor = await store.anchors().getAnchor(record.anchorKey);
-    const refusal = anchor === null ? null : changesetAnchorRefusal(record.anchorKey, anchor, loaded);
+    const anchor = await store.rulesets().get(record.rulesetKey);
+    const refusal = anchor === null ? null : changesetAnchorRefusal(record.rulesetKey, anchor, loaded);
     if (refusal !== null) throw new ConflictError(refusal);
   }
   const pass = await lockFreePass(loaded, record.id, store);
@@ -1723,7 +1723,7 @@ async function anchorBefore(
   pass: LockFreePass,
   bound: RuntimeStore,
 ): Promise<{ violations: Violation[]; coverage: Coverage | null }> {
-  const record = await bound.anchors().getAnchor(key);
+  const record = await bound.rulesets().get(key);
   if (record === null) {
     return {
       violations: [{ seq: 0, kind: "anchor_gone", message: `Anchor '${key}' no longer exists, so this changeset cannot be committed` }],
@@ -1732,12 +1732,12 @@ async function anchorBefore(
   }
   const refusal = changesetAnchorRefusal(key, record, loaded);
   if (refusal !== null) return { violations: [{ seq: 0, kind: "anchor_dangling", message: refusal }], coverage: null };
-  if (record.entity === null) return { violations: [], coverage: null };
+  if (record.anchor === null) return { violations: [], coverage: null };
 
-  const { types, readings } = hierarchyOf(record.entity.type, loaded.full);
+  const { types, readings } = hierarchyOf(record.anchor.type, loaded.full);
   const touches: Touch[] = [];
   for (const write of pass.writes) touches.push(await touchOf(loaded, pass, types, write, bound));
-  const coverage: Coverage = { key, anchorId: record.entity.id, readings, touches, refused: new Set() };
+  const coverage: Coverage = { key, anchorId: record.anchor.id, readings, touches, refused: new Set() };
 
   const before = touches.flatMap((touch) => touch.ends.filter((end) => end.before).map((end) => end.id));
   const links = await ancestry(before, readings, bound);
@@ -1753,7 +1753,7 @@ async function anchorBefore(
   }
   const deletes = pass.writes.filter((write) => write.operation === "delete_entity");
   const anchored =
-    deletes.length === 0 ? new Set() : new Set((await bound.anchors().listAnchors()).map((anchor) => anchor.entity?.id));
+    deletes.length === 0 ? new Set() : new Set((await bound.rulesets().list()).map((ruleset) => ruleset.anchor?.id));
   for (const write of deletes) {
     if (anchored.has(write.targetId!)) {
       violations.push({
@@ -1939,7 +1939,7 @@ export async function commitChangeset(
   expectedVersion: number | undefined,
   store: RuntimeStore,
 ): Promise<CommitAnswer> {
-  if (anchorKey !== null && (await store.anchors().getAnchor(anchorKey))?.stagedOnly === true) {
+  if (anchorKey !== null && (await store.rulesets().get(anchorKey))?.writeAccess === "propose") {
     throw new ConflictError(
       `Anchor '${anchorKey}' is staged-only: this connection cannot commit; submit the changeset for review`,
     );
@@ -1972,7 +1972,7 @@ export async function commitChangeset(
         const drift = await driftUnderLock(loaded, pass, bound);
         if (drift.length > 0) throw new CommitRejected(drift);
         const anchor =
-          record.anchorKey === null ? null : await anchorBefore(loaded, record.anchorKey, pass, bound);
+          record.rulesetKey === null ? null : await anchorBefore(loaded, record.rulesetKey, pass, bound);
         // 2: the replay; 3: commit validation.
         const replay = await replayJournal(loaded, search, record.id, bound);
         if (replay.fault !== null) throw new CommitRejected([replay.fault]);

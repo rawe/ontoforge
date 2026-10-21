@@ -72,8 +72,8 @@ async function handleMcpRequest(
  * built, and every call answers not found. */
 async function isStagedOnly(ontologyKey: string, anchorKey: string): Promise<boolean> {
   try {
-    const record = await (await getRuntimeStore(ontologyKey)).anchors().getAnchor(anchorKey);
-    return record?.stagedOnly === true;
+    const record = await (await getRuntimeStore(ontologyKey)).rulesets().get(anchorKey);
+    return record?.writeAccess === "propose"; // bridge: removed in 05
   } catch (error) {
     if (error instanceof NotFoundError) return false;
     throw error;

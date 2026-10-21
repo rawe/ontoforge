@@ -51,7 +51,7 @@ function changeset(overrides: Partial<ChangesetRecord> = {}): ChangesetRecord {
   return {
     id: CS,
     lensId: "lens-1",
-    anchorKey: null,
+    rulesetKey: null,
     version: 7,
     note: null,
     submittedAt: null,

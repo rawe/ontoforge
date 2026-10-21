@@ -70,7 +70,7 @@ function changeset(overrides: Partial<ChangesetRecord> = {}): ChangesetRecord {
   return {
     id: CS,
     lensId: "lens-1",
-    anchorKey: null,
+    rulesetKey: null,
     version: 3,
     note: null,
     submittedAt: null,
@@ -150,7 +150,7 @@ function expectNothingWritten(): void {
 
 describe("start", () => {
   it("binds the lens id and the anchor key of the URL, sweeps expired changesets, answers draft", async () => {
-    store.anchorStore.getAnchor.mockResolvedValue({ key: "agent-a", entity: null, entityFound: false });
+    store.rulesetStore.get.mockResolvedValue({ key: "agent-a", anchor: null, anchorFound: false });
     store.changesetStore.start.mockImplementation(async (cs: Row) => changeset({ ...cs, version: 1, writeCount: 0 }));
 
     const started = await startChangeset("full_lens", "agent-a", "g1", asRuntimeStore(store));
@@ -159,7 +159,7 @@ describe("start", () => {
     const [cutoff] = store.changesetStore.sweep.mock.calls[0]!;
     expect(Date.now() - (cutoff as Date).getTime()).toBeGreaterThanOrEqual(7 * 24 * 3_600_000 - 1_000);
     const [input] = store.changesetStore.start.mock.calls[0]!;
-    expect(input).toMatchObject({ lensId: "lens-1", anchorKey: "agent-a", note: "g1" });
+    expect(input).toMatchObject({ lensId: "lens-1", rulesetKey: "agent-a", note: "g1" });
     expect(input.id).toMatch(UUID);
     expect(started).toMatchObject({ state: "draft", version: 1, note: "g1", anchor: "agent-a", writeCount: 0 });
   });
@@ -207,10 +207,10 @@ describe("binding and expiry", () => {
 
 describe("staging checks", () => {
   it("a dangling anchor, or one at an entity the lens hides, is a 409 with nothing appended", async () => {
-    store.anchorStore.getAnchor.mockResolvedValue({
+    store.rulesetStore.get.mockResolvedValue({
       key: "agent-a",
-      entity: { type: "company", id: ACME },
-      entityFound: false,
+      anchor: { type: "company", id: ACME },
+      anchorFound: false,
     });
     await expect(
       stageOn({ operation: "update_entity", typeKey: "company", id: ACME, properties: { name: "X" } }, "agent-a"),
@@ -219,10 +219,10 @@ describe("staging checks", () => {
   });
 
   it("an anchored URL runs no coverage rule: a write outside the anchor is staged", async () => {
-    store.anchorStore.getAnchor.mockResolvedValue({
+    store.rulesetStore.get.mockResolvedValue({
       key: "agent-a",
-      entity: { type: "company", id: ACME },
-      entityFound: true,
+      anchor: { type: "company", id: ACME },
+      anchorFound: true,
     });
     const answer = await stageOn(
       {
@@ -594,7 +594,7 @@ describe("read, unstage, discard", () => {
   });
 
   it("unstage removes a seq; an unknown seq is not found; a dangling anchor does not stop it", async () => {
-    store.anchorStore.getAnchor.mockResolvedValue({ key: "a", entity: { type: "company", id: ACME }, entityFound: false });
+    store.rulesetStore.get.mockResolvedValue({ key: "a", anchor: { type: "company", id: ACME }, anchorFound: false });
     store.changesetStore.unstage.mockResolvedValue(true);
     await unstage("full_lens", "a", CS, 2, asRuntimeStore(store));
     expect(store.changesetStore.unstage).toHaveBeenCalledWith(CS, 2);

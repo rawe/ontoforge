@@ -34,7 +34,7 @@ import { runQuery, withTransaction, type DbResult, type Querier } from "./errors
 import { isUuid } from "./rows.js";
 
 /** The changeset columns of `c`. */
-const BASE_COLS = `c.changeset_id, c.lens_id, c.anchor_key, c.version, c.note, c.submitted_at,
+const BASE_COLS = `c.changeset_id, c.lens_id, c.ruleset_key, c.version, c.note, c.submitted_at,
        c.created_at, c.last_change_at`;
 
 /** The changeset columns of `c` and its number of staged writes. */
@@ -61,7 +61,7 @@ function toChangeset(row: Row): ChangesetRecord {
   return {
     id: row.changeset_id as string,
     lensId: row.lens_id as string,
-    anchorKey: row.anchor_key as string | null,
+    rulesetKey: row.ruleset_key as string | null,
     version: row.version as number,
     note: row.note as string | null,
     submittedAt: row.submitted_at as Date | null,
@@ -131,30 +131,30 @@ export class PostgresChangesetStore implements ChangesetStore {
   async start(changeset: {
     id: string;
     lensId: string;
-    anchorKey: string | null;
+    rulesetKey: string | null;
     note: string | null;
   }): Promise<ChangesetRecord> {
     const result = await this.query(
-      `INSERT INTO changeset AS c (changeset_id, lens_id, anchor_key, version, note)
+      `INSERT INTO changeset AS c (changeset_id, lens_id, ruleset_key, version, note)
        VALUES ($1, $2, $3, 1, $4)
        RETURNING ${COLS}`,
-      [changeset.id, changeset.lensId, changeset.anchorKey, changeset.note],
+      [changeset.id, changeset.lensId, changeset.rulesetKey, changeset.note],
     );
     return toChangeset(result.rows[0]!);
   }
 
-  async get(id: string, lensId: string, anchorKey: string | null): Promise<ChangesetRecord | null> {
+  async get(id: string, lensId: string, rulesetKey: string | null): Promise<ChangesetRecord | null> {
     if (!isUuid(id)) {
       return null;
     }
     const params: unknown[] = [id, lensId];
-    let anchor = "";
-    if (anchorKey !== null) {
-      params.push(anchorKey);
-      anchor = " AND c.anchor_key = $3";
+    let ruleset = "";
+    if (rulesetKey !== null) {
+      params.push(rulesetKey);
+      ruleset = " AND c.ruleset_key = $3";
     }
     const result = await this.query(
-      `SELECT ${COLS} FROM changeset c WHERE c.changeset_id = $1 AND c.lens_id = $2${anchor}`,
+      `SELECT ${COLS} FROM changeset c WHERE c.changeset_id = $1 AND c.lens_id = $2${ruleset}`,
       params,
     );
     const row = result.rows[0];
@@ -162,20 +162,20 @@ export class PostgresChangesetStore implements ChangesetStore {
   }
 
   /** One statement: a row per changeset, operation and type key. */
-  async list(lensId: string, anchorKey: string | null): Promise<ChangesetSummary[]> {
+  async list(lensId: string, rulesetKey: string | null): Promise<ChangesetSummary[]> {
     if (!isUuid(lensId)) {
       return [];
     }
     const params: unknown[] = [lensId];
-    let anchor = "";
-    if (anchorKey !== null) {
-      params.push(anchorKey);
-      anchor = " AND c.anchor_key = $2";
+    let ruleset = "";
+    if (rulesetKey !== null) {
+      params.push(rulesetKey);
+      ruleset = " AND c.ruleset_key = $2";
     }
     const result = await this.query(
       `SELECT ${BASE_COLS}, w.operation, w.type_key, count(w.seq)::int AS write_count
          FROM changeset c LEFT JOIN changeset_write w ON w.changeset_id = c.changeset_id
-        WHERE c.lens_id = $1${anchor}
+        WHERE c.lens_id = $1${ruleset}
         GROUP BY c.changeset_id, w.operation, w.type_key
         ORDER BY c.submitted_at IS NULL, c.last_change_at DESC, c.changeset_id, w.operation, w.type_key`,
       params,

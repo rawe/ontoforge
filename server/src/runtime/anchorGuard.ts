@@ -26,7 +26,7 @@
  */
 
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
-import type { AnchorEntity, AnchorRecord, RuntimeStore } from "../core/ports.js";
+import type { AnchorEntity, RulesetRecord, RuntimeStore } from "../core/ports.js";
 import type { ParentEnd } from "../core/schemas.js";
 import type { AnchorState } from "./anchors.js";
 import type { EntityTypeDef, LoadedSchema, RelationTypeDef, SchemaCacheValue } from "./schemaCache.js";
@@ -36,9 +36,9 @@ type Row = Record<string, unknown>;
 /** The state of an anchor record against the FULL schema's entity types:
  * no entity is `unanchored`; an entity no longer stored, or of a type no
  * longer in the schema, is `dangling`. */
-export function anchorState(record: AnchorRecord, entityTypes: Record<string, EntityTypeDef>): AnchorState {
-  if (record.entity === null) return "unanchored";
-  return record.entityFound && Object.hasOwn(entityTypes, record.entity.type) ? "anchored" : "dangling";
+export function anchorState(record: RulesetRecord, entityTypes: Record<string, EntityTypeDef>): AnchorState {
+  if (record.anchor === null) return "unanchored";
+  return record.anchorFound && Object.hasOwn(entityTypes, record.anchor.type) ? "anchored" : "dangling";
 }
 
 /** The child and parent ends of a parent relation type. */
@@ -72,16 +72,16 @@ export function hierarchyOf(entityType: string, full: SchemaCacheValue): { types
 
 /** Why every write through an anchor is refused: dangling, or anchored at
  * an entity the lens hides; null when unanchored or anchored and shown. */
-function anchorFault(record: AnchorRecord, loaded: LoadedSchema): "dangling" | "hidden" | null {
+function anchorFault(record: RulesetRecord, loaded: LoadedSchema): "dangling" | "hidden" | null {
   const state = anchorState(record, loaded.full.entityTypes);
   if (state === "unanchored") return null;
-  if (state === "dangling" || record.entity === null) return "dangling";
-  return Object.hasOwn(loaded.scoped.entityTypes, record.entity.type) ? null : "hidden";
+  if (state === "dangling" || record.anchor === null) return "dangling";
+  return Object.hasOwn(loaded.scoped.entityTypes, record.anchor.type) ? null : "hidden";
 }
 
 /** The refusal of an immediate write through an anchor (`anchorFault`). The
  * texts name the anchor key and the lens key only. */
-export function anchorRefusal(anchorKey: string, record: AnchorRecord, loaded: LoadedSchema): string | null {
+export function anchorRefusal(anchorKey: string, record: RulesetRecord, loaded: LoadedSchema): string | null {
   switch (anchorFault(record, loaded)) {
     case "dangling":
       return `Anchor '${anchorKey}' is dangling: its entity no longer exists, so every write is refused until a person re-anchors it`;
@@ -94,7 +94,7 @@ export function anchorRefusal(anchorKey: string, record: AnchorRecord, loaded: L
 
 /** The same refusal for a changeset's staging, submit and commit: what is
  * wrong, with the anchor key and the lens key, and no fix. */
-export function changesetAnchorRefusal(anchorKey: string, record: AnchorRecord, loaded: LoadedSchema): string | null {
+export function changesetAnchorRefusal(anchorKey: string, record: RulesetRecord, loaded: LoadedSchema): string | null {
   switch (anchorFault(record, loaded)) {
     case "dangling":
       return `Anchor '${anchorKey}' is dangling`;
@@ -112,8 +112,8 @@ export function stagedOnlyMessage(anchorKey: string): string {
 
 /** The anchor record of an anchored call, read fresh; an unknown key is
  * not found. */
-async function readRecord(anchorKey: string, store: RuntimeStore): Promise<AnchorRecord> {
-  const record = await store.anchors().getAnchor(anchorKey);
+async function readRecord(anchorKey: string, store: RuntimeStore): Promise<RulesetRecord> {
+  const record = await store.rulesets().get(anchorKey);
   if (record === null) throw new NotFoundError(`Anchor '${anchorKey}' not found`);
   return record;
 }
@@ -147,12 +147,12 @@ export class AnchorGuard {
   static async open(anchorKey: string | null, loaded: LoadedSchema, store: RuntimeStore): Promise<AnchorGuard | null> {
     if (anchorKey === null) return null;
     const record = await readRecord(anchorKey, store);
-    if (record.stagedOnly) throw new ConflictError(stagedOnlyMessage(anchorKey));
+    if (record.writeAccess === "propose") throw new ConflictError(stagedOnlyMessage(anchorKey));
     const refusal = anchorRefusal(anchorKey, record, loaded);
     if (refusal !== null) throw new ConflictError(refusal);
-    if (record.entity === null) return null;
-    const { types, readings } = hierarchyOf(record.entity.type, loaded.full);
-    return new AnchorGuard(anchorKey, record.entity, types, readings, loaded, store);
+    if (record.anchor === null) return null;
+    const { types, readings } = hierarchyOf(record.anchor.type, loaded.full);
+    return new AnchorGuard(anchorKey, record.anchor, types, readings, loaded, store);
   }
 
   /**
@@ -245,8 +245,8 @@ export class AnchorGuard {
    * service. */
   async checkDelete(entityTypeKey: string, entityId: string): Promise<void> {
     await this.checkEntity(entityTypeKey, entityId);
-    const anchors = await this.store.anchors().listAnchors();
-    if (anchors.some((a) => a.entity?.id === entityId && a.entity.type === entityTypeKey)) {
+    const rulesets = await this.store.rulesets().list();
+    if (rulesets.some((r) => r.anchor?.id === entityId && r.anchor.type === entityTypeKey)) {
       throw refuse("entityId", anchoredDeleteMessage(entityId));
     }
   }

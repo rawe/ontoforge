@@ -14,7 +14,7 @@ import type {
 } from "../../src/core/ports.js";
 import { deriveManagedIndices, type SearchIndexSchema } from "../../src/core/searchIndex.js";
 import { recordedDocument } from "../../src/runtime/changesets.js";
-import { createMockAnchorStore, type MockAnchorStore } from "../mockAnchorStore.js";
+import { createMockRulesetStore, type MockRulesetStore } from "../mockRulesetStore.js";
 import { createMockChangesetStore, type MockChangesetStore } from "../mockChangesetStore.js";
 import { createMockNavigatorStore, type MockNavigatorStore } from "../mockNavigatorStore.js";
 import { createMockSearchIndexStore, type MockSearchIndexStore } from "../mockSearchIndexStore.js";
@@ -176,8 +176,8 @@ export function makeRelation(
 
 /** Every port method as a mock — completeness is compiler-enforced. The
  * one non-method member, the store's ontology binding, stays a value; the
- * search-index, navigator, anchor and changeset stores it hands out are
- * mocks too (`indices`, `navigatorStore`, `anchorStore`, `changesetStore`).
+ * search-index, navigator, ruleset and changeset stores it hands out are
+ * mocks too (`indices`, `navigatorStore`, `rulesetStore`, `changesetStore`).
  * `transaction` hands its work the mock itself. */
 export type MockRuntimeStore = {
   [K in Exclude<keyof RuntimeStore, "ontologyKey">]: Mock;
@@ -185,7 +185,7 @@ export type MockRuntimeStore = {
   ontologyKey: string;
   indices: MockSearchIndexStore;
   navigatorStore: MockNavigatorStore;
-  anchorStore: MockAnchorStore;
+  rulesetStore: MockRulesetStore;
   changesetStore: MockChangesetStore;
 };
 
@@ -193,17 +193,17 @@ export type MockRuntimeStore = {
 export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeStore {
   const indices = createMockSearchIndexStore(ontologyKey);
   const navigatorStore = createMockNavigatorStore();
-  const anchorStore = createMockAnchorStore();
+  const rulesetStore = createMockRulesetStore();
   const changesetStore = createMockChangesetStore();
   const store: MockRuntimeStore = {
     ontologyKey,
     indices,
     navigatorStore,
-    anchorStore,
+    rulesetStore,
     changesetStore,
     searchIndices: vi.fn(() => indices),
     navigators: vi.fn(() => navigatorStore),
-    anchors: vi.fn(() => anchorStore),
+    rulesets: vi.fn(() => rulesetStore),
     changesets: vi.fn(() => changesetStore),
     transaction: vi.fn(async (work: (bound: RuntimeStore) => Promise<unknown>) => work(store)),
     supportsKeywordRanking: vi.fn(() => false),

@@ -257,28 +257,29 @@ export function ontologyDdlStatements(): string[] {
   `CREATE INDEX IF NOT EXISTS relation_from_id_idx  ON relation (from_id)`,
   `CREATE INDEX IF NOT EXISTS relation_to_id_idx    ON relation (to_id)`,
 
-  // --- Anchors -----------------------------------------------------------
+  // --- Rulesets ----------------------------------------------------------
 
-  // A named pointer at one entity, operational state beside the instances.
-  // No FK to entity: deleting the entity leaves the anchor dangling.
-  `CREATE TABLE IF NOT EXISTS anchor (
-  key             text        CONSTRAINT anchor_pk PRIMARY KEY,
-  entity_type_key text,       -- this and entity_id NULL: unanchored
-  entity_id       uuid,
+  // A named set of rules for the connections through its key, operational
+  // state beside the instances. No FK to entity: deleting the anchor's
+  // entity leaves the anchor columns as they are.
+  `CREATE TABLE IF NOT EXISTS ruleset (
+  key             text        CONSTRAINT ruleset_pk PRIMARY KEY,
+  anchor_type_key text,       -- this and anchor_id NULL: no anchor
+  anchor_id       uuid,
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
-  staged_only     boolean     NOT NULL DEFAULT false   -- writes only through a changeset
+  write_access    text        NOT NULL DEFAULT 'full'   -- none, propose or full
 )`,
 
   // --- Changesets --------------------------------------------------------
 
   // Staged writes of one lens, persisted together by a commit. Dies with
-  // its lens; no FK to anchor: an anchor delete leaves the changeset.
+  // its lens; no FK to ruleset: a ruleset delete leaves the changeset.
   `CREATE TABLE IF NOT EXISTS changeset (
   changeset_id   uuid        CONSTRAINT changeset_pk PRIMARY KEY,
   lens_id        uuid        NOT NULL CONSTRAINT changeset_lens_fk
                              REFERENCES lens (lens_id) ON DELETE CASCADE,
-  anchor_key     text,       -- NULL: the plain lens
+  ruleset_key    text,       -- NULL: the plain lens
   version        integer     NOT NULL,
   note           text,
   submitted_at   timestamptz,            -- NULL: draft

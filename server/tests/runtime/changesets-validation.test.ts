@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { ConflictError, ValidationError } from "../../src/core/exceptions.js";
-import type { AnchorRecord, ChangesetRecord, ChangesetWriteRecord, ParentLink } from "../../src/core/ports.js";
+import type { RulesetRecord, ChangesetRecord, ChangesetWriteRecord, ParentLink } from "../../src/core/ports.js";
 import { commitChangeset, recordedDocument, lockFreePass } from "../../src/runtime/changesets.js";
 import { invalidateLoadedSchemaCache, invalidateSearchContext, loadSchema } from "../../src/runtime/schemaCache.js";
 import {
@@ -63,7 +63,7 @@ function changeset(overrides: Partial<ChangesetRecord> = {}): ChangesetRecord {
   return {
     id: CS,
     lensId: "lens-1",
-    anchorKey: null,
+    rulesetKey: null,
     version: 7,
     note: null,
     submittedAt: null,
@@ -485,23 +485,23 @@ describe("step 3: the end state", () => {
 });
 
 describe("anchor coverage (V8, V42)", () => {
-  const anchorAt = (entity: { type: string; id: string } | null, entityFound = true): AnchorRecord => ({
+  const anchorAt = (anchor: { type: string; id: string } | null, anchorFound = true): RulesetRecord => ({
     key: "agent-a",
-    entity,
-    entityFound,
+    anchor,
+    anchorFound,
   });
 
   beforeEach(() => {
-    store.changesetStore.get.mockResolvedValue(changeset({ anchorKey: "agent-a" }));
-    store.changesetStore.lockForCommit.mockResolvedValue(changeset({ anchorKey: "agent-a" }));
-    store.anchorStore.getAnchor.mockResolvedValue(anchorAt({ type: "company", id: ACME }));
+    store.changesetStore.get.mockResolvedValue(changeset({ rulesetKey: "agent-a" }));
+    store.changesetStore.lockForCommit.mockResolvedValue(changeset({ rulesetKey: "agent-a" }));
+    store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "company", id: ACME }));
   });
 
   it("covered before and after: commits; the anchor is read inside the transaction", async () => {
     journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
     expect(await commit()).toMatchObject({ committed: 1 });
-    expect(store.anchorStore.getAnchor).toHaveBeenCalledWith("agent-a");
-    expect(store.anchorStore.getAnchor.mock.invocationCallOrder[0]!).toBeGreaterThan(
+    expect(store.rulesetStore.get).toHaveBeenCalledWith("agent-a");
+    expect(store.rulesetStore.get.mock.invocationCallOrder[0]!).toBeGreaterThan(
       store.changesetStore.lockForCommit.mock.invocationCallOrder[0]!,
     );
   });
@@ -529,7 +529,7 @@ describe("anchor coverage (V8, V42)", () => {
   });
 
   it("a re-point since staging makes the writes outside the new subtree violations", async () => {
-    store.anchorStore.getAnchor.mockResolvedValue(anchorAt({ type: "company", id: BETA }));
+    store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "company", id: BETA }));
     journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
     expect(await violations(commit())).toEqual([
       { seq: 1, kind: "not_covered", message: "Not under anchor 'agent-a'" },
@@ -537,7 +537,7 @@ describe("anchor coverage (V8, V42)", () => {
   });
 
   it("a staged delete of an anchored entity", async () => {
-    store.anchorStore.listAnchors.mockResolvedValue([anchorAt({ type: "company", id: ACME }), { key: "b", entity: { type: "department", id: D1 }, entityFound: true }]);
+    store.rulesetStore.list.mockResolvedValue([anchorAt({ type: "company", id: ACME }), { key: "b", anchor: { type: "department", id: D1 }, anchorFound: true }]);
     journal([deleteOf(1, "department", D1)]);
     expect(await violations(commit())).toEqual([
       { seq: 1, kind: "not_covered", message: "Anchored, so it cannot be deleted on an anchored connection" },
@@ -546,19 +546,19 @@ describe("anchor coverage (V8, V42)", () => {
 
   it("anchor_gone, anchor_dangling, hidden: one violation on seq 0, no coverage checked", async () => {
     journal([row(3, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P" } }, before: { name: "Pat" } })]);
-    store.anchorStore.getAnchor.mockResolvedValue(null);
+    store.rulesetStore.get.mockResolvedValue(null);
     expect(await violations(commit())).toEqual([
       { seq: 0, kind: "anchor_gone", message: "Anchor 'agent-a' no longer exists, so this changeset cannot be committed" },
     ]);
 
-    store.anchorStore.getAnchor.mockResolvedValue(anchorAt({ type: "company", id: ACME }, false));
+    store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "company", id: ACME }, false));
     const [dangling] = await violations(commit());
     expect(dangling).toMatchObject({ seq: 0, kind: "anchor_dangling" });
     expect(dangling!.message).toContain("is dangling");
 
     store.getFullSchemaWithLensInclusions.mockResolvedValue(schema(true));
     invalidateLoadedSchemaCache();
-    store.anchorStore.getAnchor.mockResolvedValue(anchorAt({ type: "department", id: D1 }));
+    store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "department", id: D1 }));
     const [hidden] = await violations(commit("hr_view"));
     expect(hidden).toEqual({
       seq: 0,
@@ -569,7 +569,7 @@ describe("anchor coverage (V8, V42)", () => {
   });
 
   it("an unanchored anchor guards nothing", async () => {
-    store.anchorStore.getAnchor.mockResolvedValue(anchorAt(null, false));
+    store.rulesetStore.get.mockResolvedValue(anchorAt(null, false));
     parents[D1] = [link("belongs_to", R1, BETA, D1)];
     journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
     expect(await commit()).toMatchObject({ committed: 1 });

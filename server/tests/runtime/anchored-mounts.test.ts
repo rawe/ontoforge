@@ -12,7 +12,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AnchorRecord } from "../../src/core/ports.js";
+import type { RulesetRecord } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { createMockRuntimeStore, makeEntity, makeFullSchema, type MockRuntimeStore } from "./helpers.js";
 
@@ -54,7 +54,7 @@ afterAll(async () => {
 const ID = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
 
-let anchors: Record<string, AnchorRecord>;
+let anchors: Record<string, RulesetRecord>;
 
 beforeEach(() => {
   holder.store = createMockRuntimeStore();
@@ -68,8 +68,8 @@ beforeEach(() => {
     }
     return null;
   });
-  anchors = { "agent-a": { key: "agent-a", entity: { type: "person", id: ID }, entityFound: true, stagedOnly: false } };
-  holder.store.anchorStore.getAnchor.mockImplementation(async (key: string) => anchors[key] ?? null);
+  anchors = { "agent-a": { key: "agent-a", anchor: { type: "person", id: ID }, anchorFound: true, writeAccess: "full" } };
+  holder.store.rulesetStore.get.mockImplementation(async (key: string) => anchors[key] ?? null);
   for (const spy of Object.values(writes)) spy.mockReset().mockResolvedValue({});
 });
 
@@ -125,14 +125,14 @@ describe("the anchored REST mirror", () => {
       expect(res.json().error.message).toBe("Anchor 'nope' not found");
     }
     expect(writes.createEntity).not.toHaveBeenCalled();
-    expect(holder.store.anchorStore.saveAnchor).not.toHaveBeenCalled();
+    expect(holder.store.rulesetStore.save).not.toHaveBeenCalled();
   });
 
   it("an unknown lens is not found before the anchor", async () => {
     const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/nope/anchors/nope/entities/person" });
     expect(res.statusCode).toBe(404);
     expect(res.json().error.message).toContain("Lens 'nope' not found");
-    expect(holder.store.anchorStore.getAnchor).not.toHaveBeenCalled();
+    expect(holder.store.rulesetStore.get).not.toHaveBeenCalled();
   });
 
   it("reads through the anchor as through the plain lens", async () => {
@@ -167,8 +167,8 @@ describe("the anchor through the lens", () => {
   });
 
   it("unanchored and dangling: visible, no entity, no path", async () => {
-    anchors["agent-u"] = { key: "agent-u", entity: null, entityFound: false, stagedOnly: true };
-    anchors["agent-d"] = { key: "agent-d", entity: { type: "person", id: ID }, entityFound: false, stagedOnly: false };
+    anchors["agent-u"] = { key: "agent-u", anchor: null, anchorFound: false, writeAccess: "propose" };
+    anchors["agent-d"] = { key: "agent-d", anchor: { type: "person", id: ID }, anchorFound: false, writeAccess: "full" };
     expect((await root("all", "agent-u")).json()).toEqual({
       key: "agent-u", state: "unanchored", stagedOnly: true, visible: true, entity: null, path: [],
     });

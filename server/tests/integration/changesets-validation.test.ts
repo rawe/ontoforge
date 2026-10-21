@@ -6,8 +6,9 @@
  * visible, missing, dangling, drift), drift re-checked under the lock
  * against a second connection, the end-state rules (has children, two
  * parents, cycle, endpoint type), anchor coverage before and after, the
- * re-point, a dangling or hidden anchor, the anchor gone, the cap of 100
- * listed violations, and messages that name nothing a scoped lens hides.
+ * re-point, a deleted or hidden anchor, the ruleset gone, each of the five
+ * ruleset kinds once more through a ruleset's URL, the cap of 100 listed
+ * violations, and messages that name nothing a scoped lens hides.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -576,6 +577,85 @@ describe("anchor coverage (V8, V17, V21, V42)", () => {
     expect(await rejected(cs)).toEqual([
       { seq: 0, kind: "ruleset_gone", message: "Ruleset 'agent-b' no longer exists, so this changeset cannot be committed" },
     ]);
+  });
+});
+
+describe("the five ruleset violation kinds through the REST mirror", () => {
+  const url = (key: string, lens = ALL): string => `${lens}/rulesets/${key}`;
+
+  beforeAll(fresh, 60_000);
+
+  it("ruleset_gone: the ruleset deleted after staging; the plain lens commit rejects", async () => {
+    await pointAnchor("k-gone", "project", e.P1);
+    const cs = await start(url("k-gone"));
+    await staged(url("k-gone"), cs, { operation: "update_entity", type: "task", id: e.T1, properties: { name: "T1 gone" } });
+    expect((await call("DELETE", `${RULESETS}/k-gone`)).status).toBe(204);
+    const read = await call("GET", `${url("k-gone")}/changesets/${cs}`);
+    expect(read).toMatchObject({ status: 404, body: { error: { message: "Ruleset 'k-gone' not found" } } });
+    expect(await rejected(cs)).toEqual([
+      { seq: 0, kind: "ruleset_gone", message: "Ruleset 'k-gone' no longer exists, so this changeset cannot be committed" },
+    ]);
+  });
+
+  it("outside_subtree: an update of a task under another project, named by neither id nor type", async () => {
+    await pointAnchor("k-sub", "project", e.P1);
+    const cs = await start(url("k-sub"));
+    await staged(url("k-sub"), cs, { operation: "update_entity", type: "task", id: e.T4, properties: { name: "T4 sub" } });
+    const violations = await rejected(cs, url("k-sub"));
+    expect(violations).toEqual([{ seq: 1, kind: "outside_subtree", message: "Outside the anchor subtree of ruleset 'k-sub'" }]);
+    expect(JSON.stringify(violations)).not.toMatch(new RegExp(`${e.T4}|${e.P1}|task|project`));
+  });
+
+  it("anchor_deleted: staging, submit and the commit refuse with one text", async () => {
+    await pointAnchor("k-del", "task", e.T1a1);
+    const cs = await start(url("k-del"));
+    await staged(url("k-del"), cs, { operation: "update_entity", type: "person", id: e.Kim, properties: { name: "Kim del" } });
+    expect((await call("DELETE", `${ALL}/entities/task/${e.T1a1}`)).status).toBe(204);
+    const text = "The anchor of ruleset 'k-del' no longer exists";
+    const stage = await call("POST", `${url("k-del")}/changesets/${cs}/writes`, {
+      operation: "update_entity",
+      type: "person",
+      id: e.Ana,
+      properties: { name: "Ana del" },
+    });
+    expect(stage).toMatchObject({ status: 409, body: { error: { message: text } } });
+    const submit = await call("POST", `${url("k-del")}/changesets/${cs}/submit`, {});
+    expect(submit).toMatchObject({ status: 409, body: { error: { message: text } } });
+    expect(await rejected(cs, url("k-del"))).toEqual([{ seq: 0, kind: "anchor_deleted", message: text }]);
+  });
+
+  it("anchor_hidden: re-pointed at an entity the lens hides; staging, submit and the commit refuse with one text", async () => {
+    const lens = runtimePrefix(O, "portfolio");
+    await pointAnchor("k-hid", "project", e.P3);
+    const cs = await start(url("k-hid", lens));
+    await staged(url("k-hid", lens), cs, { operation: "update_entity", type: "project", id: e.P3, properties: { name: "P3 hid" } });
+    await pointAnchor("k-hid", "task", e.T6);
+    const text = "The anchor of ruleset 'k-hid' is an entity that lens 'portfolio' does not show";
+    const stage = await call("POST", `${url("k-hid", lens)}/changesets/${cs}/writes`, {
+      operation: "update_entity",
+      type: "project",
+      id: e.P3,
+      properties: { name: "P3 hid again" },
+    });
+    expect(stage).toMatchObject({ status: 409, body: { error: { message: text } } });
+    const submit = await call("POST", `${url("k-hid", lens)}/changesets/${cs}/submit`, {});
+    expect(submit).toMatchObject({ status: 409, body: { error: { message: text } } });
+    const violations = await rejected(cs, url("k-hid", lens));
+    expect(violations).toEqual([{ seq: 0, kind: "anchor_hidden", message: text }]);
+    expect(JSON.stringify([stage.body, submit.body, violations])).not.toMatch(new RegExp(`task|${e.T6}`));
+  });
+
+  it("deletes_anchor: a staged delete of another ruleset's anchor inside the subtree, naming neither that ruleset nor the entity", async () => {
+    await pointAnchor("k-own", "project", e.P1);
+    await pointAnchor("k-leaf", "task", e.T3);
+    const cs = await start(url("k-own"));
+    await staged(url("k-own"), cs, { operation: "delete_entity", type: "task", id: e.T3 });
+    const violations = await rejected(cs, url("k-own"));
+    expect(violations).toEqual([
+      { seq: 1, kind: "deletes_anchor", message: "It is the anchor of a ruleset, so it cannot be deleted on this connection" },
+    ]);
+    expect(JSON.stringify(violations)).not.toMatch(new RegExp(`k-leaf|${e.T3}`));
+    expect(await name("task", e.T3)).toBe("T3");
   });
 });
 

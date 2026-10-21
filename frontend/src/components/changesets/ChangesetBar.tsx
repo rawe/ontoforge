@@ -3,10 +3,12 @@ import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useChangesets } from '@/api/hooks'
-import { GONE_CHANGESET_TEXT } from '@/api/staging'
 import { changesetLabel, writesText } from '@/components/changesets/changesets'
 import { Button } from '@/components/ui/button'
 import { pinnedChangeset, unpinChangeset, usePinnedChangeset } from '@/lib/pinnedChangeset'
+
+/** The bar's toast when the list no longer shows the pinned changeset; it is unpinned. */
+const BAR_CHANGESET_GONE_TEXT = 'The changeset is gone (committed, discarded or expired) — you are editing live again.'
 
 /**
  * The strip above every Workbench page while a changeset is pinned: which
@@ -35,7 +37,7 @@ export function ChangesetBar({ ontologyKey, lensKey }: { ontologyKey: string; le
       // Only while it is still the pinned one: another tab may have moved on.
       if (!listed && pinnedChangeset(ontologyKey, lensKey) === pinned) {
         unpinChangeset(ontologyKey, lensKey)
-        toast.warning(GONE_CHANGESET_TEXT)
+        toast.warning(BAR_CHANGESET_GONE_TEXT)
       }
     })
   }, [missing, listReadAt, pinned, ontologyKey, lensKey, refetch])

@@ -102,7 +102,7 @@ export async function stageIntoPinned(
   return stagedOutcome(changesetId, await stage(changesetId))
 }
 
-/** Said when the pinned changeset turns out to be gone: a write's error, or the bar's toast; it is unpinned. */
+/** A write's error when its stage call found the pinned changeset gone; it is unpinned. */
 export const GONE_CHANGESET_TEXT = 'The changeset is gone — nothing was written. You are editing live again.'
 
 /** Whether a stage call's error says the changeset itself is gone (committed, discarded, expired). */

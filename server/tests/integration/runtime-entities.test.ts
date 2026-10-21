@@ -217,6 +217,30 @@ describe("entity CRUD through the unscoped lens", () => {
     expect(created.name).toBe('{"a":1}');
   });
 
+  it("a string property holds JSON object and array text exactly as sent, on create, read and update", async () => {
+    const objectText = '{"title": "Plan", "tags": ["a", "b"], "nested": {"n": 1, "ok": true}}';
+    const arrayText = '[1, "two", {"three": 3}, [4], null]';
+    const url = "/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person";
+
+    const created = await createPerson("test_lens", { name: objectText, email: arrayText });
+    expect(created.name).toBe(objectText);
+    expect(created.email).toBe(arrayText);
+
+    const read = await app.inject({ method: "GET", url: `${url}/${created._id}` });
+    expect(read.statusCode).toBe(200);
+    expect(read.json().name).toBe(objectText);
+    expect(read.json().email).toBe(arrayText);
+
+    const updated = await app.inject({
+      method: "PATCH",
+      url: `${url}/${created._id}`,
+      payload: { name: arrayText, email: objectText },
+    });
+    expect(updated.statusCode, updated.body).toBe(200);
+    expect(updated.json().name).toBe(arrayText);
+    expect(updated.json().email).toBe(objectText);
+  });
+
   it("a garbage id answers not-found on read, update and delete", async () => {
     // Off-format ids short-circuit to not-found — indistinguishable from
     // a well-formed id that matches nothing.

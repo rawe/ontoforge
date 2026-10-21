@@ -1,10 +1,10 @@
 /**
  * Pure helpers for the Workbench's Changesets page: the list order and the
  * sidebar count, what a list row and a staged write's row say, the
- * violations of a rejected commit and the note built from them, and how
- * the bar names the pinned changeset, and why the Explorer canvas does not
- * edit while one is pinned. No React, no I/O — unit-tested with
- * `node --test`.
+ * violations of a rejected commit and the note built from them, how the
+ * bar names the pinned changeset, why the Explorer canvas does not edit
+ * while one is pinned, and the values of an entity a changeset creates. No
+ * React, no I/O — unit-tested with `node --test`.
  */
 
 import type {
@@ -134,6 +134,37 @@ export function stagedDocumentKeys(write: StagedWriteView, writes: readonly Stag
     .filter(([, value]) => isDocumentStub(value))
     .map(([key]) => key)
 }
+
+/**
+ * The values of an entity this changeset creates, as far as `writes` (the
+ * page shown) tells: the create's values with the later updates of that id
+ * folded in by seq (null removes a key). Null for any other write, and for
+ * a create a later write on the page deletes.
+ */
+export function stagedCreateValues(
+  write: StagedWriteView,
+  writes: readonly StagedWriteView[] = [],
+): Record<string, JsonValue> | null {
+  if (write.operation !== 'create_entity' || write.type === null || write.id === null) return null
+  const values: Record<string, JsonValue> = { ...write.after }
+  for (const other of writes) {
+    if (other.seq <= write.seq || other.type !== write.type || other.id !== write.id) continue
+    if (other.operation === 'delete_entity') return null
+    if (other.operation !== 'update_entity') continue
+    for (const [key, value] of Object.entries(other.after ?? {})) {
+      if (value === null) delete values[key]
+      else values[key] = value
+    }
+  }
+  return values
+}
+
+/** Beside a staged create while its changeset is not the pinned one. */
+export const EXTEND_HINT_TEXT = 'Work in this changeset to extend it'
+
+/** Why a write onto an entity only a changeset creates was refused: that changeset is not pinned. */
+export const STAGED_ONLY_TEXT =
+  'It exists only in its changeset — work in that changeset to extend it. Nothing was written.'
 
 const valuesText = (values: Readonly<Record<string, JsonValue>>) =>
   Object.entries(values)

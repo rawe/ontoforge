@@ -12,6 +12,8 @@ export interface QuickAddParent {
   typeKey: string
   id: string
   label: string
+  /** Set when the parent exists only in this changeset (created there): the child is staged there too. */
+  changesetId?: string
 }
 
 export interface QuickAddDetail {

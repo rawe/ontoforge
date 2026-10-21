@@ -7,6 +7,8 @@ import {
   FileStack,
   FileText,
   Loader2,
+  Pencil,
+  Plus,
   Send,
   Trash2,
   Undo2,
@@ -14,10 +16,11 @@ import {
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { useChangeset, useChangesets, useRuntimeSchema } from '@/api/hooks'
+import { useChangeset, useChangesets, useDisplayLabel, useRuntimeSchema } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
+import { stagedEntity } from '@/api/staging'
 import type { ChangesetViolation, JsonValue, StagedOperation, StagedWriteView } from '@/api/types'
 import { DocumentViewerDialog, type DocumentViewerTarget } from '@/components/DocumentViewerDialog'
 import { EmptyState } from '@/components/EmptyState'
@@ -27,13 +30,19 @@ import { ChangesetNoteField } from '@/components/changesets/ChangesetNoteField'
 import { ChangesetStateChip } from '@/components/changesets/ChangesetStateChip'
 import { ChangesetExplainerButton } from '@/components/changesets/explainer/ChangesetExplainer'
 import {
+  EditStagedEntityDialog,
+  type StagedEntityTarget,
+} from '@/components/changesets/EditStagedEntityDialog'
+import {
   changeText,
+  EXTEND_HINT_TEXT,
   isCommittedDataKey,
   isVersionMismatch,
   markerLabel,
   operationLabel,
   operationsSummary,
   shortId,
+  stagedCreateValues,
   stagedDocumentKeys,
   targetText,
   violationLine,
@@ -43,6 +52,8 @@ import {
   writesText,
 } from '@/components/changesets/changesets'
 import { PinChangesetButton } from '@/components/changesets/PinChangesetButton'
+import { hierarchyLinks, linkedTypeKey, type HierarchyLink } from '@/components/entity/hierarchy'
+import { openQuickAdd } from '@/components/quickadd/quickAddBus'
 import { absoluteTime, relativeTime } from '@/components/table/format'
 import {
   AlertDialog,
@@ -64,7 +75,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { pinnedChangeset, unpinChangeset } from '@/lib/pinnedChangeset'
+import { pinnedChangeset, unpinChangeset, usePinnedChangeset } from '@/lib/pinnedChangeset'
 import { cn } from '@/lib/utils'
 
 /** Why Unstage and Discard are off while submitted. */
@@ -96,7 +107,8 @@ function Disabled({ reason, children }: { reason: string; children: ReactNode })
  * it was clicked; Submit, with an optional note, and Unsubmit, with a
  * required one, move it between draft and submitted; Discard and Unstage
  * work only on a draft. A draft can be pinned ("Work in this changeset"),
- * so the Workbench's writes stage into it.
+ * so the Workbench's writes stage into it; while it is, an entity it creates
+ * offers "Edit values…" and "Add child…" on its row, both staged here.
  */
 export function ChangesetDetailPage() {
   const { ontologyKey, lensKey, changesetId } = useParams<{
@@ -112,6 +124,8 @@ export function ChangesetDetailPage() {
   const read = useChangeset(ontologyKey!, lensKey!, changesetId!, { offset, limit: WRITES_PAGE_SIZE }, !gone)
   const list = useChangesets(ontologyKey, lensKey)
   const schema = useRuntimeSchema(ontologyKey, lensKey)
+  const pinned = usePinnedChangeset(ontologyKey!, lensKey!)
+  const displayLabel = useDisplayLabel()
 
   // The violations of a rejected commit or submit.
   const [rejected, setRejected] = useState<{
@@ -126,6 +140,7 @@ export function ChangesetDetailPage() {
   // The version shown when Commit was clicked; set while its confirmation is open.
   const [commitVersion, setCommitVersion] = useState<number | null>(null)
   const [docTarget, setDocTarget] = useState<DocumentViewerTarget | null>(null)
+  const [editTarget, setEditTarget] = useState<StagedEntityTarget | null>(null)
 
   const listUrl = `/o/${ontologyKey}/w/${lensKey}/changesets`
   // The list and every page of this changeset's read share the list's key.
@@ -342,9 +357,68 @@ export function ChangesetDetailPage() {
       {documentButtons(write)}
     </>
   )
+  /**
+   * A draft's staged create: "Edit values…" and an "Add child" button per
+   * parent relation it can be the parent of (as on an entity page) while it
+   * is the pinned changeset, else a hint. Its values and name take the page's
+   * later updates of it into account.
+   */
+  const extendActions = (write: StagedWriteView) => {
+    const values = submitted ? null : stagedCreateValues(write, changeset.writes)
+    const entityType = schema.data?.entityTypes.find((t) => t.key === write.type)
+    if (values === null || entityType === undefined) return null
+    if (pinned !== changeset.id) {
+      return <p className="mt-1 text-[11.5px] text-muted-foreground">{EXTEND_HINT_TEXT}</p>
+    }
+    const label = displayLabel(stagedEntity(entityType.key, write.id!, values))
+    const childLinks = hierarchyLinks(schema.data!.relationTypes, entityType.key).children
+    const addChild = (link: HierarchyLink) =>
+      openQuickAdd(linkedTypeKey(link), {
+        relationTypeKey: link.relationType.key,
+        typeKey: entityType.key,
+        id: write.id!,
+        label,
+        changesetId: changeset.id,
+      })
+    const childName = (link: HierarchyLink) =>
+      schema.data!.entityTypes.find((t) => t.key === linkedTypeKey(link))?.displayName ?? linkedTypeKey(link)
+    return (
+      <div className="mt-1 flex flex-wrap gap-1">
+        {entityType.properties.length > 0 && (
+          <Button
+            variant="outline"
+            size="xs"
+            aria-label={`Edit the values of #${write.seq}`}
+            onClick={() => setEditTarget({ changesetId: changeset.id, entityType, id: write.id!, label, values })}
+          >
+            <Pencil className="size-3" />
+            Edit values…
+          </Button>
+        )}
+        {childLinks.map((link) => (
+          <Button
+            key={link.relationType.key}
+            variant="outline"
+            size="xs"
+            title={`Add a ${childName(link)} under ${label} via ${link.relationType.key}`}
+            onClick={() => addChild(link)}
+          >
+            <Plus className="size-3" />
+            Add {childName(link)}…
+          </Button>
+        ))}
+      </div>
+    )
+  }
+  const createChange = (write: StagedWriteView) => (
+    <>
+      {entityChange(write)}
+      {extendActions(write)}
+    </>
+  )
   /** What a write's change cell shows, by its operation. */
   const changeViews: Record<StagedOperation, (write: StagedWriteView) => ReactNode> = {
-    create_entity: entityChange,
+    create_entity: createChange,
     update_entity: entityChange,
     delete_entity: plainChange,
     create_relation: plainChange,
@@ -601,6 +675,16 @@ export function ChangesetDetailPage() {
         target={docTarget}
         onClose={() => setDocTarget(null)}
       />
+
+      {editTarget !== null && (
+        <EditStagedEntityDialog
+          key={`${editTarget.changesetId}:${editTarget.id}`}
+          ontologyKey={ontologyKey}
+          lensKey={lensKey}
+          target={editTarget}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
 
       <AlertDialog open={commitVersion !== null} onOpenChange={(open) => !open && setCommitVersion(null)}>
         <AlertDialogContent>

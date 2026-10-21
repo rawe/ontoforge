@@ -13,6 +13,7 @@ import {
   operationsSummary,
   shortId,
   sortChangesets,
+  stagedCreateValues,
   stagedDocumentKeys,
   stateLabel,
   submittedCount,
@@ -328,4 +329,19 @@ test('a read key sits under its list key, which an exact invalidation leaves alo
 test('changesetLabel names a changeset by its note, else its short id', () => {
   assert.equal(changesetLabel({ id: '7f3a9c00-1111-2222', note: 'Move the tasks' }), 'Move the tasks')
   assert.equal(changesetLabel({ id: '7f3a9c00-1111-2222', note: null }), '7f3a9c00…')
+})
+
+test('stagedCreateValues folds the page\'s later updates of a created id into its values', () => {
+  const create = write({ seq: 2, operation: 'create_entity', id: 'p-new', after: { name: 'P9', budget: 5, phase: 'a' } })
+  const rename = write({ seq: 4, id: 'p-new', after: { name: 'P9b', phase: null } })
+  const otherId = write({ seq: 5, id: 'p-other', after: { name: 'X' } })
+  const earlier = write({ seq: 1, id: 'p-new', after: { name: 'never' } })
+  assert.deepEqual(stagedCreateValues(create, [earlier, create, rename, otherId]), { name: 'P9b', budget: 5 })
+  assert.deepEqual(stagedCreateValues(create), { name: 'P9', budget: 5, phase: 'a' })
+  // Deleted later on the page: nothing to extend.
+  const deletion = write({ seq: 6, operation: 'delete_entity', id: 'p-new' })
+  assert.equal(stagedCreateValues(create, [create, rename, deletion]), null)
+  // Only creates of a visible type.
+  assert.equal(stagedCreateValues(rename), null)
+  assert.equal(stagedCreateValues(write({ operation: 'create_entity', type: null, id: 'p-new' })), null)
 })

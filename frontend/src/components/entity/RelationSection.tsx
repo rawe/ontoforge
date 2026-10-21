@@ -31,6 +31,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { usePinnedChangeset } from '@/lib/pinnedChangeset'
 import { cn } from '@/lib/utils'
 
 const PAGE_SIZE = 10
@@ -76,6 +77,7 @@ export function RelationSection({
   const queryClient = useQueryClient()
   const [limit, setLimit] = useState(PAGE_SIZE)
   const [unlinkTarget, setUnlinkTarget] = useState<Neighbor | null>(null)
+  const staging = usePinnedChangeset(ontologyKey, lensKey) !== null
 
   const myTypeKey = entity._entityTypeKey
   const isOutgoing = relationType.fromEntityTypeKey === myTypeKey
@@ -281,11 +283,12 @@ export function RelationSection({
           <AlertDialogHeader>
             <AlertDialogTitle>Remove relation?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes the {relationType.displayName} relation
+              {staging ? 'The removal of the ' : 'This removes the '}
+              {relationType.displayName} relation
               {unlinkTarget !== null
                 ? ` to “${displayLabel(unlinkTarget.entity)}”`
                 : ''}
-              . Both entities are kept.
+              {staging ? ' is staged into the pinned changeset' : ''}. Both entities are kept.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

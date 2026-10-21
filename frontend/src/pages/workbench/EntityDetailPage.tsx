@@ -329,8 +329,9 @@ export function EntityDetailPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete “{label}”?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    The entity and all of its relations are removed permanently. This
-                    cannot be undone.
+                    {pinned === null
+                      ? 'The entity and all of its relations are removed permanently. This cannot be undone.'
+                      : 'The delete is staged into the pinned changeset: nothing is removed until it is committed.'}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 {anchoredHere.length > 0 && (

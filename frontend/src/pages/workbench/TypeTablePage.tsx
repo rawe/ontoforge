@@ -63,7 +63,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { displayLabel } from '@/lib/displayLabel'
 import { isDocumentStub } from '@/lib/documents'
-import { pinnedChangeset } from '@/lib/pinnedChangeset'
+import { pinnedChangeset, usePinnedChangeset } from '@/lib/pinnedChangeset'
 
 const PAGE_SIZE = 25
 
@@ -122,6 +122,7 @@ export function TypeTablePage() {
   }, [wantsNew, typeKey, searchParams, setSearchParams])
   const queryClient = useQueryClient()
   const writes = useRuntimeWrites(ontologyKey ?? '', lensKey ?? '')
+  const pinned = usePinnedChangeset(ontologyKey ?? '', lensKey ?? '')
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const type = schema.data?.entityTypes.find((t) => t.key === typeKey)
   const nameProperty = type?.nameProperty
@@ -720,6 +721,7 @@ export function TypeTablePage() {
             count={selectedIds.length}
             typeName={type.displayName.toLowerCase()}
             deleting={bulkDelete.isPending}
+            staging={pinned !== null}
             onDelete={() => bulkDelete.mutate(selectedIds)}
             onClear={() => setRowSelection({})}
           />

@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { usePinnedChangeset } from '@/lib/pinnedChangeset'
 import { cn } from '@/lib/utils'
 
 /** Enough to show a second parent, should a race have written one. */
@@ -57,6 +58,7 @@ export function ParentSection({
   const displayLabel = useDisplayLabel()
   const queryClient = useQueryClient()
   const [unlinkTarget, setUnlinkTarget] = useState<Neighbor | null>(null)
+  const staging = usePinnedChangeset(ontologyKey, lensKey) !== null
   const typeKey = entity._entityTypeKey
 
   const results = useQueries({
@@ -191,9 +193,10 @@ export function ParentSection({
           <AlertDialogHeader>
             <AlertDialogTitle>Remove the parent?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes the {unlinkTarget?.relation._relationTypeKey} relation
-              {unlinkTarget !== null ? ` to “${displayLabel(unlinkTarget.entity)}”` : ''}. Both
-              entities are kept.
+              {staging ? 'The removal of the ' : 'This removes the '}
+              {unlinkTarget?.relation._relationTypeKey} relation
+              {unlinkTarget !== null ? ` to “${displayLabel(unlinkTarget.entity)}”` : ''}
+              {staging ? ' is staged into the pinned changeset' : ''}. Both entities are kept.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -17,6 +17,7 @@ export function createMockChangesetStore(): MockChangesetStore {
     list: vi.fn(async () => []),
     page: vi.fn(async () => []),
     findMinted: vi.fn(async () => null),
+    findMintedAmong: vi.fn(async () => []),
     writesOn: vi.fn(async () => []),
     stagedBytes: vi.fn(async () => 0),
     append: vi.fn(async () => null),

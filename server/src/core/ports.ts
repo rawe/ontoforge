@@ -757,11 +757,24 @@ export interface RuntimeStore {
   ): Promise<{ entity: Row; relation: Row }>;
 
   // ------------------------------------------------------------------
-  // Neutral reads for commit validation
+  // Neutral reads for a changeset's checks and commit validation
   //
-  // They take `readings` as the hierarchy reads do and evaluate no rule:
-  // the service does. Off-format ids match nothing.
+  // They evaluate no rule: the service does. The hierarchy ones take
+  // `readings` as the hierarchy reads do. Off-format ids match nothing.
+  // A read taking `documentKeys` (entity type key → its document
+  // property keys) returns each string stored under such a key as its
+  // fingerprint, `{sha256, length}`: the hex SHA-256 of its UTF-8 bytes
+  // and its length in characters (code points), never its text.
   // ------------------------------------------------------------------
+
+  /** The entities of `ids`, by id, as `getEntitiesByIds` returns them
+   * without property definitions, but each document value as its
+   * fingerprint; an unknown id is left out. */
+  getEntitiesByIdsHashed(ids: string[], documentKeys: Record<string, string[]>): Promise<Record<string, Row>>;
+
+  /** The relations of `ids`, of any type, by id, as `getRelation` returns
+   * them; an unknown id is left out. */
+  getRelationsByIds(ids: string[]): Promise<Record<string, Row>>;
 
   /** The parent relations whose child end is one of `ids`. */
   parentsOf(ids: string[], readings: Record<string, ParentEnd>): Promise<ParentLink[]>;
@@ -1148,6 +1161,9 @@ export interface ChangesetStore {
 
   /** The staged create that minted `mintedId`; null when none did. */
   findMinted(id: string, mintedId: string): Promise<ChangesetWriteRecord | null>;
+
+  /** The staged creates that minted any of `mintedIds`, by seq. */
+  findMintedAmong(id: string, mintedIds: string[]): Promise<ChangesetWriteRecord[]>;
 
   /** The staged writes that minted `objectId` or target it, by seq. */
   writesOn(id: string, objectId: string): Promise<ChangesetWriteRecord[]>;

@@ -43,8 +43,11 @@
  * - `transaction` hands its work a store bound to one connection: the two
  *   doors, and the anchor and changeset stores' doors, take the bound
  *   querier instead of the pool. The neutral reads (`parentsOf`,
- *   `childrenOf`, `lockTargets`) serve commit validation; `lockTargets`
- *   and a locking `childrenOf` hold their rows only inside a transaction.
+ *   `childrenOf`, `lockTargets`, `getEntitiesByIdsHashed`,
+ *   `getRelationsByIds`) serve a changeset's checks and commit
+ *   validation; `lockTargets` and a locking `childrenOf` hold their rows
+ *   only inside a transaction. `getEntitiesByIdsHashed` fingerprints
+ *   document values in SQL, so no document text leaves the database.
  */
 
 
@@ -134,6 +137,26 @@ function relationRow(row: Row, propertyDefs: PropertyDefs): Row {
     toEntityId: row.to_id,
     ...fromJson(row.props as Row, propertyDefs),
   };
+}
+
+/**
+ * `${alias}.props` with every string under a document key of its type
+ * replaced by its fingerprint, `{sha256, length}`: the hex SHA-256 of
+ * its UTF-8 bytes and `char_length`. `keysParam` is jsonb, type key → its
+ * document keys. The `OFFSET 0` fences keep each document read out of
+ * `props` once, so it is not detoasted again per use.
+ */
+function fingerprintedProps(alias: string, keysParam: string): string {
+  return `(SELECT (${alias}.props - coalesce(array_agg(k), '{}'::text[]))
+             || coalesce(jsonb_object_agg(k, jsonb_build_object(
+                  'sha256', encode(sha256(convert_to(t, 'UTF8')), 'hex'),
+                  'length', char_length(t))), '{}'::jsonb)
+           FROM (SELECT k, v #>> '{}' AS t
+                   FROM (SELECT k, ${alias}.props -> k AS v
+                           FROM jsonb_array_elements_text(${keysParam}::jsonb -> ${alias}.type_key) AS k
+                         OFFSET 0) AS keyed
+                  WHERE jsonb_typeof(v) = 'string'
+                 OFFSET 0) AS documents) AS props`;
 }
 
 /** The jsonb text for a props write: datetime `Date`s → ISO text. */
@@ -869,6 +892,30 @@ export class PostgresRuntimeStore implements RuntimeStore {
       const result = await querier.query(`${children} ORDER BY id FOR UPDATE`, params);
       return result.rows.map(toParentLink);
     });
+  }
+
+  /** One statement; each document value fingerprinted in SQL. */
+  async getEntitiesByIdsHashed(ids: string[], documentKeys: Record<string, string[]>): Promise<Record<string, Row>> {
+    const validIds = ids.filter(isUuid);
+    if (validIds.length === 0) {
+      return {};
+    }
+    const result = await this.query(
+      `SELECT e.id, e.type_key, e.created_at, e.updated_at, ${fingerprintedProps("e", "$2")}
+         FROM entity e WHERE e.id = ANY($1::uuid[])`,
+      [validIds, JSON.stringify(documentKeys)],
+    );
+    return Object.fromEntries(result.rows.map((row) => [row.id as string, entityRow(row, NO_DEFS)]));
+  }
+
+  /** One statement; no property definitions cross it, as `getRelation`. */
+  async getRelationsByIds(ids: string[]): Promise<Record<string, Row>> {
+    const validIds = ids.filter(isUuid);
+    if (validIds.length === 0) {
+      return {};
+    }
+    const result = await this.query(`SELECT ${RELATION_COLS} FROM relation WHERE id = ANY($1::uuid[])`, [validIds]);
+    return Object.fromEntries(result.rows.map((row) => [row.id as string, relationRow(row, NO_DEFS)]));
   }
 
   /** Entities first, then relations, each in id order. */

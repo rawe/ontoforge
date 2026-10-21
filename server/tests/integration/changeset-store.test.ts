@@ -22,6 +22,7 @@ import {
   type RuntimeStore,
 } from "../../src/core/ports.js";
 import { planSearchWrite } from "../../src/core/searchDependencies.js";
+import { recordedDocument } from "../../src/runtime/changesets.js";
 import { invalidateLoadedSchemaCache, loadSearchContext } from "../../src/runtime/schemaCache.js";
 import { createOntology, modelPrefix, runtimePrefix } from "./fixture.js";
 import { buildHierarchy, HIERARCHY_ONTOLOGY_KEY as O, type HierarchyIds } from "./hierarchy.js";
@@ -320,6 +321,16 @@ describe("ChangesetStore", () => {
     expect(await changesets.findMinted(cs.id, minted)).toMatchObject({ seq: 1, operation: "create_entity" });
     expect(await changesets.findMinted(cs.id, target)).toBeNull();
     expect(await changesets.findMinted(randomUUID(), minted)).toBeNull();
+    // The batch form: the creates that minted any of the ids, by seq.
+    const relation = randomUUID();
+    expect(
+      await changesets.append(cs.id, [{ write: write("create_relation", "has_task", { mintedId: relation }), bytes: 0 }]),
+    ).toEqual([4]);
+    const among = await changesets.findMintedAmong(cs.id, [relation, target, minted, "not-a-uuid"]);
+    expect(among.map((w) => [w.seq, w.mintedId])).toEqual([[1, minted], [4, relation]]);
+    expect(await changesets.findMintedAmong(cs.id, [target])).toEqual([]);
+    expect(await changesets.findMintedAmong(cs.id, [])).toEqual([]);
+    expect(await changesets.findMintedAmong(randomUUID(), [minted])).toEqual([]);
 
     expect(await changesets.append(randomUUID(), [{ write: write("create_entity", "task"), bytes: 0 }])).toBeNull();
   });
@@ -743,5 +754,45 @@ describe("neutral reads", () => {
     await store.updateEntity("task", ids.T1, { name: "T1" }, [], {});
     await store.createRelation("assigned_to", randomUUID(), ids.T1, ids.Ben, {}, {});
     expect(await store.lockTargets([])).toEqual([]);
+  });
+
+  describe("document values as their fingerprint", () => {
+    /** Multi-byte text: an emoji (two UTF-16 units, four UTF-8 bytes), an umlaut. */
+    const TEXT = `Plan 😀 für T1\n${"x".repeat(5000)}`;
+    const DOCS = { task: ["notes"] };
+
+    beforeAll(async () => {
+      await store.updateEntity("task", ids.T1, { notes: TEXT, _doc_notes_length: recordedDocument(TEXT).length }, [], {});
+    });
+
+    afterAll(async () => {
+      await store.updateEntity("task", ids.T1, {}, ["notes", "_doc_notes_length"], {});
+    });
+
+    it("getEntitiesByIdsHashed: the rows as getEntitiesByIds reads them raw, a document as recordedDocument keeps it", async () => {
+      const read = [ids.T1, ids.T2, ids.P1, randomUUID(), "not-a-uuid"];
+      const raw = await store.getEntitiesByIds(read, {});
+      const hashed = await store.getEntitiesByIdsHashed(read, DOCS);
+      expect(Object.keys(hashed).sort()).toEqual([ids.T1, ids.T2, ids.P1].sort());
+      // SQL's sha256 over the UTF-8 bytes and char_length equal Node's hash and code points.
+      expect(hashed[ids.T1]).toEqual({ ...raw[ids.T1], notes: recordedDocument(TEXT) });
+      expect(recordedDocument(TEXT).length).toBe([...TEXT].length);
+      expect(hashed[ids.T2]).toEqual(raw[ids.T2]);
+      expect(hashed[ids.P1]).toEqual(raw[ids.P1]);
+      // A key that is no document of the type is read as stored.
+      expect((await store.getEntitiesByIdsHashed([ids.T1], { project: ["notes"] }))[ids.T1]).toEqual(raw[ids.T1]);
+      expect(await store.getEntitiesByIdsHashed([], DOCS)).toEqual({});
+    });
+  });
+
+  it("getRelationsByIds: relations of any type by id, as getRelation reads them; an unknown id left out", async () => {
+    const assigned = await relationId("assigned_to", ids.T1, ids.Ben);
+    const subtask = await relationId("has_subtask", ids.T1, ids.T1a);
+    const read = await store.getRelationsByIds([assigned, subtask, ids.T1, randomUUID(), "not-a-uuid"]);
+    expect(read).toEqual({
+      [assigned]: await store.getRelation("assigned_to", assigned),
+      [subtask]: await store.getRelation("has_subtask", subtask),
+    });
+    expect(await store.getRelationsByIds([])).toEqual({});
   });
 });

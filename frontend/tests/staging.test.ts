@@ -4,7 +4,9 @@ import {
   createSerialQueue,
   documentWrite,
   isChangesetGone,
+  LEFT_CHANGESET_TEXT,
   stagedOutcome,
+  stageIntoPinned,
   stagePayload,
 } from '../src/api/staging.ts'
 
@@ -134,4 +136,46 @@ test('createSerialQueue runs tasks of different keys side by side', async () => 
   first.resolve()
   await a
   assert.deepEqual(log, ['b', 'a'])
+})
+
+test('stageIntoPinned reads the pin when its turn in the queue comes', async () => {
+  const enqueue = createSerialQueue()
+  let pin: string | null = 'cs-1'
+  const staged: string[] = []
+  const stage = async (changesetId: string) => {
+    staged.push(changesetId)
+    return { seq: staged.length, id: 'e-1' }
+  }
+  const first = deferred()
+  const a = enqueue('lens', async () => {
+    await first.promise
+    return stageIntoPinned(() => pin, stage)
+  })
+  const b = enqueue('lens', () => stageIntoPinned(() => pin, stage))
+  pin = 'cs-2' // another changeset pinned while both wait
+  first.resolve()
+  assert.equal((await a).changesetId, 'cs-2')
+  assert.equal((await b).changesetId, 'cs-2')
+  assert.deepEqual(staged, ['cs-2', 'cs-2'])
+})
+
+test('stageIntoPinned fails a queued write whose changeset was left, without staging it', async () => {
+  const enqueue = createSerialQueue()
+  let pin: string | null = 'cs-1'
+  let calls = 0
+  const stage = async () => {
+    calls += 1
+    return { seq: calls, id: 'e-1' }
+  }
+  const first = deferred()
+  const a = enqueue('lens', async () => {
+    await first.promise
+    return stageIntoPinned(() => 'cs-1', stage)
+  })
+  const b = enqueue('lens', () => stageIntoPinned(() => pin, stage))
+  pin = null // Leave while b waits
+  first.resolve()
+  await a
+  await assert.rejects(b, new RegExp(LEFT_CHANGESET_TEXT))
+  assert.equal(calls, 1)
 })

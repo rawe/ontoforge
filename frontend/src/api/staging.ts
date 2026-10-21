@@ -1,8 +1,8 @@
 /**
  * The pure part of the Workbench's write seam (`api/writes.ts`): a write as
  * the immediate API takes it, the stage payload built from it, the outcome a
- * write answers, and the queue that stages one write at a time per
- * changeset. No React, no I/O — unit-tested with `node --test`.
+ * write answers, and the queue that stages one write at a time into the
+ * pinned changeset. No React, no I/O — unit-tested with `node --test`.
  */
 
 import type { JsonValue, ParentRelationInput, StagedAnswer, StageWritePayload } from './types.ts'
@@ -68,6 +68,23 @@ export function stagedOutcome(changesetId: string, answer: StagedAnswer): Staged
  */
 export function documentWrite(type: string, id: string, propertyKey: string, text: string | null): RuntimeWrite {
   return { operation: 'update_entity', type, id, properties: { [propertyKey]: text } }
+}
+
+/** Why a queued write failed: its changeset was left while it waited. */
+export const LEFT_CHANGESET_TEXT = 'You left the changeset before this write was staged: nothing was written'
+
+/**
+ * Stages into the changeset pinned when this runs — a queued write runs
+ * after the ones before it. Nothing pinned by then fails the write: it is
+ * never written live instead.
+ */
+export async function stageIntoPinned(
+  pinned: () => string | null,
+  stage: (changesetId: string) => Promise<StagedAnswer>,
+): Promise<StagedOutcome> {
+  const changesetId = pinned()
+  if (changesetId === null) throw new Error(LEFT_CHANGESET_TEXT)
+  return stagedOutcome(changesetId, await stage(changesetId))
 }
 
 /** Whether a stage call's error says the changeset itself is gone (committed, discarded, expired). */

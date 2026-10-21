@@ -16,7 +16,7 @@ import {
   createSerialQueue,
   documentWrite,
   isChangesetGone,
-  stagedOutcome,
+  stageIntoPinned,
   stagePayload,
   type RuntimeWrite,
   type StagedOutcome,
@@ -24,6 +24,7 @@ import {
 } from './staging'
 import type { EntityInstance, JsonValue, ParentRelationInput, RelationInstance } from './types'
 import { pinnedChangeset, unpinChangeset } from '@/lib/pinnedChangeset'
+import { storageKeys } from '@/lib/storage'
 
 export type { StagedOutcome, WriteOutcome } from './staging'
 
@@ -31,7 +32,8 @@ export type { StagedOutcome, WriteOutcome } from './staging'
 export const CHANGESET_GONE_TEXT =
   'The changeset is gone (committed, discarded or expired) — you are editing live again'
 
-// One stage call at a time per changeset, across every component.
+// One stage call at a time per lens, across every component: a changeset
+// answers 409 "busy" to a second call while the first still runs.
 const enqueue = createSerialQueue()
 
 export function useRuntimeWrites(ontologyKey: string, lensKey: string) {
@@ -39,21 +41,27 @@ export function useRuntimeWrites(ontologyKey: string, lensKey: string) {
   const navigate = useNavigate()
 
   return useMemo(() => {
-    /** The pinned changeset is read when the write runs, never from an older render. */
-    async function run<T>(write: RuntimeWrite, immediate: () => Promise<T>): Promise<WriteOutcome<T>> {
-      const changesetId = pinnedChangeset(ontologyKey, lensKey)
-      if (changesetId === null) return { kind: 'written', value: await immediate() }
+    const pinned = () => pinnedChangeset(ontologyKey, lensKey)
+    const stage = async (changesetId: string, write: RuntimeWrite) => {
       try {
-        const answer = await enqueue(changesetId, () =>
-          runtime.stageWrite(ontologyKey, lensKey, changesetId, stagePayload(write)),
-        )
-        return stagedOutcome(changesetId, answer)
+        return await runtime.stageWrite(ontologyKey, lensKey, changesetId, stagePayload(write))
       } catch (err) {
         if (err instanceof ApiError && isChangesetGone(err, changesetId)) {
           unpinChangeset(ontologyKey, lensKey)
           toast.warning(CHANGESET_GONE_TEXT)
         }
         throw err
+      }
+    }
+
+    /** Live while nothing is pinned when the write is called; else staged into the changeset
+     * pinned when its turn in the queue comes (never from an older render). */
+    async function run<T>(write: RuntimeWrite, immediate: () => Promise<T>): Promise<WriteOutcome<T>> {
+      if (pinned() === null) return { kind: 'written', value: await immediate() }
+      try {
+        return await enqueue(storageKeys.changeset(ontologyKey, lensKey), () =>
+          stageIntoPinned(pinned, (changesetId) => stage(changesetId, write)),
+        )
       } finally {
         // The list's write count and every page of the changeset's review read.
         void queryClient.invalidateQueries({ queryKey: qk.changesets(ontologyKey, lensKey) })

@@ -42,7 +42,7 @@ const LINK_CLASS: Record<LinkState, string> = {
  * kept, which links it followed, and the marks it left — ranks, hops, evidence references.
  * Arrowheads show how a relation is stored; the moving dashes, the way the run follows it.
  */
-export function AssistantExplainerGraph({ step, motion }: { step: StoryStep; motion: boolean }) {
+export function AssistantExplainerGraph({ step }: { step: StoryStep }) {
   const id = useId()
   const entityState = (key: string): EntityState => step.entities[key] ?? (step.fade ? 'dim' : 'idle')
   const linkState = (key: string): LinkState => step.links[key] ?? (step.fade ? 'dim' : 'idle')
@@ -81,7 +81,7 @@ export function AssistantExplainerGraph({ step, motion }: { step: StoryStep; mot
       return <g key={link.id} className={cn('transition-opacity duration-500', state === 'dim' && 'opacity-30')}>
         <path d={d} fill="none" strokeWidth={on ? 2 : 1.25} markerEnd={`url(#${id}-${on ? 'on' : 'off'})`}
           strokeDasharray={on ? '6 4' : undefined} className={cn('transition-[stroke] duration-500', LINK_CLASS[state])}>
-          {on && motion && <animate attributeName="stroke-dashoffset" from="0" to="20" dur="0.9s" repeatCount="indefinite" />}
+          {on && <animate attributeName="stroke-dashoffset" from="0" to="20" dur="0.9s" repeatCount="indefinite" />}
         </path>
         <text x={label.x} y={label.y} textAnchor="middle" strokeWidth={4} paintOrder="stroke"
           className={cn('stroke-card text-[10.5px]', on ? 'fill-primary font-medium' : 'fill-muted-foreground')}>{link.label}</text>
@@ -96,7 +96,7 @@ export function AssistantExplainerGraph({ step, motion }: { step: StoryStep; mot
       return <g key={entity.id} className={cn('transition-opacity duration-500', state === 'dim' && 'opacity-35')}>
         {state === 'active' && <rect x={left - 4} y={top - 4} width={BOX.width + 8} height={BOX.height + 8} rx={11}
           className="fill-none stroke-primary/40" strokeWidth={3}>
-          {motion && <animate attributeName="opacity" values="1;0.25;1" dur="1.8s" repeatCount="indefinite" />}
+          <animate attributeName="opacity" values="1;0.25;1" dur="1.8s" repeatCount="indefinite" />
         </rect>}
         <rect x={left} y={top} width={BOX.width} height={BOX.height} rx={8} strokeWidth={state === 'idle' || state === 'dim' ? 1 : 1.5}
           className={cn('transition-[fill,stroke] duration-500', ENTITY_CLASS[state].box)} />

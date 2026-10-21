@@ -34,13 +34,12 @@ function ModelMark({ x, y }: { x: number; y: number }) {
  * The steps of one run of an assistant kind as a flow: model calls tinted, steps that only
  * read the lens plain, a loop framed, the current step ringed and the way the run took lit.
  */
-export function AssistantExplainerFlow({ explainer, current, passed, lit, onSelect, motion }: {
+export function AssistantExplainerFlow({ explainer, current, passed, lit, onSelect }: {
   explainer: Explainer
   current: string
   passed: Set<string>
   lit: string[]
   onSelect: (node: string) => void
-  motion: boolean
 }) {
   const id = useId()
   const nodes = new Map(explainer.flow.nodes.map((node) => [node.id, node]))
@@ -75,7 +74,7 @@ export function AssistantExplainerFlow({ explainer, current, passed, lit, onSele
         <path d={d} fill="none" strokeWidth={on ? 2 : 1.25} markerEnd={`url(#${id}-${on ? 'on' : 'off'})`}
           strokeDasharray={on ? '6 4' : undefined}
           className={cn('transition-[stroke] duration-500', on ? 'stroke-primary' : 'stroke-muted-foreground/40')}>
-          {on && motion && <animate attributeName="stroke-dashoffset" from="20" to="0" dur="0.9s" repeatCount="indefinite" />}
+          {on && <animate attributeName="stroke-dashoffset" from="20" to="0" dur="0.9s" repeatCount="indefinite" />}
         </path>
         {edge.label && <text x={label.x} y={label.y} textAnchor={label.anchor}
           className={cn('text-[11px] transition-[fill] duration-500', on ? 'fill-primary' : 'fill-muted-foreground')}>{edge.label}</text>}

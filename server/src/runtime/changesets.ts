@@ -1139,6 +1139,17 @@ async function storedEntities(loaded: LoadedSchema, ids: string[], store: Runtim
   return rows;
 }
 
+/** The type of each stored entity of `ids`, read in batches without its
+ * properties. */
+async function entityTypes(ids: string[], store: RuntimeStore): Promise<Map<string, string>> {
+  const types = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += READ_BATCH) {
+    const batch = await store.getEntityTypes(ids.slice(i, i + READ_BATCH));
+    for (const [id, type] of Object.entries(batch)) types.set(id, type);
+  }
+  return types;
+}
+
 /** The stored rows the checks of staged writes judge them against, raw:
  * entities by id (documents as hash and length), relations by id, of any
  * type. */
@@ -1825,9 +1836,7 @@ async function commitViolations(
   const children = replay.deletedChildren.flatMap((deleted) => deleted.children.map((child) => child.childId));
   const touched = coverage?.touches.flatMap((touch) => touch.ends.map((end) => end.id)) ?? [];
   const ids = new Set([...children, ...links.map((link) => link.childId), ...ends.map((end) => end.id), ...touched]);
-  const types = new Map(
-    [...(await storedEntities(loaded, [...ids], bound))].map(([id, row]) => [id, row._entityTypeKey as string] as const),
-  );
+  const types = await entityTypes([...ids], bound);
   const violations: Violation[] = [];
 
   const remaining = children.filter((id) => types.has(id));

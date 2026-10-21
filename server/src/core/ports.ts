@@ -776,6 +776,10 @@ export interface RuntimeStore {
    * them; an unknown id is left out. */
   getRelationsByIds(ids: string[]): Promise<Record<string, Row>>;
 
+  /** The type key of each entity of `ids`, by id; an unknown id is left
+   * out. No property is read. */
+  getEntityTypes(ids: string[]): Promise<Record<string, string>>;
+
   /** The parent relations whose child end is one of `ids`. */
   parentsOf(ids: string[], readings: Record<string, ParentEnd>): Promise<ParentLink[]>;
 

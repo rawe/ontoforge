@@ -129,6 +129,9 @@ beforeEach(() => {
   store.getEntitiesByIdsHashed.mockImplementation(async (ids: string[], documentKeys: Record<string, string[]>) =>
     hashedById(stored, ids, documentKeys),
   );
+  store.getEntityTypes.mockImplementation(async (ids: string[]) =>
+    Object.fromEntries(ids.filter((id) => id in stored).map((id) => [id, stored[id]!._entityTypeKey])),
+  );
   store.parentsOf.mockImplementation(async (ids: string[]) => ids.flatMap((id) => parents[id] ?? []));
   store.lockTargets.mockImplementation(async (ids: string[], documentKeys: Record<string, string[]>) =>
     ids
@@ -406,10 +409,13 @@ describe("step 3: the end state", () => {
     store.childrenOf.mockResolvedValueOnce([link("belongs_to", R1, ACME, D1)]).mockResolvedValue([]);
     journal([deleteOf(1, "company", ACME), deleteOf(2, "department", D1)]);
     stored = { [ACME]: stored[ACME]!, [D1]: stored[D1]! };
-    store.getEntitiesByIdsHashed
-      .mockImplementationOnce(async () => ({ [ACME]: stored[ACME], [D1]: stored[D1] }))
-      .mockResolvedValue({});
+    // Both deleted by the replay: the end state's type read finds neither.
+    store.getEntityTypes.mockResolvedValue({});
+    store.getEntitiesByIdsHashed.mockClear();
     expect(await commit()).toMatchObject({ committed: 2 });
+    // The end state is read by type alone; only the pass reads properties.
+    expect(store.getEntityTypes).toHaveBeenCalled();
+    expect(store.getEntitiesByIdsHashed).toHaveBeenCalledTimes(1);
   });
 
   it("two_parents: a child given a second parent; control: the old link deleted first", async () => {

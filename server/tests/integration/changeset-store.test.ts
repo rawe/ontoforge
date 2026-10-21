@@ -797,6 +797,16 @@ describe("neutral reads", () => {
     });
   });
 
+  it("getEntityTypes: the type key of each entity of the ids; relations and unknown ids left out", async () => {
+    const link = await relationId("assigned_to", ids.T1, ids.Ben);
+    expect(await store.getEntityTypes([ids.T1, ids.P1, ids.Ben, link, randomUUID(), "not-a-uuid"])).toEqual({
+      [ids.T1]: "task",
+      [ids.P1]: "project",
+      [ids.Ben]: "person",
+    });
+    expect(await store.getEntityTypes([])).toEqual({});
+  });
+
   it("getRelationsByIds: relations of any type by id, as getRelation reads them; an unknown id left out", async () => {
     const assigned = await relationId("assigned_to", ids.T1, ids.Ben);
     const subtask = await relationId("has_subtask", ids.T1, ids.T1a);

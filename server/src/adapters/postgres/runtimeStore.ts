@@ -44,7 +44,7 @@
  *   doors, and the anchor and changeset stores' doors, take the bound
  *   querier instead of the pool. The neutral reads (`parentsOf`,
  *   `childrenOf`, `lockTargets`, `getEntitiesByIdsHashed`,
- *   `getRelationsByIds`) serve a changeset's checks and commit
+ *   `getRelationsByIds`, `getEntityTypes`) serve a changeset's checks and commit
  *   validation; `lockTargets` and a locking `childrenOf` hold their rows
  *   only inside a transaction. The entity reads among them fingerprint
  *   document values in SQL, so no document text leaves the database.
@@ -916,6 +916,16 @@ export class PostgresRuntimeStore implements RuntimeStore {
     }
     const result = await this.query(`SELECT ${RELATION_COLS} FROM relation WHERE id = ANY($1::uuid[])`, [validIds]);
     return Object.fromEntries(result.rows.map((row) => [row.id as string, relationRow(row, NO_DEFS)]));
+  }
+
+  /** One statement over the id and type columns. */
+  async getEntityTypes(ids: string[]): Promise<Record<string, string>> {
+    const validIds = ids.filter(isUuid);
+    if (validIds.length === 0) {
+      return {};
+    }
+    const result = await this.query(`SELECT id, type_key FROM entity WHERE id = ANY($1::uuid[])`, [validIds]);
+    return Object.fromEntries(result.rows.map((row) => [row.id as string, row.type_key as string]));
   }
 
   /** Entities first, then relations, each in id order. Relations hold

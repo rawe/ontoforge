@@ -234,6 +234,7 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     childrenOf: vi.fn(async () => []),
     getEntitiesByIdsHashed: vi.fn(async () => ({})),
     getRelationsByIds: vi.fn(async () => ({})),
+    getEntityTypes: vi.fn(async () => ({})),
     lockTargets: vi.fn(async () => []),
   };
   return store;

@@ -125,6 +125,9 @@ beforeEach(() => {
   store.getEntitiesByIdsHashed.mockImplementation(async (ids: string[], documentKeys: Record<string, string[]>) =>
     hashedById(STORED, ids, documentKeys),
   );
+  store.getEntityTypes.mockImplementation(async (ids: string[]) =>
+    Object.fromEntries(ids.filter((id) => id in STORED).map((id) => [id, STORED[id]!._entityTypeKey])),
+  );
 });
 
 function journal(writes: ChangesetWriteRecord[]): void {

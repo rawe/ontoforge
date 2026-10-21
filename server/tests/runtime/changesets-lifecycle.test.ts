@@ -122,6 +122,9 @@ beforeEach(() => {
   store.getEntitiesByIdsHashed.mockImplementation(async (ids: string[], documentKeys: Record<string, string[]>) =>
     hashedById(stored, ids, documentKeys),
   );
+  store.getEntityTypes.mockImplementation(async (ids: string[]) =>
+    Object.fromEntries(ids.filter((id) => id in stored).map((id) => [id, stored[id]!._entityTypeKey])),
+  );
   store.changesetStore.findMintedAmong.mockImplementation(async (_id: string, ids: string[]) =>
     journal.filter((write) => write.mintedId !== null && ids.includes(write.mintedId)),
   );

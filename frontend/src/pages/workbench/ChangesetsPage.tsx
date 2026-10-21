@@ -22,6 +22,10 @@ import {
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 
+// The pin column stays in view while a narrow table scrolls sideways, so it
+// paints the row's look opaque (hover, submitted tint) over what scrolls under it.
+const PIN_COLUMN = 'sticky right-0 bg-background'
+
 /**
  * `/o/:ontologyKey/w/:lensKey/changesets` — the lens's changesets, submitted
  * first: state, note, anchor, writes, types and age. Everything is read
@@ -82,14 +86,14 @@ export function ChangesetsPage() {
                 <TableHead className="w-16 text-right">Writes</TableHead>
                 <TableHead className="w-44">Types</TableHead>
                 <TableHead className="w-20 text-right">Age</TableHead>
-                <TableHead className="w-52" aria-label="Work in a changeset" />
+                <TableHead className={cn('w-52', PIN_COLUMN)} aria-label="Work in a changeset" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {sortChangesets(changesets.data).map((item) => (
                 <TableRow
                   key={item.id}
-                  className={cn('cursor-pointer', item.state === 'submitted' && 'bg-(--tc-blue-bg)')}
+                  className={cn('group cursor-pointer', item.state === 'submitted' && 'bg-(--tc-blue-bg)')}
                   onClick={() => navigate(detail(item.id))}
                 >
                   <TableCell>
@@ -119,7 +123,14 @@ export function ChangesetsPage() {
                   >
                     {relativeTime(item.createdAt)}
                   </TableCell>
-                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                  <TableCell
+                    className={cn(
+                      'text-right group-hover:bg-[color-mix(in_oklab,var(--muted)_50%,var(--background))]',
+                      PIN_COLUMN,
+                      item.state === 'submitted' && 'bg-[color-mix(in_oklab,var(--tc-blue)_11%,var(--background))]',
+                    )}
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <PinChangesetButton ontologyKey={ontologyKey} lensKey={lensKey} changeset={item} size="xs" />
                   </TableCell>
                 </TableRow>

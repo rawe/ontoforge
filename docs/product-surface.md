@@ -126,9 +126,10 @@ anchors as a red count (a red dot when collapsed), and [Changesets](#changesets)
 carries the number of submitted changesets of the lens as a grey count (a grey dot when
 collapsed), then a data section listing every entity type the lens exposes, each with
 its type colour. Below: the collapse control and a theme control cycling system → light →
-dark. Every screen renders through the lens's schema; there is no hand-written per-type
-interface anywhere, so adding an entity type immediately produces a table, a form, a
-detail page, palette coverage and canvas support for it.
+dark. While a changeset is pinned, a [bar](#changesets) runs above every page. Every
+screen renders through the lens's schema; there is no hand-written per-type interface
+anywhere, so adding an entity type immediately produces a table, a form, a detail page,
+palette coverage and canvas support for it.
 
 Each type key is assigned a colour deterministically from a fixed palette, so a given type
 looks the same in the sidebar, chips, table badges, canvas nodes, the
@@ -226,6 +227,14 @@ Document properties render last, as collapsed rows showing a size badge. Expandi
 and renders the content; a separate action opens the [document editor](#document-viewer-and-editor).
 See [capabilities/documents.md](capabilities/documents.md).
 
+**Staged here.** While the [pinned changeset](#changesets) has writes on the entity, a
+strip under the header lists them as its review does, each with Unstage — disabled while
+it is submitted — and links to the review. A property they set shows its stored value
+struck through beside the staged one, with its drift marker; a document shows "staged"
+with its size and a View action opening the staged text, or "staged · removed". A staged
+delete adds "Deleted in this changeset" to the header. Editing starts from the staged
+value.
+
 **Parent and Children.** For an ontology with
 [parent relations](capabilities/schema-modeling.md#parent-relations), the hierarchy comes
 first, set apart in the parent colour. *Parent* is one section over every parent relation
@@ -307,8 +316,8 @@ The Studio manages no anchors: its Connect tab links here.
 ### Changesets
 
 The lens's [changesets](capabilities/changesets.md), anchored ones included, as the lens
-shows them now. The page reviews, commits and discards; it stages nothing. A help button
-beside the title of the list and of each review explains the workflow: the states and who
+shows them now. The page starts, reviews, submits, commits and discards them, and pins
+one to work in. A help button beside the title of the list and of each review explains the workflow: the states and who
 may take each way between them, a client or a person, with who does what and how the note
 changes. One example changeset plays step by step through it, beside the calls each step
 makes.
@@ -332,6 +341,9 @@ makes.
   panel, which on a submitted changeset offers to unsubmit it at once with those
   violations as its note, cut to 1,000 characters. A successful one returns to the list
   and refreshes every runtime view of the ontology.
+- **Submit** asks for an optional note, which replaces the stored one, and works on a draft
+  only; while submitted it is disabled, saying so. A submit refused by its faults lists its
+  violations in the same panel, and the changeset stays a draft.
 - **Unsubmit** asks for the required note and works on a submitted changeset only; on a
   draft it is disabled, saying so. **Discard**, behind a confirmation, and **Unstage**, per
   row, work on a draft changeset only; while submitted they are disabled, saying it is
@@ -339,6 +351,26 @@ makes.
 
 A changeset that is gone — committed, discarded or expired, or not reached through this
 lens — shows a not-found state linking to the list.
+
+**Working in a changeset.** A person stages by pinning a draft. "Start changeset" above
+the list starts one, with an optional note, pins it and opens its review; "Work in this
+changeset", on a draft's row and in its review's header, pins it in place of any other;
+"Leave", there and on the bar, unpins it, and so does committing or discarding it from its
+review. One changeset is pinned per lens, [remembered](#local-state) in the browser, and
+every open tab follows a pin or a leave at once. While one is pinned:
+
+- **The bar** above every Workbench page names it by its note or short id, with its number
+  of writes, that staging is refused once it is submitted, Review and Leave.
+- **Every Workbench write is staged** into it instead of written — the entity page's
+  edits, delete, unlinks and added relations, a target created on the way included,
+  [quick add](#quick-add) with its parent relation, and a table's bulk delete — except the
+  Explorer canvas's ([Working set](#working-set)). Each answers with a toast naming its seq
+  and linking to the review; live views stay as they are.
+- **A staged create** on the review of a draft offers "Edit values…" — the entity form
+  with its staged values, staging an update of what changed — and "Add ‹child type›…" per
+  parent relation its type is the parent end of, opening quick add under it. While the
+  changeset is not the pinned one, the row says to work in it to extend it.
+- **A pinned changeset that is gone** is left, with a message that writes are live again.
 
 ### Assistants
 
@@ -711,13 +743,14 @@ and by deep link. Step one picks the entity type (skipped when the caller pre-se
 one — in which case there is no way back to the picker). Opened from a Children section,
 it also fixes the parent: an "Under" row shows the parent's hierarchy path and the parent
 relation, the relation's own properties come first in the form, and its faults land on
-those fields. Step two is the schema-driven
+those fields; under a staged create the row says the parent is new in the changeset.
+Step two is the schema-driven
 form: required properties first, one input per data type, schema defaults pre-filled,
 empty optional properties omitted from the request entirely, all client-side coercion
 errors collected at once, and server field errors merged onto the matching fields. A
 "create and add another" option keeps the dialog open with a fresh form. Closing with
 unsaved input asks for confirmation first. On success a toast offers to open the new
-entity.
+entity, unless the create was [staged](#changesets).
 
 The same form primitives back quick add, inline target creation in the relation flow and
 the relation-property steps, so all of them accept exactly what the lens accepts.
@@ -765,6 +798,8 @@ both types. When several are valid the user picks one, phrased as a concrete sen
 (this entity → relation → that entity) rather than as an abstract type list. A
 self-referential drag collapses the two identical directions to one option. Relation
 properties are then filled in, and the new edge appears without re-laying anything out.
+While a [changeset is pinned](#changesets), a drag only says that the canvas writes live
+and the changeset must be left first.
 
 **Caps.** A soft cap of 150 nodes switches the node counter to a warning appearance and
 suggests clearing unpinned nodes. A hard cap of 300 refuses further additions with an
@@ -779,8 +814,8 @@ node opens its detail page.
 
 **Edges.** Clicking an edge opens a small card with the relation type, both endpoints as
 links, the relation's own properties, and a delete action behind a confirmation stating
-that both entities survive. Self-referential relations draw as a loop over their node
-rather than a degenerate curve. A parent relation's edge is drawn in the parent colour; a
+that both entities survive; it is off while a changeset is pinned. Self-referential
+relations draw as a loop over their node rather than a degenerate curve. A parent relation's edge is drawn in the parent colour; a
 "Hierarchy edges" toggle in the toolbar, offered when the lens has a parent relation,
 hides every other edge and moves no node.
 
@@ -1308,8 +1343,8 @@ client renders it as a size badge. Two surfaces open them.
 
 The **viewer** is a read-only overlay that fetches the full content on open and renders it
 as Markdown. It is reachable from a table cell, from the Explorer's node panel, from the
-entity detail row, and from a changeset's review, where it shows the staged text; it is the
-same overlay in all four.
+entity detail row, and from a changeset's review and an entity's staged values, where it
+shows the staged text; it is the same overlay everywhere.
 
 The **editor** is a large two-tab surface — write as Markdown, preview as rendered — that
 loads the current content, edits it as one whole string, and saves it as an ordinary
@@ -1396,7 +1431,9 @@ counts.
 **Bulk delete is a client loop.** There is no bulk endpoint. Deleting a selection issues
 one request at a time, sequentially, advancing a progress indicator and counting failures.
 The outcome is reported as a partial result when some failed. The selection is cleared and
-the list refreshed regardless of outcome.
+the list refreshed regardless of outcome. While a changeset is pinned each request stages
+a delete instead; a pin or leave during the run stops it, and the rest are reported as
+skipped.
 
 **CSV export is entirely client-side.** The server is not involved. From a table it covers
 the current page and the currently visible columns, plus the identifier; from a result set
@@ -1437,6 +1474,7 @@ the address.
 | Explorer ask dock — open or closed, its width, its assistant (kind and key), the switch that adds cited entities | Per ontology + lens | — |
 | Recently opened entities | Per ontology + lens | 10 |
 | Recent query texts | Per ontology + lens | 10 |
+| Pinned changeset | Per ontology + lens | One |
 | Current conversation thread id (Workbench Agents, Retrievers and Navigators tabs, Explorer ask dock) | Per ontology + lens + kind + assistant | One |
 | Agent details panel switch (Workbench) | Global | — |
 | Retriever diagnostics switch (Workbench) | Global | — |

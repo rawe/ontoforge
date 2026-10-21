@@ -241,12 +241,13 @@ run, and every row it touches waits as long.
 
 | | REST | MCP | Web UI |
 |---|---|---|---|
-| Start, list, read, unstage, submit, unsubmit, commit, discard | routes under `changesets` of a runtime mount | nine changeset tools | the Workbench's Changesets page: list, review with the staged text of a document, unstage, unsubmit, commit, discard |
-| Stage | `writes` of one changeset | the six write tools with `changeset_id` | — |
+| Start, list, read, unstage, submit, unsubmit, commit, discard | routes under `changesets` of a runtime mount | nine changeset tools | the Workbench's Changesets page: start, list, review with the staged text of a document, unstage, submit, unsubmit, commit, discard; an entity's page, as the pinned changeset leaves it |
+| Stage | `writes` of one changeset | the six write tools with `changeset_id` | the Workbench's writes while a changeset is pinned, except the Explorer canvas's |
 | Staged-only | the anchor's maintenance | a staged-only anchored mount | the switch on the Workbench's Anchors page |
 
-Routes and tools: [../interfaces.md](../interfaces.md#changesets). An MCP mount keeps no
-changeset of its own: every call names one by `changeset_id`, and a call that forgets it
-writes immediately, except on a staged-only mount, where `changeset_id` is required. The
-Workbench reviews and commits; it does not stage
+Routes and tools: [../interfaces.md](../interfaces.md#changesets). No MCP tool reads one
+entity as the changeset leaves it. An MCP mount keeps no changeset of its own: every call
+names one by `changeset_id`, and a call that forgets it writes immediately, except on a
+staged-only mount, where `changeset_id` is required. In the Workbench a person pins a
+draft, and the Workbench's writes stage into it until they leave it
 ([../product-surface.md](../product-surface.md#changesets)).

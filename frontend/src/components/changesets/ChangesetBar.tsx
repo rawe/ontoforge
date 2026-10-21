@@ -46,16 +46,17 @@ export function ChangesetBar({ ontologyKey, lensKey }: { ontologyKey: string; le
     <div
       role="status"
       aria-label="Pinned changeset"
-      className="flex shrink-0 items-center gap-2 border-b border-(--tc-amber-border) bg-(--tc-amber-bg) px-6 py-1.5 text-[13px]"
+      className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-(--tc-amber-border) bg-(--tc-amber-bg) px-6 py-1.5 text-[13px]"
     >
       <FileStack className="size-3.5 shrink-0 text-(--tc-amber)" />
+      {/* Narrow: only the label truncates; the count and the state wrap whole. */}
       <span className="min-w-0 truncate">
         Working in changeset <span className="font-medium">{changesetLabel(item ?? { id: pinned, note: null })}</span>
-        {item !== undefined && ` · ${writesText(item.writeCount)}`}
-        {item?.state === 'submitted' && (
-          <span className="font-medium text-(--tc-amber)"> · Submitted — staging is refused</span>
-        )}
       </span>
+      {item !== undefined && <span className="whitespace-nowrap">· {writesText(item.writeCount)}</span>}
+      {item?.state === 'submitted' && (
+        <span className="whitespace-nowrap font-medium text-(--tc-amber)">· Submitted — staging is refused</span>
+      )}
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <Button asChild size="xs" variant="outline">
           <Link to={`/o/${ontologyKey}/w/${lensKey}/changesets/${pinned}`}>Review</Link>

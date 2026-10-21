@@ -7,6 +7,7 @@ import {
   FileStack,
   FileText,
   Loader2,
+  Send,
   Trash2,
   Undo2,
 } from 'lucide-react'
@@ -22,6 +23,7 @@ import { DocumentViewerDialog, type DocumentViewerTarget } from '@/components/Do
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { TypeChip } from '@/components/TypeChip'
+import { ChangesetNoteField } from '@/components/changesets/ChangesetNoteField'
 import { ChangesetStateChip } from '@/components/changesets/ChangesetStateChip'
 import { ChangesetExplainerButton } from '@/components/changesets/explainer/ChangesetExplainer'
 import {
@@ -29,7 +31,6 @@ import {
   isCommittedDataKey,
   isVersionMismatch,
   markerLabel,
-  MAX_NOTE_LENGTH,
   operationLabel,
   operationsSummary,
   shortId,
@@ -41,6 +42,7 @@ import {
   WRITES_PAGE_SIZE,
   writesText,
 } from '@/components/changesets/changesets'
+import { PinChangesetButton } from '@/components/changesets/PinChangesetButton'
 import { absoluteTime, relativeTime } from '@/components/table/format'
 import {
   AlertDialog,
@@ -61,14 +63,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { pinnedChangeset, unpinChangeset } from '@/lib/pinnedChangeset'
 import { cn } from '@/lib/utils'
 
 /** Why Unstage and Discard are off while submitted. */
 const FROZEN_REASON = 'Submitted changesets are frozen: unsubmit it first'
 /** Why Unsubmit is off on a draft. */
 const DRAFT_REASON = 'Only a submitted changeset can be unsubmitted'
+/** Why Submit is off while submitted. */
+const SUBMITTED_REASON = 'It is submitted already'
 
 const errorText = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback)
 
@@ -89,8 +93,10 @@ function Disabled({ reason, children }: { reason: string; children: ReactNode })
  * review through the current lens: its writes by seq with names, before →
  * after and markers; a document change opens its staged text in the
  * document viewer. Commit, after a confirmation, sends the version shown when
- * it was clicked; Unsubmit sends a note and works only while submitted;
- * Discard and Unstage work only on a draft.
+ * it was clicked; Submit, with an optional note, and Unsubmit, with a
+ * required one, move it between draft and submitted; Discard and Unstage
+ * work only on a draft. A draft can be pinned ("Work in this changeset"),
+ * so the Workbench's writes stage into it.
  */
 export function ChangesetDetailPage() {
   const { ontologyKey, lensKey, changesetId } = useParams<{
@@ -107,7 +113,13 @@ export function ChangesetDetailPage() {
   const list = useChangesets(ontologyKey, lensKey)
   const schema = useRuntimeSchema(ontologyKey, lensKey)
 
-  const [rejected, setRejected] = useState<{ violations: ChangesetViolation[]; total: number } | null>(null)
+  // The violations of a rejected commit or submit.
+  const [rejected, setRejected] = useState<{
+    by: 'commit' | 'submit'
+    violations: ChangesetViolation[]
+    total: number
+  } | null>(null)
+  const [submitOpen, setSubmitOpen] = useState(false)
   const [unsubmitOpen, setUnsubmitOpen] = useState(false)
   const [note, setNote] = useState('')
   const [discardOpen, setDiscardOpen] = useState(false)
@@ -125,6 +137,7 @@ export function ChangesetDetailPage() {
    */
   const leave = () => {
     setGone(true)
+    if (pinnedChangeset(ontologyKey!, lensKey!) === changesetId) unpinChangeset(ontologyKey!, lensKey!)
     void queryClient.invalidateQueries({ queryKey: qk.changesets(ontologyKey!, lensKey!), exact: true })
     void navigate(listUrl)
   }
@@ -149,7 +162,7 @@ export function ChangesetDetailPage() {
         const found = violationsOf(err.details)
         if (found !== null) {
           setCommitVersion(null)
-          setRejected(found)
+          setRejected({ by: 'commit', ...found })
           void reload()
           return
         }
@@ -161,6 +174,24 @@ export function ChangesetDetailPage() {
         toast.error(errorText(err, 'Failed to commit'))
       }
       setRejected(null)
+      void reload()
+    },
+  })
+
+  const submit = useMutation({
+    mutationFn: (text: string) =>
+      runtime.submitChangeset(ontologyKey!, lensKey!, changesetId!, text === '' ? undefined : text),
+    onSuccess: () => {
+      toast.success('Submitted: the changeset is frozen for review')
+      setSubmitOpen(false)
+      setRejected(null)
+      void reload()
+    },
+    onError: (err) => {
+      setSubmitOpen(false)
+      const found = err instanceof ApiError && err.status === 422 ? violationsOf(err.details) : null
+      if (found !== null) setRejected({ by: 'submit', ...found })
+      else toast.error(errorText(err, 'Failed to submit'))
       void reload()
     },
   })
@@ -259,7 +290,8 @@ export function ChangesetDetailPage() {
   const submitted = changeset.state === 'submitted'
   const operations = list.data?.find((item) => item.id === changeset.id)?.operations
   const summary = operations === undefined ? '' : operationsSummary(operations)
-  const busy = commit.isPending || unsubmit.isPending || discard.isPending || unstage.isPending
+  const busy =
+    commit.isPending || submit.isPending || unsubmit.isPending || discard.isPending || unstage.isPending
 
   const typeLabel = (write: StagedWriteView) => {
     if (write.type === null) return <span className="text-muted-foreground">—</span>
@@ -319,6 +351,21 @@ export function ChangesetDetailPage() {
     update_relation: plainChange,
     delete_relation: plainChange,
   }
+
+  const submitButton = (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={submitted || busy}
+      onClick={() => {
+        setNote('')
+        setSubmitOpen(true)
+      }}
+    >
+      {submit.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+      Submit
+    </Button>
+  )
 
   const discardButton = (
     <Button
@@ -380,6 +427,8 @@ export function ChangesetDetailPage() {
         }
         actions={
           <>
+            <PinChangesetButton ontologyKey={ontologyKey} lensKey={lensKey} changeset={changeset} />
+            {submitted ? <Disabled reason={SUBMITTED_REASON}>{submitButton}</Disabled> : submitButton}
             <Button size="sm" disabled={busy} onClick={() => setCommitVersion(changeset.version)}>
               {commit.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
               Commit
@@ -403,13 +452,14 @@ export function ChangesetDetailPage() {
         {rejected !== null && (
           <div
             role="alert"
-            aria-label="Commit violations"
+            aria-label={rejected.by === 'commit' ? 'Commit violations' : 'Submit violations'}
             className="rounded-lg border border-destructive bg-destructive/10 px-3 py-2.5"
           >
             <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-semibold text-destructive">
-                  Commit rejected, nothing persisted: {rejected.total}{' '}
+                  {rejected.by === 'commit' ? 'Commit rejected, nothing persisted' : 'Submit rejected, still a draft'}:{' '}
+                  {rejected.total}{' '}
                   {rejected.total === 1 ? 'violation' : 'violations'}
                   {rejected.total > rejected.violations.length &&
                     ` (the first ${rejected.violations.length} shown)`}
@@ -587,6 +637,26 @@ export function ChangesetDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog open={submitOpen} onOpenChange={setSubmitOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Submit this changeset for review?</AlertDialogTitle>
+            <AlertDialogDescription>
+              It is frozen until it is committed or unsubmitted: no writes can be staged or unstaged. A note
+              replaces the current one; left empty, the current one stays.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ChangesetNoteField label="Note (optional)" value={note} onChange={setNote} />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button disabled={submit.isPending} onClick={() => submit.mutate(note.trim())}>
+              {submit.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+              Submit changeset
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={unsubmitOpen} onOpenChange={setUnsubmitOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -596,18 +666,7 @@ export function ChangesetDetailPage() {
               one: say what should change.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <label className="grid gap-1.5 text-[12px] text-muted-foreground">
-            <span>Note (required)</span>
-            <Textarea
-              value={note}
-              maxLength={MAX_NOTE_LENGTH}
-              rows={4}
-              onChange={(e) => setNote(e.target.value)}
-            />
-            <span className="text-right tabular-nums">
-              {note.length} / {MAX_NOTE_LENGTH}
-            </span>
-          </label>
+          <ChangesetNoteField label="Note (required)" value={note} onChange={setNote} />
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <Button

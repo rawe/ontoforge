@@ -159,37 +159,18 @@ describe("opening the guard", () => {
   });
 });
 
-describe("a staged-only anchor (V9, V43)", () => {
-  const STAGED_ONLY = "Anchor 'agent-a' is staged-only: this connection only stages; pass a changeset";
-  const openError = (lens = loaded()) =>
-    AnchorGuard.open("agent-a", lens, asRuntimeStore(store)).then(
-      () => null,
-      (e: unknown) => e as Error,
-    );
-
-  it("refuses every immediate write with a 409, whatever the state, before the state is judged", async () => {
-    for (const [entity, found] of [
-      [{ type: "project", id: "P1" }, true], // anchored
-      [null, false], // unanchored: no coverage, still refused
-      [{ type: "project", id: "P1" }, false], // dangling: the flag comes first
-    ] as const) {
-      anchorAt(entity, found, true);
-      const error = await openError();
-      expect(error).toBeInstanceOf(ConflictError);
-      expect(error!.message).toBe(STAGED_ONLY);
+describe("write access is not the guard's (writeAccess.ts)", () => {
+  it("propose or none, the guard judges the anchor alone", async () => {
+    for (const writeAccess of ["none", "propose"] as const) {
+      const at = (anchor: RulesetRecord["anchor"], anchorFound: boolean) =>
+        store.rulesetStore.get.mockResolvedValue({ key: "agent-a", anchor, anchorFound, writeAccess });
+      at({ type: "project", id: "P1" }, true);
+      expect(await open(), writeAccess).toBeInstanceOf(AnchorGuard);
+      at(null, false);
+      expect(await AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store)), writeAccess).toBeNull();
+      at({ type: "project", id: "P1" }, false);
+      await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(/is dangling/);
     }
-    anchorAt({ type: "project", id: "P1" }, true, true);
-    expect((await openError(loaded("no_projects", ["customer", "task", "milestone"])))!.message).toBe(STAGED_ONLY);
-  });
-
-  it("an unknown key stays not found", async () => {
-    store.rulesetStore.get.mockResolvedValue(null);
-    expect(await openError()).toBeInstanceOf(NotFoundError);
-  });
-
-  it("without the flag, the guard opens as before", async () => {
-    anchorAt({ type: "project", id: "P1" }, true, false);
-    expect(await open()).toBeInstanceOf(AnchorGuard);
   });
 });
 

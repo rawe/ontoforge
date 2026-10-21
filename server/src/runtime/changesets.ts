@@ -35,9 +35,8 @@
  * - **Expiry (V24, R3).** A draft changeset idle for 7 days is gone: checked
  *   on every access, where it is deleted and answers not found, and swept
  *   on start and on list. A submitted changeset never expires.
- * - **Staged-only (V9 a).** Through a staged-only anchor's URL every
- *   immediate write is a 409 (`AnchorGuard.open`) and so is commit; stage,
- *   unstage, submit, unsubmit, discard, list and read work as anywhere.
+ * - **Write access** is checked by the entrances (`writeAccess.ts`), on
+ *   the URL's ruleset, before any function here runs.
  * - **Lifecycle (V7, V38).** Submit freezes a draft changeset and hands it
  *   over with a note, after the lock-free pass (V5 d) and a compare-and-set
  *   on the version the pass saw (V40). While submitted, stage, unstage and
@@ -1923,8 +1922,7 @@ function rejection(violations: Violation[]): ValidationError {
 }
 
 /**
- * Commit a changeset: everything it stages, or nothing (D3). Through a
- * staged-only anchor's URL it is a 409, whatever the changeset (V9). With
+ * Commit a changeset: everything it stages, or nothing (D3). With
  * `expectedVersion`, a changeset changed since (V40) is a 409. Another
  * commit on the ontology or in this process, a change running on the
  * changeset, or a row held past the lock timeout are 409s too, with
@@ -1939,11 +1937,6 @@ export async function commitChangeset(
   expectedVersion: number | undefined,
   store: RuntimeStore,
 ): Promise<CommitAnswer> {
-  if (anchorKey !== null && (await store.rulesets().get(anchorKey))?.writeAccess === "propose") {
-    throw new ConflictError(
-      `Anchor '${anchorKey}' is staged-only: this connection cannot commit; submit the changeset for review`,
-    );
-  }
   if (runningCommits >= MAX_RUNNING_COMMITS) {
     throw new ConflictError("Too many commits are running; try again");
   }

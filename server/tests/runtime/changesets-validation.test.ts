@@ -506,6 +506,16 @@ describe("anchor coverage (V8, V42)", () => {
     );
   });
 
+  it("through the ruleset's URL at write access 'propose': commits, the ruleset read once, inside the transaction", async () => {
+    store.rulesetStore.get.mockResolvedValue({ ...anchorAt({ type: "company", id: ACME }), writeAccess: "propose" });
+    journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
+    expect(await commitChangeset("full_lens", "agent-a", CS, undefined, asRuntimeStore(store))).toMatchObject({ committed: 1 });
+    expect(store.rulesetStore.get).toHaveBeenCalledTimes(1);
+    expect(store.rulesetStore.get.mock.invocationCallOrder[0]!).toBeGreaterThan(
+      store.changesetStore.lockForCommit.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it("not covered before: a touched entity outside the subtree", async () => {
     parents[D1] = [link("belongs_to", R1, BETA, D1)];
     journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);

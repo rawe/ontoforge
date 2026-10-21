@@ -10,11 +10,12 @@
  * unstages one. `GET /` lists the lens's changesets (an anchored URL: its
  * anchor's), `GET /:changesetId` is the review read, and `GET
  * /:changesetId/documents/:entityTypeKey/:entityId/:propertyKey` the staged
- * text of one document property, with the document read's paging;
- * `POST /:changesetId/submit` and `/unsubmit` hand it over and back, and
- * `POST /:changesetId/commit` persists it all or nothing. No entity or
- * relation read route is mounted under a changeset: reads never see staged
- * data.
+ * text of one document property, with the document read's paging, and
+ * `GET /:changesetId/entities/:entityTypeKey/:entityId` one entity as a
+ * commit would leave it, with its staged writes; `POST
+ * /:changesetId/submit` and `/unsubmit` hand it over and back, and `POST
+ * /:changesetId/commit` persists it all or nothing. No read outside these
+ * changeset routes sees staged data.
  * Routers parse and shape only; every rule lives in `changesets.ts`.
  */
 
@@ -26,11 +27,8 @@ import * as changesets from "./changesets.js";
 import { DocumentReadQuery, LensParams, ParentRelationPayload, PropertyPayload, anchorOf } from "./router.js";
 
 const ChangesetParams = LensParams.extend({ changesetId: z.string() });
-const DocumentParams = ChangesetParams.extend({
-  entityTypeKey: z.string(),
-  entityId: z.string(),
-  propertyKey: z.string(),
-});
+const EntityParams = ChangesetParams.extend({ entityTypeKey: z.string(), entityId: z.string() });
+const DocumentParams = EntityParams.extend({ propertyKey: z.string() });
 const WriteParams = ChangesetParams.extend({ seq: z.coerce.number().int().min(1) });
 
 const StartPayload = z.strictObject({ note: z.string().nullish() }).nullish();
@@ -147,6 +145,20 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.propertyKey,
         request.query.offset,
         request.query.limit ?? null,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.get(
+    "/:changesetId/entities/:entityTypeKey/:entityId",
+    { schema: { tags: ["runtime"], params: EntityParams } },
+    async (request) =>
+      changesets.getStagedEntity(
+        request.params.lensKey,
+        anchorOf(request.params),
+        request.params.changesetId,
+        request.params.entityTypeKey,
+        request.params.entityId,
         await getRuntimeStore(request.params.ontologyKey),
       ),
   );

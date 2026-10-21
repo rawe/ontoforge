@@ -48,7 +48,8 @@
  *   a type, property or name the lens hides is never shown. The review
  *   read shows no staged arguments and stubs every document value; the
  *   staged document read returns the text the last staged write of a
- *   document property sets.
+ *   document property sets, and the staged entity read one entity as a
+ *   commit would leave it, beside its own staged writes.
  * - **Commit (D3, V1 B).** Before BEGIN, holding nothing: the schema, the
  *   changeset and the search context are loaded, and the lock-free pass
  *   (V19) runs; any fault it finds rejects here. Then one transaction on
@@ -92,7 +93,7 @@ import {
   type ParentRelationInput,
   type UpdateArgs,
 } from "./prepare.js";
-import { documentPropertyKeys, stubDocumentProperties } from "./readHelpers.js";
+import { docLengthKey, documentPropertyKeys, filterEntityProperties, stubDocumentProperties } from "./readHelpers.js";
 import { loadSchema, loadSearchContext, type LoadedSchema, type SearchContext } from "./schemaCache.js";
 import { documentSlice, endpointTypeMessage, parentReadings, type EndRole } from "./service.js";
 
@@ -578,7 +579,9 @@ export async function getChangeset(
   const loaded = await loadSchema(lensKey, store);
   const record = await loadChangeset(loaded, anchorKey, changesetId, store);
   const writes = await store.changesets().page(record.id, offset, limit);
-  return { ...toView(record), offset, limit, writes: await reviewPage(loaded, record.id, writes, store) };
+  // The pass runs over the whole journal: a write's ids may be minted anywhere in it.
+  const pass = await lockFreePass(loaded, record.id, store);
+  return { ...toView(record), offset, limit, writes: await reviewPage(loaded, writes, pass, store) };
 }
 
 /**
@@ -640,6 +643,71 @@ export async function getStagedDocument(
     );
   }
   return documentSlice(propertyKey, typeof staged.value === "string" ? staged.value : "", offset, limit);
+}
+
+/** One entity as a commit of this changeset would leave it, and the
+ * staged writes on it. */
+export interface StagedEntityView {
+  /** The stored entity, or the one this changeset creates, through the
+   * lens, with the staged writes on it folded in by seq. */
+  entity: Row;
+  /** Whether its last staged write deletes it. */
+  deleted: boolean;
+  /** Its own staged writes (create, update, delete) as the review shows them. */
+  writes: StagedWriteView[];
+}
+
+/**
+ * One entity as a commit of this changeset would leave it: the stored
+ * entity, or the one a staged create mints, with this changeset's creates
+ * and updates of it folded in by seq (a null removes a key) and no
+ * defaults applied (the commit applies them), as the entity read shows it
+ * through the lens, documents as stubs; `deleted` when its last staged
+ * write is a delete. Beside it, those writes as the review read shows
+ * them, with the lock-free pass's markers judged on them alone: they
+ * depend on nothing else in the journal. Relation writes naming the
+ * entity are not among them. Not found: a type the lens hides, or an
+ * entity neither stored nor created by this changeset.
+ */
+export async function getStagedEntity(
+  lensKey: string,
+  anchorKey: string | null,
+  changesetId: string,
+  entityTypeKey: string,
+  entityId: string,
+  store: RuntimeStore,
+): Promise<StagedEntityView> {
+  const loaded = await loadSchema(lensKey, store);
+  const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+  const type = loaded.scoped.entityTypes[entityTypeKey];
+  if (type === undefined) throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
+
+  const writes = (await store.changesets().writesOn(record.id, entityId)).filter(
+    (write) => write.operation.endsWith("_entity") && write.typeKey === entityTypeKey,
+  );
+  const stored = await store.getEntity(entityTypeKey, entityId);
+  const minted = mintedBy(writes);
+  if (stored === null && !minted.has(entityId)) throw new NotFoundError(`Entity '${entityId}' not found`);
+
+  const entity: Row = stored === null ? { _id: entityId, _entityTypeKey: entityTypeKey } : { ...stored };
+  let deleted = false;
+  for (const write of writes) {
+    deleted = write.operation === "delete_entity";
+    for (const [key, value] of Object.entries((write.arguments.properties ?? {}) as Row)) {
+      // A staged document is measured afresh, not by the stored length.
+      delete entity[docLengthKey(key)];
+      if (value === null) delete entity[key];
+      else entity[key] = value;
+    }
+  }
+
+  const rows = new Map(stored === null ? [] : [[entityId, stored] as const]);
+  const { faults } = await passFaults(loaded, writes, minted, rows, store);
+  return {
+    entity: filterEntityProperties(entity, type),
+    deleted,
+    writes: await reviewPage(loaded, writes, { faults, minted }, store, Object.fromEntries(rows)),
+  };
 }
 
 /**
@@ -1185,13 +1253,34 @@ export async function lockFreePass(
     writes.push(...page);
     if (page.length < REPLAY_PAGE) break;
   }
-  const minted = new Map(writes.filter((w) => w.mintedId !== null).map((w) => [w.mintedId!, w] as const));
-  const mintedAs = (id: string, create: string): boolean => minted.get(id)?.operation === create;
-
-  const named = new Set(writes.flatMap(entityRefs).filter((id) => !mintedAs(id, "create_entity")));
+  const minted = mintedBy(writes);
+  const named = new Set(writes.flatMap(entityRefs).filter((id) => minted.get(id)?.operation !== "create_entity"));
   const rows = await storedEntities([...named], store);
   const stored = new Map([...rows].map(([id, row]) => [id, row._entityTypeKey as string] as const));
+  const { faults, targets } = await passFaults(loaded, writes, minted, rows, store);
+  return { writes, faults, targets, stored, minted };
+}
 
+/** The staged creates among `writes`, by the id they minted. */
+function mintedBy(writes: ChangesetWriteRecord[]): Map<string, ChangesetWriteRecord> {
+  return new Map(writes.filter((w) => w.mintedId !== null).map((w) => [w.mintedId!, w] as const));
+}
+
+/**
+ * The pass's judgement of `writes`, given the staged creates (`minted`)
+ * and the stored entity rows (`rows`, raw) their ids may name: the faults
+ * by seq, and the stored targets. A stored relation target is read once
+ * per write. Sound for any `writes` whose minted ids and named entities
+ * those two maps hold.
+ */
+async function passFaults(
+  loaded: LoadedSchema,
+  writes: ChangesetWriteRecord[],
+  minted: Map<string, ChangesetWriteRecord>,
+  rows: Map<string, Row>,
+  store: RuntimeStore,
+): Promise<{ faults: Violation[]; targets: string[] }> {
+  const mintedAs = (id: string, create: string): boolean => minted.get(id)?.operation === create;
   const faults: Violation[] = [];
   const targets = new Set<string>();
   for (const write of writes) {
@@ -1214,7 +1303,7 @@ export async function lockFreePass(
       case "create_entity":
       case "create_relation":
         for (const [role, id] of createRefs(write)) {
-          if (!stored.has(id) && !mintedAs(id, "create_entity")) fault("dangling", neitherStored(role));
+          if (!rows.has(id) && !mintedAs(id, "create_entity")) fault("dangling", neitherStored(role));
         }
         break;
       case "update_entity":
@@ -1222,7 +1311,7 @@ export async function lockFreePass(
         if (mintedAs(target!, `create_${kind}`)) break;
         const current =
           kind === "entity"
-            ? stored.get(target!) === write.typeKey
+            ? rows.get(target!)?._entityTypeKey === write.typeKey
               ? rows.get(target!)!
               : null
             : await store.getRelation(write.typeKey, target!);
@@ -1237,7 +1326,7 @@ export async function lockFreePass(
       }
     }
   }
-  return { writes, faults, targets: [...targets], stored, minted };
+  return { faults, targets: [...targets] };
 }
 
 // ---------------------------------------------------------------------------
@@ -1266,24 +1355,23 @@ function recordedView(recorded: Row, keys: string[], properties: Record<string, 
 }
 
 /**
- * One page of staged writes as the review shows them (V41): names
- * resolved, `before`, `current` and `after`, and the markers of the
- * lock-free pass, which runs over the whole journal because a write's ids
- * may be minted anywhere in it. The stored entities the page names come in
- * one batched read; a stored relation target is read once per write.
- * The staged arguments are not shown, and every document value is a stub
+ * Staged writes as the review shows them (V41): names resolved, `before`,
+ * `current` and `after`, and the markers `pass` found on them, judged with
+ * the creates it holds. The stored entities the writes name come in one
+ * batched read, unless `storedRows` already holds them (raw); a stored
+ * relation target is read once per write. The staged arguments are not shown, and every document value is a stub
  * (`getStagedDocument` reads the staged text). Through the lens: a hidden
  * type keeps only seq, operation and markers, and hidden properties and
  * names are not returned.
  */
 async function reviewPage(
   loaded: LoadedSchema,
-  changesetId: string,
   writes: ChangesetWriteRecord[],
+  pass: Pick<LockFreePass, "faults" | "minted">,
   store: RuntimeStore,
+  storedRows: Record<string, Row> | null = null,
 ): Promise<StagedWriteView[]> {
   const lens = loaded.scoped;
-  const pass = await lockFreePass(loaded, changesetId, store);
   const markers = new Map<number, Marker[]>();
   for (const fault of pass.faults) {
     markers.set(fault.seq, [...(markers.get(fault.seq) ?? []), { kind: fault.kind, message: fault.message }]);
@@ -1315,7 +1403,7 @@ async function reviewPage(
     for (const id of relationEnds.get(write.seq) ?? []) ids.add(id);
   }
   // Raw rows: the name property is a string, and `current` takes raw values.
-  const rows = await store.getEntitiesByIds([...ids], {});
+  const rows = storedRows ?? (await store.getEntitiesByIds([...ids], {}));
 
   const nameOf = (id: string): string | null => {
     const row = rows[id];

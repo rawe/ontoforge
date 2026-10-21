@@ -231,6 +231,22 @@ export class PostgresChangesetStore implements ChangesetStore {
     return row === undefined ? null : toWrite(row);
   }
 
+  /** One statement. No index on the target: the scan stays inside the
+   * changeset's own rows (the primary key's prefix), bounded by the cap on
+   * staged writes, and only the matching rows' arguments are read. */
+  async writesOn(id: string, objectId: string): Promise<ChangesetWriteRecord[]> {
+    if (!isUuid(id) || !isUuid(objectId)) {
+      return [];
+    }
+    const result = await this.query(
+      `SELECT ${WRITE_COLS} FROM changeset_write
+        WHERE changeset_id = $1 AND (minted_id = $2 OR target_id = $2)
+        ORDER BY seq`,
+      [id, objectId],
+    );
+    return result.rows.map(toWrite);
+  }
+
   async stagedBytes(id: string): Promise<number> {
     if (!isUuid(id)) {
       return 0;

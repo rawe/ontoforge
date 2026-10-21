@@ -1149,6 +1149,9 @@ export interface ChangesetStore {
   /** The staged create that minted `mintedId`; null when none did. */
   findMinted(id: string, mintedId: string): Promise<ChangesetWriteRecord | null>;
 
+  /** The staged writes that minted `objectId` or target it, by seq. */
+  writesOn(id: string, objectId: string): Promise<ChangesetWriteRecord[]>;
+
   /** The sum of the `bytes` its staged writes were appended with; 0 when
    * it has none or is gone. */
   stagedBytes(id: string): Promise<number>;

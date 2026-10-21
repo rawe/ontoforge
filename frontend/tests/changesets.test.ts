@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { ChangesetListItem, ChangesetViolation, StagedWriteView } from '../src/api/types.ts'
 import {
+  changesetLabel,
   changeText,
   isCommittedDataKey,
   isVersionMismatch,
@@ -10,6 +11,7 @@ import {
   MAX_NOTE_LENGTH,
   operationLabel,
   operationsSummary,
+  pinnedInList,
   shortId,
   sortChangesets,
   stagedDocumentKeys,
@@ -322,4 +324,18 @@ test('a read key sits under its list key, which an exact invalidation leaves alo
   assert.deepEqual(read.slice(0, list.length), [...list])
   assert.notDeepEqual([...read], [...list])
   assert.deepEqual(qk.changesets('o1', 'all', 'cs-1'), ['changesets', 'o1', 'all', 'cs-1'])
+})
+
+test('changesetLabel names a changeset by its note, else its short id', () => {
+  assert.equal(changesetLabel({ id: '7f3a9c00-1111-2222', note: 'Move the tasks' }), 'Move the tasks')
+  assert.equal(changesetLabel({ id: '7f3a9c00-1111-2222', note: null }), '7f3a9c00…')
+})
+
+test('pinnedInList finds the pinned item, reads a list older than the pin again, else calls it gone', () => {
+  const pinned = item('cs-1', 'draft', '2026-10-19T10:00:00.000Z')
+  const other = item('cs-2', 'draft', '2026-10-19T10:00:00.000Z')
+  assert.equal(pinnedInList('cs-1', [other, pinned], 100, 200), pinned)
+  assert.equal(pinnedInList('cs-1', [other], 100, 200), 'stale')
+  assert.equal(pinnedInList('cs-1', [other], 300, 200), 'gone')
+  assert.equal(pinnedInList('cs-1', [], 300, 0), 'gone')
 })

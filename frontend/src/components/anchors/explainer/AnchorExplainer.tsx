@@ -35,17 +35,6 @@ const RULES = [
   },
 ]
 
-function useReducedMotion() {
-  const [reduced, setReduced] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-  useEffect(() => {
-    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const change = () => setReduced(query.matches)
-    query.addEventListener('change', change)
-    return () => query.removeEventListener('change', change)
-  }, [])
-  return reduced
-}
-
 const microLabel = 'text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'
 
 /** Opens what an anchor does to a client — the hold and staged-only — told over one example: a "?" beside a page title. */
@@ -72,7 +61,6 @@ export function AnchorExplainerButton({ className }: { className?: string }) {
 function AnchorExplainerPanel() {
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
-  const motion = !useReducedMotion()
   const step = STORY[index]
   const last = STORY.length - 1
   const ActorIcon = ACTOR_ICONS[step.actor]
@@ -93,8 +81,8 @@ function AnchorExplainerPanel() {
   const logRef = useRef<HTMLOListElement>(null)
   useEffect(() => {
     const list = logRef.current
-    if (list) list.scrollTo({ top: list.scrollHeight, behavior: motion ? 'smooth' : 'auto' })
-  }, [index, motion])
+    if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
+  }, [index])
 
   return <div className="flex min-h-0 flex-col" onKeyDown={onKeyDown}>
     <header className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b px-6 pt-5 pb-4 pr-14">
@@ -126,7 +114,7 @@ function AnchorExplainerPanel() {
             <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-destructive bg-destructive/10" />Refused here</li>
           </ul>
         </div>
-        <AnchorExplainerFlow step={step} motion={motion} />
+        <AnchorExplainerFlow step={step} />
       </section>
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">

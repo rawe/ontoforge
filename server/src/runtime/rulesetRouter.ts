@@ -56,7 +56,7 @@ export const rulesetRouter: FastifyPluginAsyncZod = async (app) => {
 /**
  * The ruleset REST mirror, mounted at
  * `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey/rulesets/:rulesetKey`:
- * the runtime and changeset routers, plus a root that mirrors `get_anchor`. Every
+ * the runtime and changeset routers, plus a root that mirrors `get_ruleset`. Every
  * request first checks ontology, lens and ruleset, in that order, so an
  * unknown ruleset is not found on reads too; then the route's operation
  * against the ruleset's write access (`writeAccess.ts`), before the route

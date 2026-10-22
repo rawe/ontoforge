@@ -48,7 +48,7 @@ export type RulesetResponse = z.infer<typeof RulesetResponse>;
 
 const PathStep = z.object({ type: z.string(), id: z.string(), name: z.string().nullable() });
 
-/** The ruleset as a ruleset mount shows it (`get_anchor`, the REST
+/** The ruleset as a ruleset mount shows it (`get_ruleset`, the REST
  * mirror's root). `visible` is false when the lens hides the anchor's
  * type; type, id and name null and path [] whenever there is no entity to
  * show (deleted or not visible). */
@@ -146,7 +146,7 @@ export async function readMountRuleset(lensKey: string, rulesetKey: string, stor
   return record;
 }
 
-/** `get_anchor`: the ruleset through the lens, with the anchor entity's
+/** `get_ruleset`: the ruleset through the lens, with the anchor entity's
  * name and its path (root first, ending with the entity, below the
  * nearest hidden ancestor). */
 export async function getRulesetView(lensKey: string, rulesetKey: string, store: RuntimeStore): Promise<RulesetView> {

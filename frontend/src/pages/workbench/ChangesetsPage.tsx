@@ -28,7 +28,7 @@ const PIN_COLUMN = 'sticky right-0 bg-background'
 
 /**
  * `/o/:ontologyKey/w/:lensKey/changesets` — the lens's changesets, submitted
- * first: state, note, anchor, writes, types and age. Everything is read
+ * first: state, note, ruleset, writes, types and age. Everything is read
  * through the current lens; a row opens the changeset's review. Start
  * changeset starts and pins one; a draft row pins it, the pinned row leaves
  * it. A "?" beside the title explains the workflow.
@@ -82,7 +82,7 @@ export function ChangesetsPage() {
               <TableRow>
                 <TableHead className="w-24">State</TableHead>
                 <TableHead className="min-w-48">Note</TableHead>
-                <TableHead className="w-28">Anchor</TableHead>
+                <TableHead className="w-28">Ruleset</TableHead>
                 <TableHead className="w-16 text-right">Writes</TableHead>
                 <TableHead className="w-44">Types</TableHead>
                 <TableHead className="w-20 text-right">Age</TableHead>

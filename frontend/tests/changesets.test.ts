@@ -20,7 +20,9 @@ import {
   targetText,
   typesText,
   valueText,
+  violationLabel,
   violationLine,
+  violationPrefix,
   violationsNote,
   violationsOf,
   writesText,
@@ -269,7 +271,29 @@ test('violationLine numbers a write and names its row; seq 0 is the whole change
   // Not visible, or not on the page shown: unnamed.
   assert.equal(violationLine(v(3, 'not_visible', 'x'), writes), '#3 not_visible — x')
   assert.equal(violationLine(v(15, 'has_children', 'Still has children')), '#15 has_children — Still has children')
-  assert.equal(violationLine(v(0, 'anchor_gone', 'Anchor gone')), 'anchor_gone — Anchor gone')
+  assert.equal(
+    violationLine(v(0, 'ruleset_gone', "Ruleset 'agent-a' no longer exists")),
+    "ruleset_gone — Ruleset 'agent-a' no longer exists",
+  )
+  assert.equal(violationPrefix(v(1, 'drift', 'x'), writes), '#1 P2 Live: ')
+  assert.equal(violationPrefix(v(15, 'drift', 'x')), '#15 ')
+  assert.equal(violationPrefix(v(0, 'ruleset_gone', 'x'), writes), '')
+})
+
+test('violationLabel names the five ruleset kinds for people, and only them', () => {
+  assert.deepEqual(
+    ['ruleset_gone', 'outside_subtree', 'anchor_deleted', 'anchor_hidden', 'deletes_anchor'].map(violationLabel),
+    [
+      'Ruleset deleted',
+      "Outside the anchor's subtree",
+      'Anchor deleted',
+      'Anchor hidden by the lens',
+      "Deletes a ruleset's anchor",
+    ],
+  )
+  for (const kind of ['drift', 'dangling', 'has_children', 'two_parents', 'not_visible', 'replay']) {
+    assert.equal(violationLabel(kind), null, kind)
+  }
 })
 
 test('violationsNote (R12): header, one line each, the rest counted, cut to 1,000', () => {
@@ -280,6 +304,11 @@ test('violationsNote (R12): header, one line each, the rest counted, cut to 1,00
   assert.equal(
     violationsNote([v(1, 'drift', 'a'), v(2, 'dangling', 'b')], 140),
     'Commit rejected: 140 violations\n#1 drift — a\n#2 dangling — b\n… and 138 more',
+  )
+  // The note keeps the raw kinds: an agent reads it.
+  assert.equal(
+    violationsNote([v(3, 'outside_subtree', "Outside the anchor subtree of ruleset 'agent-a'"), v(0, 'ruleset_gone', 'gone')], 2),
+    "Commit rejected: 2 violations\n#3 outside_subtree — Outside the anchor subtree of ruleset 'agent-a'\nruleset_gone — gone",
   )
   const long = Array.from({ length: 100 }, (_, i) => v(i + 1, 'has_children', `Entity ${'x'.repeat(30)} has children`))
   const note = violationsNote(long, 100)

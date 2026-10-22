@@ -16,8 +16,8 @@ export interface ConnectTarget {
   baseUrl: string | null
   ontologyKey: string
   lensKey: string
-  /** The anchor the runtime server is mounted under; null for the plain lens. */
-  anchorKey: string | null
+  /** The ruleset the runtime server is mounted under; null for the plain lens. */
+  rulesetKey: string | null
   /** The servers to include, in any order; the config lists them in `MCP_SERVERS` order. */
   servers: readonly McpServerKey[]
   /** Add an `Authorization: Bearer` header carrying the token placeholder. */
@@ -27,14 +27,14 @@ export interface ConnectTarget {
 /** A server's full URL; the placeholder stands in for an unknown server address. */
 export function mcpUrl(
   server: McpServer,
-  { baseUrl, ontologyKey, lensKey, anchorKey }: Omit<ConnectTarget, 'servers' | 'withToken'>,
+  { baseUrl, ontologyKey, lensKey, rulesetKey }: Omit<ConnectTarget, 'servers' | 'withToken'>,
 ): string {
-  return (baseUrl ?? SERVER_URL_PLACEHOLDER) + server.path(ontologyKey, lensKey, anchorKey)
+  return (baseUrl ?? SERVER_URL_PLACEHOLDER) + server.path(ontologyKey, lensKey, rulesetKey)
 }
 
 function entries(target: ConnectTarget) {
   return MCP_SERVERS.filter((server) => target.servers.includes(server.key)).map((server) => ({
-    name: server.entryName(target.anchorKey),
+    name: server.entryName(target.rulesetKey),
     url: mcpUrl(server, target),
   }))
 }

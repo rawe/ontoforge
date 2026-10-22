@@ -229,7 +229,7 @@ export function rulesetMcpUrl(
   rulesetKey: string,
 ): string {
   const runtime = MCP_SERVERS.find((server) => server.key === 'runtime')!
-  return mcpUrl(runtime, { baseUrl, ontologyKey, lensKey, anchorKey: rulesetKey })
+  return mcpUrl(runtime, { baseUrl, ontologyKey, lensKey, rulesetKey })
 }
 
 /** A select option on the Connect panel: "agent-a · ACME › P1". */

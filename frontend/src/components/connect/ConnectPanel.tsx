@@ -361,7 +361,7 @@ export function ConnectPanel({ ontologyKey, lensKey }: { ontologyKey: string; le
                   baseUrl,
                   ontologyKey,
                   lensKey,
-                  anchorKey,
+                  rulesetKey: anchorKey,
                   servers,
                   withToken,
                 })}

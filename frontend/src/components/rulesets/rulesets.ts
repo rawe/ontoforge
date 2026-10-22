@@ -69,7 +69,7 @@ export function deletedAnchorCount(rulesets: readonly Ruleset[]): number {
 }
 
 /** The keys of the rulesets whose anchor is one entity, in list order. */
-export function anchorsAt(rulesets: readonly Ruleset[], typeKey: string, id: string): string[] {
+export function rulesetsAnchoredAt(rulesets: readonly Ruleset[], typeKey: string, id: string): string[] {
   return rulesets
     .filter((ruleset) => ruleset.anchor?.type === typeKey && ruleset.anchor.id === id)
     .map((ruleset) => ruleset.key)
@@ -81,14 +81,35 @@ function listKeys(keys: readonly string[]): string {
   return `${keys.slice(0, -1).join(', ')} and ${keys[keys.length - 1]}`
 }
 
-/** The entity detail's chip: "agent-a is anchored here". */
-export function anchoredHereText(keys: readonly string[]): string {
-  return `${listKeys(keys)} ${keys.length === 1 ? 'is' : 'are'} anchored here`
+/** The entity detail's chip: "Anchor of agent-a". */
+export function anchorOfText(keys: readonly string[]): string {
+  return `Anchor of ${listKeys(keys)}`
 }
 
-/** The entity delete dialog's warning: "agent-a is anchored here and will be dangling". */
-export function danglingWarningText(keys: readonly string[]): string {
-  return `${anchoredHereText(keys)} and will be dangling`
+/** The entity delete dialog's warning: what a delete does to the rulesets anchored there. */
+export function anchorDeleteWarning(keys: readonly string[]): string {
+  return keys.length === 1
+    ? `This is the anchor of ${keys[0]}: its writes will be refused until the anchor is moved or removed.`
+    : `This is the anchor of ${listKeys(keys)}: their writes will be refused until their anchors are moved or removed.`
+}
+
+/**
+ * A ruleset's anchor as its view through the lens shows it: none, deleted,
+ * hidden by the lens, still loading (undefined view), or found with its
+ * entity and path.
+ */
+type AnchorOnLens =
+  | { state: 'none' | 'deleted' | 'hidden' | 'loading' }
+  | { state: 'found'; entity: PathStep; path: readonly PathStep[] }
+
+function anchorOnLens(ruleset: Ruleset, view: RulesetView | undefined): AnchorOnLens {
+  const anchor = ruleset.anchor
+  if (anchor === null) return { state: 'none' }
+  if (anchor.state === 'deleted' || view?.anchor?.state === 'deleted') return { state: 'deleted' }
+  const seen = view?.anchor
+  if (seen === undefined || seen === null) return { state: 'loading' }
+  if (!seen.visible || seen.type === null || seen.id === null) return { state: 'hidden' }
+  return { state: 'found', entity: { type: seen.type, id: seen.id, name: seen.name }, path: seen.path }
 }
 
 /**
@@ -112,28 +133,32 @@ export function anchorPlacement(
   view: RulesetView | undefined,
   typeName: (typeKey: string) => string,
 ): AnchorPlacement {
-  const anchor = ruleset.anchor
-  if (anchor === null) return { kind: 'none', primary: 'No anchor', secondary: null }
-  if (anchor.state === 'deleted' || view?.anchor?.state === 'deleted') {
-    return {
-      kind: 'deleted',
-      primary: `${typeName(anchor.type)} ${anchor.id.slice(0, 4)}… was deleted`,
-      secondary: 'Every write is refused',
+  const on = anchorOnLens(ruleset, view)
+  switch (on.state) {
+    case 'none':
+      return { kind: 'none', primary: 'No anchor', secondary: null }
+    case 'deleted': {
+      const anchor = ruleset.anchor!
+      return {
+        kind: 'deleted',
+        primary: `${typeName(anchor.type)} ${anchor.id.slice(0, 4)}… was deleted`,
+        secondary: 'Every write is refused',
+      }
     }
-  }
-  const seen = view?.anchor
-  if (seen === undefined || seen === null) return { kind: 'loading', primary: '…', secondary: null }
-  if (!seen.visible || seen.type === null || seen.id === null) {
-    return {
-      kind: 'hidden',
-      primary: 'Hidden by this lens',
-      secondary: 'Writes through this lens are refused',
-    }
-  }
-  return {
-    kind: 'path',
-    primary: formatPath(seen.path),
-    secondary: `${typeName(seen.type)} · ${stepLabel({ type: seen.type, id: seen.id, name: seen.name })}`,
+    case 'loading':
+      return { kind: 'loading', primary: '…', secondary: null }
+    case 'hidden':
+      return {
+        kind: 'hidden',
+        primary: 'Hidden by this lens',
+        secondary: 'Writes through this lens are refused',
+      }
+    case 'found':
+      return {
+        kind: 'path',
+        primary: formatPath(on.path),
+        secondary: `${typeName(on.entity.type)} · ${stepLabel(on.entity)}`,
+      }
   }
 }
 
@@ -232,27 +257,52 @@ export function rulesetMcpUrl(
   return mcpUrl(runtime, { baseUrl, ontologyKey, lensKey, rulesetKey })
 }
 
-/** A select option on the Connect panel: "agent-a · ACME › P1". */
-export function anchorOptionLabel(ruleset: Ruleset, view: RulesetView | undefined): string {
-  if (ruleset.anchor === null) return `${ruleset.key} · no anchor`
-  if (ruleset.anchor.state === 'deleted' || view?.anchor?.state === 'deleted') {
-    return `${ruleset.key} · deleted`
+/** A Connect select option: "agent-a · propose · anchor Apollo"; write access first. */
+export function rulesetOptionLabel(ruleset: Ruleset, view: RulesetView | undefined): string {
+  const label = `${ruleset.key} · ${ruleset.writeAccess}`
+  const on = anchorOnLens(ruleset, view)
+  switch (on.state) {
+    case 'found':
+      return `${label} · anchor ${stepLabel(on.entity)}`
+    case 'deleted':
+    case 'hidden':
+      return `${label} · anchor ${on.state}`
+    default:
+      return label
   }
-  if (view?.anchor === undefined || view.anchor === null) return ruleset.key
-  if (!view.anchor.visible) return `${ruleset.key} · hidden by this lens`
-  return `${ruleset.key} · ${formatPath(view.anchor.path)}`
 }
 
-/** The Connect card's line under the select: where the connection may write. */
-export function anchorWritesLine(ruleset: Ruleset, view: RulesetView | undefined): string | null {
-  if (ruleset.anchor === null) return 'No restriction, like the plain lens.'
-  if (ruleset.anchor.state === 'deleted' || view?.anchor?.state === 'deleted') {
-    return 'Its entity was deleted: every write is refused.'
+/**
+ * One line under the Connect select, per rule: write access with its level,
+ * the anchor with its state (the line's icon and colour).
+ */
+export type RulesetRuleLine =
+  | { rule: 'writeAccess'; level: WriteAccess; text: string }
+  | { rule: 'anchor'; state: 'found' | 'none' | 'deleted' | 'hidden'; text: string }
+
+/** What a connection through the ruleset may do: write access always, the anchor once its view is read. */
+export function rulesetRuleLines(ruleset: Ruleset, view: RulesetView | undefined): RulesetRuleLine[] {
+  const { level, short } = writeAccessLevel(ruleset.writeAccess)
+  const lines: RulesetRuleLine[] = [
+    { rule: 'writeAccess', level, text: `Write access ${level}: ${short[0].toLowerCase()}${short.slice(1)}` },
+  ]
+  const on = anchorOnLens(ruleset, view)
+  if (on.state === 'found') {
+    lines.push({
+      rule: 'anchor',
+      state: 'found',
+      text: `Anchor: writes in its hierarchy stay under ${stepLabel(on.entity)}; other types are free.`,
+    })
+  } else if (on.state === 'none') {
+    lines.push({ rule: 'anchor', state: 'none', text: 'No anchor: no limit on where.' })
+  } else if (on.state === 'deleted') {
+    lines.push({ rule: 'anchor', state: 'deleted', text: 'Anchor deleted: every write is refused.' })
+  } else if (on.state === 'hidden') {
+    lines.push({
+      rule: 'anchor',
+      state: 'hidden',
+      text: 'Anchor hidden by this lens: every write through it is refused.',
+    })
   }
-  const seen = view?.anchor
-  if (seen === undefined || seen === null) return null
-  if (!seen.visible || seen.id === null) {
-    return 'This lens hides its entity: every write through it is refused.'
-  }
-  return `Hierarchy writes only under ${stepLabel({ type: seen.type ?? '', id: seen.id, name: seen.name })}; other types are free.`
+  return lines
 }

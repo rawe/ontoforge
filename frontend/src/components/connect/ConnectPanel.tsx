@@ -1,9 +1,20 @@
-import { Check, ChevronRight, Copy, Layers, Shapes, type LucideIcon } from 'lucide-react'
+import {
+  Anchor,
+  Check,
+  ChevronRight,
+  Copy,
+  EyeOff,
+  Layers,
+  Shapes,
+  TriangleAlert,
+  type LucideIcon,
+} from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { useRulesets, useRulesetView, useServerInfo } from '@/api/hooks'
 import type { Ruleset } from '@/api/types'
-import { anchorOptionLabel, anchorWritesLine } from '@/components/rulesets/rulesets'
+import { rulesetOptionLabel, rulesetRuleLines, type RulesetRuleLine } from '@/components/rulesets/rulesets'
+import { WriteAccessIcon } from '@/components/rulesets/WriteAccessChip'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
@@ -43,8 +54,8 @@ const LEVEL_CHIPS = {
     label: 'Lens',
     chip: 'border-(--tc-emerald-border) bg-(--tc-emerald-bg) text-(--tc-emerald)',
   },
-  anchor: {
-    label: 'Anchor',
+  ruleset: {
+    label: 'Ruleset',
     chip: 'border-(--tc-teal-border) bg-(--tc-teal-bg) text-(--tc-teal)',
   },
 }
@@ -72,95 +83,123 @@ function NextChip({ level, keyName }: { level: keyof typeof LEVEL_CHIPS; keyName
   )
 }
 
-/** What a server's URL binds it to: the ontology, a lens within it, or an anchor under that lens. */
+/** What a server's URL binds it to: the ontology, a lens within it, or a ruleset under that lens. */
 function BoundTo({
   boundTo,
   ontologyKey,
   lensKey,
-  anchorKey,
+  rulesetKey,
 }: {
   boundTo: McpServer['boundTo']
   ontologyKey: string
   lensKey: string
-  anchorKey: string | null
+  rulesetKey: string | null
 }) {
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1 whitespace-nowrap">
       <LevelChip level="ontology" keyName={ontologyKey} />
       {boundTo === 'lens' && <NextChip level="lens" keyName={lensKey} />}
-      {boundTo === 'lens' && anchorKey !== null && <NextChip level="anchor" keyName={anchorKey} />}
+      {boundTo === 'lens' && rulesetKey !== null && <NextChip level="ruleset" keyName={rulesetKey} />}
     </div>
   )
 }
 
-/** Stands for "None" in the Anchor select; never an anchor key, which starts with a letter. */
-const NO_ANCHOR = '_none'
+/** Stands for "None" in the Ruleset select; never a ruleset key, which starts with a letter. */
+const NO_RULESET = '_none'
 
-function AnchorOption({
-  anchor,
+function RulesetOption({
+  ruleset,
   ontologyKey,
   lensKey,
 }: {
-  anchor: Ruleset
+  ruleset: Ruleset
   ontologyKey: string
   lensKey: string
 }) {
-  const view = useRulesetView(ontologyKey, lensKey, anchor.key)
-  return <SelectItem value={anchor.key}>{anchorOptionLabel(anchor, view.data)}</SelectItem>
+  const view = useRulesetView(ontologyKey, lensKey, ruleset.key)
+  return <SelectItem value={ruleset.key}>{rulesetOptionLabel(ruleset, view.data)}</SelectItem>
 }
 
-function AnchorLine({
-  anchor,
-  ontologyKey,
-  lensKey,
-}: {
-  anchor: Ruleset
-  ontologyKey: string
-  lensKey: string
-}) {
-  const view = useRulesetView(ontologyKey, lensKey, anchor.key)
-  const line = view.isError ? view.error.message : anchorWritesLine(anchor, view.data)
-  return line === null ? null : <p className="mt-1.5 text-[11px] text-muted-foreground">{line}</p>
+const ANCHOR_LINE_ICONS: Record<Extract<RulesetRuleLine, { rule: 'anchor' }>['state'], LucideIcon> = {
+  found: Anchor,
+  none: Anchor,
+  deleted: TriangleAlert,
+  hidden: EyeOff,
 }
 
-/** The runtime card's Anchor select: "None" (the plain lens) or one of the ontology's anchors. */
-function AnchorField({
-  anchors,
-  anchorKey,
-  onAnchorKeyChange,
+/** One line per rule under the select: what this connection may do. */
+function RulesetLines({
+  ruleset,
   ontologyKey,
   lensKey,
 }: {
-  anchors: readonly Ruleset[]
-  anchorKey: string | null
-  onAnchorKeyChange: (anchorKey: string | null) => void
+  ruleset: Ruleset
   ontologyKey: string
   lensKey: string
 }) {
-  const anchor = anchors.find((a) => a.key === anchorKey)
+  const view = useRulesetView(ontologyKey, lensKey, ruleset.key)
+  return (
+    <div className="mt-1.5 space-y-1">
+      {rulesetRuleLines(ruleset, view.data).map((line) => {
+        const deleted = line.rule === 'anchor' && line.state === 'deleted'
+        const Icon = line.rule === 'anchor' ? ANCHOR_LINE_ICONS[line.state] : null
+        return (
+          <p
+            key={line.rule}
+            className={`flex items-start gap-1.5 text-[11px] ${deleted ? 'text-destructive' : 'text-muted-foreground'}`}
+          >
+            {line.rule === 'writeAccess' ? (
+              <WriteAccessIcon level={line.level} className="mt-0.5 shrink-0" />
+            ) : (
+              Icon !== null && <Icon className="mt-0.5 size-3 shrink-0" />
+            )}
+            <span>{line.text}</span>
+          </p>
+        )
+      })}
+      {view.isError && <p className="text-[11px] text-destructive">{view.error.message}</p>}
+    </div>
+  )
+}
+
+/** The runtime card's Ruleset select: "None" (the plain lens) or one of the ontology's rulesets. */
+function RulesetField({
+  rulesets,
+  rulesetKey,
+  onRulesetKeyChange,
+  ontologyKey,
+  lensKey,
+}: {
+  rulesets: readonly Ruleset[]
+  rulesetKey: string | null
+  onRulesetKeyChange: (rulesetKey: string | null) => void
+  ontologyKey: string
+  lensKey: string
+}) {
+  const ruleset = rulesets.find((r) => r.key === rulesetKey)
   return (
     <div className="mt-3 border-t pt-3">
       <div className="flex items-center gap-2">
-        <Label htmlFor="connect-anchor" className="text-[12px]">
-          Anchor
+        <Label htmlFor="connect-ruleset" className="text-[12px]">
+          Ruleset
         </Label>
         <Select
-          value={anchorKey ?? NO_ANCHOR}
-          onValueChange={(value) => onAnchorKeyChange(value === NO_ANCHOR ? null : value)}
+          value={rulesetKey ?? NO_RULESET}
+          onValueChange={(value) => onRulesetKeyChange(value === NO_RULESET ? null : value)}
         >
-          <SelectTrigger id="connect-anchor" size="sm" className="min-w-0 flex-1 text-[12px]">
+          <SelectTrigger id="connect-ruleset" size="sm" className="min-w-0 flex-1 text-[12px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={NO_ANCHOR}>None</SelectItem>
-            {anchors.map((a) => (
-              <AnchorOption key={a.key} anchor={a} ontologyKey={ontologyKey} lensKey={lensKey} />
+            <SelectItem value={NO_RULESET}>None: the plain lens</SelectItem>
+            {rulesets.map((r) => (
+              <RulesetOption key={r.key} ruleset={r} ontologyKey={ontologyKey} lensKey={lensKey} />
             ))}
           </SelectContent>
         </Select>
       </div>
-      {anchor !== undefined && (
-        <AnchorLine anchor={anchor} ontologyKey={ontologyKey} lensKey={lensKey} />
+      {ruleset !== undefined && (
+        <RulesetLines ruleset={ruleset} ontologyKey={ontologyKey} lensKey={lensKey} />
       )}
     </div>
   )
@@ -171,7 +210,7 @@ function ServerCard({
   server,
   ontologyKey,
   lensKey,
-  anchorKey,
+  rulesetKey,
   selected,
   onSelectedChange,
   children,
@@ -179,7 +218,7 @@ function ServerCard({
   server: McpServer
   ontologyKey: string
   lensKey: string
-  anchorKey: string | null
+  rulesetKey: string | null
   selected: boolean
   onSelectedChange: (selected: boolean) => void
   /** Below the card's text, outside its click-to-select area. */
@@ -203,14 +242,14 @@ function ServerCard({
           <Icon className="size-4 text-muted-foreground" />
           <span className="text-[13px] font-semibold">{server.label}</span>
           <span className="font-mono text-[11px] text-muted-foreground">
-            {server.entryName(anchorKey)}
+            {server.entryName(rulesetKey)}
           </span>
         </div>
         <BoundTo
           boundTo={server.boundTo}
           ontologyKey={ontologyKey}
           lensKey={lensKey}
-          anchorKey={anchorKey}
+          rulesetKey={rulesetKey}
         />
         <p className="mt-2 text-[12px] font-medium">{server.job}</p>
         <p className="mt-0.5 text-[12px] text-muted-foreground">{server.covers}</p>
@@ -269,10 +308,10 @@ export function ConnectPanel({ ontologyKey, lensKey }: { ontologyKey: string; le
   const [client, setClient] = useState<ConnectClient>('claude-code')
   const [servers, setServers] = useState<McpServerKey[]>(MCP_SERVERS.map((s) => s.key))
   const [withToken, setWithToken] = useState(false)
-  const anchors = useRulesets(ontologyKey).data ?? []
-  const [anchorChoice, setAnchorChoice] = useState<string | null>(null)
-  // A chosen anchor that has since been deleted falls back to the plain lens.
-  const anchorKey = anchors.some((a) => a.key === anchorChoice) ? anchorChoice : null
+  const rulesets = useRulesets(ontologyKey).data ?? []
+  const [rulesetChoice, setRulesetChoice] = useState<string | null>(null)
+  // A chosen ruleset that has since been deleted falls back to the plain lens.
+  const rulesetKey = rulesets.some((r) => r.key === rulesetChoice) ? rulesetChoice : null
   const baseUrl = info.data?.baseUrl ?? null
 
   const setSelected = (key: McpServerKey, selected: boolean) =>
@@ -295,15 +334,15 @@ export function ConnectPanel({ ontologyKey, lensKey }: { ontologyKey: string; le
             server={server}
             ontologyKey={ontologyKey}
             lensKey={lensKey}
-            anchorKey={anchorKey}
+            rulesetKey={rulesetKey}
             selected={servers.includes(server.key)}
             onSelectedChange={(selected) => setSelected(server.key, selected)}
           >
             {server.key === 'runtime' && (
-              <AnchorField
-                anchors={anchors}
-                anchorKey={anchorKey}
-                onAnchorKeyChange={setAnchorChoice}
+              <RulesetField
+                rulesets={rulesets}
+                rulesetKey={rulesetKey}
+                onRulesetKeyChange={setRulesetChoice}
                 ontologyKey={ontologyKey}
                 lensKey={lensKey}
               />
@@ -361,7 +400,7 @@ export function ConnectPanel({ ontologyKey, lensKey }: { ontologyKey: string; le
                   baseUrl,
                   ontologyKey,
                   lensKey,
-                  rulesetKey: anchorKey,
+                  rulesetKey,
                   servers,
                   withToken,
                 })}

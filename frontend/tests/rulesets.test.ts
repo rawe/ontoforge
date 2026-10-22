@@ -2,18 +2,18 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { PathStep, Ruleset, RulesetView } from '../src/api/types.ts'
 import {
-  anchoredHereText,
-  anchorOptionLabel,
+  anchorDeleteWarning,
+  anchorOfText,
   anchorPlacement,
-  anchorsAt,
-  anchorWritesLine,
-  danglingWarningText,
   DEFAULT_RULES,
   deletedAnchorCount,
   loosenedRules,
   rulesetKeyProblem,
   rulesetMcpUrl,
+  rulesetOptionLabel,
   rulesetPatch,
+  rulesetRuleLines,
+  rulesetsAnchoredAt,
   WRITE_ACCESS_LEVELS,
   writeAccessLevel,
 } from '../src/components/rulesets/rulesets.ts'
@@ -95,21 +95,25 @@ test('deletedAnchorCount counts only deleted anchors', () => {
   assert.equal(deletedAnchorCount([found, noAnchor, deleted]), 1)
 })
 
-test('anchorsAt finds the keys whose anchor is one entity, by type and id', () => {
+test('rulesetsAnchoredAt finds the keys whose anchor is one entity, by type and id', () => {
   const second: Ruleset = { ...found, key: 'agent-b' }
-  assert.deepEqual(anchorsAt([found, noAnchor, second], 'project', 'p-1'), ['agent-a', 'agent-b'])
-  assert.deepEqual(anchorsAt([found], 'task', 'p-1'), [])
-  assert.deepEqual(anchorsAt([found], 'project', 'p-2'), [])
+  assert.deepEqual(rulesetsAnchoredAt([found, noAnchor, second], 'project', 'p-1'), ['agent-a', 'agent-b'])
+  assert.deepEqual(rulesetsAnchoredAt([found], 'task', 'p-1'), [])
+  assert.deepEqual(rulesetsAnchoredAt([found], 'project', 'p-2'), [])
 })
 
 test('the chip and the delete warning name the rulesets', () => {
-  assert.equal(anchoredHereText(['agent-a']), 'agent-a is anchored here')
-  assert.equal(anchoredHereText(['agent-a', 'agent-b']), 'agent-a and agent-b are anchored here')
+  assert.equal(anchorOfText(['agent-a']), 'Anchor of agent-a')
+  assert.equal(anchorOfText(['agent-a', 'agent-b']), 'Anchor of agent-a and agent-b')
+  assert.equal(anchorOfText(['agent-a', 'agent-b', 'agent-c']), 'Anchor of agent-a, agent-b and agent-c')
   assert.equal(
-    anchoredHereText(['agent-a', 'agent-b', 'agent-c']),
-    'agent-a, agent-b and agent-c are anchored here',
+    anchorDeleteWarning(['agent-a']),
+    'This is the anchor of agent-a: its writes will be refused until the anchor is moved or removed.',
   )
-  assert.equal(danglingWarningText(['agent-a']), 'agent-a is anchored here and will be dangling')
+  assert.equal(
+    anchorDeleteWarning(['agent-a', 'agent-b']),
+    'This is the anchor of agent-a and agent-b: their writes will be refused until their anchors are moved or removed.',
+  )
 })
 
 test('anchorPlacement: found, no anchor, deleted, hidden and loading', () => {
@@ -210,25 +214,65 @@ test('rulesetMcpUrl extends the runtime MCP URL by the ruleset', () => {
   )
 })
 
-test('the Connect select: an option label and the line under it, per anchor state', () => {
-  assert.equal(anchorOptionLabel(found, seen), 'agent-a · ACME › P1')
-  assert.equal(anchorOptionLabel(found, undefined), 'agent-a')
-  assert.equal(anchorOptionLabel(found, hidden), 'agent-a · hidden by this lens')
-  assert.equal(anchorOptionLabel(found, goneView), 'agent-a · deleted')
-  assert.equal(anchorOptionLabel(noAnchor, undefined), 'agent-u · no anchor')
-  assert.equal(anchorOptionLabel(deleted, undefined), 'agent-d · deleted')
-
-  assert.equal(anchorWritesLine(found, seen), 'Hierarchy writes only under P1; other types are free.')
-  assert.equal(anchorWritesLine(found, undefined), null)
-  assert.equal(
-    anchorWritesLine(found, hidden),
-    'This lens hides its entity: every write through it is refused.',
-  )
-  assert.equal(anchorWritesLine(found, goneView), 'Its entity was deleted: every write is refused.')
-  assert.equal(anchorWritesLine(noAnchor, undefined), 'No restriction, like the plain lens.')
-  assert.equal(anchorWritesLine(deleted, undefined), 'Its entity was deleted: every write is refused.')
-  // B18: the anchor line never says "covers".
-  for (const line of [seen, hidden, goneView, undefined].map((v) => anchorWritesLine(found, v))) {
-    assert.doesNotMatch(line ?? '', /cover/i)
+test('the Connect select: the option label and the lines under it, per level and anchor state', () => {
+  const writeAccessLines = {
+    none: 'Write access none: read only: no writes, no changesets.',
+    propose: 'Write access propose: stages writes into a changeset and submits it; a person commits.',
+    full: 'Write access full: writes as the lens allows, at once or through a changeset.',
   }
+  // Each anchor state: the ruleset, its view, the label's suffix, the anchor line (null: none yet).
+  const states = [
+    {
+      name: 'found',
+      ruleset: found,
+      view: seen,
+      suffix: ' · anchor P1',
+      anchor: { state: 'found', text: 'Anchor: writes in its hierarchy stay under P1; other types are free.' },
+    },
+    { name: 'no anchor', ruleset: noAnchor, view: undefined, suffix: '', anchor: { state: 'none', text: 'No anchor: no limit on where.' } },
+    {
+      name: 'deleted',
+      ruleset: deleted,
+      view: undefined,
+      suffix: ' · anchor deleted',
+      anchor: { state: 'deleted', text: 'Anchor deleted: every write is refused.' },
+    },
+    // The list still says found; the view through the lens says deleted.
+    {
+      name: 'deleted since',
+      ruleset: found,
+      view: goneView,
+      suffix: ' · anchor deleted',
+      anchor: { state: 'deleted', text: 'Anchor deleted: every write is refused.' },
+    },
+    {
+      name: 'hidden',
+      ruleset: found,
+      view: hidden,
+      suffix: ' · anchor hidden',
+      anchor: { state: 'hidden', text: 'Anchor hidden by this lens: every write through it is refused.' },
+    },
+    // The view is not read yet: no anchor word, no anchor line.
+    { name: 'loading', ruleset: found, view: undefined, suffix: '', anchor: null },
+  ] as const
+  for (const level of ['none', 'propose', 'full'] as const) {
+    for (const state of states) {
+      const ruleset: Ruleset = { ...state.ruleset, writeAccess: level }
+      const at = `${level}, ${state.name}`
+      assert.equal(rulesetOptionLabel(ruleset, state.view), `${ruleset.key} · ${level}${state.suffix}`, at)
+      assert.deepEqual(
+        rulesetRuleLines(ruleset, state.view),
+        [
+          { rule: 'writeAccess', level, text: writeAccessLines[level] },
+          ...(state.anchor === null ? [] : [{ rule: 'anchor', ...state.anchor }]),
+        ],
+        at,
+      )
+      // B18: no line says "covers".
+      for (const line of rulesetRuleLines(ruleset, state.view)) assert.doesNotMatch(line.text, /cover/i, at)
+    }
+  }
+  // An unnamed anchor falls back to its id's start, as the path does.
+  const unnamed: RulesetView = { ...seen, anchor: { ...seen.anchor!, name: null } }
+  assert.equal(rulesetOptionLabel(found, unnamed), 'agent-a · propose · anchor p-1')
 })

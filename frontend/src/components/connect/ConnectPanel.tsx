@@ -1,8 +1,8 @@
 import { Check, ChevronRight, Copy, Layers, Shapes, type LucideIcon } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { useAnchors, useAnchorView, useServerInfo } from '@/api/hooks'
-import type { Anchor } from '@/api/types'
+import { useRulesets, useRulesetView, useServerInfo } from '@/api/hooks'
+import type { Ruleset } from '@/api/types'
 import { anchorOptionLabel, anchorWritesLine } from '@/components/rulesets/rulesets'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -101,11 +101,11 @@ function AnchorOption({
   ontologyKey,
   lensKey,
 }: {
-  anchor: Anchor
+  anchor: Ruleset
   ontologyKey: string
   lensKey: string
 }) {
-  const view = useAnchorView(ontologyKey, lensKey, anchor.key)
+  const view = useRulesetView(ontologyKey, lensKey, anchor.key)
   return <SelectItem value={anchor.key}>{anchorOptionLabel(anchor, view.data)}</SelectItem>
 }
 
@@ -114,11 +114,11 @@ function AnchorLine({
   ontologyKey,
   lensKey,
 }: {
-  anchor: Anchor
+  anchor: Ruleset
   ontologyKey: string
   lensKey: string
 }) {
-  const view = useAnchorView(ontologyKey, lensKey, anchor.key)
+  const view = useRulesetView(ontologyKey, lensKey, anchor.key)
   const line = view.isError ? view.error.message : anchorWritesLine(anchor, view.data)
   return line === null ? null : <p className="mt-1.5 text-[11px] text-muted-foreground">{line}</p>
 }
@@ -131,7 +131,7 @@ function AnchorField({
   ontologyKey,
   lensKey,
 }: {
-  anchors: readonly Anchor[]
+  anchors: readonly Ruleset[]
   anchorKey: string | null
   onAnchorKeyChange: (anchorKey: string | null) => void
   ontologyKey: string
@@ -269,7 +269,7 @@ export function ConnectPanel({ ontologyKey, lensKey }: { ontologyKey: string; le
   const [client, setClient] = useState<ConnectClient>('claude-code')
   const [servers, setServers] = useState<McpServerKey[]>(MCP_SERVERS.map((s) => s.key))
   const [withToken, setWithToken] = useState(false)
-  const anchors = useAnchors(ontologyKey).data ?? []
+  const anchors = useRulesets(ontologyKey).data ?? []
   const [anchorChoice, setAnchorChoice] = useState<string | null>(null)
   // A chosen anchor that has since been deleted falls back to the plain lens.
   const anchorKey = anchors.some((a) => a.key === anchorChoice) ? anchorChoice : null

@@ -14,8 +14,8 @@
  *   ['neighbors', ontologyKey, lensKey, typeKey, id, params]
  *   ['relations', ontologyKey, lensKey, typeKey, params]
  *   ['savedQueries', ontologyKey, lensKey]
- *   ['anchors', ontologyKey]                         the ontology's anchors (lensless)
- *   ['anchors', ontologyKey, lensKey, anchorKey]     one anchor through a lens (mount root)
+ *   ['rulesets', ontologyKey]                        the ontology's rulesets (lensless)
+ *   ['rulesets', ontologyKey, lensKey, rulesetKey]   one ruleset through a lens (mount root)
  *   ['changesets', ontologyKey, lensKey]             the lens's changesets
  *   ['changesets', ontologyKey, lensKey, id, params] one changeset's review read (a page of writes)
  *   ['changesets', ontologyKey, lensKey, id, ['document', typeKey, entityId, propertyKey]]
@@ -77,11 +77,11 @@ export const qk = {
       ? (['relations', ontologyKey, lensKey, typeKey] as const)
       : (['relations', ontologyKey, lensKey, typeKey, params] as const),
 
-  /** With lens and key: one anchor's view through the lens, under the list's key. */
-  anchors: (ontologyKey: string, lensKey?: string, anchorKey?: string) =>
-    lensKey === undefined || anchorKey === undefined
-      ? (['anchors', ontologyKey] as const)
-      : (['anchors', ontologyKey, lensKey, anchorKey] as const),
+  /** With lens and key: one ruleset's view through the lens, under the list's key. */
+  rulesets: (ontologyKey: string, lensKey?: string, rulesetKey?: string) =>
+    lensKey === undefined || rulesetKey === undefined
+      ? (['rulesets', ontologyKey] as const)
+      : (['rulesets', ontologyKey, lensKey, rulesetKey] as const),
 
   /** With an id: one changeset's review read, under the list's key. */
   changesets: (ontologyKey: string, lensKey: string, changesetId?: string, params?: unknown) =>

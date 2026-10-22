@@ -11,7 +11,7 @@ export function ConnectTab({ ontologyKey, lens }: { ontologyKey: string; lens: L
         <h3 className="text-[13px] font-semibold">Connect AI clients</h3>
         {/* Anchors are managed in the Workbench; the Studio only links there. */}
         <Link
-          to={`/o/${ontologyKey}/w/${lens.key}/anchors`}
+          to={`/o/${ontologyKey}/w/${lens.key}/rulesets`}
           className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground hover:underline"
         >
           <Anchor className="size-3.5" />

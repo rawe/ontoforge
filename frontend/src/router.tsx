@@ -19,8 +19,8 @@ const QueryPage = lazy(() =>
 const AiPage = lazy(() =>
   import('@/pages/workbench/AiPage').then((m) => ({ default: m.AiPage })),
 )
-const AnchorsPage = lazy(() =>
-  import('@/pages/workbench/RulesetsPage').then((m) => ({ default: m.AnchorsPage })),
+const RulesetsPage = lazy(() =>
+  import('@/pages/workbench/RulesetsPage').then((m) => ({ default: m.RulesetsPage })),
 )
 const ChangesetsPage = lazy(() =>
   import('@/pages/workbench/ChangesetsPage').then((m) => ({ default: m.ChangesetsPage })),
@@ -74,7 +74,7 @@ export const router = createBrowserRouter([
       { path: 'explore', element: suspended(<ExplorePage />) },
       { path: 'query', element: suspended(<QueryPage />) },
       { path: 'ai', element: suspended(<AiPage />) },
-      { path: 'anchors', element: suspended(<AnchorsPage />) },
+      { path: 'rulesets', element: suspended(<RulesetsPage />) },
       { path: 'changesets', element: suspended(<ChangesetsPage />) },
       { path: 'changesets/:changesetId', element: suspended(<ChangesetDetailPage />) },
     ],

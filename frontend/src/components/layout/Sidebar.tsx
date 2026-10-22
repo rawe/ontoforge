@@ -1,11 +1,11 @@
 import {
-  Anchor,
   Check,
   ChevronsUpDown,
   FileStack,
   Layers,
   LayoutDashboard,
   Plus,
+  ScrollText,
   Search,
   Settings2,
   Sparkles,
@@ -13,8 +13,8 @@ import {
   Waypoints,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { useAnchors, useChangesets, useFeatures, useLenses, useRuntimeSchema } from '@/api/hooks'
-import { danglingCount } from '@/components/rulesets/rulesets'
+import { useChangesets, useFeatures, useLenses, useRulesets, useRuntimeSchema } from '@/api/hooks'
+import { deletedAnchorCount } from '@/components/rulesets/rulesets'
 import { submittedCount } from '@/components/changesets/changesets'
 import { OntologySwitcher } from '@/components/layout/OntologySwitcher'
 import { useSidebarCollapsed } from '@/components/layout/sidebarCollapsed'
@@ -126,8 +126,8 @@ export function Sidebar({
   const { collapsed } = useSidebarCollapsed()
   const { data: features } = useFeatures()
   const schema = useRuntimeSchema(ontologyKey, lensKey)
-  const anchors = useAnchors(ontologyKey)
-  const dangling = danglingCount(anchors.data ?? [])
+  const rulesets = useRulesets(ontologyKey)
+  const deletedAnchors = deletedAnchorCount(rulesets.data ?? [])
   // Only once the lens resolved: an unknown lens gets no changesets request (and no 404).
   const changesets = useChangesets(ontologyKey, schema.data !== undefined ? lensKey : undefined)
   const submitted = submittedCount(changesets.data ?? [])
@@ -240,11 +240,11 @@ export function Sidebar({
           <NavItem to={`${base}/ai`} label="Assistants" icon={Sparkles} collapsed={collapsed} />
         )}
         <NavItem
-          to={`${base}/anchors`}
-          label="Anchors"
-          icon={Anchor}
+          to={`${base}/rulesets`}
+          label="Rulesets"
+          icon={ScrollText}
           collapsed={collapsed}
-          alert={{ count: dangling, label: 'dangling' }}
+          alert={{ count: deletedAnchors, label: 'anchor deleted' }}
         />
         <NavItem
           to={`${base}/changesets`}

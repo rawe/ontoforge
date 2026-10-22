@@ -103,20 +103,20 @@ export function useRuntimeSchema(
   })
 }
 
-/** The ontology's anchors (lensless): the Anchors page, its sidebar count, the entity chip. */
-export function useAnchors(ontologyKey: string | undefined) {
+/** The ontology's rulesets (lensless): the Rulesets page, its sidebar count, the entity chip. */
+export function useRulesets(ontologyKey: string | undefined) {
   return useQuery({
-    queryKey: qk.anchors(ontologyKey ?? ''),
-    queryFn: () => runtime.listAnchors(ontologyKey!),
+    queryKey: qk.rulesets(ontologyKey ?? ''),
+    queryFn: () => runtime.listRulesets(ontologyKey!),
     enabled: ontologyKey !== undefined && ontologyKey !== '',
   })
 }
 
-/** One anchor seen through a lens: its anchored mount's root, with name and path. */
-export function useAnchorView(ontologyKey: string, lensKey: string, anchorKey: string) {
+/** One ruleset seen through a lens: its mount's root, with the anchor's name and path. */
+export function useRulesetView(ontologyKey: string, lensKey: string, rulesetKey: string) {
   return useQuery({
-    queryKey: qk.anchors(ontologyKey, lensKey, anchorKey),
-    queryFn: () => runtime.getAnchorView(ontologyKey, lensKey, anchorKey),
+    queryKey: qk.rulesets(ontologyKey, lensKey, rulesetKey),
+    queryFn: () => runtime.getRulesetView(ontologyKey, lensKey, rulesetKey),
   })
 }
 

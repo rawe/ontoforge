@@ -264,7 +264,7 @@ export function isVersionMismatch(error: { status: number; message: string }): b
   return error.status === 409 && error.message.includes('changed since you looked')
 }
 
-/** The cached runtime data a commit can change: entities, relations, paths, documents, anchors. */
+/** The cached runtime data a commit can change: entities, relations, paths, documents, rulesets. */
 const DATA_KEYS = new Set([
   'entities',
   'entity',
@@ -273,7 +273,7 @@ const DATA_KEYS = new Set([
   'neighbors',
   'neighborCounts',
   'relations',
-  'anchors',
+  'rulesets',
   'palette',
 ])
 

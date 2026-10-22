@@ -482,10 +482,10 @@ export function ChangesetDetailPage() {
           <>
             <ChangesetExplainerButton className="-ml-2" />
             <ChangesetStateChip state={changeset.state} />
-            {changeset.anchor !== null && (
+            {changeset.ruleset !== null && (
               <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px]">
                 <AnchorIcon className="size-3" />
-                {changeset.anchor}
+                {changeset.ruleset}
               </span>
             )}
           </>

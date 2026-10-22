@@ -109,7 +109,7 @@ export function ChangesetsPage() {
                     </Link>
                   </TableCell>
                   <TableCell className="font-mono text-[12.5px]">
-                    {item.anchor ?? <span className="text-muted-foreground">—</span>}
+                    {item.ruleset ?? <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell className="text-right text-[13px] tabular-nums" title={writesText(item.writeCount)}>
                     {item.writeCount.toLocaleString('en-US')}

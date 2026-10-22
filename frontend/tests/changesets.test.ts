@@ -25,7 +25,6 @@ import {
   violationsOf,
   writesText,
 } from '../src/components/changesets/changesets.ts'
-import { stagedOnlyOffConfirmation } from '../src/components/rulesets/rulesets.ts'
 import { qk } from '../src/api/queryKeys.ts'
 
 const item = (id: string, state: ChangesetListItem['state'], lastChangeAt: string): ChangesetListItem => ({
@@ -33,7 +32,7 @@ const item = (id: string, state: ChangesetListItem['state'], lastChangeAt: strin
   state,
   version: 2,
   note: null,
-  anchor: null,
+  ruleset: null,
   writeCount: 1,
   createdAt: '2026-10-19T10:00:00.000Z',
   lastChangeAt,
@@ -302,18 +301,11 @@ test('isCommittedDataKey: runtime data of this ontology, not schema or other ont
   assert.equal(isCommittedDataKey(['entities', 'o1', 'all', 'task'], 'o1'), true)
   assert.equal(isCommittedDataKey(['entity', 'o1', 'all', 'task', '1'], 'o1'), true)
   assert.equal(isCommittedDataKey(['neighborCounts', 'o1', 'all', 'task', '1'], 'o1'), true)
-  assert.equal(isCommittedDataKey(['anchors', 'o1'], 'o1'), true)
+  assert.equal(isCommittedDataKey(['rulesets', 'o1'], 'o1'), true)
   assert.equal(isCommittedDataKey(['palette', 'entitySearch', 'o1', 'all'], 'o1'), true)
   assert.equal(isCommittedDataKey(['entities', 'o2', 'all', 'task'], 'o1'), false)
   assert.equal(isCommittedDataKey(['schema', 'o1', 'all'], 'o1'), false)
   assert.equal(isCommittedDataKey(['changesets', 'o1', 'all'], 'o1'), false)
-})
-
-test('stagedOnlyOffConfirmation names the escape', () => {
-  assert.equal(
-    stagedOnlyOffConfirmation('agent-a'),
-    'agent-a will write immediately again: its writes no longer need a changeset, and it can commit.',
-  )
 })
 
 test('a read key sits under its list key, which an exact invalidation leaves alone', () => {

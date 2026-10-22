@@ -30,14 +30,6 @@ export function stateLabel(state: ChangesetState): string {
   return state === 'submitted' ? 'submitted' : 'draft'
 }
 
-/** Submitted first (waiting for review), then the most recently changed. */
-export function sortChangesets(items: readonly ChangesetListItem[]): ChangesetListItem[] {
-  return [...items].sort((a, b) => {
-    if (a.state !== b.state) return a.state === 'submitted' ? -1 : 1
-    return Date.parse(b.lastChangeAt) - Date.parse(a.lastChangeAt)
-  })
-}
-
 /** The sidebar entry's count: changesets waiting for review. */
 export function submittedCount(items: readonly ChangesetListItem[]): number {
   return items.filter((item) => item.state === 'submitted').length
@@ -93,9 +85,10 @@ export function shortId(id: string): string {
   return id.length > 8 ? `${id.slice(0, 8)}…` : id
 }
 
-/** A changeset named in a sentence: its note, else its short id. */
-export function changesetLabel(changeset: { id: string; note: string | null }): string {
-  return changeset.note ?? shortId(changeset.id)
+/** A changeset named in a sentence: "#12 · its note", else its note or short id while its number is unknown. */
+export function changesetLabel(changeset: { id: string; number?: number; note: string | null }): string {
+  if (changeset.number === undefined) return changeset.note ?? shortId(changeset.id)
+  return changeset.note === null ? `#${changeset.number}` : `#${changeset.number} · ${changeset.note}`
 }
 
 /** Whether a review value is a document stub `{document: true, length}`. */

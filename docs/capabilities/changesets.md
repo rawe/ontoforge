@@ -37,6 +37,11 @@ Every changeset has a `version`, which every change of its content or state rais
 staged or unstaged write, a submit, an unsubmit. A seq is higher than every seq the
 changeset had before, so it is never reused, and seqs may skip numbers.
 
+Every changeset has a **number** that people call it by: one more than the highest number
+among its lens's changesets when it starts, or 1, whichever ruleset it is started through.
+Numbers are not unique over time: once the highest is committed or discarded, the next
+start gets it again. Nothing looks a changeset up by its number; every call names the id.
+
 ## Staging
 
 Six writes can be staged, with the values of their immediate counterparts: create, update
@@ -175,7 +180,7 @@ discarded, so one that vanished was committed — or its lens was deleted.
 **What a reviewer sees**, through the lens as it is now, on every read:
 
 - **the list** of the lens's changesets — or the ruleset's, through its URL —
-  submitted first, then by last change, each with its state, version, note, ruleset,
+  by number, lowest first, each with its number, state, version, note, ruleset,
   counts per operation, and the type keys it names that the lens shows, with a count of
   the others;
 - **the writes by seq**, paged, each with the names of what it touches, an update's

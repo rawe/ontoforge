@@ -1113,6 +1113,9 @@ export interface RulesetStore {
 export interface ChangesetRecord {
   id: string;
   lensId: string;
+  /** What people call it by: the lens's highest number at its start plus
+   * one. Shown only; never looked up. */
+  number: number;
   /** Null when started through the plain lens URL. */
   rulesetKey: string | null;
   version: number;
@@ -1167,8 +1170,7 @@ export interface ChangesetStore {
    * plain lens URL) reaches every changeset of the lens. */
   get(id: string, lensId: string, rulesetKey: string | null): Promise<ChangesetRecord | null>;
 
-  /** The lens's changesets, bound as `get`; submitted first, then by
-   * last change, newest first. */
+  /** The lens's changesets, bound as `get`, by number, lowest first. */
   list(lensId: string, rulesetKey: string | null): Promise<ChangesetSummary[]>;
 
   /** The staged writes by seq. */

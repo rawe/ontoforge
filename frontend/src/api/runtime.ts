@@ -342,7 +342,7 @@ export const startChangeset = (ontologyKey: string, lensKey: string, note?: stri
     body: note === undefined ? {} : { note },
   })
 
-/** The lens's changesets, submitted first. */
+/** The lens's changesets, by number, lowest first. */
 export const listChangesets = (ontologyKey: string, lensKey: string) =>
   request<ChangesetListItem[]>(changesetsBase(ontologyKey, lensKey))
 

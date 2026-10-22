@@ -284,7 +284,8 @@ export function ontologyDdlStatements(): string[] {
   note           text,
   submitted_at   timestamptz,            -- NULL: draft
   created_at     timestamptz NOT NULL DEFAULT now(),
-  last_change_at timestamptz NOT NULL DEFAULT now()
+  last_change_at timestamptz NOT NULL DEFAULT now(),
+  number         integer     NOT NULL DEFAULT 0   -- shown to people: the lens's highest + 1
 )`,
   `CREATE INDEX IF NOT EXISTS changeset_lens_id_idx ON changeset (lens_id)`,
 

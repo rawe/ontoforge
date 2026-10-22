@@ -1165,7 +1165,7 @@ function reach(rulesetKey: string | null): string {
 }
 
 /** The fields of a changeset in every answer. */
-const CHANGESET_FIELDS = "id, state, version, note, ruleset, writeCount, createdAt, lastChangeAt and submittedAt";
+const CHANGESET_FIELDS = "id, number, state, version, note, ruleset, writeCount, createdAt, lastChangeAt and submittedAt";
 
 /** The checks without a lock that submit and commit run first (V19). */
 const LOCK_FREE_CHECKS =
@@ -1217,7 +1217,9 @@ function registerChangesetTools(
       description:
         "List the changesets of this lens" +
         (rulesetKey !== null ? " started through this ruleset" : ", those started through a ruleset included") +
-        ", submitted first, then by last change, newest first. Each has id, state ('draft': open " +
+        ", by number, lowest first. Each has id, number (what people call it by: one more than the " +
+        "lens's highest when it started; a freed number is given again, and the tools take only " +
+        "the id), state ('draft': open " +
         "for staging; 'submitted': frozen and handed over for review), version, note, ruleset " +
         "(the key of the ruleset it was started through, or null), writeCount, operations (staged " +
         "writes per operation), types (the type keys its writes name that this lens shows), " +

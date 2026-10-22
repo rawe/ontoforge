@@ -2,31 +2,31 @@ import { useId } from 'react'
 import { cn } from '@/lib/utils'
 import { FLOW, type FlowEdgeId, type FlowNodeId, type StoryStep } from './rulesetExplainerStory'
 
-const VIEW = { width: 1120, height: 270, lane: 175 }
+const VIEW = { width: 1120, height: 218, lane: 140 }
 const STEP = { width: 132, height: 48 }
 const IO = { width: 104, height: 36 }
 
 const AT: Record<FlowNodeId, { x: number; y: number }> = {
-  client: { x: 90, y: 90 },
-  write: { x: 330, y: 48 },
-  anchor: { x: 560, y: 48 },
-  stage: { x: 330, y: 132 },
-  submit: { x: 560, y: 132 },
-  review: { x: 730, y: 222 },
-  commit: { x: 920, y: 222 },
-  data: { x: 1040, y: 90 },
+  client: { x: 90, y: 78 },
+  write: { x: 330, y: 40 },
+  anchor: { x: 560, y: 40 },
+  stage: { x: 330, y: 106 },
+  submit: { x: 560, y: 106 },
+  review: { x: 730, y: 182 },
+  commit: { x: 920, y: 182 },
+  data: { x: 1040, y: 78 },
 }
 
 /** Each way's path, and where its label sits. */
 const ROUTES: Record<FlowEdgeId, { d: string; x: number; y: number; anchor?: 'start' | 'end' }> = {
-  'client-write': { d: 'M 142 82 C 200 82, 205 48, 261 48', x: 196, y: 36 },
-  'write-anchor': { d: 'M 396 48 L 491 48', x: 0, y: 0 },
-  'anchor-data': { d: 'M 626 48 C 850 48, 960 78, 985 86', x: 790, y: 40 },
-  'client-stage': { d: 'M 142 98 C 200 98, 205 132, 261 132', x: 196, y: 146 },
-  'stage-submit': { d: 'M 396 132 L 491 132', x: 0, y: 0 },
-  'submit-review': { d: 'M 600 156 C 615 205, 630 222, 661 222', x: 622, y: 214, anchor: 'end' },
-  'review-commit': { d: 'M 796 222 L 851 222', x: 0, y: 0 },
-  'commit-data': { d: 'M 986 222 C 1030 222, 1040 170, 1040 111', x: 1030, y: 170, anchor: 'end' },
+  'client-write': { d: 'M 142 70 C 200 70, 205 40, 261 40', x: 196, y: 31 },
+  'write-anchor': { d: 'M 396 40 L 491 40', x: 0, y: 0 },
+  'anchor-data': { d: 'M 626 40 C 850 40, 960 68, 985 74', x: 790, y: 32 },
+  'client-stage': { d: 'M 142 86 C 200 86, 205 106, 261 106', x: 196, y: 121 },
+  'stage-submit': { d: 'M 396 106 L 491 106', x: 0, y: 0 },
+  'submit-review': { d: 'M 600 130 C 615 165, 630 182, 661 182', x: 619, y: 175, anchor: 'end' },
+  'review-commit': { d: 'M 796 182 L 851 182', x: 0, y: 0 },
+  'commit-data': { d: 'M 986 182 C 1030 182, 1040 140, 1040 99', x: 1030, y: 148, anchor: 'end' },
 }
 
 /** A lit node or edge waits for the ones before it on the step's way: the way lights in sequence. */
@@ -41,7 +41,7 @@ const delay = (order: number) => ({ transitionDelay: order > 0 ? `${order * 150}
 export function RulesetExplainerFlow({ step }: { step: StoryStep }) {
   const id = useId()
   const escapes = step.rule === 'escapes'
-  return <svg viewBox={`0 0 ${VIEW.width} ${VIEW.height}`} className="block h-auto w-full" role="img"
+  return <svg viewBox={`0 0 ${VIEW.width} ${VIEW.height}`} className="mx-auto block h-auto w-full max-w-[1120px]" role="img"
     aria-label="A client's write through a ruleset's URL: with write access full written at once past the anchor, or, with propose or full, staged and submitted, then reviewed and committed by a person">
     <defs>
       {(['on', 'off'] as const).map((tone) => <marker key={tone} id={`${id}-${tone}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">

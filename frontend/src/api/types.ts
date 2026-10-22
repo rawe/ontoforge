@@ -233,6 +233,8 @@ export type ChangesetState = 'draft' | 'submitted'
 /** A changeset as every answer shows it. */
 export interface Changeset {
   id: string
+  /** What people call it by, within its lens; never looked up. */
+  number: number
   state: ChangesetState
   /** Bumped by every change; a commit names the one it looked at. */
   version: number

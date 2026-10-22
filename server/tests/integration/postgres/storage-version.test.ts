@@ -121,9 +121,16 @@ async function makeVersion5Layout(namespace: string): Promise<void> {
 )`);
 }
 
+/** Storage at version 8: no changeset number. Records no version —
+ * every older layout builds on it. */
+async function makeVersion8Layout(namespace: string): Promise<void> {
+  await runQuery(`ALTER TABLE ${namespace}.changeset DROP COLUMN number`);
+}
+
 /** Storage at version 7: no changeset tables, no write access on
- * rulesets. Records no version — every older layout builds on it. */
+ * rulesets. Records no version — `makeVersion6Layout` builds on it. */
 async function makeVersion7Layout(namespace: string): Promise<void> {
+  await makeVersion8Layout(namespace);
   await runQuery(`DROP TABLE ${namespace}.changeset_write`);
   await runQuery(`DROP TABLE ${namespace}.changeset`);
   await runQuery(`ALTER TABLE ${namespace}.ruleset DROP COLUMN write_access`);
@@ -367,7 +374,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 1 to 8 (2 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 1 to 9 (2 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     expect([await instances("ont_legacy"), await instances("ont_legacy_de")]).toEqual(before);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
@@ -489,7 +496,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 3 to 8 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 3 to 9 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
@@ -522,7 +529,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 4 to 8 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 4 to 9 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
@@ -558,7 +565,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 5 to 8 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 5 to 9 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     expect((await runQuery(`SELECT to_regclass('ont_older.assistant') AS t`)).rows).toEqual([{ t: null }]);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
@@ -625,7 +632,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 6 to 8 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 6 to 9 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
@@ -641,7 +648,6 @@ describe("PostgreSQL storage version", () => {
   });
 
   it("upgrades version-7 storage by adding the changeset tables and the write access, keeping every row", async () => {
-    expect(STORAGE_VERSION).toBe(8);
     await getOntologyRegistry().createOntology(ID_A, "older", null, null);
     await makeVersion7Layout("ont_older");
     const [acme, p1, lensId] = [randomUUID(), randomUUID(), randomUUID()];
@@ -695,7 +701,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 7 to 8 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 7 to 9 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
@@ -723,6 +729,41 @@ describe("PostgreSQL storage version", () => {
     // The ruleset still reads through the port.
     const ruleset = (await (await getRuntimeStore("older")).rulesets().get("agent-a"))!;
     expect(ruleset).toMatchObject({ key: "agent-a", anchor: { type: "project", id: p1 }, writeAccess: "full" });
+  });
+
+  it("upgrades version-8 storage by adding the changeset number, keeping every changeset at 0", async () => {
+    expect(STORAGE_VERSION).toBe(9);
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
+    await makeVersion8Layout("ont_older");
+    const [lensId, first, second] = [randomUUID(), randomUUID(), randomUUID()];
+    await withTransaction(async (querier) => {
+      await querier.query(`INSERT INTO ont_older.lens (lens_id, key, name) VALUES ($1, 'all', 'All')`, [lensId]);
+      await querier.query(
+        `INSERT INTO ont_older.changeset (changeset_id, lens_id, version, note)
+         VALUES ($1, $3, 1, 'one'), ($2, $3, 2, 'two')`,
+        [first, second, lensId],
+      );
+    });
+    await recordVersion(8);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await initSchema();
+
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 8 to 9 (1 ontologies).");
+    expect(await recordedVersion()).toBe(STORAGE_VERSION);
+    await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
+    expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
+    expect(
+      (await runQuery(`SELECT changeset_id, version, note, number FROM ont_older.changeset ORDER BY note`)).rows,
+    ).toEqual([
+      { changeset_id: first, version: 1, note: "one", number: 0 },
+      { changeset_id: second, version: 2, note: "two", number: 0 },
+    ]);
+    // The next start counts on from the highest.
+    const started = await (await getRuntimeStore("older"))
+      .changesets()
+      .start({ id: randomUUID(), lensId, rulesetKey: null, note: null });
+    expect(started.number).toBe(1);
   });
 
   it("a lens delete removes its changesets and their writes; a ruleset delete leaves them", async () => {

@@ -43,7 +43,7 @@ export function RulesetExplainerTree({ step }: { step: StoryStep }) {
   }
   const deleted = mode === 'deleted'
 
-  return <svg viewBox={`0 0 ${EXAMPLE.view.width} ${EXAMPLE.view.height}`} className="block h-auto w-full" role="img"
+  return <svg viewBox={`0 0 ${EXAMPLE.view.width} ${EXAMPLE.view.height}`} className="block h-auto max-w-full shrink-0" style={{ width: EXAMPLE.view.width }} role="img"
     aria-label={`Example: a customer with two projects and their tasks, and a person.${mode ? ` ${ANCHOR_CAPTIONS[mode]}.` : ''} ${step.title}.`}>
     {(mode === 'found' || deleted) && <g>
       <rect x={frame.x1} y={frame.y1} width={frame.x2 - frame.x1} height={frame.y2 - frame.y1} rx={12}

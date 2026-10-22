@@ -251,6 +251,7 @@ describe("ChangesetStore", () => {
     const cs = await started("agent-a");
     expect(cs).toMatchObject({
       lensId: lenses.all,
+      number: 1,
       rulesetKey: "agent-a",
       version: 1,
       note: "n",
@@ -259,6 +260,26 @@ describe("ChangesetStore", () => {
     });
     expect(cs.createdAt).toBeInstanceOf(Date);
     expect(cs.lastChangeAt).toBeInstanceOf(Date);
+  });
+
+  it("start numbers per lens: the highest plus one, rulesets sharing it, a freed highest given again", async () => {
+    const changesets = store.changesets();
+    const first = await started(null);
+    const second = await started("agent-a");
+    const third = await started(null);
+    expect([first.number, second.number, third.number]).toEqual([1, 2, 3]);
+    expect((await started(null, lenses.portfolio!)).number).toBe(1);
+
+    expect(await changesets.discard(second.id)).toBe(true);
+    expect((await started("agent-a")).number).toBe(4);
+    const fifth = await started(null);
+    expect(fifth.number).toBe(5);
+    expect(await changesets.discard(fifth.id)).toBe(true);
+    expect((await started(null)).number).toBe(5);
+
+    // Concurrent starts never share a number.
+    const many = await Promise.all(Array.from({ length: 8 }, () => started(null)));
+    expect(many.map((cs) => cs.number).sort((a, b) => a - b)).toEqual([6, 7, 8, 9, 10, 11, 12, 13]);
   });
 
   it("get honours the binding: another lens or another ruleset answers null", async () => {
@@ -460,7 +481,7 @@ describe("ChangesetStore", () => {
     expect(await changesets.unsubmit(randomUUID(), "x")).toBeNull();
   });
 
-  it("list: counts per operation and type keys, bound as get, submitted first", async () => {
+  it("list: counts per operation and type keys, bound as get, by number", async () => {
     const changesets = store.changesets();
     const a = await started(null);
     const b = await started("agent-a");
@@ -474,8 +495,7 @@ describe("ChangesetStore", () => {
     expect(bSubmitted).not.toBeNull();
 
     const listed = await changesets.list(lenses.all!, null);
-    expect(listed.map((cs) => cs.id)).toEqual([b.id, expect.any(String), expect.any(String)]);
-    expect(listed.map((cs) => cs.id).sort()).toEqual([a.id, b.id, empty.id].sort());
+    expect(listed.map((cs) => [cs.id, cs.number])).toEqual([[a.id, 1], [b.id, 2], [empty.id, 3]]);
     const byId = Object.fromEntries(listed.map((cs) => [cs.id, cs]));
     expect(byId[a.id]).toMatchObject({
       writeCount: 3,

@@ -130,6 +130,7 @@ export type StageableOperation = StagedWrite["operation"];
 /** A changeset as every answer shows it. */
 export interface ChangesetView {
   id: string;
+  number: number;
   state: "draft" | "submitted";
   version: number;
   note: string | null;
@@ -189,6 +190,7 @@ export interface StagedWriteView {
 /** A changeset as the list shows it (V17, V41). */
 export interface ChangesetListItem {
   id: string;
+  number: number;
   state: "draft" | "submitted";
   version: number;
   note: string | null;
@@ -227,6 +229,7 @@ function isSubmitted(id: string): ConflictError {
 function toView(record: ChangesetRecord): ChangesetView {
   return {
     id: record.id,
+    number: record.number,
     state: record.submittedAt === null ? "draft" : "submitted",
     version: record.version,
     note: record.note,
@@ -718,7 +721,7 @@ export async function getStagedEntity(
 
 /**
  * The lens's changesets (V17): through the plain lens URL every one, through
- * a ruleset URL only its ruleset's; submitted first, then by last change.
+ * a ruleset URL only its ruleset's; by number, lowest first.
  * Expired draft changesets are swept first (R3). `types` applies the lens as
  * it is now (V41).
  */
@@ -737,6 +740,7 @@ export async function listChangesets(
     const types = summary.typeKeys.filter(shown);
     return {
       id: summary.id,
+      number: summary.number,
       state: summary.submittedAt === null ? "draft" : "submitted",
       version: summary.version,
       note: summary.note,

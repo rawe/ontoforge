@@ -491,16 +491,17 @@ changeset's commit uses it.
 ## The changeset store
 
 The changeset store holds an ontology's [changesets](capabilities/changesets.md): per
-changeset its id, its lens, the ruleset key of the URL that started it or none, a version, a
+changeset its id, its lens, its number, the ruleset key of the URL that started it or none, a version, a
 note, the time it was submitted or none, and timestamps; per staged write its seq, the
 operation, its arguments, the id a create minted, the type key, the target id, an
 update's before and its size in bytes, all kept as given. The store evaluates no rule —
 the service does — except the state a write needs, which it judges in the statement that
 writes, so a submit racing a change is never overwritten.
 
-- **Reads.** Start; read one through its binding — a changeset of another lens, or bound
+- **Reads.** Start, with the number one above the highest of its lens, or 1, never shared
+  by two concurrent starts; read one through its binding — a changeset of another lens, or bound
   to another ruleset, is absent, and no ruleset key reaches every changeset of the lens;
-  list them bound the same way, submitted first, then by last change, newest first, with
+  list them bound the same way, by number, lowest first, with
   their counts per operation and the type keys they name; their staged writes by seq,
   paged; the staged create that minted a given id, and those that minted any of a set of
   ids, by seq; the staged writes that minted or target a given id, by seq; the summed size
@@ -833,7 +834,8 @@ its default on insert.
 
 Two tables per namespace. `changeset` holds one row per changeset, its `lens_id` a foreign
 key to `lens` with delete cascade, its `ruleset_key` plain text with no foreign key, so a
-ruleset delete leaves the row; `submitted_at` is null for a draft. `changeset_write` holds
+ruleset delete leaves the row; `submitted_at` is null for a draft; `number` an `integer`,
+default 0. `changeset_write` holds
 one row per staged write under the primary key `(changeset_id, seq)`, its changeset a
 foreign key with delete cascade; `arguments` and `before` are `jsonb`, the size `bytes` an
 `integer`. Two B-tree indexes serve them: changesets by lens, and staged writes by
@@ -841,7 +843,8 @@ changeset and minted id.
 
 Every change takes the changeset row `FOR UPDATE NOWAIT`, and states its state condition —
 `submitted_at IS NULL`, or not null for unsubmit — in the same statement; touch and sweep
-take it `FOR UPDATE SKIP LOCKED`. A seq is the changeset's version at the append, which
+take it `FOR UPDATE SKIP LOCKED`. A start takes `pg_advisory_xact_lock` on a key hashed
+from its lens before it reads the highest number. A seq is the changeset's version at the append, which
 every change of the changeset raises, so a seq is never reused. The commit lock is
 `pg_try_advisory_xact_lock` on a key hashed from the namespace, so it holds across server
 instances and ends with the transaction; the commit first sets `lock_timeout` to five

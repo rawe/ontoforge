@@ -319,9 +319,8 @@ The Studio manages no rulesets: its Connect tab links here.
 The lens's [changesets](capabilities/changesets.md), those started through a ruleset
 included, as the lens shows them now. The page starts, reviews, submits, commits and
 discards them, and pins one to work in. A help button beside the title of the list and of each review explains the workflow: the states and who
-may take each way between them, a client or a person, with who does what and how the note
-changes. One example changeset plays step by step through it, beside the calls each step
-makes.
+may take each way between them, a client or a person. One example changeset plays step by
+step through it.
 
 - **The list:** one row per changeset — its number, state, note, ruleset, number of writes, the
   types it names (two, then a count, and how many the lens no longer shows) and its age —

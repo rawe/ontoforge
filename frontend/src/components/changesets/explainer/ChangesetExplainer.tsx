@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useState, type KeyboardEvent } from 'react'
 import { ChevronLeft, ChevronRight, CircleQuestionMark, FileStack, Pause, Play, Plug, UserRound, type LucideIcon } from 'lucide-react'
 import { ChangesetStateChip } from '@/components/changesets/ChangesetStateChip'
 import { Button } from '@/components/ui/button'
@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { ChangesetExplainerFlow } from './ChangesetExplainerFlow'
-import { EXAMPLE, ROLES, STORY, logUpTo, passedNodes, type Actor } from './changesetExplainerStory'
+import { EXAMPLE, ROLES, STORY, passedNodes, type Actor } from './changesetExplainerStory'
 
 const PLAY_MS = 5000
 const TITLE = 'How a changeset works'
@@ -75,13 +75,6 @@ function ChangesetExplainerPanel() {
     if (event.key === 'ArrowRight') { event.preventDefault(); go(index + 1) }
     if (event.key === 'ArrowLeft') { event.preventDefault(); go(index - 1) }
   }
-  const log = logUpTo(index)
-  const logRef = useRef<HTMLOListElement>(null)
-  useEffect(() => {
-    const list = logRef.current
-    if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
-  }, [index])
-
   const shown = EXAMPLE.writes.filter((write) => step.writes.includes(write.seq) || step.unstaged?.includes(write.seq))
   const newNote = previous === null || previous.note !== step.note
 
@@ -114,7 +107,7 @@ function ChangesetExplainerPanel() {
         <ChangesetExplainerFlow current={step.node} passed={passedNodes(index)} lit={step.edges} onSelect={go} />
       </section>
 
-      <div className="grid gap-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+      <div className="grid gap-4 md:grid-cols-2">
         <section className="flex flex-col gap-3 rounded-xl border bg-card p-4" aria-label="The example changeset">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className={microLabel}>On an example changeset</h3>
@@ -164,84 +157,34 @@ function ChangesetExplainerPanel() {
           </div>
         </section>
 
-        <div className="flex min-w-0 flex-col gap-4">
-          <section className="grid gap-3 rounded-xl border bg-card p-4" aria-live="polite">
-            <div className="flex items-center justify-between gap-2">
-              <span className={microLabel}>Step {index + 1} of {STORY.length}</span>
-              <span className={cn('flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium',
-                step.actor === 'person' ? 'border-primary/40 bg-primary/10 text-primary' : 'text-muted-foreground')}>
-                <ActorIcon className="size-3" />{ROLES[step.actor].title}
-              </span>
-            </div>
-            <h4 className="text-base font-semibold">{step.title}</h4>
-            <p className="text-[13px] leading-relaxed text-muted-foreground">{step.body}</p>
-            <div className="flex items-center gap-2 border-t pt-3">
-              <Button type="button" variant="outline" size="sm" onClick={() => go(index - 1)} disabled={index === 0}>
-                <ChevronLeft /> Back
-              </Button>
-              <div className="flex flex-1 items-center justify-center gap-1.5">
-                {STORY.map((s, i) => <button key={i} type="button" aria-label={`Step ${i + 1}: ${s.title}`} aria-current={i === index ? 'step' : undefined}
-                  onClick={() => go(i)} className={cn('h-1.5 rounded-full transition-all', i === index ? 'w-5 bg-primary' : i < index ? 'w-1.5 bg-primary/40' : 'w-1.5 bg-muted-foreground/30')} />)}
-              </div>
-              <Button type="button" variant="ghost" size="icon-sm" aria-label={running ? 'Pause' : 'Play the example'}
-                onClick={() => { if (running) { setPlaying(false); return } if (index === last) setIndex(0); setPlaying(true) }}>
-                {running ? <Pause /> : <Play />}
-              </Button>
-              <Button type="button" size="sm" onClick={() => go(index + 1)} disabled={index === last}>
-                Next <ChevronRight />
-              </Button>
-            </div>
-          </section>
-
-          <section className="flex min-h-48 flex-1 flex-col gap-2 rounded-xl border bg-card p-4 md:[contain:size]" aria-label="Calls">
-            <h3 className={microLabel}>Calls</h3>
-            <ol ref={logRef} className="-mx-1 grid min-h-0 content-start gap-1.5 overflow-y-auto px-1">
-              {log.map((entry, i) => {
-                const LogIcon = ACTOR_ICONS[entry.actor]
-                const now = entry.step === index
-                return <li key={i} className={cn('flex gap-2.5 rounded-lg border px-2.5 py-1.5 transition-colors',
-                  now ? 'border-primary/30 bg-primary/5' : 'border-transparent')}>
-                  <LogIcon className={cn('mt-0.5 size-3.5 shrink-0', now ? 'text-primary' : 'text-muted-foreground')} />
-                  <div className="grid min-w-0 gap-0.5">
-                    <span className={cn('font-mono text-[11.5px] font-medium break-words', !now && 'text-muted-foreground')}>{entry.call}</span>
-                    <span className="text-[11.5px] text-muted-foreground">{entry.result}</span>
-                  </div>
-                </li>
-              })}
-            </ol>
-          </section>
-        </div>
-      </div>
-
-      <section className="grid gap-2" aria-label="Who does what">
-        <h3 className={microLabel}>Who does what — and the note</h3>
-        <div className="grid gap-2 md:grid-cols-3">
-          {(['client', 'person'] as const).map((actor) => {
-            const role = ROLES[actor]
-            const RoleIcon = ACTOR_ICONS[actor]
-            return <div key={actor} className={cn('grid content-start gap-2 rounded-lg border px-3 py-2.5 transition-colors', step.actor === actor ? 'border-primary/40 bg-primary/5' : 'bg-card')}>
-              <span className="flex items-baseline gap-1.5 text-xs font-medium">
-                <RoleIcon className="size-3.5 self-center" />{role.title}
-                <span className="font-normal text-muted-foreground">{role.via}</span>
-              </span>
-              <ul className="flex flex-wrap gap-1">
-                {role.actions.map((action) => {
-                  const on = step.actor === actor && step.action === action
-                  return <li key={action} className={cn('rounded border px-1.5 py-px text-[11px]', on ? 'border-primary/40 bg-primary/10 text-primary' : 'text-muted-foreground')}>{action}</li>
-                })}
-              </ul>
-              <span className="text-[11.5px] leading-snug text-muted-foreground">{role.hint}</span>
-            </div>
-          })}
-          <div className={cn('grid content-start gap-1.5 rounded-lg border px-3 py-2.5 transition-colors', newNote ? 'border-primary/40 bg-primary/5' : 'bg-card')}>
-            <span className="text-xs font-medium">The note</span>
-            <span className="text-[11.5px] leading-snug text-muted-foreground">
-              Optional at the start, at most 1,000 characters. Submit replaces it when it brings one; unsubmit requires one and
-              replaces it, so it tells the client what to change. The Workbench sets it at the start, by submit and by unsubmit.
+        <section className="flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-4" aria-live="polite">
+          <div className="flex items-center justify-between gap-2">
+            <span className={microLabel}>Step {index + 1} of {STORY.length}</span>
+            <span className={cn('flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium',
+              step.actor === 'person' ? 'border-primary/40 bg-primary/10 text-primary' : 'text-muted-foreground')}>
+              <ActorIcon className="size-3" />{ROLES[step.actor].title}
             </span>
           </div>
-        </div>
-      </section>
+          <h4 className="text-base font-semibold">{step.title}</h4>
+          <p className="text-[13px] leading-relaxed text-muted-foreground">{step.body}</p>
+          <div className="mt-auto flex items-center gap-2 border-t pt-3">
+            <Button type="button" variant="outline" size="sm" onClick={() => go(index - 1)} disabled={index === 0}>
+              <ChevronLeft /> Back
+            </Button>
+            <div className="flex flex-1 items-center justify-center gap-1.5">
+              {STORY.map((s, i) => <button key={i} type="button" aria-label={`Step ${i + 1}: ${s.title}`} aria-current={i === index ? 'step' : undefined}
+                onClick={() => go(i)} className={cn('h-1.5 rounded-full transition-all', i === index ? 'w-5 bg-primary' : i < index ? 'w-1.5 bg-primary/40' : 'w-1.5 bg-muted-foreground/30')} />)}
+            </div>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label={running ? 'Pause' : 'Play the example'}
+              onClick={() => { if (running) { setPlaying(false); return } if (index === last) setIndex(0); setPlaying(true) }}>
+              {running ? <Pause /> : <Play />}
+            </Button>
+            <Button type="button" size="sm" onClick={() => go(index + 1)} disabled={index === last}>
+              Next <ChevronRight />
+            </Button>
+          </div>
+        </section>
+      </div>
     </div>
   </div>
 }

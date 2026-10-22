@@ -1,16 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { EXAMPLE, FLOW, ROLES, STORY, logUpTo, passedNodes } from '../src/components/changesets/explainer/changesetExplainerStory.ts'
+import { EXAMPLE, FLOW, STORY, passedNodes } from '../src/components/changesets/explainer/changesetExplainerStory.ts'
 
 const nodes = new Set(FLOW.nodes.map((node) => node.id))
 const edges = new Map(FLOW.edges.map((edge) => [edge.id, edge]))
 const seqs = new Set<number>(EXAMPLE.writes.map((write) => write.seq))
 
-test('every story step points at the workflow, its side’s actions and the example writes', () => {
+test('every story step points at the workflow and the example writes', () => {
   for (const edge of FLOW.edges) assert.ok(nodes.has(edge.from) && nodes.has(edge.to), edge.id)
   for (const step of STORY) {
     assert.ok(nodes.has(step.node), `${step.title}: node ${step.node}`)
-    assert.ok(ROLES[step.actor].actions.includes(step.action), `${step.title}: ${step.actor} may not ${step.action}`)
     for (const id of step.edges) {
       const edge = edges.get(id)
       assert.ok(edge, `${step.title}: edge ${id}`)
@@ -18,7 +17,6 @@ test('every story step points at the workflow, its side’s actions and the exam
       assert.match(edge.who, new RegExp(step.actor), `${step.title}: ${id} does not name the ${step.actor}`)
     }
     for (const seq of [...step.writes, ...(step.unstaged ?? [])]) assert.ok(seqs.has(seq), `${step.title}: seq ${seq}`)
-    assert.ok(step.log.length > 0, `${step.title}: logs nothing`)
   }
 })
 
@@ -46,8 +44,7 @@ test('reads see the stored data alone until the commit', () => {
   assert.notDeepEqual(STORY.at(-1)!.stored, stored)
 })
 
-test('the log grows with the story; passed states lead up to the current one', () => {
-  assert.equal(logUpTo(STORY.length - 1).length, STORY.flatMap((step) => step.log).length)
+test('passed states lead up to the current one', () => {
   assert.deepEqual([...passedNodes(0)], ['start'])
   assert.ok(passedNodes(STORY.length - 1).has('submitted'))
 })

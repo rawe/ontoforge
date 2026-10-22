@@ -24,7 +24,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { RulesetDialog, type RulesetDialogTarget } from '@/components/rulesets/RulesetDialog'
 import { WriteAccessChip } from '@/components/rulesets/WriteAccessChip'
-import { AnchorExplainerButton } from '@/components/rulesets/explainer/AnchorExplainer'
+import { RulesetExplainerButton } from '@/components/rulesets/explainer/RulesetExplainer'
 import {
   anchorPlacement,
   DELETE_CONFIRMATION,
@@ -113,7 +113,7 @@ export function RulesetsPage() {
     <div>
       <PageHeader
         title="Rulesets"
-        meta={<AnchorExplainerButton className="-ml-2" />}
+        meta={<RulesetExplainerButton className="-ml-2" />}
         description="An AI client's own MCP URL, with rules it must follow: what it may do, and where."
         actions={
           <Button size="sm" disabled={schema.data === undefined} onClick={() => setDialogTarget({ mode: 'create' })}>

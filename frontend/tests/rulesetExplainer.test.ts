@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { EXAMPLE, FLOW, STORY, logUpTo } from '../src/components/rulesets/explainer/anchorExplainerStory.ts'
+import { EXAMPLE, FLOW, STORY, logUpTo } from '../src/components/rulesets/explainer/rulesetExplainerStory.ts'
 
 const nodes = new Set(FLOW.nodes.map((node) => node.id))
 const edges = new Map(FLOW.edges.map((edge) => [edge.id, edge]))

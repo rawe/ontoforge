@@ -5,9 +5,9 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { AnchorExplainerFlow } from './AnchorExplainerFlow'
-import { AnchorExplainerTree } from './AnchorExplainerTree'
-import { STORY, logUpTo, type Actor } from './anchorExplainerStory'
+import { RulesetExplainerFlow } from './RulesetExplainerFlow'
+import { RulesetExplainerTree } from './RulesetExplainerTree'
+import { STORY, logUpTo, type Actor } from './rulesetExplainerStory'
 
 const PLAY_MS = 5000
 const TITLE = 'What an anchor does to a client'
@@ -38,7 +38,7 @@ const RULES = [
 const microLabel = 'text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'
 
 /** Opens what an anchor does to a client — the hold and staged-only — told over one example: a "?" beside a page title. */
-export function AnchorExplainerButton({ className }: { className?: string }) {
+export function RulesetExplainerButton({ className }: { className?: string }) {
   return <Dialog>
     <Tooltip>
       <TooltipTrigger asChild>
@@ -52,13 +52,13 @@ export function AnchorExplainerButton({ className }: { className?: string }) {
       <TooltipContent side="top">{TITLE}</TooltipContent>
     </Tooltip>
     <DialogContent className="flex max-h-[94dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(78rem,calc(100%-2rem))]">
-      <AnchorExplainerPanel />
+      <RulesetExplainerPanel />
     </DialogContent>
   </Dialog>
 }
 
 /** The explainer's content: a write's way, an example hierarchy, step by step, and the rules. */
-function AnchorExplainerPanel() {
+function RulesetExplainerPanel() {
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
   const step = STORY[index]
@@ -114,7 +114,7 @@ function AnchorExplainerPanel() {
             <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-destructive bg-destructive/10" />Refused here</li>
           </ul>
         </div>
-        <AnchorExplainerFlow step={step} />
+        <RulesetExplainerFlow step={step} />
       </section>
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
@@ -123,7 +123,7 @@ function AnchorExplainerPanel() {
             <h3 className={microLabel}>On an example hierarchy</h3>
             <span className="text-[11px] text-muted-foreground">the anchor apollo at the project Apollo</span>
           </div>
-          <AnchorExplainerTree step={step} />
+          <RulesetExplainerTree step={step} />
           <ul className="mt-auto flex flex-wrap gap-x-4 gap-y-1 border-t pt-3 text-[11px] text-muted-foreground">
             <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] bg-primary" />Anchored</li>
             <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-primary/45 bg-primary/6" />Covered</li>

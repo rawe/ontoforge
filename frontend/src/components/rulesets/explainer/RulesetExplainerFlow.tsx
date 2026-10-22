@@ -1,6 +1,6 @@
 import { useId } from 'react'
 import { cn } from '@/lib/utils'
-import { FLOW, type FlowEdgeId, type FlowNodeId, type StoryStep } from './anchorExplainerStory'
+import { FLOW, type FlowEdgeId, type FlowNodeId, type StoryStep } from './rulesetExplainerStory'
 
 const VIEW = { width: 1120, height: 270, lane: 175 }
 const STEP = { width: 132, height: 48 }
@@ -34,7 +34,7 @@ const ROUTES: Record<FlowEdgeId, { d: string; x: number; y: number; anchor?: 'st
  * with staged-only on, staged and submitted, then committed by a person. The client's lane
  * above, the person's below; the step's way lit, where it stops marked refused.
  */
-export function AnchorExplainerFlow({ step }: { step: StoryStep }) {
+export function RulesetExplainerFlow({ step }: { step: StoryStep }) {
   const id = useId()
   return <svg viewBox={`0 0 ${VIEW.width} ${VIEW.height}`} className="block h-auto w-full" role="img"
     aria-label="A client's write through an anchored URL: written at once through the hold, or, staged-only, staged and submitted, then reviewed and committed by a person">

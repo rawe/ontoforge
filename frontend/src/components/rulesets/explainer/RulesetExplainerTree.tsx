@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils'
-import { EXAMPLE, type EntityState, type StoryStep } from './anchorExplainerStory'
+import { EXAMPLE, type EntityState, type StoryStep } from './rulesetExplainerStory'
 
 const BOX = { width: 112, height: 40 }
 const PAD = 12
@@ -21,7 +21,7 @@ const ENTITY_CLASS: Record<EntityState, { box: string; text: string }> = {
  * The example hierarchy at one step: the anchored project, its subtree framed, the free
  * type apart, and what the step's writes did — written, staged or refused.
  */
-export function AnchorExplainerTree({ step }: { step: StoryStep }) {
+export function RulesetExplainerTree({ step }: { step: StoryStep }) {
   const state = (key: string): EntityState =>
     step.entities[key] ?? (key === EXAMPLE.anchor ? 'anchor' : SUBTREE.has(key) ? 'covered' : 'idle')
   const boxes = EXAMPLE.subtree.map((key) => ENTITIES.get(key)!)

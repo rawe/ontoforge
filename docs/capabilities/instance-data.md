@@ -90,8 +90,8 @@ A relation type flagged with a parent end is a parent relation
 every parent relation of the ontology form its hierarchy. The parent rules and leaf-only
 deletes bind every client through every lens, and follow every parent relation of the full
 schema whatever the lens shows
-([ontology-lenses.md](ontology-lenses.md#the-lensfull-schema-asymmetry)). An
-[anchored mount](anchors.md) holds a client's writes further.
+([ontology-lenses.md](ontology-lenses.md#the-lensfull-schema-asymmetry)). A
+[ruleset's anchor](rulesets.md#anchor) limits a client's writes further.
 
 ### The parent rules
 
@@ -107,8 +107,9 @@ schema, with its other faults:
 Neither refusal names the existing parent. An end that already has an endpoint error is
 not checked again. Updating a parent relation changes only its properties, so nothing is
 checked; deleting one makes the child a hierarchy root, which may then take a new parent
-— except on an anchored mount, which refuses it for the anchor's hierarchy. The checks
-lock nothing; the race this leaves is in [anchors.md](anchors.md#accepted-races).
+— except through a ruleset with an anchor, which refuses it for the anchor's hierarchy.
+The checks lock nothing; the race this leaves is in
+[rulesets.md](rulesets.md#accepted-races).
 
 ### The create with a parent relation
 
@@ -125,8 +126,9 @@ must be a parent relation, and must have the entity's type at its child end; the
 must exist with the type of the parent end, checked against the full schema; the relation's
 properties follow the write rules. The parent rules need no check, since a new entity has
 neither a parent nor a descendant. A malformed `parentRelation` is rejected as a request
-of the wrong shape. Without it, the new entity is a hierarchy root; an anchored mount
-requires it for the types of the anchor's hierarchy ([anchors.md](anchors.md#what-is-held)).
+of the wrong shape. Without it, the new entity is a hierarchy root; a ruleset with an
+anchor requires it for the types of the anchor's hierarchy
+([rulesets.md](rulesets.md#what-is-held)).
 
 ### Leaf-only deletes
 
@@ -138,7 +140,7 @@ ontology without a parent relation nothing is checked.
 
 ### The path read
 
-The path of one entity is its [hierarchy path](../README.md#hierarchies-and-anchors): the
+The path of one entity is its [hierarchy path](../README.md#hierarchies): the
 entity's ancestors, root first, followed by the entity itself, each as its type key, id and
 name. A hierarchy root's path is the entity alone. Through a lens the path starts below
 the nearest ancestor whose type the lens hides, so it never names a hidden entity or one

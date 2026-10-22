@@ -78,7 +78,7 @@ export function RulesetExplainerFlow({ step }: { step: StoryStep }) {
       const refused = step.refused?.includes(node.id) ?? false
       const order = step.nodes.indexOf(node.id)
       const on = order >= 0
-      const passes = node.id === 'anchor' && step.anchor === 'none' && !refused
+      const passes = node.id === 'anchor' && step.anchor !== 'found' && step.anchor !== 'deleted' && !refused
       return <g key={node.id} className={cn('transition-opacity duration-500', !on && !io && 'opacity-60')} style={delay(order)}>
         {on && !io && <rect x={x - width / 2 - 5} y={y - height / 2 - 5} width={width + 10} height={height + 10} rx={13}
           className={cn('fill-none', refused ? 'stroke-destructive/30' : 'stroke-primary/30')} strokeWidth={4} />}

@@ -20,7 +20,7 @@ const ENTITY_CLASS: Record<EntityState, { box: string; text: string }> = {
 }
 
 /**
- * The example hierarchy at one step, by the step's anchor: no anchor, no frame; an anchor,
+ * The example hierarchy at one step, by the step's anchor: no anchor (or none to show), no frame; an anchor,
  * the project Apollo solid and its subtree framed; a deleted anchor, both dashed red. The
  * free type stands apart once there is an anchor; the step's writes show as written,
  * staged or refused.
@@ -44,8 +44,8 @@ export function RulesetExplainerTree({ step }: { step: StoryStep }) {
   const deleted = mode === 'deleted'
 
   return <svg viewBox={`0 0 ${EXAMPLE.view.width} ${EXAMPLE.view.height}`} className="block h-auto w-full" role="img"
-    aria-label={`Example: a customer with two projects and their tasks, and a person. ${ANCHOR_CAPTIONS[mode]}. ${step.title}.`}>
-    {mode !== 'none' && <g>
+    aria-label={`Example: a customer with two projects and their tasks, and a person.${mode ? ` ${ANCHOR_CAPTIONS[mode]}.` : ''} ${step.title}.`}>
+    {(mode === 'found' || deleted) && <g>
       <rect x={frame.x1} y={frame.y1} width={frame.x2 - frame.x1} height={frame.y2 - frame.y1} rx={12}
         className={deleted ? 'fill-destructive/4 stroke-destructive/60' : 'fill-primary/4 stroke-primary/50'} strokeDasharray="5 4" strokeWidth={1.25} />
       <text x={frame.x1 + 8} y={frame.y1 - 6} className={cn('text-[11px] font-medium', deleted ? 'fill-destructive' : 'fill-primary')}>subtree</text>
@@ -64,7 +64,7 @@ export function RulesetExplainerTree({ step }: { step: StoryStep }) {
       const bad = badge === 'refused' || badge === 'deleted'
       const left = entity.x - BOX.width / 2
       const top = entity.y - BOX.height / 2
-      const free = mode !== 'none' && FREE.has(entity.id)
+      const free = (mode === 'found' || deleted) && FREE.has(entity.id)
       return <g key={entity.id}>
         <rect x={left} y={top} width={BOX.width} height={BOX.height} rx={8} strokeWidth={s === 'idle' || s === 'covered' ? 1 : 1.5}
           strokeDasharray={s === 'staged' || s === 'deleted' || (free && s === 'idle') ? '4 3' : undefined}

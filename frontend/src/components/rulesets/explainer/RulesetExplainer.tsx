@@ -28,7 +28,7 @@ const microLabel = 'text-[10px] font-semibold tracking-wider text-muted-foregrou
 /** The anchor card's picture: the example hierarchy, its caption and its legend. */
 function AnchorVisual({ step }: { step: StoryStep }) {
   return <>
-    <p className={cn('text-[11px]', step.anchor === 'deleted' ? 'font-medium text-destructive' : 'text-muted-foreground')}>{ANCHOR_CAPTIONS[step.anchor]}</p>
+    {step.anchor && <p className={cn('text-[11px]', step.anchor === 'deleted' ? 'font-medium text-destructive' : 'text-muted-foreground')}>{ANCHOR_CAPTIONS[step.anchor]}</p>}
     <RulesetExplainerTree step={step} />
     <ul className="flex flex-wrap gap-x-4 gap-y-1 border-t pt-3 text-[11px] text-muted-foreground">
       <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] bg-primary" />Anchor</li>
@@ -44,6 +44,8 @@ interface RuleCard<Id = RuleId> {
   title: string
   icon: LucideIcon
   Visual: ComponentType<{ step: StoryStep }>
+  /** The rule's setting at a step for the flow's heading, such as "write access propose"; null when the step has none. */
+  phrase: (step: StoryStep) => string | null
 }
 
 /** One card per id, in the ids' order. */
@@ -54,8 +56,14 @@ type CardsOf<Ids extends readonly RuleId[]> = { [I in keyof Ids]: RuleCard<Ids[I
  * `RULE_IDS`, so every rule has exactly one card. A new rule is one more entry.
  */
 const RULE_CARDS: CardsOf<typeof RULE_IDS> = [
-  { id: 'writeAccess', title: 'Write access', icon: PencilLine, Visual: RulesetExplainerLadder },
-  { id: 'anchor', title: 'Anchor', icon: Anchor, Visual: AnchorVisual },
+  {
+    id: 'writeAccess', title: 'Write access', icon: PencilLine, Visual: RulesetExplainerLadder,
+    phrase: (step) => step.writeAccess && `write access ${step.writeAccess}`,
+  },
+  {
+    id: 'anchor', title: 'Anchor', icon: Anchor, Visual: AnchorVisual,
+    phrase: (step) => step.anchor && { none: 'no anchor', found: 'anchor Apollo', deleted: 'anchor deleted' }[step.anchor],
+  },
 ]
 
 /** The bottom row: one card per rule, then what holds for all of them. */
@@ -84,9 +92,9 @@ const BOTTOM_CARDS: { id: StepRule; title: string; icon?: LucideIcon; text: Reac
 
 const isRule = (id: StepRule) => RULE_CARDS.some((card) => card.id === id)
 
-/** "write access propose · anchor Apollo": the rules at a step, for the flow's heading. */
+/** "write access propose · anchor Apollo": each rule's phrase at a step, for the flow's heading. */
 const rulesAt = (step: StoryStep) =>
-  `write access ${step.writeAccess} · ${step.anchor === 'none' ? 'no anchor' : step.anchor === 'found' ? 'anchor Apollo' : 'anchor deleted'}`
+  RULE_CARDS.map((card) => card.phrase(step)).filter((phrase) => phrase !== null).join(' · ')
 
 /** Opens what a ruleset does to a client — write access, then the anchor — told over one example: a "?" beside a page title. */
 export function RulesetExplainerButton({ className }: { className?: string }) {
@@ -115,6 +123,7 @@ function RulesetExplainerPanel() {
   const step = STORY[index]
   const last = STORY.length - 1
   const ActorIcon = ACTOR_ICONS[step.actor]
+  const rules = rulesAt(step)
 
   const running = playing && index < last
   useEffect(() => {
@@ -160,7 +169,7 @@ function RulesetExplainerPanel() {
     <div className="grid min-h-0 gap-4 overflow-y-auto px-6 py-5">
       <section className="rounded-xl border bg-card px-4 pt-3 pb-3" aria-label="The way of a write">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h3 className={microLabel}>The way of a write — {rulesAt(step)}</h3>
+          <h3 className={microLabel}>The way of a write{rules && ` — ${rules}`}</h3>
           <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
             <li className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-dashed border-primary" />This step</li>
             <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-destructive bg-destructive/10" />Refused here</li>

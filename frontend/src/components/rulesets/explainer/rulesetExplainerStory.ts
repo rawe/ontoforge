@@ -68,14 +68,15 @@ const LEVEL_ADDS: Record<WriteAccess, string> = {
 
 /**
  * The write access staircase at one level: every level in order, below, at or above it.
- * What the levels above add is what the client cannot do.
+ * What the levels above add is what the client cannot do. With no level, every step is
+ * `unset`: nothing current, nothing struck.
  */
-export function ladder(level: WriteAccess) {
+export function ladder(level: WriteAccess | null) {
   const at = WRITE_ACCESS_LEVELS.findIndex((l) => l.level === level)
   return WRITE_ACCESS_LEVELS.map(({ level: step }, i) => ({
     level: step,
     adds: LEVEL_ADDS[step],
-    place: i < at ? 'below' as const : i === at ? 'current' as const : 'above' as const,
+    place: at < 0 ? 'unset' as const : i < at ? 'below' as const : i === at ? 'current' as const : 'above' as const,
   }))
 }
 
@@ -114,9 +115,9 @@ export interface StoryStep {
   rule: StepRule
   title: string
   body: string
-  /** The ruleset's rules at this step. */
-  writeAccess: WriteAccess
-  anchor: AnchorMode
+  /** The ruleset's rules at this step; null where the step is about none of them ("—"). */
+  writeAccess: WriteAccess | null
+  anchor: AnchorMode | null
   /** Flow nodes this step passes; `refused` is where its writes stop. */
   nodes: FlowNodeId[]
   edges: FlowEdgeId[]
@@ -222,7 +223,7 @@ export const STORY: StoryStep[] = [
     log: [{ actor: 'client', call: 'update_entity Lena', result: 'refused · anchor deleted' }],
   },
   {
-    actor: 'person', rule: 'escapes', writeAccess: 'full', anchor: 'deleted', title: 'A guard against mistakes, not a lock',
+    actor: 'person', rule: 'escapes', writeAccess: null, anchor: null, title: 'A guard against mistakes, not a lock',
     nodes: [], edges: [], entities: {},
     body: 'Rules keep a well-behaved client on track; they are not security. The plain lens URL writes as the lens allows, and anyone with REST access can change the rules.',
     log: [],

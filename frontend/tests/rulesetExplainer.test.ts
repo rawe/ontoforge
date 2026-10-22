@@ -55,7 +55,10 @@ test('the story tells the ruleset, then write access, then the anchor, then both
   ])
   assert.deepEqual(STORY.slice(1, 5).map((step) => step.writeAccess), ['full', 'propose', 'propose', 'none'])
   assert.ok(STORY.slice(0, 5).every((step) => step.anchor === 'none'))
-  assert.ok(STORY.slice(5, 10).every((step) => step.anchor !== 'none'))
+  assert.ok(STORY.slice(5, 10).every((step) => step.anchor === 'found' || step.anchor === 'deleted'))
+  assert.ok(STORY.slice(0, 10).every((step) => step.writeAccess !== null), 'a rule step without a level')
+  assert.equal(STORY[10].writeAccess, null, 'the escapes step shows no level')
+  assert.equal(STORY[10].anchor, null, 'the escapes step shows no anchor')
 })
 
 test('every step’s rule is a rule with a card, or one of the story-wide cards, and every rule has its steps', () => {
@@ -66,10 +69,11 @@ test('every step’s rule is a rule with a card, or one of the story-wide cards,
   for (const id of RULE_IDS) assert.ok(STORY.some((step) => step.rule === id), `no step about ${id}`)
 })
 
-test('the staircase marks the current level and strikes what the levels above add', () => {
+test('the staircase marks the current level and strikes what the levels above add; with no level, neither', () => {
   assert.deepEqual(ladder('none').map((s) => [s.level, s.place]), [['none', 'current'], ['propose', 'above'], ['full', 'above']])
   assert.deepEqual(ladder('propose').map((s) => [s.level, s.place]), [['none', 'below'], ['propose', 'current'], ['full', 'above']])
   assert.deepEqual(ladder('full').map((s) => [s.level, s.place]), [['none', 'below'], ['propose', 'below'], ['full', 'current']])
+  assert.deepEqual(ladder(null).map((s) => s.place), ['unset', 'unset', 'unset'])
   assert.deepEqual(ladder('propose').map((s) => s.adds), ['read', '+ stage, submit', '+ write at once, commit'])
 })
 

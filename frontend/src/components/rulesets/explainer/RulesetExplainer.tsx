@@ -1,16 +1,14 @@
-import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent } from 'react'
 import { Anchor, ChevronLeft, ChevronRight, CircleQuestionMark, Pause, Play, PencilLine, Plug, ScrollText, UserRound, type LucideIcon } from 'lucide-react'
 import { ChangesetExplainerButton } from '@/components/changesets/explainer/ChangesetExplainer'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { WRITE_ACCESS_LEVELS } from '../rulesets'
-import { WriteAccessChip } from '../WriteAccessChip'
 import { RulesetExplainerFlow } from './RulesetExplainerFlow'
 import { RulesetExplainerLadder } from './RulesetExplainerLadder'
 import { RulesetExplainerTree } from './RulesetExplainerTree'
-import { ANCHOR_CAPTIONS, STORY, logUpTo, type Actor, type RuleId, type RULE_IDS, type StepRule, type StoryStep } from './rulesetExplainerStory'
+import { ANCHOR_CAPTIONS, STORY, logUpTo, type Actor, type RuleId, type RULE_IDS, type StoryStep } from './rulesetExplainerStory'
 
 const PLAY_MS = 5000
 const TITLE = 'What a ruleset does to a client'
@@ -23,14 +21,21 @@ const FACTS = [
   { label: 'Not authentication', value: 'it guards against mistakes' },
 ]
 
+/** The step's body is always this many lines high, so the step bar keeps one height; a longer body scrolls. */
+const STEP_BODY_LINES = 2
+
 const microLabel = 'text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'
 
-/** The anchor card's picture: the example hierarchy, its caption and its legend. */
+/** The write access card's picture: the staircase, centred in the card's height. */
+function WriteAccessVisual({ step }: { step: StoryStep }) {
+  return <div className="flex min-h-0 flex-1 flex-col justify-center"><RulesetExplainerLadder step={step} /></div>
+}
+
+/** The anchor card's picture: the example hierarchy and its legend. */
 function AnchorVisual({ step }: { step: StoryStep }) {
   return <>
-    {step.anchor && <p className={cn('text-[11px]', step.anchor === 'deleted' ? 'font-medium text-destructive' : 'text-muted-foreground')}>{ANCHOR_CAPTIONS[step.anchor]}</p>}
-    <RulesetExplainerTree step={step} />
-    <ul className="flex flex-wrap gap-x-4 gap-y-1 border-t pt-3 text-[11px] text-muted-foreground">
+    <div className="flex min-h-0 flex-1 flex-col justify-center"><RulesetExplainerTree step={step} /></div>
+    <ul className="flex flex-wrap gap-x-4 gap-y-1 border-t pt-2 text-[11px] text-muted-foreground">
       <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] bg-primary" />Anchor</li>
       <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-primary/45 bg-primary/6" />In the subtree</li>
       <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-border bg-card" />Outside the subtree</li>
@@ -39,11 +44,19 @@ function AnchorVisual({ step }: { step: StoryStep }) {
   </>
 }
 
+/** The anchor's caption, beside the card's title. */
+function AnchorCaption({ step }: { step: StoryStep }) {
+  if (!step.anchor) return null
+  return <p className={cn('text-[11px]', step.anchor === 'deleted' ? 'font-medium text-destructive' : 'text-muted-foreground')}>{ANCHOR_CAPTIONS[step.anchor]}</p>
+}
+
 interface RuleCard<Id = RuleId> {
   id: Id
   title: string
   icon: LucideIcon
   Visual: ComponentType<{ step: StoryStep }>
+  /** Beside the card's title. */
+  Aside?: ComponentType<{ step: StoryStep }>
   /** The rule's setting at a step for the flow's heading, such as "write access propose"; null when the step has none. */
   phrase: (step: StoryStep) => string | null
 }
@@ -52,45 +65,19 @@ interface RuleCard<Id = RuleId> {
 type CardsOf<Ids extends readonly RuleId[]> = { [I in keyof Ids]: RuleCard<Ids[I]> }
 
 /**
- * The ruleset's rules, one card each, in rule order: the left column. Typed by
+ * The ruleset's rules, one card each, in rule order, side by side under the flow. Typed by
  * `RULE_IDS`, so every rule has exactly one card. A new rule is one more entry.
  */
 const RULE_CARDS: CardsOf<typeof RULE_IDS> = [
   {
-    id: 'writeAccess', title: 'Write access', icon: PencilLine, Visual: RulesetExplainerLadder,
+    id: 'writeAccess', title: 'Write access', icon: PencilLine, Visual: WriteAccessVisual,
     phrase: (step) => step.writeAccess && `write access ${step.writeAccess}`,
   },
   {
-    id: 'anchor', title: 'Anchor', icon: Anchor, Visual: AnchorVisual,
+    id: 'anchor', title: 'Anchor', icon: Anchor, Visual: AnchorVisual, Aside: AnchorCaption,
     phrase: (step) => step.anchor && { none: 'no anchor', found: 'anchor Apollo', deleted: 'anchor deleted' }[step.anchor],
   },
 ]
-
-/** The bottom row: one card per rule, then what holds for all of them. */
-const BOTTOM_CARDS: { id: StepRule; title: string; icon?: LucideIcon; text: ReactNode }[] = [
-  {
-    id: 'writeAccess', title: 'Write access', icon: PencilLine,
-    text: <ul className="grid gap-1">
-      {WRITE_ACCESS_LEVELS.map((level) => <li key={level.level} className="flex items-start gap-1.5">
-        <WriteAccessChip level={level.level} className="shrink-0" />{level.short}
-      </li>)}
-    </ul>,
-  },
-  {
-    id: 'anchor', title: 'Anchor', icon: Anchor,
-    text: 'Writes to the anchor’s hierarchy stay in its subtree: a create needs its parent inside it; an update, a delete or a relation may touch only covered entities and free types. No anchor: no limit on where. Anchor deleted: every write is refused.',
-  },
-  {
-    id: 'both', title: 'Both must pass',
-    text: 'Write access is checked first, then the anchor. A write goes through only if every rule allows it.',
-  },
-  {
-    id: 'escapes', title: 'Two escapes',
-    text: 'Neither is a lock. 1. The plain lens URL, the same URL without the ruleset, writes as the lens allows. 2. Ruleset maintenance, open to any REST client, can change the rules.',
-  },
-]
-
-const isRule = (id: StepRule) => RULE_CARDS.some((card) => card.id === id)
 
 /** "write access propose · anchor Apollo": each rule's phrase at a step, for the flow's heading. */
 const rulesAt = (step: StoryStep) =>
@@ -116,7 +103,11 @@ export function RulesetExplainerButton({ className }: { className?: string }) {
   </Dialog>
 }
 
-/** The explainer's content: a write's way, the ruleset's rules on an example, step by step, and the rules in short. */
+/**
+ * The explainer's content: the step over a write's way, then the ruleset's rules on an example
+ * beside the calls so far. The rule cards and Calls share one height, set by the hierarchy; only
+ * Calls, and a step body longer than its lines, scroll.
+ */
 function RulesetExplainerPanel() {
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -145,18 +136,18 @@ function RulesetExplainerPanel() {
   }, [index])
 
   return <div className="flex min-h-0 flex-col" onKeyDown={onKeyDown}>
-    <header className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b px-6 pt-5 pb-4 pr-14">
+    <header className="flex flex-wrap items-start gap-x-6 gap-y-2 border-b px-5 pt-4 pb-3 pr-14">
       <div className="flex min-w-0 flex-1 basis-[28rem] items-start gap-3">
         <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><ScrollText className="size-5" /></span>
-        <div className="grid min-w-0 gap-1.5">
+        <div className="grid min-w-0 gap-1">
           <DialogTitle className="text-lg font-semibold">{TITLE}</DialogTitle>
-          <DialogDescription className="max-w-3xl text-[13px] leading-relaxed">
+          <DialogDescription className="text-[13px] leading-relaxed">
             A ruleset gives an AI client its own MCP URL, and holds rules that every call through that URL must follow.
             Write access says what the client may do: read only (none), propose changes that a person commits (propose), or
             write as the lens allows (full). An anchor, if set, says where it may write: inside one entity’s subtree, while
             other hierarchies and types stay free.
           </DialogDescription>
-          <dl className="mt-1 flex flex-wrap gap-x-5 gap-y-1 text-xs">
+          <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
             {FACTS.map((fact) => <div key={fact.label} className="flex gap-1.5">
               <dt className="text-muted-foreground">{fact.label}</dt><dd className="font-medium">{fact.value}</dd>
             </div>)}
@@ -166,92 +157,82 @@ function RulesetExplainerPanel() {
       <ChangesetExplainerButton labeled className="shrink-0" />
     </header>
 
-    <div className="grid min-h-0 gap-4 overflow-y-auto px-6 py-5">
-      <section className="rounded-xl border bg-card px-4 pt-3 pb-3" aria-label="The way of a write">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h3 className={microLabel}>The way of a write{rules && ` — ${rules}`}</h3>
-          <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-            <li className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-dashed border-primary" />This step</li>
-            <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-destructive bg-destructive/10" />Refused here</li>
-          </ul>
-        </div>
-        <RulesetExplainerFlow step={step} />
-      </section>
-
-      <div className="grid gap-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-        <section className="flex flex-col gap-3" aria-label="The ruleset agent-a">
-          <h3 className={microLabel}>Ruleset <span className="font-mono normal-case">agent-a</span></h3>
-          {RULE_CARDS.map(({ id, title, icon: Icon, Visual }) => {
-            const lit = step.rule === id || step.rule === 'both'
-            return <section key={id} aria-label={title}
-              className={cn('flex flex-col gap-3 rounded-xl border bg-card p-4 transition-[background-color,border-color,opacity] duration-500',
-                lit ? 'border-primary/40 bg-primary/5' : step.rule !== 'ruleset' && 'opacity-70')}>
-              <h4 className="flex items-center gap-1.5 text-xs font-medium"><Icon className="size-3.5 text-muted-foreground" />{title}</h4>
-              <Visual step={step} />
-            </section>
-          })}
-        </section>
-
-        <div className="flex min-w-0 flex-col gap-4">
-          <section className="grid gap-3 rounded-xl border bg-card p-4" aria-live="polite">
-            <div className="flex items-center justify-between gap-2">
+    <div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 py-3">
+      <section className="shrink-0 rounded-xl border bg-card px-3 pt-2.5 pb-2" aria-label="The step and the way of a write">
+        <div className="flex items-start gap-6" aria-live="polite">
+          <div className="grid min-w-0 flex-1 gap-0.5">
+            <div className="flex flex-wrap items-center gap-2.5">
               <span className={microLabel}>Step {index + 1} of {STORY.length}</span>
               <span className={cn('flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium',
                 step.actor === 'person' ? 'border-primary/40 bg-primary/10 text-primary' : 'text-muted-foreground')}>
                 <ActorIcon className="size-3" />{ACTORS[step.actor]}
               </span>
+              <h4 className="text-base font-semibold">{step.title}</h4>
             </div>
-            <h4 className="text-base font-semibold">{step.title}</h4>
-            <p className="text-[13px] leading-relaxed text-muted-foreground">{step.body}</p>
-            <div className="flex items-center gap-2 border-t pt-3">
-              <Button type="button" variant="outline" size="sm" onClick={() => go(index - 1)} disabled={index === 0}>
-                <ChevronLeft /> Back
-              </Button>
-              <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-1.5">
-                {STORY.map((s, i) => <button key={i} type="button" aria-label={`Step ${i + 1}: ${s.title}`} aria-current={i === index ? 'step' : undefined}
-                  onClick={() => go(i)} className={cn('h-1.5 rounded-full transition-all', i === index ? 'w-5 bg-primary' : i < index ? 'w-1.5 bg-primary/40' : 'w-1.5 bg-muted-foreground/30')} />)}
-              </div>
-              <Button type="button" variant="ghost" size="icon-sm" aria-label={running ? 'Pause' : 'Play the example'}
-                onClick={() => { if (running) { setPlaying(false); return } if (index === last) setIndex(0); setPlaying(true) }}>
-                {running ? <Pause /> : <Play />}
-              </Button>
-              <Button type="button" size="sm" onClick={() => go(index + 1)} disabled={index === last}>
-                Next <ChevronRight />
-              </Button>
+            <p className="overflow-y-auto text-[13px] leading-relaxed text-muted-foreground" style={{ height: `${STEP_BODY_LINES}lh` }}>{step.body}</p>
+          </div>
+          <div className="flex w-[22rem] shrink-0 items-center gap-2 pt-0.5">
+            <Button type="button" variant="outline" size="sm" onClick={() => go(index - 1)} disabled={index === 0}>
+              <ChevronLeft /> Back
+            </Button>
+            <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-1.5">
+              {STORY.map((s, i) => <button key={i} type="button" aria-label={`Step ${i + 1}: ${s.title}`} aria-current={i === index ? 'step' : undefined}
+                onClick={() => go(i)} className={cn('h-1.5 rounded-full transition-all', i === index ? 'w-5 bg-primary' : i < index ? 'w-1.5 bg-primary/40' : 'w-1.5 bg-muted-foreground/30')} />)}
             </div>
-          </section>
-
-          <section className="flex min-h-48 flex-1 flex-col gap-2 rounded-xl border bg-card p-4 md:[contain:size]" aria-label="Calls">
-            <h3 className={microLabel}>Calls</h3>
-            <ol ref={logRef} className="-mx-1 grid min-h-0 content-start gap-1.5 overflow-y-auto px-1">
-              {log.map((entry, i) => {
-                const LogIcon = ACTOR_ICONS[entry.actor]
-                const now = entry.step === index
-                return <li key={i} className={cn('flex gap-2.5 rounded-lg border px-2.5 py-1.5 transition-colors',
-                  now ? 'border-primary/30 bg-primary/5' : 'border-transparent')}>
-                  <LogIcon className={cn('mt-0.5 size-3.5 shrink-0', now ? 'text-primary' : 'text-muted-foreground')} />
-                  <div className="grid min-w-0 gap-0.5">
-                    <span className={cn('font-mono text-[11.5px] font-medium break-words', !now && 'text-muted-foreground')}>{entry.call}</span>
-                    {entry.result && <span className="text-[11.5px] text-muted-foreground">{entry.result}</span>}
-                  </div>
-                </li>
-              })}
-            </ol>
-          </section>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label={running ? 'Pause' : 'Play the example'}
+              onClick={() => { if (running) { setPlaying(false); return } if (index === last) setIndex(0); setPlaying(true) }}>
+              {running ? <Pause /> : <Play />}
+            </Button>
+            <Button type="button" size="sm" onClick={() => go(index + 1)} disabled={index === last}>
+              Next <ChevronRight />
+            </Button>
+          </div>
         </div>
-      </div>
-
-      <section className="grid gap-2" aria-label="The rules">
-        <h3 className={microLabel}>The rules — and the two escapes</h3>
-        <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          {BOTTOM_CARDS.map(({ id, title, icon: Icon, text }) => <li key={id}
-            className={cn('grid content-start gap-1 rounded-lg border bg-card px-3 py-2.5 transition-[background-color,border-color] duration-500',
-              step.rule === id && !isRule(id) && 'border-primary/40 bg-primary/5')}>
-            <span className="flex items-center gap-1.5 text-xs font-medium">{Icon && <Icon className="size-3.5 text-muted-foreground" />}{title}</span>
-            <div className="text-[11.5px] leading-snug text-muted-foreground">{text}</div>
-          </li>)}
-        </ul>
+        <div className="mt-1.5 border-t pt-1.5">
+          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+            <h3 className={microLabel}>The way of a write{rules && ` — ${rules}`}</h3>
+            <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+              <li className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-dashed border-primary" />This step</li>
+              <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-destructive bg-destructive/10" />Refused here</li>
+            </ul>
+          </div>
+          <RulesetExplainerFlow step={step} />
+        </div>
       </section>
+
+      <div className="grid grid-cols-[19rem_auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+        <h3 className={cn(microLabel, 'col-span-2')}>Ruleset <span className="font-mono normal-case">agent-a</span></h3>
+        {RULE_CARDS.map(({ id, title, icon: Icon, Visual, Aside }) => {
+          const lit = step.rule === id || step.rule === 'both'
+          return <section key={id} aria-label={title}
+            className={cn('row-start-2 flex flex-col gap-2 rounded-xl border bg-card p-3 transition-[background-color,border-color,opacity] duration-500',
+              lit ? 'border-primary/40 bg-primary/5' : step.rule !== 'ruleset' && 'opacity-70')}>
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="flex items-center gap-1.5 text-xs font-medium"><Icon className="size-3.5 text-muted-foreground" />{title}</h4>
+              {Aside && <Aside step={step} />}
+            </div>
+            <Visual step={step} />
+          </section>
+        })}
+
+        <section className="row-start-2 flex min-h-0 flex-col gap-2 rounded-xl border bg-card p-3 [contain:size]" aria-label="Calls">
+          <h3 className={microLabel}>Calls</h3>
+          <ol ref={logRef} className="-mx-1 grid min-h-0 content-start gap-1.5 overflow-y-auto px-1">
+            {log.map((entry, i) => {
+              const LogIcon = ACTOR_ICONS[entry.actor]
+              const now = entry.step === index
+              return <li key={i} className={cn('flex gap-2.5 rounded-lg border px-2.5 py-1.5 transition-colors',
+                now ? 'border-primary/30 bg-primary/5' : 'border-transparent')}>
+                <LogIcon className={cn('mt-0.5 size-3.5 shrink-0', now ? 'text-primary' : 'text-muted-foreground')} />
+                <div className="grid min-w-0 gap-0.5">
+                  <span className={cn('font-mono text-[11.5px] font-medium break-words', !now && 'text-muted-foreground')}>{entry.call}</span>
+                  {entry.result && <span className="text-[11.5px] text-muted-foreground">{entry.result}</span>}
+                </div>
+              </li>
+            })}
+          </ol>
+        </section>
+      </div>
     </div>
   </div>
 }

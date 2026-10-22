@@ -1,6 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Anchor as AnchorIcon,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -9,6 +8,7 @@ import {
   Loader2,
   Pencil,
   Plus,
+  ScrollText,
   Send,
   Trash2,
   Undo2,
@@ -16,7 +16,7 @@ import {
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { useChangeset, useChangesets, useDisplayLabel, useRuntimeSchema } from '@/api/hooks'
+import { useChangeset, useChangesets, useDisplayLabel, useRulesets, useRuntimeSchema } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
@@ -45,7 +45,8 @@ import {
   stagedCreateValues,
   stagedDocumentKeys,
   targetText,
-  violationLine,
+  violationLabel,
+  violationPrefix,
   violationsNote,
   violationsOf,
   WRITES_PAGE_SIZE,
@@ -84,6 +85,39 @@ const FROZEN_REASON = 'Submitted changesets are frozen: unsubmit it first'
 const DRAFT_REASON = 'Only a submitted changeset can be unsubmitted'
 /** Why Submit is off while submitted. */
 const SUBMITTED_REASON = 'It is submitted already'
+
+/**
+ * The ruleset a changeset was started through, as a chip linking to the
+ * Rulesets page; muted and struck through once the ruleset is deleted, since
+ * the commit then rejects the changeset (`ruleset_gone`).
+ */
+function RulesetChip({ ontologyKey, lensKey, rulesetKey }: { ontologyKey: string; lensKey: string; rulesetKey: string }) {
+  const rulesets = useRulesets(ontologyKey)
+  const deleted = rulesets.data !== undefined && !rulesets.data.some((r) => r.key === rulesetKey)
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Link
+          to={`/o/${ontologyKey}/w/${lensKey}/rulesets`}
+          className={cn(
+            'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px] font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-ring/60',
+            deleted
+              ? 'border-border bg-muted text-muted-foreground line-through'
+              : 'border-(--tc-teal-border) bg-(--tc-teal-bg) text-(--tc-teal)',
+          )}
+        >
+          <ScrollText className="size-3" />
+          {rulesetKey}
+        </Link>
+      </TooltipTrigger>
+      <TooltipContent>
+        {deleted
+          ? `Ruleset ${rulesetKey} was deleted: this changeset cannot be committed.`
+          : `Started through ruleset ${rulesetKey}`}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
 
 const errorText = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback)
 
@@ -482,11 +516,8 @@ export function ChangesetDetailPage() {
           <>
             <ChangesetExplainerButton className="-ml-2" />
             <ChangesetStateChip state={changeset.state} />
-            {changeset.anchor !== null && (
-              <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px]">
-                <AnchorIcon className="size-3" />
-                {changeset.anchor}
-              </span>
+            {changeset.ruleset !== null && (
+              <RulesetChip ontologyKey={ontologyKey!} lensKey={lensKey!} rulesetKey={changeset.ruleset} />
             )}
           </>
         }
@@ -543,11 +574,16 @@ export function ChangesetDetailPage() {
                     ` (the first ${rejected.violations.length} shown)`}
                 </p>
                 <ul className="mt-1 max-h-60 space-y-0.5 overflow-y-auto text-[12.5px]">
-                  {rejected.violations.map((violation, i) => (
-                    <li key={i} className="break-words">
-                      {violationLine(violation, changeset.writes)}
-                    </li>
-                  ))}
+                  {rejected.violations.map((violation, i) => {
+                    const label = violationLabel(violation.kind)
+                    return (
+                      <li key={i} className="break-words">
+                        {violationPrefix(violation, changeset.writes)}
+                        {label === null ? violation.kind : <span className="font-medium">{label}</span>} —{' '}
+                        {violation.message}
+                      </li>
+                    )
+                  })}
                 </ul>
               </div>
               {submitted && (

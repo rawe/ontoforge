@@ -4,20 +4,20 @@
  * stages writes into it, lists and reads it, unstages one write, submits
  * and unsubmits it, discards it and commits it. REST
  * (`changesetRouter.ts`) is its entrance; like the write functions of
- * `service.ts`, every function takes the lens key and the anchor key of
+ * `service.ts`, every function takes the lens key and the ruleset key of
  * the URL (null on the plain lens) first and the store last.
  *
  * - **Binding (V8 A, V17).** A changeset is bound to the lens it was
- *   started through and to the anchor key of that URL. Through another
- *   lens, or another anchor's URL, it is unknown; the plain lens URL
+ *   started through and to the ruleset key of that URL. Through another
+ *   lens, or another ruleset's URL, it is unknown; the plain lens URL
  *   reaches every changeset of its lens. Every unknown changeset (never
  *   existed, discarded, committed, expired, bound elsewhere) answers the
  *   one 404 "Changeset '<id>' not found".
  * - **Staging** (V18) is one short write per call (D2): it appends to the
  *   journal and nothing else; entities, relations and the search queue
  *   are untouched, and reads never see staged data (V16). Its checks, in
- *   order: the changeset; the anchor of the URL (dangling, or at an entity
- *   the lens hides: 409, as every v1 write; coverage is a commit rule,
+ *   order: the changeset; the anchor of the URL's ruleset (deleted, or at
+ *   an entity the lens hides: 409, as every v1 write; coverage is a commit rule,
  *   R10); the `prepare…` of the immediate write (`prepare.ts`: the type's
  *   404 and the same 422 field errors); the target of an update or delete
  *   (minted by a staged create still in the journal, or else read once:
@@ -35,9 +35,8 @@
  * - **Expiry (V24, R3).** A draft changeset idle for 7 days is gone: checked
  *   on every access, where it is deleted and answers not found, and swept
  *   on start and on list. A submitted changeset never expires.
- * - **Staged-only (V9 a).** Through a staged-only anchor's URL every
- *   immediate write is a 409 (`AnchorGuard.open`) and so is commit; stage,
- *   unstage, submit, unsubmit, discard, list and read work as anywhere.
+ * - **Write access** is checked by the entrances (`writeAccess.ts`), on
+ *   the URL's ruleset, before any function here runs.
  * - **Lifecycle (V7, V38).** Submit freezes a draft changeset and hands it
  *   over with a note, after the lock-free pass (V5 d) and a compare-and-set
  *   on the version the pass saw (V40). While submitted, stage, unstage and
@@ -134,8 +133,8 @@ export interface ChangesetView {
   state: "draft" | "submitted";
   version: number;
   note: string | null;
-  /** The anchor key of the URL that started it; null on the plain lens. */
-  anchor: string | null;
+  /** The ruleset key of the URL that started it; null on the plain lens. */
+  ruleset: string | null;
   writeCount: number;
   createdAt: Date;
   lastChangeAt: Date;
@@ -193,7 +192,7 @@ export interface ChangesetListItem {
   state: "draft" | "submitted";
   version: number;
   note: string | null;
-  anchor: string | null;
+  ruleset: string | null;
   /** The number of staged writes, as the read shows it. */
   writeCount: number;
   /** The staged writes per operation. */
@@ -231,7 +230,7 @@ function toView(record: ChangesetRecord): ChangesetView {
     state: record.submittedAt === null ? "draft" : "submitted",
     version: record.version,
     note: record.note,
-    anchor: record.anchorKey,
+    ruleset: record.rulesetKey,
     writeCount: record.writeCount,
     createdAt: record.createdAt,
     lastChangeAt: record.lastChangeAt,
@@ -265,18 +264,18 @@ function validNote(note: string | null | undefined): string | null {
 }
 
 /**
- * The changeset through its binding: another lens, or another anchor's
+ * The changeset through its binding: another lens, or another ruleset's
  * URL, is not found. An expired one is deleted (with every other expired
  * one of the ontology) and is not found either.
  */
 async function loadChangeset(
   loaded: LoadedSchema,
-  anchorKey: string | null,
+  rulesetKey: string | null,
   id: string,
   store: RuntimeStore,
 ): Promise<ChangesetRecord> {
   const changesets = store.changesets();
-  const record = await changesets.get(id, loaded.scoped.lensId, anchorKey);
+  const record = await changesets.get(id, loaded.scoped.lensId, rulesetKey);
   if (record === null) throw notFound(id);
   const cutoff = expiryCutoff();
   if (record.submittedAt === null && record.lastChangeAt < cutoff) {
@@ -290,36 +289,36 @@ async function loadChangeset(
  * found, submitted is the 409; otherwise null. */
 async function refusalOf(
   loaded: LoadedSchema,
-  anchorKey: string | null,
+  rulesetKey: string | null,
   id: string,
   store: RuntimeStore,
 ): Promise<Error | null> {
-  const record = await store.changesets().get(id, loaded.scoped.lensId, anchorKey);
+  const record = await store.changesets().get(id, loaded.scoped.lensId, rulesetKey);
   if (record === null) return notFound(id);
   return record.submittedAt === null ? null : isSubmitted(id);
 }
 
-/** An anchor key of the URL that names no anchor is not found. */
-async function checkAnchorExists(anchorKey: string | null, store: RuntimeStore): Promise<void> {
-  if (anchorKey !== null && (await store.anchors().getAnchor(anchorKey)) === null) {
-    throw new NotFoundError(`Anchor '${anchorKey}' not found`);
+/** A ruleset key of the URL that names no ruleset is not found. */
+async function checkRulesetExists(rulesetKey: string | null, store: RuntimeStore): Promise<void> {
+  if (rulesetKey !== null && (await store.rulesets().get(rulesetKey)) === null) {
+    throw new NotFoundError(`Ruleset '${rulesetKey}' not found`);
   }
 }
 
-/** Start a changeset bound to the lens and to the anchor key of the URL
- * (V17). Unknown lens or anchor is not found, in that order. */
+/** Start a changeset bound to the lens and to the ruleset key of the URL
+ * (V17). Unknown lens or ruleset is not found, in that order. */
 export async function startChangeset(
   lensKey: string,
-  anchorKey: string | null,
+  rulesetKey: string | null,
   note: string | null | undefined,
   store: RuntimeStore,
 ): Promise<ChangesetView> {
   const loaded = await loadSchema(lensKey, store);
-  await checkAnchorExists(anchorKey, store);
+  await checkRulesetExists(rulesetKey, store);
   const valid = validNote(note);
   const changesets = store.changesets();
   await changesets.sweep(expiryCutoff());
-  const record = await changesets.start({ id: randomUUID(), lensId: loaded.scoped.lensId, anchorKey, note: valid });
+  const record = await changesets.start({ id: randomUUID(), lensId: loaded.scoped.lensId, rulesetKey: rulesetKey, note: valid });
   return toView(record);
 }
 
@@ -528,16 +527,16 @@ async function journalRows(
  */
 export async function stage(
   lensKey: string,
-  anchorKey: string | null,
+  rulesetKey: string | null,
   changesetId: string,
   write: StagedWrite,
   store: RuntimeStore,
 ): Promise<StagedAnswer> {
   const loaded = await loadSchema(lensKey, store);
-  const changeset = await loadChangeset(loaded, anchorKey, changesetId, store);
+  const changeset = await loadChangeset(loaded, rulesetKey, changesetId, store);
   if (changeset.submittedAt !== null) throw isSubmitted(changesetId);
-  // Dangling, or at an entity the lens hides: refused as every v1 write.
-  await AnchorGuard.checkStaging(anchorKey, loaded, store);
+  // The anchor deleted, or at an entity the lens hides: refused as every v1 write.
+  await AnchorGuard.checkStaging(rulesetKey, loaded, store);
 
   const rows = await journalRows(loaded, changeset.id, write, store);
   if (changeset.writeCount + rows.length > MAX_STAGED_WRITES) {
@@ -552,7 +551,7 @@ export async function stage(
   // The store appends to a draft changeset only: a submit since the read
   // is refused here.
   const seqs = await store.changesets().append(changeset.id, writes);
-  if (seqs === null) throw (await refusalOf(loaded, anchorKey, changeset.id, store)) ?? notFound(changesetId);
+  if (seqs === null) throw (await refusalOf(loaded, rulesetKey, changeset.id, store)) ?? notFound(changesetId);
   const [entity, relation] = rows;
   const answer: StagedAnswer = { seq: seqs[0]!, id: (entity!.mintedId ?? entity!.targetId)! };
   if (relation !== undefined) answer.relation = { seq: seqs[1]!, id: relation.mintedId! };
@@ -573,14 +572,14 @@ export async function stage(
  */
 export async function getChangeset(
   lensKey: string,
-  anchorKey: string | null,
+  rulesetKey: string | null,
   changesetId: string,
   offset: number,
   limit: number,
   store: RuntimeStore,
 ): Promise<ChangesetView & { offset: number; limit: number; writes: StagedWriteView[] }> {
   const loaded = await loadSchema(lensKey, store);
-  const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+  const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
   const writes = await store.changesets().page(record.id, offset, limit);
   const minted = await mintedFor(record.id, writes, store);
   const stored = await storedRows(loaded, writes, minted, true, store);
@@ -600,7 +599,7 @@ export async function getChangeset(
  */
 export async function getStagedDocument(
   lensKey: string,
-  anchorKey: string | null,
+  rulesetKey: string | null,
   changesetId: string,
   entityTypeKey: string,
   entityId: string,
@@ -610,7 +609,7 @@ export async function getStagedDocument(
   store: RuntimeStore,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
-  const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+  const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
   const type = loaded.scoped.entityTypes[entityTypeKey];
   if (type === undefined) throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
   if (type.properties[propertyKey]?.dataType !== "document") {
@@ -675,14 +674,14 @@ export interface StagedEntityView {
  */
 export async function getStagedEntity(
   lensKey: string,
-  anchorKey: string | null,
+  rulesetKey: string | null,
   changesetId: string,
   entityTypeKey: string,
   entityId: string,
   store: RuntimeStore,
 ): Promise<StagedEntityView> {
   const loaded = await loadSchema(lensKey, store);
-  const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+  const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
   const type = loaded.scoped.entityTypes[entityTypeKey];
   if (type === undefined) throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
 
@@ -719,29 +718,29 @@ export async function getStagedEntity(
 
 /**
  * The lens's changesets (V17): through the plain lens URL every one, through
- * an anchored URL only its anchor's; submitted first, then by last change.
+ * a ruleset URL only its ruleset's; submitted first, then by last change.
  * Expired draft changesets are swept first (R3). `types` applies the lens as
  * it is now (V41).
  */
 export async function listChangesets(
   lensKey: string,
-  anchorKey: string | null,
+  rulesetKey: string | null,
   store: RuntimeStore,
 ): Promise<ChangesetListItem[]> {
   const loaded = await loadSchema(lensKey, store);
-  await checkAnchorExists(anchorKey, store);
+  await checkRulesetExists(rulesetKey, store);
   const changesets = store.changesets();
   await changesets.sweep(expiryCutoff());
   const lens = loaded.scoped;
   const shown = (key: string): boolean => Object.hasOwn(lens.entityTypes, key) || Object.hasOwn(lens.relationTypes, key);
-  return (await changesets.list(lens.lensId, anchorKey)).map((summary) => {
+  return (await changesets.list(lens.lensId, rulesetKey)).map((summary) => {
     const types = summary.typeKeys.filter(shown);
     return {
       id: summary.id,
       state: summary.submittedAt === null ? "draft" : "submitted",
       version: summary.version,
       note: summary.note,
-      anchor: summary.anchorKey,
+      ruleset: summary.rulesetKey,
       writeCount: summary.writeCount,
       operations: summary.operations,
       types,
@@ -767,29 +766,29 @@ export async function lensChangesetCount(lensId: string, store: RuntimeStore): P
 
 /**
  * Submit a draft changeset (V7, V5 d): freeze it and hand it over, with the
- * note given (absent, the note stays). Already submitted, or an anchored
- * changeset whose anchor is dangling or at an entity the lens hides, is a
+ * note given (absent, the note stays). Already submitted, or a changeset
+ * whose ruleset's anchor is deleted or at an entity the lens hides, is a
  * 409. The lock-free pass runs with no lock and no transaction; its faults
  * are a 422 and the changeset stays a draft. Clean, a compare-and-set on the
  * version the pass saw (V40): a change meanwhile is a 409.
  */
 export async function submitChangeset(
   lensKey: string,
-  anchorKey: string | null,
+  rulesetKey: string | null,
   changesetId: string,
   note: string | null | undefined,
   store: RuntimeStore,
 ): Promise<ChangesetView> {
   const loaded = await loadSchema(lensKey, store);
-  const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+  const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
   if (record.submittedAt !== null) throw new ConflictError(`Changeset '${changesetId}' is already submitted`);
   const valid = validNote(note);
-  if (record.anchorKey !== null) {
-    // The stored anchor, whatever URL the call came through. A deleted one
-    // is left to the commit ("anchor gone").
-    const anchor = await store.anchors().getAnchor(record.anchorKey);
-    const refusal = anchor === null ? null : changesetAnchorRefusal(record.anchorKey, anchor, loaded);
-    if (refusal !== null) throw new ConflictError(refusal);
+  if (record.rulesetKey !== null) {
+    // The stored ruleset, whatever URL the call came through. A deleted one
+    // is left to the commit (`ruleset_gone`).
+    const anchor = await store.rulesets().get(record.rulesetKey);
+    const refusal = anchor === null ? null : changesetAnchorRefusal(record.rulesetKey, anchor, loaded);
+    if (refusal !== null) throw new ConflictError(refusal.message);
   }
   const pass = await lockFreePass(loaded, record.id, store);
   if (pass.faults.length > 0) {
@@ -797,7 +796,7 @@ export async function submitChangeset(
   }
   const submitted = await store.changesets().submit(record.id, record.version, valid ?? record.note);
   if (submitted === null) {
-    if ((await store.changesets().get(record.id, loaded.scoped.lensId, anchorKey)) === null) throw notFound(changesetId);
+    if ((await store.changesets().get(record.id, loaded.scoped.lensId, rulesetKey)) === null) throw notFound(changesetId);
     throw new ConflictError(`Changeset '${changesetId}' changed during the submit; try again`);
   }
   return toView(submitted);
@@ -805,18 +804,18 @@ export async function submitChangeset(
 
 /**
  * A submitted changeset back to draft (V7, R14), through any URL that
- * reaches it, a dangling anchor's included. The note is required: it
+ * reaches it, one whose anchor is deleted included. The note is required: it
  * replaces the stored one. A draft changeset is a 409.
  */
 export async function unsubmitChangeset(
   lensKey: string,
-  anchorKey: string | null,
+  rulesetKey: string | null,
   changesetId: string,
   note: string | null | undefined,
   store: RuntimeStore,
 ): Promise<ChangesetView> {
   const loaded = await loadSchema(lensKey, store);
-  const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+  const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
   const valid = validNote(note);
   if (valid === null || valid.trim() === "") {
     throw new ValidationError("Changeset validation failed", { fields: { note: "A note is required to unsubmit" } });
@@ -825,28 +824,28 @@ export async function unsubmitChangeset(
   if (record.submittedAt === null) throw notSubmitted;
   const draft = await store.changesets().unsubmit(record.id, valid);
   if (draft === null) {
-    if ((await store.changesets().get(record.id, loaded.scoped.lensId, anchorKey)) === null) throw notFound(changesetId);
+    if ((await store.changesets().get(record.id, loaded.scoped.lensId, rulesetKey)) === null) throw notFound(changesetId);
     throw notSubmitted;
   }
   return toView(draft);
 }
 
 /** Take one staged write out by seq. Writes that depend on it stay; the
- * commit's checks flag them (V6). Allowed on a dangling anchor. */
+ * commit's checks flag them (V6). Allowed when the anchor is deleted. */
 export async function unstage(
   lensKey: string,
-  anchorKey: string | null,
+  rulesetKey: string | null,
   changesetId: string,
   seq: number,
   store: RuntimeStore,
 ): Promise<void> {
   const loaded = await loadSchema(lensKey, store);
-  const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+  const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
   if (record.submittedAt !== null) throw isSubmitted(changesetId);
   if (!(await store.changesets().unstage(record.id, seq))) {
     // Refused by the store: gone, submitted since the read, or no such seq.
     throw (
-      (await refusalOf(loaded, anchorKey, record.id, store)) ??
+      (await refusalOf(loaded, rulesetKey, record.id, store)) ??
       new NotFoundError(`Staged write ${seq} not found in changeset '${changesetId}'`)
     );
   }
@@ -857,14 +856,14 @@ export async function unstage(
  * read is refused too. */
 export async function discardChangeset(
   lensKey: string,
-  anchorKey: string | null,
+  rulesetKey: string | null,
   changesetId: string,
   store: RuntimeStore,
 ): Promise<void> {
   const loaded = await loadSchema(lensKey, store);
-  const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+  const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
   if (record.submittedAt === null && (await store.changesets().discard(record.id))) return;
-  throw (await refusalOf(loaded, anchorKey, record.id, store)) ?? notFound(changesetId);
+  throw (await refusalOf(loaded, rulesetKey, record.id, store)) ?? notFound(changesetId);
 }
 
 // ---------------------------------------------------------------------------
@@ -910,7 +909,7 @@ export interface CommitAnswer {
  * The texts of a staged write's markers and violations say what is wrong
  * in words a person reads: no id and no fix. The seq names the write, so
  * its own target goes unnamed; another entity is named by its role (the
- * source or target end). Type, lens and anchor keys stay.
+ * source or target end). Type, lens and ruleset keys stay.
  */
 
 const DRIFTED = "Changed since this write was staged";
@@ -1656,8 +1655,8 @@ interface Touch {
   ends: TouchedEnd[];
 }
 
-/** An anchored changeset's anchor, read fresh in the transaction, and
- * what its staged writes touch. */
+/** The anchor of a changeset's ruleset, read fresh in the transaction,
+ * and what its staged writes touch. */
 interface Coverage {
   key: string;
   anchorId: string;
@@ -1710,12 +1709,14 @@ async function touchOf(
 }
 
 /**
- * Step 1, on an anchored changeset (V8, V42): the anchor read fresh, and
- * the coverage before the replay. The anchor gone, dangling, or at an
- * entity the lens hides is one violation on seq 0 (the changeset as a
- * whole), and coverage is not checked. Otherwise, as v1's `AnchorGuard`
- * holds it: every touched entity of the anchor's hierarchy stored now is
- * covered, and no staged delete takes an entity any anchor points at.
+ * Step 1, on a changeset started through a ruleset (V8, V42): the ruleset
+ * read fresh, and the coverage before the replay. One violation on seq 0
+ * (the changeset as a whole), and coverage is not checked, when the
+ * ruleset is gone (`ruleset_gone`), its anchor deleted (`anchor_deleted`)
+ * or at an entity the lens hides (`anchor_hidden`). Otherwise, as v1's
+ * `AnchorGuard` checks it: every touched entity of the anchor's hierarchy
+ * stored now is covered (`outside_subtree`), and no staged delete takes
+ * an entity any anchor points at (`deletes_anchor`).
  */
 async function anchorBefore(
   loaded: LoadedSchema,
@@ -1723,21 +1724,21 @@ async function anchorBefore(
   pass: LockFreePass,
   bound: RuntimeStore,
 ): Promise<{ violations: Violation[]; coverage: Coverage | null }> {
-  const record = await bound.anchors().getAnchor(key);
+  const record = await bound.rulesets().get(key);
   if (record === null) {
     return {
-      violations: [{ seq: 0, kind: "anchor_gone", message: `Anchor '${key}' no longer exists, so this changeset cannot be committed` }],
+      violations: [{ seq: 0, kind: "ruleset_gone", message: `Ruleset '${key}' no longer exists, so this changeset cannot be committed` }],
       coverage: null,
     };
   }
   const refusal = changesetAnchorRefusal(key, record, loaded);
-  if (refusal !== null) return { violations: [{ seq: 0, kind: "anchor_dangling", message: refusal }], coverage: null };
-  if (record.entity === null) return { violations: [], coverage: null };
+  if (refusal !== null) return { violations: [{ seq: 0, ...refusal }], coverage: null };
+  if (record.anchor === null) return { violations: [], coverage: null };
 
-  const { types, readings } = hierarchyOf(record.entity.type, loaded.full);
+  const { types, readings } = hierarchyOf(record.anchor.type, loaded.full);
   const touches: Touch[] = [];
   for (const write of pass.writes) touches.push(await touchOf(loaded, pass, types, write, bound));
-  const coverage: Coverage = { key, anchorId: record.entity.id, readings, touches, refused: new Set() };
+  const coverage: Coverage = { key, anchorId: record.anchor.id, readings, touches, refused: new Set() };
 
   const before = touches.flatMap((touch) => touch.ends.filter((end) => end.before).map((end) => end.id));
   const links = await ancestry(before, readings, bound);
@@ -1746,20 +1747,20 @@ async function anchorBefore(
     if (touch.ends.some((end) => end.before && !reaches(links, end.id, coverage.anchorId))) {
       violations.push({
         seq: touch.seq,
-        kind: "not_covered",
-        message: `Not under anchor '${key}'`,
+        kind: "outside_subtree",
+        message: `Outside the anchor subtree of ruleset '${key}'`,
       });
     }
   }
   const deletes = pass.writes.filter((write) => write.operation === "delete_entity");
-  const anchored =
-    deletes.length === 0 ? new Set() : new Set((await bound.anchors().listAnchors()).map((anchor) => anchor.entity?.id));
+  const anchors =
+    deletes.length === 0 ? new Set() : new Set((await bound.rulesets().list()).map((ruleset) => ruleset.anchor?.id));
   for (const write of deletes) {
-    if (anchored.has(write.targetId!)) {
+    if (anchors.has(write.targetId!)) {
       violations.push({
         seq: write.seq,
-        kind: "not_covered",
-        message: "Anchored, so it cannot be deleted on an anchored connection",
+        kind: "deletes_anchor",
+        message: "It is the anchor of a ruleset, so it cannot be deleted on this connection",
       });
     }
   }
@@ -1812,7 +1813,7 @@ function stagedLinksAndEnds(loaded: LoadedSchema, writes: ChangesetWriteRecord[]
 /**
  * Step 3 (V21, V13): the rules over the end state, in the service, on the
  * bound store's neutral reads, after the replay. Messages name no id,
- * only roles, the relation type key and the anchor key:
+ * only roles, the relation type key and the ruleset key:
  *
  * - `has_children`: a child recorded by a staged entity delete (the delete
  *   capture) is neither deleted nor re-parented;
@@ -1821,8 +1822,9 @@ function stagedLinksAndEnds(loaded: LoadedSchema, writes: ChangesetWriteRecord[]
  *   schema;
  * - `endpoint_type`: a created relation's end is not of the type its
  *   relation type requires;
- * - `not_covered`: on an anchored changeset, a touched entity of the
- *   anchor's hierarchy that exists now is not covered.
+ * - `outside_subtree`: on a changeset whose ruleset has an anchor, a
+ *   touched entity of the anchor's hierarchy that exists now is outside
+ *   the anchor's subtree.
  */
 async function commitViolations(
   loaded: LoadedSchema,
@@ -1899,8 +1901,8 @@ async function commitViolations(
       if (touch.ends.some((end) => types.has(end.id) && !reaches(walkAfter, end.id, coverage.anchorId))) {
         violations.push({
           seq: touch.seq,
-          kind: "not_covered",
-          message: `Would not be under anchor '${coverage.key}' after the commit`,
+          kind: "outside_subtree",
+          message: `Would be outside the anchor subtree of ruleset '${coverage.key}' after the commit`,
         });
       }
     }
@@ -1923,8 +1925,7 @@ function rejection(violations: Violation[]): ValidationError {
 }
 
 /**
- * Commit a changeset: everything it stages, or nothing (D3). Through a
- * staged-only anchor's URL it is a 409, whatever the changeset (V9). With
+ * Commit a changeset: everything it stages, or nothing (D3). With
  * `expectedVersion`, a changeset changed since (V40) is a 409. Another
  * commit on the ontology or in this process, a change running on the
  * changeset, or a row held past the lock timeout are 409s too, with
@@ -1934,16 +1935,11 @@ function rejection(violations: Violation[]): ValidationError {
  */
 export async function commitChangeset(
   lensKey: string,
-  anchorKey: string | null,
+  rulesetKey: string | null,
   changesetId: string,
   expectedVersion: number | undefined,
   store: RuntimeStore,
 ): Promise<CommitAnswer> {
-  if (anchorKey !== null && (await store.anchors().getAnchor(anchorKey))?.stagedOnly === true) {
-    throw new ConflictError(
-      `Anchor '${anchorKey}' is staged-only: this connection cannot commit; submit the changeset for review`,
-    );
-  }
   if (runningCommits >= MAX_RUNNING_COMMITS) {
     throw new ConflictError("Too many commits are running; try again");
   }
@@ -1953,7 +1949,7 @@ export async function commitChangeset(
   try {
     // 0a: before BEGIN, holding nothing. Nothing inside reaches the pool.
     const loaded = await loadSchema(lensKey, store);
-    const record = await loadChangeset(loaded, anchorKey, changesetId, store);
+    const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
     if (expectedVersion !== undefined && record.version !== expectedVersion) throw staleVersion(record.version);
     const search = await loadSearchContext(store.ontologyKey, store.searchIndices());
     try {
@@ -1972,7 +1968,7 @@ export async function commitChangeset(
         const drift = await driftUnderLock(loaded, pass, bound);
         if (drift.length > 0) throw new CommitRejected(drift);
         const anchor =
-          record.anchorKey === null ? null : await anchorBefore(loaded, record.anchorKey, pass, bound);
+          record.rulesetKey === null ? null : await anchorBefore(loaded, record.rulesetKey, pass, bound);
         // 2: the replay; 3: commit validation.
         const replay = await replayJournal(loaded, search, record.id, bound);
         if (replay.fault !== null) throw new CommitRejected([replay.fault]);

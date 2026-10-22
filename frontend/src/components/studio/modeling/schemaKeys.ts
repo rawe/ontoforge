@@ -24,8 +24,8 @@ export const SCHEMA_KEY_PATTERN = /^[a-z][a-z0-9_]*$/
  */
 export const LENS_RESOURCE_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/
 
-/** Key rule of anchors. Mirrors the server's `ANCHOR_KEY_PATTERN`. */
-export const ANCHOR_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/
+/** Key rule of rulesets. Mirrors the server's `RULESET_KEY_PATTERN`. */
+export const RULESET_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/
 
 /** Mirrors the server's `MAX_KEY_LENGTH`. */
 export const MAX_KEY_LENGTH = 64

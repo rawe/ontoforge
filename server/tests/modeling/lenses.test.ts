@@ -192,7 +192,7 @@ describe("lens CRUD", () => {
     const summary = (id: string, submittedAt: Date | null, lastChangeAt: Date): ChangesetSummary => ({
       id,
       lensId: "lens-1",
-      anchorKey: null,
+      rulesetKey: null,
       version: 1,
       note: null,
       submittedAt,

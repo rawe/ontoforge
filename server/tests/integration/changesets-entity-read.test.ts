@@ -3,7 +3,7 @@
  * (`buildProjectHierarchy`: task carries the document `notes`): one entity
  * as a commit of the changeset would leave it, stored or created by it,
  * with its own staged writes as the review shows them and their markers;
- * a staged delete; not found as the other changeset reads; the anchored
+ * a staged delete; not found as the other changeset reads; the ruleset
  * mirror. The entity read itself still answers the stored data alone.
  */
 
@@ -24,7 +24,7 @@ import { wipeDatabase } from "./reset.js";
 type Row = Record<string, any>;
 
 const ALL = runtimePrefix(O, "all");
-const ANCHORS = `/api/ontologies/${O}/runtime/anchors`;
+const RULESETS = `/api/ontologies/${O}/runtime/rulesets`;
 const UNKNOWN = "00000000-0000-4000-8000-000000000000";
 
 let app: FastifyInstance;
@@ -165,19 +165,19 @@ describe("one entity as the changeset leaves it", () => {
   });
 });
 
-describe("the anchored mirror", () => {
-  it("an anchored changeset is read through its anchor and the plain lens URL, not another anchor", async () => {
-    expect((await rest("PUT", `${ANCHORS}/agent-a`, { entity: { type: "project", id: e.P1 } })).status).toBe(200);
-    expect((await rest("PUT", `${ANCHORS}/agent-b`, { entity: { type: "project", id: e.P3 } })).status).toBe(200);
-    const A = `${ALL}/anchors/agent-a`;
+describe("the ruleset mirror", () => {
+  it("a ruleset's changeset is read through its ruleset and the plain lens URL, not another ruleset", async () => {
+    expect((await rest("PUT", `${RULESETS}/agent-a`, { anchor: { type: "project", id: e.P1 } })).status).toBe(200);
+    expect((await rest("PUT", `${RULESETS}/agent-b`, { anchor: { type: "project", id: e.P3 } })).status).toBe(200);
+    const A = `${ALL}/rulesets/agent-a`;
     const cs = await start(A);
     await staged(A, cs, { operation: "update_entity", type: "task", id: e.T5, properties: { name: "T5 b" } });
 
-    const anchored = await entityRead(cs, "task", e.T5, A);
-    expect(anchored.status, JSON.stringify(anchored.body)).toBe(200);
-    expect(anchored.body.entity.name).toBe("T5 b");
-    expect((await entityRead(cs, "task", e.T5)).body).toEqual(anchored.body);
-    const other = await entityRead(cs, "task", e.T5, `${ALL}/anchors/agent-b`);
+    const viaRuleset = await entityRead(cs, "task", e.T5, A);
+    expect(viaRuleset.status, JSON.stringify(viaRuleset.body)).toBe(200);
+    expect(viaRuleset.body.entity.name).toBe("T5 b");
+    expect((await entityRead(cs, "task", e.T5)).body).toEqual(viaRuleset.body);
+    const other = await entityRead(cs, "task", e.T5, `${ALL}/rulesets/agent-b`);
     expect(other.status).toBe(404);
     expect(other.body.error.message).toBe(`Changeset '${cs}' not found`);
   });

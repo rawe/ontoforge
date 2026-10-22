@@ -526,15 +526,15 @@ const STEPS: Step[] = [
     ],
   },
   {
-    // Parent relations and anchors: the parent end of a relation type, and
-    // the anchor table.
+    // Parent relations and rulesets: the parent end of a relation type, and
+    // the ruleset table.
     to: 7,
     actions: [
       `ALTER TABLE relation_type ADD COLUMN parent text`,
-      `CREATE TABLE anchor (
-  key             text        CONSTRAINT anchor_pk PRIMARY KEY,
-  entity_type_key text,
-  entity_id       uuid,
+      `CREATE TABLE ruleset (
+  key             text        CONSTRAINT ruleset_pk PRIMARY KEY,
+  anchor_type_key text,
+  anchor_id       uuid,
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now()
 )`,
@@ -542,14 +542,14 @@ const STEPS: Step[] = [
   },
   {
     // Changesets: the changeset table, its journal of staged writes, and
-    // the staged-only flag of an anchor.
+    // the write access of a ruleset.
     to: 8,
     actions: [
       `CREATE TABLE changeset (
   changeset_id   uuid        CONSTRAINT changeset_pk PRIMARY KEY,
   lens_id        uuid        NOT NULL CONSTRAINT changeset_lens_fk
                              REFERENCES lens (lens_id) ON DELETE CASCADE,
-  anchor_key     text,
+  ruleset_key    text,
   version        integer     NOT NULL,
   note           text,
   submitted_at   timestamptz,
@@ -572,7 +572,7 @@ const STEPS: Step[] = [
   CONSTRAINT changeset_write_pk PRIMARY KEY (changeset_id, seq)
 )`,
       `CREATE INDEX changeset_write_minted_id_idx ON changeset_write (changeset_id, minted_id)`,
-      `ALTER TABLE anchor ADD COLUMN staged_only boolean NOT NULL DEFAULT false`,
+      `ALTER TABLE ruleset ADD COLUMN write_access text NOT NULL DEFAULT 'full'`,
     ],
   },
 ];

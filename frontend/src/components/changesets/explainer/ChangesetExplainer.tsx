@@ -13,7 +13,7 @@ const TITLE = 'How a changeset works'
 const ACTOR_ICONS: Record<Actor, LucideIcon> = { client: Plug, person: UserRound }
 
 const FACTS = [
-  { label: 'Belongs to', value: 'its lens, and the anchor it was started through' },
+  { label: 'Belongs to', value: 'its lens, and the ruleset it was started through' },
   { label: 'Version', value: 'rises with every change; the Workbench commits the one on the screen' },
   { label: 'A draft', value: 'expires after 7 days unchanged' },
 ]
@@ -108,7 +108,7 @@ function ChangesetExplainerPanel() {
           <h3 className={microLabel}>The workflow — and who may take each way</h3>
           <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
             <li className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-dashed border-primary" />This step</li>
-            <li>* not through a staged-only anchor</li>
+            <li>* not with write access propose</li>
           </ul>
         </div>
         <ChangesetExplainerFlow current={step.node} passed={passedNodes(index)} lit={step.edges} onSelect={go} />

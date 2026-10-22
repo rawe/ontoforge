@@ -149,13 +149,13 @@ describe("transaction: a store bound to one connection", () => {
     return { id, plan };
   }
 
-  it("a return commits every write: entity, search queue rows, anchor and changeset", async () => {
+  it("a return commits every write: entity, search queue rows, ruleset and changeset", async () => {
     const { id, plan } = await plannedTask();
     const changesetId = randomUUID();
     const seen = await store.transaction(async (bound) => {
       await bound.createEntity("task", id, { name: "Bound" }, {}, plan);
-      await bound.anchors().saveAnchor("bound-a", { type: "task", id });
-      await bound.changesets().start({ id: changesetId, lensId: lenses.all!, anchorKey: null, note: null });
+      await bound.rulesets().save("bound-a", { anchor: { type: "task", id } });
+      await bound.changesets().start({ id: changesetId, lensId: lenses.all!, rulesetKey: null, note: null });
       // The bound store reads its own writes.
       return {
         entity: await bound.getEntity("task", id),
@@ -169,9 +169,9 @@ describe("transaction: a store bound to one connection", () => {
     expect(await sql(`SELECT part_kind FROM search_queue WHERE entity_id = $1`, [id])).toEqual([
       { part_kind: "entity" },
     ]);
-    expect(await store.anchors().getAnchor("bound-a")).toMatchObject({ entityFound: true });
+    expect(await store.rulesets().get("bound-a")).toMatchObject({ anchorFound: true });
     expect(await store.changesets().get(changesetId, lenses.all!, null)).not.toBeNull();
-    await store.anchors().deleteAnchor("bound-a");
+    await store.rulesets().delete("bound-a");
   });
 
   it("a throw rolls back everything the bound store wrote, search queue rows included", async () => {
@@ -180,8 +180,8 @@ describe("transaction: a store bound to one connection", () => {
     const promise = store.transaction(async (bound) => {
       await bound.createEntity("task", id, { name: "Gone" }, {}, plan);
       await bound.createRelation("has_task", randomUUID(), ids.P2, id, {}, {});
-      await bound.anchors().saveAnchor("bound-b", { type: "task", id });
-      await bound.changesets().start({ id: changesetId, lensId: lenses.all!, anchorKey: null, note: null });
+      await bound.rulesets().save("bound-b", { anchor: { type: "task", id } });
+      await bound.changesets().start({ id: changesetId, lensId: lenses.all!, rulesetKey: null, note: null });
       await bound.changesets().append(changesetId, [{ write: write("create_entity", "task"), bytes: 0 }]);
       throw new Error("boom");
     });
@@ -190,7 +190,7 @@ describe("transaction: a store bound to one connection", () => {
     expect(await store.getEntity("task", id)).toBeNull();
     expect(await store.childrenOf([ids.P2], READINGS)).toHaveLength(1);
     expect(await sql(`SELECT 1 FROM search_queue WHERE entity_id = $1`, [id])).toEqual([]);
-    expect(await store.anchors().getAnchor("bound-b")).toBeNull();
+    expect(await store.rulesets().get("bound-b")).toBeNull();
     expect(await sql(`SELECT 1 FROM changeset_write`)).toEqual([]);
     expect(await store.changesets().get(changesetId, lenses.all!, null)).toBeNull();
   });
@@ -231,8 +231,8 @@ describe("transaction: a store bound to one connection", () => {
 });
 
 describe("ChangesetStore", () => {
-  async function started(anchorKey: string | null = null, lensId = lenses.all!): Promise<ChangesetRecord> {
-    return store.changesets().start({ id: randomUUID(), lensId, anchorKey, note: "n" });
+  async function started(rulesetKey: string | null = null, lensId = lenses.all!): Promise<ChangesetRecord> {
+    return store.changesets().start({ id: randomUUID(), lensId, rulesetKey, note: "n" });
   }
 
   /** Move a changeset's last change back, so a refresh is visible. */
@@ -247,11 +247,11 @@ describe("ChangesetStore", () => {
     return (await store.changesets().get(id, lenses.all!, null))!;
   }
 
-  it("start: version 1, draft, no writes, bound to its lens and anchor", async () => {
+  it("start: version 1, draft, no writes, bound to its lens and ruleset", async () => {
     const cs = await started("agent-a");
     expect(cs).toMatchObject({
       lensId: lenses.all,
-      anchorKey: "agent-a",
+      rulesetKey: "agent-a",
       version: 1,
       note: "n",
       submittedAt: null,
@@ -261,20 +261,20 @@ describe("ChangesetStore", () => {
     expect(cs.lastChangeAt).toBeInstanceOf(Date);
   });
 
-  it("get honours the binding: another lens or another anchor answers null", async () => {
+  it("get honours the binding: another lens or another ruleset answers null", async () => {
     const plain = await started(null);
-    const anchored = await started("agent-a");
+    const viaRuleset = await started("agent-a");
     const changesets = store.changesets();
 
     expect(await changesets.get(plain.id, lenses.all!, null)).toMatchObject({ id: plain.id });
     expect(await changesets.get(plain.id, lenses.portfolio!, null)).toBeNull();
     expect(await changesets.get(plain.id, lenses.all!, "agent-a")).toBeNull();
 
-    // The plain lens URL reaches the anchored one; only its own anchor does.
-    expect(await changesets.get(anchored.id, lenses.all!, null)).toMatchObject({ id: anchored.id });
-    expect(await changesets.get(anchored.id, lenses.all!, "agent-a")).toMatchObject({ id: anchored.id });
-    expect(await changesets.get(anchored.id, lenses.all!, "agent-b")).toBeNull();
-    expect(await changesets.get(anchored.id, lenses.portfolio!, "agent-a")).toBeNull();
+    // The plain lens URL reaches the ruleset's one; only its own ruleset does.
+    expect(await changesets.get(viaRuleset.id, lenses.all!, null)).toMatchObject({ id: viaRuleset.id });
+    expect(await changesets.get(viaRuleset.id, lenses.all!, "agent-a")).toMatchObject({ id: viaRuleset.id });
+    expect(await changesets.get(viaRuleset.id, lenses.all!, "agent-b")).toBeNull();
+    expect(await changesets.get(viaRuleset.id, lenses.portfolio!, "agent-a")).toBeNull();
 
     expect(await changesets.get("not-a-uuid", lenses.all!, null)).toBeNull();
     expect(await changesets.get(randomUUID(), lenses.all!, null)).toBeNull();
@@ -484,7 +484,7 @@ describe("ChangesetStore", () => {
       version: 4,
     });
     expect(byId[empty.id]).toMatchObject({ writeCount: 0, operations: {}, typeKeys: [] });
-    expect(byId[b.id]).toMatchObject({ anchorKey: "agent-a", writeCount: 1, note: "go" });
+    expect(byId[b.id]).toMatchObject({ rulesetKey: "agent-a", writeCount: 1, note: "go" });
 
     expect((await changesets.list(lenses.all!, "agent-a")).map((cs) => cs.id)).toEqual([b.id]);
     expect(await changesets.list(lenses.all!, "agent-b")).toEqual([]);
@@ -626,7 +626,7 @@ describe("ChangesetStore", () => {
       const elsewhere = await other.changesets().start({
         id: randomUUID(),
         lensId: lenses.other!,
-        anchorKey: null,
+        rulesetKey: null,
         note: null,
       });
 
@@ -662,6 +662,62 @@ describe("ChangesetStore", () => {
         await holder.done;
       }
     });
+  });
+});
+
+describe("RulesetStore", () => {
+  const P1 = () => ({ type: "project", id: ids.P1 });
+
+  beforeEach(async () => {
+    await sql(`DELETE FROM ruleset`);
+  });
+
+  it("save with an empty patch creates an empty ruleset: no anchor, write access full", async () => {
+    expect(await store.rulesets().save("agent-a", {})).toEqual({
+      key: "agent-a",
+      anchor: null,
+      anchorFound: false,
+      writeAccess: "full",
+    });
+    expect(await store.rulesets().get("agent-a")).toEqual({ key: "agent-a", anchor: null, anchorFound: false, writeAccess: "full" });
+  });
+
+  it("a patch naming write access keeps the anchor", async () => {
+    await store.rulesets().save("agent-a", { anchor: P1() });
+    expect(await store.rulesets().save("agent-a", { writeAccess: "propose" })).toEqual({
+      key: "agent-a",
+      anchor: P1(),
+      anchorFound: true,
+      writeAccess: "propose",
+    });
+  });
+
+  it("a null anchor removes it and keeps write access", async () => {
+    await store.rulesets().save("agent-a", { anchor: P1(), writeAccess: "none" });
+    expect(await store.rulesets().save("agent-a", { anchor: null })).toEqual({
+      key: "agent-a",
+      anchor: null,
+      anchorFound: false,
+      writeAccess: "none",
+    });
+  });
+
+  it("a patch naming the anchor keeps write access; an empty patch keeps both", async () => {
+    await store.rulesets().save("agent-a", { writeAccess: "propose" });
+    expect(await store.rulesets().save("agent-a", { anchor: P1() })).toMatchObject({ anchor: P1(), writeAccess: "propose" });
+    expect(await store.rulesets().save("agent-a", {})).toMatchObject({ anchor: P1(), writeAccess: "propose" });
+  });
+
+  it("a new ruleset takes the rules the patch names", async () => {
+    expect(await store.rulesets().save("agent-b", { anchor: P1(), writeAccess: "none" })).toEqual({
+      key: "agent-b",
+      anchor: P1(),
+      anchorFound: true,
+      writeAccess: "none",
+    });
+    expect((await store.rulesets().list()).map((r) => r.key)).toEqual(["agent-b"]);
+    expect(await store.rulesets().delete("agent-b")).toBe(true);
+    expect(await store.rulesets().delete("agent-b")).toBe(false);
   });
 });
 

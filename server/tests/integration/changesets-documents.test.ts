@@ -6,8 +6,8 @@
  * parent carries its relation's properties, and the staged document read
  * returns the text a commit would leave, whole and in slices, from the last
  * staged write that sets it. Drift on a document is still found by its hash;
- * a lens that hides the type or the property answers not found; anchored
- * and staged-only mounts read it too.
+ * a lens that hides the type or the property answers not found; a ruleset
+ * mount with an anchor and write access propose reads it too.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -34,7 +34,7 @@ interface ToolCallResult {
 }
 
 const ALL = runtimePrefix(O, "all");
-const ANCHORS = `/api/ontologies/${O}/runtime/anchors`;
+const RULESETS = `/api/ontologies/${O}/runtime/rulesets`;
 
 /** A Markdown document of 2,000+ characters, an emoji (one character, two
  * UTF-16 units) among them. */
@@ -47,8 +47,8 @@ let h: ProjectHierarchyIds;
 let e: ProjectHierarchyIds["entities"];
 const clients: Client[] = [];
 
-async function connect(anchorKey: string | null = null): Promise<Client> {
-  const path = `/mcp/ontologies/${O}/runtime/lenses/all${anchorKey === null ? "" : `/anchors/${anchorKey}`}`;
+async function connect(rulesetKey: string | null = null): Promise<Client> {
+  const path = `/mcp/ontologies/${O}/runtime/lenses/all${rulesetKey === null ? "" : `/rulesets/${rulesetKey}`}`;
   const client = new Client({ name: "changesets-documents-tests", version: "0.0.1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}${path}`)));
   clients.push(client);
@@ -457,9 +457,9 @@ describe("through the lens and the mounts (F6)", () => {
     expect((await stagedNotes(cs, e.T1)).body.error.message).toBe(`Changeset '${cs}' not found`);
   });
 
-  it("anchored and staged-only mounts read it; another anchor does not reach it", async () => {
-    expect((await rest("PUT", `${ANCHORS}/agent-s`, { entity: { type: "project", id: e.P1 }, stagedOnly: true })).status).toBe(200);
-    expect((await rest("PUT", `${ANCHORS}/agent-b`, { entity: { type: "project", id: e.P3 } })).status).toBe(200);
+  it("a ruleset mount with an anchor at propose reads it; another ruleset does not reach it", async () => {
+    expect((await rest("PUT", `${RULESETS}/agent-s`, { anchor: { type: "project", id: e.P1 }, writeAccess: "propose" })).status).toBe(200);
+    expect((await rest("PUT", `${RULESETS}/agent-b`, { anchor: { type: "project", id: e.P3 } })).status).toBe(200);
     const client = await connect("agent-s");
     const tools = (await client.listTools()).tools.map((tool) => tool.name);
     expect(tools).toContain("get_staged_document");
@@ -475,11 +475,11 @@ describe("through the lens and the mounts (F6)", () => {
     const args = { changeset_id: cs, entity_type_key: "task", entity_id: e.T2, property_key: "notes" };
     const mcp = await ok(client, "get_staged_document", args);
     expect(mcp).toEqual({ propertyKey: "notes", content: "Proposed notes", offset: 0, length: 14, totalLength: 14 });
-    expect((await stagedNotes(cs, e.T2, "", `${ALL}/anchors/agent-s`)).body).toEqual(mcp);
+    expect((await stagedNotes(cs, e.T2, "", `${ALL}/rulesets/agent-s`)).body).toEqual(mcp);
     // The plain lens URL reaches every changeset of its lens.
     expect((await stagedNotes(cs, e.T2)).body).toEqual(mcp);
 
-    const other = await stagedNotes(cs, e.T2, "", `${ALL}/anchors/agent-b`);
+    const other = await stagedNotes(cs, e.T2, "", `${ALL}/rulesets/agent-b`);
     expect(other.status).toBe(404);
     expect(other.body.error.message).toBe(`Changeset '${cs}' not found`);
     expect(await refused(await connect("agent-b"), "get_staged_document", args)).toContain(`Changeset '${cs}' not found`);

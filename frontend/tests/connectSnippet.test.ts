@@ -7,7 +7,7 @@ const target = {
   baseUrl: 'https://api.example.com',
   ontologyKey: 'org_graph',
   lensKey: 'all',
-  anchorKey: null,
+  rulesetKey: null,
   servers: ['modeling', 'runtime'] as const,
   withToken: false,
 }
@@ -67,25 +67,25 @@ test('only the chosen servers are configured, always in a fixed order', () => {
   assert.doesNotMatch(buildSnippet('codex', { ...target, servers: ['modeling'] }), /runtime/)
 })
 
-test('an anchor mounts the runtime server under it and names its entry after it', () => {
-  const anchored = JSON.parse(buildSnippet('claude-code', { ...target, anchorKey: 'agent-a' }))
-  assert.deepEqual(anchored.mcpServers, {
+test('a ruleset mounts the runtime server under it and names its entry after it', () => {
+  const mounted = JSON.parse(buildSnippet('claude-code', { ...target, rulesetKey: 'agent-a' }))
+  assert.deepEqual(mounted.mcpServers, {
     'ontoforge-modeling': {
       type: 'http',
       url: 'https://api.example.com/mcp/ontologies/org_graph/model',
     },
     'ontoforge-runtime-agent-a': {
       type: 'http',
-      url: 'https://api.example.com/mcp/ontologies/org_graph/runtime/lenses/all/anchors/agent-a',
+      url: 'https://api.example.com/mcp/ontologies/org_graph/runtime/lenses/all/rulesets/agent-a',
     },
   })
   assert.match(
-    buildSnippet('codex', { ...target, anchorKey: 'agent-a', servers: ['runtime'] }),
-    /^\[mcp_servers\.ontoforge-runtime-agent-a\]\nurl = ".*\/runtime\/lenses\/all\/anchors\/agent-a"$/,
+    buildSnippet('codex', { ...target, rulesetKey: 'agent-a', servers: ['runtime'] }),
+    /^\[mcp_servers\.ontoforge-runtime-agent-a\]\nurl = ".*\/runtime\/lenses\/all\/rulesets\/agent-a"$/,
   )
 })
 
-test('the server list builds each entry name and URL path, with and without an anchor', () => {
+test('the server list builds each entry name and URL path, with and without a ruleset', () => {
   const [modeling, runtime] = MCP_SERVERS
   assert.equal(modeling.entryName('agent-a'), 'ontoforge-modeling')
   assert.equal(modeling.path('org_graph', 'all', 'agent-a'), '/mcp/ontologies/org_graph/model')
@@ -94,10 +94,10 @@ test('the server list builds each entry name and URL path, with and without an a
   assert.equal(runtime.path('org_graph', 'all', null), '/mcp/ontologies/org_graph/runtime/lenses/all')
   assert.equal(
     runtime.path('org_graph', 'all', 'agent-a'),
-    '/mcp/ontologies/org_graph/runtime/lenses/all/anchors/agent-a',
+    '/mcp/ontologies/org_graph/runtime/lenses/all/rulesets/agent-a',
   )
   assert.equal(
-    mcpUrl(runtime, { baseUrl: null, ontologyKey: 'org_graph', lensKey: 'all', anchorKey: null }),
+    mcpUrl(runtime, { baseUrl: null, ontologyKey: 'org_graph', lensKey: 'all', rulesetKey: null }),
     '<server-url>/mcp/ontologies/org_graph/runtime/lenses/all',
   )
 })

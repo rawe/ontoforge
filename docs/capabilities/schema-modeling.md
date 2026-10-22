@@ -117,8 +117,8 @@ Entities without a parent are hierarchy roots, and are allowed. A parent relatio
 otherwise an ordinary relation type: it has properties, it is listed, read and traversed
 like any other, and a lens includes or hides it the same way. How the rules bind instance
 writes — relation creates, the create with a parent relation, leaf-only deletes — is in
-[instance-data.md](instance-data.md#hierarchies); how they bind an anchor, in
-[anchors.md](anchors.md).
+[instance-data.md](instance-data.md#hierarchies); how they bind a ruleset's anchor, in
+[rulesets.md](rulesets.md#anchor).
 
 **The flag can be set, changed and cleared** at any time, on create and on update, and
 every read of a relation type returns it. Setting it, flipping it, or creating a relation

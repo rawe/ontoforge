@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils'
-import { EXAMPLE, type EntityState, type StoryStep } from './anchorExplainerStory'
+import { ANCHOR_CAPTIONS, EXAMPLE, type EntityState, type StoryStep } from './rulesetExplainerStory'
 
 const BOX = { width: 112, height: 40 }
 const PAD = 12
@@ -7,23 +7,33 @@ const PAD = 12
 type Entity = (typeof EXAMPLE.entities)[number]
 const ENTITIES = new Map<string, Entity>(EXAMPLE.entities.map((entity) => [entity.id, entity]))
 const SUBTREE = new Set<string>(EXAMPLE.subtree)
+const FREE = new Set<string>(EXAMPLE.free)
 
 const ENTITY_CLASS: Record<EntityState, { box: string; text: string }> = {
   idle: { box: 'fill-card stroke-border', text: 'fill-foreground/80' },
   covered: { box: 'fill-primary/6 stroke-primary/45', text: 'fill-foreground' },
   anchor: { box: 'fill-primary stroke-primary', text: 'fill-primary-foreground font-semibold' },
+  deleted: { box: 'fill-destructive/10 stroke-destructive', text: 'fill-destructive font-semibold' },
   written: { box: 'fill-primary/20 stroke-primary', text: 'fill-foreground font-semibold' },
   staged: { box: 'fill-primary/6 stroke-primary', text: 'fill-foreground' },
   refused: { box: 'fill-destructive/10 stroke-destructive', text: 'fill-foreground' },
 }
 
 /**
- * The example hierarchy at one step: the anchored project, its subtree framed, the free
- * type apart, and what the step's writes did — written, staged or refused.
+ * The example hierarchy at one step, by the step's anchor: no anchor (or none to show), no frame; an anchor,
+ * the project Apollo solid and its subtree framed; a deleted anchor, both dashed red. The
+ * free type stands apart once there is an anchor; the step's writes show as written,
+ * staged or refused.
  */
-export function AnchorExplainerTree({ step }: { step: StoryStep }) {
-  const state = (key: string): EntityState =>
-    step.entities[key] ?? (key === EXAMPLE.anchor ? 'anchor' : SUBTREE.has(key) ? 'covered' : 'idle')
+export function RulesetExplainerTree({ step }: { step: StoryStep }) {
+  const mode = step.anchor
+  const state = (key: string): EntityState => {
+    const own = step.entities[key]
+    if (own) return own
+    if (mode === 'found') return key === EXAMPLE.anchor ? 'anchor' : SUBTREE.has(key) ? 'covered' : 'idle'
+    if (mode === 'deleted' && key === EXAMPLE.anchor) return 'deleted'
+    return 'idle'
+  }
   const boxes = EXAMPLE.subtree.map((key) => ENTITIES.get(key)!)
   const frame = {
     x1: Math.min(...boxes.map((b) => b.x)) - BOX.width / 2 - PAD,
@@ -31,12 +41,15 @@ export function AnchorExplainerTree({ step }: { step: StoryStep }) {
     y1: Math.min(...boxes.map((b) => b.y)) - BOX.height / 2 - PAD,
     y2: Math.max(...boxes.map((b) => b.y)) + BOX.height / 2 + PAD,
   }
+  const deleted = mode === 'deleted'
 
   return <svg viewBox={`0 0 ${EXAMPLE.view.width} ${EXAMPLE.view.height}`} className="block h-auto w-full" role="img"
-    aria-label={`Example: a customer with two projects and their tasks; the anchor at the project Apollo. ${step.title}.`}>
-    <rect x={frame.x1} y={frame.y1} width={frame.x2 - frame.x1} height={frame.y2 - frame.y1} rx={12}
-      className="fill-primary/4 stroke-primary/50" strokeDasharray="5 4" strokeWidth={1.25} />
-    <text x={frame.x1 + 8} y={frame.y1 - 6} className="fill-primary text-[11px] font-medium">anchored subtree</text>
+    aria-label={`Example: a customer with two projects and their tasks, and a person.${mode ? ` ${ANCHOR_CAPTIONS[mode]}.` : ''} ${step.title}.`}>
+    {(mode === 'found' || deleted) && <g>
+      <rect x={frame.x1} y={frame.y1} width={frame.x2 - frame.x1} height={frame.y2 - frame.y1} rx={12}
+        className={deleted ? 'fill-destructive/4 stroke-destructive/60' : 'fill-primary/4 stroke-primary/50'} strokeDasharray="5 4" strokeWidth={1.25} />
+      <text x={frame.x1 + 8} y={frame.y1 - 6} className={cn('text-[11px] font-medium', deleted ? 'fill-destructive' : 'fill-primary')}>subtree</text>
+    </g>}
 
     {EXAMPLE.links.map(([from, to]) => {
       const a = ENTITIES.get(from)!
@@ -47,22 +60,23 @@ export function AnchorExplainerTree({ step }: { step: StoryStep }) {
 
     {EXAMPLE.entities.map((entity) => {
       const s = state(entity.id)
-      const badge = step.badges?.[entity.id]
+      const badge = step.badges?.[entity.id] ?? (s === 'deleted' ? 'deleted' : undefined)
+      const bad = badge === 'refused' || badge === 'deleted'
       const left = entity.x - BOX.width / 2
       const top = entity.y - BOX.height / 2
-      const free = entity.id === 'lena'
+      const free = (mode === 'found' || deleted) && FREE.has(entity.id)
       return <g key={entity.id}>
         <rect x={left} y={top} width={BOX.width} height={BOX.height} rx={8} strokeWidth={s === 'idle' || s === 'covered' ? 1 : 1.5}
-          strokeDasharray={s === 'staged' || (free && s === 'idle') ? '4 3' : undefined}
+          strokeDasharray={s === 'staged' || s === 'deleted' || (free && s === 'idle') ? '4 3' : undefined}
           className={cn('transition-[fill,stroke] duration-500', ENTITY_CLASS[s].box)} />
         <text x={entity.x} y={entity.y - 2} textAnchor="middle" className={cn('text-[13px] transition-[fill] duration-500', ENTITY_CLASS[s].text)}>{entity.label}</text>
         <text x={entity.x} y={entity.y + 12} textAnchor="middle"
-          className={cn('text-[10px]', s === 'anchor' ? 'fill-primary-foreground/80' : 'fill-muted-foreground')}>{entity.type}</text>
+          className={cn('text-[10px]', s === 'anchor' ? 'fill-primary-foreground/80' : 'fill-muted-foreground')}>{free ? `${entity.type} · free` : entity.type}</text>
         {badge && <g>
           <rect x={left + BOX.width - badge.length * 6.4 - 4} y={top - 16} width={badge.length * 6.4 + 14} height={18} rx={9}
-            className={badge === 'refused' ? 'fill-popover stroke-destructive' : 'fill-popover stroke-primary'} strokeWidth={1.25} />
+            className={bad ? 'fill-popover stroke-destructive' : 'fill-popover stroke-primary'} strokeWidth={1.25} />
           <text x={left + BOX.width - badge.length * 6.4 - 4 + (badge.length * 6.4 + 14) / 2} y={top - 3} textAnchor="middle"
-            className={cn('text-[10.5px] font-semibold', badge === 'refused' ? 'fill-destructive' : 'fill-primary')}>{badge}</text>
+            className={cn('text-[10.5px] font-semibold', bad ? 'fill-destructive' : 'fill-primary')}>{badge}</text>
         </g>}
       </g>
     })}

@@ -10,7 +10,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { ConflictError, NotFoundError, ValidationError } from "../../src/core/exceptions.js";
-import type { AnchorRecord, ChangesetRecord, ChangesetSummary, ChangesetWriteRecord } from "../../src/core/ports.js";
+import type { RulesetRecord, ChangesetRecord, ChangesetSummary, ChangesetWriteRecord } from "../../src/core/ports.js";
 import {
   commitChangeset,
   getChangeset,
@@ -74,7 +74,7 @@ function changeset(overrides: Partial<ChangesetRecord> = {}): ChangesetRecord {
   return {
     id: CS,
     lensId: "lens-1",
-    anchorKey: null,
+    rulesetKey: null,
     version: 5,
     note: "start note",
     submittedAt: null,
@@ -135,8 +135,8 @@ beforeEach(() => {
 
 const on = () => asRuntimeStore(store);
 
-function anchorAt(entity: { type: string; id: string } | null, entityFound = true): AnchorRecord {
-  return { key: "agent-a", entity, entityFound } as AnchorRecord;
+function anchorAt(anchor: { type: string; id: string } | null, anchorFound = true): RulesetRecord {
+  return { key: "agent-a", anchor, anchorFound } as RulesetRecord;
 }
 
 // ---------------------------------------------------------------------------
@@ -202,29 +202,29 @@ describe("submit", () => {
     );
   });
 
-  it("an anchored changeset whose anchor is dangling, or at an entity the lens hides, is a 409 with no fix hint", async () => {
-    store.changesetStore.get.mockResolvedValue(changeset({ anchorKey: "agent-a" }));
-    store.anchorStore.getAnchor.mockResolvedValue(anchorAt({ type: "company", id: ACME }, false));
+  it("a ruleset's changeset whose anchor is deleted, or at an entity the lens hides, is a 409 with no fix hint", async () => {
+    store.changesetStore.get.mockResolvedValue(changeset({ rulesetKey: "agent-a" }));
+    store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "company", id: ACME }, false));
     // Through the plain lens URL too: the stored anchor counts.
     await expect(submitChangeset("full_lens", null, CS, "n", on())).rejects.toThrow(
-      new ConflictError("Anchor 'agent-a' is dangling"),
+      new ConflictError("The anchor of ruleset 'agent-a' no longer exists"),
     );
 
     invalidateLoadedSchemaCache();
     store.getFullSchemaWithLensInclusions.mockResolvedValue(schema(true));
-    store.anchorStore.getAnchor.mockResolvedValue(anchorAt({ type: "department", id: DEPT }));
+    store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "department", id: DEPT }));
     await expect(submitChangeset("hr_view", "agent-a", CS, "n", on())).rejects.toThrow(
-      new ConflictError("Anchor 'agent-a' points at an entity that lens 'hr_view' does not show"),
+      new ConflictError("The anchor of ruleset 'agent-a' is an entity that lens 'hr_view' does not show"),
     );
     expect(store.changesetStore.submit).not.toHaveBeenCalled();
   });
 
-  it("an anchor deleted since is left to the commit; an anchored one submits", async () => {
-    store.changesetStore.get.mockResolvedValue(changeset({ anchorKey: "agent-a" }));
-    store.changesetStore.submit.mockResolvedValue(changeset({ anchorKey: "agent-a", submittedAt: NOW, version: 6 }));
-    store.anchorStore.getAnchor.mockResolvedValue(null);
+  it("a ruleset deleted since is left to the commit; one with a found anchor submits", async () => {
+    store.changesetStore.get.mockResolvedValue(changeset({ rulesetKey: "agent-a" }));
+    store.changesetStore.submit.mockResolvedValue(changeset({ rulesetKey: "agent-a", submittedAt: NOW, version: 6 }));
+    store.rulesetStore.get.mockResolvedValue(null);
     await submitChangeset("full_lens", null, CS, "n", on());
-    store.anchorStore.getAnchor.mockResolvedValue(anchorAt({ type: "company", id: ACME }));
+    store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "company", id: ACME }));
     await submitChangeset("full_lens", null, CS, "n", on());
     expect(store.changesetStore.submit).toHaveBeenCalledTimes(2);
   });
@@ -239,10 +239,10 @@ describe("unsubmit", () => {
     store.changesetStore.get.mockResolvedValue(changeset({ submittedAt: NOW }));
   });
 
-  it("back to draft, the note replaced, on any URL, a dangling anchor's included", async () => {
-    store.changesetStore.get.mockResolvedValue(changeset({ submittedAt: NOW, anchorKey: "agent-a" }));
-    store.anchorStore.getAnchor.mockResolvedValue(anchorAt({ type: "company", id: ACME }, false));
-    store.changesetStore.unsubmit.mockResolvedValue(changeset({ version: 7, note: "fix T2", anchorKey: "agent-a" }));
+  it("back to draft, the note replaced, on any URL, a deleted anchor's included", async () => {
+    store.changesetStore.get.mockResolvedValue(changeset({ submittedAt: NOW, rulesetKey: "agent-a" }));
+    store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "company", id: ACME }, false));
+    store.changesetStore.unsubmit.mockResolvedValue(changeset({ version: 7, note: "fix T2", rulesetKey: "agent-a" }));
 
     const view = await unsubmitChangeset("full_lens", "agent-a", CS, "fix T2", on());
 
@@ -363,9 +363,9 @@ function summary(overrides: Partial<ChangesetSummary>): ChangesetSummary {
 
 describe("list", () => {
   it("sweeps first, passes the binding, and answers the fields in the store's order", async () => {
-    store.anchorStore.getAnchor.mockResolvedValue(anchorAt(null));
+    store.rulesetStore.get.mockResolvedValue(anchorAt(null));
     store.changesetStore.list.mockResolvedValue([
-      summary({ id: "b", submittedAt: NOW, anchorKey: "agent-a", writeCount: 3, operations: { create_entity: 2, delete_entity: 1 }, typeKeys: ["company", "person"] }),
+      summary({ id: "b", submittedAt: NOW, rulesetKey: "agent-a", writeCount: 3, operations: { create_entity: 2, delete_entity: 1 }, typeKeys: ["company", "person"] }),
       summary({ id: "a", writeCount: 0 }),
     ]);
 
@@ -379,7 +379,7 @@ describe("list", () => {
         state: "submitted",
         version: 5,
         note: "start note",
-        anchor: "agent-a",
+        ruleset: "agent-a",
         writeCount: 3,
         operations: { create_entity: 2, delete_entity: 1 },
         types: ["company", "person"],
@@ -392,8 +392,8 @@ describe("list", () => {
     ]);
   });
 
-  it("an unknown anchor is not found", async () => {
-    await expect(listChangesets("full_lens", "nope", on())).rejects.toThrow(new NotFoundError("Anchor 'nope' not found"));
+  it("an unknown ruleset is not found", async () => {
+    await expect(listChangesets("full_lens", "nope", on())).rejects.toThrow(new NotFoundError("Ruleset 'nope' not found"));
     expect(store.changesetStore.list).not.toHaveBeenCalled();
   });
 
@@ -617,8 +617,8 @@ describe("review read", () => {
 describe("staged document read", () => {
   const NOTE2 = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
   const text = "# Plan\n\nStep one 😀, step two.";
-  const read = (id: string, offset = 0, limit: number | null = null, lensKey = "full_lens", anchorKey: string | null = null) =>
-    getStagedDocument(lensKey, anchorKey, CS, "note", id, "body", offset, limit, on());
+  const read = (id: string, offset = 0, limit: number | null = null, lensKey = "full_lens", rulesetKey: string | null = null) =>
+    getStagedDocument(lensKey, rulesetKey, CS, "note", id, "body", offset, limit, on());
 
   beforeEach(() => {
     journal = [
@@ -703,8 +703,8 @@ describe("staged document read", () => {
     await expect(read(NOTE1, 0, null, "hr_view")).rejects.toThrow(new NotFoundError("Entity type 'note' not found"));
   });
 
-  it("through the anchored URL: bound to its anchor, and readable while submitted", async () => {
-    store.changesetStore.get.mockResolvedValue(changeset({ anchorKey: "agent-a", submittedAt: NOW }));
+  it("through the ruleset URL: bound to its ruleset, and readable while submitted", async () => {
+    store.changesetStore.get.mockResolvedValue(changeset({ rulesetKey: "agent-a", submittedAt: NOW }));
     expect((await read(NOTE1, 0, null, "full_lens", "agent-a")).content).toBe(text);
     expect(store.changesetStore.get).toHaveBeenCalledWith(CS, "lens-1", "agent-a");
   });
@@ -715,8 +715,8 @@ describe("staged document read", () => {
 // ---------------------------------------------------------------------------
 
 describe("staged entity read", () => {
-  const read = (type: string, id: string, lensKey = "full_lens", anchorKey: string | null = null) =>
-    getStagedEntity(lensKey, anchorKey, CS, type, id, on());
+  const read = (type: string, id: string, lensKey = "full_lens", rulesetKey: string | null = null) =>
+    getStagedEntity(lensKey, rulesetKey, CS, type, id, on());
 
   beforeEach(() => {
     store.getEntity.mockImplementation(async (type: string, id: string) =>
@@ -837,8 +837,8 @@ describe("staged entity read", () => {
     expect(JSON.stringify(view)).not.toContain('"age"');
   });
 
-  it("through the anchored URL: bound to its anchor, and readable while submitted", async () => {
-    store.changesetStore.get.mockResolvedValue(changeset({ anchorKey: "agent-a", submittedAt: NOW }));
+  it("through the ruleset URL: bound to its ruleset, and readable while submitted", async () => {
+    store.changesetStore.get.mockResolvedValue(changeset({ rulesetKey: "agent-a", submittedAt: NOW }));
     journal = [rename(2, PAT, "Pat B", { name: "Pat" })];
     expect((await read("person", PAT, "full_lens", "agent-a")).entity).toMatchObject({ name: "Pat B" });
     expect(store.changesetStore.get).toHaveBeenCalledWith(CS, "lens-1", "agent-a");

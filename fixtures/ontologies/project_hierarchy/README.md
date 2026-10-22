@@ -1,6 +1,6 @@
 # project_hierarchy
 
-Parent relations, anchors and documents: a Customer › Project › Task hierarchy with a
+Parent relations, the anchor rule and documents: a Customer › Project › Task hierarchy with a
 required relation property, an up-pointing and a self-relation parent relation, a separate
 `manages` hierarchy, free types, lenses that hide a hierarchy level, and a document
 property on task.
@@ -37,4 +37,4 @@ Tasks with a Markdown `description`: T1 (2,992 characters, long enough to slice)
 - `portfolio`: customer, project, milestone (task hidden)
 - `no_projects`: customer, task, milestone (project hidden; milestone's only parent relation hidden); includes the passage index `task~description`
 
-Anchors are runtime state and not part of the fixture.
+Rulesets are runtime state and not part of the fixture.

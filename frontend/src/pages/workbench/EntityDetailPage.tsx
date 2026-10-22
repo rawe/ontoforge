@@ -3,7 +3,7 @@ import { AlertTriangle, Anchor, Link2, Loader2, Plus, SearchX, Trash2, Waypoints
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { useAnchors, useRuntimeSchema, useStagedEntity } from '@/api/hooks'
+import { useRulesets, useRuntimeSchema, useStagedEntity } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
@@ -12,7 +12,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { TypeNotInLens } from '@/components/home/TypeNotInLens'
 import { PageHeader } from '@/components/PageHeader'
 import { TypeChip } from '@/components/TypeChip'
-import { anchoredHereText, anchorsAt, danglingWarningText } from '@/components/anchors/anchors'
+import { anchorDeleteWarning, anchorOfText, rulesetsAnchoredAt } from '@/components/rulesets/rulesets'
 import { StagedHereStrip } from '@/components/changesets/StagedHereStrip'
 import {
   AddRelationDialog,
@@ -105,11 +105,11 @@ export function EntityDetailPage() {
   // Children the lens hides are unknown here; the server's 409 covers them.
   const hasChildren = Object.values(childCounts.data ?? {}).some((n) => n > 0)
 
-  // The anchors pointing here: a chip, and a warning before a delete leaves them dangling.
-  const anchors = useAnchors(ontologyKey)
-  const anchoredHere = useMemo(
-    () => anchorsAt(anchors.data ?? [], typeKey ?? '', id ?? ''),
-    [anchors.data, typeKey, id],
+  // The rulesets whose anchor this is: a chip, and a warning before a delete deletes their anchor.
+  const rulesets = useRulesets(ontologyKey)
+  const anchorOf = useMemo(
+    () => rulesetsAnchoredAt(rulesets.data ?? [], typeKey ?? '', id ?? ''),
+    [rulesets.data, typeKey, id],
   )
 
   // While a changeset is pinned: this entity as it leaves it (none on a 404: not stored, or gone).
@@ -166,9 +166,9 @@ export function EntityDetailPage() {
           queryKey: neighborCountsKey(ontologyKey!, lensKey!, parent.type, parent.id),
         })
       }
-      // An anchor that pointed here is now dangling.
-      if (anchoredHere.length > 0) {
-        void queryClient.invalidateQueries({ queryKey: qk.anchors(ontologyKey!) })
+      // A ruleset whose anchor this was now has a deleted anchor.
+      if (anchorOf.length > 0) {
+        void queryClient.invalidateQueries({ queryKey: qk.rulesets(ontologyKey!) })
       }
       toast.success('Entity deleted')
       navigate(`/o/${ontologyKey}/w/${lensKey}/t/${typeKey}`)
@@ -259,13 +259,13 @@ export function EntityDetailPage() {
         meta={
           <>
             <TypeChip typeKey={typeKey} displayName={entityType.displayName} size="sm" />
-            {anchoredHere.length > 0 && (
+            {anchorOf.length > 0 && (
               <Link
-                to={`/o/${ontologyKey}/w/${lensKey}/anchors`}
+                to={`/o/${ontologyKey}/w/${lensKey}/rulesets`}
                 className="inline-flex items-center gap-1 rounded-full border border-(--tc-teal-border) bg-(--tc-teal-bg) px-2 py-0.5 text-[11px] font-medium text-(--tc-teal) hover:underline focus-visible:outline-2 focus-visible:outline-ring/60"
               >
                 <Anchor className="size-3" />
-                {anchoredHereText(anchoredHere)}
+                {anchorOfText(anchorOf)}
               </Link>
             )}
             {staged !== undefined && deletedInChangeset(staged) && (
@@ -334,10 +334,10 @@ export function EntityDetailPage() {
                       : 'The delete is staged into the pinned changeset: nothing is removed until it is committed.'}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
-                {anchoredHere.length > 0 && (
+                {anchorOf.length > 0 && (
                   <p className="flex items-start gap-2 rounded-lg border border-(--tc-amber-border) bg-(--tc-amber-bg) p-3 text-[13px]">
                     <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-(--tc-amber)" />
-                    {danglingWarningText(anchoredHere)}
+                    {anchorDeleteWarning(anchorOf)}
                   </p>
                 )}
                 <AlertDialogFooter>

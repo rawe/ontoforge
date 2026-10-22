@@ -1,11 +1,11 @@
 /**
- * The write guard of an anchored mount on PostgreSQL, over the REST mirror
+ * The anchor rule of a ruleset mount on PostgreSQL, over the REST mirror
  * and the MCP mount alike, on the fixture-shaped hierarchy
  * (`buildProjectHierarchy`). `agent-a` points at P1 through lens `all`
  * unless a test says otherwise. Each test proves one rule of the spec's
  * rule table, with the refusal's field key; no refusal names an entity the
- * caller did not send. Then the anchor's states: unanchored is the plain
- * lens, dangling and hidden refuse every write with a 409, and a re-point
+ * caller did not send. Then the anchor's states: no anchor is the plain
+ * lens, deleted and hidden refuse every write with a 409, and a re-point
  * applies on the next call.
  */
 
@@ -92,7 +92,7 @@ afterEach(async () => {
 
 async function putAnchor(key: string, name: ProjectHierarchyName | null, type?: string): Promise<void> {
   const entity = name === null ? null : { type: type ?? (await typeOf(name)), id: id(name) };
-  const res = await app.inject({ method: "PUT", url: `/api/ontologies/${O}/runtime/anchors/${key}`, payload: { entity } });
+  const res = await app.inject({ method: "PUT", url: `/api/ontologies/${O}/runtime/rulesets/${key}`, payload: { anchor: entity } });
   expect(res.statusCode, res.body).toBe(200);
 }
 
@@ -195,8 +195,8 @@ function mcpWrites(url: string): Writes {
 }
 
 const TRANSPORTS = {
-  REST: (lens: string, anchor: string) => restWrites(`${runtimePrefix(O, lens)}/anchors/${anchor}`),
-  MCP: (lens: string, anchor: string) => mcpWrites(`${baseUrl}/mcp/ontologies/${O}/runtime/lenses/${lens}/anchors/${anchor}`),
+  REST: (lens: string, anchor: string) => restWrites(`${runtimePrefix(O, lens)}/rulesets/${anchor}`),
+  MCP: (lens: string, anchor: string) => mcpWrites(`${baseUrl}/mcp/ontologies/${O}/runtime/lenses/${lens}/rulesets/${anchor}`),
 };
 
 /** The plain lens `all`, over REST: the setup and the checks. */
@@ -261,7 +261,7 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
     it("a task under P2: parentRelation.parentId", async () => {
       const outcome = await agentA().createEntity("task", { name: "T8" }, HAS_TASK("P2"));
       refusedOn(outcome, "parentRelation.parentId", ["P2"]);
-      expect(outcome.text).toContain(`Entity '${id("P2")}' is not under anchor 'agent-a'`);
+      expect(outcome.text).toContain(`Entity '${id("P2")}' is outside the anchor subtree of ruleset 'agent-a'`);
     });
 
     it("a task without parentRelation: parentRelation", async () => {
@@ -347,10 +347,10 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
       await putAnchor("agent-b", "T2a");
       const frozen = await agentA().deleteEntity("task", id("T2a"));
       refusedOn(frozen, "entityId", ["T2a"]);
-      expect(frozen.text).toContain("anchored");
+      expect(frozen.text).toContain("is the anchor of a ruleset");
       expect(frozen.text).not.toContain("agent-b");
 
-      const res = await app.inject({ method: "DELETE", url: `/api/ontologies/${O}/runtime/anchors/agent-b` });
+      const res = await app.inject({ method: "DELETE", url: `/api/ontologies/${O}/runtime/rulesets/agent-b` });
       expect(res.statusCode).toBe(204);
       allowed(await agentA().deleteEntity("task", id("T2a")), 204);
     });
@@ -359,13 +359,13 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
       await putAnchor("agent-b", "T5");
       const outcome = await agentA().deleteEntity("task", id("T5"));
       refusedOn(outcome, "entityId", ["T5"]);
-      expect(outcome.text).toContain("is not under anchor 'agent-a'");
+      expect(outcome.text).toContain("is outside the anchor subtree of ruleset 'agent-a'");
     });
 
     it("frozen wins over has children: P1 itself is refused as anchored", async () => {
       const outcome = await agentA().deleteEntity("project", id("P1"));
       refusedOn(outcome, "entityId", ["P1"]);
-      expect(outcome.text).toContain("anchored");
+      expect(outcome.text).toContain("is the anchor of a ruleset");
     });
 
     it("T1a (covered, not anchored, child T1a1): 409 has children", async () => {
@@ -424,13 +424,13 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
     it("deleting P1 has_task T3: relationId", async () => {
       const outcome = await agentA().deleteRelation("has_task", ids.relations["P1 has_task T3"]!);
       refusedOn(outcome, "relationId");
-      expect(outcome.text).toContain("places an entity under anchor 'agent-a'");
+      expect(outcome.text).toContain("places an entity in the anchor subtree of ruleset 'agent-a'");
     });
 
     it("deleting P2 has_task T4 (child outside): relationId, not under the anchor", async () => {
       const outcome = await agentA().deleteRelation("has_task", ids.relations["P2 has_task T4"]!);
       refusedOn(outcome, "relationId");
-      expect(outcome.text).toContain("is not under anchor 'agent-a'");
+      expect(outcome.text).toContain("is outside the anchor subtree of ruleset 'agent-a'");
     });
 
     it("updating the phase of P1 has_task T1 (child covered): updated", async () => {
@@ -456,13 +456,13 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
   // -------------------------------------------------------------------------
 
   describe("states", () => {
-    it("unanchored is the plain lens: T5 is updated, a customer created", async () => {
+    it("no anchor is the plain lens: T5 is updated, a customer created", async () => {
       await putAnchor("agent-a", null);
       allowed(await agentA().updateEntity("task", id("T5"), { name: "T5!" }), 200);
       allowed(await agentA().createEntity("customer", { name: "GAMMA" }), 201);
     });
 
-    it("dangling by a deleted entity: every write a 409 until re-anchored", async () => {
+    it("deleted with its entity: every write a 409 until re-pointed", async () => {
       await putAnchor("agent-a", "T5");
       allowed(await plain().deleteEntity("task", id("T5")), 204);
       const writes = agentA();
@@ -472,13 +472,13 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
         await writes.createRelation("mentors", id("Ben"), id("Ana")),
         await writes.deleteRelation("mentors", ids.relations["Ben mentors Kim"]!),
       ]) {
-        conflict(outcome, "Anchor 'agent-a' is dangling");
+        conflict(outcome, "The anchor of ruleset 'agent-a' no longer exists");
       }
       await putAnchor("agent-a", "P1");
       allowed(await writes.updateEntity("task", id("T1"), { name: "T1!" }), 200);
     });
 
-    it("dangling by a deleted entity type: a 409", async () => {
+    it("deleted with its entity type: a 409", async () => {
       await putAnchor("agent-d", "open", "status");
       const relationTypes = await app.inject({ url: `${modelPrefix(O)}/relation-types` });
       const hasStatus = (relationTypes.json() as Row[]).find((rt) => rt.key === "has_status")!;
@@ -494,7 +494,7 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
         url: `${modelPrefix(O)}/entity-types/${status.entityTypeId as string}?cascade=true`,
       });
       expect(res.statusCode, res.body).toBe(204);
-      conflict(await mount("all", "agent-d").createEntity("person", { name: "Neu" }), "Anchor 'agent-d' is dangling");
+      conflict(await mount("all", "agent-d").createEntity("person", { name: "Neu" }), "The anchor of ruleset 'agent-d' no longer exists");
     });
 
     it("an anchored entity the lens hides: every write a 409 naming only the anchor and the lens", async () => {
@@ -504,7 +504,7 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
         await writes.updateEntity("task", id("T1"), { name: "T1!" }),
         await writes.deleteEntity("task", id("T1a1")),
       ]) {
-        conflict(outcome, "Anchor 'agent-a'");
+        conflict(outcome, "The anchor of ruleset 'agent-a'");
         expect(outcome.text).toContain("'no_projects'");
         expect(outcome.text).not.toMatch(/'project'/);
         namesOnly(outcome, ["T1", "T1a1"]);

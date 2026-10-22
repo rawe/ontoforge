@@ -24,7 +24,7 @@
  *    adapter.
  * 2. Each method owns its connection. The one exception is the store
  *    `RuntimeStore.transaction` hands to its work: every method of that
- *    store, and of the anchor and changeset stores it hands out, runs on
+ *    store, and of the ruleset and changeset stores it hands out, runs on
  *    the transaction's one connection, and a pool checkout inside it is
  *    an assertion failure.
  * 3. Filtering, search, and sorting inputs are structured values, never
@@ -548,8 +548,8 @@ export interface RuntimeStore {
   /** The navigator store of the same ontology. */
   navigators(): NavigatorStore;
 
-  /** The anchor store of the same ontology. */
-  anchors(): AnchorStore;
+  /** The ruleset store of the same ontology. */
+  rulesets(): RulesetStore;
 
   /** The changeset store of the same ontology. */
   changesets(): ChangesetStore;
@@ -560,7 +560,7 @@ export interface RuntimeStore {
 
   /** Run `work` on a store bound to one transaction on one connection:
    * COMMIT when it returns, ROLLBACK when it throws. Every read and write
-   * of the bound store, its anchor and changeset stores included, uses
+   * of the bound store, its ruleset and changeset stores included, uses
    * that connection (contract rule 2's exception). Anything that would
    * take a second connection inside it — a nested `transaction`,
    * `getFullSchemaWithLensInclusions` (its own REPEATABLE READ), the
@@ -1067,45 +1067,54 @@ export interface AnchorEntity {
   id: string;
 }
 
-/** One stored anchor, read with a join to `entity`. */
-export interface AnchorRecord {
+/** How a connection through a ruleset may change data: each level allows
+ * everything the one before it does. */
+export type WriteAccess = "none" | "propose" | "full";
+
+/** One stored ruleset, read with a join to `entity`. */
+export interface RulesetRecord {
   key: string;
-  /** Null when unanchored. */
-  entity: AnchorEntity | null;
-  /** Whether an entity of that id and type is stored; false when unanchored. */
-  entityFound: boolean;
-  /** Every write through the anchor's URL needs a changeset, and its
-   * commit is refused there (V9). */
-  stagedOnly: boolean;
+  /** Null when the ruleset has no anchor. */
+  anchor: AnchorEntity | null;
+  /** Whether an entity of that id and type is stored; false without an anchor. */
+  anchorFound: boolean;
+  writeAccess: WriteAccess;
+}
+
+/** The rules a save writes; an absent rule keeps its stored value. */
+export interface RulesetPatch {
+  /** Null removes the anchor. */
+  anchor?: AnchorEntity | null;
+  writeAccess?: WriteAccess;
 }
 
 /**
- * Anchors: named pointers at one entity each, operational state of the
- * ontology beside its instances. The store keeps the pointer as given and
- * never checks it; the anchor service decides the state.
+ * Rulesets: named sets of rules, operational state of the ontology beside
+ * its instances. The store keeps the anchor as given and never checks it;
+ * the ruleset service decides its state.
  */
-export interface AnchorStore {
-  /** Every anchor, by key. */
-  listAnchors(): Promise<AnchorRecord[]>;
+export interface RulesetStore {
+  /** Every ruleset, by key. */
+  list(): Promise<RulesetRecord[]>;
 
-  getAnchor(key: string): Promise<AnchorRecord | null>;
+  get(key: string): Promise<RulesetRecord | null>;
 
-  /** Create the anchor, or re-point it (null unanchors); the record as
-   * written, read with the join. `stagedOnly` undefined keeps the stored
-   * flag, and a new anchor's is false. */
-  saveAnchor(key: string, entity: AnchorEntity | null, stagedOnly?: boolean): Promise<AnchorRecord>;
+  /** Create the ruleset, or change it; the record as written, read with
+   * the join. Each rule the patch names is written, the others keep their
+   * stored value; a new ruleset has no anchor and write access `full`. */
+  save(key: string, patch: RulesetPatch): Promise<RulesetRecord>;
 
-  /** False when no anchor has this key. */
-  deleteAnchor(key: string): Promise<boolean>;
+  /** False when no ruleset has this key. */
+  delete(key: string): Promise<boolean>;
 }
 
 /** One changeset: staged writes of one lens, bound to it and to the
- * anchor of the URL that started it. */
+ * ruleset of the URL that started it. */
 export interface ChangesetRecord {
   id: string;
   lensId: string;
   /** Null when started through the plain lens URL. */
-  anchorKey: string | null;
+  rulesetKey: string | null;
   version: number;
   note: string | null;
   /** Null for a draft. */
@@ -1151,16 +1160,16 @@ export interface ChangesetWriteRecord extends NewChangesetWrite {
  * refreshes `lastChangeAt`. Off-format ids match nothing.
  */
 export interface ChangesetStore {
-  start(changeset: { id: string; lensId: string; anchorKey: string | null; note: string | null }): Promise<ChangesetRecord>;
+  start(changeset: { id: string; lensId: string; rulesetKey: string | null; note: string | null }): Promise<ChangesetRecord>;
 
   /** Through its binding: null when the changeset belongs to another lens
-   * or, with an `anchorKey`, to another anchor. A null `anchorKey` (the
+   * or, with a `rulesetKey`, to another ruleset. A null `rulesetKey` (the
    * plain lens URL) reaches every changeset of the lens. */
-  get(id: string, lensId: string, anchorKey: string | null): Promise<ChangesetRecord | null>;
+  get(id: string, lensId: string, rulesetKey: string | null): Promise<ChangesetRecord | null>;
 
   /** The lens's changesets, bound as `get`; submitted first, then by
    * last change, newest first. */
-  list(lensId: string, anchorKey: string | null): Promise<ChangesetSummary[]>;
+  list(lensId: string, rulesetKey: string | null): Promise<ChangesetSummary[]>;
 
   /** The staged writes by seq. */
   page(id: string, offset: number, limit: number): Promise<ChangesetWriteRecord[]>;

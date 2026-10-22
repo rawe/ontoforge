@@ -229,23 +229,44 @@ export function violationsOf(
   return { violations: violations as ChangesetViolation[], total }
 }
 
+/** The ruleset kinds, as the panel names them for people; an agent reads the raw kind. */
+const VIOLATION_LABELS: Readonly<Record<string, string>> = {
+  ruleset_gone: 'Ruleset deleted',
+  outside_subtree: "Outside the anchor's subtree",
+  anchor_deleted: 'Anchor deleted',
+  anchor_hidden: 'Anchor hidden by the lens',
+  deletes_anchor: "Deletes a ruleset's anchor",
+}
+
+/** A violation kind's label on the panel, or null for a kind shown as it is. */
+export function violationLabel(kind: string): string | null {
+  return VIOLATION_LABELS[kind] ?? null
+}
+
 /**
- * One violation, for the panel and the note, named by its row among `writes`
- * (the page shown) as the target column shows it:
- * "#1 P2 Live: drift — Changed since this write was staged". A row not on the
- * page, or not visible, goes unnamed; seq 0 is the whole changeset.
+ * Where a violation's line starts, named by its row among `writes` (the page
+ * shown) as the target column shows it: "#1 P2 Live: ". A row not on the
+ * page, or not visible, goes unnamed; seq 0 is the whole changeset ("").
  */
-export function violationLine(violation: ChangesetViolation, writes: readonly StagedWriteView[] = []): string {
-  const text = `${violation.kind} — ${violation.message}`
-  if (violation.seq === 0) return text
+export function violationPrefix(violation: ChangesetViolation, writes: readonly StagedWriteView[] = []): string {
+  if (violation.seq === 0) return ''
   const write = writes.find((w) => w.seq === violation.seq)
   const name = write === undefined ? '—' : targetText(write)
-  return name === '—' ? `#${violation.seq} ${text}` : `#${violation.seq} ${name}: ${text}`
+  return name === '—' ? `#${violation.seq} ` : `#${violation.seq} ${name}: `
+}
+
+/**
+ * One violation for the note, with its raw kind:
+ * "#1 P2 Live: drift — Changed since this write was staged". The panel shows
+ * the same line with `violationLabel` in place of a ruleset kind.
+ */
+export function violationLine(violation: ChangesetViolation, writes: readonly StagedWriteView[] = []): string {
+  return `${violationPrefix(violation, writes)}${violation.kind} — ${violation.message}`
 }
 
 /**
  * The note "Unsubmit with these violations" sends: a header with the total,
- * then one line per violation as the panel shows it, cut to the note's limit.
+ * then one line per violation with its raw kind, cut to the note's limit.
  */
 export function violationsNote(
   violations: readonly ChangesetViolation[],
@@ -264,7 +285,7 @@ export function isVersionMismatch(error: { status: number; message: string }): b
   return error.status === 409 && error.message.includes('changed since you looked')
 }
 
-/** The cached runtime data a commit can change: entities, relations, paths, documents, anchors. */
+/** The cached runtime data a commit can change: entities, relations, paths, documents, rulesets. */
 const DATA_KEYS = new Set([
   'entities',
   'entity',
@@ -273,7 +294,7 @@ const DATA_KEYS = new Set([
   'neighbors',
   'neighborCounts',
   'relations',
-  'anchors',
+  'rulesets',
   'palette',
 ])
 

@@ -13,8 +13,8 @@
  *   (`docs/decisions.md#schema-and-data`). A hidden property with a default is
  *   applied; a hidden property in the payload is an unknown property.
  *
- * The seven write functions take the anchor key of an anchored mount as
- * their last argument; null on the plain lens mount. On an anchored call
+ * The seven write functions take the ruleset key of a ruleset mount as
+ * their last argument; null on the plain lens mount. On a ruleset call
  * they consult the write guard (`anchorGuard.ts`) before the write.
  *
  * Six of them (entity and relation create, update, delete) compose their
@@ -297,8 +297,8 @@ async function endpointError(
  * are written in one transaction. Its parent end is checked here as a
  * relation create checks its ends (`endpointError`), under
  * `parentRelation.parentId`. The response is the entity alone, as without
- * it. On an anchored call, an entity of the anchor's hierarchy must name a
- * covered parent this way (`AnchorGuard.checkCreate`); its faults join the
+ * it. Through a ruleset with an anchor, an entity of the anchor's hierarchy
+ * must name a covered parent this way (`AnchorGuard.checkCreate`); its faults join the
  * others.
  */
 export async function createEntity(
@@ -307,11 +307,11 @@ export async function createEntity(
   body: Row,
   store: RuntimeStore,
   parentRelation: ParentRelationInput | null = null,
-  anchorKey: string | null = null,
+  rulesetKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
   const scopedEt = scopedEntityType(loaded, entityTypeKey);
-  const guard = await AnchorGuard.open(anchorKey, loaded, store);
+  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
 
   const { errors, write } = prepareCreateEntity(loaded, entityTypeKey, body, parentRelation, {
     entityId: randomUUID(),
@@ -497,9 +497,9 @@ export async function getPath(
  * Partial update (`prepareUpdateEntity`): validate against the scoped
  * properties, NO default re-application. Null removes an optional property
  * (and is rejected on a required one); a payload that changes nothing
- * returns the current state without advancing `_updatedAt`. On an anchored
- * call, an entity of the anchor's hierarchy outside the anchored subtree is
- * refused on `entityId`.
+ * returns the current state without advancing `_updatedAt`. Through a
+ * ruleset with an anchor, an entity of the anchor's hierarchy outside the
+ * anchor's subtree is refused on `entityId`.
  */
 export async function updateEntity(
   lensKey: string,
@@ -507,11 +507,11 @@ export async function updateEntity(
   entityId: string,
   body: Row,
   store: RuntimeStore,
-  anchorKey: string | null = null,
+  rulesetKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
   const scopedEt = scopedEntityType(loaded, entityTypeKey);
-  const guard = await AnchorGuard.open(anchorKey, loaded, store);
+  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
 
   const { errors, write } = prepareUpdateEntity(loaded, entityTypeKey, entityId, body);
   const outside = (await guard?.entityError(entityTypeKey, entityId)) ?? null;
@@ -547,21 +547,21 @@ export async function updateEntity(
  * data. Wherever the ontology flags a parent relation, only a leaf may go:
  * an entity with children over any parent relation of the full schema is
  * refused (409), through every lens, before the delete. Otherwise the
- * cascade is silent: nothing warns, nothing refuses. On an anchored call
- * the guard refuses first (`AnchorGuard.checkDelete`): outside the
- * anchored subtree, then anchored (422 on `entityId`); "has children"
- * comes last.
+ * cascade is silent: nothing warns, nothing refuses. Through a ruleset
+ * with an anchor the guard refuses first (`AnchorGuard.checkDelete`):
+ * outside the anchor's subtree, then the anchor of any ruleset (422 on
+ * `entityId`); "has children" comes last.
  */
 export async function deleteEntity(
   lensKey: string,
   entityTypeKey: string,
   entityId: string,
   store: RuntimeStore,
-  anchorKey: string | null = null,
+  rulesetKey: string | null = null,
 ): Promise<void> {
   const loaded = await loadSchema(lensKey, store);
   scopedEntityType(loaded, entityTypeKey);
-  const guard = await AnchorGuard.open(anchorKey, loaded, store);
+  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
 
   const write = prepareDeleteEntity(loaded, entityTypeKey, entityId);
   const readings = parentReadings(loaded.full);
@@ -762,8 +762,8 @@ function applyReplaceRange(
  * `[offset, offset+length)` with `content` (insert with length 0, append
  * at `offset == totalLength`). The changed value is persisted whole and the
  * property's search data follows: the search indices queue its passages.
- * On an anchored call, an entity of the anchor's hierarchy outside the
- * anchored subtree is refused on `entityId`.
+ * Through a ruleset with an anchor, an entity of the anchor's hierarchy
+ * outside the anchor's subtree is refused on `entityId`.
  */
 export async function editDocument(
   lensKey: string,
@@ -772,7 +772,7 @@ export async function editDocument(
   propertyKey: string,
   body: DocumentEditBody,
   store: RuntimeStore,
-  anchorKey: string | null = null,
+  rulesetKey: string | null = null,
 ): Promise<Row> {
   const { value, loaded } = await loadDocumentValue(
     lensKey,
@@ -781,7 +781,7 @@ export async function editDocument(
     propertyKey,
     store,
   );
-  await (await AnchorGuard.open(anchorKey, loaded, store))?.checkEntity(entityTypeKey, entityId);
+  await (await AnchorGuard.open(rulesetKey, loaded, store))?.checkEntity(entityTypeKey, entityId);
 
   const [newValue, offset, length, replacements] =
     body.op === "str_replace" ? applyStrReplace(value, body) : applyReplaceRange(value, body);
@@ -874,8 +874,8 @@ async function checkParentRules(
  * type's declared source/target — checked against the FULL schema, not the
  * lens, so a narrow lens cannot create an edge that is invalid under a
  * wider one. For a parent relation
- * type the parent rules follow (`checkParentRules`). On an anchored call
- * the guard checks the ends and refuses a standalone parent relation of the
+ * type the parent rules follow (`checkParentRules`). Through a ruleset with
+ * an anchor the guard checks the ends and refuses a standalone parent relation of the
  * anchor's hierarchy (`AnchorGuard.checkRelationCreate`). Endpoint, guard
  * and rule errors are collected alongside property errors in ONE response.
  */
@@ -886,11 +886,11 @@ export async function createRelation(
   toEntityId: string,
   userProps: Row,
   store: RuntimeStore,
-  anchorKey: string | null = null,
+  rulesetKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
   const scopedRt = scopedRelationType(loaded, relationTypeKey);
-  const guard = await AnchorGuard.open(anchorKey, loaded, store);
+  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
 
   const { errors, write } = prepareCreateRelation(
     loaded,
@@ -1010,7 +1010,7 @@ export async function getRelation(
  * Partial update of relation properties (`prepareUpdateRelation`).
  * ENDPOINTS ARE IMMUTABLE: payload keys `fromEntityId` / `toEntityId` are
  * dropped SILENTLY — no error — and properties in the same payload still
- * apply. On an anchored call the guard may refuse it on `relationId`
+ * apply. Through a ruleset with an anchor the guard may refuse it on `relationId`
  * (`AnchorGuard.relationError`).
  */
 export async function updateRelation(
@@ -1019,11 +1019,11 @@ export async function updateRelation(
   relationId: string,
   body: Row,
   store: RuntimeStore,
-  anchorKey: string | null = null,
+  rulesetKey: string | null = null,
 ): Promise<Row> {
   const loaded = await loadSchema(lensKey, store);
   const scopedRt = scopedRelationType(loaded, relationTypeKey);
-  const guard = await AnchorGuard.open(anchorKey, loaded, store);
+  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
 
   const { errors, write } = prepareUpdateRelation(loaded, relationTypeKey, relationId, body);
   const refused =
@@ -1053,18 +1053,18 @@ export async function updateRelation(
   return filterRelationProperties(relation, scopedRt);
 }
 
-/** Delete a relation; neither endpoint is touched. On an anchored call the
- * guard may refuse it on `relationId` (`AnchorGuard.checkRelationDelete`). */
+/** Delete a relation; neither endpoint is touched. Through a ruleset with
+ * an anchor the guard may refuse it on `relationId` (`AnchorGuard.checkRelationDelete`). */
 export async function deleteRelation(
   lensKey: string,
   relationTypeKey: string,
   relationId: string,
   store: RuntimeStore,
-  anchorKey: string | null = null,
+  rulesetKey: string | null = null,
 ): Promise<void> {
   const loaded = await loadSchema(lensKey, store);
   const scopedRt = scopedRelationType(loaded, relationTypeKey);
-  const guard = await AnchorGuard.open(anchorKey, loaded, store);
+  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
   await guard?.checkRelationDelete(loaded.full.relationTypes[relationTypeKey] ?? scopedRt, relationId);
 
   const write = prepareDeleteRelation(loaded, relationTypeKey, relationId);

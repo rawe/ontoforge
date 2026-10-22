@@ -29,7 +29,7 @@ const ALL_TABLES = [
   "assistant_navigator",
   "entity",
   "relation",
-  "anchor",
+  "ruleset",
   "changeset",
   "changeset_write",
   "search_settings",

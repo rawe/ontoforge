@@ -27,7 +27,7 @@ interface EntityTargetPickerProps {
 
 /**
  * Search one entity type through the lens and pick an entity: the add-relation
- * target picker, also used to choose where an anchor points.
+ * target picker, also used to choose where a ruleset's anchor points.
  */
 export function EntityTargetPicker({
   ontologyKey,

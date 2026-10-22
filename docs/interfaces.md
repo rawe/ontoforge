@@ -20,11 +20,11 @@ response bodies are reproduced here.
 | `/api/server` | Server — deployment capability reads |
 | `/api/ontologies/{ontologyKey}/model` | Modeling REST — one ontology's schema and per-lens configuration |
 | `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` | Runtime REST — one ontology's instance data through one lens |
-| `/api/ontologies/{ontologyKey}/runtime/anchors` | Anchor maintenance — one ontology's anchors, without a lens |
-| `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/anchors/{anchorKey}` | Anchored runtime REST — the runtime routes through one lens, writes held by one anchor |
+| `/api/ontologies/{ontologyKey}/runtime/rulesets` | Ruleset maintenance — one ontology's rulesets, without a lens |
+| `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/rulesets/{rulesetKey}` | Ruleset runtime REST — the runtime routes through one lens, under one ruleset's rules |
 | `/mcp/ontologies/{ontologyKey}/model` | Modeling MCP server, bound to one ontology |
 | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` | Runtime MCP server, bound to one ontology and one lens |
-| `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/anchors/{anchorKey}` | Anchored runtime MCP server, bound to one ontology, one lens and one anchor |
+| `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/rulesets/{rulesetKey}` | Ruleset runtime MCP server, bound to one ontology, one lens and one ruleset |
 
 Every ontology-scoped request names its ontology in the path, and an ontology is always
 spelled `ontologies/<key>`, a lens always `lenses/<key>` — uniformly across REST, MCP
@@ -36,7 +36,7 @@ else about it is considered.
 
 The registry addresses ontologies by key. Below one ontology, the modeling surface
 addresses the schema; the runtime surface addresses instance data and carries the lens
-key as a second path parameter, and an anchored mount the anchor key as a third. How the
+key as a second path parameter, and a ruleset mount the ruleset key as a third. How the
 address keeps ontologies apart: [architecture.md](architecture.md#ontology-isolation).
 
 Modeling REST does **not** nest types under a lens. Entity types, relation types and
@@ -51,7 +51,7 @@ This is the single most common source of mistakes against the modeling surface.
 | Surface | Addressed by |
 |---|---|
 | Registry | Ontology key |
-| Runtime REST, everywhere | Keys — ontology key, lens key, anchor key, type key, property key; instance ids for entities and relations |
+| Runtime REST, everywhere | Keys — ontology key, lens key, ruleset key, type key, property key; instance ids for entities and relations |
 | Modeling REST — lenses, entity types, relation types, properties, inclusions | **Internal identifiers**, not keys |
 | Modeling REST — agent configs, saved queries, retrievers, navigators | Lens key and the resource key |
 | Modeling REST — search indices | Index key — managed keys included, which carry `~` |
@@ -608,9 +608,10 @@ for an entity the changeset creates, `writes` unpaged, as
 the changeset read shows them. Start, submit and unsubmit answer the changeset; commit
 answers `{committed, alreadyGone}`, the number of writes and the seqs of deletes whose
 target was already gone. Every unknown changeset — committed, discarded, expired, never
-started, or bound to another lens or anchor — is `RESOURCE_NOT_FOUND`. A refusal by state
-is `RESOURCE_CONFLICT`: a submitted or busy changeset, a stale `expectedVersion`, a full
-changeset, a staged-only connection, a second commit on the ontology or in the process.
+started, or bound to another lens or ruleset — is `RESOURCE_NOT_FOUND`. A refusal by
+state is `RESOURCE_CONFLICT`: a submitted or busy changeset, a stale `expectedVersion`, a
+full changeset, a call the write access of the URL's ruleset does not allow, a second
+commit on the ontology or in the process.
 Staging answers the immediate write's validation errors. A submit refused by its faults
 and a rejected commit answer `VALIDATION_ERROR` with `details.violations`, each
 `{seq, kind, message}`, ordered by seq, at most 100, and `details.total`; seq 0 is the
@@ -886,37 +887,39 @@ are rejected before streaming, using the ordinary HTTP error response. Disconnec
 further agent work, with best-effort cancellation of running operations. Reading a thread
 needs no provider, as the list does.
 
-## Anchors
+## Rulesets
 
-Prefix `/api/ontologies/{ontologyKey}/runtime/anchors`. One ontology's anchors, without a
-lens. Semantics: [capabilities/anchors.md](capabilities/anchors.md).
+Prefix `/api/ontologies/{ontologyKey}/runtime/rulesets`. One ontology's rulesets, without a
+lens. Semantics: [capabilities/rulesets.md](capabilities/rulesets.md).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/` | List the anchors, by key, each `{key, entity, state, stagedOnly}` |
-| GET | `/{anchorKey}` | Read one anchor |
-| PUT | `/{anchorKey}` | Create or re-point an anchor; the body is `{entity: {type, id}}`, or `{entity: null}` to unanchor, with an optional `stagedOnly` that, absent, keeps the flag; 200 with the record either way |
-| DELETE | `/{anchorKey}` | Delete an anchor; 204 |
+| GET | `/` | List the rulesets, by key, each `{key, anchor, writeAccess}` |
+| GET | `/{rulesetKey}` | Read one ruleset |
+| PUT | `/{rulesetKey}` | Create or change a ruleset; the body is `{anchor?, writeAccess?}`, and a rule it leaves out keeps its value, or takes its default on a new ruleset, so `{}` creates a ruleset that limits nothing; 200 with the record either way |
+| DELETE | `/{rulesetKey}` | Delete a ruleset; 204 |
 
-`entity` is `{type, id}` or null, `state` is `anchored`, `unanchored` or `dangling`. A key
-that breaks the anchor key rule is a `VALIDATION_ERROR` with a message only; an entity
-type or entity that is not stored is a field error on `entity.type` or `entity.id`. An
-unknown anchor is not found on read and delete.
+`anchor` is `{type, id, state}` or null, `state` is `found` or `deleted`; in the body it is
+`{type, id}`, or null to remove it. `writeAccess` is `none`, `propose` or `full`. A key
+that breaks the ruleset key rule is a `VALIDATION_ERROR` with a message only; an entity
+type or entity that is not stored is a field error on `anchor.type` or `anchor.id`, and
+an unknown level one on `writeAccess`. An unknown ruleset is not found on read and delete.
 
-### Anchored mounts
+### Ruleset mounts
 
-`/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/anchors/{anchorKey}` mirrors the
+`/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/rulesets/{rulesetKey}` mirrors the
 [runtime REST](#runtime-rest) routes from schema introspection to saved queries, the path
 read included; the AI and entity identity comparison routes are not mirrored. Its root,
-`GET` on the prefix itself, answers what `get_anchor` answers:
-`{key, state, stagedOnly, visible, entity, path}`, `entity` and every path step as
-`{type, id, name}`.
-Every request checks the ontology, then the lens, then the anchor, after its own shape:
-an unknown anchor is not found on reads too. Writes are held by the
-[write guard](capabilities/anchors.md#the-write-guard): its refusals are field errors, and
-a dangling anchor or an anchored entity the lens hides answers `RESOURCE_CONFLICT` to
-every write, and a staged-only anchor to every immediate write and every commit. The MCP
-equivalent is the [anchored runtime mount](#how-a-mount-is-bound).
+`GET` on the prefix itself, answers what `get_ruleset` answers:
+`{key, writeAccess, anchor}`, `anchor` null or `{type, id, name, state, visible, path}`,
+every path step as `{type, id, name}`.
+Every request checks the ontology, then the lens, then the ruleset, after its own shape:
+an unknown ruleset is not found on reads too. A route its
+[write access](capabilities/rulesets.md#where-write-access-is-checked) does not allow
+answers `RESOURCE_CONFLICT` before it runs. Writes stay in the
+[anchor's subtree](capabilities/rulesets.md#what-is-held): its refusals are field errors,
+and a deleted anchor or an anchor's entity the lens hides answers `RESOURCE_CONFLICT` to
+every write. The MCP equivalent is the [ruleset mount](#how-a-mount-is-bound).
 
 ## MCP
 
@@ -929,7 +932,7 @@ connection carries state.
 |---|---|---|
 | Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
 | Bound to | One ontology | One ontology and one lens |
-| Tools | 45 | 33; 34 on an anchored mount, 31 on a staged-only one |
+| Tools | 45 | 33; 34 on a ruleset mount, 31 with write access `propose`, 20 with `none` |
 
 ### How a mount is bound
 
@@ -945,19 +948,18 @@ creating under an arbitrary key, renaming, deleting — is REST and web UI only,
 carve-out: the modeling mount's `ensure_ontology` tool, which acts only on the mount's
 own binding.
 
-A runtime mount URL may add `/anchors/{anchorKey}`: the mount is then also bound to that
-anchor, gains `get_anchor`, and holds its writes by the anchor's
-[write guard](capabilities/anchors.md#the-write-guard). Its tools are otherwise the
-runtime tools, and `create_entity`'s description adds the anchored rule. On a staged-only
-anchor's mount the six write tools require `changeset_id`, and `commit_changeset`,
-`edit_document` and `write_document` are absent
-([capabilities/anchors.md](capabilities/anchors.md#anchored-mounts)). No mount creates
-an anchor.
+A runtime mount URL may add `/rulesets/{rulesetKey}`: the mount is then also bound to that
+ruleset, gains `get_ruleset`, and follows the ruleset's
+[rules](capabilities/rulesets.md#the-rules). Its tools are otherwise the runtime tools
+that its write access allows
+([capabilities/rulesets.md](capabilities/rulesets.md#write-access-through-the-interfaces)).
+On a ruleset mount `get_schema`'s description says to call it after `get_ruleset`, and
+`create_entity`'s adds the anchor's rule. No mount creates a ruleset.
 
 The modeling mount serves requests even when its ontology does not exist yet — that is
 what lets `ensure_ontology` provision it; until then every other tool answers a
 not-found tool error. The runtime mount requires both its ontology and its lens to
-exist, and an anchored mount its anchor as well; its tools answer not-found tool errors
+exist, and a ruleset mount its ruleset as well; its tools answer not-found tool errors
 otherwise, reads included.
 
 ### Modeling tools
@@ -1025,7 +1027,7 @@ Everything a client can do to instance data through one lens.
 
 | Tool | Purpose |
 |---|---|
-| `get_anchor` | Anchored mounts only: where the connection is anchored — key, state, stagedOnly, visible, entity and path |
+| `get_ruleset` | Ruleset mounts only: what the connection may do — key, write access, and the anchor with its type, id, name, state, visible and path |
 | `get_schema` | The scoped schema, as REST `/schema` returns it — the lens's key, name and description; types, properties, required flags, name properties |
 | `create_entity` | Create an entity, optionally with its parent relation (`parent_relation`: `type`, `parent_id`, `properties`) |
 | `list_entities` | List entities with search, filters, sorting, paging and projection |
@@ -1074,7 +1076,7 @@ An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
 `get_entity`, `get_document`, `list_relations`, `get_neighbors`, `search`,
 `search_documents`, `execute_query`, `list_saved_queries`, `run_saved_query`,
 `search_saved_queries`. Every write tool is outside that set, and so are the read-only
-`get_relation`, `get_path`, `get_anchor`, `list_changesets`, `get_changeset` and
+`get_relation`, `get_path`, `get_ruleset`, `list_changesets`, `get_changeset` and
 `get_staged_document` — being
 read-only is not sufficient to be grantable. The two search tools
 return the REST envelope and take no strategy and no `min_similarity`; they apply the

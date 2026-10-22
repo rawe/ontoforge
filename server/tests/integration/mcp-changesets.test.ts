@@ -5,9 +5,9 @@
  * whole round through the tools alone (start, stage, read, submit,
  * unsubmit, unstage, commit, discard) with the same answers and errors as
  * REST, the byte cap among them, a write without `changeset_id` staying
- * immediate, and the anchored mount's binding: a changeset carries its
- * anchor, another anchor does not reach it, and the commit holds it to the
- * anchor. `edit_document` and
+ * immediate, and the ruleset mount's binding: a changeset carries its
+ * ruleset, another ruleset does not reach it, and the commit keeps it in
+ * the anchor's subtree. `edit_document` and
  * `write_document` refuse a `changeset_id`, and REST has no document edit
  * route under a changeset.
  */
@@ -37,7 +37,7 @@ interface ToolCallResult {
 }
 
 const ALL = runtimePrefix(O, "all");
-const ANCHORS = `/api/ontologies/${O}/runtime/anchors`;
+const RULESETS = `/api/ontologies/${O}/runtime/rulesets`;
 const STAGEABLE = ["create_entity", "update_entity", "delete_entity", "create_relation", "update_relation", "delete_relation"];
 const CHANGESET_TOOLS = [
   "start_changeset",
@@ -57,8 +57,8 @@ let h: ProjectHierarchyIds;
 let e: ProjectHierarchyIds["entities"];
 const clients: Client[] = [];
 
-async function connect(anchorKey: string | null = null): Promise<Client> {
-  const path = `/mcp/ontologies/${O}/runtime/lenses/all${anchorKey === null ? "" : `/anchors/${anchorKey}`}`;
+async function connect(rulesetKey: string | null = null): Promise<Client> {
+  const path = `/mcp/ontologies/${O}/runtime/lenses/all${rulesetKey === null ? "" : `/rulesets/${rulesetKey}`}`;
   const client = new Client({ name: "mcp-changesets-tests", version: "0.0.1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}${path}`)));
   clients.push(client);
@@ -101,7 +101,7 @@ async function fresh(): Promise<void> {
 }
 
 async function pointAnchor(key: string, type: string, id: string): Promise<void> {
-  const res = await rest("PUT", `${ANCHORS}/${key}`, { entity: { type, id } });
+  const res = await rest("PUT", `${RULESETS}/${key}`, { anchor: { type, id } });
   expect(res.status, JSON.stringify(res.body)).toBe(200);
 }
 
@@ -128,9 +128,9 @@ describe("the tool surface (V33, V4)", () => {
   beforeAll(fresh, 60_000);
 
   it("lists the nine changeset tools and an optional changeset_id on the six stageable tools only", async () => {
-    for (const anchorKey of [null, "agent-a"]) {
-      if (anchorKey !== null) await pointAnchor(anchorKey, "project", e.P1);
-      const { tools } = await (await connect(anchorKey)).listTools();
+    for (const rulesetKey of [null, "agent-a"]) {
+      if (rulesetKey !== null) await pointAnchor(rulesetKey, "project", e.P1);
+      const { tools } = await (await connect(rulesetKey)).listTools();
       const byName = new Map(tools.map((tool) => [tool.name, tool.inputSchema as { properties?: Row; required?: string[] }]));
       for (const name of CHANGESET_TOOLS) expect(byName.has(name), name).toBe(true);
       for (const name of STAGEABLE) {
@@ -152,7 +152,7 @@ describe("a whole round through MCP alone (V4, V7, V28)", () => {
   it("starts, stages, reads, submits, unsubmits, unstages and commits, as REST does", async () => {
     const client = await connect();
     const started = await ok(client, "start_changeset", { note: "g12" });
-    expect(started).toMatchObject({ state: "draft", version: 1, note: "g12", anchor: null, writeCount: 0 });
+    expect(started).toMatchObject({ state: "draft", version: 1, note: "g12", ruleset: null, writeCount: 0 });
     const cs = started.id as string;
 
     const t9 = await ok(client, "create_entity", {
@@ -346,19 +346,19 @@ describe("the errors are REST's (R4)", () => {
   });
 });
 
-describe("the anchored mount (V8, V17, V21, V42)", () => {
+describe("the ruleset mount (V8, V17, V21, V42)", () => {
   beforeAll(async () => {
     await fresh();
     await pointAnchor("agent-a", "project", e.P1);
     await pointAnchor("agent-b", "project", e.P3);
   }, 60_000);
 
-  it("binds a started changeset to its anchor; another anchor does not reach it", async () => {
+  it("binds a started changeset to its ruleset; another ruleset does not reach it", async () => {
     const a = await connect("agent-a");
     const b = await connect("agent-b");
     const plain = await connect();
     const started = await ok(a, "start_changeset", { note: "through a" });
-    expect(started.anchor).toBe("agent-a");
+    expect(started.ruleset).toBe("agent-a");
     const cs = started.id as string;
 
     const notFound = `Changeset '${cs}' not found`;
@@ -369,12 +369,12 @@ describe("the anchored mount (V8, V17, V21, V42)", () => {
     ).toContain(notFound);
     expect(await ok(b, "list_changesets")).toEqual([]);
     expect((await ok(a, "list_changesets")).map((c: Row) => c.id)).toEqual([cs]);
-    expect((await ok(plain, "list_changesets")).map((c: Row) => [c.id, c.anchor])).toEqual([[cs, "agent-a"]]);
-    expect((await ok(plain, "get_changeset", { changeset_id: cs })).anchor).toBe("agent-a");
+    expect((await ok(plain, "list_changesets")).map((c: Row) => [c.id, c.ruleset])).toEqual([[cs, "agent-a"]]);
+    expect((await ok(plain, "get_changeset", { changeset_id: cs })).ruleset).toBe("agent-a");
     await ok(a, "discard_changeset", { changeset_id: cs });
   });
 
-  it("staging takes a write outside the anchor; the commit rejects it as not covered", async () => {
+  it("staging takes a write outside the anchor; the commit rejects it as outside the subtree", async () => {
     const a = await connect("agent-a");
     const cs = (await ok(a, "start_changeset")).id as string;
     const staged = await ok(a, "create_entity", {
@@ -386,39 +386,39 @@ describe("the anchored mount (V8, V17, V21, V42)", () => {
     expect(staged).toMatchObject({ seq: 1, relation: { seq: 2 } });
     const rejected = await refused(a, "commit_changeset", { changeset_id: cs });
     expect(rejected).toContain("The commit was rejected; nothing was persisted");
-    expect(rejected).toContain("seq 1 not_covered: ");
-    expect(rejected).toContain("seq 2 not_covered: ");
+    expect(rejected).toContain("seq 1 outside_subtree: ");
+    expect(rejected).toContain("seq 2 outside_subtree: ");
     expect(await refused(a, "get_entity", { entity_type_key: "task", entity_id: staged.id })).toContain("not found");
     await ok(a, "discard_changeset", { changeset_id: cs });
   });
 
-  it("a dangling anchor refuses staging and submit, allows unstage, and rejects the commit", async () => {
+  it("a deleted anchor refuses staging and submit, allows unstage, and rejects the commit", async () => {
     await pointAnchor("agent-d", "task", e.T2a);
     const d = await connect("agent-d");
     const cs = (await ok(d, "start_changeset")).id as string;
     await ok(d, "update_entity", { entity_type_key: "person", entity_id: e.Kim, properties: { name: "Kim B" }, changeset_id: cs });
     expect((await rest("DELETE", `${ALL}/entities/task/${e.T2a}`)).status).toBe(204);
 
-    const dangling = "Anchor 'agent-d' is dangling";
+    const deleted = "The anchor of ruleset 'agent-d' no longer exists";
     expect(
       await refused(d, "update_entity", { entity_type_key: "person", entity_id: e.Ana, properties: { name: "x" }, changeset_id: cs }),
-    ).toContain(dangling);
-    expect(await refused(d, "submit_changeset", { changeset_id: cs })).toContain(dangling);
-    expect(await refused(d, "commit_changeset", { changeset_id: cs })).toContain("anchor_dangling");
+    ).toContain(deleted);
+    expect(await refused(d, "submit_changeset", { changeset_id: cs })).toContain(deleted);
+    expect(await refused(d, "commit_changeset", { changeset_id: cs })).toContain("anchor_deleted");
     await ok(d, "unstage", { changeset_id: cs, seq: 1 });
     expect((await ok(d, "get_changeset", { changeset_id: cs })).writeCount).toBe(0);
   });
 
-  it("a deleted anchor leaves its changeset to the plain lens, whose commit answers anchor_gone", async () => {
+  it("a deleted ruleset leaves its changeset to the plain lens, whose commit answers ruleset_gone", async () => {
     const b = await connect("agent-b");
     const cs = (await ok(b, "start_changeset")).id as string;
     await ok(b, "update_entity", { entity_type_key: "project", entity_id: e.P3, properties: { name: "P3 b" }, changeset_id: cs });
-    expect((await rest("DELETE", `${ANCHORS}/agent-b`)).status).toBe(204);
+    expect((await rest("DELETE", `${RULESETS}/agent-b`)).status).toBe(204);
 
-    expect(await refused(b, "get_changeset", { changeset_id: cs })).toContain("Anchor 'agent-b' not found");
+    expect(await refused(b, "get_changeset", { changeset_id: cs })).toContain("Ruleset 'agent-b' not found");
     const plain = await connect();
-    expect((await ok(plain, "get_changeset", { changeset_id: cs })).anchor).toBe("agent-b");
-    expect(await refused(plain, "commit_changeset", { changeset_id: cs })).toContain("anchor_gone");
+    expect((await ok(plain, "get_changeset", { changeset_id: cs })).ruleset).toBe("agent-b");
+    expect(await refused(plain, "commit_changeset", { changeset_id: cs })).toContain("ruleset_gone");
     expect((await ok(plain, "get_entity", { entity_type_key: "project", entity_id: e.P3 })).name).toBe("P3");
   });
 });
@@ -433,8 +433,8 @@ describe("the document edit tools refuse a changeset_id (F7)", () => {
     (await rest("GET", `${ALL}/entities/task/${id}/documents/notes`)).body.content as string;
 
   it("refuses with a validation error on both mounts; nothing is written or staged", async () => {
-    for (const anchorKey of [null, "agent-a"]) {
-      const client = await connect(anchorKey);
+    for (const rulesetKey of [null, "agent-a"]) {
+      const client = await connect(rulesetKey);
       const cs = (await ok(client, "start_changeset")).id as string;
       for (const [name, args] of [
         ["edit_document", { old_string: "Notes", new_string: "Changed" }],

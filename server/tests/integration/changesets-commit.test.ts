@@ -350,25 +350,25 @@ describe("a rejected commit persists nothing", () => {
     expect((await call("DELETE", `${ALL}/changesets/${cs}`)).status).toBe(204);
   });
 
-  it("through an anchored URL, another anchor's changeset is 404", async () => {
-    const anchors = `/api/ontologies/${O}/runtime/anchors`;
+  it("through a ruleset URL, another ruleset's changeset is 404", async () => {
+    const rulesets = `/api/ontologies/${O}/runtime/rulesets`;
     for (const [key, id] of [
       ["agent-a", e.P2],
       ["agent-b", e.P3],
     ] as const) {
-      expect((await call("PUT", `${anchors}/${key}`, { entity: { type: "project", id } })).status).toBe(200);
+      expect((await call("PUT", `${rulesets}/${key}`, { anchor: { type: "project", id } })).status).toBe(200);
     }
-    const cs = await start(`${ALL}/anchors/agent-a`);
-    await staged(`${ALL}/anchors/agent-a`, cs, {
+    const cs = await start(`${ALL}/rulesets/agent-a`);
+    await staged(`${ALL}/rulesets/agent-a`, cs, {
       operation: "update_entity",
       type: "task",
       id: e.T5,
       properties: { name: "T5b" },
     });
-    expect((await commit(cs, undefined, `${ALL}/anchors/agent-b`)).status).toBe(404);
-    expect(await commit(cs, undefined, `${ALL}/anchors/agent-a`)).toMatchObject({ status: 200, body: { committed: 1 } });
-    await call("DELETE", `${anchors}/agent-a`);
-    await call("DELETE", `${anchors}/agent-b`);
+    expect((await commit(cs, undefined, `${ALL}/rulesets/agent-b`)).status).toBe(404);
+    expect(await commit(cs, undefined, `${ALL}/rulesets/agent-a`)).toMatchObject({ status: 200, body: { committed: 1 } });
+    await call("DELETE", `${rulesets}/agent-a`);
+    await call("DELETE", `${rulesets}/agent-b`);
   });
 });
 

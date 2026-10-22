@@ -7,7 +7,7 @@
  *   /w/{lens}/t/{type} · /e/{type}/…   schema graph with that entity type selected
  *   /w/{lens}/query                    that lens, Saved queries tab
  *   /w/{lens}/ai[?tab=…]               that lens, the matching assistant tab
- *   /w/{lens}/anchors                  that lens, Connect tab
+ *   /w/{lens}/rulesets                 that lens, Connect tab
  *   /w/{lens} · /explore · /changesets that lens, Scope tab
  *
  *   Studio                             Workbench
@@ -39,7 +39,7 @@ export function studioTarget(
   if (lensId === undefined) return `/o/${ontologyKey}/studio/lenses`
   const lens = `/o/${ontologyKey}/studio/lenses/${lensId}`
   if (page === 'query') return `${lens}?tab=queries`
-  if (page === 'anchors') return `${lens}?tab=connect`
+  if (page === 'rulesets') return `${lens}?tab=connect`
   if (page === 'ai') {
     const tab = new URLSearchParams(search).get('tab')
     if (tab === 'retriever') return `${lens}?tab=retriever-agents`

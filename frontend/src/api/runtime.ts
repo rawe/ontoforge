@@ -13,8 +13,6 @@ import {
 } from './chatStream'
 import { buildQuery, request, type FilterMap } from './http'
 import type {
-  Anchor,
-  AnchorView,
   AssistantKind,
   Changeset,
   ChangesetDetail,
@@ -30,6 +28,9 @@ import type {
   PathStep,
   QueryResult,
   RelationInstance,
+  Ruleset,
+  RulesetPatch,
+  RulesetView,
   RuntimeAssistant,
   RuntimeSchema,
   SavedQuery,
@@ -283,34 +284,23 @@ export const runSavedQuery = (
     body: { params },
   })
 
-/* ---------------------------------- anchors ---------------------------------- */
+/* ---------------------------------- rulesets --------------------------------- */
 
-// Maintenance is lensless: anchors belong to the ontology.
-const anchorsBase = (ontologyKey: string) => `/api/ontologies/${ontologyKey}/runtime/anchors`
+// Maintenance is lensless: rulesets belong to the ontology.
+const rulesetsBase = (ontologyKey: string) => `/api/ontologies/${ontologyKey}/runtime/rulesets`
 
-export const listAnchors = (ontologyKey: string) => request<Anchor[]>(anchorsBase(ontologyKey))
+export const listRulesets = (ontologyKey: string) => request<Ruleset[]>(rulesetsBase(ontologyKey))
 
-/**
- * Create or re-point (200 both); `null` unanchors. A missing entity answers 422.
- * Without `stagedOnly` the stored flag stays.
- */
-export const putAnchor = (
-  ontologyKey: string,
-  anchorKey: string,
-  entity: { type: string; id: string } | null,
-  stagedOnly?: boolean,
-) =>
-  request<Anchor>(`${anchorsBase(ontologyKey)}/${anchorKey}`, {
-    method: 'PUT',
-    body: stagedOnly === undefined ? { entity } : { entity, stagedOnly },
-  })
+/** Create or change (200 both): the patch names only the rules that change. A missing entity answers 422. */
+export const putRuleset = (ontologyKey: string, rulesetKey: string, patch: RulesetPatch) =>
+  request<Ruleset>(`${rulesetsBase(ontologyKey)}/${rulesetKey}`, { method: 'PUT', body: patch })
 
-export const deleteAnchor = (ontologyKey: string, anchorKey: string) =>
-  request<undefined>(`${anchorsBase(ontologyKey)}/${anchorKey}`, { method: 'DELETE' })
+export const deleteRuleset = (ontologyKey: string, rulesetKey: string) =>
+  request<undefined>(`${rulesetsBase(ontologyKey)}/${rulesetKey}`, { method: 'DELETE' })
 
-/** The anchored mount's root: the anchor with its entity's name and path through the lens. */
-export const getAnchorView = (ontologyKey: string, lensKey: string, anchorKey: string) =>
-  request<AnchorView>(`${base(ontologyKey, lensKey)}/anchors/${anchorKey}`)
+/** The ruleset mount's root: the rules, with the anchor's name and path through the lens. */
+export const getRulesetView = (ontologyKey: string, lensKey: string, rulesetKey: string) =>
+  request<RulesetView>(`${base(ontologyKey, lensKey)}/rulesets/${rulesetKey}`)
 
 /* ------------------------------------- AI ------------------------------------ */
 
@@ -341,11 +331,11 @@ export const readAssistantThread = (
 
 /* -------------------------------- changesets -------------------------------- */
 
-// The plain lens URL: every changeset of the lens, anchored ones included.
+// The plain lens URL: every changeset of the lens, those started through a ruleset included.
 const changesetsBase = (ontologyKey: string, lensKey: string) =>
   `${base(ontologyKey, lensKey)}/changesets`
 
-/** A new draft changeset on the plain lens, so never held to an anchor. */
+/** A new draft changeset on the plain lens, so started through no ruleset. */
 export const startChangeset = (ontologyKey: string, lensKey: string, note?: string) =>
   request<Changeset>(changesetsBase(ontologyKey, lensKey), {
     method: 'POST',

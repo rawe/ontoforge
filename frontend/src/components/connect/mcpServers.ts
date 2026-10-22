@@ -7,9 +7,9 @@
  * its tool groups change, update this list — the cards and the snippets are
  * both built from it.
  *
- * The runtime server can be mounted under an anchor: its URL then ends in
- * `/anchors/{key}` and its entry is named after the anchor. The modeling
- * server ignores the anchor.
+ * The runtime server can be mounted under a ruleset: its URL then ends in
+ * `/rulesets/{key}` and its entry is named after the ruleset. The modeling
+ * server ignores the ruleset.
  */
 
 export type McpServerKey = 'modeling' | 'runtime'
@@ -17,11 +17,11 @@ export type McpServerKey = 'modeling' | 'runtime'
 export interface McpServer {
   key: McpServerKey
   /** Key of the server's entry in the client config. */
-  entryName: (anchorKey: string | null) => string
+  entryName: (rulesetKey: string | null) => string
   label: string
   /** What the URL binds the connection to. */
   boundTo: 'ontology' | 'lens'
-  path: (ontologyKey: string, lensKey: string, anchorKey: string | null) => string
+  path: (ontologyKey: string, lensKey: string, rulesetKey: string | null) => string
   /** One sentence: the server's job. */
   job: string
   /** What it covers. */
@@ -44,13 +44,13 @@ export const MCP_SERVERS: readonly McpServer[] = [
   },
   {
     key: 'runtime',
-    entryName: (anchorKey) =>
-      anchorKey === null ? 'ontoforge-runtime' : `ontoforge-runtime-${anchorKey}`,
+    entryName: (rulesetKey) =>
+      rulesetKey === null ? 'ontoforge-runtime' : `ontoforge-runtime-${rulesetKey}`,
     label: 'Runtime',
     boundTo: 'lens',
-    path: (ontologyKey, lensKey, anchorKey) =>
+    path: (ontologyKey, lensKey, rulesetKey) =>
       `/mcp/ontologies/${ontologyKey}/runtime/lenses/${lensKey}` +
-      (anchorKey === null ? '' : `/anchors/${anchorKey}`),
+      (rulesetKey === null ? '' : `/rulesets/${rulesetKey}`),
     job: 'Works with the data, as this lens shows it.',
     covers:
       'Create, read, update and delete entities and relations · search and query · run saved queries',

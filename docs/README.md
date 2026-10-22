@@ -42,8 +42,8 @@ what rules bind it, and how it is reached from every interface.
 | [threads](capabilities/threads.md) | Server-held assistant conversations: starting, continuing and reading a thread, atomic turns, lifetime |
 | [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
 | [transfer](capabilities/transfer.md) | Schema export and import |
-| [anchors](capabilities/anchors.md) | Anchors — named records holding an MCP client's writes within one entity's subtree: the record and its states, maintenance, anchored mounts, the write guard |
-| [changesets](capabilities/changesets.md) | Changesets — runtime writes staged over time and committed all or nothing: staging, the commit and its validation, binding, the review, staged-only |
+| [rulesets](capabilities/rulesets.md) | Rulesets — named records holding the rules for the MCP clients of one URL: the record and its maintenance, ruleset mounts, write access, the anchor |
+| [changesets](capabilities/changesets.md) | Changesets — runtime writes staged over time and committed all or nothing: staging, the commit and its validation, binding, the review |
 
 ## Internal provider interfaces
 
@@ -195,7 +195,7 @@ only. Reads return a size stub rather than the content, so that listing entities
 cheap. See [capabilities/documents.md](capabilities/documents.md).
 
 **Key** — the stable, human-readable identifier of an ontology, type, property, lens,
-search index, saved query, agent, retriever, navigator or anchor. Keys are what every interface speaks.
+search index, saved query, agent, retriever, navigator or ruleset. Keys are what every interface speaks.
 They are never database identifiers, and they are never exposed as UUIDs. Every key is
 unique within its owner; only ontology keys are unique server-wide. A key follows the rule
 of its level:
@@ -206,7 +206,7 @@ of its level:
 - **Lens-resource keys** — saved queries, agents, retrievers and navigators — match
   `^[a-z][a-z0-9_-]*$`: the schema rule plus `-`. They travel only in URLs, JSON and tool
   arguments.
-- **Anchor keys** match `^[a-z][a-z0-9_-]*$`.
+- **Ruleset keys** match `^[a-z][a-z0-9_-]*$`.
 
 ### Lenses
 
@@ -239,7 +239,7 @@ begin with an underscore, so the two namespaces cannot collide.
 **Chunk** — an internal fragment of a document property, so that search can match and
 return a passage rather than a whole document. Not addressable directly.
 
-### Hierarchies and anchors
+### Hierarchies
 
 **Parent relation** — a relation type that names one of its ends, source or target, as
 the parent end. Its relations form a hierarchy: across all parent relations of an
@@ -254,21 +254,39 @@ is an entity type.
 ending with the entity, as one lens shows them. Qualified, because a query path is a
 filter key. See [capabilities/instance-data.md](capabilities/instance-data.md#the-path-read).
 
-**Anchor** — a named record of an ontology that a person points at one entity, or at none:
-anchored, unanchored or dangling. An MCP client connected through an anchored mount has
-its writes to the anchor's hierarchy held to the anchored subtree. Not authentication. See
-[capabilities/anchors.md](capabilities/anchors.md).
+### Rulesets
 
-**Anchored subtree** — the anchored entity and its descendants: the entities an anchor
-covers.
+**Ruleset** — a named record of an ontology holding the rules for the MCP clients of its
+URL: a runtime mount URL that names a lens and the ruleset. A ruleset that limits nothing
+writes as the plain lens does, but reaches only the changesets started through it. Not
+authentication. See [capabilities/rulesets.md](capabilities/rulesets.md).
 
-**Anchor's hierarchy** — the entity types joined by parent relations to the anchored
-entity's type, with those parent relations. Writes to every other type are not held.
+**Rule** — one limit a ruleset sets on its clients, on top of what the lens allows. The
+server defines every rule; a person sets only its value. Qualified as a ruleset's rule
+where the parent rules or a key rule could be meant.
+
+**Write access** — the rule saying how a ruleset's clients may change data, on one of
+three levels, each allowing what the one below allows and more.
+
+**`none`, `propose`, `full`** — the three levels of write access. `none` reads everything,
+changesets included, and writes nothing. `propose` stages writes into changesets and
+submits them, but writes nothing at once and commits nothing: the client proposes, a
+person commits. `full` allows everything the lens allows, and is the default.
+
+**Anchor** — the rule pointing a ruleset at one entity, or at none. Writes through the
+ruleset's URL to the anchor's hierarchy stay in its subtree; other types are not held. If
+the anchor's entity is deleted, the anchor's state is **deleted**, and every write is
+refused.
+
+**Subtree** — the anchor's entity and its descendants: the entities the anchor covers.
+
+**Anchor's hierarchy** — the entity types joined by parent relations to the type of the
+anchor's entity, with those parent relations. Writes to every other type are not held.
 
 ### Changesets
 
 **Changeset** — runtime writes of one lens, staged over any length of time and committed
-together, all or nothing. Bound to the lens and the anchor of the URL it was started
+together, all or nothing. Bound to the lens and the ruleset of the URL it was started
 through. See [capabilities/changesets.md](capabilities/changesets.md).
 
 **Staged write** — one write held in a changeset: nothing changes until the commit, and
@@ -289,9 +307,6 @@ a note; **unsubmit** makes it a draft again, with a required note, whoever calls
 values of the keys it sends as they were when it was staged; **current**, those values
 now; **after**, the values it sets. **Drift** — current differing from before, which
 rejects the commit.
-
-**Staged-only** — an anchor's flag: through its URL every write must be staged, and a
-changeset cannot be committed.
 
 **MCP client** — an AI client outside the server, connected to one of its MCP mounts and
 acting on its own judgment. Not an agent, which is an assistant the server runs.

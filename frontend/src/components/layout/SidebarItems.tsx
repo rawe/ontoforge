@@ -16,7 +16,7 @@ interface NavItemProps {
   leading?: ReactNode
   end?: boolean
   /**
-   * A count after the label (a dot when collapsed), such as "1 dangling"; hidden at 0.
+   * A count after the label (a dot when collapsed), such as "1 anchor deleted"; hidden at 0.
    * Red by default; `neutral` for what waits rather than what is wrong.
    */
   alert?: { count: number; label: string; tone?: 'alert' | 'neutral' }

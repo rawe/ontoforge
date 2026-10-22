@@ -184,32 +184,45 @@ export interface PathStep {
   name: string | null
 }
 
-/* ------------------------------ runtime — anchors ----------------------------- */
+/* ----------------------------- runtime — rulesets ---------------------------- */
 
-/** `anchored`: the entity exists; `unanchored`: no entity; `dangling`: the entity is gone. */
-export type AnchorState = 'anchored' | 'unanchored' | 'dangling'
+/** A ruleset's write access: what its connection may change, from read only to everything. */
+export type WriteAccess = 'none' | 'propose' | 'full'
 
-/** An anchor of the ontology, from the lensless list (no name, no path). */
-export interface Anchor {
+/** A set anchor's state: `found` while its entity exists, `deleted` once it is gone. */
+export type AnchorState = 'found' | 'deleted'
+
+/** A ruleset of the ontology, from the lensless list (no name, no path). */
+export interface Ruleset {
   key: string
-  entity: { type: string; id: string } | null
-  state: AnchorState
-  /** Its connection only stages: writes need a changeset, and commit is refused. */
-  stagedOnly: boolean
+  /** Where the connection may write; null: no anchor, no limit on where. */
+  anchor: { type: string; id: string; state: AnchorState } | null
+  writeAccess: WriteAccess
+}
+
+/** A PUT body: an absent rule keeps its stored value; `{}` creates an empty ruleset. */
+export interface RulesetPatch {
+  anchor?: { type: string; id: string } | null
+  writeAccess?: WriteAccess
 }
 
 /**
- * An anchor seen through one lens (the anchored mount's root). `visible` is
- * false when the lens hides the anchored entity: entity null, path empty.
+ * A ruleset seen through one lens (its mount's root). A hidden or deleted
+ * anchor has type, id and name null and an empty path; `visible` is false
+ * when the lens hides the anchor's entity.
  */
-export interface AnchorView {
+export interface RulesetView {
   key: string
-  state: AnchorState
-  stagedOnly: boolean
-  visible: boolean
-  entity: PathStep | null
-  /** Root → … → the anchored entity, through the lens. */
-  path: PathStep[]
+  writeAccess: WriteAccess
+  anchor: {
+    type: string | null
+    id: string | null
+    name: string | null
+    state: AnchorState
+    visible: boolean
+    /** Root → … → the anchor's entity, through the lens. */
+    path: PathStep[]
+  } | null
 }
 
 /* ---------------------------- runtime — changesets --------------------------- */
@@ -224,8 +237,8 @@ export interface Changeset {
   /** Bumped by every change; a commit names the one it looked at. */
   version: number
   note: string | null
-  /** The anchor of the URL that started it; null on the plain lens. */
-  anchor: string | null
+  /** The ruleset of the URL that started it; null on the plain lens. */
+  ruleset: string | null
   writeCount: number
   createdAt: string
   lastChangeAt: string

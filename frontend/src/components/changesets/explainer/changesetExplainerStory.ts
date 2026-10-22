@@ -52,7 +52,7 @@ export const ROLES: Record<Actor, { title: string; via: string; actions: string[
     title: 'Client',
     via: 'over REST or MCP',
     actions: ['start', 'stage', 'unstage', 'submit', 'unsubmit', 'discard', 'commit'],
-    hint: 'Proposes. Through a staged-only anchor it cannot commit: a person has to.',
+    hint: 'Proposes. With write access propose it cannot commit: a person has to; with none it cannot start one.',
   },
   person: {
     title: 'Person',
@@ -100,7 +100,7 @@ export const STORY: StoryStep[] = [
   {
     actor: 'client', action: 'start', node: 'draft', edges: ['start'],
     title: 'A client starts a changeset',
-    body: 'Over REST or MCP, through a lens — and on an anchored URL, through its anchor: the changeset belongs to both. The note is optional; here it says what the plan is for. Every changeset starts as a draft, at version 1. A person starts one on the Workbench’s Changesets page.',
+    body: 'Over REST or MCP, through a lens — and on a ruleset’s URL, through its ruleset: the changeset belongs to both. The note is optional; here it says what the plan is for. Every changeset starts as a draft, at version 1. A person starts one on the Workbench’s Changesets page.',
     state: 'draft', version: 1, note: 'Tidy up Apollo', writes: [], stored: STORED_BEFORE,
     log: [{ call: 'start_changeset', result: 'draft · version 1' }],
   },

@@ -86,7 +86,7 @@ export function anchorOfText(keys: readonly string[]): string {
   return `Anchor of ${listKeys(keys)}`
 }
 
-/** The entity delete dialog's warning: what a delete does to the rulesets anchored there. */
+/** The entity delete dialog's warning: what a delete does to the rulesets whose anchor it is. */
 export function anchorDeleteWarning(keys: readonly string[]): string {
   return keys.length === 1
     ? `This is the anchor of ${keys[0]}: its writes will be refused until the anchor is moved or removed.`

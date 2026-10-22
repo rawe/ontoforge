@@ -5,7 +5,7 @@ Rule: [Interfaces](../decisions.md#interfaces)
 ## Context
 
 With many isolated ontologies in one server, both MCP servers need a binding: which
-ontology, and for runtime which lens and, optionally, which anchor, a connected client
+ontology, and for runtime which lens and, optionally, which ruleset, a connected client
 works in. The binding channel decides whether isolation holds by structure or has to be
 checked.
 
@@ -25,5 +25,6 @@ checked.
   the client knows least.
 - **Implicit creation when a mount URL names a missing ontology.** A typo in a client
   config would silently create a junk ontology.
-- **Implicit creation when a mount URL names a missing anchor.** A typo in a client config
-  would silently create an anchor that holds nothing.
+- **Implicit creation when a mount URL names a missing ruleset.** A typo in a client
+  config would silently create a ruleset that limits nothing, and the client would write
+  as through the plain lens.

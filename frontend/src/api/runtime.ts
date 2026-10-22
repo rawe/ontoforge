@@ -331,11 +331,11 @@ export const readAssistantThread = (
 
 /* -------------------------------- changesets -------------------------------- */
 
-// The plain lens URL: every changeset of the lens, anchored ones included.
+// The plain lens URL: every changeset of the lens, those started through a ruleset included.
 const changesetsBase = (ontologyKey: string, lensKey: string) =>
   `${base(ontologyKey, lensKey)}/changesets`
 
-/** A new draft changeset on the plain lens, so never held to an anchor. */
+/** A new draft changeset on the plain lens, so started through no ruleset. */
 export const startChangeset = (ontologyKey: string, lensKey: string, note?: string) =>
   request<Changeset>(changesetsBase(ontologyKey, lensKey), {
     method: 'POST',

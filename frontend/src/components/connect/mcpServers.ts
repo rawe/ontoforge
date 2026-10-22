@@ -8,7 +8,7 @@
  * both built from it.
  *
  * The runtime server can be mounted under an anchor: its URL then ends in
- * `/anchors/{key}` and its entry is named after the anchor. The modeling
+ * `/rulesets/{key}` and its entry is named after the anchor. The modeling
  * server ignores the anchor.
  */
 
@@ -50,7 +50,7 @@ export const MCP_SERVERS: readonly McpServer[] = [
     boundTo: 'lens',
     path: (ontologyKey, lensKey, anchorKey) =>
       `/mcp/ontologies/${ontologyKey}/runtime/lenses/${lensKey}` +
-      (anchorKey === null ? '' : `/anchors/${anchorKey}`),
+      (anchorKey === null ? '' : `/rulesets/${anchorKey}`),
     job: 'Works with the data, as this lens shows it.',
     covers:
       'Create, read, update and delete entities and relations · search and query · run saved queries',

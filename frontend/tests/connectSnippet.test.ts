@@ -76,12 +76,12 @@ test('an anchor mounts the runtime server under it and names its entry after it'
     },
     'ontoforge-runtime-agent-a': {
       type: 'http',
-      url: 'https://api.example.com/mcp/ontologies/org_graph/runtime/lenses/all/anchors/agent-a',
+      url: 'https://api.example.com/mcp/ontologies/org_graph/runtime/lenses/all/rulesets/agent-a',
     },
   })
   assert.match(
     buildSnippet('codex', { ...target, anchorKey: 'agent-a', servers: ['runtime'] }),
-    /^\[mcp_servers\.ontoforge-runtime-agent-a\]\nurl = ".*\/runtime\/lenses\/all\/anchors\/agent-a"$/,
+    /^\[mcp_servers\.ontoforge-runtime-agent-a\]\nurl = ".*\/runtime\/lenses\/all\/rulesets\/agent-a"$/,
   )
 })
 
@@ -94,7 +94,7 @@ test('the server list builds each entry name and URL path, with and without an a
   assert.equal(runtime.path('org_graph', 'all', null), '/mcp/ontologies/org_graph/runtime/lenses/all')
   assert.equal(
     runtime.path('org_graph', 'all', 'agent-a'),
-    '/mcp/ontologies/org_graph/runtime/lenses/all/anchors/agent-a',
+    '/mcp/ontologies/org_graph/runtime/lenses/all/rulesets/agent-a',
   )
   assert.equal(
     mcpUrl(runtime, { baseUrl: null, ontologyKey: 'org_graph', lensKey: 'all', anchorKey: null }),

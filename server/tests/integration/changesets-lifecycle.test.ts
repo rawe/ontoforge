@@ -3,8 +3,8 @@
  * (`buildProjectHierarchy`, rebuilt fresh per group): submit and unsubmit
  * with their notes, the refusals while submitted, the version check of a
  * commit, a rejected commit that stays submitted, submit refused by the
- * lock-free pass and by a dangling anchor, no expiry while submitted, the
- * list per lens and per anchor, and the review read: names, before →
+ * lock-free pass and by a deleted anchor, no expiry while submitted, the
+ * list per lens and per ruleset, and the review read: names, before →
  * after, markers, and nothing a scoped lens hides.
  */
 
@@ -254,33 +254,33 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
 describe("the list (V17, V41)", () => {
   beforeAll(fresh, 60_000);
 
-  it("per lens and per anchor, submitted first, with counts and types", async () => {
+  it("per lens and per ruleset, submitted first, with counts and types", async () => {
     await pointAnchor("agent-a", "project", e.P1);
     await pointAnchor("agent-b", "project", e.P3);
     const AA = `${ALL}/rulesets/agent-a`;
     const plain = await start(ALL, "plain");
     await staged(ALL, plain, { operation: "update_entity", type: "project", id: e.P2, properties: { name: "P2 x" } });
-    const anchored = await start(AA, "anchored");
-    await staged(AA, anchored, {
+    const viaRuleset = await start(AA, "via ruleset");
+    await staged(AA, viaRuleset, {
       operation: "create_entity",
       type: "task",
       properties: { name: "T9" },
       parentRelation: { type: "has_task", parentId: e.P1, properties: { phase: "build" } },
     });
-    await staged(AA, anchored, { operation: "delete_entity", type: "task", id: e.T3 });
-    await staged(AA, anchored, {
+    await staged(AA, viaRuleset, { operation: "delete_entity", type: "task", id: e.T3 });
+    await staged(AA, viaRuleset, {
       operation: "create_relation",
       type: "assigned_to",
       fromEntityId: e.T1,
       toEntityId: e.Kim,
     });
     const late = await start(ALL, "late");
-    expect((await submit(anchored, "review")).status).toBe(200);
+    expect((await submit(viaRuleset, "review")).status).toBe(200);
 
     const all = await list();
-    expect(all.map((c) => c.id)).toEqual([anchored, late, plain]);
+    expect(all.map((c) => c.id)).toEqual([viaRuleset, late, plain]);
     expect(all[0]).toEqual({
-      id: anchored,
+      id: viaRuleset,
       state: "submitted",
       version: 6,
       note: "review",
@@ -295,7 +295,7 @@ describe("the list (V17, V41)", () => {
     });
     expect(all[1]).toMatchObject({ state: "draft", writeCount: 0, operations: {}, types: [], ruleset: null });
 
-    expect((await list(AA)).map((c) => c.id)).toEqual([anchored]);
+    expect((await list(AA)).map((c) => c.id)).toEqual([viaRuleset]);
     expect(await list(`${ALL}/rulesets/agent-b`)).toEqual([]);
     expect(await list(runtimePrefix(O, "portfolio"))).toEqual([]);
     expect((await call("GET", `${ALL}/rulesets/nope/changesets`)).status).toBe(404);
@@ -466,10 +466,10 @@ describe("the review read (V41)", () => {
   });
 });
 
-describe("anchors at submit (V42; the dangling row of 'Who may do what')", () => {
+describe("a deleted anchor at submit (V42; the deleted row of the anchor states)", () => {
   beforeAll(fresh, 60_000);
 
-  it("a dangling anchor refuses submit with 409; unsubmit stays allowed", async () => {
+  it("a deleted anchor refuses submit with 409; unsubmit stays allowed", async () => {
     await pointAnchor("agent-a", "task", e.T2a);
     const AA = `${ALL}/rulesets/agent-a`;
     const cs = await start(AA);
@@ -478,14 +478,14 @@ describe("anchors at submit (V42; the dangling row of 'Who may do what')", () =>
     expect((await submit(other, "before")).status).toBe(200);
     expect((await call("DELETE", `${ALL}/entities/task/${e.T2a}`)).status).toBe(204);
 
-    const dangling = "The anchor of ruleset 'agent-a' no longer exists";
+    const deleted = "The anchor of ruleset 'agent-a' no longer exists";
     for (const base of [AA, ALL]) {
       const res = await submit(cs, "n", base);
       expect(res.status).toBe(409);
-      expect(res.body.error.message).toBe(dangling);
+      expect(res.body.error.message).toBe(deleted);
     }
-    const back = await unsubmit(other, { note: "anchor is dangling" }, AA);
+    const back = await unsubmit(other, { note: "anchor is deleted" }, AA);
     expect(back.status, JSON.stringify(back.body)).toBe(200);
-    expect(back.body).toMatchObject({ state: "draft", note: "anchor is dangling" });
+    expect(back.body).toMatchObject({ state: "draft", note: "anchor is deleted" });
   });
 });

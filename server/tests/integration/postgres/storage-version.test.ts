@@ -727,7 +727,7 @@ describe("PostgreSQL storage version", () => {
 
   it("a lens delete removes its changesets and their writes; a ruleset delete leaves them", async () => {
     await getOntologyRegistry().createOntology(ID_A, "fresh", null, null);
-    const [lensId, p1, anchored, plain] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+    const [lensId, p1, viaRuleset, plain] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
     await withTransaction(async (querier) => {
       await querier.query(`INSERT INTO ont_fresh.lens (lens_id, key, name) VALUES ($1, 'all', 'All')`, [lensId]);
       await querier.query(`INSERT INTO ont_fresh.entity (id, type_key) VALUES ($1, 'project')`, [p1]);
@@ -739,13 +739,13 @@ describe("PostgreSQL storage version", () => {
       await querier.query(
         `INSERT INTO ont_fresh.changeset (changeset_id, lens_id, ruleset_key, version)
          VALUES ($1, $3, 'agent-a', 1), ($2, $3, NULL, 1)`,
-        [anchored, plain, lensId],
+        [viaRuleset, plain, lensId],
       );
       await querier.query(
         `INSERT INTO ont_fresh.changeset_write (changeset_id, seq, operation, arguments, minted_id, type_key, bytes)
          VALUES ($1, 1, 'create_entity', '{"name": "T9"}', $3, 'task', 13),
                 ($2, 1, 'create_entity', '{"name": "T10"}', $4, 'task', 14)`,
-        [anchored, plain, randomUUID(), randomUUID()],
+        [viaRuleset, plain, randomUUID(), randomUUID()],
       );
     });
     const counts = async () =>

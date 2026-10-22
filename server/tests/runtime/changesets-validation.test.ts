@@ -562,9 +562,9 @@ describe("anchor coverage (V8, V42)", () => {
     ]);
 
     store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "company", id: ACME }, false));
-    const [dangling] = await violations(commit());
-    expect(dangling).toMatchObject({ seq: 0, kind: "anchor_deleted" });
-    expect(dangling!.message).toContain("no longer exists");
+    const [deleted] = await violations(commit());
+    expect(deleted).toMatchObject({ seq: 0, kind: "anchor_deleted" });
+    expect(deleted!.message).toContain("no longer exists");
 
     store.getFullSchemaWithLensInclusions.mockResolvedValue(schema(true));
     invalidateLoadedSchemaCache();
@@ -578,7 +578,7 @@ describe("anchor coverage (V8, V42)", () => {
     expect(store.parentsOf).not.toHaveBeenCalledWith([PAT], expect.anything());
   });
 
-  it("an unanchored anchor guards nothing", async () => {
+  it("a ruleset without an anchor guards nothing", async () => {
     store.rulesetStore.get.mockResolvedValue(anchorAt(null, false));
     parents[D1] = [link("belongs_to", R1, BETA, D1)];
     journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);

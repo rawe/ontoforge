@@ -350,7 +350,7 @@ describe("a rejected commit persists nothing", () => {
     expect((await call("DELETE", `${ALL}/changesets/${cs}`)).status).toBe(204);
   });
 
-  it("through an anchored URL, another anchor's changeset is 404", async () => {
+  it("through a ruleset URL, another ruleset's changeset is 404", async () => {
     const rulesets = `/api/ontologies/${O}/runtime/rulesets`;
     for (const [key, id] of [
       ["agent-a", e.P2],

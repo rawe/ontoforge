@@ -164,7 +164,7 @@ describe("start", () => {
     expect(started).toMatchObject({ state: "draft", version: 1, note: "g1", ruleset: "agent-a", writeCount: 0 });
   });
 
-  it("an unknown anchor is not found; a note over 1000 characters is a 422; neither starts one", async () => {
+  it("an unknown ruleset is not found; a note over 1000 characters is a 422; neither starts one", async () => {
     store.changesetStore.start.mockImplementation(async (cs: Row) => changeset({ ...cs, version: 1, writeCount: 0 }));
     await expect(startChangeset("full_lens", "nope", null, asRuntimeStore(store))).rejects.toThrow(
       new NotFoundError("Ruleset 'nope' not found"),
@@ -180,7 +180,7 @@ describe("start", () => {
 });
 
 describe("binding and expiry", () => {
-  it("loads through the lens id and the URL's anchor key; null is the one not-found text", async () => {
+  it("loads through the lens id and the URL's ruleset key; null is the one not-found text", async () => {
     store.changesetStore.get.mockResolvedValue(null);
     await expect(
       stageOn({ operation: "delete_entity", typeKey: "person", id: P1 }, null),
@@ -206,7 +206,7 @@ describe("binding and expiry", () => {
 });
 
 describe("staging checks", () => {
-  it("a dangling anchor, or one at an entity the lens hides, is a 409 with nothing appended", async () => {
+  it("a deleted anchor, or one at an entity the lens hides, is a 409 with nothing appended", async () => {
     store.rulesetStore.get.mockResolvedValue({
       key: "agent-a",
       anchor: { type: "company", id: ACME },
@@ -218,7 +218,7 @@ describe("staging checks", () => {
     expectNothingWritten();
   });
 
-  it("an anchored URL runs no coverage rule: a write outside the anchor is staged", async () => {
+  it("a ruleset URL runs no coverage rule: a write outside the anchor is staged", async () => {
     store.rulesetStore.get.mockResolvedValue({
       key: "agent-a",
       anchor: { type: "company", id: ACME },
@@ -593,7 +593,7 @@ describe("read, unstage, discard", () => {
     ]);
   });
 
-  it("unstage removes a seq; an unknown seq is not found; a dangling anchor does not stop it", async () => {
+  it("unstage removes a seq; an unknown seq is not found; a deleted anchor does not stop it", async () => {
     store.rulesetStore.get.mockResolvedValue({ key: "a", anchor: { type: "company", id: ACME }, anchorFound: false });
     store.changesetStore.unstage.mockResolvedValue(true);
     await unstage("full_lens", "a", CS, 2, asRuntimeStore(store));

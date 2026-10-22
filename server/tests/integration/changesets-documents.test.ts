@@ -6,8 +6,8 @@
  * parent carries its relation's properties, and the staged document read
  * returns the text a commit would leave, whole and in slices, from the last
  * staged write that sets it. Drift on a document is still found by its hash;
- * a lens that hides the type or the property answers not found; anchored
- * and staged-only mounts read it too.
+ * a lens that hides the type or the property answers not found; a ruleset
+ * mount with an anchor and write access propose reads it too.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -457,7 +457,7 @@ describe("through the lens and the mounts (F6)", () => {
     expect((await stagedNotes(cs, e.T1)).body.error.message).toBe(`Changeset '${cs}' not found`);
   });
 
-  it("anchored and staged-only mounts read it; another anchor does not reach it", async () => {
+  it("a ruleset mount with an anchor at propose reads it; another ruleset does not reach it", async () => {
     expect((await rest("PUT", `${RULESETS}/agent-s`, { anchor: { type: "project", id: e.P1 }, writeAccess: "propose" })).status).toBe(200);
     expect((await rest("PUT", `${RULESETS}/agent-b`, { anchor: { type: "project", id: e.P3 } })).status).toBe(200);
     const client = await connect("agent-s");

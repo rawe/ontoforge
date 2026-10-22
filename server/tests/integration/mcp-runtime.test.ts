@@ -1159,7 +1159,7 @@ describe("the ruleset mount", () => {
         await client.close();
       }
     }
-    // Nothing written, no anchor created.
+    // Nothing written, no ruleset created.
     const tasks = await app.inject({ method: "GET", url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all/entities/task` });
     expect(tasks.json().total).toBe(3);
     const rulesets = await app.inject({ method: "GET", url: `/api/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/rulesets` });

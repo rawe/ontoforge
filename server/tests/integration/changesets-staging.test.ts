@@ -3,8 +3,8 @@
  * (`buildHierarchy`, with `has_task` requiring `phase` and a document
  * property on project): start, the six staged writes and their body, a
  * create with a parent relation as two writes, minted ids, bases, the
- * immediate write's 404 and 422, binding to the lens and the anchor,
- * the dangling anchor, unstage, discard, expiry, the note, write and byte caps,
+ * immediate write's 404 and 422, binding to the lens and the ruleset,
+ * the deleted anchor, unstage, discard, expiry, the note, write and byte caps,
  * and a staged write while a commit holds the row.
  */
 
@@ -140,23 +140,23 @@ beforeEach(async () => {
 });
 
 describe("start", () => {
-  it("answers 201: draft, version, note, and no anchor on the plain lens", async () => {
+  it("answers 201: draft, version, note, and no ruleset on the plain lens", async () => {
     const cs = await start(ALL, "g1");
     expect(cs).toMatchObject({ state: "draft", version: 1, note: "g1", ruleset: null, writeCount: 0 });
     expect(cs.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(await call("POST", `${ALL}/changesets`)).toMatchObject({ status: 201, body: { note: null } });
   });
 
-  it("through an anchored URL, the anchor is its key", async () => {
+  it("through a ruleset URL, the ruleset is its key", async () => {
     await putAnchor("agent-a", { type: "project", id: ids.P1 });
     const cs = await start(`${ALL}/rulesets/agent-a`);
     expect(cs.ruleset).toBe("agent-a");
   });
 
-  it("not found in the order lens, anchor; a note of 1001 characters is 422", async () => {
+  it("not found in the order lens, ruleset; a note of 1001 characters is 422", async () => {
     expect((await call("POST", `${runtimePrefix(O, "nope")}/changesets`)).status).toBe(404);
-    const anchor = await call("POST", `${ALL}/rulesets/ghost/changesets`);
-    expect(anchor).toMatchObject({ status: 404, body: { error: { message: "Ruleset 'ghost' not found" } } });
+    const ruleset = await call("POST", `${ALL}/rulesets/ghost/changesets`);
+    expect(ruleset).toMatchObject({ status: 404, body: { error: { message: "Ruleset 'ghost' not found" } } });
     const long = await call("POST", `${ALL}/changesets`, { note: "x".repeat(1001) });
     expect(long.status).toBe(422);
     expect(long.body.error.details.fields.note).toContain("1000");
@@ -325,9 +325,9 @@ describe("the six staged writes", () => {
   it("the six staging routes of the immediate paths are not mounted, on either mount", async () => {
     await putAnchor("agent-a", { type: "project", id: ids.P1 });
     const plain = (await start()).id as string;
-    const anchored = (await start(`${ALL}/rulesets/agent-a`)).id as string;
+    const viaRuleset = (await start(`${ALL}/rulesets/agent-a`)).id as string;
     const relation = await relationId("assigned_to", ids.T1, ids.Ben);
-    for (const url of [`${ALL}/changesets/${plain}`, `${ALL}/rulesets/agent-a/changesets/${anchored}`]) {
+    for (const url of [`${ALL}/changesets/${plain}`, `${ALL}/rulesets/agent-a/changesets/${viaRuleset}`]) {
       for (const [method, path, payload] of [
         ["POST", "/entities/task", { name: "T9" }],
         ["PATCH", `/entities/project/${ids.P2}`, { name: "x" }],
@@ -395,23 +395,23 @@ describe("the six staged writes", () => {
 });
 
 describe("binding", () => {
-  it("another lens is 404; another anchor's URL is 404; the plain lens URL reaches an anchored one", async () => {
+  it("another lens is 404; another ruleset's URL is 404; the plain lens URL reaches a ruleset's one", async () => {
     await putAnchor("agent-a", { type: "project", id: ids.P1 });
     await putAnchor("agent-b", { type: "project", id: ids.P2 });
     const plain = (await start()).id as string;
-    const anchored = (await start(`${ALL}/rulesets/agent-a`)).id as string;
+    const viaRuleset = (await start(`${ALL}/rulesets/agent-a`)).id as string;
     const notFound = (cs: string) => ({ status: 404, body: { error: { message: `Changeset '${cs}' not found` } } });
 
     expect(await call("GET", `${PORTFOLIO}/changesets/${plain}`)).toMatchObject(notFound(plain));
     expect(await stage(plain, rename(ids.P2, "x"), PORTFOLIO)).toMatchObject(notFound(plain));
-    expect(await call("GET", `${ALL}/rulesets/agent-b/changesets/${anchored}`)).toMatchObject(notFound(anchored));
+    expect(await call("GET", `${ALL}/rulesets/agent-b/changesets/${viaRuleset}`)).toMatchObject(notFound(viaRuleset));
     expect(await call("GET", `${ALL}/rulesets/agent-a/changesets/${plain}`)).toMatchObject(notFound(plain));
-    expect((await call("GET", `${ALL}/rulesets/agent-a/changesets/${anchored}`)).status).toBe(200);
-    expect((await call("GET", `${ALL}/changesets/${anchored}`)).status).toBe(200);
+    expect((await call("GET", `${ALL}/rulesets/agent-a/changesets/${viaRuleset}`)).status).toBe(200);
+    expect((await call("GET", `${ALL}/changesets/${viaRuleset}`)).status).toBe(200);
     expect(await call("GET", `${ALL}/changesets/not-a-uuid`)).toMatchObject(notFound("not-a-uuid"));
   });
 
-  it("an anchored URL stages outside its anchor: coverage is a commit rule", async () => {
+  it("a ruleset URL stages outside its anchor: coverage is a commit rule", async () => {
     await putAnchor("agent-a", { type: "project", id: ids.P1 });
     const cs = (await start(`${ALL}/rulesets/agent-a`)).id as string;
     const res = await stage(
@@ -427,20 +427,20 @@ describe("binding", () => {
     expect(res.status).toBe(201);
   });
 
-  it("a dangling anchor refuses staging with 409; unstage still works", async () => {
+  it("a deleted anchor refuses staging with 409; unstage still works", async () => {
     const leaf = (await call("POST", `${ALL}/entities/task`, {
       name: "Leaf",
       parentRelation: { type: "has_task", parentId: ids.P2, properties: { phase: "x" } },
     })).body._id as string;
     await putAnchor("agent-a", { type: "task", id: leaf });
-    const anchored = `${ALL}/rulesets/agent-a`;
-    const base = `${anchored}/changesets`;
-    const cs = (await start(anchored)).id as string;
+    const mount = `${ALL}/rulesets/agent-a`;
+    const base = `${mount}/changesets`;
+    const cs = (await start(mount)).id as string;
     const l2 = { operation: "update_entity", type: "task", id: leaf, properties: { name: "L2" } };
-    expect((await stage(cs, l2, anchored)).status).toBe(201);
+    expect((await stage(cs, l2, mount)).status).toBe(201);
 
     expect((await call("DELETE", `${ALL}/entities/task/${leaf}`)).status).toBe(204);
-    const refused = await stage(cs, rename(ids.P2, "x"), anchored);
+    const refused = await stage(cs, rename(ids.P2, "x"), mount);
     expect(refused.status).toBe(409);
     expect(refused.body.error.message).toContain("no longer exists");
     expect(await journal(cs)).toHaveLength(1);
@@ -449,7 +449,7 @@ describe("binding", () => {
     expect(await journal(cs)).toEqual([]);
   });
 
-  it("after its anchor is deleted, the plain lens URL still reaches the changeset", async () => {
+  it("after its ruleset is deleted, the plain lens URL still reaches the changeset", async () => {
     await putAnchor("agent-b", { type: "project", id: ids.P2 });
     const cs = (await start(`${ALL}/rulesets/agent-b`)).id as string;
     expect((await call("DELETE", `${RULESETS}/agent-b`)).status).toBe(204);

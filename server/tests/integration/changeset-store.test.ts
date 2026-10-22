@@ -247,7 +247,7 @@ describe("ChangesetStore", () => {
     return (await store.changesets().get(id, lenses.all!, null))!;
   }
 
-  it("start: version 1, draft, no writes, bound to its lens and anchor", async () => {
+  it("start: version 1, draft, no writes, bound to its lens and ruleset", async () => {
     const cs = await started("agent-a");
     expect(cs).toMatchObject({
       lensId: lenses.all,
@@ -261,20 +261,20 @@ describe("ChangesetStore", () => {
     expect(cs.lastChangeAt).toBeInstanceOf(Date);
   });
 
-  it("get honours the binding: another lens or another anchor answers null", async () => {
+  it("get honours the binding: another lens or another ruleset answers null", async () => {
     const plain = await started(null);
-    const anchored = await started("agent-a");
+    const viaRuleset = await started("agent-a");
     const changesets = store.changesets();
 
     expect(await changesets.get(plain.id, lenses.all!, null)).toMatchObject({ id: plain.id });
     expect(await changesets.get(plain.id, lenses.portfolio!, null)).toBeNull();
     expect(await changesets.get(plain.id, lenses.all!, "agent-a")).toBeNull();
 
-    // The plain lens URL reaches the anchored one; only its own anchor does.
-    expect(await changesets.get(anchored.id, lenses.all!, null)).toMatchObject({ id: anchored.id });
-    expect(await changesets.get(anchored.id, lenses.all!, "agent-a")).toMatchObject({ id: anchored.id });
-    expect(await changesets.get(anchored.id, lenses.all!, "agent-b")).toBeNull();
-    expect(await changesets.get(anchored.id, lenses.portfolio!, "agent-a")).toBeNull();
+    // The plain lens URL reaches the ruleset's one; only its own ruleset does.
+    expect(await changesets.get(viaRuleset.id, lenses.all!, null)).toMatchObject({ id: viaRuleset.id });
+    expect(await changesets.get(viaRuleset.id, lenses.all!, "agent-a")).toMatchObject({ id: viaRuleset.id });
+    expect(await changesets.get(viaRuleset.id, lenses.all!, "agent-b")).toBeNull();
+    expect(await changesets.get(viaRuleset.id, lenses.portfolio!, "agent-a")).toBeNull();
 
     expect(await changesets.get("not-a-uuid", lenses.all!, null)).toBeNull();
     expect(await changesets.get(randomUUID(), lenses.all!, null)).toBeNull();

@@ -353,7 +353,7 @@ describe("the ruleset mount (V8, V17, V21, V42)", () => {
     await pointAnchor("agent-b", "project", e.P3);
   }, 60_000);
 
-  it("binds a started changeset to its anchor; another anchor does not reach it", async () => {
+  it("binds a started changeset to its ruleset; another ruleset does not reach it", async () => {
     const a = await connect("agent-a");
     const b = await connect("agent-b");
     const plain = await connect();
@@ -392,24 +392,24 @@ describe("the ruleset mount (V8, V17, V21, V42)", () => {
     await ok(a, "discard_changeset", { changeset_id: cs });
   });
 
-  it("a dangling anchor refuses staging and submit, allows unstage, and rejects the commit", async () => {
+  it("a deleted anchor refuses staging and submit, allows unstage, and rejects the commit", async () => {
     await pointAnchor("agent-d", "task", e.T2a);
     const d = await connect("agent-d");
     const cs = (await ok(d, "start_changeset")).id as string;
     await ok(d, "update_entity", { entity_type_key: "person", entity_id: e.Kim, properties: { name: "Kim B" }, changeset_id: cs });
     expect((await rest("DELETE", `${ALL}/entities/task/${e.T2a}`)).status).toBe(204);
 
-    const dangling = "The anchor of ruleset 'agent-d' no longer exists";
+    const deleted = "The anchor of ruleset 'agent-d' no longer exists";
     expect(
       await refused(d, "update_entity", { entity_type_key: "person", entity_id: e.Ana, properties: { name: "x" }, changeset_id: cs }),
-    ).toContain(dangling);
-    expect(await refused(d, "submit_changeset", { changeset_id: cs })).toContain(dangling);
+    ).toContain(deleted);
+    expect(await refused(d, "submit_changeset", { changeset_id: cs })).toContain(deleted);
     expect(await refused(d, "commit_changeset", { changeset_id: cs })).toContain("anchor_deleted");
     await ok(d, "unstage", { changeset_id: cs, seq: 1 });
     expect((await ok(d, "get_changeset", { changeset_id: cs })).writeCount).toBe(0);
   });
 
-  it("a deleted anchor leaves its changeset to the plain lens, whose commit answers ruleset_gone", async () => {
+  it("a deleted ruleset leaves its changeset to the plain lens, whose commit answers ruleset_gone", async () => {
     const b = await connect("agent-b");
     const cs = (await ok(b, "start_changeset")).id as string;
     await ok(b, "update_entity", { entity_type_key: "project", entity_id: e.P3, properties: { name: "P3 b" }, changeset_id: cs });

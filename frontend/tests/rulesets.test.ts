@@ -154,7 +154,7 @@ test('rulesetPatch sends only the rules that changed', () => {
 })
 
 test('loosenedRules: one line per loosened rule, none when a save only tightens', () => {
-  const paths = { lensKey: 'work', fromPath: [acme, p1], toPath: [acme, p2] }
+  const paths = { lensKey: 'work', fromPath: [acme, p1], toPath: [acme, p2], typeName }
   const lines = (ruleset: Ruleset, patch: Parameters<typeof loosenedRules>[1], p = paths) =>
     loosenedRules(ruleset, patch, p).map((l) => `${l.rule}: ${l.text}`)
 
@@ -179,6 +179,10 @@ test('loosenedRules: one line per loosened rule, none when a save only tightens'
   assert.deepEqual(lines(deleted, { anchor: null }), [
     'Anchor: removed. agent-d will be able to write anywhere in lens work.',
   ])
+  // Re-pointing a deleted anchor, which refused every write: its old path is the row's text.
+  assert.deepEqual(lines(deleted, { anchor: { type: 'project', id: 'p-2' } }, { ...paths, fromPath: [] }), [
+    'Anchor: moves from Project 7f3a… was deleted to ACME › P2. Its next call works under P2.',
+  ])
   // The old anchor hidden by the lens.
   assert.deepEqual(lines(found, { anchor: { type: 'project', id: 'p-2' } }, { ...paths, fromPath: [] }), [
     'Anchor: moves from an entity this lens hides to ACME › P2. Its next call works under P2.',
@@ -193,8 +197,6 @@ test('loosenedRules: one line per loosened rule, none when a save only tightens'
     lines(found, { anchor: { type: 'task', id: 't-1' } }, { ...paths, toPath: [acme, p1, t1] }),
     [],
   )
-  // Re-pointing a deleted anchor, which refused every write.
-  assert.deepEqual(lines(deleted, { anchor: { type: 'project', id: 'p-2' } }, { ...paths, fromPath: [] }), [])
 })
 
 test('rulesetMcpUrl extends the runtime MCP URL by the ruleset', () => {

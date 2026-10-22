@@ -283,6 +283,7 @@ function RulesetFlow({
           lensKey,
           fromPath: view.data?.anchor?.path ?? [],
           toPath: pickedPath.data ?? [],
+          typeName,
         })
 
   const save = useMutation({

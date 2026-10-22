@@ -171,15 +171,26 @@ const pathText = (path: readonly PathStep[]) =>
 /**
  * The rules a save loosens, one line each, in the dialog's order; empty when
  * it only tightens, so it saves at once. Raising write access loosens; so do
- * removing the anchor and moving it out of its subtree. Setting an anchor,
- * narrowing it into its subtree, or re-pointing a deleted one (which refused
- * every write) tightens. `fromPath` is the stored anchor's path through the
- * lens, `toPath` the new one's.
+ * removing the anchor, moving it out of its subtree, and re-pointing a deleted
+ * one (which refused every write); its old path is then the row's deleted
+ * text. Setting an anchor or narrowing it into its subtree tightens.
+ * `fromPath` is the stored anchor's path through the lens, `toPath` the new
+ * one's; `typeName` names a type as `anchorPlacement` does.
  */
 export function loosenedRules(
   ruleset: Ruleset,
   patch: RulesetPatch,
-  { lensKey, fromPath, toPath }: { lensKey: string; fromPath: readonly PathStep[]; toPath: readonly PathStep[] },
+  {
+    lensKey,
+    fromPath,
+    toPath,
+    typeName,
+  }: {
+    lensKey: string
+    fromPath: readonly PathStep[]
+    toPath: readonly PathStep[]
+    typeName: (typeKey: string) => string
+  },
 ): RuleLine[] {
   const lines: RuleLine[] = []
   const key = ruleset.key
@@ -196,10 +207,12 @@ export function loosenedRules(
   if (patch.anchor !== undefined && from !== null) {
     if (patch.anchor === null) {
       lines.push({ rule: 'Anchor', text: `removed. ${key} will be able to write anywhere in lens ${lensKey}.` })
-    } else if (from.state === 'found' && !toPath.some((s) => s.type === from.type && s.id === from.id)) {
+    } else if (from.state === 'deleted' || !toPath.some((s) => s.type === from.type && s.id === from.id)) {
+      const old =
+        from.state === 'deleted' ? anchorPlacement(ruleset, undefined, typeName).primary : pathText(fromPath)
       const target = toPath.at(-1)
       const under = target === undefined ? '' : ` Its next call works under ${stepLabel(target)}.`
-      lines.push({ rule: 'Anchor', text: `moves from ${pathText(fromPath)} to ${pathText(toPath)}.${under}` })
+      lines.push({ rule: 'Anchor', text: `moves from ${old} to ${pathText(toPath)}.${under}` })
     }
   }
   return lines

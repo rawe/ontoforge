@@ -221,7 +221,7 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
         }}
       >
         <DialogContent
-          className="sm:max-w-md"
+          className="sm:max-w-2xl"
           onEscapeKeyDown={(e) => {
             e.preventDefault()
             attemptClose()

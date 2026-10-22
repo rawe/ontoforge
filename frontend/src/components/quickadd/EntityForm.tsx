@@ -159,7 +159,7 @@ export function EntityForm({
 
   return (
     <form onSubmit={handleSubmit} className="contents">
-      <div className="max-h-[50dvh] space-y-3.5 overflow-y-auto px-0.5 py-0.5">
+      <div className="max-h-[70dvh] space-y-3.5 overflow-y-auto px-0.5 py-0.5">
         {relation !== undefined && relationProperties.length > 0 && (
           <>
             <h4 className="font-mono text-[12px] font-semibold">

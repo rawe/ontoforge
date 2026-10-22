@@ -13,7 +13,7 @@ import {
   repointConfirmation,
   anchorWritesLine,
   unanchorConfirmation,
-} from '../src/components/anchors/anchors.ts'
+} from '../src/components/rulesets/rulesets.ts'
 
 const step = (type: string, id: string, name: string | null): PathStep => ({ type, id, name })
 const acme = step('customer', 'c-acme', 'ACME')

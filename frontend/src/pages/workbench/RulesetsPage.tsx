@@ -9,8 +9,8 @@ import * as runtime from '@/api/runtime'
 import type { Anchor, AnchorView } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
-import { AnchorDialog, type AnchorDialogTarget } from '@/components/anchors/AnchorDialog'
-import { AnchorExplainerButton } from '@/components/anchors/explainer/AnchorExplainer'
+import { AnchorDialog, type AnchorDialogTarget } from '@/components/rulesets/RulesetDialog'
+import { AnchorExplainerButton } from '@/components/rulesets/explainer/AnchorExplainer'
 import {
   anchoredMcpUrl,
   anchorPlacement,
@@ -18,7 +18,7 @@ import {
   STAGED_ONLY_DANGLING_REASON,
   stagedOnlyOffConfirmation,
   unanchorConfirmation,
-} from '@/components/anchors/anchors'
+} from '@/components/rulesets/rulesets'
 import {
   AlertDialog,
   AlertDialogCancel,

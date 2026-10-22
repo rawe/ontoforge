@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAnchors, useChangesets, useFeatures, useLenses, useRuntimeSchema } from '@/api/hooks'
-import { danglingCount } from '@/components/anchors/anchors'
+import { danglingCount } from '@/components/rulesets/rulesets'
 import { submittedCount } from '@/components/changesets/changesets'
 import { OntologySwitcher } from '@/components/layout/OntologySwitcher'
 import { useSidebarCollapsed } from '@/components/layout/sidebarCollapsed'

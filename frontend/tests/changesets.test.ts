@@ -25,7 +25,7 @@ import {
   violationsOf,
   writesText,
 } from '../src/components/changesets/changesets.ts'
-import { stagedOnlyOffConfirmation } from '../src/components/anchors/anchors.ts'
+import { stagedOnlyOffConfirmation } from '../src/components/rulesets/rulesets.ts'
 import { qk } from '../src/api/queryKeys.ts'
 
 const item = (id: string, state: ChangesetListItem['state'], lastChangeAt: string): ChangesetListItem => ({

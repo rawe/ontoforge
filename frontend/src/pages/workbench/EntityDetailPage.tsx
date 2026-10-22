@@ -12,7 +12,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { TypeNotInLens } from '@/components/home/TypeNotInLens'
 import { PageHeader } from '@/components/PageHeader'
 import { TypeChip } from '@/components/TypeChip'
-import { anchoredHereText, anchorsAt, danglingWarningText } from '@/components/anchors/anchors'
+import { anchoredHereText, anchorsAt, danglingWarningText } from '@/components/rulesets/rulesets'
 import { StagedHereStrip } from '@/components/changesets/StagedHereStrip'
 import {
   AddRelationDialog,

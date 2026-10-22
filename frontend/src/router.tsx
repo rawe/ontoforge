@@ -20,7 +20,7 @@ const AiPage = lazy(() =>
   import('@/pages/workbench/AiPage').then((m) => ({ default: m.AiPage })),
 )
 const AnchorsPage = lazy(() =>
-  import('@/pages/workbench/AnchorsPage').then((m) => ({ default: m.AnchorsPage })),
+  import('@/pages/workbench/RulesetsPage').then((m) => ({ default: m.AnchorsPage })),
 )
 const ChangesetsPage = lazy(() =>
   import('@/pages/workbench/ChangesetsPage').then((m) => ({ default: m.ChangesetsPage })),

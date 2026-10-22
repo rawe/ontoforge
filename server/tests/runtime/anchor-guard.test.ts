@@ -131,7 +131,7 @@ describe("opening the guard", () => {
     expect(store.rulesetStore.get).not.toHaveBeenCalled();
   });
 
-  it("unanchored has no guard: the plain lens", async () => {
+  it("without an anchor, no guard: the plain lens", async () => {
     anchorAt(null);
     expect(await AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).toBeNull();
   });
@@ -141,14 +141,14 @@ describe("opening the guard", () => {
     await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(NotFoundError);
   });
 
-  it("dangling, by a deleted entity or a deleted type: 409 with v1's text", async () => {
-    const dangling = new ConflictError(
+  it("deleted, with its entity or its type: 409 with v1's text", async () => {
+    const deleted = new ConflictError(
       "The anchor of ruleset 'agent-a' no longer exists, so every write is refused until a person sets a new anchor",
     );
     anchorAt({ type: "project", id: "P1" }, false);
-    await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(dangling);
+    await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(deleted);
     anchorAt({ type: "gone", id: "P1" }, true);
-    await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(dangling);
+    await expect(AnchorGuard.open("agent-a", loaded(), asRuntimeStore(store))).rejects.toThrow(deleted);
   });
 
   it("an anchored entity the lens hides: 409 naming only the anchor and the lens", async () => {
@@ -197,7 +197,7 @@ describe("the staging check (R10)", () => {
     expect(await check("agent-a")).toBeNull();
   });
 
-  it("dangling, or an anchored entity the lens hides, is a 409 with no fix hint; an unknown key is not found", async () => {
+  it("deleted, or an anchored entity the lens hides, is a 409 with no fix hint; an unknown key is not found", async () => {
     anchorAt({ type: "project", id: "P1" }, false, "propose");
     expect(await check("agent-a")).toEqual(new ConflictError("The anchor of ruleset 'agent-a' no longer exists"));
     anchorAt({ type: "project", id: "P1" }, true);

@@ -1,11 +1,11 @@
 /**
- * The write guard of an anchored mount on PostgreSQL, over the REST mirror
+ * The anchor rule of a ruleset mount on PostgreSQL, over the REST mirror
  * and the MCP mount alike, on the fixture-shaped hierarchy
  * (`buildProjectHierarchy`). `agent-a` points at P1 through lens `all`
  * unless a test says otherwise. Each test proves one rule of the spec's
  * rule table, with the refusal's field key; no refusal names an entity the
- * caller did not send. Then the anchor's states: unanchored is the plain
- * lens, dangling and hidden refuse every write with a 409, and a re-point
+ * caller did not send. Then the anchor's states: no anchor is the plain
+ * lens, deleted and hidden refuse every write with a 409, and a re-point
  * applies on the next call.
  */
 
@@ -456,13 +456,13 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
   // -------------------------------------------------------------------------
 
   describe("states", () => {
-    it("unanchored is the plain lens: T5 is updated, a customer created", async () => {
+    it("no anchor is the plain lens: T5 is updated, a customer created", async () => {
       await putAnchor("agent-a", null);
       allowed(await agentA().updateEntity("task", id("T5"), { name: "T5!" }), 200);
       allowed(await agentA().createEntity("customer", { name: "GAMMA" }), 201);
     });
 
-    it("dangling by a deleted entity: every write a 409 until re-anchored", async () => {
+    it("deleted with its entity: every write a 409 until re-pointed", async () => {
       await putAnchor("agent-a", "T5");
       allowed(await plain().deleteEntity("task", id("T5")), 204);
       const writes = agentA();
@@ -478,7 +478,7 @@ describe.each(Object.entries(TRANSPORTS))("the guard over %s, agent-a → P1 via
       allowed(await writes.updateEntity("task", id("T1"), { name: "T1!" }), 200);
     });
 
-    it("dangling by a deleted entity type: a 409", async () => {
+    it("deleted with its entity type: a 409", async () => {
       await putAnchor("agent-d", "open", "status");
       const relationTypes = await app.inject({ url: `${modelPrefix(O)}/relation-types` });
       const hasStatus = (relationTypes.json() as Row[]).find((rt) => rt.key === "has_status")!;

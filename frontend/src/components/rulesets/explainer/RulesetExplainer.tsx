@@ -1,43 +1,94 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { Anchor, ChevronLeft, ChevronRight, CircleQuestionMark, Pause, Play, Plug, UserRound, type LucideIcon } from 'lucide-react'
+import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react'
+import { Anchor, ChevronLeft, ChevronRight, CircleQuestionMark, Pause, Play, PencilLine, Plug, ScrollText, UserRound, type LucideIcon } from 'lucide-react'
 import { ChangesetExplainerButton } from '@/components/changesets/explainer/ChangesetExplainer'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { WRITE_ACCESS_LEVELS } from '../rulesets'
+import { WriteAccessChip } from '../WriteAccessChip'
 import { RulesetExplainerFlow } from './RulesetExplainerFlow'
+import { RulesetExplainerLadder } from './RulesetExplainerLadder'
 import { RulesetExplainerTree } from './RulesetExplainerTree'
-import { STORY, logUpTo, type Actor } from './rulesetExplainerStory'
+import { ANCHOR_CAPTIONS, STORY, logUpTo, type Actor, type RuleId, type RULE_IDS, type StepRule, type StoryStep } from './rulesetExplainerStory'
 
 const PLAY_MS = 5000
-const TITLE = 'What an anchor does to a client'
+const TITLE = 'What a ruleset does to a client'
 const ACTOR_ICONS: Record<Actor, LucideIcon> = { client: Plug, person: UserRound }
 const ACTORS: Record<Actor, string> = { client: 'Client', person: 'Person' }
 
 const FACTS = [
   { label: 'Reads', value: 'not narrowed: the whole lens' },
-  { label: 'Checked', value: 'on every call, against the anchor as it is then' },
+  { label: 'Checked', value: 'on every call, against the ruleset as it is then' },
   { label: 'Not authentication', value: 'it guards against mistakes' },
-]
-
-const RULES = [
-  {
-    title: 'The hold',
-    text: 'Writes to the anchored entity’s hierarchy stay in its subtree: a create needs its parent relation to a parent inside it; an update, a delete or a relation may touch only covered entities and free types, those outside the hierarchy. Unanchored, an anchor holds nothing; dangling, its entity deleted, it refuses every write.',
-  },
-  {
-    title: 'Staged-only',
-    text: 'Every immediate write through the anchor’s URL is refused, and so is the commit, whatever the anchor’s state. Starting, staging, unstaging, submitting, unsubmitting and discarding a draft still work: the client proposes, a person commits.',
-  },
-  {
-    title: 'Two escapes',
-    text: 'Neither is a lock. 1. The plain lens URL, the anchored URL without its anchor, writes immediately and commits. 2. The anchor’s maintenance, open to any REST client, turns the flag off or re-points the anchor.',
-  },
 ]
 
 const microLabel = 'text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'
 
-/** Opens what an anchor does to a client — the hold and staged-only — told over one example: a "?" beside a page title. */
+/** The anchor card's picture: the example hierarchy, its caption and its legend. */
+function AnchorVisual({ step }: { step: StoryStep }) {
+  return <>
+    <p className={cn('text-[11px]', step.anchor === 'deleted' ? 'font-medium text-destructive' : 'text-muted-foreground')}>{ANCHOR_CAPTIONS[step.anchor]}</p>
+    <RulesetExplainerTree step={step} />
+    <ul className="flex flex-wrap gap-x-4 gap-y-1 border-t pt-3 text-[11px] text-muted-foreground">
+      <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] bg-primary" />Anchor</li>
+      <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-primary/45 bg-primary/6" />In the subtree</li>
+      <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-border bg-card" />Outside the subtree</li>
+      <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-dashed border-foreground/40 bg-card" />Free type</li>
+    </ul>
+  </>
+}
+
+interface RuleCard<Id = RuleId> {
+  id: Id
+  title: string
+  icon: LucideIcon
+  Visual: ComponentType<{ step: StoryStep }>
+}
+
+/** One card per id, in the ids' order. */
+type CardsOf<Ids extends readonly RuleId[]> = { [I in keyof Ids]: RuleCard<Ids[I]> }
+
+/**
+ * The ruleset's rules, one card each, in rule order: the left column. Typed by
+ * `RULE_IDS`, so every rule has exactly one card. A new rule is one more entry.
+ */
+const RULE_CARDS: CardsOf<typeof RULE_IDS> = [
+  { id: 'writeAccess', title: 'Write access', icon: PencilLine, Visual: RulesetExplainerLadder },
+  { id: 'anchor', title: 'Anchor', icon: Anchor, Visual: AnchorVisual },
+]
+
+/** The bottom row: one card per rule, then what holds for all of them. */
+const BOTTOM_CARDS: { id: StepRule; title: string; icon?: LucideIcon; text: ReactNode }[] = [
+  {
+    id: 'writeAccess', title: 'Write access', icon: PencilLine,
+    text: <ul className="grid gap-1">
+      {WRITE_ACCESS_LEVELS.map((level) => <li key={level.level} className="flex items-start gap-1.5">
+        <WriteAccessChip level={level.level} className="shrink-0" />{level.short}
+      </li>)}
+    </ul>,
+  },
+  {
+    id: 'anchor', title: 'Anchor', icon: Anchor,
+    text: 'Writes to the anchor’s hierarchy stay in its subtree: a create needs its parent inside it; an update, a delete or a relation may touch only covered entities and free types. No anchor: no limit on where. Anchor deleted: every write is refused.',
+  },
+  {
+    id: 'both', title: 'Both must pass',
+    text: 'Write access is checked first, then the anchor. A write goes through only if every rule allows it.',
+  },
+  {
+    id: 'escapes', title: 'Two escapes',
+    text: 'Neither is a lock. 1. The plain lens URL, the same URL without the ruleset, writes as the lens allows. 2. Ruleset maintenance, open to any REST client, can change the rules.',
+  },
+]
+
+const isRule = (id: StepRule) => RULE_CARDS.some((card) => card.id === id)
+
+/** "write access propose · anchor Apollo": the rules at a step, for the flow's heading. */
+const rulesAt = (step: StoryStep) =>
+  `write access ${step.writeAccess} · ${step.anchor === 'none' ? 'no anchor' : step.anchor === 'found' ? 'anchor Apollo' : 'anchor deleted'}`
+
+/** Opens what a ruleset does to a client — write access, then the anchor — told over one example: a "?" beside a page title. */
 export function RulesetExplainerButton({ className }: { className?: string }) {
   return <Dialog>
     <Tooltip>
@@ -57,7 +108,7 @@ export function RulesetExplainerButton({ className }: { className?: string }) {
   </Dialog>
 }
 
-/** The explainer's content: a write's way, an example hierarchy, step by step, and the rules. */
+/** The explainer's content: a write's way, the ruleset's rules on an example, step by step, and the rules in short. */
 function RulesetExplainerPanel() {
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -87,13 +138,14 @@ function RulesetExplainerPanel() {
   return <div className="flex min-h-0 flex-col" onKeyDown={onKeyDown}>
     <header className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b px-6 pt-5 pb-4 pr-14">
       <div className="flex min-w-0 flex-1 basis-[28rem] items-start gap-3">
-        <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Anchor className="size-5" /></span>
+        <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><ScrollText className="size-5" /></span>
         <div className="grid min-w-0 gap-1.5">
           <DialogTitle className="text-lg font-semibold">{TITLE}</DialogTitle>
           <DialogDescription className="max-w-3xl text-[13px] leading-relaxed">
-            An anchor points at one entity. A client on the anchor’s URL has its writes to that entity’s hierarchy held to the
-            entity and its descendants. With staged-only on, it writes nothing at once: it stages writes into a changeset and
-            submits them, and a person commits.
+            A ruleset gives an AI client its own MCP URL, and holds rules that every call through that URL must follow.
+            Write access says what the client may do: read only (none), propose changes that a person commits (propose), or
+            write as the lens allows (full). An anchor, if set, says where it may write: inside one entity’s subtree, while
+            other hierarchies and types stay free.
           </DialogDescription>
           <dl className="mt-1 flex flex-wrap gap-x-5 gap-y-1 text-xs">
             {FACTS.map((fact) => <div key={fact.label} className="flex gap-1.5">
@@ -108,7 +160,7 @@ function RulesetExplainerPanel() {
     <div className="grid min-h-0 gap-4 overflow-y-auto px-6 py-5">
       <section className="rounded-xl border bg-card px-4 pt-3 pb-3" aria-label="The way of a write">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h3 className={microLabel}>The way of a write — {step.stagedOnly ? 'staged-only on' : 'staged-only off'}</h3>
+          <h3 className={microLabel}>The way of a write — {rulesAt(step)}</h3>
           <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
             <li className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-dashed border-primary" />This step</li>
             <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-destructive bg-destructive/10" />Refused here</li>
@@ -118,18 +170,17 @@ function RulesetExplainerPanel() {
       </section>
 
       <div className="grid gap-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-        <section className="flex flex-col gap-3 rounded-xl border bg-card p-4" aria-label="The example hierarchy">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className={microLabel}>On an example hierarchy</h3>
-            <span className="text-[11px] text-muted-foreground">the anchor apollo at the project Apollo</span>
-          </div>
-          <RulesetExplainerTree step={step} />
-          <ul className="mt-auto flex flex-wrap gap-x-4 gap-y-1 border-t pt-3 text-[11px] text-muted-foreground">
-            <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] bg-primary" />Anchored</li>
-            <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-primary/45 bg-primary/6" />Covered</li>
-            <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-border bg-card" />Outside the subtree</li>
-            <li className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] border border-dashed border-foreground/40 bg-card" />Free type</li>
-          </ul>
+        <section className="flex flex-col gap-3" aria-label="The ruleset agent-a">
+          <h3 className={microLabel}>Ruleset <span className="font-mono normal-case">agent-a</span></h3>
+          {RULE_CARDS.map(({ id, title, icon: Icon, Visual }) => {
+            const lit = step.rule === id || step.rule === 'both'
+            return <section key={id} aria-label={title}
+              className={cn('flex flex-col gap-3 rounded-xl border bg-card p-4 transition-[background-color,border-color,opacity] duration-500',
+                lit ? 'border-primary/40 bg-primary/5' : step.rule !== 'ruleset' && 'opacity-70')}>
+              <h4 className="flex items-center gap-1.5 text-xs font-medium"><Icon className="size-3.5 text-muted-foreground" />{title}</h4>
+              <Visual step={step} />
+            </section>
+          })}
         </section>
 
         <div className="flex min-w-0 flex-col gap-4">
@@ -147,7 +198,7 @@ function RulesetExplainerPanel() {
               <Button type="button" variant="outline" size="sm" onClick={() => go(index - 1)} disabled={index === 0}>
                 <ChevronLeft /> Back
               </Button>
-              <div className="flex flex-1 items-center justify-center gap-1.5">
+              <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-1.5">
                 {STORY.map((s, i) => <button key={i} type="button" aria-label={`Step ${i + 1}: ${s.title}`} aria-current={i === index ? 'step' : undefined}
                   onClick={() => go(i)} className={cn('h-1.5 rounded-full transition-all', i === index ? 'w-5 bg-primary' : i < index ? 'w-1.5 bg-primary/40' : 'w-1.5 bg-muted-foreground/30')} />)}
               </div>
@@ -172,7 +223,7 @@ function RulesetExplainerPanel() {
                   <LogIcon className={cn('mt-0.5 size-3.5 shrink-0', now ? 'text-primary' : 'text-muted-foreground')} />
                   <div className="grid min-w-0 gap-0.5">
                     <span className={cn('font-mono text-[11.5px] font-medium break-words', !now && 'text-muted-foreground')}>{entry.call}</span>
-                    <span className="text-[11.5px] text-muted-foreground">{entry.result}</span>
+                    {entry.result && <span className="text-[11.5px] text-muted-foreground">{entry.result}</span>}
                   </div>
                 </li>
               })}
@@ -183,10 +234,12 @@ function RulesetExplainerPanel() {
 
       <section className="grid gap-2" aria-label="The rules">
         <h3 className={microLabel}>The rules — and the two escapes</h3>
-        <ul className="grid gap-2 md:grid-cols-3">
-          {RULES.map((rule) => <li key={rule.title} className="grid content-start gap-1 rounded-lg border bg-card px-3 py-2.5">
-            <span className="text-xs font-medium">{rule.title}</span>
-            <span className="text-[11.5px] leading-snug text-muted-foreground">{rule.text}</span>
+        <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {BOTTOM_CARDS.map(({ id, title, icon: Icon, text }) => <li key={id}
+            className={cn('grid content-start gap-1 rounded-lg border bg-card px-3 py-2.5 transition-[background-color,border-color] duration-500',
+              step.rule === id && !isRule(id) && 'border-primary/40 bg-primary/5')}>
+            <span className="flex items-center gap-1.5 text-xs font-medium">{Icon && <Icon className="size-3.5 text-muted-foreground" />}{title}</span>
+            <div className="text-[11.5px] leading-snug text-muted-foreground">{text}</div>
           </li>)}
         </ul>
       </section>

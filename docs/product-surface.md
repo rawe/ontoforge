@@ -70,7 +70,7 @@ particular lens carry the lens icon.
 | Query | Lens detail of the current lens, Saved queries tab |
 | Assistants | Lens detail, the tab of the open assistant kind |
 | Home, Explore, Changesets | Lens detail, Scope tab |
-| Anchors | Lens detail of the current lens, Connect tab |
+| Rulesets | Lens detail of the current lens, Connect tab |
 
 | From the Studio | Leads to the Workbench's |
 |---|---|
@@ -121,8 +121,8 @@ boundary — not even between same-keyed lenses of two ontologies.
 A collapsible sidebar (collapse state persists) carrying: the ontology switcher, the
 surface switch and the lens switcher beneath it, a search
 trigger, a create-entity trigger, fixed entries for Home, Explore, Query, Assistants when
-available, [Anchors](#anchors), which carries the number of dangling
-anchors as a red count (a red dot when collapsed), and [Changesets](#changesets), which
+available, [Rulesets](#rulesets), which carries the number of rulesets whose anchor is
+deleted as a red count (a red dot when collapsed), and [Changesets](#changesets), which
 carries the number of submitted changesets of the lens as a grey count (a grey dot when
 collapsed), then a data section listing every entity type the lens exposes, each with
 its type colour. Below: the collapse control and a theme control cycling system → light →
@@ -210,10 +210,11 @@ relation, open the entity in the Explorer, and delete it behind a confirmation t
 the relations will go with it. Above the label, a breadcrumb shows the entity's
 [hierarchy path](capabilities/instance-data.md#the-path-read) from the path read —
 ancestors as links, the entity itself last and muted — and nothing for a hierarchy root.
-Anchors pointing at the entity show as a chip after the type chip, linking to the
-[Anchors](#anchors) page, and the delete confirmation then warns that they will be
-dangling. Delete is disabled, saying to delete the children first, while the entity has
-children the lens shows; one whose children the lens hides gets the server's refusal as a
+The rulesets whose anchor is the entity show as a chip after the type chip, "Anchor of"
+and their keys, linking to the [Rulesets](#rulesets) page, and the delete confirmation
+then warns that their writes will be refused until the anchor is moved or removed.
+Delete is disabled, saying to delete the children first, while the entity has children
+the lens shows; one whose children the lens hides gets the server's refusal as a
 message. Opening an entity records it in the recents list used by the command palette and
 the Explorer's empty state.
 
@@ -284,49 +285,50 @@ See [Working set](#working-set) for both.
 Two tabs — Console and Library — which both stay live, so results survive a switch. See
 [Query console](#query-console) and [Saved-query library](#saved-query-library).
 
-### Anchors
+### Rulesets
 
-The ontology's [anchors](capabilities/anchors.md), shown through the current lens: one
-row per anchor with its key, its state and where it is anchored — the anchored entity's
-hierarchy path with a link to the entity, "No restriction, like the plain lens" for an
-unanchored one, the deleted entity's type and short id for a dangling one, whose row is
-marked red and says every write is refused, and "Hidden by this lens" for an anchored
-entity the lens hides. A note under the table says the URLs use the current lens, that
-anchors belong to the ontology, and that every change takes effect on the next call. A
-help button beside the title explains what an anchor does to a client: the hold to its
-subtree, and staged-only, where the client stages and submits and a person commits, with
-its two escapes. One example hierarchy plays step by step through it, and the help links to
-the [Changesets](#changesets) one for the workflow.
+The ontology's [rulesets](capabilities/rulesets.md), shown through the current lens: one
+row per ruleset with its key and a cell per rule. A note under the table says the URLs use
+the current lens, that rulesets belong to the ontology, and that every change takes effect
+on the client's next call. Per row: copy the ruleset's MCP URL; edit it; show its anchor in
+the Explorer; delete it, which needs its key typed and says that clients using its URL get
+not found. **New ruleset** and **Edit…** open one dialog: the key on create — part of the
+MCP URL, validated live against the ruleset key rule and the existing keys, permanent —
+then one section per rule. A save that loosens a rule first asks, one line per loosened
+rule; one that only tightens saves at once.
 
-- **New anchor** asks for a key — part of the MCP URL, validated live against the
-  anchor key rule and the existing keys, permanent — and either an entity, picked
-  by type and search with each result's hierarchy path shown, or no entity at all.
-- **Per row:** copy the anchored MCP URL; anchor an unanchored one or re-anchor a dangling
-  one, with no further question; re-point an anchored one, confirming with both hierarchy
-  paths; unanchor it behind a confirmation saying its client may then write anywhere in
-  the lens; show its entity in the Explorer; delete it, which needs its key typed and
-  says that clients using its URL get not found.
-- **Staged only:** a switch per row, with a "staged only" chip beside the state while it
-  is on. Turning it on takes effect at once; turning it off asks first, saying the client
-  then writes immediately and can commit. It is disabled on a dangling anchor, which must
-  be re-anchored or unanchored first. Re-pointing and unanchoring keep it.
+- **Write access:** in the row, the level's chip, its tooltip saying what the level
+  allows. In the dialog, the three levels as cards from `none` to `full`, each saying what
+  the client can and cannot do, `full` marked as the default. Raising the level loosens.
+- **Anchor:** in the row, the anchor's hierarchy path with a link to the entity, "No
+  anchor", the deleted entity's type and short id for a deleted anchor, whose row is marked
+  red and says every write is refused, or "Hidden by this lens". In the dialog, no anchor
+  or an entity, picked by type and search with each result's hierarchy path shown, and
+  what it covers. Removing the anchor, moving it out of its subtree, or re-pointing a
+  deleted one loosens.
 
-The Studio manages no anchors: its Connect tab links here.
+A help button beside the title explains what a ruleset does to a client: write access as a
+staircase from `none` to `full`, then the anchor and its subtree, that a write must pass
+both, and the two escapes. One example hierarchy plays step by step through it, and the
+help links to the [Changesets](#changesets) one for the workflow.
+
+The Studio manages no rulesets: its Connect tab links here.
 
 ### Changesets
 
-The lens's [changesets](capabilities/changesets.md), anchored ones included, as the lens
-shows them now. The page starts, reviews, submits, commits and discards them, and pins
-one to work in. A help button beside the title of the list and of each review explains the workflow: the states and who
+The lens's [changesets](capabilities/changesets.md), those started through a ruleset
+included, as the lens shows them now. The page starts, reviews, submits, commits and
+discards them, and pins one to work in. A help button beside the title of the list and of each review explains the workflow: the states and who
 may take each way between them, a client or a person, with who does what and how the note
 changes. One example changeset plays step by step through it, beside the calls each step
 makes.
 
-- **The list:** one row per changeset — its state, note, anchor, number of writes, the
+- **The list:** one row per changeset — its state, note, ruleset, number of writes, the
   types it names (two, then a count, and how many the lens no longer shows) and its age —
   submitted ones first and tinted, then by last change. A row opens its review. Empty, it
   says the lens has no changesets.
-- **The review:** a header with the short id, the state, the anchor, the writes per
+- **The review:** a header with the short id, the state, the ruleset — linking to the
+  Rulesets page, struck through once the ruleset is deleted — the writes per
   operation, the version and the times, and the note. Below, the writes by seq, a page of
   100 at a time: the operation, the type, the target by name — "(new)" for a create,
   `from → to` for a relation, a short id when the lens shows no name — and the change:
@@ -338,7 +340,8 @@ makes.
 - **Commit**, behind a confirmation naming the number of writes, sends the version on the
   screen. When the changeset changed since, it says so and reloads the review; any other
   conflict shows its message and reloads too. A rejected commit lists its violations in a
-  panel, which on a submitted changeset offers to unsubmit it at once with those
+  panel, each of a ruleset's kinds under a label saying what went wrong, which on a
+  submitted changeset offers to unsubmit it at once with those
   violations as its note, cut to 1,000 characters. A successful one returns to the list
   and refreshes every runtime view of the ontology.
 - **Submit** asks for an optional note, which replaces the stored one, and works on a draft
@@ -541,13 +544,13 @@ needs, or both. The configuration is offered in two formats, Claude Code and Cod
 address the server reports for itself ([interfaces.md](interfaces.md#server)); when it
 reports none, a visible placeholder stands in its place with a note to replace it. A
 switch adds an `Authorization: Bearer` header holding a token placeholder for servers
-reached through an access-controlled entry point. The runtime card's Anchor select offers
-none or any of the ontology's [anchors](#anchors), each with its hierarchy path or its
-state; choosing one binds the runtime URL and the entry name to that anchor, adds it as a
-third chip after ontology and lens, and shows a line describing its state. An anchor
-deleted meanwhile falls back to none. The same panel opens from the Workbench home's
-AI-clients card and empty-state guide. In the Studio the tab also links to the
-Workbench's Anchors page.
+reached through an access-controlled entry point. The runtime card's Ruleset select offers
+none, the plain lens, or any of the ontology's [rulesets](#rulesets), each with its write
+access and its anchor; choosing one binds the runtime URL and the entry name to that
+ruleset, adds it as a third chip after ontology and lens, and shows one line per rule
+saying what the connection may do. A ruleset deleted meanwhile falls back to none. The
+same panel opens from the Workbench home's AI-clients card and empty-state guide. In the
+Studio the tab also links to the Workbench's Rulesets page.
 
 ### Search
 
@@ -1525,7 +1528,7 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/w/{lensKey}/ai` | The Assistants panel, Agents tab; an unknown `tab` shows Agents as well |
 | `/o/{ontologyKey}/w/{lensKey}/ai?tab=retriever` | The Retrievers tab |
 | `/o/{ontologyKey}/w/{lensKey}/ai?assistant={key}` · `?tab=retriever&assistant={key}` | That tab with that assistant — `_default` for the default one; the default one when the lens has no such assistant |
-| `/o/{ontologyKey}/w/{lensKey}/anchors` | The [Anchors](#anchors) page |
+| `/o/{ontologyKey}/w/{lensKey}/rulesets` | The [Rulesets](#rulesets) page |
 | `/o/{ontologyKey}/w/{lensKey}/changesets` | The [Changesets](#changesets) list |
 | `/o/{ontologyKey}/w/{lensKey}/changesets/{changesetId}` | One changeset's review |
 | `/o/{ontologyKey}/studio` · `/o/{ontologyKey}/studio/schema` | Redirects to the schema graph |

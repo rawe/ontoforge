@@ -8,8 +8,10 @@
  * staging, and write access wins over both; the escapes (the plain lens
  * URL commits, the PUT gives full access back); through a 'none'
  * ruleset's URL every write, stage and commit route is a 409 and every
- * read answers, the changeset reads included; and the MCP tool set at
- * 'propose' (V29, R13).
+ * read answers, the changeset reads included; and the MCP tool list at
+ * 'propose' (V29, R13) and 'none', with every refused call answering the
+ * write access refusal, also for a tool the client's older list still
+ * shows.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -462,6 +464,32 @@ describe("the MCP tool set at 'propose' (V29, R13)", () => {
     expect(update.required ?? []).not.toContain("changeset_id");
   });
 
+  it("a tool the list leaves out answers the write access refusal, not an unknown tool", async () => {
+    const client = await connect("agent-s");
+    const edit = await call(client, "edit_document", {
+      entity_type_key: "task",
+      entity_id: e.T1,
+      property_key: "notes",
+      old_string: "Notes",
+      new_string: "Text",
+    });
+    expect(text(edit)).toBe(`Error executing tool edit_document: ${NO_WRITE("agent-s")}`);
+    const cs = (await ok(client, "start_changeset")).id as string;
+    const commit = await call(client, "commit_changeset", { changeset_id: cs });
+    expect(text(commit)).toBe(`Error executing tool commit_changeset: ${NO_COMMIT("agent-s")}`);
+    expect((await rest("GET", `${ALL}/entities/task/${e.T1}/documents/notes`)).body.content).not.toContain("Text");
+  });
+
+  it("a level lowered after tools/list: the listed tool answers the refusal", async () => {
+    await putRuleset("agent-s", { writeAccess: "full" });
+    const client = await connect("agent-s");
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("commit_changeset");
+    const cs = (await ok(client, "start_changeset")).id as string;
+    await putRuleset("agent-s", { writeAccess: "propose" });
+    const commit = await call(client, "commit_changeset", { changeset_id: cs });
+    expect(text(commit)).toBe(`Error executing tool commit_changeset: ${NO_COMMIT("agent-s")}`);
+  });
+
   it("an unknown ruleset keeps the normal tool set, and every call answers not found", async () => {
     const client = await connect("nope");
     const names = (await client.listTools()).tools.map((tool) => tool.name);
@@ -472,3 +500,73 @@ describe("the MCP tool set at 'propose' (V29, R13)", () => {
   });
 });
 
+describe("the MCP tool set at 'none'", () => {
+  let cs: string;
+  beforeEach(async () => {
+    // A changeset with a staged update of T1, started while the level was 'propose'.
+    await putRuleset("agent-n", { anchor: { type: "project", id: e.P1 }, writeAccess: "propose" });
+    const client = await connect("agent-n");
+    cs = (await ok(client, "start_changeset", { note: "plan" })).id as string;
+    await ok(client, "update_entity", { entity_type_key: "task", entity_id: e.T1, properties: { notes: "Staged notes" }, changeset_id: cs });
+    await putRuleset("agent-n", { writeAccess: "none" });
+  });
+
+  it("tools/list: the reads, the changeset reads and get_ruleset, 20", async () => {
+    const names = (await (await connect("agent-n")).listTools()).tools.map((tool) => tool.name);
+    expect(names.sort()).toEqual([
+      "execute_query",
+      "get_changeset",
+      "get_document",
+      "get_entity",
+      "get_neighbors",
+      "get_path",
+      "get_relation",
+      "get_ruleset",
+      "get_schema",
+      "get_staged_document",
+      "list_changesets",
+      "list_entities",
+      "list_relations",
+      "list_saved_queries",
+      "list_search_indices",
+      "run_saved_query",
+      "search",
+      "search_by_index",
+      "search_documents",
+      "search_saved_queries",
+    ]);
+  });
+
+  it("the reads and the changeset reads answer; every write, stage and commit call answers the refusal", async () => {
+    const client = await connect("agent-n");
+    expect((await ok(client, "get_ruleset")).writeAccess).toBe("none");
+    expect((await ok(client, "get_entity", { entity_type_key: "task", entity_id: e.T1 })).name).toBe("T1");
+    expect((await ok(client, "list_changesets")).map((c: Row) => c.id)).toEqual([cs]);
+    expect((await ok(client, "get_changeset", { changeset_id: cs })).writeCount).toBe(1);
+    const staged = await ok(client, "get_staged_document", {
+      changeset_id: cs,
+      entity_type_key: "task",
+      entity_id: e.T1,
+      property_key: "notes",
+    });
+    expect(staged.content).toBe("Staged notes");
+    for (const [name, args, verb] of [
+      ["create_entity", { entity_type_key: "person", properties: { name: "Ann" } }, "write directly"],
+      ["update_entity", { entity_type_key: "task", entity_id: e.T1, properties: { name: "T1x" } }, "write directly"],
+      ["write_document", { entity_type_key: "task", entity_id: e.T1, property_key: "notes", offset: 0, length: 0, content: "x" }, "write directly"],
+      ["update_entity", { entity_type_key: "task", entity_id: e.T1, properties: { name: "T1x" }, changeset_id: cs }, "start or change a changeset"],
+      ["start_changeset", {}, "start or change a changeset"],
+      ["submit_changeset", { changeset_id: cs }, "start or change a changeset"],
+      ["discard_changeset", { changeset_id: cs }, "start or change a changeset"],
+      ["commit_changeset", { changeset_id: cs }, "commit"],
+    ] as const) {
+      const result = await call(client, name, args);
+      expect(result.isError, name).toBe(true);
+      expect(text(result), name).toBe(`Error executing tool ${name}: ${ONLY_READ("agent-n", verb)}`);
+    }
+    // Nothing written, nothing staged.
+    expect((await rest("GET", `${ALL}/entities/task/${e.T1}`)).body.name).toBe("T1");
+    expect((await rest("GET", `${ALL}/entities/person`)).body.items.map((p: Row) => p.name)).not.toContain("Ann");
+    expect((await ok(client, "get_changeset", { changeset_id: cs })).writeCount).toBe(1);
+  });
+});

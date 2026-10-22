@@ -4,7 +4,9 @@
  * to every write, the plain lens passes null; every request checks lens,
  * then ruleset, reads included; `get_ruleset` and the mirror's root give
  * the ruleset through the lens; only the ruleset MCP server has
- * `get_ruleset`.
+ * `get_ruleset`. Over HTTP, a tools/list reads the ruleset once and lists
+ * its level's tools; a tools/call reads it once, and a tool the level
+ * leaves out answers the write access refusal.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -314,3 +316,42 @@ describe("the ruleset MCP server", () => {
   });
 });
 
+describe("the MCP ruleset mount over HTTP", () => {
+  const MOUNT = "/mcp/ontologies/test_ont/runtime/lenses/all/rulesets/agent-a";
+  /** One stateless JSON-RPC request to the mount. */
+  const rpc = async (method: string, params: Record<string, unknown> = {}) => {
+    const res = await app.inject({
+      method: "POST",
+      url: MOUNT,
+      headers: { accept: "application/json, text/event-stream", "content-type": "application/json" },
+      payload: { jsonrpc: "2.0", id: 1, method, params },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    return res.json().result;
+  };
+
+  it("tools/list reads the ruleset once and lists what its level allows", async () => {
+    for (const [level, count] of [["full", 34], ["propose", 31], ["none", 20]] as const) {
+      rulesets["agent-a"]!.writeAccess = level;
+      holder.store.rulesetStore.get.mockClear();
+      const { tools } = await rpc("tools/list");
+      expect(tools, level).toHaveLength(count);
+      expect(holder.store.rulesetStore.get, level).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("a tools/call reads the ruleset once; a tool its level leaves out answers the refusal", async () => {
+    rulesets["agent-a"]!.writeAccess = "none";
+    const result = await rpc("tools/call", {
+      name: "create_entity",
+      arguments: { entity_type_key: "person", properties: { name: "Ann" } },
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(
+      "Error executing tool create_entity: Ruleset 'agent-a' gives write access 'none': this " +
+        "connection cannot write directly; it can only read",
+    );
+    expect(holder.store.rulesetStore.get).toHaveBeenCalledTimes(1);
+    expect(writes.createEntity).not.toHaveBeenCalled();
+  });
+});

@@ -350,6 +350,76 @@ describe("schema lifecycle over MCP (keys, never ids)", () => {
   });
 });
 
+describe("update_property is a sparse update", () => {
+  it("keeps a default across an update that omits it, on both type kinds", async () => {
+    await call(client, "create_entity_type", { key: "person", display_name: "Person" });
+    await call(client, "create_relation_type", {
+      key: "works_for",
+      display_name: "Works for",
+      source_entity_type_key: "person",
+      target_entity_type_key: "person",
+    });
+    for (const [typeKind, typeKey] of [
+      ["entity_type", "person"],
+      ["relation_type", "works_for"],
+    ] as const) {
+      const added = json(
+        await call(client, "add_property", {
+          type_kind: typeKind,
+          type_key: typeKey,
+          key: "billable",
+          display_name: "Billable",
+          data_type: "boolean",
+          required: true,
+          default_value: "true",
+        }),
+      );
+      expect(added.defaultValue).toBe("true");
+
+      const described = json(
+        await call(client, "update_property", {
+          type_kind: typeKind,
+          type_key: typeKey,
+          property_key: "billable",
+          description: "Whether the time can be billed.",
+        }),
+      );
+      expect(described.description).toBe("Whether the time can be billed.");
+      expect(described.defaultValue).toBe("true");
+      expect(described.required).toBe(true);
+      expect(described.displayName).toBe("Billable");
+    }
+  });
+
+  it("an explicit null default_value removes the default", async () => {
+    await call(client, "create_entity_type", { key: "person", display_name: "Person" });
+    await call(client, "add_property", {
+      type_kind: "entity_type",
+      type_key: "person",
+      key: "status",
+      display_name: "Status",
+      data_type: "string",
+      default_value: "open",
+    });
+
+    const cleared = json(
+      await call(client, "update_property", {
+        type_kind: "entity_type",
+        type_key: "person",
+        property_key: "status",
+        default_value: null,
+      }),
+    );
+    expect(cleared.defaultValue).toBeNull();
+    expect(cleared.displayName).toBe("Status");
+
+    const schema = json(await call(client, "get_schema"));
+    const person = (schema.entityTypes as Record<string, unknown>[]).find((t) => t.key === "person");
+    const status = (person?.properties as Record<string, unknown>[]).find((p) => p.key === "status");
+    expect(status?.defaultValue).toBeNull();
+  });
+});
+
 describe("search settings over MCP", () => {
   it("reads and changes the keyword language set and the switches", async () => {
     expect(json(await call(client, "get_search_settings"))).toEqual({

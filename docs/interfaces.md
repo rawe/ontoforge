@@ -304,11 +304,11 @@ list the owner's properties.
 |---|---|---|---|
 | POST | `/entity-types/{entityTypeId}/properties` | Define a property on an entity type | `cascade` |
 | GET | `/entity-types/{entityTypeId}/properties` | List an entity type's properties | — |
-| PUT | `/entity-types/{entityTypeId}/properties/{propertyId}` | Update a property; key and data type are immutable | — |
+| PUT | `/entity-types/{entityTypeId}/properties/{propertyId}` | Update a property (`defaultValue`; null clears it); key and data type are immutable | — |
 | DELETE | `/entity-types/{entityTypeId}/properties/{propertyId}` | Remove a property definition; refused for the type's name property | `cascade` |
 | POST | `/relation-types/{relationTypeId}/properties` | Define a property on a relation type | `cascade` |
 | GET | `/relation-types/{relationTypeId}/properties` | List a relation type's properties | — |
-| PUT | `/relation-types/{relationTypeId}/properties/{propertyId}` | Update a property; key and data type are immutable | — |
+| PUT | `/relation-types/{relationTypeId}/properties/{propertyId}` | Update a property (`defaultValue`; null clears it); key and data type are immutable | — |
 | DELETE | `/relation-types/{relationTypeId}/properties/{propertyId}` | Remove a property definition | `cascade` |
 
 `cascade` is the explicit second consent for a change that would invalidate a lens or
@@ -975,7 +975,7 @@ otherwise, reads included.
 | `update_relation_type` | Change display name, description or parent end (`parent`; null clears it); endpoints are immutable |
 | `delete_relation_type` | Remove a relation type and its properties |
 | `add_property` | Define a property on an entity type or a relation type |
-| `update_property` | Change a property's metadata; key and data type are immutable |
+| `update_property` | Change a property's metadata (`default_value`; null clears it); key and data type are immutable |
 | `delete_property` | Remove a property definition; refused for an entity type's name property |
 | `validate_schema` | Check the ontology's schema and every lens |
 | `export_schema` | Produce a transfer payload |

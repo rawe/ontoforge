@@ -535,14 +535,15 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     {
       description:
         "Update a property's metadata. Key and data type are immutable after creation. " +
-        "type_kind must be 'entity_type' or 'relation_type'.",
+        "type_kind must be 'entity_type' or 'relation_type'. " +
+        "Omitted arguments stay unchanged; pass default_value as null to remove a default.",
       inputSchema: {
         type_kind: z.string(),
         type_key: z.string(),
         property_key: z.string(),
         display_name: z.string().optional(),
         required: z.boolean().optional(),
-        default_value: z.string().optional(),
+        default_value: z.string().nullable().optional(),
         description: z.string().optional(),
       },
     },
@@ -552,19 +553,19 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       property_key: string;
       display_name?: string | undefined;
       required?: boolean | undefined;
-      default_value?: string | undefined;
+      default_value?: string | null | undefined;
       description?: string | undefined;
     }) => {
       const store = await getModelingStore(ontologyKey);
       const [ownerId, typeKind] = await resolveOwner(store, args.type_kind, args.type_key);
       const prop = await resolveProperty(store, ownerId, typeKind, args.property_key);
-      // Known wart: the tool argument shape cannot distinguish an omitted
-      // default_value from an explicit null, so both clear the default.
+      // Sparse update: an omitted argument is `undefined` and stays
+      // unchanged; only an explicit null default_value clears the default.
       const body = PropertyDefinitionUpdate.parse({
-        displayName: args.display_name ?? null,
-        description: args.description ?? null,
-        required: args.required ?? null,
-        defaultValue: args.default_value ?? null,
+        displayName: args.display_name,
+        description: args.description,
+        required: args.required,
+        defaultValue: args.default_value,
       });
       const result = await service.updateProperty(
         ownerId,

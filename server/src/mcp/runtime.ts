@@ -6,8 +6,8 @@
  * (`/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey`, `mount.ts`)
  * and are fixed into the server factory, so a tool can never name an
  * ontology or a lens, and can never reach across two
- * (`docs/decisions.md#interfaces`). The anchored mount (`…/anchors/:anchorKey`)
- * binds an anchor the same way.
+ * (`docs/decisions.md#interfaces`). The ruleset mount (`…/rulesets/:rulesetKey`)
+ * binds a ruleset the same way.
  *
  * Tools call the runtime services directly, take snake_case parameters,
  * and CLAMP `limit`/`offset` into range where REST rejects out-of-range
@@ -20,10 +20,12 @@
  * the same functions as REST); nine tools start, list, read, unstage,
  * submit, unsubmit, commit and discard a changeset and read its staged
  * document text. None is grantable to
- * an agent (`toolNames.ts`). On a staged-only anchor (V9, V29) the six
- * write tools require `changeset_id`, and `commit_changeset`,
- * `edit_document` and `write_document` are not registered (R13);
- * elsewhere those two refuse a `changeset_id` rather than drop it.
+ * an agent (`toolNames.ts`). A ruleset mount lists the tools its write
+ * access allows (`writeAccess.ts`): at 'propose' the six write tools
+ * require `changeset_id`, and `commit_changeset`, `edit_document` and
+ * `write_document` are not listed (R13); at 'none' only the reads and the
+ * changeset reads are. `edit_document` and `write_document` refuse a
+ * `changeset_id` rather than drop it.
  */
 
 import {
@@ -46,7 +48,14 @@ import { getRulesetView, readMountRuleset } from "../runtime/rulesets.js";
 import { filterRules } from "../runtime/readHelpers.js";
 import * as changesets from "../runtime/changesets.js";
 import * as service from "../runtime/service.js";
-import { checkOperation, toolOperation, type Operation } from "../runtime/writeAccess.js";
+import {
+  allows,
+  checkOperation,
+  listsTool,
+  toolOperation,
+  type Binding,
+  type Operation,
+} from "../runtime/writeAccess.js";
 import { formatToolError } from "./modeling.js";
 
 interface ToolResult {
@@ -108,8 +117,8 @@ function filterText(filters: Record<string, unknown> | undefined): Record<string
 
 /** The staged mode of a write tool with `changeset_id` (V4, V29), per
  * kind of write: what staging checks now and what only the commit does.
- * Staged-only, `changeset_id` is required. */
-function stagedMode(kind: "create" | "update" | "delete", anchored: boolean, stagedOnly: boolean): string {
+ * On a level that cannot write directly, `changeset_id` is required. */
+function stagedMode(kind: "create" | "update" | "delete", binding: Binding): string {
   const checks = {
     create:
       " A staged create's id is final, and later writes of the same changeset may name it. " +
@@ -126,14 +135,16 @@ function stagedMode(kind: "create" | "update" | "delete", anchored: boolean, sta
       "commit, and a target already gone by then is skipped.",
   }[kind];
   return (
-    (stagedOnly
-      ? " This connection only stages: 'changeset_id' is required, and the write is staged into " +
-        "that draft changeset; nothing changes now, "
-      : " 'changeset_id' stages the write into that draft changeset instead: nothing changes now, ") +
+    (allows(binding.writeAccess, "write")
+      ? " 'changeset_id' stages the write into that draft changeset instead: nothing changes now, "
+      : ` This connection has write access '${binding.writeAccess}': it only stages, so ` +
+        "'changeset_id' is required and the write is staged into that draft changeset; nothing " +
+        "changes now, ") +
     "the answer is {seq, id}, and reads never see staged data." +
     checks +
-    (anchored
-      ? " The hold to the anchored entity is checked at commit; a dangling anchor refuses staging."
+    (binding.rulesetKey !== null
+      ? " If this connection's ruleset sets an anchor, the commit checks that the write stays in " +
+        "the anchor's subtree, and staging is refused while the anchor entity no longer exists."
       : "")
   );
 }
@@ -150,7 +161,7 @@ function refuseChangesetId(tool: string, args: object): void {
   }
 }
 
-/** Open the store of one tool call: on an anchored mount, after the
+/** Open the store of one tool call: on a ruleset mount, after the
  * not-found checks and the call's operation against write access. */
 type Open = () => Promise<RuntimeStore>;
 
@@ -160,30 +171,38 @@ type ToolFactory = <Args>(
   fn: (args: Args, open: Open) => Promise<ToolResult>,
 ) => (args: Args) => Promise<ToolResult>;
 
+/** Register a tool, listed only when the binding's level allows it. */
+type Register = McpServer["registerTool"];
+
+/** The binding of the plain lens: no ruleset, full write access. */
+const PLAIN_LENS: Binding = { rulesetKey: null, writeAccess: "full" };
+
 /**
  * Build the runtime MCP server bound to one ontology and one lens, and on
- * the anchored mount to one anchor. Anchored, every tool first checks
- * ontology, lens and anchor, in that order, reading the anchor fresh,
- * then its operation against the ruleset's write access
- * (`writeAccess.ts`, one read per call); the write tools pass the anchor
- * key to the service; and `get_anchor` is added. Changesets started here
- * carry the anchor, and only the anchor's are reachable, as on the
- * anchored REST mirror. A tool with no row in the operation table fails
- * the build.
+ * the ruleset mount to one ruleset. The tool list follows the binding's
+ * write access (`listsTool`). On a ruleset mount every tool call first
+ * checks ontology, lens and ruleset, in that order, reading the ruleset
+ * fresh, then its operation against the ruleset's write access
+ * (`writeAccess.ts`, one read per call), so a call its level does not
+ * allow is refused whatever list the client holds; the write tools pass
+ * the ruleset key to the service; and `get_ruleset`
+ * is added. Changesets started here carry the ruleset key, and only the
+ * ruleset's are reachable, as on the ruleset REST mirror. A tool with no
+ * row in the operation table fails the build.
  */
 export function createRuntimeMcpServer(
   ontologyKey: string,
   lensKey: string,
-  anchorKey: string | null = null,
-  stagedOnly = false,
+  binding: Binding = PLAIN_LENS,
 ): McpServer {
   const server = new McpServer({ name: "OntoForge Runtime", version: "0.1.0" });
+  const { rulesetKey } = binding;
 
   const openStore = async (operation: Operation): Promise<RuntimeStore> => {
     const store = await getRuntimeStore(ontologyKey);
-    if (anchorKey !== null) {
-      const record = await readMountRuleset(lensKey, anchorKey, store);
-      checkOperation({ rulesetKey: anchorKey, writeAccess: record.writeAccess }, operation);
+    if (rulesetKey !== null) {
+      const record = await readMountRuleset(lensKey, rulesetKey, store);
+      checkOperation({ rulesetKey, writeAccess: record.writeAccess }, operation);
     }
     return store;
   };
@@ -191,39 +210,52 @@ export function createRuntimeMcpServer(
     toolOperation(name, {}); // a tool without a row throws here
     return wrap(name, (args) => fn(args, () => openStore(toolOperation(name, args))));
   };
+  // Every tool is built, so a missing row fails at any level; the list
+  // keeps the ones the level allows.
+  const lists = (name: string): boolean => listsTool(binding.writeAccess, name);
+  const register: Register = (name, config, cb) => {
+    const registered = server.registerTool(name, config, cb);
+    if (!lists(name)) registered.remove();
+    return registered;
+  };
 
-  /** Stage one write into a changeset of this lens (and anchor). */
+  /** Stage one write into a changeset of this lens (and ruleset). */
   const stageInto = async (open: Open, changesetId: string, write: changesets.StagedWrite): Promise<ToolResult> =>
-    jsonResult(await changesets.stage(lensKey, anchorKey, changesetId, write, await open()));
-  const anchored = anchorKey !== null;
-  const staged = (kind: "create" | "update" | "delete"): string => stagedMode(kind, anchored, stagedOnly);
-  // Staged-only, every write names its changeset (V29).
-  const changesetIdParam = stagedOnly ? z.string() : z.string().optional();
+    jsonResult(await changesets.stage(lensKey, rulesetKey, changesetId, write, await open()));
+  const staged = (kind: "create" | "update" | "delete"): string => stagedMode(kind, binding);
+  // A level that cannot write directly only stages: every write names its changeset (V29).
+  const changesetIdParam = allows(binding.writeAccess, "write") ? z.string().optional() : z.string();
 
-  if (anchorKey !== null) {
-    server.registerTool(
-      "get_anchor",
+  if (rulesetKey !== null) {
+    register(
+      "get_ruleset",
       {
         description:
-          "Read where this connection is anchored. Returns key, state, stagedOnly, visible, " +
-          "entity and path. state 'anchored': writes to the anchored entity's hierarchy are held to " +
-          "that entity and its descendants; other types are written as usual. " +
-          "'unanchored': no restriction. 'dangling': the entity was deleted, and every " +
-          "write is refused until a person re-anchors. visible false: this lens does not " +
-          "show the entity, and every write is refused. stagedOnly true: this connection only " +
-          "stages, whatever the state: every write needs 'changeset_id', and it cannot commit; " +
-          "submit the changeset so a person can review and commit it. path lists the entity's visible " +
-          "ancestors, root first, ending with the entity. Read-only: a person sets the " +
-          "anchor and may change it at any time, so read it again after a refusal.",
+          "Read the ruleset of this connection: what it may write. Call this first; read it again " +
+          "after a refusal, because a person sets the ruleset and may change it at any time. " +
+          "Returns key, writeAccess and anchor. writeAccess 'full': every write this lens allows, " +
+          "directly or through a changeset. 'propose': writes only into a changeset, so every " +
+          "write needs 'changeset_id'; it can submit the changeset for review but not commit it, " +
+          "a person commits it. 'none': read only, no writes; it can read changesets but not " +
+          "start, stage into or submit one. The tools this connection lists follow writeAccess. " +
+          "anchor null: writes are not limited to a subtree. Otherwise anchor is {type, id, name, " +
+          "state, visible, path}: writes to the entity types of the anchor's hierarchy (the types " +
+          "joined to it by parent relations) must stay in its subtree, the anchor entity and its " +
+          "descendants; other types are written as usual. state 'found': the anchor entity " +
+          "exists. state 'deleted': the anchor entity no longer exists, so every write is " +
+          "refused, staged or not, until a person sets a new anchor. visible false: this lens " +
+          "does not show the anchor entity, so every write is refused. When the anchor entity is " +
+          "deleted or not visible, type, id and name are null and path is empty. path lists the " +
+          "anchor entity's visible ancestors, root first, ending with the entity. Read-only.",
         inputSchema: {},
       },
-      tool("get_anchor", async () =>
-        jsonResult(await getRulesetView(lensKey, anchorKey, await getRuntimeStore(ontologyKey))),
+      tool("get_ruleset", async () =>
+        jsonResult(await getRulesetView(lensKey, rulesetKey, await getRuntimeStore(ontologyKey))),
       ),
     );
   }
 
-  server.registerTool(
+  register(
     "get_schema",
     {
       description:
@@ -231,7 +263,8 @@ export function createRuntimeMcpServer(
         "relation types, and their property definitions including data types and " +
         "required flags. A relation type's `parent` names the end (`source` or " +
         "`target`) whose entity is the parent of the entity at the other end; null " +
-        "means an ordinary relation. Call this first.",
+        "means an ordinary relation." +
+        (rulesetKey === null ? " Call this first." : " Call this after get_ruleset."),
       inputSchema: {},
     },
     tool("get_schema", async (_args, open) => {
@@ -240,7 +273,7 @@ export function createRuntimeMcpServer(
     }),
   );
 
-  server.registerTool(
+  register(
     "create_entity",
     {
       description:
@@ -253,13 +286,13 @@ export function createRuntimeMcpServer(
         "'properties' are the relation's own, held to the same rules as entity " +
         "properties. Its faults are reported together with the entity's, and the " +
         "entity and its parent relation are stored together or not at all." +
-        (anchorKey === null
+        (rulesetKey === null
           ? ""
-          : " On this anchored connection, an entity of a type in the anchored entity's " +
-            "hierarchy must be created with 'parent_relation', and its parent must be the " +
-            "anchored entity or one of its descendants; a hierarchy type this lens shows no " +
-            "parent relation into cannot be created here. Entities of other types are " +
-            "created as usual, 'parent_relation' optional.") +
+          : " If this connection's ruleset sets an anchor, an entity of a type in the anchor's " +
+            "hierarchy must be created with 'parent_relation', and its parent must be in the " +
+            "anchor's subtree: the anchor entity or one of its descendants. A hierarchy type this " +
+            "lens shows no parent relation into cannot be created here. Entities of other types " +
+            "are created as usual, 'parent_relation' optional.") +
         staged("create") +
         " With 'parent_relation' and 'changeset_id', two writes are staged, the entity's and then " +
         "its parent relation's, and the answer is {seq, id, relation: {seq, id}}; the relation is a " +
@@ -306,14 +339,14 @@ export function createRuntimeMcpServer(
           args.properties,
           await open(),
           parentRelation,
-          anchorKey,
+          rulesetKey,
         );
         return jsonResult(result);
       },
     ),
   );
 
-  server.registerTool(
+  register(
     "list_entities",
     {
       description:
@@ -372,7 +405,7 @@ export function createRuntimeMcpServer(
     ),
   );
 
-  server.registerTool(
+  register(
     "get_entity",
     {
       description:
@@ -406,7 +439,7 @@ export function createRuntimeMcpServer(
     ),
   );
 
-  server.registerTool(
+  register(
     "get_path",
     {
       description:
@@ -431,7 +464,7 @@ export function createRuntimeMcpServer(
     }),
   );
 
-  server.registerTool(
+  register(
     "get_document",
     {
       description:
@@ -475,17 +508,17 @@ export function createRuntimeMcpServer(
     ),
   );
 
-  server.registerTool(
+  register(
     "update_entity",
     {
       description:
         "Partial update — only provided properties change. Set a property to null " +
         "to remove it (fails for required properties). Document properties are " +
-        (stagedOnly
-          ? "replaced whole: send the complete new text."
-          : "replaced whole here — prefer edit_document / write_document for " +
+        (lists("edit_document")
+          ? "replaced whole here — prefer edit_document / write_document for " +
             "partial edits inside a document; in a changeset, where those cannot stage, replace " +
-            "it whole here.") +
+            "it whole here."
+          : "replaced whole: send the complete new text.") +
         staged("update"),
       inputSchema: {
         entity_type_key: z.string(),
@@ -516,125 +549,123 @@ export function createRuntimeMcpServer(
           args.entity_id,
           args.properties,
           await open(),
-          anchorKey,
+          rulesetKey,
         );
         return jsonResult(result);
       },
     ),
   );
 
-  // They cannot stage (V2): not offered where every write must (R13).
-  if (!stagedOnly) {
-    server.registerTool(
+  // They cannot stage (V2): not listed where every write must (R13).
+  register(
+    "edit_document",
+    {
+      description:
+        "Edit a document property by exact string replacement — the preferred " +
+        "way to change part of a document. old_string must match the current " +
+        "content exactly and uniquely; if it matches more than once, provide a " +
+        "longer string with surrounding context, or set replace_all to true to " +
+        "replace every occurrence. Returns the new totalLength, the edited " +
+        "range, and ~200 chars of context around the edit for verification. It always " +
+        "writes immediately and cannot be staged into a changeset: a 'changeset_id' is " +
+        "refused and nothing is written; to stage a document change, pass the whole new " +
+        "value to update_entity with 'changeset_id'.",
+      inputSchema: z.looseObject({
+        entity_type_key: z.string(),
+        entity_id: z.string(),
+        property_key: z.string(),
+        old_string: z.string(),
+        new_string: z.string(),
+        replace_all: z.boolean().optional(),
+      }),
+    },
+    tool(
       "edit_document",
-      {
-        description:
-          "Edit a document property by exact string replacement — the preferred " +
-          "way to change part of a document. old_string must match the current " +
-          "content exactly and uniquely; if it matches more than once, provide a " +
-          "longer string with surrounding context, or set replace_all to true to " +
-          "replace every occurrence. Returns the new totalLength, the edited " +
-          "range, and ~200 chars of context around the edit for verification. It always " +
-          "writes immediately and cannot be staged into a changeset: a 'changeset_id' is " +
-          "refused and nothing is written; to stage a document change, pass the whole new " +
-          "value to update_entity with 'changeset_id'.",
-        inputSchema: z.looseObject({
-          entity_type_key: z.string(),
-          entity_id: z.string(),
-          property_key: z.string(),
-          old_string: z.string(),
-          new_string: z.string(),
-          replace_all: z.boolean().optional(),
-        }),
+      async (args: {
+        entity_type_key: string;
+        entity_id: string;
+        property_key: string;
+        old_string: string;
+        new_string: string;
+        replace_all?: boolean | undefined;
+      }, open) => {
+        refuseChangesetId("edit_document", args);
+        const result = await service.editDocument(
+          lensKey,
+          args.entity_type_key,
+          args.entity_id,
+          args.property_key,
+          {
+            op: "str_replace",
+            oldString: args.old_string,
+            newString: args.new_string,
+            replaceAll: args.replace_all ?? false,
+          },
+          await open(),
+          rulesetKey,
+        );
+        return jsonResult(result);
       },
-      tool(
-        "edit_document",
-        async (args: {
-          entity_type_key: string;
-          entity_id: string;
-          property_key: string;
-          old_string: string;
-          new_string: string;
-          replace_all?: boolean | undefined;
-        }, open) => {
-          refuseChangesetId("edit_document", args);
-          const result = await service.editDocument(
-            lensKey,
-            args.entity_type_key,
-            args.entity_id,
-            args.property_key,
-            {
-              op: "str_replace",
-              oldString: args.old_string,
-              newString: args.new_string,
-              replaceAll: args.replace_all ?? false,
-            },
-            await open(),
-            anchorKey,
-          );
-          return jsonResult(result);
-        },
-      ),
-    );
+    ),
+  );
 
-    server.registerTool(
+  register(
+    "write_document",
+    {
+      description:
+        "Overwrite a character range of a document property: replaces " +
+        "[offset, offset+length) with content. Insert with length=0; append " +
+        "with offset=totalLength and length=0. Offsets pair with get_document " +
+        "reads and the charOffset/charLength of search matches. Pass " +
+        "'expect' (the text currently in the range) to fail safely if the " +
+        "document changed since it was read. Returns the new totalLength, the " +
+        "edited range, and ~200 chars of context around the edit. It always writes " +
+        "immediately and cannot be staged into a changeset: a 'changeset_id' is refused and " +
+        "nothing is written; to stage a document change, pass the whole new value to " +
+        "update_entity with 'changeset_id'.",
+      inputSchema: z.looseObject({
+        entity_type_key: z.string(),
+        entity_id: z.string(),
+        property_key: z.string(),
+        offset: z.number(),
+        length: z.number(),
+        content: z.string(),
+        expect: z.string().optional(),
+      }),
+    },
+    tool(
       "write_document",
-      {
-        description:
-          "Overwrite a character range of a document property: replaces " +
-          "[offset, offset+length) with content. Insert with length=0; append " +
-          "with offset=totalLength and length=0. Offsets pair with get_document " +
-          "reads and the charOffset/charLength of search matches. Pass " +
-          "'expect' (the text currently in the range) to fail safely if the " +
-          "document changed since it was read. Returns the new totalLength, the " +
-          "edited range, and ~200 chars of context around the edit. It always writes " +
-          "immediately and cannot be staged into a changeset: a 'changeset_id' is refused and " +
-          "nothing is written; to stage a document change, pass the whole new value to " +
-          "update_entity with 'changeset_id'.",
-        inputSchema: z.looseObject({
-          entity_type_key: z.string(),
-          entity_id: z.string(),
-          property_key: z.string(),
-          offset: z.number(),
-          length: z.number(),
-          content: z.string(),
-          expect: z.string().optional(),
-        }),
+      async (args: {
+        entity_type_key: string;
+        entity_id: string;
+        property_key: string;
+        offset: number;
+        length: number;
+        content: string;
+        expect?: string | undefined;
+      }, open) => {
+        refuseChangesetId("write_document", args);
+        const result = await service.editDocument(
+          lensKey,
+          args.entity_type_key,
+          args.entity_id,
+          args.property_key,
+          {
+            op: "replace_range",
+            offset: args.offset,
+            length: args.length,
+            content: args.content,
+            expect: args.expect ?? null,
+          },
+          await open(),
+          rulesetKey,
+        );
+        return jsonResult(result);
       },
-      tool(
-        "write_document",
-        async (args: {
-          entity_type_key: string;
-          entity_id: string;
-          property_key: string;
-          offset: number;
-          length: number;
-          content: string;
-          expect?: string | undefined;
-        }, open) => {
-          refuseChangesetId("write_document", args);
-          const result = await service.editDocument(
-            lensKey,
-            args.entity_type_key,
-            args.entity_id,
-            args.property_key,
-            {
-              op: "replace_range",
-              offset: args.offset,
-              length: args.length,
-              content: args.content,
-              expect: args.expect ?? null,
-            },
-            await open(),
-            anchorKey,
-          );
-          return jsonResult(result);
-        },
-      ),
-    );
-  }
+    ),
+  );
 
-  server.registerTool(
+  register(
     "delete_entity",
     {
       description:
@@ -662,7 +693,7 @@ export function createRuntimeMcpServer(
         args.entity_type_key,
         args.entity_id,
         await open(),
-        anchorKey,
+        rulesetKey,
       );
       // This tool returns a message OBJECT, unlike the modeling delete
       // tools, which return bare strings. Wire contract — do not unify.
@@ -670,7 +701,7 @@ export function createRuntimeMcpServer(
     }),
   );
 
-  server.registerTool(
+  register(
     "create_relation",
     {
       description:
@@ -714,14 +745,14 @@ export function createRuntimeMcpServer(
           args.to_entity_id,
           args.properties ?? {},
           await open(),
-          anchorKey,
+          rulesetKey,
         );
         return jsonResult(result);
       },
     ),
   );
 
-  server.registerTool(
+  register(
     "list_relations",
     {
       description:
@@ -778,7 +809,7 @@ export function createRuntimeMcpServer(
     ),
   );
 
-  server.registerTool(
+  register(
     "get_relation",
     {
       description: "Retrieve a specific relation by its _id.",
@@ -798,7 +829,7 @@ export function createRuntimeMcpServer(
     }),
   );
 
-  server.registerTool(
+  register(
     "update_relation",
     {
       description:
@@ -834,14 +865,14 @@ export function createRuntimeMcpServer(
           args.relation_id,
           args.properties,
           await open(),
-          anchorKey,
+          rulesetKey,
         );
         return jsonResult(result);
       },
     ),
   );
 
-  server.registerTool(
+  register(
     "delete_relation",
     {
       description: "Delete a relation. Connected entities are unaffected." + staged("delete"),
@@ -864,13 +895,13 @@ export function createRuntimeMcpServer(
         args.relation_type_key,
         args.relation_id,
         await open(),
-        anchorKey,
+        rulesetKey,
       );
       return jsonResult({ message: `Relation '${args.relation_id}' deleted successfully.` });
     }),
   );
 
-  server.registerTool(
+  register(
     "get_neighbors",
     {
       description:
@@ -917,7 +948,7 @@ export function createRuntimeMcpServer(
     ),
   );
 
-  server.registerTool(
+  register(
     "execute_query",
     {
       description:
@@ -945,7 +976,7 @@ export function createRuntimeMcpServer(
     }),
   );
 
-  server.registerTool(
+  register(
     "list_search_indices",
     {
       description:
@@ -965,7 +996,7 @@ export function createRuntimeMcpServer(
 
   for (const document of [false, true]) {
     const name = document ? "search_documents" : "search";
-    server.registerTool(
+    register(
       name,
       {
         description:
@@ -1010,7 +1041,7 @@ export function createRuntimeMcpServer(
     );
   }
 
-  server.registerTool(
+  register(
     "search_by_index",
     {
       description:
@@ -1056,7 +1087,7 @@ export function createRuntimeMcpServer(
     }),
   );
 
-  server.registerTool(
+  register(
     "list_saved_queries",
     {
       description:
@@ -1071,7 +1102,7 @@ export function createRuntimeMcpServer(
     }),
   );
 
-  server.registerTool(
+  register(
     "run_saved_query",
     {
       description:
@@ -1097,7 +1128,7 @@ export function createRuntimeMcpServer(
     ),
   );
 
-  server.registerTool(
+  register(
     "search_saved_queries",
     {
       description:
@@ -1121,20 +1152,20 @@ export function createRuntimeMcpServer(
     }),
   );
 
-  registerChangesetTools(server, lensKey, anchorKey, stagedOnly, tool);
+  registerChangesetTools(register, lists, lensKey, binding, tool);
 
   return server;
 }
 
 /** Who reaches a changeset through this mount (V8 A, V17, R4). */
-function reach(anchored: boolean): string {
-  return anchored
-    ? " A changeset_id not started through this anchor, or committed, discarded or expired, is not found."
+function reach(rulesetKey: string | null): string {
+  return rulesetKey !== null
+    ? " A changeset_id not started through this ruleset, or committed, discarded or expired, is not found."
     : " A changeset_id this lens does not hold (started through another lens, committed, discarded or expired) is not found.";
 }
 
 /** The fields of a changeset in every answer. */
-const CHANGESET_FIELDS = "id, state, version, note, anchor, writeCount, createdAt, lastChangeAt and submittedAt";
+const CHANGESET_FIELDS = "id, state, version, note, ruleset, writeCount, createdAt, lastChangeAt and submittedAt";
 
 /** The checks without a lock that submit and commit run first (V19). */
 const LOCK_FREE_CHECKS =
@@ -1144,19 +1175,19 @@ const LOCK_FREE_CHECKS =
 
 /**
  * The nine changeset tools (V33): the same service functions as the REST
- * routes, through this mount's lens and anchor. Staged-only, no
- * `commit_changeset` (V9).
+ * routes, through this mount's lens and ruleset, listed as the level
+ * allows (`lists`).
  */
 function registerChangesetTools(
-  server: McpServer,
+  register: Register,
+  lists: (name: string) => boolean,
   lensKey: string,
-  anchorKey: string | null,
-  stagedOnly: boolean,
+  binding: Binding,
   tool: ToolFactory,
 ): void {
-  const anchored = anchorKey !== null;
+  const { rulesetKey } = binding;
 
-  server.registerTool(
+  register(
     "start_changeset",
     {
       description:
@@ -1168,27 +1199,27 @@ function registerChangesetTools(
         "staged data. A changeset holds at most 10,000 writes, and at most " +
         `${settings.CHANGESET_MAX_BYTES} bytes of them as JSON, document text included. A draft ` +
         "changeset left unchanged for 7 days expires and is deleted." +
-        (anchored
-          ? " It carries this connection's anchor: it is reached only through this anchor, or " +
-            "through the lens without an anchor, and its commit holds its writes to the " +
-            "anchored entity and its descendants."
-          : " Only connections to this lens without an anchor reach it."),
+        (rulesetKey !== null
+          ? " It carries this connection's ruleset: it is reached only through this ruleset, or " +
+            "through the lens without a ruleset, and if the ruleset sets an anchor, its commit " +
+            "keeps every write in the anchor's subtree."
+          : " Only connections to this lens without a ruleset reach it."),
       inputSchema: { note: z.string().optional() },
     },
     tool("start_changeset", async (args: { note?: string | undefined }, open) =>
-      jsonResult(await changesets.startChangeset(lensKey, anchorKey, args.note, await open())),
+      jsonResult(await changesets.startChangeset(lensKey, rulesetKey, args.note, await open())),
     ),
   );
 
-  server.registerTool(
+  register(
     "list_changesets",
     {
       description:
         "List the changesets of this lens" +
-        (anchored ? " started through this anchor" : ", those started through an anchor included") +
+        (rulesetKey !== null ? " started through this ruleset" : ", those started through a ruleset included") +
         ", submitted first, then by last change, newest first. Each has id, state ('draft': open " +
-        "for staging; 'submitted': frozen and handed over for review), version, note, anchor " +
-        "(the anchor key it was started through, or null), writeCount, operations (staged " +
+        "for staging; 'submitted': frozen and handed over for review), version, note, ruleset " +
+        "(the key of the ruleset it was started through, or null), writeCount, operations (staged " +
         "writes per operation), types (the type keys its writes name that this lens shows), " +
         "notVisible (how many type keys its writes name that this lens no longer shows), " +
         "createdAt, lastChangeAt and submittedAt. A changeset leaves the list when it is " +
@@ -1198,11 +1229,11 @@ function registerChangesetTools(
       inputSchema: {},
     },
     tool("list_changesets", async (_args, open) =>
-      jsonResult(await changesets.listChangesets(lensKey, anchorKey, await open())),
+      jsonResult(await changesets.listChangesets(lensKey, rulesetKey, await open())),
     ),
   );
 
-  server.registerTool(
+  register(
     "get_changeset",
     {
       description:
@@ -1223,8 +1254,8 @@ function registerChangesetTools(
         "staged text. Everything is shown through this lens as it is now: what it hides is " +
         "left out, and a write of a type it no longer shows keeps only seq, operation, " +
         "createdAt and markers." +
-        (stagedOnly ? "" : " To commit exactly what you read, pass version as expected_version to commit_changeset.") +
-        reach(anchored),
+        (lists("commit_changeset") ? " To commit exactly what you read, pass version as expected_version to commit_changeset." : "") +
+        reach(rulesetKey),
       inputSchema: {
         changeset_id: z.string(),
         offset: z.number().optional(),
@@ -1237,7 +1268,7 @@ function registerChangesetTools(
         jsonResult(
           await changesets.getChangeset(
             lensKey,
-            anchorKey,
+            rulesetKey,
             args.changeset_id,
             Math.max(0, Math.trunc(args.offset ?? 0)),
             clamp(Math.trunc(args.limit ?? 100), 1, 500),
@@ -1247,7 +1278,7 @@ function registerChangesetTools(
     ),
   );
 
-  server.registerTool(
+  register(
     "get_staged_document",
     {
       description:
@@ -1260,7 +1291,7 @@ function registerChangesetTools(
         "offset, length (of content) and totalLength. Not found when no staged write of this " +
         "changeset sets that property, when a later staged write deletes the entity, or when " +
         "this lens does not show the entity type or the property." +
-        reach(anchored),
+        reach(rulesetKey),
       inputSchema: {
         changeset_id: z.string(),
         entity_type_key: z.string(),
@@ -1283,7 +1314,7 @@ function registerChangesetTools(
         jsonResult(
           await changesets.getStagedDocument(
             lensKey,
-            anchorKey,
+            rulesetKey,
             args.changeset_id,
             args.entity_type_key,
             args.entity_id,
@@ -1296,7 +1327,7 @@ function registerChangesetTools(
     ),
   );
 
-  server.registerTool(
+  register(
     "unstage",
     {
       description:
@@ -1306,16 +1337,16 @@ function registerChangesetTools(
         "create is staged again. A staged write cannot be edited: to change one, a drifted " +
         "update included, unstage it and stage it again. A submitted changeset refuses it. A " +
         "seq the changeset does not hold is not found." +
-        reach(anchored),
+        reach(rulesetKey),
       inputSchema: { changeset_id: z.string(), seq: z.number().int() },
     },
     tool("unstage", async (args: { changeset_id: string; seq: number }, open) => {
-      await changesets.unstage(lensKey, anchorKey, args.changeset_id, args.seq, await open());
+      await changesets.unstage(lensKey, rulesetKey, args.changeset_id, args.seq, await open());
       return jsonResult({ message: `Staged write ${args.seq} removed from changeset '${args.changeset_id}'.` });
     }),
   );
 
-  server.registerTool(
+  register(
     "submit_changeset",
     {
       description:
@@ -1326,101 +1357,99 @@ function registerChangesetTools(
         LOCK_FREE_CHECKS +
         ". Any fault refuses the submit, naming its violations (total, then the first 100, " +
         "each with seq, kind and message), and the changeset stays a draft. The hierarchy rules" +
-        (anchored ? " and the hold to the anchored entity" : "") +
+        (rulesetKey !== null ? " and the anchor's subtree" : "") +
         " are checked only at commit. Also refused when the changeset is already submitted, " +
-        "when it changed during the submit, or when its anchor is dangling or at an entity " +
-        `this lens hides. Returns the changeset: ${CHANGESET_FIELDS}; state is 'submitted'.` +
-        (stagedOnly
-          ? " This connection cannot commit: submitting hands the changeset to a person, who " +
-            "commits it or sends it back."
-          : "") +
-        reach(anchored),
+        "when it changed during the submit, or when its ruleset's anchor entity no longer exists " +
+        `or this lens does not show it. Returns the changeset: ${CHANGESET_FIELDS}; state is 'submitted'.` +
+        (lists("commit_changeset")
+          ? ""
+          : ` This connection has write access '${binding.writeAccess}' and cannot commit: submitting hands the ` +
+            "changeset to a person, who commits it or sends it back.") +
+        reach(rulesetKey),
       inputSchema: { changeset_id: z.string(), note: z.string().optional() },
     },
     tool("submit_changeset", async (args: { changeset_id: string; note?: string | undefined }, open) =>
       jsonResult(
-        await changesets.submitChangeset(lensKey, anchorKey, args.changeset_id, args.note, await open()),
+        await changesets.submitChangeset(lensKey, rulesetKey, args.changeset_id, args.note, await open()),
       ),
     ),
   );
 
-  server.registerTool(
+  register(
     "unsubmit_changeset",
     {
       description:
         "Send a submitted changeset back: it is a draft again with its writes kept, so it can be " +
-        (stagedOnly
-          ? "staged into, unstaged, discarded or submitted again; its version goes up. "
-          : "staged into, unstaged, discarded, submitted or committed again; its version goes up. ") +
+        (lists("commit_changeset")
+          ? "staged into, unstaged, discarded, submitted or committed again; its version goes up. "
+          : "staged into, unstaged, discarded or submitted again; its version goes up. ") +
         "note: required, not blank, at most 1,000 characters; it replaces the stored note, so " +
         "say what should change. A draft changeset is refused." +
-        (anchored ? " It works while the anchor is dangling." : "") +
+        (rulesetKey !== null ? " It works while the ruleset's anchor entity no longer exists." : "") +
         ` Returns the changeset: ${CHANGESET_FIELDS}; state is 'draft'.` +
-        reach(anchored),
+        reach(rulesetKey),
       inputSchema: { changeset_id: z.string(), note: z.string() },
     },
     tool("unsubmit_changeset", async (args: { changeset_id: string; note: string }, open) =>
       jsonResult(
-        await changesets.unsubmitChangeset(lensKey, anchorKey, args.changeset_id, args.note, await open()),
+        await changesets.unsubmitChangeset(lensKey, rulesetKey, args.changeset_id, args.note, await open()),
       ),
     ),
   );
 
-  if (!stagedOnly) {
-    server.registerTool(
-      "commit_changeset",
-      {
-        description:
-          "Persist every staged write of a changeset, draft or submitted, in seq order, all or " +
-          "nothing; committing a submitted changeset approves it. expected_version: optional, the " +
-          "version you reviewed; if the changeset changed since, the commit is refused and " +
-          "nothing is written. Omitted, the current version commits. Checked first: " +
-          LOCK_FREE_CHECKS +
-          ". Then, on the result: every entity has at most one parent, no cycles, relation ends " +
-          "of the right types, no entity deleted while it keeps children" +
-          (anchored
-            ? ", and every write held to the anchored entity and its descendants; a dangling or " +
-              "deleted anchor rejects the commit"
-            : ", and for a changeset started through an anchor, every write held to the anchored " +
-              "entity and its descendants; a dangling or deleted anchor rejects it") +
-          ". A rejection names its violations (total, then the first 100, each with seq, kind " +
-          "and message); nothing is persisted and the changeset stays as it was, draft or submitted. " +
-          "On drift, compare before and current in get_changeset, and restage only if your " +
-          "change still applies. Refused with nothing persisted while another " +
-          "commit runs on this ontology or the changeset is busy: try again. Committed, it " +
-          "returns {committed, alreadyGone}, the number of writes and the seqs of deletes whose " +
-          "target was already gone, and the changeset is gone. If the response is lost, tell the " +
-          "outcome by reading an id a staged create minted, or by listing the changesets: a " +
-          "submitted changeset that is no longer listed was committed, and one still listed is " +
-          "not committed." +
-          reach(anchored),
-        inputSchema: { changeset_id: z.string(), expected_version: z.number().int().optional() },
-      },
-      tool("commit_changeset", async (args: { changeset_id: string; expected_version?: number | undefined }, open) =>
-        jsonResult(
-          await changesets.commitChangeset(
-            lensKey,
-            anchorKey,
-            args.changeset_id,
-            args.expected_version,
-            await open(),
-          ),
+  register(
+    "commit_changeset",
+    {
+      description:
+        "Persist every staged write of a changeset, draft or submitted, in seq order, all or " +
+        "nothing; committing a submitted changeset approves it. expected_version: optional, the " +
+        "version you reviewed; if the changeset changed since, the commit is refused and " +
+        "nothing is written. Omitted, the current version commits. Checked first: " +
+        LOCK_FREE_CHECKS +
+        ". Then, on the result: every entity has at most one parent, no cycles, relation ends " +
+        "of the right types, no entity deleted while it keeps children" +
+        (rulesetKey !== null
+          ? ", and, if this connection's ruleset sets an anchor, every write in the anchor's " +
+            "subtree; a deleted ruleset, or an anchor entity that no longer exists, rejects the commit"
+          : ", and for a changeset started through a ruleset that sets an anchor, every write in " +
+            "the anchor's subtree; a deleted ruleset, or an anchor entity that no longer exists, rejects it") +
+        ". A rejection names its violations (total, then the first 100, each with seq, kind " +
+        "and message); nothing is persisted and the changeset stays as it was, draft or submitted. " +
+        "On drift, compare before and current in get_changeset, and restage only if your " +
+        "change still applies. Refused with nothing persisted while another " +
+        "commit runs on this ontology or the changeset is busy: try again. Committed, it " +
+        "returns {committed, alreadyGone}, the number of writes and the seqs of deletes whose " +
+        "target was already gone, and the changeset is gone. If the response is lost, tell the " +
+        "outcome by reading an id a staged create minted, or by listing the changesets: a " +
+        "submitted changeset that is no longer listed was committed, and one still listed is " +
+        "not committed." +
+        reach(rulesetKey),
+      inputSchema: { changeset_id: z.string(), expected_version: z.number().int().optional() },
+    },
+    tool("commit_changeset", async (args: { changeset_id: string; expected_version?: number | undefined }, open) =>
+      jsonResult(
+        await changesets.commitChangeset(
+          lensKey,
+          rulesetKey,
+          args.changeset_id,
+          args.expected_version,
+          await open(),
         ),
       ),
-    );
-  }
+    ),
+  );
 
-  server.registerTool(
+  register(
     "discard_changeset",
     {
       description:
         "Delete a draft changeset and all its staged writes; the data is not touched, and it " +
         "cannot be undone. A submitted changeset is refused until it is unsubmitted." +
-        reach(anchored),
+        reach(rulesetKey),
       inputSchema: { changeset_id: z.string() },
     },
     tool("discard_changeset", async (args: { changeset_id: string }, open) => {
-      await changesets.discardChangeset(lensKey, anchorKey, args.changeset_id, await open());
+      await changesets.discardChangeset(lensKey, rulesetKey, args.changeset_id, await open());
       return jsonResult({ message: `Changeset '${args.changeset_id}' discarded.` });
     }),
   );

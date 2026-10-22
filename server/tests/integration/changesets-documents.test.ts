@@ -47,8 +47,8 @@ let h: ProjectHierarchyIds;
 let e: ProjectHierarchyIds["entities"];
 const clients: Client[] = [];
 
-async function connect(anchorKey: string | null = null): Promise<Client> {
-  const path = `/mcp/ontologies/${O}/runtime/lenses/all${anchorKey === null ? "" : `/anchors/${anchorKey}`}`;
+async function connect(rulesetKey: string | null = null): Promise<Client> {
+  const path = `/mcp/ontologies/${O}/runtime/lenses/all${rulesetKey === null ? "" : `/rulesets/${rulesetKey}`}`;
   const client = new Client({ name: "changesets-documents-tests", version: "0.0.1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}${path}`)));
   clients.push(client);

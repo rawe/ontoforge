@@ -4,8 +4,8 @@
  * Both servers are bound by URL, mirroring the REST tree — the URL is
  * the ONLY binding channel (`docs/decisions.md#interfaces`): no header,
  * no environment fallback, no tool parameter. A URL that names no
- * ontology (or, for runtime, no lens; anchored, no anchor) answers the
- * app's standard 404 — as an unmatched route, or through the
+ * ontology (or, for runtime, no lens; on a ruleset mount, no ruleset)
+ * answers the app's standard 404 — as an unmatched route, or through the
  * empty-segment guards below.
  *
  *   - Modeling: `/mcp/ontologies/:ontologyKey/model`. The mount accepts
@@ -13,10 +13,11 @@
  *     lets `ensure_ontology` provision the mount's own ontology; every
  *     other tool then fails with not-found until it exists.
  *   - Runtime: `/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey`.
- *   - Anchored runtime: the runtime mount plus `/anchors/:anchorKey`, which
- *     adds `get_anchor` and binds the anchor the write tools are held to.
- *     The anchor record is read before the server is built: a staged-only
- *     anchor gets the staged-only tool set (`createRuntimeMcpServer`).
+ *   - Ruleset runtime: the runtime mount plus `/rulesets/:rulesetKey`,
+ *     which adds `get_ruleset` and binds the ruleset whose rules the tools
+ *     follow. The ruleset is read before the server is built, so the tool
+ *     list follows its write access (`createRuntimeMcpServer`); a tool
+ *     call's server offers every tool, and the call's check judges it.
  *
  * Transport is Streamable HTTP, STATELESS, with plain JSON responses
  * (no SSE), per `docs/decisions.md#interfaces`: a fresh server +
@@ -31,6 +32,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { NotFoundError } from "../core/exceptions.js";
 import { getRuntimeStore } from "../core/ports.js";
 import { createModelingMcpServer } from "./modeling.js";
+import type { Binding } from "../runtime/writeAccess.js";
 import { createRuntimeMcpServer } from "./runtime.js";
 
 /** Serve one stateless MCP request with a fresh server + transport pair. */
@@ -67,22 +69,28 @@ async function handleMcpRequest(
   }
 }
 
-/** Whether the anchor of an anchored mount is staged-only, read once per
- * request. An unknown ontology or anchor is not: the normal tool set is
- * built, and every call answers not found. */
-async function isStagedOnly(ontologyKey: string, anchorKey: string): Promise<boolean> {
+/** The binding a ruleset mount's server is built with, once per request;
+ * its level shapes the tool list. A request that lists tools reads the
+ * ruleset; an unknown ontology or ruleset lists every tool, at 'full', and
+ * every call answers not found. A tool call lists nothing: its server
+ * offers every tool, at 'full', without a read, and the call's own check
+ * reads the ruleset and refuses what its level lacks. So a client whose
+ * list is older than the level gets the refusal, not an unknown tool. */
+async function bindingOf(ontologyKey: string, rulesetKey: string, body: unknown): Promise<Binding> {
+  const callsTool = typeof body === "object" && body !== null && (body as { method?: unknown }).method === "tools/call";
+  if (callsTool) return { rulesetKey, writeAccess: "full" };
   try {
-    const record = await (await getRuntimeStore(ontologyKey)).rulesets().get(anchorKey);
-    return record?.writeAccess === "propose"; // bridge: removed in 07
+    const record = await (await getRuntimeStore(ontologyKey)).rulesets().get(rulesetKey);
+    return { rulesetKey, writeAccess: record?.writeAccess ?? "full" };
   } catch (error) {
-    if (error instanceof NotFoundError) return false;
+    if (error instanceof NotFoundError) return { rulesetKey, writeAccess: "full" };
     throw error;
   }
 }
 
 export function mountMcp(app: FastifyInstance): void {
   // A tool with no row in the operation table fails the boot (`writeAccess.ts`).
-  createRuntimeMcpServer("boot", "boot", "boot");
+  createRuntimeMcpServer("boot", "boot", { rulesetKey: "boot", writeAccess: "full" });
 
   app.route({
     method: ["GET", "POST", "DELETE"],
@@ -117,19 +125,19 @@ export function mountMcp(app: FastifyInstance): void {
 
   app.route({
     method: ["GET", "POST", "DELETE"],
-    url: "/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey/anchors/:anchorKey",
+    url: "/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey/rulesets/:rulesetKey",
     schema: { hide: true },
     handler: async (request, reply) => {
-      const { ontologyKey, lensKey, anchorKey } = request.params as {
+      const { ontologyKey, lensKey, rulesetKey } = request.params as {
         ontologyKey: string;
         lensKey: string;
-        anchorKey: string;
+        rulesetKey: string;
       };
-      if (ontologyKey === "" || lensKey === "" || anchorKey === "") {
+      if (ontologyKey === "" || lensKey === "" || rulesetKey === "") {
         return reply.callNotFound();
       }
-      const stagedOnly = await isStagedOnly(ontologyKey, anchorKey);
-      await handleMcpRequest(createRuntimeMcpServer(ontologyKey, lensKey, anchorKey, stagedOnly), request, reply);
+      const binding = await bindingOf(ontologyKey, rulesetKey, request.body);
+      await handleMcpRequest(createRuntimeMcpServer(ontologyKey, lensKey, binding), request, reply);
     },
   });
 }

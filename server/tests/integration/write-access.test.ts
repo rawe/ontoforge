@@ -63,8 +63,8 @@ async function putRuleset(key: string, payload: Row): Promise<Row> {
   return res.body;
 }
 
-async function connect(anchorKey: string): Promise<Client> {
-  const path = `/mcp/ontologies/${O}/runtime/lenses/all/anchors/${anchorKey}`;
+async function connect(rulesetKey: string): Promise<Client> {
+  const path = `/mcp/ontologies/${O}/runtime/lenses/all/rulesets/${rulesetKey}`;
   const client = new Client({ name: "write-access-tests", version: "0.0.1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}${path}`)));
   clients.push(client);
@@ -146,7 +146,7 @@ afterAll(async () => {
 });
 
 describe("the level on the ruleset reads", () => {
-  it("the GET, the list, the mount root and get_anchor report it", async () => {
+  it("the GET, the list, the mount root and get_ruleset report it", async () => {
     await putRuleset("agent-s", { anchor: { type: "project", id: e.P1 }, writeAccess: "propose" });
     await putRuleset("agent-a", { anchor: { type: "project", id: e.P1 } });
     await putRuleset("agent-n", { writeAccess: "none" });
@@ -163,8 +163,8 @@ describe("the level on the ruleset reads", () => {
     });
     expect((await rest("GET", `${ALL}/rulesets/agent-a`)).body.writeAccess).toBe("full");
     expect((await rest("GET", `${ALL}/rulesets/agent-n`)).body).toEqual({ key: "agent-n", writeAccess: "none", anchor: null });
-    expect(await ok(await connect("agent-s"), "get_anchor")).toMatchObject({ writeAccess: "propose", anchor: { state: "found" } });
-    expect((await ok(await connect("agent-a"), "get_anchor")).writeAccess).toBe("full");
+    expect(await ok(await connect("agent-s"), "get_ruleset")).toMatchObject({ writeAccess: "propose", anchor: { state: "found" } });
+    expect((await ok(await connect("agent-a"), "get_ruleset")).writeAccess).toBe("full");
   });
 });
 
@@ -424,16 +424,17 @@ describe("the MCP tool set at 'propose' (V29, R13)", () => {
     const byName = new Map(tools.map((tool) => [tool.name, tool.inputSchema as { required?: string[] }]));
     for (const name of STAGEABLE) expect(byName.get(name)?.required, name).toContain("changeset_id");
     for (const name of ["commit_changeset", "edit_document", "write_document"]) expect(byName.has(name), name).toBe(false);
-    for (const name of ["start_changeset", "list_changesets", "get_changeset", "unstage", "submit_changeset", "unsubmit_changeset", "discard_changeset", "get_anchor"]) {
+    for (const name of ["start_changeset", "list_changesets", "get_changeset", "unstage", "submit_changeset", "unsubmit_changeset", "discard_changeset", "get_ruleset"]) {
       expect(byName.has(name), name).toBe(true);
     }
     for (const tool of tools) expect((tool.description ?? "").length, tool.name).toBeLessThanOrEqual(2000);
   });
 
-  it("a write without changeset_id is an error; staging, submit, unsubmit, discard, list and reads work", async () => {
+  it("a write without changeset_id is refused; staging, submit, unsubmit, discard, list and reads work", async () => {
     const client = await connect("agent-s");
     const immediate = await call(client, "update_entity", { entity_type_key: "task", entity_id: e.T1, properties: { name: "T1x" } });
     expect(immediate.isError).toBe(true);
+    expect(text(immediate)).toBe(`Error executing tool update_entity: ${NO_WRITE("agent-s")}`);
     expect((await rest("GET", `${ALL}/entities/task/${e.T1}`)).body.name).toBe("T1");
 
     const cs = (await ok(client, "start_changeset", { note: "plan" })).id as string;
@@ -461,12 +462,13 @@ describe("the MCP tool set at 'propose' (V29, R13)", () => {
     expect(update.required ?? []).not.toContain("changeset_id");
   });
 
-  it("an unknown anchor keeps the normal tool set, and every call answers not found", async () => {
+  it("an unknown ruleset keeps the normal tool set, and every call answers not found", async () => {
     const client = await connect("nope");
     const names = (await client.listTools()).tools.map((tool) => tool.name);
     expect(names).toContain("commit_changeset");
-    const result = await call(client, "get_anchor");
+    const result = await call(client, "get_ruleset");
     expect(result.isError).toBe(true);
     expect(text(result)).toContain("Ruleset 'nope' not found");
   });
 });
+

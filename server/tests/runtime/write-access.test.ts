@@ -1,9 +1,10 @@
 /**
  * Write access (`writeAccess.ts`): the levels as sets of operations, the
  * one check and its refusal, the tables against what the mounts register,
- * and the check at both entrances over a mocked store, at each level: the
- * REST mirror's preHandler and the MCP tools, after the not-found order
- * and before any service runs, reading the ruleset once.
+ * which tools a level lists, and the check at both entrances over a
+ * mocked store, at each level: the REST mirror's preHandler and the MCP
+ * tools (a level lowered since the tool list was built), after the
+ * not-found order and before any service runs, reading the ruleset once.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -21,6 +22,7 @@ import {
   TOOLS,
   allows,
   checkOperation,
+  listsTool,
   routeOperation,
   toolOperation,
   type Operation,
@@ -124,6 +126,17 @@ describe("the levels and the check", () => {
     expect(routeOperation("POST", "/query")).toBe("read");
     expect(() => routeOperation("PUT", "/schema")).toThrow("Route 'PUT /schema' has no row in the operation table");
   });
+
+  it("a level lists the tools whose operation it allows, and a stageable tool from staging up: 34, 31, 20", () => {
+    const listed = (level: WriteAccess) => Object.keys(TOOLS).filter((name) => listsTool(level, name));
+    expect(listed("full")).toHaveLength(34);
+    expect(listed("propose").sort()).toEqual(
+      Object.keys(TOOLS).filter((name) => !["commit_changeset", "edit_document", "write_document"].includes(name)).sort(),
+    );
+    expect(listed("none").sort()).toEqual(Object.keys(TOOLS).filter((name) => TOOLS[name]!.operation === "read").sort());
+    expect(listed("none")).toHaveLength(20);
+    expect(() => listsTool("full", "nope")).toThrow("Tool 'nope' has no row in the operation table");
+  });
 });
 
 describe("the tables cannot drift", () => {
@@ -146,7 +159,7 @@ describe("the tables cannot drift", () => {
     expect(registered.size).toBe(38);
   });
 
-  it("TOOLS are exactly the tools of a ruleset mount (34)", async () => {
+  it("TOOLS are exactly the tools of a ruleset mount at full (34)", async () => {
     const client = await connect("agent-a");
     const names = (await client.listTools()).tools.map((tool) => tool.name);
     await client.close();
@@ -155,9 +168,11 @@ describe("the tables cannot drift", () => {
   });
 });
 
-async function connect(rulesetKey: string | null): Promise<Client> {
+/** A client of a server whose tool list was built at `listed`. */
+async function connect(rulesetKey: string | null, listed: WriteAccess = "full"): Promise<Client> {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await createRuntimeMcpServer("test_ont", "all", rulesetKey).connect(serverTransport);
+  const binding = rulesetKey === null ? undefined : { rulesetKey, writeAccess: listed };
+  await createRuntimeMcpServer("test_ont", "all", binding).connect(serverTransport);
   const client = new Client({ name: "write-access-tests", version: "0.0.1" });
   await client.connect(clientTransport);
   return client;
@@ -336,9 +351,9 @@ describe("the MCP tools", () => {
     ["commit_changeset", { changeset_id: ID }],
   ] as const;
 
-  it("none: every write and changeset change is refused at call time, reading the ruleset once; reads pass", async () => {
+  it("lowered to none since the list was built: every write and changeset change is refused at call time, reading the ruleset once; reads pass", async () => {
+    const client = await connect("agent-a", "full");
     level = "none";
-    const client = await connect("agent-a");
     try {
       for (const [name, args] of [...WRITE_CALLS, ...CHANGESET_CALLS]) {
         holder.store.rulesetStore.get.mockClear();
@@ -366,9 +381,9 @@ describe("the MCP tools", () => {
     }
   });
 
-  it("propose: a stageable tool with changeset_id stages; the commit is refused", async () => {
+  it("lowered to propose since the list was built: a stageable tool with changeset_id stages; the commit is refused", async () => {
+    const client = await connect("agent-a", "full");
     level = "propose";
-    const client = await connect("agent-a");
     try {
       const staged = await call(client, "update_entity", CHANGESET_CALLS[1][1]);
       expect(isRefusal(staged.content[0]!.text)).toBe(false);

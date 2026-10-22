@@ -5,7 +5,8 @@
  * a fixed set of operations. The two entrances (the mirror's preHandler,
  * `rulesetRouter.ts`; the MCP tools, `mcp/runtime.ts`) run `checkOperation`
  * on the binding of the URL before any service is called, and nothing
- * else checks write access. A route or tool without a row fails the boot.
+ * else checks write access. A ruleset mount lists only the tools its level
+ * allows (`listsTool`). A route or tool without a row fails the boot.
  *
  * The binding is the URL's only: a changeset started through a ruleset
  * and committed through the plain lens is judged by the plain lens's
@@ -38,7 +39,7 @@ const STAGEABLE: ToolRow = { operation: "write", stageable: true };
 
 /** Every tool of a ruleset mount, by name. */
 export const TOOLS: Record<string, ToolRow> = {
-  get_anchor: { operation: "read" },
+  get_ruleset: { operation: "read" },
   get_schema: { operation: "read" },
   create_entity: STAGEABLE,
   list_entities: { operation: "read" },
@@ -128,11 +129,23 @@ export function allows(level: WriteAccess, operation: Operation): boolean {
   return LEVELS[level].has(operation);
 }
 
+function toolRow(name: string): ToolRow {
+  const row = TOOLS[name];
+  if (row === undefined) throw new Error(`Tool '${name}' has no row in the operation table`);
+  return row;
+}
+
+/** Whether a level lists a tool: it allows the tool's operation, or, for
+ * a stageable tool, staging. A tool without a row throws. */
+export function listsTool(level: WriteAccess, name: string): boolean {
+  const row = toolRow(name);
+  return allows(level, row.operation) || (row.stageable === true && allows(level, "stage"));
+}
+
 /** The operation of one tool call: a stageable tool stages with
  * `changeset_id`. A tool without a row throws. */
 export function toolOperation(name: string, args: unknown): Operation {
-  const row = TOOLS[name];
-  if (row === undefined) throw new Error(`Tool '${name}' has no row in the operation table`);
+  const row = toolRow(name);
   const stages =
     row.stageable === true &&
     typeof args === "object" &&

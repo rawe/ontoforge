@@ -1,10 +1,10 @@
 /**
- * The anchored mounts over a mocked store, with the seven write functions
- * spied: the REST mirror and the anchored MCP server pass the anchor key
+ * The ruleset mounts over a mocked store, with the seven write functions
+ * spied: the REST mirror and the ruleset MCP server pass the ruleset key
  * to every write, the plain lens passes null; every request checks lens,
- * then anchor, reads included; `get_anchor` and the mirror's root give
- * the anchor through the lens; only the anchored MCP server has
- * `get_anchor`.
+ * then ruleset, reads included; `get_ruleset` and the mirror's root give
+ * the ruleset through the lens; only the ruleset MCP server has
+ * `get_ruleset`.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -54,7 +54,7 @@ afterAll(async () => {
 const ID = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
 
-let anchors: Record<string, RulesetRecord>;
+let rulesets: Record<string, RulesetRecord>;
 
 beforeEach(() => {
   holder.store = createMockRuntimeStore();
@@ -68,13 +68,13 @@ beforeEach(() => {
     }
     return null;
   });
-  anchors = { "agent-a": { key: "agent-a", anchor: { type: "person", id: ID }, anchorFound: true, writeAccess: "full" } };
-  holder.store.rulesetStore.get.mockImplementation(async (key: string) => anchors[key] ?? null);
+  rulesets = { "agent-a": { key: "agent-a", anchor: { type: "person", id: ID }, anchorFound: true, writeAccess: "full" } };
+  holder.store.rulesetStore.get.mockImplementation(async (key: string) => rulesets[key] ?? null);
   for (const spy of Object.values(writes)) spy.mockReset().mockResolvedValue({});
 });
 
 const PLAIN = "/api/ontologies/test_ont/runtime/lenses/all";
-const ANCHORED = `${PLAIN}/rulesets/agent-a`;
+const RULESET = `${PLAIN}/rulesets/agent-a`;
 
 /** Every write route, with the spy it reaches. */
 const WRITE_ROUTES = [
@@ -87,10 +87,10 @@ const WRITE_ROUTES = [
   ["DELETE", `/relations/works_for/${ID}`, undefined, writes.deleteRelation],
 ] as const;
 
-describe("the anchored REST mirror", () => {
-  it.each(WRITE_ROUTES)("%s %s passes the anchor key; the plain lens passes null", async (method, path, payload, spy) => {
-    const anchored = await app.inject({ method, url: `${ANCHORED}${path}`, payload });
-    expect(anchored.statusCode, anchored.body).toBeLessThan(300);
+describe("the ruleset REST mirror", () => {
+  it.each(WRITE_ROUTES)("%s %s passes the ruleset key; the plain lens passes null", async (method, path, payload, spy) => {
+    const viaRuleset = await app.inject({ method, url: `${RULESET}${path}`, payload });
+    expect(viaRuleset.statusCode, viaRuleset.body).toBeLessThan(300);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy.mock.calls[0]!.at(-1)).toBe("agent-a");
     expect(spy.mock.calls[0]![0]).toBe("all");
@@ -102,7 +102,7 @@ describe("the anchored REST mirror", () => {
   });
 
   it("no document edit route is mounted under a changeset: 404 and nothing written (F7)", async () => {
-    for (const base of [PLAIN, ANCHORED]) {
+    for (const base of [PLAIN, RULESET]) {
       const res = await app.inject({
         method: "PATCH",
         url: `${base}/changesets/${OTHER}/documents/person/${ID}/bio`,
@@ -113,7 +113,7 @@ describe("the anchored REST mirror", () => {
     expect(writes.editDocument).not.toHaveBeenCalled();
   });
 
-  it("an unknown anchor is not found on a read, a write and the root; nothing is written or created", async () => {
+  it("an unknown ruleset is not found on a read, a write and the root; nothing is written or created", async () => {
     for (const [method, path] of [
       ["GET", ""],
       ["GET", "/entities/person"],
@@ -128,21 +128,21 @@ describe("the anchored REST mirror", () => {
     expect(holder.store.rulesetStore.save).not.toHaveBeenCalled();
   });
 
-  it("an unknown lens is not found before the anchor", async () => {
+  it("an unknown lens is not found before the ruleset", async () => {
     const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/nope/rulesets/nope/entities/person" });
     expect(res.statusCode).toBe(404);
     expect(res.json().error.message).toContain("Lens 'nope' not found");
     expect(holder.store.rulesetStore.get).not.toHaveBeenCalled();
   });
 
-  it("reads through the anchor as through the plain lens", async () => {
-    const res = await app.inject({ method: "GET", url: `${ANCHORED}/entities/person` });
+  it("reads through the ruleset as through the plain lens", async () => {
+    const res = await app.inject({ method: "GET", url: `${RULESET}/entities/person` });
     expect(res.statusCode, res.body).toBe(200);
     expect(holder.store.listEntities).toHaveBeenCalled();
   });
 });
 
-describe("the anchor through the lens", () => {
+describe("the ruleset through the lens", () => {
   const root = (lens = "all", key = "agent-a") =>
     app.inject({ method: "GET", url: `/api/ontologies/test_ont/runtime/lenses/${lens}/rulesets/${key}` });
 
@@ -175,8 +175,8 @@ describe("the anchor through the lens", () => {
   });
 
   it("no anchor: null; deleted: visible, no entity, no path", async () => {
-    anchors["agent-u"] = { key: "agent-u", anchor: null, anchorFound: false, writeAccess: "propose" };
-    anchors["agent-d"] = { key: "agent-d", anchor: { type: "person", id: ID }, anchorFound: false, writeAccess: "full" };
+    rulesets["agent-u"] = { key: "agent-u", anchor: null, anchorFound: false, writeAccess: "propose" };
+    rulesets["agent-d"] = { key: "agent-d", anchor: { type: "person", id: ID }, anchorFound: false, writeAccess: "full" };
     expect((await root("all", "agent-u")).json()).toEqual({ key: "agent-u", writeAccess: "propose", anchor: null });
     expect((await root("all", "agent-d")).json()).toEqual({
       key: "agent-d",
@@ -186,11 +186,12 @@ describe("the anchor through the lens", () => {
   });
 });
 
-describe("the anchored MCP server", () => {
-  async function connect(anchorKey: string | null, lensKey = "all"): Promise<Client> {
+describe("the ruleset MCP server", () => {
+  async function connect(rulesetKey: string | null, lensKey = "all"): Promise<Client> {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    await createRuntimeMcpServer("test_ont", lensKey, anchorKey).connect(serverTransport);
-    const client = new Client({ name: "anchored-mount-tests", version: "0.0.1" });
+    const binding = rulesetKey === null ? undefined : { rulesetKey, writeAccess: "full" as const };
+    await createRuntimeMcpServer("test_ont", lensKey, binding).connect(serverTransport);
+    const client = new Client({ name: "ruleset-mount-tests", version: "0.0.1" });
     await client.connect(clientTransport);
     return client;
   }
@@ -202,18 +203,18 @@ describe("the anchored MCP server", () => {
   const call = async (client: Client, name: string, args: Record<string, unknown> = {}) =>
     (await client.callTool({ name, arguments: args })) as unknown as ToolCallResult;
 
-  it("has get_anchor; the plain lens server does not", async () => {
-    const anchored = await connect("agent-a");
+  it("has get_ruleset; the plain lens server does not", async () => {
+    const viaRuleset = await connect("agent-a");
     const plain = await connect(null);
     try {
       const names = async (client: Client) => (await client.listTools()).tools.map((tool) => tool.name);
-      const anchoredNames = await names(anchored);
+      const rulesetNames = await names(viaRuleset);
       const plainNames = await names(plain);
-      expect(anchoredNames).toContain("get_anchor");
-      expect(plainNames).not.toContain("get_anchor");
-      expect(anchoredNames.filter((name) => name !== "get_anchor").sort()).toEqual([...plainNames].sort());
+      expect(rulesetNames).toContain("get_ruleset");
+      expect(plainNames).not.toContain("get_ruleset");
+      expect(rulesetNames.filter((name) => name !== "get_ruleset").sort()).toEqual([...plainNames].sort());
     } finally {
-      await anchored.close();
+      await viaRuleset.close();
       await plain.close();
     }
   });
@@ -229,18 +230,18 @@ describe("the anchored MCP server", () => {
     ["delete_relation", { relation_type_key: "works_for", relation_id: ID }, writes.deleteRelation],
   ] as const;
 
-  it.each(WRITE_TOOLS)("%s passes the anchor key; the plain lens passes null", async (name, args, spy) => {
-    const anchored = await connect("agent-a");
+  it.each(WRITE_TOOLS)("%s passes the ruleset key; the plain lens passes null", async (name, args, spy) => {
+    const viaRuleset = await connect("agent-a");
     const plain = await connect(null);
     try {
-      const result = await call(anchored, name, args);
+      const result = await call(viaRuleset, name, args);
       expect(result.isError, result.content[0]?.text).toBeFalsy();
       expect(spy.mock.calls[0]!.at(-1)).toBe("agent-a");
       spy.mockClear();
       await call(plain, name, args);
       expect(spy.mock.calls[0]!.at(-1)).toBeNull();
     } finally {
-      await anchored.close();
+      await viaRuleset.close();
       await plain.close();
     }
   });
@@ -248,8 +249,8 @@ describe("the anchored MCP server", () => {
   it.each(WRITE_TOOLS.filter(([name]) => name === "edit_document" || name === "write_document"))(
     "%s refuses any changeset_id and writes nothing, on both mounts (F7)",
     async (name, args, spy) => {
-      for (const anchorKey of [null, "agent-a"]) {
-        const client = await connect(anchorKey);
+      for (const rulesetKey of [null, "agent-a"]) {
+        const client = await connect(rulesetKey);
         try {
           for (const changesetId of [ID, "", null]) {
             const result = await call(client, name, { ...args, changeset_id: changesetId });
@@ -268,33 +269,33 @@ describe("the anchored MCP server", () => {
     },
   );
 
-  it("an unknown anchor fails every tool, after an unknown lens", async () => {
-    const unknownAnchor = await connect("nope");
+  it("an unknown ruleset fails every tool, after an unknown lens", async () => {
+    const unknownRuleset = await connect("nope");
     const unknownLens = await connect("nope", "nope");
     try {
       for (const [name, args] of [
-        ["get_anchor", {}],
+        ["get_ruleset", {}],
         ["list_entities", { entity_type_key: "person" }],
         ["create_entity", { entity_type_key: "person", properties: { name: "Ann" } }],
       ] as const) {
-        const anchorMissing = await call(unknownAnchor, name, args);
-        expect(anchorMissing.isError, name).toBe(true);
-        expect(anchorMissing.content[0]!.text).toContain("Ruleset 'nope' not found");
+        const rulesetMissing = await call(unknownRuleset, name, args);
+        expect(rulesetMissing.isError, name).toBe(true);
+        expect(rulesetMissing.content[0]!.text).toContain("Ruleset 'nope' not found");
         const lensMissing = await call(unknownLens, name, args);
         expect(lensMissing.content[0]!.text).toContain("Lens 'nope' not found");
       }
       expect(writes.createEntity).not.toHaveBeenCalled();
     } finally {
-      await unknownAnchor.close();
+      await unknownRuleset.close();
       await unknownLens.close();
     }
   });
 
-  it("get_anchor gives the mirror's answer", async () => {
+  it("get_ruleset gives the mirror's answer", async () => {
     holder.store.getEntitiesByIds.mockResolvedValue({ [ID]: makeEntity({ _id: ID, name: "Ann" }) });
     const client = await connect("agent-a");
     try {
-      const result = await call(client, "get_anchor");
+      const result = await call(client, "get_ruleset");
       expect(JSON.parse(result.content[0]!.text)).toEqual({
         key: "agent-a",
         writeAccess: "full",
@@ -312,3 +313,4 @@ describe("the anchored MCP server", () => {
     }
   });
 });
+

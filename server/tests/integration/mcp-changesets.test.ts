@@ -5,9 +5,9 @@
  * whole round through the tools alone (start, stage, read, submit,
  * unsubmit, unstage, commit, discard) with the same answers and errors as
  * REST, the byte cap among them, a write without `changeset_id` staying
- * immediate, and the anchored mount's binding: a changeset carries its
- * anchor, another anchor does not reach it, and the commit holds it to the
- * anchor. `edit_document` and
+ * immediate, and the ruleset mount's binding: a changeset carries its
+ * ruleset, another ruleset does not reach it, and the commit keeps it in
+ * the anchor's subtree. `edit_document` and
  * `write_document` refuse a `changeset_id`, and REST has no document edit
  * route under a changeset.
  */
@@ -57,8 +57,8 @@ let h: ProjectHierarchyIds;
 let e: ProjectHierarchyIds["entities"];
 const clients: Client[] = [];
 
-async function connect(anchorKey: string | null = null): Promise<Client> {
-  const path = `/mcp/ontologies/${O}/runtime/lenses/all${anchorKey === null ? "" : `/anchors/${anchorKey}`}`;
+async function connect(rulesetKey: string | null = null): Promise<Client> {
+  const path = `/mcp/ontologies/${O}/runtime/lenses/all${rulesetKey === null ? "" : `/rulesets/${rulesetKey}`}`;
   const client = new Client({ name: "mcp-changesets-tests", version: "0.0.1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}${path}`)));
   clients.push(client);
@@ -128,9 +128,9 @@ describe("the tool surface (V33, V4)", () => {
   beforeAll(fresh, 60_000);
 
   it("lists the nine changeset tools and an optional changeset_id on the six stageable tools only", async () => {
-    for (const anchorKey of [null, "agent-a"]) {
-      if (anchorKey !== null) await pointAnchor(anchorKey, "project", e.P1);
-      const { tools } = await (await connect(anchorKey)).listTools();
+    for (const rulesetKey of [null, "agent-a"]) {
+      if (rulesetKey !== null) await pointAnchor(rulesetKey, "project", e.P1);
+      const { tools } = await (await connect(rulesetKey)).listTools();
       const byName = new Map(tools.map((tool) => [tool.name, tool.inputSchema as { properties?: Row; required?: string[] }]));
       for (const name of CHANGESET_TOOLS) expect(byName.has(name), name).toBe(true);
       for (const name of STAGEABLE) {
@@ -346,7 +346,7 @@ describe("the errors are REST's (R4)", () => {
   });
 });
 
-describe("the anchored mount (V8, V17, V21, V42)", () => {
+describe("the ruleset mount (V8, V17, V21, V42)", () => {
   beforeAll(async () => {
     await fresh();
     await pointAnchor("agent-a", "project", e.P1);
@@ -433,8 +433,8 @@ describe("the document edit tools refuse a changeset_id (F7)", () => {
     (await rest("GET", `${ALL}/entities/task/${id}/documents/notes`)).body.content as string;
 
   it("refuses with a validation error on both mounts; nothing is written or staged", async () => {
-    for (const anchorKey of [null, "agent-a"]) {
-      const client = await connect(anchorKey);
+    for (const rulesetKey of [null, "agent-a"]) {
+      const client = await connect(rulesetKey);
       const cs = (await ok(client, "start_changeset")).id as string;
       for (const [name, args] of [
         ["edit_document", { old_string: "Notes", new_string: "Changed" }],

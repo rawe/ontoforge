@@ -196,7 +196,7 @@ function mcpWrites(url: string): Writes {
 
 const TRANSPORTS = {
   REST: (lens: string, anchor: string) => restWrites(`${runtimePrefix(O, lens)}/rulesets/${anchor}`),
-  MCP: (lens: string, anchor: string) => mcpWrites(`${baseUrl}/mcp/ontologies/${O}/runtime/lenses/${lens}/anchors/${anchor}`),
+  MCP: (lens: string, anchor: string) => mcpWrites(`${baseUrl}/mcp/ontologies/${O}/runtime/lenses/${lens}/rulesets/${anchor}`),
 };
 
 /** The plain lens `all`, over REST: the setup and the checks. */

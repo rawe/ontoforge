@@ -7,8 +7,8 @@
  * fallback), ontology isolation between two bound clients, the
  * limit/offset CLAMPING that diverges by design from REST's rejection,
  * the entity tool round trip, and the parent rules, the create with a
- * parent relation and the path read through the tools; and the anchored
- * mount `…/anchors/:anchorKey` with `get_anchor` and its not-found order.
+ * parent relation and the path read through the tools; and the ruleset
+ * mount `…/rulesets/:rulesetKey` with `get_ruleset` and its not-found order.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -1050,9 +1050,9 @@ describe("get_path", () => {
   });
 });
 
-describe("the anchored mount", () => {
+describe("the ruleset mount", () => {
   const mount = (o: string, lens: string, key: string) =>
-    `${baseUrl}/mcp/ontologies/${o}/runtime/lenses/${lens}/anchors/${key}`;
+    `${baseUrl}/mcp/ontologies/${o}/runtime/lenses/${lens}/rulesets/${key}`;
   const putAnchor = async (key: string, entity: { type: string; id: string } | null) => {
     const res = await app.inject({
       method: "PUT",
@@ -1062,30 +1062,31 @@ describe("the anchored mount", () => {
     expect(res.statusCode, res.body).toBe(200);
   };
 
-  it("lists the runtime tools plus get_anchor", async () => {
+  it("lists the runtime tools plus get_ruleset", async () => {
     const ids = await buildHierarchy(app);
     await putAnchor("agent-a", { type: "project", id: ids.P1 });
     const plain = await connectClient(`${baseUrl}/mcp/ontologies/${HIERARCHY_ONTOLOGY_KEY}/runtime/lenses/all`);
-    const anchored = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "all", "agent-a"));
+    const viaRuleset = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "all", "agent-a"));
     try {
       const plainNames = (await plain.listTools()).tools.map((tool) => tool.name);
-      const anchoredNames = (await anchored.listTools()).tools.map((tool) => tool.name);
-      expect(plainNames).not.toContain("get_anchor");
-      expect(anchoredNames.sort()).toEqual([...plainNames, "get_anchor"].sort());
+      const rulesetNames = (await viaRuleset.listTools()).tools.map((tool) => tool.name);
+      expect(plainNames).not.toContain("get_ruleset");
+      expect(plainNames).toHaveLength(33);
+      expect(rulesetNames.sort()).toEqual([...plainNames, "get_ruleset"].sort());
     } finally {
       await plain.close();
-      await anchored.close();
+      await viaRuleset.close();
     }
   });
 
-  it("get_anchor gives the anchor through the lens, and nothing when the lens hides it", async () => {
+  it("get_ruleset gives the anchor through the lens, and nothing when the lens hides it", async () => {
     const ids = await buildHierarchy(app);
     await addLensHidingProject(app);
     await putAnchor("agent-a", { type: "project", id: ids.P1 });
     const all = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "all", "agent-a"));
     const delivery = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "delivery", "agent-a"));
     try {
-      expect(json(await call(all, "get_anchor"))).toEqual({
+      expect(json(await call(all, "get_ruleset"))).toEqual({
         key: "agent-a",
         writeAccess: "full",
         anchor: {
@@ -1100,7 +1101,7 @@ describe("the anchored mount", () => {
           ],
         },
       });
-      expect(json(await call(delivery, "get_anchor"))).toEqual({
+      expect(json(await call(delivery, "get_ruleset"))).toEqual({
         key: "agent-a",
         writeAccess: "full",
         anchor: { type: null, id: null, name: null, state: "found", visible: false, path: [] },
@@ -1115,7 +1116,7 @@ describe("the anchored mount", () => {
     }
   });
 
-  it("get_anchor shows no anchor and a deleted one", async () => {
+  it("get_ruleset shows no anchor and a deleted one", async () => {
     const ids = await buildHierarchy(app);
     await putAnchor("agent-u", null);
     await putAnchor("agent-d", { type: "task", id: ids.T1a });
@@ -1124,18 +1125,18 @@ describe("the anchored mount", () => {
     for (const [key, anchor] of [["agent-u", null], ["agent-d", deleted]] as const) {
       const client = await connectClient(mount(HIERARCHY_ONTOLOGY_KEY, "all", key));
       try {
-        expect(json(await call(client, "get_anchor"))).toEqual({ key, writeAccess: "full", anchor });
+        expect(json(await call(client, "get_ruleset"))).toEqual({ key, writeAccess: "full", anchor });
       } finally {
         await client.close();
       }
     }
   });
 
-  it("not found in the order ontology, lens, anchor, on every tool, reads included", async () => {
+  it("not found in the order ontology, lens, ruleset, on every tool, reads included", async () => {
     const ids = await buildHierarchy(app);
     await putAnchor("agent-a", { type: "project", id: ids.P1 });
     const tools = [
-      ["get_anchor", {}],
+      ["get_ruleset", {}],
       ["get_schema", {}],
       ["list_entities", { entity_type_key: "task" }],
       ["get_path", { entity_type_key: "task", entity_id: ids.T1 }],
@@ -1165,10 +1166,11 @@ describe("the anchored mount", () => {
     expect(rulesets.json().map((ruleset: { key: string }) => ruleset.key)).toEqual(["agent-a"]);
   });
 
-  it("a mount URL naming no anchor is an error", async () => {
+  it("a mount URL naming no ruleset is an error, and no /anchors mount exists", async () => {
     for (const url of [
-      "/mcp/ontologies/test_ont/runtime/lenses/test_lens/anchors",
-      "/mcp/ontologies/test_ont/runtime/lenses/test_lens/anchors/",
+      "/mcp/ontologies/test_ont/runtime/lenses/test_lens/rulesets",
+      "/mcp/ontologies/test_ont/runtime/lenses/test_lens/rulesets/",
+      "/mcp/ontologies/test_ont/runtime/lenses/test_lens/anchors/agent-a",
     ]) {
       const res = await app.inject({ method: "POST", url });
       expect(res.statusCode, url).toBe(404);

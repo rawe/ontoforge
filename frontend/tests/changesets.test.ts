@@ -12,7 +12,6 @@ import {
   operationLabel,
   operationsSummary,
   shortId,
-  sortChangesets,
   stagedCreateValues,
   stagedDocumentKeys,
   stateLabel,
@@ -31,6 +30,7 @@ import { qk } from '../src/api/queryKeys.ts'
 
 const item = (id: string, state: ChangesetListItem['state'], lastChangeAt: string): ChangesetListItem => ({
   id,
+  number: 1,
   state,
   version: 2,
   note: null,
@@ -60,15 +60,6 @@ const write = (over: Partial<StagedWriteView>): StagedWriteView => ({
 test('stateLabel names both states', () => {
   assert.equal(stateLabel('draft'), 'draft')
   assert.equal(stateLabel('submitted'), 'submitted')
-})
-
-test('sortChangesets puts submitted first, then the latest change', () => {
-  const draft = item('draft-new', 'draft', '2026-10-19T12:00:00.000Z')
-  const oldDraft = item('draft-old', 'draft', '2026-10-19T09:00:00.000Z')
-  const sub = item('sub-old', 'submitted', '2026-10-18T09:00:00.000Z')
-  const sub2 = item('sub-new', 'submitted', '2026-10-19T11:00:00.000Z')
-  const sorted = sortChangesets([oldDraft, draft, sub, sub2]).map((c) => c.id)
-  assert.deepEqual(sorted, ['sub-new', 'sub-old', 'draft-new', 'draft-old'])
 })
 
 test('submittedCount counts only submitted changesets: the sidebar count', () => {
@@ -347,7 +338,9 @@ test('a read key sits under its list key, which an exact invalidation leaves alo
   assert.deepEqual(qk.changesets('o1', 'all', 'cs-1'), ['changesets', 'o1', 'all', 'cs-1'])
 })
 
-test('changesetLabel names a changeset by its note, else its short id', () => {
+test('changesetLabel names a changeset by its number and note, else its note or short id', () => {
+  assert.equal(changesetLabel({ id: '7f3a9c00-1111-2222', number: 12, note: 'Move the tasks' }), '#12 · Move the tasks')
+  assert.equal(changesetLabel({ id: '7f3a9c00-1111-2222', number: 12, note: null }), '#12')
   assert.equal(changesetLabel({ id: '7f3a9c00-1111-2222', note: 'Move the tasks' }), 'Move the tasks')
   assert.equal(changesetLabel({ id: '7f3a9c00-1111-2222', note: null }), '7f3a9c00…')
 })

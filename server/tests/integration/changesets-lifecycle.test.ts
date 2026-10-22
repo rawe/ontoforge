@@ -254,7 +254,7 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
 describe("the list (V17, V41)", () => {
   beforeAll(fresh, 60_000);
 
-  it("per lens and per ruleset, submitted first, with counts and types", async () => {
+  it("per lens and per ruleset, by number, with counts and types", async () => {
     await pointAnchor("agent-a", "project", e.P1);
     await pointAnchor("agent-b", "project", e.P3);
     const AA = `${ALL}/rulesets/agent-a`;
@@ -278,9 +278,10 @@ describe("the list (V17, V41)", () => {
     expect((await submit(viaRuleset, "review")).status).toBe(200);
 
     const all = await list();
-    expect(all.map((c) => c.id)).toEqual([viaRuleset, late, plain]);
-    expect(all[0]).toEqual({
+    expect(all.map((c) => [c.id, c.number])).toEqual([[plain, 1], [viaRuleset, 2], [late, 3]]);
+    expect(all[1]).toEqual({
       id: viaRuleset,
+      number: 2,
       state: "submitted",
       version: 6,
       note: "review",
@@ -293,7 +294,7 @@ describe("the list (V17, V41)", () => {
       lastChangeAt: expect.any(String),
       submittedAt: expect.any(String),
     });
-    expect(all[1]).toMatchObject({ state: "draft", writeCount: 0, operations: {}, types: [], ruleset: null });
+    expect(all[2]).toMatchObject({ state: "draft", writeCount: 0, operations: {}, types: [], ruleset: null });
 
     expect((await list(AA)).map((c) => c.id)).toEqual([viaRuleset]);
     expect(await list(`${ALL}/rulesets/agent-b`)).toEqual([]);

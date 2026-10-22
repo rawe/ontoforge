@@ -47,7 +47,7 @@ import { quoteIdent } from "./oql/bindings.js";
 import { camelizeRow } from "./rows.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 8;
+export const STORAGE_VERSION = 9;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 1;
@@ -574,6 +574,11 @@ const STEPS: Step[] = [
       `CREATE INDEX changeset_write_minted_id_idx ON changeset_write (changeset_id, minted_id)`,
       `ALTER TABLE ruleset ADD COLUMN write_access text NOT NULL DEFAULT 'full'`,
     ],
+  },
+  {
+    // The changeset number people refer to a changeset by.
+    to: 9,
+    actions: [`ALTER TABLE changeset ADD COLUMN number integer NOT NULL DEFAULT 0`],
   },
 ];
 

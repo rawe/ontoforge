@@ -323,11 +323,11 @@ may take each way between them, a client or a person, with who does what and how
 changes. One example changeset plays step by step through it, beside the calls each step
 makes.
 
-- **The list:** one row per changeset — its state, note, ruleset, number of writes, the
+- **The list:** one row per changeset — its number, state, note, ruleset, number of writes, the
   types it names (two, then a count, and how many the lens no longer shows) and its age —
-  submitted ones first and tinted, then by last change. A row opens its review. Empty, it
+  by number, lowest first, submitted ones tinted. A row opens its review. Empty, it
   says the lens has no changesets.
-- **The review:** a header with the short id, the state, the ruleset — linking to the
+- **The review:** a header with the number, the state, the ruleset — linking to the
   Rulesets page, struck through once the ruleset is deleted — the writes per
   operation, the version and the times, and the note. Below, the writes by seq, a page of
   100 at a time: the operation, the type, the target by name — "(new)" for a create,
@@ -362,7 +362,7 @@ changeset", on a draft's row and in its review's header, pins it in place of any
 review. One changeset is pinned per lens, [remembered](#local-state) in the browser, and
 every open tab follows a pin or a leave at once. While one is pinned:
 
-- **The bar** above every Workbench page names it by its note or short id, with its number
+- **The bar** above every Workbench page names it by its number and note, with its number
   of writes, that staging is refused once it is submitted, Review and Leave.
 - **Every Workbench write is staged** into it instead of written — the entity page's
   edits, delete, unlinks and added relations, a target created on the way included,

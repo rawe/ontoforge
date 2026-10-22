@@ -41,7 +41,6 @@ import {
   markerLabel,
   operationLabel,
   operationsSummary,
-  shortId,
   stagedCreateValues,
   stagedDocumentKeys,
   targetText,
@@ -511,7 +510,7 @@ export function ChangesetDetailPage() {
     <div>
       <PageHeader
         breadcrumb={back}
-        title={`Changeset ${shortId(changeset.id)}`}
+        title={`Changeset #${changeset.number}`}
         meta={
           <>
             <ChangesetExplainerButton className="-ml-2" />

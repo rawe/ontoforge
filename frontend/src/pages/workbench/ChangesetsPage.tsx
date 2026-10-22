@@ -6,7 +6,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { ChangesetStateChip } from '@/components/changesets/ChangesetStateChip'
 import { ChangesetExplainerButton } from '@/components/changesets/explainer/ChangesetExplainer'
-import { sortChangesets, typesText, writesText } from '@/components/changesets/changesets'
+import { typesText, writesText } from '@/components/changesets/changesets'
 import { PinChangesetButton } from '@/components/changesets/PinChangesetButton'
 import { StartChangesetDialog } from '@/components/changesets/StartChangesetDialog'
 import { absoluteTime, relativeTime } from '@/components/table/format'
@@ -27,8 +27,8 @@ import { cn } from '@/lib/utils'
 const PIN_COLUMN = 'sticky right-0 bg-background'
 
 /**
- * `/o/:ontologyKey/w/:lensKey/changesets` — the lens's changesets, submitted
- * first: state, note, ruleset, writes, types and age. Everything is read
+ * `/o/:ontologyKey/w/:lensKey/changesets` — the lens's changesets, by number:
+ * number, state, note, ruleset, writes, types and age. Everything is read
  * through the current lens; a row opens the changeset's review. Start
  * changeset starts and pins one; a draft row pins it, the pinned row leaves
  * it. A "?" beside the title explains the workflow.
@@ -80,6 +80,7 @@ export function ChangesetsPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-14 text-right">#</TableHead>
                 <TableHead className="w-24">State</TableHead>
                 <TableHead className="min-w-48">Note</TableHead>
                 <TableHead className="w-28">Ruleset</TableHead>
@@ -90,12 +91,13 @@ export function ChangesetsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortChangesets(changesets.data).map((item) => (
+              {changesets.data.map((item) => (
                 <TableRow
                   key={item.id}
                   className={cn('group cursor-pointer', item.state === 'submitted' && 'bg-(--tc-blue-bg)')}
                   onClick={() => navigate(detail(item.id))}
                 >
+                  <TableCell className="text-right font-mono text-[12.5px] tabular-nums">{item.number}</TableCell>
                   <TableCell>
                     <ChangesetStateChip state={item.state} />
                   </TableCell>

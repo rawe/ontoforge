@@ -14,6 +14,10 @@
  *   append, unstage, submit and discard change a draft changeset only,
  *   unsubmit a submitted one. A submit landing between the service's read
  *   and the write is therefore never overwritten.
+ * - A changeset's number is the lens's highest number plus one, taken
+ *   under a transaction-scoped advisory lock keyed by the lens, so two
+ *   starts never share one. A number freed by a commit or discard of the
+ *   highest is given again.
  * - The journal dies with its changeset (`ON DELETE CASCADE`).
  * - `lockForCommit` runs only inside a bound store. It first bounds the
  *   transaction's lock waits (`lock_timeout`, 5 s). The commit lock is a
@@ -34,7 +38,7 @@ import { runQuery, withTransaction, type DbResult, type Querier } from "./errors
 import { isUuid } from "./rows.js";
 
 /** The changeset columns of `c`. */
-const BASE_COLS = `c.changeset_id, c.lens_id, c.ruleset_key, c.version, c.note, c.submitted_at,
+const BASE_COLS = `c.changeset_id, c.lens_id, c.number, c.ruleset_key, c.version, c.note, c.submitted_at,
        c.created_at, c.last_change_at`;
 
 /** The changeset columns of `c` and its number of staged writes. */
@@ -61,6 +65,7 @@ function toChangeset(row: Row): ChangesetRecord {
   return {
     id: row.changeset_id as string,
     lensId: row.lens_id as string,
+    number: row.number as number,
     rulesetKey: row.ruleset_key as string | null,
     version: row.version as number,
     note: row.note as string | null,
@@ -134,13 +139,18 @@ export class PostgresChangesetStore implements ChangesetStore {
     rulesetKey: string | null;
     note: string | null;
   }): Promise<ChangesetRecord> {
-    const result = await this.query(
-      `INSERT INTO changeset AS c (changeset_id, lens_id, ruleset_key, version, note)
-       VALUES ($1, $2, $3, 1, $4)
-       RETURNING ${COLS}`,
-      [changeset.id, changeset.lensId, changeset.rulesetKey, changeset.note],
-    );
-    return toChangeset(result.rows[0]!);
+    return this.tx(async (querier) => {
+      await querier.query(`SELECT pg_advisory_xact_lock(hashtextextended('ontoforge.changeset-number.' || $1, 0))`, [
+        changeset.lensId,
+      ]);
+      const result = await querier.query(
+        `INSERT INTO changeset AS c (changeset_id, lens_id, number, ruleset_key, version, note)
+         SELECT $1, $2, COALESCE(max(number), 0) + 1, $3, 1, $4 FROM changeset WHERE lens_id = $2
+         RETURNING ${COLS}`,
+        [changeset.id, changeset.lensId, changeset.rulesetKey, changeset.note],
+      );
+      return toChangeset(result.rows[0]!);
+    });
   }
 
   async get(id: string, lensId: string, rulesetKey: string | null): Promise<ChangesetRecord | null> {
@@ -177,7 +187,7 @@ export class PostgresChangesetStore implements ChangesetStore {
          FROM changeset c LEFT JOIN changeset_write w ON w.changeset_id = c.changeset_id
         WHERE c.lens_id = $1${ruleset}
         GROUP BY c.changeset_id, w.operation, w.type_key
-        ORDER BY c.submitted_at IS NULL, c.last_change_at DESC, c.changeset_id, w.operation, w.type_key`,
+        ORDER BY c.number, c.created_at, c.changeset_id, w.operation, w.type_key`,
       params,
     );
     const summaries = new Map<string, ChangesetSummary>();

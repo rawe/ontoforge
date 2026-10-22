@@ -50,7 +50,7 @@ key, the optional display name and timestamps. Six operations:
 | Read by key | One row, or an absent result. |
 | Read by display name | One row, or an absent result — display names are unique server-wide, and the pre-write conflict check needs the lookup. |
 | Rename | Set the display name; the key never changes. Absent result when not found. |
-| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, retrievers, navigators, instances, anchors, changesets, and every search index. False when not found. |
+| Delete | Hard cascade: the ontology's physical home and its registry entry go together — schema, lenses, agents, saved queries, retrievers, navigators, instances, rulesets, changesets, and every search index. False when not found. |
 
 The registry — not the database's own catalog — is the authoritative list of ontologies.
 The store must enforce server-wide uniqueness of the ontology key and the display name;
@@ -464,24 +464,24 @@ queueing transaction commits, never before. A subscription may end on its own, a
 connection for instance; it then says so and the subscriber subscribes again. Polling
 above the port covers the time without one.
 
-## The anchor store
+## The ruleset store
 
-The anchor store holds an ontology's [anchors](capabilities/anchors.md): per key, the
-entity it points at — its type key and id — or none, the staged-only flag, and timestamps.
-List, ordered by key; read by key, absent when unknown; save, an upsert that creates the
-anchor or re-points it and returns the record as written, writing the flag when given and
-otherwise keeping it, off for a new anchor; delete, false when the key is absent. Every
-record read also says whether its entity is still stored under that type key. The store
-never checks the pointer on save and never decides a state — the service does — so a
-deleted entity leaves its anchors in place. The runtime store hands out the anchor store
-of its own ontology. Anchors are not part of any export read, and registry delete removes
-them.
+The ruleset store holds an ontology's [rulesets](capabilities/rulesets.md): per key, the
+value of each rule — the anchor's entity, its type key and id, or none, and the write
+access — and timestamps. List, ordered by key; read by key, absent when unknown; save, an
+upsert that creates the ruleset or changes it and returns the record as written, writing
+each rule the patch names and keeping the others, a new ruleset with no anchor and write
+access `full`; delete, false when the key is absent. Every record read also says whether
+the anchor's entity is still stored under that type key. The store checks no value on
+save and never decides a state — the service does — so a deleted entity leaves the
+anchors that name it in place. The runtime store hands out the ruleset store of its own
+ontology. Rulesets are not part of any export read, and registry delete removes them.
 
 ## Transactions
 
 The runtime store runs a unit of work on a store bound to one transaction, on one
 connection, with read-committed isolation: it commits when the work returns and rolls back
-when it throws. Every operation of that store, and of the anchor and changeset stores it
+when it throws. Every operation of that store, and of the ruleset and changeset stores it
 hands out, runs on that connection — the one exception to every operation owning its
 connection. Anything that would take a second connection inside the work — a nested unit
 of work, the full-schema retrieval, the search-index or navigator store — fails as a
@@ -491,7 +491,7 @@ changeset's commit uses it.
 ## The changeset store
 
 The changeset store holds an ontology's [changesets](capabilities/changesets.md): per
-changeset its id, its lens, the anchor key of the URL that started it or none, a version, a
+changeset its id, its lens, the ruleset key of the URL that started it or none, a version, a
 note, the time it was submitted or none, and timestamps; per staged write its seq, the
 operation, its arguments, the id a create minted, the type key, the target id, an
 update's before and its size in bytes, all kept as given. The store evaluates no rule —
@@ -499,7 +499,7 @@ the service does — except the state a write needs, which it judges in the stat
 writes, so a submit racing a change is never overwritten.
 
 - **Reads.** Start; read one through its binding — a changeset of another lens, or bound
-  to another anchor, is absent, and no anchor key reaches every changeset of the lens;
+  to another ruleset, is absent, and no ruleset key reaches every changeset of the lens;
   list them bound the same way, submitted first, then by last change, newest first, with
   their counts per operation and the type keys they name; their staged writes by seq,
   paged; the staged create that minted a given id, and those that minted any of a set of
@@ -520,7 +520,7 @@ writes, so a submit racing a change is never overwritten.
   from then on wait at most five seconds for a row another transaction holds, then fail
   as a conflict; finally delete the changeset with its staged writes.
 
-Deleting a lens deletes its changesets, deleting an anchor leaves them, and registry
+Deleting a lens deletes its changesets, deleting a ruleset leaves them, and registry
 delete removes them. Changesets are not part of any export read.
 
 ## The navigator store
@@ -818,21 +818,22 @@ from every entity that is also a parent, with the same path-array guard. The cre
 parent relation inserts the entity, applies its plan, inserts the relation and applies its
 plan, in one transaction; the relation's foreign key holds the parent.
 
-## How anchors are stored
+## How rulesets are stored
 
-One table per namespace, `anchor`: the key as primary key, the entity type key, the entity
-id, the boolean `staged_only` and timestamps. It carries no foreign key to `entity` and no
-check, so deleting an entity leaves the row, and the record then reads as no longer
-stored. Every read is the row left-joined to `entity` on id and type key. A save is one
+One table per namespace, `ruleset`: the key as primary key, the anchor's `anchor_type_key`
+and `anchor_id`, both null for no anchor, timestamps, and `write_access`, text, not null,
+with the default `full`. It carries no foreign key to `entity` and no check, so deleting an entity
+leaves the row, and the anchor then reads as no longer stored. Every read is the row
+left-joined to `entity` on the anchor's id and type key. A save is one
 `INSERT … ON CONFLICT DO UPDATE … RETURNING`, read back through the same join, setting
-`updated_at` on a re-point; a flag not given is coalesced to the stored one, or to false
-on insert.
+`updated_at` on every save; a rule the patch leaves out keeps its stored value, or takes
+its default on insert.
 
 ## How changesets are stored
 
 Two tables per namespace. `changeset` holds one row per changeset, its `lens_id` a foreign
-key to `lens` with delete cascade, its `anchor_key` plain text with no foreign key, so an
-anchor delete leaves the row; `submitted_at` is null for a draft. `changeset_write` holds
+key to `lens` with delete cascade, its `ruleset_key` plain text with no foreign key, so a
+ruleset delete leaves the row; `submitted_at` is null for a draft. `changeset_write` holds
 one row per staged write under the primary key `(changeset_id, seq)`, its changeset a
 foreign key with delete cascade; `arguments` and `before` are `jsonb`, the size `bytes` an
 `integer`. Two B-tree indexes serve them: changesets by lens, and staged writes by
@@ -1000,7 +1001,7 @@ Provide, in this order:
    agents, saved queries and the navigator store. Nothing on the data side is useful
    until the schema can be read back.
 6. **The data side.** Entities, relations, traversal, the hierarchy operations, the
-   commit reads, the anchor store, units of work and the changeset store.
+   commit reads, the ruleset store, units of work and the changeset store.
 7. **Filters, sorts and text search.** The predicate builder, shared by listing and by
    filtered vector search.
 8. **Search** — the search-index store with its queue, wake-ups and retrievers — and the

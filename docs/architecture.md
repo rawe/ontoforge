@@ -109,10 +109,10 @@ agent ever spans two. The architecture makes that structural rather than checked
   address: a parent flag change, a modeling request, reads the stored relations to refuse
   and never writes them ([capabilities/schema-modeling.md](capabilities/schema-modeling.md#parent-relations));
   a lens delete, a modeling request, deletes the lens's changesets
-  ([capabilities/changesets.md](capabilities/changesets.md#binding)); and anchor
-  maintenance is runtime state addressed without a lens, whose put reads whether the named
-  entity exists ([capabilities/anchors.md](capabilities/anchors.md#maintenance)).
-  An anchored mount adds an anchor to a lens's address and narrows its writes, never its
+  ([capabilities/changesets.md](capabilities/changesets.md#binding)); and ruleset
+  maintenance is runtime state addressed without a lens, whose put reads whether the
+  anchor's entity exists ([capabilities/rulesets.md](capabilities/rulesets.md#maintenance)).
+  A ruleset mount adds a ruleset to a lens's address and narrows what it may do, never its
   reach. There is no other addressing channel: no header, no default, no fallback.
 - **Every persistence operation runs through a store bound to exactly one ontology.**
   The service layer obtains a modeling or runtime store *for* an ontology key; every
@@ -128,7 +128,7 @@ The registry — not any storage catalog — is the authoritative list of ontolo
 ontologies is a valid server state: a fresh server starts empty, nothing is auto-created
 at boot, and the last ontology is deletable. Deleting an ontology is one hard cascade
 over everything it contains — schema, lenses, saved queries, assistants,
-instance data, anchors, changesets and search indices.
+instance data, rulesets, changesets and search indices.
 
 ## Logical data model
 
@@ -172,8 +172,8 @@ lens key, can exist independently in two ontologies.
 |---|---|---|
 | Entity | `_id` | its type key, plus the properties its type defines |
 | Relation | `_id` | its type key, its two endpoint ids, plus its properties |
-| Anchor | unique `key` | the entity it points at (type key and id), or none; the staged-only flag |
-| Changeset | id | its lens, the anchor key of the URL that started it (optional), version, note, submitted time (absent for a draft), timestamps |
+| Ruleset | unique `key` | its rules: the anchor's entity (type key and id) or none, and the write access |
+| Changeset | id | its lens, the ruleset key of the URL that started it (optional), version, note, submitted time (absent for a draft), timestamps |
 | Changeset write | changeset + seq | operation, its arguments, the id a create minted, type key, target id, the before of an update |
 | Chunk | internal | fragment of one document property, with its offset and length, kept as a passage entry |
 | Search entry | internal | one indexed text of one entity in one generation of a search index — its own fields, one relation, or one chunk |
@@ -337,7 +337,7 @@ targets but judge nothing. The replay itself goes through the same store writes 
 immediate path.
 
 **One connection.** A commit runs on a store bound to one database transaction: every
-operation of that store, and of the anchor and changeset stores it hands out, uses the
+operation of that store, and of the ruleset and changeset stores it hands out, uses the
 transaction's one connection. It is the one exception to every port operation owning its
 connection, and taking a second connection inside it is a programming error
 ([storage-adapters.md](storage-adapters.md#transactions)).

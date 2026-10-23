@@ -18,11 +18,15 @@ import {
 } from "./core/embedding.js";
 import { closeStores, ensureSemanticIndexes, initStores } from "./core/ports.js";
 import { startSearchWorker, stopSearchWorker } from "./runtime/indexing/worker.js";
+import { MemoryThreadStore } from "./runtime/threads/memoryThreadStore.js";
+import type { ThreadStore } from "./runtime/threads/threadStore.js";
+import { ValkeyThreadStore } from "./runtime/threads/valkeyThreadStore.js";
 
 /**
  * Run the ordered startup sequence and return the ready-to-listen app.
  *
  * 1. Connect storage, verify reachability, ensure constraints and indexes.
+ *    Open the thread store; a Valkey must be reachable and evict nothing.
  * 2. Initialize the embedding provider, if configured.
  * 3. Initialize the language-model provider, if configured.
  * 4. If embeddings are enabled, reconcile vector index widths against the
@@ -31,19 +35,34 @@ import { startSearchWorker, stopSearchWorker } from "./runtime/indexing/worker.j
  * 5. Start the search worker — it reconciles every ontology's index
  *    generations, then builds entries from the queue in the background.
  * 6. Start both MCP servers (mounted inside `createApp`).
+ *
+ * The app closes the thread store when it closes; a failed boot closes it here.
  */
 export async function startServer(): Promise<FastifyInstance> {
   await initStores();
-  initEmbeddingProvider();
-  initAiModel();
-  initDecisionModel();
-  const embeddingProvider = getEmbeddingProvider();
-  if (embeddingProvider) {
-    await ensureSemanticIndexes(embeddingProvider.dimensions);
+  const threads = await openThreadStore();
+  try {
+    initEmbeddingProvider();
+    initAiModel();
+    initDecisionModel();
+    const embeddingProvider = getEmbeddingProvider();
+    if (embeddingProvider) {
+      await ensureSemanticIndexes(embeddingProvider.dimensions);
+    }
+    await startSearchWorker();
+    // Step 6: the MCP mounts are part of createApp.
+    return await createApp(threads);
+  } catch (error) {
+    await threads.close();
+    throw error;
   }
-  await startSearchWorker();
-  // Step 6: the MCP mounts are part of createApp.
-  return createApp();
+}
+
+/** The thread store `THREAD_STORE` names, connected and checked. */
+async function openThreadStore(): Promise<ThreadStore> {
+  return settings.THREAD_STORE === "valkey"
+    ? ValkeyThreadStore.connect(settings.VALKEY_URL!)
+    : new MemoryThreadStore();
 }
 
 export async function shutdownServer(app: FastifyInstance): Promise<void> {

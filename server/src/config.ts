@@ -38,6 +38,9 @@ export interface Settings {
   DECISION_API_KEY: string | null;
 
   PUBLIC_URL: string | null;
+
+  THREAD_STORE: "memory" | "valkey";
+  VALKEY_URL: string | null;
 }
 
 function str(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
@@ -86,6 +89,36 @@ function optOneOf(
     );
   }
   return value;
+}
+
+/**
+ * Where assistant conversations live: `memory` serves one process only,
+ * `valkey` is shared by every server naming the same `VALKEY_URL`. A URL
+ * without the switch fails the boot — it would otherwise quietly run each
+ * server on its own memory.
+ */
+function threadStore(env: NodeJS.ProcessEnv): Pick<Settings, "THREAD_STORE" | "VALKEY_URL"> {
+  const store = optOneOf(env, "THREAD_STORE", ["memory", "valkey"]) ?? "memory";
+  const url = optStr(env, "VALKEY_URL");
+  if (store === "memory") {
+    if (url !== null) {
+      throw new Error("Environment variable VALKEY_URL is set but THREAD_STORE is not 'valkey'");
+    }
+    return { THREAD_STORE: "memory", VALKEY_URL: null };
+  }
+  if (url === null) {
+    throw new Error("Environment variable VALKEY_URL is required when THREAD_STORE is 'valkey'");
+  }
+  let protocol: string | null = null;
+  try {
+    protocol = new URL(url).protocol;
+  } catch {
+    // Reported below.
+  }
+  if (protocol !== "redis:" && protocol !== "rediss:") {
+    throw new Error("Environment variable VALKEY_URL is not a redis:// or rediss:// URL");
+  }
+  return { THREAD_STORE: "valkey", VALKEY_URL: url };
 }
 
 /** Where a provider is reached when no base URL is configured. */
@@ -189,6 +222,8 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     DECISION_API_KEY: optStr(env, "DECISION_API_KEY") ?? optStr(env, "TYPESAFE_API_KEY"),
 
     PUBLIC_URL: optStr(env, "PUBLIC_URL"),
+
+    ...threadStore(env),
   };
 }
 

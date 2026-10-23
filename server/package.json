@@ -14,7 +14,8 @@
     "test:integration": "ENV_FILE=${ENV_FILE:-../env/test.env} vitest run --config vitest.integration.config.ts",
     "test:integration:embedding": "ENV_FILE=${ENV_FILE:-../env/test-embedding.env} vitest run --config vitest.integration.embedding.config.ts",
     "test:integration:ai": "ENV_FILE=${ENV_FILE:-../env/test-ai.env} vitest run --config vitest.integration.ai.config.ts",
-    "test:integration:decision": "ENV_FILE=${ENV_FILE:-../env/test.env} vitest run --config vitest.integration.decision.config.ts"
+    "test:integration:decision": "ENV_FILE=${ENV_FILE:-../env/test.env} vitest run --config vitest.integration.decision.config.ts",
+    "test:integration:valkey": "ENV_FILE=${ENV_FILE:-../env/test-valkey.env} vitest run --config vitest.integration.valkey.config.ts"
   },
   "engines": {
     "node": ">=22"
@@ -32,6 +33,7 @@
     "antlr4ng": "^3.0.16",
     "fastify": "^5.10.0",
     "fastify-type-provider-zod": "^7.0.0",
+    "iovalkey": "0.4.0",
     "langchain": "^1.5.16",
     "pg": "^8.23.0",
     "pgvector": "^0.3.0",

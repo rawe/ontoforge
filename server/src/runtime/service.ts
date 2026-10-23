@@ -437,10 +437,11 @@ export interface PathStep {
 
 /**
  * The entity's path through the lens: root first, ending with the entity.
- * The walk follows every parent relation of the FULL schema; the lens then
- * cuts it, so the path starts below the nearest ancestor whose type the
- * lens hides and never names a hidden entity. A root's path is itself
- * alone. A hidden type or an unknown entity is not found, as `getEntity`.
+ * The walk follows only the parent relations the lens shows, and the lens
+ * cuts it again at the nearest ancestor whose type it hides: the path
+ * starts below a hidden parent relation or a hidden ancestor and never
+ * names either. A root's path is itself alone. A hidden type or an unknown
+ * entity is not found, as `getEntity`.
  *
  * On data the accepted race left with two parents the walk is no chain:
  * the path then lists every visible ancestor the walk reaches, in the
@@ -460,8 +461,10 @@ export async function getPath(
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
   }
 
-  // Nearest first: keep the ancestors below the first hidden one.
-  const ancestors = await store.getAncestors(entityId, parentReadings(loaded.full));
+  // The walk follows only the parent relations the lens shows, so it ends
+  // at the first step over one it hides. Nearest first: keep the
+  // ancestors below the first one of a hidden type.
+  const ancestors = await store.getAncestors(entityId, parentReadings(loaded.scoped));
   const hidden = ancestors.findIndex((ancestor) => !(ancestor.type in visibleTypes));
   const visible = hidden === -1 ? ancestors : ancestors.slice(0, hidden);
   const steps = [...visible.reverse(), { type: entityTypeKey, id: entityId }];

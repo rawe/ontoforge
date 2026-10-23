@@ -4,10 +4,11 @@
 //
 //   node scripts/scale/scenarios.mjs [all | <scenario>…]
 //
-// Scenarios: continue, replace, valkey-reset, stale-schema, fencing, drain.
+// Scenarios: continue, replace, valkey-reset, stale-schema, fencing, drain, upgrade.
 // Each prints PASS, FAIL or SKIP with its evidence; the exit code is 1 when any
 // selected scenario failed. They touch only the ontoforge-scale Compose project
-// and the seed ontology fx_people_basic, which they load when it is missing.
+// and the seed ontology fx_people_basic, which they load when it is missing;
+// `upgrade` rewrites the storage of the harness database.
 
 import {
   SEED, backendReady, chat, compose, composeAsync, ensureSeed, fakeControl, http, logsSince, modelPath,
@@ -328,6 +329,48 @@ async function drainScenario(run) {
   }
 }
 
+/**
+ * A and B start together on storage one version behind: one upgrades it, the
+ * other waits; both become ready on the current version, the data unchanged.
+ * Version-8 storage is made in SQL while both are stopped: every namespace
+ * loses step 9's design revision, and the recorded version goes back to 8.
+ */
+async function upgradeScenario(run) {
+  const u = urls();
+  const current = Number(sql('SELECT version FROM public.storage_version'));
+  if (current !== 9) {
+    run.skip(`the scenario rebuilds version 8 from version 9; storage is version ${current}`);
+    return;
+  }
+  const before = { person: await entityTotal(u.lb, 'person'), company: await entityTotal(u.lb, 'company') };
+  try {
+    await composeAsync(['stop', 'backend-a', 'backend-b']);
+    const since = new Date().toISOString();
+    const namespaces = sql('SELECT namespace FROM public.ontology ORDER BY namespace').split('\n').filter(Boolean);
+    sql(`${namespaces.map((ns) => `DROP TABLE ${ns}.design_revision;`).join(' ')} UPDATE public.storage_version SET version = 8;`);
+    run.note(`storage set back to version ${sql('SELECT version FROM public.storage_version')}, ${namespaces.length} namespaces`);
+
+    const t0 = Date.now();
+    await composeAsync(['start', 'backend-a', 'backend-b']);
+    const ready = await Promise.all([backendUp(u.a), backendUp(u.b)]);
+    run.check('A and B ready', ready.every(Boolean), `${ready.map((ok) => (ok ? 'ready' : 'not ready')).join(' / ')} after ${Date.now() - t0} ms`);
+    const lines = (marker) => ['backend-a', 'backend-b'].flatMap((service) =>
+      logsSince(service, since).split('\n').filter((l) => l.includes(marker)).map((l) => l.replace(/\s+\|\s*/, ': ')));
+    const upgrades = lines('Upgrading storage');
+    run.check('exactly one upgrade across A and B', upgrades.length === 1, upgrades.join('; ') || 'none');
+    run.note(`waited for the other: ${lines('Waiting for another server').map((l) => l.split(':')[0]).join(', ') || 'none'}`);
+    const version = Number(sql('SELECT version FROM public.storage_version'));
+    run.check('storage at the current version', version === current, `version ${version}`);
+    const revisions = namespaces.filter((ns) => sql(`SELECT revision FROM ${ns}.design_revision`) === '1').length;
+    run.check('every namespace has its design revision', revisions === namespaces.length, `${revisions} of ${namespaces.length}`);
+    const after = { person: await entityTotal(u.lb, 'person'), company: await entityTotal(u.lb, 'company') };
+    run.check('ontology data intact', JSON.stringify(after) === JSON.stringify(before),
+      `before ${JSON.stringify(before)}, after ${JSON.stringify(after)}`);
+  } finally {
+    await composeAsync(['start', 'backend-a', 'backend-b']);
+  }
+}
+
 const SCENARIOS = {
   continue: continueScenario,
   replace: replaceScenario,
@@ -335,6 +378,7 @@ const SCENARIOS = {
   'stale-schema': staleSchemaScenario,
   fencing: fencingScenario,
   drain: drainScenario,
+  upgrade: upgradeScenario,
 };
 
 // --- Main --------------------------------------------------------------------

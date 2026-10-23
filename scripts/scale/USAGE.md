@@ -47,6 +47,7 @@ is missing, and chat with its unscoped lens's built-in agent. The fake answers
 | `stale-schema` | B has read the schema; A adds a property and makes another required; B must accept the new property and reject a create without the required one |
 | `fencing` | worker fencing across processes: B paused, a person updated through A, A parked in the fake's embed call; the claim's lease expired in SQL, B resumes and builds a newer update; then A's call is answered — A logs `Search claim lost`, the entry keeps B's version, the queue is empty, nothing failed |
 | `drain` | a short turn finishes while A stops, a long one is cut and leaves the thread at its previous turn, and the next turn on B is not `THREAD_BUSY` |
+| `upgrade` | with A and B stopped, the storage is set back to version 8 in SQL (every namespace loses its design revision); A and B start together: exactly one `Upgrading storage` line across both, both ready, version 9, every design revision back, the ontology data unchanged |
 
 Each prints its evidence (HTTP statuses, thread ids, counts) and PASS, FAIL or SKIP;
 the exit code is 1 when one failed.

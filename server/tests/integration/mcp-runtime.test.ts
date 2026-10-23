@@ -211,6 +211,7 @@ describe("tool surface", () => {
     try {
       const tools = await client.listTools();
       expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+        "check_changeset",
         "commit_changeset",
         "create_entity",
         "create_relation",
@@ -1072,7 +1073,7 @@ describe("the ruleset mount", () => {
       const plainNames = (await plain.listTools()).tools.map((tool) => tool.name);
       const rulesetNames = (await viaRuleset.listTools()).tools.map((tool) => tool.name);
       expect(plainNames).not.toContain("get_ruleset");
-      expect(plainNames).toHaveLength(34);
+      expect(plainNames).toHaveLength(35);
       expect(rulesetNames.sort()).toEqual([...plainNames, "get_ruleset"].sort());
     } finally {
       await plain.close();

@@ -17,9 +17,9 @@
  *
  * Changesets: the six entity and relation write tools and the two
  * document edit tools take an optional `changeset_id` that stages the
- * write instead (`runtime/changesets.ts`, the same functions as REST); ten
- * tools start, list, read, unstage from, rebase, submit, unsubmit, commit
- * and discard a changeset and read its staged document text. None is
+ * write instead (`runtime/changesets.ts`, the same functions as REST);
+ * eleven tools start, list, read, unstage from, rebase, submit, unsubmit,
+ * check, commit and discard a changeset and read its staged document text. None is
  * grantable to an agent (`toolNames.ts`). A ruleset mount lists the tools
  * its write access allows (`writeAccess.ts`): at 'propose' the eight write
  * tools require `changeset_id` and `commit_changeset` is not listed; at
@@ -1445,7 +1445,7 @@ function registerChangesetTools(
         `. Any fault refuses the submit, naming ${VIOLATIONS}, and the changeset stays a ` +
         "draft. The hierarchy rules" +
         (rulesetKey !== null ? " and the anchor's subtree" : "") +
-        " are checked only at commit. Also refused when the changeset is already submitted, " +
+        " are checked only at commit and by check_changeset. Also refused when the changeset is already submitted, " +
         "when it changed during the submit, or when its ruleset's anchor entity no longer exists " +
         `or this lens does not show it. Returns the changeset: ${CHANGESET_FIELDS}; state is 'submitted'.` +
         (lists("commit_changeset")
@@ -1483,6 +1483,27 @@ function registerChangesetTools(
       jsonResult(
         await changesets.unsubmitChangeset(lensKey, rulesetKey, args.changeset_id, args.note, await open()),
       ),
+    ),
+  );
+
+  register(
+    "check_changeset",
+    {
+      description:
+        "Try a commit of a changeset, draft or submitted, without persisting anything: it runs " +
+        "every check and every write of a commit, then rolls all of it back. Nothing " +
+        "changes, the changeset's version and last change included. Passed, it returns " +
+        "{version, committed, alreadyGone}: the version checked, the number of staged objects " +
+        "a commit would persist and the ids of deletes already done. Failed, it names " +
+        `${VIOLATIONS} and the version checked, exactly as a commit of that version would be ` +
+        "rejected; a commit can still differ when the changeset or the data change meanwhile. " +
+        "Refused while another commit or check runs on this ontology or the changeset is busy: " +
+        "try again." +
+        reach(rulesetKey),
+      inputSchema: { changeset_id: z.string() },
+    },
+    tool("check_changeset", async (args: { changeset_id: string }, open) =>
+      jsonResult(await changesets.checkChangeset(lensKey, rulesetKey, args.changeset_id, await open())),
     ),
   );
 

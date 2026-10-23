@@ -17,7 +17,7 @@ import { ConflictError } from "../core/exceptions.js";
 import type { WriteAccess } from "../core/ports.js";
 
 /** The closed list of operations. `stage` starts, stages into, unstages
- * from, rebases, submits, unsubmits and discards a changeset. */
+ * from, rebases, checks, submits, unsubmits and discards a changeset. */
 export type Operation = "read" | "stage" | "commit" | "write";
 
 /** Each level a fixed set of operations, an ordered ladder: each level
@@ -72,6 +72,7 @@ export const TOOLS: Record<string, ToolRow> = {
   rebase: { operation: "stage" },
   submit_changeset: { operation: "stage" },
   unsubmit_changeset: { operation: "stage" },
+  check_changeset: { operation: "stage" },
   commit_changeset: { operation: "commit" },
   discard_changeset: { operation: "stage" },
 };
@@ -118,6 +119,7 @@ export const ROUTES: Record<string, Operation> = {
   "POST /changesets/:changesetId/objects/:objectId/rebase": "stage",
   "POST /changesets/:changesetId/submit": "stage",
   "POST /changesets/:changesetId/unsubmit": "stage",
+  "POST /changesets/:changesetId/check": "stage",
   "POST /changesets/:changesetId/commit": "commit",
 };
 

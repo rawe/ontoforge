@@ -129,6 +129,7 @@ describe("the levels and the check", () => {
       expect(toolOperation(name, {})).toBe("write");
     }
     expect(toolOperation("rebase", { changeset_id: ID })).toBe("stage");
+    expect(toolOperation("check_changeset", { changeset_id: ID })).toBe("stage");
     expect(toolOperation("commit_changeset", { changeset_id: ID })).toBe("commit");
     expect(() => toolOperation("nope", {})).toThrow("Tool 'nope' has no row in the operation table");
     expect(routeOperation("HEAD", "/schema")).toBe("read");
@@ -136,9 +137,9 @@ describe("the levels and the check", () => {
     expect(() => routeOperation("PUT", "/schema")).toThrow("Route 'PUT /schema' has no row in the operation table");
   });
 
-  it("a level lists the tools whose operation it allows, and a stageable tool from staging up: 35, 34, 20", () => {
+  it("a level lists the tools whose operation it allows, and a stageable tool from staging up: 36, 35, 20", () => {
     const listed = (level: WriteAccess) => Object.keys(TOOLS).filter((name) => listsTool(level, name));
-    expect(listed("full")).toHaveLength(35);
+    expect(listed("full")).toHaveLength(36);
     expect(listed("propose").sort()).toEqual(Object.keys(TOOLS).filter((name) => name !== "commit_changeset").sort());
     expect(listed("none").sort()).toEqual(Object.keys(TOOLS).filter((name) => TOOLS[name]!.operation === "read").sort());
     expect(listed("none")).toHaveLength(20);
@@ -147,7 +148,7 @@ describe("the levels and the check", () => {
 });
 
 describe("the tables cannot drift", () => {
-  it("ROUTES are exactly the routes the ruleset mirror registers (40)", async () => {
+  it("ROUTES are exactly the routes the ruleset mirror registers (41)", async () => {
     const prefix = "/api/ontologies/:ontologyKey/runtime/lenses/:lensKey/rulesets/:rulesetKey";
     const app = Fastify();
     app.setValidatorCompiler(validatorCompiler);
@@ -163,15 +164,15 @@ describe("the tables cannot drift", () => {
     await app.ready();
     await app.close();
     expect([...registered].sort()).toEqual(Object.keys(ROUTES).sort());
-    expect(registered.size).toBe(40);
+    expect(registered.size).toBe(41);
   });
 
-  it("TOOLS are exactly the tools of a ruleset mount at full (35)", async () => {
+  it("TOOLS are exactly the tools of a ruleset mount at full (36)", async () => {
     const client = await connect("agent-a");
     const names = (await client.listTools()).tools.map((tool) => tool.name);
     await client.close();
     expect(names.sort()).toEqual(Object.keys(TOOLS).sort());
-    expect(names).toHaveLength(35);
+    expect(names).toHaveLength(36);
   });
 });
 
@@ -275,6 +276,7 @@ describe("the REST mirror", () => {
     "POST /changesets/:changesetId/objects/:objectId/rebase": [`${CS}/objects/${ID}/rebase`, {}],
     "POST /changesets/:changesetId/submit": [`${CS}/submit`, {}],
     "POST /changesets/:changesetId/unsubmit": [`${CS}/unsubmit`, { note: "again" }],
+    "POST /changesets/:changesetId/check": [`${CS}/check`],
     "POST /changesets/:changesetId/commit": [`${CS}/commit`, {}],
   };
 
@@ -303,20 +305,20 @@ describe("the REST mirror", () => {
     return refused;
   }
 
-  it("full answers all 40", async () => {
+  it("full answers all 41", async () => {
     expect(await refusedAt("full")).toEqual([]);
   });
 
-  it("propose refuses the 7 immediate writes and the commit: 32 / 8", async () => {
+  it("propose refuses the 7 immediate writes and the commit: 33 / 8", async () => {
     const refused = await refusedAt("propose");
     expect(refused.map((route) => ROUTES[route])).toEqual([...Array(7).fill("write"), "commit"]);
-    expect(Object.keys(ROUTES).length - refused.length).toBe(32);
+    expect(Object.keys(ROUTES).length - refused.length).toBe(33);
   });
 
-  it("none refuses every write, stage and commit: 24 / 16; the changeset reads still answer", async () => {
+  it("none refuses every write, stage and commit: 24 / 17; the changeset reads still answer", async () => {
     const refused = await refusedAt("none");
     expect(refused).toEqual(Object.keys(ROUTES).filter((route) => ROUTES[route] !== "read"));
-    expect(refused).toHaveLength(16);
+    expect(refused).toHaveLength(17);
     expect(refused).not.toContain("GET /changesets/:changesetId/entities/:entityTypeKey/:entityId");
     for (const spy of Object.values(writes)) expect(spy).not.toHaveBeenCalled();
   });
@@ -358,6 +360,7 @@ describe("the MCP tools", () => {
     ["rebase", { changeset_id: ID, object_id: ID }],
     ["submit_changeset", { changeset_id: ID }],
     ["unsubmit_changeset", { changeset_id: ID, note: "again" }],
+    ["check_changeset", { changeset_id: ID }],
     ["discard_changeset", { changeset_id: ID }],
     ["commit_changeset", { changeset_id: ID }],
   ] as const;

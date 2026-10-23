@@ -2,7 +2,8 @@
  * The commit over mocked stores: the order of its steps, the version
  * check, the staged objects applied in fixed phases through the store's
  * write methods, idempotent deletes, the delete capture, a fault rolled
- * back as a 422, the errors that stay 409s, and the process limit. The
+ * back as a 422, the errors that stay 409s, the process limit, and the
+ * check: the same steps rolled back, with nothing touched. The
  * stored entities the objects name answer the lock-free pass
  * (`changesets-validation.test.ts` covers it).
  */
@@ -11,7 +12,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { ConflictError, NotFoundError, ValidationError } from "../../src/core/exceptions.js";
 import type { ChangesetRecord, StagedObjectRecord } from "../../src/core/ports.js";
-import { applyObjects, commitChangeset, type Applied } from "../../src/runtime/changesets.js";
+import { applyObjects, checkChangeset, commitChangeset, type Applied } from "../../src/runtime/changesets.js";
 import {
   invalidateLoadedSchemaCache,
   invalidateSearchContext,
@@ -366,5 +367,94 @@ describe("the process limit", () => {
       await expect(commitChangeset("full_lens", null, CS, undefined, asRuntimeStore(store))).rejects.toThrow(NotFoundError);
     }
     expect(await commit()).toMatchObject({ committed: 0 });
+  });
+});
+
+describe("the check", () => {
+  /** Check the changeset as staged, seeded afresh. */
+  function check(overrides: Partial<ChangesetRecord> = {}) {
+    store.changesetStore.seed(changeset({ objectCount: staged.length, ...overrides }), inTouchOrder(staged));
+    return checkChangeset("full_lens", null, CS, asRuntimeStore(store));
+  }
+
+  it("runs the commit's steps and phases, then rolls back: the answer with the version, nothing deleted or touched", async () => {
+    changesetOf(sixObjects());
+    expect(await check()).toEqual({ version: 7, committed: 6, alreadyGone: [] });
+    expect(store.changesetStore.lockForCommit).toHaveBeenCalledWith(CS);
+    expect(writeOrder()).toEqual([
+      "createEntity",
+      "updateEntity",
+      "deleteRelation",
+      "createRelation",
+      "updateRelation",
+      "deleteEntity",
+    ]);
+    // The transaction ends in a throw: the store rolls it back.
+    await expect(store.transaction.mock.results[0]!.value).rejects.toThrow();
+    expect(store.changesetStore.deleteCommitted).not.toHaveBeenCalled();
+    expect(store.changesetStore.touch).not.toHaveBeenCalled();
+  });
+
+  it("a submitted changeset checks too, and already gone deletes are answered", async () => {
+    store.deleteEntity.mockResolvedValue(false);
+    changesetOf([stagedObject(D1, "delete", "department")]);
+    expect(await check({ submittedAt: NOW, version: 9 })).toEqual({ version: 9, committed: 1, alreadyGone: [D1] });
+  });
+
+  it("a fault while applying is the commit's 422 with the version checked, and no touch", async () => {
+    store.updateEntity.mockResolvedValue(null);
+    changesetOf(sixObjects());
+    const error = await rejected(check());
+    expect(error.message).toBe("Checked version 7: the commit would be rejected");
+    expect(error.details).toEqual({
+      violations: [{ object: P1, kind: "replay", message: "Deleted since it was staged" }],
+      total: 1,
+      version: 7,
+    });
+    expect(store.changesetStore.deleteCommitted).not.toHaveBeenCalled();
+    expect(store.changesetStore.touch).not.toHaveBeenCalled();
+  });
+
+  it("a lock-free pass fault rejects before BEGIN, with no touch", async () => {
+    changesetOf([stagedObject(D1, "delete", "gone")]);
+    const error = await rejected(check());
+    expect(error.details).toMatchObject({ total: 1, version: 7, violations: [{ object: D1, kind: "not_visible" }] });
+    expect(store.transaction).not.toHaveBeenCalled();
+    expect(store.changesetStore.touch).not.toHaveBeenCalled();
+  });
+
+  it("an unknown changeset is 404; another commit running stays a 409", async () => {
+    await expect(checkChangeset("full_lens", null, CS, asRuntimeStore(store))).rejects.toThrow(NotFoundError);
+    store.changesetStore.lockForCommit.mockRejectedValue(new ConflictError("Another commit is running; try again"));
+    await expect(check()).rejects.toThrow(ConflictError);
+    expect(store.changesetStore.touch).not.toHaveBeenCalled();
+  });
+
+  it("counts as a running commit: a commit beside a check is 409 at once, and a check beside a commit", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    store.changesetStore.lockForCommit.mockImplementationOnce(async () => {
+      await held;
+      return changeset();
+    });
+    const first = check();
+    await expect(commitChangeset("full_lens", null, CS, undefined, asRuntimeStore(store))).rejects.toThrow(
+      new ConflictError("Too many commits are running; try again"),
+    );
+    release();
+    expect(await first).toEqual({ version: 7, committed: 0, alreadyGone: [] });
+
+    let releaseCommit!: () => void;
+    const heldCommit = new Promise<void>((resolve) => (releaseCommit = resolve));
+    store.changesetStore.lockForCommit.mockImplementationOnce(async () => {
+      await heldCommit;
+      return changeset();
+    });
+    const running = commit();
+    await expect(checkChangeset("full_lens", null, CS, asRuntimeStore(store))).rejects.toThrow(
+      new ConflictError("Too many commits are running; try again"),
+    );
+    releaseCommit();
+    expect(await running).toEqual({ committed: 0, alreadyGone: [] });
   });
 });

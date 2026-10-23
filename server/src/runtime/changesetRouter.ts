@@ -16,7 +16,8 @@
  * staged text of one document property, with the document read's paging,
  * and `GET /:changesetId/entities/:entityTypeKey/:entityId` one entity as
  * a commit would leave it, with its staged object; `POST
- * /:changesetId/submit` and `/unsubmit` hand it over and back, and `POST
+ * /:changesetId/submit` and `/unsubmit` hand it over and back, `POST
+ * /:changesetId/check` runs the commit and rolls it back, and `POST
  * /:changesetId/commit` persists it all or nothing. No read outside these
  * changeset routes sees staged data.
  * Routers parse and shape only; every rule lives in `changesets.ts`.
@@ -289,6 +290,15 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
         request.body?.note,
         await getRuntimeStore(request.params.ontologyKey),
       ),
+  );
+
+  app.post("/:changesetId/check", { schema: { tags: ["runtime"], params: ChangesetParams } }, async (request) =>
+    changesets.checkChangeset(
+      request.params.lensKey,
+      rulesetOf(request.params),
+      request.params.changesetId,
+      await getRuntimeStore(request.params.ontologyKey),
+    ),
   );
 
   app.post(

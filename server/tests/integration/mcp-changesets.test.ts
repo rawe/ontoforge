@@ -4,7 +4,7 @@
  * (`buildProjectHierarchy`, rebuilt fresh per group): the tool surface, a
  * whole round through the tools alone (start, stage, read, submit,
  * unsubmit, unstage, cut, commit, discard) with the same answers and
- * errors as REST, the byte cap among them, a drift fixed by rebase, a
+ * errors as REST, the check among them, the byte cap among them, a drift fixed by rebase, a
  * write without `changeset_id` staying immediate, and the ruleset mount's
  * binding: a changeset carries its ruleset, another ruleset does not reach
  * it, and the commit keeps it in the anchor's subtree. `edit_document` and
@@ -58,6 +58,7 @@ const CHANGESET_TOOLS = [
   "rebase",
   "submit_changeset",
   "unsubmit_changeset",
+  "check_changeset",
   "commit_changeset",
   "discard_changeset",
 ];
@@ -138,7 +139,7 @@ afterAll(async () => {
 describe("the tool surface", () => {
   beforeAll(fresh, 60_000);
 
-  it("lists the ten changeset tools and an optional changeset_id on the eight stageable tools", async () => {
+  it("lists the eleven changeset tools and an optional changeset_id on the eight stageable tools", async () => {
     for (const rulesetKey of [null, "agent-a"]) {
       if (rulesetKey !== null) await pointAnchor(rulesetKey, "project", e.P1);
       const { tools } = await (await connect(rulesetKey)).listTools();
@@ -313,6 +314,10 @@ describe("a whole round through MCP alone", () => {
     expect(await refused(client, "rebase", { changeset_id: cs, object_id: e.Ana, properties: ["email"] })).toContain(
       `No value of 'email' is staged for object '${e.Ana}' in changeset '${cs}'`,
     );
+    const { version } = await ok(client, "get_changeset", { changeset_id: cs });
+    expect(await ok(client, "check_changeset", { changeset_id: cs })).toEqual({ version, committed: 1, alreadyGone: [] });
+    expect((await ok(client, "get_entity", { entity_type_key: "person", entity_id: e.Ana })).name).toBe("Ana M");
+    expect(await ok(client, "get_changeset", { changeset_id: cs })).toMatchObject({ state: "draft", version });
     expect(await ok(client, "commit_changeset", { changeset_id: cs })).toEqual({ committed: 1, alreadyGone: [] });
     expect((await ok(client, "get_entity", { entity_type_key: "person", entity_id: e.Ana })).name).toBe("Ana W");
   });
@@ -348,6 +353,11 @@ describe("the errors are REST's", () => {
     // A rejected commit names its violations; nothing is persisted.
     await ok(client, "delete_entity", { entity_type_key: "project", entity_id: e.P2, changeset_id: cs });
     const before = (await ok(client, "get_changeset", { changeset_id: cs })).version;
+    const checkRest = await rest("POST", `${ALL}/changesets/${cs}/check`);
+    expect(checkRest.status).toBe(422);
+    const checked = await refused(client, "check_changeset", { changeset_id: cs });
+    expect(checked).toContain(`${checkRest.body.error.message} — 1 violation: object ${e.P2} has_children: `);
+    expect(checked).toContain(`Checked version ${before}: the commit would be rejected`);
     const rejected = await refused(client, "commit_changeset", { changeset_id: cs });
     expect(rejected).toContain(`The commit was rejected; nothing was persisted — 1 violation: object ${e.P2} has_children: `);
     expect((await ok(client, "get_entity", { entity_type_key: "project", entity_id: e.P2 })).name).toBe("P2");

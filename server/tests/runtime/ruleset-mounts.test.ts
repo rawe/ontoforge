@@ -326,7 +326,7 @@ describe("the MCP ruleset mount over HTTP", () => {
   };
 
   it("tools/list reads the ruleset once and lists what its level allows", async () => {
-    for (const [level, count] of [["full", 35], ["propose", 34], ["none", 20]] as const) {
+    for (const [level, count] of [["full", 36], ["propose", 35], ["none", 20]] as const) {
       rulesets["agent-a"]!.writeAccess = level;
       holder.store.rulesetStore.get.mockClear();
       const { tools } = await rpc("tools/list");

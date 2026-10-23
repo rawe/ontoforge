@@ -77,6 +77,10 @@
  *   COMMIT. Any failure rolls all of it back; a rejection (422, the
  *   violations by object and property) then refreshes the last change and
  *   keeps the version. One commit runs at a time in one process.
+ * - **Check.** The commit's own steps, draft or submitted, rolled back
+ *   where the commit would delete the changeset: it answers what the
+ *   commit would, with the version it checked, and changes nothing, the
+ *   last change included. It counts as a running commit.
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -1062,6 +1066,12 @@ export interface CommitAnswer {
   alreadyGone: string[];
 }
 
+/** The answer of a check that passed: what the commit would answer, on
+ * the version checked. */
+export interface CheckAnswer extends CommitAnswer {
+  version: number;
+}
+
 /*
  * The texts of markers and violations say what is wrong in words a person
  * reads: no id and no fix. The object they sit on goes unnamed; another
@@ -1086,6 +1096,14 @@ class ApplyFault extends Error {}
 class CommitRejected extends Error {
   constructor(readonly violations: Violation[]) {
     super("Commit rejected");
+  }
+}
+
+/** Thrown inside a check's transaction where the commit would delete the
+ * changeset: it rolls everything back and carries the answer out. */
+class CheckPassed extends Error {
+  constructor(readonly answer: CommitAnswer) {
+    super("Check passed");
   }
 }
 
@@ -1911,11 +1929,12 @@ async function commitViolations(
 
 /** A 422 with the first violations and their total, those on the whole
  * changeset first. */
-function violationsError(message: string, violations: Violation[]): ValidationError {
+function violationsError(message: string, violations: Violation[], extra: Record<string, unknown> = {}): ValidationError {
   const ordered = [...violations.filter((v) => v.object === null), ...violations.filter((v) => v.object !== null)];
   return new ValidationError(message, {
     violations: ordered.slice(0, MAX_VIOLATIONS),
     total: violations.length,
+    ...extra,
   });
 }
 
@@ -1940,6 +1959,35 @@ export async function commitChangeset(
   expectedVersion: number | undefined,
   store: RuntimeStore,
 ): Promise<CommitAnswer> {
+  return (await runCommit(lensKey, rulesetKey, changesetId, expectedVersion, false, store)).answer;
+}
+
+/**
+ * Check a changeset, draft or submitted: the commit run to its end and
+ * rolled back. It refuses as the commit does; a rejection is the commit's
+ * 422 with the `version` checked. Nothing changes, the changeset's version
+ * and last change included.
+ */
+export async function checkChangeset(
+  lensKey: string,
+  rulesetKey: string | null,
+  changesetId: string,
+  store: RuntimeStore,
+): Promise<CheckAnswer> {
+  const { version, answer } = await runCommit(lensKey, rulesetKey, changesetId, undefined, true, store);
+  return { version, ...answer };
+}
+
+/** The commit's steps; a check rolls back at the last one and never
+ * touches the changeset. */
+async function runCommit(
+  lensKey: string,
+  rulesetKey: string | null,
+  changesetId: string,
+  expectedVersion: number | undefined,
+  check: boolean,
+  store: RuntimeStore,
+): Promise<{ version: number; answer: CommitAnswer }> {
   if (runningCommits >= MAX_RUNNING_COMMITS) {
     throw new ConflictError("Too many commits are running; try again");
   }
@@ -1956,7 +2004,7 @@ export async function commitChangeset(
       // 0b: the lock-free pass; a fault rejects with no lock taken.
       const pass = await lockFreePass(loaded, record.id, store);
       if (pass.faults.length > 0) throw new CommitRejected(pass.faults);
-      return await store.transaction(async (bound) => {
+      const answer = await store.transaction(async (bound) => {
         // 1: the commit lock and the row, the version, then the targets
         // and drift under the lock, and the anchor read fresh.
         const locked = await bound.changesets().lockForCommit(record.id);
@@ -1977,12 +2025,22 @@ export async function commitChangeset(
           ...(await commitViolations(loaded, pass, applied, anchor?.coverage ?? null, bound)),
         ];
         if (violations.length > 0) throw new CommitRejected(violations);
+        const answer = { committed: applied.applied, alreadyGone: applied.alreadyGone };
+        // A check rolls back here.
+        if (check) throw new CheckPassed(answer);
         // 4: the staged objects go with the changeset; COMMIT on return.
         await bound.changesets().deleteCommitted(record.id);
-        return { committed: applied.applied, alreadyGone: applied.alreadyGone };
+        return answer;
       });
+      return { version: record.version, answer };
     } catch (error) {
+      if (error instanceof CheckPassed) return { version: record.version, answer: error.answer };
       if (!(error instanceof CommitRejected)) throw error;
+      if (check) {
+        throw violationsError(`Checked version ${record.version}: the commit would be rejected`, error.violations, {
+          version: record.version,
+        });
+      }
       await store.changesets().touch(record.id);
       throw rejection(error.violations);
     }

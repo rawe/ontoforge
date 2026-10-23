@@ -172,6 +172,7 @@ describe("tool descriptions", () => {
     "rebase",
     "submit_changeset",
     "unsubmit_changeset",
+    "check_changeset",
     "commit_changeset",
     "discard_changeset",
   ];
@@ -231,6 +232,8 @@ describe("tool descriptions", () => {
     expect(parameters("unsubmit_changeset").required).toEqual(["changeset_id", "note"]);
     expect(parameters("submit_changeset").required).toEqual(["changeset_id"]);
     expect(parameters("commit_changeset").required).toEqual(["changeset_id"]);
+    expect(Object.keys(parameters("check_changeset").properties ?? {})).toEqual(["changeset_id"]);
+    expect(parameters("check_changeset").required).toEqual(["changeset_id"]);
     expect(parameters("get_changeset").required).toEqual(["changeset_id"]);
     expect(parameters("get_staged_document").required).toEqual([
       "changeset_id",
@@ -279,6 +282,17 @@ describe("tool descriptions", () => {
     }
   });
 
+  it("check_changeset says it persists nothing, what it answers, and is listed wherever staging is", () => {
+    for (const map of [runtime, full, propose]) {
+      const text = map.get("check_changeset")!;
+      expect(text).toContain("without persisting anything");
+      expect(text).toContain("{version, committed, alreadyGone}");
+      expect(text).toContain("Nothing changes, the changeset's version and last change included");
+    }
+    expect(none.has("check_changeset")).toBe(false);
+    expect(runtime.get("submit_changeset")).toContain("checked only at commit and by check_changeset");
+  });
+
   it("the drift guidance is stated in get_changeset and commit_changeset: compare, then rebase or unstage", () => {
     for (const map of [runtime, full, propose]) {
       expect(map.get("get_changeset")).toContain("compare them, then rebase to keep your value, or unstage it");
@@ -303,10 +317,10 @@ describe("tool descriptions", () => {
       .filter((name) => allows(level, TOOLS[name]!.operation) || (TOOLS[name]!.stageable === true && allows(level, "stage")))
       .sort();
 
-  it("the tool list follows the operation table: 34 on the plain lens; 35, 34 and 20 at full, propose and none", () => {
-    expect(runtime.size).toBe(34);
-    expect(full.size).toBe(35);
-    expect(propose.size).toBe(34);
+  it("the tool list follows the operation table: 35 on the plain lens; 36, 35 and 20 at full, propose and none", () => {
+    expect(runtime.size).toBe(35);
+    expect(full.size).toBe(36);
+    expect(propose.size).toBe(35);
     expect(none.size).toBe(20);
     expect([...runtime.keys()].sort()).toEqual(allowed("full").filter((name) => name !== "get_ruleset"));
     for (const [level, map] of [["full", full], ["propose", propose], ["none", none]] as const) {

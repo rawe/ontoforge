@@ -2,8 +2,8 @@
  * How a chat reaches its thread (`docs/capabilities/threads.md`): a
  * message starts or continues one before the stream opens, and a thread
  * is read back as its user and assistant texts. Both refuse a thread that
- * is unknown, expired or bound to another assistant alike, so a client
- * learns nothing about threads it cannot use.
+ * is unknown, expired, bound to another assistant or owned by another
+ * principal alike, so a client learns nothing about threads it cannot use.
  */
 
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";

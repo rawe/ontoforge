@@ -34,7 +34,7 @@ export const navigatorRuntimeRouter: FastifyPluginAsyncZod<{ threads: ThreadStor
       // Resolved before the stream opens: unknown and invalid navigators
       // answer with a plain error response.
       const navigator = await loadRunnableNavigator(lensKey, assistantKey, store);
-      const turn = await openThread(threads, threadBinding(request.params, "navigators"), request.body.threadId);
+      const turn = await openThread(threads, await threadBinding(request, "navigators"), request.body.threadId);
       return sendChatStream(reply, { threads, turn }, (execution, thread) =>
         runNavigatorTurn(navigator, lensKey, store, request.body.message, thread, execution),
       );
@@ -47,7 +47,7 @@ export const navigatorRuntimeRouter: FastifyPluginAsyncZod<{ threads: ThreadStor
     { schema: { tags: ["ai"], params: ThreadParams } },
     async (request) => {
       await loadSchema(request.params.lensKey, await getRuntimeStore(request.params.ontologyKey));
-      return readThread(threads, threadBinding(request.params, "navigators"), request.params.threadId);
+      return readThread(threads, await threadBinding(request, "navigators"), request.params.threadId);
     },
   );
 };

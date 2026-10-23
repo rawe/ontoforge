@@ -53,13 +53,16 @@ export const TURNS_PER_THREAD = 25;
  */
 export const TURNS_THE_MODEL_SEES = 8;
 
-/** What a thread belongs to. Continuing it through another assistant is refused. */
+/** What a thread belongs to. Continuing it through another assistant, or
+ * as another principal, is refused. */
 export interface ThreadBinding {
   ontologyKey: string;
   lensKey: string;
   /** The assistant kind as the routes name it. */
   kind: string;
   assistantKey: string;
+  /** The principal that started it; null when authentication is off. */
+  owner: string | null;
 }
 
 /** A thread's registry entry. */
@@ -138,6 +141,7 @@ export function sameBinding(a: ThreadBinding, b: ThreadBinding): boolean {
     a.ontologyKey === b.ontologyKey &&
     a.lensKey === b.lensKey &&
     a.kind === b.kind &&
-    a.assistantKey === b.assistantKey
+    a.assistantKey === b.assistantKey &&
+    a.owner === b.owner
   );
 }

@@ -41,7 +41,7 @@ export const retrieverRuntimeRouter: FastifyPluginAsyncZod<{ threads: ThreadStor
       // Resolved before the stream opens: unknown and invalid retrievers answer
       // with a plain error response.
       const retriever = await loadRunnableRetriever(request.params.lensKey, request.params.assistantKey, store);
-      const turn = await openThread(threads, threadBinding(request.params, "retrievers"), request.body.threadId);
+      const turn = await openThread(threads, await threadBinding(request, "retrievers"), request.body.threadId);
       return sendChatStream(reply, { threads, turn }, (execution, thread) =>
         chat(retriever, request.body.message, thread, execution, request.body.diagnostics),
       );
@@ -54,7 +54,7 @@ export const retrieverRuntimeRouter: FastifyPluginAsyncZod<{ threads: ThreadStor
     { schema: { tags: ["ai"], params: ThreadParams } },
     async (request) => {
       await requireRetrievers(request.params.lensKey, await getRuntimeStore(request.params.ontologyKey));
-      return readThread(threads, threadBinding(request.params, "retrievers"), request.params.threadId);
+      return readThread(threads, await threadBinding(request, "retrievers"), request.params.threadId);
     },
   );
 

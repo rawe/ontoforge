@@ -7,8 +7,10 @@
  * published on success and dropped on cancel or failure, the lease released.
  */
 import { once } from "node:events";
-import type { FastifyReply } from "fastify";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { ownerOf } from "../access/authorize.js";
+import { accessOf } from "../auth/plugin.js";
 import { ConflictError, NotFoundError, StoreError, ValidationError } from "../core/exceptions.js";
 import { threadBusy, threadNotFound } from "./threads/access.js";
 import {
@@ -28,12 +30,14 @@ export const ChatPayload = z
   })
   .strict();
 
-/** The assistant a chat's thread is bound to, named by the request's path. */
-export function threadBinding(
-  params: { ontologyKey: string; lensKey: string; assistantKey: string },
+/** The assistant a chat's thread is bound to, named by the request's path,
+ * and its owner: the request's principal, null when authentication is off. */
+export async function threadBinding(
+  request: FastifyRequest<{ Params: { ontologyKey: string; lensKey: string; assistantKey: string } }>,
   kind: string,
-): ThreadBinding {
-  return { ontologyKey: params.ontologyKey, lensKey: params.lensKey, kind, assistantKey: params.assistantKey };
+): Promise<ThreadBinding> {
+  const { ontologyKey, lensKey, assistantKey } = request.params;
+  return { ontologyKey, lensKey, kind, assistantKey, owner: ownerOf(await accessOf(request)) };
 }
 
 /** NDJSON event envelope; callers define their event payloads. */

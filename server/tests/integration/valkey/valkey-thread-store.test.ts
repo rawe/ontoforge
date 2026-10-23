@@ -20,7 +20,7 @@ import type { StoreLifetimes, ThreadBinding, Turn } from "../../../src/runtime/t
 import { SUITE_LIFETIMES, threadStoreSuite } from "../../runtime/threads/threadStoreSuite.js";
 import { CONTAINER, expectEveryKeyExpiring, openAdmin, url } from "./support.js";
 
-const BINDING: ThreadBinding = { ontologyKey: "fair", lensKey: "visitor", kind: "agents", assistantKey: "guide" };
+const BINDING: ThreadBinding = { ontologyKey: "fair", lensKey: "visitor", kind: "agents", assistantKey: "guide", owner: null };
 const bytes = (text: string) => new Uint8Array(Buffer.from(text));
 
 /** A thread store on a client of its own, as one server holds it. */

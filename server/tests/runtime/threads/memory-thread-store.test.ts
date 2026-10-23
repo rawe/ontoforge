@@ -16,7 +16,7 @@ threadStoreSuite("in memory", async (lifetimes) => {
   return { store: new MemoryThreadStore({ clock: () => now, lifetimes }), advance: async (ms) => { now += ms; } };
 });
 
-const BINDING: ThreadBinding = { ontologyKey: "fair", lensKey: "visitor", kind: "agents", assistantKey: "guide" };
+const BINDING: ThreadBinding = { ontologyKey: "fair", lensKey: "visitor", kind: "agents", assistantKey: "guide", owner: null };
 
 describe("in-memory thread store", () => {
   it("expires a thread exactly one idle lifetime after its last activity, a lease exactly one lease after its renewal", async () => {

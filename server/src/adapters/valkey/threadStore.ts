@@ -7,7 +7,7 @@
  *
  * Per thread two keys, hash-tagged into one slot:
  *
- *   ontoforge:thread:{<id>}        hash ontologyKey lensKey kind assistantKey [state], PEXPIRE idle
+ *   ontoforge:thread:{<id>}        hash ontologyKey lensKey kind assistantKey owner [state], PEXPIRE idle
  *   ontoforge:thread:{<id>}:turn   the running turn's owner token, PX lease
  *
  * Every deadline is relative, so Valkey's clock alone decides expiry. Each
@@ -15,6 +15,7 @@
  * writes a new thread key; every write after `begin` compares the owner
  * token. Scripts without `allow-oom` are refused whole when Valkey is out of
  * memory; `renew` and `release` carry it, so a full store can still end turns.
+ * `owner` is the principal id, empty when authentication is off.
  */
 
 import { randomUUID } from "node:crypto";
@@ -35,18 +36,18 @@ import { toStoreError, type ValkeyScripts } from "./connection.js";
 
 // KEYS[1] = thread, KEYS[2] = turn.
 const LUA = {
-  // ARGV: ontologyKey, lensKey, kind, assistantKey, idleMs
+  // ARGV: ontologyKey, lensKey, kind, assistantKey, owner, idleMs
   threadCreate: `#!lua
 if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
-redis.call('HSET', KEYS[1], 'ontologyKey', ARGV[1], 'lensKey', ARGV[2], 'kind', ARGV[3], 'assistantKey', ARGV[4])
-redis.call('PEXPIRE', KEYS[1], ARGV[5])
-return 1`,
-  // ARGV: ontologyKey, lensKey, kind, assistantKey, token, idleMs, leaseMs
-  threadBegin: `#!lua
-local b = redis.call('HMGET', KEYS[1], 'ontologyKey', 'lensKey', 'kind', 'assistantKey')
-if b[1] ~= ARGV[1] or b[2] ~= ARGV[2] or b[3] ~= ARGV[3] or b[4] ~= ARGV[4] then return {0} end
-if not redis.call('SET', KEYS[2], ARGV[5], 'NX', 'PX', ARGV[7]) then return {1} end
+redis.call('HSET', KEYS[1], 'ontologyKey', ARGV[1], 'lensKey', ARGV[2], 'kind', ARGV[3], 'assistantKey', ARGV[4], 'owner', ARGV[5])
 redis.call('PEXPIRE', KEYS[1], ARGV[6])
+return 1`,
+  // ARGV: ontologyKey, lensKey, kind, assistantKey, owner, token, idleMs, leaseMs
+  threadBegin: `#!lua
+local b = redis.call('HMGET', KEYS[1], 'ontologyKey', 'lensKey', 'kind', 'assistantKey', 'owner')
+if b[1] ~= ARGV[1] or b[2] ~= ARGV[2] or b[3] ~= ARGV[3] or b[4] ~= ARGV[4] or (b[5] or '') ~= ARGV[5] then return {0} end
+if not redis.call('SET', KEYS[2], ARGV[6], 'NX', 'PX', ARGV[8]) then return {1} end
+redis.call('PEXPIRE', KEYS[1], ARGV[7])
 return {2, redis.call('HGET', KEYS[1], 'state')}`,
   // ARGV: token, leaseMs
   threadRenew: `#!lua flags=allow-oom
@@ -98,25 +99,26 @@ export class ValkeyThreadStore implements ThreadStore {
 
   async create(binding: ThreadBinding): Promise<Thread> {
     const threadId = randomUUID();
-    const { ontologyKey, lensKey, kind, assistantKey } = binding;
+    const { ontologyKey, lensKey, kind, assistantKey, owner } = binding;
     const created = await this.call(() =>
-      this.scripts.threadCreate(...keys(threadId), ontologyKey, lensKey, kind, assistantKey, this.lifetimes.idleMs),
+      this.scripts.threadCreate(...keys(threadId), ontologyKey, lensKey, kind, assistantKey, owner ?? "", this.lifetimes.idleMs),
     );
     if (created !== 1) throw toStoreError("thread store", new Error("A new thread id was already taken"));
-    return { threadId, binding: { ontologyKey, lensKey, kind, assistantKey } };
+    return { threadId, binding: { ontologyKey, lensKey, kind, assistantKey, owner } };
   }
 
   async read(threadId: string, binding: ThreadBinding): Promise<{ state: Uint8Array | null } | null> {
     const fields = await this.call(() =>
-      this.client.hmgetBuffer(threadKey(threadId), "ontologyKey", "lensKey", "kind", "assistantKey", "state"),
+      this.client.hmgetBuffer(threadKey(threadId), "ontologyKey", "lensKey", "kind", "assistantKey", "owner", "state"),
     );
-    const [ontologyKey, lensKey, kind, assistantKey, state] = fields.map((field) => field ?? null);
+    const [ontologyKey, lensKey, kind, assistantKey, owner, state] = fields.map((field) => field ?? null);
     if (!ontologyKey || !lensKey || !kind || !assistantKey) return null;
     const stored = {
       ontologyKey: ontologyKey.toString(),
       lensKey: lensKey.toString(),
       kind: kind.toString(),
       assistantKey: assistantKey.toString(),
+      owner: owner && owner.length > 0 ? owner.toString() : null,
     };
     if (!sameBinding(stored, binding)) return null;
     return { state: state ? new Uint8Array(state) : null };
@@ -124,10 +126,10 @@ export class ValkeyThreadStore implements ThreadStore {
 
   async begin(threadId: string, binding: ThreadBinding): Promise<Turn | "busy" | null> {
     const token = randomUUID();
-    const { ontologyKey, lensKey, kind, assistantKey } = binding;
+    const { ontologyKey, lensKey, kind, assistantKey, owner } = binding;
     const [outcome, state] = await this.call(() =>
       this.scripts.threadBeginBuffer(
-        ...keys(threadId), ontologyKey, lensKey, kind, assistantKey, token, this.lifetimes.idleMs, this.lifetimes.leaseMs,
+        ...keys(threadId), ontologyKey, lensKey, kind, assistantKey, owner ?? "", token, this.lifetimes.idleMs, this.lifetimes.leaseMs,
       ),
     );
     if (outcome === 0) return null;

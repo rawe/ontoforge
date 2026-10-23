@@ -1108,8 +1108,8 @@ export interface RulesetStore {
   delete(key: string): Promise<boolean>;
 }
 
-/** One changeset: staged writes of one lens, bound to it and to the
- * ruleset of the URL that started it. */
+/** One changeset: what a commit of one lens will apply, bound to the lens
+ * and to the ruleset of the URL that started it. */
 export interface ChangesetRecord {
   id: string;
   lensId: string;
@@ -1124,43 +1124,74 @@ export interface ChangesetRecord {
   submittedAt: Date | null;
   createdAt: Date;
   lastChangeAt: Date;
-  /** The number of staged writes. */
-  writeCount: number;
+  /** The number of staged objects. */
+  objectCount: number;
 }
 
 /** A changeset as the list shows it. */
 export interface ChangesetSummary extends ChangesetRecord {
-  /** Staged writes per operation. */
+  /** Staged objects per operation: `<action>_<kind>`, as `create_entity`. */
   operations: Record<string, number>;
-  /** The type keys the staged writes name, sorted. */
+  /** The type keys the staged objects name, sorted. */
   typeKeys: string[];
 }
 
-/** One staged write as the service hands it over: plain JSON, kept as
- * given. */
-export interface NewChangesetWrite {
-  operation: string;
-  arguments: Row;
-  /** The id a staged create minted. */
-  mintedId: string | null;
+export type StagedKind = "entity" | "relation";
+export type StagedAction = "create" | "update" | "delete";
+
+/** One entity or relation a changeset touches, as the service hands it
+ * over. */
+export interface NewStagedObject {
+  objectId: string;
+  kind: StagedKind;
   typeKey: string;
-  targetId: string | null;
-  /** A staged update's stored values of its patched keys, as they were
-   * when it was staged. */
-  before: Row | null;
+  action: StagedAction;
+  /** A relation's ends; null for an entity. */
+  fromId: string | null;
+  toId: string | null;
 }
 
-export interface ChangesetWriteRecord extends NewChangesetWrite {
-  seq: number;
-  createdAt: Date;
+/** One staged property value of a staged object: plain JSON, kept as
+ * given. */
+export interface NewStagedValue {
+  objectId: string;
+  propertyKey: string;
+  /** JSON null removes the property (an update only). */
+  value: unknown;
+  /** The stored value at the key's first touch, as the service encodes
+   * it; null when the object is created in the changeset. */
+  before: Row | null;
+  /** Its size as the service counts it toward the byte cap. */
+  bytes: number;
+}
+
+export type StagedValueRecord = Omit<NewStagedValue, "objectId">;
+
+export interface StagedObjectRecord extends NewStagedObject {
+  firstTouchedAt: Date;
+  /** Its staged values, by property key. */
+  values: StagedValueRecord[];
+}
+
+/** One change of a changeset's staged objects, applied all or none in
+ * this order: objects removed with their values, values removed, objects
+ * written, values written. */
+export interface ChangesetChange {
+  removeObjects?: string[];
+  removeValues?: { objectId: string; propertyKey: string }[];
+  /** A new object is added, touched first now; an existing one gets the
+   * action given and keeps everything else. */
+  objects?: NewStagedObject[];
+  /** Each value written whole, replacing the one stored under its key. */
+  values?: NewStagedValue[];
 }
 
 /**
- * Changesets and their journal. The store keeps what it is given and
- * evaluates no rule; the changeset service decides. Every mutation
- * except `touch` and `sweep` takes the changeset row `FOR UPDATE NOWAIT`
- * — a held row is a `ConflictError`, never a wait — bumps `version` and
- * refreshes `lastChangeAt`. Off-format ids match nothing.
+ * Changesets, their staged objects and values. The store keeps what it is
+ * given and evaluates no rule; the changeset service decides. Every
+ * mutation except `touch` and `sweep` takes the changeset row `FOR UPDATE
+ * NOWAIT` — a held row is a `ConflictError`, never a wait — bumps
+ * `version` and refreshes `lastChangeAt`. Off-format ids match nothing.
  */
 export interface ChangesetStore {
   start(changeset: { id: string; lensId: string; rulesetKey: string | null; note: string | null }): Promise<ChangesetRecord>;
@@ -1173,30 +1204,24 @@ export interface ChangesetStore {
   /** The lens's changesets, bound as `get`, by number, lowest first. */
   list(lensId: string, rulesetKey: string | null): Promise<ChangesetSummary[]>;
 
-  /** The staged writes by seq. */
-  page(id: string, offset: number, limit: number): Promise<ChangesetWriteRecord[]>;
+  /** The staged objects with their values, by first touch. */
+  page(id: string, offset: number, limit: number): Promise<StagedObjectRecord[]>;
 
-  /** The staged create that minted `mintedId`; null when none did. */
-  findMinted(id: string, mintedId: string): Promise<ChangesetWriteRecord | null>;
+  /** The staged objects of `objectIds` with their values; an id not
+   * staged is left out. */
+  objects(id: string, objectIds: string[]): Promise<StagedObjectRecord[]>;
 
-  /** The staged creates that minted any of `mintedIds`, by seq. */
-  findMintedAmong(id: string, mintedIds: string[]): Promise<ChangesetWriteRecord[]>;
+  /** The ids of the staged relations with an end at `entityId`. */
+  relationsAt(id: string, entityId: string): Promise<string[]>;
 
-  /** The staged writes that minted `objectId` or target it, by seq. */
-  writesOn(id: string, objectId: string): Promise<ChangesetWriteRecord[]>;
-
-  /** The sum of the `bytes` its staged writes were appended with; 0 when
-   * it has none or is gone. */
+  /** The sum of the `bytes` of its staged values; 0 when it has none or
+   * is gone. */
   stagedBytes(id: string): Promise<number>;
 
-  /** Append writes to a draft changeset in the given order, each kept with
-   * its size in `bytes`, all or none; their seqs, consecutive, or null when
-   * the changeset is gone or submitted. A seq is higher than every seq the
-   * changeset had before, so an unstaged seq is never reused. */
-  append(id: string, writes: { write: NewChangesetWrite; bytes: number }[]): Promise<number[] | null>;
-
-  /** False when no write has this seq, or the changeset is submitted. */
-  unstage(id: string, seq: number): Promise<boolean>;
+  /** Compare-and-set on the version of a draft changeset: applies the
+   * change. Null when the version differs, the changeset is submitted, or
+   * it is gone. */
+  apply(id: string, expectedVersion: number, change: ChangesetChange): Promise<ChangesetRecord | null>;
 
   /** Compare-and-set on the version of a draft changeset: sets
    * `submittedAt` and the note. Null when the version differs, the
@@ -1207,8 +1232,8 @@ export interface ChangesetStore {
    * the changeset is a draft or gone. */
   unsubmit(id: string, note: string): Promise<ChangesetRecord | null>;
 
-  /** The changeset and its journal, while a draft; false when it is gone
-   * or submitted. */
+  /** The changeset and its staged objects, while a draft; false when it
+   * is gone or submitted. */
   discard(id: string): Promise<boolean>;
 
   /** Refresh the last change only, keeping the version; skipped while
@@ -1227,8 +1252,8 @@ export interface ChangesetStore {
    * a longer wait is a `ConflictError`. */
   lockForCommit(id: string): Promise<ChangesetRecord | null>;
 
-  /** Delete the journal and the changeset. */
-  deleteWithJournal(id: string): Promise<void>;
+  /** Delete the changeset with its staged objects. */
+  deleteCommitted(id: string): Promise<void>;
 }
 
 export interface SearchIndexStore {

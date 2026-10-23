@@ -86,6 +86,40 @@ type Row = Record<string, unknown>;
  * only that one exists. */
 export const HAS_CHILDREN_MESSAGE = "This entity has children; delete them first";
 
+/** The refusal of an entity delete while a relation of a type the lens
+ * hides is attached to it: the delete would remove that relation unseen.
+ * It names no type, id or count. */
+export const HIDDEN_RELATIONS_MESSAGE =
+  "This entity has relations this lens does not show; it can only be deleted through a lens that shows them";
+
+/** The relation types the lens hides that an entity of `entityTypeKey`
+ * can take part in, as the readings of `RuntimeStore.hasChildren`: one
+ * for the source end, one for the target end; empty ones left out. */
+function hiddenRelationEnds(loaded: LoadedSchema, entityTypeKey: string): Record<string, ParentEnd>[] {
+  const asSource: Record<string, ParentEnd> = {};
+  const asTarget: Record<string, ParentEnd> = {};
+  for (const rt of Object.values(loaded.full.relationTypes)) {
+    if (rt.key in loaded.scoped.relationTypes) continue;
+    if (rt.fromEntityTypeKey === entityTypeKey) asSource[rt.key] = "source";
+    if (rt.toEntityTypeKey === entityTypeKey) asTarget[rt.key] = "target";
+  }
+  return [asSource, asTarget].filter((ends) => Object.keys(ends).length > 0);
+}
+
+/** Whether a relation of a type the lens hides is attached to the entity,
+ * at either end. No read when the lens hides none its type takes part in. */
+export async function hasHiddenRelations(
+  loaded: LoadedSchema,
+  entityTypeKey: string,
+  entityId: string,
+  store: RuntimeStore,
+): Promise<boolean> {
+  for (const ends of hiddenRelationEnds(loaded, entityTypeKey)) {
+    if (await store.hasChildren(entityId, ends)) return true;
+  }
+  return false;
+}
+
 /** Every parent relation of the FULL schema, as relation type key →
  * parent end: the parent rules hold across all of them, whatever the
  * lens shows. Empty when the ontology flags none. */
@@ -532,15 +566,16 @@ export async function updateEntity(
 }
 
 /**
- * Delete an entity, every relation attached to it in either direction —
- * including relations whose type the lens cannot see — and its search
- * data. Wherever the ontology flags a parent relation, only a leaf may go:
- * an entity with children over any parent relation of the full schema is
- * refused (409), through every lens, before the delete. Otherwise the
- * cascade is silent: nothing warns, nothing refuses. Through a ruleset
- * with an anchor the guard refuses first (`AnchorGuard.checkDelete`):
- * outside the anchor's subtree, then the anchor of any ruleset (422 on
- * `entityId`); "has children" comes last.
+ * Delete an entity, every relation attached to it in either direction, and
+ * its search data. Wherever the ontology flags a parent relation, only a
+ * leaf may go: an entity with children over any parent relation of the
+ * full schema is refused (409), through every lens, before the delete. An
+ * entity with a relation attached of a type the lens hides is refused too
+ * (409, `HIDDEN_RELATIONS_MESSAGE`): a lens never removes what it does not
+ * show. Through a ruleset with an anchor the guard refuses first
+ * (`AnchorGuard.checkDelete`): outside the anchor's subtree, then the
+ * anchor of any ruleset (422 on `entityId`); "has children", then the
+ * hidden relations, come last.
  */
 export async function deleteEntity(
   lensKey: string,
@@ -556,13 +591,17 @@ export async function deleteEntity(
     const write = prepareDeleteEntity(loaded, entityTypeKey, entityId);
     const readings = parentReadings(loaded.full);
     const flagged = Object.keys(readings).length > 0;
-    // A missing entity stays not-found, whatever its id has below it.
-    if (flagged && (await tx.getEntity(entityTypeKey, entityId)) === null) {
+    const hidesRelations = hiddenRelationEnds(loaded, entityTypeKey).length > 0;
+    // A missing entity stays not-found, whatever its id has attached.
+    if ((flagged || hidesRelations) && (await tx.getEntity(entityTypeKey, entityId)) === null) {
       throw new NotFoundError(`Entity '${entityId}' not found`);
     }
     await guard?.checkDelete(entityTypeKey, entityId);
     if (flagged && (await tx.hasChildren(entityId, readings))) {
       throw new ConflictError(HAS_CHILDREN_MESSAGE);
+    }
+    if (await hasHiddenRelations(loaded, entityTypeKey, entityId, tx)) {
+      throw new ConflictError(HIDDEN_RELATIONS_MESSAGE);
     }
 
     const deleted = await tx.deleteEntity(write.entityTypeKey, write.entityId, planSearchWrite(search.dependencies, write.change));

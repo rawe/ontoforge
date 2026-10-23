@@ -478,6 +478,47 @@ describe("delete entity", () => {
     expect(holder.store.deleteEntity).not.toHaveBeenCalled();
   });
 
+  it("a relation the lens hides attached: 409 naming nothing hidden, nothing deleted", async () => {
+    // hr_view hides belongs_to (department → company).
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
+    holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Acme" }, "company", "acme"));
+    holder.store.hasChildren.mockImplementation(async (_id: string, readings: Row) => readings.belongs_to === "target");
+
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/company/acme",
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toEqual({
+      code: "RESOURCE_CONFLICT",
+      message: "This entity has relations this lens does not show; it can only be deleted through a lens that shows them",
+    });
+    expect(holder.store.hasChildren).toHaveBeenCalledWith("acme", { belongs_to: "target" });
+    expect(holder.store.deleteEntity).not.toHaveBeenCalled();
+  });
+
+  it("no hidden relation attached: deleted; a missing one is not found before any relation read", async () => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
+    holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Acme" }, "company", "acme"));
+    holder.store.deleteEntity.mockResolvedValue(true);
+
+    const ok = await app.inject({
+      method: "DELETE",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/company/acme",
+    });
+    expect(ok.statusCode).toBe(204);
+
+    holder.store.getEntity.mockResolvedValue(null);
+    holder.store.hasChildren.mockClear();
+    const missing = await app.inject({
+      method: "DELETE",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/company/ghost",
+    });
+    expect(missing.statusCode).toBe(404);
+    expect(holder.store.hasChildren).not.toHaveBeenCalled();
+  });
+
   it("a missing entity answers 404", async () => {
     holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     holder.store.deleteEntity.mockResolvedValue(false);

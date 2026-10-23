@@ -104,6 +104,20 @@ describe("with authentication on", () => {
     expect(res.json()).toEqual({ error: { code: "FORBIDDEN", message: expect.stringMatching(/Ontology Creator/) } });
   });
 
+  it("answers 503 while the provider's keys cannot be fetched, admitting nothing", async () => {
+    fakes.oidc.tokens.set("t", identified("plain"));
+    fakes.oidc.unavailable = true;
+    try {
+      const res = await app.inject({ url: "/api/ontologies", headers: { authorization: "Bearer t" } });
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toEqual({
+        error: { code: "PROVIDER_UNAVAILABLE", message: "The identity provider cannot be reached; try again later" },
+      });
+    } finally {
+      fakes.oidc.unavailable = false;
+    }
+  });
+
   it("refuses a cookie-authenticated change from another origin before judging the role", async () => {
     const cookie = `${SESSION_COOKIE}=${await sessionOf("plain")}`;
     const crossSite = await app.inject({ method: "POST", url: "/api/ontologies", headers: { cookie, origin: "http://evil.example.com" }, payload: { key: "x" } });

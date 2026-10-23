@@ -33,6 +33,7 @@ import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  ProviderUnavailableError,
   StoreError,
   UnauthenticatedError,
   ValidationError,
@@ -254,6 +255,9 @@ export async function createApp(shared?: SharedState, auth: AuthRuntime | null =
     }
     if (error instanceof ForbiddenError) {
       return sendError(reply, 403, "FORBIDDEN", error.message);
+    }
+    if (error instanceof ProviderUnavailableError) {
+      return sendError(reply, 503, "PROVIDER_UNAVAILABLE", error.message);
     }
     if (error instanceof NotFoundError) {
       return sendError(reply, 404, "RESOURCE_NOT_FOUND", error.message, error.details);

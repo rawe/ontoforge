@@ -11,6 +11,7 @@ import type { Identified, LoginStart, Oidc } from "../../src/auth/oidc.js";
 import type { AuthRuntime } from "../../src/auth/runtime.js";
 import { MemorySessionStore } from "../../src/auth/sessionStore.js";
 import type { AuthSettings } from "../../src/config.js";
+import { ProviderUnavailableError } from "../../src/core/exceptions.js";
 
 export const ISSUER = "http://localhost:8180/realms/ontoforge";
 export const PUBLIC_URL = "http://localhost:5173";
@@ -111,6 +112,8 @@ export class FakeOidc implements Oidc {
   /** Access tokens this provider accepts. */
   readonly tokens = new Map<string, Identified>();
   verifications = 0;
+  /** True while the provider's keys cannot be fetched. */
+  unavailable = false;
   /** What the next callback yields: an identity, or an error thrown. */
   login: Identified | Error = identified("someone");
   readonly finished: { callbackUrl: URL; checks: { state: string; nonce: string; codeVerifier: string } }[] = [];
@@ -137,6 +140,7 @@ export class FakeOidc implements Oidc {
 
   async verifyAccessToken(token: string): Promise<Identified | null> {
     this.verifications += 1;
+    if (this.unavailable) throw new ProviderUnavailableError();
     return this.tokens.get(token) ?? null;
   }
 }

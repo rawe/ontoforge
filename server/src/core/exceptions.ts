@@ -63,6 +63,14 @@ export class ForbiddenError extends OntoForgeError {
   }
 }
 
+/** The identity provider cannot be reached, so no credential can be
+ * checked; nothing is admitted. -> 503 PROVIDER_UNAVAILABLE */
+export class ProviderUnavailableError extends OntoForgeError {
+  constructor(message = "The identity provider cannot be reached; try again later") {
+    super(message);
+  }
+}
+
 /** Request or business-logic validation failed. -> 422 VALIDATION_ERROR */
 export class ValidationError extends OntoForgeError {
   details: Record<string, unknown> | null;

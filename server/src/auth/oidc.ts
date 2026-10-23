@@ -14,6 +14,7 @@ import { createRemoteJWKSet, customFetch as joseFetch, jwtVerify, type JWTPayloa
 import * as client from "openid-client";
 
 import type { AuthSettings } from "../config.js";
+import { ProviderUnavailableError } from "../core/exceptions.js";
 
 /** The display claims of a signed-in person or service. */
 export interface Identified {
@@ -39,7 +40,8 @@ export interface Oidc {
   finishLogin(callbackUrl: URL, checks: { state: string; nonce: string; codeVerifier: string }): Promise<Identified>;
   /** Where the browser ends its provider session, returning to `postLogoutRedirectUri`. */
   logoutUrl(postLogoutRedirectUri: string): string;
-  /** The caller of an access token, or null when it is not one this server accepts. */
+  /** The caller of an access token, or null when it is not one this server accepts.
+   * Rejects with `ProviderUnavailableError` when the provider's keys cannot be fetched. */
   verifyAccessToken(token: string): Promise<Identified | null>;
 }
 
@@ -156,17 +158,24 @@ export async function connectOidc(auth: AuthSettings): Promise<Oidc> {
         return identified(payload);
       } catch (error) {
         if (isTokenRejection(error)) return null;
-        throw error;
+        const { message, code, cause } = error as { message?: string; code?: string; cause?: { code?: string } };
+        const reason = code ?? cause?.code;
+        console.error(`Signing keys of ${auth.issuer} not available${reason ? ` (${reason})` : ""}: ${message ?? String(error)}`);
+        throw new ProviderUnavailableError();
       }
     },
   };
 }
 
-/** A token that is wrong, as opposed to a provider this server cannot reach. */
+/** Failures of fetching the provider's key set: the provider, not the token, failed. */
+const PROVIDER_FAILURES = new Set(["ERR_JWKS_TIMEOUT", "ERR_JOSE_GENERIC", "ERR_JWKS_INVALID"]);
+
+/**
+ * A token that is wrong, as opposed to a provider this server cannot reach.
+ * Verification throws only jose's errors besides what fetching the key set
+ * throws (a refused or failed connection), so anything else is the provider's.
+ */
 function isTokenRejection(error: unknown): boolean {
   const code = (error as { code?: unknown })?.code;
-  if (typeof code !== "string") return false;
-  // The key set could not be fetched: the provider, not the token, failed.
-  if (code === "ERR_JWKS_TIMEOUT") return false;
-  return code.startsWith("ERR_J") || code === "ERR_JOSE_NOT_SUPPORTED" || code === "ERR_JOSE_ALG_NOT_ALLOWED";
+  return typeof code === "string" && code.startsWith("ERR_J") && !PROVIDER_FAILURES.has(code);
 }

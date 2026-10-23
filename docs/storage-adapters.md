@@ -492,34 +492,35 @@ changeset's commit uses it.
 
 The changeset store holds an ontology's [changesets](capabilities/changesets.md): per
 changeset its id, its lens, its number, the ruleset key of the URL that started it or none, a version, a
-note, the time it was submitted or none, and timestamps; per staged write its seq, the
-operation, its arguments, the id a create minted, the type key, the target id, an
-update's before and its size in bytes, all kept as given. The store evaluates no rule —
-the service does — except the state a write needs, which it judges in the statement that
-writes, so a submit racing a change is never overwritten.
+note, the time it was submitted or none, and timestamps; per staged object its id, kind,
+type key, action, a relation's two ends and the time it was first touched; per staged
+value its property key, the value, the recorded before or none, and its size in bytes,
+all kept as given. The store evaluates no rule — the service does — except the state and
+version a change needs, which it judges in the statement that writes, so a submit racing
+a change is never overwritten.
 
 - **Reads.** Start, with the number one above the highest of its lens, or 1, never shared
   by two concurrent starts; read one through its binding — a changeset of another lens, or bound
   to another ruleset, is absent, and no ruleset key reaches every changeset of the lens;
   list them bound the same way, by number, lowest first, with
-  their counts per operation and the type keys they name; their staged writes by seq,
-  paged; the staged create that minted a given id, and those that minted any of a set of
-  ids, by seq; the staged writes that minted or target a given id, by seq; the summed size
-  of its staged writes.
-- **Changes.** Append staged writes to a draft changeset, all or none, in order, each with
-  a consecutive seq higher than every earlier one; unstage one by seq from a draft
-  changeset; submit, a compare-and-set on the version of a draft changeset, setting the
-  submitted time and the note; unsubmit a submitted one, with a note; discard a draft one
-  with its staged writes. Each takes the changeset without waiting — one held elsewhere is
-  a conflict at once — raises its version and refreshes its last change, and answers
-  absent when the changeset is gone or in the other state.
+  their counts per action and kind and the type keys they name; their staged objects
+  with their values by first touch, paged; the staged objects of given ids; the staged
+  relations with an end at a given entity; the summed size of its staged values.
+- **Changes.** Apply one change to a draft changeset at the version the service read, all
+  or none: remove objects with their values, remove values, add objects or change their
+  action, and write values whole; submit, a compare-and-set on the version of a draft
+  changeset, setting the submitted time and the note; unsubmit a submitted one, with a
+  note; discard a draft one with its staged objects. Each takes the changeset without
+  waiting — one held elsewhere is a conflict at once — raises its version and refreshes
+  its last change, and answers absent when the changeset is gone, in the other state, or
+  at another version.
 - **Upkeep.** Touch refreshes the last change alone; sweep deletes the draft changesets
   unchanged since a given time. Both skip a changeset held elsewhere rather than wait or
   fail.
 - **The commit**, inside a unit of work only: take the ontology's commit lock without
   waiting, then the changeset without waiting — either held elsewhere is a conflict — and
   from then on wait at most five seconds for a row another transaction holds, then fail
-  as a conflict; finally delete the changeset with its staged writes.
+  as a conflict; finally delete the changeset with its staged objects.
 
 Deleting a lens deletes its changesets, deleting a ruleset leaves them, and registry
 delete removes them. Changesets are not part of any export read.
@@ -725,7 +726,7 @@ namespace and every ontology creation fail.
 
 **Registry create** is one transaction:
 the registry row first — so a concurrent same-key create dies on the named constraint as
-a conflict — then the fresh namespace, the nineteen tables below with the search settings
+a conflict — then the fresh namespace, the twenty tables below with the search settings
 row and, when an embedding width is given, the fixed saved-query vector index inside it. **Registry delete** is one
 transaction: the registry row out, the namespace dropped in one cascade. A bound store applies its
 ontology's namespace to the search path per statement, inside the shared transaction
@@ -832,20 +833,26 @@ its default on insert.
 
 ## How changesets are stored
 
-Two tables per namespace. `changeset` holds one row per changeset, its `lens_id` a foreign
+Three tables per namespace. `changeset` holds one row per changeset, its `lens_id` a foreign
 key to `lens` with delete cascade, its `ruleset_key` plain text with no foreign key, so a
-ruleset delete leaves the row; `submitted_at` is null for a draft; `number` an `integer`,
-default 0. `changeset_write` holds
-one row per staged write under the primary key `(changeset_id, seq)`, its changeset a
-foreign key with delete cascade; `arguments` and `before` are `jsonb`, the size `bytes` an
-`integer`. Two B-tree indexes serve them: changesets by lens, and staged writes by
-changeset and minted id.
+ruleset delete leaves the row; `submitted_at` is null for a draft; `number` an `integer`.
+`changeset_object` holds one row per staged object under the primary key
+`(changeset_id, object_id)`, its changeset a foreign key with delete cascade; `kind`,
+`type_key` and `action` are text, `from_id` and `to_id` a relation's ends, null for an
+entity, and `first_touched_at` the clock at its insert, so the objects one change adds
+keep their order. `changeset_value` holds one row per staged value under the primary key
+`(changeset_id, object_id, property_key)`, its object a foreign key with delete cascade;
+`value` is `jsonb`, JSON null removing the property; `before` is `jsonb`, `{"value": …}`
+for a stored value, `{}` for a key the target lacked and SQL null for a value of a
+create; the size `bytes` an `integer`. Two B-tree indexes serve them besides the primary
+keys: changesets by lens, and staged objects by changeset and first touch. The staged
+relations at an entity are found by a scan of the changeset's own objects.
 
 Every change takes the changeset row `FOR UPDATE NOWAIT`, and states its state condition —
-`submitted_at IS NULL`, or not null for unsubmit — in the same statement; touch and sweep
+`submitted_at IS NULL`, or not null for unsubmit — in the same statement, an applied
+change and a submit with the version the service read; touch and sweep
 take it `FOR UPDATE SKIP LOCKED`. A start takes `pg_advisory_xact_lock` on a key hashed
-from its lens before it reads the highest number. A seq is the changeset's version at the append, which
-every change of the changeset raises, so a seq is never reused. The commit lock is
+from its lens before it reads the highest number. The commit lock is
 `pg_try_advisory_xact_lock` on a key hashed from the namespace, so it holds across server
 instances and ends with the transaction; the commit first sets `lock_timeout` to five
 seconds for its transaction. A lock that is not available, `55P03`, translates to the

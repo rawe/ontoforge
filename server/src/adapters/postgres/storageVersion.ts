@@ -47,7 +47,7 @@ import { quoteIdent } from "./oql/bindings.js";
 import { camelizeRow } from "./rows.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 9;
+export const STORAGE_VERSION = 8;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 1;
@@ -541,14 +541,15 @@ const STEPS: Step[] = [
     ],
   },
   {
-    // Changesets: the changeset table, its journal of staged writes, and
-    // the write access of a ruleset.
+    // Changesets: the changeset table, its staged objects and their staged
+    // values, and the write access of a ruleset.
     to: 8,
     actions: [
       `CREATE TABLE changeset (
   changeset_id   uuid        CONSTRAINT changeset_pk PRIMARY KEY,
   lens_id        uuid        NOT NULL CONSTRAINT changeset_lens_fk
                              REFERENCES lens (lens_id) ON DELETE CASCADE,
+  number         integer     NOT NULL,
   ruleset_key    text,
   version        integer     NOT NULL,
   note           text,
@@ -557,28 +558,32 @@ const STEPS: Step[] = [
   last_change_at timestamptz NOT NULL DEFAULT now()
 )`,
       `CREATE INDEX changeset_lens_id_idx ON changeset (lens_id)`,
-      `CREATE TABLE changeset_write (
-  changeset_id uuid        NOT NULL CONSTRAINT changeset_write_changeset_fk
-                           REFERENCES changeset (changeset_id) ON DELETE CASCADE,
-  seq          integer     NOT NULL,
-  operation    text        NOT NULL,
-  arguments    jsonb       NOT NULL,
-  minted_id    uuid,
-  type_key     text        NOT NULL,
-  target_id    uuid,
-  before       jsonb,
-  bytes        integer     NOT NULL,
-  created_at   timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT changeset_write_pk PRIMARY KEY (changeset_id, seq)
+      `CREATE TABLE changeset_object (
+  changeset_id     uuid        NOT NULL CONSTRAINT changeset_object_changeset_fk
+                               REFERENCES changeset (changeset_id) ON DELETE CASCADE,
+  object_id        uuid        NOT NULL,
+  kind             text        NOT NULL,
+  type_key         text        NOT NULL,
+  action           text        NOT NULL,
+  from_id          uuid,
+  to_id            uuid,
+  first_touched_at timestamptz NOT NULL,
+  CONSTRAINT changeset_object_pk PRIMARY KEY (changeset_id, object_id)
 )`,
-      `CREATE INDEX changeset_write_minted_id_idx ON changeset_write (changeset_id, minted_id)`,
+      `CREATE INDEX changeset_object_touched_idx ON changeset_object (changeset_id, first_touched_at, object_id)`,
+      `CREATE TABLE changeset_value (
+  changeset_id uuid    NOT NULL,
+  object_id    uuid    NOT NULL,
+  property_key text    NOT NULL,
+  value        jsonb   NOT NULL,
+  before       jsonb,
+  bytes        integer NOT NULL,
+  CONSTRAINT changeset_value_pk PRIMARY KEY (changeset_id, object_id, property_key),
+  CONSTRAINT changeset_value_object_fk FOREIGN KEY (changeset_id, object_id)
+    REFERENCES changeset_object (changeset_id, object_id) ON DELETE CASCADE
+)`,
       `ALTER TABLE ruleset ADD COLUMN write_access text NOT NULL DEFAULT 'full'`,
     ],
-  },
-  {
-    // The changeset number people refer to a changeset by.
-    to: 9,
-    actions: [`ALTER TABLE changeset ADD COLUMN number integer NOT NULL DEFAULT 0`],
   },
 ];
 

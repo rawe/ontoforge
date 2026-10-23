@@ -2,14 +2,14 @@
  * Write access over REST and MCP, on PostgreSQL with the in-test project
  * hierarchy (`buildProjectHierarchy`, fresh per test): reported by the
  * ruleset reads; through a 'propose' ruleset's URL every immediate write
- * and the commit are 409s while staging, submit, unsubmit, discard, the
- * list and reads work; the same on a ruleset without an anchor, with no
+ * and the commit are 409s while staging, the check, submit, unsubmit,
+ * discard, the list and reads work; the same on a ruleset without an anchor, with no
  * coverage rules; a deleted anchor, or one the lens hides, still refuses
  * staging, and write access wins over both; the escapes (the plain lens
  * URL commits, the PUT gives full access back); through a 'none'
  * ruleset's URL every write, stage and commit route is a 409 and every
  * read answers, the changeset reads included; and the MCP tool list at
- * 'propose' (V29, R13) and 'none', with every refused call answering the
+ * 'propose' and 'none', with every refused call answering the
  * write access refusal, also for a tool the client's older list still
  * shows.
  */
@@ -46,7 +46,16 @@ const NO_COMMIT = (key: string) =>
   `Ruleset '${key}' gives write access 'propose': this connection cannot commit; submit the changeset, and a person commits it`;
 const ONLY_READ = (key: string, verb: string) =>
   `Ruleset '${key}' gives write access 'none': this connection cannot ${verb}; it can only read`;
-const STAGEABLE = ["create_entity", "update_entity", "delete_entity", "create_relation", "update_relation", "delete_relation"];
+const STAGEABLE = [
+  "create_entity",
+  "update_entity",
+  "delete_entity",
+  "create_relation",
+  "update_relation",
+  "delete_relation",
+  "edit_document",
+  "write_document",
+];
 
 let app: FastifyInstance;
 let baseUrl: string;
@@ -85,7 +94,7 @@ async function ok(client: Client, name: string, args: Row = {}): Promise<any> {
   return JSON.parse(text(result));
 }
 
-/** The journal body of a create of a task under `parentId`. */
+/** The body of a staged create of a task under `parentId`. */
 function taskUnder(parentId: string, name: string): Row {
   return {
     operation: "create_entity",
@@ -96,7 +105,7 @@ function taskUnder(parentId: string, name: string): Row {
 }
 
 /** Start a changeset through `base` and stage a task under P1 into it:
- * two writes, the task's and its parent relation's. */
+ * two objects, the task and its parent relation. */
 async function startWithTask(base: string, name = "T9"): Promise<{ cs: string; task: string }> {
   const started = await rest("POST", `${base}/changesets`, {});
   expect(started.status, JSON.stringify(started.body)).toBe(201);
@@ -188,7 +197,7 @@ describe("through a 'propose' ruleset's URL (REST)", () => {
     expect((await rest("GET", `${ALL}/relations/assigned_to/${h.relations["T1 assigned_to Ben"]!}`)).status).toBe(200);
   });
 
-  it("stage, unstage, list, read, submit, unsubmit and discard work; the commit answers 409", async () => {
+  it("stage, unstage, cut, rebase, list, read, check, submit, unsubmit and discard work; the commit answers 409", async () => {
     const { cs } = await startWithTask(S);
     const update = await rest("POST", `${S}/changesets/${cs}/writes`, {
       operation: "update_entity",
@@ -196,13 +205,20 @@ describe("through a 'propose' ruleset's URL (REST)", () => {
       id: e.P2,
       properties: { name: "P2 Website" },
     });
-    expect(update.status).toBe(201);
-    expect((await rest("DELETE", `${S}/changesets/${cs}/writes/${update.body.seq}`)).status).toBe(204);
+    expect(update).toEqual({ status: 201, body: { id: e.P2 } });
+    expect((await rest("POST", `${S}/changesets/${cs}/objects/${e.P2}/rebase`, {})).status).toBe(200);
+    expect((await rest("DELETE", `${S}/changesets/${cs}/objects/${e.P2}/properties/name`)).status).toBe(204);
+    await rest("POST", `${S}/changesets/${cs}/writes`, { operation: "delete_entity", type: "person", id: e.Kim });
+    expect((await rest("DELETE", `${S}/changesets/${cs}/objects/${e.Kim}`)).status).toBe(204);
     expect((await rest("GET", `${S}/changesets`)).body.map((c: Row) => c.id)).toEqual([cs]);
     const read = await rest("GET", `${S}/changesets/${cs}`);
     expect(read.status).toBe(200);
-    expect(read.body).toMatchObject({ ruleset: "agent-s", writeCount: 2 });
+    expect(read.body).toMatchObject({ ruleset: "agent-s", objectCount: 2 });
     expect((await rest("GET", `${S}/entities/task`)).status).toBe(200);
+    expect(await rest("POST", `${S}/changesets/${cs}/check`)).toEqual({
+      status: 200,
+      body: { version: read.body.version, committed: 2, alreadyGone: [] },
+    });
 
     const commit = await rest("POST", `${S}/changesets/${cs}/commit`, {});
     expect(commit.status).toBe(409);
@@ -212,6 +228,7 @@ describe("through a 'propose' ruleset's URL (REST)", () => {
     const submittedCommit = await rest("POST", `${S}/changesets/${cs}/commit`, { expectedVersion: 1 });
     expect(submittedCommit.status).toBe(409);
     expect(submittedCommit.body.error.message).toBe(NO_COMMIT("agent-s"));
+    expect(await rest("POST", `${S}/changesets/${cs}/check`)).toMatchObject({ status: 200, body: { committed: 2 } });
     expect((await rest("POST", `${S}/changesets/${cs}/unsubmit`, { note: "fix it" })).body.state).toBe("draft");
     expect((await rest("DELETE", `${S}/changesets/${cs}`)).status).toBe(204);
     expect((await rest("GET", `${S}/changesets/${cs}`)).status).toBe(404);
@@ -242,7 +259,7 @@ describe("through a 'propose' ruleset's URL (REST)", () => {
 
   it("a deleted anchor refuses staging (R10); write access refuses every immediate write first", async () => {
     await putRuleset("agent-s", { anchor: { type: "task", id: e.T2a } });
-    const { cs } = await startWithTask(S);
+    const { cs, task } = await startWithTask(S);
     expect((await rest("DELETE", `${ALL}/entities/task/${e.T2a}`)).status).toBe(204);
     const staged = await rest("POST", `${S}/changesets/${cs}/writes`, {
       operation: "update_entity",
@@ -255,7 +272,7 @@ describe("through a 'propose' ruleset's URL (REST)", () => {
     const immediate = await rest("PATCH", `${S}/entities/person/${e.Kim}`, { name: "Kim2" });
     expect(immediate.status).toBe(409);
     expect(immediate.body.error.message).toBe(NO_WRITE("agent-s"));
-    expect((await rest("DELETE", `${S}/changesets/${cs}/writes/1`)).status).toBe(204);
+    expect((await rest("DELETE", `${S}/changesets/${cs}/objects/${task}`)).status).toBe(204);
   });
 
   it("an anchor the lens hides refuses staging; write access refuses every immediate write first", async () => {
@@ -361,9 +378,12 @@ describe("through a 'none' ruleset's URL (REST)", () => {
       ["GET /changesets/:changesetId/entities/:entityTypeKey/:entityId", `${C}/entities/task/${task}`],
       ["DELETE /changesets/:changesetId", C],
       ["POST /changesets/:changesetId/writes", `${C}/writes`, taskUnder(e.P1, "T10")],
-      ["DELETE /changesets/:changesetId/writes/:seq", `${C}/writes/1`],
+      ["DELETE /changesets/:changesetId/objects/:objectId", `${C}/objects/${task}`],
+      ["DELETE /changesets/:changesetId/objects/:objectId/properties/:propertyKey", `${C}/objects/${e.T1}/properties/notes`],
+      ["POST /changesets/:changesetId/objects/:objectId/rebase", `${C}/objects/${e.T1}/rebase`, {}],
       ["POST /changesets/:changesetId/submit", `${C}/submit`, {}],
       ["POST /changesets/:changesetId/unsubmit", `${C}/unsubmit`, { note: "again" }],
+      ["POST /changesets/:changesetId/check", `${C}/check`],
       ["POST /changesets/:changesetId/commit", `${C}/commit`, {}],
     ];
   }
@@ -376,7 +396,7 @@ describe("through a 'none' ruleset's URL (REST)", () => {
   };
   const VERBS = { write: "write directly", stage: "start or change a changeset", commit: "commit" } as const;
 
-  it("refuses the 7 writes, the 6 stage routes and the commit with 409; the 24 reads answer", async () => {
+  it("refuses the 7 writes, the 9 stage routes and the commit with 409; the 24 reads answer", async () => {
     const all = requests();
     expect(all.map(([route]) => route).sort()).toEqual(Object.keys(ROUTES).sort());
     const refused: string[] = [];
@@ -391,13 +411,13 @@ describe("through a 'none' ruleset's URL (REST)", () => {
         refused.push(route);
       }
     }
-    expect(refused).toHaveLength(14);
+    expect(refused).toHaveLength(17);
     expect(all.length - refused.length).toBe(24);
     // Nothing written, nothing staged, nothing started.
     expect((await rest("GET", `${ALL}/entities/task/${e.T1}`)).body.name).toBe("T1");
     expect((await rest("GET", `${ALL}/entities/task/${e.T1a1}`)).status).toBe(200);
     expect((await rest("GET", `${ALL}/entities/person`)).body.items.map((p: Row) => p.name)).not.toContain("Ann");
-    expect((await rest("GET", `${N}/changesets`)).body.map((c: Row) => [c.id, c.state, c.writeCount])).toEqual([
+    expect((await rest("GET", `${N}/changesets`)).body.map((c: Row) => [c.id, c.state, c.objectCount])).toEqual([
       [cs, "draft", 3],
     ]);
   });
@@ -416,23 +436,23 @@ describe("through a 'none' ruleset's URL (REST)", () => {
   });
 });
 
-describe("the MCP tool set at 'propose' (V29, R13)", () => {
+describe("the MCP tool set at 'propose'", () => {
   beforeEach(async () => {
     await putRuleset("agent-s", { anchor: { type: "project", id: e.P1 }, writeAccess: "propose" });
   });
 
-  it("tools/list: the six write tools require changeset_id; no commit_changeset, edit_document or write_document", async () => {
+  it("tools/list: the eight write tools require changeset_id; no commit_changeset", async () => {
     const { tools } = await (await connect("agent-s")).listTools();
     const byName = new Map(tools.map((tool) => [tool.name, tool.inputSchema as { required?: string[] }]));
     for (const name of STAGEABLE) expect(byName.get(name)?.required, name).toContain("changeset_id");
-    for (const name of ["commit_changeset", "edit_document", "write_document"]) expect(byName.has(name), name).toBe(false);
-    for (const name of ["start_changeset", "list_changesets", "get_changeset", "unstage", "submit_changeset", "unsubmit_changeset", "discard_changeset", "get_ruleset"]) {
+    expect(byName.has("commit_changeset")).toBe(false);
+    for (const name of ["start_changeset", "list_changesets", "get_changeset", "unstage", "rebase", "check_changeset", "submit_changeset", "unsubmit_changeset", "discard_changeset", "get_ruleset"]) {
       expect(byName.has(name), name).toBe(true);
     }
     for (const tool of tools) expect((tool.description ?? "").length, tool.name).toBeLessThanOrEqual(2000);
   });
 
-  it("a write without changeset_id is refused; staging, submit, unsubmit, discard, list and reads work", async () => {
+  it("a write without changeset_id is refused; staging, check, submit, unsubmit, discard, list and reads work", async () => {
     const client = await connect("agent-s");
     const immediate = await call(client, "update_entity", { entity_type_key: "task", entity_id: e.T1, properties: { name: "T1x" } });
     expect(immediate.isError).toBe(true);
@@ -446,10 +466,22 @@ describe("the MCP tool set at 'propose' (V29, R13)", () => {
       properties: { name: "T1x" },
       changeset_id: cs,
     });
-    expect(staged.seq).toBeGreaterThan(0);
+    expect(staged).toEqual({ id: e.T1 });
+    const edited = await ok(client, "edit_document", {
+      entity_type_key: "task",
+      entity_id: e.T1,
+      property_key: "notes",
+      old_string: "Notes",
+      new_string: "Text",
+      changeset_id: cs,
+    });
+    expect(edited).toMatchObject({ id: e.T1, totalLength: 10 });
     expect((await ok(client, "list_changesets")).map((c: Row) => c.id)).toEqual([cs]);
-    expect((await ok(client, "get_changeset", { changeset_id: cs })).writeCount).toBe(1);
+    expect((await ok(client, "get_changeset", { changeset_id: cs })).objectCount).toBe(1);
+    expect((await rest("GET", `${ALL}/entities/task/${e.T1}/documents/notes`)).body.content).toBe("Notes of T1");
     expect((await ok(client, "get_entity", { entity_type_key: "task", entity_id: e.T1 })).name).toBe("T1");
+    const { version } = await ok(client, "get_changeset", { changeset_id: cs });
+    expect(await ok(client, "check_changeset", { changeset_id: cs })).toEqual({ version, committed: 1, alreadyGone: [] });
     expect((await ok(client, "submit_changeset", { changeset_id: cs })).state).toBe("submitted");
     expect((await ok(client, "unsubmit_changeset", { changeset_id: cs, note: "again" })).state).toBe("draft");
     expect((await ok(client, "discard_changeset", { changeset_id: cs })).message).toContain("discarded");
@@ -466,18 +498,9 @@ describe("the MCP tool set at 'propose' (V29, R13)", () => {
 
   it("a tool the list leaves out answers the write access refusal, not an unknown tool", async () => {
     const client = await connect("agent-s");
-    const edit = await call(client, "edit_document", {
-      entity_type_key: "task",
-      entity_id: e.T1,
-      property_key: "notes",
-      old_string: "Notes",
-      new_string: "Text",
-    });
-    expect(text(edit)).toBe(`Error executing tool edit_document: ${NO_WRITE("agent-s")}`);
     const cs = (await ok(client, "start_changeset")).id as string;
     const commit = await call(client, "commit_changeset", { changeset_id: cs });
     expect(text(commit)).toBe(`Error executing tool commit_changeset: ${NO_COMMIT("agent-s")}`);
-    expect((await rest("GET", `${ALL}/entities/task/${e.T1}/documents/notes`)).body.content).not.toContain("Text");
   });
 
   it("a level lowered after tools/list: the listed tool answers the refusal", async () => {
@@ -542,7 +565,7 @@ describe("the MCP tool set at 'none'", () => {
     expect((await ok(client, "get_ruleset")).writeAccess).toBe("none");
     expect((await ok(client, "get_entity", { entity_type_key: "task", entity_id: e.T1 })).name).toBe("T1");
     expect((await ok(client, "list_changesets")).map((c: Row) => c.id)).toEqual([cs]);
-    expect((await ok(client, "get_changeset", { changeset_id: cs })).writeCount).toBe(1);
+    expect((await ok(client, "get_changeset", { changeset_id: cs })).objectCount).toBe(1);
     const staged = await ok(client, "get_staged_document", {
       changeset_id: cs,
       entity_type_key: "task",
@@ -555,8 +578,12 @@ describe("the MCP tool set at 'none'", () => {
       ["update_entity", { entity_type_key: "task", entity_id: e.T1, properties: { name: "T1x" } }, "write directly"],
       ["write_document", { entity_type_key: "task", entity_id: e.T1, property_key: "notes", offset: 0, length: 0, content: "x" }, "write directly"],
       ["update_entity", { entity_type_key: "task", entity_id: e.T1, properties: { name: "T1x" }, changeset_id: cs }, "start or change a changeset"],
+      ["edit_document", { entity_type_key: "task", entity_id: e.T1, property_key: "notes", old_string: "N", new_string: "M", changeset_id: cs }, "start or change a changeset"],
+      ["unstage", { changeset_id: cs, object_id: e.T1 }, "start or change a changeset"],
+      ["rebase", { changeset_id: cs, object_id: e.T1 }, "start or change a changeset"],
       ["start_changeset", {}, "start or change a changeset"],
       ["submit_changeset", { changeset_id: cs }, "start or change a changeset"],
+      ["check_changeset", { changeset_id: cs }, "start or change a changeset"],
       ["discard_changeset", { changeset_id: cs }, "start or change a changeset"],
       ["commit_changeset", { changeset_id: cs }, "commit"],
     ] as const) {
@@ -567,6 +594,6 @@ describe("the MCP tool set at 'none'", () => {
     // Nothing written, nothing staged.
     expect((await rest("GET", `${ALL}/entities/task/${e.T1}`)).body.name).toBe("T1");
     expect((await rest("GET", `${ALL}/entities/person`)).body.items.map((p: Row) => p.name)).not.toContain("Ann");
-    expect((await ok(client, "get_changeset", { changeset_id: cs })).writeCount).toBe(1);
+    expect((await ok(client, "get_changeset", { changeset_id: cs })).objectCount).toBe(1);
   });
 });

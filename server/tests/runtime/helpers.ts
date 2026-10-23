@@ -11,9 +11,10 @@ import type {
   SearchEntryQuery,
   SearchGenerationRecord,
   SearchIndexRecord,
+  StagedObjectRecord,
 } from "../../src/core/ports.js";
 import { deriveManagedIndices, type SearchIndexSchema } from "../../src/core/searchIndex.js";
-import { recordedDocument } from "../../src/runtime/changesets.js";
+import { recordedDocument, valueBytes } from "../../src/runtime/changesets.js";
 import { createMockRulesetStore, type MockRulesetStore } from "../mockRulesetStore.js";
 import { createMockChangesetStore, type MockChangesetStore } from "../mockChangesetStore.js";
 import { createMockNavigatorStore, type MockNavigatorStore } from "../mockNavigatorStore.js";
@@ -242,6 +243,41 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
 
 export function asRuntimeStore(mock: MockRuntimeStore): RuntimeStore {
   return mock;
+}
+
+/** Staged values by key: `[after]` on a create, `[after, before]` on an
+ * update, a before `undefined` for a key the target lacked. */
+export type StagedValues = Record<string, [unknown] | [unknown, unknown]>;
+
+/** A staged object as the changeset store keeps it: a relation when it has
+ * `ends`. */
+export function stagedObject(
+  objectId: string,
+  action: StagedObjectRecord["action"],
+  typeKey: string,
+  values: StagedValues = {},
+  ends?: [string, string],
+): StagedObjectRecord {
+  return {
+    objectId,
+    kind: ends === undefined ? "entity" : "relation",
+    typeKey,
+    action,
+    fromId: ends?.[0] ?? null,
+    toId: ends?.[1] ?? null,
+    firstTouchedAt: NOW,
+    values: Object.entries(values)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([propertyKey, pair]) => {
+        const before = pair.length === 1 ? null : pair[1] === undefined ? {} : { value: pair[1] };
+        return { propertyKey, value: pair[0], before, bytes: valueBytes(pair[0], before) };
+      }),
+  };
+}
+
+/** `objects` first touched one second apart, in this order. */
+export function inTouchOrder(objects: StagedObjectRecord[]): StagedObjectRecord[] {
+  return objects.map((object, i) => ({ ...object, firstTouchedAt: new Date(NOW.getTime() + i * 1000) }));
 }
 
 /** `props` with each string under a document key of `typeKey` as its

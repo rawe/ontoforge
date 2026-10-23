@@ -91,8 +91,9 @@ way, in slices.
 ### Partial writes
 
 Two operations edit in place. Writing the whole value through an ordinary entity create or
-update remains valid and does exactly what it says. A [changeset](changesets.md) stages a
-document value only that way, whole; the two operations below cannot be staged.
+update remains valid and does exactly what it says. Both can be staged into a
+[changeset](changesets.md#staging), which keeps one staged text per document: an edit
+applies to that text, or else to the stored one, and stages the whole result.
 
 **Exact string replacement.** Give the string to remove and the string to put in its place.
 It fails when the old string is empty, when the new string is missing or identical to the

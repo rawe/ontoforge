@@ -24,7 +24,7 @@ import { MiniMap } from '@/components/entity/MiniMap'
 import { ParentSection } from '@/components/entity/ParentSection'
 import { PropertiesCard } from '@/components/entity/PropertiesCard'
 import { RelationSection } from '@/components/entity/RelationSection'
-import { deletedInChangeset, stagedFields } from '@/components/entity/stagedFields'
+import { stagedFields } from '@/components/entity/stagedFields'
 import {
   invalidateNeighborhood,
   neighborCountsKey,
@@ -115,7 +115,7 @@ export function EntityDetailPage() {
   // While a changeset is pinned: this entity as it leaves it (none on a 404: not stored, or gone).
   const pinned = usePinnedChangeset(ontologyKey ?? '', lensKey ?? '')
   const stagedQuery = useStagedEntity(ontologyKey ?? '', lensKey ?? '', pinned, typeKey ?? '', id ?? '')
-  const staged = pinned === null || stagedQuery.data?.writes.length === 0 ? undefined : stagedQuery.data
+  const staged = pinned === null || stagedQuery.data?.object === null ? undefined : stagedQuery.data
   const overlay = useMemo(
     () => (staged === undefined ? undefined : { changesetId: pinned!, fields: stagedFields(staged) }),
     [staged, pinned],
@@ -268,7 +268,7 @@ export function EntityDetailPage() {
                 {anchorOfText(anchorOf)}
               </Link>
             )}
-            {staged !== undefined && deletedInChangeset(staged) && (
+            {staged?.deleted && (
               <span className="inline-flex items-center gap-1 rounded-full border border-(--tc-amber-border) bg-(--tc-amber-bg) px-2 py-0.5 text-[11px] font-medium text-(--tc-amber)">
                 <Trash2 className="size-3" />
                 Deleted in this changeset
@@ -356,7 +356,7 @@ export function EntityDetailPage() {
       />
 
       {staged !== undefined && (
-        <StagedHereStrip ontologyKey={ontologyKey} lensKey={lensKey} changesetId={pinned!} writes={staged.writes} />
+        <StagedHereStrip ontologyKey={ontologyKey} lensKey={lensKey} changesetId={pinned!} object={staged.object!} />
       )}
 
       <div className="grid items-start gap-6 p-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">

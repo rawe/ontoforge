@@ -273,38 +273,50 @@ export function ontologyDdlStatements(): string[] {
 
   // --- Changesets --------------------------------------------------------
 
-  // Staged writes of one lens, persisted together by a commit. Dies with
+  // What a commit of one lens will apply, staged over any time. Dies with
   // its lens; no FK to ruleset: a ruleset delete leaves the changeset.
   `CREATE TABLE IF NOT EXISTS changeset (
   changeset_id   uuid        CONSTRAINT changeset_pk PRIMARY KEY,
   lens_id        uuid        NOT NULL CONSTRAINT changeset_lens_fk
                              REFERENCES lens (lens_id) ON DELETE CASCADE,
+  number         integer     NOT NULL,   -- shown to people: the lens's highest + 1
   ruleset_key    text,       -- NULL: the plain lens
   version        integer     NOT NULL,
   note           text,
   submitted_at   timestamptz,            -- NULL: draft
   created_at     timestamptz NOT NULL DEFAULT now(),
-  last_change_at timestamptz NOT NULL DEFAULT now(),
-  number         integer     NOT NULL DEFAULT 0   -- shown to people: the lens's highest + 1
+  last_change_at timestamptz NOT NULL DEFAULT now()
 )`,
   `CREATE INDEX IF NOT EXISTS changeset_lens_id_idx ON changeset (lens_id)`,
 
-  // The journal: one row per staged write, replayed by seq.
-  `CREATE TABLE IF NOT EXISTS changeset_write (
-  changeset_id uuid        NOT NULL CONSTRAINT changeset_write_changeset_fk
-                           REFERENCES changeset (changeset_id) ON DELETE CASCADE,
-  seq          integer     NOT NULL,
-  operation    text        NOT NULL,
-  arguments    jsonb       NOT NULL,   -- as sent, after coercion
-  minted_id    uuid,                   -- the id a staged create got
-  type_key     text        NOT NULL,
-  target_id    uuid,
-  before       jsonb,                  -- a staged update's stored values of its patched keys, at staging
-  bytes        integer     NOT NULL,   -- the write's size as the service counts it
-  created_at   timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT changeset_write_pk PRIMARY KEY (changeset_id, seq)
+  // One row per entity or relation a changeset touches.
+  `CREATE TABLE IF NOT EXISTS changeset_object (
+  changeset_id     uuid        NOT NULL CONSTRAINT changeset_object_changeset_fk
+                               REFERENCES changeset (changeset_id) ON DELETE CASCADE,
+  object_id        uuid        NOT NULL,
+  kind             text        NOT NULL,   -- entity or relation
+  type_key         text        NOT NULL,
+  action           text        NOT NULL,   -- create, update or delete
+  from_id          uuid,                   -- a relation's ends; NULL for an entity
+  to_id            uuid,
+  first_touched_at timestamptz NOT NULL,
+  CONSTRAINT changeset_object_pk PRIMARY KEY (changeset_id, object_id)
 )`,
-  `CREATE INDEX IF NOT EXISTS changeset_write_minted_id_idx ON changeset_write (changeset_id, minted_id)`,
+  `CREATE INDEX IF NOT EXISTS changeset_object_touched_idx
+  ON changeset_object (changeset_id, first_touched_at, object_id)`,
+
+  // One row per staged property value of a staged object.
+  `CREATE TABLE IF NOT EXISTS changeset_value (
+  changeset_id uuid    NOT NULL,
+  object_id    uuid    NOT NULL,
+  property_key text    NOT NULL,
+  value        jsonb   NOT NULL,   -- JSON null: remove the property (an update only)
+  before       jsonb,              -- the stored value at first touch; NULL: created in the changeset
+  bytes        integer NOT NULL,   -- the value's size as the service counts it
+  CONSTRAINT changeset_value_pk PRIMARY KEY (changeset_id, object_id, property_key),
+  CONSTRAINT changeset_value_object_fk FOREIGN KEY (changeset_id, object_id)
+    REFERENCES changeset_object (changeset_id, object_id) ON DELETE CASCADE
+)`,
 
   // --- Search indices ----------------------------------------------------
 

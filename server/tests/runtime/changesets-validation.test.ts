@@ -1,15 +1,16 @@
 /**
  * Commit validation over mocked stores: the lock-free pass (step 0b) and
- * what it finds per staged write; drift re-checked under the lock (step
- * 1); the end-state rules after the replay (step 3): children of a staged
- * delete, the parent rules, endpoint types and anchor coverage; the cap on
- * listed violations; and messages that name nothing the lens hides.
+ * what it finds per staged object and value; drift re-checked under the
+ * lock (step 1); the end-state rules after the phases (step 3): children
+ * of a staged delete, the parent rules, endpoint types and anchor
+ * coverage; the cap on listed violations; and messages that name nothing
+ * the lens hides.
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { ConflictError, ValidationError } from "../../src/core/exceptions.js";
-import type { RulesetRecord, ChangesetRecord, ChangesetWriteRecord, ParentLink } from "../../src/core/ports.js";
+import type { ChangesetRecord, ParentLink, RulesetRecord, StagedObjectRecord } from "../../src/core/ports.js";
 import { commitChangeset, recordedDocument, lockFreePass } from "../../src/runtime/changesets.js";
 import { invalidateLoadedSchemaCache, invalidateSearchContext, loadSchema } from "../../src/runtime/schemaCache.js";
 import {
@@ -18,11 +19,14 @@ import {
   createMockRuntimeStore,
   fingerprinted,
   hashedById,
+  inTouchOrder,
   makeEntity,
   makeRelation,
   makeScopedSchema,
   makeUnscopedSchema,
+  stagedObject,
   type MockRuntimeStore,
+  type StagedValues,
 } from "./helpers.js";
 
 type Row = Record<string, any>;
@@ -63,45 +67,35 @@ function changeset(overrides: Partial<ChangesetRecord> = {}): ChangesetRecord {
   return {
     id: CS,
     lensId: "lens-1",
+    number: 1,
     rulesetKey: null,
     version: 7,
     note: null,
     submittedAt: null,
     createdAt: NOW,
     lastChangeAt: new Date(),
-    writeCount: 1,
+    objectCount: 1,
     ...overrides,
   };
 }
 
-function row(seq: number, overrides: Partial<ChangesetWriteRecord>): ChangesetWriteRecord {
-  return {
-    seq,
-    operation: "create_entity",
-    arguments: {},
-    mintedId: null,
-    typeKey: "person",
-    targetId: null,
-    before: null,
-    createdAt: NOW,
-    ...overrides,
-  };
-}
-
-const rename = (seq: number, id: string, name: string, before: Row | null): ChangesetWriteRecord =>
-  row(seq, { operation: "update_entity", typeKey: "person", targetId: id, arguments: { properties: { name } }, before });
-const deleteOf = (seq: number, type: string, id: string): ChangesetWriteRecord =>
-  row(seq, { operation: "delete_entity", typeKey: type, targetId: id, arguments: {} });
-const relate = (seq: number, type: string, id: string, from: string, to: string): ChangesetWriteRecord =>
-  row(seq, { operation: "create_relation", typeKey: type, mintedId: id, arguments: { fromEntityId: from, toEntityId: to, properties: {} } });
-/** A department created under `parentId`, as staging expands it: the
- * entity's create at `seq`, its `belongs_to` relation at `seq + 1`. */
-const department = (seq: number, id: string, parentId: string, relationId: string): ChangesetWriteRecord[] => [
-  row(seq, { operation: "create_entity", typeKey: "department", mintedId: id, arguments: { properties: { name: "New" } } }),
-  relate(seq + 1, "belongs_to", relationId, id, parentId),
+const update = (id: string, type: string, values: StagedValues): StagedObjectRecord =>
+  stagedObject(id, "update", type, values);
+const rename = (id: string, name: string, before: string): StagedObjectRecord => update(id, "person", { name: [name, before] });
+const deleteOf = (type: string, id: string): StagedObjectRecord => stagedObject(id, "delete", type);
+const relate = (type: string, id: string, from: string, to: string): StagedObjectRecord =>
+  stagedObject(id, "create", type, {}, [from, to]);
+/** A department created under `parentId`, as staging stages it: the
+ * entity's create, then its `belongs_to` relation's. */
+const department = (id: string, parentId: string, relationId: string): StagedObjectRecord[] => [
+  stagedObject(id, "create", "department", { name: ["New"] }),
+  relate("belongs_to", relationId, id, parentId),
 ];
 
 let store: MockRuntimeStore;
+/** The changeset as seeded before each pass or commit, and its objects. */
+let record: Partial<ChangesetRecord>;
+let staged: StagedObjectRecord[];
 /** The entities as stored, by id. */
 let stored: Record<string, Row>;
 /** The parent links as stored, by child id. */
@@ -116,8 +110,8 @@ beforeEach(() => {
   invalidateSearchContext();
   store = createMockRuntimeStore();
   store.getFullSchemaWithLensInclusions.mockResolvedValue(schema());
-  store.changesetStore.get.mockResolvedValue(changeset());
-  store.changesetStore.lockForCommit.mockResolvedValue(changeset());
+  record = {};
+  staged = [];
   stored = {
     [PAT]: makeEntity({ name: "Pat", email: null }, "person", PAT),
     [KIM]: makeEntity({ name: "Kim" }, "person", KIM),
@@ -150,13 +144,18 @@ beforeEach(() => {
   store.deleteRelation.mockResolvedValue(true);
 });
 
-function journal(writes: ChangesetWriteRecord[]): void {
-  store.changesetStore.page.mockImplementation(async (_id: string, offset: number, limit: number) =>
-    writes.slice(offset, offset + limit),
-  );
+/** Stage these objects, first touched in this order. */
+function changesetOf(objects: StagedObjectRecord[]): void {
+  staged = objects;
+}
+
+/** The changeset as staged, seeded afresh: a commit deletes it. */
+function seed(): void {
+  store.changesetStore.seed(changeset({ objectCount: staged.length, ...record }), inTouchOrder(staged));
 }
 
 function commit(lensKey = "full_lens") {
+  seed();
   return commitChangeset(lensKey, null, CS, undefined, asRuntimeStore(store));
 }
 
@@ -168,189 +167,185 @@ async function violations(promise: Promise<unknown>): Promise<Row[]> {
   return details.violations;
 }
 
-async function pass(writes: ChangesetWriteRecord[], lensKey = "full_lens") {
-  journal(writes);
+async function pass(objects: StagedObjectRecord[], lensKey = "full_lens") {
+  changesetOf(objects);
+  seed();
   return lockFreePass(await loadSchema(lensKey, asRuntimeStore(store)), CS, asRuntimeStore(store));
 }
 
+
+const DRIFTED = "Changed since it was staged";
+const GONE_SINCE = "Deleted since it was staged";
+
+/** The helper schema with a document `bio` on person. */
+function withBio(): Row {
+  const full = schema();
+  full.entityTypes.find((et: Row) => et.key === "person").properties.push({
+    key: "bio",
+    displayName: "Bio",
+    dataType: "document",
+    required: false,
+    defaultValue: null,
+  });
+  return full;
+}
+
 describe("the lock-free pass (step 0b)", () => {
-  it("a clean journal has no faults, and names the stored targets to lock", async () => {
+  it("a clean changeset has no faults, and names the stored targets to lock", async () => {
     const result = await pass([
-      rename(1, PAT, "Pat M", { name: "Pat" }),
-      ...department(2, NEW, ACME, NEW_REL),
-      rename(4, NEW, "x", null),
-      deleteOf(5, "department", D1),
-      relate(6, "works_for", R1, PAT, ACME),
-      row(7, { operation: "update_relation", typeKey: "works_for", targetId: R1, arguments: { properties: { role: "x" } } }),
+      rename(PAT, "Pat M", "Pat"),
+      ...department(NEW, ACME, NEW_REL),
+      deleteOf("department", D1),
+      stagedObject(R1, "create", "works_for", { role: ["x"] }, [PAT, ACME]),
     ]);
     expect(result.faults).toEqual([]);
     expect(result.targets.sort()).toEqual([D1, PAT].sort());
     expect(result.stored.get(PAT)).toBe("person");
-    expect([...result.minted.keys()]).toEqual([NEW, NEW_REL, R1]);
+    expect(result.objects.map((o) => o.objectId)).toEqual([PAT, NEW, NEW_REL, D1, R1]);
   });
 
-  it("not_visible: a hidden type or property, named by neither; nothing else checked", async () => {
+  it("not_visible: a hidden type, or a property it sets, named by neither; nothing else checked", async () => {
     store.getFullSchemaWithLensInclusions.mockResolvedValue(schema(true));
     const result = await pass(
       [
-        deleteOf(1, "department", D1),
-        row(2, { operation: "update_entity", typeKey: "person", targetId: GHOST, arguments: { properties: { age: 3 } }, before: {} }),
-        // A parent relation's write: its end GHOST is not judged.
-        relate(3, "belongs_to", NEW_REL, D1, GHOST),
-        rename(4, PAT, "Pat M", { name: "Pat" }),
+        deleteOf("department", D1),
+        update(GHOST, "person", { age: [3, undefined] }),
+        // A parent relation's object: its end GHOST is not judged.
+        relate("belongs_to", NEW_REL, D1, GHOST),
+        rename(PAT, "Pat M", "Pat"),
       ],
       "hr_view",
     );
     const through = "is no longer visible through lens 'hr_view'";
     expect(result.faults).toEqual([
-      { seq: 1, kind: "not_visible", message: `The type of this write ${through}` },
-      { seq: 2, kind: "not_visible", message: `A property this write sets ${through}` },
-      { seq: 3, kind: "not_visible", message: `The type of this write ${through}` },
+      { object: D1, kind: "not_visible", message: `The type of this entity ${through}` },
+      { object: GHOST, kind: "not_visible", message: `A property this entity sets ${through}` },
+      { object: NEW_REL, kind: "not_visible", message: `The type of this relation ${through}` },
     ]);
     for (const fault of result.faults) {
       expect(fault.message).not.toMatch(/department|age|belongs_to/);
     }
   });
 
-  it("replay: a value the lens no longer accepts, as the replay would meet it", async () => {
-    const result = await pass([
-      row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { age: "old" } }, before: {} }),
+  it("replay: a value the lens no longer accepts, on its property; a create's required value missing", async () => {
+    const result = await pass([update(PAT, "person", { age: ["old", undefined] }), stagedObject(NEW, "create", "person", { email: ["e"] })]);
+    expect(result.faults).toEqual([
+      { object: PAT, property: "age", kind: "replay", message: expect.stringMatching(/^Instance validation failed: age: /) },
+      { object: NEW, property: "name", kind: "replay", message: "Instance validation failed: name: Required property missing" },
     ]);
-    expect(result.faults).toHaveLength(1);
-    expect(result.faults[0]).toMatchObject({ seq: 1, kind: "replay" });
-    expect(result.faults[0]!.message).toMatch(/^Instance validation failed: age: /);
   });
 
-  it("missing: an update target stored at staging is gone", async () => {
+  it("missing: the stored target of an update is gone", async () => {
     delete stored[PAT];
-    const result = await pass([rename(1, PAT, "Pat M", { name: "Pat" })]);
-    expect(result.faults).toEqual([{ seq: 1, kind: "missing", message: "Deleted since this write was staged" }]);
+    expect((await pass([rename(PAT, "Pat M", "Pat")])).faults).toEqual([{ object: PAT, kind: "missing", message: GONE_SINCE }]);
   });
 
-  it("missing: a relation update target stored at staging is gone; stored, it passes", async () => {
-    const update = row(1, { operation: "update_relation", typeKey: "works_for", targetId: R1, arguments: { properties: { role: "lead" } }, before: { role: "dev" } });
-    expect((await pass([update])).faults).toEqual([{ seq: 1, kind: "missing", message: "Deleted since this write was staged" }]);
+  it("missing: a relation update's target is gone; stored, it passes; of another type, it is not the target", async () => {
+    const relation = stagedObject(R1, "update", "works_for", { role: ["lead", "dev"] }, [PAT, ACME]);
+    expect((await pass([relation])).faults).toEqual([{ object: R1, kind: "missing", message: GONE_SINCE }]);
     store.getRelationsByIds.mockResolvedValue({ [R1]: makeRelation({ role: "dev" }, { relationId: R1 }) });
-    expect((await pass([update])).faults).toEqual([]);
+    expect((await pass([relation])).faults).toEqual([]);
     expect(store.getRelationsByIds).toHaveBeenCalledWith([R1]);
-    // Of another type, it is not the target.
     store.getRelationsByIds.mockResolvedValue({ [R1]: makeRelation({ role: "dev" }, { relationId: R1, relationTypeKey: "reports_to" }) });
-    expect((await pass([update])).faults.map((f) => f.kind)).toEqual(["missing"]);
+    expect((await pass([relation])).faults.map((f) => f.kind)).toEqual(["missing"]);
   });
 
-  it("dangling: what a create since unstaged minted (V6), or an end neither stored nor minted, named by its role", async () => {
+  it("dangling: an end neither stored nor created here, or deleted here, named by its role", async () => {
+    const D2 = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const R2 = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    store.getRelationsByIds.mockResolvedValue({ [R1]: makeRelation({}, { relationId: R1, relationTypeKey: "reports_to", fromEntityId: PAT, toEntityId: KIM }) });
     const result = await pass([
-      rename(2, NEW, "x", null),
-      relate(3, "works_for", NEW_REL, GHOST, ACME),
-      ...department(4, "dddddddd-dddd-4ddd-8ddd-dddddddddddd", GHOST, R1),
+      relate("works_for", NEW_REL, GHOST, ACME),
+      ...department(D2, GHOST, R2),
+      deleteOf("person", KIM),
+      relate("reports_to", NEW, KIM, PAT),
+      stagedObject(R1, "update", "reports_to", {}, [PAT, KIM]),
     ]);
     expect(result.faults).toEqual([
-      { seq: 2, kind: "dangling", message: "Neither stored nor created in this changeset" },
-      { seq: 3, kind: "dangling", message: "The source end is neither stored nor created in this changeset" },
-      { seq: 5, kind: "dangling", message: "The target end is neither stored nor created in this changeset" },
+      { object: NEW_REL, kind: "dangling", message: "The source end is neither stored nor created in this changeset" },
+      { object: R2, kind: "dangling", message: "The target end is neither stored nor created in this changeset" },
+      { object: NEW, kind: "dangling", message: "The source end is deleted in this changeset" },
+      { object: R1, kind: "dangling", message: "The target end is deleted in this changeset" },
     ]);
   });
 
-  it("control: ends and parents minted by a create still in the journal resolve", async () => {
-    const result = await pass([
-      row(1, { operation: "create_entity", typeKey: "person", mintedId: NEW, arguments: { properties: { name: "N" } } }),
-      relate(2, "reports_to", NEW_REL, NEW, PAT),
-    ]);
+  it("control: ends and parents created in this changeset resolve", async () => {
+    const result = await pass([stagedObject(NEW, "create", "person", { name: ["N"] }), relate("reports_to", NEW_REL, NEW, PAT)]);
     expect(result.faults).toEqual([]);
   });
 
-  it("a delete whose target is gone is no fault: the replay counts it as done", async () => {
-    expect((await pass([deleteOf(1, "department", GHOST)])).faults).toEqual([]);
+  it("a delete whose target is gone is no fault: the commit counts it as done", async () => {
+    expect((await pass([deleteOf("department", GHOST)])).faults).toEqual([]);
   });
 
-  describe("drift (V10)", () => {
-    it("a changed value of a patched key drifts; another key's change does not", async () => {
+  describe("drift, per value", () => {
+    it("a changed value of a staged key drifts; another key's change does not", async () => {
       stored[PAT]!.name = "Pat Mobile";
-      const result = await pass([rename(1, PAT, "Pat W", { name: "Pat" })]);
-      expect(result.faults).toEqual([
-        { seq: 1, kind: "drift", message: "Changed since this write was staged" },
-      ]);
+      expect((await pass([rename(PAT, "Pat W", "Pat")])).faults).toEqual([{ object: PAT, property: "name", kind: "drift", message: DRIFTED }]);
       stored[PAT]!.name = "Pat";
       stored[PAT]!.age = 50;
-      expect((await pass([rename(1, PAT, "Pat W", { name: "Pat" })])).faults).toEqual([]);
+      expect((await pass([rename(PAT, "Pat W", "Pat")])).faults).toEqual([]);
     });
 
-    it("a value changed and changed back is no drift", async () => {
-      stored[PAT]!.name = "Pat";
-      expect((await pass([rename(1, PAT, "Pat W", { name: "Pat" })])).faults).toEqual([]);
+    it("each value on its own: only the drifted one is marked", async () => {
+      stored[PAT] = { ...stored[PAT]!, name: "Pat Mobile", age: 41 };
+      expect((await pass([update(PAT, "person", { name: ["Pat W", "Pat"], age: [42, 41] })])).faults).toEqual([
+        { object: PAT, property: "name", kind: "drift", message: DRIFTED },
+      ]);
     });
 
     it("absent and null differ", async () => {
-      // Pat stores `email: null`; a before staged while the key was absent drifts.
-      const write = row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { email: "p@x" } }, before: {} });
-      expect((await pass([write])).faults.map((f) => f.kind)).toEqual(["drift"]);
-      expect((await pass([{ ...write, before: { email: null } }])).faults).toEqual([]);
+      // Pat stores `email: null`; a before recorded while the key was absent drifts.
+      expect((await pass([update(PAT, "person", { email: ["p@x", undefined] })])).faults.map((f) => f.kind)).toEqual(["drift"]);
+      expect((await pass([update(PAT, "person", { email: ["p@x", null] })])).faults).toEqual([]);
     });
 
     it("a document value is compared by its hash", async () => {
-      const full = schema();
-      full.entityTypes.find((et: Row) => et.key === "person").properties.push({
-        key: "bio",
-        displayName: "Bio",
-        dataType: "document",
-        required: false,
-        defaultValue: null,
-      });
-      store.getFullSchemaWithLensInclusions.mockResolvedValue(full);
+      store.getFullSchemaWithLensInclusions.mockResolvedValue(withBio());
       stored[PAT]!.bio = "old text";
-      const write = row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { bio: "new" } }, before: { bio: recordedDocument("old text") } });
-      expect((await pass([write])).faults).toEqual([]);
-      invalidateLoadedSchemaCache();
+      const object = update(PAT, "person", { bio: ["new", recordedDocument("old text")] });
+      expect((await pass([object])).faults).toEqual([]);
       stored[PAT]!.bio = "other text";
-      expect((await pass([write])).faults.map((f) => f.kind)).toEqual(["drift"]);
+      expect((await pass([object])).faults.map((f) => f.kind)).toEqual(["drift"]);
     });
 
     it("a document is compared by its hash alone: a before recorded without a length still matches", async () => {
-      const full = schema();
-      full.entityTypes.find((et: Row) => et.key === "person").properties.push({
-        key: "bio",
-        displayName: "Bio",
-        dataType: "document",
-        required: false,
-        defaultValue: null,
-      });
-      store.getFullSchemaWithLensInclusions.mockResolvedValue(full);
+      store.getFullSchemaWithLensInclusions.mockResolvedValue(withBio());
       stored[PAT]!.bio = "old text";
       const { sha256 } = recordedDocument("old text");
-      const write = row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { bio: "new" } }, before: { bio: { sha256 } } });
-      expect((await pass([write])).faults).toEqual([]);
-      invalidateLoadedSchemaCache();
+      const object = update(PAT, "person", { bio: ["new", { sha256 }] });
+      expect((await pass([object])).faults).toEqual([]);
       // The same length, another text: drift.
       stored[PAT]!.bio = "new text";
-      expect((await pass([write])).faults.map((f) => f.kind)).toEqual(["drift"]);
+      expect((await pass([object])).faults.map((f) => f.kind)).toEqual(["drift"]);
     });
   });
 
   it("a fault rejects before BEGIN: no transaction, no commit lock; the last change is refreshed", async () => {
     delete stored[PAT];
-    journal([rename(1, PAT, "Pat M", { name: "Pat" })]);
-    expect(await violations(commit())).toEqual([{ seq: 1, kind: "missing", message: "Deleted since this write was staged" }]);
+    changesetOf([rename(PAT, "Pat M", "Pat")]);
+    expect(await violations(commit())).toEqual([{ object: PAT, kind: "missing", message: GONE_SINCE }]);
     expect(store.transaction).not.toHaveBeenCalled();
     expect(store.changesetStore.lockForCommit).not.toHaveBeenCalled();
     expect(store.changesetStore.touch).toHaveBeenCalledWith(CS);
   });
 
-  it("lists the first 100 faults by seq, and the total", async () => {
-    delete stored[PAT];
-    journal(Array.from({ length: 150 }, (_, i) => rename(150 - i, PAT, "x", { name: "Pat" })).reverse());
+  it("lists the first 100 faults by first touch, and the total", async () => {
+    const ids = Array.from({ length: 150 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
+    changesetOf(ids.map((id) => rename(id, "x", "Pat")));
     const error = (await commit().catch((e: unknown) => e)) as ValidationError;
     const details = error.details as Row;
     expect(details.total).toBe(150);
     expect(details.violations).toHaveLength(100);
-    expect(details.violations.map((v: Row) => v.seq)).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
+    expect(details.violations.map((v: Row) => v.object)).toEqual(ids.slice(0, 100));
   });
 });
 
 describe("step 1: under the lock", () => {
   it("locks every stored target and re-checks drift on the locked rows", async () => {
-    journal([rename(1, PAT, "Pat W", { name: "Pat" }), deleteOf(2, "department", D1)]);
+    changesetOf([rename(PAT, "Pat W", "Pat"), deleteOf("department", D1)]);
     store.lockTargets.mockResolvedValue([{ id: PAT, kind: "entity", typeKey: "person", props: { name: "Pat Mobile" } }]);
-    expect(await violations(commit())).toEqual([{ seq: 1, kind: "drift", message: "Changed since this write was staged" }]);
+    expect(await violations(commit())).toEqual([{ object: PAT, property: "name", kind: "drift", message: DRIFTED }]);
     expect(store.lockTargets.mock.calls[0]![0].sort()).toEqual([PAT, D1].sort());
     expect(store.lockTargets.mock.invocationCallOrder[0]!).toBeGreaterThan(
       store.changesetStore.lockForCommit.mock.invocationCallOrder[0]!,
@@ -359,29 +354,21 @@ describe("step 1: under the lock", () => {
   });
 
   it("a document is re-read under the lock as its hash and length, and compared by its hash", async () => {
-    const full = schema();
-    full.entityTypes.find((et: Row) => et.key === "person").properties.push({
-      key: "bio",
-      displayName: "Bio",
-      dataType: "document",
-      required: false,
-      defaultValue: null,
-    });
-    store.getFullSchemaWithLensInclusions.mockResolvedValue(full);
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(withBio());
     stored[PAT]!.bio = "old text";
-    journal([row(1, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { bio: "new" } }, before: { bio: recordedDocument("old text") } })]);
+    changesetOf([update(PAT, "person", { bio: ["new", recordedDocument("old text")] })]);
     // Changed after the pass, as the lock reads it.
     store.lockTargets.mockResolvedValueOnce([
       { id: PAT, kind: "entity", typeKey: "person", props: { name: "Pat", bio: recordedDocument("other text") } },
     ]);
-    expect(await violations(commit())).toEqual([{ seq: 1, kind: "drift", message: "Changed since this write was staged" }]);
+    expect(await violations(commit())).toEqual([{ object: PAT, property: "bio", kind: "drift", message: DRIFTED }]);
     expect(store.lockTargets.mock.calls[0]![1]).toEqual({ person: ["bio"] });
     // Unchanged, it commits.
     expect(await commit()).toEqual({ committed: 1, alreadyGone: [] });
   });
 
-  it("a journal changed between the pass and the lock is a 409", async () => {
-    journal([rename(1, PAT, "Pat W", { name: "Pat" })]);
+  it("a changeset changed between the pass and the lock is a 409", async () => {
+    changesetOf([rename(PAT, "Pat W", "Pat")]);
     store.changesetStore.lockForCommit.mockResolvedValue(changeset({ version: 8 }));
     const error = await commit().catch((e: unknown) => e);
     expect(error).toEqual(new ConflictError(`Changeset '${CS}' changed during the commit; try again`));
@@ -392,24 +379,21 @@ describe("step 1: under the lock", () => {
 describe("step 3: the end state", () => {
   it("has_children: a recorded child neither deleted nor re-parented; the message names no entity", async () => {
     store.childrenOf.mockResolvedValue([link("belongs_to", R1, ACME, D1)]);
-    journal([deleteOf(1, "company", ACME)]);
+    changesetOf([deleteOf("company", ACME)]);
     parents[D1] = [];
-    expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "has_children", message: "Still has children" },
-    ]);
-    expect(store.changesetStore.deleteWithJournal).not.toHaveBeenCalled();
+    expect(await violations(commit())).toEqual([{ object: ACME, kind: "has_children", message: "Still has children" }]);
+    expect(store.changesetStore.deleteCommitted).not.toHaveBeenCalled();
   });
 
   it("has_children control: the child re-parented, or deleted too", async () => {
     store.childrenOf.mockResolvedValueOnce([link("belongs_to", R1, ACME, D1)]).mockResolvedValue([]);
-    journal([deleteOf(1, "company", ACME), relate(2, "belongs_to", NEW_REL, D1, BETA)]);
+    changesetOf([deleteOf("company", ACME), relate("belongs_to", NEW_REL, D1, BETA)]);
     parents[D1] = [link("belongs_to", NEW_REL, BETA, D1)];
     expect(await commit()).toEqual({ committed: 2, alreadyGone: [] });
 
     store.childrenOf.mockResolvedValueOnce([link("belongs_to", R1, ACME, D1)]).mockResolvedValue([]);
-    journal([deleteOf(1, "company", ACME), deleteOf(2, "department", D1)]);
-    stored = { [ACME]: stored[ACME]!, [D1]: stored[D1]! };
-    // Both deleted by the replay: the end state's type read finds neither.
+    changesetOf([deleteOf("company", ACME), deleteOf("department", D1)]);
+    // Both deleted by the commit: the end state's type read finds neither.
     store.getEntityTypes.mockResolvedValue({});
     store.getEntitiesByIdsHashed.mockClear();
     expect(await commit()).toMatchObject({ committed: 2 });
@@ -418,87 +402,84 @@ describe("step 3: the end state", () => {
     expect(store.getEntitiesByIdsHashed).toHaveBeenCalledTimes(1);
   });
 
-  it("two_parents: a child given a second parent; control: the old link deleted first", async () => {
-    journal([relate(1, "belongs_to", NEW_REL, D1, BETA)]);
+  it("two_parents: a child given a second parent; control: a parent move, the old link deleted in the same changeset", async () => {
+    changesetOf([relate("belongs_to", NEW_REL, D1, BETA)]);
     parents[D1] = [link("belongs_to", R1, ACME, D1), link("belongs_to", NEW_REL, BETA, D1)];
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "two_parents", message: "The source end already has a parent" },
+      { object: NEW_REL, kind: "two_parents", message: "The source end already has a parent" },
     ]);
 
-    journal([row(1, { operation: "delete_relation", typeKey: "belongs_to", targetId: R1, arguments: {} }), relate(2, "belongs_to", NEW_REL, D1, BETA)]);
+    // Staged in any order: the commit deletes relations before it creates them.
+    changesetOf([relate("belongs_to", NEW_REL, D1, BETA), stagedObject(R1, "delete", "belongs_to", {}, [D1, ACME])]);
     parents[D1] = [link("belongs_to", NEW_REL, BETA, D1)];
     expect(await commit()).toMatchObject({ committed: 2 });
+    expect(store.deleteRelation.mock.invocationCallOrder.at(-1)!).toBeLessThan(store.createRelation.mock.invocationCallOrder.at(-1)!);
   });
 
   it("two_parents on a create staged with its parent relation: each relation names its child end", async () => {
     stored[NEW] = makeEntity({ name: "New" }, "department", NEW);
-    journal([...department(1, NEW, ACME, R1), relate(3, "belongs_to", NEW_REL, NEW, BETA)]);
+    changesetOf([...department(NEW, ACME, R1), relate("belongs_to", NEW_REL, NEW, BETA)]);
     parents[NEW] = [link("belongs_to", R1, ACME, NEW), link("belongs_to", NEW_REL, BETA, NEW)];
     expect(await violations(commit())).toEqual([
-      { seq: 2, kind: "two_parents", message: "The source end already has a parent" },
-      { seq: 3, kind: "two_parents", message: "The source end already has a parent" },
+      { object: R1, kind: "two_parents", message: "The source end already has a parent" },
+      { object: NEW_REL, kind: "two_parents", message: "The source end already has a parent" },
     ]);
   });
 
   it("cycle: a parent link that closes a cycle, and a self-loop", async () => {
     // Kim reports to Pat, staged; Pat already reports to Kim.
-    journal([relate(1, "reports_to", NEW_REL, KIM, PAT), relate(2, "reports_to", R1, PAT, PAT)]);
+    changesetOf([relate("reports_to", NEW_REL, KIM, PAT), relate("reports_to", R1, PAT, PAT)]);
     parents[KIM] = [link("reports_to", NEW_REL, PAT, KIM)];
     parents[PAT] = [link("reports_to", "r-old", KIM, PAT), link("reports_to", R1, PAT, PAT)];
     const found = await violations(commit());
-    expect(found).toContainEqual({ seq: 1, kind: "cycle", message: "This parent link would close a cycle" });
-    expect(found).toContainEqual({ seq: 2, kind: "cycle", message: "This parent link would close a cycle" });
-    expect(found.filter((v) => v.seq === 1).map((v) => v.kind)).toEqual(["cycle"]);
-  });
-
-  it("a link the changeset creates and then deletes is not judged", async () => {
-    journal([relate(1, "belongs_to", NEW_REL, D1, BETA), row(2, { operation: "delete_relation", typeKey: "belongs_to", targetId: NEW_REL, arguments: {} })]);
-    expect(await commit()).toMatchObject({ committed: 2 });
+    expect(found).toContainEqual({ object: NEW_REL, kind: "cycle", message: "This parent link would close a cycle" });
+    expect(found).toContainEqual({ object: R1, kind: "cycle", message: "This parent link would close a cycle" });
+    expect(found.filter((v) => v.object === NEW_REL).map((v) => v.kind)).toEqual(["cycle"]);
   });
 
   it("endpoint_type: a relation end of another type, a create's parent relation's too, the type not named", async () => {
-    journal([relate(1, "works_for", NEW_REL, PAT, D1), ...department(2, NEW, KIM, R1)]);
+    changesetOf([relate("works_for", NEW_REL, PAT, D1), ...department(NEW, KIM, R1)]);
     const found = await violations(commit());
     expect(found).toEqual([
-      { seq: 1, kind: "endpoint_type", message: "The target end does not have the type relation type 'works_for' requires" },
-      { seq: 3, kind: "endpoint_type", message: "The target end does not have the type relation type 'belongs_to' requires" },
+      { object: NEW_REL, kind: "endpoint_type", message: "The target end does not have the type relation type 'works_for' requires" },
+      { object: R1, kind: "endpoint_type", message: "The target end does not have the type relation type 'belongs_to' requires" },
     ]);
     for (const v of found) expect(v.message).not.toMatch(/department|person|company/);
   });
 
-  it("an end of the wrong type is not judged by the parent rules, as in v1", async () => {
+  it("an end of the wrong type is not judged by the parent rules", async () => {
     // Pat (a person) as the department end of belongs_to: one violation.
-    journal([relate(1, "belongs_to", NEW_REL, PAT, BETA)]);
+    changesetOf([relate("belongs_to", NEW_REL, PAT, BETA)]);
     parents[PAT] = [link("reports_to", "r-old", KIM, PAT), link("belongs_to", NEW_REL, BETA, PAT)];
     expect((await violations(commit())).map((v) => v.kind)).toEqual(["endpoint_type"]);
   });
 
-  it("every kind found is listed in one rejection, by seq", async () => {
+  it("every kind found is listed in one rejection", async () => {
     store.childrenOf.mockResolvedValueOnce([link("belongs_to", R1, ACME, D1)]).mockResolvedValue([]);
-    journal([relate(1, "works_for", NEW_REL, PAT, D1), deleteOf(2, "company", ACME)]);
+    changesetOf([relate("works_for", NEW_REL, PAT, D1), deleteOf("company", ACME)]);
     parents[D1] = [];
-    expect((await violations(commit())).map((v) => [v.seq, v.kind])).toEqual([
-      [1, "endpoint_type"],
-      [2, "has_children"],
+    expect((await violations(commit())).map((v) => [v.object, v.kind])).toEqual([
+      [ACME, "has_children"],
+      [NEW_REL, "endpoint_type"],
     ]);
   });
 });
 
-describe("anchor coverage (V8, V42)", () => {
+describe("anchor coverage", () => {
   const anchorAt = (anchor: { type: string; id: string } | null, anchorFound = true): RulesetRecord => ({
     key: "agent-a",
     anchor,
     anchorFound,
-  });
+  }) as RulesetRecord;
+  const code = (): StagedObjectRecord => update(D1, "department", { code: ["x", undefined] });
 
   beforeEach(() => {
-    store.changesetStore.get.mockResolvedValue(changeset({ rulesetKey: "agent-a" }));
-    store.changesetStore.lockForCommit.mockResolvedValue(changeset({ rulesetKey: "agent-a" }));
+    record = { rulesetKey: "agent-a" };
     store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "company", id: ACME }));
   });
 
   it("covered before and after: commits; the anchor is read inside the transaction", async () => {
-    journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
+    changesetOf([code()]);
     expect(await commit()).toMatchObject({ committed: 1 });
     expect(store.rulesetStore.get).toHaveBeenCalledWith("agent-a");
     expect(store.rulesetStore.get.mock.invocationCallOrder[0]!).toBeGreaterThan(
@@ -508,7 +489,8 @@ describe("anchor coverage (V8, V42)", () => {
 
   it("through the ruleset's URL at write access 'propose': commits, the ruleset read once, inside the transaction", async () => {
     store.rulesetStore.get.mockResolvedValue({ ...anchorAt({ type: "company", id: ACME }), writeAccess: "propose" });
-    journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
+    changesetOf([code()]);
+    seed();
     expect(await commitChangeset("full_lens", "agent-a", CS, undefined, asRuntimeStore(store))).toMatchObject({ committed: 1 });
     expect(store.rulesetStore.get).toHaveBeenCalledTimes(1);
     expect(store.rulesetStore.get.mock.invocationCallOrder[0]!).toBeGreaterThan(
@@ -518,52 +500,48 @@ describe("anchor coverage (V8, V42)", () => {
 
   it("not covered before: a touched entity outside the subtree", async () => {
     parents[D1] = [link("belongs_to", R1, BETA, D1)];
-    journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
+    changesetOf([code()]);
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "outside_subtree", message: "Outside the anchor subtree of ruleset 'agent-a'" },
+      { object: D1, kind: "outside_subtree", message: "Outside the anchor subtree of ruleset 'agent-a'" },
     ]);
   });
 
-  it("not covered after: a create placed outside, or moved out; a free type is free", async () => {
+  it("not covered after: a create placed outside; its parent relation touches its stored parent; a free type is free", async () => {
     parents[NEW] = [link("belongs_to", R1, BETA, NEW)];
     stored[NEW] = makeEntity({ name: "New" }, "department", NEW);
-    journal([
-      ...department(1, NEW, BETA, R1),
-      row(3, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P" } }, before: { name: "Pat" } }),
-    ]);
-    // The parent relation's write touches its stored parent BETA too.
+    changesetOf([...department(NEW, BETA, R1), rename(PAT, "P", "Pat")]);
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "outside_subtree", message: "Would be outside the anchor subtree of ruleset 'agent-a' after the commit" },
-      { seq: 2, kind: "outside_subtree", message: "Outside the anchor subtree of ruleset 'agent-a'" },
+      { object: R1, kind: "outside_subtree", message: "Outside the anchor subtree of ruleset 'agent-a'" },
+      { object: NEW, kind: "outside_subtree", message: "Would be outside the anchor subtree of ruleset 'agent-a' after the commit" },
     ]);
   });
 
-  it("a re-point since staging makes the writes outside the new subtree violations", async () => {
+  it("a re-point since staging makes the objects outside the new subtree violations", async () => {
     store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "company", id: BETA }));
-    journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
+    changesetOf([code()]);
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "outside_subtree", message: "Outside the anchor subtree of ruleset 'agent-a'" },
+      { object: D1, kind: "outside_subtree", message: "Outside the anchor subtree of ruleset 'agent-a'" },
     ]);
   });
 
   it("a staged delete of an anchored entity", async () => {
     store.rulesetStore.list.mockResolvedValue([anchorAt({ type: "company", id: ACME }), { key: "b", anchor: { type: "department", id: D1 }, anchorFound: true }]);
-    journal([deleteOf(1, "department", D1)]);
+    changesetOf([deleteOf("department", D1)]);
     expect(await violations(commit())).toEqual([
-      { seq: 1, kind: "deletes_anchor", message: "It is the anchor of a ruleset, so it cannot be deleted on this connection" },
+      { object: D1, kind: "deletes_anchor", message: "It is the anchor of a ruleset, so it cannot be deleted on this connection" },
     ]);
   });
 
-  it("ruleset_gone, anchor_deleted, anchor_hidden: one violation on seq 0, no coverage checked", async () => {
-    journal([row(3, { operation: "update_entity", typeKey: "person", targetId: PAT, arguments: { properties: { name: "P" } }, before: { name: "Pat" } })]);
+  it("ruleset_gone, anchor_deleted, anchor_hidden: one violation on the whole changeset, no coverage checked", async () => {
+    changesetOf([rename(PAT, "P", "Pat")]);
     store.rulesetStore.get.mockResolvedValue(null);
     expect(await violations(commit())).toEqual([
-      { seq: 0, kind: "ruleset_gone", message: "Ruleset 'agent-a' no longer exists, so this changeset cannot be committed" },
+      { object: null, kind: "ruleset_gone", message: "Ruleset 'agent-a' no longer exists, so this changeset cannot be committed" },
     ]);
 
     store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "company", id: ACME }, false));
     const [deleted] = await violations(commit());
-    expect(deleted).toMatchObject({ seq: 0, kind: "anchor_deleted" });
+    expect(deleted).toMatchObject({ object: null, kind: "anchor_deleted" });
     expect(deleted!.message).toContain("no longer exists");
 
     store.getFullSchemaWithLensInclusions.mockResolvedValue(schema(true));
@@ -571,7 +549,7 @@ describe("anchor coverage (V8, V42)", () => {
     store.rulesetStore.get.mockResolvedValue(anchorAt({ type: "department", id: D1 }));
     const [hidden] = await violations(commit("hr_view"));
     expect(hidden).toEqual({
-      seq: 0,
+      object: null,
       kind: "anchor_hidden",
       message: "The anchor of ruleset 'agent-a' is an entity that lens 'hr_view' does not show",
     });
@@ -581,7 +559,7 @@ describe("anchor coverage (V8, V42)", () => {
   it("a ruleset without an anchor guards nothing", async () => {
     store.rulesetStore.get.mockResolvedValue(anchorAt(null, false));
     parents[D1] = [link("belongs_to", R1, BETA, D1)];
-    journal([row(1, { operation: "update_entity", typeKey: "department", targetId: D1, arguments: { properties: { code: "x" } }, before: {} })]);
+    changesetOf([code()]);
     expect(await commit()).toMatchObject({ committed: 1 });
   });
 });

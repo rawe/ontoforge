@@ -19,6 +19,7 @@ import {
   isChangesetGone,
   stageIntoPinned,
   stagePayload,
+  stagedText,
   type RuntimeWrite,
   type StagedOutcome,
   type WriteOutcome,
@@ -62,7 +63,7 @@ export function useRuntimeWrites(ontologyKey: string, lensKey: string) {
           stageIntoPinned(pinned, (changesetId) => stage(changesetId, write)),
         )
       } finally {
-        // The list's write count and every page of the changeset's review read.
+        // The list's object count and every page of the changeset's review read.
         void queryClient.invalidateQueries({ queryKey: qk.changesets(ontologyKey, lensKey) })
       }
     }
@@ -109,8 +110,8 @@ export function useRuntimeWrites(ontologyKey: string, lensKey: string) {
         run(documentWrite(entityTypeKey, id, propertyKey, text), () =>
           runtime.updateEntity(ontologyKey, lensKey, entityTypeKey, id, { [propertyKey]: text }),
         ),
-      /** The staged branch's toast: "Staged #7" (or `text`), with a link to the changeset. */
-      toastStaged: (outcome: StagedOutcome, text = `Staged #${outcome.seq}`) =>
+      /** The staged branch's toast: "Staged" (or `text`), with a link to the changeset. */
+      toastStaged: (outcome: StagedOutcome, text = stagedText(outcome)) =>
         toast.success(text, {
           action: {
             label: 'Open changeset',

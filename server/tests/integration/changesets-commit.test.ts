@@ -1,8 +1,10 @@
 /**
  * The commit over REST, on the in-test project hierarchy
  * (`buildProjectHierarchy`): every staged operation persisted with its
- * search work, the move, the nested create, the order-free subtree delete,
- * the rollback of a rejection after the replay, the version check, and
+ * search work, in fixed phases whatever the staging order: the move, an
+ * entity created with a relation onto it beside another entity's delete,
+ * the nested create, the order-free subtree delete, the rollback of a
+ * rejection after the phases, the version check, and
  * the locks: the commit lock, the changeset row, a graph row held past the
  * lock timeout, and the process limit. Two small ontologies of their own give commits
  * that run beside it.
@@ -60,7 +62,7 @@ async function start(base = ALL): Promise<string> {
   return res.body.id as string;
 }
 
-/** Stage one write: its journal body, answered 201. */
+/** Stage one call: its body, answered 201. */
 async function staged(base: string, cs: string, write: Row): Promise<Row> {
   const res = await call("POST", `${base}/changesets/${cs}/writes`, write);
   expect(res.status, JSON.stringify(res.body)).toBe(201);
@@ -140,8 +142,8 @@ afterAll(async () => {
   await closeStores();
 });
 
-describe("a commit persists every staged write", () => {
-  it("all six operations and a whole document value, with their search work; then the changeset is gone", async () => {
+describe("a commit persists every staged object", () => {
+  it("all six operations, a whole document value and a document edit, with their search work; then the changeset is gone", async () => {
     await sql(`DELETE FROM search_queue`);
     const cs = await start();
     const t9 = (
@@ -165,6 +167,16 @@ describe("a commit persists every staged write", () => {
       id: e.T5,
       properties: { notes: "A whole new text" },
     });
+    // A document edit applies to the staged text.
+    await staged(ALL, cs, {
+      operation: "edit_document",
+      type: "task",
+      id: e.T5,
+      property: "notes",
+      op: "str_replace",
+      oldString: "new",
+      newString: "fresh",
+    });
     await staged(ALL, cs, { operation: "delete_entity", type: "task", id: e.T4 });
     const assigned = (
       await staged(ALL, cs, {
@@ -184,8 +196,9 @@ describe("a commit persists every staged write", () => {
     expect(await sql(`SELECT 1 FROM search_queue`)).toEqual([]);
 
     const res = await commit(cs, { expectedVersion: await version(cs) });
-    // The create with a parent relation is two writes.
-    expect(res).toEqual({ status: 200, body: { committed: 9, alreadyGone: [] } });
+    // The create with a parent relation is two objects; T9's update and
+    // T5's edit merged into their objects.
+    expect(res).toEqual({ status: 200, body: { committed: 8, alreadyGone: [] } });
 
     expect((await call("GET", `${ALL}/entities/task/${t9}`)).body).toMatchObject({ name: "T9b" });
     expect(await pathNames("task", t9)).toEqual(["ACME", "P1", "T9b"]);
@@ -193,7 +206,7 @@ describe("a commit persists every staged write", () => {
     expect(parent.body.items).toEqual([expect.objectContaining({ fromEntityId: e.P1, phase: "build" })]);
     expect((await call("GET", `${ALL}/entities/project/${e.P2}`)).body).toMatchObject({ name: "P2 Website" });
     const notes = await call("GET", `${ALL}/entities/task/${e.T5}/documents/notes`);
-    expect(notes.body).toMatchObject({ content: "A whole new text" });
+    expect(notes.body).toMatchObject({ content: "A whole fresh text" });
     expect((await call("GET", `${ALL}/entities/task/${e.T4}`)).status).toBe(404);
     expect((await call("GET", `${ALL}/relations/assigned_to/${assigned}`)).body).toMatchObject({
       fromEntityId: e.T2,
@@ -219,15 +232,14 @@ describe("a commit persists every staged write", () => {
     expect(await kinds(e.T5)).not.toEqual([]);
     expect(await kinds(e.T5)).toEqual(await kinds(e.T6));
 
-    // The changeset and its journal are gone.
+    // The changeset and its staged objects are gone.
     expect((await call("GET", `${ALL}/changesets/${cs}`)).status).toBe(404);
     expect((await commit(cs)).status).toBe(404);
-    expect(await sql(`SELECT 1 FROM changeset_write WHERE changeset_id = $1`, [cs])).toEqual([]);
+    expect(await sql(`SELECT 1 FROM changeset_object WHERE changeset_id = $1`, [cs])).toEqual([]);
   });
 
-  it("the move: delete the parent relation, then create the new one", async () => {
+  it("the move: the new parent relation staged before the old one's delete; the commit deletes first", async () => {
     const cs = await start();
-    await staged(ALL, cs, { operation: "delete_relation", type: "has_task", id: h.relations["P1 has_task T3"] });
     await staged(ALL, cs, {
       operation: "create_relation",
       type: "has_task",
@@ -235,10 +247,22 @@ describe("a commit persists every staged write", () => {
       toEntityId: e.T3,
       properties: { phase: "test" },
     });
+    await staged(ALL, cs, { operation: "delete_relation", type: "has_task", id: h.relations["P1 has_task T3"] });
     expect(await commit(cs)).toMatchObject({ status: 200, body: { committed: 2 } });
     expect(await pathNames("task", e.T3)).toEqual(["ACME", "P2 Website", "T3"]);
     const assigned = await call("GET", `${ALL}/relations/assigned_to?fromEntityId=${e.T3}`);
     expect(assigned.body.items).toEqual([expect.objectContaining({ toEntityId: e.Ana })]);
+  });
+
+  it("an entity created with a relation onto it, staged after the delete of another entity", async () => {
+    const x = (await call("POST", `${ALL}/entities/person`, { name: "X" })).body._id as string;
+    const cs = await start();
+    await staged(ALL, cs, { operation: "delete_entity", type: "person", id: x });
+    const y = (await staged(ALL, cs, { operation: "create_entity", type: "person", properties: { name: "Y" } })).id as string;
+    const link = (await staged(ALL, cs, { operation: "create_relation", type: "assigned_to", fromEntityId: e.T2, toEntityId: y })).id as string;
+    expect(await commit(cs)).toEqual({ status: 200, body: { committed: 3, alreadyGone: [] } });
+    expect((await call("GET", `${ALL}/entities/person/${x}`)).status).toBe(404);
+    expect((await call("GET", `${ALL}/relations/assigned_to/${link}`)).body).toMatchObject({ fromEntityId: e.T2, toEntityId: y });
   });
 
   it("the nested create: a project, tasks under its minted id, an update of one", async () => {
@@ -260,8 +284,8 @@ describe("a commit persists every staged write", () => {
     const t7 = (await staged(ALL, cs, under("T7"))).id as string;
     const t8 = (await staged(ALL, cs, under("T8"))).id as string;
     await staged(ALL, cs, { operation: "update_entity", type: "task", id: t7, properties: { name: "T7b" } });
-    // Each create with a parent relation is two writes.
-    expect(await commit(cs)).toMatchObject({ status: 200, body: { committed: 7 } });
+    // Each create with a parent relation is two objects; the update merged into T7's.
+    expect(await commit(cs)).toMatchObject({ status: 200, body: { committed: 6 } });
     expect(await pathNames("task", t7)).toEqual(["ACME", "P4", "T7b"]);
     expect(await pathNames("task", t8)).toEqual(["ACME", "P4", "T8"]);
   });
@@ -282,12 +306,12 @@ describe("a commit persists every staged write", () => {
     const cs = await start();
     await staged(ALL, cs, { operation: "delete_entity", type: "person", id: x });
     expect((await call("DELETE", `${ALL}/entities/person/${x}`)).status).toBe(204);
-    expect(await commit(cs)).toEqual({ status: 200, body: { committed: 1, alreadyGone: [1] } });
+    expect(await commit(cs)).toEqual({ status: 200, body: { committed: 1, alreadyGone: [x] } });
   });
 });
 
 describe("a rejected commit persists nothing", () => {
-  it("a rejection after the replay rolls everything back: 422 naming the seq; the version kept, the last change refreshed", async () => {
+  it("a rejection after the phases rolls everything back: 422 naming the object; the version kept, the last change refreshed", async () => {
     await sql(`DELETE FROM search_queue`);
     const cs = await start();
     await staged(ALL, cs, {
@@ -296,8 +320,8 @@ describe("a rejected commit persists nothing", () => {
       properties: { name: "T10" },
       parentRelation: { type: "has_task", parentId: e.P2, properties: { phase: "build" } },
     });
-    // T6 stays under P3: a second parent, found only after the replay.
-    await staged(ALL, cs, {
+    // T6 stays under P3: a second parent, found only after the phases.
+    const second = await staged(ALL, cs, {
       operation: "create_relation",
       type: "has_task",
       fromEntityId: e.P2,
@@ -316,7 +340,7 @@ describe("a rejected commit persists nothing", () => {
     expect(res.body.error).toMatchObject({
       code: "VALIDATION_ERROR",
       message: "The commit was rejected; nothing was persisted",
-      details: { violations: [{ seq: 3, kind: "two_parents", message: "The target end already has a parent" }], total: 1 },
+      details: { violations: [{ object: second.id, kind: "two_parents", message: "The target end already has a parent" }], total: 1 },
     });
 
     expect(await graphCounts()).toEqual(before);
@@ -401,7 +425,7 @@ describe("locks", () => {
     expect(await commit(cs)).toMatchObject({ status: 200 });
   });
 
-  it("while a commit runs, a staged write to it and a second commit are 409; it then commits", async () => {
+  it("while a commit runs, a staged call to it and a second commit are 409; it then commits", async () => {
     const cs = await start();
     await staged(ALL, cs, { operation: "update_entity", type: "person", id: e.Ana, properties: { name: "Ana B" } });
     const second = await start();

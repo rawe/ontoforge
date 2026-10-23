@@ -4,7 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FileStack,
-  FileText,
+  ListChecks,
   Loader2,
   Pencil,
   Plus,
@@ -13,7 +13,7 @@ import {
   Trash2,
   Undo2,
 } from 'lucide-react'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useChangeset, useChangesets, useDisplayLabel, useRulesets, useRuntimeSchema } from '@/api/hooks'
@@ -21,7 +21,7 @@ import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
 import { stagedEntity } from '@/api/staging'
-import type { ChangesetViolation, JsonValue, StagedOperation, StagedWriteView } from '@/api/types'
+import type { ChangesetViolation, StagedObjectView } from '@/api/types'
 import { DocumentViewerDialog, type DocumentViewerTarget } from '@/components/DocumentViewerDialog'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
@@ -34,24 +34,22 @@ import {
   type StagedEntityTarget,
 } from '@/components/changesets/EditStagedEntityDialog'
 import {
-  changeText,
   EXTEND_HINT_TEXT,
   isCommittedDataKey,
   isVersionMismatch,
-  markerLabel,
-  operationLabel,
+  OBJECTS_PAGE_SIZE,
+  objectsText,
   operationsSummary,
   stagedCreateValues,
-  stagedDocumentKeys,
   targetText,
   violationLabel,
   violationPrefix,
   violationsNote,
   violationsOf,
-  WRITES_PAGE_SIZE,
-  writesText,
 } from '@/components/changesets/changesets'
 import { PinChangesetButton } from '@/components/changesets/PinChangesetButton'
+import { Disabled, FROZEN_REASON, StagedObjectCard } from '@/components/changesets/StagedObjectCard'
+import { useStagedObjectActions } from '@/components/changesets/useStagedObjectActions'
 import { hierarchyLinks, linkedTypeKey, sharesLinkedType, type HierarchyLink } from '@/components/entity/hierarchy'
 import { openQuickAdd } from '@/components/quickadd/quickAddBus'
 import { absoluteTime, relativeTime } from '@/components/table/format'
@@ -66,24 +64,21 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { pinnedChangeset, unpinChangeset, usePinnedChangeset } from '@/lib/pinnedChangeset'
 import { cn } from '@/lib/utils'
 
-/** Why Unstage and Discard are off while submitted. */
-const FROZEN_REASON = 'Submitted changesets are frozen: unsubmit it first'
 /** Why Unsubmit is off on a draft. */
 const DRAFT_REASON = 'Only a submitted changeset can be unsubmitted'
 /** Why Submit is off while submitted. */
 const SUBMITTED_REASON = 'It is submitted already'
+
+/** The violations panel's name and heading, by what was rejected. */
+const REJECTED = {
+  commit: { label: 'Commit violations', title: 'Commit rejected, nothing persisted' },
+  submit: { label: 'Submit violations', title: 'Submit rejected, still a draft' },
+  check: { label: 'Check violations', title: 'Check failed, a commit would be rejected' },
+} as const
 
 /**
  * The ruleset a changeset was started through, as a chip linking to the
@@ -120,26 +115,16 @@ function RulesetChip({ ontologyKey, lensKey, rulesetKey }: { ontologyKey: string
 
 const errorText = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback)
 
-/** A disabled control with its reason on hover: a disabled button gets no pointer events. */
-function Disabled({ reason, children }: { reason: string; children: ReactNode }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span tabIndex={0}>{children}</span>
-      </TooltipTrigger>
-      <TooltipContent>{reason}</TooltipContent>
-    </Tooltip>
-  )
-}
-
 /**
  * `/o/:ontologyKey/w/:lensKey/changesets/:changesetId` — one changeset's
- * review through the current lens: its writes by seq with names, before →
- * after and markers; a document change opens its staged text in the
- * document viewer. Commit, after a confirmation, sends the version shown when
- * it was clicked; Submit, with an optional note, and Unsubmit, with a
- * required one, move it between draft and submitted; Discard and Unstage
- * work only on a draft. A draft can be pinned ("Work in this changeset"),
+ * review through the current lens: its staged objects by first touch, a card
+ * each with its action, name or ends, markers and values (before / current /
+ * after); a staged document opens its staged text in the document viewer.
+ * Commit, after a confirmation, sends the version shown when it was clicked;
+ * Check, draft or submitted, runs the commit without persisting and shows what
+ * it would commit or its violations; Submit, with an optional note, and Unsubmit, with a required one, move it
+ * between draft and submitted; Discard, and removing an object, cutting a
+ * value or accepting a drifted value's current one, work only on a draft. A draft can be pinned ("Work in this changeset"),
  * so the Workbench's writes stage into it; while it is, an entity it creates
  * offers "Edit values…" and an add-child button per parent relation on its
  * row, both staged here.
@@ -155,17 +140,18 @@ export function ChangesetDetailPage() {
   const [offset, setOffset] = useState(0)
   // Set once a commit or discard removed the changeset: its read must not run again.
   const [gone, setGone] = useState(false)
-  const read = useChangeset(ontologyKey!, lensKey!, changesetId!, { offset, limit: WRITES_PAGE_SIZE }, !gone)
+  const read = useChangeset(ontologyKey!, lensKey!, changesetId!, { offset, limit: OBJECTS_PAGE_SIZE }, !gone)
   const list = useChangesets(ontologyKey, lensKey)
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const pinned = usePinnedChangeset(ontologyKey!, lensKey!)
   const displayLabel = useDisplayLabel()
 
-  // The violations of a rejected commit or submit.
+  // The violations of a rejected commit, submit or check (with the version checked).
   const [rejected, setRejected] = useState<{
-    by: 'commit' | 'submit'
+    by: 'commit' | 'submit' | 'check'
     violations: ChangesetViolation[]
     total: number
+    version?: number
   } | null>(null)
   const [submitOpen, setSubmitOpen] = useState(false)
   const [unsubmitOpen, setUnsubmitOpen] = useState(false)
@@ -199,7 +185,7 @@ export function ChangesetDetailPage() {
     mutationFn: (expectedVersion: number) =>
       runtime.commitChangeset(ontologyKey!, lensKey!, changesetId!, expectedVersion),
     onSuccess: (result) => {
-      toast.success(`Committed ${writesText(result.committed)}`)
+      toast.success(`Committed ${objectsText(result.committed)}`)
       // The changed entities show wherever they are read next.
       void queryClient.invalidateQueries({
         predicate: (query) => isCommittedDataKey(query.queryKey, ontologyKey!),
@@ -223,6 +209,27 @@ export function ChangesetDetailPage() {
         toast.error(errorText(err, 'Failed to commit'))
       }
       setRejected(null)
+      void reload()
+    },
+  })
+
+  const check = useMutation({
+    mutationFn: () => runtime.checkChangeset(ontologyKey!, lensKey!, changesetId!),
+    onSuccess: (result) => {
+      setRejected(null)
+      toast.success(`Would commit ${objectsText(result.committed)}`, {
+        description: `Checked version ${result.version}; nothing was persisted.`,
+      })
+      void reload()
+    },
+    onError: (err) => {
+      const details = err instanceof ApiError && err.status === 422 ? err.details : undefined
+      const found = violationsOf(details)
+      if (found !== null) {
+        setRejected({ by: 'check', ...found, version: typeof details?.version === 'number' ? details.version : undefined })
+      } else {
+        toast.error(errorText(err, 'Failed to check'))
+      }
       void reload()
     },
   })
@@ -273,20 +280,7 @@ export function ChangesetDetailPage() {
     },
   })
 
-  const unstage = useMutation({
-    mutationFn: (seq: number) => runtime.unstageWrite(ontologyKey!, lensKey!, changesetId!, seq),
-    onSuccess: (_, seq) => {
-      toast.success(`#${seq} unstaged`)
-      setRejected(null)
-      // The last row of a trailing page: back one page.
-      if (offset > 0 && read.data?.writes.length === 1) setOffset(offset - WRITES_PAGE_SIZE)
-      void reload()
-    },
-    onError: (err) => {
-      toast.error(errorText(err, 'Failed to unstage'))
-      void reload()
-    },
-  })
+  const objectActions = useStagedObjectActions(ontologyKey!, lensKey!, changesetId!)
 
   if (ontologyKey === undefined || lensKey === undefined || changesetId === undefined) return null
 
@@ -340,77 +334,57 @@ export function ChangesetDetailPage() {
   const operations = list.data?.find((item) => item.id === changeset.id)?.operations
   const summary = operations === undefined ? '' : operationsSummary(operations)
   const busy =
-    commit.isPending || submit.isPending || unsubmit.isPending || discard.isPending || unstage.isPending
+    commit.isPending ||
+    check.isPending ||
+    submit.isPending ||
+    unsubmit.isPending ||
+    discard.isPending ||
+    objectActions.busy
 
-  const typeLabel = (write: StagedWriteView) => {
-    if (write.type === null) return <span className="text-muted-foreground">—</span>
-    const entityType = schema.data?.entityTypes.find((t) => t.key === write.type)
+  const typeLabel = (object: StagedObjectView) => {
+    if (object.type === null) return undefined
+    const entityType = schema.data?.entityTypes.find((t) => t.key === object.type)
     if (entityType !== undefined) {
       return <TypeChip typeKey={entityType.key} displayName={entityType.displayName} size="sm" />
     }
-    const relationType = schema.data?.relationTypes.find((t) => t.key === write.type)
-    return <span className="text-[12.5px]">{relationType?.displayName ?? write.type}</span>
+    const relationType = schema.data?.relationTypes.find((t) => t.key === object.type)
+    return <span className="text-[12.5px] text-muted-foreground">{relationType?.displayName ?? object.type}</span>
   }
 
-  /** The staged document properties of a write, each a button opening its staged text;
-   * none when a later write on the page deletes the entity. */
-  const documentButtons = (write: StagedWriteView) => {
-    const entityType = schema.data?.entityTypes.find((t) => t.key === write.type)
-    const buttons = stagedDocumentKeys(write, changeset.writes).flatMap((key) => {
-      const property = entityType?.properties.find((p) => p.key === key)
-      if (property === undefined) return []
-      const stub = write.after?.[key] as Record<string, JsonValue>
-      return [
-        <Button
-          key={key}
-          variant="outline"
-          size="xs"
-          aria-label={`View the staged ${property.displayName} of #${write.seq}`}
-          onClick={() =>
-            setDocTarget({
-              entityTypeKey: write.type!,
-              entityId: write.id!,
-              entityLabel: targetText(write),
-              property,
-              length: typeof stub.length === 'number' ? stub.length : 0,
-            })
-          }
-        >
-          <FileText className="size-3" />
-          View {property.displayName}
-        </Button>,
-      ]
+  /** Opens the staged text of one of an entity's document values. */
+  const viewDocument = (object: StagedObjectView, key: string) => {
+    const property = schema.data?.entityTypes.find((t) => t.key === object.type)?.properties.find((p) => p.key === key)
+    const stub = object.values.find((value) => value.property === key)?.after
+    if (property === undefined) return
+    const length = typeof stub === 'object' && stub !== null && !Array.isArray(stub) ? stub.length : null
+    setDocTarget({
+      entityTypeKey: object.type!,
+      entityId: object.id,
+      entityLabel: targetText(object),
+      property,
+      length: typeof length === 'number' ? length : 0,
     })
-    return buttons.length === 0 ? null : <div className="mt-1 flex flex-wrap gap-1">{buttons}</div>
   }
 
-  const plainChange = (write: StagedWriteView) => <div className="text-[13px] break-words">{changeText(write)}</div>
-  const entityChange = (write: StagedWriteView) => (
-    <>
-      {plainChange(write)}
-      {documentButtons(write)}
-    </>
-  )
   /**
-   * A draft's staged create: "Edit values…" and an "Add child" button per
-   * parent relation it can be the parent of (as on an entity page) while it
-   * is the pinned changeset, else a hint. Its values and name take the page's
-   * later updates of it into account.
+   * A draft's staged entity create: "Edit values…" and an "Add child" button
+   * per parent relation it can be the parent of (as on an entity page) while
+   * it is the pinned changeset, else a hint.
    */
-  const extendActions = (write: StagedWriteView) => {
-    const values = submitted ? null : stagedCreateValues(write, changeset.writes)
-    const entityType = schema.data?.entityTypes.find((t) => t.key === write.type)
-    if (values === null || entityType === undefined) return null
+  const extendActions = (object: StagedObjectView) => {
+    const values = submitted ? null : stagedCreateValues(object)
+    const entityType = schema.data?.entityTypes.find((t) => t.key === object.type)
+    if (values === null || entityType === undefined) return undefined
     if (pinned !== changeset.id) {
-      return <p className="mt-1 text-[11.5px] text-muted-foreground">{EXTEND_HINT_TEXT}</p>
+      return <p className="text-[11.5px] text-muted-foreground">{EXTEND_HINT_TEXT}</p>
     }
-    const label = displayLabel(stagedEntity(entityType.key, write.id!, values))
+    const label = displayLabel(stagedEntity(entityType.key, object.id, values))
     const childLinks = hierarchyLinks(schema.data!.relationTypes, entityType.key).children
     const addChild = (link: HierarchyLink) =>
       openQuickAdd(linkedTypeKey(link), {
         relationTypeKey: link.relationType.key,
         typeKey: entityType.key,
-        id: write.id!,
+        id: object.id,
         label,
         changesetId: changeset.id,
       })
@@ -420,13 +394,13 @@ export function ChangesetDetailPage() {
     const buttonName = (link: HierarchyLink) =>
       sharesLinkedType(link, childLinks) ? `${childName(link)} (${link.relationType.displayName})` : childName(link)
     return (
-      <div className="mt-1 flex flex-wrap gap-1">
+      <div className="flex flex-wrap gap-1">
         {entityType.properties.length > 0 && (
           <Button
             variant="outline"
             size="xs"
-            aria-label={`Edit the values of #${write.seq}`}
-            onClick={() => setEditTarget({ changesetId: changeset.id, entityType, id: write.id!, label, values })}
+            aria-label={`Edit the values of ${label}`}
+            onClick={() => setEditTarget({ changesetId: changeset.id, entityType, id: object.id, label, values })}
           >
             <Pencil className="size-3" />
             Edit values…
@@ -447,21 +421,9 @@ export function ChangesetDetailPage() {
       </div>
     )
   }
-  const createChange = (write: StagedWriteView) => (
-    <>
-      {entityChange(write)}
-      {extendActions(write)}
-    </>
-  )
-  /** What a write's change cell shows, by its operation. */
-  const changeViews: Record<StagedOperation, (write: StagedWriteView) => ReactNode> = {
-    create_entity: createChange,
-    update_entity: entityChange,
-    delete_entity: plainChange,
-    create_relation: plainChange,
-    update_relation: plainChange,
-    delete_relation: plainChange,
-  }
+
+  /** A change of the page's objects succeeded: the rejection shown is stale. */
+  const changed = () => setRejected(null)
 
   const submitButton = (
     <Button
@@ -475,6 +437,13 @@ export function ChangesetDetailPage() {
     >
       {submit.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
       Submit
+    </Button>
+  )
+
+  const checkButton = (
+    <Button size="sm" variant="outline" disabled={busy} onClick={() => check.mutate()}>
+      {check.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <ListChecks className="size-3.5" />}
+      Check
     </Button>
   )
 
@@ -522,7 +491,7 @@ export function ChangesetDetailPage() {
         }
         description={
           <>
-            {writesText(changeset.writeCount)}
+            {objectsText(changeset.objectCount)}
             {summary !== '' && `: ${summary}`} · version {changeset.version} ·{' '}
             <span title={absoluteTime(changeset.createdAt)}>started {relativeTime(changeset.createdAt)}</span>{' '}
             · <span title={absoluteTime(changeset.lastChangeAt)}>last change {relativeTime(changeset.lastChangeAt)}</span>
@@ -536,6 +505,7 @@ export function ChangesetDetailPage() {
         actions={
           <>
             <PinChangesetButton ontologyKey={ontologyKey} lensKey={lensKey} changeset={changeset} />
+            {checkButton}
             {submitted ? <Disabled reason={SUBMITTED_REASON}>{submitButton}</Disabled> : submitButton}
             <Button size="sm" disabled={busy} onClick={() => setCommitVersion(changeset.version)}>
               {commit.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
@@ -560,13 +530,14 @@ export function ChangesetDetailPage() {
         {rejected !== null && (
           <div
             role="alert"
-            aria-label={rejected.by === 'commit' ? 'Commit violations' : 'Submit violations'}
+            aria-label={REJECTED[rejected.by].label}
             className="rounded-lg border border-destructive bg-destructive/10 px-3 py-2.5"
           >
             <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-semibold text-destructive">
-                  {rejected.by === 'commit' ? 'Commit rejected, nothing persisted' : 'Submit rejected, still a draft'}:{' '}
+                  {REJECTED[rejected.by].title}
+                  {rejected.version !== undefined && ` (version ${rejected.version})`}:{' '}
                   {rejected.total}{' '}
                   {rejected.total === 1 ? 'violation' : 'violations'}
                   {rejected.total > rejected.violations.length &&
@@ -577,7 +548,7 @@ export function ChangesetDetailPage() {
                     const label = violationLabel(violation.kind)
                     return (
                       <li key={i} className="break-words">
-                        {violationPrefix(violation, changeset.writes)}
+                        {violationPrefix(violation, changeset.objects)}
                         {label === null ? violation.kind : <span className="font-medium">{label}</span>} —{' '}
                         {violation.message}
                       </li>
@@ -590,7 +561,7 @@ export function ChangesetDetailPage() {
                   size="sm"
                   variant="outline"
                   disabled={busy}
-                  onClick={() => unsubmit.mutate(violationsNote(rejected.violations, rejected.total, changeset.writes))}
+                  onClick={() => unsubmit.mutate(violationsNote(rejected.violations, rejected.total, changeset.objects))}
                 >
                   Unsubmit with these violations
                 </Button>
@@ -599,85 +570,45 @@ export function ChangesetDetailPage() {
           </div>
         )}
 
-        {changeset.writeCount === 0 ? (
-          <EmptyState icon={FileStack} title="No staged writes" description="Nothing is staged in this changeset." />
+        {changeset.objectCount === 0 ? (
+          <EmptyState icon={FileStack} title="Nothing staged" description="Nothing is staged in this changeset." />
         ) : (
           <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">#</TableHead>
-                  <TableHead className="w-28">Operation</TableHead>
-                  <TableHead className="w-[14%]">Type</TableHead>
-                  <TableHead className="w-[18%]">Target</TableHead>
-                  <TableHead className="min-w-56">Change</TableHead>
-                  <TableHead className="w-20 text-right">Unstage</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {changeset.writes.map((write) => {
-                  const unstageButton = (
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      aria-label={`Unstage #${write.seq}`}
-                      disabled={submitted || busy}
-                      onClick={() => unstage.mutate(write.seq)}
-                    >
-                      Unstage
-                    </Button>
-                  )
-                  return (
-                    <TableRow
-                      key={write.seq}
-                      className={cn(write.markers.length > 0 && 'bg-(--tc-amber-bg) hover:bg-(--tc-amber-bg)')}
-                    >
-                      <TableCell className="text-[12.5px] text-muted-foreground tabular-nums">{write.seq}</TableCell>
-                      <TableCell className="text-[13px]">{operationLabel(write.operation)}</TableCell>
-                      <TableCell>{typeLabel(write)}</TableCell>
-                      <TableCell className="max-w-0 truncate text-[13px] font-medium" title={write.id ?? undefined}>
-                        {targetText(write)}
-                      </TableCell>
-                      <TableCell className="whitespace-normal">
-                        {changeViews[write.operation](write)}
-                        {write.markers.length > 0 && (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {write.markers.map((marker, i) => (
-                              <span
-                                key={i}
-                                title={marker.message}
-                                className={cn(
-                                  'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold',
-                                  marker.kind === 'drift'
-                                    ? 'border-(--tc-amber-border) bg-background text-(--tc-amber)'
-                                    : 'border-destructive bg-background text-destructive',
-                                )}
-                              >
-                                {markerLabel(marker.kind)}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        {write.markers.map((marker, i) => (
-                          <p key={i} className="mt-0.5 text-[11.5px] text-muted-foreground">
-                            {marker.message}
-                          </p>
-                        ))}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {submitted ? <Disabled reason={FROZEN_REASON}>{unstageButton}</Disabled> : unstageButton}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
+            <div className="space-y-2">
+              {changeset.objects.map((object) => (
+                <StagedObjectCard
+                  key={object.id}
+                  object={object}
+                  type={typeLabel(object)}
+                  frozen={submitted ? FROZEN_REASON : null}
+                  busy={busy}
+                  onRemove={() =>
+                    objectActions.remove.mutate(object.id, {
+                      onSuccess: () => {
+                        changed()
+                        // The last object of a trailing page: back one page.
+                        if (offset > 0 && changeset.objects.length === 1) setOffset(offset - OBJECTS_PAGE_SIZE)
+                      },
+                    })
+                  }
+                  onCut={(property) =>
+                    objectActions.cut.mutate({ objectId: object.id, property }, { onSuccess: changed })
+                  }
+                  onAcceptCurrent={(property) =>
+                    objectActions.acceptCurrent.mutate({ objectId: object.id, property }, { onSuccess: changed })
+                  }
+                  onView={(property) => viewDocument(object, property)}
+                >
+                  {extendActions(object)}
+                </StagedObjectCard>
+              ))}
+            </div>
 
-            {changeset.writeCount > WRITES_PAGE_SIZE && (
+            {changeset.objectCount > OBJECTS_PAGE_SIZE && (
               <div className="flex items-center justify-between">
                 <span className="text-xs tabular-nums text-muted-foreground">
-                  {offset + 1}–{Math.min(offset + WRITES_PAGE_SIZE, changeset.writeCount)} of{' '}
-                  {changeset.writeCount}
+                  {offset + 1}–{Math.min(offset + OBJECTS_PAGE_SIZE, changeset.objectCount)} of{' '}
+                  {changeset.objectCount}
                 </span>
                 <div className="flex items-center gap-2">
                   <Button
@@ -685,7 +616,7 @@ export function ChangesetDetailPage() {
                     size="icon"
                     className="size-7"
                     disabled={offset === 0}
-                    onClick={() => setOffset((o) => Math.max(0, o - WRITES_PAGE_SIZE))}
+                    onClick={() => setOffset((o) => Math.max(0, o - OBJECTS_PAGE_SIZE))}
                     aria-label="Previous page"
                   >
                     <ChevronLeft className="size-3.5" />
@@ -694,8 +625,8 @@ export function ChangesetDetailPage() {
                     variant="outline"
                     size="icon"
                     className="size-7"
-                    disabled={offset + WRITES_PAGE_SIZE >= changeset.writeCount}
-                    onClick={() => setOffset((o) => o + WRITES_PAGE_SIZE)}
+                    disabled={offset + OBJECTS_PAGE_SIZE >= changeset.objectCount}
+                    onClick={() => setOffset((o) => o + OBJECTS_PAGE_SIZE)}
                     aria-label="Next page"
                   >
                     <ChevronRight className="size-3.5" />
@@ -728,7 +659,7 @@ export function ChangesetDetailPage() {
       <AlertDialog open={commitVersion !== null} onOpenChange={(open) => !open && setCommitVersion(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Commit {writesText(changeset.writeCount)} to the data?</AlertDialogTitle>
+            <AlertDialogTitle>Commit {objectsText(changeset.objectCount)} to the data?</AlertDialogTitle>
             <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -746,7 +677,7 @@ export function ChangesetDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Discard this changeset?</AlertDialogTitle>
             <AlertDialogDescription>
-              Its {writesText(changeset.writeCount)} are dropped and nothing is persisted. This cannot be
+              Its {objectsText(changeset.objectCount)} are dropped and nothing is persisted. This cannot be
               undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -765,7 +696,7 @@ export function ChangesetDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Submit this changeset for review?</AlertDialogTitle>
             <AlertDialogDescription>
-              It is frozen until it is committed or unsubmitted: no writes can be staged or unstaged. A note
+              It is frozen until it is committed or unsubmitted: nothing can be staged, removed or cut. A note
               replaces the current one; left empty, the current one stays.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -785,7 +716,7 @@ export function ChangesetDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Unsubmit this changeset?</AlertDialogTitle>
             <AlertDialogDescription>
-              It goes back to draft, so its writes can be changed again. The note replaces the current
+              It goes back to draft, so it can be changed again. The note replaces the current
               one: say what should change.
             </AlertDialogDescription>
           </AlertDialogHeader>

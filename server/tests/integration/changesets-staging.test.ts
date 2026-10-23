@@ -1,11 +1,13 @@
 /**
  * Staging into a changeset over REST, on the in-test hierarchy
  * (`buildHierarchy`, with `has_task` requiring `phase` and a document
- * property on project): start, the six staged writes and their body, a
- * create with a parent relation as two writes, minted ids, bases, the
- * immediate write's 404 and 422, binding to the lens and the ruleset,
- * the deleted anchor, unstage, discard, expiry, the note, write and byte caps,
- * and a staged write while a commit holds the row.
+ * property on project): start, the seven staging operations and their
+ * body, how each merges into the set of staged objects and values, a
+ * create with a parent relation as two objects, minted ids, the before at
+ * first touch, document edits on the staged text, the delete cascade, the
+ * immediate write's 404 and 422, binding to the lens and the ruleset, the
+ * deleted anchor, unstage, cut, rebase, discard, expiry, the note, the
+ * object and byte caps, and a staged call while a commit holds the row.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -55,12 +57,31 @@ async function graphCounts(): Promise<Row> {
   )[0]!;
 }
 
-async function journal(cs: string): Promise<Row[]> {
-  return sql(
-    `SELECT seq, operation, arguments, minted_id, type_key, target_id, before
-       FROM changeset_write WHERE changeset_id = $1 ORDER BY seq`,
+/** The staged objects of a changeset, by first touch, each with its
+ * values by key: `{value, before}`. */
+async function objects(cs: string): Promise<Row[]> {
+  const rows = await sql(
+    `SELECT object_id, kind, type_key, action, from_id, to_id FROM changeset_object
+      WHERE changeset_id = $1 ORDER BY first_touched_at, object_id`,
     [cs],
   );
+  const values = await sql(
+    `SELECT object_id, property_key, value, before, bytes FROM changeset_value WHERE changeset_id = $1`,
+    [cs],
+  );
+  return rows.map((row) => ({
+    ...row,
+    values: Object.fromEntries(
+      values
+        .filter((v) => v.object_id === row.object_id)
+        .map((v) => [v.property_key, { value: v.value, before: v.before }]),
+    ),
+  }));
+}
+
+/** The one staged object on `id`. */
+async function objectOn(cs: string, id: string): Promise<Row | undefined> {
+  return (await objects(cs)).find((o) => o.object_id === id);
 }
 
 async function start(base = ALL, note?: string): Promise<Row> {
@@ -69,12 +90,12 @@ async function start(base = ALL, note?: string): Promise<Row> {
   return res.body;
 }
 
-/** Stage one write: its journal body, posted to the changeset's writes. */
+/** Stage one call: its body, posted to the changeset's writes. */
 function stage(cs: string, write: Row, base = ALL): Promise<{ status: number; body: Row }> {
   return call("POST", `${base}/changesets/${cs}/writes`, write);
 }
 
-/** The journal body of an update of project P1 or another project. */
+/** The body of an update of project P1 or another project. */
 function rename(id: string, name: string): Row {
   return { operation: "update_entity", type: "project", id, properties: { name } };
 }
@@ -142,7 +163,7 @@ beforeEach(async () => {
 describe("start", () => {
   it("answers 201: draft, version, note, and no ruleset on the plain lens", async () => {
     const cs = await start(ALL, "g1");
-    expect(cs).toMatchObject({ state: "draft", version: 1, note: "g1", ruleset: null, writeCount: 0 });
+    expect(cs).toMatchObject({ state: "draft", version: 1, note: "g1", ruleset: null, objectCount: 0 });
     expect(cs.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(await call("POST", `${ALL}/changesets`)).toMatchObject({ status: 201, body: { note: null } });
   });
@@ -165,70 +186,61 @@ describe("start", () => {
   });
 });
 
-describe("the six staged writes", () => {
-  it("each answers 201 {seq, id} and appends one row; nothing reaches the graph or the search queue", async () => {
+describe("staging merges into the set", () => {
+  it("each call answers 201 {id}; one object per entity or relation; nothing reaches the graph or the search queue", async () => {
     const cs = (await start()).id as string;
     const before = await graphCounts();
     const url = `${ALL}/changesets/${cs}`;
     const assigned = await relationId("assigned_to", ids.T1, ids.Ben);
 
     const create = await stage(cs, { operation: "create_entity", type: "task", properties: { name: "T9" } });
-    expect(create).toMatchObject({ status: 201, body: { seq: 1, id: expect.any(String) } });
-    expect(create.body).not.toHaveProperty("relation");
+    expect(create).toEqual({ status: 201, body: { id: expect.any(String) } });
     const t9 = create.body.id as string;
-
     // Reads never see staged data.
     expect((await call("GET", `${ALL}/entities/task/${t9}`)).status).toBe(404);
 
     expect(await stage(cs, { operation: "update_entity", type: "task", id: t9, properties: { name: "T9b" } })).toEqual({
       status: 201,
-      body: { seq: 2, id: t9 },
+      body: { id: t9 },
     });
-    expect(await stage(cs, rename(ids.P2, "P2 Website"))).toEqual({ status: 201, body: { seq: 3, id: ids.P2 } });
+    expect(await stage(cs, rename(ids.P2, "P2 Website"))).toEqual({ status: 201, body: { id: ids.P2 } });
+    expect(await stage(cs, rename(ids.P2, "P2 Web"))).toEqual({ status: 201, body: { id: ids.P2 } });
     expect(await stage(cs, { operation: "delete_entity", type: "task", id: ids.T2 })).toEqual({
       status: 201,
-      body: { seq: 4, id: ids.T2 },
+      body: { id: ids.T2 },
     });
-    const relation = await stage(cs, {
-      operation: "create_relation",
-      type: "assigned_to",
-      fromEntityId: ids.T2,
-      toEntityId: ids.Ben,
-    });
-    expect(relation).toMatchObject({ status: 201, body: { seq: 5 } });
-    // properties defaults to {}.
+    const relation = await stage(cs, { operation: "create_relation", type: "assigned_to", fromEntityId: ids.T1a, toEntityId: ids.Ben });
+    expect(relation).toEqual({ status: 201, body: { id: expect.any(String) } });
+    // properties defaults to {}: an update that changes nothing stages nothing.
     expect(await stage(cs, { operation: "update_relation", type: "assigned_to", id: assigned })).toEqual({
       status: 201,
-      body: { seq: 6, id: assigned },
+      body: { id: assigned },
     });
     const removal = await app.inject({
       method: "POST",
       url: `${url}/writes`,
       payload: { operation: "delete_relation", type: "assigned_to", id: assigned },
     });
-    expect([removal.statusCode, removal.json()]).toEqual([201, { seq: 7, id: assigned }]);
-    // The seq is in the body; no Location.
+    expect([removal.statusCode, removal.json()]).toEqual([201, { id: assigned }]);
     expect(removal.headers).not.toHaveProperty("location");
 
     expect(await graphCounts()).toEqual(before);
-    const rows = await journal(cs);
-    expect(rows.map((r) => [r.seq, r.operation, r.type_key])).toEqual([
-      [1, "create_entity", "task"],
-      [2, "update_entity", "task"],
-      [3, "update_entity", "project"],
-      [4, "delete_entity", "task"],
-      [5, "create_relation", "assigned_to"],
-      [6, "update_relation", "assigned_to"],
-      [7, "delete_relation", "assigned_to"],
+    const staged = await objects(cs);
+    expect(staged.map((o) => [o.object_id, o.kind, o.type_key, o.action])).toEqual([
+      [t9, "entity", "task", "create"],
+      [ids.P2, "entity", "project", "update"],
+      [ids.T2, "entity", "task", "delete"],
+      [relation.body.id, "relation", "assigned_to", "create"],
+      [assigned, "relation", "assigned_to", "delete"],
     ]);
-    // The create's id is final and kept in the row; the update by the
-    // minted id has no before.
-    expect(rows[0]).toMatchObject({ minted_id: t9, target_id: null, before: null, arguments: { properties: { name: "T9" } } });
-    expect(rows[1]).toMatchObject({ target_id: t9, before: null, arguments: { properties: { name: "T9b" } } });
-    expect(rows[2]).toMatchObject({ target_id: ids.P2, before: { name: "P2" } });
-    expect(rows[3]).toMatchObject({ target_id: ids.T2, before: null, arguments: {} });
-    expect(rows[4]).toMatchObject({ minted_id: relation.body.id, arguments: { fromEntityId: ids.T2, toEntityId: ids.Ben } });
-    expect(rows[5]).toMatchObject({ target_id: assigned, arguments: { properties: {} } });
+    // The create's id is final; its update merged into its values with no before.
+    expect(staged[0]!.values).toEqual({ name: { value: "T9b", before: null } });
+    // A value staged again replaces the staged one and keeps the first before.
+    expect(staged[1]!.values).toEqual({ name: { value: "P2 Web", before: { value: "P2" } } });
+    expect(staged[2]!.values).toEqual({});
+    // A relation records its ends, a stored one too.
+    expect(staged[3]).toMatchObject({ from_id: ids.T1a, to_id: ids.Ben });
+    expect(staged[4]).toMatchObject({ from_id: ids.T1, to_id: ids.Ben });
 
     // The immediate data is unchanged.
     expect((await call("GET", `${ALL}/entities/project/${ids.P2}`)).body.name).toBe("P2");
@@ -236,21 +248,27 @@ describe("the six staged writes", () => {
 
     const read = await call("GET", `${url}?limit=3&offset=1`);
     expect(read.status).toBe(200);
-    expect(read.body).toMatchObject({ id: cs, state: "draft", version: 8, writeCount: 7, offset: 1, limit: 3 });
-    expect(read.body.writes.map((w: Row) => [w.seq, w.operation, w.type, w.id])).toEqual([
-      [2, "update_entity", "task", t9],
-      [3, "update_entity", "project", ids.P2],
-      [4, "delete_entity", "task", ids.T2],
+    // Seven changes of the set, the update that changed nothing aside.
+    expect(read.body).toMatchObject({ id: cs, state: "draft", version: 8, objectCount: 5, offset: 1, limit: 3 });
+    expect(read.body.objects.map((o: Row) => [o.id, o.kind, o.type, o.action])).toEqual([
+      [ids.P2, "entity", "project", "update"],
+      [ids.T2, "entity", "task", "delete"],
+      [relation.body.id, "relation", "assigned_to", "create"],
     ]);
-    expect((await call("GET", url)).body.writes).toHaveLength(7);
+    expect(read.body.objects[0]).toMatchObject({
+      name: "P2",
+      firstTouchedAt: expect.any(String),
+      markers: [],
+      values: [{ property: "name", before: "P2", current: "P2", after: "P2 Web", markers: [] }],
+    });
+    expect(read.body.objects[2]).toMatchObject({ from: { id: ids.T1a, name: "T1a" }, to: { id: ids.Ben, name: "Ben" } });
+    expect(JSON.stringify(read.body)).not.toMatch(/"seq"/);
+    expect((await call("GET", url)).body.objects).toHaveLength(5);
     expect((await call("GET", `${url}?limit=501`)).status).toBe(422);
   });
 
-  it("a create with a parent relation is two writes, the entity's and then the relation's, by consecutive seqs", async () => {
+  it("a create with a parent relation is two objects, the entity first; the relation is a staged relation like any other", async () => {
     const cs = (await start()).id as string;
-    await stage(cs, rename(ids.P2, "x"));
-    expect((await call("DELETE", `${ALL}/changesets/${cs}/writes/1`)).status).toBe(204);
-
     const create = await stage(cs, {
       operation: "create_entity",
       type: "task",
@@ -258,50 +276,80 @@ describe("the six staged writes", () => {
       parentRelation: { type: "has_task", parentId: ids.P1, properties: { phase: "build" } },
     });
     expect(create.status, JSON.stringify(create.body)).toBe(201);
-    const { seq, id: t9, relation } = create.body;
-    expect(create.body).toEqual({ seq, id: t9, relation: { seq: seq + 1, id: expect.any(String) } });
-    expect(seq).toBeGreaterThan(1);
+    const { id: t9, relation } = create.body;
+    expect(create.body).toEqual({ id: t9, relation: { id: expect.any(String) } });
 
-    const rows = await journal(cs);
-    expect(rows).toEqual([
+    expect(await objects(cs)).toEqual([
+      { object_id: t9, kind: "entity", type_key: "task", action: "create", from_id: null, to_id: null, values: { name: { value: "T9", before: null } } },
       {
-        seq,
-        operation: "create_entity",
-        arguments: { properties: { name: "T9" } },
-        minted_id: t9,
-        type_key: "task",
-        target_id: null,
-        before: null,
-      },
-      {
-        seq: seq + 1,
-        operation: "create_relation",
-        arguments: { fromEntityId: ids.P1, toEntityId: t9, properties: { phase: "build" } },
-        minted_id: relation.id,
+        object_id: relation.id,
+        kind: "relation",
         type_key: "has_task",
-        target_id: null,
-        before: null,
+        action: "create",
+        from_id: ids.P1,
+        to_id: t9,
+        values: { phase: { value: "build", before: null } },
       },
     ]);
-    // Each row keeps its own bytes.
-    const bytes = await sql(`SELECT bytes FROM changeset_write WHERE changeset_id = $1 ORDER BY seq`, [cs]);
-    expect(bytes.map((r) => r.bytes)).toEqual(
-      rows.map((r) => Buffer.byteLength(JSON.stringify(r.arguments))),
-    );
+    // Each value keeps its own bytes.
+    const bytes = await sql(`SELECT property_key, bytes FROM changeset_value WHERE changeset_id = $1 ORDER BY property_key`, [cs]);
+    expect(bytes).toEqual([
+      { property_key: "name", bytes: Buffer.byteLength('"T9"') },
+      { property_key: "phase", bytes: Buffer.byteLength('"build"') },
+    ]);
 
-    // The relation is a staged relation like any other: later writes name it.
+    // Later calls name the relation: an update merges into its create.
     expect(
       await stage(cs, { operation: "update_relation", type: "has_task", id: relation.id, properties: { phase: "test" } }),
-    ).toMatchObject({ status: 201, body: { id: relation.id } });
-    expect(await stage(cs, { operation: "delete_relation", type: "has_task", id: relation.id })).toMatchObject({
-      status: 201,
-    });
-    // Unstaging one of the two leaves the other.
-    expect((await call("DELETE", `${ALL}/changesets/${cs}/writes/${seq}`)).status).toBe(204);
-    expect((await journal(cs)).map((r) => r.operation)).toEqual(["create_relation", "update_relation", "delete_relation"]);
+    ).toEqual({ status: 201, body: { id: relation.id } });
+    expect((await objectOn(cs, relation.id))!.values).toEqual({ phase: { value: "test", before: null } });
+    // Unstaging the entity leaves the relation: it shows as dangling.
+    expect((await call("DELETE", `${ALL}/changesets/${cs}/objects/${t9}`)).status).toBe(204);
+    const [left] = (await call("GET", `${ALL}/changesets/${cs}`)).body.objects;
+    expect(left).toMatchObject({ id: relation.id, markers: [{ kind: "dangling", message: "The target end is neither stored nor created in this changeset" }] });
   });
 
-  it("the body: one of six operations, each a strict object; anything else is 422 VALIDATION_ERROR", async () => {
+  it("deletes: a stored object's values go, an object created here goes, an entity's staged relations go with it", async () => {
+    const cs = (await start()).id as string;
+    await stage(cs, rename(ids.P2, "P2 Website"));
+    await stage(cs, { operation: "update_entity", type: "task", id: ids.T2, properties: { name: "T2b" } });
+    const t9 = (await stage(cs, { operation: "create_entity", type: "task", properties: { name: "T9" } })).body.id as string;
+    const toT9 = (await stage(cs, { operation: "create_relation", type: "assigned_to", fromEntityId: t9, toEntityId: ids.Ben })).body.id as string;
+    const toT2 = (await stage(cs, { operation: "create_relation", type: "has_subtask", fromEntityId: ids.T2, toEntityId: ids.T1a })).body.id as string;
+    const onT2 = await relationId("has_task", ids.P2, ids.T2);
+    await stage(cs, { operation: "update_relation", type: "has_task", id: onT2, properties: { phase: "x" } });
+
+    expect(await stage(cs, { operation: "delete_entity", type: "project", id: ids.P2 })).toEqual({
+      status: 201,
+      body: { id: ids.P2, cascaded: [onT2] },
+    });
+    expect(await objectOn(cs, ids.P2)).toMatchObject({ action: "delete", values: {} });
+    expect(await stage(cs, { operation: "delete_entity", type: "task", id: t9 })).toEqual({
+      status: 201,
+      body: { id: t9, cascaded: [toT9] },
+    });
+    expect(await stage(cs, { operation: "delete_entity", type: "task", id: ids.T2 })).toEqual({
+      status: 201,
+      body: { id: ids.T2, cascaded: [toT2] },
+    });
+    expect((await objects(cs)).map((o) => [o.object_id, o.action])).toEqual([
+      [ids.P2, "delete"],
+      [ids.T2, "delete"],
+    ]);
+
+    // An object deleted here takes no more calls: the immediate write's 404.
+    for (const body of [
+      rename(ids.P2, "again"),
+      { operation: "delete_entity", type: "project", id: ids.P2 },
+      { operation: "edit_document", type: "project", id: ids.P2, property: "body", op: "replace_range", offset: 0, length: 0, content: "x" },
+    ]) {
+      expect(await stage(cs, body)).toMatchObject({ status: 404, body: { error: { message: `Entity '${ids.P2}' not found` } } });
+    }
+    // An id created here and deleted again is gone: as an id never stored.
+    expect((await stage(cs, { operation: "update_entity", type: "task", id: t9, properties: { name: "x" } })).status).toBe(404);
+  });
+
+  it("the body: one of seven operations, each a strict object; anything else is 422 VALIDATION_ERROR", async () => {
     const cs = (await start()).id as string;
     for (const body of [
       {},
@@ -314,12 +362,15 @@ describe("the six staged writes", () => {
       { operation: "update_entity", type: "project", id: ids.P2, properties: "x" },
       { operation: "create_entity", type: "task", parentRelation: { type: "has_task" } },
       { operation: "delete_relation", type: "has_task", relationId: ids.T2 },
+      { operation: "edit_document", type: "project", id: ids.P1, op: "str_replace", oldString: "a", newString: "b" },
+      { operation: "edit_document", type: "project", id: ids.P1, property: "body", op: "append", content: "x" },
+      { operation: "edit_document", type: "project", id: ids.P1, property: "body", op: "str_replace", bogus: 1 },
     ]) {
       const res = await stage(cs, body);
       expect(res.status, JSON.stringify(body)).toBe(422);
       expect(res.body.error.code, JSON.stringify(body)).toBe("VALIDATION_ERROR");
     }
-    expect(await journal(cs)).toEqual([]);
+    expect(await objects(cs)).toEqual([]);
   });
 
   it("the six staging routes of the immediate paths are not mounted, on either mount", async () => {
@@ -335,26 +386,34 @@ describe("the six staged writes", () => {
         ["POST", "/relations/assigned_to", { fromEntityId: ids.T2, toEntityId: ids.Ben }],
         ["PATCH", `/relations/assigned_to/${relation}`, {}],
         ["DELETE", `/relations/assigned_to/${relation}`, undefined],
+        ["PATCH", `/entities/project/${ids.P1}/documents/body`, { op: "str_replace", oldString: "a", newString: "b" }],
       ] as const) {
         expect((await call(method, `${url}${path}`, payload)).status, `${method} ${path}`).toBe(404);
       }
     }
-    expect(await sql(`SELECT 1 FROM changeset_write`)).toEqual([]);
+    expect(await sql(`SELECT 1 FROM changeset_object`)).toEqual([]);
   });
 
-  it("before holds exactly the patched keys: absent stays absent, a document is its hash and length", async () => {
+  it("the before is the stored value at a key's first touch: absent is the empty before, a document its hash and length", async () => {
     const cs = (await start()).id as string;
     await stage(cs, { operation: "update_entity", type: "project", id: ids.P1, properties: { name: "P1 New", body: "new plan" } });
     await stage(cs, { operation: "update_entity", type: "project", id: ids.P2, properties: { body: "first plan" } });
-    const rows = await journal(cs);
     const hash = createHash("sha256").update("the plan").digest("hex");
-    expect(rows[0]!.before).toEqual({ name: "P1", body: { sha256: hash, length: "the plan".length } });
-    expect(rows[0]!.arguments).toEqual({ properties: { name: "P1 New", body: "new plan" } });
-    // P2 holds no body: the key is absent from before, not null.
-    expect(rows[1]!.before).toEqual({});
+    expect((await objectOn(cs, ids.P1))!.values).toEqual({
+      name: { value: "P1 New", before: { value: "P1" } },
+      body: { value: "new plan", before: { value: { sha256: hash, length: "the plan".length } } },
+    });
+    // P2 holds no body: the before is empty, not null.
+    expect((await objectOn(cs, ids.P2))!.values).toEqual({ body: { value: "first plan", before: {} } });
+
+    // A change made meanwhile does not refresh a before; a key touched first now records the stored value now.
+    expect((await call("PATCH", `${ALL}/entities/project/${ids.P1}`, { name: "P1 Changed" })).status).toBe(200);
+    await stage(cs, { operation: "update_entity", type: "project", id: ids.P1, properties: { name: "P1 Newer" } });
+    expect((await objectOn(cs, ids.P1))!.values.name).toEqual({ value: "P1 Newer", before: { value: "P1" } });
+    await call("PATCH", `${ALL}/entities/project/${ids.P1}`, { name: "P1" });
   });
 
-  it("a missing target is 404 and a bad value 422 with the immediate write's fields; neither appends", async () => {
+  it("a missing target is 404 and a bad value 422 with the immediate write's fields; neither stages", async () => {
     const cs = (await start()).id as string;
     const url = `${ALL}/changesets/${cs}`;
     const ghost = randomUUID();
@@ -389,8 +448,78 @@ describe("the six staged writes", () => {
       body: { error: { details: { fields: { name: "Expected string for 'name', got object" } } } },
     });
     expect((await stage(cs, { operation: "delete_entity", type: "nope", id: ids.P1 })).status).toBe(404);
-    expect(await journal(cs)).toEqual([]);
+    expect(await objects(cs)).toEqual([]);
     expect((await call("GET", url)).body.version).toBe(1);
+  });
+});
+
+describe("edit_document: a document edit on the staged text", () => {
+  const edit = (id: string, body: Row): Row => ({ operation: "edit_document", type: "project", id, property: "body", ...body });
+
+  it("str_replace on the stored text: the whole result staged, the answer the immediate edit's with the id", async () => {
+    const cs = (await start()).id as string;
+    const res = await stage(cs, edit(ids.P1, { op: "str_replace", oldString: "plan", newString: "roadmap" }));
+    expect(res).toEqual({
+      status: 201,
+      body: {
+        id: ids.P1,
+        propertyKey: "body",
+        totalLength: 11,
+        editedRange: { offset: 4, length: 7 },
+        replacements: 1,
+        context: "the roadmap",
+        contextOffset: 0,
+      },
+    });
+    const hash = createHash("sha256").update("the plan").digest("hex");
+    expect((await objectOn(cs, ids.P1))!.values).toEqual({
+      body: { value: "the roadmap", before: { value: { sha256: hash, length: 8 } } },
+    });
+    // The stored document is untouched.
+    expect((await call("GET", `${ALL}/entities/project/${ids.P1}/documents/body`)).body.content).toBe("the plan");
+
+    // A second edit applies to the staged text; the before stays.
+    await stage(cs, edit(ids.P1, { op: "replace_range", offset: 11, length: 0, content: " for 2027" }));
+    expect((await objectOn(cs, ids.P1))!.values.body).toEqual({
+      value: "the roadmap for 2027",
+      before: { value: { sha256: hash, length: 8 } },
+    });
+    expect((await call("GET", `${ALL}/changesets/${cs}/documents/project/${ids.P1}/body`)).body).toMatchObject({
+      content: "the roadmap for 2027",
+      totalLength: 20,
+    });
+  });
+
+  it("on a project created here: the empty text without a staged value, no before", async () => {
+    const cs = (await start()).id as string;
+    const p9 = (await stage(cs, { operation: "create_entity", type: "project", properties: { name: "P9" } })).body.id as string;
+    await stage(cs, edit(p9, { op: "replace_range", offset: 0, length: 0, content: "Draft" }));
+    await stage(cs, edit(p9, { op: "str_replace", oldString: "Draft", newString: "Final" }));
+    expect((await objectOn(cs, p9))!).toMatchObject({
+      action: "create",
+      values: { name: { value: "P9", before: null }, body: { value: "Final", before: null } },
+    });
+  });
+
+  it("the immediate edit's faults with its status and text; the document read's 404s; nothing staged", async () => {
+    const cs = (await start()).id as string;
+    const document = `${ALL}/entities/project/${ids.P1}/documents/body`;
+    for (const body of [
+      { op: "str_replace", oldString: "nope", newString: "x" },
+      { op: "str_replace", oldString: "plan", newString: "plan" },
+      { op: "replace_range", offset: 99, length: 0, content: "x" },
+      { op: "replace_range", offset: 0, length: 3, content: "x", expect: "thx" },
+    ]) {
+      const staged = await stage(cs, edit(ids.P1, body));
+      const immediate = await call("PATCH", document, body);
+      expect([staged.status, staged.body], JSON.stringify(body)).toEqual([immediate.status, immediate.body]);
+    }
+    expect((await stage(cs, { ...edit(ids.P1, { op: "str_replace", oldString: "a", newString: "b" }), property: "name" })).body.error.message).toBe(
+      "Document property 'name' not found on entity type 'project'",
+    );
+    expect((await stage(cs, edit(randomUUID(), { op: "str_replace", oldString: "a", newString: "b" }))).status).toBe(404);
+    expect(await objects(cs)).toEqual([]);
+    expect((await call("GET", document)).body.content).toBe("the plan");
   });
 });
 
@@ -443,10 +572,10 @@ describe("binding", () => {
     const refused = await stage(cs, rename(ids.P2, "x"), mount);
     expect(refused.status).toBe(409);
     expect(refused.body.error.message).toContain("no longer exists");
-    expect(await journal(cs)).toHaveLength(1);
+    expect(await objects(cs)).toHaveLength(1);
 
-    expect((await call("DELETE", `${base}/${cs}/writes/1`)).status).toBe(204);
-    expect(await journal(cs)).toEqual([]);
+    expect((await call("DELETE", `${base}/${cs}/objects/${leaf}`)).status).toBe(204);
+    expect(await objects(cs)).toEqual([]);
   });
 
   it("after its ruleset is deleted, the plain lens URL still reaches the changeset", async () => {
@@ -459,27 +588,89 @@ describe("binding", () => {
   });
 });
 
-describe("unstage, discard, expiry, caps, the row lock", () => {
-  it("unstage removes one write by seq; an unknown seq is 404; a seq is never reused", async () => {
+describe("unstage, cut, rebase", () => {
+  it("unstage takes an object out with its values; cut takes one value, an update left empty goes; 404s; the version rises", async () => {
     const cs = (await start()).id as string;
     const url = `${ALL}/changesets/${cs}`;
-    await stage(cs, rename(ids.P1, "a"));
+    await stage(cs, { operation: "update_entity", type: "project", id: ids.P1, properties: { name: "a", body: "b" } });
     await stage(cs, rename(ids.P2, "b"));
-    expect((await call("DELETE", `${url}/writes/2`)).status).toBe(204);
-    expect(await call("DELETE", `${url}/writes/2`)).toMatchObject({
+    const version = (await call("GET", url)).body.version as number;
+
+    expect((await call("DELETE", `${url}/objects/${ids.P2}`)).status).toBe(204);
+    expect(await call("DELETE", `${url}/objects/${ids.P2}`)).toMatchObject({
       status: 404,
-      body: { error: { message: `Staged write 2 not found in changeset '${cs}'` } },
+      body: { error: { message: `Object '${ids.P2}' is not staged in changeset '${cs}'` } },
     });
-    const next = await stage(cs, rename(ids.P2, "c"));
-    expect(next.body.seq).toBeGreaterThan(2);
-    expect((await journal(cs)).map((r) => r.seq)).toEqual([1, next.body.seq]);
+    expect((await call("DELETE", `${url}/objects/${ids.P1}/properties/body`)).status).toBe(204);
+    expect((await objectOn(cs, ids.P1))!.values).toEqual({ name: { value: "a", before: { value: "P1" } } });
+    expect(await call("DELETE", `${url}/objects/${ids.P1}/properties/body`)).toMatchObject({
+      status: 404,
+      body: { error: { message: `No value of 'body' is staged for object '${ids.P1}' in changeset '${cs}'` } },
+    });
+    expect((await call("DELETE", `${url}/objects/${ids.P1}/properties/name`)).status).toBe(204);
+    expect(await objects(cs)).toEqual([]);
+    expect((await call("GET", url)).body.version).toBe(version + 3);
   });
 
-  it("discard deletes the changeset and its journal; then it is 404", async () => {
+  it("rebase sets the befores to the stored values now and keeps the staged values; its answer is the object as reviewed", async () => {
+    const cs = (await start()).id as string;
+    const url = `${ALL}/changesets/${cs}`;
+    await stage(cs, { operation: "update_entity", type: "project", id: ids.P2, properties: { name: "P2 Web", body: "x" } });
+    expect((await call("PATCH", `${ALL}/entities/project/${ids.P2}`, { name: "P2 Mobile" })).status).toBe(200);
+    const [drifted] = (await call("GET", url)).body.objects;
+    expect(drifted.values.map((v: Row) => [v.property, v.markers.map((m: Row) => m.kind)])).toEqual([
+      ["body", []],
+      ["name", ["drift"]],
+    ]);
+
+    const rebased = await call("POST", `${url}/objects/${ids.P2}/rebase`, { properties: ["name"] });
+    expect(rebased.status).toBe(200);
+    expect(rebased.body).toMatchObject({
+      id: ids.P2,
+      action: "update",
+      markers: [],
+      values: [
+        { property: "body", before: null, after: { document: true, length: 1 }, markers: [] },
+        { property: "name", before: "P2 Mobile", current: "P2 Mobile", after: "P2 Web", markers: [] },
+      ],
+    });
+    // Without a body: every value of the object.
+    expect((await call("POST", `${url}/objects/${ids.P2}/rebase`)).status).toBe(200);
+
+    expect((await call("POST", `${url}/objects/${ids.P2}/rebase`, { properties: ["code"] })).status).toBe(404);
+    const p9 = (await stage(cs, { operation: "create_entity", type: "project", properties: { name: "P9" } })).body.id as string;
+    expect(await call("POST", `${url}/objects/${p9}/rebase`)).toMatchObject({
+      status: 409,
+      body: { error: { message: "Only an update of a stored object can be rebased; this object is a create" } },
+    });
+    expect((await call("POST", `${url}/objects/${ids.P2}/rebase`, { properties: "name" })).status).toBe(422);
+    await call("PATCH", `${ALL}/entities/project/${ids.P2}`, { name: "P2" });
+  });
+
+  it("unstage, cut and rebase are 409 while submitted", async () => {
+    const cs = (await start()).id as string;
+    const url = `${ALL}/changesets/${cs}`;
+    await stage(cs, rename(ids.P2, "b"));
+    expect((await call("POST", `${url}/submit`, {})).status).toBe(200);
+    for (const [method, path] of [
+      ["DELETE", `/objects/${ids.P2}`],
+      ["DELETE", `/objects/${ids.P2}/properties/name`],
+      ["POST", `/objects/${ids.P2}/rebase`],
+    ] as const) {
+      expect(await call(method, `${url}${path}`, method === "POST" ? {} : undefined)).toMatchObject({
+        status: 409,
+        body: { error: { message: `Changeset '${cs}' is submitted; unsubmit it first` } },
+      });
+    }
+  });
+});
+
+describe("discard, expiry, caps, the row lock", () => {
+  it("discard deletes the changeset with its objects; then it is 404", async () => {
     const cs = (await start()).id as string;
     await stage(cs, rename(ids.P1, "a"));
     expect((await call("DELETE", `${ALL}/changesets/${cs}`)).status).toBe(204);
-    expect(await sql(`SELECT 1 FROM changeset_write WHERE changeset_id = $1`, [cs])).toEqual([]);
+    expect(await sql(`SELECT 1 FROM changeset_object WHERE changeset_id = $1`, [cs])).toEqual([]);
     expect((await call("GET", `${ALL}/changesets/${cs}`)).status).toBe(404);
     expect((await call("DELETE", `${ALL}/changesets/${cs}`)).status).toBe(404);
   });
@@ -500,7 +691,7 @@ describe("unstage, discard, expiry, caps, the row lock", () => {
       body: { error: { message: `Changeset '${cs}' not found` } },
     });
     expect(await sql(`SELECT 1 FROM changeset WHERE changeset_id = $1`, [cs])).toEqual([]);
-    expect(await sql(`SELECT 1 FROM changeset_write WHERE changeset_id = $1`, [cs])).toEqual([]);
+    expect(await sql(`SELECT 1 FROM changeset_object WHERE changeset_id = $1`, [cs])).toEqual([]);
   });
 
   it("start sweeps expired draft changesets of the ontology", async () => {
@@ -510,27 +701,31 @@ describe("unstage, discard, expiry, caps, the row lock", () => {
     expect(await sql(`SELECT 1 FROM changeset WHERE changeset_id = $1`, [old])).toEqual([]);
   });
 
-  it("the cap: at 10,000 writes the next stage is 409 'full' and appends nothing", async () => {
-    const cs = (await start()).id as string;
+  /** Fill a changeset with `n` staged deletes of tasks that do not exist. */
+  async function fill(cs: string, n: number): Promise<void> {
     await sql(
-      `INSERT INTO changeset_write (changeset_id, seq, operation, arguments, type_key, bytes)
-       SELECT $1, g, 'delete_entity', '{}'::jsonb, 'task', 2 FROM generate_series(1, 10000) g`,
-      [cs],
+      `INSERT INTO changeset_object (changeset_id, object_id, kind, type_key, action, first_touched_at)
+       SELECT $1, gen_random_uuid(), 'entity', 'task', 'delete', now() FROM generate_series(1, $2::int)`,
+      [cs, n],
     );
-    const res = await stage(cs, rename(ids.P1, "a"));
-    expect(res).toMatchObject({ status: 409, body: { error: { message: `Changeset '${cs}' is full: at most 10000 staged writes` } } });
-    expect(await sql(`SELECT count(*)::int AS n FROM changeset_write WHERE changeset_id = $1`, [cs])).toEqual([
-      { n: 10000 },
-    ]);
+  }
+
+  const count = async (cs: string) =>
+    (await sql(`SELECT count(*)::int AS n FROM changeset_object WHERE changeset_id = $1`, [cs]))[0]!.n;
+
+  it("the object cap: at 10,000 objects a new object is 409 'full'; a merge into a staged one is not", async () => {
+    const cs = (await start()).id as string;
+    await stage(cs, rename(ids.P1, "a"));
+    await fill(cs, 9999);
+    const res = await stage(cs, rename(ids.P2, "b"));
+    expect(res).toMatchObject({ status: 409, body: { error: { message: `Changeset '${cs}' is full: at most 10000 staged objects` } } });
+    expect(await count(cs)).toBe(10000);
+    expect((await stage(cs, rename(ids.P1, "a2"))).status).toBe(201);
   });
 
-  it("the cap counts both writes of a create with a parent relation: one short of it, the pair is 409 and appends nothing", async () => {
+  it("the cap counts both objects of a create with a parent relation: one short of it, the pair is 409", async () => {
     const cs = (await start()).id as string;
-    await sql(
-      `INSERT INTO changeset_write (changeset_id, seq, operation, arguments, type_key, bytes)
-       SELECT $1, g, 'delete_entity', '{}'::jsonb, 'task', 2 FROM generate_series(1, 9999) g`,
-      [cs],
-    );
+    await fill(cs, 9999);
     const pair = {
       operation: "create_entity",
       type: "task",
@@ -539,80 +734,44 @@ describe("unstage, discard, expiry, caps, the row lock", () => {
     };
     expect(await stage(cs, pair)).toMatchObject({
       status: 409,
-      body: { error: { message: `Changeset '${cs}' is full: at most 10000 staged writes` } },
+      body: { error: { message: `Changeset '${cs}' is full: at most 10000 staged objects` } },
     });
-    const count = async () =>
-      (await sql(`SELECT count(*)::int AS n FROM changeset_write WHERE changeset_id = $1`, [cs]))[0]!.n;
-    expect(await count()).toBe(9999);
-    // One write still fits.
+    expect(await count(cs)).toBe(9999);
+    // One object still fits.
     expect((await stage(cs, rename(ids.P1, "a"))).status).toBe(201);
-    expect(await count()).toBe(10000);
+    expect(await count(cs)).toBe(10000);
   });
 
-  it("the byte cap: document text counts; a write past it is 409 'full' and appends nothing", async () => {
+  it("the byte cap counts the staged values now, one copy per document: a merge past it is 409 'full'", async () => {
     const cap = settings.CHANGESET_MAX_BYTES;
     settings.CHANGESET_MAX_BYTES = 1_000_000;
     try {
       const cs = (await start()).id as string;
       // 200,000 characters, 400,000 bytes as UTF-8.
       const body = "ä".repeat(200_000);
-      const write = { operation: "update_entity", type: "project", id: ids.P1, properties: { body } };
-      expect((await stage(cs, write)).status).toBe(201);
-      const second = await stage(cs, write);
-      expect(second.status).toBe(201);
-      const res = await stage(cs, write);
+      const write = (id: string) => ({ operation: "update_entity", type: "project", id, properties: { body } });
+      // Staged again, a document replaces its staged copy.
+      for (let i = 0; i < 3; i++) expect((await stage(cs, write(ids.P1))).status).toBe(201);
+      expect((await stage(cs, write(ids.P2))).status).toBe(201);
+      const res = await stage(cs, { operation: "create_entity", type: "project", properties: { name: "P9", body } });
       expect(res).toMatchObject({
         status: 409,
-        body: { error: { message: `Changeset '${cs}' is full: at most 1000000 bytes of staged writes` } },
+        body: { error: { message: `Changeset '${cs}' is full: at most 1000000 bytes of staged values` } },
       });
-      const [row] = await sql(
-        `SELECT count(*)::int AS n, sum(bytes)::int AS bytes FROM changeset_write WHERE changeset_id = $1`,
-        [cs],
-      );
+      const [row] = await sql(`SELECT count(*)::int AS n, sum(bytes)::int AS bytes FROM changeset_value WHERE changeset_id = $1`, [cs]);
       expect(row!.n).toBe(2);
       expect(row!.bytes).toBeGreaterThan(800_000);
       expect(row!.bytes).toBeLessThan(1_000_000);
 
-      // Unstaging frees its bytes.
-      expect((await call("DELETE", `${ALL}/changesets/${cs}/writes/${second.body.seq}`)).status).toBe(204);
-      expect((await stage(cs, write)).status).toBe(201);
+      // A cut frees its bytes.
+      expect((await call("DELETE", `${ALL}/changesets/${cs}/objects/${ids.P2}/properties/body`)).status).toBe(204);
+      expect((await stage(cs, { operation: "create_entity", type: "project", properties: { name: "P9", body } })).status).toBe(201);
     } finally {
       settings.CHANGESET_MAX_BYTES = cap;
     }
   });
 
-  it("the byte cap sums both writes of a create with a parent relation: if the pair passes it, neither is appended", async () => {
-    const cap = settings.CHANGESET_MAX_BYTES;
-    settings.CHANGESET_MAX_BYTES = 1_000_000;
-    try {
-      const cs = (await start()).id as string;
-      const body = "ä".repeat(200_000);
-      const filler = { operation: "update_entity", type: "project", id: ids.P1, properties: { body } };
-      expect((await stage(cs, filler)).status).toBe(201);
-      expect((await stage(cs, filler)).status).toBe(201);
-      // Two rows of 150,000 bytes each: either alone would fit beside the
-      // 800,000 staged, the two together do not.
-      const half = "ö".repeat(75_000);
-      const pair = {
-        operation: "create_entity",
-        type: "task",
-        properties: { name: half },
-        parentRelation: { type: "has_task", parentId: ids.P1, properties: { phase: half } },
-      };
-      expect(await stage(cs, pair)).toMatchObject({
-        status: 409,
-        body: { error: { message: `Changeset '${cs}' is full: at most 1000000 bytes of staged writes` } },
-      });
-      expect(await journal(cs)).toHaveLength(2);
-      expect((await call("DELETE", `${ALL}/changesets/${cs}/writes/2`)).status).toBe(204);
-      expect((await stage(cs, pair)).status).toBe(201);
-      expect(await journal(cs)).toHaveLength(3);
-    } finally {
-      settings.CHANGESET_MAX_BYTES = cap;
-    }
-  });
-
-  it("a staged write while a commit holds the row is 409 at once; after release it is staged", async () => {
+  it("a staged call while a commit holds the row is 409 at once; after release it is staged", async () => {
     const cs = (await start()).id as string;
     const release = await hold((bound) => bound.changesets().lockForCommit(cs));
     try {
@@ -624,7 +783,7 @@ describe("unstage, discard, expiry, caps, the row lock", () => {
     } finally {
       await release();
     }
-    expect(await journal(cs)).toEqual([]);
+    expect(await objects(cs)).toEqual([]);
     expect((await stage(cs, rename(ids.P1, "a"))).status).toBe(201);
   });
 });

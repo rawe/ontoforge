@@ -113,13 +113,23 @@ describe("the levels and the check", () => {
   it("a stageable tool stages with changeset_id and writes without it; HEAD is GET's; no row throws", () => {
     const stageable = Object.entries(TOOLS).filter(([, row]) => row.stageable).map(([name]) => name);
     expect(stageable.sort()).toEqual(
-      ["create_entity", "create_relation", "delete_entity", "delete_relation", "update_entity", "update_relation"],
+      [
+        "create_entity",
+        "create_relation",
+        "delete_entity",
+        "delete_relation",
+        "edit_document",
+        "update_entity",
+        "update_relation",
+        "write_document",
+      ],
     );
     for (const name of stageable) {
       expect(toolOperation(name, { changeset_id: ID })).toBe("stage");
       expect(toolOperation(name, {})).toBe("write");
     }
-    expect(toolOperation("edit_document", { changeset_id: ID })).toBe("write");
+    expect(toolOperation("rebase", { changeset_id: ID })).toBe("stage");
+    expect(toolOperation("check_changeset", { changeset_id: ID })).toBe("stage");
     expect(toolOperation("commit_changeset", { changeset_id: ID })).toBe("commit");
     expect(() => toolOperation("nope", {})).toThrow("Tool 'nope' has no row in the operation table");
     expect(routeOperation("HEAD", "/schema")).toBe("read");
@@ -127,12 +137,10 @@ describe("the levels and the check", () => {
     expect(() => routeOperation("PUT", "/schema")).toThrow("Route 'PUT /schema' has no row in the operation table");
   });
 
-  it("a level lists the tools whose operation it allows, and a stageable tool from staging up: 34, 31, 20", () => {
+  it("a level lists the tools whose operation it allows, and a stageable tool from staging up: 36, 35, 20", () => {
     const listed = (level: WriteAccess) => Object.keys(TOOLS).filter((name) => listsTool(level, name));
-    expect(listed("full")).toHaveLength(34);
-    expect(listed("propose").sort()).toEqual(
-      Object.keys(TOOLS).filter((name) => !["commit_changeset", "edit_document", "write_document"].includes(name)).sort(),
-    );
+    expect(listed("full")).toHaveLength(36);
+    expect(listed("propose").sort()).toEqual(Object.keys(TOOLS).filter((name) => name !== "commit_changeset").sort());
     expect(listed("none").sort()).toEqual(Object.keys(TOOLS).filter((name) => TOOLS[name]!.operation === "read").sort());
     expect(listed("none")).toHaveLength(20);
     expect(() => listsTool("full", "nope")).toThrow("Tool 'nope' has no row in the operation table");
@@ -140,7 +148,7 @@ describe("the levels and the check", () => {
 });
 
 describe("the tables cannot drift", () => {
-  it("ROUTES are exactly the routes the ruleset mirror registers (38)", async () => {
+  it("ROUTES are exactly the routes the ruleset mirror registers (41)", async () => {
     const prefix = "/api/ontologies/:ontologyKey/runtime/lenses/:lensKey/rulesets/:rulesetKey";
     const app = Fastify();
     app.setValidatorCompiler(validatorCompiler);
@@ -156,15 +164,15 @@ describe("the tables cannot drift", () => {
     await app.ready();
     await app.close();
     expect([...registered].sort()).toEqual(Object.keys(ROUTES).sort());
-    expect(registered.size).toBe(38);
+    expect(registered.size).toBe(41);
   });
 
-  it("TOOLS are exactly the tools of a ruleset mount at full (34)", async () => {
+  it("TOOLS are exactly the tools of a ruleset mount at full (36)", async () => {
     const client = await connect("agent-a");
     const names = (await client.listTools()).tools.map((tool) => tool.name);
     await client.close();
     expect(names.sort()).toEqual(Object.keys(TOOLS).sort());
-    expect(names).toHaveLength(34);
+    expect(names).toHaveLength(36);
   });
 });
 
@@ -197,7 +205,7 @@ beforeEach(() => {
     submittedAt: null,
     createdAt: NOW,
     lastChangeAt: NOW,
-    writeCount: 0,
+    objectCount: 0,
   }));
   for (const spy of Object.values(writes)) spy.mockReset().mockResolvedValue({});
 });
@@ -263,9 +271,12 @@ describe("the REST mirror", () => {
       `${CS}/writes`,
       { operation: "update_entity", type: "person", id: OTHER, properties: { name: "Ann" } },
     ],
-    "DELETE /changesets/:changesetId/writes/:seq": [`${CS}/writes/1`],
+    "DELETE /changesets/:changesetId/objects/:objectId": [`${CS}/objects/${ID}`],
+    "DELETE /changesets/:changesetId/objects/:objectId/properties/:propertyKey": [`${CS}/objects/${ID}/properties/name`],
+    "POST /changesets/:changesetId/objects/:objectId/rebase": [`${CS}/objects/${ID}/rebase`, {}],
     "POST /changesets/:changesetId/submit": [`${CS}/submit`, {}],
     "POST /changesets/:changesetId/unsubmit": [`${CS}/unsubmit`, { note: "again" }],
+    "POST /changesets/:changesetId/check": [`${CS}/check`],
     "POST /changesets/:changesetId/commit": [`${CS}/commit`, {}],
   };
 
@@ -294,20 +305,20 @@ describe("the REST mirror", () => {
     return refused;
   }
 
-  it("full answers all 38", async () => {
+  it("full answers all 41", async () => {
     expect(await refusedAt("full")).toEqual([]);
   });
 
-  it("propose refuses the 7 immediate writes and the commit: 30 / 8", async () => {
+  it("propose refuses the 7 immediate writes and the commit: 33 / 8", async () => {
     const refused = await refusedAt("propose");
     expect(refused.map((route) => ROUTES[route])).toEqual([...Array(7).fill("write"), "commit"]);
-    expect(Object.keys(ROUTES).length - refused.length).toBe(30);
+    expect(Object.keys(ROUTES).length - refused.length).toBe(33);
   });
 
-  it("none refuses every write, stage and commit: 24 / 14; the changeset reads still answer", async () => {
+  it("none refuses every write, stage and commit: 24 / 17; the changeset reads still answer", async () => {
     const refused = await refusedAt("none");
     expect(refused).toEqual(Object.keys(ROUTES).filter((route) => ROUTES[route] !== "read"));
-    expect(refused).toHaveLength(14);
+    expect(refused).toHaveLength(17);
     expect(refused).not.toContain("GET /changesets/:changesetId/entities/:entityTypeKey/:entityId");
     for (const spy of Object.values(writes)) expect(spy).not.toHaveBeenCalled();
   });
@@ -344,9 +355,12 @@ describe("the MCP tools", () => {
   const CHANGESET_CALLS = [
     ["start_changeset", {}],
     ["update_entity", { entity_type_key: "person", entity_id: ID, properties: { name: "Ann" }, changeset_id: ID }],
-    ["unstage", { changeset_id: ID, seq: 1 }],
+    ["edit_document", { entity_type_key: "person", entity_id: ID, property_key: "bio", old_string: "a", new_string: "b", changeset_id: ID }],
+    ["unstage", { changeset_id: ID, object_id: ID }],
+    ["rebase", { changeset_id: ID, object_id: ID }],
     ["submit_changeset", { changeset_id: ID }],
     ["unsubmit_changeset", { changeset_id: ID, note: "again" }],
+    ["check_changeset", { changeset_id: ID }],
     ["discard_changeset", { changeset_id: ID }],
     ["commit_changeset", { changeset_id: ID }],
   ] as const;

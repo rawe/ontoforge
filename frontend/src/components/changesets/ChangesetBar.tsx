@@ -3,7 +3,7 @@ import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useChangesets } from '@/api/hooks'
-import { changesetLabel, writesText } from '@/components/changesets/changesets'
+import { changesetLabel, objectsText } from '@/components/changesets/changesets'
 import { Button } from '@/components/ui/button'
 import { pinnedChangeset, unpinChangeset, usePinnedChangeset } from '@/lib/pinnedChangeset'
 
@@ -12,7 +12,7 @@ const BAR_CHANGESET_GONE_TEXT = 'The changeset is gone (committed, discarded or 
 
 /**
  * The strip above every Workbench page while a changeset is pinned: which
- * one, its writes, Review and Leave. A pinned changeset the list does not
+ * one, its staged objects, Review and Leave. A pinned changeset the list does not
  * show is read again; still missing from that read, it is gone: unpinned
  * with a toast.
  */
@@ -57,7 +57,7 @@ export function ChangesetBar({ ontologyKey, lensKey }: { ontologyKey: string; le
           Working in changeset <span className="font-medium">{changesetLabel(item ?? { id: pinned, note: null })}</span>
         </span>
       </span>
-      {item !== undefined && <span className="whitespace-nowrap">· {writesText(item.writeCount)}</span>}
+      {item !== undefined && <span className="whitespace-nowrap">· {objectsText(item.objectCount)}</span>}
       {item?.state === 'submitted' && (
         <span className="whitespace-nowrap font-medium text-(--tc-amber)">· Submitted — staging is refused</span>
       )}

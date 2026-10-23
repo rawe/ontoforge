@@ -110,9 +110,10 @@ export const DocumentReadQuery = z.looseObject({
   limit: z.coerce.number().int().min(1).optional(),
 });
 
-/** One partial-write operation, discriminated by `op`, carrying both
- * operation shapes. Per-op field validation happens in the service. */
-const DocumentEditPayload = z.looseObject({
+/** The fields of one partial-write operation, discriminated by `op`,
+ * carrying both operation shapes. Per-op field validation happens in the
+ * service. */
+export const DocumentEditFields = {
   op: z.enum(["str_replace", "replace_range"]),
   // str_replace
   oldString: z.string().nullish(),
@@ -123,7 +124,9 @@ const DocumentEditPayload = z.looseObject({
   length: z.number().int().nullish(),
   content: z.string().nullish(),
   expect: z.string().nullish(),
-});
+};
+
+const DocumentEditPayload = z.looseObject(DocumentEditFields);
 
 /** OQL query request: the query text, nothing else (`docs/interfaces.md`). */
 const QueryPayload = z.looseObject({ query: z.string().min(1) });

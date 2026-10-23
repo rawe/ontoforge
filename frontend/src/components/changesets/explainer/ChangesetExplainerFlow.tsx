@@ -2,14 +2,14 @@ import { useId } from 'react'
 import { cn } from '@/lib/utils'
 import { FLOW, STORY, type FlowEdgeId, type FlowNodeId } from './changesetExplainerStory'
 
-const VIEW = { width: 1120, height: 330, lane: 165 }
+const VIEW = { width: 1120, height: 280, lane: 135 }
 const STATE = { width: 140, height: 52 }
 const END = { width: 96, height: 34 }
 
 const AT: Record<FlowNodeId, { x: number; y: number }> = {
-  start: { x: 150, y: 70 },
-  discarded: { x: 150, y: 140 },
-  expired: { x: 150, y: 200 },
+  start: { x: 150, y: 60 },
+  discarded: { x: 150, y: 112 },
+  expired: { x: 150, y: 165 },
   draft: { x: 430, y: VIEW.lane },
   submitted: { x: 700, y: VIEW.lane },
   committed: { x: 970, y: VIEW.lane },
@@ -17,14 +17,14 @@ const AT: Record<FlowNodeId, { x: number; y: number }> = {
 
 /** Each way's path, and where its name (and who may take it, below) sits. */
 const ROUTES: Record<FlowEdgeId, { d: string; x: number; y: number }> = {
-  start: { d: 'M 198 70 C 300 70, 380 92, 393 136', x: 290, y: 50 },
-  stage: { d: 'M 405 139 C 392 82, 468 82, 455 136', x: 430, y: 64 },
-  submit: { d: 'M 485 139 C 525 72, 610 72, 648 136', x: 566, y: 64 },
-  unsubmit: { d: 'M 662 191 C 630 268, 500 268, 470 194', x: 566, y: 216 },
-  commit: { d: 'M 740 191 C 770 268, 905 268, 932 194', x: 836, y: 216 },
-  'commit-draft': { d: 'M 400 191 C 425 340, 975 340, 1000 194', x: 700, y: 270 },
-  discard: { d: 'M 358 156 L 202 141', x: 282, y: 124 },
-  expire: { d: 'M 358 176 L 202 199', x: 282, y: 214 },
+  start: { d: 'M 198 60 C 300 60, 380 75, 393 106', x: 290, y: 44 },
+  stage: { d: 'M 405 109 C 392 52, 468 52, 455 106', x: 430, y: 36 },
+  submit: { d: 'M 485 109 C 525 44, 610 44, 648 106', x: 566, y: 36 },
+  unsubmit: { d: 'M 662 161 C 630 238, 500 238, 470 164', x: 566, y: 188 },
+  commit: { d: 'M 740 161 C 770 238, 905 238, 932 164', x: 836, y: 188 },
+  'commit-draft': { d: 'M 400 161 C 425 290, 975 290, 1000 164', x: 700, y: 234 },
+  discard: { d: 'M 358 126 L 202 114', x: 282, y: 95 },
+  expire: { d: 'M 358 146 L 202 163', x: 282, y: 180 },
 }
 
 /**
@@ -39,7 +39,7 @@ export function ChangesetExplainerFlow({ current, passed, lit, onSelect }: {
 }) {
   const id = useId()
   const stepOf = (edge: FlowEdgeId) => STORY.findIndex((step) => step.edges.includes(edge))
-  return <svg viewBox={`0 0 ${VIEW.width} ${VIEW.height}`} className="block h-auto w-full" role="img"
+  return <svg viewBox={`0 0 ${VIEW.width} ${VIEW.height}`} className="mx-auto block h-auto w-full max-w-[1120px]" role="img"
     aria-label={`The changeset workflow: ${FLOW.edges.map((edge) => `${edge.label}, ${edge.who}`).join('; ')}`}>
     <defs>
       {(['on', 'off'] as const).map((tone) => <marker key={tone} id={`${id}-${tone}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">

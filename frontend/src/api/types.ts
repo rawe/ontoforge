@@ -241,102 +241,119 @@ export interface Changeset {
   note: string | null
   /** The ruleset of the URL that started it; null on the plain lens. */
   ruleset: string | null
-  writeCount: number
+  /** How many staged objects it holds. */
+  objectCount: number
   createdAt: string
   lastChangeAt: string
   submittedAt: string | null
 }
 
-/** A changeset in the lens's list: its staged writes per operation, and the types they name. */
+/** A changeset in the lens's list: its staged objects per operation, and the types they name. */
 export interface ChangesetListItem extends Changeset {
+  /** Keyed `<action>_<kind>`, such as `create_entity`. */
   operations: Record<string, number>
   /** The type keys the lens shows, sorted. */
   types: string[]
-  /** How many type keys the staged writes name that the lens no longer shows. */
+  /** How many type keys the staged objects name that the lens no longer shows. */
   notVisible: number
 }
 
-/** One end of a staged relation write. */
+/** One end of a staged relation. */
 export interface ChangesetEnd {
   id: string
   /** Null when the lens shows no name for it. */
   name: string | null
 }
 
-/** A fault the lock-free pass finds on a staged write: drift, dangling, not_visible, missing, replay. */
+/** A fault the lock-free pass finds on a staged object or value: drift, dangling, not_visible, missing, replay. */
 export interface ChangesetMarker {
   kind: string
   message: string
 }
 
-export type StagedOperation =
-  | 'create_entity'
-  | 'update_entity'
-  | 'delete_entity'
-  | 'create_relation'
-  | 'update_relation'
-  | 'delete_relation'
+export type StagedKind = 'entity' | 'relation'
+export type StagedAction = 'create' | 'update' | 'delete'
 
 /**
- * One staged write as the review read shows it through the lens. A write
- * whose type the lens no longer shows has `type` and `id` null and no values.
+ * One staged value of an object. Document values, in `before`, `current`
+ * and `after`, are stubs `{document: true, length}`.
  */
-export interface StagedWriteView {
-  seq: number
-  operation: StagedOperation
-  type: string | null
-  id: string | null
-  createdAt: string
-  /** Entity writes: the target's name. */
-  name?: string | null
-  /** Relation writes: the two ends. */
-  from?: ChangesetEnd | null
-  to?: ChangesetEnd | null
-  /** Updates of a stored target: the stored values of the patched keys when
-   * it was staged. Document values, here as in `current` and `after`, are
-   * stubs `{document: true, length}`; the length is null on a write staged
-   * without one. */
-  before: Record<string, JsonValue> | null
-  /** Updates of a stored target: those values now; null when it is gone.
-   * Drift is `current` ≠ `before`. */
-  current: Record<string, JsonValue> | null
-  /** Creates and updates: the staged values. */
-  after: Record<string, JsonValue> | null
+export interface StagedValueView {
+  property: string
+  /** An update's stored value at the key's first touch (or its last
+   * rebase); null for a key the target lacked, and on a create. */
+  before: JsonValue
+  /** An update's stored value now; null when the target is gone or lacks
+   * the key, and on a create. Drift is `current` ≠ `before`. */
+  current: JsonValue
+  /** The staged value; null removes the property. */
+  after: JsonValue
+  /** Drift or replay on this value. */
   markers: ChangesetMarker[]
 }
 
-/** The review read: the changeset and one page of its writes by seq. */
+/**
+ * One staged object — an entity or relation the changeset touches — as the
+ * review read shows it through the lens. An object whose type the lens no
+ * longer shows has `type` null and no values.
+ */
+export interface StagedObjectView {
+  id: string
+  kind: StagedKind
+  type: string | null
+  action: StagedAction
+  firstTouchedAt: string
+  /** Entities: the name. */
+  name?: string | null
+  /** Relations: the two ends. */
+  from?: ChangesetEnd
+  to?: ChangesetEnd
+  /** Faults on the object as a whole: not visible, missing, dangling, a value it lacks. */
+  markers: ChangesetMarker[]
+  /** Its staged values the lens shows; none on a delete. */
+  values: StagedValueView[]
+}
+
+/** The review read: the changeset and one page of its staged objects by first touch. */
 export interface ChangesetDetail extends Changeset {
   offset: number
   limit: number
-  writes: StagedWriteView[]
+  objects: StagedObjectView[]
 }
 
 /**
  * One entity as a commit of a changeset would leave it: the stored entity,
- * or the one the changeset creates, with its staged creates and updates
- * folded in by seq (no defaults yet, documents as stubs), and beside it its
- * own staged writes as the review read shows them.
+ * or the one the changeset creates, with its staged values applied (no
+ * defaults yet, documents as stubs), and beside it its staged object as the
+ * review read shows it.
  */
 export interface StagedEntity {
   /** A staged create has no `_createdAt` / `_updatedAt`. */
   entity: { _id: string; _entityTypeKey: string; [property: string]: JsonValue }
-  /** Its last staged write deletes it. */
+  /** The changeset deletes it. */
   deleted: boolean
-  writes: StagedWriteView[]
+  /** Null when nothing is staged on it. */
+  object: StagedObjectView | null
 }
 
-/** One reason a commit was rejected; seq 0 concerns the whole changeset. */
+/** One reason a commit was rejected: on a staged object and maybe one of its
+ * properties, or on the changeset as a whole (`object` null). */
 export interface ChangesetViolation {
-  seq: number
+  object: string | null
+  property?: string
   kind: string
   message: string
 }
 
-/** A commit's answer: the writes persisted, and the deletes that found nothing. */
+/** A commit's answer: the staged objects applied, and the ids of the deletes that found nothing. */
 export interface CommitResult {
   committed: number
-  alreadyGone: number[]
+  alreadyGone: string[]
+}
+
+/** A check that passed: what a commit of the version checked would answer. */
+export interface CheckResult extends CommitResult {
+  version: number
 }
 
 /** The parent relation a create names for its new entity. */
@@ -368,12 +385,13 @@ export type StageWritePayload =
     }
   | { operation: 'delete_relation'; type: string; id: string }
 
-/** A staged write's answer: its seq and the minted (create) or target id;
- * a create with a parent relation also names the relation's row. */
+/** A staged call's answer: the id of its object; a create with a parent
+ * relation also names the relation's, an entity delete the staged relations
+ * at it that it removed. */
 export interface StagedAnswer {
-  seq: number
   id: string
-  relation?: { seq: number; id: string }
+  relation?: { id: string }
+  cascaded?: string[]
 }
 
 /* ------------------------------ runtime — search ----------------------------- */

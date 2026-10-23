@@ -100,12 +100,12 @@ the server fixes, and each level allows a fixed set of them:
 | Operation | What it covers | `none` | `propose` | `full` |
 |---|---|---|---|---|
 | `read` | every read, list, search and query, the path read, `get_ruleset`, and the changeset reads: list, read, the staged text of a document, one entity as the changeset leaves it | ✓ | ✓ | ✓ |
-| `stage` | start a changeset, stage a write into it, unstage, submit, unsubmit, discard | — | ✓ | ✓ |
+| `stage` | start a changeset, stage a write into it, unstage, cut, rebase, check, submit, unsubmit, discard | — | ✓ | ✓ |
 | `commit` | commit a changeset | — | — | ✓ |
 | `write` | every immediate write, document edits included | — | — | ✓ |
 
-A create, update or delete of an entity or a relation is `write` without a changeset and
-`stage` with one. So under `propose` a client plans its changes in changesets and submits
+A create, update or delete of an entity or a relation, and a document edit, is `write`
+without a changeset and `stage` with one. So under `propose` a client plans its changes in changesets and submits
 them, and a person commits them; under `none` it only reads.
 
 ### Where write access is checked
@@ -133,7 +133,7 @@ changesets committable there.
 - **REST:** the ruleset's `writeAccess`, set by the maintenance put. The mirror answers or
   refuses each route by its operation.
 - **MCP:** a ruleset mount lists only the tools whose operation its level allows; a level
-  that stages but does not write lists the six write tools with `changeset_id` required.
+  that stages but does not write lists the eight write tools with `changeset_id` required.
   A call of a tool the level does not list, for example after the level was lowered,
   answers the refusal above. The tool count per level is in
   [../interfaces.md](../interfaces.md#mcp).

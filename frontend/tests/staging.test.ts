@@ -7,6 +7,7 @@ import {
   LEFT_CHANGESET_TEXT,
   stagedEntity,
   stagedOutcome,
+  stagedText,
   stageIntoPinned,
   stagePayload,
 } from '../src/api/staging.ts'
@@ -60,13 +61,19 @@ test('stagePayload names only type and id for deletes', () => {
 })
 
 test('stagedOutcome names the changeset beside the answer', () => {
-  assert.deepEqual(stagedOutcome('cs-1', { seq: 7, id: 'e-1', relation: { seq: 8, id: 'r-1' } }), {
+  assert.deepEqual(stagedOutcome('cs-1', { id: 'e-1', relation: { id: 'r-1' } }), {
     kind: 'staged',
     changesetId: 'cs-1',
-    seq: 7,
     id: 'e-1',
-    relation: { seq: 8, id: 'r-1' },
+    relation: { id: 'r-1' },
   })
+})
+
+test('stagedText names the staged relations an entity delete removed with it', () => {
+  assert.equal(stagedText({ id: 'e-1' }), 'Staged')
+  assert.equal(stagedText({ id: 'e-1', cascaded: [] }), 'Staged')
+  assert.equal(stagedText({ id: 'e-1', cascaded: ['r-1'] }), 'Staged, with 1 staged relation at it removed')
+  assert.equal(stagedText({ id: 'e-1', cascaded: ['r-1', 'r-2'] }), 'Staged, with 2 staged relations at it removed')
 })
 
 test('stagedEntity puts the typed values under the minted id and type', () => {
@@ -155,7 +162,7 @@ test('stageIntoPinned reads the pin when its turn in the queue comes', async () 
   const staged: string[] = []
   const stage = async (changesetId: string) => {
     staged.push(changesetId)
-    return { seq: staged.length, id: 'e-1' }
+    return { id: `e-${staged.length}` }
   }
   const first = deferred()
   const a = enqueue('lens', async () => {
@@ -176,7 +183,7 @@ test('stageIntoPinned fails a queued write whose changeset was left, without sta
   let calls = 0
   const stage = async () => {
     calls += 1
-    return { seq: calls, id: 'e-1' }
+    return { id: 'e-1' }
   }
   const first = deferred()
   const a = enqueue('lens', async () => {

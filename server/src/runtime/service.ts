@@ -755,6 +755,35 @@ function applyReplaceRange(
 }
 
 /**
+ * One partial-write operation on a document's text, as the document edit
+ * applies it: the new text, and the answer of the edit (the new length, the
+ * edited range, the replacements and the context around the edit). Its
+ * faults are the edit's: a 422 for a bad body or a miss, a 409 for an
+ * `expect` mismatch.
+ */
+export function applyDocumentEdit(
+  propertyKey: string,
+  value: string,
+  body: DocumentEditBody,
+): { value: string; answer: Row } {
+  const [newValue, offset, length, replacements] =
+    body.op === "str_replace" ? applyStrReplace(value, body) : applyReplaceRange(value, body);
+  const contextStart = Math.max(0, offset - EDIT_CONTEXT_CHARS);
+  const contextEnd = Math.min(cpLength(newValue), offset + length + EDIT_CONTEXT_CHARS);
+  return {
+    value: newValue,
+    answer: {
+      propertyKey,
+      totalLength: cpLength(newValue),
+      editedRange: { offset, length },
+      replacements,
+      context: cpSlice(newValue, contextStart, contextEnd),
+      contextOffset: contextStart,
+    },
+  };
+}
+
+/**
  * Apply one partial-write operation to a document property.
  *
  * `str_replace` swaps an exact, unique string (or all occurrences with
@@ -783,12 +812,10 @@ export async function editDocument(
   );
   await (await AnchorGuard.open(rulesetKey, loaded, store))?.checkEntity(entityTypeKey, entityId);
 
-  const [newValue, offset, length, replacements] =
-    body.op === "str_replace" ? applyStrReplace(value, body) : applyReplaceRange(value, body);
-
+  const edited = applyDocumentEdit(propertyKey, value, body);
   const setProps: Row = {
-    [propertyKey]: newValue,
-    [docLengthKey(propertyKey)]: cpLength(newValue),
+    [propertyKey]: edited.value,
+    [docLengthKey(propertyKey)]: cpLength(edited.value),
   };
   const fullEt = loaded.full.entityTypes[entityTypeKey];
   const entity = await store.updateEntity(
@@ -807,17 +834,7 @@ export async function editDocument(
   if (entity === null) {
     throw new NotFoundError(`Entity '${entityId}' not found`);
   }
-
-  const contextStart = Math.max(0, offset - EDIT_CONTEXT_CHARS);
-  const contextEnd = Math.min(cpLength(newValue), offset + length + EDIT_CONTEXT_CHARS);
-  return {
-    propertyKey,
-    totalLength: cpLength(newValue),
-    editedRange: { offset, length },
-    replacements,
-    context: cpSlice(newValue, contextStart, contextEnd),
-    contextOffset: contextStart,
-  };
+  return edited.answer;
 }
 
 // ---------------------------------------------------------------------------

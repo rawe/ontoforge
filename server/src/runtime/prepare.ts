@@ -2,8 +2,8 @@
  * The pure half of the six stageable runtime writes: one `prepare…` per
  * operation turns a payload into the exact arguments of the store call and
  * the search change it causes. The immediate service functions
- * (`service.ts`) use them today; staging and the commit's replay use the
- * same ones, so the write composition exists once.
+ * (`service.ts`) use them today; staging and the commit of a changeset use
+ * the same ones, so the write composition exists once.
  *
  * A `prepare…` reads no storage. It takes the loaded schema, the type key,
  * the target id, the body and the ids the caller minted, and holds:

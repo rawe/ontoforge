@@ -17,6 +17,7 @@ import type {
   Changeset,
   ChangesetDetail,
   ChangesetListItem,
+  CheckResult,
   CommitResult,
   DocumentContentResponse,
   EntityInstance,
@@ -42,6 +43,7 @@ import type {
   SearchStrategy,
   StagedAnswer,
   StagedEntity,
+  StagedObjectView,
   StageWritePayload,
 } from './types'
 
@@ -346,7 +348,7 @@ export const startChangeset = (ontologyKey: string, lensKey: string, note?: stri
 export const listChangesets = (ontologyKey: string, lensKey: string) =>
   request<ChangesetListItem[]>(changesetsBase(ontologyKey, lensKey))
 
-/** The review read: the changeset and its writes by seq, `limit` at most 500. */
+/** The review read: the changeset and a page of its staged objects by first touch, `limit` at most 500. */
 export const getChangeset = (
   ontologyKey: string,
   lensKey: string,
@@ -358,7 +360,7 @@ export const getChangeset = (
   )
 
 /**
- * Persists every staged write or none. A changed version answers 409; a
+ * Applies every staged object or none. A changed version answers 409; a
  * rejection answers 422 with `details.violations` and `details.total`.
  */
 export const commitChangeset = (
@@ -371,6 +373,13 @@ export const commitChangeset = (
     method: 'POST',
     body: { expectedVersion },
   })
+
+/**
+ * Runs the commit and rolls it back, draft or submitted: nothing changes. A
+ * rejection answers 422 as the commit's, with `details.version` added.
+ */
+export const checkChangeset = (ontologyKey: string, lensKey: string, changesetId: string) =>
+  request<CheckResult>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}/check`, { method: 'POST' })
 
 /**
  * Freezes a draft for review; a fault answers 422 with `details.violations`.
@@ -399,8 +408,8 @@ export const unsubmitChangeset = (
     body: { note },
   })
 
-/** The text a commit would leave in a document property: from the last
- * staged write of the changeset that sets it; 404 when none does. */
+/** The text a commit would leave in a document property: its staged value;
+ * 404 when the changeset stages none. */
 export const getStagedDocument = (
   ontologyKey: string,
   lensKey: string,
@@ -414,7 +423,7 @@ export const getStagedDocument = (
     `${changesetsBase(ontologyKey, lensKey)}/${changesetId}/documents/${entityTypeKey}/${id}/${propertyKey}${buildQuery(params)}`,
   )
 
-/** One entity as a commit would leave it, with its own staged writes; 404
+/** One entity as a commit would leave it, with its staged object; 404
  * when the changeset is gone or the entity is neither stored nor created by it. */
 export const getStagedEntity = (
   ontologyKey: string,
@@ -433,18 +442,39 @@ export const discardChangeset = (ontologyKey: string, lensKey: string, changeset
     method: 'DELETE',
   })
 
-/** Takes one staged write out, draft only. */
-export const unstageWrite = (
+const objectPath = (ontologyKey: string, lensKey: string, changesetId: string, objectId: string) =>
+  `${changesetsBase(ontologyKey, lensKey)}/${changesetId}/objects/${objectId}`
+
+/** Removes one staged object with its values, draft only. */
+export const unstageObject = (ontologyKey: string, lensKey: string, changesetId: string, objectId: string) =>
+  request<undefined>(objectPath(ontologyKey, lensKey, changesetId, objectId), { method: 'DELETE' })
+
+/** Cuts one staged value of an object, draft only; an update left with none is removed. */
+export const cutValue = (
   ontologyKey: string,
   lensKey: string,
   changesetId: string,
-  seq: number,
+  objectId: string,
+  propertyKey: string,
 ) =>
-  request<undefined>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}/writes/${seq}`, {
+  request<undefined>(`${objectPath(ontologyKey, lensKey, changesetId, objectId)}/properties/${propertyKey}`, {
     method: 'DELETE',
   })
 
-/** Appends one write to a draft; a busy changeset (another call staging) answers 409. */
+/** Accepts the stored values now as the befores of an update's values (all, or `properties`); draft only. */
+export const rebaseObject = (
+  ontologyKey: string,
+  lensKey: string,
+  changesetId: string,
+  objectId: string,
+  properties?: string[],
+) =>
+  request<StagedObjectView>(`${objectPath(ontologyKey, lensKey, changesetId, objectId)}/rebase`, {
+    method: 'POST',
+    body: properties === undefined ? {} : { properties },
+  })
+
+/** Stages one call into a draft: it merges into the object it touches. A busy changeset answers 409. */
 export const stageWrite = (
   ontologyKey: string,
   lensKey: string,

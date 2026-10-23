@@ -80,7 +80,11 @@ export interface AccessStore {
   listPrincipals(query: { search?: string; limit: number; offset: number }): Promise<PrincipalPage>;
 
   // --- Changes: each one transaction with its audit row ---------------------------------
-  /** A service principal with its identity; ConflictError if the identity is bound. */
+  /**
+   * A service principal with its identity. An identity a token's first call
+   * already bound to a role-less `user` becomes that service principal;
+   * one bound otherwise is a ConflictError.
+   */
   admitService(issuer: string, subject: string, displayName: string, actorId: string): Promise<Principal>;
   /** Null when the principal does not exist. Refuses to disable the last active
    * Platform Administrator (ConflictError). */

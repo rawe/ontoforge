@@ -275,15 +275,14 @@ async function serviceStep() {
   const token = await serviceToken();
   const before = await call(BASE, 'GET', `${runtime(ctx.lensA)}/entities/${ctx.type}?limit=1`, { token });
   check('service token before admission → 403/404', isOneOf(before, 403, 404), said(before));
-  // Known after its first call (provisioned from the token), else admitted by name.
-  let id = (await me({ token })).json?.user?.id ?? null;
-  let how = 'provisioned at its first call';
-  if (!id) {
-    const admitted = await asAdmin('POST', '/api/users', { kind: 'service', displayName: 'E2E service', subject: subject('service') });
-    id = admitted.json?.id ?? null;
-    how = `admitted by POST /api/users (${said(admitted)})`;
-  }
-  need(check('service principal known', !!id, `user ${id}, ${how}`), 'no service principal');
+  // Its first call provisioned a role-less user; admission makes that user the service
+  // principal (a rerun finds it admitted already: 409).
+  const admitted = await asAdmin('POST', '/api/users', { kind: 'service', displayName: 'E2E service', subject: subject('service') });
+  const user = (await me({ token })).json?.user ?? null;
+  const id = user?.id ?? null;
+  check('administrator admits it: a service principal', isOneOf(admitted, 201, 409) && user?.kind === 'service',
+    `${said(admitted)}, user ${id}, kind ${user?.kind}`);
+  need(id, 'no service principal');
   const r = await grant('service', id, { role: 'reader', ontologyKey: ctx.ontology, lensKey: ctx.lensA });
   check('administrator grants it reader on lens A', r.status === 201, `${said(r)}, assignment ${r.json?.id}`);
   const after = await call(BASE, 'GET', `${runtime(ctx.lensA)}/entities/${ctx.type}?limit=1`, { token });

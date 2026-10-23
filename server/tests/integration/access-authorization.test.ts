@@ -219,6 +219,11 @@ describe("authorization with authentication on", () => {
     expect(admitted.status).toBe(201);
     expect(admitted.body.kind).toBe("service");
     expect((await as("admin", "POST", "/api/users", service)).status).toBe(409);
+    // A service whose token called first is a role-less user until it is admitted.
+    expect((await as("early-service", "GET", "/api/ontologies")).status).toBe(200);
+    const early = await as("admin", "POST", "/api/users", { ...service, subject: "early-service" });
+    expect(early.status).toBe(201);
+    expect(early.body).toMatchObject({ id: await idOf("early-service"), kind: "service", displayName: "Importer" });
   });
 
   it("a Reader's runtime MCP mount lists only reads and refuses a write call", async () => {

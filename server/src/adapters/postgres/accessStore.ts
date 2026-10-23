@@ -373,9 +373,19 @@ class PostgresAccessStore implements AccessStore {
         subject,
       ]);
       if (bound.rowCount !== 0) {
-        throw new ConflictError("This identity is already bound to a principal", {
-          principalId: bound.rows[0].principal_id,
-        });
+        // A token's first call made it a role-less user: that user becomes the service.
+        const principalId = bound.rows[0].principal_id as string;
+        const admitted = await client.query(
+          `UPDATE principal SET kind = 'service', display_name = $2, updated_at = now()
+           WHERE id = $1 AND kind = 'user' AND NOT EXISTS (SELECT 1 FROM assignment WHERE principal_id = $1)
+           RETURNING ${PRINCIPAL_COLUMNS}`,
+          [principalId, displayName],
+        );
+        if (admitted.rowCount === 0) {
+          throw new ConflictError("This identity is already bound to a principal", { principalId });
+        }
+        await this.audit(client, actorId, "principal.admitted", principalId, { issuer, kind: "service" });
+        return toPrincipal(admitted.rows[0] as Row);
       }
       const id = randomUUID();
       const created = await client.query(

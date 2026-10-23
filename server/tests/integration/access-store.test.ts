@@ -236,6 +236,19 @@ describe("principals", () => {
     await expect(store.admitService(ISSUER, "admin", "Taken", admin.id)).rejects.toBeInstanceOf(ConflictError);
   });
 
+  it("admits a service whose token called first while its user holds no role", async () => {
+    const admin = await store.signIn(ISSUER, "admin", profile("admin"), true);
+    const early = await store.signIn(ISSUER, "svc", profile("svc"), false);
+    const service = await store.admitService(ISSUER, "svc", "Nightly import", admin.id);
+    expect(service).toMatchObject({ id: early.id, kind: "service", displayName: "Nightly import" });
+    expect((await auditActions()).at(-1)).toBe("principal.admitted");
+    // A user holding a role is someone's account, not a service to admit.
+    const user = await store.signIn(ISSUER, "u", profile("u"), false);
+    await store.assign({ principalId: user.id, role: "ontology_creator", ontologyId: null, lensId: null }, admin.id);
+    await expect(store.admitService(ISSUER, "u", "Taken", admin.id)).rejects.toBeInstanceOf(ConflictError);
+    expect((await store.principal(user.id))?.kind).toBe("user");
+  });
+
   it("searches by name, email and username, case-insensitively, with literal wildcards", async () => {
     await store.signIn(ISSUER, "1", { displayName: "Ada Lovelace", email: "ada@x.test", username: "ada" }, false);
     await store.signIn(ISSUER, "2", { displayName: "Bob", email: "bob_100%@x.test", username: "bob" }, false);

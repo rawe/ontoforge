@@ -159,7 +159,8 @@ export async function setUserStatus(
   return userView(updated);
 }
 
-/** Admits a service principal of the configured issuer before its first call. */
+/** Admits a service principal of the configured issuer: before its first
+ * call, or after it, while that call's role-less user holds no role. */
 export async function admitService(
   store: AccessStore,
   caller: Caller,

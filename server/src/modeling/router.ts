@@ -15,7 +15,9 @@ import { Readable } from "node:stream";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
-import { getModelingStore, getRuntimeStore } from "../core/ports.js";
+import { lensFilter } from "../access/authorize.js";
+import { accessOf } from "../auth/plugin.js";
+import { getModelingStore, getOntologyRegistry, getRuntimeStore } from "../core/ports.js";
 import { navigatorModelingRouter } from "./navigatorRouter.js";
 import { retrieverModelingRouter } from "./retrieverRouter.js";
 import {
@@ -117,7 +119,15 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         response: { 200: z.array(LensResponse) },
       },
     },
-    async (request) => service.listLenses(await getModelingStore(request.params.ontologyKey)),
+    async (request) => {
+      const lenses = await service.listLenses(await getModelingStore(request.params.ontologyKey));
+      // With authentication on: the lenses the caller holds a role on, every one for administrators.
+      const access = await accessOf(request);
+      if (access.kind === "trusted") return lenses;
+      const ontology = await getOntologyRegistry().getOntology(request.params.ontologyKey);
+      const visible = lensFilter(access, ontology?.ontologyId as string);
+      return lenses.filter((lens) => visible(lens.lensId));
+    },
   );
 
   app.get(
@@ -162,12 +172,18 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         params: LensIdParams,
       },
     },
-    async (request) =>
-      service.deleteLens(
+    async (request) => {
+      const result = await service.deleteLens(
         request.params.lensId,
         await getModelingStore(request.params.ontologyKey),
         await getRuntimeStore(request.params.ontologyKey),
-      ),
+      );
+      // Its assignments go too, best effort: a leftover is inert, ids are never reused.
+      await request.server.auth?.access.forgetLens(request.params.lensId).catch((error: unknown) => {
+        console.error(`Removing the assignments of deleted lens '${request.params.lensId}' failed:`, error);
+      });
+      return result;
+    },
   );
 
   // --- Scope Management ---

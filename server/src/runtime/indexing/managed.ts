@@ -1,8 +1,11 @@
 /**
  * Managed search indices: per entity type a default index over its own
  * string properties, per document property a passage index
- * (`deriveManagedIndices`). They follow the schema silently — the modeling
- * service syncs them after every schema change, the worker at start:
+ * (`deriveManagedIndices`). They follow the schema silently — their
+ * definitions change in the same design change as the schema
+ * (`syncManagedDefinitions`), and the generations follow after its commit
+ * (`afterDesignChange`); the worker syncs both at start
+ * (`syncManagedSearchIndices`):
  *
  * - a derived index without a row gets one, and is included in every
  *   scoped lens that exposes its root type (a passage index: its
@@ -25,7 +28,7 @@
 import { randomUUID } from "node:crypto";
 
 import { ConflictError } from "../../core/exceptions.js";
-import type { SearchIndexRecord, SearchIndexStore } from "../../core/ports.js";
+import { getModelingStore, type SearchIndexRecord, type SearchIndexStore } from "../../core/ports.js";
 import {
   definitionsEqual,
   deriveManagedIndices,
@@ -33,7 +36,7 @@ import {
   type SearchIndexKind,
 } from "../../core/searchIndex.js";
 import { disabledDefaultsOf, disabledIndexKeys } from "../../core/searchPipeline.js";
-import { invalidateSearchContext, loadSearchContextUncached } from "../schemaCache.js";
+import { loadSearchContextUncached } from "../schemaCache.js";
 import { reconcileSearchGenerations, refreshSearchIndex } from "./generations.js";
 
 /** What one sync changed, by index key. */
@@ -41,71 +44,122 @@ export interface ManagedSync {
   created: string[];
   updated: string[];
   deleted: string[];
-  refreshed: string[];
 }
 
-/**
- * Bring the managed index rows of an ontology in step with its schema,
- * reconcile every index's generations, and refresh the indices that read
- * any of `refreshTypes` (entity or relation type keys whose display
- * names or name property changed).
- */
-export async function syncManagedSearchIndices(
-  store: SearchIndexStore,
-  options: { refreshTypes?: readonly string[] } = {},
-): Promise<ManagedSync> {
-  const ontologyKey = store.ontologyKey;
+/** What bringing the managed rows in step with the schema would do. */
+interface ManagedPlan {
+  create: { kind: SearchIndexKind; definition: SearchIndexDefinition }[];
+  update: SearchIndexDefinition[];
+  delete: string[];
+  /** The switched-off keys to keep, when some name an index that is gone. */
+  disabled: string[] | null;
+}
+
+/** Plan the managed rows against the schema, as read now through `store`. */
+async function planManaged(store: SearchIndexStore): Promise<ManagedPlan> {
   const { schema, indices } = await loadSearchContextUncached(store);
+  const settings = await store.getSearchSettings();
   const existing = new Map(
     indices.filter((index) => index.kind !== "custom").map((index) => [index.key, index] as const),
   );
-  const result: ManagedSync = { created: [], updated: [], deleted: [], refreshed: [] };
-
+  const plan: ManagedPlan = { create: [], update: [], delete: [], disabled: null };
   const derived = deriveManagedIndices(schema);
   for (const { kind, definition } of derived) {
     const row = existing.get(definition.key);
     existing.delete(definition.key);
     if (row === undefined) {
-      if ((await createUnlessTaken(store, kind, definition)) !== null) {
-        await store.includeIndexInScopedLenses(definition.key);
-        result.created.push(definition.key);
-      }
+      plan.create.push({ kind, definition });
     } else if (!definitionsEqual(row.definition, definition)) {
-      await store.updateIndexDefinition(definition.key, definition);
-      result.updated.push(definition.key);
+      plan.update.push(definition);
     }
   }
-  for (const key of existing.keys()) {
+  plan.delete = [...existing.keys()];
+  // Switches of indices that no longer exist go with them.
+  const managedKeys = new Set(derived.map((m) => m.definition.key));
+  const disabled = [...disabledIndexKeys(settings)];
+  if (disabled.some((key) => !managedKeys.has(key))) {
+    plan.disabled = disabled.filter((key) => managedKeys.has(key));
+  }
+  return plan;
+}
+
+function isEmpty(plan: ManagedPlan): boolean {
+  return plan.create.length + plan.update.length + plan.delete.length === 0 && plan.disabled === null;
+}
+
+/**
+ * Bring the managed index rows of an ontology in step with its schema:
+ * the part of a schema change that belongs to its design change — `store`
+ * is that change's search-index store. The generations follow after the
+ * commit (`afterDesignChange`).
+ */
+export async function syncManagedDefinitions(store: SearchIndexStore): Promise<ManagedSync> {
+  const plan = await planManaged(store);
+  const result: ManagedSync = { created: [], updated: [], deleted: [] };
+  for (const { kind, definition } of plan.create) {
+    if ((await createUnlessTaken(store, kind, definition)) !== null) {
+      await store.includeIndexInScopedLenses(definition.key);
+      result.created.push(definition.key);
+    }
+  }
+  for (const definition of plan.update) {
+    await store.updateIndexDefinition(definition.key, definition);
+    result.updated.push(definition.key);
+  }
+  for (const key of plan.delete) {
     await store.deleteIndex(key);
     result.deleted.push(key);
   }
-
-  // Switches of indices that no longer exist go with them.
-  const settings = await store.getSearchSettings();
-  const managedKeys = new Set(derived.map((m) => m.definition.key));
-  const disabled = disabledIndexKeys(settings);
-  if ([...disabled].some((key) => !managedKeys.has(key))) {
-    await store.setSearchSettings({
-      ...settings,
-      disabledDefaults: disabledDefaultsOf([...disabled].filter((key) => managedKeys.has(key))),
-    });
+  if (plan.disabled !== null) {
+    const settings = await store.getSearchSettings();
+    await store.setSearchSettings({ ...settings, disabledDefaults: disabledDefaultsOf(plan.disabled) });
   }
+  return result;
+}
 
-  // An entity type deletion takes its indices by cascade; their tables
-  // are collected here.
+/**
+ * After a design change committed: collect the tables of the generations
+ * it removed (an entity type deletion takes its indices by cascade),
+ * reconcile every index's generations, and refresh the indices that read
+ * any of `refreshTypes` (entity or relation type keys whose display names
+ * or name property changed). Returns the keys refreshed.
+ */
+export async function afterDesignChange(
+  store: SearchIndexStore,
+  refreshTypes: readonly string[] = [],
+): Promise<string[]> {
+  const ontologyKey = store.ontologyKey;
   await store.sweepGenerations();
-  invalidateSearchContext(ontologyKey);
   await reconcileSearchGenerations(ontologyKey);
 
-  const refreshTypes = new Set(options.refreshTypes ?? []);
-  if (refreshTypes.size > 0) {
+  const refreshed: string[] = [];
+  const types = new Set(refreshTypes);
+  if (types.size > 0) {
     for (const index of await store.listIndices()) {
-      if (readsType(index.definition, refreshTypes)) {
+      if (readsType(index.definition, types)) {
         await refreshSearchIndex(ontologyKey, index.key);
-        result.refreshed.push(index.key);
+        refreshed.push(index.key);
       }
     }
   }
+  return refreshed;
+}
+
+/**
+ * The worker's sync at start: bring the managed rows in step with the
+ * schema — as a design change of its own, only when they differ, so
+ * processes starting together change them once — then sweep and
+ * reconcile (`afterDesignChange`).
+ */
+export async function syncManagedSearchIndices(store: SearchIndexStore): Promise<ManagedSync> {
+  let result: ManagedSync = { created: [], updated: [], deleted: [] };
+  if (!isEmpty(await planManaged(store))) {
+    const modeling = await getModelingStore(store.ontologyKey);
+    // Planned again under the exclusive hold: another process may have
+    // synced meanwhile.
+    result = await modeling.changeDesign((change) => syncManagedDefinitions(change.searchIndices()));
+  }
+  await afterDesignChange(store);
   return result;
 }
 

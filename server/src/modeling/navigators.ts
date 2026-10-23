@@ -124,25 +124,28 @@ export async function saveNavigator(
   if (config === null) {
     throw new ValidationError(`Invalid navigator configuration: ${errors.join("; ")}`, { errors });
   }
-  const [saved, created] = await store.navigators().saveNavigator(
-    lensId,
-    {
-      navigatorId: randomUUID(),
-      key,
-      name: parsed.name,
-      description: parsed.description,
-      configVersion: NAVIGATOR_CONFIG_VERSION,
-      config,
-    },
-    false,
-  );
+  const [saved, created] = await store.changeDesign((s) =>
+    s.navigators().saveNavigator(
+      lensId,
+      {
+        navigatorId: randomUUID(),
+        key,
+        name: parsed.name,
+        description: parsed.description,
+        configVersion: NAVIGATOR_CONFIG_VERSION,
+        config,
+      },
+      false,
+    ));
   return [toResponse(saved, lensKey, lens), created];
 }
 
 export async function deleteNavigator(lensKey: string, key: string, store: ModelingStore): Promise<void> {
-  const found = await store.getLensByKey(lensKey);
-  if (!found) throw new NotFoundError(`Lens '${lensKey}' not found`);
-  if (!(await store.navigators().deleteNavigator(found.lensId as string, key))) {
-    throw new NotFoundError(`Navigator '${key}' not found`);
-  }
+  await store.changeDesign(async (s) => {
+    const found = await s.getLensByKey(lensKey);
+    if (!found) throw new NotFoundError(`Lens '${lensKey}' not found`);
+    if (!(await s.navigators().deleteNavigator(found.lensId as string, key))) {
+      throw new NotFoundError(`Navigator '${key}' not found`);
+    }
+  });
 }

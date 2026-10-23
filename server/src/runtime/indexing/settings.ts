@@ -2,18 +2,17 @@
  * Search settings: the ontology's keyword language set and which managed
  * indices are switched off — one record per ontology, edited in modeling.
  *
- * Every change reconciles the generations: a new language set yields new
- * keyword generations for every index (no embedding calls), switching a
- * managed index off retires its generations, switching it on builds them
- * anew. The ready generations keep serving until their successors are
- * finished.
+ * A change is a design change; after its commit the caller reconciles
+ * the generations: a new language set yields new keyword generations for
+ * every index (no embedding calls), switching a managed index off retires
+ * its generations, switching it on builds them anew. The ready generations
+ * keep serving until their successors are finished.
  */
 
 import { ValidationError } from "../../core/exceptions.js";
 import type { KeywordLanguage, KeywordLanguageSet } from "../../core/keywordLanguage.js";
 import type { SearchIndexStore, SearchSettings } from "../../core/ports.js";
 import { disabledDefaultsOf, disabledIndexKeys } from "../../core/searchPipeline.js";
-import { reconcileSearchGenerations } from "./generations.js";
 
 /** The settings as the interfaces speak them. */
 export interface SearchSettingsView {
@@ -41,9 +40,10 @@ export async function readSearchSettings(store: SearchIndexStore): Promise<Searc
 }
 
 /**
- * Change the settings, then reconcile the generations. A switched-off key
- * that names no managed index fails validation (`disabledIndices.<i>`)
- * before anything is written. Returns the settings now in force.
+ * Change the settings; the caller reconciles the generations after the
+ * commit. A switched-off key that names no managed index fails validation
+ * (`disabledIndices.<i>`) before anything is written. Returns the settings
+ * now in force.
  */
 export async function updateSearchSettings(
   store: SearchIndexStore,
@@ -57,9 +57,7 @@ export async function updateSearchSettings(
         ? current.disabledDefaults
         : await managedSwitches(store, change.disabledIndices),
   };
-  const stored = await store.setSearchSettings(next);
-  await reconcileSearchGenerations(store.ontologyKey);
-  return viewOf(stored);
+  return viewOf(await store.setSearchSettings(next));
 }
 
 /** The stored form of switching exactly `keys` off; every key must name a

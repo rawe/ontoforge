@@ -4,7 +4,8 @@ import type { AccessAssignment, Assignment, AuthMe, Role } from '@/api/types'
  * What the signed-in user may do, read from its assignments (`GET /api/auth/me`).
  * Roles do not inherit: a Platform Administrator manages users but neither
  * designs nor reads data by itself. The server enforces every rule; the UI
- * only hides what would be refused. With authentication off everything is allowed.
+ * only hides what would be refused. With authentication off everything is allowed;
+ * while the auth state is unknown (loading or unreadable) nothing is.
  */
 export interface Access {
   /** Whether sign-in is on; false means today's app without any access UI. */
@@ -32,10 +33,13 @@ export const ALLOW_ALL: Access = {
   canWrite: () => true,
 }
 
-/** Access from the auth state; while it is unknown the server alone decides. */
+/**
+ * Access from the auth state. Only an answer saying authentication is off
+ * allows everything; an unknown state holds no role, like signed out.
+ */
 export function accessFrom(me: AuthMe | undefined): Access {
-  if (me === undefined || !me.authentication) return ALLOW_ALL
-  const assignments = me.user === null ? [] : me.assignments
+  if (me !== undefined && !me.authentication) return ALLOW_ALL
+  const assignments = me === undefined || me.user === null ? [] : me.assignments
   const has = (role: Role) => assignments.some((a) => a.role === role)
   const onLens = (o: string, l: string, roles: Role[]) =>
     assignments.some((a) => roles.includes(a.role) && a.ontologyKey === o && a.lensKey === l)

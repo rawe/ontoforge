@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
-import { LogIn, LogOut } from 'lucide-react'
+import { LogIn, LogOut, RotateCw } from 'lucide-react'
 import { loginUrl } from '@/api/auth'
 import { useAuthMe } from '@/api/hooks'
+import { ApiError } from '@/api/http'
 import type { User } from '@/api/types'
 import { useSignOut } from '@/components/auth/useSignOut'
 import { Logo } from '@/components/Logo'
@@ -70,15 +71,51 @@ function NoAccessScreen({ user }: { user: User }) {
   )
 }
 
+/** The auth state could not be read: nothing is shown as allowed until it can. */
+function UnavailableScreen({
+  error,
+  retrying,
+  onRetry,
+}: {
+  error: Error | null
+  retrying: boolean
+  onRetry: () => void
+}) {
+  return (
+    <AuthScreen>
+      <div className="space-y-1">
+        <h2 className="text-sm font-medium">OntoForge cannot check your sign-in right now</h2>
+        {error instanceof ApiError && (
+          <p className="text-[13px] text-muted-foreground">{error.message}</p>
+        )}
+      </div>
+      <Button variant="outline" disabled={retrying} onClick={onRetry}>
+        <RotateCw className="size-4" /> Retry
+      </Button>
+    </AuthScreen>
+  )
+}
+
 /**
- * Decides what the app shows from `GET /api/auth/me`: with authentication off
- * (or the state unreadable) the app as it is; signed out the sign-in screen;
- * signed in without any role a "No access assigned" screen; else the app.
+ * Decides what the app shows from `GET /api/auth/me`: nothing while loading;
+ * an error screen with Retry when it cannot be read; with authentication off
+ * the app as it is; signed out the sign-in screen; signed in without any role
+ * a "No access assigned" screen; else the app.
  */
 export function AuthGate({ children }: { children: ReactNode }) {
   const me = useAuthMe()
   if (me.isPending) return null
-  if (me.data === undefined || !me.data.authentication) return children
+  // A failed refetch keeps the last answer; only a first read that failed has none.
+  if (me.data === undefined) {
+    return (
+      <UnavailableScreen
+        error={me.error}
+        retrying={me.isFetching}
+        onRetry={() => void me.refetch()}
+      />
+    )
+  }
+  if (!me.data.authentication) return children
   if (me.data.user === null) return <SignInScreen />
   if (me.data.assignments.length === 0) return <NoAccessScreen user={me.data.user} />
   return children

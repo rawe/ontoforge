@@ -28,14 +28,24 @@ function assignment(role: Role, ontologyKey: string | null = null, lensKey: stri
 
 const signedIn = (...assignments: Assignment[]): AuthMe => ({ authentication: true, user, assignments })
 
-test('authentication off, or not yet known, allows everything and shows no access UI', () => {
-  for (const access of [accessFrom({ authentication: false }), accessFrom(undefined)]) {
-    assert.equal(access.authentication, false)
-    assert.equal(access.canDesign('any'), true)
-    assert.equal(access.canWrite('any', 'lens'), true)
-    assert.equal(access.canCreateOntology, true)
-    assert.equal(access.canManageUsers, false)
-  }
+test('authentication off allows everything and shows no access UI', () => {
+  const access = accessFrom({ authentication: false })
+  assert.equal(access.authentication, false)
+  assert.equal(access.canDesign('any'), true)
+  assert.equal(access.canWrite('any', 'lens'), true)
+  assert.equal(access.canCreateOntology, true)
+  assert.equal(access.canManageUsers, false)
+})
+
+test('an unknown auth state (loading or unreadable) allows nothing', () => {
+  const access = accessFrom(undefined)
+  assert.equal(access.authentication, true)
+  assert.equal(access.isPlatformAdmin, false)
+  assert.equal(access.canDesign('any'), false)
+  assert.equal(access.canRead('any', 'lens'), false)
+  assert.equal(access.canWrite('any', 'lens'), false)
+  assert.equal(access.canCreateOntology, false)
+  assert.equal(access.canManageUsers, false)
 })
 
 test('a Writer reads and writes its lens only; a Reader only reads', () => {

@@ -67,7 +67,7 @@ function UserPicker({ value, onChange }: { value: User | null; onChange: (user: 
 
   return (
     <div className="relative">
-      <Search className="pointer-events-none absolute left-2.5 top-[1.125rem] size-3.5 -translate-y-1/2 text-muted-foreground" />
+      <Search className="pointer-events-none absolute left-2.5 top-4 size-3.5 -translate-y-1/2 text-muted-foreground" />
       <Input
         id="access-user"
         value={search}
@@ -147,7 +147,7 @@ function AddAccessForm({ ontologyKey }: { ontologyKey: string }) {
       <div className="grid gap-1.5">
         <Label className="text-[12px]">Lens</Label>
         <Select value={lensKey} onValueChange={setLensKey}>
-          <SelectTrigger size="sm" className="w-full text-[13px]" aria-label="Lens">
+          <SelectTrigger className="w-full text-[13px]" aria-label="Lens">
             <SelectValue placeholder="Lens" />
           </SelectTrigger>
           <SelectContent>
@@ -162,7 +162,7 @@ function AddAccessForm({ ontologyKey }: { ontologyKey: string }) {
       <div className="grid gap-1.5">
         <Label className="text-[12px]">Role</Label>
         <Select value={role} onValueChange={(value) => setRole(value as Role)}>
-          <SelectTrigger size="sm" className="w-full text-[13px]" aria-label="Role">
+          <SelectTrigger className="w-full text-[13px]" aria-label="Role">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -171,7 +171,7 @@ function AddAccessForm({ ontologyKey }: { ontologyKey: string }) {
           </SelectContent>
         </Select>
       </div>
-      <Button type="submit" size="sm" disabled={!ready || add.isPending} className="md:mt-[1.375rem]">
+      <Button type="submit" disabled={!ready || add.isPending} className="md:mt-[1.125rem]">
         <Plus className="size-3.5" /> Add
       </Button>
     </form>

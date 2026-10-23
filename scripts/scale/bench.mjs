@@ -34,7 +34,7 @@ const LIMITATIONS = [
   'Load generator, both backends, PostgreSQL, Valkey and nginx share one laptop CPU and one Docker VM: absolute numbers say nothing about production capacity, and scaling cannot look linear.',
   'One PostgreSQL serves both backends; it is the shared bottleneck by design.',
   'Backends are capped at 1 CPU each (compose.yml), so a single backend is CPU-bound early; the gain from a second one is the point, not the absolute rate.',
-  'macOS-to-VM port forwarding adds latency to every request; the LB adds one more hop and a new upstream connection per request (compare lb-a with lb-ab, not direct-a with lb-ab).',
+  'macOS-to-VM port forwarding adds latency to every request; the LB adds one more hop through its keepalive pool of upstream connections (compare lb-a with lb-ab, not direct-a with lb-ab).',
   'The fake model answers instantly: chat latency is the server-side turn cost (thread store, agent setup), not model latency.',
   'Both backends run their search worker throughout; creates in either run enqueue indexing work that any backend may build.',
 ];

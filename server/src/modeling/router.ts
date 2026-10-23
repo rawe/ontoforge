@@ -12,10 +12,11 @@
 
 import { Readable } from "node:stream";
 
+import type { FastifyRequest } from "fastify";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
-import { lensFilter } from "../access/authorize.js";
+import { isOntologyAdmin, lensFilter } from "../access/authorize.js";
 import { accessOf, actorOf } from "../auth/plugin.js";
 import { getModelingStore, getOntologyRegistry, getRuntimeStore } from "../core/ports.js";
 import { navigatorModelingRouter } from "./navigatorRouter.js";
@@ -86,6 +87,18 @@ const CascadeQuery = z.object({
     .default("false")
     .transform((value) => value === "true" || value === "1"),
 });
+
+/**
+ * Whether the request reads a lens's inclusions as the runtime serves them:
+ * with authentication on, a Reader or Writer of the lens who does not
+ * administer the ontology sees no more of the design than its lens shows.
+ */
+async function readsAsServed(request: FastifyRequest, ontologyKey: string): Promise<boolean> {
+  const access = await accessOf(request);
+  if (access.kind !== "caller") return false;
+  const ontology = await getOntologyRegistry().getOntology(ontologyKey);
+  return ontology === null || !isOntologyAdmin(access.caller, ontology.ontologyId as string);
+}
 
 /** Routes mounted at `/api/ontologies/:ontologyKey/model`. */
 export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
@@ -214,11 +227,14 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         response: { 200: z.array(IncludeTypeResponse) },
       },
     },
-    async (request) =>
-      service.listIncludesEntityTypes(
-        request.params.lensId,
-        await getModelingStore(request.params.ontologyKey),
-      ),
+    async (request) => {
+      const { lensId, ontologyKey } = request.params;
+      const store = await getModelingStore(ontologyKey);
+      if (await readsAsServed(request, ontologyKey)) {
+        return service.listServedIncludes(lensId, "EntityType", store, await getRuntimeStore(ontologyKey));
+      }
+      return service.listIncludesEntityTypes(lensId, store);
+    },
   );
 
   app.put(
@@ -287,11 +303,14 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         response: { 200: z.array(IncludeTypeResponse) },
       },
     },
-    async (request) =>
-      service.listIncludesRelationTypes(
-        request.params.lensId,
-        await getModelingStore(request.params.ontologyKey),
-      ),
+    async (request) => {
+      const { lensId, ontologyKey } = request.params;
+      const store = await getModelingStore(ontologyKey);
+      if (await readsAsServed(request, ontologyKey)) {
+        return service.listServedIncludes(lensId, "RelationType", store, await getRuntimeStore(ontologyKey));
+      }
+      return service.listIncludesRelationTypes(lensId, store);
+    },
   );
 
   app.put(
@@ -363,11 +382,14 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         response: { 200: z.array(IncludeSearchIndex) },
       },
     },
-    async (request) =>
-      searchIndices.listLensIndexInclusions(
-        request.params.lensId,
-        await getModelingStore(request.params.ontologyKey),
-      ),
+    async (request) => {
+      const { lensId, ontologyKey } = request.params;
+      const store = await getModelingStore(ontologyKey);
+      if (await readsAsServed(request, ontologyKey)) {
+        return searchIndices.listServedLensIndexInclusions(lensId, store, await getRuntimeStore(ontologyKey));
+      }
+      return searchIndices.listLensIndexInclusions(lensId, store);
+    },
   );
 
   app.delete(

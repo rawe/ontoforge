@@ -28,6 +28,7 @@ import {
 } from "../core/exceptions.js";
 import type {
   ModelingStore,
+  RuntimeStore,
   SearchIndexRecord,
   SearchIndexStore,
   SearchQueueError,
@@ -61,7 +62,8 @@ import {
 } from "../runtime/indexing/generations.js";
 import { getSearchIndexStatus, listSearchIndexStatuses } from "../runtime/indexing/status.js";
 import { searchEntryRates } from "../runtime/indexing/worker.js";
-import { loadSearchContextUncached } from "../runtime/schemaCache.js";
+import { loadSchema, loadSearchContextUncached } from "../runtime/schemaCache.js";
+import { searchableIndices } from "../runtime/search/indexSearch.js";
 import type {
   ExportSearchIndicesInput,
   IncludeSearchIndexBody,
@@ -422,6 +424,24 @@ export async function listLensIndexInclusions(
   const indices = requireSearchIndices(store);
   await existingLens(store, lensId);
   return (await indices.listLensIndexInclusions(lensId)).map((key) => ({ key }));
+}
+
+/** The indices a lens includes and its runtime searches — what a Reader or
+ * Writer of the lens sees of its design. */
+export async function listServedLensIndexInclusions(
+  lensId: string,
+  store: ModelingStore,
+  runtime: RuntimeStore,
+): Promise<IncludeSearchIndexBody[]> {
+  const lens = await store.getLens(lensId);
+  if (lens === null) {
+    throw new NotFoundError(`Lens '${lensId}' not found`);
+  }
+  const loaded = await loadSchema(lens.key as string, runtime);
+  const searchable = new Set((await searchableIndices(loaded, runtime.searchIndices())).map((index) => index.key));
+  return (await requireSearchIndices(store).listLensIndexInclusions(lensId))
+    .filter((key) => searchable.has(key))
+    .map((key) => ({ key }));
 }
 
 /**

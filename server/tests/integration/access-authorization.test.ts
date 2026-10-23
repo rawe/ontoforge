@@ -187,6 +187,32 @@ describe("authorization with authentication on", () => {
     expect((await as("alice", "PUT", `${fair}/runtime/rulesets/r1`, { writeAccess: "none" })).status).toBe(403);
   });
 
+  it("a Reader reads its lens's inclusions as its runtime serves them; the administrator as designed", async () => {
+    const model = `${fair}/model`;
+    for (const key of ["a", "b"]) {
+      expect((await as("creator", "POST", `${model}/entity-types`, { key, displayName: key })).status).toBe(201);
+    }
+    const relation = { key: "a_to_b", displayName: "a to b", sourceEntityTypeKey: "a", targetEntityTypeKey: "b" };
+    expect((await as("creator", "POST", `${model}/relation-types`, relation)).status).toBe(201);
+    const lensId = ((await as("creator", "GET", `${model}/lenses`)).body as Json[]).find((l) => l.key === "visitor")!.lensId;
+    const includes = `${model}/lenses/${lensId}/includes`;
+    for (const key of ["a", "b"]) expect((await as("creator", "POST", `${includes}/entity-types`, { key })).status).toBe(201);
+    expect((await as("creator", "POST", `${includes}/relation-types`, { key: "a_to_b" })).status).toBe(201);
+    expect((await as("creator", "POST", `${includes}/search-indices`, { key: "b~default" })).status).toBe(201);
+    // Hiding b leaves the relation type into it and b's index behind, unserved.
+    const types = (await as("creator", "GET", `${model}/entity-types`)).body as Json[];
+    const b = types.find((t) => t.key === "b")!.entityTypeId;
+    expect((await as("creator", "DELETE", `${includes}/entity-types/${b}`)).status).toBe(204);
+
+    const keys = async (subject: string, kind: string) =>
+      ((await as(subject, "GET", `${includes}/${kind}`)).body as Json[]).map((row) => row.key);
+    expect(await keys("alice", "entity-types")).toEqual(["a"]);
+    expect(await keys("alice", "relation-types")).toEqual([]);
+    expect(await keys("alice", "search-indices")).toEqual([]);
+    expect(await keys("creator", "relation-types")).toEqual(["a_to_b"]);
+    expect(await keys("creator", "search-indices")).toEqual(["b~default"]);
+  });
+
   it("an Ontology Administrator gets no runtime data without a lens role; a Writer writes", async () => {
     expect((await as("creator", "GET", `${visitor}/schema`)).status).toBe(403);
     expect((await as("admin", "GET", `${visitor}/schema`)).status).toBe(403);

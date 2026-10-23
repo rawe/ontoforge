@@ -62,7 +62,7 @@ import {
 import { portableNavigator } from "./navigators.js";
 import { portable as portableRetriever } from "./retrievers.js";
 import { readSearchSettings, updateSearchSettings as changeSearchSettings } from "../runtime/indexing/settings.js";
-import { loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
+import { loadSchema, loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
   ExportPayload,
@@ -844,6 +844,30 @@ export async function listIncludesEntityTypes(
   await resolveLens(store, lensId);
   const rows = await store.listIncludesTypes(lensId, "EntityType");
   return rows.map(toIncludeResponse);
+}
+
+/**
+ * A lens's type inclusions as its runtime serves them — what a Reader or
+ * Writer of the lens sees of its design: an inclusion whose key no longer
+ * resolves, a relation type into an entity type the lens hides and a
+ * property that no longer exists are left out, as the runtime's scope
+ * filtering leaves them out (`runtime/schemaCache.ts`).
+ */
+export async function listServedIncludes(
+  lensId: string,
+  typeKind: TypeKind,
+  store: ModelingStore,
+  runtime: RuntimeStore,
+): Promise<IncludeTypeResponseBody[]> {
+  const lens = await resolveLens(store, lensId);
+  const { scoped } = await loadSchema(lens.key as string, runtime);
+  const served = typeKind === "EntityType" ? scoped.entityTypes : scoped.relationTypes;
+  return (await store.listIncludesTypes(lensId, typeKind)).flatMap((row) => {
+    const type = served[row.key as string];
+    if (type === undefined) return [];
+    const { key, properties } = toIncludeResponse(row);
+    return [{ key, properties: properties === null ? null : properties.filter((p) => p in type.properties) }];
+  });
 }
 
 export async function updateIncludesEntityType(

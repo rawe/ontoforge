@@ -19,10 +19,11 @@ vi.mock("../../src/core/ports.js", () => ({
   getRuntimeStore: async () => ({}),
 }));
 
-// A store with search indices syncs them after an import; the sync itself
+// A store with search indices syncs them with an import; the sync itself
 // is the pipeline's business, covered by the PostgreSQL tier.
 vi.mock("../../src/runtime/indexing/managed.js", () => ({
-  syncManagedSearchIndices: vi.fn(async () => undefined),
+  syncManagedDefinitions: vi.fn(async () => ({ created: [], updated: [], deleted: [] })),
+  afterDesignChange: vi.fn(async () => []),
 }));
 
 const FULL_SCHEMA = {
@@ -1579,5 +1580,42 @@ describe("import side effects with a provider", () => {
     // The shared saved-query index is ensured once at the end.
     expect(holder.store.ensureSavedQueryVectorIndex).toHaveBeenCalledTimes(1);
     expect(holder.store.ensureSavedQueryVectorIndex).toHaveBeenCalledWith(8);
+  });
+
+  it("a failing provider fails the import before its design change: nothing is written", async () => {
+    setEmbeddingProvider({
+      dimensions: 8,
+      embed: async () => {
+        throw new Error("provider down");
+      },
+    });
+    const res = await postImport({
+      entityTypes: [
+        {
+          key: "person",
+          displayName: "Person",
+          nameProperty: "name",
+          properties: [{ key: "name", displayName: "Name", dataType: "string", required: true }],
+        },
+      ],
+      relationTypes: [],
+      lenses: [
+        {
+          key: "imported",
+          name: "Imported",
+          savedQueries: [
+            {
+              key: "find-people",
+              name: "Find People",
+              description: "Find people by name",
+              steps: [{ name: "main", type: "oql", oql: "MATCH (p:person) RETURN p" }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(res.statusCode).toBe(500);
+    expect(holder.store.changeDesign).not.toHaveBeenCalled();
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
   });
 });

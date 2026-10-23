@@ -1,0 +1,139 @@
+# Shared-state harness: two backends behind a round-robin load balancer, one
+# PostgreSQL, one Valkey, and a deterministic fake model server. Its own Compose
+# project, so nothing here reaches the dev database of the root compose file.
+#
+#   ./dev.sh scale up | down | reset | logs | test | bench | status
+#
+# The backends read their whole configuration from one env file
+# (env/scale.env unless SCALE_ENV_FILE names another preset); nothing below sets
+# a server variable.
+name: ontoforge-scale
+
+x-backend: &backend
+  build:
+    context: ../../server
+  image: ontoforge-scale/server:dev
+  env_file:
+    - path: ${SCALE_ENV_FILE:-../../env/scale.env}
+      required: true
+  cpus: 1.0
+  mem_limit: 768m
+  stop_grace_period: 40s
+  # The slim image has no curl. /readyz once the server has it, else any answer
+  # from the server info route.
+  healthcheck:
+    test:
+      - CMD
+      - node
+      - -e
+      - >-
+        const u='http://localhost:8000';
+        fetch(u+'/readyz').then(r=>r.status===404?fetch(u+'/api/server/info'):r)
+        .then(r=>process.exit(r.ok?0:1),()=>process.exit(1))
+    interval: 3s
+    timeout: 3s
+    retries: 3
+    start_period: 60s
+    start_interval: 1s
+  depends_on:
+    postgres:
+      condition: service_healthy
+    valkey:
+      condition: service_healthy
+    fake-ollama:
+      condition: service_started
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg18-trixie
+    ports:
+      - "25432:5432"
+    environment:
+      POSTGRES_PASSWORD: ontoforge_dev
+      POSTGRES_DB: ontoforge
+    volumes:
+      - pg:/var/lib/postgresql
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ontoforge"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  # Shared conversation store: nothing persisted, never evicts (a full store
+  # refuses writes rather than dropping conversations).
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    command:
+      - valkey-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - noeviction
+    ports:
+      - "26379:6379"
+    # Headroom above maxmemory, as deploy/kubernetes/valkey.yaml.
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  backend-a:
+    <<: *backend
+    ports:
+      - "18001:8000"
+
+  backend-b:
+    <<: *backend
+    ports:
+      - "18002:8000"
+
+  # Deterministic stand-in for Ollama's chat and embed endpoints. Runs on the
+  # server image (it has Node), so the harness pulls no extra runtime.
+  fake-ollama:
+    image: ontoforge-scale/server:dev
+    build:
+      context: ../../server
+    command: ["node", "/scale/fake-ollama.mjs"]
+    volumes:
+      - ../../scripts/scale:/scale:ro
+    ports:
+      - "18080:11434"
+    mem_limit: 128m
+
+  lb:
+    image: nginx:1.28-alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "18000:80"
+    mem_limit: 64m
+    depends_on:
+      backend-a:
+        condition: service_healthy
+      backend-b:
+        condition: service_healthy
+
+  frontend:
+    profiles: ["ui"]
+    build:
+      context: ../../frontend
+    image: ontoforge-scale/frontend:dev
+    environment:
+      # Where the frontend's own nginx proxies /api and /mcp (not server configuration).
+      BACKEND_URL: http://lb:80
+    ports:
+      - "13000:80"
+    mem_limit: 64m
+    depends_on:
+      - lb
+
+volumes:
+  pg:

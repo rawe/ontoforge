@@ -134,6 +134,7 @@ describe("PostgreSQL search-index storage", () => {
     return (await store.createIndex(randomUUID(), "custom", definition(key)))!;
   }
 
+  // Forced: these generations share one definition hash on purpose.
   async function semantic(index: SearchIndexRecord, dimensions = 3): Promise<string> {
     const generationId = randomUUID();
     await store.createGeneration({
@@ -144,7 +145,7 @@ describe("PostgreSQL search-index storage", () => {
       modelId: "fake:model:3",
       dimensions,
       languages: null,
-    });
+    }, { design: await store.designRevision(), force: true });
     return generationId;
   }
 
@@ -158,7 +159,7 @@ describe("PostgreSQL search-index storage", () => {
       modelId: null,
       dimensions: null,
       languages: ["german", "english"],
-    });
+    }, { design: await store.designRevision(), force: true });
     return generationId;
   }
 

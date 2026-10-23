@@ -9,6 +9,7 @@ export interface Settings {
   DB_USER: string;
   DB_PASSWORD: string;
   PORT: number;
+  SHUTDOWN_DRAIN_SECONDS: number;
 
   EMBEDDING_PROVIDER: string | null;
   EMBEDDING_MODEL: string;
@@ -38,6 +39,9 @@ export interface Settings {
   DECISION_API_KEY: string | null;
 
   PUBLIC_URL: string | null;
+
+  SHARED_STATE: "memory" | "valkey";
+  VALKEY_URL: string | null;
 }
 
 function str(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
@@ -86,6 +90,36 @@ function optOneOf(
     );
   }
   return value;
+}
+
+/**
+ * Where shared state such as assistant conversations lives: `memory` serves
+ * one process only, `valkey` is shared by every server naming the same
+ * `VALKEY_URL`. A URL without the switch fails the boot — it would otherwise
+ * quietly run each server on its own memory.
+ */
+function sharedState(env: NodeJS.ProcessEnv): Pick<Settings, "SHARED_STATE" | "VALKEY_URL"> {
+  const store = optOneOf(env, "SHARED_STATE", ["memory", "valkey"]) ?? "memory";
+  const url = optStr(env, "VALKEY_URL");
+  if (store === "memory") {
+    if (url !== null) {
+      throw new Error("Environment variable VALKEY_URL is set but SHARED_STATE is not 'valkey'");
+    }
+    return { SHARED_STATE: "memory", VALKEY_URL: null };
+  }
+  if (url === null) {
+    throw new Error("Environment variable VALKEY_URL is required when SHARED_STATE is 'valkey'");
+  }
+  let protocol: string | null = null;
+  try {
+    protocol = new URL(url).protocol;
+  } catch {
+    // Reported below.
+  }
+  if (protocol !== "redis:" && protocol !== "rediss:") {
+    throw new Error("Environment variable VALKEY_URL is not a redis:// or rediss:// URL");
+  }
+  return { SHARED_STATE: "valkey", VALKEY_URL: url };
 }
 
 /** Where a provider is reached when no base URL is configured. */
@@ -153,6 +187,9 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     DB_USER: str(env, "DB_USER", "postgres"),
     DB_PASSWORD: str(env, "DB_PASSWORD", "ontoforge_dev"),
     PORT: int(env, "PORT", 8000),
+    // How long a stopping server lets running requests and chat streams
+    // finish before it cuts them.
+    SHUTDOWN_DRAIN_SECONDS: positiveInt(env, "SHUTDOWN_DRAIN_SECONDS", 20),
 
     EMBEDDING_PROVIDER: embeddingProvider,
     EMBEDDING_MODEL: str(env, "EMBEDDING_MODEL", "bge-m3"),
@@ -189,6 +226,8 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     DECISION_API_KEY: optStr(env, "DECISION_API_KEY") ?? optStr(env, "TYPESAFE_API_KEY"),
 
     PUBLIC_URL: optStr(env, "PUBLIC_URL"),
+
+    ...sharedState(env),
   };
 }
 

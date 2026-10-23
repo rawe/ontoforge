@@ -202,6 +202,15 @@ does not interpret them. A saved query also accepts an embedding of its descript
 the key of its owning lens alongside it, so that a search over descriptions can be
 narrowed to one lens without a join.
 
+**Design changes.** The modeling store runs a unit of work as one design change: one
+transaction that holds the ontology's design exclusively — data writes and other design
+changes wait for it — and advances the ontology's [design revision](#the-design-revision),
+committing when the work returns and rolling back, the revision included, when it throws.
+Every operation of the store handed to the work, and of the search-index and navigator
+stores it hands out, runs on that transaction; the generation lifecycle, which needs
+connections of its own, fails there as a programming error. Work started on a store
+already inside a design change runs within it.
+
 **Search-data maintenance.** Backing the rebuild operation: list every saved query with
 enough identity to re-embed it; set the embedding on one saved query. Plus the vector
 index operations under obligations, below.
@@ -213,9 +222,11 @@ modeling side. The runtime store exposes three operations, each keyed by lens ke
 its binding. One returns the full schema together with the lens and its inclusion rows,
 one returns the lens's agent configurations, and one returns the lens's saved queries. The
 caller uses the inclusion rows to compute the scoped schema. The first also carries the
-keys of the search indices the lens includes, in key order. The first returns nothing at all when no lens has that key, which is how an unknown lens
+keys of the search indices the lens includes, in key order, and the design revision of the
+same snapshot. The first returns nothing at all when no lens has that key, which is how an unknown lens
 is detected. The runtime store also exposes the ontology key it is bound to, because the
-schema cache keys its entries by ontology plus lens.
+schema cache keys its entries by ontology plus lens, and reads the current design revision
+alone, taking no lock.
 
 **Entity lifecycle.** Create with the type key, a caller-supplied instance id and the
 validated property map. Read by type key and id; read by
@@ -385,12 +396,12 @@ entries go.
 
 | Operation | Obligation |
 |---|---|
-| Create | Start a building generation. One still building for the same index and representation is superseded: it retires. Given a root entity type to backfill, queue every entity of that type — one whole-entity item each — in the same transaction and set the total to their count, so a generation never appears with a queue not yet filled. Absent result when the index does not exist. |
+| Create | Start a building generation, holding the ontology's design exclusively, so no data write falls between the backfill and the generation taking new work. One still building for the same index and representation is superseded: it retires. Given a root entity type to backfill, queue every entity of that type — one whole-entity item each — in the same transaction and set the total to their count, so a generation never appears with a queue not yet filled. Absent result, nothing created, when the index does not exist, when the design revision is no longer the one the caller names, or — unless forced — when a building or ready generation of the index and representation already matches. |
 | Read, list | One by id; all, or those of one index, oldest first. |
 | Record progress | Add to the counters. |
 | Finish | Make a building generation the active one in a single step: the previous active one retires. False when the generation is no longer building. |
 | Fail | Mark a building generation failed. False when it is no longer building. |
-| Retire | Retire a building or active generation no definition wants any more. False when it is neither. |
+| Retire | Retire a building or active generation no definition wants any more. False when it is neither, or when the design revision is no longer the one the caller names. |
 | Sweep | Remove the entry storage of every generation neither building nor ready — what an interrupted removal left behind. Idempotent. |
 
 **Entries.** An entry is identified within its generation by entity id, part kind — the
@@ -408,9 +419,13 @@ Entry writes address a generation by id wherever it is in its lifecycle. Upsert 
 identity, refused — false, nothing written — once the generation is neither building
 nor ready; a vector whose width differs from the generation's is a programming error.
 Read the stored hashes of given parts. Delete given parts; delete an entity's parts of
-one kind and group except a list to keep. Delete an entity's entries, or a relation's,
+one kind and group except a list to keep. Upsert and both deletes take an optional claim
+(below): given one, they act only for the entities whose claimed items the claim still
+all holds, and leave the others as they are. Delete an entity's entries, or a relation's,
 in every generation of the ontology. The worker composes against the ontology's full
-schema, which the store reads for it — every type and property, unscoped.
+schema, which the store reads for it — every type and property, unscoped — with the index
+definitions and the design revision of the same snapshot. The store also reads the current
+design revision alone, taking no lock.
 
 **Ranking entries.** One operation ranks the entries of one generation, best first, and
 returns nothing unless the generation is ready. A semantic generation takes a query vector
@@ -444,14 +459,21 @@ deleted entity, so it is applied before the rows go.
 the whole entity (an entity created, a field every part renders changed, a backfill); a
 passage item with an empty part id stands for all of the entity's passages, re-chunked.
 Queueing an item already queued refreshes it instead of duplicating it: it is due at once,
-its attempts start afresh, and it carries a new token. The worker's surface:
+its attempts start afresh, and it carries a new token. A claim's lease is its fencing
+token: every claim of an item writes a later lease than the one it takes over, and a claim
+holds an item only while the item still carries its lease. Settling a claim — complete,
+fail, release — and the entry writes made for it act only on the items it holds, and only
+for entities whose claimed items it all holds; what it lost was taken over after its lease
+ran out, or withdrawn by a write that deleted it, and what it would have done is dropped.
+The worker's surface:
 
 | Operation | Obligation |
 |---|---|
 | Queue a type | Queue every entity of a type, as one whole-entity item each, into the given generations — those neither building nor ready are skipped. Returns the count. |
-| Claim | Lease up to a limit of claimable items — due, not leased or with an expired lease, attempts below the maximum, of a building or ready generation — keyword items first, then oldest first; semantic items only of generations of the given model id. Items another claim holds are skipped, never waited for. The lease commits with the claim. Each item carries its attempts and its token. |
-| Complete | Remove claimed items — except one queued again since its claim (its token changed): that one stays, released for the next claim. A write during a lease is never lost. |
-| Fail | Record a failed attempt — attempts plus one, the error and its time, the lease released, the item held back by its delay. An item queued again since its claim is not charged. |
+| Claim | Lease up to a limit of claimable items — due, not leased or with an expired lease, attempts below the maximum, of a building or ready generation — keyword items first, then oldest first; semantic items only of generations of the given model id. Items another claim holds are skipped, never waited for. The lease commits with the claim. Each item carries its attempts, its token and its lease. |
+| Complete | Remove the held items — except one queued again since its claim (its token changed): that one stays, released for the next claim, like every other held item it does not remove. A write during a lease is never lost. Returns the count removed and the count no longer held. |
+| Fail | Record a failed attempt on the held items — attempts plus one, the error and its time, the lease released, the item held back by its delay. An item queued again since its claim is not charged. Returns each charged item's attempts and the count no longer held. |
+| Release | Release the held items without charging them, so the next claim takes them at once. Returns the count released. |
 | Statistics | Per generation with queued items: pending and failed counts, and the errors of failed or retrying items — the newest item per distinct message, newest first, at most ten, each with its entity, part kind, message and time. |
 
 An item whose attempts reached the maximum is failed for good and never claimed again; a
@@ -477,16 +499,26 @@ save and never decides a state — the service does — so a deleted entity leav
 anchors that name it in place. The runtime store hands out the ruleset store of its own
 ontology. Rulesets are not part of any export read, and registry delete removes them.
 
+## The design revision
+
+Each ontology's [design revision](architecture.md#design-revision) is created with the
+ontology. Its identity is never reused: an ontology deleted and created again under its
+key starts its number again under a new identity, so only the pair tells two designs
+apart.
+
 ## Transactions
 
 The runtime store runs a unit of work on a store bound to one transaction, on one
 connection, with read-committed isolation: it commits when the work returns and rolls back
-when it throws. Every operation of that store, and of the ruleset and changeset stores it
-hands out, runs on that connection — the one exception to every operation owning its
-connection. Anything that would take a second connection inside the work — a nested unit
-of work, the full-schema retrieval, the search-index or navigator store — fails as a
-programming error, so the work can never wait for a connection it holds itself. Only a
-changeset's commit uses it.
+when it throws. The transaction first holds the ontology's design shared — design changes
+wait for it, other data writes do not — and fails with a conflict unless the design
+revision is still the one the caller names, so nothing commits against a design that
+changed. Every operation of that store, and of the ruleset and changeset stores it hands
+out, runs on that connection; this and a design change are the exceptions to every
+operation owning its connection. Anything that would take a second connection inside the
+work — a nested unit of work, the full-schema retrieval, the search-index or navigator
+store — fails as a programming error, so the work can never wait for a connection it holds
+itself. Every data write uses it, a changeset's commit included.
 
 ## The changeset store
 
@@ -718,7 +750,7 @@ runs each missing upgrade step inside every `ont_*` namespace — then the step'
 server-wide statements, if it has any, once in `public` — and records the new version
 last. The upgrade is logged, and the server never backs up storage itself. The steps and
 both version constants live in the storage-version module beside the DDL; the current
-storage version is 8. Before that
+storage version is 9. Before that
 transaction the adapter logs the pgvector version — the installed one, or the one the
 extension would install — and warns when it predates 0.7, which has no
 `halfvec`: the search entry table cannot then be created, so an upgrade of an existing
@@ -726,8 +758,9 @@ namespace and every ontology creation fail.
 
 **Registry create** is one transaction:
 the registry row first — so a concurrent same-key create dies on the named constraint as
-a conflict — then the fresh namespace, the twenty tables below with the search settings
-row and, when an embedding width is given, the fixed saved-query vector index inside it. **Registry delete** is one
+a conflict — then the fresh namespace, the twenty-one tables below with the search
+settings row and the design revision row and, when an embedding width is given, the fixed
+saved-query vector index inside it. **Registry delete** is one
 transaction: the registry row out, the namespace dropped in one cascade. A bound store applies its
 ontology's namespace to the search path per statement, inside the shared transaction
 machinery.
@@ -764,6 +797,19 @@ because a type and its name property are created in one transaction and each ref
 the other. Deleting the name property alone violates it at commit, which the error
 translation reports as the same conflict the service raises; that the name property is a
 `string` property is the service's check, not the database's.
+
+## How the design is guarded
+
+The design revision is the one row of `design_revision` in the namespace: the ontology's
+id from the registry and an `integer` revision, starting at 1. The design lock is a
+transaction-scoped advisory lock on a key hashed from the namespace —
+`pg_advisory_xact_lock_shared` for a data write, `pg_advisory_xact_lock` for a design
+change and a generation create — always the first lock its transaction takes, after
+`lock_timeout` is set to five seconds for the transaction. The revision is read in a
+statement of its own after the lock is granted; a design change advances it with an
+`UPDATE` in the same transaction. Shared holders never wait for each other, while an
+exclusive request queues new shared ones behind it, so steady writes cannot starve a
+design change. A lock not granted in time, `55P03`, translates to the conflict error.
 
 ## Naming transformations
 
@@ -883,9 +929,9 @@ Each generation's entries live in a table of its own (naming, above), which join
 `search_entry` as a partition when the generation becomes active:
 
 - **Create** inserts the `building` row and creates the standalone table in one
-  transaction, holding the index row locked so generation changes of one index
-  serialize; a generation still building for the same index and representation retires
-  in that transaction. The table carries B-tree indexes on entity id and part id, for the
+  transaction, which first holds the design exclusively and checks the revision, then
+  holds the index row locked so generation changes of one index serialize; a generation
+  still building for the same index and representation retires in that transaction. The table carries B-tree indexes on entity id and part id, for the
   deletes that reach it while it fills, and a CHECK matching its future partition bound,
   so the attach needs no validation scan.
 - **Writes** go to the generation's table by name, attached or not. Each takes the
@@ -893,7 +939,9 @@ Each generation's entries live in a table of its own (naming, above), which join
   in flight and no table is touched after the change that leads to its drop. Deleting an
   entity's or relation's entries in every generation goes through the parent for attached
   partitions and to each building generation's table directly.
-- **Finish** first builds the search index in a transaction of its own — HNSW over
+- **Finish** first builds the search index in a transaction of its own, under a
+  transaction-scoped advisory try-lock keyed by the generation — a process that finds it
+  taken skips the build, and a later pass finds it done — HNSW over
   `embedding::halfvec(D)`, cosine, at the generation's width; or GIN over the
   `tsvector` — then, in one transaction, retires the previous `ready` generation,
   attaches the table, drops the bound CHECK and marks the generation `ready`. The
@@ -904,7 +952,8 @@ Each generation's entries live in a table of its own (naming, above), which join
   concurrent detach cannot run in a transaction. What an interruption leaves, and what a
   cascade leaves — deleting an index or its root entity type removes rows, not tables —
   the sweep collects: every `se_` table whose generation is neither building nor ready.
-  Deleting an index runs it. **Retire** sets the state and deletes the queued work in one
+  Deleting an index runs it, after its design change commits. **Retire** holds the design
+  shared, checks the revision, sets the state and deletes the queued work in one
   transaction; the table goes the same best-effort way.
 
 The queue works in plain SQL on `search_queue`:
@@ -923,13 +972,20 @@ The queue works in plain SQL on `search_queue`:
   still exist — their entries and queued items are found through them.
 - **Claim** is one statement: a CTE selects the claimable rows joined to their
   generation, ordered keyword first and then by `enqueued_at`, with the limit and
-  `FOR UPDATE SKIP LOCKED` on the queue rows; the `UPDATE` sets `lease_until` and returns each row's attempts
-  and token. It commits on its own, so no transaction is held while the worker composes
-  and calls the embedding provider.
-- **Complete** deletes the claimed rows whose `enqueued_at` still equals the token and
-  clears the lease of the rest; **fail** increments attempts, records the error and its
-  time and sets the earliest retry on the rows whose token still matches, and clears
-  every claimed row's lease.
+  `FOR UPDATE SKIP LOCKED` on the queue rows; the `UPDATE` sets `lease_until` to now plus
+  the lease length and returns each row's attempts, token and `lease_until` as text — the
+  lease. It commits on its own, so no transaction is held while the worker composes
+  and calls the embedding provider. A claim takes a row only once its lease has passed,
+  so the new lease is always the later one.
+- **Holding a claim.** Entry writes, complete, fail and release first lock, `FOR UPDATE`,
+  the claimed rows whose `lease_until` still equals the claim's lease, for the rest of
+  their transaction: a takeover skips the locked rows, and a write that deletes or queues
+  one again waits for it.
+- **Complete** deletes the held rows whose `enqueued_at` still equals the token and
+  clears the lease of the other held rows; **fail** increments attempts, records the error
+  and its time and sets the earliest retry on the held rows whose token still matches, and
+  clears the lease of every held row; **release** clears it alone. Rows no longer held are
+  left untouched.
 - **Statistics** is one statement per call: counts grouped by generation, and the
   newest row per generation and distinct `last_error` — an error without a recorded
   time takes `enqueued_at` as its time — ranked by time and cut at ten.

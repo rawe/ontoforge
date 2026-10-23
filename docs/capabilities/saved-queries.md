@@ -77,8 +77,6 @@ in bindings and no entity type key. A final search step returns the plain search
 - Saved queries belong to a lens ([ontology-lenses.md](ontology-lenses.md)). Deleting the
   lens deletes them, and they travel with it through
   [transfer](transfer.md).
-- Defining, replacing or deleting one is a modeling operation and invalidates the schema
-  cache described in [../architecture.md](../architecture.md).
 
 ### Structure
 
@@ -186,10 +184,6 @@ else. Complete operation index: [../interfaces.md](../interfaces.md).
 | REST | List, upsert by key, delete, under the lens's route | List, semantic search, run by key |
 | MCP | `list_saved_queries`, `set_saved_query`, `delete_saved_query` | `list_saved_queries`, `search_saved_queries`, `run_saved_query` |
 | Web UI | The lens's saved-query editor, with a run panel | Quick-run cards on the workbench home and a library beside the query console |
-
-The runtime listing and the modeling listing differ in one respect worth knowing: the
-runtime one is served from the schema cache, so it reflects the state of the process that
-answers it.
 
 A model reaching this capability over MCP or as an agent tool sees three tools that
 compose into one workflow: search or list to find a key and its parameters, then run it.

@@ -5,7 +5,7 @@ Every assistant — an [agent](agents.md), a [retriever](retrievers.md) or a
 converses in **threads** the server holds. A client sends only its new message and, to
 continue, the thread's id; the server continues from what the thread kept. How the server
 stores threads, and the numbers below (turns kept, turns the model sees, lifetime, how
-many threads a server holds): [../architecture.md](../architecture.md#thread-store).
+much a thread and the store hold): [../architecture.md](../architecture.md#thread-store).
 
 ## Starting and continuing
 
@@ -29,12 +29,13 @@ A turn is one user message, the assistant's work on it and its answer. For an ag
 work is its tool calls and their results; they stay in the thread with the turn.
 
 - **One run per thread.** A message to a thread whose previous message is still being
-  answered is refused as busy before anything runs — never queued, since two runs would
-  fork the conversation.
+  answered, on whichever server, is refused as busy before anything runs — never queued,
+  since two runs would fork the conversation.
 - **A turn is atomic.** A turn cancelled — the client disconnects — or failed leaves
   nothing in the thread: not the user's message, not partial tool work, so no tool call is
-  left without its result. A thread only ever holds complete turns. An interrupted turn is
-  asked again, never resumed.
+  left without its result. A thread only ever holds complete turns, and while a turn runs
+  it reads back as of its last completed one. An interrupted turn is asked again, never
+  resumed. A thread grown too large to keep refuses its turn; the client starts a new one.
 - **The model sees the recent turns,** not the whole thread — for an agent including those
   turns' tool calls and results. A thread keeps a bounded number of turns; older ones are
   removed.
@@ -59,10 +60,12 @@ does not keep them.
 
 ## Lifetime
 
-A thread expires after a period without a turn, and a server holds a bounded number of
-threads, removing the one unused the longest when it is full. Threads live as long as the
-server process: a restart loses them all. Continuing or reading a thread that is gone
-answers not found, as above. Reading a thread does not count as use.
+A thread expires after a period without activity: a message accepted for it or a turn
+completed. Reading a thread is not activity. Every server sharing the thread store sees
+the same threads. A thread is lost before it expires only when its store is: a server
+holding threads in its memory restarts, or the shared store is reset. No thread is removed
+to make room: a full store refuses new threads and completed turns as a storage failure.
+Continuing or reading a thread that is gone answers not found, as above.
 
 ## Reading a thread back
 

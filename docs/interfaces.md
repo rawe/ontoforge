@@ -1,8 +1,8 @@
 # Interfaces
 
 The complete index of every way into the system: the ontology registry, two per-ontology
-REST surfaces, one server-wide route, and two MCP servers. Concepts and vocabulary:
-[README.md](README.md). Structure and error model: [architecture.md](architecture.md).
+REST surfaces, one server-wide route, two probes, and two MCP servers. Concepts and
+vocabulary: [README.md](README.md). Structure and error model: [architecture.md](architecture.md).
 What each operation *means* is in [capabilities/](capabilities/) — this document is the
 map, not the semantics.
 
@@ -202,6 +202,10 @@ An assistant thread that is unknown, expired or bound to another assistant answe
 previous message is still being answered answers `RESOURCE_CONFLICT` with `details.code`
 of `THREAD_BUSY` ([assistant chat and threads](#assistant-chat-and-threads)).
 
+A data write whose ontology's design keeps changing while it runs, or a write or modeling
+change that waits too long for another one, answers `RESOURCE_CONFLICT` and has written
+nothing; it may be sent again ([architecture.md](architecture.md#design-revision)).
+
 Call `GET /api/server/features` first all the same. Probing lets a client hide what is
 unavailable, rather than offering it and explaining the refusal afterwards.
 
@@ -252,6 +256,20 @@ deployment.
 | `searchStrategies` | list | The available search strategies, in preference order |
 | `ai` | boolean | A language-model provider is configured; gates the `/ai` routes |
 | `decisions` | boolean | A Decision provider is configured; gates the `/decisions` routes |
+
+## Probes
+
+Two routes outside `/api` for an orchestrator; they check no dependency, are not part of
+the OpenAPI description and do not use the error envelope.
+
+| Method | Path | Answers |
+|---|---|---|
+| GET | `/livez` | `200` while the process answers requests |
+| GET | `/readyz` | `200` until the server starts shutting down, then `503` |
+
+Neither answers before startup is done ([architecture.md](architecture.md#startup)); while
+`/readyz` answers `503` the server finishes its running work
+([architecture.md](architecture.md#shutdown)).
 
 ## Modeling REST
 
@@ -754,9 +772,12 @@ kind sends is in its section below.
 
 A kind's own events are named `<kind>.<event>` — `agent.…`, `retriever.…`, `navigator.…`; a client may
 ignore those it does not know. A writable stream has exactly one terminal `final` or
-`error`; EOF without one means an incomplete turn. A closed connection cancels the turn,
-and a cancelled or failed turn leaves nothing in its thread. Unexpected failures after
-streaming begins have the generic `INTERNAL_ERROR` message `Internal Server Error`.
+`error`; EOF without one means an incomplete turn — so does a stream a stopping server
+cuts. A closed connection cancels the turn, and a cancelled or failed turn leaves nothing
+in its thread. A turn whose result cannot be kept ends with `error`: `THREAD_NOT_FOUND`
+when its thread is gone meanwhile, `THREAD_BUSY` when it lost its hold on the thread,
+`VALIDATION_ERROR` when the thread grew too large to keep, `STORAGE_ERROR` when the thread
+store is full or fails. Unexpected failures after streaming begins have the generic `INTERNAL_ERROR` message `Internal Server Error`.
 Delivery bounds buffering and terminates stalled or oversized streams.
 
 **Read a thread.** `200` with `threadId` and `messages` — the user messages and the
@@ -1115,7 +1136,6 @@ Reasonable things to look for that are absent everywhere — REST, MCP and the w
 
 | Absent | Consequence |
 |---|---|
-| Health or readiness endpoint | Nothing for an orchestrator to probe; liveness must be inferred from a real request |
 | Data-wipe endpoint | Instance data is removed one entity or relation at a time; deleting the whole ontology is the only bulk removal |
 | Bulk or batch write | Every create and update is a single object, except a create with a parent relation, which writes one entity and its one relation, on every mount; a changeset stages writes call by call and commits them together; import covers the design, not data |
 | Instance-data export | Transfer moves the design only; data leaves through queries or listing |

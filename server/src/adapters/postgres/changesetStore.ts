@@ -405,13 +405,15 @@ export class PostgresChangesetStore implements ChangesetStore {
     );
   }
 
-  async sweep(olderThan: Date): Promise<number> {
+  async sweep(idleMs: number): Promise<number> {
+    // The cutoff by now(), the clock that wrote last_change_at.
     const result = await this.query(
       `DELETE FROM changeset
         WHERE changeset_id IN (SELECT changeset_id FROM changeset
-                                WHERE submitted_at IS NULL AND last_change_at < $1
+                                WHERE submitted_at IS NULL
+                                  AND last_change_at < now() - $1::bigint * interval '1 millisecond'
                                 FOR UPDATE SKIP LOCKED)`,
-      [olderThan],
+      [idleMs],
     );
     return result.rowCount;
   }

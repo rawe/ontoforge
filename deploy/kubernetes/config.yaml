@@ -1,0 +1,35 @@
+# The server's one env file, mounted as /config/ontoforge.env (ENV_FILE). The
+# secrets come in as environment variables from the Secret ontoforge-secrets,
+# created out of band (README), and win over the file.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ontoforge-config
+  labels:
+    app.kubernetes.io/name: ontoforge-server
+data:
+  ontoforge.env: |
+    # --- Datastore ---
+    DB_BACKEND=postgres
+    DB_URI=postgresql://postgres.example.internal:5432/ontoforge
+    DB_USER=ontoforge
+    # DB_PASSWORD comes from the Secret ontoforge-secrets.
+
+    # --- Shared state (conversations): shared by every replica ---
+    # Without Valkey: SHARED_STATE=memory (the default), and exactly one replica.
+    # A VALKEY_URL carrying a password belongs in the Secret instead.
+    SHARED_STATE=valkey
+    VALKEY_URL=redis://valkey:6379
+
+    # --- Where clients reach the server ---
+    PUBLIC_URL=https://ontoforge.example.org
+
+    # --- Embedding and language model (optional) ---
+    # EMBEDDING_PROVIDER=openai
+    # EMBEDDING_MODEL=bge-m3
+    # EMBEDDING_BASE_URL=https://embeddings.example.org/v1
+    # EMBEDDING_DIMENSIONS=1024
+    # AI_PROVIDER=openai
+    # AI_MODEL=example-model
+    # AI_BASE_URL=https://llm.example.org/v1
+    # EMBEDDING_API_KEY and AI_API_KEY come from the Secret ontoforge-secrets.

@@ -25,11 +25,13 @@ export type MockModelingStore = {
 export function createMockModelingStore(): MockModelingStore {
   const indices = createMockSearchIndexStore();
   const navigatorStore = createMockNavigatorStore();
-  return {
+  const store: MockModelingStore = {
     indices,
     navigatorStore,
     searchIndices: vi.fn(() => indices),
     navigators: vi.fn(() => navigatorStore),
+    // A design change hands its work the mock itself.
+    changeDesign: vi.fn(async (work: (store: ModelingStore) => Promise<unknown>) => work(store)),
     createLens: vi.fn(),
     listLenses: vi.fn(async () => []),
     getLens: vi.fn(async () => null),
@@ -83,6 +85,7 @@ export function createMockModelingStore(): MockModelingStore {
     dropMismatchedVectorIndexes: vi.fn(async () => undefined),
     ensureVectorIndexes: vi.fn(async () => undefined),
   };
+  return store;
 }
 
 export function asModelingStore(mock: MockModelingStore): ModelingStore {

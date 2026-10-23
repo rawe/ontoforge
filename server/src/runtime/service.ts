@@ -20,7 +20,10 @@
  * Six of them (entity and relation create, update, delete) compose their
  * write through a pure `prepare…` (`prepare.ts`), then run what reads
  * storage here: load schema → guard → `prepare…` → reads and checks →
- * search plan → store call.
+ * search plan → store call. Everything after the schema load runs in one
+ * transaction checked against the design revision the schema was loaded
+ * with (`designWrite.ts`): a design change in between makes the write
+ * reload and run again, never commit against the old design.
  */
 
 import { randomUUID } from "node:crypto";
@@ -29,11 +32,12 @@ import { CoercionError, assertNoNulCharacter, coerceValue, valueToText } from ".
 import { getEmbeddingProvider } from "../core/embedding.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core/oql/index.js";
-import type { RuntimeStore, SearchWritePlan } from "../core/ports.js";
+import type { RuntimeStore } from "../core/ports.js";
 import type { ParentEnd, PropertyDef } from "../core/schemas.js";
-import { planSearchWrite, type SearchChange } from "../core/searchDependencies.js";
+import { planSearchWrite } from "../core/searchDependencies.js";
 import { AnchorGuard } from "./anchorGuard.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
+import { writeWithDesign } from "./designWrite.js";
 import {
   prepareCreateEntity,
   prepareCreateRelation,
@@ -48,7 +52,6 @@ import {
 import { isQueryPath } from "./queryPaths.js";
 import {
   loadSchema,
-  loadSearchContext,
   type EntityTypeDef,
   type LoadedSchema,
   type RelationTypeDef,
@@ -73,21 +76,6 @@ export { search } from "./search/entry.js";
 export { searchByIndices, searchIndexCatalog } from "./search/indexSearch.js";
 
 type Row = Record<string, unknown>;
-
-// ---------------------------------------------------------------------------
-// Search work of a write
-// ---------------------------------------------------------------------------
-
-/**
- * The search work a write causes, handed to the store with the write so
- * both commit together; the search worker (`runtime/indexing/`) builds
- * the entries from it later. Null when no index reads what the write
- * changes.
- */
-async function searchPlan(store: RuntimeStore, change: SearchChange): Promise<SearchWritePlan | null> {
-  const context = await loadSearchContext(store.ontologyKey, store.searchIndices());
-  return planSearchWrite(context.dependencies, change);
-}
 
 // ---------------------------------------------------------------------------
 // Parent relations
@@ -309,53 +297,52 @@ export async function createEntity(
   parentRelation: ParentRelationInput | null = null,
   rulesetKey: string | null = null,
 ): Promise<Row> {
-  const loaded = await loadSchema(lensKey, store);
-  const scopedEt = scopedEntityType(loaded, entityTypeKey);
-  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
+  const ids = { entityId: randomUUID(), relationId: randomUUID() };
+  return writeWithDesign(lensKey, store, async (tx, loaded, search) => {
+    const scopedEt = scopedEntityType(loaded, entityTypeKey);
+    const guard = await AnchorGuard.open(rulesetKey, loaded, tx);
 
-  const { errors, write } = prepareCreateEntity(loaded, entityTypeKey, body, parentRelation, {
-    entityId: randomUUID(),
-    relationId: randomUUID(),
-  });
-  if (write.parent !== null) {
-    const { parentId, parentType } = write.parent;
-    const parentError = await endpointError(store, loaded.full, parentId, parentType, write.parent.relation.relationTypeKey, "Parent");
-    if (parentError !== null) {
-      errors["parentRelation.parentId"] = parentError;
+    const { errors, write } = prepareCreateEntity(loaded, entityTypeKey, body, parentRelation, ids);
+    if (write.parent !== null) {
+      const { parentId, parentType } = write.parent;
+      const parentError = await endpointError(tx, loaded.full, parentId, parentType, write.parent.relation.relationTypeKey, "Parent");
+      if (parentError !== null) {
+        errors["parentRelation.parentId"] = parentError;
+      }
     }
-  }
-  await guard?.checkCreate(entityTypeKey, parentRelation, errors);
-  if (Object.keys(errors).length > 0) {
-    throw new ValidationError("Instance validation failed", { fields: errors });
-  }
+    await guard?.checkCreate(entityTypeKey, parentRelation, errors);
+    if (Object.keys(errors).length > 0) {
+      throw new ValidationError("Instance validation failed", { fields: errors });
+    }
 
-  const e = write.entity;
-  const entitySearch = await searchPlan(store, e.change);
-  if (write.parent === null) {
-    const entity = await store.createEntity(e.entityTypeKey, e.entityId, e.properties, e.propertyDefs, entitySearch);
+    const e = write.entity;
+    const entitySearch = planSearchWrite(search.dependencies, e.change);
+    if (write.parent === null) {
+      const entity = await tx.createEntity(e.entityTypeKey, e.entityId, e.properties, e.propertyDefs, entitySearch);
+      return filterEntityProperties(entity, scopedEt);
+    }
+
+    const r = write.parent.relation;
+    const { entity } = await tx.createEntityWithParent(
+      {
+        entityTypeKey: e.entityTypeKey,
+        entityId: e.entityId,
+        properties: e.properties,
+        propertyDefs: e.propertyDefs,
+        search: entitySearch,
+      },
+      {
+        relationTypeKey: r.relationTypeKey,
+        relationId: r.relationId,
+        fromEntityId: r.fromEntityId,
+        toEntityId: r.toEntityId,
+        properties: r.properties,
+        propertyDefs: r.propertyDefs,
+        search: planSearchWrite(search.dependencies, r.change),
+      },
+    );
     return filterEntityProperties(entity, scopedEt);
-  }
-
-  const r = write.parent.relation;
-  const { entity } = await store.createEntityWithParent(
-    {
-      entityTypeKey: e.entityTypeKey,
-      entityId: e.entityId,
-      properties: e.properties,
-      propertyDefs: e.propertyDefs,
-      search: entitySearch,
-    },
-    {
-      relationTypeKey: r.relationTypeKey,
-      relationId: r.relationId,
-      fromEntityId: r.fromEntityId,
-      toEntityId: r.toEntityId,
-      properties: r.properties,
-      propertyDefs: r.propertyDefs,
-      search: await searchPlan(store, r.change),
-    },
-  );
-  return filterEntityProperties(entity, scopedEt);
+  });
 }
 
 export async function listEntities(
@@ -509,36 +496,36 @@ export async function updateEntity(
   store: RuntimeStore,
   rulesetKey: string | null = null,
 ): Promise<Row> {
-  const loaded = await loadSchema(lensKey, store);
-  const scopedEt = scopedEntityType(loaded, entityTypeKey);
-  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
+  return writeWithDesign(lensKey, store, async (tx, loaded, search) => {
+    const scopedEt = scopedEntityType(loaded, entityTypeKey);
+    const guard = await AnchorGuard.open(rulesetKey, loaded, tx);
 
-  const { errors, write } = prepareUpdateEntity(loaded, entityTypeKey, entityId, body);
-  const outside = (await guard?.entityError(entityTypeKey, entityId)) ?? null;
-  if (outside !== null) {
-    errors.entityId = outside;
-  }
-  if (Object.keys(errors).length > 0) {
-    throw new ValidationError("Instance validation failed", { fields: errors });
-  }
+    const { errors, write } = prepareUpdateEntity(loaded, entityTypeKey, entityId, body);
+    const outside = (await guard?.entityError(entityTypeKey, entityId)) ?? null;
+    if (outside !== null) {
+      errors.entityId = outside;
+    }
+    if (Object.keys(errors).length > 0) {
+      throw new ValidationError("Instance validation failed", { fields: errors });
+    }
 
-  if (write === null) {
-    return getEntity(lensKey, entityTypeKey, entityId, store);
-  }
+    const entity =
+      write === null
+        ? await tx.getEntity(entityTypeKey, entityId)
+        : await tx.updateEntity(
+            write.entityTypeKey,
+            write.entityId,
+            write.setProperties,
+            write.removeProperties,
+            write.propertyDefs,
+            planSearchWrite(search.dependencies, write.change),
+          );
+    if (entity === null) {
+      throw new NotFoundError(`Entity '${entityId}' not found`);
+    }
 
-  const entity = await store.updateEntity(
-    write.entityTypeKey,
-    write.entityId,
-    write.setProperties,
-    write.removeProperties,
-    write.propertyDefs,
-    await searchPlan(store, write.change),
-  );
-  if (entity === null) {
-    throw new NotFoundError(`Entity '${entityId}' not found`);
-  }
-
-  return filterEntityProperties(entity, scopedEt);
+    return filterEntityProperties(entity, scopedEt);
+  });
 }
 
 /**
@@ -559,26 +546,27 @@ export async function deleteEntity(
   store: RuntimeStore,
   rulesetKey: string | null = null,
 ): Promise<void> {
-  const loaded = await loadSchema(lensKey, store);
-  scopedEntityType(loaded, entityTypeKey);
-  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
+  await writeWithDesign(lensKey, store, async (tx, loaded, search) => {
+    scopedEntityType(loaded, entityTypeKey);
+    const guard = await AnchorGuard.open(rulesetKey, loaded, tx);
 
-  const write = prepareDeleteEntity(loaded, entityTypeKey, entityId);
-  const readings = parentReadings(loaded.full);
-  const flagged = Object.keys(readings).length > 0;
-  // A missing entity stays not-found, whatever its id has below it.
-  if (flagged && (await store.getEntity(entityTypeKey, entityId)) === null) {
-    throw new NotFoundError(`Entity '${entityId}' not found`);
-  }
-  await guard?.checkDelete(entityTypeKey, entityId);
-  if (flagged && (await store.hasChildren(entityId, readings))) {
-    throw new ConflictError(HAS_CHILDREN_MESSAGE);
-  }
+    const write = prepareDeleteEntity(loaded, entityTypeKey, entityId);
+    const readings = parentReadings(loaded.full);
+    const flagged = Object.keys(readings).length > 0;
+    // A missing entity stays not-found, whatever its id has below it.
+    if (flagged && (await tx.getEntity(entityTypeKey, entityId)) === null) {
+      throw new NotFoundError(`Entity '${entityId}' not found`);
+    }
+    await guard?.checkDelete(entityTypeKey, entityId);
+    if (flagged && (await tx.hasChildren(entityId, readings))) {
+      throw new ConflictError(HAS_CHILDREN_MESSAGE);
+    }
 
-  const deleted = await store.deleteEntity(write.entityTypeKey, write.entityId, await searchPlan(store, write.change));
-  if (!deleted) {
-    throw new NotFoundError(`Entity '${entityId}' not found`);
-  }
+    const deleted = await tx.deleteEntity(write.entityTypeKey, write.entityId, planSearchWrite(search.dependencies, write.change));
+    if (!deleted) {
+      throw new NotFoundError(`Entity '${entityId}' not found`);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -597,8 +585,20 @@ async function loadDocumentValue(
   entityId: string,
   propertyKey: string,
   store: RuntimeStore,
-): Promise<{ value: string; loaded: Awaited<ReturnType<typeof loadSchema>> }> {
+): Promise<string> {
   const loaded = await loadSchema(lensKey, store);
+  return documentValue(loaded, entityTypeKey, entityId, propertyKey, store);
+}
+
+/** The current value of a scoped document property, read through `store`
+ * (`loadDocumentValue`). */
+async function documentValue(
+  loaded: LoadedSchema,
+  entityTypeKey: string,
+  entityId: string,
+  propertyKey: string,
+  store: RuntimeStore,
+): Promise<string> {
   const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
   if (scopedEt === undefined) {
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
@@ -617,7 +617,7 @@ async function loadDocumentValue(
   }
 
   const value = entity[propertyKey];
-  return { value: typeof value === "string" ? value : "", loaded };
+  return typeof value === "string" ? value : "";
 }
 
 /**
@@ -635,7 +635,7 @@ export async function getDocument(
   limit: number | null,
   store: RuntimeStore,
 ): Promise<Row> {
-  const { value } = await loadDocumentValue(
+  const value = await loadDocumentValue(
     lensKey,
     entityTypeKey,
     entityId,
@@ -803,38 +803,34 @@ export async function editDocument(
   store: RuntimeStore,
   rulesetKey: string | null = null,
 ): Promise<Row> {
-  const { value, loaded } = await loadDocumentValue(
-    lensKey,
-    entityTypeKey,
-    entityId,
-    propertyKey,
-    store,
-  );
-  await (await AnchorGuard.open(rulesetKey, loaded, store))?.checkEntity(entityTypeKey, entityId);
+  return writeWithDesign(lensKey, store, async (tx, loaded, search) => {
+    const value = await documentValue(loaded, entityTypeKey, entityId, propertyKey, tx);
+    await (await AnchorGuard.open(rulesetKey, loaded, tx))?.checkEntity(entityTypeKey, entityId);
 
-  const edited = applyDocumentEdit(propertyKey, value, body);
-  const setProps: Row = {
-    [propertyKey]: edited.value,
-    [docLengthKey(propertyKey)]: cpLength(edited.value),
-  };
-  const fullEt = loaded.full.entityTypes[entityTypeKey];
-  const entity = await store.updateEntity(
-    entityTypeKey,
-    entityId,
-    setProps,
-    [],
-    fullEt?.properties ?? {},
-    await searchPlan(store, {
-      kind: "entityUpdated",
-      entityType: entityTypeKey,
+    const edited = applyDocumentEdit(propertyKey, value, body);
+    const setProps: Row = {
+      [propertyKey]: edited.value,
+      [docLengthKey(propertyKey)]: cpLength(edited.value),
+    };
+    const fullEt = loaded.full.entityTypes[entityTypeKey];
+    const entity = await tx.updateEntity(
+      entityTypeKey,
       entityId,
-      changedKeys: [propertyKey],
-    }),
-  );
-  if (entity === null) {
-    throw new NotFoundError(`Entity '${entityId}' not found`);
-  }
-  return edited.answer;
+      setProps,
+      [],
+      fullEt?.properties ?? {},
+      planSearchWrite(search.dependencies, {
+        kind: "entityUpdated",
+        entityType: entityTypeKey,
+        entityId,
+        changedKeys: [propertyKey],
+      }),
+    );
+    if (entity === null) {
+      throw new NotFoundError(`Entity '${entityId}' not found`);
+    }
+    return edited.answer;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -905,65 +901,67 @@ export async function createRelation(
   store: RuntimeStore,
   rulesetKey: string | null = null,
 ): Promise<Row> {
-  const loaded = await loadSchema(lensKey, store);
-  const scopedRt = scopedRelationType(loaded, relationTypeKey);
-  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
+  const relationId = randomUUID();
+  return writeWithDesign(lensKey, store, async (tx, loaded, search) => {
+    const scopedRt = scopedRelationType(loaded, relationTypeKey);
+    const guard = await AnchorGuard.open(rulesetKey, loaded, tx);
 
-  const { errors, write } = prepareCreateRelation(
-    loaded,
-    relationTypeKey,
-    fromEntityId,
-    toEntityId,
-    userProps,
-    randomUUID(),
-  );
+    const { errors, write } = prepareCreateRelation(
+      loaded,
+      relationTypeKey,
+      fromEntityId,
+      toEntityId,
+      userProps,
+      relationId,
+    );
 
-  // Endpoint validation against the FULL schema's declared source/target.
-  const fullRtForValidation = loaded.full.relationTypes[relationTypeKey] ?? scopedRt;
-  const fromError = await endpointError(
-    store,
-    loaded.full,
-    fromEntityId,
-    fullRtForValidation.fromEntityTypeKey,
-    relationTypeKey,
-    "Source",
-  );
-  if (fromError !== null) {
-    errors.fromEntityId = fromError;
-  }
-  const toError = await endpointError(
-    store,
-    loaded.full,
-    toEntityId,
-    fullRtForValidation.toEntityTypeKey,
-    relationTypeKey,
-    "Target",
-  );
-  if (toError !== null) {
-    errors.toEntityId = toError;
-  }
+    // Endpoint validation against the FULL schema's declared source/target.
+    const fullRtForValidation = loaded.full.relationTypes[relationTypeKey] ?? scopedRt;
+    const fromError = await endpointError(
+      tx,
+      loaded.full,
+      fromEntityId,
+      fullRtForValidation.fromEntityTypeKey,
+      relationTypeKey,
+      "Source",
+    );
+    if (fromError !== null) {
+      errors.fromEntityId = fromError;
+    }
+    const toError = await endpointError(
+      tx,
+      loaded.full,
+      toEntityId,
+      fullRtForValidation.toEntityTypeKey,
+      relationTypeKey,
+      "Target",
+    );
+    if (toError !== null) {
+      errors.toEntityId = toError;
+    }
 
-  await guard?.checkRelationCreate(fullRtForValidation, fromEntityId, toEntityId, errors);
+    await guard?.checkRelationCreate(fullRtForValidation, fromEntityId, toEntityId, errors);
 
-  if (fullRtForValidation.parent !== null) {
-    await checkParentRules(fullRtForValidation.parent, fromEntityId, toEntityId, loaded.full, errors, store);
-  }
+    if (fullRtForValidation.parent !== null) {
+      await checkParentRules(fullRtForValidation.parent, fromEntityId, toEntityId, loaded.full, errors, tx);
+    }
 
-  if (Object.keys(errors).length > 0) {
-    throw new ValidationError("Instance validation failed", { fields: errors });
-  }
+    if (Object.keys(errors).length > 0) {
+      throw new ValidationError("Instance validation failed", { fields: errors });
+    }
 
-  const relation = await store.createRelation(
-    write.relationTypeKey,
-    write.relationId,
-    write.fromEntityId,
-    write.toEntityId,
-    write.properties,
-    write.propertyDefs,
-    await searchPlan(store, write.change),
-  );
+    const relation = await tx.createRelation(
+      write.relationTypeKey,
+      write.relationId,
+      write.fromEntityId,
+      write.toEntityId,
+      write.properties,
+      write.propertyDefs,
+      planSearchWrite(search.dependencies, write.change),
+    );
 
-  return filterRelationProperties(relation, scopedRt);
+    return filterRelationProperties(relation, scopedRt);
+  });
 }
 
 export async function listRelations(
@@ -1038,36 +1036,36 @@ export async function updateRelation(
   store: RuntimeStore,
   rulesetKey: string | null = null,
 ): Promise<Row> {
-  const loaded = await loadSchema(lensKey, store);
-  const scopedRt = scopedRelationType(loaded, relationTypeKey);
-  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
+  return writeWithDesign(lensKey, store, async (tx, loaded, search) => {
+    const scopedRt = scopedRelationType(loaded, relationTypeKey);
+    const guard = await AnchorGuard.open(rulesetKey, loaded, tx);
 
-  const { errors, write } = prepareUpdateRelation(loaded, relationTypeKey, relationId, body);
-  const refused =
-    (await guard?.relationError(loaded.full.relationTypes[relationTypeKey] ?? scopedRt, relationId, "update")) ?? null;
-  if (refused !== null) {
-    errors.relationId = refused;
-  }
-  if (Object.keys(errors).length > 0) {
-    throw new ValidationError("Instance validation failed", { fields: errors });
-  }
+    const { errors, write } = prepareUpdateRelation(loaded, relationTypeKey, relationId, body);
+    const refused =
+      (await guard?.relationError(loaded.full.relationTypes[relationTypeKey] ?? scopedRt, relationId, "update")) ?? null;
+    if (refused !== null) {
+      errors.relationId = refused;
+    }
+    if (Object.keys(errors).length > 0) {
+      throw new ValidationError("Instance validation failed", { fields: errors });
+    }
 
-  if (write === null) {
-    return getRelation(lensKey, relationTypeKey, relationId, store);
-  }
-
-  const relation = await store.updateRelation(
-    write.relationTypeKey,
-    write.relationId,
-    write.setProperties,
-    write.removeProperties,
-    write.propertyDefs,
-    await searchPlan(store, write.change),
-  );
-  if (relation === null) {
-    throw new NotFoundError(`Relation '${relationId}' not found`);
-  }
-  return filterRelationProperties(relation, scopedRt);
+    const relation =
+      write === null
+        ? await tx.getRelation(relationTypeKey, relationId)
+        : await tx.updateRelation(
+            write.relationTypeKey,
+            write.relationId,
+            write.setProperties,
+            write.removeProperties,
+            write.propertyDefs,
+            planSearchWrite(search.dependencies, write.change),
+          );
+    if (relation === null) {
+      throw new NotFoundError(`Relation '${relationId}' not found`);
+    }
+    return filterRelationProperties(relation, scopedRt);
+  });
 }
 
 /** Delete a relation; neither endpoint is touched. Through a ruleset with
@@ -1079,20 +1077,21 @@ export async function deleteRelation(
   store: RuntimeStore,
   rulesetKey: string | null = null,
 ): Promise<void> {
-  const loaded = await loadSchema(lensKey, store);
-  const scopedRt = scopedRelationType(loaded, relationTypeKey);
-  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
-  await guard?.checkRelationDelete(loaded.full.relationTypes[relationTypeKey] ?? scopedRt, relationId);
+  await writeWithDesign(lensKey, store, async (tx, loaded, search) => {
+    const scopedRt = scopedRelationType(loaded, relationTypeKey);
+    const guard = await AnchorGuard.open(rulesetKey, loaded, tx);
+    await guard?.checkRelationDelete(loaded.full.relationTypes[relationTypeKey] ?? scopedRt, relationId);
 
-  const write = prepareDeleteRelation(loaded, relationTypeKey, relationId);
-  const deleted = await store.deleteRelation(
-    write.relationTypeKey,
-    write.relationId,
-    await searchPlan(store, write.change),
-  );
-  if (!deleted) {
-    throw new NotFoundError(`Relation '${relationId}' not found`);
-  }
+    const write = prepareDeleteRelation(loaded, relationTypeKey, relationId);
+    const deleted = await tx.deleteRelation(
+      write.relationTypeKey,
+      write.relationId,
+      planSearchWrite(search.dependencies, write.change),
+    );
+    if (!deleted) {
+      throw new NotFoundError(`Relation '${relationId}' not found`);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------

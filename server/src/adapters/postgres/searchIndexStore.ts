@@ -33,6 +33,20 @@
  * an FK cascade (`search_index` → `entity_type` does not drop tables) — is
  * collected by `sweepGenerations`.
  *
+ * Generation creation holds the ontology's design exclusively
+ * (`design.ts`) and checks the revision its caller reconciled against:
+ * every data write holds the design shared and enqueues in its own
+ * transaction, so a write either commits before the backfill reads the
+ * entities or sees the new generation when it enqueues. Retirement checks
+ * the revision too, so a reconciliation that read an older design cannot
+ * retire what a newer one wants.
+ *
+ * Handed out by a design change (`ModelingStore.changeDesign`), the store
+ * runs its definition, inclusion, settings and retriever methods on that
+ * change's connection. The generation lifecycle needs connections of its
+ * own (a partition is detached outside any transaction), so it refuses to
+ * run there; a deleted index's tables are swept after the commit.
+ *
  * The queue (`search_queue`) holds the parts waiting to be composed, per
  * generation. Writes enqueue in their own transaction
  * (`applySearchWritePlan`, run by the runtime store); a worker claims a
@@ -40,11 +54,21 @@
  * transaction, then completes or fails the claim. An item's
  * `enqueued_at` is the claim's token: enqueueing an item again while it
  * is leased refreshes it, and the completion of the older claim leaves it
- * queued.
+ * queued. Its `lease_until` fences the claim: a claim takes an item only
+ * once `lease_until < now()` and writes `now()` plus the lease time, so
+ * every claim of an item writes a later lease than the one it replaces,
+ * and the lease identifies the claim (servers of the previous release
+ * claim the same way). Entry writes and the claim's completion, failure
+ * and release first lock the queue rows still carrying the claim's lease
+ * (`holdClaim`) and act only for entities whose claimed items are all
+ * still held — a takeover skips the locked rows, a write that deletes or
+ * re-enqueues one waits — so a worker whose claim was taken over, or
+ * whose entity was deleted while it composed, changes nothing.
  */
 
 import { toSql } from "pgvector";
 
+import { sameDesign } from "../../core/designRevision.js";
 import { ConflictError, NotFoundError } from "../../core/exceptions.js";
 
 import {
@@ -54,6 +78,7 @@ import {
 } from "../../core/keywordLanguage.js";
 import type {
   ClaimedSearchQueueItem,
+  DesignRevision,
   IndexContentRequest,
   NewSearchGeneration,
   RankedSearchEntry,
@@ -79,6 +104,7 @@ import type {
   SearchRepresentation,
 } from "../../core/searchIndex.js";
 import { MAX_LAST_ERRORS, type IndexContentSize } from "../../core/searchPipeline.js";
+import { holdDesignExclusive, holdDesignShared, readDesign } from "./design.js";
 import { keywordQuery } from "./keywordQuery.js";
 import { runQuery, withTransaction, type DbResult, type Querier } from "./errors.js";
 import { buildFilterClauses } from "./filters.js";
@@ -126,11 +152,14 @@ const LIVE_STATES = "('building', 'ready')";
 /** A list of claimed items as a row source, aliased `c`. */
 const CLAIMED_SOURCE =
   "jsonb_to_recordset($1::jsonb) AS c(generation_id uuid, entity_id uuid, part_kind text, " +
-  "group_no integer, part_id text, token text, delay_ms double precision)";
+  "group_no integer, part_id text, token text, lease text, delay_ms double precision)";
 
 const CLAIMED_MATCH =
   "q.generation_id = c.generation_id AND q.entity_id = c.entity_id AND q.part_kind = c.part_kind " +
   "AND q.group_no = c.group_no AND q.part_id = c.part_id";
+
+/** The claimed item still carries the claim's lease: the claim holds it. */
+const CLAIM_HELD = "q.lease_until = c.lease::timestamptz";
 
 /** The table one generation's entries live in. */
 function partitionName(generationId: string): string {
@@ -237,17 +266,32 @@ function checkNewGeneration(generation: NewSearchGeneration): void {
 }
 
 export class PostgresSearchIndexStore implements SearchIndexStore {
+  /** `bound`: the connection of the design change it belongs to. */
   constructor(
     private readonly namespace: string,
     readonly ontologyKey: string,
+    private readonly bound?: Querier,
   ) {}
 
   private query(text: string, params?: unknown[]): Promise<DbResult> {
+    if (this.bound !== undefined) return this.bound.query(text, params);
     return runQuery(text, params, this.namespace);
   }
 
   private tx<T>(work: (querier: Querier) => Promise<T>): Promise<T> {
+    if (this.bound !== undefined) return work(this.bound);
     return withTransaction(work, "READ COMMITTED", this.namespace);
+  }
+
+  /** The generation lifecycle runs on connections of its own. */
+  private unbound(): void {
+    if (this.bound !== undefined) {
+      throw new Error("Generations cannot change inside a design change");
+    }
+  }
+
+  designRevision(): Promise<DesignRevision> {
+    return readDesign(this.bound, this.namespace);
   }
 
   /** A namespace-qualified name, for statements that run unbound. */
@@ -326,7 +370,7 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     // partitions are tables, which the sweep removes.
     const result = await this.query(`DELETE FROM search_index WHERE key = $1`, [key]);
     if (result.rowCount === 0) return false;
-    await this.bestEffort(() => this.sweepGenerations());
+    if (this.bound === undefined) await this.bestEffort(() => this.sweepGenerations());
     return true;
   }
 
@@ -513,18 +557,24 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
 
   async createGeneration(
     generation: NewSearchGeneration,
-    options: { backfillEntityType?: string } = {},
+    options: { design: DesignRevision; backfillEntityType?: string; force?: boolean },
   ): Promise<SearchGenerationRecord | null> {
+    this.unbound();
     checkNewGeneration(generation);
     if (!isUuid(generation.searchIndexId)) return null;
     const table = partitionName(generation.generationId);
     const created = await this.tx(async (querier) => {
+      // No data write runs while the backfill reads and the generation
+      // becomes visible; a design that moved is reconciled by its change.
+      if (!sameDesign(await holdDesignExclusive(querier), options.design)) return null;
       // Serializes generation changes of one index.
       const index = await querier.query(
         `SELECT 1 FROM search_index WHERE search_index_id = $1 FOR UPDATE`,
         [generation.searchIndexId],
       );
       if (index.rowCount === 0) return null;
+      // Another process may have created the same generation meanwhile.
+      if (options.force !== true && (await matchingGeneration(querier, generation))) return null;
       const superseded = await retire(querier, generation.searchIndexId, generation.representation, "building");
       const inserted = await querier.query(
         `INSERT INTO search_generation
@@ -601,6 +651,7 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   }
 
   async finishGeneration(generationId: string): Promise<boolean> {
+    this.unbound();
     const generation = await this.getGeneration(generationId);
     if (generation === null || generation.state !== "building") return false;
     const table = partitionName(generationId);
@@ -609,6 +660,13 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     // build holds no lock a modeling change would wait for. Writers to the
     // table wait; a superseding change drops the table only afterwards.
     const built = await this.tx(async (querier) => {
+      // One build per generation at a time: a process that finds another
+      // building it skips, and a later pass finds the structure built.
+      const lock = await querier.query(
+        `SELECT pg_try_advisory_xact_lock(hashtextextended('ontoforge.search-build.' || $1, 0)) AS taken`,
+        [generationId],
+      );
+      if (lock.rows[0]?.["taken"] !== true) return false;
       const exists = await querier.query(`SELECT to_regclass($1) IS NOT NULL AS present`, [table]);
       if (exists.rows[0]?.["present"] !== true) return false;
       if (generation.representation === "semantic") {
@@ -649,6 +707,7 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   }
 
   async failGeneration(generationId: string): Promise<boolean> {
+    this.unbound();
     if (!isUuid(generationId)) return false;
     const failed = await this.tx(async (querier) => {
       const result = await querier.query(
@@ -664,9 +723,11 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     return failed;
   }
 
-  async retireGeneration(generationId: string): Promise<boolean> {
+  async retireGeneration(generationId: string, design: DesignRevision): Promise<boolean> {
+    this.unbound();
     if (!isUuid(generationId)) return false;
     const retired = await this.tx(async (querier) => {
+      if (!sameDesign(await holdDesignShared(querier), design)) return false;
       const result = await querier.query(
         `UPDATE search_generation SET state = 'retired'
          WHERE generation_id = $1 AND state IN ${LIVE_STATES}`,
@@ -681,6 +742,7 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   }
 
   async sweepGenerations(): Promise<void> {
+    this.unbound();
     const tables = await this.query(
       `SELECT c.relname FROM pg_class c
        JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -702,11 +764,16 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   // Entries
   // ------------------------------------------------------------------
 
-  async upsertEntries(generationId: string, entries: SearchEntryWrite[]): Promise<boolean> {
+  async upsertEntries(
+    generationId: string,
+    writes: SearchEntryWrite[],
+    claim?: ClaimedSearchQueueItem[],
+  ): Promise<boolean> {
     if (!isUuid(generationId)) return false;
     return this.tx(async (querier) => {
       const generation = await liveGeneration(querier, generationId);
       if (generation === null) return false;
+      const entries = await heldOnly(querier, writes, claim);
       if (entries.length === 0) return true;
       const semantic = generation.representation === "semantic";
       if (semantic) {
@@ -779,14 +846,20 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     });
   }
 
-  async deleteEntries(generationId: string, parts: SearchEntryPart[]): Promise<number> {
+  async deleteEntries(
+    generationId: string,
+    parts: SearchEntryPart[],
+    claim?: ClaimedSearchQueueItem[],
+  ): Promise<number> {
     if (!isUuid(generationId) || parts.length === 0) return 0;
     return this.tx(async (querier) => {
       if ((await liveGeneration(querier, generationId)) === null) return 0;
+      const held = await heldOnly(querier, parts, claim);
+      if (held.length === 0) return 0;
       const result = await querier.query(
         `DELETE FROM ${partitionName(generationId)} e USING ${PARTS_SOURCE}
          WHERE e.generation_id = $1 AND ${PART_MATCH}`,
-        [generationId, partsJson(parts)],
+        [generationId, partsJson(held)],
       );
       return result.rowCount;
     });
@@ -798,10 +871,12 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     partKind: SearchPartKind,
     groupNo: number,
     keepPartIds: string[],
+    claim?: ClaimedSearchQueueItem[],
   ): Promise<number> {
     if (!isUuid(generationId) || !isUuid(entityId)) return 0;
     return this.tx(async (querier) => {
       if ((await liveGeneration(querier, generationId)) === null) return 0;
+      if ((await heldOnly(querier, [{ entityId }], claim)).length === 0) return 0;
       const result = await querier.query(
         `DELETE FROM ${partitionName(generationId)}
          WHERE entity_id = $1 AND part_kind = $2 AND group_no = $3
@@ -935,11 +1010,15 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   // ------------------------------------------------------------------
 
   async readFullSchema(): Promise<Row> {
-    return withTransaction(
-      (querier) => readTypesWithProperties(querier, false),
-      "REPEATABLE READ",
-      this.namespace,
-    );
+    const read = async (querier: Querier): Promise<Row> => {
+      const design = await readDesign(querier, this.namespace);
+      const types = await readTypesWithProperties(querier, false);
+      const indices = await querier.query(`SELECT ${INDEX_COLS} FROM search_index ORDER BY key`);
+      return { ...types, indices: indices.rows.map(toIndex), design };
+    };
+    // Bound, the design change's exclusive hold keeps the design still.
+    if (this.bound !== undefined) return read(this.bound);
+    return withTransaction(read, "REPEATABLE READ", this.namespace);
   }
 
   async enqueueEntityType(generationIds: string[], entityTypeKey: string): Promise<number> {
@@ -976,7 +1055,7 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
        FROM claimable c
        WHERE ${CLAIMED_MATCH}
        RETURNING q.generation_id, q.entity_id, q.part_kind, q.group_no, q.part_id, q.attempts,
-                 q.enqueued_at::text AS token, c.representation`,
+                 q.enqueued_at::text AS token, q.lease_until::text AS lease, c.representation`,
       [options.limit, options.maxAttempts, options.semanticModelId, options.leaseSeconds],
     );
     return result.rows.map((row) => ({
@@ -988,47 +1067,58 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
       representation: row["representation"] as SearchRepresentation,
       attempts: row["attempts"] as number,
       token: row["token"] as string,
+      lease: row["lease"] as string,
     }));
   }
 
-  async completeQueueItems(items: ClaimedSearchQueueItem[]): Promise<void> {
-    if (items.length === 0) return;
-    await this.tx(async (querier) => {
-      const claimed = claimedJson(items.map((item) => ({ item, delayMs: 0 })));
-      await querier.query(
+  async completeQueueItems(
+    items: ClaimedSearchQueueItem[],
+  ): Promise<{ completed: number; lost: number }> {
+    if (items.length === 0) return { completed: 0, lost: 0 };
+    return this.tx(async (querier) => {
+      const held = await holdClaim(querier, items);
+      const done = items.filter((item) => held.entities.has(item.entityId));
+      const removed = await querier.query(
         `DELETE FROM search_queue q USING ${CLAIMED_SOURCE}
-         WHERE ${CLAIMED_MATCH} AND q.enqueued_at = c.token::timestamptz`,
-        [claimed],
+         WHERE ${CLAIMED_MATCH} AND ${CLAIM_HELD} AND q.enqueued_at = c.token::timestamptz`,
+        [claimedJson(done.map((item) => ({ item, delayMs: 0 })))],
       );
-      // Enqueued again while leased: keep it, released for the next claim.
-      await querier.query(
-        `UPDATE search_queue q SET lease_until = NULL FROM ${CLAIMED_SOURCE} WHERE ${CLAIMED_MATCH}`,
-        [claimed],
-      );
+      // Enqueued again while leased, or of an entity partly lost: released
+      // for the next claim.
+      await releaseHeld(querier, items);
+      return { completed: removed.rowCount, lost: items.length - held.count };
     });
   }
 
   async failQueueItems(
     failures: { item: ClaimedSearchQueueItem; delayMs: number }[],
     error: string,
-  ): Promise<void> {
-    if (failures.length === 0) return;
-    await this.tx(async (querier) => {
-      const claimed = claimedJson(failures);
+  ): Promise<{ attempts: number[]; lost: number }> {
+    if (failures.length === 0) return { attempts: [], lost: 0 };
+    const items = failures.map(({ item }) => item);
+    return this.tx(async (querier) => {
+      const held = await holdClaim(querier, items);
       // An item enqueued again since its claim already starts afresh.
-      await querier.query(
+      const charged = await querier.query(
         `UPDATE search_queue q
          SET attempts = q.attempts + 1, last_error = $2, last_error_at = now(), lease_until = NULL,
              not_before = now() + make_interval(secs => c.delay_ms / 1000.0)
          FROM ${CLAIMED_SOURCE}
-         WHERE ${CLAIMED_MATCH} AND q.enqueued_at = c.token::timestamptz`,
-        [claimed, error.slice(0, 2000)],
+         WHERE ${CLAIMED_MATCH} AND ${CLAIM_HELD} AND q.enqueued_at = c.token::timestamptz
+         RETURNING q.attempts`,
+        [claimedJson(failures.filter(({ item }) => held.entities.has(item.entityId))), error.slice(0, 2000)],
       );
-      await querier.query(
-        `UPDATE search_queue q SET lease_until = NULL FROM ${CLAIMED_SOURCE} WHERE ${CLAIMED_MATCH}`,
-        [claimed],
-      );
+      await releaseHeld(querier, items);
+      return {
+        attempts: charged.rows.map((row) => row["attempts"] as number),
+        lost: items.length - held.count,
+      };
     });
+  }
+
+  async releaseQueueItems(items: ClaimedSearchQueueItem[]): Promise<number> {
+    if (items.length === 0) return 0;
+    return this.tx((querier) => releaseHeld(querier, items));
   }
 
   async queueStats(maxAttempts: number): Promise<SearchQueueStats[]> {
@@ -1336,9 +1426,59 @@ function claimedJson(failures: { item: ClaimedSearchQueueItem; delayMs: number }
       group_no: item.groupNo,
       part_id: item.partId,
       token: item.token,
+      lease: item.lease,
       delay_ms: delayMs,
     })),
   );
+}
+
+/**
+ * Lock the claimed items that still carry the claim's lease, for the rest
+ * of the transaction: a takeover skips them, a write that deletes or
+ * re-enqueues one waits. Their count, and the entities whose claimed
+ * items are all held — only for those does the claim still act. Once lost,
+ * an item is never held again: a later claim writes a later lease.
+ */
+async function holdClaim(
+  querier: Querier,
+  claim: ClaimedSearchQueueItem[],
+): Promise<{ count: number; entities: Set<string> }> {
+  const held = await querier.query(
+    `SELECT q.entity_id FROM search_queue q, ${CLAIMED_SOURCE}
+     WHERE ${CLAIMED_MATCH} AND ${CLAIM_HELD}
+     FOR UPDATE OF q`,
+    [claimedJson(claim.map((item) => ({ item, delayMs: 0 })))],
+  );
+  const missing = new Map<string, number>();
+  for (const item of claim) missing.set(item.entityId, (missing.get(item.entityId) ?? 0) + 1);
+  for (const row of held.rows) {
+    const entityId = row["entity_id"] as string;
+    missing.set(entityId, missing.get(entityId)! - 1);
+  }
+  const entities = new Set([...missing].filter(([, count]) => count === 0).map(([entityId]) => entityId));
+  return { count: held.rowCount, entities };
+}
+
+/** Of `values` (entries or parts), those of the entities the claim still
+ * holds; all of them without a claim. */
+async function heldOnly<T extends { entityId: string }>(
+  querier: Querier,
+  values: T[],
+  claim: ClaimedSearchQueueItem[] | undefined,
+): Promise<T[]> {
+  if (claim === undefined || values.length === 0) return values;
+  const { entities } = await holdClaim(querier, claim);
+  return values.filter((value) => entities.has(value.entityId));
+}
+
+/** Clear the lease of the claimed items still held; the count released. */
+async function releaseHeld(querier: Querier, claim: ClaimedSearchQueueItem[]): Promise<number> {
+  const released = await querier.query(
+    `UPDATE search_queue q SET lease_until = NULL FROM ${CLAIMED_SOURCE}
+     WHERE ${CLAIMED_MATCH} AND ${CLAIM_HELD}`,
+    [claimedJson(claim.map((item) => ({ item, delayMs: 0 })))],
+  );
+  return released.rowCount;
 }
 
 function toSettings(row: Row): SearchSettings {
@@ -1368,6 +1508,26 @@ async function retire(
     await querier.query(`DELETE FROM search_queue WHERE generation_id = ANY($1::uuid[])`, [ids]);
   }
   return ids;
+}
+
+/** Whether a building or ready generation of the new one's index and
+ * representation already holds what it describes. */
+async function matchingGeneration(querier: Querier, generation: NewSearchGeneration): Promise<boolean> {
+  const result = await querier.query(
+    `SELECT 1 FROM search_generation
+     WHERE search_index_id = $1 AND representation = $2 AND state IN ${LIVE_STATES}
+       AND definition_hash = $3 AND model_id IS NOT DISTINCT FROM $4
+       AND dimensions IS NOT DISTINCT FROM $5 AND languages IS NOT DISTINCT FROM $6::text[]`,
+    [
+      generation.searchIndexId,
+      generation.representation,
+      generation.definitionHash,
+      generation.representation === "semantic" ? generation.modelId : null,
+      generation.representation === "semantic" ? generation.dimensions : null,
+      generation.representation === "keyword" ? generation.languages : null,
+    ],
+  );
+  return result.rowCount > 0;
 }
 
 /** The generation, share-locked, while it is building or ready; null

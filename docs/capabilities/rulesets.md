@@ -216,7 +216,7 @@ again, whichever URL the commit comes through ([changesets.md](changesets.md#bin
 
 ### Accepted races
 
-Neither the parent rules nor the anchor locks anything. Three races follow, and are
+Neither the parent rules nor the anchor locks anything. Two races follow, and are
 accepted:
 
 - **The parent rules** are checked once, in the service, against the cached schema. Two
@@ -225,12 +225,10 @@ accepted:
   deleted can rarely end up a root. A later [flag change](schema-modeling.md#parent-relations)
   reports such data. A create with a parent relation cannot hit the first two: its new
   entity has no competing parent.
-- **The anchor** is read, and coverage walked, just before the write, not inside the
-  write's transaction. A write can still commit when, during the call, a person moves or
+- **The anchor** is read, and coverage walked, just before the write, in the write's
+  transaction but without locking anything. A write can still commit when, during the call, a person moves or
   removes the anchor or deletes its entity, or a plain-lens client moves an entity out of
   the subtree. The next call sees the current state.
-- **Several server instances** each check against their own cached schema
-  ([../architecture.md](../architecture.md#schema-cache)).
 
 Each write through a ruleset with an anchor costs a read of the ruleset and a walk per end
 it checks, one step per level of the hierarchy.

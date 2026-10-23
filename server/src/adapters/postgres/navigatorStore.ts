@@ -1,6 +1,8 @@
 /**
  * `NavigatorStore` on PostgreSQL: one row per navigator in the
- * `assistant_navigator` table of an ontology's namespace.
+ * `assistant_navigator` table of an ontology's namespace. Handed out by a
+ * design change (`ModelingStore.changeDesign`), it runs on that change's
+ * connection.
  */
 
 import type { NavigatorRecord, NavigatorWrite } from "../../core/navigator.js";
@@ -25,13 +27,19 @@ function toNavigator(row: Row): NavigatorRecord {
 }
 
 export class PostgresNavigatorStore implements NavigatorStore {
-  constructor(private readonly namespace: string) {}
+  /** `bound`: the connection of the design change it belongs to. */
+  constructor(
+    private readonly namespace: string,
+    private readonly bound?: Querier,
+  ) {}
 
   private query(text: string, params?: unknown[]): Promise<DbResult> {
+    if (this.bound !== undefined) return this.bound.query(text, params);
     return runQuery(text, params, this.namespace);
   }
 
   private tx<T>(work: (querier: Querier) => Promise<T>): Promise<T> {
+    if (this.bound !== undefined) return work(this.bound);
     return withTransaction(work, "READ COMMITTED", this.namespace);
   }
 

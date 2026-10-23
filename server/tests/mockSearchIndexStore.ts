@@ -7,16 +7,22 @@
 
 import { vi, type Mock } from "vitest";
 
-import type { SearchIndexStore } from "../src/core/ports.js";
+import type { DesignRevision, SearchIndexStore } from "../src/core/ports.js";
+
+/** The design revision every mock store answers: one design throughout. */
+export const TEST_DESIGN: DesignRevision = { ontologyId: "00000000-0000-4000-8000-000000000001", revision: 1 };
 
 /** Every method as a mock — completeness is compiler-enforced. */
 export type MockSearchIndexStore = {
   [K in Exclude<keyof SearchIndexStore, "ontologyKey">]: Mock;
 } & { ontologyKey: string };
 
+/** `readFullSchema` answers no types, the indices `listIndices` answers,
+ * and `TEST_DESIGN`. */
 export function createMockSearchIndexStore(ontologyKey = "test_ont"): MockSearchIndexStore {
-  return {
+  const store: MockSearchIndexStore = {
     ontologyKey,
+    designRevision: vi.fn(async () => TEST_DESIGN),
     getSearchSettings: vi.fn(async () => ({ keywordLanguages: ["german", "english"], disabledDefaults: {} })),
     setSearchSettings: vi.fn(async (settings: unknown) => settings),
     createIndex: vi.fn(async () => null),
@@ -48,11 +54,17 @@ export function createMockSearchIndexStore(ontologyKey = "test_ont"): MockSearch
     deleteEntriesOfEntity: vi.fn(async () => 0),
     deleteEntriesOfRelation: vi.fn(async () => 0),
     rankEntries: vi.fn(async () => []),
-    readFullSchema: vi.fn(async () => ({ entityTypes: [], relationTypes: [] })),
+    readFullSchema: vi.fn(async () => ({
+      entityTypes: [],
+      relationTypes: [],
+      indices: await store.listIndices(),
+      design: TEST_DESIGN,
+    })),
     enqueueEntityType: vi.fn(async () => 0),
     claimQueueItems: vi.fn(async () => []),
-    completeQueueItems: vi.fn(async () => undefined),
-    failQueueItems: vi.fn(async () => undefined),
+    completeQueueItems: vi.fn(async () => ({ completed: 0, lost: 0 })),
+    failQueueItems: vi.fn(async () => ({ attempts: [], lost: 0 })),
+    releaseQueueItems: vi.fn(async () => 0),
     queueStats: vi.fn(async () => []),
     findLensesIncludingIndex: vi.fn(async () => []),
     measureIndexContent: vi.fn(async () => ({
@@ -62,4 +74,5 @@ export function createMockSearchIndexStore(ontologyKey = "test_ont"): MockSearch
       passageEntries: 0,
     })),
   };
+  return store;
 }

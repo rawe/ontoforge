@@ -19,6 +19,7 @@ import {
   makeUnscopedSchema,
   type MockRuntimeStore,
 } from "./helpers.js";
+import { TEST_DESIGN } from "../mockSearchIndexStore.js";
 
 const holder: { store: MockRuntimeStore } = { store: createMockRuntimeStore() };
 
@@ -68,6 +69,7 @@ function makeDocumentSchema(): Record<string, unknown> {
     relationTypes: [],
     entityInclusions: [],
     relationInclusions: [],
+    design: TEST_DESIGN,
   };
 }
 
@@ -221,6 +223,7 @@ describe("bad-default failure modes", () => {
       relationTypes: [],
       entityInclusions: [],
       relationInclusions: [],
+      design: TEST_DESIGN,
     };
   }
 

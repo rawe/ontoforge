@@ -18,8 +18,8 @@ import {
   describeSchema,
   runAgentChat,
 } from "../../../../src/runtime/assistants/agents/runtime.js";
-import { MemoryThreadStore } from "../../../../src/runtime/threads/memoryThreadStore.js";
 import { TURNS_PER_THREAD, TURNS_THE_MODEL_SEES, type GraphThread } from "../../../../src/runtime/threads/threadStore.js";
+import { graphValues, newGraphThread } from "../../threads/graphThread.js";
 import { invalidateLoadedSchemaCache, loadSchema } from "../../../../src/runtime/schemaCache.js";
 import { FakeToolCallingModel, toolCallMessage } from "../../aiHelpers.js";
 import {
@@ -37,12 +37,9 @@ import {
 
 type Row = Record<string, unknown>;
 
-const threads = new MemoryThreadStore();
-
 /** A new thread of the default agent, as a chat without a thread id starts one. */
 async function newThread(): Promise<GraphThread> {
-  const { threadId } = await threads.create({ ontologyKey: "o", lensKey: "full_lens", kind: "agents", assistantKey: "_default" });
-  return { checkpointer: threads.checkpointer, threadId };
+  return newGraphThread();
 }
 
 /** One turn with the built-in default agent, on a new thread unless one is given. */
@@ -606,7 +603,7 @@ describe("chat trace and turns on a thread", () => {
       await aiChat("full_lens", `question ${i}`, asRuntimeStore(store), thread);
     }
 
-    const messages = (await threads.values(thread.threadId))!.messages as HumanMessage[];
+    const messages = (await graphValues(thread)).messages as HumanMessage[];
     const questions = messages.filter((m) => m.getType() === "human").map((m) => String(m.content));
     expect(questions).toHaveLength(TURNS_PER_THREAD);
     expect(questions[0]).toBe("question 3");

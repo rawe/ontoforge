@@ -9,7 +9,8 @@ Four parts, two processes.
 
 **Server** — one deployable unit. Serves the ontology registry, the modeling API, the
 runtime API, both MCP servers and the OpenAPI description. There is no mode switch and no
-partial deployment: every instance serves everything.
+partial deployment: every instance serves everything, and any number of instances share one
+database and one [thread store](#thread-store).
 
 **Web client** — a separate static application talking to the server over REST only. It
 holds no privileged path; anything it does can be done over the API.
@@ -95,8 +96,7 @@ it calls, which is what makes the schema cache possible. Runtime uses core alone
 other three may use runtime as well as core: modeling where it needs runtime's own view —
 assembling a lens's schema, deriving the managed search indices of a changed schema, and
 validating agent configurations, retrievers and navigators against what runtime offers;
-registry to clear the schema cache when an ontology is deleted; server to report which
-search strategies the deployment offers.
+server to report which search strategies the deployment offers.
 
 ## Ontology isolation
 
@@ -235,50 +235,73 @@ in memory: its scoped schema, the full schema, its agent configurations and its 
 queries.
 
 The cache is keyed by ontology plus lens — lens keys are unique only within their
-ontology, so the lens key alone would be ambiguous. Entries are built lazily and cleared
-wholesale by any modeling mutation, in any ontology, and by deleting an ontology through
-the registry. Wholesale rather than selective, because a single schema change can affect
-many lenses and the cost of rebuilding is small.
+ontology, so the lens key alone would be ambiguous. Beside the lenses, the cache holds one
+entry per ontology for [search indexing](#search-indexing): its index definitions and the
+map, derived from them and the schema, of which writes affect which entries.
 
-Beside the lenses, the cache holds one entry per ontology for
-[search indexing](#search-indexing): its index definitions and the map, derived from them
-and the schema, of which writes affect which entries. It is cleared with the rest, and by
-any change of the ontology's index definitions.
+Each server process holds its own cache. Every entry is tagged with the
+[design revision](#design-revision) it was read with; every use reads the ontology's
+current revision first and uses an entry only while it is still that revision, otherwise
+builds it again. A design change made on any server is therefore seen by the next request
+on every other, with no signal between them, and an ontology deleted and created again
+under its key never meets its predecessor's entries. The cache holds at most 512 lenses
+and 128 search contexts, dropping the least recently used first.
 
-It is **per process**. Multiple server instances against one database will not see each
-other's schema changes until each rebuilds — a real constraint on horizontal scaling that
-no interface currently exposes.
+## Design revision
+
+Each ontology carries a design revision: its never-reused identity and a number every
+design change advances. Every modeling change — an import and a cascade included — is one
+design change: one transaction that holds the ontology's design exclusively and advances
+the revision, committing whole or not at all. Every data write, immediate or a changeset's
+commit, validates against the cached schema of the revision it read and then runs its
+checks, the write and its search work in one transaction that holds the design shared and
+first checks the revision is unchanged ([decisions.md](decisions.md#storage)). Shared holds
+never wait for each other; a design change waits for running writes, and writes arriving
+meanwhile wait for it. When the revision moved, the write loads the schema again,
+validates again and retries; a design that keeps moving, or a wait of more than five
+seconds for the design or a row, answers a conflict and nothing is written.
+
+An assistant turn already running is not stopped by a design change: each of its tool
+calls reads and writes against the design current at that call.
 
 ## Thread store
 
 Assistants converse in threads the server holds: a client sends a new message and, to
-continue, a thread id; the server continues from the state it kept. Every thread of a
-server lives in one thread store — one per server, not per ontology — behind an interface
-of its own, beside the persistence port rather than behind it
-([decisions.md](decisions.md#storage)).
+continue, a thread id; the server continues from the state it kept. Every thread lives in
+one thread store — one for every server, not per ontology — behind an interface of its
+own, beside the persistence port rather than behind it
+([decisions.md](decisions.md#storage)). Configuration chooses its adapter: memory, which
+serves one server process, or Valkey, shared by every server that names it. A configured
+Valkey that does not answer, that would evict data rather than refuse it, or that cannot
+run the store's scripts fails the boot; nothing falls back to memory.
 
 **Registry.** Each thread has a random, unguessable id — knowing it is what lets a client
 continue the thread — and a binding to exactly one assistant: ontology, lens, kind and key.
 A thread is found only through its own assistant; through any other it is unknown. Nothing
 cascades: a deleted ontology, lens or assistant leaves its threads to retention.
 
-**State.** The store keeps a thread's conversation state after the latest step of its last
-run, never earlier steps, plus — while a turn runs — the state the turn started from. A
-thread keeps at most 25 turns; older ones are removed. The model sees at most the last 8.
+**State.** The store keeps one value per thread: its conversation state after its last
+completed turn. A thread keeps at most 25 turns; older ones are removed. The model sees at
+most the last 8. A thread's state takes at most 8 MiB; a turn that would exceed it fails.
 
-**One run per thread, atomic turns.** A run holds the thread's run lock; a run on a thread
-that is still running is refused, never queued. A cancelled or failed turn returns the
-thread to the state the turn started from; a successful one drops it. A thread only ever
-holds complete turns, and an interrupted turn is asked again, never resumed.
+**One turn per thread, atomic turns.** A turn holds its thread under a lease of 30 seconds,
+renewed every 10 while it runs; a message to a thread whose lease is held, on any server,
+is refused, never queued. The turn runs on a copy of the thread's state in its own process
+and stores the result once, when it completes — only while it still holds the lease, and
+ending the lease in the same step. A cancelled or failed turn stores nothing and releases
+the lease. So a thread read during a turn shows its last completed turn, a thread only ever
+holds complete turns, and an interrupted turn is asked again, never resumed. A server that
+stops without ending its turn blocks the thread until the lease runs out.
 
-**Retention.** A thread expires 2 hours after its last turn; expiry removes its state and
-its registry entry, and reading a thread does not count as use. The store holds at most
-100 threads; reaching the cap removes the thread unused the longest. Retention is applied
-on every read and write of the store — no background job.
+**Retention.** A thread expires 24 hours after its last activity: a message accepted for
+it or a turn completed. Reading a thread is not activity. Expiry removes its state and its
+registry entry, with no background job. No thread is ever removed to make room: a full
+store refuses new threads and completed turns as a storage failure. The memory adapter
+holds at most 256 MiB; Valkey is bounded by its own memory limit.
 
-Like the schema cache, the thread store is **per process**: threads live in the server's
-memory, a restart loses them all, and multiple instances do not share them. A client
-continuing a lost thread is told it is not found and starts a new one.
+**Loss.** Nothing is persisted. Threads are lost only when their store loses them: a
+memory store with its server's restart, Valkey with its own reset. A client continuing a
+lost thread is told it is not found and starts a new one.
 
 ## Assistant kinds
 
@@ -306,11 +329,13 @@ A runtime write, which is the longest path:
     → parse and validate shape
     → bind a runtime store to the ontology key (unknown key → not found)
     → resolve the lens key within that ontology
-    → load lens from schema cache (build on miss)
+    → read the design revision; load lens and search context from the schema cache
+      (build when missing or older)
     → reject unknown properties; check required; apply defaults
     → coerce each value to its declared data type
     → derive the search work the write causes, from the cached search context
-    → cross the persistence port (the write and its search work, one transaction)
+    → cross the persistence port (one transaction holding the design shared: check the
+      revision, then the write and its search work; a moved revision starts over)
     → adapter compiles and executes
     → filter response to the scoped properties
     → stub documents, apply field projection
@@ -338,10 +363,10 @@ state, through neutral reads of the port that return stored parent links and loc
 targets but judge nothing. The staged objects are applied through the same store writes
 as the immediate path.
 
-**One connection.** A commit runs on a store bound to one database transaction: every
-operation of that store, and of the ruleset and changeset stores it hands out, uses the
-transaction's one connection. It is the one exception to every port operation owning its
-connection, and taking a second connection inside it is a programming error
+**One connection.** A commit runs, like every data write, on a store bound to one
+database transaction: every operation of that store, and of the ruleset and changeset
+stores it hands out, uses the transaction's one connection, and taking a second connection
+inside it is a programming error
 ([storage-adapters.md](storage-adapters.md#transactions)).
 
 **The commit lock.** Each ontology has one commit lock, held only by commits and checks
@@ -368,7 +393,10 @@ with the write instead of queueing anything. A change no index reads queues noth
 time-limited lease — items another process holds are skipped, so any number of processes
 share one queue — and composes each claimed part's text from current state, outside any
 transaction. It skips parts whose text is unchanged, embeds the rest in provider batches,
-writes the entries and completes the claim. A write that queues an item again while it is
+writes the entries and completes the claim. The lease fences the claim: once it runs out
+another process may take the items over, and from then on whatever the first worker
+writes or settles for them is dropped and logged — as for an entity deleted while the
+worker composed. A write that queues an item again while it is
 claimed is never lost: completing the older claim leaves it queued. A failed batch is
 retried with exponentially growing delays; after the configured number of attempts its
 items count as failed and wait for a rebuild or a new write of their entity. The worker
@@ -380,7 +408,7 @@ semantic and keyword — as a generation identified by the definition it was bui
 and, for semantic entries, the embedding model, for keyword entries the keyword language
 set. When no generation matches, a new one is built from a full backfill beside the
 active one, which keeps serving until the new one is complete and takes its place in one
-step. An entry's semantic text is labelled with the schema's display names, unless the
+step; one process at a time builds its search structure. An entry's semantic text is labelled with the schema's display names, unless the
 index renders it from a template; its keyword text holds values only ([decisions.md](decisions.md#search)).
 
 **Managed indices follow the schema.** After every schema change the modeling side derives
@@ -388,7 +416,13 @@ the managed indices again from the full schema — creating, updating and deleti
 definitions, including a new one in every scoped lens that exposes its root type (a
 passage index: its document property too) — and brings the generations in line. A changed display name or name property, which no
 definition captures, queues the entities of every index rendering that type again. The worker does the same for
-every ontology when it starts. Ranked search reads the ready generations
+every ontology when it starts, and brings an ontology's generations in line again whenever
+its design revision moved since it last did: after a change this is best effort, so a
+failure there is logged, never answered, and made good by the worker. Any number of servers may bring generations in line at
+once: a generation is created or retired only while the design revision is the one that
+was read, and none is created where a matching one already builds or serves. Creating one
+holds the design exclusively, so no data write falls between its backfill and its taking
+new work. Ranked search reads the ready generations
 ([capabilities/search-indices.md](capabilities/search-indices.md)).
 
 ## Error model
@@ -440,7 +474,8 @@ Ordered, and failure at any step prevents serving:
 1. Connect storage, verify reachability, ensure the server-wide constraints and indexes
    exist, and bring storage of an older storage version up to date
    ([decisions.md](decisions.md#storage)). Per-ontology storage is provisioned when an
-   ontology is created; at boot only an upgrade reaches into it.
+   ontology is created; at boot only an upgrade reaches into it. Open the
+   [thread store](#thread-store).
 2. Initialize the embedding provider, if configured.
 3. Initialize the language-model and decision-model providers, if configured.
 4. If embeddings are enabled, compare the width of every registered ontology's
@@ -452,13 +487,31 @@ Ordered, and failure at any step prevents serving:
    brings every ontology's generations in line with the current definitions, embedding
    model and keyword language sets — a changed model or language set starts its new
    generations here — then drains the queue. Its failures are logged
-   and never prevent serving; at shutdown it stops after the pass it is in.
+   and never prevent serving.
 6. Start both MCP servers.
 
 The registry walks in steps 4 and 5 do nothing when no ontology exists — a zero-ontology
 server boots clean. Note step 4 warns and does not repair — deliberately, for the reason
 given in [decisions.md](decisions.md#deployment). Rebuild is where repair happens, one
 ontology at a time.
+
+The port opens only once these steps are done; from then on the liveness and readiness
+probes answer ([interfaces.md](interfaces.md#probes)).
+
+## Shutdown
+
+A stopping server — on SIGTERM or SIGINT — drains, then closes, once:
+
+1. Readiness answers not ready, and every response not yet started closes its
+   connection after it. No new connection is accepted and idle ones close.
+2. Running requests and chat streams go on, for at most the configured drain period.
+   The search worker stops alongside: it starts no further ontology and cancels its
+   embedding requests; a batch it stops is not counted as failed but released, so the
+   next claim, in any process, takes it at once.
+3. Whatever still runs then is cut. A cut chat stream ends without a terminal event; its
+   turn stores nothing and releases its lease.
+4. The app with its thread store, the worker, the providers and storage close, in that
+   order. A shutdown that stalls exits the process.
 
 ## Configuration
 
@@ -471,6 +524,8 @@ per-ontology deployment configuration.
 | Embedding | Provider, model, endpoint, credential, vector width, request batching | Semantic search unavailable |
 | Documents | Chunk size and overlap | Defaults apply |
 | Search indexing | Attempts before a queued item counts as failed, worker batch size, polling interval | Defaults apply |
+| Thread store | Memory or Valkey, and how to reach Valkey | Memory |
+| Shutdown | How long a stopping server drains | Default applies |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
 | Decision model | Endpoint, model, credential | Entity identity comparison unavailable |
 | Public URL | The server's public base address, read by no capability yet | Nothing changes |
@@ -494,8 +549,6 @@ Stated plainly, because their absence is a design position and not an oversight:
   network.
 - **No multi-tenancy.** An ontology isolates data but is not a tenant — the rule and
   its reason are in [decisions.md](decisions.md#scope).
-- **No cross-process cache coherence and no shared threads**, as described above.
 
-Absences in the API surface itself — no health probe, no bulk write, no instance-data
-export — are listed with their consequences in
-[interfaces.md](interfaces.md#what-is-not-exposed).
+Absences in the API surface itself — no bulk write, no instance-data export — are listed
+with their consequences in [interfaces.md](interfaces.md#what-is-not-exposed).

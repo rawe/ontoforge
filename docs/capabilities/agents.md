@@ -70,8 +70,7 @@ know it: it is not listed, read or written there.
   message is handed back to the model as the tool's result, so it can correct itself and
   retry within the same turn. Only errors outside that pair abort.
 - Agents belong to a lens: keys are unique within it, deleting the lens deletes them, and
-  they travel with it through [transfer](transfer.md). Defining or deleting one
-  invalidates the schema cache.
+  they travel with it through [transfer](transfer.md).
 
 ### Live tool activity
 

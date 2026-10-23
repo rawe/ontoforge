@@ -6,7 +6,12 @@
  * see the error model in `docs/architecture.md`. Framework-level failures
  * are mapped into the same envelope: an unparsable JSON body answers
  * `400 INVALID_JSON`, a request-shape failure `422 VALIDATION_ERROR`.
+ *
+ * The probes `/livez` and `/readyz` sit outside `/api` and outside that
+ * envelope; shutdown drains through the app's `lifecycle`.
  */
+
+import type { ServerResponse } from "node:http";
 
 import cors from "@fastify/cors";
 import swagger from "@fastify/swagger";
@@ -34,8 +39,87 @@ import { changesetRouter } from "./runtime/changesetRouter.js";
 import { decisionRouter } from "./runtime/decisionRouter.js";
 import { runtimeRouter } from "./runtime/router.js";
 import { rulesetRouter, rulesetRuntimeRouter } from "./runtime/rulesetRouter.js";
-import { MemoryThreadStore } from "./runtime/threads/memoryThreadStore.js";
 import { serverRouter } from "./server/router.js";
+import { openSharedState, type SharedState } from "./sharedState.js";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    lifecycle: Lifecycle;
+  }
+}
+
+/**
+ * What shutdown drains (`main.ts`): the readiness the probes report and the
+ * work still running. Work is every request until its response closes, and
+ * every route handler until its promise settles — a chat stream's handler
+ * settles only once its turn is published or released, so no work running
+ * also means no turn held.
+ */
+export class Lifecycle {
+  private isDraining = false;
+  private running = 0;
+  private readonly waiters = new Set<() => void>();
+  /** Responses whose headers may still be written. */
+  private readonly open = new Set<ServerResponse>();
+
+  get draining(): boolean {
+    return this.isDraining;
+  }
+
+  /** Shutdown starts: `/readyz` answers 503, and every response not yet
+   * started — running or new — closes its connection. */
+  drain(): void {
+    this.isDraining = true;
+    for (const response of this.open) this.closeAfter(response);
+  }
+
+  /** Count a raw request until its response closes. Raw, so hijacked chat
+   * streams and MCP count as well. */
+  track(response: ServerResponse): void {
+    const end = this.begin();
+    this.open.add(response);
+    if (this.isDraining) this.closeAfter(response);
+    response.once("close", () => {
+      this.open.delete(response);
+      end();
+    });
+  }
+
+  private closeAfter(response: ServerResponse): void {
+    if (!response.headersSent) response.setHeader("connection", "close");
+  }
+
+  /** Count one piece of work; the returned function ends it, once. */
+  begin(): () => void {
+    this.running += 1;
+    let ended = false;
+    return () => {
+      if (ended) return;
+      ended = true;
+      this.running -= 1;
+      if (this.running === 0) {
+        for (const waiter of this.waiters) waiter();
+        this.waiters.clear();
+      }
+    };
+  }
+
+  /** True once no work runs, false if some still does after `ms`. */
+  settled(ms: number): Promise<boolean> {
+    if (this.running === 0) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const done = (): void => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        this.waiters.delete(done);
+        resolve(false);
+      }, ms);
+      this.waiters.add(done);
+    });
+  }
+}
 
 function sendError(
   reply: FastifyReply,
@@ -51,8 +135,28 @@ function sendError(
   return reply.status(status).send({ error });
 }
 
-export async function createApp(): Promise<FastifyInstance> {
+/** The app over `shared`, which it closes when it closes. The server
+ * passes the configured shared state; tests that pass none get it in memory. */
+export async function createApp(shared?: SharedState): Promise<FastifyInstance> {
+  const state = shared ?? (await openSharedState({ kind: "memory" }));
   const app = Fastify({ logger: false });
+  app.addHook("onClose", () => state.close());
+
+  const lifecycle = new Lifecycle();
+  app.decorate("lifecycle", lifecycle);
+  app.server.on("request", (_request, response) => lifecycle.track(response));
+  // Every route registered from here on: its handler counts until it settles.
+  app.addHook("onRoute", (route) => {
+    const handler = route.handler;
+    route.handler = function (this: FastifyInstance, request, reply) {
+      const result = handler.call(this, request, reply);
+      if (result instanceof Promise) {
+        const end = lifecycle.begin();
+        result.then(end, end);
+      }
+      return result;
+    };
+  });
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -107,6 +211,15 @@ export async function createApp(): Promise<FastifyInstance> {
   await app.register(swaggerUi, { routePrefix: "/docs" });
 
   app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
+
+  // Probes: live while the event loop answers; ready until shutdown starts
+  // draining. Booting needs no answer of its own: the port opens only once
+  // boot is done. No dependency is checked — a shared one failing would take
+  // every server out of service at once.
+  app.get("/livez", { schema: { hide: true } }, async () => ({ live: true }));
+  app.get("/readyz", { schema: { hide: true } }, async (_request, reply) =>
+    lifecycle.draining ? reply.status(503).send({ ready: false }) : { ready: true },
+  );
 
   // An unknown route is a resource that does not exist; it answers in the
   // standard envelope like every other error, rather than leaking the
@@ -174,7 +287,7 @@ export async function createApp(): Promise<FastifyInstance> {
   await app.register(runtimeRouter, { prefix: runtimePrefix });
   await app.register(changesetRouter, { prefix: `${runtimePrefix}/changesets` });
   // One thread store per server: every assistant conversation lives in it.
-  await app.register(aiRouter, { prefix: runtimePrefix, threads: new MemoryThreadStore() });
+  await app.register(aiRouter, { prefix: runtimePrefix, threads: state.threads });
   await app.register(decisionRouter, { prefix: runtimePrefix });
   // Ruleset maintenance names no lens: the first lensless runtime routes.
   await app.register(rulesetRouter, { prefix: "/api/ontologies/:ontologyKey/runtime/rulesets" });

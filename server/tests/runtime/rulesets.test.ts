@@ -34,7 +34,7 @@ afterAll(async () => {
 beforeEach(() => {
   holder.store = createMockRuntimeStore();
   // The full schema: person, company and department.
-  holder.store.indices.readFullSchema.mockResolvedValue(makeFullSchema());
+  holder.store.indices.readFullSchema.mockResolvedValue({ ...makeFullSchema(), indices: [] });
   invalidateLoadedSchemaCache();
 });
 

@@ -38,6 +38,7 @@ const ALL_TABLES = [
   "search_generation",
   "search_queue",
   "search_entry",
+  "design_revision",
 ];
 
 const ID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -80,6 +81,9 @@ describe("PostgreSQL registry provisioning", () => {
     await getOntologyRegistry().createOntology(ID_A, "crm", null, null);
     expect(await namespaceExists("ont_crm")).toBe(true);
     expect(await tablesIn("ont_crm")).toEqual([...ALL_TABLES].sort());
+    // The design starts at revision 1 under the ontology's id.
+    const design = await runQuery(`SELECT ontology_id, revision FROM ont_crm.design_revision`);
+    expect(design.rows).toEqual([{ ontology_id: ID_A, revision: 1 }]);
   });
 
   it("a failure after the namespace exists rolls everything back", async () => {

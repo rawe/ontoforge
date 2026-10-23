@@ -53,10 +53,9 @@ export const aiRouter: FastifyPluginAsyncZod<{ threads: ThreadStore }> = async (
     async (request, reply) => {
       const store = await getRuntimeStore(request.params.ontologyKey);
       const config = await agents.prepareChat(request.params.lensKey, store, request.params.assistantKey);
-      const threadId = await openThread(threads, threadBinding(request.params, "agents"), request.body.threadId);
-      return sendChatStream(reply, { threads, threadId }, (execution) => agents.runAgentChat(
-        config, request.params.lensKey, request.body.message, store,
-        { checkpointer: threads.checkpointer, threadId }, execution,
+      const turn = await openThread(threads, threadBinding(request.params, "agents"), request.body.threadId);
+      return sendChatStream(reply, { threads, turn }, (execution, thread) => agents.runAgentChat(
+        config, request.params.lensKey, request.body.message, store, thread, execution,
       ));
     },
   );

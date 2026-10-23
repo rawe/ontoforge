@@ -92,6 +92,7 @@ import { ConflictError, NotFoundError, ValidationError } from "../core/exception
 import type {
   ChangesetChange,
   ChangesetRecord,
+  DesignRevision,
   NewStagedObject,
   NewStagedValue,
   ParentLink,
@@ -117,8 +118,9 @@ import {
   type ParentRelationInput,
   type UpdateArgs,
 } from "./prepare.js";
+import { loadDesign, retryOnDesignChange } from "./designWrite.js";
 import { docLengthKey, documentPropertyKeys, filterEntityProperties } from "./readHelpers.js";
-import { loadSchema, loadSearchContext, type LoadedSchema, type SearchContext } from "./schemaCache.js";
+import { loadSchema, type LoadedSchema, type SearchContext } from "./schemaCache.js";
 import {
   applyDocumentEdit,
   documentSlice,
@@ -280,11 +282,6 @@ function toView(record: ChangesetRecord): ChangesetView {
   };
 }
 
-/** Draft changesets last changed before this are expired. */
-function expiryCutoff(): Date {
-  return new Date(Date.now() - IDLE_MS);
-}
-
 /** A valid note, or null; over the cap, or holding a NUL, is a 422. */
 function validNote(note: string | null | undefined): string | null {
   if (note === null || note === undefined) return null;
@@ -319,10 +316,9 @@ async function loadChangeset(
   const changesets = store.changesets();
   const record = await changesets.get(id, loaded.scoped.lensId, rulesetKey);
   if (record === null) throw notFound(id);
-  const cutoff = expiryCutoff();
-  if (record.submittedAt === null && record.lastChangeAt < cutoff) {
-    await changesets.sweep(cutoff);
-    throw notFound(id);
+  // A draft expires by the database's clock: whether it has is the sweep's to say.
+  if (record.submittedAt === null && (await changesets.sweep(IDLE_MS)) > 0) {
+    if ((await changesets.get(id, loaded.scoped.lensId, rulesetKey)) === null) throw notFound(id);
   }
   return record;
 }
@@ -375,7 +371,7 @@ export async function startChangeset(
   await checkRulesetExists(rulesetKey, store);
   const valid = validNote(note);
   const changesets = store.changesets();
-  await changesets.sweep(expiryCutoff());
+  await changesets.sweep(IDLE_MS);
   const record = await changesets.start({ id: randomUUID(), lensId: loaded.scoped.lensId, rulesetKey: rulesetKey, note: valid });
   return toView(record);
 }
@@ -924,7 +920,7 @@ export async function listChangesets(
   const loaded = await loadSchema(lensKey, store);
   await checkRulesetExists(rulesetKey, store);
   const changesets = store.changesets();
-  await changesets.sweep(expiryCutoff());
+  await changesets.sweep(IDLE_MS);
   const lens = loaded.scoped;
   const shown = (key: string): boolean => Object.hasOwn(lens.entityTypes, key) || Object.hasOwn(lens.relationTypes, key);
   return (await changesets.list(lens.lensId, rulesetKey)).map((summary) => {
@@ -948,11 +944,11 @@ export async function listChangesets(
 }
 
 /** How many changesets a lens delete takes with it, counted before the
- * delete; an expired draft changeset is gone already. */
+ * delete; an expired draft changeset is swept first. */
 export async function lensChangesetCount(lensId: string, store: RuntimeStore): Promise<number> {
-  const cutoff = expiryCutoff();
-  const summaries = await store.changesets().list(lensId, null);
-  return summaries.filter((summary) => summary.submittedAt !== null || summary.lastChangeAt >= cutoff).length;
+  const changesets = store.changesets();
+  await changesets.sweep(IDLE_MS);
+  return (await changesets.list(lensId, null)).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -1991,60 +1987,76 @@ async function runCommit(
   if (runningCommits >= MAX_RUNNING_COMMITS) {
     throw new ConflictError("Too many commits are running; try again");
   }
-  const staleVersion = (version: number): ConflictError =>
-    new ConflictError(`Changeset '${changesetId}' changed since you looked: version ${version}, not ${expectedVersion}`);
   runningCommits += 1;
   try {
-    // 0a: before BEGIN, holding nothing. Nothing inside reaches the pool.
-    const loaded = await loadSchema(lensKey, store);
-    const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
-    if (expectedVersion !== undefined && record.version !== expectedVersion) throw staleVersion(record.version);
-    const search = await loadSearchContext(store.ontologyKey, store.searchIndices());
-    try {
-      // 0b: the lock-free pass; a fault rejects with no lock taken.
-      const pass = await lockFreePass(loaded, record.id, store);
-      if (pass.faults.length > 0) throw new CommitRejected(pass.faults);
-      const answer = await store.transaction(async (bound) => {
-        // 1: the commit lock and the row, the version, then the targets
-        // and drift under the lock, and the anchor read fresh.
-        const locked = await bound.changesets().lockForCommit(record.id);
-        if (locked === null) throw notFound(changesetId);
-        if (expectedVersion !== undefined && locked.version !== expectedVersion) throw staleVersion(locked.version);
-        if (locked.version !== record.version) {
-          throw new ConflictError(`Changeset '${changesetId}' changed during the commit; try again`);
-        }
-        const drift = await driftUnderLock(loaded, pass, bound);
-        if (drift.length > 0) throw new CommitRejected(drift);
-        const anchor =
-          record.rulesetKey === null ? null : await anchorBefore(loaded, record.rulesetKey, pass, bound);
-        // 2: the phases; 3: commit validation.
-        const applied = await applyObjects(loaded, search, pass.objects, bound);
-        if (applied.fault !== null) throw new CommitRejected([applied.fault]);
-        const violations = [
-          ...(anchor?.violations ?? []),
-          ...(await commitViolations(loaded, pass, applied, anchor?.coverage ?? null, bound)),
-        ];
-        if (violations.length > 0) throw new CommitRejected(violations);
-        const answer = { committed: applied.applied, alreadyGone: applied.alreadyGone };
-        // A check rolls back here.
-        if (check) throw new CheckPassed(answer);
-        // 4: the staged objects go with the changeset; COMMIT on return.
-        await bound.changesets().deleteCommitted(record.id);
-        return answer;
-      });
-      return { version: record.version, answer };
-    } catch (error) {
-      if (error instanceof CheckPassed) return { version: record.version, answer: error.answer };
-      if (!(error instanceof CommitRejected)) throw error;
-      if (check) {
-        throw violationsError(`Checked version ${record.version}: the commit would be rejected`, error.violations, {
-          version: record.version,
-        });
-      }
-      await store.changesets().touch(record.id);
-      throw rejection(error.violations);
-    }
+    // Every run validates against the design it loaded and commits only
+    // while it is still that design; a change in between runs it again.
+    return await retryOnDesignChange(store, (current) =>
+      commitRun(lensKey, rulesetKey, changesetId, expectedVersion, check, store, current));
   } finally {
     runningCommits -= 1;
+  }
+}
+
+/** One run of the commit's steps against the design revision `current`. */
+async function commitRun(
+  lensKey: string,
+  rulesetKey: string | null,
+  changesetId: string,
+  expectedVersion: number | undefined,
+  check: boolean,
+  store: RuntimeStore,
+  current: DesignRevision,
+): Promise<{ version: number; answer: CommitAnswer }> {
+  const staleVersion = (version: number): ConflictError =>
+    new ConflictError(`Changeset '${changesetId}' changed since you looked: version ${version}, not ${expectedVersion}`);
+  // 0a: before BEGIN, holding nothing. Nothing inside reaches the pool.
+  const { loaded, search } = await loadDesign(lensKey, store, current);
+  const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
+  if (expectedVersion !== undefined && record.version !== expectedVersion) throw staleVersion(record.version);
+  try {
+    // 0b: the lock-free pass; a fault rejects with no lock taken.
+    const pass = await lockFreePass(loaded, record.id, store);
+    if (pass.faults.length > 0) throw new CommitRejected(pass.faults);
+    // The transaction first holds the design shared and checks it.
+    const answer = await store.transaction(loaded.design, async (bound) => {
+      // 1: the commit lock and the row, the version, then the targets
+      // and drift under the lock, and the anchor read fresh.
+      const locked = await bound.changesets().lockForCommit(record.id);
+      if (locked === null) throw notFound(changesetId);
+      if (expectedVersion !== undefined && locked.version !== expectedVersion) throw staleVersion(locked.version);
+      if (locked.version !== record.version) {
+        throw new ConflictError(`Changeset '${changesetId}' changed during the commit; try again`);
+      }
+      const drift = await driftUnderLock(loaded, pass, bound);
+      if (drift.length > 0) throw new CommitRejected(drift);
+      const anchor =
+        record.rulesetKey === null ? null : await anchorBefore(loaded, record.rulesetKey, pass, bound);
+      // 2: the phases; 3: commit validation.
+      const applied = await applyObjects(loaded, search, pass.objects, bound);
+      if (applied.fault !== null) throw new CommitRejected([applied.fault]);
+      const violations = [
+        ...(anchor?.violations ?? []),
+        ...(await commitViolations(loaded, pass, applied, anchor?.coverage ?? null, bound)),
+      ];
+      if (violations.length > 0) throw new CommitRejected(violations);
+      const answer = { committed: applied.applied, alreadyGone: applied.alreadyGone };
+      // A check rolls back here.
+      if (check) throw new CheckPassed(answer);
+      // 4: the staged objects go with the changeset; COMMIT on return.
+      await bound.changesets().deleteCommitted(record.id);
+      return answer;
+    });
+    return { version: record.version, answer };
+  } catch (error) {
+    if (error instanceof CheckPassed) return { version: record.version, answer: error.answer };
+    if (!(error instanceof CommitRejected)) throw error;
+    if (check) {
+      throw violationsError(`Checked version ${record.version}: the commit would be rejected`, error.violations, {
+        version: record.version,
+      });
+    }
+    await store.changesets().touch(record.id);
+    throw rejection(error.violations);
   }
 }

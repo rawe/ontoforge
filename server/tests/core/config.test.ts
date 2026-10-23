@@ -11,6 +11,7 @@ describe("config defaults", () => {
     expect(settings.DB_USER).toBe("postgres");
     expect(settings.DB_PASSWORD).toBe("ontoforge_dev");
     expect(settings.PORT).toBe(8000);
+    expect(settings.SHUTDOWN_DRAIN_SECONDS).toBe(20);
 
     expect(settings.EMBEDDING_PROVIDER).toBeNull();
     expect(settings.EMBEDDING_MODEL).toBe("bge-m3");
@@ -43,6 +44,7 @@ describe("config env overrides", () => {
       DB_USER: "admin",
       DB_PASSWORD: "secret",
       PORT: "9001",
+      SHUTDOWN_DRAIN_SECONDS: "45",
       EMBEDDING_PROVIDER: "ollama",
       EMBEDDING_MODEL: "custom-model",
       EMBEDDING_BASE_URL: "http://embed:1234",
@@ -66,6 +68,7 @@ describe("config env overrides", () => {
     expect(settings.DB_USER).toBe("admin");
     expect(settings.DB_PASSWORD).toBe("secret");
     expect(settings.PORT).toBe(9001);
+    expect(settings.SHUTDOWN_DRAIN_SECONDS).toBe(45);
     expect(settings.EMBEDDING_PROVIDER).toBe("ollama");
     expect(settings.EMBEDDING_MODEL).toBe("custom-model");
     expect(settings.EMBEDDING_BASE_URL).toBe("http://embed:1234");
@@ -100,6 +103,7 @@ describe("config env overrides", () => {
       "EMBEDDING_BATCH_SIZE",
       "EMBEDDING_CONCURRENCY",
       "CHANGESET_MAX_BYTES",
+      "SHUTDOWN_DRAIN_SECONDS",
     ]) {
       expect(() => loadSettings({ [name]: "0" })).toThrow(
         new RegExp(`${name} must be a positive integer`),
@@ -223,5 +227,29 @@ describe("decision provider configuration", () => {
       .DECISION_API_KEY).toBe("explicit-key");
     expect(loadSettings({ DECISION_API_KEY: "", TYPESAFE_API_KEY: "provider-key" })
       .DECISION_API_KEY).toBe("provider-key");
+  });
+});
+
+describe("shared state configuration", () => {
+  it("keeps shared state in memory by default", () => {
+    const settings = loadSettings({});
+    expect(settings.SHARED_STATE).toBe("memory");
+    expect(settings.VALKEY_URL).toBeNull();
+  });
+
+  it("takes a Valkey with its URL", () => {
+    const settings = loadSettings({ SHARED_STATE: "valkey", VALKEY_URL: "redis://valkey:6379" });
+    expect(settings.SHARED_STATE).toBe("valkey");
+    expect(settings.VALKEY_URL).toBe("redis://valkey:6379");
+    expect(loadSettings({ SHARED_STATE: "valkey", VALKEY_URL: "rediss://u:p@valkey:6380/0" }).VALKEY_URL)
+      .toBe("rediss://u:p@valkey:6380/0");
+  });
+
+  it("fails the boot for an unknown store, a missing or malformed URL, and a URL without the switch", () => {
+    expect(() => loadSettings({ SHARED_STATE: "redis" })).toThrow(/SHARED_STATE/);
+    expect(() => loadSettings({ SHARED_STATE: "valkey" })).toThrow(/VALKEY_URL is required/);
+    expect(() => loadSettings({ SHARED_STATE: "valkey", VALKEY_URL: "http://valkey:6379" })).toThrow(/VALKEY_URL/);
+    expect(() => loadSettings({ VALKEY_URL: "redis://valkey:6379" })).toThrow(/SHARED_STATE is not 'valkey'/);
+    expect(() => loadSettings({ SHARED_STATE: "memory", VALKEY_URL: "redis://valkey:6379" })).toThrow(/VALKEY_URL/);
   });
 });

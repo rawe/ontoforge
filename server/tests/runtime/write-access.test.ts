@@ -191,7 +191,7 @@ let level: WriteAccess;
 beforeEach(() => {
   holder.store = createMockRuntimeStore();
   invalidateLoadedSchemaCache();
-  holder.store.indices.readFullSchema.mockResolvedValue(makeFullSchema());
+  holder.store.indices.readFullSchema.mockResolvedValue({ ...makeFullSchema(), indices: [] });
   holder.store.getFullSchemaWithLensInclusions.mockImplementation(async (lensKey: string) =>
     lensKey === "all" ? makeFullSchema({ lensKey }) : null,
   );

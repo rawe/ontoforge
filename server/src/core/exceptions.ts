@@ -35,6 +35,16 @@ export class ConflictError extends OntoForgeError {
   }
 }
 
+/** The ontology's design changed between the design a write checked
+ * against and its commit; nothing was written. The write retries against
+ * the new design and answers this only when it keeps changing. -> 409
+ * RESOURCE_CONFLICT */
+export class DesignChangedError extends ConflictError {
+  constructor() {
+    super("The ontology's design changed while this write ran; try again");
+  }
+}
+
 /** Request or business-logic validation failed. -> 422 VALIDATION_ERROR */
 export class ValidationError extends OntoForgeError {
   details: Record<string, unknown> | null;

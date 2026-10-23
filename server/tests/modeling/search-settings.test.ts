@@ -19,7 +19,8 @@ vi.mock("../../src/core/ports.js", () => ({
 }));
 
 const reconcile = vi.hoisted(() => vi.fn(async () => []));
-vi.mock("../../src/runtime/indexing/generations.js", () => ({
+vi.mock("../../src/runtime/indexing/generations.js", async (importOriginal) => ({
+  afterCommit: (await importOriginal<typeof import("../../src/runtime/indexing/generations.js")>()).afterCommit,
   reconcileSearchGenerations: reconcile,
 }));
 

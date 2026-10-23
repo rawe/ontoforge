@@ -26,16 +26,14 @@ import type { Intent } from "../../../../src/runtime/assistants/navigators/under
 import { runNavigatorTurn } from "../../../../src/runtime/assistants/navigators/runtime.js";
 import type { StreamEvent } from "../../../../src/runtime/chatStream.js";
 import type { LoadedSchema } from "../../../../src/runtime/schemaCache.js";
-import { MemoryThreadStore } from "../../../../src/runtime/threads/memoryThreadStore.js";
 import type { GraphThread } from "../../../../src/runtime/threads/threadStore.js";
+import { graphValues, newGraphThread } from "../../threads/graphThread.js";
 import { LENS, orgReader, type FakeReader } from "./fixture.js";
 
-const threads = new MemoryThreadStore();
 let reader: FakeReader;
 
 async function newThread(): Promise<GraphThread> {
-  const { threadId } = await threads.create({ ontologyKey: "o", lensKey: "org", kind: "navigators", assistantKey: "_default" });
-  return { checkpointer: threads.checkpointer, threadId };
+  return newGraphThread();
 }
 
 const plan = (intent: Partial<Intent>) => ({
@@ -360,7 +358,7 @@ describe("follow-ups on a thread", () => {
   it("the thread keeps the conversation and what the answer cited, nothing else", async () => {
     answer("Apollo [E4] and Zeus [E5].");
     const { thread } = await turn("Which projects do Lena's reports work on?");
-    const values = (await threads.values(thread.threadId))!;
+    const values = await graphValues(thread);
     const kept = Object.entries(values).filter(([key, value]) => value !== undefined && !key.startsWith("__"));
     expect(kept.map(([key]) => key).sort()).toEqual(["carried", "messages", "round"]);
     expect((values.messages as { text: string }[]).map((m) => m.text)).toEqual([
@@ -376,7 +374,7 @@ describe("follow-ups on a thread", () => {
   it("an answer that cites nothing carries its evidence beyond the anchors", async () => {
     answer("I could not tell.");
     const { thread } = await turn("Which projects do Lena's reports work on?");
-    expect(((await threads.values(thread.threadId))!.carried as { label: string }[]).map((c) => c.label)).toEqual([
+    expect(((await graphValues(thread)).carried as { label: string }[]).map((c) => c.label)).toEqual([
       "Kira Novak", "Apollo", "Omar Haddad", "Zeus",
     ]);
   });

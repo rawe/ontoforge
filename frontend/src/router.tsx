@@ -3,7 +3,6 @@ import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { StudioLayout } from '@/components/layout/StudioLayout'
 import { WorkbenchLayout } from '@/components/layout/WorkbenchLayout'
 import { RouteFallback } from '@/components/RouteFallback'
-import { UsersPage } from '@/pages/admin/UsersPage'
 import { StartPage } from '@/pages/StartPage'
 import { EntityDetailPage } from '@/pages/workbench/EntityDetailPage'
 import { HomePage } from '@/pages/workbench/HomePage'
@@ -55,6 +54,9 @@ const SearchIndexPage = lazy(() =>
 const TransferPage = lazy(() =>
   import('@/pages/studio/TransferPage').then((m) => ({ default: m.TransferPage })),
 )
+const UsersPage = lazy(() =>
+  import('@/pages/admin/UsersPage').then((m) => ({ default: m.UsersPage })),
+)
 const AccessPage = lazy(() =>
   import('@/pages/studio/AccessPage').then((m) => ({ default: m.AccessPage })),
 )
@@ -68,7 +70,7 @@ const suspended = (node: ReactNode) => (
 // URL is the only source of truth for both keys.
 export const router = createBrowserRouter([
   { path: '/', element: <StartPage /> },
-  { path: '/admin/users', element: <UsersPage /> },
+  { path: '/admin/users', element: suspended(<UsersPage />) },
   {
     path: '/o/:ontologyKey/w/:lensKey',
     element: <WorkbenchLayout />,

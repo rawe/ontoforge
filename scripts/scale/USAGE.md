@@ -55,8 +55,8 @@ the exit code is 1 when one failed.
 
 `--duration 60 --warmup 10 --concurrency 32 --chat-threads 20 --chat-turns 6` are the
 defaults. A mixed REST load (70 % filtered list, 20 % read by id, 10 % create) runs
-against A directly, then against both through the LB; then conversations through the
-LB. It records throughput, p50/p95/p99, errors, the LB's distribution and
+against A directly, against A alone through the LB (B stopped), and against A and B
+through the LB; then conversations through the LB. It records throughput, p50/p95/p99, errors, the LB's distribution and
 `docker stats` taken mid-run, and deletes what it created. Everything runs on one
 machine, so the numbers compare the two setups and are no capacity figure; the report
 lists the limitations next to them.

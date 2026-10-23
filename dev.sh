@@ -3,11 +3,20 @@ set -euo pipefail
 
 # Usage: ./dev.sh [env-file]      (default: server/.env)
 #        ./dev.sh scale …         (shared-state harness, see below)
+#        ./dev.sh keycloak [down|reset]   (development identity provider)
 #
 # The named file is the whole configuration for this run. Presets live in
 # env/ — e.g. ./dev.sh env/ollama.env
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# --- Development identity provider -------------------------------------------
+# ./dev.sh keycloak          start, provision and verify Keycloak (scripts/keycloak/USAGE.md)
+# ./dev.sh keycloak down     stop it, keep its data
+# ./dev.sh keycloak reset    remove it with its data
+if [ "${1:-}" = "keycloak" ]; then
+    exec node "$ROOT_DIR/scripts/keycloak/setup.mjs" "${@:2}"
+fi
 
 # --- Shared-state harness ----------------------------------------------------
 # ./dev.sh scale up [env-file] | down | reset | logs [service…] | test [scenario…]

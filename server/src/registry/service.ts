@@ -38,9 +38,12 @@ function toOntologyResponse(data: Row): OntologyResponseBody {
   };
 }
 
+/** Creates an ontology under `ontologyId` — new unless the caller chose it
+ * beforehand, to name it before it exists (its creator's assignment). */
 export async function createOntology(
   body: OntologyCreateInput,
   registry: OntologyRegistry,
+  ontologyId: string = randomUUID(),
 ): Promise<OntologyResponseBody> {
   const displayName = body.displayName ?? null;
   const existingKey = await registry.getOntology(body.key);
@@ -54,7 +57,7 @@ export async function createOntology(
     }
   }
   const dimensions = getEmbeddingProvider()?.dimensions ?? null;
-  const data = await registry.createOntology(randomUUID(), body.key, displayName, dimensions);
+  const data = await registry.createOntology(ontologyId, body.key, displayName, dimensions);
   return toOntologyResponse(data);
 }
 

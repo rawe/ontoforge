@@ -8,12 +8,13 @@
  * (`access/authorize.ts`).
  */
 
+import { randomUUID } from "node:crypto";
+
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import { visibleOntologies } from "../access/authorize.js";
 import { accessOf, actorOf } from "../auth/plugin.js";
-import { StoreError } from "../core/exceptions.js";
 import { getOntologyRegistry } from "../core/ports.js";
 import { OntologyCreate, OntologyRename, OntologyResponse } from "./schemas.js";
 import * as service from "./service.js";
@@ -34,26 +35,27 @@ export const registryRouter: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      const result = await service.createOntology(request.body, getOntologyRegistry());
-      // With authentication on, the creator administers what it created.
-      const access = await accessOf(request);
-      if (access.kind === "caller") {
-        const actor = access.caller.principal.id;
-        try {
-          await request.server.auth!.access.assign(
-            { principalId: actor, role: "ontology_admin", ontologyId: result.ontologyId, lensId: null },
-            actor,
-          );
-        } catch (error) {
-          const failure = new StoreError(
-            `Ontology '${result.key}' was created, but making you its administrator failed; ` +
-              "a Platform Administrator can assign the role",
-          );
-          console.error(`Assigning the creator of ontology '${result.key}' failed [${failure.errorId}]:`, error);
-          throw failure;
-        }
+      const actor = await actorOf(request);
+      if (actor === null) {
+        return reply.status(201).send(await service.createOntology(request.body, getOntologyRegistry()));
       }
-      return reply.status(201).send(result);
+      // With authentication on, the creator administers what it creates. The
+      // assignment comes first, under the new ontology's id: until that exists
+      // it is inert, and a failed create takes it back.
+      const ontologyId = randomUUID();
+      const { principalId } = actor;
+      const assignment = await actor.store.assign(
+        { principalId, role: "ontology_admin", ontologyId, lensId: null },
+        principalId,
+      );
+      try {
+        return reply.status(201).send(await service.createOntology(request.body, getOntologyRegistry(), ontologyId));
+      } catch (error) {
+        await actor.store.revoke(assignment.id, principalId).catch((revokeError: unknown) => {
+          console.error(`Taking back the administrator role of uncreated ontology '${request.body.key}' failed:`, revokeError);
+        });
+        throw error;
+      }
     },
   );
 

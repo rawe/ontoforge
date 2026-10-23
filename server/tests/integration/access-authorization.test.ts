@@ -21,6 +21,7 @@ import { openAccessStore } from "../../src/adapters/postgres/accessStore.js";
 import { createApp } from "../../src/app.js";
 import type { AuthRuntime } from "../../src/auth/runtime.js";
 import { settings } from "../../src/config.js";
+import { StoreError } from "../../src/core/exceptions.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { wipeDatabase } from "./reset.js";
 
@@ -144,6 +145,23 @@ describe("authorization with authentication on", () => {
     }
     const roles = (await access.assignmentsOf(await idOf("creator"))).map((a) => a.role).sort();
     expect(roles).toEqual(["ontology_admin", "ontology_creator"]);
+  });
+
+  it("the creator's role is written before the ontology: a failed create takes it back, a failed role creates nothing", async () => {
+    const roles = async () => (await access.assignmentsOf(await idOf("creator"))).length;
+    const before = await roles();
+    expect((await as("creator", "POST", "/api/ontologies", { key: "fair" })).status).toBe(409);
+    expect(await roles()).toBe(before);
+    const assign = access.assign;
+    access.assign = async () => {
+      throw new StoreError("The access database is down");
+    };
+    try {
+      expect((await as("creator", "POST", "/api/ontologies", { key: "orphan" })).status).toBe(500);
+    } finally {
+      access.assign = assign;
+    }
+    expect((await as("admin", "GET", "/api/ontologies/orphan")).status).toBe(404);
   });
 
   it("lists are filtered: ontologies by any role, lenses by a lens role", async () => {

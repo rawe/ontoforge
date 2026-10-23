@@ -496,8 +496,12 @@ ontologies. Exactly one is active.
 **Design revision** — an ontology's never-reused identity and a number every change of its
 design advances. See [architecture.md](architecture.md#design-revision).
 
-**Thread store** — where every server keeps the assistants' threads: in its own memory, or
-in one store all servers share. See [architecture.md](architecture.md#thread-store).
+**Shared state** — what every server must see alike but may lose, such as the assistants'
+threads: in each server's own memory, or in one Valkey all servers share. See
+[architecture.md](architecture.md#shared-state).
+
+**Thread store** — where every server keeps the assistants' threads, part of the shared
+state. See [architecture.md](architecture.md#thread-store).
 
 **Transfer format** — the versioned JSON representation of one ontology's design, used
 for export and import. Carries schema, lenses, assistants, saved queries, the

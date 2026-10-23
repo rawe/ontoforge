@@ -31,6 +31,14 @@ the remote.
 
 The tag push triggers the GitHub Actions workflow (`.github/workflows/release-images.yml`), which runs `make release` to build and push container images to GHCR.
 
+## Deploying a release
+
+Releasing builds the images; deploying them is the operator's step. A release that keeps
+the storage version replaces the servers one by one, as a normal rolling update. A release
+that raises it starts only after every older server has stopped: stop them all, then start
+the new image. Backing up the database first is the operator's business. Its release notes
+say that the storage version rises.
+
 ## Storage upgrades
 
 The storage version is its own number, not the release version — the rule is in

@@ -7,7 +7,7 @@ removed, and when it gets an ADR: [workflows/recording-decisions.md](workflows/r
 
 **Every server serves everything — registry, modeling, runtime and both MCP servers — with
 no mode switch and no partial deployment, and any number of identical servers share one
-database and one thread store.** A schema change and the data it governs must never be able
+database and one shared state.** A schema change and the data it governs must never be able
 to diverge between servers.
 
 **One database holds every ontology's schema and instance data.** Two stores would turn
@@ -51,11 +51,11 @@ the adapter.** Services, routers and MCP handlers then speak schema vocabulary o
 ontology; registry operations live on a separate registry port.** Isolation is then structural above the
 adapter rather than a filter a query could forget.
 
-**Conversations live in one thread store shared by every server, behind an interface of its
-own beside the persistence port; a store in memory serves a single process only and never
-replaces a configured shared one.** Conversation state is not ontology data: it is never
-exported, never cascades and expires on its own, so it stays out of the port; a server
-falling back to memory would split the conversations unnoticed.
+**Shared state — what every server must see alike, may lose and lets expire — lives in one
+store for all servers, behind a narrow interface per concern beside the persistence port;
+memory serves a single process only and never replaces a configured shared store.** Such
+state is not ontology data and does not survive the store's reset, so durable state belongs
+in the database, and a server falling back to memory would split it unnoticed.
 
 **Every data write commits against the design revision it validated against, holding the
 design shared; every design change holds the design exclusively and advances the
@@ -76,9 +76,13 @@ except for the vector indexes a rebuild recreates and each search-index generati
 storage.** The storage version then says which layout a server finds; the exceptions are
 created and dropped by their own lifecycles.
 
+**A release that raises the storage version starts only after every older server has
+stopped.** OntoForge may be unavailable during an upgrade, which is simpler than keeping two
+releases working on one storage.
+
 **Within a major release line, upgrade steps only add; renaming, removing or rewriting
-stored data waits for a major release, which keeps none of the earlier steps.** Servers of
-the previous release keep working during a rolling update.
+stored data waits for a major release, which keeps none of the earlier steps.** An older
+server left running by mistake then still works.
 
 **Filters, sorts and searches cross the port as structured values, never as query text or
 fragments.** Query syntax above the port would tie the services to one database's language.

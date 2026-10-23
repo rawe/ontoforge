@@ -13,7 +13,7 @@ All commands are run from `server/`.
 | `npm run test:integration:embedding` | Semantic search | The test database + Ollama (embedding model) |
 | `npm run test:integration:ai` | AI (slow, real model) | The test database + Ollama (tool-calling model) |
 | `npm run test:integration:decision` | Decision HTTP contract | Local decision API; no database |
-| `npm run test:integration:valkey` | Valkey thread store | The dev Valkey; no database |
+| `npm run test:integration:valkey` | Valkey shared state | The dev Valkey; no database |
 
 **Unit tests** (`tests/`, excluding `tests/integration/`) mock all external
 dependencies (database drivers, embedding providers, AI models). They run fast and
@@ -50,9 +50,10 @@ DECISION_BASE_URL=http://localhost:8002 DECISION_MODEL=Mapika/decider-0.8b \
 The provider contract and configuration template are described in
 [Decision API](../providers/decision-api.md).
 
-The Valkey suite runs the thread-store contract against a real Valkey, plus what only
-Valkey can do to it: a flush, a restart or a full memory under a running turn, a dropped
-connection, a wrong eviction policy, a Valkey that may not run scripts. It uses the Valkey
+The Valkey suite checks the shared-state connection — a wrong eviction policy, a Valkey that
+may not run scripts, two scripts of one name — and runs the thread-store contract against a
+real Valkey, plus what only Valkey can do to it: a flush, a restart or a full memory under a
+running turn, a dropped connection. After every test each key it left must expire. It uses the Valkey
 of `docker-compose.yml` (`docker compose up -d valkey`) in a logical database of its own,
 which `env/test-valkey.env` names and the suite insists on: it flushes only that database
 and restores the settings it changes, but it pauses and restarts the container, which

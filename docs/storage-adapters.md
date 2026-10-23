@@ -547,8 +547,8 @@ a change is never overwritten.
   its last change, and answers absent when the changeset is gone, in the other state, or
   at another version.
 - **Upkeep.** Touch refreshes the last change alone; sweep deletes the draft changesets
-  unchanged since a given time. Both skip a changeset held elsewhere rather than wait or
-  fail.
+  unchanged for a given duration, measured by the database's clock that stamps the last
+  change. Both skip a changeset held elsewhere rather than wait or fail.
 - **The commit**, inside a unit of work only: take the ontology's commit lock without
   waiting, then the changeset without waiting — either held elsewhere is a conflict — and
   from then on wait at most five seconds for a row another transaction holds, then fail

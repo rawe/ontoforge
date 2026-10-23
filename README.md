@@ -240,8 +240,8 @@ The backend reads settings from environment variables (or a `.env` file in `serv
 | `DB_PASSWORD` | `ontoforge_dev` | Database password |
 | `PORT` | `8000` | HTTP listen port |
 | `SHUTDOWN_DRAIN_SECONDS` | `20` | Seconds a stopping server lets running requests and chat streams finish before it cuts them; readiness answers 503 meanwhile (positive integer) |
-| `THREAD_STORE` | `memory` | Where assistant conversations live: `memory` serves one server process; `valkey` is shared by every server naming the same Valkey |
-| `VALKEY_URL` | *(required with `THREAD_STORE=valkey`)* | `redis://` or `rediss://` URL of the shared Valkey, which must run without persistence and with `maxmemory-policy noeviction`; an unreachable Valkey, another eviction policy or a Valkey that cannot run the store's scripts fails the boot, and so does `VALKEY_URL` set without `THREAD_STORE=valkey` |
+| `SHARED_STATE` | `memory` | Where shared state such as assistant conversations lives: `memory` serves one server process; `valkey` is shared by every server naming the same Valkey |
+| `VALKEY_URL` | *(required with `SHARED_STATE=valkey`)* | `redis://` or `rediss://` URL of the shared Valkey, which must run without persistence and with `maxmemory-policy noeviction`; an unreachable Valkey, another eviction policy or a Valkey that cannot run the scripts fails the boot, and so does `VALKEY_URL` set without `SHARED_STATE=valkey` |
 | `SEARCH_MAX_ATTEMPTS` | `5` | Failed attempts before a queued search-indexing item counts as failed — a rebuild or a new write of its entity retries it (positive integer) |
 | `SEARCH_WORKER_BATCH` | `64` | Queued search-indexing items the background worker claims per batch (positive integer) |
 | `SEARCH_POLL_MS` | `5000` | Milliseconds the background worker waits between queue checks when no wake-up notification arrives (positive integer) |

@@ -10,7 +10,7 @@ Four parts, two processes.
 **Server** — one deployable unit. Serves the ontology registry, the modeling API, the
 runtime API, both MCP servers and the OpenAPI description. There is no mode switch and no
 partial deployment: every instance serves everything, and any number of instances share one
-database and one [thread store](#thread-store).
+database and one [shared state](#shared-state).
 
 **Web client** — a separate static application talking to the server over REST only. It
 holds no privileged path; anything it does can be done over the API.
@@ -264,16 +264,33 @@ seconds for the design or a row, answers a conflict and nothing is written.
 An assistant turn already running is not stopped by a design change: each of its tool
 calls reads and writes against the design current at that call.
 
+## Shared state
+
+Shared state is what every server must see alike but may lose: the assistants' threads
+([thread store](#thread-store)). It sits beside the persistence port rather than behind it
+([decisions.md](decisions.md#storage)), and one setting chooses where all of it lives:
+memory, which serves one server process, or Valkey, shared by every server that names it.
+A configured Valkey that does not answer, that would evict data rather than refuse it, or
+that cannot run the scripts fails the boot; nothing falls back to memory.
+
+**What belongs there.** State another server must see, whose loss users recover from, and
+that expires on its own. Durable or authoritative state, and state that must commit with
+ontology data, belongs in the database; state a server can rebuild alone, such as the
+[schema cache](#schema-cache), stays in that server.
+
+**One concern, one interface.** Each concern has a narrow interface in its own terms, with
+a memory and a Valkey adapter held to one contract; there is no general key-value or cache
+interface. On Valkey every concern shares one connection, keeps its keys under its own
+prefix, writes every key with an expiry, makes every check-and-write one atomic script,
+and is refused rather than evicted when Valkey is full. A new concern brings its interface
+and both adapters, never a setting of its own.
+
 ## Thread store
 
 Assistants converse in threads the server holds: a client sends a new message and, to
 continue, a thread id; the server continues from the state it kept. Every thread lives in
 one thread store — one for every server, not per ontology — behind an interface of its
-own, beside the persistence port rather than behind it
-([decisions.md](decisions.md#storage)). Configuration chooses its adapter: memory, which
-serves one server process, or Valkey, shared by every server that names it. A configured
-Valkey that does not answer, that would evict data rather than refuse it, or that cannot
-run the store's scripts fails the boot; nothing falls back to memory.
+own, part of the [shared state](#shared-state).
 
 **Registry.** Each thread has a random, unguessable id — knowing it is what lets a client
 continue the thread — and a binding to exactly one assistant: ontology, lens, kind and key.
@@ -475,7 +492,7 @@ Ordered, and failure at any step prevents serving:
    exist, and bring storage of an older storage version up to date
    ([decisions.md](decisions.md#storage)). Per-ontology storage is provisioned when an
    ontology is created; at boot only an upgrade reaches into it. Open the
-   [thread store](#thread-store).
+   [shared state](#shared-state).
 2. Initialize the embedding provider, if configured.
 3. Initialize the language-model and decision-model providers, if configured.
 4. If embeddings are enabled, compare the width of every registered ontology's
@@ -510,7 +527,7 @@ A stopping server — on SIGTERM or SIGINT — drains, then closes, once:
    next claim, in any process, takes it at once.
 3. Whatever still runs then is cut. A cut chat stream ends without a terminal event; its
    turn stores nothing and releases its lease.
-4. The app with its thread store, the worker, the providers and storage close, in that
+4. The app with its shared state, the worker, the providers and storage close, in that
    order. A shutdown that stalls exits the process.
 
 ## Configuration
@@ -524,7 +541,7 @@ per-ontology deployment configuration.
 | Embedding | Provider, model, endpoint, credential, vector width, request batching | Semantic search unavailable |
 | Documents | Chunk size and overlap | Defaults apply |
 | Search indexing | Attempts before a queued item counts as failed, worker batch size, polling interval | Defaults apply |
-| Thread store | Memory or Valkey, and how to reach Valkey | Memory |
+| Shared state | Memory or Valkey, and how to reach Valkey | Memory |
 | Shutdown | How long a stopping server drains | Default applies |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
 | Decision model | Endpoint, model, credential | Entity identity comparison unavailable |

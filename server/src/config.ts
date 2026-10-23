@@ -158,6 +158,33 @@ function httpUrl(name: string, value: string): string {
   return value.replace(/\/+$/, "");
 }
 
+/** Hosts a browser treats as secure over plain `http:`. */
+function isLoopback(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname.endsWith(".localhost")
+  );
+}
+
+/**
+ * The browser-facing origin with authentication on. Its cookies are
+ * `Secure`, which a browser accepts over `http:` from a loopback host only:
+ * anywhere else the sign-in would silently never stick.
+ */
+function publicUrl(value: string): string {
+  const url = httpUrl("PUBLIC_URL", value);
+  const { protocol, hostname } = new URL(url);
+  if (protocol === "http:" && !isLoopback(hostname)) {
+    throw new Error(
+      `Environment variable PUBLIC_URL must be an https URL when AUTH_ENABLED is 'true' ` +
+        `(http is allowed on localhost only): '${value}'`,
+    );
+  }
+  return url;
+}
+
 /**
  * Authentication: `AUTH_ENABLED` is `true` or `false` (the default). When
  * it is on, every variable it needs must be set — a missing one fails the
@@ -200,7 +227,7 @@ function auth(
     }
     return value;
   };
-  httpUrl("PUBLIC_URL", required("PUBLIC_URL"));
+  publicUrl(required("PUBLIC_URL"));
   const issuer = httpUrl("OIDC_ISSUER", required("OIDC_ISSUER"));
   const backchannel = optStr(env, "OIDC_BACKCHANNEL_URL");
   const accessDb = required("ACCESS_DB_URI");

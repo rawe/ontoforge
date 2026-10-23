@@ -312,4 +312,14 @@ describe("authentication settings", () => {
     expect(() => loadSettings({ ...enabled, ACCESS_DB_URI: "mysql://x/y" })).toThrow(/ACCESS_DB_URI/);
     expect(() => loadSettings({ ...enabled, OIDC_BACKCHANNEL_URL: "nope" })).toThrow(/OIDC_BACKCHANNEL_URL/);
   });
+
+  it("allows an http PUBLIC_URL on a loopback host only", () => {
+    for (const url of ["http://localhost:5173", "http://127.0.0.1:8000", "http://[::1]:5173", "http://app.localhost", "https://ontoforge.example.com"]) {
+      expect(loadSettings({ ...enabled, PUBLIC_URL: url }).PUBLIC_URL, url).toBe(url);
+    }
+    for (const url of ["http://ontoforge.example.com", "http://192.168.1.5:5173", "http://localhost.example.com"]) {
+      expect(() => loadSettings({ ...enabled, PUBLIC_URL: url }), url).toThrow(/PUBLIC_URL must be an https URL/);
+    }
+    expect(loadSettings({ PUBLIC_URL: "http://ontoforge.example.com" }).PUBLIC_URL).toBe("http://ontoforge.example.com");
+  });
 });

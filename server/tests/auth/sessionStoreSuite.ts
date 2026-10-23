@@ -14,12 +14,11 @@ export interface SessionStoreUnderTest {
   close?(): Promise<void>;
 }
 
-export const SUITE_SESSION_LIFETIMES: SessionLifetimes = { loginMs: 300, idleMs: 400, absoluteMs: 1000 };
-const { loginMs: LOGIN, idleMs: IDLE, absoluteMs: ABSOLUTE } = SUITE_SESSION_LIFETIMES;
+export const SUITE_SESSION_LIFETIMES: SessionLifetimes = { idleMs: 400, absoluteMs: 1000 };
+const { idleMs: IDLE, absoluteMs: ABSOLUTE } = SUITE_SESSION_LIFETIMES;
 const MARGIN = 60;
 
-const SESSION: Session = { principalId: "p-1", issuer: "http://issuer", subject: "s-1", idToken: "id.token.value" };
-const LOGIN_TX = { codeVerifier: "verifier", nonce: "nonce", returnTo: "/o/x" };
+const SESSION: Session = { principalId: "p-1", issuer: "http://issuer", subject: "s-1" };
 
 export function sessionStoreSuite(
   name: string,
@@ -29,24 +28,6 @@ export function sessionStoreSuite(
     async function open(): Promise<SessionStoreUnderTest> {
       return factory(SUITE_SESSION_LIFETIMES);
     }
-
-    it("hands a login transaction out exactly once", async () => {
-      const { store, close } = await open();
-      await store.startLogin("state-1", LOGIN_TX);
-      const [first, second] = await Promise.all([store.takeLogin("state-1"), store.takeLogin("state-1")]);
-      expect([first, second].filter((v) => v !== null)).toEqual([LOGIN_TX]);
-      expect(await store.takeLogin("state-1")).toBeNull();
-      expect(await store.takeLogin("never")).toBeNull();
-      await close?.();
-    });
-
-    it("expires a login transaction", async () => {
-      const { store, advance, close } = await open();
-      await store.startLogin("state-2", LOGIN_TX);
-      await advance(LOGIN + MARGIN);
-      expect(await store.takeLogin("state-2")).toBeNull();
-      await close?.();
-    });
 
     it("keeps a session, deletes it, and knows no other id", async () => {
       const { store, close } = await open();

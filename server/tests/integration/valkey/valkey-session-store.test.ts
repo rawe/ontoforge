@@ -45,23 +45,18 @@ describe("valkey session store", () => {
   it("serves a session created through one server's client to another's", async () => {
     const a = await connect(SUITE_SESSION_LIFETIMES);
     const b = await connect(SUITE_SESSION_LIFETIMES);
-    await a.store.startLogin("state", { codeVerifier: "v", nonce: "n", returnTo: "/" });
-    expect(await b.store.takeLogin("state")).toMatchObject({ codeVerifier: "v" });
-    await a.store.create("sid", { principalId: "p", issuer: "i", subject: "s", idToken: null });
+    await a.store.create("sid", { principalId: "p", issuer: "i", subject: "s" });
     expect(await b.store.get("sid")).toMatchObject({ principalId: "p" });
     await a.close();
     await b.close();
   });
 
-  it("keys by digest: no session id or state appears in a key", async () => {
+  it("keys by digest: no session id appears in a key", async () => {
     const { store, close } = await connect(SUITE_SESSION_LIFETIMES);
-    await store.create("secret-session-id", { principalId: "p", issuer: "i", subject: "s", idToken: null });
-    await store.startLogin("secret-state", { codeVerifier: "v", nonce: "n", returnTo: "/" });
+    await store.create("secret-session-id", { principalId: "p", issuer: "i", subject: "s" });
     const keys = await admin.keys("ontoforge:*");
-    expect(keys).toHaveLength(2);
-    expect(keys.join()).not.toMatch(/secret/);
-    expect(keys.some((k) => k.startsWith("ontoforge:session:{"))).toBe(true);
-    expect(keys.some((k) => k.startsWith("ontoforge:login:{"))).toBe(true);
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toMatch(/^ontoforge:session:\{[0-9a-f]{64}\}$/);
     await close();
   });
 });

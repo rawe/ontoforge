@@ -3,19 +3,16 @@
  * Valkey, on the shared-state client (`connection.ts`).
  *
  *   ontoforge:session:{<sha256 of the id>}   hash data abs, PEXPIRE min(idle, abs - now)
- *   ontoforge:login:{<sha256 of the state>}  string, PX loginMs
  *
  * Valkey's clock alone decides expiry: `sessionCreate` stores the absolute
  * deadline from Valkey's `TIME`, and `sessionGet` moves the idle deadline
- * in the same step that reads, never past it. A login is taken with
- * `GETDEL`, so it completes once.
+ * in the same step that reads, never past it.
  */
 
 import type { Valkey } from "iovalkey";
 
 import {
   digest,
-  type LoginTransaction,
   type Session,
   type SessionLifetimes,
   type SessionStore,
@@ -54,7 +51,6 @@ interface SessionScripts {
 }
 
 const sessionKey = (id: string) => `ontoforge:session:{${digest(id)}}`;
-const loginKey = (state: string) => `ontoforge:login:{${digest(state)}}`;
 
 export class ValkeySessionStore implements SessionStore {
   private readonly scripts: SessionScripts;
@@ -64,15 +60,6 @@ export class ValkeySessionStore implements SessionStore {
     private readonly lifetimes: SessionLifetimes,
   ) {
     this.scripts = client as unknown as SessionScripts;
-  }
-
-  async startLogin(state: string, login: LoginTransaction): Promise<void> {
-    await this.call(() => this.client.set(loginKey(state), JSON.stringify(login), "PX", this.lifetimes.loginMs));
-  }
-
-  async takeLogin(state: string): Promise<LoginTransaction | null> {
-    const value = await this.call(() => this.client.getdel(loginKey(state)));
-    return value === null ? null : (JSON.parse(value) as LoginTransaction);
   }
 
   async create(id: string, session: Session): Promise<void> {

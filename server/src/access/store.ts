@@ -71,10 +71,11 @@ export interface AccessStore {
   /**
    * The principal of `(issuer, subject)`, created with its identity in one
    * transaction on the first sign-in — concurrent first sign-ins create one.
-   * A new principal starts with no role, except that `bootstrapAdmin` makes
-   * a newly created one Platform Administrator in the same transaction. An
-   * existing principal gets its profile and last sign-in refreshed; its
-   * status and roles are never touched.
+   * A new principal starts with no role. An existing principal gets its
+   * profile and last sign-in refreshed; its status and roles are never
+   * touched — except that `bootstrapAdmin` (the configured administrator)
+   * ensures, in the same transaction and audited, that it is active and
+   * Platform Administrator: the configuration is the recovery path.
    */
   signIn(issuer: string, subject: string, profile: Profile, bootstrapAdmin: boolean): Promise<Principal>;
   /** The principal an identity is bound to, unchanged. */
@@ -102,11 +103,10 @@ export interface AccessStore {
   /** The removed assignment, or null. Refuses to remove the last active Platform
    * Administrator's role (ConflictError). */
   revoke(id: string, actorId: string): Promise<Assignment | null>;
-  /** Removes every assignment of a deleted ontology (or one deleted lens). */
+  /** Removes every assignment of a deleted ontology (or one deleted lens). A
+   * leftover is inert: ids are never reused. */
   forgetOntology(ontologyId: string): Promise<number>;
   forgetLens(lensId: string): Promise<number>;
-  /** Removes assignments whose ontology or lens no longer exists. */
-  sweep(existing: { ontologyIds: ReadonlySet<string>; lensIds: ReadonlySet<string> }): Promise<number>;
 
   close(): Promise<void>;
 }

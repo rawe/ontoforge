@@ -269,10 +269,12 @@ class PostgresAccessStore implements AccessStore {
         subject,
       ]);
       if (bound.rowCount !== 0) {
+        const id = bound.rows[0].principal_id as string;
+        if (bootstrapAdmin) await this.ensureBootstrapAdmin(client, id);
         const updated = await client.query(
           `UPDATE principal SET display_name = $2, email = $3, username = $4, last_login_at = now(), updated_at = now()
            WHERE id = $1 RETURNING ${PRINCIPAL_COLUMNS}`,
-          [bound.rows[0].principal_id, profile.displayName, profile.email, profile.username],
+          [id, profile.displayName, profile.email, profile.username],
         );
         return toPrincipal(updated.rows[0] as Row);
       }
@@ -284,20 +286,31 @@ class PostgresAccessStore implements AccessStore {
       );
       await client.query("INSERT INTO identity (issuer, subject, principal_id) VALUES ($1, $2, $3)", [issuer, subject, id]);
       await this.audit(client, null, "principal.created", id, { issuer, kind: "user" });
-      if (bootstrapAdmin) {
-        const assignmentId = randomUUID();
-        await client.query(
-          "INSERT INTO assignment (id, principal_id, role) VALUES ($1, $2, 'platform_admin')",
-          [assignmentId, id],
-        );
-        await this.audit(client, null, "assignment.created", id, {
-          assignmentId,
-          role: "platform_admin",
-          reason: "bootstrap administrator",
-        });
-      }
+      if (bootstrapAdmin) await this.ensureBootstrapAdmin(client, id);
       return toPrincipal(created.rows[0] as Row);
     });
+  }
+
+  /** The configured administrator: active and Platform Administrator, whatever happened before. */
+  private async ensureBootstrapAdmin(client: Client, id: string): Promise<void> {
+    const enabled = await client.query(
+      "UPDATE principal SET status = 'active', updated_at = now() WHERE id = $1 AND status <> 'active'",
+      [id],
+    );
+    if (enabled.rowCount) await this.audit(client, null, "principal.enabled", id, { reason: "bootstrap administrator" });
+    const assignmentId = randomUUID();
+    const granted = await client.query(
+      `INSERT INTO assignment (id, principal_id, role) VALUES ($1, $2, 'platform_admin')
+       ON CONFLICT (principal_id, role) WHERE ontology_id IS NULL DO NOTHING`,
+      [assignmentId, id],
+    );
+    if (granted.rowCount) {
+      await this.audit(client, null, "assignment.created", id, {
+        assignmentId,
+        role: "platform_admin",
+        reason: "bootstrap administrator",
+      });
+    }
   }
 
   async principalOf(issuer: string, subject: string): Promise<Principal | null> {
@@ -489,19 +502,6 @@ class PostgresAccessStore implements AccessStore {
       const removed = await client.query("DELETE FROM assignment WHERE lens_id = $1", [lensId]);
       if (removed.rowCount) await this.audit(client, null, "assignment.swept", null, { lensId, count: removed.rowCount });
       return removed.rowCount ?? 0;
-    });
-  }
-
-  async sweep(existing: { ontologyIds: ReadonlySet<string>; lensIds: ReadonlySet<string> }): Promise<number> {
-    return this.transaction(async (client) => {
-      const rows = await client.query(`SELECT ${ASSIGNMENT_COLUMNS} FROM assignment WHERE ontology_id IS NOT NULL`);
-      const stale = rows.rows
-        .map((r) => toAssignment(r as Row))
-        .filter((a) => !existing.ontologyIds.has(a.ontologyId!) || (a.lensId !== null && !existing.lensIds.has(a.lensId)));
-      if (stale.length === 0) return 0;
-      await client.query("DELETE FROM assignment WHERE id = ANY($1::uuid[])", [stale.map((a) => a.id)]);
-      await this.audit(client, null, "assignment.swept", null, { count: stale.length });
-      return stale.length;
     });
   }
 

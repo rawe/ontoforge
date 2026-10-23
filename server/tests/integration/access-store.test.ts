@@ -98,11 +98,25 @@ describe("sign-in", () => {
     expect(roles.map((a) => a.role)).toEqual(["platform_admin"]);
   });
 
+  it("restores the configured administrator at every sign-in", async () => {
+    const admin = await store.signIn(ISSUER, "admin", profile("admin"), true);
+    const other = await store.signIn(ISSUER, "other", profile("other"), false);
+    await store.assign({ principalId: other.id, role: "platform_admin", ontologyId: null, lensId: null }, admin.id);
+    const [role] = await store.assignmentsOf(admin.id);
+    await store.revoke(role!.id, other.id);
+    await store.setStatus(admin.id, "disabled", other.id);
+    const again = await store.signIn(ISSUER, "admin", profile("admin"), true);
+    expect(again.status).toBe("active");
+    expect((await store.assignmentsOf(admin.id)).map((a) => a.role)).toEqual(["platform_admin"]);
+    await store.signIn(ISSUER, "admin", profile("admin"), true);
+    expect((await store.assignmentsOf(admin.id)).length).toBe(1);
+  });
+
   it("refreshes the profile but never status or roles", async () => {
     const created = await store.signIn(ISSUER, "sub-2", profile("old"), false);
     const admin = await store.signIn(ISSUER, "admin", profile("admin"), true);
     await store.setStatus(created.id, "disabled", admin.id);
-    const again = await store.signIn(ISSUER, "sub-2", { displayName: "New Name", email: "new@x.test", username: "new" }, true);
+    const again = await store.signIn(ISSUER, "sub-2", { displayName: "New Name", email: "new@x.test", username: "new" }, false);
     expect(again.id).toBe(created.id);
     expect(again.displayName).toBe("New Name");
     expect(again.email).toBe("new@x.test");
@@ -174,7 +188,7 @@ describe("assignments", () => {
     expect(await store.revoke(role!.id, admin.id)).toBeNull();
   });
 
-  it("forgets an ontology's and a lens's assignments, and sweeps those of missing ones", async () => {
+  it("forgets an ontology's and a lens's assignments", async () => {
     const admin = await store.signIn(ISSUER, "admin", profile("admin"), true);
     const user = await store.signIn(ISSUER, "u", profile("u"), false);
     const [o1, o2, o3] = [randomUUID(), randomUUID(), randomUUID()];
@@ -185,8 +199,7 @@ describe("assignments", () => {
     await store.assign({ principalId: user.id, role: "ontology_admin", ontologyId: o3, lensId: null }, admin.id);
     expect(await store.forgetOntology(o1)).toBe(1);
     expect(await store.forgetLens(l2)).toBe(1);
-    expect(await store.sweep({ ontologyIds: new Set([o3]), lensIds: new Set() })).toBe(1);
-    expect((await store.assignmentsOf(user.id)).map((a) => a.role)).toEqual(["ontology_admin"]);
+    expect((await store.assignmentsOf(user.id)).map((a) => a.role).sort()).toEqual(["ontology_admin", "writer"]);
     expect((await store.assignmentsOf(admin.id)).map((a) => a.role)).toEqual(["platform_admin"]);
   });
 });

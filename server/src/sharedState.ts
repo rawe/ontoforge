@@ -11,7 +11,6 @@ import { closeValkey, connectValkey } from "./adapters/valkey/connection.js";
 import { SESSION_SCRIPTS, ValkeySessionStore } from "./adapters/valkey/sessionStore.js";
 import { THREAD_SCRIPTS, ValkeyThreadStore } from "./adapters/valkey/threadStore.js";
 import {
-  LOGIN_LIFETIME_MS,
   MemorySessionStore,
   SESSION_ABSOLUTE_LIFETIME_MS,
   type SessionLifetimes,
@@ -35,7 +34,6 @@ export type SharedStateConfig = ({ kind: "memory" } | { kind: "valkey"; url: str
 /** Opens the shared state; a Valkey is connected and checked first (`connectValkey`). */
 export async function openSharedState(config: SharedStateConfig): Promise<SharedState> {
   const lifetimes: SessionLifetimes = {
-    loginMs: LOGIN_LIFETIME_MS,
     idleMs: config.sessionIdleMs ?? 8 * 60 * 60 * 1000,
     absoluteMs: SESSION_ABSOLUTE_LIFETIME_MS,
   };

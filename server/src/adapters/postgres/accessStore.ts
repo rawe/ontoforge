@@ -163,6 +163,18 @@ async function ensureDatabase(config: pg.ClientConfig): Promise<void> {
   }
 }
 
+/** Why `error` happened, in words: its message, else those of the errors it
+ * gathers (a refused connection tried on several addresses), else its code. */
+function reasonOf(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  if (error.message !== "") return error.message;
+  if (error instanceof AggregateError && error.errors.length > 0) {
+    return [...new Set(error.errors.map(reasonOf))].join("; ");
+  }
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : error.name;
+}
+
 /** Opens the access database: creates it if missing, brings its schema up to date. */
 export async function openAccessStore(url: string, user: string, password: string): Promise<AccessStore> {
   const config = connectionConfig(url, user, password);
@@ -170,7 +182,7 @@ export async function openAccessStore(url: string, user: string, password: strin
     await ensureDatabase(config);
   } catch (error) {
     throw new Error(
-      `Access database '${config.database}' at ${config.host}:${config.port} is not usable: ${error instanceof Error ? error.message : String(error)}`,
+      `Access database '${config.database}' at ${config.host}:${config.port} is not usable: ${reasonOf(error)}`,
       { cause: error },
     );
   }
@@ -182,7 +194,7 @@ export async function openAccessStore(url: string, user: string, password: strin
   } catch (error) {
     await pool.end().catch(() => undefined);
     throw new Error(
-      `Access database '${config.database}' could not be prepared: ${error instanceof Error ? error.message : String(error)}`,
+      `Access database '${config.database}' could not be prepared: ${reasonOf(error)}`,
       { cause: error },
     );
   }

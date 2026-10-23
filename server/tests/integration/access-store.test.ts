@@ -72,6 +72,12 @@ describe("opening", () => {
     await again.close();
   });
 
+  it("names why a server it cannot reach is not usable", async () => {
+    await expect(openAccessStore("postgresql://localhost:1/x", "u", "p")).rejects.toThrow(
+      /^Access database 'x' at localhost:1 is not usable: .*ECONNREFUSED/,
+    );
+  });
+
   it("opens concurrently from several servers", async () => {
     const stores = await Promise.all([1, 2, 3].map(() => openAccessStore(accessUrl(), settings.DB_USER, settings.DB_PASSWORD)));
     await Promise.all(stores.map((s) => s.close()));

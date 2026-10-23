@@ -10,6 +10,7 @@ import type { FastifyInstance } from "fastify";
 import { openAccessStore } from "./adapters/postgres/accessStore.js";
 import type { AccessStore } from "./access/store.js";
 import { createApp } from "./app.js";
+import type { AuthRuntime } from "./auth/runtime.js";
 import { connectOidc } from "./auth/oidc.js";
 import { authSettings, settings } from "./config.js";
 import { closeAiModel, initAiModel } from "./core/ai.js";
@@ -48,12 +49,14 @@ export async function startServer(): Promise<FastifyInstance> {
   const auth = authSettings(settings);
   const shared = await openSharedState({
     ...(settings.SHARED_STATE === "valkey" ? { kind: "valkey", url: settings.VALKEY_URL! } : { kind: "memory" }),
-    sessionIdleMs: settings.AUTH_SESSION_IDLE_SECONDS * 1000,
+    ...(auth !== null ? { sessionIdleMs: auth.sessionIdleSeconds * 1000 } : {}),
   });
   let access: AccessStore | null = null;
   try {
+    let runtime: AuthRuntime | null = null;
     if (auth !== null) {
       access = await openAccessStore(auth.accessDbUri, settings.DB_USER, settings.DB_PASSWORD);
+      runtime = { settings: auth, oidc: await connectOidc(auth), access, sessions: shared.sessions };
     }
     initEmbeddingProvider();
     initAiModel();
@@ -63,10 +66,6 @@ export async function startServer(): Promise<FastifyInstance> {
       await ensureSemanticIndexes(embeddingProvider.dimensions);
     }
     await startSearchWorker();
-    const runtime =
-      auth !== null && access !== null
-        ? { settings: auth, oidc: await connectOidc(auth), access, sessions: shared.sessions }
-        : null;
     // Step 6: the MCP mounts are part of createApp.
     return await createApp(shared, runtime);
   } catch (error) {

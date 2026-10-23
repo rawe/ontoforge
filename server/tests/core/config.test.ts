@@ -267,9 +267,10 @@ describe("authentication settings", () => {
   };
 
   it("is off by default and then reads none of its variables", () => {
-    const settings = loadSettings({ OIDC_ISSUER: "not a url" });
+    const settings = loadSettings({ OIDC_ISSUER: "not a url", AUTH_SESSION_IDLE_SECONDS: "never" });
     expect(settings.AUTH_ENABLED).toBe(false);
     expect(settings.OIDC_ISSUER).toBeNull();
+    expect(settings.AUTH_SESSION_IDLE_SECONDS).toBeNull();
     expect(authSettings(settings)).toBeNull();
   });
 
@@ -311,6 +312,23 @@ describe("authentication settings", () => {
     expect(() => loadSettings({ ...enabled, PUBLIC_URL: "ftp://x" })).toThrow(/PUBLIC_URL/);
     expect(() => loadSettings({ ...enabled, ACCESS_DB_URI: "mysql://x/y" })).toThrow(/ACCESS_DB_URI/);
     expect(() => loadSettings({ ...enabled, OIDC_BACKCHANNEL_URL: "nope" })).toThrow(/OIDC_BACKCHANNEL_URL/);
+    expect(() => loadSettings({ ...enabled, AUTH_SESSION_IDLE_SECONDS: "0" })).toThrow(/AUTH_SESSION_IDLE_SECONDS/);
+  });
+
+  it("refuses an API audience an ID token would carry: the client id", () => {
+    expect(() => loadSettings({ ...enabled, OIDC_AUDIENCE: "ontoforge-web" })).toThrow(/OIDC_AUDIENCE must differ from OIDC_CLIENT_ID/);
+  });
+
+  it("allows an http issuer on a loopback host only; the back channel anywhere", () => {
+    expect(loadSettings({ ...enabled, OIDC_ISSUER: "https://login.example.com/realms/x" }).OIDC_ISSUER).toBe(
+      "https://login.example.com/realms/x",
+    );
+    expect(() => loadSettings({ ...enabled, OIDC_ISSUER: "http://keycloak.example.com/realms/x" })).toThrow(
+      /OIDC_ISSUER must be an https URL/,
+    );
+    expect(loadSettings({ ...enabled, OIDC_BACKCHANNEL_URL: "http://keycloak:8080/realms/ontoforge" }).OIDC_BACKCHANNEL_URL).toBe(
+      "http://keycloak:8080/realms/ontoforge",
+    );
   });
 
   it("allows an http PUBLIC_URL on a loopback host only", () => {

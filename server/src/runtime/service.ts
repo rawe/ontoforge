@@ -1184,10 +1184,22 @@ export async function getNeighbors(
     Object.assign(defs, etDef.properties);
   }
 
+  // The relation types to read: the requested one, if the lens shows it,
+  // else every type the lens shows — filtered in storage, before the limit,
+  // so hidden relations take no room in the page. A lens that shows every
+  // relation type needs no filter.
+  const shownRelationTypeKeys = Object.keys(loaded.scoped.relationTypes);
+  const relationTypeKeys =
+    relationTypeKey !== null
+      ? shownRelationTypeKeys.filter((key) => key === relationTypeKey)
+      : shownRelationTypeKeys.length < Object.keys(loaded.full.relationTypes).length
+        ? shownRelationTypeKeys
+        : null;
+
   const neighbors = await store.getNeighbors(
     entityId,
     direction,
-    relationTypeKey,
+    relationTypeKeys,
     limit,
     propertyDefsByType,
   );

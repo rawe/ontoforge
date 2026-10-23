@@ -461,7 +461,7 @@ async function composeItems(
           ? await runtime.getNeighbors(
               entityId,
               group.direction,
-              group.relationType,
+              [group.relationType],
               ALL_RELATIONS,
               definitionsByType,
             )

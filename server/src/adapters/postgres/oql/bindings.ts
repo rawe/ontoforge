@@ -21,8 +21,8 @@ import type { ColumnConversion } from "./conversion.js";
 export type TableKind = "entity" | "relation";
 
 /** A node or relationship variable. `typeKey` is null for a pattern
- * element written without a label / relationship type — the documented
- * untyped case, which widens traversal but projects nothing typed. */
+ * element written without a label / relationship type — the untyped
+ * case, which matches every type of its kind the lens shows. */
 export interface TableBinding {
   kind: TableKind;
   typeKey: string | null;

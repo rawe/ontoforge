@@ -22,7 +22,8 @@
  * produced by dropping what the current code adds and restoring the
  * per-entity search storage it retires; the same step upgrades it,
  * converting its retrievers. The upgrade runs once however many servers
- * start together; storage newer than the code stays untouched. Requires
+ * start together; a failing upgrade and storage newer than the code leave
+ * the storage untouched. Requires
  * the docker-compose PostgreSQL.
  */
 
@@ -1112,6 +1113,25 @@ describe("PostgreSQL storage version", () => {
     const upgrades = log.mock.calls.filter(([line]) => String(line).startsWith("Upgrading storage"));
     expect(upgrades).toHaveLength(1);
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
+  });
+
+  it("a failing upgrade leaves the version and every namespace as they were", async () => {
+    await getOntologyRegistry().createOntology(ID_A, "first", null, null);
+    await getOntologyRegistry().createOntology(ID_B, "second", null, null);
+    await makeVersion7Layout("ont_first");
+    await makeVersion7Layout("ont_second");
+    // Step 9 fails in the second namespace, after steps 8 and 9 ran in the first.
+    await runQuery(`CREATE TABLE ont_second.design_revision (stray integer)`);
+    await recordVersion(7);
+    const before = { first: await layout("ont_first"), second: await layout("ont_second") };
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const failure = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(initSchema()).rejects.toThrow("A storage operation failed");
+    expect(String(failure.mock.calls[0])).toContain('relation "design_revision" already exists');
+
+    expect(await recordedVersion()).toBe(7);
+    expect({ first: await layout("ont_first"), second: await layout("ont_second") }).toEqual(before);
   });
 
   it("storage newer than the code stops the boot and stays untouched", async () => {

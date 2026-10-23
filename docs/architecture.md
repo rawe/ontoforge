@@ -173,8 +173,9 @@ lens key, can exist independently in two ontologies.
 | Entity | `_id` | its type key, plus the properties its type defines |
 | Relation | `_id` | its type key, its two endpoint ids, plus its properties |
 | Ruleset | unique `key` | its rules: the anchor's entity (type key and id) or none, and the write access |
-| Changeset | id | its lens, the ruleset key of the URL that started it (optional), version, note, submitted time (absent for a draft), timestamps |
-| Changeset write | changeset + seq | operation, its arguments, the id a create minted, type key, target id, the before of an update |
+| Changeset | id | its lens, its number, the ruleset key of the URL that started it (optional), version, note, submitted time (absent for a draft), timestamps |
+| Staged object | changeset + the entity or relation id | kind, type key, action, a relation's ends, first touch |
+| Staged value | staged object + property key | the value, the before of an update |
 | Chunk | internal | fragment of one document property, with its offset and length, kept as a passage entry |
 | Search entry | internal | one indexed text of one entity in one generation of a search index — its own fields, one relation, or one chunk |
 
@@ -327,14 +328,15 @@ and what it refuses is in
 
 ## Changeset commits
 
-A [changeset](capabilities/changesets.md) is staged call by call, each call appending
-to its journal and holding nothing afterwards; only its commit is transactional.
+A [changeset](capabilities/changesets.md) is staged call by call, each call merged into
+its set of staged objects and values and holding nothing afterwards; only its commit is
+transactional.
 
 **Where the rules run.** Every rule of a commit runs in the service, as for an immediate
 write: the lock-free pass before anything is locked, then commit validation over the end
 state, through neutral reads of the port that return stored parent links and lock
-targets but judge nothing. The replay itself goes through the same store writes as the
-immediate path.
+targets but judge nothing. The staged objects are applied through the same store writes
+as the immediate path.
 
 **One connection.** A commit runs on a store bound to one database transaction: every
 operation of that store, and of the ruleset and changeset stores it hands out, uses the

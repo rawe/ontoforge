@@ -29,7 +29,7 @@ it: **agent configurations** ([agents.md](agents.md)), **saved queries**
 and **navigators** ([navigators.md](navigators.md)). They are lens-local because they are
 written in terms of what that lens exposes.
 
-A lens also holds its [changesets](changesets.md): staged writes bound to it, reached,
+A lens also holds its [changesets](changesets.md): staged changes bound to it, reached,
 submitted and committed only through it, and never exported. Every read, submit and
 commit of a changeset applies the lens as it is at that moment, so a changeset never shows
 or writes what the lens hides now.

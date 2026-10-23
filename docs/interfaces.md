@@ -584,38 +584,50 @@ Semantics: [capabilities/changesets.md](capabilities/changesets.md).
 |---|---|---|---|
 | POST | `/changesets` | Start a changeset, with an optional `note`; 201 | — |
 | GET | `/changesets` | List the changesets this URL reaches | — |
-| GET | `/changesets/{changesetId}` | Read a changeset with its staged writes by seq | `offset`, `limit` |
+| GET | `/changesets/{changesetId}` | Read a changeset with its staged objects by first touch | `offset`, `limit` |
 | GET | `/changesets/{changesetId}/documents/{entityTypeKey}/{entityId}/{propertyKey}` | Read the text a commit would leave in a document property, whole or by character range | `offset`, `limit` |
-| GET | `/changesets/{changesetId}/entities/{entityTypeKey}/{entityId}` | Read one entity as the changeset leaves it, with its staged writes on it | — |
+| GET | `/changesets/{changesetId}/entities/{entityTypeKey}/{entityId}` | Read one entity as the changeset leaves it, with its staged object | — |
 | DELETE | `/changesets/{changesetId}` | Discard a draft changeset; 204 | — |
-| POST | `/changesets/{changesetId}/writes` | Stage one write, its body discriminated by `operation`; 201 `{seq, id}`, and `relation: {seq, id}` for a create with a parent relation | — |
-| DELETE | `/changesets/{changesetId}/writes/{seq}` | Unstage one write; 204 | — |
+| POST | `/changesets/{changesetId}/writes` | Stage one call, its body discriminated by `operation`; 201 | — |
+| DELETE | `/changesets/{changesetId}/objects/{objectId}` | Unstage one staged object with its values; 204 | — |
+| DELETE | `/changesets/{changesetId}/objects/{objectId}/properties/{propertyKey}` | Cut one staged value; 204 | — |
+| POST | `/changesets/{changesetId}/objects/{objectId}/rebase` | Rebase an update, with optional `properties`, the keys to rebase | — |
 | POST | `/changesets/{changesetId}/submit` | Submit, with an optional `note` | — |
 | POST | `/changesets/{changesetId}/unsubmit` | Unsubmit, with a required `note` | — |
 | POST | `/changesets/{changesetId}/commit` | Commit, with an optional `expectedVersion` | — |
 
-A staged write's `operation` is one of six, each with its keys and no other:
+A staged call's `operation` is one of seven, each with its keys and no other:
 `create_entity` `{type, properties?, parentRelation?}`, `update_entity`
 `{type, id, properties?}`, `delete_entity` `{type, id}`, `create_relation`
-`{type, fromEntityId, toEntityId, properties?}`, `update_relation` `{type, id, properties?}`
-and `delete_relation` `{type, id}`; `type` is the type key, `id` the target, `properties`
-the values as one object, and `parentRelation` the immediate create's.
+`{type, fromEntityId, toEntityId, properties?}`, `update_relation` `{type, id, properties?}`,
+`delete_relation` `{type, id}` and `edit_document` `{type, id, property}` with the body of
+the [document write](#documents); `type` is the type key, `id` the target, `properties`
+the values as one object, and `parentRelation` the immediate create's. Staging answers
+`{id}`, the staged object's id; a create with a parent relation adds `relation: {id}`, an
+entity delete that took out staged relations `cascaded`, their ids, and `edit_document`
+the document write's answer beside `id`.
 
-`limit` of the changeset read is 1–500, default 100; the staged document read pages and
-answers as the document read does. The staged entity read answers
-`{entity, deleted, writes}`: `entity` as the entity read answers it, without timestamps
-for an entity the changeset creates, `writes` unpaged, as
-the changeset read shows them. Start, submit and unsubmit answer the changeset; commit
-answers `{committed, alreadyGone}`, the number of writes and the seqs of deletes whose
-target was already gone. Every unknown changeset — committed, discarded, expired, never
-started, or bound to another lens or ruleset — is `RESOURCE_NOT_FOUND`. A refusal by
-state is `RESOURCE_CONFLICT`: a submitted or busy changeset, a stale `expectedVersion`, a
-full changeset, a call the write access of the URL's ruleset does not allow, a second
-commit on the ontology or in the process.
+`limit` of the changeset read is 1–500, default 100. A changeset carries `objectCount`, its
+number of staged objects; the read adds `objects`, each `{id, kind, type, action,
+firstTouchedAt, markers, values}`, with `name` for an entity and `from` and `to`, each
+`{id, name}`, for a relation, and each value `{property, before, current, after,
+markers}`, a document value as `{document: true, length}`. The list counts `operations`
+per `<action>_<kind>`. The staged document read pages and answers as the document read
+does. The staged entity read answers `{entity, deleted, object}`: `entity` as the entity
+read answers it, without timestamps for an entity the changeset creates, `object` as the
+changeset read shows it, or null. Start, submit and unsubmit answer the changeset, and
+rebase the object; commit answers `{committed, alreadyGone}`, the number of staged objects
+and the ids of deletes whose target was already gone. Every unknown changeset —
+committed, discarded, expired, never started, or bound to another lens or ruleset — is
+`RESOURCE_NOT_FOUND`, and so is an object or value the changeset does not stage. A
+refusal by state is `RESOURCE_CONFLICT`: a submitted or busy changeset, one changed
+during the call, a stale `expectedVersion`, a full changeset, a rebase of a create or a
+delete, a call the write access of the URL's ruleset does not allow, a second commit on
+the ontology or in the process.
 Staging answers the immediate write's validation errors. A submit refused by its faults
 and a rejected commit answer `VALIDATION_ERROR` with `details.violations`, each
-`{seq, kind, message}`, ordered by seq, at most 100, and `details.total`; seq 0 is the
-changeset as a whole.
+`{object, property?, kind, message}`, at most 100, and `details.total`; `object` is the
+staged object's id, or null for the changeset as a whole, and those come first.
 
 ### Search
 
@@ -932,7 +944,7 @@ connection carries state.
 |---|---|---|
 | Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
 | Bound to | One ontology | One ontology and one lens |
-| Tools | 45 | 33; 34 on a ruleset mount, 31 with write access `propose`, 20 with `none` |
+| Tools | 45 | 34; 35 on a ruleset mount, 34 with write access `propose`, 20 with `none` |
 
 ### How a mount is bound
 
@@ -1054,20 +1066,19 @@ Everything a client can do to instance data through one lens.
 | `search_saved_queries` | Find a saved query by describing what it should do |
 | `start_changeset` | Start a changeset, with an optional `note` |
 | `list_changesets` | The changesets this mount reaches |
-| `get_changeset` | A changeset with its staged writes by seq |
+| `get_changeset` | A changeset with its staged objects by first touch |
 | `get_staged_document` | The text a commit would leave in a document property, whole or by character range |
-| `unstage` | Remove one staged write, by `seq` |
+| `unstage` | Remove one staged object, by `object_id`, or with `property` cut one staged value |
+| `rebase` | Rebase an update, by `object_id`, with optional `properties` |
 | `submit_changeset` | Submit a changeset, with an optional `note` |
 | `unsubmit_changeset` | Unsubmit a changeset, with a required `note` |
 | `commit_changeset` | Commit a changeset, with an optional `expected_version` |
 | `discard_changeset` | Discard a draft changeset |
 
-`create_entity`, `update_entity`, `delete_entity`, `create_relation`, `update_relation`
-and `delete_relation` take an optional `changeset_id`: with it the write is staged into
-that changeset and answers `{seq, id}`, and a `create_entity` with `parent_relation`
-`{seq, id, relation: {seq, id}}`. `edit_document` and `write_document` cannot stage:
-given a `changeset_id`, they refuse with a validation error and write nothing. Every
-changeset tool but `start_changeset` and `list_changesets` takes `changeset_id`;
+`create_entity`, `update_entity`, `delete_entity`, `create_relation`, `update_relation`,
+`delete_relation`, `edit_document` and `write_document` take an optional `changeset_id`:
+with it the call is staged into that changeset and answers as the staging route does.
+Every changeset tool but `start_changeset` and `list_changesets` takes `changeset_id`;
 `get_changeset` takes `offset` and `limit`, which it clamps into range, and
 `get_staged_document` takes those of `get_document`. The changeset tools
 answer what the REST routes answer, and `unstage` and `discard_changeset` a message.

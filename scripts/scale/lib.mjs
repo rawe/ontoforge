@@ -220,7 +220,18 @@ export async function ensureSeed() {
   return 'loaded';
 }
 
-/** Sets the fake model server's knobs ({chatDelayMs, holdEmbed}). */
+/** Runs one SQL statement against the harness PostgreSQL (psql in its
+ * container); rows as lines, columns separated by `|`. */
+export function sql(statement) {
+  return compose(['exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'ontoforge', '-qAt', '-c', statement]);
+}
+
+/** A service's log lines since a moment (an ISO timestamp). */
+export function logsSince(service, since) {
+  return compose(['logs', '--no-color', '--since', since, service]);
+}
+
+/** Sets the fake model server's knobs ({chatDelayMs, holdEmbed, keepHeld}). */
 export function fakeControl(settings) {
   return http('POST', `${urls().fake}/control`, settings);
 }

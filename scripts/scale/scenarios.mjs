@@ -10,8 +10,8 @@
 // and the seed ontology fx_people_basic, which they load when it is missing.
 
 import {
-  SEED, backendReady, chat, compose, composeAsync, ensureSeed, fakeControl, http, modelPath,
-  readThread, readiness, runtimePath, sleep, urls, waitFor,
+  SEED, backendReady, chat, compose, composeAsync, ensureSeed, fakeControl, http, logsSince, modelPath,
+  readThread, readiness, runtimePath, sleep, sql, urls, waitFor,
 } from './lib.mjs';
 
 /** One scenario's checks and notes, printed as it goes. */
@@ -205,23 +205,76 @@ async function lifecycleMissing(run) {
 }
 
 /**
- * Worker fencing across processes (dev-workers-lifecycle.md §4). Steps, once
- * stage 4 is in: stop backend-b; holdEmbed; update a person through A (A claims
- * the queue item and blocks in the embed call); expire the item's lease in SQL;
- * start backend-b (it takes the claim over and builds the entry); update the
- * person again (B builds that version); release the hold. Pass: the entry is
- * the second version, the queue is empty, A logs the lost claim, build done ≤ total.
+ * Worker fencing across processes: A's claim is taken over by B while A waits
+ * in the embed call, and A's late effects must be dropped. With B paused, a
+ * person is updated (v1) through A; A claims its items and parks in the
+ * fake's embed call. The claim's lease is expired in SQL, B resumes, the
+ * person is updated again (v2) through B, and B takes the claim over and
+ * builds v2. Then A's call is answered: A's v1 entry and completion must be
+ * dropped, with one log line on A. (The generations are ready, so build
+ * progress is not counted here; the integration tests cover it.)
  */
 async function fencingScenario(run) {
   if (await lifecycleMissing(run)) return;
-  run.skip('not written yet: needs the stage 4 claim fence and its log line');
+  const u = urls();
+  const ns = `ont_${SEED.ontology}`;
+  const stamp = Date.now();
+  const persons = `${u.a}${runtimePath()}/entities/person`;
+  const name = (version) => `fencing-${version}-${stamp}`;
+  const created = await http('POST', persons, { name: name('v0') });
+  const id = created.json?._id;
+  if (!run.check('probe person on A', created.status === 201 && id, `HTTP ${created.status} ${id ?? ''}`)) return;
+  const queuedOf = () => Number(sql(`SELECT count(*) FROM ${ns}.search_queue WHERE entity_id = '${id}'`));
+  const semanticText = () => sql(
+    `SELECT e.text FROM ${ns}.search_entry e JOIN ${ns}.search_generation g USING (generation_id)
+     WHERE e.entity_id = '${id}' AND e.part_kind = 'self' AND g.representation = 'semantic' AND g.state = 'ready'`);
+  let paused = false;
+  try {
+    run.check('v0 indexed', await waitFor(() => queuedOf() === 0, 30), `${queuedOf()} items queued`);
+    compose(['pause', 'backend-b']);
+    paused = true;
+    await fakeControl({ holdEmbed: true });
+    const since = new Date().toISOString();
+    const v1 = await http('PATCH', `${persons}/${id}`, { name: name('v1') });
+    run.check('v1 written through A', v1.status === 200, `HTTP ${v1.status}`);
+    const parked = await waitFor(async () => (await fakeControl({})).json?.waiting > 0, 20, 200);
+    if (!run.check('A waits in the embed call', parked, `${(await fakeControl({})).json?.waiting} parked`)) return;
+
+    const expired = sql(
+      `UPDATE ${ns}.search_queue SET lease_until = now() - interval '1 second'
+       WHERE entity_id = '${id}' AND lease_until IS NOT NULL RETURNING part_kind`).split('\n').filter(Boolean);
+    run.check("A's lease expired in SQL", expired.length > 0, `${expired.length} items`);
+    await fakeControl({ holdEmbed: false, keepHeld: true });
+    compose(['unpause', 'backend-b']);
+    paused = false;
+    const v2 = await http('PATCH', `${u.b}${runtimePath()}/entities/person/${id}`, { name: name('v2') });
+    run.check('v2 written through B', v2.status === 200, `HTTP ${v2.status}`);
+    const built = await waitFor(() => queuedOf() === 0 && semanticText().includes(name('v2')), 20, 250);
+    run.check('B took the claim over and built v2', built, `entry "${semanticText()}", ${queuedOf()} queued`);
+
+    await fakeControl({ holdEmbed: false });
+    const marker = 'Search claim lost';
+    const logged = await waitFor(() => logsSince('backend-a', since).includes(marker), 20, 500);
+    const line = logsSince('backend-a', since).split('\n').find((l) => l.includes(marker)) ?? 'none';
+    run.check('A logs its lost claim', logged, line.replace(/^\S+\s+\|\s*/, ''));
+    await sleep(1000);
+    const text = semanticText();
+    run.check("entry keeps B's v2", text.includes(name('v2')) && !text.includes(name('v1')), `"${text}"`);
+    const left = sql(`SELECT count(*), coalesce(max(attempts), 0) FROM ${ns}.search_queue WHERE entity_id = '${id}'`);
+    run.check('queue empty, nothing failed', left === '0|0', `count|max attempts ${left}`);
+  } finally {
+    await fakeControl({ holdEmbed: false });
+    if (paused) compose(['unpause', 'backend-b']);
+    await http('DELETE', `${u.lb}${runtimePath()}/entities/person/${id}`);
+    run.note('cleanup: probe person removed, backend-b running, embed calls released');
+  }
 }
 
 /**
  * Draining a backend (dev-workers-lifecycle.md §4): a turn shorter than the
  * drain deadline finishes while A stops; a longer one is cut without a terminal
- * event and leaves the thread at its previous turn; reads through the LB see no
- * error; A rejoins.
+ * event and leaves the thread at its previous turn, released, so the next turn
+ * on B runs (not THREAD_BUSY); reads through the LB see no error; A rejoins.
  */
 async function drainScenario(run) {
   if (await lifecycleMissing(run)) return;
@@ -256,6 +309,8 @@ async function drainScenario(run) {
     const read = await readThread(u.b, first.threadId);
     run.check('thread keeps its last completed turn', (read.json?.messages ?? []).length === 4,
       `HTTP ${read.status}, ${(read.json?.messages ?? []).length} messages`);
+    const next = await chat(u.b, 'the next turn, on B', first.threadId);
+    run.check('next turn on B is not busy', next.status === 200 && next.reply === 'user-messages:3', said(next));
     await composeAsync(['start', 'backend-a']);
     run.check('backend-a ready again', await backendUp(u.a), 'readiness');
   } finally {

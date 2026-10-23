@@ -10,7 +10,9 @@
 //                               seeded by the text, so equal texts get equal vectors.
 //   GET  /control               The current settings and call counters.
 //   POST /control               Change settings: {chatDelayMs, holdEmbed, dimensions}.
-//                               holdEmbed:true parks every embed call until holdEmbed:false.
+//                               holdEmbed:true parks every embed call until holdEmbed:false;
+//                               with keepHeld:true that only stops parking new calls,
+//                               the parked ones wait for the next holdEmbed:false.
 //   GET  /  and  /api/tags      Liveness, as Ollama answers them.
 //
 // Listens on PORT (default 11434).
@@ -109,7 +111,7 @@ async function control(req, res) {
     if (body.dimensions !== undefined) state.dimensions = Number(body.dimensions);
     if (body.holdEmbed !== undefined) {
       state.holdEmbed = Boolean(body.holdEmbed);
-      if (!state.holdEmbed) {
+      if (!state.holdEmbed && body.keepHeld !== true) {
         const waiting = held;
         held = [];
         for (const resolve of waiting) resolve(true);

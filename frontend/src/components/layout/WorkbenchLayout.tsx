@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 import { Link, Outlet, useParams } from 'react-router-dom'
 import { useLenses, useOntologies, useRuntimeSchema } from '@/api/hooks'
 import { ApiError } from '@/api/http'
+import { NoAccess } from '@/components/auth/NoAccess'
+import { useAccess } from '@/components/auth/useAccess'
 import { EmptyState } from '@/components/EmptyState'
 import { ChangesetBar } from '@/components/changesets/ChangesetBar'
 import { Sidebar } from '@/components/layout/Sidebar'
@@ -27,6 +29,7 @@ export function WorkbenchLayout() {
   const lenses = useLenses(notFound ? ontologyKey : undefined)
   const ontologyMissing = lenses.error instanceof ApiError && lenses.error.status === 404
   const { data: ontologies } = useOntologies()
+  const access = useAccess()
   const ontologyName = ontologies?.find((o) => o.key === ontologyKey)?.displayName ?? ontologyKey
   useDocumentTitle(
     schema.data === undefined ? undefined : `${schema.data.lens.name} · Workbench · ${ontologyName}`,
@@ -61,6 +64,15 @@ export function WorkbenchLayout() {
 
   if (ontologyKey === undefined || lensKey === undefined) return null
 
+  if (!access.canRead(ontologyKey, lensKey)) {
+    return (
+      <NoAccess
+        title="No access to this lens"
+        description={`You hold no Reader or Writer role on lens "${lensKey}" of ontology "${ontologyKey}".`}
+      />
+    )
+  }
+
   if (notFound) {
     // Wait for the lens list before telling the ontology from the lens apart.
     if (lenses.isPending) return null
@@ -76,7 +88,7 @@ export function WorkbenchLayout() {
           }
           action={
             <div className="flex flex-wrap justify-center gap-2">
-              {!ontologyMissing && (
+              {!ontologyMissing && access.canDesign(ontologyKey) && (
                 <Button asChild size="sm">
                   <Link to={`/o/${ontologyKey}/studio/lenses`}>
                     <STUDIO_ICON className="size-3.5" /> Open its lenses in the Studio

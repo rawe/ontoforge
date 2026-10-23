@@ -23,6 +23,7 @@ import type {
   SchemaEntityType,
   SchemaRelationType,
 } from '@/api/types'
+import { useAccess } from '@/components/auth/useAccess'
 import { DocumentBadge } from '@/components/DocumentBadge'
 import {
   DocumentViewerDialog,
@@ -88,6 +89,7 @@ export function NodePanel({
   onDeselect,
 }: NodePanelProps) {
   const displayLabel = useDisplayLabel()
+  const canWrite = useAccess().canWrite(ontologyKey, lensKey)
   const entity = node.data.entity
   const typeKey = entity._entityTypeKey
   const entityType = entityTypes.find((t) => t.key === typeKey)
@@ -183,14 +185,16 @@ export function NodePanel({
               </>
             )}
           </Button>
-          <Button
-            variant="outline"
-            size="xs"
-            disabled={applicable.length === 0}
-            onClick={() => setAddRelationOpen(true)}
-          >
-            <Link2 className="size-3" /> Connect
-          </Button>
+          {canWrite && (
+            <Button
+              variant="outline"
+              size="xs"
+              disabled={applicable.length === 0}
+              onClick={() => setAddRelationOpen(true)}
+            >
+              <Link2 className="size-3" /> Connect
+            </Button>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

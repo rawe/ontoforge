@@ -32,6 +32,7 @@ import type {
   RelationInstance,
   RuntimeSchema,
 } from '@/api/types'
+import { useAccess } from '@/components/auth/useAccess'
 import type { Turn } from '@/components/assistants/chat/chatModel'
 import { EmptyState } from '@/components/EmptyState'
 import { EXPLORER_LIVE_ONLY_TEXT } from '@/components/changesets/changesets'
@@ -135,6 +136,8 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
   /** The Hierarchy edges filter: only parent relations' edges show; no node moves. */
   const [hierarchyOnly, setHierarchyOnly] = useState(false)
   const [connectPair, setConnectPair] = useState<ConnectPair | null>(null)
+  // Dragging from node to node creates a relation: only on a lens one may write.
+  const canWrite = useAccess().canWrite(ontologyKey, lensKey)
   const [edgePopover, setEdgePopover] = useState<{ id: string; x: number; y: number } | null>(null)
   const [relayouting, setRelayouting] = useState(false)
   const [recents] = useState<RecentEntity[]>(() => readRecents(ontologyKey, lensKey))
@@ -707,6 +710,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            nodesConnectable={canWrite}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}

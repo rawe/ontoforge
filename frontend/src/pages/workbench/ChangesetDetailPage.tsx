@@ -22,6 +22,7 @@ import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
 import { stagedEntity } from '@/api/staging'
 import type { ChangesetViolation, StagedObjectView } from '@/api/types'
+import { useAccess } from '@/components/auth/useAccess'
 import { DocumentViewerDialog, type DocumentViewerTarget } from '@/components/DocumentViewerDialog'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
@@ -72,6 +73,8 @@ import { cn } from '@/lib/utils'
 const DRAFT_REASON = 'Only a submitted changeset can be unsubmitted'
 /** Why Submit is off while submitted. */
 const SUBMITTED_REASON = 'It is submitted already'
+/** Why a Reader cannot change staged objects. */
+const READER_REASON = 'Changing a changeset needs the Writer role on this lens'
 
 /** The violations panel's name and heading, by what was rejected. */
 const REJECTED = {
@@ -144,6 +147,8 @@ export function ChangesetDetailPage() {
   const list = useChangesets(ontologyKey, lensKey)
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const pinned = usePinnedChangeset(ontologyKey!, lensKey!)
+  // A Reader reviews and checks; staging, submitting and committing need Writer.
+  const canWrite = useAccess().canWrite(ontologyKey!, lensKey!)
   const displayLabel = useDisplayLabel()
 
   // The violations of a rejected commit, submit or check (with the version checked).
@@ -372,7 +377,7 @@ export function ChangesetDetailPage() {
    * it is the pinned changeset, else a hint.
    */
   const extendActions = (object: StagedObjectView) => {
-    const values = submitted ? null : stagedCreateValues(object)
+    const values = submitted || !canWrite ? null : stagedCreateValues(object)
     const entityType = schema.data?.entityTypes.find((t) => t.key === object.type)
     if (values === null || entityType === undefined) return undefined
     if (pinned !== changeset.id) {
@@ -506,13 +511,17 @@ export function ChangesetDetailPage() {
           <>
             <PinChangesetButton ontologyKey={ontologyKey} lensKey={lensKey} changeset={changeset} />
             {checkButton}
-            {submitted ? <Disabled reason={SUBMITTED_REASON}>{submitButton}</Disabled> : submitButton}
-            <Button size="sm" disabled={busy} onClick={() => setCommitVersion(changeset.version)}>
-              {commit.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-              Commit
-            </Button>
-            {submitted ? unsubmitButton : <Disabled reason={DRAFT_REASON}>{unsubmitButton}</Disabled>}
-            {submitted ? <Disabled reason={FROZEN_REASON}>{discardButton}</Disabled> : discardButton}
+            {canWrite && (
+              <>
+                {submitted ? <Disabled reason={SUBMITTED_REASON}>{submitButton}</Disabled> : submitButton}
+                <Button size="sm" disabled={busy} onClick={() => setCommitVersion(changeset.version)}>
+                  {commit.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                  Commit
+                </Button>
+                {submitted ? unsubmitButton : <Disabled reason={DRAFT_REASON}>{unsubmitButton}</Disabled>}
+                {submitted ? <Disabled reason={FROZEN_REASON}>{discardButton}</Disabled> : discardButton}
+              </>
+            )}
           </>
         }
       />
@@ -556,7 +565,7 @@ export function ChangesetDetailPage() {
                   })}
                 </ul>
               </div>
-              {submitted && (
+              {submitted && canWrite && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -580,7 +589,7 @@ export function ChangesetDetailPage() {
                   key={object.id}
                   object={object}
                   type={typeLabel(object)}
-                  frozen={submitted ? FROZEN_REASON : null}
+                  frozen={!canWrite ? READER_REASON : submitted ? FROZEN_REASON : null}
                   busy={busy}
                   onRemove={() =>
                     objectActions.remove.mutate(object.id, {

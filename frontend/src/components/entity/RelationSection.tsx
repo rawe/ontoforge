@@ -14,6 +14,7 @@ import type {
   SchemaEntityType,
   SchemaRelationType,
 } from '@/api/types'
+import { useAccess } from '@/components/auth/useAccess'
 import { TypeChip } from '@/components/TypeChip'
 import type { RelationInitial } from '@/components/entity/AddRelationDialog'
 import { relationPropsSummary } from '@/components/entity/relationProps'
@@ -77,6 +78,7 @@ export function RelationSection({
   const queryClient = useQueryClient()
   const [limit, setLimit] = useState(PAGE_SIZE)
   const [unlinkTarget, setUnlinkTarget] = useState<Neighbor | null>(null)
+  const canWrite = useAccess().canWrite(ontologyKey, lensKey)
   const staging = usePinnedChangeset(ontologyKey, lensKey) !== null
 
   const myTypeKey = entity._entityTypeKey
@@ -168,20 +170,22 @@ export function RelationSection({
           {count ?? '…'}
         </Badge>
         {childSection?.action}
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label={`Add ${relationType.displayName} relation`}
-          onClick={() => {
-            const initial: RelationInitial =
-              direction === 'both'
-                ? { relationType }
-                : { relationType, direction }
-            onAdd(initial)
-          }}
-        >
-          <Plus className="size-3.5" />
-        </Button>
+        {canWrite && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Add ${relationType.displayName} relation`}
+            onClick={() => {
+              const initial: RelationInitial =
+                direction === 'both'
+                  ? { relationType }
+                  : { relationType, direction }
+              onAdd(initial)
+            }}
+          >
+            <Plus className="size-3.5" />
+          </Button>
+        )}
       </header>
 
       {neighbors.isPending ? (
@@ -200,17 +204,19 @@ export function RelationSection({
           <p className="text-[13px] text-muted-foreground">
             {childSection !== undefined ? 'No children yet.' : `No ${relationType.displayName} relations yet.`}
           </p>
-          <Button
-            variant="outline"
-            size="xs"
-            onClick={() =>
-              onAdd(
-                direction === 'both' ? { relationType } : { relationType, direction },
-              )
-            }
-          >
-            <Plus className="size-3" /> Add
-          </Button>
+          {canWrite && (
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={() =>
+                onAdd(
+                  direction === 'both' ? { relationType } : { relationType, direction },
+                )
+              }
+            >
+              <Plus className="size-3" /> Add
+            </Button>
+          )}
         </div>
       ) : (
         <ul className="divide-y divide-border/60">
@@ -242,15 +248,17 @@ export function RelationSection({
                     {summary}
                   </span>
                 )}
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="ml-auto opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-                  aria-label={`Remove relation to ${displayLabel(neighbor.entity)}`}
-                  onClick={() => setUnlinkTarget(neighbor)}
-                >
-                  <Unlink className="size-3.5 text-muted-foreground" />
-                </Button>
+                {canWrite && (
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="ml-auto opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                    aria-label={`Remove relation to ${displayLabel(neighbor.entity)}`}
+                    onClick={() => setUnlinkTarget(neighbor)}
+                  >
+                    <Unlink className="size-3.5 text-muted-foreground" />
+                  </Button>
+                )}
               </li>
             )
           })}

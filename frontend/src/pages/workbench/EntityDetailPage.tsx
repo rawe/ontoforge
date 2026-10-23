@@ -8,6 +8,7 @@ import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
 import { useRuntimeWrites } from '@/api/writes'
+import { useAccess } from '@/components/auth/useAccess'
 import { EmptyState } from '@/components/EmptyState'
 import { TypeNotInLens } from '@/components/home/TypeNotInLens'
 import { PageHeader } from '@/components/PageHeader'
@@ -68,6 +69,7 @@ export function EntityDetailPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const schema = useRuntimeSchema(ontologyKey, lensKey)
+  const canWrite = useAccess().canWrite(ontologyKey ?? '', lensKey ?? '')
 
   const entityQuery = useQuery({
     queryKey: qk.entity(ontologyKey ?? '', lensKey ?? '', typeKey ?? '', id ?? ''),
@@ -284,73 +286,77 @@ export function EntityDetailPage() {
         }
         actions={
           <>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={relationTypes.length === 0}
-              onClick={() => setAddRelation({ open: true })}
-            >
-              <Link2 className="size-3.5" />
-              Add relation
-            </Button>
+            {canWrite && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={relationTypes.length === 0}
+                onClick={() => setAddRelation({ open: true })}
+              >
+                <Link2 className="size-3.5" />
+                Add relation
+              </Button>
+            )}
             <Button variant="outline" size="sm" asChild>
               <Link to={explorePath}>
                 <Waypoints className="size-3.5" />
                 Open in Explorer
               </Link>
             </Button>
-            <AlertDialog>
-              {hasChildren ? (
-                // A disabled button fires no pointer events: the wrapper carries the tooltip.
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span tabIndex={0} aria-label="Delete its children first">
-                      <Button variant="destructive" size="sm" disabled>
+            {canWrite && (
+              <AlertDialog>
+                {hasChildren ? (
+                  // A disabled button fires no pointer events: the wrapper carries the tooltip.
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span tabIndex={0} aria-label="Delete its children first">
+                        <Button variant="destructive" size="sm" disabled>
+                          <Trash2 className="size-3.5" />
+                          Delete
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>Delete its children first</TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" size="sm" disabled={deleteMutation.isPending}>
+                      {deleteMutation.isPending ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
                         <Trash2 className="size-3.5" />
-                        Delete
-                      </Button>
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>Delete its children first</TooltipContent>
-                </Tooltip>
-              ) : (
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive" size="sm" disabled={deleteMutation.isPending}>
-                    {deleteMutation.isPending ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="size-3.5" />
-                    )}
-                    Delete
-                  </Button>
-                </AlertDialogTrigger>
-              )}
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete “{label}”?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {pinned === null
-                      ? 'The entity and all of its relations are removed permanently. This cannot be undone.'
-                      : 'The delete is staged into the pinned changeset: nothing is removed until it is committed.'}
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                {anchorOf.length > 0 && (
-                  <p className="flex items-start gap-2 rounded-lg border border-(--tc-amber-border) bg-(--tc-amber-bg) p-3 text-[13px]">
-                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-(--tc-amber)" />
-                    {anchorDeleteWarning(anchorOf)}
-                  </p>
+                      )}
+                      Delete
+                    </Button>
+                  </AlertDialogTrigger>
                 )}
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={() => deleteMutation.mutate()}
-                    className="bg-destructive text-white hover:bg-destructive/90"
-                  >
-                    Delete
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete “{label}”?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {pinned === null
+                        ? 'The entity and all of its relations are removed permanently. This cannot be undone.'
+                        : 'The delete is staged into the pinned changeset: nothing is removed until it is committed.'}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  {anchorOf.length > 0 && (
+                    <p className="flex items-start gap-2 rounded-lg border border-(--tc-amber-border) bg-(--tc-amber-bg) p-3 text-[13px]">
+                      <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-(--tc-amber)" />
+                      {anchorDeleteWarning(anchorOf)}
+                    </p>
+                  )}
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => deleteMutation.mutate()}
+                      className="bg-destructive text-white hover:bg-destructive/90"
+                    >
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
           </>
         }
       />
@@ -402,7 +408,7 @@ export function EntityDetailPage() {
                     onAdd={(initial) => setAddRelation({ open: true, initial })}
                     childSection={{
                       direction: link.direction,
-                      action: (
+                      action: canWrite && (
                         <Button
                           variant="outline"
                           size="xs"

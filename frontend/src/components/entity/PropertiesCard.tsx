@@ -11,6 +11,7 @@ import type {
   SchemaProperty,
 } from '@/api/types'
 import { useRuntimeWrites } from '@/api/writes'
+import { useAccess } from '@/components/auth/useAccess'
 import { MarkerChip } from '@/components/changesets/MarkerChip'
 import { DocumentPropertyRow } from '@/components/entity/DocumentPropertyRow'
 import type { StagedField } from '@/components/entity/stagedFields'
@@ -38,6 +39,8 @@ interface PropertyRowProps {
 function PropertyRow({ ontologyKey, lensKey, entity, property, staged }: PropertyRowProps) {
   const queryClient = useQueryClient()
   const writes = useRuntimeWrites(ontologyKey, lensKey)
+  // A Reader sees the values; the click-to-edit button is disabled.
+  const canWrite = useAccess().canWrite(ontologyKey, lensKey)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -172,14 +175,15 @@ function PropertyRow({ ontologyKey, lensKey, entity, property, staged }: Propert
         <button
           type="button"
           onClick={startEdit}
+          disabled={!canWrite}
           className={cn(
             '-mx-1.5 min-h-7 rounded-md px-1.5 py-1 text-left text-[13px] break-words whitespace-pre-wrap',
-            'transition-colors duration-100 hover:bg-muted/60',
+            'transition-colors duration-100 enabled:hover:bg-muted/60',
             'focus-visible:outline-2 focus-visible:outline-ring/60',
             mono,
             rendered === null && 'text-muted-foreground/50',
           )}
-          aria-label={`Edit ${property.displayName}`}
+          aria-label={canWrite ? `Edit ${property.displayName}` : undefined}
         >
           {staged === undefined ? (
             (rendered ?? '—')

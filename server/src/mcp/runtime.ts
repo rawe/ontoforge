@@ -40,7 +40,8 @@ import { z } from "zod";
 
 import { settings } from "../config.js";
 import { valueToText } from "../core/dataTypes.js";
-import { getRuntimeStore, type RuntimeStore } from "../core/ports.js";
+import { ForbiddenError } from "../core/exceptions.js";
+import { getRuntimeStore, type RuntimeStore, type WriteAccess } from "../core/ports.js";
 import { getRulesetView, readMountRuleset } from "../runtime/rulesets.js";
 import { filterRules } from "../runtime/readHelpers.js";
 import * as changesets from "../runtime/changesets.js";
@@ -179,6 +180,12 @@ type ToolFactory = <Args>(
 /** Register a tool, listed only when the binding's level allows it. */
 type Register = McpServer["registerTool"];
 
+/** The caller's role on the lens, before anything else: a Reader (level
+ * `none`) only reads. Authentication off is `full`. */
+function checkRole(lensKey: string, roleLevel: WriteAccess, operation: Operation): void {
+  if (!allows(roleLevel, operation)) throw new ForbiddenError(`Reader on lens '${lensKey}' cannot write`);
+}
+
 /** The binding of the plain lens: no ruleset, full write access. */
 const PLAIN_LENS: Binding = { rulesetKey: null, writeAccess: "full" };
 
@@ -194,11 +201,19 @@ const PLAIN_LENS: Binding = { rulesetKey: null, writeAccess: "full" };
  * is added. Changesets started here carry the ruleset key, and only the
  * ruleset's are reachable, as on the ruleset REST mirror. A tool with no
  * row in the operation table fails the build.
+ *
+ * `roleLevel` is the caller's role on the lens (`access/authorize.ts`
+ * `lensLevel`): every call first checks its operation against it, so a
+ * Reader's write is refused as forbidden. The list keeps only what
+ * `listedRoleLevel` allows too; a tool call's server lists at `full`, so
+ * a refused call is refused by the check, not unknown.
  */
 export function createRuntimeMcpServer(
   ontologyKey: string,
   lensKey: string,
   binding: Binding = PLAIN_LENS,
+  roleLevel: WriteAccess = "full",
+  listedRoleLevel: WriteAccess = roleLevel,
 ): McpServer {
   const server = new McpServer({ name: "OntoForge Runtime", version: "0.1.0" });
   const { rulesetKey } = binding;
@@ -213,11 +228,15 @@ export function createRuntimeMcpServer(
   };
   const tool: ToolFactory = (name, fn) => {
     toolOperation(name, {}); // a tool without a row throws here
-    return wrap(name, (args) => fn(args, () => openStore(toolOperation(name, args))));
+    return wrap(name, (args) => {
+      checkRole(lensKey, roleLevel, toolOperation(name, args));
+      return fn(args, () => openStore(toolOperation(name, args)));
+    });
   };
   // Every tool is built, so a missing row fails at any level; the list
-  // keeps the ones the level allows.
-  const lists = (name: string): boolean => listsTool(binding.writeAccess, name);
+  // keeps the ones both the binding's level and the caller's role allow.
+  const lists = (name: string): boolean =>
+    listsTool(binding.writeAccess, name) && listsTool(listedRoleLevel, name);
   const register: Register = (name, config, cb) => {
     const registered = server.registerTool(name, config, cb);
     if (!lists(name)) registered.remove();

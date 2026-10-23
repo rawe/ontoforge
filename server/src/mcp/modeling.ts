@@ -248,7 +248,13 @@ const SEARCH_INDEX_RECORD =
 // ---------------------------------------------------------------------------
 
 /** Build the modeling MCP server bound to one ontology key. */
-export function createModelingMcpServer(ontologyKey: string): McpServer {
+/**
+ * The modeling server of one ontology. With `authentication` on, every
+ * tool needs the ontology's administrator (the mount's route check), and
+ * `ensure_ontology` creates nothing: an ontology is created over REST,
+ * where its creator becomes its administrator.
+ */
+export function createModelingMcpServer(ontologyKey: string, authentication = false): McpServer {
   const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" });
 
   // The ONE registry-touching tool over MCP (`docs/decisions.md#interfaces`): with
@@ -262,13 +268,22 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         "no-op if it does. Takes no arguments — it acts only on the mount's own " +
         "ontology — and reports the ontology key and whether it created. A " +
         "created ontology starts bare (no types, no lenses, no data) and " +
-        "without a display name; naming happens over REST/UI.",
+        "without a display name; naming happens over REST/UI." +
+        (authentication
+          ? " This server requires sign-in: it creates no ontology; a missing one is created " +
+            "through the REST API or the web client."
+          : ""),
       inputSchema: {},
     },
     wrap("ensure_ontology", async () => {
       const registry = getOntologyRegistry();
       if ((await registry.getOntology(ontologyKey)) !== null) {
         return jsonResult({ key: ontologyKey, created: false });
+      }
+      if (authentication) {
+        throw new ValidationError(
+          `Ontology '${ontologyKey}' does not exist; create it through the REST API or the web client`,
+        );
       }
       const body = OntologyCreate.parse({ key: ontologyKey });
       await registryService.createOntology(body, registry);

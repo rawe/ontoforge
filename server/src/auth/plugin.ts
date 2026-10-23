@@ -37,24 +37,7 @@ declare module "fastify" {
 export const API_SCOPE = "ontoforge-api";
 
 const ANONYMOUS: Access = { kind: "anonymous" };
-const PUBLIC: Need = { kind: "public" };
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-
-/** Routes that are public whatever the route table says: probes, docs, the
- * deployment description, sign-in itself, resource metadata, CORS preflight. */
-function isPublicRoute(method: string, url: string): boolean {
-  return (
-    url === "/livez" ||
-    url === "/readyz" ||
-    url === "/openapi.json" ||
-    url === "/docs" ||
-    url.startsWith("/docs/") ||
-    url.startsWith("/api/server/") ||
-    url.startsWith("/api/auth/") ||
-    url.startsWith("/.well-known/") ||
-    (method === "OPTIONS" && url === "*")
-  );
-}
 
 /** Declares every route registered from here on: its need per method, or the boot fails. */
 export function classifyRoutes(app: FastifyInstance): void {
@@ -62,7 +45,7 @@ export function classifyRoutes(app: FastifyInstance): void {
     const methods = Array.isArray(route.method) ? route.method : [route.method];
     const needs: Record<string, Need> = {};
     for (const method of methods) {
-      const need = needOf(method, route.url) ?? (isPublicRoute(method, route.url) ? PUBLIC : undefined);
+      const need = needOf(method, route.url);
       if (need === undefined) {
         throw new Error(`Route ${method} ${route.url} has no entry in the access route table`);
       }

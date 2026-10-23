@@ -9,7 +9,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { runQuery } from "../../src/adapters/postgres/errors.js";
 import { createApp } from "../../src/app.js";
@@ -250,6 +250,18 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
     expect((await view(kept)).status).toBe(200);
     expect((await list()).map((c) => c.id)).toContain(kept);
     expect((await view(gone)).status).toBe(404);
+  });
+
+  it("a draft expires by the database's clock: a server clock 30 days ahead keeps it", async () => {
+    const draft = await start();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 30 * 24 * 3_600_000);
+    try {
+      expect((await view(draft)).status).toBe(200);
+      expect((await list()).map((c) => c.id)).toContain(draft);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

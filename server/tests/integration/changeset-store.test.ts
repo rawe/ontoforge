@@ -510,8 +510,7 @@ describe("ChangesetStore", () => {
     await age(idle.id, "8 days");
     await age(submitted.id, "8 days");
 
-    const cutoff = new Date(Date.now() - 7 * 24 * 3_600_000);
-    expect(await changesets.sweep(cutoff)).toBe(1);
+    expect(await changesets.sweep(7 * 24 * 3_600_000)).toBe(1);
     expect(await changesets.get(idle.id, lenses.all!, null)).toBeNull();
     expect(await sql(`SELECT 1 FROM changeset_object WHERE changeset_id = $1`, [idle.id])).toEqual([]);
     expect(await sql(`SELECT 1 FROM changeset_value WHERE changeset_id = $1`, [idle.id])).toEqual([]);
@@ -588,7 +587,7 @@ describe("ChangesetStore", () => {
       }
       // touch and sweep skip the held row without waiting.
       expect(await settlesWithin(changesets.touch(cs.id), 2_000)).toBe(true);
-      expect(await changesets.sweep(new Date())).toBe(0);
+      expect(await changesets.sweep(0)).toBe(0);
       // Reads never wait.
       expect(await read(cs.id)).toMatchObject({ version: before.version });
       expect(await changesets.page(cs.id, 0, 10)).toHaveLength(1);

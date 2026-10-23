@@ -167,8 +167,7 @@ describe("start", () => {
     store.rulesetStore.get.mockResolvedValue({ key: "agent-a", anchor: null, anchorFound: false });
     const started = await startChangeset("full_lens", "agent-a", "g1", asRuntimeStore(store));
     expect(store.changesetStore.sweep).toHaveBeenCalledTimes(1);
-    const [cutoff] = store.changesetStore.sweep.mock.calls[0]!;
-    expect(Date.now() - (cutoff as Date).getTime()).toBeGreaterThanOrEqual(7 * 24 * 3_600_000 - 1_000);
+    expect(store.changesetStore.sweep).toHaveBeenCalledWith(7 * 24 * 3_600_000);
     const [input] = store.changesetStore.start.mock.calls[0]!;
     expect(input).toMatchObject({ lensId: "lens-1", rulesetKey: "agent-a", note: "g1" });
     expect(input.id).toMatch(UUID);

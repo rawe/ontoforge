@@ -1270,9 +1270,10 @@ export interface ChangesetStore {
    * another transaction holds the row. */
   touch(id: string): Promise<void>;
 
-  /** Delete the draft changesets of the ontology last changed before
-   * `olderThan`, skipping any whose row is held; how many. */
-  sweep(olderThan: Date): Promise<number>;
+  /** Delete the draft changesets of the ontology last changed more than
+   * `idleMs` ago by the database's clock, skipping any whose row is held;
+   * how many. */
+  sweep(idleMs: number): Promise<number>;
 
   /** Inside a bound store only: the ontology's commit lock, a
    * transaction-scoped advisory lock taken with try semantics, then the

@@ -204,13 +204,10 @@ describe("lens CRUD", () => {
       typeKeys: [],
     });
     const old = new Date(Date.now() - 8 * 24 * 3_600_000);
-    // A draft one, a submitted one of any age; an expired draft one is gone already.
-    holder.runtime.changesetStore.list.mockResolvedValue([
-      summary("a", null, new Date()),
-      summary("b", NOW, old),
-      summary("c", null, old),
-    ]);
+    // A draft one, a submitted one of any age; expired draft ones are swept first.
+    holder.runtime.changesetStore.list.mockResolvedValue([summary("a", null, new Date()), summary("b", NOW, old)]);
     holder.store.deleteLens.mockImplementation(async () => {
+      expect(holder.runtime.changesetStore.sweep).toHaveBeenCalledWith(7 * 24 * 3_600_000);
       expect(holder.runtime.changesetStore.list).toHaveBeenCalledWith("lens-1", null);
       return true;
     });

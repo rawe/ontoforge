@@ -163,10 +163,10 @@ export function createMockChangesetStore(): MockChangesetStore {
       const h = held.get(id);
       if (h !== undefined) h.record = { ...h.record, lastChangeAt: new Date() };
     }),
-    sweep: vi.fn(async (olderThan: Date) => {
+    sweep: vi.fn(async (idleMs: number) => {
       let swept = 0;
       for (const [id, h] of held) {
-        if (h.record.submittedAt === null && h.record.lastChangeAt < olderThan) {
+        if (h.record.submittedAt === null && h.record.lastChangeAt.getTime() < Date.now() - idleMs) {
           held.delete(id);
           swept += 1;
         }

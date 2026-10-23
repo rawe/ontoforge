@@ -282,11 +282,6 @@ function toView(record: ChangesetRecord): ChangesetView {
   };
 }
 
-/** Draft changesets last changed before this are expired. */
-function expiryCutoff(): Date {
-  return new Date(Date.now() - IDLE_MS);
-}
-
 /** A valid note, or null; over the cap, or holding a NUL, is a 422. */
 function validNote(note: string | null | undefined): string | null {
   if (note === null || note === undefined) return null;
@@ -321,10 +316,9 @@ async function loadChangeset(
   const changesets = store.changesets();
   const record = await changesets.get(id, loaded.scoped.lensId, rulesetKey);
   if (record === null) throw notFound(id);
-  const cutoff = expiryCutoff();
-  if (record.submittedAt === null && record.lastChangeAt < cutoff) {
-    await changesets.sweep(cutoff);
-    throw notFound(id);
+  // A draft expires by the database's clock: whether it has is the sweep's to say.
+  if (record.submittedAt === null && (await changesets.sweep(IDLE_MS)) > 0) {
+    if ((await changesets.get(id, loaded.scoped.lensId, rulesetKey)) === null) throw notFound(id);
   }
   return record;
 }
@@ -377,7 +371,7 @@ export async function startChangeset(
   await checkRulesetExists(rulesetKey, store);
   const valid = validNote(note);
   const changesets = store.changesets();
-  await changesets.sweep(expiryCutoff());
+  await changesets.sweep(IDLE_MS);
   const record = await changesets.start({ id: randomUUID(), lensId: loaded.scoped.lensId, rulesetKey: rulesetKey, note: valid });
   return toView(record);
 }
@@ -926,7 +920,7 @@ export async function listChangesets(
   const loaded = await loadSchema(lensKey, store);
   await checkRulesetExists(rulesetKey, store);
   const changesets = store.changesets();
-  await changesets.sweep(expiryCutoff());
+  await changesets.sweep(IDLE_MS);
   const lens = loaded.scoped;
   const shown = (key: string): boolean => Object.hasOwn(lens.entityTypes, key) || Object.hasOwn(lens.relationTypes, key);
   return (await changesets.list(lens.lensId, rulesetKey)).map((summary) => {
@@ -950,11 +944,11 @@ export async function listChangesets(
 }
 
 /** How many changesets a lens delete takes with it, counted before the
- * delete; an expired draft changeset is gone already. */
+ * delete; an expired draft changeset is swept first. */
 export async function lensChangesetCount(lensId: string, store: RuntimeStore): Promise<number> {
-  const cutoff = expiryCutoff();
-  const summaries = await store.changesets().list(lensId, null);
-  return summaries.filter((summary) => summary.submittedAt !== null || summary.lastChangeAt >= cutoff).length;
+  const changesets = store.changesets();
+  await changesets.sweep(IDLE_MS);
+  return (await changesets.list(lensId, null)).length;
 }
 
 // ---------------------------------------------------------------------------

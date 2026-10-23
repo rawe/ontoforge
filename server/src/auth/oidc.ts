@@ -16,6 +16,10 @@ import * as client from "openid-client";
 import type { AuthSettings } from "../config.js";
 import { ProviderUnavailableError } from "../core/exceptions.js";
 
+/** The OAuth scope that puts this server's audience into an access token; an
+ * access token must carry it. */
+export const API_SCOPE = "ontoforge-api";
+
 /** The display claims of a signed-in person or service. */
 export interface Identified {
   issuer: string;
@@ -33,7 +37,6 @@ export interface LoginStart {
 }
 
 export interface Oidc {
-  readonly issuer: string;
   /** The provider's login page for a new login, with fresh `state`, `nonce` and PKCE verifier. */
   startLogin(redirectUri: string): Promise<LoginStart>;
   /** Exchanges the callback's code and checks the ID token; throws on any mismatch. */
@@ -74,6 +77,15 @@ function identified(claims: JWTPayload): Identified {
   };
 }
 
+/** The scopes a token grants: `scope` space-separated, or `scp` as a string or a list. */
+function grantedScopes(claims: JWTPayload): string[] {
+  const { scope, scp } = claims as { scope?: unknown; scp?: unknown };
+  if (typeof scope === "string") return scope.split(" ");
+  if (typeof scp === "string") return scp.split(" ");
+  if (Array.isArray(scp)) return scp.filter((value): value is string => typeof value === "string");
+  return [];
+}
+
 /** Discovers the provider (bounded) and keeps its configuration; a failure fails the boot. */
 export async function connectOidc(auth: AuthSettings): Promise<Oidc> {
   const send = backchannelFetch(auth.issuer, auth.backchannelUrl);
@@ -107,8 +119,6 @@ export async function connectOidc(auth: AuthSettings): Promise<Oidc> {
   });
 
   return {
-    issuer: auth.issuer,
-
     async startLogin(redirectUri) {
       const codeVerifier = client.randomPKCECodeVerifier();
       const state = client.randomState();
@@ -155,6 +165,8 @@ export async function connectOidc(auth: AuthSettings): Promise<Oidc> {
         // Keycloak names its token kinds; an ID or refresh token is never an API credential.
         const kind = payload["typ"];
         if (kind !== undefined && kind !== "Bearer") return null;
+        // An ID token carries a nonce and no scope; an access token for this API its scope.
+        if (payload["nonce"] !== undefined || !grantedScopes(payload).includes(API_SCOPE)) return null;
         return identified(payload);
       } catch (error) {
         if (isTokenRejection(error)) return null;

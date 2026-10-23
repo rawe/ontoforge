@@ -108,7 +108,6 @@ export class FakeAccess {
 }
 
 export class FakeOidc implements Oidc {
-  readonly issuer = ISSUER;
   /** Access tokens this provider accepts. */
   readonly tokens = new Map<string, Identified>();
   verifications = 0;

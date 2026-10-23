@@ -59,7 +59,7 @@ function connect(answer: typeof keys): Promise<Oidc> {
 }
 
 function token(claims: Record<string, unknown> = {}): Promise<string> {
-  return new SignJWT({ typ: "Bearer", iss: issuer, sub: "sub-1", aud: SETTINGS.audience, ...claims })
+  return new SignJWT({ typ: "Bearer", iss: issuer, sub: "sub-1", aud: SETTINGS.audience, scope: "profile ontoforge-api", ...claims })
     .setProtectedHeader({ alg: "RS256", kid: "k1" })
     .setExpirationTime("5m")
     .sign(privateKey);
@@ -76,6 +76,20 @@ describe("verifying an access token", () => {
     expect(await oidc.verifyAccessToken("junk")).toBeNull();
     expect(await oidc.verifyAccessToken(await token({ aud: "someone-else" }))).toBeNull();
     expect(await oidc.verifyAccessToken(await token({ typ: "Refresh" }))).toBeNull();
+  });
+
+  it("needs the API scope, in scope or scp", async () => {
+    const oidc = await connect("serve");
+    expect(await oidc.verifyAccessToken(await token({ scope: undefined }))).toBeNull();
+    expect(await oidc.verifyAccessToken(await token({ scope: "openid profile" }))).toBeNull();
+    expect(await oidc.verifyAccessToken(await token({ scope: "ontoforge-api-x" }))).toBeNull();
+    expect(await oidc.verifyAccessToken(await token({ scope: undefined, scp: "ontoforge-api" }))).not.toBeNull();
+    expect(await oidc.verifyAccessToken(await token({ scope: undefined, scp: ["read", "ontoforge-api"] }))).not.toBeNull();
+  });
+
+  it("takes no ID token, even one carrying the API audience and scope", async () => {
+    const oidc = await connect("serve");
+    expect(await oidc.verifyAccessToken(await token({ typ: undefined, nonce: "n-1" }))).toBeNull();
   });
 
   it("fails as an unavailable provider when the key set cannot be fetched", async () => {

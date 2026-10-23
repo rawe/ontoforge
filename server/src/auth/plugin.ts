@@ -23,7 +23,7 @@ import { needOf } from "../access/routes.js";
 import type { Profile } from "../access/store.js";
 import { ForbiddenError, UnauthenticatedError } from "../core/exceptions.js";
 import { cookieNames, readCookie } from "./cookies.js";
-import type { Identified } from "./oidc.js";
+import { API_SCOPE, type Identified } from "./oidc.js";
 import type { AuthRuntime } from "./runtime.js";
 
 declare module "fastify" {
@@ -32,9 +32,6 @@ declare module "fastify" {
     needs?: Record<string, Need>;
   }
 }
-
-/** The OAuth scope that puts this server's audience into an access token. */
-export const API_SCOPE = "ontoforge-api";
 
 const ANONYMOUS: Access = { kind: "anonymous" };
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);

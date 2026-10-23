@@ -28,7 +28,8 @@ import {
   sessionCookie,
 } from "./cookies.js";
 import { LOGIN_LIFETIME_MS, loginCookieKey, openLogin, sealLogin } from "./loginCookie.js";
-import { accessOf, API_SCOPE, checkOrigin, isConfiguredAdmin } from "./plugin.js";
+import { API_SCOPE } from "./oidc.js";
+import { accessOf, checkOrigin, isConfiguredAdmin } from "./plugin.js";
 
 const User = z.object({
   id: z.string(),

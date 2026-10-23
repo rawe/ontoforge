@@ -2,11 +2,53 @@
 set -euo pipefail
 
 # Usage: ./dev.sh [env-file]      (default: server/.env)
+#        ./dev.sh scale …         (shared-state harness, see below)
 #
 # The named file is the whole configuration for this run. Presets live in
 # env/ — e.g. ./dev.sh env/ollama.env
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# --- Shared-state harness ----------------------------------------------------
+# ./dev.sh scale up [env-file] | down | reset | logs [service…] | test [scenario…]
+#               | bench [options] | status
+#
+# Drives the Compose project in docker/scale/compose.yml and the scripts in
+# scripts/scale/ (see scripts/scale/USAGE.md). The backends' configuration is
+# one env file, env/scale.env unless `up` names another preset.
+if [ "${1:-}" = "scale" ]; then
+    SCALE=(docker compose -f "$ROOT_DIR/docker/scale/compose.yml")
+    case "${2:-}" in
+        up)
+            if [ -n "${3:-}" ]; then
+                if [ ! -f "$3" ]; then
+                    echo "Config file not found: $3"
+                    exit 1
+                fi
+                SCALE_ENV_FILE="$(cd "$(dirname "$3")" && pwd)/$(basename "$3")"
+                export SCALE_ENV_FILE
+            fi
+            "${SCALE[@]}" up -d --build --wait --wait-timeout 300
+            node "$ROOT_DIR/scripts/scale/ready.mjs" --wait 60
+            ;;
+        down)   "${SCALE[@]}" --profile ui down --remove-orphans ;;
+        reset)  "${SCALE[@]}" --profile ui down --volumes --remove-orphans ;;
+        logs)   "${SCALE[@]}" logs -f --tail 100 "${@:3}" ;;
+        test)   node "$ROOT_DIR/scripts/scale/scenarios.mjs" "${@:3}" ;;
+        bench)  node "$ROOT_DIR/scripts/scale/bench.mjs" "${@:3}" ;;
+        status)
+            "${SCALE[@]}" ps
+            node "$ROOT_DIR/scripts/scale/ready.mjs"
+            ;;
+        *)
+            echo "Usage: ./dev.sh scale up [env-file] | down | reset | logs [service…]"
+            echo "                      | test [scenario…] | bench [options] | status"
+            exit 1
+            ;;
+    esac
+    exit 0
+fi
+
 BACKEND_PID=""
 FRONTEND_PID=""
 POSTGRES_STARTED_BY_US=false

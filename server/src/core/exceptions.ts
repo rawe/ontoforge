@@ -45,6 +45,20 @@ export class DesignChangedError extends ConflictError {
   }
 }
 
+/** No valid credential for a protected operation. -> 401 UNAUTHENTICATED */
+export class UnauthenticatedError extends OntoForgeError {
+  constructor(message = "Sign in or send a valid bearer token") {
+    super(message);
+  }
+}
+
+/** An authenticated caller lacks the role an operation needs. -> 403 FORBIDDEN */
+export class ForbiddenError extends OntoForgeError {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
 /** Request or business-logic validation failed. -> 422 VALIDATION_ERROR */
 export class ValidationError extends OntoForgeError {
   details: Record<string, unknown> | null;

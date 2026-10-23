@@ -45,7 +45,7 @@ describe("valkey session store", () => {
   it("serves a session created through one server's client to another's", async () => {
     const a = await connect(SUITE_SESSION_LIFETIMES);
     const b = await connect(SUITE_SESSION_LIFETIMES);
-    await a.store.create("sid", { principalId: "p", issuer: "i", subject: "s" });
+    await a.store.create("sid", { principalId: "p" });
     expect(await b.store.get("sid")).toMatchObject({ principalId: "p" });
     await a.close();
     await b.close();
@@ -53,7 +53,7 @@ describe("valkey session store", () => {
 
   it("keys by digest: no session id appears in a key", async () => {
     const { store, close } = await connect(SUITE_SESSION_LIFETIMES);
-    await store.create("secret-session-id", { principalId: "p", issuer: "i", subject: "s" });
+    await store.create("secret-session-id", { principalId: "p" });
     const keys = await admin.keys("ontoforge:*");
     expect(keys).toHaveLength(1);
     expect(keys[0]).toMatch(/^ontoforge:session:\{[0-9a-f]{64}\}$/);

@@ -54,7 +54,11 @@ import {
   type SearchIndexStatus,
 } from "../core/searchPipeline.js";
 import { lensIndexFindings } from "../core/searchQuery.js";
-import { rebuildSearchIndex as rebuildGenerations, reconcileSearchGenerations } from "../runtime/indexing/generations.js";
+import {
+  afterCommit,
+  rebuildSearchIndex as rebuildGenerations,
+  reconcileSearchGenerations,
+} from "../runtime/indexing/generations.js";
 import { getSearchIndexStatus, listSearchIndexStatuses } from "../runtime/indexing/status.js";
 import { searchEntryRates } from "../runtime/indexing/worker.js";
 import { loadSearchContextUncached } from "../runtime/schemaCache.js";
@@ -291,10 +295,14 @@ async function estimateCost(
 // Writes
 // ---------------------------------------------------------------------------
 
-/** After a committed change of the definitions: bring the generations in
- * step (a new or changed definition builds). */
-async function afterIndexChange(indices: SearchIndexStore): Promise<void> {
-  await reconcileSearchGenerations(indices.ontologyKey);
+/** After a committed change of the definitions: sweep the tables of the
+ * generations it removed when `sweep`, and bring the generations in step
+ * (a new or changed definition builds). Best effort (`afterCommit`). */
+async function afterIndexChange(indices: SearchIndexStore, sweep = false): Promise<void> {
+  await afterCommit(indices.ontologyKey, async () => {
+    if (sweep) await indices.sweepGenerations();
+    await reconcileSearchGenerations(indices.ontologyKey);
+  });
 }
 
 /**
@@ -381,9 +389,7 @@ export async function deleteSearchIndex(
     await indices.deleteIndex(key);
   });
   // The index's tables go with the sweep.
-  const indices = requireSearchIndices(store);
-  await indices.sweepGenerations();
-  await afterIndexChange(indices);
+  await afterIndexChange(requireSearchIndices(store), true);
 }
 
 /** Force new generations of an index and answer its status (the build

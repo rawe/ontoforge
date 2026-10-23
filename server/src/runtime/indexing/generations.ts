@@ -12,7 +12,9 @@
  * schema, the language set or the embedding model changed — as long as
  * the caller reconciles after the change:
  *
- * - the worker, at start (model change, language change, upgrade);
+ * - the worker, at start (model change, language change, upgrade) and
+ *   whenever an ontology's design revision moved since it last
+ *   reconciled it (a post-commit reconcile that failed, `afterCommit`);
  * - modeling, after index CRUD, search-settings changes, schema changes
  *   and imports (`reconcileSearchGenerations`);
  * - a manual rebuild, which forces new generations (`rebuildSearchIndex`).
@@ -95,9 +97,31 @@ export async function reconcileSearchGenerations(
   return changes;
 }
 
+/**
+ * Run the work that follows a committed design change — sweeping,
+ * reconciling, refreshing — as best effort: the change stands, so a
+ * failure (a lock wait over the timeout, a storage error) is logged, not
+ * answered. The worker reconciles every ontology whose design revision
+ * moved since it last did (`worker.ts`), which heals a failed or cut-off
+ * run.
+ */
+export async function afterCommit(ontologyKey: string, work: () => Promise<unknown>): Promise<void> {
+  try {
+    await work();
+  } catch (exc) {
+    console.warn(
+      `Search work after a design change of ontology '${ontologyKey}' failed; the worker reconciles later: ` +
+        (exc instanceof Error ? exc.message : String(exc)),
+    );
+  }
+}
+
 /** Force new generations of one index — every enabled representation —
  * and rebuild them from scratch. Retries what failed. Unknown key ->
- * not found; a switched-off managed index -> conflict. */
+ * not found; a switched-off managed index -> conflict. A design change
+ * committed meanwhile refuses the forced creation (its own reconcile does
+ * not force): the rebuild then runs again, and after three tries it is a
+ * conflict. */
 export async function rebuildSearchIndex(
   ontologyKey: string,
   indexKey: string,
@@ -109,7 +133,15 @@ export async function rebuildSearchIndex(
   if (disabledIndexKeys(await store.getSearchSettings()).has(indexKey)) {
     throw new ConflictError(`Search index '${indexKey}' is switched off`);
   }
-  return reconcileSearchGenerations(ontologyKey, [indexKey]);
+  for (let attempt = 1; ; attempt++) {
+    const before = await store.designRevision();
+    const changes = await reconcileSearchGenerations(ontologyKey, [indexKey]);
+    const created = changes.some((change) => change.indexKey === indexKey && change.action === "created");
+    if (created || (await store.designRevision()).revision === before.revision) return changes;
+    if (attempt === 3) {
+      throw new ConflictError(`The design of ontology '${ontologyKey}' kept changing; rebuild again`);
+    }
+  }
 }
 
 /** Re-queue every entity of an index into its current generations — for

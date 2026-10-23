@@ -9,7 +9,8 @@
  * definitions; a design change in the window between a write's check and
  * its hold makes it run again; generation creation and data writes hand
  * over without losing queue work; a failing design change leaves nothing
- * behind. Requires the docker-compose PostgreSQL.
+ * behind, and a reconciliation failing after the commit fails nothing
+ * and is made good by the worker. Requires the docker-compose PostgreSQL.
  */
 
 import { randomUUID } from "node:crypto";
@@ -33,6 +34,7 @@ import {
 import { SearchIndexDefinition } from "../../src/core/searchIndex.js";
 import * as modeling from "../../src/modeling/service.js";
 import { reconcileSearchGenerations } from "../../src/runtime/indexing/generations.js";
+import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import * as service from "../../src/runtime/service.js";
 import { buildFixture, FIXTURE_ONTOLOGY_KEY as O, modelPrefix, runtimePrefix, type FixtureIds } from "./fixture.js";
@@ -532,4 +534,74 @@ describe("the design lock", () => {
     }
     expect(await sql(`SELECT id FROM entity`)).toEqual([]);
   }, 15_000);
+});
+
+describe("a reconciliation that fails after its design change committed", () => {
+  it("answers the change, and the worker creates the generation later without losing work", async () => {
+    await drainSearchWork({ ontologyKey: O });
+    const [managed] = await sql(
+      `SELECT search_index_id FROM search_index WHERE kind = 'default' AND definition->>'entityType' = 'person'`,
+    );
+    const searchIndexId = managed!.search_index_id as string;
+    const generations = async (): Promise<Row[]> =>
+      sql(`SELECT generation_id, state FROM search_generation WHERE search_index_id = $1 AND state <> 'retired'`, [
+        searchIndexId,
+      ]);
+    const before = await generations();
+    expect(before.map((g) => g.state)).toEqual(["ready"]);
+
+    // Right after the commit a long write holds the design shared: the
+    // reconciliation's generation waits past the lock timeout.
+    let writer: { release: () => void; done: Promise<void> } | null = null;
+    const store = await getModelingStore(O);
+    const delayed = new Proxy(store, {
+      get(target, property, receiver) {
+        if (property === "searchIndices") {
+          const indices = target.searchIndices();
+          return () =>
+            new Proxy(indices, {
+              get(inner, name, innerReceiver) {
+                if (name === "sweepGenerations") {
+                  return async () => {
+                    writer = await holdRaw(async (querier) => {
+                      await querier.query(`SELECT pg_advisory_xact_lock_shared(${LOCK_KEY})`);
+                    });
+                    await inner.sweepGenerations();
+                  };
+                }
+                const value = Reflect.get(inner, name, innerReceiver);
+                return typeof value === "function" ? value.bind(inner) : value;
+              },
+            });
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const property = await modeling.createProperty(
+      ids.personId,
+      "EntityType",
+      { key: "nickname", displayName: "Nickname", dataType: "string", required: false },
+      false,
+      delayed,
+    );
+    expect(property.key).toBe("nickname");
+    expect(writer).not.toBeNull();
+    writer!.release();
+    await writer!.done;
+    // The changed definition has no generation yet; the old one serves.
+    expect(await generations()).toEqual(before);
+
+    const zed = await createPerson(ALL, { name: "Zed", nickname: "Zephyrine" });
+    expect(zed.status).toBe(201);
+    await drainSearchWork({ ontologyKey: O });
+
+    const after = await generations();
+    expect(after).toHaveLength(1);
+    expect(after[0]!.generation_id).not.toBe(before[0]!.generation_id);
+    expect(after[0]!.state).toBe("ready");
+    const found = await call("POST", `${ALL}/search`, { query: "Zephyrine" });
+    expect(found.status).toBe(200);
+    expect(found.body.hits.map((hit: Row) => hit.entity._id)).toContain(zed.body._id);
+  }, 20_000);
 });

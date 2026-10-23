@@ -8,7 +8,7 @@
  * design exclusively and advances its revision, so it applies whole or
  * not at all, and every server process sees it by the revision. Work that
  * needs a provider (embeddings) runs before it; generation work after its
- * commit. Schema changes also keep the managed search indices in step —
+ * commit, as best effort (`afterCommit`). Schema changes also keep the managed search indices in step —
  * their definitions inside the change (`syncManagedDefinitions`), their
  * generations after it (`afterSchemaChange`); a schema removal that
  * reaches a custom search index follows the cascade protocol
@@ -43,7 +43,7 @@ import {
 } from "../core/schemas.js";
 import { NAVIGATOR_CONFIG_VERSION, NavigatorConfig } from "../runtime/assistants/navigators/config.js";
 import { lensChangesetCount } from "../runtime/changesets.js";
-import { reconcileSearchGenerations } from "../runtime/indexing/generations.js";
+import { afterCommit, reconcileSearchGenerations } from "../runtime/indexing/generations.js";
 import { afterDesignChange, syncManagedDefinitions } from "../runtime/indexing/managed.js";
 import {
   applyIndexCascade,
@@ -169,7 +169,8 @@ function toLensResponse(data: Row): LensResponseBody {
  * name or the name property changed).
  */
 async function afterSchemaChange(store: ModelingStore, refreshTypes: string[] = []): Promise<void> {
-  await afterDesignChange(store.searchIndices(), refreshTypes);
+  const indices = store.searchIndices();
+  await afterCommit(indices.ontologyKey, () => afterDesignChange(indices, refreshTypes));
 }
 
 // --- Lens ---
@@ -2028,8 +2029,11 @@ export async function importSchema(
   });
 
   // The shared saved-query index is ensured once at the end.
+  // Best effort like the reconcile: the boot ensures it again.
   if (provider) {
-    await store.ensureSavedQueryVectorIndex(provider.dimensions);
+    await afterCommit(requireSearchIndices(store).ontologyKey, () =>
+      store.ensureSavedQueryVectorIndex(provider.dimensions),
+    );
   }
   await afterSchemaChange(store);
   return { lenses: createdLenses };
@@ -2052,7 +2056,8 @@ export async function updateSearchSettings(
   store: ModelingStore,
 ): Promise<SearchSettingsResponseBody> {
   const result = await store.changeDesign((s) => changeSearchSettings(requireSearchIndices(s), body));
-  await reconcileSearchGenerations(requireSearchIndices(store).ontologyKey);
+  const ontologyKey = requireSearchIndices(store).ontologyKey;
+  await afterCommit(ontologyKey, () => reconcileSearchGenerations(ontologyKey));
   return result;
 }
 

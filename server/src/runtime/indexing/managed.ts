@@ -27,8 +27,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { ConflictError } from "../../core/exceptions.js";
-import { getModelingStore, type SearchIndexRecord, type SearchIndexStore } from "../../core/ports.js";
+import { getModelingStore, type SearchIndexStore } from "../../core/ports.js";
 import {
   definitionsEqual,
   deriveManagedIndices,
@@ -97,7 +96,9 @@ export async function syncManagedDefinitions(store: SearchIndexStore): Promise<M
   const plan = await planManaged(store);
   const result: ManagedSync = { created: [], updated: [], deleted: [] };
   for (const { kind, definition } of plan.create) {
-    if ((await createUnlessTaken(store, kind, definition)) !== null) {
+    // Null when its root type is gone. No other process creates it
+    // meanwhile: the design change holds the design exclusively.
+    if ((await store.createIndex(randomUUID(), kind, definition)) !== null) {
       await store.includeIndexInScopedLenses(definition.key);
       result.created.push(definition.key);
     }
@@ -161,21 +162,6 @@ export async function syncManagedSearchIndices(store: SearchIndexStore): Promise
   }
   await afterDesignChange(store);
   return result;
-}
-
-/** Create a managed index row; null when its root type is gone or a
- * concurrent sync (another server process) created it first. */
-async function createUnlessTaken(
-  store: SearchIndexStore,
-  kind: SearchIndexKind,
-  definition: SearchIndexDefinition,
-): Promise<SearchIndexRecord | null> {
-  try {
-    return await store.createIndex(randomUUID(), kind, definition);
-  } catch (exc) {
-    if (exc instanceof ConflictError) return null;
-    throw exc;
-  }
 }
 
 /** Whether an index renders anything of one of the types: its root, a

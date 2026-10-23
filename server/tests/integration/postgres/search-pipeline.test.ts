@@ -570,6 +570,40 @@ describe("PostgreSQL search pipeline", () => {
     expect(await queued()).toEqual([]);
   });
 
+  it("a rebuild that a design change overtakes runs again instead of vanishing", async () => {
+    await person("Ada", { email: "ada@example.org", age: 36 });
+    const index = await addIndex();
+    await drainSearchWork();
+    const before = await active(index, "keyword");
+
+    // Another server's design change holds the design and commits while
+    // the rebuild waits for it with the revision it read before.
+    let committed!: () => void;
+    const release = new Promise<void>((resolve) => (committed = resolve));
+    let locked!: () => void;
+    const held = new Promise<void>((resolve) => (locked = resolve));
+    const change = withTransaction(
+      async (querier) => {
+        await querier.query(`SELECT pg_advisory_xact_lock(hashtextextended('ontoforge.design.' || current_schema(), 0))`);
+        await querier.query(`UPDATE design_revision SET revision = revision + 1`);
+        locked();
+        await release;
+      },
+      "READ COMMITTED",
+      NAMESPACE,
+    );
+    await held;
+    const rebuild = rebuildSearchIndex(ONTOLOGY_KEY, "employment");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    committed();
+    await change;
+
+    const changes = await rebuild;
+    expect(changes.filter((c) => c.representation === "keyword").map((c) => c.action)).toEqual(["created"]);
+    await drainSearchWork();
+    expect((await active(index, "keyword")).generationId).not.toBe(before.generationId);
+  });
+
   // ---------------------------------------------------------------------
   // Reconciliation
   // ---------------------------------------------------------------------

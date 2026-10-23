@@ -25,7 +25,10 @@
  * Between passes it sleeps until an enqueue notifies it or the polling
  * interval (`SEARCH_POLL_MS`) passes. At start it syncs every ontology's
  * managed indices, sweeps leftover partitions and reconciles the
- * generations (`managed.ts`, `generations.ts`). Tests drive passes directly (`drainSearchWork`).
+ * generations (`managed.ts`, `generations.ts`); a pass sweeps and
+ * reconciles an ontology again whenever its design revision moved since
+ * this process last did, so a design change whose own reconcile failed
+ * gets its generations all the same. Tests drive passes directly (`drainSearchWork`).
  *
  * The worker measures entries written per second per representation —
  * a moving average, kept in memory — for the cost preview
@@ -66,6 +69,7 @@ import {
 } from "../../core/searchPipeline.js";
 import { loadSearchContextUncached, type SearchContext } from "../schemaCache.js";
 import { chunkDocument } from "../search/chunking.js";
+import { reconcileSearchGenerations } from "./generations.js";
 import { syncManagedSearchIndices } from "./managed.js";
 
 type Row = Record<string, unknown>;
@@ -174,8 +178,28 @@ export async function drainSearchWork(options: SearchWorkOptions = {}): Promise<
   }
 }
 
+/** Per ontology key the design this process last reconciled, as
+ * `ontologyId:revision`. */
+const reconciled = new Map<string, string>();
+
+/** Sweep and reconcile an ontology when its design moved since this
+ * process last did. A failure is logged and retried by the next pass. */
+async function reconcileIfMoved(store: SearchIndexStore): Promise<void> {
+  try {
+    const design = await store.designRevision();
+    const tag = `${design.ontologyId}:${design.revision}`;
+    if (reconciled.get(store.ontologyKey) === tag) return;
+    await store.sweepGenerations();
+    await reconcileSearchGenerations(store.ontologyKey);
+    reconciled.set(store.ontologyKey, tag);
+  } catch (exc) {
+    console.warn(`Search generations of ontology '${store.ontologyKey}' not reconciled: ${message(exc)}`);
+  }
+}
+
 async function processOntology(ontologyKey: string, options: ResolvedOptions): Promise<number> {
   const store = await getSearchIndexStore(ontologyKey);
+  await reconcileIfMoved(store);
   const provider = getEmbeddingProvider();
   const claimed = await store.claimQueueItems({
     limit: options.batchSize,

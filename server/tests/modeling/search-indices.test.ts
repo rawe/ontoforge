@@ -18,6 +18,7 @@ import type {
   SearchQueueStats,
   SearchSettings,
 } from "../../src/core/ports.js";
+import { ConflictError } from "../../src/core/exceptions.js";
 import { SearchIndexDefinition } from "../../src/core/searchIndex.js";
 import { TEST_DESIGN } from "../mockSearchIndexStore.js";
 import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.js";
@@ -35,7 +36,8 @@ vi.mock("../../src/core/ports.js", () => ({
 
 const reconcile = vi.hoisted(() => vi.fn(async () => []));
 const rebuild = vi.hoisted(() => vi.fn(async () => []));
-vi.mock("../../src/runtime/indexing/generations.js", () => ({
+vi.mock("../../src/runtime/indexing/generations.js", async (importOriginal) => ({
+  afterCommit: (await importOriginal<typeof import("../../src/runtime/indexing/generations.js")>()).afterCommit,
   reconcileSearchGenerations: reconcile,
   rebuildSearchIndex: rebuild,
 }));
@@ -259,6 +261,16 @@ describe("create", () => {
     expect(res.json()).toMatchObject({ key: "staff", kind: "custom", enabled: true });
     expect(indices.createIndex).toHaveBeenCalledWith(expect.any(String), "custom", expect.objectContaining({ key: "staff" }));
     expect(reconcile).toHaveBeenCalledWith("onto");
+  });
+
+  it("answers the committed index when its reconciliation fails: the worker makes it good", async () => {
+    withSearchIndices();
+    reconcile.mockRejectedValueOnce(new ConflictError("Another operation holds this data; try again"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const res = await app.inject({ method: "POST", url: INDICES, payload: { ...EMPLOYMENT, key: "staff", relations: [] } });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("the worker reconciles later"));
+    warn.mockRestore();
   });
 
   it("reports schema issues as details.fields by dotted path", async () => {

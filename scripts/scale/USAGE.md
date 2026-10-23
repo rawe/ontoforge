@@ -43,7 +43,7 @@ is missing, and chat with its unscoped lens's built-in agent. The fake answers
 |---|---|
 | `continue` | a conversation started on A continues on B; reading it on A and through the LB shows both turns |
 | `replace` | A stops; the conversation continues on B; A starts again and continues it; a GET loop through the LB sees no error |
-| `valkey-reset` | after a Valkey restart the old thread is `THREAD_NOT_FOUND` on A and B, a new conversation works, the ontology data is unchanged |
+| `valkey-reset` | after a Valkey restart the old thread is `THREAD_NOT_FOUND` on A and B once each has reconnected (a storage error until then), a new conversation works, the ontology data is unchanged |
 | `stale-schema` | B has read the schema; A adds a property and makes another required; B must accept the new property and reject a create without the required one |
 | `fencing` | worker fencing across processes: B paused, a person updated through A, A parked in the fake's embed call; the claim's lease expired in SQL, B resumes and builds a newer update; then A's call is answered — A logs `Search claim lost`, the entry keeps B's version, the queue is empty, nothing failed |
 | `drain` | a short turn finishes while A stops, a long one is cut and leaves the thread at its previous turn, and the next turn on B is not `THREAD_BUSY` |

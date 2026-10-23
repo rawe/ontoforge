@@ -122,8 +122,15 @@ async function valkeyResetScenario(run) {
   }, 30);
   run.note(`valkey restarted, ${up ? 'PONG' : 'no PONG'} after ${Date.now() - t0} ms`);
   for (const [where, base] of [['A', u.a], ['B', u.b]]) {
-    const old = await chat(base, 'old thread after the reset', first.threadId);
-    run.check(`old thread on ${where} is unknown`, refusedAs(old, 404, 'THREAD_NOT_FOUND'), said(old));
+    // Until its client is back, a server answers a storage error; then not found.
+    let old;
+    let tries = 0;
+    await waitFor(async () => {
+      tries++;
+      old = await chat(base, 'old thread after the reset', first.threadId);
+      return !(old.status === 500 && old.body?.error?.code === 'STORAGE_ERROR');
+    }, 15, 200);
+    run.check(`old thread on ${where} is unknown`, refusedAs(old, 404, 'THREAD_NOT_FOUND'), `${said(old)}, attempt ${tries}`);
   }
   let attempts = 0;
   let fresh;

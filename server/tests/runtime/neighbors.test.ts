@@ -174,12 +174,13 @@ describe("scope filtering", () => {
     expect(rel.direction).toBe("outgoing");
   });
 
-  it("the documented leak: an out-of-scope neighbour escapes property stripping", async () => {
-    // A lens exposing person and belongs_to (department -> company) but NOT
-    // department: the department neighbour comes back with ALL properties.
+  it("a relation type into an entity type the lens hides is not served, nor its neighbour", async () => {
+    // A lens including person, company and belongs_to (department ->
+    // company) but NOT department: belongs_to is dropped from the lens, so
+    // the department neighbour never comes back.
     holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(
       makeFullSchema({
-        lensKey: "leaky_view",
+        lensKey: "narrow_view",
         entityInclusions: [
           { key: "person", properties: ["name"] },
           { key: "company", properties: null },
@@ -200,14 +201,11 @@ describe("scope filtering", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/ontologies/test_ont/runtime/lenses/leaky_view/entities/company/ent-2/neighbors",
+      url: "/api/ontologies/test_ont/runtime/lenses/narrow_view/entities/company/ent-2/neighbors",
     });
 
     expect(res.statusCode).toBe(200);
-    const neighbour = res.json().neighbors[0].entity;
-    // Both properties leak through, unstripped.
-    expect(neighbour.name).toBe("R&D");
-    expect(neighbour.code).toBe("RD-1");
+    expect(res.json().neighbors).toEqual([]);
   });
 
   it("an unscoped lens returns neighbours of every relation type", async () => {

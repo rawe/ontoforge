@@ -409,7 +409,9 @@ function filterProperties(
  * The four-row scoping matrix. Entity and relation scoping are independent
  * dimensions; the inferred row admits every relation type whose source AND
  * target entity types are both exposed. Inclusion keys that no longer
- * resolve are skipped silently.
+ * resolve are skipped silently, and so is a relation inclusion whose source
+ * or target entity type the lens does not expose (validation reports it):
+ * no relation type of a lens leads to an entity type the lens hides.
  */
 export function applyScopeFiltering(
   full: SchemaCacheValue,
@@ -468,11 +470,16 @@ export function applyScopeFiltering(
       }
     }
   } else {
-    // Rows 3 and 4: only explicitly included relation types.
+    // Rows 3 and 4: only explicitly included relation types — and in row 4
+    // only those whose both endpoint types are exposed: a relation type
+    // into a hidden entity type would reach entities the lens hides.
     for (const inclusion of relationInclusions) {
       const rtDef = full.relationTypes[inclusion.key];
       if (rtDef === undefined) {
         continue; // dead inclusion key: skipped silently
+      }
+      if (!includedEtKeys.has(rtDef.fromEntityTypeKey) || !includedEtKeys.has(rtDef.toEntityTypeKey)) {
+        continue; // an endpoint the lens hides: skipped silently, as a dead key
       }
       const copy = structuredClone(rtDef);
       copy.properties = filterProperties(copy.properties, inclusion.properties);

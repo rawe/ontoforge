@@ -1105,10 +1105,8 @@ export interface NeighborhoodResult {
 
 /**
  * One entity plus its immediate neighbourhood. Relations whose type the
- * lens does not expose are dropped together with their neighbour. A
- * neighbour is filtered to the lens only when its own entity type is in
- * scope — an out-of-scope neighbour escapes property stripping (the
- * documented leak), though its document values are still stubbed.
+ * lens does not expose are dropped together with their neighbour; every
+ * kept relation and neighbour is filtered to the lens.
  */
 export async function getNeighbors(
   lensKey: string,
@@ -1152,35 +1150,21 @@ export async function getNeighbors(
     propertyDefsByType,
   );
 
-  // Filter neighbors by scoped relation types.
+  // Keep only neighbours over a relation type the lens exposes, to an
+  // entity type it exposes — the lens never serves a relation type into a
+  // hidden one, so the second test only fails closed.
   const filteredNeighbors: Row[] = [];
   for (const n of neighbors) {
     const rel = n.relation as Row;
-    const rtKey = rel._relationTypeKey as string | undefined;
-    if (rtKey && rtKey in loaded.scoped.relationTypes) {
-      const scopedRt = loaded.scoped.relationTypes[rtKey]!;
-      n.relation = filterRelationProperties(rel, scopedRt);
-      // Filter neighbor entity properties only when its own type is in scope.
-      const neighborEntity = n.entity as Row;
-      const neighborEtKey = neighborEntity._entityTypeKey as string | undefined;
-      if (neighborEtKey && neighborEtKey in loaded.scoped.entityTypes) {
-        n.entity = filterEntityProperties(
-          neighborEntity,
-          loaded.scoped.entityTypes[neighborEtKey]!,
-          fields,
-        );
-      } else if (neighborEtKey && neighborEtKey in loaded.full.entityTypes) {
-        // Type not in scope — still stub document values (never inline).
-        n.entity = stubDocumentProperties(
-          neighborEntity,
-          loaded.full.entityTypes[neighborEtKey]!.properties,
-          fields,
-        );
-      }
-      filteredNeighbors.push(n);
-    } else if (!rtKey) {
-      filteredNeighbors.push(n);
+    const neighborEntity = n.entity as Row;
+    const scopedRt = loaded.scoped.relationTypes[rel._relationTypeKey as string];
+    const scopedNeighborEt = loaded.scoped.entityTypes[neighborEntity._entityTypeKey as string];
+    if (scopedRt === undefined || scopedNeighborEt === undefined) {
+      continue;
     }
+    n.relation = filterRelationProperties(rel, scopedRt);
+    n.entity = filterEntityProperties(neighborEntity, scopedNeighborEt, fields);
+    filteredNeighbors.push(n);
   }
 
   // Filter the centre entity.

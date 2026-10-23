@@ -154,8 +154,9 @@ async function ensureDatabase(config: pg.ClientConfig): Promise<void> {
         await maintenance.query(`CREATE DATABASE ${quoteIdent(config.database!)}`);
         console.log(`Access database '${config.database}' created`);
       } catch (error) {
-        // Another server created it first.
-        if (!(error instanceof pg.DatabaseError && error.code === "42P04")) throw error;
+        // Another server created it first: 'already exists', or — when both
+        // created it at the same moment — a unique violation in the catalog.
+        if (!(error instanceof pg.DatabaseError && (error.code === "42P04" || error.code === "23505"))) throw error;
       }
     }
   } finally {

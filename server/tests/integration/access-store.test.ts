@@ -78,6 +78,14 @@ describe("opening", () => {
     );
   });
 
+  it("creates the missing database once when several servers open it at the same moment", async () => {
+    await store.close();
+    await maintenance((c) => c.query(`DROP DATABASE IF EXISTS ${DATABASE} WITH (FORCE)`));
+    const stores = await Promise.all([1, 2, 3, 4].map(() => openAccessStore(accessUrl(), settings.DB_USER, settings.DB_PASSWORD)));
+    await Promise.all(stores.map((s) => s.close()));
+    store = await openAccessStore(accessUrl(), settings.DB_USER, settings.DB_PASSWORD);
+  });
+
   it("opens concurrently from several servers", async () => {
     const stores = await Promise.all([1, 2, 3].map(() => openAccessStore(accessUrl(), settings.DB_USER, settings.DB_PASSWORD)));
     await Promise.all(stores.map((s) => s.close()));

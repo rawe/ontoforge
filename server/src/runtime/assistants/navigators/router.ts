@@ -34,10 +34,9 @@ export const navigatorRuntimeRouter: FastifyPluginAsyncZod<{ threads: ThreadStor
       // Resolved before the stream opens: unknown and invalid navigators
       // answer with a plain error response.
       const navigator = await loadRunnableNavigator(lensKey, assistantKey, store);
-      const threadId = await openThread(threads, threadBinding(request.params, "navigators"), request.body.threadId);
-      return sendChatStream(reply, { threads, threadId }, (execution) =>
-        runNavigatorTurn(navigator, lensKey, store, request.body.message,
-          { checkpointer: threads.checkpointer, threadId }, execution),
+      const turn = await openThread(threads, threadBinding(request.params, "navigators"), request.body.threadId);
+      return sendChatStream(reply, { threads, turn }, (execution, thread) =>
+        runNavigatorTurn(navigator, lensKey, store, request.body.message, thread, execution),
       );
     },
   );

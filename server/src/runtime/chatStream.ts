@@ -2,14 +2,23 @@
  * REST delivery of one chat turn, shared by every assistant kind: the
  * request body, bounded writes, the shared events
  * (`thread` first, then the kind's events, one terminal `final` or
- * `error`), disconnect cancellation, and the turn's thread — committed on
- * success, rolled back on cancel or failure, its run lock released.
+ * `error`), disconnect cancellation, and the turn's thread: the graph runs
+ * on a local saver seeded from the thread's last published state, which is
+ * published on success and dropped on cancel or failure, the lease released.
  */
 import { once } from "node:events";
 import type { FastifyReply } from "fastify";
 import { z } from "zod";
-import { NotFoundError, StoreError, ValidationError } from "../core/exceptions.js";
-import type { ThreadBinding, ThreadStore } from "./threads/threadStore.js";
+import { ConflictError, NotFoundError, StoreError, ValidationError } from "../core/exceptions.js";
+import { threadBusy, threadNotFound } from "./threads/access.js";
+import {
+  TURN_HEARTBEAT_MS,
+  type GraphThread,
+  type ThreadBinding,
+  type ThreadStore,
+  type Turn,
+} from "./threads/threadStore.js";
+import { TurnSaver } from "./threads/turnSaver.js";
 
 /** The chat body every assistant kind shares; a kind may add fields. */
 export const ChatPayload = z
@@ -35,15 +44,19 @@ export interface StreamExecution {
   onToolEvent: (event: StreamEvent) => Promise<void>;
 }
 
-/** The thread a turn runs on, its run lock already taken (`threads/access.ts`). */
+/** The turn a chat runs, its lease already taken (`threads/access.ts`). */
 export interface ChatTurn {
   threads: ThreadStore;
-  threadId: string;
+  turn: Turn;
 }
 
 function publicError(error: unknown) {
   if (error instanceof NotFoundError) return {
     code: "RESOURCE_NOT_FOUND", message: error.message,
+    ...(error.details === null ? {} : { details: error.details }),
+  };
+  if (error instanceof ConflictError) return {
+    code: "RESOURCE_CONFLICT", message: error.message,
     ...(error.details === null ? {} : { details: error.details }),
   };
   if (error instanceof ValidationError) return {
@@ -59,28 +72,47 @@ function publicError(error: unknown) {
 export async function sendChatStream(
   reply: FastifyReply,
   turn: ChatTurn,
-  run: (execution: StreamExecution) => Promise<Record<string, unknown>>,
+  run: (execution: StreamExecution, thread: GraphThread) => Promise<Record<string, unknown>>,
 ) {
-  const { threads, threadId } = turn;
-  // Ends the turn once: kept or undone, then the lock released — before the
-  // terminal event, so a client may send its next message as soon as it
-  // has the answer.
+  const { threads, turn: owned } = turn;
+  const { threadId } = owned;
+  // The heartbeat keeps the lease while the turn runs. A lost lease does not
+  // abort the turn: its publish is refused anyway.
+  const heartbeat = setInterval(() => {
+    threads.renew(owned).then(
+      (renewed) => { if (!renewed) console.warn(`Thread ${threadId}: the running turn lost its lease`); },
+      (error) => console.error(`Thread ${threadId}: renewing the turn's lease failed:`, error),
+    );
+  }, TURN_HEARTBEAT_MS);
+  heartbeat.unref();
+  // Ends the turn once. Publishing ends it too; otherwise the lease is
+  // released — before the terminal event, so a client may send its next
+  // message as soon as it has the answer. A failed release is logged only:
+  // the lease runs out on its own.
   let open = true;
-  const endTurn = async (complete: boolean) => {
+  const endTurn = async () => {
+    clearInterval(heartbeat);
     if (!open) return;
     open = false;
     try {
-      await (complete ? threads.commitTurn(threadId) : threads.rollbackTurn(threadId));
-    } finally {
-      await threads.release(threadId);
+      await threads.release(owned);
+    } catch (error) {
+      console.error(`Thread ${threadId}: releasing the turn failed:`, error);
     }
   };
 
+  let saver: TurnSaver;
+  try {
+    saver = TurnSaver.load(threadId, owned.state);
+  } catch (error) {
+    await endTurn();
+    throw error;
+  }
   const controller = new AbortController();
   const { signal } = controller;
   const raw = reply.raw;
   if (raw.destroyed) {
-    await endTurn(false);
+    await endTurn();
     return reply;
   }
   let terminal = false;
@@ -111,14 +143,17 @@ export async function sendChatStream(
     }
   };
   try {
-    await threads.beginTurn(threadId);
     await write({ type: "thread", threadId });
-    const result = await run({ signal, onToolEvent: write });
-    await endTurn(true);
+    const result = await run({ signal, onToolEvent: write }, { checkpointer: saver, threadId });
+    const published = await threads.publish(owned, saver.dump());
+    open = false;
+    clearInterval(heartbeat);
+    if (published === "taken") throw threadBusy();
+    if (published === "gone") throw threadNotFound();
     await write({ type: "final", reply: result.reply });
   } catch (error) {
     // A cancelled or failed turn leaves nothing in its thread.
-    await endTurn(false);
+    await endTurn();
     if (!signal.aborted && !raw.destroyed && !terminal) {
       const payload = publicError(error);
       // Expected errors describe themselves to the client; anything else is
@@ -128,7 +163,7 @@ export async function sendChatStream(
       catch { raw.destroy(); }
     }
   } finally {
-    await endTurn(false);
+    await endTurn();
     controller.abort();
     raw.removeListener("close", disconnect);
     if (!raw.destroyed) raw.end();

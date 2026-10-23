@@ -35,6 +35,7 @@ import { decisionRouter } from "./runtime/decisionRouter.js";
 import { runtimeRouter } from "./runtime/router.js";
 import { rulesetRouter, rulesetRuntimeRouter } from "./runtime/rulesetRouter.js";
 import { MemoryThreadStore } from "./runtime/threads/memoryThreadStore.js";
+import type { ThreadStore } from "./runtime/threads/threadStore.js";
 import { serverRouter } from "./server/router.js";
 
 function sendError(
@@ -51,8 +52,11 @@ function sendError(
   return reply.status(status).send({ error });
 }
 
-export async function createApp(): Promise<FastifyInstance> {
+/** The app over `threads`, which it closes when it closes. The server
+ * passes the configured store; tests that pass none get one in memory. */
+export async function createApp(threads: ThreadStore = new MemoryThreadStore()): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+  app.addHook("onClose", () => threads.close());
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -174,7 +178,7 @@ export async function createApp(): Promise<FastifyInstance> {
   await app.register(runtimeRouter, { prefix: runtimePrefix });
   await app.register(changesetRouter, { prefix: `${runtimePrefix}/changesets` });
   // One thread store per server: every assistant conversation lives in it.
-  await app.register(aiRouter, { prefix: runtimePrefix, threads: new MemoryThreadStore() });
+  await app.register(aiRouter, { prefix: runtimePrefix, threads });
   await app.register(decisionRouter, { prefix: runtimePrefix });
   // Ruleset maintenance names no lens: the first lensless runtime routes.
   await app.register(rulesetRouter, { prefix: "/api/ontologies/:ontologyKey/runtime/rulesets" });

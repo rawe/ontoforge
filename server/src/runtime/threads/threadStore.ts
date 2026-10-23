@@ -1,28 +1,42 @@
 /**
  * The thread store: the one seam for server-held assistant conversations
- * (`docs/architecture.md#thread-store`). Graphs and routes talk only to
- * this interface; the in-memory implementation is `memoryThreadStore.ts`.
+ * (`docs/architecture.md#thread-store`). Routes talk only to this
+ * interface; the implementations are `memoryThreadStore.ts` (one process)
+ * and `valkeyThreadStore.ts` (shared by any number of servers).
  *
- * The interface assumes nothing about where threads live: every operation
- * is async, values go in and out as serialisable copies, and the run lock
- * and expiry are operations of the store. A second implementation (e.g.
- * PostgreSQL) must pass the same suite.
+ * The store holds one opaque byte string per thread: its state after the
+ * last completed turn. A turn never writes into the store while it runs —
+ * it runs its graph on a local `TurnSaver` seeded from that state and
+ * publishes the saver's bytes once, when it completes:
  *
- * A turn runs in this order:
+ *   begin (lease + state) → TurnSaver.load → graph run, renew as heartbeat
+ *     → publish (stores, ends the lease) on success | release on cancel or failure
  *
- *   acquire → beginTurn → graph run (checkpointer, `thread_id`)
- *     → commitTurn on success | rollbackTurn on cancel or failure
- *   → release (always)
+ * So reads during a turn show the last completed turn, a failed turn
+ * leaves the previous state, and every write after `begin` is checked
+ * against the turn's owner token: an owner that lost its lease can no
+ * longer touch the thread.
  */
 
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 
+import { ValidationError } from "../../core/exceptions.js";
+
 /**
- * A thread expires this long after its last turn. Long enough to come back
- * to a conversation within a working session; short enough that abandoned
- * conversations do not pile up.
+ * A thread expires this long after its last activity — an accepted message
+ * or a completed turn. Long enough to come back to a conversation the next
+ * day; abandoned conversations still go.
  */
-export const THREAD_IDLE_LIFETIME_MS = 2 * 60 * 60 * 1000;
+export const THREAD_IDLE_LIFETIME_MS = 24 * 60 * 60 * 1000;
+
+/** A running turn's lease: an owner that died blocks its thread at most this long. */
+export const TURN_LEASE_MS = 30_000;
+
+/** A running turn renews its lease this often: three renewals per lease. */
+export const TURN_HEARTBEAT_MS = 10_000;
+
+/** The most bytes one thread's published state may take — the chat stream's buffer cap. */
+export const THREAD_STATE_MAX_BYTES = 8 * 1024 * 1024;
 
 /**
  * At most this many turns stay in a thread's state; older ones are removed.
@@ -47,13 +61,18 @@ export interface ThreadBinding {
   assistantKey: string;
 }
 
-/** A thread's registry entry. Times are epoch milliseconds. */
+/** A thread's registry entry. */
 export interface Thread {
   threadId: string;
   binding: ThreadBinding;
-  createdAt: number;
-  /** Start or end of the last turn; expiry counts from it. */
-  lastUsedAt: number;
+}
+
+/** A running turn: its owner token, never reused, and the state it started from. */
+export interface Turn {
+  threadId: string;
+  token: string;
+  /** The last published state; `null` before the first completed turn. */
+  state: Uint8Array | null;
 }
 
 /** What a graph run needs of its thread: the id and the saver to run on. */
@@ -65,47 +84,61 @@ export interface GraphThread {
 /** The store's clock, injectable so expiry is testable without waiting. */
 export type Clock = () => number;
 
-export interface ThreadStore {
-  /**
-   * The checkpoint saver graphs compile with. A run names its thread in
-   * `configurable.thread_id`. It keeps only the latest checkpoint per
-   * thread; writing to an unknown or expired thread throws.
-   */
-  readonly checkpointer: BaseCheckpointSaver;
+/** A store's lifetimes; tests shorten them, servers use the defaults above. */
+export interface StoreLifetimes {
+  idleMs: number;
+  leaseMs: number;
+}
 
-  /** Registers a new thread with a random, unguessable id. */
+export const DEFAULT_LIFETIMES: StoreLifetimes = { idleMs: THREAD_IDLE_LIFETIME_MS, leaseMs: TURN_LEASE_MS };
+
+export interface ThreadStore {
+  /** Registers a new thread with a random, unguessable id; no state, no turn. Counts as activity. */
   create(binding: ThreadBinding): Promise<Thread>;
 
   /**
-   * The thread, or `null` when it is unknown, expired, or bound to another
-   * assistant. Reading does not count as use.
+   * The last published state (`state: null` before the first completed
+   * turn), or `null` when the thread is unknown, expired or bound to another
+   * assistant. Not activity.
    */
-  find(threadId: string, binding: ThreadBinding): Promise<Thread | null>;
+  read(threadId: string, binding: ThreadBinding): Promise<{ state: Uint8Array | null } | null>;
 
   /**
-   * Takes the thread's run lock and marks the thread used. `false` when a
-   * run already holds it — never queued. Throws for an unknown thread.
+   * An accepted message: takes the thread's lease with a fresh token and
+   * renews its idle deadline. `"busy"` while a live lease exists — never
+   * queued; `null` when unknown, expired or bound to another assistant.
    */
-  acquire(threadId: string): Promise<boolean>;
+  begin(threadId: string, binding: ThreadBinding): Promise<Turn | "busy" | null>;
 
-  /** Releases the run lock and marks the thread used. No-op for an unknown thread. */
-  release(threadId: string): Promise<void>;
-
-  /** Remembers the thread's current checkpoint as the state before this turn. */
-  beginTurn(threadId: string): Promise<void>;
-
-  /** The turn succeeded: forgets the remembered checkpoint. */
-  commitTurn(threadId: string): Promise<void>;
+  /** Heartbeat: extends the lease, never the idle deadline. `false` = no longer the owner. */
+  renew(turn: Turn): Promise<boolean>;
 
   /**
-   * The turn was cancelled or failed: returns the thread to the remembered
-   * checkpoint, discarding everything the turn wrote.
+   * A completed turn: stores `state`, renews the idle deadline and ends the
+   * lease, in one step — only while the thread exists and `turn` still owns
+   * it. Never recreates a thread. Throws ValidationError over
+   * `THREAD_STATE_MAX_BYTES`, leaving state and lease as they were.
    */
-  rollbackTurn(threadId: string): Promise<void>;
+  publish(turn: Turn, state: Uint8Array): Promise<"published" | "taken" | "gone">;
 
-  /**
-   * The graph state of the thread's latest checkpoint (channel values), or
-   * `null` for an unknown or expired thread. Reading does not count as use.
-   */
-  values(threadId: string): Promise<Record<string, unknown> | null>;
+  /** Ends the lease if `turn` still owns it; never touches state or deadline. */
+  release(turn: Turn): Promise<void>;
+
+  close(): Promise<void>;
+}
+
+/** Refuses a state over `THREAD_STATE_MAX_BYTES`; both adapters check it before writing. */
+export function checkStateSize(state: Uint8Array): void {
+  if (state.byteLength > THREAD_STATE_MAX_BYTES) {
+    throw new ValidationError("Conversation too large; start a new one.");
+  }
+}
+
+export function sameBinding(a: ThreadBinding, b: ThreadBinding): boolean {
+  return (
+    a.ontologyKey === b.ontologyKey &&
+    a.lensKey === b.lensKey &&
+    a.kind === b.kind &&
+    a.assistantKey === b.assistantKey
+  );
 }

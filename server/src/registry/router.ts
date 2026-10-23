@@ -11,8 +11,8 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
-import { ontologyFilter } from "../access/authorize.js";
-import { accessOf } from "../auth/plugin.js";
+import { visibleOntologies } from "../access/authorize.js";
+import { accessOf, actorOf } from "../auth/plugin.js";
 import { StoreError } from "../core/exceptions.js";
 import { getOntologyRegistry } from "../core/ports.js";
 import { OntologyCreate, OntologyRename, OntologyResponse } from "./schemas.js";
@@ -66,8 +66,7 @@ export const registryRouter: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request) => {
-      const visible = ontologyFilter(await accessOf(request));
-      return (await service.listOntologies(getOntologyRegistry())).filter((o) => visible(o.ontologyId));
+      return visibleOntologies(await accessOf(request), await service.listOntologies(getOntologyRegistry()));
     },
   );
 
@@ -110,9 +109,9 @@ export const registryRouter: FastifyPluginAsyncZod = async (app) => {
       const ontologyId = (await registry.getOntology(request.params.ontologyKey))?.ontologyId as string | undefined;
       await service.deleteOntology(request.params.ontologyKey, registry);
       // Its assignments go too, best effort: a leftover is inert, ids are never reused.
-      const auth = request.server.auth;
-      if (auth !== null && ontologyId !== undefined) {
-        await auth.access.forgetOntology(ontologyId).catch((error: unknown) => {
+      const actor = await actorOf(request);
+      if (actor !== null && ontologyId !== undefined) {
+        await actor.store.forgetOntology(ontologyId, actor.principalId).catch((error: unknown) => {
           console.error(`Removing the assignments of deleted ontology '${request.params.ontologyKey}' failed:`, error);
         });
       }

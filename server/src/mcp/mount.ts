@@ -35,7 +35,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { lensLevel } from "../access/authorize.js";
-import { accessOf } from "../auth/plugin.js";
+import { accessOf, actorOf } from "../auth/plugin.js";
 import { NotFoundError } from "../core/exceptions.js";
 import { getRuntimeStore, type WriteAccess } from "../core/ports.js";
 import { createModelingMcpServer } from "./modeling.js";
@@ -120,7 +120,7 @@ export function mountMcp(app: FastifyInstance): void {
       if (ontologyKey === "") {
         return reply.callNotFound();
       }
-      await handleMcpRequest(createModelingMcpServer(ontologyKey, (app.auth ?? null) !== null), request, reply);
+      await handleMcpRequest(createModelingMcpServer(ontologyKey, await actorOf(request)), request, reply);
     },
   });
 

@@ -484,18 +484,28 @@ class PostgresAccessStore implements AccessStore {
     });
   }
 
-  async forgetOntology(ontologyId: string): Promise<number> {
-    return this.transaction(async (client) => {
-      const removed = await client.query("DELETE FROM assignment WHERE ontology_id = $1", [ontologyId]);
-      if (removed.rowCount) await this.audit(client, null, "assignment.swept", null, { ontologyId, count: removed.rowCount });
-      return removed.rowCount ?? 0;
-    });
+  async forgetOntology(ontologyId: string, actorId: string): Promise<number> {
+    return this.forget("ontology_id", ontologyId, actorId, "ontology deleted");
   }
 
-  async forgetLens(lensId: string): Promise<number> {
+  async forgetLens(lensId: string, actorId: string): Promise<number> {
+    return this.forget("lens_id", lensId, actorId, "lens deleted");
+  }
+
+  /** Removes the assignments naming a deleted ontology or lens, each audited. */
+  private async forget(column: "ontology_id" | "lens_id", id: string, actorId: string, reason: string): Promise<number> {
     return this.transaction(async (client) => {
-      const removed = await client.query("DELETE FROM assignment WHERE lens_id = $1", [lensId]);
-      if (removed.rowCount) await this.audit(client, null, "assignment.swept", null, { lensId, count: removed.rowCount });
+      const removed = await client.query(`DELETE FROM assignment WHERE ${column} = $1 RETURNING ${ASSIGNMENT_COLUMNS}`, [id]);
+      for (const row of removed.rows) {
+        const assignment = toAssignment(row as Row);
+        await this.audit(client, actorId, "assignment.removed", assignment.principalId, {
+          assignmentId: assignment.id,
+          role: assignment.role,
+          ontologyId: assignment.ontologyId,
+          lensId: assignment.lensId,
+          reason,
+        });
+      }
       return removed.rowCount ?? 0;
     });
   }

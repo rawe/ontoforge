@@ -211,10 +211,18 @@ describe("assignments", () => {
     await store.assign({ principalId: user.id, role: "reader", ontologyId: o2, lensId: l2 }, admin.id);
     await store.assign({ principalId: user.id, role: "writer", ontologyId: o3, lensId: l3 }, admin.id);
     await store.assign({ principalId: user.id, role: "ontology_admin", ontologyId: o3, lensId: null }, admin.id);
-    expect(await store.forgetOntology(o1)).toBe(1);
-    expect(await store.forgetLens(l2)).toBe(1);
+    expect(await store.forgetOntology(o1, admin.id)).toBe(1);
+    expect(await store.forgetLens(l2, admin.id)).toBe(1);
     expect((await store.assignmentsOf(user.id)).map((a) => a.role).sort()).toEqual(["ontology_admin", "writer"]);
     expect((await store.assignmentsOf(admin.id)).map((a) => a.role)).toEqual(["platform_admin"]);
+    // Each removal audited as the deleting actor's, with why.
+    const removals = await connect(DATABASE, (c) =>
+      c.query("SELECT actor_id, target_id, details FROM audit WHERE action = 'assignment.removed' ORDER BY id"),
+    );
+    expect(removals.rows).toEqual([
+      { actor_id: admin.id, target_id: user.id, details: expect.objectContaining({ ontologyId: o1, lensId: l1, reason: "ontology deleted" }) },
+      { actor_id: admin.id, target_id: user.id, details: expect.objectContaining({ ontologyId: o2, lensId: l2, reason: "lens deleted" }) },
+    ]);
   });
 });
 

@@ -8,6 +8,8 @@
  * Reader's level and owned assistant threads.
  */
 
+import { randomUUID } from "node:crypto";
+
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { FastifyInstance } from "fastify";
@@ -68,6 +70,17 @@ async function as(subject: string | null, method: string, url: string, payload?:
 
 async function idOf(subject: string): Promise<string> {
   return (await access.principalOf(ISSUER, subject))!.id;
+}
+
+/** An MCP client on `path` as `subject`. */
+async function mcpAs(subject: string, path: string): Promise<Client> {
+  const client = new Client({ name: "access-tests", version: "0.0.1" });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(`${baseUrl}${path}`), {
+      requestInit: { headers: { authorization: `Bearer ${subject}` } },
+    }),
+  );
+  return client;
 }
 
 async function grant(by: string, subject: string, body: object): Promise<Json> {
@@ -242,6 +255,19 @@ describe("authorization with authentication on", () => {
     expect(res.status).toBe(403);
   });
 
+  it("deleting a lens over MCP removes its assignments too", async () => {
+    expect((await as("creator", "POST", `${fair}/model/lenses`, { key: "temp", name: "temp" })).status).toBe(201);
+    const assignment = await grant("creator", "alice", { role: "reader", ontologyKey: "fair", lensKey: "temp" });
+    const client = await mcpAs("creator", "/mcp/ontologies/fair/model");
+    try {
+      const result = (await client.callTool({ name: "delete_lens", arguments: { lens_key: "temp" } })) as { isError?: boolean };
+      expect(result.isError).toBeFalsy();
+    } finally {
+      await client.close();
+    }
+    expect(await access.assignment(assignment.id as string)).toBeNull();
+  });
+
   it("deleting a lens or an ontology removes its assignments", async () => {
     const lenses = (await as("creator", "GET", `${fair}/model/lenses`)).body as Json[];
     const lensId = lenses.find((l) => l.key === "visitor")!.lensId as string;
@@ -249,6 +275,11 @@ describe("authorization with authentication on", () => {
     expect((await as("creator", "DELETE", `${fair}/model/lenses/${lensId}`)).status).toBe(200);
     expect((await access.assignmentsInOntology(fairId)).filter((a) => a.lensId !== null)).toEqual([]);
     expect((await as("alice", "GET", "/api/ontologies")).body.map((o: Json) => o.key)).toEqual(["other"]);
+    // A role a deleted lens left behind reveals nothing.
+    await access.assign({ principalId: await idOf("alice"), role: "reader", ontologyId: fairId, lensId: randomUUID() }, await idOf("creator"));
+    expect((await as("alice", "GET", "/api/ontologies")).body.map((o: Json) => o.key)).toEqual(["other"]);
+    expect((await as("alice", "GET", fair)).status).toBe(404);
+    expect((await as("alice", "GET", `${fair}/runtime/rulesets`)).status).toBe(404);
     expect((await as("creator", "DELETE", fair)).status).toBe(204);
     expect(await access.assignmentsInOntology(fairId)).toEqual([]);
     expect((await as("creator", "GET", "/api/ontologies")).body).toEqual([]);

@@ -16,7 +16,7 @@ import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import { lensFilter } from "../access/authorize.js";
-import { accessOf } from "../auth/plugin.js";
+import { accessOf, actorOf } from "../auth/plugin.js";
 import { getModelingStore, getOntologyRegistry, getRuntimeStore } from "../core/ports.js";
 import { navigatorModelingRouter } from "./navigatorRouter.js";
 import { retrieverModelingRouter } from "./retrieverRouter.js";
@@ -172,18 +172,13 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         params: LensIdParams,
       },
     },
-    async (request) => {
-      const result = await service.deleteLens(
+    async (request) =>
+      service.deleteLens(
         request.params.lensId,
         await getModelingStore(request.params.ontologyKey),
         await getRuntimeStore(request.params.ontologyKey),
-      );
-      // Its assignments go too, best effort: a leftover is inert, ids are never reused.
-      await request.server.auth?.access.forgetLens(request.params.lensId).catch((error: unknown) => {
-        console.error(`Removing the assignments of deleted lens '${request.params.lensId}' failed:`, error);
-      });
-      return result;
-    },
+        await actorOf(request),
+      ),
   );
 
   // --- Scope Management ---

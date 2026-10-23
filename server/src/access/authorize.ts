@@ -61,17 +61,36 @@ export function lensNotFound(key: string): NotFoundError {
 }
 
 /**
- * The ontology of `key` if it exists and the caller holds a role in it or
- * is Platform Administrator; otherwise not found, alike.
+ * The caller's Reader and Writer roles in one ontology whose lens still
+ * exists: a role a deleted lens left behind counts for nothing.
+ */
+async function liveLensRoles(caller: Caller, ontology: KnownOntology): Promise<Assignment[]> {
+  const roles = caller.assignments.filter((a) => a.lensId !== null && a.ontologyId === ontology.ontologyId);
+  if (roles.length === 0) return [];
+  let lenses;
+  try {
+    lenses = await (await getModelingStore(ontology.key)).listLenses();
+  } catch (error) {
+    // Deleted since the registry was read.
+    if (error instanceof NotFoundError) return [];
+    throw error;
+  }
+  const live = new Set(lenses.map((lens) => lens.lensId as string));
+  return roles.filter((a) => live.has(a.lensId!));
+}
+
+/**
+ * The ontology of `key` if it exists and the caller administers it, holds
+ * a role on one of its lenses or is Platform Administrator; otherwise not
+ * found, alike.
  */
 export async function knownOntology(caller: Caller, key: string): Promise<KnownOntology> {
   const row = await getOntologyRegistry().getOntology(key);
   if (row === null) throw ontologyNotFound(key);
-  const ontologyId = row.ontologyId as string;
-  if (!isPlatformAdmin(caller) && !caller.assignments.some((a) => a.ontologyId === ontologyId)) {
-    throw ontologyNotFound(key);
-  }
-  return { ontologyId, key };
+  const ontology = { ontologyId: row.ontologyId as string, key };
+  if (isPlatformAdmin(caller) || isOntologyAdmin(caller, ontology.ontologyId)) return ontology;
+  if ((await liveLensRoles(caller, ontology)).length === 0) throw ontologyNotFound(key);
+  return ontology;
 }
 
 /** The id of the lens `lensKey` of an ontology, or null. */
@@ -135,8 +154,7 @@ async function authorizeLens(
 
   // A lensless lens need (the ruleset reads): a role on any lens of the ontology.
   if (params.lensKey === undefined && params.lensId === undefined) {
-    const roles = caller.assignments.filter((a) => a.lensId !== null && a.ontologyId === ontology.ontologyId);
-    if (roles.some((role) => roleAllows(role, operation))) return;
+    if ((await liveLensRoles(caller, ontology)).some((role) => roleAllows(role, operation))) return;
     throw new ForbiddenError(`This needs a role on a lens of ontology '${ontology.key}'`);
   }
 
@@ -169,15 +187,20 @@ export async function lensLevel(access: Access, ontologyKey: string, lensKey: st
   return role?.role === "writer" ? "full" : "none";
 }
 
-/** Which ontologies a caller sees listed: every one for trusted access and
- * Platform Administrators, else those it holds a role in. */
-export function ontologyFilter(access: Access): (ontologyId: string) => boolean {
-  if (access.kind === "trusted") return () => true;
-  if (access.kind === "anonymous") return () => false;
+/** Which of `ontologies` a caller sees listed: every one for trusted access
+ * and Platform Administrators, else those `knownOntology` lets it know. */
+export async function visibleOntologies<T extends KnownOntology>(access: Access, ontologies: T[]): Promise<T[]> {
+  if (access.kind === "trusted") return ontologies;
+  if (access.kind === "anonymous") return [];
   const { caller } = access;
-  if (isPlatformAdmin(caller)) return () => true;
-  const held = new Set(caller.assignments.map((a) => a.ontologyId));
-  return (ontologyId) => held.has(ontologyId);
+  if (isPlatformAdmin(caller)) return ontologies;
+  const visible: T[] = [];
+  for (const ontology of ontologies) {
+    if (isOntologyAdmin(caller, ontology.ontologyId) || (await liveLensRoles(caller, ontology)).length > 0) {
+      visible.push(ontology);
+    }
+  }
+  return visible;
 }
 
 /** Which lenses of an ontology a caller sees listed: every one for trusted

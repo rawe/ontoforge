@@ -15,6 +15,8 @@ const O_FAIR = "00000000-0000-4000-8000-00000000000f";
 const O_OTHER = "00000000-0000-4000-8000-00000000000e";
 const L_VISITOR = "00000000-0000-4000-8000-0000000000a1";
 const L_STAFF = "00000000-0000-4000-8000-0000000000a2";
+/** A lens deleted while a role on it was left behind. */
+const L_GONE = "00000000-0000-4000-8000-0000000000a3";
 
 const ONTOLOGIES: Record<string, { ontologyId: string; key: string }> = {
   fair: { ontologyId: O_FAIR, key: "fair" },
@@ -30,10 +32,11 @@ vi.mock("../../src/core/ports.js", () => ({
   getModelingStore: async () => ({
     getLensByKey: async (key: string) => LENSES.find((l) => l.key === key) ?? null,
     getLens: async (id: string) => LENSES.find((l) => l.lensId === id) ?? null,
+    listLenses: async () => LENSES,
   }),
 }));
 
-const { authorize, lensFilter, lensLevel, ontologyFilter, ownerOf } = await import("../../src/access/authorize.js");
+const { authorize, lensFilter, lensLevel, ownerOf, visibleOntologies } = await import("../../src/access/authorize.js");
 
 let next = 0;
 function caller(...roles: [Role, string?, string?][]): Access {
@@ -70,6 +73,7 @@ const ADMIN = caller(["ontology_admin", O_FAIR]);
 const READER = caller(["reader", O_FAIR, L_VISITOR]);
 const WRITER = caller(["writer", O_FAIR, L_VISITOR]);
 const NOBODY = caller();
+const LEFTOVER = caller(["reader", O_FAIR, L_GONE], ["writer", O_FAIR, L_GONE]);
 
 const READ: Need = { kind: "lens", operation: "read" };
 const WRITE: Need = { kind: "lens", operation: "write" };
@@ -176,6 +180,12 @@ describe("authorize", () => {
     expect(await outcome(PLATFORM_ADMIN, DESIGN, FAIR)).toBe(403);
     expect(await outcome(NOBODY, DESIGN, FAIR)).toBe(404);
   });
+
+  it("a role a deleted lens left behind reveals nothing", async () => {
+    expect(await outcome(LEFTOVER, { kind: "ontology-member" }, FAIR)).toBe(404);
+    expect(await outcome(LEFTOVER, DESIGN, FAIR)).toBe(404);
+    expect(await outcome(LEFTOVER, READ, VISITOR)).toBe(404);
+  });
 });
 
 describe("what handlers ask", () => {
@@ -187,12 +197,16 @@ describe("what handlers ask", () => {
     expect(await lensLevel(WRITER, "fair", "staff")).toBe("none");
   });
 
-  it("ontologyFilter: every ontology for trusted and Platform Administrators, else those with a role", () => {
-    expect(ontologyFilter(TRUSTED)(O_OTHER)).toBe(true);
-    expect(ontologyFilter(PLATFORM_ADMIN)(O_OTHER)).toBe(true);
-    expect(ontologyFilter(READER)(O_FAIR)).toBe(true);
-    expect(ontologyFilter(READER)(O_OTHER)).toBe(false);
-    expect(ontologyFilter(CREATOR)(O_FAIR)).toBe(false);
+  it("visibleOntologies: every ontology for trusted and Platform Administrators, else those with a live role", async () => {
+    const all = Object.values(ONTOLOGIES);
+    const keys = async (access: Access) => (await visibleOntologies(access, all)).map((o) => o.key);
+    expect(await keys(TRUSTED)).toEqual(["fair", "other"]);
+    expect(await keys(PLATFORM_ADMIN)).toEqual(["fair", "other"]);
+    expect(await keys(ADMIN)).toEqual(["fair"]);
+    expect(await keys(READER)).toEqual(["fair"]);
+    expect(await keys(CREATOR)).toEqual([]);
+    expect(await keys(LEFTOVER)).toEqual([]);
+    expect(await keys(ANONYMOUS)).toEqual([]);
   });
 
   it("lensFilter: every lens for administrators, else the held ones", () => {

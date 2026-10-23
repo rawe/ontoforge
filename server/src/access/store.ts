@@ -93,10 +93,18 @@ export interface AccessStore {
   /** The removed assignment, or null. Refuses to remove the last active Platform
    * Administrator's role (ConflictError). */
   revoke(id: string, actorId: string): Promise<Assignment | null>;
-  /** Removes every assignment of a deleted ontology (or one deleted lens). A
-   * leftover is inert: ids are never reused. */
-  forgetOntology(ontologyId: string): Promise<number>;
-  forgetLens(lensId: string): Promise<number>;
+  /** Removes every assignment of a deleted ontology (or one deleted lens),
+   * audited as the deleting `actorId`'s. A leftover is inert: ids are never
+   * reused, and authorization counts no role on a lens that is gone. */
+  forgetOntology(ontologyId: string, actorId: string): Promise<number>;
+  forgetLens(lensId: string, actorId: string): Promise<number>;
 
   close(): Promise<void>;
+}
+
+/** Who deletes an ontology or a lens with authentication on: the store its
+ * assignments go from, and the principal the removal is audited as. */
+export interface AccessActor {
+  store: AccessStore;
+  principalId: string;
 }

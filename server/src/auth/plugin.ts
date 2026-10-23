@@ -20,7 +20,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { authorize } from "../access/authorize.js";
 import { TRUSTED, type Access, type Need } from "../access/caller.js";
 import { needOf } from "../access/routes.js";
-import type { Profile } from "../access/store.js";
+import type { AccessActor, Profile } from "../access/store.js";
 import { ForbiddenError, UnauthenticatedError } from "../core/exceptions.js";
 import { cookieNames, readCookie } from "./cookies.js";
 import { API_SCOPE, type Identified } from "./oidc.js";
@@ -99,6 +99,14 @@ async function resolve(request: FastifyRequest): Promise<Access> {
 /** The display claims a sign-in refreshes. */
 export function profileOf(identified: Identified): Profile {
   return { displayName: identified.displayName, email: identified.email, username: identified.username };
+}
+
+/** The request's caller as the actor of a deletion whose assignments go with it; null with authentication off. */
+export async function actorOf(request: FastifyRequest): Promise<AccessActor | null> {
+  const access = await accessOf(request);
+  const auth = request.server.auth ?? null;
+  if (auth === null || access.kind !== "caller") return null;
+  return { store: auth.access, principalId: access.caller.principal.id };
 }
 
 /** True for the identity the configuration names as the administrator. */

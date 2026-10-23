@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
 
+import type { AccessActor } from "../access/store.js";
 import { getEmbeddingProvider } from "../core/embedding.js";
 import {
   CascadeRequiredError,
@@ -236,18 +237,24 @@ export async function updateLens(
  * own agent configurations, saved queries and changesets (handled in the
  * store), needs no consent, and leaves the schema and every instance
  * untouched. It reports how many changesets went with it (V42), counted
- * before the delete.
+ * before the delete. With authentication on (`actor`), the lens's role
+ * assignments go too, best effort: a leftover reveals nothing
+ * (`access/authorize.ts`).
  */
 export async function deleteLens(
   lensId: string,
   store: ModelingStore,
   runtime: RuntimeStore,
+  actor: AccessActor | null = null,
 ): Promise<{ changesetsDeleted: number }> {
   const changesetsDeleted = await lensChangesetCount(lensId, runtime);
   await store.changeDesign(async (s) => {
     if (!(await s.deleteLens(lensId))) {
       throw new NotFoundError(`Lens '${lensId}' not found`);
     }
+  });
+  await actor?.store.forgetLens(lensId, actor.principalId).catch((error: unknown) => {
+    console.error(`Removing the assignments of deleted lens '${lensId}' failed:`, error);
   });
   return { changesetsDeleted };
 }

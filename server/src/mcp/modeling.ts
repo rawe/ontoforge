@@ -22,6 +22,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z, ZodError } from "zod";
 
+import type { AccessActor } from "../access/store.js";
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import { getModelingStore, getOntologyRegistry, getRuntimeStore } from "../core/ports.js";
 import type { ModelingStore } from "../core/ports.js";
@@ -249,13 +250,15 @@ const SEARCH_INDEX_RECORD =
 
 /** Build the modeling MCP server bound to one ontology key. */
 /**
- * The modeling server of one ontology. With `authentication` on, every
- * tool needs the ontology's administrator (the mount's route check), and
- * `ensure_ontology` creates nothing: an ontology is created over REST,
- * where its creator becomes its administrator.
+ * The modeling server of one ontology. With authentication on — `actor`,
+ * the calling administrator — every tool needs the ontology's
+ * administrator (the mount's route check, which answers not found for a
+ * missing ontology), so `ensure_ontology` never creates one: an ontology
+ * is created over REST, where its creator becomes its administrator.
  */
-export function createModelingMcpServer(ontologyKey: string, authentication = false): McpServer {
+export function createModelingMcpServer(ontologyKey: string, actor: AccessActor | null = null): McpServer {
   const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" });
+  const authentication = actor !== null;
 
   // The ONE registry-touching tool over MCP (`docs/decisions.md#interfaces`): with
   // no arguments it can only ever act on the binding the client already
@@ -934,6 +937,7 @@ export function createModelingMcpServer(ontologyKey: string, authentication = fa
         lens.lensId as string,
         store,
         await getRuntimeStore(ontologyKey),
+        actor,
       );
       return textResult(
         `Lens '${args.lens_key}' deleted successfully. Changesets deleted with it: ${changesetsDeleted}.`,

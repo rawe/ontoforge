@@ -1,7 +1,8 @@
 # Interfaces
 
 The complete index of every way into the system: the ontology registry, two per-ontology
-REST surfaces, one server-wide route, two probes, and two MCP servers. Concepts and
+REST surfaces, one server-wide route, two probes, two MCP servers, and — with
+authentication on — sign-in and user management. Concepts and
 vocabulary: [README.md](README.md). Structure and error model: [architecture.md](architecture.md).
 What each operation *means* is in [capabilities/](capabilities/) — this document is the
 map, not the semantics.
@@ -18,6 +19,8 @@ response bodies are reproduced here.
 |---|---|
 | `/api/ontologies` | Registry — ontologies as whole units |
 | `/api/server` | Server — deployment capability reads |
+| `/api/auth` | Sign-in — the browser session and who is signed in |
+| `/api/users` | User management — principals and their roles; authentication on only |
 | `/api/ontologies/{ontologyKey}/model` | Modeling REST — one ontology's schema and per-lens configuration |
 | `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` | Runtime REST — one ontology's instance data through one lens |
 | `/api/ontologies/{ontologyKey}/runtime/rulesets` | Ruleset maintenance — one ontology's rulesets, without a lens |
@@ -25,6 +28,7 @@ response bodies are reproduced here.
 | `/mcp/ontologies/{ontologyKey}/model` | Modeling MCP server, bound to one ontology |
 | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` | Runtime MCP server, bound to one ontology and one lens |
 | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/rulesets/{rulesetKey}` | Ruleset runtime MCP server, bound to one ontology, one lens and one ruleset |
+| `/.well-known/oauth-protected-resource` | Where MCP clients discover how to sign in; authentication on only |
 
 Every ontology-scoped request names its ontology in the path, and an ontology is always
 spelled `ontologies/<key>`, a lens always `lenses/<key>` — uniformly across REST, MCP
@@ -175,7 +179,7 @@ Other runtime parameters follow their documented names, including kind-prefixed
 
 ### Errors
 
-Every REST surface answers with the single error envelope and the six-code taxonomy
+Every REST surface answers with the single error envelope and the nine-code taxonomy
 defined in [architecture.md](architecture.md#error-model). Nothing is added per route.
 
 MCP reports the same failures as tool errors. Because a tool error is a single string, the
@@ -197,10 +201,10 @@ require a language-model provider; execution requirements are listed with the ro
 chat requires a language-model provider
 ([capabilities/agents.md](capabilities/agents.md)).
 
-An assistant thread that is unknown, expired or bound to another assistant answers
-`RESOURCE_NOT_FOUND` with `details.code` of `THREAD_NOT_FOUND`; a message to a thread whose
-previous message is still being answered answers `RESOURCE_CONFLICT` with `details.code`
-of `THREAD_BUSY` ([assistant chat and threads](#assistant-chat-and-threads)).
+An assistant thread that is unknown, expired, bound to another assistant or started by
+another principal answers `RESOURCE_NOT_FOUND` with `details.code` of `THREAD_NOT_FOUND`;
+a message to a thread whose previous message is still being answered answers
+`RESOURCE_CONFLICT` with `details.code` of `THREAD_BUSY` ([assistant chat and threads](#assistant-chat-and-threads)).
 
 A data write whose ontology's design keeps changing while it runs, or a write or modeling
 change that waits too long for another one, answers `RESOURCE_CONFLICT` and has written
@@ -208,6 +212,36 @@ nothing; it may be sent again ([architecture.md](architecture.md#design-revision
 
 Call `GET /api/server/features` first all the same. Probing lets a client hide what is
 unavailable, rather than offering it and explaining the refusal afterwards.
+
+### Who may call
+
+With authentication off, every route serves every caller. With it on, every route except
+sign-in, `/api/server`, the probes, the API description and the resource metadata needs a
+signed-in caller — a bearer access token, or on REST the browser's session cookie — holding
+the role the route needs ([capabilities/authentication.md](capabilities/authentication.md#roles)):
+
+| Routes | Need |
+|---|---|
+| `GET /api/ontologies` | Any signed-in caller; lists the ontologies it holds a role in, every one for a Platform Administrator |
+| `POST /api/ontologies` | Ontology Creator |
+| `GET /api/ontologies/{ontologyKey}` | Any role in the ontology, or Platform Administrator |
+| `PATCH`, `DELETE /api/ontologies/{ontologyKey}` | Ontology Administrator |
+| `GET .../model/lenses` | Any role in the ontology, or Platform Administrator; lists the lenses the caller holds Reader or Writer on, every one for an administrator |
+| `GET` of one lens and below it on the modeling surface | Reader or Writer on that lens, or Ontology Administrator |
+| Every other modeling route, and the modeling MCP mount | Ontology Administrator |
+| `GET` of ruleset maintenance | Reader or Writer on any lens of the ontology, or Ontology Administrator |
+| Every other ruleset maintenance route | Ontology Administrator |
+| Runtime routes, plain and below a ruleset, and the runtime MCP mounts | Reader or Writer on the lens for a route that reads — chat, search, query and a changeset's check among them — Writer for every other |
+| `/api/users`, `/api/ontologies/{ontologyKey}/access` | Platform Administrator or an Ontology Administrator, narrowed per [route](#user-management) |
+
+A request without a valid credential answers `401 UNAUTHENTICATED` with a
+`WWW-Authenticate: Bearer` challenge, carrying `error="invalid_token"` when a token was
+sent. A disabled principal, a role the caller lacks on something it may know of, and a
+request by session cookie that may change something without the deployment's own
+`Origin` answer `403 FORBIDDEN`. An ontology or lens outside the caller's roles answers
+`404 RESOURCE_NOT_FOUND`, as an unknown key does. A bearer token that cannot be checked
+because the provider's keys cannot be fetched answers `503 PROVIDER_UNAVAILABLE`; nothing
+is admitted unchecked.
 
 ## Registry
 
@@ -247,6 +281,7 @@ deployment.
 |---|---|---|
 | `baseUrl` | string or null | The address clients reach this server at, without a trailing slash; REST and MCP paths are appended to it. Taken from the deployment's configured public address; `null` when none is configured |
 | `version` | string | The server's release version |
+| `authentication` | boolean | Authentication is on: callers sign in, and roles decide what they may do |
 
 `features` answers as follows; clients call it before offering optional capabilities.
 
@@ -256,6 +291,56 @@ deployment.
 | `searchStrategies` | list | The available search strategies, in preference order |
 | `ai` | boolean | A language-model provider is configured; gates the `/ai` routes |
 | `decisions` | boolean | A Decision provider is configured; gates the `/decisions` routes |
+
+## Sign-in
+
+Prefix `/api/auth`. The browser's sign-in, with the server as the provider's client.
+Semantics: [capabilities/authentication.md](capabilities/authentication.md#signing-in).
+`me` exists with authentication off too; the others only with it on.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/auth/me` | Whether authentication is on, and who is signed in with their roles |
+| GET | `/api/auth/login` | Start a browser sign-in: redirects to the provider; `returnTo`, a path on the deployment's own address, is where the browser lands afterwards |
+| GET | `/api/auth/callback` | Where the provider sends the browser back: starts the session and redirects to `returnTo` |
+| POST | `/api/auth/logout` | End the session; answers `logoutUrl`, the provider's sign-out page, for the browser to open |
+
+`me` never answers `401`: `authentication` alone when it is off; with it on, `user` — null
+when no one is signed in — and `assignments`, each with its role and the keys of its
+ontology and lens. An assignment whose ontology or lens no longer exists is left out. A
+failed sign-in lands on `/?login=failed`, that of a disabled principal on
+`/?login=disabled`, both without a session.
+
+**MCP clients** discover the provider through the protected-resource metadata
+(RFC 9728): an MCP mount's `401` challenge names `resource_metadata`, the document at
+`/.well-known/oauth-protected-resource` followed by the mount's path, and the scope
+OntoForge's audience comes with. The document names the mount on the deployment's public
+address as `resource`, the provider as its authorization server, and that scope; the bare
+`/.well-known/oauth-protected-resource` describes the server. A client connects through
+the public address, signs in at the provider and sends its access token as a bearer
+header on every request; MCP takes no cookie.
+
+## User management
+
+Prefix `/api/users`, plus one route per ontology. Exists only with authentication on;
+off, every route here answers not found. Semantics and who may do what:
+[capabilities/authentication.md](capabilities/authentication.md#user-management).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/users` | Find principals by name, email or username; `search`, `limit` (at most 200, default 50), `offset`; answers `items` and `total` |
+| POST | `/api/users` | Admit a service under its subject at the provider, before its first call |
+| GET | `/api/users/{userId}` | Read one principal with the assignments the caller may see |
+| PATCH | `/api/users/{userId}` | Disable or enable a principal |
+| POST | `/api/users/{userId}/assignments` | Grant a role: platform roles without keys, Ontology Administrator with `ontologyKey`, Reader and Writer with `ontologyKey` and `lensKey`; idempotent |
+| DELETE | `/api/users/{userId}/assignments/{assignmentId}` | Revoke one assignment |
+| GET | `/api/ontologies/{ontologyKey}/access` | Every assignment within one ontology, each with its principal |
+
+Removing the role of the last active Platform Administrator or of the configured
+administrator, disabling either of them, or disabling oneself answers
+`RESOURCE_CONFLICT`. Admitting an identity bound to a principal that holds no role turns
+that principal into the service; one bound to a principal with a role answers
+`RESOURCE_CONFLICT`.
 
 ## Probes
 
@@ -748,10 +833,10 @@ routes, its extra request fields and its own events.
 **Request.** `message` (1 to 2,000 characters) and optionally `threadId`; a kind may add
 fields, and unknown fields are rejected. Without `threadId` the message starts a new
 thread bound to the addressed assistant; with it, the message continues that thread. A
-thread that is unknown, expired or bound to another assistant answers
-`RESOURCE_NOT_FOUND` with `details.code` `THREAD_NOT_FOUND`; a thread whose previous
-message is still being answered answers `RESOURCE_CONFLICT` with `details.code`
-`THREAD_BUSY`. Both are plain error responses before the stream opens, like every other
+thread that is unknown, expired, bound to another assistant or started by another
+principal answers `RESOURCE_NOT_FOUND` with `details.code` `THREAD_NOT_FOUND`; a thread
+whose previous message is still being answered answers `RESOURCE_CONFLICT` with
+`details.code` `THREAD_BUSY`. Both are plain error responses before the stream opens, like every other
 refusal the kind lists; a busy message is never queued.
 
 **Stream.** Successful responses use `application/x-ndjson`: one complete JSON object per
@@ -783,9 +868,9 @@ Delivery bounds buffering and terminates stalled or oversized streams.
 
 **Read a thread.** `200` with `threadId` and `messages` — the user messages and the
 assistant's answers in order, each `role` (`user` or `assistant`) and `content`, at most
-the turns a thread keeps, without tool payloads. Unknown, expired or another assistant's
-thread: `THREAD_NOT_FOUND`. Reading needs no language-model provider and does not count as
-use; it is gated like the kind's list.
+the turns a thread keeps, without tool payloads. Unknown, expired, another assistant's or
+another principal's thread: `THREAD_NOT_FOUND`. Reading needs no language-model provider
+and does not count as use; it is gated like the kind's list.
 
 ### Retriever list, chat and retrieve
 
@@ -969,7 +1054,8 @@ connection carries state.
 |---|---|---|
 | Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
 | Bound to | One ontology | One ontology and one lens |
-| Tools | 45 | 35; 36 on a ruleset mount, 35 with write access `propose`, 20 with `none` |
+| Tools | 45 | 35; 36 on a ruleset mount, 35 with write access `propose`, 20 with `none` or for a Reader |
+| Sign-in, authentication on | Bearer token of an Ontology Administrator | Bearer token of a Reader or Writer on the lens |
 
 ### How a mount is bound
 
@@ -995,7 +1081,9 @@ On a ruleset mount `get_schema`'s description says to call it after `get_ruleset
 
 The modeling mount serves requests even when its ontology does not exist yet — that is
 what lets `ensure_ontology` provision it; until then every other tool answers a
-not-found tool error. The runtime mount requires both its ontology and its lens to
+not-found tool error. With authentication on it does not: a missing ontology answers not
+found like any ontology the caller holds no role in, and `ensure_ontology` creates
+nothing. How a client signs in: [Sign-in](#sign-in). The runtime mount requires both its ontology and its lens to
 exist, and a ruleset mount its ruleset as well; its tools answer not-found tool errors
 otherwise, reads included.
 
@@ -1003,7 +1091,7 @@ otherwise, reads included.
 
 | Tool | Purpose |
 |---|---|
-| `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation |
+| `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation. With authentication on it creates nothing |
 | `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries, retrievers and navigators. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
 | `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`) |
 | `update_entity_type` | Change display name, description or name property (`name_property`); the key is immutable |
@@ -1145,5 +1233,5 @@ Reasonable things to look for that are absent everywhere — REST, MCP and the w
 | Cross-ontology anything | No route or tool sees two ontologies at once; overviews are a client-side concern |
 | Registry over MCP | Ontology management is REST/UI only; `ensure_ontology` is the sole, self-scoped exception |
 
-Authentication, authorization and multi-tenancy are absent by design and are discussed in
+Multi-tenancy is absent by design and is discussed in
 [architecture.md](architecture.md#what-the-architecture-does-not-provide).

@@ -1,9 +1,11 @@
 # Storage adapters
 
-Everything OntoForge persists crosses one boundary: the persistence port. Above it,
-services speak schema vocabulary only — keys, property definitions, structured filters,
-instance identifiers — through stores bound to one ontology and a small registry port.
-Below it, exactly one adapter knows a database.
+Everything OntoForge persists about its ontologies crosses one boundary: the persistence
+port. Above it, services speak schema vocabulary only — keys, property definitions,
+structured filters, instance identifiers — through stores bound to one ontology and a
+small registry port. Below it, exactly one adapter knows a database. The access database, which holds who may
+do what when authentication is on, sits behind a port of its own and is not part of this
+contract ([architecture.md](architecture.md#components)).
 
 This document is the contract an adapter must satisfy. Concepts and vocabulary:
 [README.md](README.md). Where the port sits in the system:

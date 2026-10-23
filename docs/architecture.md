@@ -5,21 +5,35 @@ this document obeys: [decisions.md](decisions.md).
 
 ## Components
 
-Four parts, two processes.
+Four parts, two processes; with [authentication](#authentication-and-authorization) on,
+two more.
 
 **Server** — one deployable unit. Serves the ontology registry, the modeling API, the
 runtime API, both MCP servers and the OpenAPI description. There is no mode switch and no
 partial deployment: every instance serves everything, and any number of instances share one
-database and one [shared state](#shared-state).
+database and one [shared state](#shared-state) — and, with authentication on, one access
+database and one identity provider.
 
 **Web client** — a separate static application talking to the server over REST only. It
-holds no privileged path; anything it does can be done over the API.
+holds no privileged path; anything it does can be done over the API. With authentication
+on, it is served from the deployment's public address, which proxies the API to the
+server, so the browser's session cookie reaches the server.
 
 **Database** — one instance, holding every ontology's schema and instance data together.
 Reached only through the persistence port.
 
 **Storage adapter** — the single active implementation of that port. See
 [storage-adapters.md](storage-adapters.md).
+
+**Access database** — with authentication on, a PostgreSQL database of its own beside the
+ontology database: principals, their identities, role assignments and the audit of every
+change to them. Reached through the access store, a port of its own, never through the
+persistence port; it carries its own storage version. Locally it is a second database in
+the same PostgreSQL.
+
+**Identity provider** — with authentication on, an external OpenID provider where people
+and services sign in; Keycloak in development. It says who a caller is, never what it may
+do.
 
 ```
    web client ────┐
@@ -89,6 +103,11 @@ the exception taxonomy, the data-type and keyword language enumerations, embeddi
 decision-model provider abstractions, OQL parsing and validation, and the storage-free
 parts of search indexing — entry composition and the map of which writes affect which
 entries.
+
+Two more modules sit at the interface layer, beside these contexts: **auth** identifies the
+caller — browser sign-in, sessions, access tokens — and **access** holds the authorization
+service, the route table and user management. The routers of the contexts ask access what
+a caller may see, and access reads runtime's operation table to tell reads from writes.
 
 **Runtime never depends on modeling.** Everything runtime needs about the schema, it
 reads through the port. This keeps the schema a *value* to runtime rather than a service
@@ -194,6 +213,20 @@ server-managed as any other system property.
 Embedding vectors and document length bookkeeping are internal. They are stored, but
 never appear in a response.
 
+### Access level
+
+In the access database, with authentication on; nothing here belongs to an ontology.
+
+| Kind | Identity | Notable fields |
+|---|---|---|
+| Principal | id | kind (user or service), display name, email, username, status (active or disabled), last sign-in |
+| Identity | issuer + subject, unique | its principal |
+| Assignment | id | its principal, role, ontology id (ontology and lens roles), lens id (lens roles), who granted it |
+| Audit entry | internal | who changed what, and when |
+
+Assignments name ontologies and lenses by their never-reused ids; keys are resolved on
+every request, and an assignment whose ontology or lens is gone is left out.
+
 ### Invariants
 
 Enforced in the service layer on every write path, whichever interface it arrived by. This
@@ -267,7 +300,8 @@ calls reads and writes against the design current at that call.
 ## Shared state
 
 Shared state is what every server must see alike but may lose: the assistants' threads
-([thread store](#thread-store)). It sits beside the persistence port rather than behind it
+([thread store](#thread-store)) and, with authentication on, the browser sessions
+([authentication](#authentication-and-authorization)). It sits beside the persistence port rather than behind it
 ([decisions.md](decisions.md#storage)), and one setting chooses where all of it lives:
 memory, which serves one server process, or Valkey, shared by every server that names it.
 A configured Valkey that does not answer, that would evict data rather than refuse it, or
@@ -293,8 +327,9 @@ one thread store — one for every server, not per ontology — behind an interf
 own, part of the [shared state](#shared-state).
 
 **Registry.** Each thread has a random, unguessable id — knowing it is what lets a client
-continue the thread — and a binding to exactly one assistant: ontology, lens, kind and key.
-A thread is found only through its own assistant; through any other it is unknown. Nothing
+continue the thread — and a binding to exactly one assistant: ontology, lens, kind and key,
+and with authentication on to the principal that started it. A thread is found only
+through its own assistant, and only by its own principal; otherwise it is unknown. Nothing
 cascades: a deleted ontology, lens or assistant leaves its threads to retention.
 
 **State.** The store keeps one value per thread: its conversation state after its last
@@ -337,12 +372,53 @@ with the navigator's name, and streams the entities its answer may use before th
 as the shared `entities` event ([interfaces.md](interfaces.md#assistant-chat-and-threads)).
 Its model calls are never retried.
 
+## Authentication and authorization
+
+One startup setting turns authentication on for a server; every server of a deployment
+shares it ([decisions.md](decisions.md#system-shape)). Off, every request is trusted and
+nothing below runs. What a caller experiences, and what each role allows:
+[capabilities/authentication.md](capabilities/authentication.md).
+
+**Who is calling.** A request proves itself by a bearer access token or by the browser's
+session cookie, never both: a bearer header decides alone, and the MCP mounts take bearer
+tokens only. A token is checked against the provider's published keys — issuer, audience,
+OntoForge's scope, expiry, an asymmetric signature, and no nonce, which only an ID token
+carries — and never sent to the provider to ask. Its identity, or
+the session's, leads to the principal in the access database, read with its assignments
+afresh on every request, with no cache: a revoked role or a disabled principal is refused
+on the next request, on every server. An identity seen for the first time becomes a
+principal with no role, created once however many first requests race.
+
+**Browser sessions.** The server is the browser's OpenID client: authorization code with
+PKCE, as a confidential client ([decisions.md](decisions.md#access)). A login in progress
+keeps nothing on the server; it travels in a short-lived, sealed cookie that any server of
+the deployment can open. The session lives in the shared state, keyed by a digest of the
+cookie's random id, and expires after its idle time or at the latest 24 hours after
+sign-in. Both cookies are HttpOnly, Secure and SameSite=Lax, named after the public
+address's port. A cookie request that may change something must carry the public
+address's origin, and cross-origin browser calls are allowed without credentials only.
+
+**What a route needs.** Every route declares its need — public, any signed-in caller, a
+platform role, the administrator or any member of the ontology in its path, a role on the
+lens in its path for an operation, or user administration — when it is registered; a
+route without one fails the boot. Runtime routes take their operation from the same table
+that classifies a ruleset's writes, so one table says what writes. Public routes resolve no
+caller and keep working whatever the provider or the access database does.
+
+**One authorization service.** It judges a route's need before the request's body is read,
+and tells handlers which ontologies and lenses a caller may see listed. The MCP mounts go
+through it as REST does, and a runtime mount builds its tool list from the caller's role as
+from a ruleset's level. An assistant's tool calls run inside its chat request, already
+judged for that lens.
+
 ## Request lifecycle
 
 A runtime write, which is the longest path:
 
 ```
   request
+    → with authentication on: identify the caller and judge the route's need
+      (no credential → unauthenticated, no role → not found or forbidden)
     → parse and validate shape
     → bind a runtime store to the ontology key (unknown key → not found)
     → resolve the lens key within that ontology
@@ -450,10 +526,13 @@ Every error response has the same envelope:
 { "error": { "code": "...", "message": "...", "details": { } } }
 ```
 
-There are exactly six top-level codes:
+There are exactly nine top-level codes:
 
 | Condition | Status | Code | `details` |
 |---|---|---|---|
+| No valid credential (authentication on) | 401 | `UNAUTHENTICATED` | — |
+| The caller's roles do not allow it (authentication on) | 403 | `FORBIDDEN` | — |
+| The identity provider's keys cannot be fetched to check a token (authentication on) | 503 | `PROVIDER_UNAVAILABLE` | — |
 | Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — or `code` |
 | Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | —, `code` or `violations` |
 | Input rejected | 422 | `VALIDATION_ERROR` | `fields` map, `errors` list, or `violations` list with `total` |
@@ -461,16 +540,16 @@ There are exactly six top-level codes:
 | Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
 | Malformed request body | 400 | `INVALID_JSON` | — |
 
-Three refinements:
+Four refinements:
 
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
-stays one of the six. A request for an unavailable search strategy, search with no available strategy,
+stays one of the nine. A request for an unavailable search strategy, search with no available strategy,
 saved-query discovery with no embedding provider, an AI request with no
 language-model provider configured answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
-An assistant thread that is unknown, expired or bound to another assistant answers
-`404 RESOURCE_NOT_FOUND` with `details.code` of `THREAD_NOT_FOUND`, and a message to a
-thread still running `409 RESOURCE_CONFLICT` with `details.code` of `THREAD_BUSY`
-([thread store](#thread-store)).
+An assistant thread that is unknown, expired, bound to another assistant or started by
+another principal answers `404 RESOURCE_NOT_FOUND` with `details.code` of
+`THREAD_NOT_FOUND`, and a message to a thread still running `409 RESOURCE_CONFLICT` with
+`details.code` of `THREAD_BUSY` ([thread store](#thread-store)).
 
 **A refused parent flag carries its violations.** A parent flag change — on create,
 update or import — that the stored relations break answers `409 RESOURCE_CONFLICT` with
@@ -484,6 +563,11 @@ physical objects, which must not reach a client. The adapter logs the original a
 generated `errorId` and returns only that id, so a reported failure can still be traced to
 its server-side record.
 
+**What a caller holds no role in is not found.** An ontology or lens outside the caller's
+assignments answers `RESOURCE_NOT_FOUND`, as an unknown key does; `FORBIDDEN` is for what
+the caller may know of ([capabilities/authentication.md](capabilities/authentication.md#what-a-caller-sees)).
+A `401` carries a `WWW-Authenticate` challenge ([interfaces.md](interfaces.md#sign-in)).
+
 ## Startup
 
 Ordered, and failure at any step prevents serving:
@@ -492,7 +576,10 @@ Ordered, and failure at any step prevents serving:
    exist, and bring storage of an older storage version up to date
    ([decisions.md](decisions.md#storage)). Per-ontology storage is provisioned when an
    ontology is created; at boot only an upgrade reaches into it. Open the
-   [shared state](#shared-state).
+   [shared state](#shared-state). With authentication on, open the access database:
+   create it when it is missing and bring its schema up to date, once however many
+   servers start together; a schema newer than the server understands fails the boot.
+   Then discover the identity provider, waiting at most 10 seconds.
 2. Initialize the embedding provider, if configured.
 3. Initialize the language-model and decision-model providers, if configured.
 4. If embeddings are enabled, compare the width of every registered ontology's
@@ -506,6 +593,10 @@ Ordered, and failure at any step prevents serving:
    generations here — then drains the queue. Its failures are logged
    and never prevent serving.
 6. Start both MCP servers.
+
+With authentication on, neither the access database nor the provider is optional: either
+failing fails the boot, and nothing falls back to running without authentication
+([decisions.md](decisions.md#access)). With it off, neither is touched.
 
 The registry walks in steps 4 and 5 do nothing when no ontology exists — a zero-ontology
 server boots clean. Note step 4 warns and does not repair — deliberately, for the reason
@@ -545,7 +636,8 @@ per-ontology deployment configuration.
 | Shutdown | How long a stopping server drains | Default applies |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
 | Decision model | Endpoint, model, credential | Entity identity comparison unavailable |
-| Public URL | The server's public base address, read by no capability yet | Nothing changes |
+| Public URL | The address clients reach the deployment at, reported to clients; with authentication on, the browser's origin | No address is reported; required with authentication on |
+| Authentication | On or off; the identity provider, how this server reaches it, the client and its secret, the audience, the configured administrator, the session idle time, the access database | Off: every caller trusted |
 
 Exact variable names are in the repository README; they are deployment surface, not
 architecture.
@@ -559,11 +651,8 @@ Provider setup and the wire contract are documented in
 
 ## What the architecture does not provide
 
-Stated plainly, because their absence is a design position and not an oversight:
+Stated plainly, because its absence is a design position and not an oversight:
 
-- **No authentication or authorization.** Every caller has full access to every
-  ontology. OntoForge is deployed behind something that provides this, or on a trusted
-  network.
 - **No multi-tenancy.** An ontology isolates data but is not a tenant — the rule and
   its reason are in [decisions.md](decisions.md#scope).
 

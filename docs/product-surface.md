@@ -112,6 +112,50 @@ Per-lens client state (see [Local state](#local-state)) is keyed by ontology plu
 so switching either never leaks a working set, a chat or a query history across a
 boundary — not even between same-keyed lenses of two ontologies.
 
+### Signing in
+
+Only when the server reports authentication on
+([capabilities/authentication.md](capabilities/authentication.md)); otherwise none of this
+exists and every control is offered.
+
+- **Sign-in screen.** Anyone not signed in sees only the product mark and a Sign in
+  button, which leads to the identity provider and back to the address they came from. A
+  failed attempt, or a disabled account, is named above the button. A request that answers
+  unauthenticated, such as an ended session, brings the screen back. When the sign-in
+  state cannot be read at all, a screen says so with Retry, and nothing else is shown.
+- **No access assigned.** A signed-in user holding no role sees their name, that no role
+  has been given yet, and Sign out — nothing else.
+- **User menu.** In the sidebar of both surfaces and on the start page: the user's name
+  with their email or username, Users for those who manage users, and Sign out, which ends
+  the session and opens the provider's sign-out page.
+- **Users page** (`/admin/users`), for Platform Administrators and Ontology
+  Administrators. A searchable table — name, email or username, kind (user or service),
+  status, last sign-in — opens one user beside it: kind, username, last sign-in, when
+  added, their roles, each removable by whoever may revoke it, and an Add role form
+  choosing role, then ontology, then lens as far as the role needs. A Platform
+  Administrator also disables and enables the user, may add every role, and admits a
+  service by its name and its subject at the identity provider; an Ontology
+  Administrator sees and adds only Reader and Writer on the lenses of the ontologies it
+  administers.
+- **Access** (`/o/{ontologyKey}/studio/access`), a Studio page: the ontology's
+  administrators, then each lens with who reads and who writes through it, each removable;
+  an add form picks a user by search, a lens and Reader or Writer.
+
+**What each role sees.** Controls a role does not allow are not shown; the server refuses
+them all the same.
+
+| Where | Shown only to |
+|---|---|
+| Start page | The ontologies the user holds a role in; on a card, the lenses the user holds a role on ("No lens assigned to you" when none) |
+| "+ New ontology" | Ontology Creators |
+| A card's Open Studio, Rename and Delete; the Studio itself | The ontology's administrators; anyone else opening the Studio sees "No access to the Studio" |
+| The Workbench of a lens | Its Readers and Writers; anyone else sees "No access to this lens" |
+| Lens switcher, a type's links to other lenses | The lenses the user holds a role on |
+| Surface switch, "Manage lenses…", links into the Studio | The ontology's administrators |
+| New entity, quick add, editing, deleting, relating, documents' edit, the Explorer's connecting drag | Writers of the lens |
+| Starting, pinning, editing, submitting and committing a changeset | Writers of the lens; a Reader reviews and checks |
+| Ruleset maintenance | The ontology's administrators; everyone else uses the rulesets |
+
 ---
 
 ## Workbench screens
@@ -398,7 +442,7 @@ provider the navigation entry is gone and the screen renders an explanation; see
 
 The Studio is scoped wholesale to one ontology: its sidebar carries the ontology
 switcher and the surface switch beneath it, its navigation covers Schema, Lenses, Search
-and Transfer, and everything it reads and writes belongs to the current ontology. Its
+and Transfer, with authentication on also [Access](#signing-in), and everything it reads and writes belongs to the current ontology. Its
 footer holds the theme control and the collapse control. Like the Workbench sidebar, it
 collapses to an icon rail whose entries name themselves on hover; both sidebars share one
 collapse preference.
@@ -554,7 +598,9 @@ needs, or both. The configuration is offered in two formats, Claude Code and Cod
 address the server reports for itself ([interfaces.md](interfaces.md#server)); when it
 reports none, a visible placeholder stands in its place with a note to replace it. A
 switch adds an `Authorization: Bearer` header holding a token placeholder for servers
-reached through an access-controlled entry point. The runtime card's Ruleset select offers
+reached through an access-controlled entry point; with authentication on there is no
+switch, and a note says OAuth-capable clients sign in through the browser on first
+connect. The runtime card's Ruleset select offers
 none, the plain lens, or any of the ontology's [rulesets](#rulesets), each with its write
 access and its anchor; choosing one binds the runtime URL and the entry name to that
 ruleset, adds it as a third chip after ontology and lens, and shows one line per rule
@@ -1559,6 +1605,8 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/studio/search/new?entityType={typeKey}` | The same, with the entity type pre-selected |
 | `/o/{ontologyKey}/studio/search/{indexKey}` | An index: the designer for a custom index, the read-only view for a managed one |
 | `/o/{ontologyKey}/studio/transfer` | Export, import, rebuild search data |
+| `/o/{ontologyKey}/studio/access` | Who holds which role in the ontology ([Signing in](#signing-in)) |
+| `/admin/users` | The Users page ([Signing in](#signing-in)) |
 
 Two consumed parameters are stripped from the address as soon as they are acted on, so that
 a reload does not repeat the action: the quick-add trigger and the Explorer focus target.

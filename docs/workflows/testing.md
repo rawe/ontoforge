@@ -51,14 +51,22 @@ The provider contract and configuration template are described in
 [Decision API](../providers/decision-api.md).
 
 The Valkey suite checks the shared-state connection — a wrong eviction policy, a Valkey that
-may not run scripts, two scripts of one name — and runs the thread-store contract against a
-real Valkey, plus what only Valkey can do to it: a flush, a restart or a full memory under a
+may not run scripts, two scripts of one name — and runs the thread-store and session-store
+contracts against a real Valkey, plus what only Valkey can do to it: a flush, a restart or a full memory under a
 running turn, a dropped connection. After every test each key it left must expire. It uses the Valkey
 of `docker-compose.yml` (`docker compose up -d valkey`) in a logical database of its own,
 which `env/test-valkey.env` names and the suite insists on: it flushes only that database
 and restores the settings it changes, but it pauses and restarts the container, which
 ends the conversations a dev server keeps there. Like the integration suite, it fails
 loudly when its Valkey is down.
+
+The access store and authorization tests of the integration suite (`access-store`,
+`access-authorization`) need a second database: `ontoforge_access_test`, beside the test
+database in the same PostgreSQL, which they drop and create themselves. They stand in a
+stub for the identity provider. Authentication end to end — browser sign-in against the
+development Keycloak, bearer tokens, MCP OAuth with a real client, roles, revocation and
+disabling — is checked against a running server by `node scripts/auth/e2e.mjs`
+([scripts/auth/USAGE.md](../../scripts/auth/USAGE.md)).
 
 Behaviour across several servers sharing one database and one Valkey — a conversation
 continued on another server, a server replaced or drained, a schema change seen
@@ -148,7 +156,7 @@ npm run test:integration:ai
 ### Unit Tests
 
 - Place in `tests/` subdirectories matching the module structure (`modeling/`,
-  `runtime/`, `mcp/`, `core/`, `adapters/`)
+  `runtime/`, `mcp/`, `core/`, `adapters/`, `auth/`, `access/`)
 - Mock at the adapter boundary — never hit a real database
 - Shared schema fixtures live in `tests/fixtures/`
 

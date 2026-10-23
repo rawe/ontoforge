@@ -45,10 +45,14 @@ export class DesignChangedError extends ConflictError {
   }
 }
 
-/** No valid credential for a protected operation. -> 401 UNAUTHENTICATED */
+/** No valid credential for a protected operation. -> 401 UNAUTHENTICATED;
+ * `invalidToken` when a bearer token was sent and rejected. */
 export class UnauthenticatedError extends OntoForgeError {
-  constructor(message = "Sign in or send a valid bearer token") {
+  invalidToken: boolean;
+
+  constructor(message = "Sign in or send a valid bearer token", invalidToken = false) {
     super(message);
+    this.invalidToken = invalidToken;
   }
 }
 

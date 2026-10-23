@@ -7,8 +7,11 @@ import { pathToFileURL } from "node:url";
 
 import type { FastifyInstance } from "fastify";
 
+import { openAccessStore } from "./adapters/postgres/accessStore.js";
+import type { AccessStore } from "./access/store.js";
 import { createApp } from "./app.js";
-import { settings } from "./config.js";
+import { connectOidc } from "./auth/oidc.js";
+import { authSettings, settings } from "./config.js";
 import { closeAiModel, initAiModel } from "./core/ai.js";
 import { initDecisionModel } from "./core/decision.js";
 import {
@@ -25,6 +28,9 @@ import { openSharedState } from "./sharedState.js";
  *
  * 1. Connect storage, verify reachability, ensure constraints and indexes.
  *    Open the shared state; a Valkey must be reachable and evict nothing.
+ *    With authentication on, open the access database (creating and
+ *    upgrading it) and discover the OpenID provider; either failing fails
+ *    the boot. With it off, neither is touched.
  * 2. Initialize the embedding provider, if configured.
  * 3. Initialize the language-model provider, if configured.
  * 4. If embeddings are enabled, reconcile vector index widths against the
@@ -34,14 +40,21 @@ import { openSharedState } from "./sharedState.js";
  *    generations, then builds entries from the queue in the background.
  * 6. Start both MCP servers (mounted inside `createApp`).
  *
- * The app closes the shared state when it closes; a failed boot closes it here.
+ * The app closes the shared state and the access store when it closes; a
+ * failed boot closes them here.
  */
 export async function startServer(): Promise<FastifyInstance> {
   await initStores();
-  const shared = await openSharedState(
-    settings.SHARED_STATE === "valkey" ? { kind: "valkey", url: settings.VALKEY_URL! } : { kind: "memory" },
-  );
+  const auth = authSettings(settings);
+  const shared = await openSharedState({
+    ...(settings.SHARED_STATE === "valkey" ? { kind: "valkey", url: settings.VALKEY_URL! } : { kind: "memory" }),
+    sessionIdleMs: settings.AUTH_SESSION_IDLE_SECONDS * 1000,
+  });
+  let access: AccessStore | null = null;
   try {
+    if (auth !== null) {
+      access = await openAccessStore(auth.accessDbUri, settings.DB_USER, settings.DB_PASSWORD);
+    }
     initEmbeddingProvider();
     initAiModel();
     initDecisionModel();
@@ -50,9 +63,14 @@ export async function startServer(): Promise<FastifyInstance> {
       await ensureSemanticIndexes(embeddingProvider.dimensions);
     }
     await startSearchWorker();
+    const runtime =
+      auth !== null && access !== null
+        ? { settings: auth, oidc: await connectOidc(auth), access, sessions: shared.sessions }
+        : null;
     // Step 6: the MCP mounts are part of createApp.
-    return await createApp(shared);
+    return await createApp(shared, runtime);
   } catch (error) {
+    await access?.close();
     await shared.close();
     throw error;
   }

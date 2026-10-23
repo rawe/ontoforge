@@ -18,6 +18,7 @@ import { SERVER_VERSION } from "../version.js";
 const InfoResponse = z.object({
   baseUrl: z.string().nullable(),
   version: z.string(),
+  authentication: z.boolean(),
 });
 
 const FeaturesResponse = z.object({
@@ -40,6 +41,7 @@ export const serverRouter: FastifyPluginAsyncZod = async (app) => {
     async () => ({
       baseUrl: settings.PUBLIC_URL?.replace(/\/+$/, "") ?? null,
       version: SERVER_VERSION,
+      authentication: app.auth !== null,
     }),
   );
 

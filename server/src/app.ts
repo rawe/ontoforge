@@ -2,7 +2,7 @@
  * Fastify application factory: routes, error handlers, CORS, OpenAPI.
  *
  * Every error response uses the one envelope
- * `{"error": {"code", "message", "details?"}}` with exactly six codes —
+ * `{"error": {"code", "message", "details?"}}` with exactly eight codes —
  * see the error model in `docs/architecture.md`. Framework-level failures
  * are mapped into the same envelope: an unparsable JSON body answers
  * `400 INVALID_JSON`, a request-shape failure `422 VALIDATION_ERROR`.
@@ -24,11 +24,17 @@ import {
   validatorCompiler,
 } from "fastify-type-provider-zod";
 
+import { accessRouter } from "./access/router.js";
+import { challenge, classifyRoutes, guardRoutes } from "./auth/plugin.js";
+import { authRouter, resourceMetadataRouter } from "./auth/router.js";
+import type { AuthRuntime } from "./auth/runtime.js";
 import {
   CascadeRequiredError,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
   StoreError,
+  UnauthenticatedError,
   ValidationError,
 } from "./core/exceptions.js";
 import { mountMcp } from "./mcp/mount.js";
@@ -136,11 +142,19 @@ function sendError(
 }
 
 /** The app over `shared`, which it closes when it closes. The server
- * passes the configured shared state; tests that pass none get it in memory. */
-export async function createApp(shared?: SharedState): Promise<FastifyInstance> {
+ * passes the configured shared state; tests that pass none get it in memory.
+ * `auth`, when authentication is on, is closed with the app as well; without
+ * it the app runs without authentication. */
+export async function createApp(shared?: SharedState, auth: AuthRuntime | null = null): Promise<FastifyInstance> {
   const state = shared ?? (await openSharedState({ kind: "memory" }));
   const app = Fastify({ logger: false });
   app.addHook("onClose", () => state.close());
+  app.decorate("auth", auth);
+  if (auth !== null) {
+    app.addHook("onClose", () => auth.access.close());
+    // Before any route: every route registered from here on declares its need.
+    classifyRoutes(app);
+  }
 
   const lifecycle = new Lifecycle();
   app.decorate("lifecycle", lifecycle);
@@ -195,12 +209,17 @@ export async function createApp(shared?: SharedState): Promise<FastifyInstance> 
   );
 
   // CORS allow-all: origins, methods and headers unrestricted, credentials
-  // allowed (the origin is reflected).
+  // allowed (the origin is reflected). With authentication on, no credentials:
+  // the session cookie serves this deployment's own origin only, and a
+  // bearer caller needs none.
   await app.register(cors, {
     origin: true,
-    credentials: true,
+    credentials: auth === null,
     methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+    ...(auth !== null ? { exposedHeaders: ["WWW-Authenticate"] } : {}),
   });
+  // After CORS, so a refusal still carries its CORS headers.
+  if (auth !== null) guardRoutes(app);
 
   await app.register(swagger, {
     openapi: {
@@ -229,6 +248,13 @@ export async function createApp(shared?: SharedState): Promise<FastifyInstance> 
   });
 
   app.setErrorHandler((error, request, reply) => {
+    if (error instanceof UnauthenticatedError) {
+      reply.header("www-authenticate", challenge(request, error));
+      return sendError(reply, 401, "UNAUTHENTICATED", error.message);
+    }
+    if (error instanceof ForbiddenError) {
+      return sendError(reply, 403, "FORBIDDEN", error.message);
+    }
     if (error instanceof NotFoundError) {
       return sendError(reply, 404, "RESOURCE_NOT_FOUND", error.message, error.details);
     }
@@ -279,6 +305,13 @@ export async function createApp(shared?: SharedState): Promise<FastifyInstance> 
   await app.register(registryRouter, { prefix: "/api" });
   // The phase-neutral server surface: capability reads only.
   await app.register(serverRouter, { prefix: "/api/server" });
+  // Sign-in; with authentication off only `me`, which says so.
+  await app.register(authRouter, { prefix: "/api/auth" });
+  if (auth !== null) {
+    // User management exists only with authentication on.
+    await app.register(accessRouter, { prefix: "/api" });
+    await app.register(resourceMetadataRouter);
+  }
   // The modeling and runtime surfaces are ontology-scoped: every request
   // names its ontology in the path and runs against a store bound to it;
   // runtime requests additionally name the lens they read through.

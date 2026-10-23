@@ -30,8 +30,8 @@ data alone; a changeset's plan is seen only through the changeset's own reads
 
 | State | What it allows |
 |---|---|
-| `draft` | stage, unstage, cut, rebase, submit, commit, discard |
-| `submitted` | unsubmit, commit; it is frozen for everything else |
+| `draft` | stage, unstage, cut, rebase, check, submit, commit, discard |
+| `submitted` | check, unsubmit, commit; it is frozen for everything else |
 
 A changeset starts as a draft. After a commit or a discard it is gone, and every call
 naming it answers not found — the same answer as for an id that never existed, one that
@@ -136,6 +136,16 @@ and lists the violations of the step that rejected it, at most 100 with their to
 names the staged object it sits on, and the property when it concerns one value; those on
 the whole changeset come first, then the others in the order the checks find them.
 
+### The check
+
+A **check** runs the commit's own steps on a draft or a submitted changeset, all five, and
+then rolls everything back instead of persisting. It answers what a commit of that version
+would — the number of staged objects and the deletes already gone, or the same violations —
+with the version it checked, and it changes nothing: neither the data and its search work,
+nor the changeset's state, version or last change. It holds the commit lock while it runs
+and counts as a running commit. A commit after a check can still differ when the data or
+the changeset change meanwhile.
+
 ### Commit validation
 
 | Kind | When |
@@ -195,7 +205,7 @@ if any.
   entity the lens hides, staging through the ruleset's URL and submit answer a conflict,
   and the commit rejects with `anchor_deleted` or `anchor_hidden`; unstage, cut, rebase,
   unsubmit and discard still work. Whether the staged objects stay in the subtree is
-  judged at the commit only.
+  judged by the commit and a check only.
 - **A ruleset deleted** makes its URL answer not found; its changesets stay reachable
   through the plain lens URL, and their commit rejects with `ruleset_gone`.
 - **A lens deleted** deletes its changesets, draft and submitted, and reports how many
@@ -214,6 +224,9 @@ discarding are refused as a conflict.
 **Unsubmit** makes it a draft again, from whoever calls it, with a required note that
 replaces the stored one — the way to send a plan back, or to turn it down before
 discarding it.
+
+A [check](#the-check) shows the client before it submits, and the reviewer before they
+commit, everything the commit would find, the parent rules and the anchor included.
 
 **Committing a submitted changeset is the approval.** The reviewer commits with the version
 they looked at, so a plan changed since then is refused rather than committed unseen. A
@@ -257,8 +270,8 @@ its staged text is not found; a document value is shown only by its length.
 - **Expiry.** A draft changeset unchanged for 7 days is deleted. Every change of it, and a
   rejected commit, counts as a change; a submitted changeset never expires.
 - **The note** is at most 1,000 characters.
-- **One commit runs at a time in one server process**; a second answers a conflict at
-  once, holding nothing.
+- **One commit runs at a time in one server process**, a check counted as one; a second
+  answers a conflict at once, holding nothing.
 
 Each staged call reads its target once. Submit runs the lock-free pass over the whole
 changeset, with no lock; the read of a changeset's objects judges the objects of its page
@@ -269,7 +282,6 @@ database connection for its whole run, and every row it touches waits as long.
 
 ## Not possible
 
-- Graph-rule faults before the commit: submit reports only the lock-free pass's.
 - Turning a plan down without a trace: a submitted changeset is unsubmitted with a note.
 - The history of the calls that built a changeset, merging changesets, or a sign that two
   changesets touch the same object.
@@ -282,7 +294,7 @@ database connection for its whole run, and every row it touches waits as long.
 
 | | REST | MCP | Web UI |
 |---|---|---|---|
-| Start, list, read, unstage, cut, rebase, submit, unsubmit, commit, discard | routes under `changesets` of a runtime mount | ten changeset tools | the Workbench's Changesets page: start, list, review with the staged text of a document, remove an object, cut a value, accept current, submit, unsubmit, commit, discard; an entity's page, as the pinned changeset leaves it |
+| Start, list, read, unstage, cut, rebase, check, submit, unsubmit, commit, discard | routes under `changesets` of a runtime mount | eleven changeset tools | the Workbench's Changesets page: start, list, review with the staged text of a document, remove an object, cut a value, accept current, check, submit, unsubmit, commit, discard; an entity's page, as the pinned changeset leaves it |
 | Stage | `writes` of one changeset | the six write tools and the two document tools with `changeset_id` | the Workbench's writes while a changeset is pinned, except the Explorer canvas's |
 
 Routes and tools: [../interfaces.md](../interfaces.md#changesets). No MCP tool reads one

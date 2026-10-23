@@ -594,6 +594,7 @@ Semantics: [capabilities/changesets.md](capabilities/changesets.md).
 | POST | `/changesets/{changesetId}/objects/{objectId}/rebase` | Rebase an update, with optional `properties`, the keys to rebase | — |
 | POST | `/changesets/{changesetId}/submit` | Submit, with an optional `note` | — |
 | POST | `/changesets/{changesetId}/unsubmit` | Unsubmit, with a required `note` | — |
+| POST | `/changesets/{changesetId}/check` | Check: run the commit and roll it back; no body | — |
 | POST | `/changesets/{changesetId}/commit` | Commit, with an optional `expectedVersion` | — |
 
 A staged call's `operation` is one of seven, each with its keys and no other:
@@ -617,17 +618,19 @@ does. The staged entity read answers `{entity, deleted, object}`: `entity` as th
 read answers it, without timestamps for an entity the changeset creates, `object` as the
 changeset read shows it, or null. Start, submit and unsubmit answer the changeset, and
 rebase the object; commit answers `{committed, alreadyGone}`, the number of staged objects
-and the ids of deletes whose target was already gone. Every unknown changeset —
+and the ids of deletes whose target was already gone, and a check that passes
+`{version, committed, alreadyGone}`, with the version it checked. Every unknown changeset —
 committed, discarded, expired, never started, or bound to another lens or ruleset — is
 `RESOURCE_NOT_FOUND`, and so is an object or value the changeset does not stage. A
 refusal by state is `RESOURCE_CONFLICT`: a submitted or busy changeset, one changed
 during the call, a stale `expectedVersion`, a full changeset, a rebase of a create or a
 delete, a call the write access of the URL's ruleset does not allow, a second commit on
-the ontology or in the process.
-Staging answers the immediate write's validation errors. A submit refused by its faults
-and a rejected commit answer `VALIDATION_ERROR` with `details.violations`, each
-`{object, property?, kind, message}`, at most 100, and `details.total`; `object` is the
-staged object's id, or null for the changeset as a whole, and those come first.
+the ontology or in the process, a check beside a running commit.
+Staging answers the immediate write's validation errors. A submit refused by its faults,
+a rejected commit and a failed check answer `VALIDATION_ERROR` with `details.violations`,
+each `{object, property?, kind, message}`, at most 100, and `details.total`; `object` is
+the staged object's id, or null for the changeset as a whole, and those come first. A
+failed check adds `details.version`, the version it checked.
 
 ### Search
 
@@ -944,7 +947,7 @@ connection carries state.
 |---|---|---|
 | Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
 | Bound to | One ontology | One ontology and one lens |
-| Tools | 45 | 34; 35 on a ruleset mount, 34 with write access `propose`, 20 with `none` |
+| Tools | 45 | 35; 36 on a ruleset mount, 35 with write access `propose`, 20 with `none` |
 
 ### How a mount is bound
 
@@ -1072,6 +1075,7 @@ Everything a client can do to instance data through one lens.
 | `rebase` | Rebase an update, by `object_id`, with optional `properties` |
 | `submit_changeset` | Submit a changeset, with an optional `note` |
 | `unsubmit_changeset` | Unsubmit a changeset, with a required `note` |
+| `check_changeset` | Check a changeset: run the commit and roll it back |
 | `commit_changeset` | Commit a changeset, with an optional `expected_version` |
 | `discard_changeset` | Discard a draft changeset |
 

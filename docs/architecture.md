@@ -344,9 +344,9 @@ transaction's one connection. It is the one exception to every port operation ow
 connection, and taking a second connection inside it is a programming error
 ([storage-adapters.md](storage-adapters.md#transactions)).
 
-**The commit lock.** Each ontology has one commit lock, held only by commits and only for
-the commit's transaction; a second commit on the ontology is refused at once rather than
-queued. Immediate writes, staging and submit never take it; an immediate write waits only
+**The commit lock.** Each ontology has one commit lock, held only by commits and checks
+and only for their transaction; a second commit on the ontology is refused at once rather
+than queued. Immediate writes, staging and submit never take it; an immediate write waits only
 for a row a running commit has locked.
 
 ## Search indexing

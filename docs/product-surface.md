@@ -317,7 +317,7 @@ The Studio manages no rulesets: its Connect tab links here.
 ### Changesets
 
 The lens's [changesets](capabilities/changesets.md), those started through a ruleset
-included, as the lens shows them now. The page starts, reviews, submits, commits and
+included, as the lens shows them now. The page starts, reviews, checks, submits, commits and
 discards them, and pins one to work in. A help button beside the title of the list and of each review explains the workflow: the states and who
 may take each way between them, a client or a person. One example changeset plays step by
 step through it in nine steps: calls becoming staged objects with their values, a later
@@ -351,6 +351,9 @@ commit in its phases.
   submitted changeset offers to unsubmit it at once with those
   violations as its note, cut to 1,000 characters. A successful one returns to the list
   and refreshes every runtime view of the ontology.
+- **Check**, beside Submit, on a draft or a submitted changeset, runs the commit without
+  persisting anything: a pass says how many staged objects a commit would persist, and a
+  failure lists the violations in the same panel, with the version checked.
 - **Submit** asks for an optional note, which replaces the stored one, and works on a draft
   only; while submitted it is disabled, saying so. A submit refused by its faults lists its
   violations in the same panel, and the changeset stays a draft.

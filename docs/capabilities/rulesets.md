@@ -100,7 +100,7 @@ the server fixes, and each level allows a fixed set of them:
 | Operation | What it covers | `none` | `propose` | `full` |
 |---|---|---|---|---|
 | `read` | every read, list, search and query, the path read, `get_ruleset`, and the changeset reads: list, read, the staged text of a document, one entity as the changeset leaves it | ✓ | ✓ | ✓ |
-| `stage` | start a changeset, stage a write into it, unstage, cut, rebase, submit, unsubmit, discard | — | ✓ | ✓ |
+| `stage` | start a changeset, stage a write into it, unstage, cut, rebase, check, submit, unsubmit, discard | — | ✓ | ✓ |
 | `commit` | commit a changeset | — | — | ✓ |
 | `write` | every immediate write, document edits included | — | — | ✓ |
 

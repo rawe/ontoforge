@@ -17,18 +17,23 @@ import {
 const SERVER_DDL = ["CREATE TABLE IF NOT EXISTS public.storage_version (version integer NOT NULL)"];
 
 /** A database as the boot sees it: the version row (absent = unversioned),
- * whether the registry exists, its ontology namespaces, and whether they
- * keep retrievers in `retriever_config` (the unreleased version 2). */
+ * whether the registry exists, its ontology namespaces, whether they
+ * keep retrievers in `retriever_config` (the unreleased version 2), and
+ * whether another server holds the storage lock. */
 function database(state: {
   version?: number;
   registry: boolean;
   namespaces?: string[];
   retrieverConfig?: boolean;
+  lockHeld?: boolean;
 }) {
   const queries: string[] = [];
   const querier: Querier = {
     async query(text: string): Promise<DbResult> {
       queries.push(text);
+      if (text.includes("pg_try_advisory_xact_lock")) {
+        return { rows: [{ locked: !(state.lockHeld ?? false) }], rowCount: 1 };
+      }
       if (text.includes("to_regclass") && text.includes("retriever_config")) {
         return { rows: [{ present: state.retrieverConfig ?? false }], rowCount: 1 };
       }
@@ -75,7 +80,15 @@ describe("storage version at boot", () => {
   it("takes the database-wide lock before reading the version", async () => {
     const { querier, queries } = database({ version: STORAGE_VERSION, registry: true });
     await bringStorageUpToDate(querier, SERVER_DDL);
-    expect(queries[0]).toContain("pg_advisory_xact_lock");
+    expect(queries[0]).toContain("pg_try_advisory_xact_lock");
+    expect(queries.some((q) => q.includes("pg_advisory_xact_lock"))).toBe(false);
+  });
+
+  it("says it waits while another server holds the lock, then takes it", async () => {
+    const { querier, queries } = database({ version: STORAGE_VERSION, registry: true, lockHeld: true });
+    await bringStorageUpToDate(querier, SERVER_DDL);
+    expect(console.log).toHaveBeenCalledWith("Waiting for another server to bring the storage up to date.");
+    expect(queries[1]).toContain("pg_advisory_xact_lock");
   });
 
   it("records an empty database at the current version without running a step", async () => {

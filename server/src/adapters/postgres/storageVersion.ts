@@ -603,7 +603,7 @@ const STEPS: Step[] = [
 ];
 
 /** Serializes the boot DDL and upgrade of every server on one database. */
-const LOCK = `SELECT pg_advisory_xact_lock(hashtextextended('ontoforge.storage', 0))`;
+const LOCK_KEY = `hashtextextended('ontoforge.storage', 0)`;
 
 /** The recorded version; `null` for an empty database. */
 async function recordedVersion(querier: Querier): Promise<number | null> {
@@ -634,7 +634,11 @@ export async function bringStorageUpToDate(
   querier: Querier,
   serverDdl: readonly string[],
 ): Promise<void> {
-  await querier.query(LOCK);
+  const free = await querier.query(`SELECT pg_try_advisory_xact_lock(${LOCK_KEY}) AS locked`);
+  if (free.rows[0]!["locked"] !== true) {
+    console.log("Waiting for another server to bring the storage up to date.");
+    await querier.query(`SELECT pg_advisory_xact_lock(${LOCK_KEY})`);
+  }
   const recorded = await recordedVersion(querier);
   if (recorded !== null && recorded > STORAGE_VERSION) {
     throw new Error(

@@ -5,9 +5,10 @@ removed, and when it gets an ADR: [workflows/recording-decisions.md](workflows/r
 
 ## System shape
 
-**One server serves everything: registry, modeling, runtime and both MCP servers, with no
-mode switch and no partial deployment.** A schema change and the data it governs must never
-be able to reach different servers.
+**Every server serves everything — registry, modeling, runtime and both MCP servers — with
+no mode switch and no partial deployment, and any number of identical servers share one
+database and one thread store.** A schema change and the data it governs must never be able
+to diverge between servers.
 
 **One database holds every ontology's schema and instance data.** Two stores would turn
 every schema change into a distributed transaction to buy an isolation nothing needs.
@@ -50,9 +51,16 @@ the adapter.** Services, routers and MCP handlers then speak schema vocabulary o
 ontology; registry operations live on a separate registry port.** Isolation is then structural above the
 adapter rather than a filter a query could forget.
 
-**Conversations live in one thread store per server, behind an interface of its own beside
-the persistence port.** Conversation state is not ontology data: it is never exported,
-never cascades and expires on its own, so it stays out of the port.
+**Conversations live in one thread store shared by every server, behind an interface of its
+own beside the persistence port; a store in memory serves a single process only and never
+replaces a configured shared one.** Conversation state is not ontology data: it is never
+exported, never cascades and expires on its own, so it stays out of the port; a server
+falling back to memory would split the conversations unnoticed.
+
+**Every data write commits against the design revision it validated against, holding the
+design shared; every design change holds the design exclusively and advances the
+revision.** A server validating against a stale schema then cannot write what the current
+design forbids, with no signal between servers.
 
 **On PostgreSQL, each ontology lives in its own namespace, and `public` holds only
 server-wide data.** Inside the adapter too, no query can reach another ontology's data by

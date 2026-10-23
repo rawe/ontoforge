@@ -298,8 +298,8 @@ Sharing stops at the ontology boundary: lenses of two ontologies share nothing,
 whatever their keys.
 
 A lens is assembled once per process, cached under its ontology and lens keys, and
-discarded after any modeling change; the caching rules and their one operational
-limit are in [../architecture.md](../architecture.md).
+used only while the ontology's design is unchanged; the caching rules are in
+[../architecture.md](../architecture.md#schema-cache).
 
 ## Through the interfaces
 

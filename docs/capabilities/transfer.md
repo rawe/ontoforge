@@ -156,9 +156,8 @@ Two consequences:
   together with the target's own, are read against the relations already stored in the
   target — which a deleted relation type leaves behind — and a violation is refused with
   the same conflict and its list. A rejected payload writes
-  nothing. Only a clean payload starts writing. The residual risk is a crash mid-write,
-  which can leave a partial schema; a retry after cleanup then behaves like a fresh
-  import.
+  nothing. Only a clean payload starts writing, and the writing is one design change: a
+  failure at any point, a crash included, leaves the target as it was.
 
 ### Replacing an existing design
 
@@ -245,10 +244,9 @@ artefacts and computes embeddings, all within the target ontology.
   index gets its generations, which the worker builds in the background
   ([search-indices.md](search-indices.md#lifecycle)); with no instance data imported,
   there is nothing to build until data is written.
-- **Embedding.** Each imported saved query's description is embedded as it is written, so
-  the queries are semantically discoverable immediately. Nothing else is embedded — there
-  is no instance data to embed.
-- **Cache invalidation.** Import clears the schema cache, as any modeling change does.
+- **Embedding.** Each imported saved query's description is embedded before anything is
+  written, so the queries are semantically discoverable immediately. Nothing else is
+  embedded — there is no instance data to embed.
 - **Retrievers** are written last, once the indices exist. They embed nothing; a
   `5.0` payload's converted agents keep their conversion warnings, key renames among them
   ([above](#the-format-version)).

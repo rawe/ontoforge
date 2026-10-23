@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Plus, Search, UserX, Users } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -178,6 +178,71 @@ function AddRoleForm({ user }: { user: User }) {
   )
 }
 
+/* ------------------------------- admit service ------------------------------ */
+
+/**
+ * A service principal signs in with its own token, never in the browser, so it
+ * is added by hand: a name and the identity provider's subject of its account.
+ */
+function AdmitServiceForm({ onAdmitted }: { onAdmitted: (user: User) => void }) {
+  const queryClient = useQueryClient()
+  const id = useId()
+  const [displayName, setDisplayName] = useState('')
+  const [subject, setSubject] = useState('')
+  const ready = displayName.trim() !== '' && subject.trim() !== ''
+
+  const admit = useMutation({
+    mutationFn: () =>
+      users.createServiceUser({ displayName: displayName.trim(), subject: subject.trim() }),
+    onSuccess: (user) => {
+      invalidateAccess(queryClient)
+      toast.success(`${user.displayName} admitted`)
+      setDisplayName('')
+      setSubject('')
+      onAdmitted(user)
+    },
+    onError: toastError,
+  })
+
+  return (
+    <form
+      className="grid gap-2 rounded-xl border bg-card p-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (ready && !admit.isPending) admit.mutate()
+      }}
+    >
+      <h2 className="text-sm font-semibold">Admit service</h2>
+      <Label htmlFor={`${id}-name`} className="text-[12px]">
+        Display name
+      </Label>
+      <Input
+        id={`${id}-name`}
+        value={displayName}
+        onChange={(e) => setDisplayName(e.target.value)}
+        className="h-8 text-[13px]"
+      />
+      <Label htmlFor={`${id}-subject`} className="text-[12px]">
+        Subject at the identity provider
+      </Label>
+      <Input
+        id={`${id}-subject`}
+        value={subject}
+        onChange={(e) => setSubject(e.target.value)}
+        className="h-8 font-mono text-[12.5px]"
+      />
+      <Button
+        type="submit"
+        size="sm"
+        disabled={!ready || admit.isPending}
+        className="justify-self-start"
+      >
+        <Plus className="size-3.5" /> Admit
+      </Button>
+    </form>
+  )
+}
+
 /* ---------------------------------- detail ---------------------------------- */
 
 /** One user: who it is, its assignments (an Ontology Administrator sees those within its ontologies). */
@@ -289,7 +354,7 @@ function UserDetail({ userId }: { userId: string }) {
 
 /**
  * `/admin/users` — find users, see and change their roles. Platform
- * Administrators manage every role and a user's status; Ontology
+ * Administrators manage every role and a user's status, and admit services; Ontology
  * Administrators grant Reader and Writer on lenses of their ontologies.
  */
 export function UsersPage() {
@@ -442,7 +507,7 @@ export function UsersPage() {
             )}
           </div>
 
-          <aside className="lg:sticky lg:top-6">
+          <aside className="space-y-3 lg:sticky lg:top-6">
             {selected === null ? (
               <p className="rounded-xl border border-dashed p-4 text-center text-[13px] text-muted-foreground">
                 Choose a user to see and change its roles.
@@ -450,6 +515,7 @@ export function UsersPage() {
             ) : (
               <UserDetail userId={selected} />
             )}
+            {access.isPlatformAdmin && <AdmitServiceForm onAdmitted={(user) => select(user.id)} />}
           </aside>
         </div>
       </div>

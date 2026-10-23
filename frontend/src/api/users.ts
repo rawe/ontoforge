@@ -9,6 +9,10 @@ import type { AccessAssignment, Assignment, AssignmentInput, User, UserDetail } 
 export const listUsers = (params: { search?: string; limit?: number; offset?: number }) =>
   request<{ items: User[]; total: number }>(`/api/users${buildQuery(params)}`)
 
+/** Admits a service principal by its subject at the identity provider; 409 when the subject is taken. */
+export const createServiceUser = (body: { displayName: string; subject: string }) =>
+  request<User>('/api/users', { method: 'POST', body: { kind: 'service', ...body } })
+
 /** An ontology administrator sees only the assignments within its ontologies. */
 export const getUser = (userId: string) =>
   request<UserDetail>(`/api/users/${encodeURIComponent(userId)}`)

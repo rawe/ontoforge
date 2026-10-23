@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { loadSettings } from "../../src/config.js";
+import { authSettings, loadSettings } from "../../src/config.js";
 
 describe("config defaults", () => {
   const settings = loadSettings({});
@@ -251,5 +251,65 @@ describe("shared state configuration", () => {
     expect(() => loadSettings({ SHARED_STATE: "valkey", VALKEY_URL: "http://valkey:6379" })).toThrow(/VALKEY_URL/);
     expect(() => loadSettings({ VALKEY_URL: "redis://valkey:6379" })).toThrow(/SHARED_STATE is not 'valkey'/);
     expect(() => loadSettings({ SHARED_STATE: "memory", VALKEY_URL: "redis://valkey:6379" })).toThrow(/VALKEY_URL/);
+  });
+});
+
+describe("authentication settings", () => {
+  const enabled = {
+    AUTH_ENABLED: "true",
+    PUBLIC_URL: "http://localhost:5173/",
+    OIDC_ISSUER: "http://localhost:8180/realms/ontoforge",
+    OIDC_CLIENT_ID: "ontoforge-web",
+    OIDC_CLIENT_SECRET: "s3cret",
+    OIDC_AUDIENCE: "ontoforge-api",
+    AUTH_ADMIN_SUBJECT: "4f1c",
+    ACCESS_DB_URI: "postgresql://localhost:5432/ontoforge_access",
+  };
+
+  it("is off by default and then reads none of its variables", () => {
+    const settings = loadSettings({ OIDC_ISSUER: "not a url" });
+    expect(settings.AUTH_ENABLED).toBe(false);
+    expect(settings.OIDC_ISSUER).toBeNull();
+    expect(authSettings(settings)).toBeNull();
+  });
+
+  it("accepts only true or false", () => {
+    expect(() => loadSettings({ AUTH_ENABLED: "yes" })).toThrow(/AUTH_ENABLED/);
+    expect(loadSettings({ AUTH_ENABLED: "false" }).AUTH_ENABLED).toBe(false);
+  });
+
+  it("reads every variable when on", () => {
+    const auth = authSettings(loadSettings(enabled))!;
+    expect(auth).toEqual({
+      issuer: "http://localhost:8180/realms/ontoforge",
+      backchannelUrl: "http://localhost:8180/realms/ontoforge",
+      clientId: "ontoforge-web",
+      clientSecret: "s3cret",
+      audience: "ontoforge-api",
+      adminSubject: "4f1c",
+      sessionIdleSeconds: 28800,
+      accessDbUri: "postgresql://localhost:5432/ontoforge_access",
+      publicUrl: "http://localhost:5173",
+    });
+    expect(
+      authSettings(
+        loadSettings({ ...enabled, OIDC_BACKCHANNEL_URL: "http://host.docker.internal:8180/realms/ontoforge/", AUTH_SESSION_IDLE_SECONDS: "60" }),
+      ),
+    ).toMatchObject({ backchannelUrl: "http://host.docker.internal:8180/realms/ontoforge", sessionIdleSeconds: 60 });
+  });
+
+  it("fails the boot naming each missing variable when on", () => {
+    for (const name of Object.keys(enabled).filter((n) => n !== "AUTH_ENABLED")) {
+      const env: Record<string, string> = { ...enabled };
+      delete env[name];
+      expect(() => loadSettings(env), name).toThrow(new RegExp(name));
+    }
+  });
+
+  it("refuses malformed URLs", () => {
+    expect(() => loadSettings({ ...enabled, OIDC_ISSUER: "localhost:8180" })).toThrow(/OIDC_ISSUER/);
+    expect(() => loadSettings({ ...enabled, PUBLIC_URL: "ftp://x" })).toThrow(/PUBLIC_URL/);
+    expect(() => loadSettings({ ...enabled, ACCESS_DB_URI: "mysql://x/y" })).toThrow(/ACCESS_DB_URI/);
+    expect(() => loadSettings({ ...enabled, OIDC_BACKCHANNEL_URL: "nope" })).toThrow(/OIDC_BACKCHANNEL_URL/);
   });
 });

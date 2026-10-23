@@ -12,10 +12,8 @@
 export type PrincipalKind = "user" | "service";
 export type PrincipalStatus = "active" | "disabled";
 
-export const PLATFORM_ROLES = ["platform_admin", "ontology_creator"] as const;
-export const LENS_ROLES = ["reader", "writer"] as const;
-export type Role = (typeof PLATFORM_ROLES)[number] | "ontology_admin" | (typeof LENS_ROLES)[number];
-export const ROLES: readonly Role[] = ["platform_admin", "ontology_creator", "ontology_admin", "reader", "writer"];
+export const ROLES = ["platform_admin", "ontology_creator", "ontology_admin", "reader", "writer"] as const;
+export type Role = (typeof ROLES)[number];
 
 export interface Principal {
   id: string;
@@ -27,13 +25,6 @@ export interface Principal {
   createdAt: Date;
   updatedAt: Date;
   lastLoginAt: Date | null;
-}
-
-export interface Identity {
-  issuer: string;
-  subject: string;
-  principalId: string;
-  createdAt: Date;
 }
 
 export interface Assignment {
@@ -81,7 +72,6 @@ export interface AccessStore {
   /** The principal an identity is bound to, unchanged. */
   principalOf(issuer: string, subject: string): Promise<Principal | null>;
   principal(id: string): Promise<Principal | null>;
-  identities(principalId: string): Promise<Identity[]>;
   assignmentsOf(principalId: string): Promise<Assignment[]>;
   assignment(id: string): Promise<Assignment | null>;
   assignmentsInOntology(ontologyId: string): Promise<Assignment[]>;

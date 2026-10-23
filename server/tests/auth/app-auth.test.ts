@@ -55,7 +55,7 @@ afterAll(async () => {
 async function sessionOf(subject: string): Promise<string> {
   const principal = (await fakes.access.principalOf(ISSUER, subject)) ?? fakes.access.add(subject);
   const id = `session-${subject}-${Math.random()}`;
-  await fakes.runtime.sessions.create(id, { principalId: principal.id, issuer: ISSUER, subject });
+  await fakes.runtime.sessions.create(id, { principalId: principal.id });
   return id;
 }
 

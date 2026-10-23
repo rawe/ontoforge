@@ -12,31 +12,9 @@ import { z } from "zod";
 import { accessOf } from "../auth/plugin.js";
 import { UnauthenticatedError } from "../core/exceptions.js";
 import type { Caller } from "./caller.js";
+import { Assignment, Role, User } from "./schemas.js";
 import * as service from "./service.js";
 import type { AccessStore } from "./store.js";
-
-const User = z.object({
-  id: z.string(),
-  kind: z.enum(["user", "service"]),
-  displayName: z.string(),
-  email: z.string().nullable(),
-  username: z.string().nullable(),
-  status: z.enum(["active", "disabled"]),
-  createdAt: z.iso.datetime(),
-  lastLoginAt: z.iso.datetime().nullable(),
-});
-
-const Role = z.enum(["platform_admin", "ontology_creator", "ontology_admin", "reader", "writer"]);
-
-const Assignment = z.object({
-  id: z.string(),
-  role: Role,
-  ontologyKey: z.string().nullable(),
-  lensKey: z.string().nullable(),
-  ontologyId: z.string().nullable(),
-  lensId: z.string().nullable(),
-  createdAt: z.iso.datetime(),
-});
 
 const UserParams = z.object({ userId: z.string() });
 const AssignmentParams = UserParams.extend({ assignmentId: z.string() });

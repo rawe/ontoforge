@@ -16,8 +16,6 @@ import { StoreError } from "../core/exceptions.js";
 
 export interface Session {
   principalId: string;
-  issuer: string;
-  subject: string;
 }
 
 export interface SessionLifetimes {

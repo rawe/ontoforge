@@ -280,11 +280,6 @@ export function createModelingMcpServer(ontologyKey: string, authentication = fa
       if ((await registry.getOntology(ontologyKey)) !== null) {
         return jsonResult({ key: ontologyKey, created: false });
       }
-      if (authentication) {
-        throw new ValidationError(
-          `Ontology '${ontologyKey}' does not exist; create it through the REST API or the web client`,
-        );
-      }
       const body = OntologyCreate.parse({ key: ontologyKey });
       await registryService.createOntology(body, registry);
       return jsonResult({ key: ontologyKey, created: true });

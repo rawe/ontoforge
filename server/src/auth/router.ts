@@ -16,6 +16,7 @@ import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import type { Access } from "../access/caller.js";
+import { Assignment, User } from "../access/schemas.js";
 import { assignmentViews, userView } from "../access/service.js";
 import { ForbiddenError, UnauthenticatedError } from "../core/exceptions.js";
 import {
@@ -29,33 +30,12 @@ import {
 } from "./cookies.js";
 import { LOGIN_LIFETIME_MS, loginCookieKey, openLogin, sealLogin } from "./loginCookie.js";
 import { API_SCOPE } from "./oidc.js";
-import { accessOf, checkOrigin, isConfiguredAdmin } from "./plugin.js";
-
-const User = z.object({
-  id: z.string(),
-  kind: z.enum(["user", "service"]),
-  displayName: z.string(),
-  email: z.string().nullable(),
-  username: z.string().nullable(),
-  status: z.enum(["active", "disabled"]),
-  createdAt: z.string(),
-  lastLoginAt: z.string().nullable(),
-});
-
-const MyAssignment = z.object({
-  id: z.string(),
-  role: z.enum(["platform_admin", "ontology_creator", "ontology_admin", "reader", "writer"]),
-  ontologyKey: z.string().nullable(),
-  lensKey: z.string().nullable(),
-  ontologyId: z.string().nullable(),
-  lensId: z.string().nullable(),
-  createdAt: z.string(),
-});
+import { accessOf, checkOrigin, isConfiguredAdmin, profileOf } from "./plugin.js";
 
 const MeResponse = z.object({
   authentication: z.boolean(),
   user: User.nullable().optional(),
-  assignments: z.array(MyAssignment).optional(),
+  assignments: z.array(Assignment).optional(),
 });
 
 const LoginQuery = z.object({ returnTo: z.string().optional() });
@@ -140,19 +120,14 @@ export const authRouter: FastifyPluginAsyncZod = async (app) => {
       return fail("failed");
     }
     const { issuer, subject } = identified;
-    const principal = await auth.access.signIn(
-      issuer,
-      subject,
-      { displayName: identified.displayName, email: identified.email, username: identified.username },
-      isConfiguredAdmin(auth, issuer, subject),
-    );
+    const principal = await auth.access.signIn(issuer, subject, profileOf(identified), isConfiguredAdmin(auth, issuer, subject));
     if (principal.status === "disabled") return fail("disabled");
 
     // A new session at every sign-in; one the browser still carries ends.
     const previous = readCookie(request, names.session);
     if (previous !== null) await auth.sessions.delete(previous);
     const sessionId = newSessionId();
-    await auth.sessions.create(sessionId, { principalId: principal.id, issuer, subject });
+    await auth.sessions.create(sessionId, { principalId: principal.id });
     return reply
       .header("set-cookie", [sessionCookie(names.session, sessionId), clearLogin])
       .redirect(transaction.returnTo);

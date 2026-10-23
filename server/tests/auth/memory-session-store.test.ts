@@ -14,7 +14,7 @@ sessionStoreSuite("in memory", async (lifetimes) => {
   return { store: new MemorySessionStore(lifetimes, () => now), advance: async (ms) => { now += ms; } };
 });
 
-const SESSION = { principalId: "p", issuer: "i", subject: "s" };
+const SESSION = { principalId: "p" };
 
 describe("in-memory session store", () => {
   it("refuses beyond its bound once nothing has expired, and makes room from expired entries", async () => {

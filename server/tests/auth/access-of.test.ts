@@ -53,7 +53,7 @@ describe("accessOf", () => {
   async function session(subject: string): Promise<string> {
     const principal = (await fakes.access.principalOf(fakes.runtime.settings.issuer, subject)) ?? fakes.access.add(subject);
     const id = `session-of-${subject}`;
-    await fakes.runtime.sessions.create(id, { principalId: principal.id, issuer: fakes.runtime.settings.issuer, subject });
+    await fakes.runtime.sessions.create(id, { principalId: principal.id });
     return id;
   }
 

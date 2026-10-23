@@ -2,7 +2,7 @@
  * Fastify application factory: routes, error handlers, CORS, OpenAPI.
  *
  * Every error response uses the one envelope
- * `{"error": {"code", "message", "details?"}}` with exactly eight codes —
+ * `{"error": {"code", "message", "details?"}}` with exactly nine codes —
  * see the error model in `docs/architecture.md`. Framework-level failures
  * are mapped into the same envelope: an unparsable JSON body answers
  * `400 INVALID_JSON`, a request-shape failure `422 VALIDATION_ERROR`.

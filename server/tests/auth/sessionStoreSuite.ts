@@ -18,7 +18,7 @@ export const SUITE_SESSION_LIFETIMES: SessionLifetimes = { idleMs: 400, absolute
 const { idleMs: IDLE, absoluteMs: ABSOLUTE } = SUITE_SESSION_LIFETIMES;
 const MARGIN = 60;
 
-const SESSION: Session = { principalId: "p-1", issuer: "http://issuer", subject: "s-1" };
+const SESSION: Session = { principalId: "p-1" };
 
 export function sessionStoreSuite(
   name: string,

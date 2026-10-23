@@ -17,7 +17,6 @@ import pg from "pg";
 import type {
   AccessStore,
   Assignment,
-  Identity,
   NewAssignment,
   Principal,
   PrincipalPage,
@@ -115,15 +114,6 @@ function toAssignment(row: Row): Assignment {
     lensId: (row.lens_id as string | null) ?? null,
     createdAt: row.created_at as Date,
     createdBy: (row.created_by as string | null) ?? null,
-  };
-}
-
-function toIdentity(row: Row): Identity {
-  return {
-    issuer: row.issuer as string,
-    subject: row.subject as string,
-    principalId: row.principal_id as string,
-    createdAt: row.created_at as Date,
   };
 }
 
@@ -338,14 +328,6 @@ class PostgresAccessStore implements AccessStore {
   async principal(id: string): Promise<Principal | null> {
     const rows = await this.query(`SELECT ${PRINCIPAL_COLUMNS} FROM principal WHERE id = $1`, [id]);
     return rows[0] ? toPrincipal(rows[0]) : null;
-  }
-
-  async identities(principalId: string): Promise<Identity[]> {
-    const rows = await this.query(
-      "SELECT issuer, subject, principal_id, created_at FROM identity WHERE principal_id = $1 ORDER BY created_at",
-      [principalId],
-    );
-    return rows.map(toIdentity);
   }
 
   async assignmentsOf(principalId: string): Promise<Assignment[]> {

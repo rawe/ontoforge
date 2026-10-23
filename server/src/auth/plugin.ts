@@ -96,7 +96,8 @@ async function resolve(request: FastifyRequest): Promise<Access> {
   return sessionAccess(auth, request, sessionId);
 }
 
-function profileOf(identified: Identified): Profile {
+/** The display claims a sign-in refreshes. */
+export function profileOf(identified: Identified): Profile {
   return { displayName: identified.displayName, email: identified.email, username: identified.username };
 }
 
@@ -110,14 +111,14 @@ async function bearerAccess(auth: AuthRuntime, token: string): Promise<Access> {
   if (identified === null) throw new UnauthenticatedError("The bearer token is not valid", true);
   const { issuer, subject } = identified;
   const admin = isConfiguredAdmin(auth, issuer, subject);
+  const profile = profileOf(identified);
   // An unknown identity becomes a role-less principal, as at a first browser sign-in.
   let principal =
-    (await auth.access.principalOf(issuer, subject)) ??
-    (await auth.access.signIn(issuer, subject, profileOf(identified), admin));
+    (await auth.access.principalOf(issuer, subject)) ?? (await auth.access.signIn(issuer, subject, profile, admin));
   let assignments = await auth.access.assignmentsOf(principal.id);
   // The configured administrator is restored whenever it lost its standing.
   if (admin && (principal.status !== "active" || !assignments.some((a) => a.role === "platform_admin"))) {
-    principal = await auth.access.signIn(issuer, subject, profileOf(identified), true);
+    principal = await auth.access.signIn(issuer, subject, profile, true);
     assignments = await auth.access.assignmentsOf(principal.id);
   }
   if (principal.status === "disabled") throw new ForbiddenError("This account is disabled");

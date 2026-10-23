@@ -351,6 +351,11 @@ export interface CommitResult {
   alreadyGone: string[]
 }
 
+/** A check that passed: what a commit of the version checked would answer. */
+export interface CheckResult extends CommitResult {
+  version: number
+}
+
 /** The parent relation a create names for its new entity. */
 export interface ParentRelationInput {
   type: string

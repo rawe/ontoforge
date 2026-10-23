@@ -17,6 +17,7 @@ import type {
   Changeset,
   ChangesetDetail,
   ChangesetListItem,
+  CheckResult,
   CommitResult,
   DocumentContentResponse,
   EntityInstance,
@@ -372,6 +373,13 @@ export const commitChangeset = (
     method: 'POST',
     body: { expectedVersion },
   })
+
+/**
+ * Runs the commit and rolls it back, draft or submitted: nothing changes. A
+ * rejection answers 422 as the commit's, with `details.version` added.
+ */
+export const checkChangeset = (ontologyKey: string, lensKey: string, changesetId: string) =>
+  request<CheckResult>(`${changesetsBase(ontologyKey, lensKey)}/${changesetId}/check`, { method: 'POST' })
 
 /**
  * Freezes a draft for review; a fault answers 422 with `details.violations`.

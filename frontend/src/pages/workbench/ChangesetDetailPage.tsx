@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FileStack,
+  ListChecks,
   Loader2,
   Pencil,
   Plus,
@@ -72,6 +73,13 @@ const DRAFT_REASON = 'Only a submitted changeset can be unsubmitted'
 /** Why Submit is off while submitted. */
 const SUBMITTED_REASON = 'It is submitted already'
 
+/** The violations panel's name and heading, by what was rejected. */
+const REJECTED = {
+  commit: { label: 'Commit violations', title: 'Commit rejected, nothing persisted' },
+  submit: { label: 'Submit violations', title: 'Submit rejected, still a draft' },
+  check: { label: 'Check violations', title: 'Check failed, a commit would be rejected' },
+} as const
+
 /**
  * The ruleset a changeset was started through, as a chip linking to the
  * Rulesets page; muted and struck through once the ruleset is deleted, since
@@ -113,7 +121,8 @@ const errorText = (err: unknown, fallback: string) => (err instanceof Error ? er
  * each with its action, name or ends, markers and values (before / current /
  * after); a staged document opens its staged text in the document viewer.
  * Commit, after a confirmation, sends the version shown when it was clicked;
- * Submit, with an optional note, and Unsubmit, with a required one, move it
+ * Check, draft or submitted, runs the commit without persisting and shows what
+ * it would commit or its violations; Submit, with an optional note, and Unsubmit, with a required one, move it
  * between draft and submitted; Discard, and removing an object, cutting a
  * value or accepting a drifted value's current one, work only on a draft. A draft can be pinned ("Work in this changeset"),
  * so the Workbench's writes stage into it; while it is, an entity it creates
@@ -137,11 +146,12 @@ export function ChangesetDetailPage() {
   const pinned = usePinnedChangeset(ontologyKey!, lensKey!)
   const displayLabel = useDisplayLabel()
 
-  // The violations of a rejected commit or submit.
+  // The violations of a rejected commit, submit or check (with the version checked).
   const [rejected, setRejected] = useState<{
-    by: 'commit' | 'submit'
+    by: 'commit' | 'submit' | 'check'
     violations: ChangesetViolation[]
     total: number
+    version?: number
   } | null>(null)
   const [submitOpen, setSubmitOpen] = useState(false)
   const [unsubmitOpen, setUnsubmitOpen] = useState(false)
@@ -199,6 +209,27 @@ export function ChangesetDetailPage() {
         toast.error(errorText(err, 'Failed to commit'))
       }
       setRejected(null)
+      void reload()
+    },
+  })
+
+  const check = useMutation({
+    mutationFn: () => runtime.checkChangeset(ontologyKey!, lensKey!, changesetId!),
+    onSuccess: (result) => {
+      setRejected(null)
+      toast.success(`Would commit ${objectsText(result.committed)}`, {
+        description: `Checked version ${result.version}; nothing was persisted.`,
+      })
+      void reload()
+    },
+    onError: (err) => {
+      const details = err instanceof ApiError && err.status === 422 ? err.details : undefined
+      const found = violationsOf(details)
+      if (found !== null) {
+        setRejected({ by: 'check', ...found, version: typeof details?.version === 'number' ? details.version : undefined })
+      } else {
+        toast.error(errorText(err, 'Failed to check'))
+      }
       void reload()
     },
   })
@@ -303,7 +334,12 @@ export function ChangesetDetailPage() {
   const operations = list.data?.find((item) => item.id === changeset.id)?.operations
   const summary = operations === undefined ? '' : operationsSummary(operations)
   const busy =
-    commit.isPending || submit.isPending || unsubmit.isPending || discard.isPending || objectActions.busy
+    commit.isPending ||
+    check.isPending ||
+    submit.isPending ||
+    unsubmit.isPending ||
+    discard.isPending ||
+    objectActions.busy
 
   const typeLabel = (object: StagedObjectView) => {
     if (object.type === null) return undefined
@@ -404,6 +440,13 @@ export function ChangesetDetailPage() {
     </Button>
   )
 
+  const checkButton = (
+    <Button size="sm" variant="outline" disabled={busy} onClick={() => check.mutate()}>
+      {check.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <ListChecks className="size-3.5" />}
+      Check
+    </Button>
+  )
+
   const discardButton = (
     <Button
       size="sm"
@@ -462,6 +505,7 @@ export function ChangesetDetailPage() {
         actions={
           <>
             <PinChangesetButton ontologyKey={ontologyKey} lensKey={lensKey} changeset={changeset} />
+            {checkButton}
             {submitted ? <Disabled reason={SUBMITTED_REASON}>{submitButton}</Disabled> : submitButton}
             <Button size="sm" disabled={busy} onClick={() => setCommitVersion(changeset.version)}>
               {commit.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
@@ -486,13 +530,14 @@ export function ChangesetDetailPage() {
         {rejected !== null && (
           <div
             role="alert"
-            aria-label={rejected.by === 'commit' ? 'Commit violations' : 'Submit violations'}
+            aria-label={REJECTED[rejected.by].label}
             className="rounded-lg border border-destructive bg-destructive/10 px-3 py-2.5"
           >
             <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-semibold text-destructive">
-                  {rejected.by === 'commit' ? 'Commit rejected, nothing persisted' : 'Submit rejected, still a draft'}:{' '}
+                  {REJECTED[rejected.by].title}
+                  {rejected.version !== undefined && ` (version ${rejected.version})`}:{' '}
                   {rejected.total}{' '}
                   {rejected.total === 1 ? 'violation' : 'violations'}
                   {rejected.total > rejected.violations.length &&

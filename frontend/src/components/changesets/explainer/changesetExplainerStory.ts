@@ -142,7 +142,7 @@ export const STORY: StoryStep[] = [
   {
     actor: 'client', node: 'submitted', edges: ['submit'],
     title: 'Submit: ready for review',
-    body: 'Submit checks every staged object against the lens and the stored data. With no fault, the changeset is frozen and handed over: nothing can be staged, removed, cut or discarded until it is committed or unsubmitted. Submitted without a note, it keeps the one it has. A submitted changeset never expires.',
+    body: 'Submit checks every staged object against the lens and the stored data. With no fault, the changeset is frozen and handed over: nothing can be staged, removed, cut or discarded until it is committed or unsubmitted. Submitted without a note, it keeps the one it has. A submitted changeset never expires. A check, on a draft or a submitted changeset, runs the whole commit without persisting anything.',
     state: 'submitted', version: 8, note: 'Tidy up Apollo', changes: 0,
     objects: [apollo(NAME, BRIEF), ci(CI_NAME, CI_OWNER), BACKLOG], stored: STORED_BEFORE,
   },

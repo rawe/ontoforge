@@ -16,9 +16,8 @@ import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import type { Access } from "../access/caller.js";
-import type { Assignment, Principal } from "../access/store.js";
-import { ForbiddenError, NotFoundError, UnauthenticatedError } from "../core/exceptions.js";
-import { getModelingStore, getOntologyRegistry } from "../core/ports.js";
+import { assignmentViews, userView } from "../access/service.js";
+import { ForbiddenError, UnauthenticatedError } from "../core/exceptions.js";
 import {
   clearedCookie,
   cookieNames,
@@ -79,57 +78,6 @@ export function normalizeReturnTo(value: string | undefined, publicUrl: string):
   return url.pathname + url.search;
 }
 
-function userOf(principal: Principal): z.infer<typeof User> {
-  return {
-    id: principal.id,
-    kind: principal.kind,
-    displayName: principal.displayName,
-    email: principal.email,
-    username: principal.username,
-    status: principal.status,
-    createdAt: principal.createdAt.toISOString(),
-    lastLoginAt: principal.lastLoginAt?.toISOString() ?? null,
-  };
-}
-
-/** The assignments with their keys, as of now; those whose ontology or lens is gone are left out. */
-async function withKeys(assignments: Assignment[]): Promise<z.infer<typeof MyAssignment>[]> {
-  if (assignments.length === 0) return [];
-  const ontologyKeys = new Map(
-    (await getOntologyRegistry().listOntologies()).map((row) => [row.ontologyId as string, row.key as string]),
-  );
-  const lensKeys = new Map<string, string>();
-  const withLenses = new Set(assignments.filter((a) => a.lensId !== null).map((a) => a.ontologyId!));
-  for (const ontologyId of withLenses) {
-    const key = ontologyKeys.get(ontologyId);
-    if (key === undefined) continue;
-    try {
-      for (const lens of await (await getModelingStore(key)).listLenses()) {
-        lensKeys.set(lens.lensId as string, lens.key as string);
-      }
-    } catch (error) {
-      // Deleted since the registry was read.
-      if (!(error instanceof NotFoundError)) throw error;
-    }
-  }
-  return assignments.flatMap((a) => {
-    const ontologyKey = a.ontologyId === null ? null : ontologyKeys.get(a.ontologyId);
-    const lensKey = a.lensId === null ? null : lensKeys.get(a.lensId);
-    if (ontologyKey === undefined || lensKey === undefined) return [];
-    return [
-      {
-        id: a.id,
-        role: a.role,
-        ontologyKey,
-        lensKey,
-        ontologyId: a.ontologyId,
-        lensId: a.lensId,
-        createdAt: a.createdAt.toISOString(),
-      },
-    ];
-  });
-}
-
 /** Routes mounted at `/api/auth`: `me` always, the rest with authentication on. */
 export const authRouter: FastifyPluginAsyncZod = async (app) => {
   app.get(
@@ -147,7 +95,7 @@ export const authRouter: FastifyPluginAsyncZod = async (app) => {
       }
       if (access.kind !== "caller") return { authentication: true, user: null, assignments: [] };
       const { principal, assignments } = access.caller;
-      return { authentication: true, user: userOf(principal), assignments: await withKeys(assignments) };
+      return { authentication: true, user: userView(principal), assignments: await assignmentViews(assignments) };
     },
   );
 

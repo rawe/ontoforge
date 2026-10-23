@@ -72,8 +72,13 @@ export async function assignmentViews(assignments: Assignment[]): Promise<Assign
   for (const ontologyId of withLenses) {
     const ontologyKey = ontologyKeys.get(ontologyId);
     if (ontologyKey === undefined) continue;
-    for (const lens of await (await getModelingStore(ontologyKey)).listLenses()) {
-      lensKeys.set(lens.lensId as string, lens.key as string);
+    try {
+      for (const lens of await (await getModelingStore(ontologyKey)).listLenses()) {
+        lensKeys.set(lens.lensId as string, lens.key as string);
+      }
+    } catch (error) {
+      // Deleted since the registry was read.
+      if (!(error instanceof NotFoundError)) throw error;
     }
   }
   return assignments.flatMap((a) => {

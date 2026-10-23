@@ -36,15 +36,21 @@ It also carries `EMBEDDING_API_KEY`, `AI_API_KEY`, and a `VALKEY_URL` with a pas
   `noeviction` makes a full store refuse new turns instead of dropping conversations.
   The pod's memory limit (512 Mi) stays well above `maxmemory` (256 MB): client buffers
   are not counted in it, and an OOM kill would end every conversation.
-- **Probes**: `/livez` for startup (up to 5 minutes, which covers a storage upgrade at
+- **Probes**: `/livez` for startup (up to 30 minutes, which covers a storage upgrade at
   boot) and liveness, `/readyz` for readiness.
 - **Shutdown**: `preStop` sleeps 5 s so the Service stops routing to the pod, then
   SIGTERM starts the drain (`SHUTDOWN_DRAIN_SECONDS`, 20 s by default).
   `terminationGracePeriodSeconds: 45` stays above preStop + drain + closing the stores.
   Raise it together with `SHUTDOWN_DRAIN_SECONDS`.
 - **Rolling update** with `maxUnavailable: 0`, and a PodDisruptionBudget keeping one
-  server up during node drains. Releases before storage version 9 (7.1 and older) do not
-  keep the design revision and must not run beside this one: stop them before upgrading.
+  server up during node drains.
+
+## Updating
+
+A release that keeps the storage version rolls as usual. One that raises it starts only
+after every older server has stopped: scale to 0, back up the database, set the new image,
+scale up. One server upgrades the storage while the others wait; OntoForge is unavailable
+until the pods are ready.
 
 ## Not included
 

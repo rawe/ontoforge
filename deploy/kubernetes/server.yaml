@@ -50,13 +50,14 @@ spec:
             - name: config
               mountPath: /config
               readOnly: true
-          # Up to 5 minutes to boot, which covers a storage upgrade.
+          # Up to 30 minutes to boot: a storage upgrade, or waiting for another
+          # server's, keeps the port closed, and a kill restarts the upgrade.
           startupProbe:
             httpGet:
               path: /livez
               port: http
             periodSeconds: 5
-            failureThreshold: 60
+            failureThreshold: 360
           readinessProbe:
             httpGet:
               path: /readyz

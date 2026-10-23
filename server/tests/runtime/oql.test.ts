@@ -1001,6 +1001,76 @@ describe("query endpoint", () => {
     expect(row["p.name"]).toBe("Ada");
   });
 
+  it("strips whole nodes and relations inside collections, lists and maps", async () => {
+    const { makeScopedSchema } = await import("./helpers.js");
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
+    const alice = () => makeEntity({ name: "Alice", age: 30, email: "a@b.com" });
+    const job = () => ({ _id: "rel-1", _relationTypeKey: "works_for", role: "Eng", since: "2024-01-01" });
+    holder.store.executeOql.mockResolvedValue([
+      ["ps", "l", "m"],
+      [{ ps: [alice(), alice()], l: [[alice()], job()], m: { x: alice(), y: { z: [alice()] }, n: 1 } }],
+    ]);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/query",
+      payload: {
+        query: "MATCH (p:person)-[r:works_for]->(c:company) RETURN collect(p) AS ps, [[p], r] AS l, {x: p, y: {z: [p]}, n: 1} AS m",
+      },
+    });
+
+    expect(res.statusCode, res.body).toBe(200);
+    const row = res.json().results[0];
+    for (const person of [row.ps[0], row.ps[1], row.l[0][0], row.m.x, row.m.y.z[0]]) {
+      expect(person).toMatchObject({ name: "Alice", email: "a@b.com" });
+      expect(person).not.toHaveProperty("age");
+    }
+    expect(row.l[1]).toMatchObject({ role: "Eng", since: "2024-01-01" });
+    expect(row.m.n).toBe(1);
+    expect(res.body).not.toContain('"age"');
+  });
+
+  it("fails closed on a node or relation of a type the lens does not show", async () => {
+    const { makeScopedSchema } = await import("./helpers.js");
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
+    const hidden = { _id: "rel-9", _relationTypeKey: "manages", note: "secret" };
+    const hiddenEntity = makeEntity({ code: "RD-1" }, "department", "ent-9");
+    holder.store.executeOql.mockResolvedValue([
+      ["r", "rs"],
+      [{ r: { ...hidden }, rs: [{ ...hidden }, hiddenEntity] }],
+    ]);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/query",
+      payload: { query: "MATCH (a:person)-[r]->(b:company) RETURN r, collect(r) AS rs" },
+    });
+
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().results[0]).toEqual({ r: null, rs: [null, null] });
+    expect(res.body).not.toContain("manages");
+    expect(res.body).not.toContain("secret");
+  });
+
+  it("stubs document values inside collected nodes", async () => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(docSchemaPayload());
+    holder.store.executeOql.mockResolvedValue([
+      ["ps"],
+      [{ ps: [makeEntity({ name: "Ada", bio: "x".repeat(500), _doc_bio_length: 500 })] }],
+    ]);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/test_ont/runtime/lenses/docs_view/query",
+      payload: { query: "MATCH (p:person) RETURN collect(p) AS ps" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const [ada] = res.json().results[0].ps;
+    expect(ada.bio).toEqual({ document: true, length: 500 });
+    expect(ada).not.toHaveProperty("_doc_bio_length");
+  });
+
   it("an ALIASED document projection returns the full text", async () => {
     holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(docSchemaPayload());
     holder.store.executeOql.mockResolvedValue([

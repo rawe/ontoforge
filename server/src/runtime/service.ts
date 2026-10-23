@@ -1240,12 +1240,15 @@ function isPlainObject(value: unknown): value is Row {
 /**
  * Filter out-of-scope properties and stub document values (in place).
  *
- * Node/relationship maps are stripped to scoped properties with document
- * values stubbed — per column, exactly as a read result is
- * (`docs/capabilities/ontology-lenses.md#what-scoping-cuts`). Scalar
- * columns of the form `var.property` that reference a document property
- * are stubbed as well; an ALIASED projection of a document property is
- * not of that form and returns the full text — the documented exception.
+ * Every entity and relation in a row — a column of its own, or at any
+ * depth inside a list or map (`collect(p)`, `[p]`, `{x: p}`) — is stripped
+ * to its type's scoped properties with document values stubbed, exactly as
+ * a read result is (`docs/capabilities/ontology-lenses.md#what-scoping-cuts`).
+ * One of a type the lens does not show becomes null: the compiler never
+ * matches one, so this only fails closed. Scalar columns of the form
+ * `var.property` that reference a document property are stubbed as well;
+ * an ALIASED projection of a document property is not of that form and
+ * returns the full text — the documented exception.
  */
 function postprocessQueryRows(
   rows: Row[],
@@ -1254,13 +1257,7 @@ function postprocessQueryRows(
 ): void {
   for (const row of rows) {
     for (const [col, value] of Object.entries(row)) {
-      if (isPlainObject(value)) {
-        const typeKey = resolveTypeKeyForValue(col, value, varMap, scoped);
-        if (typeKey === null) {
-          continue;
-        }
-        row[col] = stripOutOfScopeProps(value, typeKey, scoped);
-      } else if (typeof value === "string" && col.includes(".")) {
+      if (typeof value === "string" && col.includes(".")) {
         // Scalar projection like `RETURN p.bio` — stub document values.
         const dot = col.indexOf(".");
         const variable = col.slice(0, dot).trim();
@@ -1277,32 +1274,35 @@ function postprocessQueryRows(
         if (propDef !== undefined && propDef.dataType === "document") {
           row[col] = { document: true, length: cpLength(value) };
         }
+      } else {
+        row[col] = projectQueryValue(value, scoped);
       }
     }
   }
 }
 
-/** Figure out the schema type key for a map returned by the store. */
-function resolveTypeKeyForValue(
-  column: string,
-  value: Row,
-  varMap: Map<string, string | null>,
-  schema: SchemaCacheValue,
-): string | null {
-  // If the column is a known variable, use the pre-built mapping.
-  if (varMap.has(column)) {
-    return varMap.get(column)!;
+/** One projected value through the lens: lists and maps walked, every
+ * entity or relation in them (it carries its type key) stripped, and one
+ * of a type the lens does not show replaced by null. */
+function projectQueryValue(value: unknown, scoped: SchemaCacheValue): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => projectQueryValue(item, scoped));
   }
-  // Fallback: inspect _entityTypeKey or _relationTypeKey in the value.
-  const etk = value._entityTypeKey;
-  if (typeof etk === "string" && etk in schema.entityTypes) {
-    return etk;
+  if (!isPlainObject(value)) {
+    return value;
   }
-  const rtk = value._relationTypeKey;
-  if (typeof rtk === "string" && rtk in schema.relationTypes) {
-    return rtk;
+  if ("_entityTypeKey" in value) {
+    const etDef = scoped.entityTypes[value._entityTypeKey as string];
+    return etDef === undefined ? null : stripOutOfScopeProps(value, etDef.properties, true);
   }
-  return null;
+  if ("_relationTypeKey" in value) {
+    const rtDef = scoped.relationTypes[value._relationTypeKey as string];
+    return rtDef === undefined ? null : stripOutOfScopeProps(value, rtDef.properties, false);
+  }
+  for (const [key, item] of Object.entries(value)) {
+    value[key] = projectQueryValue(item, scoped);
+  }
+  return value;
 }
 
 // ---------------------------------------------------------------------------
@@ -1545,23 +1545,13 @@ export async function searchSavedQueries(
   return results;
 }
 
-/** Remove properties not in the scoped schema and stub documents. Unlike
- * entity reads, only the SYSTEM properties survive here — other
- * underscore-prefixed bookkeeping is stripped. */
-function stripOutOfScopeProps(value: Row, typeKey: string, schema: SchemaCacheValue): Row {
-  let allowed: Set<string>;
-  let result = value;
-  const etDef = schema.entityTypes[typeKey];
-  const rtDef = schema.relationTypes[typeKey];
-  if (etDef !== undefined) {
-    allowed = new Set([...Object.keys(etDef.properties), ...SYSTEM_PROPERTIES]);
-    // Stub document values before the helper `_doc_*_length` keys are stripped.
-    result = stubDocumentProperties(value, etDef.properties);
-  } else if (rtDef !== undefined) {
-    allowed = new Set([...Object.keys(rtDef.properties), ...SYSTEM_PROPERTIES]);
-  } else {
-    return value;
-  }
+/** Remove properties not in the scoped definitions and stub documents
+ * (of an entity). Unlike entity reads, only the SYSTEM properties survive
+ * here — other underscore-prefixed bookkeeping is stripped. */
+function stripOutOfScopeProps(value: Row, properties: Record<string, PropertyDef>, entity: boolean): Row {
+  const allowed = new Set([...Object.keys(properties), ...SYSTEM_PROPERTIES]);
+  // Stub document values before the helper `_doc_*_length` keys are stripped.
+  const result = entity ? stubDocumentProperties(value, properties) : value;
   for (const key of Object.keys(result)) {
     if (!allowed.has(key)) {
       delete result[key];

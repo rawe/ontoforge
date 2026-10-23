@@ -229,8 +229,8 @@ and renders the content; a separate action opens the [document editor](#document
 See [capabilities/documents.md](capabilities/documents.md).
 
 **Staged here.** While the [pinned changeset](#changesets) stages the entity, a strip
-under the header shows its staged object as its review does, with its actions — disabled
-while it is submitted — and links to the review. A property with a staged value shows its
+under the header shows its staged object as a card of the review, with Remove, Cut and
+Accept current — disabled while it is submitted — and links to the review. A property with a staged value shows its
 stored value struck through beside the staged one, with its drift marker; a document
 shows "staged" with its size and a View action opening the staged text, or "staged ·
 removed". A staged delete adds "Deleted in this changeset" to the header. Editing starts
@@ -320,9 +320,10 @@ The lens's [changesets](capabilities/changesets.md), those started through a rul
 included, as the lens shows them now. The page starts, reviews, submits, commits and
 discards them, and pins one to work in. A help button beside the title of the list and of each review explains the workflow: the states and who
 may take each way between them, a client or a person. One example changeset plays step by
-step through it: a set of staged objects with their values, a later call changing the
-same object, a document keeping one staged text that takes small edits, removing an
-object, cutting a value, accepting current, and the commit in its phases.
+step through it in nine steps: calls becoming staged objects with their values, a later
+call changing the same object, a document keeping one staged text that takes small edits,
+drift found at review, removing an object, cutting a value, accepting current, and the
+commit in its phases.
 
 - **The list:** one row per changeset — its number, state, note, ruleset, number of staged objects, the
   types it names (two, then a count, and how many the lens no longer shows) and its age —
@@ -334,9 +335,9 @@ object, cutting a value, accepting current, and the commit in its phases.
   order they were first touched, a page of 100 at a time, each a card: its action, the
   type, the target by name — "(new)" for a create, `from → to` for a relation, a short id
   when the lens shows no name — its markers, and its values: `key: before → after` for an
-  update, with the current value on drift, the values for a create. A marker chip with its
-  message tints the card or the value it sits on. An object the lens no longer shows says
-  so; a document value shows its length, and a View action opens the staged text, as a
+  update, with the current value on drift as "(now …)", the values for a create. A marker
+  chip with its message sits on the card or under the value it concerns, and tints the
+  card. An object the lens no longer shows says so; a document value shows its length, and a View action opens the staged text, as a
   commit would leave it, in the [document viewer](#document-viewer-and-editor).
 - **On a draft**, each card offers Remove, taking the object out with its values; each
   value a scissors action, cutting it out; and a value with drift "Accept current",
@@ -345,7 +346,8 @@ object, cutting a value, accepting current, and the commit in its phases.
 - **Commit**, behind a confirmation naming the number of staged objects, sends the version on the
   screen. When the changeset changed since, it says so and reloads the review; any other
   conflict shows its message and reloads too. A rejected commit lists its violations in a
-  panel, each of a ruleset's kinds under a label saying what went wrong, which on a
+  panel, each named by its object and property where the page shows them, and each of a
+  ruleset's kinds under a label saying what went wrong, which on a
   submitted changeset offers to unsubmit it at once with those
   violations as its note, cut to 1,000 characters. A successful one returns to the list
   and refreshes every runtime view of the ontology.
@@ -371,7 +373,8 @@ every open tab follows a pin or a leave at once. While one is pinned:
 - **Every Workbench write is staged** into it instead of written — the entity page's
   edits, delete, unlinks and added relations, a target created on the way included,
   [quick add](#quick-add) with its parent relation, and a table's bulk delete — except the
-  Explorer canvas's ([Working set](#working-set)). Each answers with a toast, a bulk
+  Explorer canvas's ([Working set](#working-set)). Each answers with a toast saying it was
+  staged — for an entity delete, with how many staged relations at it went too — a bulk
   delete with one for all, linking to the review; live views stay as they are.
 - **A staged create** on the review of a draft offers "Edit values…" — the entity form
   with its staged values, staging an update of what changed — and "Add ‹child type›…" per

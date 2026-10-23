@@ -4,10 +4,10 @@
 #   ./dev.sh keycloak            (scripts/keycloak/setup.mjs, see scripts/keycloak/USAGE.md)
 #
 # The issuer is http://localhost:8180/realms/ontoforge for every caller: the browser and a
-# server on the host reach it directly; a server in a container reaches it through
-# host.docker.internal and is told so by OIDC_BACKCHANNEL_URL. KC_HOSTNAME fixes the issuer;
-# KC_HOSTNAME_BACKCHANNEL_DYNAMIC lets the back-channel endpoints (token, keys) follow the
-# host a server asked on.
+# server on the host reach it directly; a server in a container joins this project's network
+# and reaches it as http://keycloak:8080, which OIDC_BACKCHANNEL_URL names. KC_HOSTNAME fixes
+# the issuer; KC_HOSTNAME_BACKCHANNEL_DYNAMIC lets the back-channel endpoints (token, keys)
+# follow the host a server asked on.
 name: ontoforge-keycloak
 
 services:

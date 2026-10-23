@@ -7,8 +7,9 @@ removed, and when it gets an ADR: [workflows/recording-decisions.md](workflows/r
 
 **Every server serves everything — registry, modeling, runtime and both MCP servers — with
 no mode switch and no partial deployment, and any number of identical servers share one
-database and one shared state.** A schema change and the data it governs must never be able
-to diverge between servers.
+database, one shared state and, with authentication on, one access database.** A schema
+change and the data it governs must never be able to diverge between servers, nor may one
+server open what another protects.
 
 **One database holds every ontology's schema and instance data.** Two stores would turn
 every schema change into a distributed transaction to buy an isolation nothing needs.
@@ -162,6 +163,38 @@ work nobody will receive stops.
 event; a kind's own events and its tool events never carry entity cards.** Chat, citations
 and the Explorer then treat every assistant alike, and tool activity stays generic.
 → [adr/0027](adr/0027-one-shared-entities-event.md)
+
+## Access
+
+**OntoForge owns authorization: a principal is bound to a verified issuer and subject, and
+its roles are assigned in OntoForge only, never derived from provider claims or an email
+address.** A provider's groups, administrator flags and email addresses are outside
+OntoForge's control and may change or be reused, granting access nobody assigned.
+
+**One authorization service judges every entrance — REST, MCP and the tool calls of a
+turn — and every route declares what it needs; a route without a declaration fails the
+boot.** A check in one router leaves the other entrances open, and a forgotten route would
+be open to everyone.
+
+**No assignment means no access, and no role implies another: administering an ontology
+grants no lens data, and a lens role no design.** Every right then traces to one
+assignment, and revoking it takes away exactly that right.
+
+**With authentication on, nothing falls back to off: missing configuration, an unreachable
+provider or an unusable access database fails the boot, and a check that fails refuses.**
+A server running unprotected by accident would expose every ontology while looking
+healthy.
+
+**The server is the browser's OpenID client and keeps browser sessions in shared state;
+the browser holds only an HttpOnly cookie.** No provider token reaches a script in the
+browser, no further component is deployed, and a lost session costs only a new sign-in.
+→ [adr/0031](adr/0031-server-as-browser-openid-client.md)
+
+**Principals, their identities and role assignments live in an access database of their
+own, behind a port of their own beside the persistence port.** Who may do what must be
+durable and independent of any ontology's storage, and moving it to its own instance
+changes only its address.
+→ [adr/0030](adr/0030-access-database-of-its-own.md)
 
 ## Schema and data
 
@@ -320,7 +353,5 @@ under any key, and creating an ontology stays a registry operation.
 A design exported before a format change then moves to a later server without a
 conversion tool.
 
-**No authentication, authorization or multi-tenancy: ontologies isolate data but have no
-owner, ACL or quota.** OntoForge runs behind something that provides them or on a trusted
-network, and a permission model built before a deployment needs one would guess at its
-shape.
+**No multi-tenancy: ontologies isolate data but are not tenants and carry no quota.**
+Tenancy built before a deployment needs it would guess at its shape.

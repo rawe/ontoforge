@@ -19,7 +19,7 @@ services:
       retries: 5
       start_period: 30s
 
-  # Shared conversations (THREAD_STORE=valkey) and the Valkey test suite.
+  # Shared state such as conversations (SHARED_STATE=valkey) and the Valkey test suite.
   # Nothing is persisted: a restart loses every conversation, by design.
   valkey:
     image: valkey/valkey:8.1-alpine

@@ -116,8 +116,6 @@ export class MemoryThreadStore implements ThreadStore {
     if (entry) entry.lease = null;
   }
 
-  async close(): Promise<void> {}
-
   /** Renews a thread's idle deadline and moves it to the end of the map. */
   private touch(threadId: string, entry: Entry): void {
     entry.deadline = this.clock() + this.lifetimes.idleMs;

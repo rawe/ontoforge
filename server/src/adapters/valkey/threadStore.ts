@@ -1,8 +1,9 @@
 /**
  * The Valkey thread store, shared by every server that names the same
- * Valkey. Valkey runs without persistence and with `noeviction`: a reset
- * loses every thread (clients recover through the not-found answer), and a
- * full Valkey refuses writes instead of dropping threads.
+ * Valkey. It runs on the shared-state client (`connection.ts`); Valkey runs
+ * without persistence and with `noeviction`: a reset loses every thread
+ * (clients recover through the not-found answer), and a full Valkey refuses
+ * writes instead of dropping threads.
  *
  * Per thread two keys, hash-tagged into one slot:
  *
@@ -18,9 +19,8 @@
 
 import { randomUUID } from "node:crypto";
 
-import { Valkey } from "iovalkey";
+import type { Valkey } from "iovalkey";
 
-import { StoreError } from "../../core/exceptions.js";
 import {
   checkStateSize,
   DEFAULT_LIFETIMES,
@@ -30,10 +30,11 @@ import {
   type ThreadBinding,
   type ThreadStore,
   type Turn,
-} from "./threadStore.js";
+} from "../../runtime/threads/threadStore.js";
+import { toStoreError, type ValkeyScripts } from "./connection.js";
 
 // KEYS[1] = thread, KEYS[2] = turn.
-const SCRIPTS = {
+const LUA = {
   // ARGV: ontologyKey, lensKey, kind, assistantKey, idleMs
   threadCreate: `#!lua
 if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
@@ -66,9 +67,14 @@ if redis.call('GET', KEYS[2]) == ARGV[1] then redis.call('DEL', KEYS[2]) end
 return 0`,
 };
 
+/** The thread scripts, as `connectValkey` defines and loads them. */
+export const THREAD_SCRIPTS: ValkeyScripts = Object.fromEntries(
+  Object.entries(LUA).map(([name, lua]) => [name, { lua, numberOfKeys: 2 }]),
+);
+
 type Arg = string | number | Buffer;
 
-/** The scripts as `defineCommand` installs them. */
+/** The scripts as `defineCommand` installs them on the client. */
 interface ThreadScripts {
   threadCreate(thread: string, turn: string, ...args: Arg[]): Promise<number>;
   threadBeginBuffer(thread: string, turn: string, ...args: Arg[]): Promise<[number, (Buffer | null)?]>;
@@ -80,77 +86,14 @@ interface ThreadScripts {
 const threadKey = (threadId: string) => `ontoforge:thread:{${threadId}}`;
 const keys = (threadId: string): [string, string] => [threadKey(threadId), `${threadKey(threadId)}:turn`];
 
-/** Logs a client or Valkey failure and returns the `StoreError` that replaces it. */
-function toStoreError(exc: unknown): StoreError {
-  const error = new StoreError();
-  error.cause = exc;
-  console.error(`Storage failure ${error.errorId}: thread store: ${exc instanceof Error ? exc.message : String(exc)}`);
-  return error;
-}
-
-/** The URL as it may appear in a log or boot error: without its password. */
-export function redactUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    if (parsed.password) parsed.password = "***";
-    return parsed.toString();
-  } catch {
-    return "<unparsable URL>";
-  }
-}
-
-/** `INFO memory`'s eviction policy. */
-function evictionPolicy(info: string): string | null {
-  return /^maxmemory_policy:(\S+)/m.exec(info)?.[1] ?? null;
-}
-
 export class ValkeyThreadStore implements ThreadStore {
   private readonly scripts: ThreadScripts;
 
-  private constructor(
+  constructor(
     private readonly client: Valkey,
-    private readonly lifetimes: StoreLifetimes,
+    private readonly lifetimes: StoreLifetimes = DEFAULT_LIFETIMES,
   ) {
     this.scripts = client as unknown as ThreadScripts;
-  }
-
-  /**
-   * Connects and checks the Valkey before the server uses it: reachable,
-   * evicting nothing (`maxmemory-policy noeviction`), and able to run the
-   * scripts (loaded here: a Valkey before 7.2, a Redis before 7 or a service
-   * that restricts scripting refuses them). Any failure closes the client and
-   * throws, naming the URL without its password.
-   */
-  static async connect(url: string, lifetimes: StoreLifetimes = DEFAULT_LIFETIMES): Promise<ValkeyThreadStore> {
-    const client = new Valkey(url, {
-      lazyConnect: true,
-      // Commands during a disconnect fail at once instead of queueing, and a
-      // command in flight is never replayed: a replayed publish would answer
-      // "taken" for a turn that was stored.
-      enableOfflineQueue: false,
-      maxRetriesPerRequest: 0,
-      autoResendUnfulfilledCommands: false,
-      connectTimeout: 5000,
-      commandTimeout: 5000,
-    });
-    client.on("error", (error: Error) => console.error(`Thread store (${redactUrl(url)}): ${error.message}`));
-    for (const [name, lua] of Object.entries(SCRIPTS)) client.defineCommand(name, { lua, numberOfKeys: 2 });
-    try {
-      await client.connect();
-      await client.ping();
-      const policy = evictionPolicy(await client.info("memory"));
-      if (policy !== "noeviction") {
-        throw new Error(`maxmemory-policy must be noeviction, is ${policy ?? "unknown"}`);
-      }
-      for (const lua of Object.values(SCRIPTS)) await client.script("LOAD", lua);
-    } catch (error) {
-      client.disconnect();
-      throw new Error(
-        `Thread store Valkey at ${redactUrl(url)} is not usable: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      );
-    }
-    return new ValkeyThreadStore(client, lifetimes);
   }
 
   async create(binding: ThreadBinding): Promise<Thread> {
@@ -159,7 +102,7 @@ export class ValkeyThreadStore implements ThreadStore {
     const created = await this.call(() =>
       this.scripts.threadCreate(...keys(threadId), ontologyKey, lensKey, kind, assistantKey, this.lifetimes.idleMs),
     );
-    if (created !== 1) throw toStoreError(new Error("A new thread id was already taken"));
+    if (created !== 1) throw toStoreError("thread store", new Error("A new thread id was already taken"));
     return { threadId, binding: { ontologyKey, lensKey, kind, assistantKey } };
   }
 
@@ -208,19 +151,11 @@ export class ValkeyThreadStore implements ThreadStore {
     await this.call(() => this.scripts.threadRelease(...keys(turn.threadId), turn.token));
   }
 
-  async close(): Promise<void> {
-    try {
-      await this.client.quit();
-    } catch {
-      this.client.disconnect();
-    }
-  }
-
   private async call<T>(command: () => Promise<T>): Promise<T> {
     try {
       return await command();
     } catch (error) {
-      throw toStoreError(error);
+      throw toStoreError("thread store", error);
     }
   }
 }

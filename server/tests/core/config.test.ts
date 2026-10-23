@@ -230,26 +230,26 @@ describe("decision provider configuration", () => {
   });
 });
 
-describe("thread store configuration", () => {
-  it("keeps conversations in memory by default", () => {
+describe("shared state configuration", () => {
+  it("keeps shared state in memory by default", () => {
     const settings = loadSettings({});
-    expect(settings.THREAD_STORE).toBe("memory");
+    expect(settings.SHARED_STATE).toBe("memory");
     expect(settings.VALKEY_URL).toBeNull();
   });
 
   it("takes a Valkey with its URL", () => {
-    const settings = loadSettings({ THREAD_STORE: "valkey", VALKEY_URL: "redis://valkey:6379" });
-    expect(settings.THREAD_STORE).toBe("valkey");
+    const settings = loadSettings({ SHARED_STATE: "valkey", VALKEY_URL: "redis://valkey:6379" });
+    expect(settings.SHARED_STATE).toBe("valkey");
     expect(settings.VALKEY_URL).toBe("redis://valkey:6379");
-    expect(loadSettings({ THREAD_STORE: "valkey", VALKEY_URL: "rediss://u:p@valkey:6380/0" }).VALKEY_URL)
+    expect(loadSettings({ SHARED_STATE: "valkey", VALKEY_URL: "rediss://u:p@valkey:6380/0" }).VALKEY_URL)
       .toBe("rediss://u:p@valkey:6380/0");
   });
 
   it("fails the boot for an unknown store, a missing or malformed URL, and a URL without the switch", () => {
-    expect(() => loadSettings({ THREAD_STORE: "redis" })).toThrow(/THREAD_STORE/);
-    expect(() => loadSettings({ THREAD_STORE: "valkey" })).toThrow(/VALKEY_URL is required/);
-    expect(() => loadSettings({ THREAD_STORE: "valkey", VALKEY_URL: "http://valkey:6379" })).toThrow(/VALKEY_URL/);
-    expect(() => loadSettings({ VALKEY_URL: "redis://valkey:6379" })).toThrow(/THREAD_STORE is not 'valkey'/);
-    expect(() => loadSettings({ THREAD_STORE: "memory", VALKEY_URL: "redis://valkey:6379" })).toThrow(/VALKEY_URL/);
+    expect(() => loadSettings({ SHARED_STATE: "redis" })).toThrow(/SHARED_STATE/);
+    expect(() => loadSettings({ SHARED_STATE: "valkey" })).toThrow(/VALKEY_URL is required/);
+    expect(() => loadSettings({ SHARED_STATE: "valkey", VALKEY_URL: "http://valkey:6379" })).toThrow(/VALKEY_URL/);
+    expect(() => loadSettings({ VALKEY_URL: "redis://valkey:6379" })).toThrow(/SHARED_STATE is not 'valkey'/);
+    expect(() => loadSettings({ SHARED_STATE: "memory", VALKEY_URL: "redis://valkey:6379" })).toThrow(/VALKEY_URL/);
   });
 });

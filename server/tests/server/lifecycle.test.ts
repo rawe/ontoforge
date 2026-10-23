@@ -9,17 +9,15 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
 import { shutdownServer } from "../../src/main.js";
 import { MemoryThreadStore } from "../../src/runtime/threads/memoryThreadStore.js";
+import type { SharedState } from "../../src/sharedState.js";
 
-/** A thread store that records when it closes. */
-class RecordingThreads extends MemoryThreadStore {
-  constructor(private readonly events: string[]) {
-    super();
-  }
-  override async close(): Promise<void> {
-    this.events.push("threads closed");
-    await super.close();
-  }
-}
+/** Shared state in memory that records when it closes. */
+const recordingState = (events: string[]): SharedState => ({
+  threads: new MemoryThreadStore(),
+  close: async () => {
+    events.push("shared state closed");
+  },
+});
 
 let app: FastifyInstance | null = null;
 
@@ -29,7 +27,7 @@ afterEach(async () => {
 });
 
 async function build(events: string[] = []): Promise<FastifyInstance> {
-  app = await createApp(new RecordingThreads(events));
+  app = await createApp(recordingState(events));
   return app;
 }
 
@@ -69,7 +67,7 @@ describe("probes", () => {
 });
 
 describe("shutdown", () => {
-  it("lets a running request finish, refuses new connections, then closes the thread store", async () => {
+  it("lets a running request finish, refuses new connections, then closes the shared state", async () => {
     const events: string[] = [];
     const app = await build(events);
     let finish!: () => void;
@@ -93,10 +91,10 @@ describe("shutdown", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("connection")).toBe("close");
     await shutdown;
-    expect(events).toEqual(["handled", "threads closed"]);
+    expect(events).toEqual(["handled", "shared state closed"]);
   });
 
-  it("cuts a stream at the deadline and closes the thread store only after its turn is released", async () => {
+  it("cuts a stream at the deadline and closes the shared state only after its turn is released", async () => {
     const events: string[] = [];
     const app = await build(events);
     // Shaped like a chat stream: hijacked, and the turn is released after
@@ -119,7 +117,7 @@ describe("shutdown", () => {
     await shutdownServer(app, { drainMs: 200 });
     await cut;
     expect(stream.complete).toBe(false);
-    expect(events).toEqual(["turn released", "threads closed"]);
+    expect(events).toEqual(["turn released", "shared state closed"]);
     expect(Date.now() - started).toBeLessThan(2_000);
   });
 
@@ -127,7 +125,7 @@ describe("shutdown", () => {
     const events: string[] = [];
     const app = await build(events);
     await shutdownServer(app, { drainMs: 100 });
-    expect(events).toEqual(["threads closed"]);
+    expect(events).toEqual(["shared state closed"]);
   });
 
   it("runs once for repeated calls", async () => {
@@ -138,6 +136,6 @@ describe("shutdown", () => {
     const second = shutdownServer(app, { drainMs: 100 });
     expect(second).toBe(first);
     await Promise.all([first, second]);
-    expect(events).toEqual(["threads closed"]);
+    expect(events).toEqual(["shared state closed"]);
   });
 });

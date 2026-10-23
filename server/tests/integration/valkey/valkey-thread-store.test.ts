@@ -2,43 +2,38 @@
  * The Valkey thread store against the dev Valkey, in a logical database of
  * its own (`env/test-valkey.env`): the contract suite with real expiry, plus
  * what only Valkey can do to it — a flush or a restart under a running turn,
- * a full memory, a dropped connection, a misconfigured eviction policy.
- * Fails loudly when that Valkey is down, like the database suite.
+ * a full memory, a dropped connection. After every test each key expires.
+ * Fails loudly when that Valkey is down, like the database suite. The boot
+ * checks are in `valkey-connection.test.ts`.
  */
 
 import { execFileSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { Valkey } from "iovalkey";
+import type { Valkey } from "iovalkey";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { settings } from "../../../src/config.js";
+import { closeValkey, connectValkey } from "../../../src/adapters/valkey/connection.js";
+import { THREAD_SCRIPTS, ValkeyThreadStore } from "../../../src/adapters/valkey/threadStore.js";
 import { StoreError } from "../../../src/core/exceptions.js";
-import type { ThreadBinding, Turn } from "../../../src/runtime/threads/threadStore.js";
-import { ValkeyThreadStore } from "../../../src/runtime/threads/valkeyThreadStore.js";
+import type { StoreLifetimes, ThreadBinding, Turn } from "../../../src/runtime/threads/threadStore.js";
 import { SUITE_LIFETIMES, threadStoreSuite } from "../../runtime/threads/threadStoreSuite.js";
+import { CONTAINER, expectEveryKeyExpiring, openAdmin, url } from "./support.js";
 
-/** The dev Valkey's container (`docker-compose.yml`); one test pauses and restarts it. */
-const CONTAINER = "ontoforge-valkey-dev";
-/** The logical database the suite owns: it flushes this one only. */
-const DATABASE = "/15";
 const BINDING: ThreadBinding = { ontologyKey: "fair", lensKey: "visitor", kind: "agents", assistantKey: "guide" };
 const bytes = (text: string) => new Uint8Array(Buffer.from(text));
 
-if (settings.THREAD_STORE !== "valkey" || settings.VALKEY_URL === null) {
-  throw new Error("The Valkey suite runs with env/test-valkey.env (THREAD_STORE=valkey, VALKEY_URL)");
-}
-const url = settings.VALKEY_URL;
-if (new URL(url).pathname !== DATABASE) {
-  throw new Error(`The Valkey suite flushes its database: VALKEY_URL must name database ${DATABASE.slice(1)}`);
+/** A thread store on a client of its own, as one server holds it. */
+async function connect(lifetimes: StoreLifetimes): Promise<{ store: ValkeyThreadStore; close: () => Promise<void> }> {
+  const client = await connectValkey(url, [THREAD_SCRIPTS]);
+  return { store: new ValkeyThreadStore(client, lifetimes), close: () => closeValkey(client) };
 }
 
 /** A plain client for what the store never does: flushing, configuring, inspecting. */
 let admin: Valkey;
 
 beforeAll(async () => {
-  admin = new Valkey(url);
-  await admin.ping();
+  admin = await openAdmin();
 });
 
 afterAll(async () => {
@@ -49,19 +44,20 @@ beforeEach(async () => {
   await admin.flushdb();
 });
 
-threadStoreSuite("valkey", async (lifetimes) => ({
-  store: await ValkeyThreadStore.connect(url, lifetimes),
-  advance: (ms) => sleep(ms),
-}));
+afterEach(async () => {
+  await expectEveryKeyExpiring(admin);
+});
+
+threadStoreSuite("valkey", async (lifetimes) => ({ ...(await connect(lifetimes)), advance: (ms) => sleep(ms) }));
 
 describe("valkey thread store", () => {
   let store: ValkeyThreadStore;
-  const opened: ValkeyThreadStore[] = [];
+  const opened: (() => Promise<void>)[] = [];
 
   async function open(): Promise<ValkeyThreadStore> {
-    const opening = await ValkeyThreadStore.connect(url, SUITE_LIFETIMES);
-    opened.push(opening);
-    return opening;
+    const opening = await connect(SUITE_LIFETIMES);
+    opened.push(opening.close);
+    return opening.store;
   }
 
   beforeEach(async () => {
@@ -71,7 +67,7 @@ describe("valkey thread store", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    await Promise.all(opened.splice(0).map((each) => each.close()));
+    await Promise.all(opened.splice(0).map((close) => close()));
   });
 
   /** Every key the store holds, each with its remaining time to live. */
@@ -186,28 +182,4 @@ describe("valkey thread store", () => {
     expect(await store.publish((await store.begin(fresh.threadId, BINDING)) as Turn, bytes("one"))).toBe("published");
     await vi.waitFor(() => admin.ping(), { timeout: 5000 });
   }, 60_000);
-
-  it("refuses to connect to a Valkey that evicts, cannot run the scripts or cannot be reached, without leaking the password", async () => {
-    await admin.config("SET", "maxmemory-policy", "allkeys-lru");
-    try {
-      await expect(ValkeyThreadStore.connect(url)).rejects.toThrow(/maxmemory-policy must be noeviction, is allkeys-lru/);
-    } finally {
-      await admin.config("SET", "maxmemory-policy", "noeviction");
-    }
-    // A Valkey that may not run scripts (as some managed services restrict them).
-    await admin.acl("SETUSER", "noscripts", "on", ">secret", "~*", "+@all", "-@scripting");
-    try {
-      const target = new URL(url);
-      target.username = "noscripts";
-      target.password = "secret";
-      const restricted = ValkeyThreadStore.connect(target.toString());
-      await expect(restricted).rejects.toThrow(/is not usable: .*NOPERM/);
-      await expect(restricted).rejects.not.toThrow(/secret/);
-    } finally {
-      await admin.acl("DELUSER", "noscripts");
-    }
-    const unreachable = ValkeyThreadStore.connect("redis://user:secret@127.0.0.1:1");
-    await expect(unreachable).rejects.toThrow(/Valkey at redis:\/\/user:\*\*\*@127\.0\.0\.1:1/);
-    await expect(unreachable).rejects.not.toThrow(/secret/);
-  });
 });

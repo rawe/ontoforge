@@ -39,9 +39,8 @@ import { changesetRouter } from "./runtime/changesetRouter.js";
 import { decisionRouter } from "./runtime/decisionRouter.js";
 import { runtimeRouter } from "./runtime/router.js";
 import { rulesetRouter, rulesetRuntimeRouter } from "./runtime/rulesetRouter.js";
-import { MemoryThreadStore } from "./runtime/threads/memoryThreadStore.js";
-import type { ThreadStore } from "./runtime/threads/threadStore.js";
 import { serverRouter } from "./server/router.js";
+import { openSharedState, type SharedState } from "./sharedState.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -136,11 +135,12 @@ function sendError(
   return reply.status(status).send({ error });
 }
 
-/** The app over `threads`, which it closes when it closes. The server
- * passes the configured store; tests that pass none get one in memory. */
-export async function createApp(threads: ThreadStore = new MemoryThreadStore()): Promise<FastifyInstance> {
+/** The app over `shared`, which it closes when it closes. The server
+ * passes the configured shared state; tests that pass none get it in memory. */
+export async function createApp(shared?: SharedState): Promise<FastifyInstance> {
+  const state = shared ?? (await openSharedState({ kind: "memory" }));
   const app = Fastify({ logger: false });
-  app.addHook("onClose", () => threads.close());
+  app.addHook("onClose", () => state.close());
 
   const lifecycle = new Lifecycle();
   app.decorate("lifecycle", lifecycle);
@@ -287,7 +287,7 @@ export async function createApp(threads: ThreadStore = new MemoryThreadStore()):
   await app.register(runtimeRouter, { prefix: runtimePrefix });
   await app.register(changesetRouter, { prefix: `${runtimePrefix}/changesets` });
   // One thread store per server: every assistant conversation lives in it.
-  await app.register(aiRouter, { prefix: runtimePrefix, threads });
+  await app.register(aiRouter, { prefix: runtimePrefix, threads: state.threads });
   await app.register(decisionRouter, { prefix: runtimePrefix });
   // Ruleset maintenance names no lens: the first lensless runtime routes.
   await app.register(rulesetRouter, { prefix: "/api/ontologies/:ontologyKey/runtime/rulesets" });

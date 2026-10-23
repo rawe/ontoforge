@@ -40,7 +40,7 @@ export interface Settings {
 
   PUBLIC_URL: string | null;
 
-  THREAD_STORE: "memory" | "valkey";
+  SHARED_STATE: "memory" | "valkey";
   VALKEY_URL: string | null;
 }
 
@@ -93,22 +93,22 @@ function optOneOf(
 }
 
 /**
- * Where assistant conversations live: `memory` serves one process only,
- * `valkey` is shared by every server naming the same `VALKEY_URL`. A URL
- * without the switch fails the boot — it would otherwise quietly run each
- * server on its own memory.
+ * Where shared state such as assistant conversations lives: `memory` serves
+ * one process only, `valkey` is shared by every server naming the same
+ * `VALKEY_URL`. A URL without the switch fails the boot — it would otherwise
+ * quietly run each server on its own memory.
  */
-function threadStore(env: NodeJS.ProcessEnv): Pick<Settings, "THREAD_STORE" | "VALKEY_URL"> {
-  const store = optOneOf(env, "THREAD_STORE", ["memory", "valkey"]) ?? "memory";
+function sharedState(env: NodeJS.ProcessEnv): Pick<Settings, "SHARED_STATE" | "VALKEY_URL"> {
+  const store = optOneOf(env, "SHARED_STATE", ["memory", "valkey"]) ?? "memory";
   const url = optStr(env, "VALKEY_URL");
   if (store === "memory") {
     if (url !== null) {
-      throw new Error("Environment variable VALKEY_URL is set but THREAD_STORE is not 'valkey'");
+      throw new Error("Environment variable VALKEY_URL is set but SHARED_STATE is not 'valkey'");
     }
-    return { THREAD_STORE: "memory", VALKEY_URL: null };
+    return { SHARED_STATE: "memory", VALKEY_URL: null };
   }
   if (url === null) {
-    throw new Error("Environment variable VALKEY_URL is required when THREAD_STORE is 'valkey'");
+    throw new Error("Environment variable VALKEY_URL is required when SHARED_STATE is 'valkey'");
   }
   let protocol: string | null = null;
   try {
@@ -119,7 +119,7 @@ function threadStore(env: NodeJS.ProcessEnv): Pick<Settings, "THREAD_STORE" | "V
   if (protocol !== "redis:" && protocol !== "rediss:") {
     throw new Error("Environment variable VALKEY_URL is not a redis:// or rediss:// URL");
   }
-  return { THREAD_STORE: "valkey", VALKEY_URL: url };
+  return { SHARED_STATE: "valkey", VALKEY_URL: url };
 }
 
 /** Where a provider is reached when no base URL is configured. */
@@ -227,7 +227,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
 
     PUBLIC_URL: optStr(env, "PUBLIC_URL"),
 
-    ...threadStore(env),
+    ...sharedState(env),
   };
 }
 

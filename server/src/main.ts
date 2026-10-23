@@ -18,15 +18,13 @@ import {
 } from "./core/embedding.js";
 import { closeStores, ensureSemanticIndexes, initStores } from "./core/ports.js";
 import { startSearchWorker, stopSearchWorker } from "./runtime/indexing/worker.js";
-import { MemoryThreadStore } from "./runtime/threads/memoryThreadStore.js";
-import type { ThreadStore } from "./runtime/threads/threadStore.js";
-import { ValkeyThreadStore } from "./runtime/threads/valkeyThreadStore.js";
+import { openSharedState } from "./sharedState.js";
 
 /**
  * Run the ordered startup sequence and return the ready-to-listen app.
  *
  * 1. Connect storage, verify reachability, ensure constraints and indexes.
- *    Open the thread store; a Valkey must be reachable and evict nothing.
+ *    Open the shared state; a Valkey must be reachable and evict nothing.
  * 2. Initialize the embedding provider, if configured.
  * 3. Initialize the language-model provider, if configured.
  * 4. If embeddings are enabled, reconcile vector index widths against the
@@ -36,11 +34,13 @@ import { ValkeyThreadStore } from "./runtime/threads/valkeyThreadStore.js";
  *    generations, then builds entries from the queue in the background.
  * 6. Start both MCP servers (mounted inside `createApp`).
  *
- * The app closes the thread store when it closes; a failed boot closes it here.
+ * The app closes the shared state when it closes; a failed boot closes it here.
  */
 export async function startServer(): Promise<FastifyInstance> {
   await initStores();
-  const threads = await openThreadStore();
+  const shared = await openSharedState(
+    settings.SHARED_STATE === "valkey" ? { kind: "valkey", url: settings.VALKEY_URL! } : { kind: "memory" },
+  );
   try {
     initEmbeddingProvider();
     initAiModel();
@@ -51,18 +51,11 @@ export async function startServer(): Promise<FastifyInstance> {
     }
     await startSearchWorker();
     // Step 6: the MCP mounts are part of createApp.
-    return await createApp(threads);
+    return await createApp(shared);
   } catch (error) {
-    await threads.close();
+    await shared.close();
     throw error;
   }
-}
-
-/** The thread store `THREAD_STORE` names, connected and checked. */
-async function openThreadStore(): Promise<ThreadStore> {
-  return settings.THREAD_STORE === "valkey"
-    ? ValkeyThreadStore.connect(settings.VALKEY_URL!)
-    : new MemoryThreadStore();
 }
 
 /** After the drain deadline: how long cut chat streams get to roll back and
@@ -90,7 +83,7 @@ export interface ShutdownOptions {
  * 3. Wait until no work runs, at most `drainMs`. Then cut every connection:
  *    a cut chat stream aborts its turn, which is rolled back and released
  *    (`chatStream.ts`); wait for that at most `UNWIND_MS`.
- * 4. Close the app — its thread store with it — the worker, the providers
+ * 4. Close the app — its shared state with it — the worker, the providers
  *    and the stores, in that order: none closes while work could use it.
  */
 export function shutdownServer(app: FastifyInstance, options: ShutdownOptions = {}): Promise<void> {

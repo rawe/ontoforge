@@ -7,8 +7,8 @@ metadata:
   labels:
     app.kubernetes.io/name: ontoforge-server
 spec:
-  # More than one replica needs Valkey (valkey.yaml) and THREAD_STORE=valkey with
-  # VALKEY_URL. Without Valkey: exactly 1, with THREAD_STORE=memory (the default).
+  # More than one replica needs Valkey (valkey.yaml) and SHARED_STATE=valkey with
+  # VALKEY_URL. Without Valkey: exactly 1, with SHARED_STATE=memory (the default).
   replicas: 2
   strategy:
     type: RollingUpdate

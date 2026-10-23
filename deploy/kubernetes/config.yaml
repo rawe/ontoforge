@@ -15,10 +15,10 @@ data:
     DB_USER=ontoforge
     # DB_PASSWORD comes from the Secret ontoforge-secrets.
 
-    # --- Conversations: shared by every replica ---
-    # Without Valkey: THREAD_STORE=memory (the default), and exactly one replica.
+    # --- Shared state (conversations): shared by every replica ---
+    # Without Valkey: SHARED_STATE=memory (the default), and exactly one replica.
     # A VALKEY_URL carrying a password belongs in the Secret instead.
-    THREAD_STORE=valkey
+    SHARED_STATE=valkey
     VALKEY_URL=redis://valkey:6379
 
     # --- Where clients reach the server ---

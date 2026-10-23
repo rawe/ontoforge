@@ -29,6 +29,8 @@ import { threadValues, TurnSaver } from "../../../src/runtime/threads/turnSaver.
 export interface StoreUnderTest {
   store: ThreadStore;
   advance(ms: number): Promise<void>;
+  /** Releases what the store runs on, if anything. */
+  close?(): Promise<void>;
 }
 
 export type ThreadStoreFactory = (lifetimes: StoreLifetimes) => Promise<StoreUnderTest>;
@@ -81,13 +83,14 @@ export function threadStoreSuite(name: string, factory: ThreadStoreFactory): voi
   describe(`thread store: ${name}`, () => {
     let store: ThreadStore;
     let advance: (ms: number) => Promise<void>;
+    let close: (() => Promise<void>) | undefined;
 
     beforeEach(async () => {
-      ({ store, advance } = await factory(SUITE_LIFETIMES));
+      ({ store, advance, close } = await factory(SUITE_LIFETIMES));
     });
 
     afterEach(async () => {
-      await store.close();
+      await close?.();
     });
 
     /** A thread with one completed turn that left `state`. */

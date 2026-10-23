@@ -22,15 +22,15 @@ It also carries `EMBEDDING_API_KEY`, `AI_API_KEY`, and a `VALKEY_URL` with a pas
 
 - **PostgreSQL runs elsewhere** (managed or your own operator) and is named in `DB_URI`.
   Every replica uses the same database; schema and data never live in a pod.
-- **A server release with `/livez`, `/readyz` and `THREAD_STORE`.** Replace `VERSION` in
+- **A server release with `/livez`, `/readyz` and `SHARED_STATE`.** Replace `VERSION` in
   the image with that release, pinned.
 - **One env file.** The ConfigMap key `ontoforge.env` is mounted at `/config` and named by
   `ENV_FILE`. Secrets come from `ontoforge-secrets` as environment variables, which win
   over the file.
-- **Conversations live in Valkey**, shared by every replica, so the Service needs no
-  session affinity. Without Valkey the server runs as exactly one replica with
-  `THREAD_STORE=memory` (the default); more than one replica requires deploying Valkey and
-  setting `THREAD_STORE=valkey` and `VALKEY_URL`. Nothing checks this: a pod cannot see
+- **Shared state lives in Valkey** — the conversations, shared by every replica — so the
+  Service needs no session affinity. Without Valkey the server runs as exactly one replica
+  with `SHARED_STATE=memory` (the default); more than one replica requires deploying Valkey
+  and setting `SHARED_STATE=valkey` and `VALKEY_URL`. Nothing checks this: a pod cannot see
   the other replicas. Valkey keeps nothing on disk: restarting it ends every open
   conversation (clients get `THREAD_NOT_FOUND` and start a new one) and nothing else.
   `noeviction` makes a full store refuse new turns instead of dropping conversations.

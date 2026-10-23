@@ -2,7 +2,8 @@
  * The thread store: the one seam for server-held assistant conversations
  * (`docs/architecture.md#thread-store`). Routes talk only to this
  * interface; the implementations are `memoryThreadStore.ts` (one process)
- * and `valkeyThreadStore.ts` (shared by any number of servers).
+ * and `adapters/valkey/threadStore.ts` (shared by any number of servers).
+ * Both are part of the shared state (`sharedState.ts`), which closes them.
  *
  * The store holds one opaque byte string per thread: its state after the
  * last completed turn. A turn never writes into the store while it runs —
@@ -123,8 +124,6 @@ export interface ThreadStore {
 
   /** Ends the lease if `turn` still owns it; never touches state or deadline. */
   release(turn: Turn): Promise<void>;
-
-  close(): Promise<void>;
 }
 
 /** Refuses a state over `THREAD_STATE_MAX_BYTES`; both adapters check it before writing. */

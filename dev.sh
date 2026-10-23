@@ -135,7 +135,7 @@ start_service() {
 # --- PostgreSQL and Valkey ---
 # Each only when the run uses it: another DB_URI or VALKEY_URL (the scale
 # harness's, say) leaves the dev container alone. Memory stays the default
-# thread store; THREAD_STORE=valkey with VALKEY_URL=redis://localhost:6379
+# shared state; SHARED_STATE=valkey with VALKEY_URL=redis://localhost:6379
 # uses this Valkey.
 DB_URI_RUN="$(setting DB_URI)"
 VALKEY_URL_RUN="$(setting VALKEY_URL)"

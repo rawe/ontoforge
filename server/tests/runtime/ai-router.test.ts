@@ -583,7 +583,7 @@ describe("threads shared by servers", () => {
 
   it("two servers sharing one store continue each other's threads", async () => {
     const { createApp } = await import("../../src/app.js");
-    const shared = new MemoryThreadStore();
+    const shared = { threads: new MemoryThreadStore(), close: async () => {} };
     const [a, b] = [await createApp(shared), await createApp(shared)];
     try {
       const model = new FakeToolCallingModel([new AIMessage("Alice is here."), new AIMessage("She is 30.")]);
@@ -608,7 +608,7 @@ describe("threads shared by servers", () => {
         return outcome;
       }
     }
-    const losing = await createApp(new Losing());
+    const losing = await createApp({ threads: new Losing(), close: async () => {} });
     try {
       setAiModel(new FakeToolCallingModel([new AIMessage("Lost")]));
       const taken = events((await post(losing, "_default", { message: "Hi" })).body);

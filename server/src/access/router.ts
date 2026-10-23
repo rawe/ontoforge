@@ -42,6 +42,11 @@ function storeOf(request: FastifyRequest): AccessStore {
   return request.server.auth!.access;
 }
 
+function configuredAdmin(request: FastifyRequest): service.ConfiguredAdmin {
+  const { issuer, adminSubject } = request.server.auth!.settings;
+  return { issuer, subject: adminSubject };
+}
+
 /** Routes mounted at `/api`. */
 export const accessRouter: FastifyPluginAsyncZod = async (app) => {
   app.get(
@@ -77,7 +82,13 @@ export const accessRouter: FastifyPluginAsyncZod = async (app) => {
     "/users/:userId",
     { schema: { tags: ["users"], params: UserParams, body: StatusBody, response: { 200: User } } },
     async (request) =>
-      service.setUserStatus(storeOf(request), await callerOf(request), request.params.userId, request.body.status),
+      service.setUserStatus(
+        storeOf(request),
+        await callerOf(request),
+        configuredAdmin(request),
+        request.params.userId,
+        request.body.status,
+      ),
   );
 
   app.post(
@@ -93,7 +104,13 @@ export const accessRouter: FastifyPluginAsyncZod = async (app) => {
     "/users/:userId/assignments/:assignmentId",
     { schema: { tags: ["users"], params: AssignmentParams } },
     async (request, reply) => {
-      await service.revoke(storeOf(request), await callerOf(request), request.params.userId, request.params.assignmentId);
+      await service.revoke(
+        storeOf(request),
+        await callerOf(request),
+        configuredAdmin(request),
+        request.params.userId,
+        request.params.assignmentId,
+      );
       return reply.status(204).send();
     },
   );

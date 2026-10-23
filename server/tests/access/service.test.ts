@@ -43,6 +43,10 @@ vi.mock("../../src/core/ports.js", () => ({
 
 const service = await import("../../src/access/service.js");
 
+const ISSUER = "http://issuer";
+/** The configured administrator: `platform`. */
+const CONFIGURED = { issuer: ISSUER, subject: "platform" };
+
 /** Just enough of the access store, in memory. */
 class MemoryAccess {
   principals = new Map<string, Principal>();
@@ -66,6 +70,11 @@ class MemoryAccess {
 
   async principal(id: string) {
     return this.principals.get(id) ?? null;
+  }
+  /** Every principal's subject is its name. */
+  async principalOf(issuer: string, subject: string) {
+    if (issuer !== ISSUER) return null;
+    return [...this.principals.values()].find((p) => p.username === subject) ?? null;
   }
   async assignmentsOf(id: string) {
     return this.assignments.filter((a) => a.principalId === id);
@@ -191,28 +200,41 @@ describe("granting", () => {
 describe("revoking", () => {
   it("an Ontology Administrator revokes lens roles within its ontology; others it does not see", async () => {
     const [inFair, inOther] = await memory.assignmentsOf(alice.id);
-    await expect(service.revoke(store, callerOf(fairAdmin), alice.id, inOther!.id)).rejects.toThrow(NotFoundError);
-    await service.revoke(store, callerOf(fairAdmin), alice.id, inFair!.id);
+    await expect(service.revoke(store, callerOf(fairAdmin), CONFIGURED, alice.id, inOther!.id)).rejects.toThrow(NotFoundError);
+    await service.revoke(store, callerOf(fairAdmin), CONFIGURED, alice.id, inFair!.id);
     expect((await memory.assignmentsOf(alice.id)).map((a) => a.id)).toEqual([inOther!.id]);
   });
 
   it("an Ontology Administrator sees but cannot revoke an administrator role in its ontology", async () => {
     const [own] = await memory.assignmentsOf(fairAdmin.id);
-    await expect(service.revoke(store, callerOf(fairAdmin), fairAdmin.id, own!.id)).rejects.toThrow(ForbiddenError);
+    await expect(service.revoke(store, callerOf(fairAdmin), CONFIGURED, fairAdmin.id, own!.id)).rejects.toThrow(ForbiddenError);
   });
 
   it("an assignment named under another user is not found", async () => {
     const [inFair] = await memory.assignmentsOf(alice.id);
-    await expect(service.revoke(store, callerOf(platform), fairAdmin.id, inFair!.id)).rejects.toThrow(NotFoundError);
+    await expect(service.revoke(store, callerOf(platform), CONFIGURED, fairAdmin.id, inFair!.id)).rejects.toThrow(NotFoundError);
   });
 });
 
 describe("platform administration", () => {
   it("only Platform Administrators change status or admit services; none disables itself", async () => {
-    await expect(service.setUserStatus(store, callerOf(fairAdmin), alice.id, "disabled")).rejects.toThrow(ForbiddenError);
-    expect((await service.setUserStatus(store, callerOf(platform), alice.id, "disabled")).status).toBe("disabled");
-    await expect(service.setUserStatus(store, callerOf(platform), platform.id, "disabled")).rejects.toThrow(ConflictError);
-    await expect(service.admitService(store, callerOf(fairAdmin), "http://issuer", { displayName: "s", subject: "s" })).rejects.toThrow(ForbiddenError);
+    await expect(service.setUserStatus(store, callerOf(fairAdmin), CONFIGURED, alice.id, "disabled")).rejects.toThrow(ForbiddenError);
+    expect((await service.setUserStatus(store, callerOf(platform), CONFIGURED, alice.id, "disabled")).status).toBe("disabled");
+    await expect(service.setUserStatus(store, callerOf(platform), CONFIGURED, platform.id, "disabled")).rejects.toThrow(ConflictError);
+    await expect(service.admitService(store, callerOf(fairAdmin), ISSUER, { displayName: "s", subject: "s" })).rejects.toThrow(ForbiddenError);
+  });
+
+  it("the configured administrator is neither disabled nor demoted: every sign-in restores it", async () => {
+    const other = memory.add("other-admin");
+    grantDirect(other, "platform_admin");
+    const [role] = await memory.assignmentsOf(platform.id);
+    await expect(service.setUserStatus(store, callerOf(other), CONFIGURED, platform.id, "disabled")).rejects.toThrow(
+      "This account cannot be disabled: the configured administrator is restored at every sign-in; change AUTH_ADMIN_SUBJECT first",
+    );
+    await expect(service.revoke(store, callerOf(other), CONFIGURED, platform.id, role!.id)).rejects.toThrow(ConflictError);
+    expect(await memory.assignmentsOf(platform.id)).toHaveLength(1);
+    // Another administrator is neither.
+    expect((await service.setUserStatus(store, callerOf(platform), CONFIGURED, other.id, "disabled")).status).toBe("disabled");
   });
 
   it("an ontology's access list: its administrator and Platform Administrators", async () => {

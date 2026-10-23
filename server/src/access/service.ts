@@ -46,7 +46,21 @@ export interface GrantInput {
   lensKey?: string | undefined;
 }
 
+/** The identity `AUTH_ADMIN_SUBJECT` names at the configured issuer. */
+export interface ConfiguredAdmin {
+  issuer: string;
+  subject: string;
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const CONFIGURED_ADMIN_RESTORED =
+  "the configured administrator is restored at every sign-in; change AUTH_ADMIN_SUBJECT first";
+
+/** Whether a principal is the configured administrator, whom every sign-in makes active Platform Administrator again. */
+async function isConfiguredAdmin(store: AccessStore, admin: ConfiguredAdmin, principalId: string): Promise<boolean> {
+  return (await store.principalOf(admin.issuer, admin.subject))?.id === principalId;
+}
 
 export function userView(principal: Principal): UserView {
   return {
@@ -146,6 +160,7 @@ export async function getUser(
 export async function setUserStatus(
   store: AccessStore,
   caller: Caller,
+  admin: ConfiguredAdmin,
   userId: string,
   status: PrincipalStatus,
 ): Promise<UserView> {
@@ -154,6 +169,9 @@ export async function setUserStatus(
     throw new ConflictError("You cannot disable your own account");
   }
   await principalOf(store, userId);
+  if (status === "disabled" && (await isConfiguredAdmin(store, admin, userId))) {
+    throw new ConflictError(`This account cannot be disabled: ${CONFIGURED_ADMIN_RESTORED}`);
+  }
   const updated = await store.setStatus(userId, status, caller.principal.id);
   if (updated === null) throw new NotFoundError(`User '${userId}' not found`);
   return userView(updated);
@@ -227,13 +245,22 @@ export async function grant(
 }
 
 /** Revokes one of a user's assignments, within the scope that may grant it. */
-export async function revoke(store: AccessStore, caller: Caller, userId: string, assignmentId: string): Promise<void> {
+export async function revoke(
+  store: AccessStore,
+  caller: Caller,
+  admin: ConfiguredAdmin,
+  userId: string,
+  assignmentId: string,
+): Promise<void> {
   const assignment = UUID.test(assignmentId) ? await store.assignment(assignmentId) : null;
   if (assignment === null || assignment.principalId !== userId || !sees(caller, assignment)) {
     throw new NotFoundError(`Assignment '${assignmentId}' not found`);
   }
   if (!manages(caller, assignment)) {
     throw new ForbiddenError(`Revoking role '${assignment.role}' needs the Platform Administrator role`);
+  }
+  if (assignment.role === "platform_admin" && (await isConfiguredAdmin(store, admin, userId))) {
+    throw new ConflictError(`This Platform Administrator role cannot be revoked: ${CONFIGURED_ADMIN_RESTORED}`);
   }
   if ((await store.revoke(assignmentId, caller.principal.id)) === null) {
     throw new NotFoundError(`Assignment '${assignmentId}' not found`);

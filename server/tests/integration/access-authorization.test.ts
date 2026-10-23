@@ -244,6 +244,17 @@ describe("authorization with authentication on", () => {
     expect(early.body).toMatchObject({ id: await idOf("early-service"), kind: "service", displayName: "Importer" });
   });
 
+  it("the configured administrator is neither disabled nor demoted by another administrator", async () => {
+    const adminId = await idOf("admin");
+    const bobRole = await grant("admin", "bob", { role: "platform_admin" });
+    const disable = await as("bob", "PATCH", `/api/users/${adminId}`, { status: "disabled" });
+    expect(disable.status).toBe(409);
+    expect(disable.body.error.message).toContain("change AUTH_ADMIN_SUBJECT first");
+    const role = (await access.assignmentsOf(adminId)).find((a) => a.role === "platform_admin")!;
+    expect((await as("bob", "DELETE", `/api/users/${adminId}/assignments/${role.id}`)).status).toBe(409);
+    expect((await as("admin", "DELETE", `/api/users/${await idOf("bob")}/assignments/${bobRole.id}`)).status).toBe(204);
+  });
+
   it("a Reader's runtime MCP mount lists only reads and refuses a write call", async () => {
     const connect = async (subject: string) => {
       const client = new Client({ name: "access-tests", version: "0.0.1" });

@@ -22,11 +22,11 @@
  *    driver types. The sole exception is the validated-query object from
  *    `core/oql`, which crosses the port opaque and is compiled by the
  *    adapter.
- * 2. Each method owns its connection. The one exception is the store
- *    `RuntimeStore.transaction` hands to its work: every method of that
- *    store, and of the ruleset and changeset stores it hands out, runs on
- *    the transaction's one connection, and a pool checkout inside it is
- *    an assertion failure.
+ * 2. Each method owns its connection. The exceptions are the stores
+ *    `RuntimeStore.transaction` and `ModelingStore.changeDesign` hand to
+ *    their work: every method of that store, and of the stores it hands
+ *    out, runs on the transaction's one connection, and a pool checkout
+ *    inside it is an assertion failure.
  * 3. Filtering, search, and sorting inputs are structured values, never
  *    query fragments.
  * 4. Driver exceptions never cross the port; adapters raise the domain
@@ -176,6 +176,17 @@ export interface ParentViolation {
 export type ParentFlagWrite = { row: Row } | { violations: ParentViolation[] };
 
 /**
+ * The design revision of an ontology: its never-reused id and a number
+ * every design change advances. A recreated ontology starts again at 1,
+ * so only the pair tells two designs apart. Caches tag what they hold
+ * with it; data writes check theirs under the design guard.
+ */
+export interface DesignRevision {
+  ontologyId: string;
+  revision: number;
+}
+
+/**
  * The modeling side of the persistence port: schema persistence.
  *
  * Capability grouping follows `docs/storage-adapters.md` ("The two store
@@ -188,6 +199,15 @@ export interface ModelingStore {
 
   /** The navigator store of the same ontology. */
   navigators(): NavigatorStore;
+
+  /** Run `work` as one design change: one transaction that holds the
+   * ontology's design exclusively — data writes and other design changes
+   * wait — and advances its revision; COMMIT when `work` returns,
+   * ROLLBACK (the revision included) when it throws. The store handed to
+   * `work`, and the search-index and navigator stores it hands out, run
+   * on that transaction (contract rule 2). On a store already inside a
+   * design change, `work` runs on it. */
+  changeDesign<T>(work: (store: ModelingStore) => Promise<T>): Promise<T>;
 
   // ------------------------------------------------------------------
   // Lenses
@@ -528,10 +548,13 @@ export interface RuntimeStore {
   // Schema reading (for the runtime schema cache)
   // ------------------------------------------------------------------
 
+  /** The ontology's current design revision; takes no lock. */
+  designRevision(): Promise<DesignRevision>;
+
   /** Unfiltered: the adapter never applies the inclusions. Null when no
    * lens has the key. Contract: `docs/storage-adapters.md`, "Schema reading".
    * Carries `searchIndexInclusions`, the keys of the indices the lens
-   * includes. */
+   * includes, and `design`, the design revision of the same snapshot. */
   getFullSchemaWithLensInclusions(lensKey: string): Promise<Row | null>;
 
   getAgentConfigs(lensKey: string): Promise<Row[]>;
@@ -559,13 +582,16 @@ export interface RuntimeStore {
   // ------------------------------------------------------------------
 
   /** Run `work` on a store bound to one transaction on one connection:
-   * COMMIT when it returns, ROLLBACK when it throws. Every read and write
-   * of the bound store, its ruleset and changeset stores included, uses
-   * that connection (contract rule 2's exception). Anything that would
-   * take a second connection inside it — a nested `transaction`,
-   * `getFullSchemaWithLensInclusions` (its own REPEATABLE READ), the
-   * search-index or navigator store — is an assertion failure. */
-  transaction<T>(work: (store: RuntimeStore) => Promise<T>): Promise<T>;
+   * COMMIT when it returns, ROLLBACK when it throws. The transaction first
+   * holds the ontology's design shared — design changes wait for it, other
+   * writes do not — and throws `DesignChangedError` unless the design is
+   * still `design`, so nothing commits against a design that changed.
+   * Every read and write of the bound store, its ruleset and changeset
+   * stores included, uses that connection (contract rule 2's exception).
+   * Anything that would take a second connection inside it — a nested
+   * `transaction`, `getFullSchemaWithLensInclusions` (its own REPEATABLE
+   * READ), the search-index or navigator store — is an assertion failure. */
+  transaction<T>(design: DesignRevision, work: (store: RuntimeStore) => Promise<T>): Promise<T>;
 
   // ------------------------------------------------------------------
   // Entity instances
@@ -1260,6 +1286,9 @@ export interface SearchIndexStore {
   /** The ontology this store is bound to. */
   readonly ontologyKey: string;
 
+  /** The ontology's current design revision; takes no lock. */
+  designRevision(): Promise<DesignRevision>;
+
   // ------------------------------------------------------------------
   // Settings
   // ------------------------------------------------------------------
@@ -1358,9 +1387,14 @@ export interface SearchIndexStore {
   // ------------------------------------------------------------------
 
   /**
-   * Start a building generation. A generation still building for the same
-   * index and representation is superseded: it retires with its queued
-   * work and entries. Null when the index does not exist.
+   * Start a building generation, holding the ontology's design
+   * exclusively, so no data write runs between the backfill and the
+   * generation becoming visible to writes. A generation still building for
+   * the same index and representation is superseded: it retires with its
+   * queued work and entries. Null, with nothing created, when the index
+   * does not exist, when the design is no longer `design` (the change that
+   * moved it reconciles), or — unless `force` — when a building or ready
+   * generation of the index and representation already matches.
    *
    * `backfillEntityType` queues every entity of that type (one `entity`
    * item each) in the same transaction and sets `total` to their count —
@@ -1368,7 +1402,7 @@ export interface SearchIndexStore {
    */
   createGeneration(
     generation: NewSearchGeneration,
-    options?: { backfillEntityType?: string },
+    options: { design: DesignRevision; backfillEntityType?: string; force?: boolean },
   ): Promise<SearchGenerationRecord | null>;
 
   getGeneration(generationId: string): Promise<SearchGenerationRecord | null>;
@@ -1396,8 +1430,9 @@ export interface SearchIndexStore {
 
   /** Retire a building or ready generation that no definition wants any
    * more (a representation switched off, a definition changed back), with
-   * its queued work and entries. False when it is neither. */
-  retireGeneration(generationId: string): Promise<boolean>;
+   * its queued work and entries. False when it is neither, or when the
+   * design is no longer `design`. */
+  retireGeneration(generationId: string, design: DesignRevision): Promise<boolean>;
 
   /** Remove the entries storage of every generation that is neither
    * building nor ready — what an interrupted retirement or an entity type
@@ -1454,7 +1489,9 @@ export interface SearchIndexStore {
 
   /** Every type and property of the ontology — what the worker composes
    * entries against: `{ entityTypes, relationTypes }` as rows, the shape
-   * `RuntimeStore.getFullSchemaWithLensInclusions` returns them in. */
+   * `RuntimeStore.getFullSchemaWithLensInclusions` returns them in — with
+   * the index definitions (`indices`) and the design revision (`design`)
+   * of the same snapshot. */
   readFullSchema(): Promise<Row>;
 
   /** Queue every entity of a type, as one `entity` item each, into the

@@ -18,7 +18,7 @@ import { recordedDocument, valueBytes } from "../../src/runtime/changesets.js";
 import { createMockRulesetStore, type MockRulesetStore } from "../mockRulesetStore.js";
 import { createMockChangesetStore, type MockChangesetStore } from "../mockChangesetStore.js";
 import { createMockNavigatorStore, type MockNavigatorStore } from "../mockNavigatorStore.js";
-import { createMockSearchIndexStore, type MockSearchIndexStore } from "../mockSearchIndexStore.js";
+import { createMockSearchIndexStore, TEST_DESIGN, type MockSearchIndexStore } from "../mockSearchIndexStore.js";
 
 export const NOW = new Date("2025-01-01T12:00:00.000Z");
 
@@ -31,7 +31,8 @@ interface InclusionRow {
 
 /**
  * Build a full-schema payload as returned by the runtime store's
- * `getFullSchemaWithLensInclusions`. With no inclusions the lens is fully unscoped.
+ * `getFullSchemaWithLensInclusions` — of `TEST_DESIGN`, the revision the
+ * mock stores answer. With no inclusions the lens is fully unscoped.
  */
 export function makeFullSchema(options?: {
   lensKey?: string;
@@ -109,6 +110,7 @@ export function makeFullSchema(options?: {
     ],
     entityInclusions: options?.entityInclusions ?? [],
     relationInclusions: options?.relationInclusions ?? [],
+    design: TEST_DESIGN,
   };
 }
 
@@ -179,7 +181,8 @@ export function makeRelation(
  * one non-method member, the store's ontology binding, stays a value; the
  * search-index, navigator, ruleset and changeset stores it hands out are
  * mocks too (`indices`, `navigatorStore`, `rulesetStore`, `changesetStore`).
- * `transaction` hands its work the mock itself. */
+ * Every design read answers `TEST_DESIGN`; `transaction` hands its work the
+ * mock itself. */
 export type MockRuntimeStore = {
   [K in Exclude<keyof RuntimeStore, "ontologyKey">]: Mock;
 } & {
@@ -206,7 +209,8 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     navigators: vi.fn(() => navigatorStore),
     rulesets: vi.fn(() => rulesetStore),
     changesets: vi.fn(() => changesetStore),
-    transaction: vi.fn(async (work: (bound: RuntimeStore) => Promise<unknown>) => work(store)),
+    designRevision: vi.fn(async () => TEST_DESIGN),
+    transaction: vi.fn(async (_design: unknown, work: (bound: RuntimeStore) => Promise<unknown>) => work(store)),
     supportsKeywordRanking: vi.fn(() => false),
     supportsSearchPathConditions: vi.fn(() => false),
     getFullSchemaWithLensInclusions: vi.fn(async () => null),

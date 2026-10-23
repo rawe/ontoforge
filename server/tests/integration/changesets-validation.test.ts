@@ -124,7 +124,7 @@ async function hold(during: (bound: RuntimeStore) => Promise<unknown>): Promise<
   const released = new Promise<void>((resolve) => (release = resolve));
   let ready!: () => void;
   const held = new Promise<void>((resolve) => (ready = resolve));
-  const done = store.transaction(async (bound) => {
+  const done = store.transaction(await store.designRevision(), async (bound) => {
     await during(bound);
     ready();
     await released;

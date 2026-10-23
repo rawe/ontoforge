@@ -1,17 +1,18 @@
 /**
  * Runtime schema cache: lazy assembly, the four-row scoping matrix with
  * the inferred-relations rule and its cliff edge, silent skipping of dead
- * inclusion keys, and wholesale invalidation via the seam every modeling
- * mutation calls.
+ * inclusion keys, and the design revision every use checks.
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { NotFoundError } from "../../src/core/exceptions.js";
 import {
+  cachedEntryCounts,
   invalidateLoadedSchemaCache,
   loadSchema,
 } from "../../src/runtime/schemaCache.js";
+import { TEST_DESIGN } from "../mockSearchIndexStore.js";
 import {
   asRuntimeStore,
   createMockRuntimeStore,
@@ -288,50 +289,90 @@ describe("the cache key carries the ontology dimension", () => {
   });
 });
 
-describe("wholesale invalidation via the modeling seam", () => {
-  it("a modeling mutation clears the WHOLE cache", async () => {
-    const hrMock = storeWith(makeScopedSchema());
-    const fullMock = storeWith(makeFullSchema({ lensKey: "full_lens" }));
+describe("design revisions", () => {
+  const design = (revision: number, ontologyId = TEST_DESIGN.ontologyId) => ({ ontologyId, revision });
 
-    await loadSchema("hr_view", asRuntimeStore(hrMock));
-    await loadSchema("full_lens", asRuntimeStore(fullMock));
-    expect(hrMock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(1);
-    expect(fullMock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(1);
+  /** A promise and the function that settles it. */
+  function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((settle) => {
+      resolve = settle;
+    });
+    return { promise, resolve };
+  }
 
-    // What every mutating modeling service path calls.
-    invalidateLoadedSchemaCache();
+  it("serves an entry while the revision holds and reloads once it moved", async () => {
+    const mock = storeWith(makeScopedSchema());
+    await loadSchema("hr_view", asRuntimeStore(mock));
+    await loadSchema("hr_view", asRuntimeStore(mock));
+    expect(mock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(1);
+    expect(mock.designRevision).toHaveBeenCalledTimes(2);
 
-    await loadSchema("hr_view", asRuntimeStore(hrMock));
-    await loadSchema("full_lens", asRuntimeStore(fullMock));
-    expect(hrMock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(2);
-    expect(fullMock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(2);
+    // Another process changed the design: no signal, only the revision.
+    mock.designRevision.mockResolvedValue(design(2));
+    mock.getFullSchemaWithLensInclusions.mockResolvedValue({ ...makeScopedSchema(), design: design(2) });
+    const reloaded = await loadSchema("hr_view", asRuntimeStore(mock));
+    expect(reloaded.design).toEqual(design(2));
+    expect(mock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(2);
+    expect(await loadSchema("hr_view", asRuntimeStore(mock))).toBe(reloaded);
   });
 
-  it("a real modeling service write invalidates the cache", async () => {
-    const runtimeMock = storeWith(makeScopedSchema());
-    await loadSchema("hr_view", asRuntimeStore(runtimeMock));
-    await loadSchema("hr_view", asRuntimeStore(runtimeMock));
-    expect(runtimeMock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(1);
+  it("a revision passed in is used without reading it", async () => {
+    const mock = storeWith(makeScopedSchema());
+    await loadSchema("hr_view", asRuntimeStore(mock), TEST_DESIGN);
+    expect(mock.designRevision).not.toHaveBeenCalled();
+  });
 
-    const { createMockModelingStore, asModelingStore, NOW } = await import(
-      "../modeling/helpers.js"
-    );
-    const modelingService = await import("../../src/modeling/service.js");
-    const modelingMock = createMockModelingStore();
-    modelingMock.createLens.mockResolvedValue({
-      lensId: "lens-2",
-      key: "new_view",
-      name: "New View",
-      description: null,
-      createdAt: NOW,
-      updatedAt: NOW,
-    });
-    await modelingService.createLens(
-      { key: "new_view", name: "New View", description: null },
-      asModelingStore(modelingMock),
-    );
+  it("an ontology created again under its key is never served its predecessor's entry", async () => {
+    const mock = storeWith(makeScopedSchema());
+    await loadSchema("hr_view", asRuntimeStore(mock));
 
-    await loadSchema("hr_view", asRuntimeStore(runtimeMock));
-    expect(runtimeMock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(2);
+    // Same key, same lens key, revision 1 again — another ontology id.
+    const successor = design(1, "00000000-0000-4000-8000-000000000002");
+    mock.designRevision.mockResolvedValue(successor);
+    mock.getFullSchemaWithLensInclusions.mockResolvedValue({ ...makeFullSchema(), design: successor });
+    const loaded = await loadSchema("hr_view", asRuntimeStore(mock));
+    expect(loaded.design).toEqual(successor);
+    expect(Object.keys(loaded.scoped.entityTypes)).toEqual(["person", "company", "department"]);
+  });
+
+  it("a slower fill of an older revision never replaces a newer entry", async () => {
+    const mock = storeWith(null);
+    const slow = deferred<Record<string, unknown>>();
+    // The first fill reads revision 1 and stalls; a second, of revision 2,
+    // finishes first.
+    mock.designRevision.mockResolvedValueOnce(design(1)).mockResolvedValue(design(2));
+    mock.getFullSchemaWithLensInclusions
+      .mockReturnValueOnce(slow.promise)
+      .mockResolvedValueOnce({ ...makeFullSchema(), design: design(2) });
+
+    const older = loadSchema("hr_view", asRuntimeStore(mock));
+    const newer = await loadSchema("hr_view", asRuntimeStore(mock));
+    expect(newer.design).toEqual(design(2));
+
+    slow.resolve({ ...makeScopedSchema(), design: design(1) });
+    expect((await older).design).toEqual(design(1));
+
+    // Revision 2 is still served from the cache.
+    expect(await loadSchema("hr_view", asRuntimeStore(mock))).toBe(newer);
+    expect(mock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(2);
+  });
+
+  it("holds at most 512 lenses, dropping the least recently used", async () => {
+    const mock = createMockRuntimeStore();
+    mock.getFullSchemaWithLensInclusions.mockImplementation(async (lensKey: string) =>
+      makeFullSchema({ lensKey }));
+    const first = await loadSchema("lens_0", asRuntimeStore(mock));
+    for (let i = 1; i < 512; i++) await loadSchema(`lens_${i}`, asRuntimeStore(mock));
+    expect(cachedEntryCounts().lenses).toBe(512);
+
+    // A hit makes lens_0 the most recent; lens_1 is now the oldest.
+    expect(await loadSchema("lens_0", asRuntimeStore(mock))).toBe(first);
+    await loadSchema("lens_512", asRuntimeStore(mock));
+    expect(cachedEntryCounts().lenses).toBe(512);
+    expect(await loadSchema("lens_0", asRuntimeStore(mock))).toBe(first);
+    const calls = mock.getFullSchemaWithLensInclusions.mock.calls.length;
+    await loadSchema("lens_1", asRuntimeStore(mock));
+    expect(mock.getFullSchemaWithLensInclusions).toHaveBeenCalledTimes(calls + 1);
   });
 });

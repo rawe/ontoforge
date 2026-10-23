@@ -40,8 +40,9 @@
  *   guard.
  * - The create with a parent relation writes both rows and their search
  *   work in one transaction.
- * - `transaction` hands its work a store bound to one connection: the two
- *   doors, and the ruleset and changeset stores' doors, take the bound
+ * - `transaction` holds the design shared and checks the revision first
+ *   (`design.ts`), then hands its work a store bound to one connection: the
+ *   two doors, and the ruleset and changeset stores' doors, take the bound
  *   querier instead of the pool. The neutral reads (`parentsOf`,
  *   `childrenOf`, `lockTargets`, `getEntitiesByIdsHashed`,
  *   `getRelationsByIds`, `getEntityTypes`) serve a changeset's checks and commit
@@ -51,9 +52,12 @@
  */
 
 
+import { sameDesign } from "../../core/designRevision.js";
+import { DesignChangedError } from "../../core/exceptions.js";
 import type { ValidatedQuery } from "../../core/oql/index.js";
 import type {
   ChangesetStore,
+  DesignRevision,
   FilterCondition,
   LockedTarget,
   NavigatorStore,
@@ -66,6 +70,7 @@ import type {
 } from "../../core/ports.js";
 import type { ParentEnd, PropertyDef } from "../../core/schemas.js";
 import { SAVED_QUERY_INDEX } from "./ddl.js";
+import { holdDesignShared, readDesign } from "./design.js";
 import {
   runArrayQuery,
   runQuery,
@@ -197,11 +202,15 @@ export class PostgresRuntimeStore implements RuntimeStore {
     return withTransaction(work, isolation, this.namespace);
   }
 
-  transaction<T>(work: (store: RuntimeStore) => Promise<T>): Promise<T> {
-    return withBoundTransaction(
-      (querier) => work(new PostgresRuntimeStore(this.ontologyKey, this.namespace, querier)),
-      this.namespace,
-    );
+  designRevision(): Promise<DesignRevision> {
+    return readDesign(this.bound, this.namespace);
+  }
+
+  transaction<T>(design: DesignRevision, work: (store: RuntimeStore) => Promise<T>): Promise<T> {
+    return withBoundTransaction(async (querier) => {
+      if (!sameDesign(await holdDesignShared(querier), design)) throw new DesignChangedError();
+      return work(new PostgresRuntimeStore(this.ontologyKey, this.namespace, querier));
+    }, this.namespace);
   }
 
   /**
@@ -282,11 +291,12 @@ export class PostgresRuntimeStore implements RuntimeStore {
   // Schema reading (for the runtime schema cache)
   // ------------------------------------------------------------------
 
-  /** The lens, ALL types with their properties, and this lens's
-   * inclusions — one coherent REPEATABLE READ snapshot.
+  /** The lens, ALL types with their properties, this lens's inclusions
+   * and the design revision — one coherent REPEATABLE READ snapshot.
    * Answers null when no lens has the key. */
   async getFullSchemaWithLensInclusions(lensKey: string): Promise<Row | null> {
     return this.tx(async (querier) => {
+      const design = await readDesign(querier, this.namespace);
       const lensResult = await querier.query(`SELECT ${LENS_COLS} FROM lens WHERE key = $1`, [
         lensKey,
       ]);
@@ -324,6 +334,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
         entityInclusions,
         relationInclusions,
         searchIndexInclusions,
+        design,
       };
     }, "REPEATABLE READ");
   }

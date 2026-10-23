@@ -222,7 +222,7 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
     const released = new Promise<void>((resolve) => (release = resolve));
     let ready!: () => void;
     const held = new Promise<void>((resolve) => (ready = resolve));
-    const done = store.transaction(async (bound) => {
+    const done = store.transaction(await store.designRevision(), async (bound) => {
       await bound.changesets().lockForCommit(cs);
       ready();
       await released;

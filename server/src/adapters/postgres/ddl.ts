@@ -323,6 +323,20 @@ export function ontologyDdlStatements(): string[] {
   ...searchStorageStatements(),
   `INSERT INTO search_settings (keyword_languages)
   VALUES (ARRAY[${DEFAULT_KEYWORD_LANGUAGES.map(literal).join(", ")}])`,
+
+  // --- Design revision ---------------------------------------------------
+
+  // One row: the ontology's never-reused id and the number every design
+  // change advances (`design.ts`). Filled from the registry row, which the
+  // creating transaction inserted first.
+  `CREATE TABLE IF NOT EXISTS design_revision (
+  singleton   boolean NOT NULL DEFAULT true CONSTRAINT design_revision_pk PRIMARY KEY
+                      CONSTRAINT design_revision_singleton CHECK (singleton),
+  ontology_id uuid    NOT NULL,
+  revision    integer NOT NULL
+)`,
+  `INSERT INTO design_revision (ontology_id, revision)
+  SELECT ontology_id, 1 FROM public.ontology WHERE namespace = current_schema()`,
 ];
 }
 

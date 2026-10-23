@@ -23,6 +23,13 @@
  *   before any statement; off-format input short-circuits to the
  *   method's not-found shape.
  *
+ * - `changeDesign` opens one transaction that holds the design
+ *   exclusively and advances its revision (`design.ts`), and hands its
+ *   work a store bound to that connection: every method above, and the
+ *   search-index and navigator stores it hands out, run on it. Bound,
+ *   `getFullSchema` reads at READ COMMITTED: the exclusive hold keeps the
+ *   design still.
+ *
  * The saved-query index methods are `ddl.ts`'s — physical naming and
  * index DDL live there, beside the init DDL. The vector-index inventory
  * is the saved-query index alone; search-index generations keep their
@@ -43,7 +50,15 @@ import type {
 } from "../../core/ports.js";
 import type { NewPropertyDef, ParentEnd, TypeKind } from "../../core/schemas.js";
 import * as vectorDdl from "./ddl.js";
-import { runQuery, withTransaction, type DbResult, type IsolationLevel, type Querier } from "./errors.js";
+import { advanceDesign, holdDesignExclusive } from "./design.js";
+import {
+  runQuery,
+  withBoundTransaction,
+  withTransaction,
+  type DbResult,
+  type IsolationLevel,
+  type Querier,
+} from "./errors.js";
 import { camelizeRow, camelizeRows, isUuid } from "./rows.js";
 import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
 import { PostgresNavigatorStore } from "./navigatorStore.js";
@@ -205,10 +220,12 @@ async function parentViolations(
 
 export class PostgresModelingStore implements ModelingStore {
   /** Bound to one ontology's namespace; unbound (tests only) runs against
-   * the connection's default namespace. */
+   * the connection's default namespace. `bound`: the connection of the
+   * design change `changeDesign` opened. */
   constructor(
     private readonly namespace?: string,
     private readonly ontologyKey: string = "",
+    private readonly bound?: Querier,
   ) {}
 
   /** The search-index store of the same ontology. */
@@ -216,26 +233,38 @@ export class PostgresModelingStore implements ModelingStore {
     if (this.namespace === undefined) {
       throw new Error("An unbound modeling store has no search indices");
     }
-    return new PostgresSearchIndexStore(this.namespace, this.ontologyKey);
+    return new PostgresSearchIndexStore(this.namespace, this.ontologyKey, this.bound);
   }
 
   navigators(): NavigatorStore {
     if (this.namespace === undefined) {
       throw new Error("An unbound modeling store has no navigators");
     }
-    return new PostgresNavigatorStore(this.namespace);
+    return new PostgresNavigatorStore(this.namespace, this.bound);
+  }
+
+  changeDesign<T>(work: (store: ModelingStore) => Promise<T>): Promise<T> {
+    if (this.bound !== undefined) return work(this);
+    return withBoundTransaction(async (querier) => {
+      await holdDesignExclusive(querier);
+      await advanceDesign(querier);
+      return work(new PostgresModelingStore(this.namespace, this.ontologyKey, querier));
+    }, this.namespace);
   }
 
   /** Door one, carrying this store's binding. */
   private query(text: string, params?: unknown[]): Promise<DbResult> {
+    if (this.bound !== undefined) return this.bound.query(text, params);
     return runQuery(text, params, this.namespace);
   }
 
-  /** Door two, carrying this store's binding. */
+  /** Door two, carrying this store's binding. A bound store runs `work`
+   * on its own transaction, whatever the isolation asked for. */
   private tx<T>(
     work: (querier: Querier) => Promise<T>,
     isolation: IsolationLevel = "READ COMMITTED",
   ): Promise<T> {
+    if (this.bound !== undefined) return work(this.bound);
     return withTransaction(work, isolation, this.namespace);
   }
 

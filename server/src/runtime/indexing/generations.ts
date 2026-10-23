@@ -26,6 +26,13 @@
  * switched-off managed index (search settings). Semantic entries
  * need an embedding provider: without one no semantic generation is
  * created, and existing ones are left as they are.
+ *
+ * A reconciliation reads the design revision before anything else and
+ * creates and retires only while the design is still that revision: what
+ * it read can then be no older than the revision, and a design change
+ * committed meanwhile reconciles again after its own commit. Two
+ * processes reconciling the same revision create one generation: the
+ * second finds the first's match.
  */
 
 import { randomUUID } from "node:crypto";
@@ -34,6 +41,7 @@ import { getEmbeddingProvider } from "../../core/embedding.js";
 import { ConflictError, NotFoundError } from "../../core/exceptions.js";
 import {
   getSearchIndexStore,
+  type DesignRevision,
   type NewSearchGeneration,
   type SearchGenerationRecord,
   type SearchIndexRecord,
@@ -42,7 +50,6 @@ import {
 import type { KeywordLanguageSet } from "../../core/keywordLanguage.js";
 import { definitionHash, type SearchRepresentation } from "../../core/searchIndex.js";
 import { disabledIndexKeys } from "../../core/searchPipeline.js";
-import { invalidateSearchContext } from "../schemaCache.js";
 
 const REPRESENTATIONS: readonly SearchRepresentation[] = ["keyword", "semantic"];
 
@@ -57,15 +64,14 @@ export interface GenerationChange {
 /**
  * Bring every index of an ontology to matching generations (see the
  * module comment). Indices named in `force` get new generations whether
- * or not one matches. Also forgets the ontology's cached search context,
- * so writes plan against the current definitions. Returns what changed.
+ * or not one matches. Returns what changed.
  */
 export async function reconcileSearchGenerations(
   ontologyKey: string,
   force: readonly string[] = [],
 ): Promise<GenerationChange[]> {
-  invalidateSearchContext(ontologyKey);
   const store = await getSearchIndexStore(ontologyKey);
+  const design = await store.designRevision();
   const [indices, generations, settings] = await Promise.all([
     store.listIndices(),
     store.listGenerations(),
@@ -79,6 +85,7 @@ export async function reconcileSearchGenerations(
     );
     changes.push(
       ...(await reconcileIndex(store, index, live, {
+        design,
         keywordLanguages: settings.keywordLanguages,
         force: force.includes(index.key),
         disabled: disabled.has(index.key),
@@ -115,7 +122,6 @@ export async function refreshSearchIndex(ontologyKey: string, indexKey: string):
   if (index === null) {
     throw new NotFoundError(`Search index '${indexKey}' not found`);
   }
-  invalidateSearchContext(ontologyKey);
   const live = (await store.listGenerations(index.searchIndexId))
     .filter((g) => g.state === "building" || g.state === "ready")
     .map((g) => g.generationId);
@@ -126,7 +132,8 @@ async function reconcileIndex(
   store: SearchIndexStore,
   index: SearchIndexRecord,
   live: SearchGenerationRecord[],
-  { keywordLanguages, force, disabled }: {
+  { design, keywordLanguages, force, disabled }: {
+    design: DesignRevision;
     keywordLanguages: KeywordLanguageSet;
     force: boolean;
     disabled: boolean;
@@ -144,7 +151,7 @@ async function reconcileIndex(
     const generations = live.filter((g) => g.representation === representation);
     if (disabled || !index.definition[representation].enabled) {
       for (const generation of generations) {
-        if (await store.retireGeneration(generation.generationId)) {
+        if (await store.retireGeneration(generation.generationId, design)) {
           change(representation, "retired", generation.generationId);
         }
       }
@@ -168,14 +175,16 @@ async function reconcileIndex(
       if (ready !== undefined && matches(ready, wanted)) {
         // The active generation is current: a build towards something
         // else (a definition since changed back) is not wanted.
-        if (building !== undefined && (await store.retireGeneration(building.generationId))) {
+        if (building !== undefined && (await store.retireGeneration(building.generationId, design))) {
           change(representation, "retired", building.generationId);
         }
         continue;
       }
     }
     const created = await store.createGeneration(wanted, {
+      design,
       backfillEntityType: index.definition.entityType,
+      force,
     });
     if (created !== null) change(representation, "created", created.generationId);
   }

@@ -47,7 +47,7 @@ import { quoteIdent } from "./oql/bindings.js";
 import { camelizeRow } from "./rows.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 8;
+export const STORAGE_VERSION = 9;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 1;
@@ -583,6 +583,21 @@ const STEPS: Step[] = [
     REFERENCES changeset_object (changeset_id, object_id) ON DELETE CASCADE
 )`,
       `ALTER TABLE ruleset ADD COLUMN write_access text NOT NULL DEFAULT 'full'`,
+    ],
+  },
+  {
+    // The design revision: the ontology's id and the number every design
+    // change advances, starting at 1.
+    to: 9,
+    actions: [
+      `CREATE TABLE design_revision (
+  singleton   boolean NOT NULL DEFAULT true CONSTRAINT design_revision_pk PRIMARY KEY
+                      CONSTRAINT design_revision_singleton CHECK (singleton),
+  ontology_id uuid    NOT NULL,
+  revision    integer NOT NULL
+)`,
+      `INSERT INTO design_revision (ontology_id, revision)
+  SELECT ontology_id, 1 FROM public.ontology WHERE namespace = current_schema()`,
     ],
   },
 ];

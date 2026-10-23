@@ -13,6 +13,7 @@ import {
   makeEntity,
   type MockRuntimeStore,
 } from "./helpers.js";
+import { TEST_DESIGN } from "../mockSearchIndexStore.js";
 
 type Row = Record<string, unknown>;
 
@@ -40,6 +41,7 @@ function makeDocSchema(entityInclusions?: Row[]): Row {
     relationTypes: [],
     entityInclusions: entityInclusions ?? [],
     relationInclusions: [],
+    design: TEST_DESIGN,
   };
 }
 

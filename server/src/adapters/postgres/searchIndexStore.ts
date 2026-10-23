@@ -33,6 +33,20 @@
  * an FK cascade (`search_index` → `entity_type` does not drop tables) — is
  * collected by `sweepGenerations`.
  *
+ * Generation creation holds the ontology's design exclusively
+ * (`design.ts`) and checks the revision its caller reconciled against:
+ * every data write holds the design shared and enqueues in its own
+ * transaction, so a write either commits before the backfill reads the
+ * entities or sees the new generation when it enqueues. Retirement checks
+ * the revision too, so a reconciliation that read an older design cannot
+ * retire what a newer one wants.
+ *
+ * Handed out by a design change (`ModelingStore.changeDesign`), the store
+ * runs its definition, inclusion, settings and retriever methods on that
+ * change's connection. The generation lifecycle needs connections of its
+ * own (a partition is detached outside any transaction), so it refuses to
+ * run there; a deleted index's tables are swept after the commit.
+ *
  * The queue (`search_queue`) holds the parts waiting to be composed, per
  * generation. Writes enqueue in their own transaction
  * (`applySearchWritePlan`, run by the runtime store); a worker claims a
@@ -45,6 +59,7 @@
 
 import { toSql } from "pgvector";
 
+import { sameDesign } from "../../core/designRevision.js";
 import { ConflictError, NotFoundError } from "../../core/exceptions.js";
 
 import {
@@ -54,6 +69,7 @@ import {
 } from "../../core/keywordLanguage.js";
 import type {
   ClaimedSearchQueueItem,
+  DesignRevision,
   IndexContentRequest,
   NewSearchGeneration,
   RankedSearchEntry,
@@ -79,6 +95,7 @@ import type {
   SearchRepresentation,
 } from "../../core/searchIndex.js";
 import { MAX_LAST_ERRORS, type IndexContentSize } from "../../core/searchPipeline.js";
+import { holdDesignExclusive, holdDesignShared, readDesign } from "./design.js";
 import { keywordQuery } from "./keywordQuery.js";
 import { runQuery, withTransaction, type DbResult, type Querier } from "./errors.js";
 import { buildFilterClauses } from "./filters.js";
@@ -237,17 +254,32 @@ function checkNewGeneration(generation: NewSearchGeneration): void {
 }
 
 export class PostgresSearchIndexStore implements SearchIndexStore {
+  /** `bound`: the connection of the design change it belongs to. */
   constructor(
     private readonly namespace: string,
     readonly ontologyKey: string,
+    private readonly bound?: Querier,
   ) {}
 
   private query(text: string, params?: unknown[]): Promise<DbResult> {
+    if (this.bound !== undefined) return this.bound.query(text, params);
     return runQuery(text, params, this.namespace);
   }
 
   private tx<T>(work: (querier: Querier) => Promise<T>): Promise<T> {
+    if (this.bound !== undefined) return work(this.bound);
     return withTransaction(work, "READ COMMITTED", this.namespace);
+  }
+
+  /** The generation lifecycle runs on connections of its own. */
+  private unbound(): void {
+    if (this.bound !== undefined) {
+      throw new Error("Generations cannot change inside a design change");
+    }
+  }
+
+  designRevision(): Promise<DesignRevision> {
+    return readDesign(this.bound, this.namespace);
   }
 
   /** A namespace-qualified name, for statements that run unbound. */
@@ -326,7 +358,7 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     // partitions are tables, which the sweep removes.
     const result = await this.query(`DELETE FROM search_index WHERE key = $1`, [key]);
     if (result.rowCount === 0) return false;
-    await this.bestEffort(() => this.sweepGenerations());
+    if (this.bound === undefined) await this.bestEffort(() => this.sweepGenerations());
     return true;
   }
 
@@ -513,18 +545,24 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
 
   async createGeneration(
     generation: NewSearchGeneration,
-    options: { backfillEntityType?: string } = {},
+    options: { design: DesignRevision; backfillEntityType?: string; force?: boolean },
   ): Promise<SearchGenerationRecord | null> {
+    this.unbound();
     checkNewGeneration(generation);
     if (!isUuid(generation.searchIndexId)) return null;
     const table = partitionName(generation.generationId);
     const created = await this.tx(async (querier) => {
+      // No data write runs while the backfill reads and the generation
+      // becomes visible; a design that moved is reconciled by its change.
+      if (!sameDesign(await holdDesignExclusive(querier), options.design)) return null;
       // Serializes generation changes of one index.
       const index = await querier.query(
         `SELECT 1 FROM search_index WHERE search_index_id = $1 FOR UPDATE`,
         [generation.searchIndexId],
       );
       if (index.rowCount === 0) return null;
+      // Another process may have created the same generation meanwhile.
+      if (options.force !== true && (await matchingGeneration(querier, generation))) return null;
       const superseded = await retire(querier, generation.searchIndexId, generation.representation, "building");
       const inserted = await querier.query(
         `INSERT INTO search_generation
@@ -601,6 +639,7 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   }
 
   async finishGeneration(generationId: string): Promise<boolean> {
+    this.unbound();
     const generation = await this.getGeneration(generationId);
     if (generation === null || generation.state !== "building") return false;
     const table = partitionName(generationId);
@@ -649,6 +688,7 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   }
 
   async failGeneration(generationId: string): Promise<boolean> {
+    this.unbound();
     if (!isUuid(generationId)) return false;
     const failed = await this.tx(async (querier) => {
       const result = await querier.query(
@@ -664,9 +704,11 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     return failed;
   }
 
-  async retireGeneration(generationId: string): Promise<boolean> {
+  async retireGeneration(generationId: string, design: DesignRevision): Promise<boolean> {
+    this.unbound();
     if (!isUuid(generationId)) return false;
     const retired = await this.tx(async (querier) => {
+      if (!sameDesign(await holdDesignShared(querier), design)) return false;
       const result = await querier.query(
         `UPDATE search_generation SET state = 'retired'
          WHERE generation_id = $1 AND state IN ${LIVE_STATES}`,
@@ -681,6 +723,7 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   }
 
   async sweepGenerations(): Promise<void> {
+    this.unbound();
     const tables = await this.query(
       `SELECT c.relname FROM pg_class c
        JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -935,11 +978,15 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   // ------------------------------------------------------------------
 
   async readFullSchema(): Promise<Row> {
-    return withTransaction(
-      (querier) => readTypesWithProperties(querier, false),
-      "REPEATABLE READ",
-      this.namespace,
-    );
+    const read = async (querier: Querier): Promise<Row> => {
+      const design = await readDesign(querier, this.namespace);
+      const types = await readTypesWithProperties(querier, false);
+      const indices = await querier.query(`SELECT ${INDEX_COLS} FROM search_index ORDER BY key`);
+      return { ...types, indices: indices.rows.map(toIndex), design };
+    };
+    // Bound, the design change's exclusive hold keeps the design still.
+    if (this.bound !== undefined) return read(this.bound);
+    return withTransaction(read, "REPEATABLE READ", this.namespace);
   }
 
   async enqueueEntityType(generationIds: string[], entityTypeKey: string): Promise<number> {
@@ -1368,6 +1415,26 @@ async function retire(
     await querier.query(`DELETE FROM search_queue WHERE generation_id = ANY($1::uuid[])`, [ids]);
   }
   return ids;
+}
+
+/** Whether a building or ready generation of the new one's index and
+ * representation already holds what it describes. */
+async function matchingGeneration(querier: Querier, generation: NewSearchGeneration): Promise<boolean> {
+  const result = await querier.query(
+    `SELECT 1 FROM search_generation
+     WHERE search_index_id = $1 AND representation = $2 AND state IN ${LIVE_STATES}
+       AND definition_hash = $3 AND model_id IS NOT DISTINCT FROM $4
+       AND dimensions IS NOT DISTINCT FROM $5 AND languages IS NOT DISTINCT FROM $6::text[]`,
+    [
+      generation.searchIndexId,
+      generation.representation,
+      generation.definitionHash,
+      generation.representation === "semantic" ? generation.modelId : null,
+      generation.representation === "semantic" ? generation.dimensions : null,
+      generation.representation === "keyword" ? generation.languages : null,
+    ],
+  );
+  return result.rowCount > 0;
 }
 
 /** The generation, share-locked, while it is building or ready; null

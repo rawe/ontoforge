@@ -24,7 +24,10 @@ fi
 #
 # Drives the Compose project in docker/scale/compose.yml and the scripts in
 # scripts/scale/ (see scripts/scale/USAGE.md). The backends' configuration is
-# one env file, env/scale.env unless `up` names another preset.
+# one env file, env/scale.env unless `up` names another preset. An env file with
+# AUTH_ENABLED=true also starts the frontend (profile ui, the PUBLIC_URL
+# http://localhost:13000) and joins the backends to Keycloak's network
+# (docker/scale/compose.auth.yml); the other subcommands work either way.
 if [ "${1:-}" = "scale" ]; then
     SCALE=(docker compose -f "$ROOT_DIR/docker/scale/compose.yml")
     case "${2:-}" in
@@ -37,16 +40,23 @@ if [ "${1:-}" = "scale" ]; then
                 SCALE_ENV_FILE="$(cd "$(dirname "$3")" && pwd)/$(basename "$3")"
                 export SCALE_ENV_FILE
             fi
+            if grep -qE '^AUTH_ENABLED=true$' "${SCALE_ENV_FILE:-$ROOT_DIR/env/scale.env}"; then
+                if ! docker network inspect ontoforge-keycloak >/dev/null 2>&1; then
+                    echo "Authentication is on: start Keycloak first (./dev.sh keycloak)."
+                    exit 1
+                fi
+                SCALE+=(-f "$ROOT_DIR/docker/scale/compose.auth.yml" --profile ui)
+            fi
             "${SCALE[@]}" up -d --build --wait --wait-timeout 300
             node "$ROOT_DIR/scripts/scale/ready.mjs" --wait 60
             ;;
         down)   "${SCALE[@]}" --profile ui down --remove-orphans ;;
         reset)  "${SCALE[@]}" --profile ui down --volumes --remove-orphans ;;
-        logs)   "${SCALE[@]}" logs -f --tail 100 "${@:3}" ;;
+        logs)   "${SCALE[@]}" --profile ui logs -f --tail 100 "${@:3}" ;;
         test)   node "$ROOT_DIR/scripts/scale/scenarios.mjs" "${@:3}" ;;
         bench)  node "$ROOT_DIR/scripts/scale/bench.mjs" "${@:3}" ;;
         status)
-            "${SCALE[@]}" ps
+            "${SCALE[@]}" --profile ui ps
             node "$ROOT_DIR/scripts/scale/ready.mjs"
             ;;
         *)

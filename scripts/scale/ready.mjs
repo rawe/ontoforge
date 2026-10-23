@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Prints the HTTP status of every service of the shared-state harness.
+// Prints the HTTP status of every service of the shared-state harness (the frontend too
+// when the backends run with authentication on: it is their PUBLIC_URL).
 //
 //   node scripts/scale/ready.mjs              one check; exit 1 unless all answer 200
 //   node scripts/scale/ready.mjs --wait 120   repeat until all answer 200, at most 120 s

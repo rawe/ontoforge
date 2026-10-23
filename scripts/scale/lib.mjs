@@ -43,16 +43,16 @@ export function composeAsync(args) {
 
 let published = null;
 
-/** Base URLs of the services as compose.yml publishes them on the host. */
+/** Base URLs of the services as compose.yml publishes them on the host (`front`: profile ui). */
 export function urls() {
   if (published) return published;
-  const config = JSON.parse(compose(['config', '--format', 'json']));
+  const config = JSON.parse(compose(['--profile', 'ui', 'config', '--format', 'json']));
   const port = (service) => {
     const entry = config.services?.[service]?.ports?.[0];
     if (!entry) throw new Error(`service ${service} publishes no port in ${COMPOSE_FILE}`);
     return `http://localhost:${entry.published}`;
   };
-  published = { a: port('backend-a'), b: port('backend-b'), lb: port('lb'), fake: port('fake-ollama') };
+  published = { a: port('backend-a'), b: port('backend-b'), lb: port('lb'), fake: port('fake-ollama'), front: port('frontend') };
   return published;
 }
 
@@ -182,17 +182,28 @@ export async function backendReady(base) {
   return { ok: info.status === 200, status: info.status, route: '/api/server/info' };
 }
 
-/** The status of every published service. */
+/** Whether the backend at `base` runs with authentication on (its /api/auth/me says so). */
+export async function authEnabled(base = urls().a) {
+  const me = await http('GET', `${base}/api/auth/me`, undefined, { timeoutMs: 3000 });
+  return me.status === 200 && me.json?.authentication === true;
+}
+
+/** The status of every published service; the frontend too when authentication is on (it is PUBLIC_URL). */
 export async function readiness() {
   const u = urls();
   const fake = await http('GET', `${u.fake}/control`, undefined, { timeoutMs: 3000 });
   const lb = await http('GET', `${u.lb}/api/server/info`, undefined, { timeoutMs: 3000 });
-  return {
+  const status = {
     'backend-a': { url: u.a, ...(await backendReady(u.a)) },
     'backend-b': { url: u.b, ...(await backendReady(u.b)) },
     lb: { url: u.lb, ok: lb.status === 200, status: lb.status, route: '/api/server/info' },
     'fake-ollama': { url: u.fake, ok: fake.status === 200, status: fake.status, route: '/control' },
   };
+  if (await authEnabled(u.a)) {
+    const front = await http('GET', `${u.front}/api/server/info`, undefined, { timeoutMs: 3000 });
+    status.frontend = { url: u.front, ok: front.status === 200, status: front.status, route: '/api/server/info' };
+  }
+  return status;
 }
 
 /** Waits until `check()` is true, up to `seconds`; returns whether it became true. */
@@ -212,6 +223,7 @@ export async function ensureSeed() {
   const u = urls();
   const existing = await http('GET', `${u.lb}/api/ontologies/${SEED.ontology}`);
   if (existing.status === 200) return 'present';
+  if (existing.status === 401) throw new Error('the harness runs with authentication on; the seed needs env/scale.env (./dev.sh scale up)');
   if (existing.status !== 404) throw new Error(`seed check answered ${existing.status}: ${existing.text}`);
   const result = spawnSync(process.execPath, [join(ROOT, 'fixtures', 'fixture.mjs'), 'load', SEED.fixture, '--base-url', u.lb], {
     stdio: 'inherit',

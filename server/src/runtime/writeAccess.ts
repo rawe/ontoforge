@@ -16,8 +16,8 @@
 import { ConflictError } from "../core/exceptions.js";
 import type { WriteAccess } from "../core/ports.js";
 
-/** The closed list of operations. `stage` starts, stages into, unstages,
- * submits, unsubmits and discards a changeset. */
+/** The closed list of operations. `stage` starts, stages into, unstages
+ * from, rebases, submits, unsubmits and discards a changeset. */
 export type Operation = "read" | "stage" | "commit" | "write";
 
 /** Each level a fixed set of operations, an ordered ladder: each level
@@ -47,8 +47,8 @@ export const TOOLS: Record<string, ToolRow> = {
   get_path: { operation: "read" },
   get_document: { operation: "read" },
   update_entity: STAGEABLE,
-  edit_document: { operation: "write" },
-  write_document: { operation: "write" },
+  edit_document: STAGEABLE,
+  write_document: STAGEABLE,
   delete_entity: STAGEABLE,
   create_relation: STAGEABLE,
   list_relations: { operation: "read" },
@@ -69,6 +69,7 @@ export const TOOLS: Record<string, ToolRow> = {
   get_changeset: { operation: "read" },
   get_staged_document: { operation: "read" },
   unstage: { operation: "stage" },
+  rebase: { operation: "stage" },
   submit_changeset: { operation: "stage" },
   unsubmit_changeset: { operation: "stage" },
   commit_changeset: { operation: "commit" },
@@ -112,7 +113,9 @@ export const ROUTES: Record<string, Operation> = {
   "GET /changesets/:changesetId/entities/:entityTypeKey/:entityId": "read",
   "DELETE /changesets/:changesetId": "stage",
   "POST /changesets/:changesetId/writes": "stage",
-  "DELETE /changesets/:changesetId/writes/:seq": "stage",
+  "DELETE /changesets/:changesetId/objects/:objectId": "stage",
+  "DELETE /changesets/:changesetId/objects/:objectId/properties/:propertyKey": "stage",
+  "POST /changesets/:changesetId/objects/:objectId/rebase": "stage",
   "POST /changesets/:changesetId/submit": "stage",
   "POST /changesets/:changesetId/unsubmit": "stage",
   "POST /changesets/:changesetId/commit": "commit",

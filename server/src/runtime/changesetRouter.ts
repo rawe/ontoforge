@@ -4,15 +4,18 @@
  * below the ruleset mirror at `…/rulesets/:rulesetKey/changesets`
  * (`rulesetRouter.ts`, whose hooks check the ruleset first).
  *
- * `POST /:changesetId/writes` stages one write, its body discriminated by
- * `operation`, and answers 201 `{seq, id}` (a create with a parent
- * relation adds `relation: {seq, id}`); `DELETE /:changesetId/writes/:seq`
- * unstages one. `GET /` lists the lens's changesets (a ruleset URL: its
- * ruleset's), `GET /:changesetId` is the review read, and `GET
- * /:changesetId/documents/:entityTypeKey/:entityId/:propertyKey` the staged
- * text of one document property, with the document read's paging, and
- * `GET /:changesetId/entities/:entityTypeKey/:entityId` one entity as a
- * commit would leave it, with its staged writes; `POST
+ * `POST /:changesetId/writes` stages one call, its body discriminated by
+ * `operation`, and answers 201 `{id}` (a create with a parent relation
+ * adds `relation: {id}`, an entity delete `cascaded`, a document edit the
+ * document edit's answer). `DELETE /:changesetId/objects/:objectId`
+ * unstages one staged object, `DELETE …/objects/:objectId/properties/:propertyKey`
+ * cuts one staged value, and `POST …/objects/:objectId/rebase` accepts the
+ * stored values now as the befores. `GET /` lists the lens's changesets (a
+ * ruleset URL: its ruleset's), `GET /:changesetId` is the review read, and
+ * `GET /:changesetId/documents/:entityTypeKey/:entityId/:propertyKey` the
+ * staged text of one document property, with the document read's paging,
+ * and `GET /:changesetId/entities/:entityTypeKey/:entityId` one entity as
+ * a commit would leave it, with its staged object; `POST
  * /:changesetId/submit` and `/unsubmit` hand it over and back, and `POST
  * /:changesetId/commit` persists it all or nothing. No read outside these
  * changeset routes sees staged data.
@@ -24,23 +27,34 @@ import { z } from "zod";
 
 import { getRuntimeStore } from "../core/ports.js";
 import * as changesets from "./changesets.js";
-import { DocumentReadQuery, LensParams, ParentRelationPayload, PropertyPayload, rulesetOf } from "./router.js";
+import {
+  DocumentEditFields,
+  DocumentReadQuery,
+  LensParams,
+  ParentRelationPayload,
+  PropertyPayload,
+  rulesetOf,
+} from "./router.js";
 
 const ChangesetParams = LensParams.extend({ changesetId: z.string() });
 const EntityParams = ChangesetParams.extend({ entityTypeKey: z.string(), entityId: z.string() });
 const DocumentParams = EntityParams.extend({ propertyKey: z.string() });
-const WriteParams = ChangesetParams.extend({ seq: z.coerce.number().int().min(1) });
+const ObjectParams = ChangesetParams.extend({ objectId: z.string() });
+const ValueParams = ObjectParams.extend({ propertyKey: z.string() });
 
 const StartPayload = z.strictObject({ note: z.string().nullish() }).nullish();
 
 /** Submit: the note is optional (absent, the note stays); unsubmit: the
- * service requires one (R14), so its 422 names `fields.note`. */
+ * service requires one, so its 422 names `fields.note`. */
 const NotePayload = z.strictObject({ note: z.string().nullish() }).nullish();
+
+/** The keys of an object's values to rebase; without them, all. */
+const RebasePayload = z.strictObject({ properties: z.array(z.string()).optional() }).nullish();
 
 /** The version the caller looked at; without it, any version commits. */
 const CommitPayload = z.strictObject({ expectedVersion: z.number().int().min(1).optional() }).nullish();
 
-/** The writes of a changeset by seq: default 100, at most 500 (R7). */
+/** The staged objects of a changeset by first touch: default 100, at most 500. */
 const PageQuery = z.looseObject({
   offset: z.coerce.number().int().min(0).default(0),
   limit: z.coerce.number().int().min(1).max(500).default(100),
@@ -48,8 +62,9 @@ const PageQuery = z.looseObject({
 
 const Properties = PropertyPayload.default({});
 
-/** One staged write: `type` is the entity or relation type key, `id` the
- * target of an update or delete. */
+/** One staged call: `type` is the entity or relation type key, `id` the
+ * target of an update, delete or document edit; a document edit carries
+ * the body of the document PATCH beside `property`. */
 const StagedWritePayload = z.discriminatedUnion("operation", [
   z.strictObject({
     operation: z.literal("create_entity"),
@@ -68,6 +83,13 @@ const StagedWritePayload = z.discriminatedUnion("operation", [
   }),
   z.strictObject({ operation: z.literal("update_relation"), type: z.string(), id: z.string(), properties: Properties }),
   z.strictObject({ operation: z.literal("delete_relation"), type: z.string(), id: z.string() }),
+  z.strictObject({
+    operation: z.literal("edit_document"),
+    type: z.string(),
+    id: z.string(),
+    property: z.string(),
+    ...DocumentEditFields,
+  }),
 ]);
 
 function stagedWrite(body: z.infer<typeof StagedWritePayload>): changesets.StagedWrite {
@@ -89,6 +111,11 @@ function stagedWrite(body: z.infer<typeof StagedWritePayload>): changesets.Stage
     case "delete_entity":
     case "delete_relation":
       return { operation: body.operation, typeKey, id: body.id };
+    case "edit_document": {
+      const { op, oldString, newString, replaceAll, offset, length, content, expect } = body;
+      const edit = { op, oldString, newString, replaceAll, offset, length, content, expect };
+      return { operation: body.operation, typeKey, id: body.id, propertyKey: body.property, edit };
+    }
   }
 }
 
@@ -193,18 +220,49 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.delete(
-    "/:changesetId/writes/:seq",
-    { schema: { tags: ["runtime"], params: WriteParams } },
+    "/:changesetId/objects/:objectId",
+    { schema: { tags: ["runtime"], params: ObjectParams } },
     async (request, reply) => {
       await changesets.unstage(
         request.params.lensKey,
         rulesetOf(request.params),
         request.params.changesetId,
-        request.params.seq,
+        request.params.objectId,
+        null,
         await getRuntimeStore(request.params.ontologyKey),
       );
       return reply.status(204).send();
     },
+  );
+
+  app.delete(
+    "/:changesetId/objects/:objectId/properties/:propertyKey",
+    { schema: { tags: ["runtime"], params: ValueParams } },
+    async (request, reply) => {
+      await changesets.unstage(
+        request.params.lensKey,
+        rulesetOf(request.params),
+        request.params.changesetId,
+        request.params.objectId,
+        request.params.propertyKey,
+        await getRuntimeStore(request.params.ontologyKey),
+      );
+      return reply.status(204).send();
+    },
+  );
+
+  app.post(
+    "/:changesetId/objects/:objectId/rebase",
+    { schema: { tags: ["runtime"], params: ObjectParams, body: RebasePayload } },
+    async (request) =>
+      changesets.rebase(
+        request.params.lensKey,
+        rulesetOf(request.params),
+        request.params.changesetId,
+        request.params.objectId,
+        request.body?.properties ?? null,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
   );
 
   app.post(

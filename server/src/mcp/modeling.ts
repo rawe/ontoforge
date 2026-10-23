@@ -101,9 +101,11 @@ export function formatToolError(error: unknown): string {
       return message.includes(errors) ? message : `${message} — ${errors}`;
     }
     if ("violations" in details) {
-      const violations = details.violations as { seq: number; kind: string; message: string }[];
+      const violations = details.violations as { object: string | null; property?: string; kind: string; message: string }[];
       const total = details.total as number;
-      const listed = violations.map((v) => `seq ${v.seq} ${v.kind}: ${v.message}`).join("; ");
+      const at = (v: (typeof violations)[number]): string =>
+        (v.object === null ? "changeset" : `object ${v.object}`) + (v.property === undefined ? "" : ` property ${v.property}`);
+      const listed = violations.map((v) => `${at(v)} ${v.kind}: ${v.message}`).join("; ");
       const shown = total > violations.length ? `, the first ${violations.length} shown` : "";
       return `${message} — ${total} violation${total === 1 ? "" : "s"}${shown}: ${listed}`;
     }
@@ -909,7 +911,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "delete_lens",
     {
       description:
-        "Delete a lens, with its agents, saved queries and changesets (staged writes not yet committed). " +
+        "Delete a lens, with its agents, saved queries and changesets (changes staged and not yet committed). " +
         "Does not affect the schema, the instance data or other lenses. The result states how many changesets were deleted.",
       inputSchema: {
         lens_key: z.string(),

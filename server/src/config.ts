@@ -174,7 +174,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     SEARCH_WORKER_BATCH: positiveInt(env, "SEARCH_WORKER_BATCH", 64),
     SEARCH_POLL_MS: positiveInt(env, "SEARCH_POLL_MS", 5000),
 
-    // The most bytes one changeset's staged writes hold (`writeBytes`).
+    // The most bytes one changeset's staged values hold (`valueBytes`).
     CHANGESET_MAX_BYTES: positiveInt(env, "CHANGESET_MAX_BYTES", 32 * 1024 * 1024),
 
     AI_PROVIDER: aiProvider,

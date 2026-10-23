@@ -232,6 +232,7 @@ describe("tool surface", () => {
         "list_relations",
         "list_saved_queries",
         "list_search_indices",
+        "rebase",
         "run_saved_query",
         "search",
         "search_by_index",
@@ -1071,7 +1072,7 @@ describe("the ruleset mount", () => {
       const plainNames = (await plain.listTools()).tools.map((tool) => tool.name);
       const rulesetNames = (await viaRuleset.listTools()).tools.map((tool) => tool.name);
       expect(plainNames).not.toContain("get_ruleset");
-      expect(plainNames).toHaveLength(33);
+      expect(plainNames).toHaveLength(34);
       expect(rulesetNames.sort()).toEqual([...plainNames, "get_ruleset"].sort());
     } finally {
       await plain.close();

@@ -2,12 +2,13 @@
  * Documents in changesets over REST and MCP, on the in-test project
  * hierarchy (`buildProjectHierarchy`: task carries the document `notes`)
  * with the official SDK client on a real listening server: the review read
- * shows no staged arguments and every document value as a stub, a create's
- * parent carries its relation's properties, and the staged document read
- * returns the text a commit would leave, whole and in slices, from the last
- * staged write that sets it. Drift on a document is still found by its hash;
- * a lens that hides the type or the property answers not found; a ruleset
- * mount with an anchor and write access propose reads it too.
+ * shows every document value as a stub, a create's parent carries its
+ * relation's properties, and the staged document read returns the text a
+ * commit would leave, whole and in slices: the one staged value of the
+ * property. Document edits stage through MCP on the staged text. Drift on a
+ * document is still found by its hash; a lens that hides the type or the
+ * property answers not found; a ruleset mount with an anchor and write
+ * access propose reads it too.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -92,7 +93,7 @@ async function start(base = ALL): Promise<string> {
   return res.body.id as string;
 }
 
-/** Stage one write: its journal body, answered 201. */
+/** Stage one call: its body, answered 201. */
 async function staged(base: string, cs: string, write: Row): Promise<Row> {
   const res = await rest("POST", `${base}/changesets/${cs}/writes`, write);
   expect(res.status, JSON.stringify(res.body)).toBe(201);
@@ -135,7 +136,7 @@ describe("the review read and the staged document read (F6)", () => {
       type: "task",
       id: e.T1,
       properties: { notes: PLAN },
-    }); // 1: a whole document
+    }); // a whole document
     t9 = (
       await staged(ALL, cs, {
         operation: "create_entity",
@@ -143,63 +144,73 @@ describe("the review read and the staged document read (F6)", () => {
         properties: { name: "T9", notes: "Draft of T9" },
         parentRelation: { type: "has_task", parentId: e.P1, properties: { phase: "plan" } },
       })
-    ).id as string; // 2, 3: a create with a document, and its parent relation
+    ).id as string; // a create with a document, and its parent relation
     await staged(ALL, cs, {
       operation: "update_entity",
       type: "task",
       id: e.T2,
       properties: { notes: "First rewrite of T2" },
-    }); // 4
+    });
     await staged(ALL, cs, {
       operation: "update_entity",
       type: "task",
       id: t9,
       properties: { notes: "Final text of T9" },
-    }); // 5: the created entity again
+    }); // the created entity again: merged into its create
     await staged(ALL, cs, {
       operation: "update_entity",
       type: "task",
       id: e.T2,
       properties: { notes: "Second rewrite" },
-    }); // 6: the last of two wins
+    }); // the later value replaces the earlier
     await staged(ALL, cs, {
       operation: "update_entity",
       type: "task",
       id: e.T5,
       properties: { name: "T5 b" },
-    }); // 7: sets no document
+    }); // sets no document
   }, 60_000);
 
-  it("shows no arguments and every document value as a stub, over REST and MCP alike", async () => {
+  it("one object per entity, every document value as a stub, over REST and MCP alike", async () => {
     const read = (await rest("GET", `${ALL}/changesets/${cs}`)).body;
-    expect(read.writeCount).toBe(7);
-    for (const write of read.writes as Row[]) expect(write, `seq ${write.seq}`).not.toHaveProperty("arguments");
-    const [t1, create, parent, t2, , , t5] = read.writes as Row[];
+    expect(read.objectCount).toBe(5);
+    const [t1, create, parent, t2, t5] = read.objects as Row[];
     expect(t1).toMatchObject({
+      id: e.T1,
       name: "T1",
-      before: { notes: { document: true, length: chars("Notes of T1") } },
-      current: { notes: { document: true, length: chars("Notes of T1") } },
-      after: { notes: { document: true, length: chars(PLAN) } },
+      action: "update",
       markers: [],
+      values: [
+        {
+          property: "notes",
+          before: { document: true, length: chars("Notes of T1") },
+          current: { document: true, length: chars("Notes of T1") },
+          after: { document: true, length: chars(PLAN) },
+          markers: [],
+        },
+      ],
     });
     expect(create).toMatchObject({
       id: t9,
       name: "T9",
-      after: { name: "T9", notes: { document: true, length: chars("Draft of T9") } },
-      before: null,
-      current: null,
+      action: "create",
+      values: [
+        { property: "name", before: null, current: null, after: "T9" },
+        { property: "notes", before: null, current: null, after: { document: true, length: chars("Final text of T9") } },
+      ],
     });
     expect(create).not.toHaveProperty("parent");
-    // The parent relation is a write of its own, its ends named.
+    // The parent relation is an object of its own, its ends named.
     expect(parent).toMatchObject({
-      operation: "create_relation",
+      kind: "relation",
+      action: "create",
       type: "has_task",
       from: { id: e.P1, name: "P1" },
       to: { id: t9, name: "T9" },
-      after: { phase: "plan" },
+      values: [{ property: "phase", after: "plan" }],
     });
-    expect(t2).toMatchObject({ after: { notes: { document: true, length: chars("First rewrite of T2") } } });
-    expect(t5).toMatchObject({ after: { name: "T5 b" } });
+    expect(t2).toMatchObject({ id: e.T2, values: [{ property: "notes", after: { document: true, length: chars("Second rewrite") } }] });
+    expect(t5).toMatchObject({ id: e.T5, values: [{ property: "name", after: "T5 b" }] });
     const json = JSON.stringify(read);
     for (const staged of ["Plan of T1", "Draft of T9", "Final text of T9", "Rewrite", "rewrite", "sha256", "Notes of"]) {
       expect(json).not.toContain(staged);
@@ -249,12 +260,12 @@ describe("the review read and the staged document read (F6)", () => {
     ).toMatchObject({ offset: 0, content: "N", length: 1 });
   });
 
-  it("an entity created in this changeset, and the last of two writes to the same document", async () => {
+  it("an entity created in this changeset, and one staged value per document: the later replaced the earlier", async () => {
     expect((await stagedNotes(cs, t9)).body).toMatchObject({ content: "Final text of T9", totalLength: 16 });
     expect((await stagedNotes(cs, e.T2)).body).toMatchObject({ content: "Second rewrite", totalLength: 14 });
-    // Unstaging the later write brings back the earlier one.
-    expect((await rest("DELETE", `${ALL}/changesets/${cs}/writes/6`)).status).toBe(204);
-    expect((await stagedNotes(cs, e.T2)).body).toMatchObject({ content: "First rewrite of T2" });
+    // Cutting the value takes it out; nothing earlier comes back.
+    expect((await rest("DELETE", `${ALL}/changesets/${cs}/objects/${e.T2}/properties/notes`)).status).toBe(204);
+    expect((await stagedNotes(cs, e.T2)).status).toBe(404);
     await staged(ALL, cs, {
       operation: "update_entity",
       type: "task",
@@ -263,8 +274,8 @@ describe("the review read and the staged document read (F6)", () => {
     });
   });
 
-  it("not found when no staged write sets it, or for what is no document or no changeset", async () => {
-    const none = (task: string) => `No staged write of changeset '${cs}' sets 'notes' of entity '${task}'`;
+  it("not found when the changeset stages no value of it, or for what is no document or no changeset", async () => {
+    const none = (task: string) => `Changeset '${cs}' stages no 'notes' of entity '${task}'`;
     for (const task of [e.T3, e.T5]) {
       const res = await stagedNotes(cs, task);
       expect(res.status).toBe(404);
@@ -285,7 +296,7 @@ describe("the review read and the staged document read (F6)", () => {
     ).toContain(none(e.T3));
   });
 
-  it("not found when a later staged write deletes the entity, over REST and MCP", async () => {
+  it("not found when the changeset deletes the entity, or took its create out, over REST and MCP", async () => {
     const other = await start();
     await staged(ALL, other, {
       operation: "update_entity",
@@ -302,8 +313,10 @@ describe("the review read and the staged document read (F6)", () => {
     await staged(ALL, other, { operation: "delete_entity", type: "task", id: e.T1a1 });
     await staged(ALL, other, { operation: "delete_entity", type: "task", id: t10 });
     const client = await connect();
-    for (const task of [e.T1a1, t10]) {
-      const message = `Changeset '${other}' deletes entity '${task}': a commit leaves no 'notes'`;
+    for (const [task, message] of [
+      [e.T1a1, `Changeset '${other}' deletes entity '${e.T1a1}': a commit leaves no 'notes'`],
+      [t10, `Changeset '${other}' stages no 'notes' of entity '${t10}'`],
+    ] as const) {
       const res = await stagedNotes(other, task);
       expect(res.status).toBe(404);
       expect(res.body.error).toMatchObject({ code: "RESOURCE_NOT_FOUND", message });
@@ -311,9 +324,9 @@ describe("the review read and the staged document read (F6)", () => {
         await refused(client, "get_staged_document", { changeset_id: other, entity_type_key: "task", entity_id: task, property_key: "notes" }),
       ).toContain(message);
     }
-    // Unstaging the delete brings the staged text back.
-    expect((await rest("DELETE", `${ALL}/changesets/${other}/writes/3`)).status).toBe(204);
-    expect((await stagedNotes(other, e.T1a1)).body.content).toBe("Doomed notes");
+    // Unstaging the delete brings nothing back: the delete dropped the staged text.
+    expect((await rest("DELETE", `${ALL}/changesets/${other}/objects/${e.T1a1}`)).status).toBe(204);
+    expect((await stagedNotes(other, e.T1a1)).status).toBe(404);
     expect((await rest("DELETE", `${ALL}/changesets/${other}`)).status).toBe(204);
   });
 
@@ -343,15 +356,17 @@ describe("drift on a document (F6)", () => {
     });
     expect(edit.status, JSON.stringify(edit.body)).toBe(200);
 
-    const [write] = (await rest("GET", `${ALL}/changesets/${cs}`)).body.writes as Row[];
-    expect(write).toMatchObject({
-      before: { notes: { document: true, length: 11 } },
-      current: { notes: { document: true, length: 11 } },
-      after: { notes: { document: true, length: chars("Planned notes of T4") } },
-    });
-    expect(write!.markers).toEqual([
-      { kind: "drift", message: "Changed since this write was staged" },
+    const [object] = (await rest("GET", `${ALL}/changesets/${cs}`)).body.objects as Row[];
+    expect(object!.values).toEqual([
+      {
+        property: "notes",
+        before: { document: true, length: 11 },
+        current: { document: true, length: 11 },
+        after: { document: true, length: chars("Planned notes of T4") },
+        markers: [{ kind: "drift", message: "Changed since it was staged" }],
+      },
     ]);
+    expect(object!.markers).toEqual([]);
     const commit = await rest("POST", `${ALL}/changesets/${cs}/commit`, {});
     expect(commit.status).toBe(422);
     expect(commit.body.error.details.violations.map((v: Row) => v.kind)).toEqual(["drift"]);
@@ -361,59 +376,112 @@ describe("drift on a document (F6)", () => {
   });
 });
 
-describe("each review page judges its own writes", () => {
+describe("document edits staged through MCP", () => {
+  beforeAll(fresh, 60_000);
+
+  it("edit_document and write_document with changeset_id edit the staged text; the stored text stays until the commit", async () => {
+    const client = await connect();
+    const cs = (await ok(client, "start_changeset", {})).id as string;
+    const target = { entity_type_key: "task", entity_id: e.T1, property_key: "notes", changeset_id: cs };
+    expect(await ok(client, "edit_document", { ...target, old_string: "Notes", new_string: "Plans" })).toEqual({
+      id: e.T1,
+      propertyKey: "notes",
+      totalLength: 11,
+      editedRange: { offset: 0, length: 5 },
+      replacements: 1,
+      context: "Plans of T1",
+      contextOffset: 0,
+    });
+    expect(await ok(client, "write_document", { ...target, offset: 11, length: 0, content: " for 2027" })).toMatchObject({
+      id: e.T1,
+      totalLength: 20,
+      context: "Plans of T1 for 2027",
+    });
+    // The immediate edit's faults, unchanged.
+    expect(await refused(client, "edit_document", { ...target, old_string: "missing", new_string: "x" })).toContain(
+      "oldString not found in document",
+    );
+    expect(await refused(client, "write_document", { ...target, offset: 0, length: 5, content: "x", expect: "Notes" })).toContain(
+      "expect mismatch",
+    );
+
+    expect((await stagedNotes(cs, e.T1)).body.content).toBe("Plans of T1 for 2027");
+    expect((await rest("GET", `${ALL}/entities/task/${e.T1}/documents/notes`)).body.content).toBe("Notes of T1");
+    const [object] = (await ok(client, "get_changeset", { changeset_id: cs })).objects as Row[];
+    expect(object).toMatchObject({
+      id: e.T1,
+      action: "update",
+      values: [{ property: "notes", before: { document: true, length: 11 }, after: { document: true, length: 20 }, markers: [] }],
+    });
+
+    expect(await ok(client, "commit_changeset", { changeset_id: cs })).toEqual({ committed: 1, alreadyGone: [] });
+    expect((await rest("GET", `${ALL}/entities/task/${e.T1}/documents/notes`)).body.content).toBe("Plans of T1 for 2027");
+  });
+});
+
+describe("each review page judges its own objects", () => {
   beforeAll(fresh, 60_000);
 
   it("every page answers as the whole read, and their markers are submit's violations: drift on a document and a relation, missing, dangling across pages", async () => {
     const cs = await start();
     const link = h.relations["P1 has_task T1"]!;
-    await staged(ALL, cs, { operation: "update_entity", type: "task", id: e.T1, properties: { notes: "Planned T1" } }); // 1: drift by hash
+    await staged(ALL, cs, { operation: "update_entity", type: "task", id: e.T1, properties: { notes: "Planned T1" } }); // drift by hash
     const t9 = await staged(ALL, cs, {
       operation: "create_entity",
       type: "task",
       properties: { name: "T9", notes: PLAN },
       parentRelation: { type: "has_task", parentId: e.P1, properties: { phase: "plan" } },
-    }); // 2, 3
-    await staged(ALL, cs, { operation: "update_relation", type: "has_task", id: link, properties: { phase: "review" } }); // 4: drift
-    await staged(ALL, cs, { operation: "update_relation", type: "has_task", id: t9.relation.id, properties: { phase: "done" } }); // 5: ends from 3
-    await staged(ALL, cs, { operation: "update_entity", type: "task", id: e.T4, properties: { name: "T4 b" } }); // 6: missing
-    const t10 = await staged(ALL, cs, { operation: "create_entity", type: "task", properties: { name: "T10" } }); // 7: unstaged below
-    await staged(ALL, cs, { operation: "update_entity", type: "task", id: t10.id, properties: { name: "T10 b" } }); // 8: dangling
-    await staged(ALL, cs, { operation: "create_relation", type: "assigned_to", fromEntityId: t10.id, toEntityId: e.Ben }); // 9: dangling
-    await staged(ALL, cs, { operation: "create_relation", type: "assigned_to", fromEntityId: t9.id, toEntityId: e.Ben }); // 10: an end minted by 2
-    await staged(ALL, cs, { operation: "update_entity", type: "task", id: e.T2, properties: { notes: "T2 again" } }); // 11: clean
-    expect((await rest("DELETE", `${ALL}/changesets/${cs}/writes/7`)).status).toBe(204);
+    });
+    await staged(ALL, cs, { operation: "update_relation", type: "has_task", id: link, properties: { phase: "review" } }); // drift
+    await staged(ALL, cs, { operation: "update_relation", type: "has_task", id: t9.relation.id, properties: { phase: "done" } }); // merged into its create
+    await staged(ALL, cs, { operation: "update_entity", type: "task", id: e.T4, properties: { name: "T4 b" } }); // missing
+    const t10 = await staged(ALL, cs, { operation: "create_entity", type: "task", properties: { name: "T10" } }); // taken out below
+    const toT10 = await staged(ALL, cs, { operation: "create_relation", type: "assigned_to", fromEntityId: t10.id, toEntityId: e.Ben }); // dangling
+    const toT9 = await staged(ALL, cs, { operation: "create_relation", type: "assigned_to", fromEntityId: t9.id, toEntityId: e.Ben }); // an end created here
+    await staged(ALL, cs, { operation: "update_entity", type: "task", id: e.T2, properties: { notes: "T2 again" } }); // clean
+    expect((await rest("DELETE", `${ALL}/changesets/${cs}/objects/${t10.id}`)).status).toBe(204);
     // Immediate writes since: the text of T1 at the same length, the link's phase, T4 gone.
     const edit = await rest("PATCH", `${ALL}/entities/task/${e.T1}/documents/notes`, { op: "str_replace", oldString: "Notes", newString: "Texts" });
     expect(edit.status, JSON.stringify(edit.body)).toBe(200);
     expect((await rest("PATCH", `${ALL}/relations/has_task/${link}`, { phase: "test" })).status).toBe(200);
     expect((await rest("DELETE", `${ALL}/entities/task/${e.T4}`)).status).toBe(204);
 
-    const whole = (await rest("GET", `${ALL}/changesets/${cs}?limit=500`)).body.writes as Row[];
-    expect(Object.fromEntries(whole.map((w) => [w.seq, w.markers.map((m: Row) => m.kind)]))).toEqual({
-      1: ["drift"], 2: [], 3: [], 4: ["drift"], 5: [], 6: ["missing"], 8: ["dangling"], 9: ["dangling"], 10: [], 11: [],
+    const whole = (await rest("GET", `${ALL}/changesets/${cs}?limit=500`)).body.objects as Row[];
+    const all = (object: Row): Row[] => [...object.markers, ...object.values.flatMap((v: Row) => v.markers)];
+    expect(whole.map((o) => [o.id, all(o).map((m: Row) => m.kind)])).toEqual([
+      [e.T1, ["drift"]],
+      [t9.id, []],
+      [t9.relation.id, []],
+      [link, ["drift"]],
+      [e.T4, ["missing"]],
+      [toT10.id, ["dangling"]],
+      [toT9.id, []],
+      [e.T2, []],
+    ]);
+    expect(whole[0]!.values[0]).toMatchObject({
+      before: { document: true, length: chars("Notes of T1") },
+      current: { document: true, length: chars("Texts of T1") },
     });
-    expect(whole[0]).toMatchObject({
-      before: { notes: { document: true, length: chars("Notes of T1") } },
-      current: { notes: { document: true, length: chars("Texts of T1") } },
-    });
-    expect(whole[3]).toMatchObject({ before: { phase: "build" }, current: { phase: "test" }, from: { id: e.P1, name: "P1" }, to: { id: e.T1, name: "T1" } });
-    expect(whole[4]).toMatchObject({ before: null, current: null, from: { id: e.P1, name: "P1" }, to: { id: t9.id, name: "T9" } });
-    expect(whole[8]).toMatchObject({ from: { id: t9.id, name: "T9" }, to: { id: e.Ben, name: "Ben" } });
-    expect(whole[9]).toMatchObject({ current: { notes: { document: true, length: chars("Notes of T2") } } });
+    expect(whole[2]).toMatchObject({ from: { id: e.P1, name: "P1" }, to: { id: t9.id, name: "T9" }, values: [{ property: "phase", after: "done" }] });
+    expect(whole[3]).toMatchObject({ from: { id: e.P1, name: "P1" }, to: { id: e.T1, name: "T1" }, values: [{ before: "build", current: "test" }] });
+    expect(whole[6]).toMatchObject({ from: { id: t9.id, name: "T9" }, to: { id: e.Ben, name: "Ben" } });
+    expect(whole[7]!.values[0]).toMatchObject({ current: { document: true, length: chars("Notes of T2") } });
 
     for (const limit of [1, 3]) {
       for (let offset = 0; offset < whole.length; offset += 1) {
         const page = await rest("GET", `${ALL}/changesets/${cs}?offset=${offset}&limit=${limit}`);
-        expect(page.body.writes, `offset ${offset}, limit ${limit}`).toEqual(whole.slice(offset, offset + limit));
+        expect(page.body.objects, `offset ${offset}, limit ${limit}`).toEqual(whole.slice(offset, offset + limit));
       }
     }
 
-    // Submit runs the pass over the whole journal: the same faults.
+    // Submit runs the pass over the whole changeset: the same faults.
     const submit = await rest("POST", `${ALL}/changesets/${cs}/submit`, {});
     expect(submit.status).toBe(422);
     expect(submit.body.error.details.violations).toEqual(
-      whole.flatMap((w) => w.markers.map((m: Row) => ({ seq: w.seq, kind: m.kind, message: m.message }))),
+      whole.flatMap((o) => [
+        ...o.markers.map((m: Row) => ({ object: o.id, kind: m.kind, message: m.message })),
+        ...o.values.flatMap((v: Row) => v.markers.map((m: Row) => ({ object: o.id, property: v.property, kind: m.kind, message: m.message }))),
+      ]),
     );
   });
 });
@@ -486,7 +554,7 @@ describe("through the lens and the mounts (F6)", () => {
   });
 });
 
-describe("a staged write keeps its arguments for the commit (F6)", () => {
+describe("the commit applies the staged values (F6)", () => {
   beforeAll(fresh, 60_000);
 
   it("the commit applies the staged document and the parent relation's properties", async () => {

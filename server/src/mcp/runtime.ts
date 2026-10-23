@@ -15,17 +15,15 @@
  * Failures are reported as tool errors with per-field detail flattened
  * into the message text (shared `formatToolError`).
  *
- * Changesets: the six entity and relation write tools take an optional
- * `changeset_id` that stages the write instead (`runtime/changesets.ts`,
- * the same functions as REST); nine tools start, list, read, unstage,
- * submit, unsubmit, commit and discard a changeset and read its staged
- * document text. None is grantable to
- * an agent (`toolNames.ts`). A ruleset mount lists the tools its write
- * access allows (`writeAccess.ts`): at 'propose' the six write tools
- * require `changeset_id`, and `commit_changeset`, `edit_document` and
- * `write_document` are not listed (R13); at 'none' only the reads and the
- * changeset reads are. `edit_document` and `write_document` refuse a
- * `changeset_id` rather than drop it.
+ * Changesets: the six entity and relation write tools and the two
+ * document edit tools take an optional `changeset_id` that stages the
+ * write instead (`runtime/changesets.ts`, the same functions as REST); ten
+ * tools start, list, read, unstage from, rebase, submit, unsubmit, commit
+ * and discard a changeset and read its staged document text. None is
+ * grantable to an agent (`toolNames.ts`). A ruleset mount lists the tools
+ * its write access allows (`writeAccess.ts`): at 'propose' the eight write
+ * tools require `changeset_id` and `commit_changeset` is not listed; at
+ * 'none' only the reads and the changeset reads are.
  */
 
 import {
@@ -42,7 +40,6 @@ import { z } from "zod";
 
 import { settings } from "../config.js";
 import { valueToText } from "../core/dataTypes.js";
-import { ValidationError } from "../core/exceptions.js";
 import { getRuntimeStore, type RuntimeStore } from "../core/ports.js";
 import { getRulesetView, readMountRuleset } from "../runtime/rulesets.js";
 import { filterRules } from "../runtime/readHelpers.js";
@@ -115,24 +112,44 @@ function filterText(filters: Record<string, unknown> | undefined): Record<string
   );
 }
 
-/** The staged mode of a write tool with `changeset_id` (V4, V29), per
- * kind of write: what staging checks now and what only the commit does.
- * On a level that cannot write directly, `changeset_id` is required. */
-function stagedMode(kind: "create" | "update" | "delete", binding: Binding): string {
+/** The staged mode of a write tool with `changeset_id`, per kind of
+ * write: how it merges into the changeset, what staging checks now and
+ * what only the commit does. On a level that cannot write directly,
+ * `changeset_id` is required. */
+function stagedMode(kind: "create" | "update" | "delete" | "edit", binding: Binding): string {
+  const before =
+    "For a stored target, the first staging of a key records its stored value as the before: " +
+    "if it changes before the commit, the commit is rejected, until rebase accepts the change.";
   const checks = {
     create:
       " A staged create's id is final, and later writes of the same changeset may name it. " +
       "Staging checks the type and the properties; relation ends, parents and the hierarchy " +
       "rules are checked at commit.",
     update:
-      " It may name an id a staged create of the same changeset returned; that id is final. " +
-      "Staging checks the type, the properties and that the target exists, and records the " +
-      "stored values of the keys sent as the write's before: if they change before the commit, " +
-      "the commit is rejected.",
+      " It may name an id a staged create of the same changeset returned. The changeset holds " +
+      "one staged value per property: sending a key again replaces its staged value, and an " +
+      "update of an entity or relation created in the changeset changes that create. Staging " +
+      "checks the type, the properties and that the target exists, stored or created in the " +
+      "changeset and not deleted there. " +
+      before,
     delete:
-      " It may name an id a staged create of the same changeset returned; that id is final. " +
-      "Staging checks the type and that the target exists; the parent rules are checked at " +
-      "commit, and a target already gone by then is skipped.",
+      " It may name an id a staged create of the same changeset returned. A delete of an " +
+      "object created in the changeset takes that create out; a delete of a stored one drops " +
+      "its staged values. Staging checks the type and that the target exists, stored or " +
+      "created in the changeset and not deleted there; the parent rules are checked at commit, " +
+      "and a target already gone by then is skipped.",
+    edit:
+      " The edit applies to the staged text of the property, or else the stored text, and the " +
+      "whole result is staged as the property's value; it may name an entity created in the " +
+      "changeset. Staging checks what the immediate edit checks and that the entity exists, " +
+      "stored or created in the changeset and not deleted there. " +
+      before,
+  }[kind];
+  const answer = {
+    create: "the answer is {id}",
+    update: "the answer is {id}",
+    delete: "the answer is {id}",
+    edit: "the answer is the edit's answer with id",
   }[kind];
   return (
     (allows(binding.writeAccess, "write")
@@ -140,25 +157,13 @@ function stagedMode(kind: "create" | "update" | "delete", binding: Binding): str
       : ` This connection has write access '${binding.writeAccess}': it only stages, so ` +
         "'changeset_id' is required and the write is staged into that draft changeset; nothing " +
         "changes now, ") +
-    "the answer is {seq, id}, and reads never see staged data." +
+    `${answer}, and reads never see staged data.` +
     checks +
     (binding.rulesetKey !== null
       ? " If this connection's ruleset sets an anchor, the commit checks that the write stays in " +
         "the anchor's subtree, and staging is refused while the anchor entity no longer exists."
       : "")
   );
-}
-
-/** The document edit tools cannot stage (V2). Their schemas keep unknown
- * keys, so a 'changeset_id' is refused here instead of dropped: a write
- * meant for a changeset never happens now. */
-function refuseChangesetId(tool: string, args: object): void {
-  if ("changeset_id" in args) {
-    throw new ValidationError(
-      `changeset_id is not accepted: ${tool} always writes immediately and cannot be staged; ` +
-        "to stage a document change, pass the whole new value to update_entity with 'changeset_id'",
-    );
-  }
 }
 
 /** Open the store of one tool call: on a ruleset mount, after the
@@ -222,8 +227,8 @@ export function createRuntimeMcpServer(
   /** Stage one write into a changeset of this lens (and ruleset). */
   const stageInto = async (open: Open, changesetId: string, write: changesets.StagedWrite): Promise<ToolResult> =>
     jsonResult(await changesets.stage(lensKey, rulesetKey, changesetId, write, await open()));
-  const staged = (kind: "create" | "update" | "delete"): string => stagedMode(kind, binding);
-  // A level that cannot write directly only stages: every write names its changeset (V29).
+  const staged = (kind: "create" | "update" | "delete" | "edit"): string => stagedMode(kind, binding);
+  // A level that cannot write directly only stages: every write names its changeset.
   const changesetIdParam = allows(binding.writeAccess, "write") ? z.string().optional() : z.string();
 
   if (rulesetKey !== null) {
@@ -294,9 +299,9 @@ export function createRuntimeMcpServer(
             "lens shows no parent relation into cannot be created here. Entities of other types " +
             "are created as usual, 'parent_relation' optional.") +
         staged("create") +
-        " With 'parent_relation' and 'changeset_id', two writes are staged, the entity's and then " +
-        "its parent relation's, and the answer is {seq, id, relation: {seq, id}}; the relation is a " +
-        "staged relation like any other, which later writes may name.",
+        " With 'parent_relation' and 'changeset_id', two objects are staged, the entity and its " +
+        "parent relation, and the answer is {id, relation: {id}}; the relation is a staged " +
+        "relation like any other, which later writes may name.",
       inputSchema: {
         entity_type_key: z.string(),
         properties: z.record(z.string(), z.unknown()),
@@ -514,11 +519,8 @@ export function createRuntimeMcpServer(
       description:
         "Partial update — only provided properties change. Set a property to null " +
         "to remove it (fails for required properties). Document properties are " +
-        (lists("edit_document")
-          ? "replaced whole here — prefer edit_document / write_document for " +
-            "partial edits inside a document; in a changeset, where those cannot stage, replace " +
-            "it whole here."
-          : "replaced whole: send the complete new text.") +
+        "replaced whole here — prefer edit_document / write_document for partial edits " +
+        "inside a document." +
         staged("update"),
       inputSchema: {
         entity_type_key: z.string(),
@@ -556,7 +558,6 @@ export function createRuntimeMcpServer(
     ),
   );
 
-  // They cannot stage (V2): not listed where every write must (R13).
   register(
     "edit_document",
     {
@@ -566,18 +567,17 @@ export function createRuntimeMcpServer(
         "content exactly and uniquely; if it matches more than once, provide a " +
         "longer string with surrounding context, or set replace_all to true to " +
         "replace every occurrence. Returns the new totalLength, the edited " +
-        "range, and ~200 chars of context around the edit for verification. It always " +
-        "writes immediately and cannot be staged into a changeset: a 'changeset_id' is " +
-        "refused and nothing is written; to stage a document change, pass the whole new " +
-        "value to update_entity with 'changeset_id'.",
-      inputSchema: z.looseObject({
+        "range, and ~200 chars of context around the edit for verification." +
+        staged("edit"),
+      inputSchema: {
         entity_type_key: z.string(),
         entity_id: z.string(),
         property_key: z.string(),
         old_string: z.string(),
         new_string: z.string(),
         replace_all: z.boolean().optional(),
-      }),
+        changeset_id: changesetIdParam,
+      },
     },
     tool(
       "edit_document",
@@ -588,19 +588,29 @@ export function createRuntimeMcpServer(
         old_string: string;
         new_string: string;
         replace_all?: boolean | undefined;
+        changeset_id?: string | undefined;
       }, open) => {
-        refuseChangesetId("edit_document", args);
+        const edit: service.DocumentEditBody = {
+          op: "str_replace",
+          oldString: args.old_string,
+          newString: args.new_string,
+          replaceAll: args.replace_all ?? false,
+        };
+        if (args.changeset_id !== undefined) {
+          return stageInto(open, args.changeset_id, {
+            operation: "edit_document",
+            typeKey: args.entity_type_key,
+            id: args.entity_id,
+            propertyKey: args.property_key,
+            edit,
+          });
+        }
         const result = await service.editDocument(
           lensKey,
           args.entity_type_key,
           args.entity_id,
           args.property_key,
-          {
-            op: "str_replace",
-            oldString: args.old_string,
-            newString: args.new_string,
-            replaceAll: args.replace_all ?? false,
-          },
+          edit,
           await open(),
           rulesetKey,
         );
@@ -619,11 +629,9 @@ export function createRuntimeMcpServer(
         "reads and the charOffset/charLength of search matches. Pass " +
         "'expect' (the text currently in the range) to fail safely if the " +
         "document changed since it was read. Returns the new totalLength, the " +
-        "edited range, and ~200 chars of context around the edit. It always writes " +
-        "immediately and cannot be staged into a changeset: a 'changeset_id' is refused and " +
-        "nothing is written; to stage a document change, pass the whole new value to " +
-        "update_entity with 'changeset_id'.",
-      inputSchema: z.looseObject({
+        "edited range, and ~200 chars of context around the edit." +
+        staged("edit"),
+      inputSchema: {
         entity_type_key: z.string(),
         entity_id: z.string(),
         property_key: z.string(),
@@ -631,7 +639,8 @@ export function createRuntimeMcpServer(
         length: z.number(),
         content: z.string(),
         expect: z.string().optional(),
-      }),
+        changeset_id: changesetIdParam,
+      },
     },
     tool(
       "write_document",
@@ -643,20 +652,30 @@ export function createRuntimeMcpServer(
         length: number;
         content: string;
         expect?: string | undefined;
+        changeset_id?: string | undefined;
       }, open) => {
-        refuseChangesetId("write_document", args);
+        const edit: service.DocumentEditBody = {
+          op: "replace_range",
+          offset: args.offset,
+          length: args.length,
+          content: args.content,
+          expect: args.expect ?? null,
+        };
+        if (args.changeset_id !== undefined) {
+          return stageInto(open, args.changeset_id, {
+            operation: "edit_document",
+            typeKey: args.entity_type_key,
+            id: args.entity_id,
+            propertyKey: args.property_key,
+            edit,
+          });
+        }
         const result = await service.editDocument(
           lensKey,
           args.entity_type_key,
           args.entity_id,
           args.property_key,
-          {
-            op: "replace_range",
-            offset: args.offset,
-            length: args.length,
-            content: args.content,
-            expect: args.expect ?? null,
-          },
+          edit,
           await open(),
           rulesetKey,
         );
@@ -673,7 +692,9 @@ export function createRuntimeMcpServer(
         "relations (relation types whose `parent` names the parent end), an entity that " +
         "still has children is refused: delete its children first, bottom-up. A leaf, " +
         "or any entity in an ontology without parent relations, goes with its relations." +
-        staged("delete"),
+        staged("delete") +
+        " A staged entity delete also takes out every relation staged in the changeset at that " +
+        "entity, and the answer lists their ids as cascaded.",
       inputSchema: {
         entity_type_key: z.string(),
         entity_id: z.string(),
@@ -1157,7 +1178,7 @@ export function createRuntimeMcpServer(
   return server;
 }
 
-/** Who reaches a changeset through this mount (V8 A, V17, R4). */
+/** Who reaches a changeset through this mount. */
 function reach(rulesetKey: string | null): string {
   return rulesetKey !== null
     ? " A changeset_id not started through this ruleset, or committed, discarded or expired, is not found."
@@ -1165,18 +1186,24 @@ function reach(rulesetKey: string | null): string {
 }
 
 /** The fields of a changeset in every answer. */
-const CHANGESET_FIELDS = "id, number, state, version, note, ruleset, writeCount, createdAt, lastChangeAt and submittedAt";
+const CHANGESET_FIELDS = "id, number, state, version, note, ruleset, objectCount, createdAt, lastChangeAt and submittedAt";
 
-/** The checks without a lock that submit and commit run first (V19). */
+/** The checks without a lock that submit and commit run first. */
 const LOCK_FREE_CHECKS =
-  "every target still exists, no value an update replaces has changed since staging, every " +
-  "id a write names is stored or created in this changeset, and this lens still shows every " +
-  "type and accepts every value";
+  "every updated target still exists, no stored value an update replaces has changed since " +
+  "its before was recorded, every end of a staged relation is stored or created in this " +
+  "changeset and not deleted in it, and this lens still shows every type and property and " +
+  "accepts every value, a create's required ones included";
+
+/** How a violation names what it concerns. */
+const VIOLATIONS =
+  "its violations (total, then the first 100, each with object, the staged object's id or null " +
+  "for the whole changeset, property when it concerns one value, kind and message)";
 
 /**
- * The nine changeset tools (V33): the same service functions as the REST
- * routes, through this mount's lens and ruleset, listed as the level
- * allows (`lists`).
+ * The ten changeset tools: the same service functions as the REST routes,
+ * through this mount's lens and ruleset, listed as the level allows
+ * (`lists`).
  */
 function registerChangesetTools(
   register: Register,
@@ -1191,14 +1218,17 @@ function registerChangesetTools(
     "start_changeset",
     {
       description:
-        "Start a changeset: a plan of writes to this lens's data, staged over any time and " +
+        "Start a changeset: a plan of changes to this lens's data, staged over any time and " +
         "committed later, all or nothing. note: optional, at most 1,000 characters, for whoever " +
         `reviews the plan. Returns the changeset: ${CHANGESET_FIELDS}; state is 'draft'. Next, ` +
         "stage writes by passing its id as 'changeset_id' to create_entity, update_entity, " +
-        "delete_entity, create_relation, update_relation or delete_relation; reads never see " +
-        "staged data. A changeset holds at most 10,000 writes, and at most " +
-        `${settings.CHANGESET_MAX_BYTES} bytes of them as JSON, document text included. A draft ` +
-        "changeset left unchanged for 7 days expires and is deleted." +
+        "delete_entity, create_relation, update_relation, delete_relation, edit_document or " +
+        "write_document; reads never see staged data. The changeset is a set, not a history: " +
+        "one staged object per entity or relation it touches, with its action (create, update " +
+        "or delete) and one staged value per property, each later write merged in. It holds at " +
+        `most 10,000 staged objects, and at most ${settings.CHANGESET_MAX_BYTES} bytes of staged ` +
+        "values as JSON, document text included. A draft changeset left unchanged for 7 days " +
+        "expires and is deleted." +
         (rulesetKey !== null
           ? " It carries this connection's ruleset: it is reached only through this ruleset, or " +
             "through the lens without a ruleset, and if the ruleset sets an anchor, its commit " +
@@ -1221,9 +1251,11 @@ function registerChangesetTools(
         "lens's highest when it started; a freed number is given again, and the tools take only " +
         "the id), state ('draft': open " +
         "for staging; 'submitted': frozen and handed over for review), version, note, ruleset " +
-        "(the key of the ruleset it was started through, or null), writeCount, operations (staged " +
-        "writes per operation), types (the type keys its writes name that this lens shows), " +
-        "notVisible (how many type keys its writes name that this lens no longer shows), " +
+        "(the key of the ruleset it was started through, or null), objectCount, operations (staged " +
+        "objects counted per '<action>_<kind>', the action create, update or delete and the kind " +
+        "entity or relation), types (the type keys its " +
+        "objects name that this lens shows), notVisible (how many type keys its objects name " +
+        "that this lens no longer shows), " +
         "createdAt, lastChangeAt and submittedAt. A changeset leaves the list when it is " +
         "committed or discarded, or when it expires after 7 days unchanged as a draft. A " +
         "submitted changeset can be neither discarded nor expire, so one that left the list " +
@@ -1239,23 +1271,27 @@ function registerChangesetTools(
     "get_changeset",
     {
       description:
-        "Read a changeset and one page of its staged writes by seq: offset (default 0) and " +
-        `limit (default 100, 1–500). Returns ${CHANGESET_FIELDS}, offset, limit and writes. ` +
-        "Each write has seq (seqs may skip numbers), operation, type, id (the id a create " +
-        "minted, or the target) and createdAt; entity writes add name; relation " +
-        "writes add from and to {id, name}; before (an " +
-        "update's stored values of the keys it sets, as they were when it was staged), current " +
-        "(those values now; null when the target is gone), both " +
-        "null when the target is created in this changeset; after (the values it sets), and " +
-        "markers [{kind, message}]: what would reject the commit now, the hierarchy rules aside: " +
-        "drift (current differs from before: compare them, and restage only if your change " +
-        "still applies), missing (its target is gone), dangling (an id " +
-        "neither stored nor created in this changeset), not_visible (this lens no longer shows " +
-        "its type), replay (a value this lens no longer accepts). Document values in before, " +
+        "Read a changeset and one page of its staged objects, in the order they were first " +
+        "touched: offset (default 0) and limit (default 100, 1–500). Returns " +
+        `${CHANGESET_FIELDS}, offset, limit and objects. Each object has id (the entity or ` +
+        "relation), kind (entity or relation), type, action (create, update or delete), " +
+        "firstTouchedAt, markers and values; an entity adds name, a relation from and to {id, " +
+        "name}. values lists its staged values [{property, before, current, after, markers}]: " +
+        "after is the staged value (null removes the property); on an update, before is the " +
+        "stored value when the property was first staged (or last rebased) and current the " +
+        "stored value now, null when absent or the target is gone; on a create both are null; " +
+        "a delete has no values. markers [{kind, message}] say what would reject the commit " +
+        "now, the hierarchy rules aside. On a value: drift (current differs from before: " +
+        (lists("rebase") ? "compare them, then rebase to keep your value, or unstage it" : "compare them") +
+        "), replay (a value this lens no longer accepts). On the object: missing (the target " +
+        "of an update is gone), " +
+        "dangling (an end of a relation is neither stored nor created in this changeset, or " +
+        "deleted in it), not_visible (this lens no longer shows its type or a property it " +
+        "sets), replay (a value a create requires is missing). Document values in before, " +
         "current and after show as {document: true, length}; get_staged_document reads the " +
         "staged text. Everything is shown through this lens as it is now: what it hides is " +
-        "left out, and a write of a type it no longer shows keeps only seq, operation, " +
-        "createdAt and markers." +
+        "left out, and an object of a type it no longer shows keeps only id, kind, action, " +
+        "firstTouchedAt and markers." +
         (lists("commit_changeset") ? " To commit exactly what you read, pass version as expected_version to commit_changeset." : "") +
         reach(rulesetKey),
       inputSchema: {
@@ -1284,15 +1320,14 @@ function registerChangesetTools(
     "get_staged_document",
     {
       description:
-        "Read the text a commit of a changeset would leave in one document property, as set by " +
-        "the last write staged in it that sets that property: a create of the entity (one " +
-        "created in this changeset included) or an update of it. A staged document value is " +
+        "Read the text a commit of a changeset would leave in one document property: its staged " +
+        "value, on an entity stored or created in this changeset. A staged document value is " +
         "always the whole new text; a staged null reads as empty. get_changeset shows document " +
         "values only as {document: true, length}. 'offset' and 'limit' are character-based, as " +
         "in get_document; omit both to read the whole text. Returns propertyKey, content, " +
-        "offset, length (of content) and totalLength. Not found when no staged write of this " +
-        "changeset sets that property, when a later staged write deletes the entity, or when " +
-        "this lens does not show the entity type or the property." +
+        "offset, length (of content) and totalLength. Not found when the changeset stages no " +
+        "value of that property, when it deletes the entity, or when this lens does not show " +
+        "the entity type or the property." +
         reach(rulesetKey),
       inputSchema: {
         changeset_id: z.string(),
@@ -1333,32 +1368,82 @@ function registerChangesetTools(
     "unstage",
     {
       description:
-        "Remove one staged write, by its seq, from a draft changeset; its version goes up. " +
-        "Writes that depend on it stay staged: a write naming an id that a removed create " +
-        "minted is dangling, and submit and commit reject it until it is removed too or the " +
-        "create is staged again. A staged write cannot be edited: to change one, a drifted " +
-        "update included, unstage it and stage it again. A submitted changeset refuses it. A " +
-        "seq the changeset does not hold is not found." +
+        "Take one staged object out of a draft changeset, with all its staged values, by its " +
+        "object_id (the id of the entity or relation); with 'property', cut out only that one " +
+        "staged value, and an update left without values goes too. Its version goes up. Nothing " +
+        "else changes: a staged relation at an entity whose create was taken out is dangling, " +
+        "and a create without a value it requires fails replay, until they are fixed too. " +
+        "Taking out a delete brings back nothing it dropped. A submitted changeset refuses it. " +
+        "An object or value the changeset does not stage is not found." +
         reach(rulesetKey),
-      inputSchema: { changeset_id: z.string(), seq: z.number().int() },
+      inputSchema: { changeset_id: z.string(), object_id: z.string(), property: z.string().optional() },
     },
-    tool("unstage", async (args: { changeset_id: string; seq: number }, open) => {
-      await changesets.unstage(lensKey, rulesetKey, args.changeset_id, args.seq, await open());
-      return jsonResult({ message: `Staged write ${args.seq} removed from changeset '${args.changeset_id}'.` });
-    }),
+    tool(
+      "unstage",
+      async (args: { changeset_id: string; object_id: string; property?: string | undefined }, open) => {
+        await changesets.unstage(
+          lensKey,
+          rulesetKey,
+          args.changeset_id,
+          args.object_id,
+          args.property ?? null,
+          await open(),
+        );
+        return jsonResult({
+          message:
+            args.property === undefined
+              ? `Staged object '${args.object_id}' removed from changeset '${args.changeset_id}'.`
+              : `Staged value '${args.property}' of '${args.object_id}' removed from changeset '${args.changeset_id}'.`,
+        });
+      },
+    ),
+  );
+
+  register(
+    "rebase",
+    {
+      description:
+        "Accept the stored values now for a staged update of a stored entity or relation in a " +
+        "draft changeset: the before of each of its staged values named in 'properties' (all " +
+        "of them when omitted) becomes the stored value now, and the staged values stay. Use it " +
+        "on drift, after comparing before and current, to keep your value over the change made " +
+        "meanwhile. Its version goes up. Refused for a create or a delete, and by a submitted " +
+        "changeset; an object, a value or a target that is gone is not found. Returns the object " +
+        "as get_changeset shows it." +
+        reach(rulesetKey),
+      inputSchema: {
+        changeset_id: z.string(),
+        object_id: z.string(),
+        properties: z.array(z.string()).optional(),
+      },
+    },
+    tool(
+      "rebase",
+      async (args: { changeset_id: string; object_id: string; properties?: string[] | undefined }, open) =>
+        jsonResult(
+          await changesets.rebase(
+            lensKey,
+            rulesetKey,
+            args.changeset_id,
+            args.object_id,
+            args.properties ?? null,
+            await open(),
+          ),
+        ),
+    ),
   );
 
   register(
     "submit_changeset",
     {
       description:
-        "Hand a draft changeset over for review: it is frozen (no staging, unstaging or " +
-        "discarding) until it is committed or unsubmitted, and its version goes up. note: " +
+        "Hand a draft changeset over for review: it is frozen (no staging, unstaging, rebasing " +
+        "or discarding) until it is committed or unsubmitted, and its version goes up. note: " +
         "optional, at most 1,000 characters; it replaces the stored note, and without it the " +
-        "note stays. First, with no lock taken, every write is checked: " +
+        "note stays. First, with no lock taken, every staged object is checked: " +
         LOCK_FREE_CHECKS +
-        ". Any fault refuses the submit, naming its violations (total, then the first 100, " +
-        "each with seq, kind and message), and the changeset stays a draft. The hierarchy rules" +
+        `. Any fault refuses the submit, naming ${VIOLATIONS}, and the changeset stays a ` +
+        "draft. The hierarchy rules" +
         (rulesetKey !== null ? " and the anchor's subtree" : "") +
         " are checked only at commit. Also refused when the changeset is already submitted, " +
         "when it changed during the submit, or when its ruleset's anchor entity no longer exists " +
@@ -1381,10 +1466,12 @@ function registerChangesetTools(
     "unsubmit_changeset",
     {
       description:
-        "Send a submitted changeset back: it is a draft again with its writes kept, so it can be " +
+        "Send a submitted changeset back: it is a draft again with its staged objects kept, so " +
         (lists("commit_changeset")
-          ? "staged into, unstaged, discarded, submitted or committed again; its version goes up. "
-          : "staged into, unstaged, discarded or submitted again; its version goes up. ") +
+          ? "it can be staged into, unstaged from, rebased, discarded, submitted or committed " +
+            "again; its version goes up. "
+          : "it can be staged into, unstaged from, rebased, discarded or submitted again; its " +
+            "version goes up. ") +
         "note: required, not blank, at most 1,000 characters; it replaces the stored note, so " +
         "say what should change. A draft changeset is refused." +
         (rulesetKey !== null ? " It works while the ruleset's anchor entity no longer exists." : "") +
@@ -1403,25 +1490,26 @@ function registerChangesetTools(
     "commit_changeset",
     {
       description:
-        "Persist every staged write of a changeset, draft or submitted, in seq order, all or " +
-        "nothing; committing a submitted changeset approves it. expected_version: optional, the " +
-        "version you reviewed; if the changeset changed since, the commit is refused and " +
+        "Persist every staged object of a changeset, draft or submitted, all or nothing, " +
+        "entity creates first and entity deletes last; committing a submitted changeset " +
+        "approves it. expected_version: optional, the version you reviewed; if the changeset " +
+        "changed since, the commit is refused and " +
         "nothing is written. Omitted, the current version commits. Checked first: " +
         LOCK_FREE_CHECKS +
         ". Then, on the result: every entity has at most one parent, no cycles, relation ends " +
         "of the right types, no entity deleted while it keeps children" +
         (rulesetKey !== null
-          ? ", and, if this connection's ruleset sets an anchor, every write in the anchor's " +
-            "subtree; a deleted ruleset, or an anchor entity that no longer exists, rejects the commit"
-          : ", and for a changeset started through a ruleset that sets an anchor, every write in " +
-            "the anchor's subtree; a deleted ruleset, or an anchor entity that no longer exists, rejects it") +
-        ". A rejection names its violations (total, then the first 100, each with seq, kind " +
-        "and message); nothing is persisted and the changeset stays as it was, draft or submitted. " +
-        "On drift, compare before and current in get_changeset, and restage only if your " +
-        "change still applies. Refused with nothing persisted while another " +
+          ? ", and, if this connection's ruleset sets an anchor, every staged object in the " +
+            "anchor's subtree; a deleted ruleset, or an anchor entity that no longer exists, rejects the commit"
+          : ", and for a changeset started through a ruleset that sets an anchor, every staged " +
+            "object in the anchor's subtree; a deleted ruleset, or an anchor entity that no longer " +
+            "exists, rejects it") +
+        `. A rejection names ${VIOLATIONS}; nothing is persisted and the changeset stays as it ` +
+        "was, draft or submitted. On drift, compare before and current in get_changeset, then " +
+        "rebase to keep your value or unstage it. Refused with nothing persisted while another " +
         "commit runs on this ontology or the changeset is busy: try again. Committed, it " +
-        "returns {committed, alreadyGone}, the number of writes and the seqs of deletes whose " +
-        "target was already gone, and the changeset is gone. If the response is lost, tell the " +
+        "returns {committed, alreadyGone}, the number of staged objects and the ids of deletes " +
+        "already done, and the changeset is gone. If the response is lost, tell the " +
         "outcome by reading an id a staged create minted, or by listing the changesets: a " +
         "submitted changeset that is no longer listed was committed, and one still listed is " +
         "not committed." +
@@ -1445,7 +1533,7 @@ function registerChangesetTools(
     "discard_changeset",
     {
       description:
-        "Delete a draft changeset and all its staged writes; the data is not touched, and it " +
+        "Delete a draft changeset and all its staged objects; the data is not touched, and it " +
         "cannot be undone. A submitted changeset is refused until it is unsubmitted." +
         reach(rulesetKey),
       inputSchema: { changeset_id: z.string() },

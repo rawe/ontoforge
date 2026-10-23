@@ -2,7 +2,7 @@
  * The staged entity read over REST, on the in-test project hierarchy
  * (`buildProjectHierarchy`: task carries the document `notes`): one entity
  * as a commit of the changeset would leave it, stored or created by it,
- * with its own staged writes as the review shows them and their markers;
+ * with its staged object as the review shows it and its markers;
  * a staged delete; not found as the other changeset reads; the ruleset
  * mirror. The entity read itself still answers the stored data alone.
  */
@@ -84,38 +84,45 @@ describe("one entity as the changeset leaves it", () => {
     await staged(ALL, cs, { operation: "update_entity", type: "task", id: e.T3, properties: { name: "T3 b" } });
   });
 
-  it("a stored entity with its update folded in, the document a stub; its write as the review shows it", async () => {
+  it("a stored entity with its staged values applied, the document a stub; its object as the review shows it", async () => {
     const res = await entityRead(cs, "task", e.T1);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.deleted).toBe(false);
     expect(res.body.entity).toMatchObject({ _id: e.T1, _entityTypeKey: "task", name: "T1 b", notes: { document: true, length: 8 } });
-    expect(res.body.writes).toHaveLength(1);
-    expect(res.body.writes[0]).toMatchObject({
-      seq: 1,
-      operation: "update_entity",
-      type: "task",
+    expect(res.body.object).toMatchObject({
       id: e.T1,
+      kind: "entity",
+      type: "task",
+      action: "update",
       name: "T1",
-      before: { name: "T1", notes: { document: true, length: 11 } },
-      current: { name: "T1", notes: { document: true, length: 11 } },
-      after: { name: "T1 b", notes: { document: true, length: 8 } },
       markers: [],
+      values: [
+        { property: "name", before: "T1", current: "T1", after: "T1 b", markers: [] },
+        {
+          property: "notes",
+          before: { document: true, length: 11 },
+          current: { document: true, length: 11 },
+          after: { document: true, length: 8 },
+          markers: [],
+        },
+      ],
     });
     expect(JSON.stringify(res.body)).not.toContain("New plan");
     // The entity read itself answers the stored data alone.
     expect((await rest("GET", `${ALL}/entities/task/${e.T1}`)).body.name).toBe("T1");
   });
 
-  it("an entity this changeset creates: its create and update folded, a null removing a key; its parent relation is no write of it", async () => {
+  it("an entity this changeset creates: its create with the update merged in, a null removing a value; its parent relation is no part of it", async () => {
     const res = await entityRead(cs, "task", created.id);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body).toMatchObject({ deleted: false, entity: { _id: created.id, _entityTypeKey: "task", name: "T9 b" } });
     expect(res.body.entity).not.toHaveProperty("notes");
-    expect(res.body.writes.map((w: Row) => [w.seq, w.operation])).toEqual([
-      [created.seq, "create_entity"],
-      [created.seq + 2, "update_entity"],
-    ]);
-    expect(res.body.writes[1]).toMatchObject({ name: "T9", before: null, current: null, after: { name: "T9 b", notes: null } });
+    expect(res.body.object).toMatchObject({
+      id: created.id,
+      action: "create",
+      name: "T9 b",
+      values: [{ property: "name", before: null, current: null, after: "T9 b", markers: [] }],
+    });
     // Not stored: the entity read does not see it.
     expect((await rest("GET", `${ALL}/entities/task/${created.id}`)).status).toBe(404);
   });
@@ -123,21 +130,28 @@ describe("one entity as the changeset leaves it", () => {
   it("a staged delete: deleted, with the stored values", async () => {
     const res = await entityRead(cs, "task", e.T2);
     expect(res.body).toMatchObject({ deleted: true, entity: { _id: e.T2, name: "T2" } });
-    expect(res.body.writes).toEqual([expect.objectContaining({ operation: "delete_entity", id: e.T2, name: "T2", markers: [] })]);
+    expect(res.body.object).toMatchObject({ action: "delete", id: e.T2, name: "T2", markers: [], values: [] });
   });
 
-  it("a stored entity no write of it names: as stored, with no writes", async () => {
+  it("a stored entity the changeset does not touch: as stored, with no object", async () => {
     const res = await entityRead(cs, "project", e.P1);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(res.body).toMatchObject({ deleted: false, entity: { _id: e.P1, name: "P1" }, writes: [] });
+    expect(res.body).toMatchObject({ deleted: false, entity: { _id: e.P1, name: "P1" }, object: null });
   });
 
   it("drift since staging is a marker, current showing the stored value now", async () => {
     expect((await rest("PATCH", `${ALL}/entities/task/${e.T3}`, { name: "T3 live" })).status).toBe(200);
     const res = await entityRead(cs, "task", e.T3);
     expect(res.body.entity.name).toBe("T3 b");
-    expect(res.body.writes[0]).toMatchObject({ before: { name: "T3" }, current: { name: "T3 live" }, after: { name: "T3 b" } });
-    expect(res.body.writes[0].markers).toEqual([{ kind: "drift", message: "Changed since this write was staged" }]);
+    expect(res.body.object.values).toEqual([
+      {
+        property: "name",
+        before: "T3",
+        current: "T3 live",
+        after: "T3 b",
+        markers: [{ kind: "drift", message: "Changed since it was staged" }],
+      },
+    ]);
   });
 
   it("not found: neither stored nor created by this changeset, another type, a hidden type, another lens, a gone changeset", async () => {

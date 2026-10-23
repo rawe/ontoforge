@@ -249,20 +249,15 @@ describe("the ruleset MCP server", () => {
   });
 
   it.each(WRITE_TOOLS.filter(([name]) => name === "edit_document" || name === "write_document"))(
-    "%s refuses any changeset_id and writes nothing, on both mounts (F7)",
+    "%s with changeset_id stages instead of writing, on both mounts",
     async (name, args, spy) => {
       for (const rulesetKey of [null, "agent-a"]) {
         const client = await connect(rulesetKey);
         try {
-          for (const changesetId of [ID, "", null]) {
-            const result = await call(client, name, { ...args, changeset_id: changesetId });
-            expect(result.isError, String(changesetId)).toBe(true);
-            expect(result.content[0]!.text).toBe(
-              `Error executing tool ${name}: changeset_id is not accepted: ${name} always writes ` +
-                "immediately and cannot be staged; to stage a document change, pass the whole new " +
-                "value to update_entity with 'changeset_id'",
-            );
-          }
+          const result = await call(client, name, { ...args, changeset_id: ID });
+          // The mocked changeset store holds no changeset: the staging path answers.
+          expect(result.isError).toBe(true);
+          expect(result.content[0]!.text).toBe(`Error executing tool ${name}: Changeset '${ID}' not found`);
         } finally {
           await client.close();
         }
@@ -331,7 +326,7 @@ describe("the MCP ruleset mount over HTTP", () => {
   };
 
   it("tools/list reads the ruleset once and lists what its level allows", async () => {
-    for (const [level, count] of [["full", 34], ["propose", 31], ["none", 20]] as const) {
+    for (const [level, count] of [["full", 35], ["propose", 34], ["none", 20]] as const) {
       rulesets["agent-a"]!.writeAccess = level;
       holder.store.rulesetStore.get.mockClear();
       const { tools } = await rpc("tools/list");

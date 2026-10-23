@@ -1,66 +1,82 @@
 /**
- * Changesets: runtime writes of one lens, staged into a journal over any
- * time and persisted together by a commit. This module starts a changeset,
- * stages writes into it, lists and reads it, unstages one write, submits
- * and unsubmits it, discards it and commits it. REST
- * (`changesetRouter.ts`) is its entrance; like the write functions of
- * `service.ts`, every function takes the lens key and the ruleset key of
- * the URL (null on the plain lens) first and the store last.
+ * Changesets: what a commit of one lens will apply to the live data,
+ * staged over any time and persisted together by a commit. A changeset is
+ * a set: per entity or relation it touches one staged object, and per
+ * property of it at most one staged value; no history of calls is kept.
+ * This module starts a changeset, stages into it, lists and reads it,
+ * unstages an object or one value, rebases a value, submits and unsubmits
+ * it, discards it and commits it. REST (`changesetRouter.ts`) is its
+ * entrance; like the write functions of `service.ts`, every function takes
+ * the lens key and the ruleset key of the URL (null on the plain lens)
+ * first and the store last.
  *
- * - **Binding (V8 A, V17).** A changeset is bound to the lens it was
- *   started through and to the ruleset key of that URL. Through another
- *   lens, or another ruleset's URL, it is unknown; the plain lens URL
- *   reaches every changeset of its lens. Every unknown changeset (never
- *   existed, discarded, committed, expired, bound elsewhere) answers the
- *   one 404 "Changeset '<id>' not found".
- * - **Staging** (V18) is one short write per call (D2): it appends to the
- *   journal and nothing else; entities, relations and the search queue
- *   are untouched, and reads never see staged data (V16). Its checks, in
- *   order: the changeset; the anchor of the URL's ruleset (deleted, or at
- *   an entity the lens hides: 409, as every v1 write; coverage is a commit rule,
- *   R10); the `prepare…` of the immediate write (`prepare.ts`: the type's
- *   404 and the same 422 field errors); the target of an update or delete
- *   (minted by a staged create still in the journal, or else read once:
- *   missing is the immediate write's 404); the caps on writes and bytes
- *   (V25, R11, `writeBytes`), counted over every row the write
- *   appends. Relation ends are not checked here.
- * - **Ids (V3).** A create mints its final id now. A create with a parent
- *   relation is staged as two rows, the entity's create and then the
- *   relation's `create_relation`, each with its own id.
- * - **Before (V10).** A staged update of a stored target records the
- *   stored values of exactly its patched keys as its `before`, raw: an
- *   absent key stays absent, distinct from null, and a document value is
- *   kept as its hash and its length. Drift is the stored values now
+ * - **Binding.** A changeset is bound to the lens it was started through
+ *   and to the ruleset key of that URL. Through another lens, or another
+ *   ruleset's URL, it is unknown; the plain lens URL reaches every
+ *   changeset of its lens. Every unknown changeset (never existed,
+ *   discarded, committed, expired, bound elsewhere) answers the one 404
+ *   "Changeset '<id>' not found".
+ * - **Staging** merges one call into the set; entities, relations and the
+ *   search queue are untouched, and reads never see staged data. Its
+ *   checks, in order: the changeset; the anchor of the URL's ruleset
+ *   (deleted, or at an entity the lens hides: 409, as every write;
+ *   coverage is a commit rule); the `prepare…` of the immediate write
+ *   (`prepare.ts`: the type's 404 and the same 422 field errors); the
+ *   target of an update, delete or document edit (created in this
+ *   changeset, or else stored, read once: missing, or deleted in this
+ *   changeset, is the immediate write's 404); the caps on objects and
+ *   bytes (`valueBytes`). Relation ends are not checked here. The merge
+ *   is read-modify-write: it is applied with a compare-and-set on the
+ *   version it read, so a change in between is a 409 and nothing is
+ *   written.
+ * - **Merging.** A create adds its object and one value per key sent; a
+ *   create with a parent relation adds the relation's object too. An
+ *   update of a stored object adds an `update` object if none is staged
+ *   and writes each key sent; into a create it merges as the create's
+ *   values, a null removing one. A delete of a stored object makes its
+ *   object a `delete` and drops its values; a delete of an object created
+ *   here removes the object. An entity delete also removes every staged
+ *   relation at that entity, and answers their ids as `cascaded`. A
+ *   document edit applies the immediate edit to the staged text, or else
+ *   the stored one, and stages the whole result as the value.
+ * - **Ids.** A create mints its final id now; later calls name it.
+ * - **Before.** A value of an update records the stored value of its key
+ *   at the key's first touch, raw: an absent key distinct from null, a
+ *   document as its hash and length (`recordedBefore`). Staging never
+ *   refreshes it; `rebase` does, on request. Drift is the stored value now
  *   (`current`) differing from it, a document by its hash.
- * - **Expiry (V24, R3).** A draft changeset idle for 7 days is gone: checked
- *   on every access, where it is deleted and answers not found, and swept
- *   on start and on list. A submitted changeset never expires.
+ * - **Unstage, cut, rebase** remove an object with its values, remove one
+ *   value (an update left without values goes too), or set the before of
+ *   an update's values to the stored values now. Nothing cascades: what
+ *   becomes invalid shows as a marker.
+ * - **Expiry.** A draft changeset idle for 7 days is gone: checked on every
+ *   access, where it is deleted and answers not found, and swept on start
+ *   and on list. A submitted changeset never expires.
  * - **Write access** is checked by the entrances (`writeAccess.ts`), on
  *   the URL's ruleset, before any function here runs.
- * - **Lifecycle (V7, V38).** Submit freezes a draft changeset and hands it
- *   over with a note, after the lock-free pass (V5 d) and a compare-and-set
- *   on the version the pass saw (V40). While submitted, stage, unstage and
- *   discard are 409s, decided in the store's own statement; unsubmit (a
- *   note is required, R14) makes it a draft again, and commit is the
- *   approval. A rejected commit leaves it as it was (R6).
- * - **Review (V41).** The list and the reads apply the lens as it is now:
- *   a type, property or name the lens hides is never shown. The review
- *   read shows no staged arguments and stubs every document value; the
- *   staged document read returns the text the last staged write of a
- *   document property sets, and the staged entity read one entity as a
- *   commit would leave it, beside its own staged writes.
- * - **Commit (D3, V1 B).** Before BEGIN, holding nothing: the schema, the
- *   changeset and the search context are loaded, and the lock-free pass
- *   (V19) runs; any fault it finds rejects here. Then one transaction on
- *   one connection: the commit lock and the changeset row (V12), the
- *   version check (V40), every stored target `FOR UPDATE` with drift
- *   re-checked, the anchor read fresh; the replay of the journal by seq
- *   through the store's own write methods with their search work (V20,
- *   V23); commit validation over the end state (V21); the journal
- *   deleted, COMMIT. Any failure rolls all of it back; a rejection (422,
- *   the violations by seq, V22) then refreshes the last change and keeps
- *   the version (R6). One commit runs at a time in one process (V26,
- *   R5).
+ * - **Lifecycle.** Submit freezes a draft changeset and hands it over with
+ *   a note, after the lock-free pass and a compare-and-set on the version
+ *   the pass saw. While submitted, staging, unstaging, cutting, rebasing
+ *   and discarding are 409s, decided in the store's own statement;
+ *   unsubmit (a note is required) makes it a draft again, and commit is
+ *   the approval. A rejected commit leaves it as it was.
+ * - **Review.** The list and the reads apply the lens as it is now: a type,
+ *   property or name the lens hides is never shown. The review read shows
+ *   every document value as a stub; the staged document read returns the
+ *   staged text of one document property, and the staged entity read one
+ *   entity as a commit would leave it, beside its staged object.
+ * - **Commit.** Before BEGIN, holding nothing: the schema, the changeset
+ *   and the search context are loaded, and the lock-free pass runs; any
+ *   fault it finds rejects here. Then one transaction on one connection:
+ *   the commit lock and the changeset row, the version check, every stored
+ *   target `FOR UPDATE` with drift re-checked, the anchor read fresh; the
+ *   staged objects applied in fixed phases (entity creates, entity
+ *   updates, relation deletes, relation creates, relation updates, entity
+ *   deletes), each through the store's own write method with its search
+ *   work; commit validation over the end state; the changeset deleted,
+ *   COMMIT. Any failure rolls all of it back; a rejection (422, the
+ *   violations by object and property) then refreshes the last change and
+ *   keeps the version. One commit runs at a time in one process.
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -70,12 +86,17 @@ import { CoercionError, assertNoNulCharacter } from "../core/dataTypes.js";
 import { settings } from "../config.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import type {
+  ChangesetChange,
   ChangesetRecord,
-  ChangesetWriteRecord,
-  NewChangesetWrite,
+  NewStagedObject,
+  NewStagedValue,
   ParentLink,
   RuntimeStore,
   SearchWritePlan,
+  StagedAction,
+  StagedKind,
+  StagedObjectRecord,
+  StagedValueRecord,
 } from "../core/ports.js";
 import type { ParentEnd, PropertyDef } from "../core/schemas.js";
 import { planSearchWrite, type SearchChange } from "../core/searchDependencies.js";
@@ -92,40 +113,46 @@ import {
   type ParentRelationInput,
   type UpdateArgs,
 } from "./prepare.js";
-import { docLengthKey, documentPropertyKeys, filterEntityProperties, stubDocumentProperties } from "./readHelpers.js";
+import { docLengthKey, documentPropertyKeys, filterEntityProperties } from "./readHelpers.js";
 import { loadSchema, loadSearchContext, type LoadedSchema, type SearchContext } from "./schemaCache.js";
-import { documentSlice, endpointTypeMessage, parentReadings, type EndRole } from "./service.js";
+import {
+  applyDocumentEdit,
+  documentSlice,
+  endpointTypeMessage,
+  parentReadings,
+  type DocumentEditBody,
+  type EndRole,
+} from "./service.js";
 
 type Row = Record<string, unknown>;
 
-/** A draft changeset idle this long is gone (V24). */
+/** A draft changeset idle this long is gone. */
 export const CHANGESET_IDLE_DAYS = 7;
-/** The longest note, in characters (V32). */
+/** The longest note, in characters. */
 export const MAX_NOTE_LENGTH = 1000;
-/** The most staged writes one changeset holds (V25). */
-export const MAX_STAGED_WRITES = 10_000;
+/** The most staged objects one changeset holds. */
+export const MAX_STAGED_OBJECTS = 10_000;
 
-/** The size a staged write counts toward the byte cap
- * (`CHANGESET_MAX_BYTES`): the UTF-8 bytes of its arguments and its
- * before as JSON, document text included. */
-export function writeBytes(write: NewChangesetWrite): number {
-  const before = write.before === null ? 0 : Buffer.byteLength(JSON.stringify(write.before));
-  return Buffer.byteLength(JSON.stringify(write.arguments)) + before;
+/** The size a staged value counts toward the byte cap
+ * (`CHANGESET_MAX_BYTES`): the UTF-8 bytes of its value and its before as
+ * JSON, document text included. */
+export function valueBytes(value: unknown, before: Row | null): number {
+  const recorded = before === null ? 0 : Buffer.byteLength(JSON.stringify(before));
+  return Buffer.byteLength(JSON.stringify(value)) + recorded;
 }
 
 const IDLE_MS = CHANGESET_IDLE_DAYS * 24 * 3_600_000;
 
-/** One stageable write (V2), as the entrances hand it over: the values of
- * the matching immediate write. */
+/** One stageable call, as the entrances hand it over: the values of the
+ * matching immediate write. */
 export type StagedWrite =
   | { operation: "create_entity"; typeKey: string; properties: Row; parentRelation: ParentRelationInput | null }
   | { operation: "update_entity"; typeKey: string; id: string; properties: Row }
   | { operation: "delete_entity"; typeKey: string; id: string }
   | { operation: "create_relation"; typeKey: string; fromEntityId: string; toEntityId: string; properties: Row }
   | { operation: "update_relation"; typeKey: string; id: string; properties: Row }
-  | { operation: "delete_relation"; typeKey: string; id: string };
-
-export type StageableOperation = StagedWrite["operation"];
+  | { operation: "delete_relation"; typeKey: string; id: string }
+  | { operation: "edit_document"; typeKey: string; id: string; propertyKey: string; edit: DocumentEditBody };
 
 /** A changeset as every answer shows it. */
 export interface ChangesetView {
@@ -136,58 +163,66 @@ export interface ChangesetView {
   note: string | null;
   /** The ruleset key of the URL that started it; null on the plain lens. */
   ruleset: string | null;
-  writeCount: number;
+  objectCount: number;
   createdAt: Date;
   lastChangeAt: Date;
   submittedAt: Date | null;
 }
 
-/** One end of a staged relation write. */
+/** One end of a staged relation. */
 export interface EndView {
   id: string;
-  /** Its name through the lens: the stored name when stored, staged when a create of
-   * this changeset mints it; null when the lens shows none. */
+  /** Its name through the lens: the stored name when stored, the staged
+   * one when this changeset creates it; null when the lens shows none. */
   name: string | null;
 }
 
-/** A fault the lock-free pass finds on a staged write (V19). */
+/** A fault the lock-free pass finds on a staged object or value. */
 export interface Marker {
   kind: string;
   message: string;
 }
 
-/**
- * One staged write as the review read shows it, through the lens as it is
- * now (V41). A write whose type the lens no longer shows keeps only its
- * seq, operation, time and markers.
- */
-export interface StagedWriteView {
-  seq: number;
-  operation: string;
-  /** The entity or relation type key; null when the lens hides it. */
-  type: string | null;
-  /** The id a create minted, or the target of an update or delete. */
-  id: string | null;
-  createdAt: Date;
-  /** Entity writes: the target's name. */
-  name?: string | null;
-  /** Relation writes: the two ends. */
-  from?: EndView | null;
-  to?: EndView | null;
-  /** Updates of a stored target: the stored values of the patched keys as
-   * they were when it was staged, null for a key the target lacked. */
-  before: Row | null;
-  /** Updates of a stored target: the stored values of the patched keys
-   * now; null when the target is gone. Drift is `current` ≠ `before`. */
-  current: Row | null;
-  /** Creates and updates: the staged values. */
-  after: Row | null;
-  /** The lock-free pass's faults on this write: drift, dangling, not
-   * visible, missing, or a value the lens no longer accepts. */
+/** One staged value as the review read shows it. */
+export interface StagedValueView {
+  property: string;
+  /** An update's stored value of the key at its first touch (or its last
+   * rebase); null for a key the target lacked, and on a create. */
+  before: unknown;
+  /** An update's stored value of the key now; null when the target is gone
+   * or lacks the key, and on a create. Drift is `current` ≠ `before`. */
+  current: unknown;
+  /** The staged value; null removes the property. */
+  after: unknown;
+  /** The lock-free pass's faults on this value: drift or replay. */
   markers: Marker[];
 }
 
-/** A changeset as the list shows it (V17, V41). */
+/**
+ * One staged object as the review read shows it, through the lens as it is
+ * now. An object whose type the lens no longer shows keeps only its id,
+ * kind, action, first touch and markers.
+ */
+export interface StagedObjectView {
+  id: string;
+  kind: StagedKind;
+  /** The entity or relation type key; null when the lens hides it. */
+  type: string | null;
+  action: StagedAction;
+  firstTouchedAt: Date;
+  /** Entities: the name. */
+  name?: string | null;
+  /** Relations: the two ends. */
+  from?: EndView;
+  to?: EndView;
+  /** The lock-free pass's faults on the object: not visible, missing,
+   * dangling, or a value it needs and lacks. */
+  markers: Marker[];
+  /** Its staged values the lens shows, by property key; none on a delete. */
+  values: StagedValueView[];
+}
+
+/** A changeset as the list shows it. */
 export interface ChangesetListItem {
   id: string;
   number: number;
@@ -195,13 +230,12 @@ export interface ChangesetListItem {
   version: number;
   note: string | null;
   ruleset: string | null;
-  /** The number of staged writes, as the read shows it. */
-  writeCount: number;
-  /** The staged writes per operation. */
+  objectCount: number;
+  /** The staged objects per operation: `create_entity`, `update_relation`, …. */
   operations: Record<string, number>;
-  /** The type keys the staged writes name that the lens shows, sorted. */
+  /** The type keys the staged objects name that the lens shows, sorted. */
   types: string[];
-  /** How many type keys the staged writes name that the lens no longer
+  /** How many type keys the staged objects name that the lens no longer
    * shows; they are left out of `types`. */
   notVisible: number;
   createdAt: Date;
@@ -209,19 +243,20 @@ export interface ChangesetListItem {
   submittedAt: Date | null;
 }
 
-/** The answer of a staged write (R4). */
-export interface StagedAnswer {
-  seq: number;
+/** The answer of a staged call: the id of its object. A create with a
+ * parent relation adds the relation's; an entity delete the staged
+ * relations it removed; a document edit the immediate edit's answer. */
+export type StagedAnswer = Row & {
   id: string;
-  /** A create with a parent relation: the relation's write, staged next. */
-  relation?: { seq: number; id: string };
-}
+  relation?: { id: string };
+  cascaded?: string[];
+};
 
 function notFound(id: string): NotFoundError {
   return new NotFoundError(`Changeset '${id}' not found`);
 }
 
-/** The 409 of stage, unstage and discard while submitted (V18, V38). */
+/** The 409 of every change while submitted. */
 function isSubmitted(id: string): ConflictError {
   return new ConflictError(`Changeset '${id}' is submitted; unsubmit it first`);
 }
@@ -234,7 +269,7 @@ function toView(record: ChangesetRecord): ChangesetView {
     version: record.version,
     note: record.note,
     ruleset: record.rulesetKey,
-    writeCount: record.writeCount,
+    objectCount: record.objectCount,
     createdAt: record.createdAt,
     lastChangeAt: record.lastChangeAt,
     submittedAt: record.submittedAt,
@@ -246,7 +281,7 @@ function expiryCutoff(): Date {
   return new Date(Date.now() - IDLE_MS);
 }
 
-/** A valid note, or null; over the cap, or holding a NUL, is a 422 (V32). */
+/** A valid note, or null; over the cap, or holding a NUL, is a 422. */
 function validNote(note: string | null | undefined): string | null {
   if (note === null || note === undefined) return null;
   let fault: string | null = null;
@@ -288,17 +323,33 @@ async function loadChangeset(
   return record;
 }
 
-/** After the store refused to change a draft changeset: gone is not
- * found, submitted is the 409; otherwise null. */
-async function refusalOf(
+/** A draft changeset to change: submitted is the 409. */
+async function loadDraft(
   loaded: LoadedSchema,
   rulesetKey: string | null,
   id: string,
   store: RuntimeStore,
-): Promise<Error | null> {
-  const record = await store.changesets().get(id, loaded.scoped.lensId, rulesetKey);
-  if (record === null) return notFound(id);
-  return record.submittedAt === null ? null : isSubmitted(id);
+): Promise<ChangesetRecord> {
+  const record = await loadChangeset(loaded, rulesetKey, id, store);
+  if (record.submittedAt !== null) throw isSubmitted(id);
+  return record;
+}
+
+/** Apply a change to a draft changeset at the version read. The store
+ * refused: gone is not found, submitted the 409, and a draft changed
+ * since the read the 409 of a conflict. */
+async function applyChange(
+  loaded: LoadedSchema,
+  rulesetKey: string | null,
+  record: ChangesetRecord,
+  change: ChangesetChange,
+  store: RuntimeStore,
+): Promise<void> {
+  if ((await store.changesets().apply(record.id, record.version, change)) !== null) return;
+  const now = await store.changesets().get(record.id, loaded.scoped.lensId, rulesetKey);
+  if (now === null) throw notFound(record.id);
+  if (now.submittedAt !== null) throw isSubmitted(record.id);
+  throw new ConflictError(`Changeset '${record.id}' changed meanwhile; try again`);
 }
 
 /** A ruleset key of the URL that names no ruleset is not found. */
@@ -308,8 +359,8 @@ async function checkRulesetExists(rulesetKey: string | null, store: RuntimeStore
   }
 }
 
-/** Start a changeset bound to the lens and to the ruleset key of the URL
- * (V17). Unknown lens or ruleset is not found, in that order. */
+/** Start a changeset bound to the lens and to the ruleset key of the URL.
+ * Unknown lens or ruleset is not found, in that order. */
 export async function startChangeset(
   lensKey: string,
   rulesetKey: string | null,
@@ -346,79 +397,174 @@ function sent(coerced: Row, body: Row): Row {
 }
 
 /** The coerced patch of an update: each changed key, null removing it. */
-function patchOf(write: UpdateArgs): Row {
-  const keys = "changedKeys" in write.change ? write.change.changedKeys : [];
+function patchOf(write: UpdateArgs | null): Row {
+  const keys = write !== null && "changedKeys" in write.change ? write.change.changedKeys : [];
   return Object.fromEntries(
-    keys.map((key) => [key, Object.hasOwn(write.setProperties, key) ? write.setProperties[key] : null]),
+    keys.map((key) => [key, Object.hasOwn(write!.setProperties, key) ? write!.setProperties[key] : null]),
   );
 }
 
-/** How a document value is kept in a staged update's `before`: its hash
- * and its length in characters, not its text. */
+/** How a document value is kept in a before: its hash and its length in
+ * characters, not its text. */
 export function recordedDocument(text: string): Row {
   return { sha256: createHash("sha256").update(text, "utf8").digest("hex"), length: cpLength(text) };
 }
 
 /**
- * The stored values of exactly `keys` as a staged update records them in
- * its `before` and drift compares them (V10): raw as the store reads them
- * without definitions. A key the target does not hold stays absent,
- * distinct from a stored null; a document value is its hash and length
- * (`recordedDocument`).
+ * The stored value of `key` as a staged value records it in its before and
+ * drift compares it: `{value}`, raw as the store reads it without
+ * definitions, a document value as its hash and length
+ * (`recordedDocument`); `{}` when the stored object does not hold the key,
+ * distinct from a stored null.
  */
-export function recordedValues(stored: Row, keys: string[], propertyDefs: Record<string, PropertyDef>): Row {
-  const documents = documentPropertyKeys(propertyDefs);
-  const values: Row = {};
-  for (const key of keys) {
-    if (!Object.hasOwn(stored, key)) continue;
-    const value = stored[key];
-    values[key] = documents.has(key) && typeof value === "string" ? recordedDocument(value) : value;
-  }
-  return values;
+export function recordedBefore(stored: Row, key: string, propertyDefs: Record<string, PropertyDef>): Row {
+  if (!Object.hasOwn(stored, key)) return {};
+  const value = stored[key];
+  const document = propertyDefs[key]?.dataType === "document" && typeof value === "string";
+  return { value: document ? recordedDocument(value) : value };
 }
 
-/** Whether `id` was minted by a staged create of this kind and type that
- * is still in the journal (V18). */
-async function mintedInJournal(
-  changesetId: string,
-  create: "create_entity" | "create_relation",
+/** The staged values of an object, as a property map. */
+function valuesOf(object: StagedObjectRecord): Row {
+  return Object.fromEntries(object.values.map((value) => [value.propertyKey, value.value]));
+}
+
+function newObject(
+  kind: StagedKind,
   typeKey: string,
-  id: string,
-  store: RuntimeStore,
-): Promise<boolean> {
-  const row = await store.changesets().findMinted(changesetId, id);
-  return row !== null && row.operation === create && row.typeKey === typeKey;
+  objectId: string,
+  action: StagedAction,
+  ends: [string, string] | null = null,
+): NewStagedObject {
+  return { objectId, kind, typeKey, action, fromId: ends?.[0] ?? null, toId: ends?.[1] ?? null };
 }
 
-/** The stored target of an update or delete, read once; null when a staged
- * create minted it. Missing is the immediate write's 404. */
+function newValue(objectId: string, propertyKey: string, value: unknown, before: Row | null): NewStagedValue {
+  return { objectId, propertyKey, value, before, bytes: valueBytes(value, before) };
+}
+
+/** One staged call as a change of the set, and its answer. */
+interface Merge {
+  change: ChangesetChange;
+  answer: StagedAnswer;
+  /** The objects it adds. */
+  added: number;
+  /** How many bytes its values add, net of the values they replace. */
+  grows: number;
+}
+
+/** The bytes `values` add over those of `object` they replace. */
+function growth(object: StagedObjectRecord | undefined, values: NewStagedValue[]): number {
+  const old = new Map((object?.values ?? []).map((value) => [value.propertyKey, value.bytes] as const));
+  return values.reduce((sum, value) => sum + value.bytes - (old.get(value.propertyKey) ?? 0), 0);
+}
+
+function missing(kind: StagedKind, id: string): NotFoundError {
+  return new NotFoundError(`${kind === "entity" ? "Entity" : "Relation"} '${id}' not found`);
+}
+
+/** The target of an update, delete or document edit: its staged object,
+ * if any, and the stored row, null when this changeset creates it. */
+interface Target {
+  object: StagedObjectRecord | undefined;
+  stored: Row | null;
+}
+
+/** The target, read once: created in this changeset, or else stored.
+ * Deleted in this changeset, or neither, is the immediate write's 404. An
+ * object of another kind or type staged under the id is not this target. */
 async function target(
   changesetId: string,
-  kind: "entity" | "relation",
+  kind: StagedKind,
   typeKey: string,
   id: string,
   store: RuntimeStore,
-): Promise<Row | null> {
-  if (await mintedInJournal(changesetId, kind === "entity" ? "create_entity" : "create_relation", typeKey, id, store)) {
-    return null;
-  }
+): Promise<Target> {
+  const [found] = await store.changesets().objects(changesetId, [id]);
+  const object = found?.kind === kind && found.typeKey === typeKey ? found : undefined;
+  if (object?.action === "delete") throw missing(kind, id);
+  if (object?.action === "create") return { object, stored: null };
   const stored = kind === "entity" ? await store.getEntity(typeKey, id) : await store.getRelation(typeKey, id);
-  if (stored === null) {
-    throw new NotFoundError(`${kind === "entity" ? "Entity" : "Relation"} '${id}' not found`);
-  }
-  return stored;
+  if (stored === null) throw missing(kind, id);
+  return { object, stored };
 }
 
-/** The journal rows of one staged write, after its checks: one row, or
- * for a create with a parent relation two, the entity's create and then
- * the parent relation's, the row a staged `create_relation` of it gets. */
-async function journalRows(
+/** A stored relation's ends. */
+function storedEnds(relation: Row): [string, string] {
+  return [relation.fromEntityId as string, relation.toEntityId as string];
+}
+
+/**
+ * A patch (key → value, null removing the key) merged into the object
+ * staged on its target: into a create of this changeset as its values, a
+ * null removing one; otherwise into the target's `update`, staged now if
+ * there is none, each key keeping the before of its first touch and a key
+ * touched first now recording the stored value.
+ */
+function patchMerge(
+  at: Target,
+  kind: StagedKind,
+  typeKey: string,
+  id: string,
+  patch: Row,
+  propertyDefs: Record<string, PropertyDef>,
+): Merge {
+  const answer = { id };
+  const staged = new Map((at.object?.values ?? []).map((value) => [value.propertyKey, value] as const));
+  if (at.stored === null) {
+    const values: NewStagedValue[] = [];
+    const removeValues: { objectId: string; propertyKey: string }[] = [];
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== null) values.push(newValue(id, key, value, null));
+      else if (staged.has(key)) removeValues.push({ objectId: id, propertyKey: key });
+    }
+    return { change: { removeValues, values }, answer, added: 0, grows: growth(at.object, values) };
+  }
+  const stored = at.stored;
+  const values = Object.entries(patch).map(([key, value]) =>
+    newValue(id, key, value, staged.get(key)?.before ?? recordedBefore(stored, key, propertyDefs)),
+  );
+  // A patch that changes nothing stages nothing.
+  if (values.length === 0) return { change: {}, answer, added: 0, grows: 0 };
+  const ends = kind === "relation" ? storedEnds(stored) : null;
+  const objects = at.object === undefined ? [newObject(kind, typeKey, id, "update", ends)] : [];
+  return { change: { objects, values }, answer, added: objects.length, grows: growth(at.object, values) };
+}
+
+/** A delete merged in: an object created here is removed, a stored one's
+ * object becomes a `delete` without values. An entity delete also removes
+ * every staged relation at that entity. */
+async function deleteMerge(
+  changesetId: string,
+  kind: StagedKind,
+  typeKey: string,
+  id: string,
+  store: RuntimeStore,
+): Promise<Merge> {
+  const at = await target(changesetId, kind, typeKey, id, store);
+  const cascaded = kind === "entity" ? await store.changesets().relationsAt(changesetId, id) : [];
+  const answer: StagedAnswer = cascaded.length > 0 ? { id, cascaded } : { id };
+  if (at.stored === null) return { change: { removeObjects: [id, ...cascaded] }, answer, added: 0, grows: 0 };
+  const ends = kind === "relation" ? storedEnds(at.stored) : null;
+  return {
+    change: {
+      removeObjects: cascaded,
+      removeValues: (at.object?.values ?? []).map((value) => ({ objectId: id, propertyKey: value.propertyKey })),
+      objects: [newObject(kind, typeKey, id, "delete", ends)],
+    },
+    answer,
+    added: at.object === undefined ? 1 : 0,
+    grows: 0,
+  };
+}
+
+/** One staged call as a change of the set, after its checks. */
+async function mergeOf(
   loaded: LoadedSchema,
   changesetId: string,
   write: StagedWrite,
   store: RuntimeStore,
-): Promise<NewChangesetWrite[]> {
-  const row = { operation: write.operation, typeKey: write.typeKey, mintedId: null, targetId: null, before: null };
+): Promise<Merge> {
   switch (write.operation) {
     case "create_entity": {
       const ids = { entityId: randomUUID(), relationId: randomUUID() };
@@ -430,50 +576,21 @@ async function journalRows(
         ids,
       );
       refuseOn(errors);
-      const entity = {
-        ...row,
-        mintedId: ids.entityId,
-        arguments: { properties: sent(prepared.entity.properties, write.properties) },
-      };
+      const objects = [newObject("entity", write.typeKey, ids.entityId, "create")];
+      const entityValues = sent(prepared.entity.properties, write.properties);
+      const values = Object.entries(entityValues).map(([key, value]) => newValue(ids.entityId, key, value, null));
       const input = write.parentRelation;
-      if (input === null || prepared.parent === null) return [entity];
-      // Oriented by the relation type's parent end.
-      const r = prepared.parent.relation;
-      return [
-        entity,
-        {
-          operation: "create_relation",
-          typeKey: input.type,
-          mintedId: ids.relationId,
-          targetId: null,
-          before: null,
-          arguments: {
-            fromEntityId: r.fromEntityId,
-            toEntityId: r.toEntityId,
-            properties: sent(r.properties, input.properties ?? {}),
-          },
-        },
-      ];
-    }
-    case "update_entity": {
-      const { errors, write: prepared } = prepareUpdateEntity(loaded, write.typeKey, write.id, write.properties);
-      refuseOn(errors);
-      const patch = prepared === null ? {} : patchOf(prepared);
-      const stored = await target(changesetId, "entity", write.typeKey, write.id, store);
-      const defs = loaded.full.entityTypes[write.typeKey]?.properties ?? {};
-      return [
-        {
-          ...row,
-          targetId: write.id,
-          arguments: { properties: patch },
-          before: stored === null ? null : recordedValues(stored, Object.keys(patch), defs),
-        },
-      ];
-    }
-    case "delete_entity": {
-      prepareDeleteEntity(loaded, write.typeKey, write.id);
-      await target(changesetId, "entity", write.typeKey, write.id, store);
-      return [{ ...row, targetId: write.id, arguments: {} }];
+      const answer: StagedAnswer = { id: ids.entityId };
+      if (input !== null && prepared.parent !== null) {
+        // Oriented by the relation type's parent end.
+        const r = prepared.parent.relation;
+        objects.push(newObject("relation", input.type, ids.relationId, "create", [r.fromEntityId, r.toEntityId]));
+        for (const [key, value] of Object.entries(sent(r.properties, input.properties ?? {}))) {
+          values.push(newValue(ids.relationId, key, value, null));
+        }
+        answer.relation = { id: ids.relationId };
+      }
+      return { change: { objects, values }, answer, added: objects.length, grows: growth(undefined, values) };
     }
     case "create_relation": {
       const relationId = randomUUID();
@@ -486,47 +603,69 @@ async function journalRows(
         relationId,
       );
       refuseOn(errors);
-      return [
-        {
-          ...row,
-          mintedId: relationId,
-          arguments: {
-            fromEntityId: write.fromEntityId,
-            toEntityId: write.toEntityId,
-            properties: sent(prepared.properties, write.properties),
-          },
+      const values = Object.entries(sent(prepared.properties, write.properties)).map(([key, value]) =>
+        newValue(relationId, key, value, null),
+      );
+      return {
+        change: {
+          objects: [newObject("relation", write.typeKey, relationId, "create", [write.fromEntityId, write.toEntityId])],
+          values,
         },
-      ];
+        answer: { id: relationId },
+        added: 1,
+        grows: growth(undefined, values),
+      };
+    }
+    case "update_entity": {
+      const { errors, write: prepared } = prepareUpdateEntity(loaded, write.typeKey, write.id, write.properties);
+      refuseOn(errors);
+      const at = await target(changesetId, "entity", write.typeKey, write.id, store);
+      const defs = loaded.full.entityTypes[write.typeKey]?.properties ?? {};
+      return patchMerge(at, "entity", write.typeKey, write.id, patchOf(prepared), defs);
     }
     case "update_relation": {
       const { errors, write: prepared } = prepareUpdateRelation(loaded, write.typeKey, write.id, write.properties);
       refuseOn(errors);
-      const patch = prepared === null ? {} : patchOf(prepared);
-      const stored = await target(changesetId, "relation", write.typeKey, write.id, store);
+      const at = await target(changesetId, "relation", write.typeKey, write.id, store);
       const defs = loaded.full.relationTypes[write.typeKey]?.properties ?? {};
-      return [
-        {
-          ...row,
-          targetId: write.id,
-          arguments: { properties: patch },
-          before: stored === null ? null : recordedValues(stored, Object.keys(patch), defs),
-        },
-      ];
+      return patchMerge(at, "relation", write.typeKey, write.id, patchOf(prepared), defs);
     }
-    case "delete_relation": {
+    case "delete_entity":
+      prepareDeleteEntity(loaded, write.typeKey, write.id);
+      return deleteMerge(changesetId, "entity", write.typeKey, write.id, store);
+    case "delete_relation":
       prepareDeleteRelation(loaded, write.typeKey, write.id);
-      await target(changesetId, "relation", write.typeKey, write.id, store);
-      return [{ ...row, targetId: write.id, arguments: {} }];
+      return deleteMerge(changesetId, "relation", write.typeKey, write.id, store);
+    case "edit_document": {
+      // The document read's 404s, then the edit on the staged text, or
+      // else the stored one ("" on a create without it).
+      const type = loaded.scoped.entityTypes[write.typeKey];
+      if (type === undefined) throw new NotFoundError(`Entity type '${write.typeKey}' not found`);
+      const key = write.propertyKey;
+      if (type.properties[key]?.dataType !== "document") {
+        throw new NotFoundError(`Document property '${key}' not found on entity type '${write.typeKey}'`);
+      }
+      const at = await target(changesetId, "entity", write.typeKey, write.id, store);
+      const staged = at.object?.values.find((value) => value.propertyKey === key);
+      const text = staged !== undefined ? staged.value : at.stored?.[key];
+      const edited = applyDocumentEdit(key, typeof text === "string" ? text : "", write.edit);
+      const defs = loaded.full.entityTypes[write.typeKey]?.properties ?? {};
+      const merge = patchMerge(at, "entity", write.typeKey, write.id, { [key]: edited.value }, defs);
+      return { ...merge, answer: { id: write.id, ...edited.answer } };
     }
   }
 }
 
+function isEmpty(change: ChangesetChange): boolean {
+  return Object.values(change).every((part: unknown[] | undefined) => part === undefined || part.length === 0);
+}
+
 /**
- * Stage one write: its checks (see the header), then its journal rows,
- * all or none. Answers the seq and the id of its first row: the minted id
- * of a create, the target of an update or delete; a create with a parent
- * relation adds the relation's seq and id. A full changeset, or one a
- * commit holds, is a 409.
+ * Stage one call: its checks (see the header), then its merge into the
+ * set, applied with a compare-and-set on the version read; a call that
+ * changes nothing applies nothing. Answers the id of its object (see
+ * `StagedAnswer`). A full changeset, a change in between, or one a commit
+ * holds is a 409.
  */
 export async function stage(
   lensKey: string,
@@ -536,42 +675,134 @@ export async function stage(
   store: RuntimeStore,
 ): Promise<StagedAnswer> {
   const loaded = await loadSchema(lensKey, store);
-  const changeset = await loadChangeset(loaded, rulesetKey, changesetId, store);
-  if (changeset.submittedAt !== null) throw isSubmitted(changesetId);
-  // The anchor deleted, or at an entity the lens hides: refused as every v1 write.
+  const changeset = await loadDraft(loaded, rulesetKey, changesetId, store);
+  // The anchor deleted, or at an entity the lens hides: refused as every write.
   await AnchorGuard.checkStaging(rulesetKey, loaded, store);
 
-  const rows = await journalRows(loaded, changeset.id, write, store);
-  if (changeset.writeCount + rows.length > MAX_STAGED_WRITES) {
-    throw new ConflictError(`Changeset '${changesetId}' is full: at most ${MAX_STAGED_WRITES} staged writes`);
+  const merge = await mergeOf(loaded, changeset.id, write, store);
+  if (merge.added > 0 && changeset.objectCount + merge.added > MAX_STAGED_OBJECTS) {
+    throw new ConflictError(`Changeset '${changesetId}' is full: at most ${MAX_STAGED_OBJECTS} staged objects`);
   }
-  const writes = rows.map((row) => ({ write: row, bytes: writeBytes(row) }));
-  const bytes = writes.reduce((sum, { bytes }) => sum + bytes, 0);
   const maxBytes = settings.CHANGESET_MAX_BYTES;
-  if ((await store.changesets().stagedBytes(changeset.id)) + bytes > maxBytes) {
-    throw new ConflictError(`Changeset '${changesetId}' is full: at most ${maxBytes} bytes of staged writes`);
+  if (merge.grows > 0 && (await store.changesets().stagedBytes(changeset.id)) + merge.grows > maxBytes) {
+    throw new ConflictError(`Changeset '${changesetId}' is full: at most ${maxBytes} bytes of staged values`);
   }
-  // The store appends to a draft changeset only: a submit since the read
-  // is refused here.
-  const seqs = await store.changesets().append(changeset.id, writes);
-  if (seqs === null) throw (await refusalOf(loaded, rulesetKey, changeset.id, store)) ?? notFound(changesetId);
-  const [entity, relation] = rows;
-  const answer: StagedAnswer = { seq: seqs[0]!, id: (entity!.mintedId ?? entity!.targetId)! };
-  if (relation !== undefined) answer.relation = { seq: seqs[1]!, id: relation.mintedId! };
-  return answer;
+  if (!isEmpty(merge.change)) await applyChange(loaded, rulesetKey, changeset, merge.change, store);
+  return merge.answer;
 }
 
 // ---------------------------------------------------------------------------
-// Read, unstage, discard
+// Unstage, cut, rebase, discard
+// ---------------------------------------------------------------------------
+
+/** The staged object `objectId` of a changeset; not staged is a 404. */
+async function stagedObject(changesetId: string, objectId: string, store: RuntimeStore): Promise<StagedObjectRecord> {
+  const [object] = await store.changesets().objects(changesetId, [objectId]);
+  if (object === undefined) {
+    throw new NotFoundError(`Object '${objectId}' is not staged in changeset '${changesetId}'`);
+  }
+  return object;
+}
+
+function noValue(changesetId: string, objectId: string, propertyKey: string): NotFoundError {
+  return new NotFoundError(`No value of '${propertyKey}' is staged for object '${objectId}' in changeset '${changesetId}'`);
+}
+
+/**
+ * Take one staged object out with its values; with `propertyKey`, cut
+ * only that value out, and an `update` left without values goes too.
+ * Nothing else changes: what depends on it shows as a marker. Unstaging a
+ * delete brings nothing back. Allowed when the anchor is deleted.
+ */
+export async function unstage(
+  lensKey: string,
+  rulesetKey: string | null,
+  changesetId: string,
+  objectId: string,
+  propertyKey: string | null,
+  store: RuntimeStore,
+): Promise<void> {
+  const loaded = await loadSchema(lensKey, store);
+  const record = await loadDraft(loaded, rulesetKey, changesetId, store);
+  const object = await stagedObject(record.id, objectId, store);
+  let change: ChangesetChange = { removeObjects: [object.objectId] };
+  if (propertyKey !== null) {
+    if (!object.values.some((value) => value.propertyKey === propertyKey)) {
+      throw noValue(changesetId, objectId, propertyKey);
+    }
+    const last = object.action === "update" && object.values.length === 1;
+    if (!last) change = { removeValues: [{ objectId: object.objectId, propertyKey }] };
+  }
+  await applyChange(loaded, rulesetKey, record, change, store);
+}
+
+/**
+ * Accept the stored values now: the before of each named value of an
+ * update of a stored object (default: all of them) becomes the stored
+ * value now, and the staged values stay. Any other action is a 409, a
+ * key without a staged value a 404, and so is a target gone. Answers the
+ * object as the review shows it.
+ */
+export async function rebase(
+  lensKey: string,
+  rulesetKey: string | null,
+  changesetId: string,
+  objectId: string,
+  propertyKeys: string[] | null,
+  store: RuntimeStore,
+): Promise<StagedObjectView> {
+  const loaded = await loadSchema(lensKey, store);
+  const record = await loadDraft(loaded, rulesetKey, changesetId, store);
+  const object = await stagedObject(record.id, objectId, store);
+  if (object.action !== "update") {
+    throw new ConflictError(`Only an update of a stored object can be rebased; this object is a ${object.action}`);
+  }
+  const keys = propertyKeys ?? object.values.map((value) => value.propertyKey);
+  const staged = new Map(object.values.map((value) => [value.propertyKey, value] as const));
+  for (const key of keys) {
+    if (!staged.has(key)) throw noValue(changesetId, objectId, key);
+  }
+  const entity = object.kind === "entity";
+  const stored = entity
+    ? await store.getEntity(object.typeKey, object.objectId)
+    : await store.getRelation(object.typeKey, object.objectId);
+  if (stored === null) throw missing(object.kind, object.objectId);
+  const defs = (entity ? loaded.full.entityTypes : loaded.full.relationTypes)[object.typeKey]?.properties ?? {};
+  const values = [...new Set(keys)].map((key) =>
+    newValue(object.objectId, key, staged.get(key)!.value, recordedBefore(stored, key, defs)),
+  );
+  await applyChange(loaded, rulesetKey, record, { values }, store);
+  const [view] = await reviewOf(loaded, record.id, await store.changesets().objects(record.id, [objectId]), store);
+  return view!;
+}
+
+/** Delete a draft changeset and its staged objects. A submitted one is
+ * refused; the store deletes a draft one only, so a submit landing after
+ * the read is refused too. */
+export async function discardChangeset(
+  lensKey: string,
+  rulesetKey: string | null,
+  changesetId: string,
+  store: RuntimeStore,
+): Promise<void> {
+  const loaded = await loadSchema(lensKey, store);
+  const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
+  if (record.submittedAt === null && (await store.changesets().discard(record.id))) return;
+  const now = await store.changesets().get(record.id, loaded.scoped.lensId, rulesetKey);
+  throw now === null || now.submittedAt === null ? notFound(changesetId) : isSubmitted(changesetId);
+}
+
+// ---------------------------------------------------------------------------
+// Reads
 // ---------------------------------------------------------------------------
 
 /**
- * The review read (R7, V41): the changeset and one page of its writes by
- * seq, each with names resolved, `before`, `current` and `after`, and
- * the markers the lock-free pass finds on it. The page's writes are
- * judged alone, as `getStagedEntity` judges an entity's: a write's
- * markers depend on nothing else in the journal but which creates still
- * in it minted the ids it names (`mintedFor`).
+ * The review read: the changeset and one page of its staged objects by
+ * first touch, each with names resolved, its values with `before`,
+ * `current` and `after`, and the markers the lock-free pass finds on it.
+ * The page's objects are judged alone, as `getStagedEntity` judges one:
+ * an object's markers depend on nothing else in the changeset but the
+ * objects at its relation ends.
  */
 export async function getChangeset(
   lensKey: string,
@@ -580,25 +811,20 @@ export async function getChangeset(
   offset: number,
   limit: number,
   store: RuntimeStore,
-): Promise<ChangesetView & { offset: number; limit: number; writes: StagedWriteView[] }> {
+): Promise<ChangesetView & { offset: number; limit: number; objects: StagedObjectView[] }> {
   const loaded = await loadSchema(lensKey, store);
   const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
-  const writes = await store.changesets().page(record.id, offset, limit);
-  const minted = await mintedFor(record.id, writes, store);
-  const stored = await storedRows(loaded, writes, minted, true, store);
-  const { faults } = passFaults(loaded, writes, minted, stored);
-  return { ...toView(record), offset, limit, writes: reviewPage(loaded, writes, { faults, minted }, stored) };
+  const objects = await reviewOf(loaded, record.id, await store.changesets().page(record.id, offset, limit), store);
+  return { ...toView(record), offset, limit, objects };
 }
 
 /**
  * The text a commit of this changeset would leave in one document
- * property: the value the last staged write setting it sets (a create or
- * an update of that entity, an entity this changeset creates included),
- * sliced as the document read slices (`documentSlice`). A null set is the
- * empty text. Through the lens as every review read: a type or property it
- * hides is not found, and so is a property no staged write sets, or one of
- * an entity a later staged write deletes (ids are final: nothing re-creates
- * it).
+ * property: its staged value, sliced as the document read slices
+ * (`documentSlice`); a staged null is the empty text. Through the lens as
+ * every review read: a type or property it hides is not found, and so is
+ * a property with no staged value, or one of an entity this changeset
+ * deletes.
  */
 export async function getStagedDocument(
   lensKey: string,
@@ -618,62 +844,39 @@ export async function getStagedDocument(
   if (type.properties[propertyKey]?.dataType !== "document") {
     throw new NotFoundError(`Document property '${propertyKey}' not found on entity type '${entityTypeKey}'`);
   }
-
-  let staged: { value: unknown } | null = null;
-  let deleted = false;
-  for (let at = 0; ; at += REPLAY_PAGE) {
-    const page = await store.changesets().page(record.id, at, REPLAY_PAGE);
-    for (const write of page) {
-      if (write.typeKey !== entityTypeKey) continue;
-      const sets =
-        (write.operation === "create_entity" && write.mintedId === entityId) ||
-        (write.operation === "update_entity" && write.targetId === entityId);
-      const properties = (write.arguments.properties ?? {}) as Row;
-      if (sets && Object.hasOwn(properties, propertyKey)) {
-        staged = { value: properties[propertyKey] };
-        deleted = false;
-      } else if (write.operation === "delete_entity" && write.targetId === entityId) {
-        deleted = true;
-      }
-    }
-    if (page.length < REPLAY_PAGE) break;
+  const [object] = await store.changesets().objects(record.id, [entityId]);
+  const own = object?.kind === "entity" && object.typeKey === entityTypeKey ? object : undefined;
+  if (own?.action === "delete") {
+    throw new NotFoundError(`Changeset '${changesetId}' deletes entity '${entityId}': a commit leaves no '${propertyKey}'`);
   }
-  if (staged !== null && deleted) {
-    throw new NotFoundError(
-      `Changeset '${changesetId}' deletes entity '${entityId}': a commit leaves no '${propertyKey}'`,
-    );
-  }
-  if (staged === null) {
-    throw new NotFoundError(
-      `No staged write of changeset '${changesetId}' sets '${propertyKey}' of entity '${entityId}'`,
-    );
+  const staged = own?.values.find((value) => value.propertyKey === propertyKey);
+  if (staged === undefined) {
+    throw new NotFoundError(`Changeset '${changesetId}' stages no '${propertyKey}' of entity '${entityId}'`);
   }
   return documentSlice(propertyKey, typeof staged.value === "string" ? staged.value : "", offset, limit);
 }
 
-/** One entity as a commit of this changeset would leave it, and the
- * staged writes on it. */
+/** One entity as a commit of this changeset would leave it, and its
+ * staged object. */
 export interface StagedEntityView {
   /** The stored entity, or the one this changeset creates, through the
-   * lens, with the staged writes on it folded in by seq. */
+   * lens, with its staged values applied. */
   entity: Row;
-  /** Whether its last staged write deletes it. */
+  /** Whether this changeset deletes it. */
   deleted: boolean;
-  /** Its own staged writes (create, update, delete) as the review shows them. */
-  writes: StagedWriteView[];
+  /** Its staged object as the review shows it; null when none is staged. */
+  object: StagedObjectView | null;
 }
 
 /**
  * One entity as a commit of this changeset would leave it: the stored
- * entity, or the one a staged create mints, with this changeset's creates
- * and updates of it folded in by seq (a null removes a key) and no
- * defaults applied (the commit applies them), as the entity read shows it
- * through the lens, documents as stubs; `deleted` when its last staged
- * write is a delete. Beside it, those writes as the review read shows
- * them, with the lock-free pass's markers judged on them alone: they
- * depend on nothing else in the journal. Relation writes naming the
- * entity are not among them. Not found: a type the lens hides, or an
- * entity neither stored nor created by this changeset.
+ * entity, or the one this changeset creates, with its staged values
+ * applied (a null removes a key) and no defaults (the commit applies
+ * them), as the entity read shows it through the lens, documents as stubs;
+ * `deleted` when the changeset deletes it. Beside it, its staged object as
+ * the review read shows it. Staged relations at it are not part of it.
+ * Not found: a type the lens hides, or an entity neither stored nor
+ * created by this changeset.
  */
 export async function getStagedEntity(
   lensKey: string,
@@ -688,42 +891,26 @@ export async function getStagedEntity(
   const type = loaded.scoped.entityTypes[entityTypeKey];
   if (type === undefined) throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
 
-  const writes = (await store.changesets().writesOn(record.id, entityId)).filter(
-    (write) => write.operation.endsWith("_entity") && write.typeKey === entityTypeKey,
-  );
+  const [found] = await store.changesets().objects(record.id, [entityId]);
+  const object = found?.kind === "entity" && found.typeKey === entityTypeKey ? found : undefined;
   const stored = await store.getEntity(entityTypeKey, entityId);
-  const minted = mintedBy(writes);
-  if (stored === null && !minted.has(entityId)) throw new NotFoundError(`Entity '${entityId}' not found`);
+  if (stored === null && object?.action !== "create") throw new NotFoundError(`Entity '${entityId}' not found`);
 
   const entity: Row = stored === null ? { _id: entityId, _entityTypeKey: entityTypeKey } : { ...stored };
-  let deleted = false;
-  for (const write of writes) {
-    deleted = write.operation === "delete_entity";
-    for (const [key, value] of Object.entries((write.arguments.properties ?? {}) as Row)) {
-      // A staged document is measured afresh, not by the stored length.
-      delete entity[docLengthKey(key)];
-      if (value === null) delete entity[key];
-      else entity[key] = value;
-    }
+  for (const { propertyKey, value } of object?.values ?? []) {
+    // A staged document is measured afresh, not by the stored length.
+    delete entity[docLengthKey(propertyKey)];
+    if (value === null) delete entity[propertyKey];
+    else entity[propertyKey] = value;
   }
-
-  const rows: Stored = {
-    entities: new Map(stored === null ? [] : [[entityId, stored] as const]),
-    relations: new Map(),
-  };
-  const { faults } = passFaults(loaded, writes, minted, rows);
-  return {
-    entity: filterEntityProperties(entity, type),
-    deleted,
-    writes: reviewPage(loaded, writes, { faults, minted }, rows),
-  };
+  const [view] = object === undefined ? [] : await reviewOf(loaded, record.id, [object], store);
+  return { entity: filterEntityProperties(entity, type), deleted: object?.action === "delete", object: view ?? null };
 }
 
 /**
- * The lens's changesets (V17): through the plain lens URL every one, through
- * a ruleset URL only its ruleset's; by number, lowest first.
- * Expired draft changesets are swept first (R3). `types` applies the lens as
- * it is now (V41).
+ * The lens's changesets: through the plain lens URL every one, through a
+ * ruleset URL only its ruleset's; by number, lowest first. Expired draft
+ * changesets are swept first. `types` applies the lens as it is now.
  */
 export async function listChangesets(
   lensKey: string,
@@ -745,7 +932,7 @@ export async function listChangesets(
       version: summary.version,
       note: summary.note,
       ruleset: summary.rulesetKey,
-      writeCount: summary.writeCount,
+      objectCount: summary.objectCount,
       operations: summary.operations,
       types,
       notVisible: summary.typeKeys.length - types.length,
@@ -756,8 +943,8 @@ export async function listChangesets(
   });
 }
 
-/** How many changesets a lens delete takes with it (V42, R8), counted
- * before the delete; an expired draft changeset is gone already. */
+/** How many changesets a lens delete takes with it, counted before the
+ * delete; an expired draft changeset is gone already. */
 export async function lensChangesetCount(lensId: string, store: RuntimeStore): Promise<number> {
   const cutoff = expiryCutoff();
   const summaries = await store.changesets().list(lensId, null);
@@ -769,12 +956,12 @@ export async function lensChangesetCount(lensId: string, store: RuntimeStore): P
 // ---------------------------------------------------------------------------
 
 /**
- * Submit a draft changeset (V7, V5 d): freeze it and hand it over, with the
- * note given (absent, the note stays). Already submitted, or a changeset
- * whose ruleset's anchor is deleted or at an entity the lens hides, is a
- * 409. The lock-free pass runs with no lock and no transaction; its faults
- * are a 422 and the changeset stays a draft. Clean, a compare-and-set on the
- * version the pass saw (V40): a change meanwhile is a 409.
+ * Submit a draft changeset: freeze it and hand it over, with the note
+ * given (absent, the note stays). Already submitted, or a changeset whose
+ * ruleset's anchor is deleted or at an entity the lens hides, is a 409.
+ * The lock-free pass runs with no lock and no transaction; its faults are
+ * a 422 and the changeset stays a draft. Clean, a compare-and-set on the
+ * version the pass saw: a change meanwhile is a 409.
  */
 export async function submitChangeset(
   lensKey: string,
@@ -807,9 +994,9 @@ export async function submitChangeset(
 }
 
 /**
- * A submitted changeset back to draft (V7, R14), through any URL that
- * reaches it, one whose anchor is deleted included. The note is required: it
- * replaces the stored one. A draft changeset is a 409.
+ * A submitted changeset back to draft, through any URL that reaches it,
+ * one whose anchor is deleted included. The note is required: it replaces
+ * the stored one. A draft changeset is a 409.
  */
 export async function unsubmitChangeset(
   lensKey: string,
@@ -834,102 +1021,66 @@ export async function unsubmitChangeset(
   return toView(draft);
 }
 
-/** Take one staged write out by seq. Writes that depend on it stay; the
- * commit's checks flag them (V6). Allowed when the anchor is deleted. */
-export async function unstage(
-  lensKey: string,
-  rulesetKey: string | null,
-  changesetId: string,
-  seq: number,
-  store: RuntimeStore,
-): Promise<void> {
-  const loaded = await loadSchema(lensKey, store);
-  const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
-  if (record.submittedAt !== null) throw isSubmitted(changesetId);
-  if (!(await store.changesets().unstage(record.id, seq))) {
-    // Refused by the store: gone, submitted since the read, or no such seq.
-    throw (
-      (await refusalOf(loaded, rulesetKey, record.id, store)) ??
-      new NotFoundError(`Staged write ${seq} not found in changeset '${changesetId}'`)
-    );
-  }
-}
-
-/** Delete a draft changeset and its journal. A submitted one is refused
- * (V38); the store deletes a draft one only, so a submit landing after the
- * read is refused too. */
-export async function discardChangeset(
-  lensKey: string,
-  rulesetKey: string | null,
-  changesetId: string,
-  store: RuntimeStore,
-): Promise<void> {
-  const loaded = await loadSchema(lensKey, store);
-  const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
-  if (record.submittedAt === null && (await store.changesets().discard(record.id))) return;
-  throw (await refusalOf(loaded, rulesetKey, record.id, store)) ?? notFound(changesetId);
-}
-
 // ---------------------------------------------------------------------------
 // Commit
 // ---------------------------------------------------------------------------
 
-/** At most this many commits run at once in one process (V26, R5). */
+/** At most this many commits run at once in one process. */
 export const MAX_RUNNING_COMMITS = 1;
-/** A rejection names at most this many violations (V21). */
+/** A rejection names at most this many violations. */
 export const MAX_VIOLATIONS = 100;
-/** The journal is replayed in pages of this many writes. */
-const REPLAY_PAGE = 500;
+/** The staged objects are read in pages of this many. */
+const READ_PAGE = 500;
 
 let runningCommits = 0;
 
-/** One reason a commit is rejected, on the staged write it concerns. */
+/** One reason a commit is rejected: on a staged object, and on one of its
+ * properties, or on the changeset as a whole (`object` null). */
 export interface Violation {
-  seq: number;
+  object: string | null;
+  property?: string;
   kind: string;
   message: string;
 }
 
-/** What the replay leaves for commit validation. */
-export interface Replay {
-  /** The staged writes replayed. */
-  replayed: number;
-  /** The seqs of staged deletes that found nothing: done (V20). */
-  alreadyGone: number[];
+/** What applying the staged objects leaves for commit validation. */
+export interface Applied {
+  /** The staged objects applied. */
+  applied: number;
+  /** The ids of staged deletes that found nothing: done. */
+  alreadyGone: string[];
   /** Each staged entity delete's children over the parent relations,
    * read with the entity locked, just before its delete. */
-  deletedChildren: { seq: number; entityId: string; children: ParentLink[] }[];
-  /** The write that could not be replayed; nothing after it ran. */
+  deletedChildren: { objectId: string; children: ParentLink[] }[];
+  /** The object that could not be applied; nothing after it ran. */
   fault: Violation | null;
 }
 
 /** The answer of a commit. */
 export interface CommitAnswer {
   committed: number;
-  alreadyGone: number[];
+  alreadyGone: string[];
 }
 
 /*
- * The texts of a staged write's markers and violations say what is wrong
- * in words a person reads: no id and no fix. The seq names the write, so
- * its own target goes unnamed; another entity is named by its role (the
- * source or target end). Type, lens and ruleset keys stay.
+ * The texts of markers and violations say what is wrong in words a person
+ * reads: no id and no fix. The object they sit on goes unnamed; another
+ * entity is named by its role (the source or target end). Type, property,
+ * lens and ruleset keys stay.
  */
 
-const DRIFTED = "Changed since this write was staged";
-const DELETED_SINCE = "Deleted since this write was staged";
+const DRIFTED = "Changed since it was staged";
+const DELETED_SINCE = "Deleted since it was staged";
 
-/** An entity a staged write names that is neither stored nor created by
- * a staged write still in the changeset; `role` null is its own target. */
-function neitherStored(role: string | null): string {
-  return role === null
-    ? "Neither stored nor created in this changeset"
-    : `${role} is neither stored nor created in this changeset`;
+/** An end of a staged relation that is neither stored nor created in
+ * this changeset. */
+function neitherStored(role: string): string {
+  return `${role} is neither stored nor created in this changeset`;
 }
 
-/** A staged write that cannot be replayed; its message names only what
+/** A staged object that cannot be applied; its message names only what
  * the caller sent. */
-class ReplayFault extends Error {}
+class ApplyFault extends Error {}
 
 /** Thrown inside the commit transaction to roll it back with these. */
 class CommitRejected extends Error {
@@ -938,7 +1089,7 @@ class CommitRejected extends Error {
   }
 }
 
-/** The one-line text of a write's field errors; null when there are none. */
+/** The one-line text of field errors; null when there are none. */
 function fieldFaults(errors: FieldErrors): string | null {
   const fields = Object.entries(errors);
   if (fields.length === 0) return null;
@@ -947,156 +1098,160 @@ function fieldFaults(errors: FieldErrors): string | null {
 
 function faultOn(errors: FieldErrors): void {
   const message = fieldFaults(errors);
-  if (message !== null) throw new ReplayFault(message);
+  if (message !== null) throw new ApplyFault(message);
 }
 
-/** One staged write, replayed through the store's write method with its
+/** The order in which a commit applies the staged objects. */
+const PHASES: readonly (readonly [StagedKind, StagedAction])[] = [
+  ["entity", "create"],
+  ["entity", "update"],
+  ["relation", "delete"],
+  ["relation", "create"],
+  ["relation", "update"],
+  ["entity", "delete"],
+];
+
+/** One staged object, applied through the store's write method with its
  * search work, as the immediate write runs it. */
-async function replayOne(
+async function applyOne(
   loaded: LoadedSchema,
   plan: (change: SearchChange) => SearchWritePlan | null,
   readings: Record<string, ParentEnd>,
-  write: ChangesetWriteRecord,
+  object: StagedObjectRecord,
   bound: RuntimeStore,
-  replay: Replay,
+  applied: Applied,
 ): Promise<void> {
-  const args = write.arguments;
-  const properties = (args.properties ?? {}) as Row;
-  switch (write.operation) {
-    case "create_entity": {
-      const { errors, write: prepared } = prepareCreateEntity(loaded, write.typeKey, properties, null, {
-        entityId: write.mintedId!,
-        relationId: randomUUID(),
-      });
-      faultOn(errors);
-      const e = prepared.entity;
-      await bound.createEntity(e.entityTypeKey, e.entityId, e.properties, e.propertyDefs, plan(e.change));
-      return;
-    }
-    case "update_entity": {
-      const { errors, write: prepared } = prepareUpdateEntity(loaded, write.typeKey, write.targetId!, properties);
-      faultOn(errors);
-      if (prepared === null) return;
-      const updated = await bound.updateEntity(
-        prepared.entityTypeKey,
-        prepared.entityId,
-        prepared.setProperties,
-        prepared.removeProperties,
-        prepared.propertyDefs,
-        plan(prepared.change),
-      );
-      if (updated === null) throw new ReplayFault(DELETED_SINCE);
-      return;
-    }
-    case "delete_entity": {
-      const prepared = prepareDeleteEntity(loaded, write.typeKey, write.targetId!);
-      // Delete capture: X locked, so no child can attach until COMMIT, and
-      // its children recorded before the cascade erases them.
-      const children = await bound.childrenOf([prepared.entityId], readings, true);
-      replay.deletedChildren.push({ seq: write.seq, entityId: prepared.entityId, children });
-      if (!(await bound.deleteEntity(prepared.entityTypeKey, prepared.entityId, plan(prepared.change)))) {
-        replay.alreadyGone.push(write.seq);
+  const id = object.objectId;
+  const values = valuesOf(object);
+  if (object.kind === "entity") {
+    switch (object.action) {
+      case "create": {
+        const { errors, write } = prepareCreateEntity(loaded, object.typeKey, values, null, {
+          entityId: id,
+          relationId: randomUUID(),
+        });
+        faultOn(errors);
+        const e = write.entity;
+        await bound.createEntity(e.entityTypeKey, e.entityId, e.properties, e.propertyDefs, plan(e.change));
+        return;
       }
-      return;
+      case "update": {
+        const { errors, write } = prepareUpdateEntity(loaded, object.typeKey, id, values);
+        faultOn(errors);
+        if (write === null) return;
+        const updated = await bound.updateEntity(
+          write.entityTypeKey,
+          write.entityId,
+          write.setProperties,
+          write.removeProperties,
+          write.propertyDefs,
+          plan(write.change),
+        );
+        if (updated === null) throw new ApplyFault(DELETED_SINCE);
+        return;
+      }
+      case "delete": {
+        const write = prepareDeleteEntity(loaded, object.typeKey, id);
+        // Delete capture: X locked, so no child can attach until COMMIT, and
+        // its children recorded before the cascade erases them.
+        const children = await bound.childrenOf([id], readings, true);
+        applied.deletedChildren.push({ objectId: id, children });
+        if (!(await bound.deleteEntity(write.entityTypeKey, write.entityId, plan(write.change)))) {
+          applied.alreadyGone.push(id);
+        }
+        return;
+      }
     }
-    case "create_relation": {
-      const { errors, write: prepared } = prepareCreateRelation(
-        loaded,
-        write.typeKey,
-        args.fromEntityId as string,
-        args.toEntityId as string,
-        properties,
-        write.mintedId!,
-      );
+  }
+  switch (object.action) {
+    case "create": {
+      const { errors, write } = prepareCreateRelation(loaded, object.typeKey, object.fromId!, object.toId!, values, id);
       faultOn(errors);
       await bound.createRelation(
-        prepared.relationTypeKey,
-        prepared.relationId,
-        prepared.fromEntityId,
-        prepared.toEntityId,
-        prepared.properties,
-        prepared.propertyDefs,
-        plan(prepared.change),
+        write.relationTypeKey,
+        write.relationId,
+        write.fromEntityId,
+        write.toEntityId,
+        write.properties,
+        write.propertyDefs,
+        plan(write.change),
       );
       return;
     }
-    case "update_relation": {
-      const { errors, write: prepared } = prepareUpdateRelation(loaded, write.typeKey, write.targetId!, properties);
+    case "update": {
+      const { errors, write } = prepareUpdateRelation(loaded, object.typeKey, id, values);
       faultOn(errors);
-      if (prepared === null) return;
+      if (write === null) return;
       const updated = await bound.updateRelation(
-        prepared.relationTypeKey,
-        prepared.relationId,
-        prepared.setProperties,
-        prepared.removeProperties,
-        prepared.propertyDefs,
-        plan(prepared.change),
+        write.relationTypeKey,
+        write.relationId,
+        write.setProperties,
+        write.removeProperties,
+        write.propertyDefs,
+        plan(write.change),
       );
-      if (updated === null) throw new ReplayFault(DELETED_SINCE);
+      if (updated === null) throw new ApplyFault(DELETED_SINCE);
       return;
     }
-    case "delete_relation": {
-      const prepared = prepareDeleteRelation(loaded, write.typeKey, write.targetId!);
-      if (!(await bound.deleteRelation(prepared.relationTypeKey, prepared.relationId, plan(prepared.change)))) {
-        replay.alreadyGone.push(write.seq);
+    case "delete": {
+      const write = prepareDeleteRelation(loaded, object.typeKey, id);
+      if (!(await bound.deleteRelation(write.relationTypeKey, write.relationId, plan(write.change)))) {
+        applied.alreadyGone.push(id);
       }
       return;
     }
-    default:
-      throw new ReplayFault(`Unknown operation '${write.operation}'`);
   }
 }
 
-/** A replay fault's text. A relation create the store refuses as not
- * found names an end gone since the lock-free pass, by its role; any other
- * fault keeps its text. */
-function replayMessage(write: ChangesetWriteRecord, error: Error): string {
-  if (error instanceof NotFoundError && write.operation === "create_relation") {
+/** A fault's text. A relation create the store refuses as not found names
+ * an end gone since the lock-free pass, by its role; any other fault keeps
+ * its text. */
+function applyMessage(object: StagedObjectRecord, error: Error): string {
+  if (error instanceof NotFoundError && object.kind === "relation" && object.action === "create") {
     return "The source or target end no longer exists";
   }
   return error.message;
 }
 
 /**
- * Step 2 of the commit (V20): replay the journal by seq on the bound
- * store, each write through its `prepare…` and the store's write method,
- * its search work queued in the same transaction (V23). A staged entity
+ * Step 2 of the commit: apply the staged objects on the bound store, phase
+ * by phase (`PHASES`), each through its `prepare…` and the store's write
+ * method, its search work queued in the same transaction. A staged entity
  * delete first locks the entity and records its children; a delete that
- * finds nothing is done, and noted. No savepoints: the first write that
- * fails ends the replay as its `fault` (an unknown id, a reference to an
+ * finds nothing is done, and noted. No savepoints: the first object that
+ * fails ends the run as its `fault` (a target gone, a reference to an
  * entity that does not exist, a value the lens no longer accepts). Any
  * other error, a lock wait past the timeout among them, is thrown.
  */
-export async function replayJournal(
+export async function applyObjects(
   loaded: LoadedSchema,
   search: SearchContext,
-  changesetId: string,
+  objects: StagedObjectRecord[],
   bound: RuntimeStore,
-): Promise<Replay> {
-  const replay: Replay = { replayed: 0, alreadyGone: [], deletedChildren: [], fault: null };
+): Promise<Applied> {
+  const applied: Applied = { applied: 0, alreadyGone: [], deletedChildren: [], fault: null };
   const plan = (change: SearchChange): SearchWritePlan | null => planSearchWrite(search.dependencies, change);
   const readings = parentReadings(loaded.full);
-  const changesets = bound.changesets();
-  for (let offset = 0; ; offset += REPLAY_PAGE) {
-    const writes = await changesets.page(changesetId, offset, REPLAY_PAGE);
-    for (const write of writes) {
+  for (const [kind, action] of PHASES) {
+    for (const object of objects) {
+      if (object.kind !== kind || object.action !== action) continue;
       try {
-        await replayOne(loaded, plan, readings, write, bound, replay);
+        await applyOne(loaded, plan, readings, object, bound, applied);
       } catch (error) {
-        if (error instanceof ReplayFault || error instanceof NotFoundError) {
-          replay.fault = { seq: write.seq, kind: "replay", message: replayMessage(write, error) };
-          return replay;
+        if (error instanceof ApplyFault || error instanceof NotFoundError) {
+          applied.fault = { object: object.objectId, kind: "replay", message: applyMessage(object, error) };
+          return applied;
         }
         throw error;
       }
-      replay.replayed += 1;
+      applied.applied += 1;
     }
-    if (writes.length < REPLAY_PAGE) return replay;
   }
+  return applied;
 }
 
 // ---------------------------------------------------------------------------
-// The lock-free pass (V19)
+// The lock-free pass
 // ---------------------------------------------------------------------------
 
 /** Stored entities and relations are read in batches of this many ids. */
@@ -1105,17 +1260,15 @@ const READ_BATCH = 1000;
 /** What the lock-free pass found, and what the commit's later steps take
  * from it. */
 export interface LockFreePass {
-  /** Every staged write, by seq. */
-  writes: ChangesetWriteRecord[];
-  /** The faults, by seq. */
+  /** Every staged object, by first touch. */
+  objects: StagedObjectRecord[];
+  /** The faults, by object. */
   faults: Violation[];
-  /** The targets of the staged updates and deletes that no staged create
-   * minted: the rows step 1 locks. */
+  /** The stored targets of the staged updates and deletes: the rows step 1
+   * locks. */
   targets: string[];
-  /** The entities the journal names that are stored, as id → type. */
+  /** The entities the staged objects name that are stored, as id → type. */
   stored: Map<string, string>;
-  /** The staged creates, by the id they minted. */
-  minted: Map<string, ChangesetWriteRecord>;
 }
 
 /** The document property keys of every entity type of the full schema
@@ -1153,7 +1306,11 @@ async function entityTypes(ids: string[], store: RuntimeStore): Promise<Map<stri
   return types;
 }
 
-/** The stored rows the checks of staged writes judge them against, raw:
+/** The objects of a changeset by id: every judged object, and every
+ * object at an end of a judged relation. */
+type Known = Map<string, StagedObjectRecord>;
+
+/** The stored rows the checks of staged objects judge them against, raw:
  * entities by id (documents as hash and length), relations by id, of any
  * type. */
 interface Stored {
@@ -1161,156 +1318,78 @@ interface Stored {
   relations: Map<string, Row>;
 }
 
-/**
- * The stored rows `writes` name, in batches: the relations they update
- * or delete that no staged create minted, and the entities they name
- * that no staged create minted (`minted` holds every create that minted
- * an id they name): targets and the ends of created relations, and with
- * `ends` the ends of every relation they update or delete too, whose
- * names the review shows.
- */
+/** Whether this changeset creates the entity `id`. */
+function createdHere(known: Known, id: string): boolean {
+  const object = known.get(id);
+  return object?.kind === "entity" && object.action === "create";
+}
+
+/** `objects` and the staged objects at the ends of their relations, in one
+ * read. */
+async function knownFor(changesetId: string, objects: StagedObjectRecord[], store: RuntimeStore): Promise<Known> {
+  const known: Known = new Map(objects.map((object) => [object.objectId, object] as const));
+  const ends = objects.flatMap((object) => (object.kind === "relation" ? [object.fromId!, object.toId!] : []));
+  const unknown = [...new Set(ends)].filter((id) => !known.has(id));
+  if (unknown.length > 0) {
+    for (const object of await store.changesets().objects(changesetId, unknown)) known.set(object.objectId, object);
+  }
+  return known;
+}
+
+/** The stored rows `objects` name, in batches: the targets of their updates
+ * and deletes, and every relation end this changeset does not create. */
 async function storedRows(
   loaded: LoadedSchema,
-  writes: ChangesetWriteRecord[],
-  minted: Map<string, ChangesetWriteRecord>,
-  ends: boolean,
+  objects: StagedObjectRecord[],
+  known: Known,
   store: RuntimeStore,
 ): Promise<Stored> {
-  const mintedAs = (id: string, create: string): boolean => minted.get(id)?.operation === create;
-  const relationWrites = writes.filter(
-    (write) => write.operation === "update_relation" || write.operation === "delete_relation",
-  );
-  const relationIds = new Set(
-    relationWrites.map((write) => write.targetId!).filter((id) => !mintedAs(id, "create_relation")),
-  );
+  const relationIds = objects
+    .filter((object) => object.kind === "relation" && object.action !== "create")
+    .map((object) => object.objectId);
   const relations = new Map<string, Row>();
-  const ids = [...relationIds];
-  for (let i = 0; i < ids.length; i += READ_BATCH) {
-    const batch = await store.getRelationsByIds(ids.slice(i, i + READ_BATCH));
+  for (let i = 0; i < relationIds.length; i += READ_BATCH) {
+    const batch = await store.getRelationsByIds(relationIds.slice(i, i + READ_BATCH));
     for (const [id, row] of Object.entries(batch)) relations.set(id, row);
   }
-
-  const named = new Set(writes.flatMap(entityRefs));
-  if (ends) {
-    for (const write of relationWrites) {
-      const create = minted.get(write.targetId!);
-      const relation = relations.get(write.targetId!);
-      const at =
-        create?.operation === "create_relation"
-          ? create.arguments
-          : relation?._relationTypeKey === write.typeKey
-            ? relation
-            : undefined;
-      if (at === undefined) continue;
-      named.add(at.fromEntityId as string);
-      named.add(at.toEntityId as string);
+  const entityIds = new Set<string>();
+  for (const object of objects) {
+    if (object.kind === "entity") {
+      if (object.action !== "create") entityIds.add(object.objectId);
+      continue;
+    }
+    for (const end of [object.fromId!, object.toId!]) {
+      if (!createdHere(known, end)) entityIds.add(end);
     }
   }
-  const entityIds = [...named].filter((id) => !mintedAs(id, "create_entity"));
-  return { entities: await storedEntities(loaded, entityIds, store), relations };
+  return { entities: await storedEntities(loaded, [...entityIds], store), relations };
 }
 
-/**
- * The staged creates that minted an id `writes` name, by that id, for
- * judging `writes` alone: their own creates, and in one batched read
- * those still in the journal that minted a target or a relation end of
- * theirs; then, in one more, those that minted an end of a relation that
- * a staged create minted and they update or delete.
- */
-async function mintedFor(
-  changesetId: string,
-  writes: ChangesetWriteRecord[],
-  store: RuntimeStore,
-): Promise<Map<string, ChangesetWriteRecord>> {
-  const minted = mintedBy(writes);
-  const lookUp = async (ids: string[]): Promise<void> => {
-    const unknown = [...new Set(ids)].filter((id) => !minted.has(id));
-    if (unknown.length === 0) return;
-    for (const create of await store.changesets().findMintedAmong(changesetId, unknown)) {
-      minted.set(create.mintedId!, create);
-    }
-  };
-  await lookUp(writes.flatMap((write) => [...(write.targetId === null ? [] : [write.targetId]), ...entityRefs(write)]));
-  await lookUp(
-    writes.flatMap((write) => {
-      const create = write.targetId === null ? undefined : minted.get(write.targetId);
-      return write.operation.endsWith("_relation") && create !== undefined ? createRefs(create).map(([, id]) => id) : [];
-    }),
-  );
-  return minted;
-}
-
-/** The entities a staged create names, each as role → id: a relation's
- * ends. */
-function createRefs(write: ChangesetWriteRecord): [string, string][] {
-  const args = write.arguments;
-  if (write.operation !== "create_relation") return [];
-  return [
-    ["The source end", args.fromEntityId as string],
-    ["The target end", args.toEntityId as string],
-  ];
-}
-
-/** The entity ids a staged write names: its target, its relation ends. */
-function entityRefs(write: ChangesetWriteRecord): string[] {
-  switch (write.operation) {
-    case "create_relation":
-      return createRefs(write).map(([, id]) => id);
-    case "update_entity":
-    case "delete_entity":
-      return [write.targetId!];
-    default:
-      return [];
+/** The stored target of a staged update or delete, when it is still
+ * stored with the object's type. */
+function storedTarget(object: StagedObjectRecord, stored: Stored): Row | undefined {
+  if (object.kind === "entity") {
+    const row = stored.entities.get(object.objectId);
+    return row?._entityTypeKey === object.typeKey ? row : undefined;
   }
+  const row = stored.relations.get(object.objectId);
+  return row?._relationTypeKey === object.typeKey ? row : undefined;
 }
 
-/** What of a write the lens no longer shows (V19, V41), as a text that
- * names neither the type nor the property; null when all is shown. */
-function hiddenPart(loaded: LoadedSchema, write: ChangesetWriteRecord): string | null {
-  const lens = loaded.scoped;
-  const through = `is no longer visible through lens '${lens.lensKey}'`;
-  const type = write.operation.endsWith("_entity")
-    ? lens.entityTypes[write.typeKey]
-    : lens.relationTypes[write.typeKey];
-  if (type === undefined) return `The type of this write ${through}`;
-  const properties = Object.keys((write.arguments.properties ?? {}) as Row);
-  if (properties.some((key) => !Object.hasOwn(type.properties, key))) {
-    return `A property this write sets ${through}`;
+/** The field errors the current lens finds in a staged object's values,
+ * as applying it would meet them; a create's required value missing
+ * among them. */
+function fieldErrorsOf(loaded: LoadedSchema, object: StagedObjectRecord): FieldErrors {
+  const values = valuesOf(object);
+  const id = object.objectId;
+  if (object.kind === "entity") {
+    return object.action === "create"
+      ? prepareCreateEntity(loaded, object.typeKey, values, null, { entityId: id, relationId: randomUUID() }).errors
+      : prepareUpdateEntity(loaded, object.typeKey, id, values).errors;
   }
-  return null;
-}
-
-/** The field faults the current lens finds in a staged write's values, as
- * its replay would meet them; null when there are none. */
-function valueFaults(loaded: LoadedSchema, write: ChangesetWriteRecord): string | null {
-  const args = write.arguments;
-  const properties = (args.properties ?? {}) as Row;
-  switch (write.operation) {
-    case "create_entity":
-      return fieldFaults(
-        prepareCreateEntity(loaded, write.typeKey, properties, null, {
-          entityId: write.mintedId!,
-          relationId: randomUUID(),
-        }).errors,
-      );
-    case "update_entity":
-      return fieldFaults(prepareUpdateEntity(loaded, write.typeKey, write.targetId!, properties).errors);
-    case "create_relation":
-      return fieldFaults(
-        prepareCreateRelation(
-          loaded,
-          write.typeKey,
-          args.fromEntityId as string,
-          args.toEntityId as string,
-          properties,
-          write.mintedId!,
-        ).errors,
-      );
-    case "update_relation":
-      return fieldFaults(prepareUpdateRelation(loaded, write.typeKey, write.targetId!, properties).errors);
-    default:
-      return null;
-  }
+  return object.action === "create"
+    ? prepareCreateRelation(loaded, object.typeKey, object.fromId!, object.toId!, values, id).errors
+    : prepareUpdateRelation(loaded, object.typeKey, id, values).errors;
 }
 
 /** Whether `value` is a document as `recordedDocument` keeps it. */
@@ -1318,293 +1397,239 @@ function isRecordedDocument(value: unknown): value is Row {
   return typeof value === "object" && value !== null && typeof (value as Row).sha256 === "string";
 }
 
-/** Recorded values as drift compares them: a document by its hash alone. */
-function byHash(values: Row | null, documents: Set<string>): Row | null {
-  if (values === null) return null;
-  return Object.fromEntries(
-    Object.entries(values).map(([key, value]) => [
-      key,
-      documents.has(key) && isRecordedDocument(value) ? value.sha256 : value,
-    ]),
-  );
+/** A before as drift compares it: a document by its hash alone. */
+function byHash(before: Row, document: boolean): Row {
+  return document && isRecordedDocument(before.value) ? { value: before.value.sha256 } : before;
 }
 
-/** Whether the stored values of a staged update's patched keys now differ
- * from its `before` (V10): raw, absent distinct from null, a document by
- * its hash. */
-function drifted(loaded: LoadedSchema, write: ChangesetWriteRecord, stored: Row): boolean {
-  const types = write.operation === "update_entity" ? loaded.full.entityTypes : loaded.full.relationTypes;
-  const defs = types[write.typeKey]?.properties ?? {};
-  const keys = Object.keys((write.arguments.properties ?? {}) as Row);
-  const documents = documentPropertyKeys(defs);
-  return !isDeepStrictEqual(byHash(write.before, documents), byHash(recordedValues(stored, keys, defs), documents));
+/** Whether the stored value of a staged update's key now differs from its
+ * before: raw, absent distinct from null, a document by its hash. */
+function drifted(value: StagedValueRecord, stored: Row, propertyDefs: Record<string, PropertyDef>): boolean {
+  const document = propertyDefs[value.propertyKey]?.dataType === "document";
+  const now = recordedBefore(stored, value.propertyKey, propertyDefs);
+  return !isDeepStrictEqual(byHash(value.before!, document), byHash(now, document));
 }
 
-function driftFault(write: ChangesetWriteRecord): Violation {
-  return { seq: write.seq, kind: "drift", message: DRIFTED };
+/** The defs of a staged object's type in the full schema. */
+function fullDefs(loaded: LoadedSchema, object: StagedObjectRecord): Record<string, PropertyDef> {
+  const types = object.kind === "entity" ? loaded.full.entityTypes : loaded.full.relationTypes;
+  return types[object.typeKey]?.properties ?? {};
 }
 
 /**
- * The lock-free pass (V19, V5 d): one paged read of the journal and of
- * the stored rows it names, with no lock and no transaction. Per staged
- * write, by seq, it finds:
+ * The pass's judgement of `objects`, given the staged objects at their
+ * relation ends (`known`) and the stored rows they name (`stored`). Per
+ * object it finds:
  *
- * - `not_visible`: its type or a property it sets is no longer in the lens
- *   (V41); nothing else is checked on that write;
- * - `replay`: a value the lens no longer accepts, as the replay would
- *   meet it;
- * - `missing`: the target of an update, stored at staging, is gone;
- * - `dangling`: an id it names is neither stored nor minted by a create
- *   still in the journal: the target of an update minted by a create
- *   since unstaged (V6), or a relation end;
- * - `drift`: a stored update target's values of the patched keys differ
- *   from its `before` (V10).
+ * - `not_visible`: its type, or a property it sets, is no longer in the
+ *   lens; nothing else is checked on that object;
+ * - `replay`: a value the lens no longer accepts, or a create's required
+ *   value missing, as applying it would meet them, on that property;
+ * - `missing`: the stored target of an update is gone;
+ * - `dangling`: an end of a staged relation is neither stored nor created
+ *   in this changeset, or this changeset deletes it;
+ * - `drift`: the stored value of an update's key differs from its before,
+ *   on that property.
  *
- * A delete whose target is gone is no fault: the replay counts it as done
- * (V20). Submit and the commit run the pass; the review reads judge their
- * own writes the same way (`passFaults`). Stored rows are read in
- * batches, documents as hash and length (`storedRows`).
+ * A delete whose target is gone is no fault: the commit counts it as done.
+ */
+function judge(loaded: LoadedSchema, objects: StagedObjectRecord[], known: Known, stored: Stored): Violation[] {
+  const lens = loaded.scoped;
+  const through = `is no longer visible through lens '${lens.lensKey}'`;
+  const faults: Violation[] = [];
+  for (const object of objects) {
+    const fault = (kind: string, message: string, property?: string): void => {
+      faults.push(property === undefined ? { object: object.objectId, kind, message } : { object: object.objectId, property, kind, message });
+    };
+    const type = object.kind === "entity" ? lens.entityTypes[object.typeKey] : lens.relationTypes[object.typeKey];
+    if (type === undefined) {
+      fault("not_visible", `The type of this ${object.kind} ${through}`);
+      continue;
+    }
+    if (object.values.some((value) => !Object.hasOwn(type.properties, value.propertyKey))) {
+      fault("not_visible", `A property this ${object.kind} sets ${through}`);
+      continue;
+    }
+    if (object.action === "delete") continue;
+    for (const [key, message] of Object.entries(fieldErrorsOf(loaded, object))) {
+      fault("replay", `Instance validation failed: ${key}: ${message}`, key);
+    }
+    if (object.kind === "relation") {
+      const ends: [string, string][] = [
+        ["The source end", object.fromId!],
+        ["The target end", object.toId!],
+      ];
+      for (const [role, id] of ends) {
+        const end = known.get(id);
+        if (end?.kind === "entity" && end.action === "delete") {
+          fault("dangling", `${role} is deleted in this changeset`);
+        } else if (object.action === "create" && !stored.entities.has(id) && !createdHere(known, id)) {
+          fault("dangling", neitherStored(role));
+        }
+      }
+    }
+    if (object.action === "update") {
+      const row = storedTarget(object, stored);
+      if (row === undefined) {
+        fault("missing", DELETED_SINCE);
+        continue;
+      }
+      const defs = fullDefs(loaded, object);
+      for (const value of object.values) {
+        if (drifted(value, row, defs)) fault("drift", DRIFTED, value.propertyKey);
+      }
+    }
+  }
+  return faults;
+}
+
+/**
+ * The lock-free pass: one paged read of the staged objects and of the
+ * stored rows they name, with no lock and no transaction, judged
+ * (`judge`). Submit and the commit run it; the review reads judge their own
+ * objects the same way. Stored rows are read in batches, documents as hash
+ * and length (`storedRows`).
  */
 export async function lockFreePass(
   loaded: LoadedSchema,
   changesetId: string,
   store: RuntimeStore,
 ): Promise<LockFreePass> {
-  const writes: ChangesetWriteRecord[] = [];
-  for (let offset = 0; ; offset += REPLAY_PAGE) {
-    const page = await store.changesets().page(changesetId, offset, REPLAY_PAGE);
-    writes.push(...page);
-    if (page.length < REPLAY_PAGE) break;
+  const objects: StagedObjectRecord[] = [];
+  for (let offset = 0; ; offset += READ_PAGE) {
+    const page = await store.changesets().page(changesetId, offset, READ_PAGE);
+    objects.push(...page);
+    if (page.length < READ_PAGE) break;
   }
-  const minted = mintedBy(writes);
-  const rows = await storedRows(loaded, writes, minted, false, store);
+  const known: Known = new Map(objects.map((object) => [object.objectId, object] as const));
+  const rows = await storedRows(loaded, objects, known, store);
   const stored = new Map([...rows.entities].map(([id, row]) => [id, row._entityTypeKey as string] as const));
-  const { faults, targets } = passFaults(loaded, writes, minted, rows);
-  return { writes, faults, targets, stored, minted };
-}
-
-/** The staged creates among `writes`, by the id they minted. */
-function mintedBy(writes: ChangesetWriteRecord[]): Map<string, ChangesetWriteRecord> {
-  return new Map(writes.filter((w) => w.mintedId !== null).map((w) => [w.mintedId!, w] as const));
-}
-
-/**
- * The pass's judgement of `writes`, given the staged creates (`minted`)
- * and the stored rows (`stored`) their ids may name: the faults by seq,
- * and the stored targets. Sound for any `writes` whose minted ids, named
- * entities and relation targets those maps hold.
- */
-function passFaults(
-  loaded: LoadedSchema,
-  writes: ChangesetWriteRecord[],
-  minted: Map<string, ChangesetWriteRecord>,
-  stored: Stored,
-): { faults: Violation[]; targets: string[] } {
-  const rows = stored.entities;
-  const mintedAs = (id: string, create: string): boolean => minted.get(id)?.operation === create;
-  const faults: Violation[] = [];
-  const targets = new Set<string>();
-  for (const write of writes) {
-    const fault = (kind: string, message: string): void => {
-      faults.push({ seq: write.seq, kind, message });
-    };
-    const hidden = hiddenPart(loaded, write);
-    if (hidden !== null) {
-      fault("not_visible", hidden);
-      continue;
-    }
-    const invalid = valueFaults(loaded, write);
-    if (invalid !== null) fault("replay", invalid);
-
-    const kind = write.operation.endsWith("_entity") ? "entity" : "relation";
-    const target = write.targetId;
-    if (target !== null && !mintedAs(target, `create_${kind}`)) targets.add(target);
-
-    switch (write.operation) {
-      case "create_entity":
-      case "create_relation":
-        for (const [role, id] of createRefs(write)) {
-          if (!rows.has(id) && !mintedAs(id, "create_entity")) fault("dangling", neitherStored(role));
-        }
-        break;
-      case "update_entity":
-      case "update_relation": {
-        if (mintedAs(target!, `create_${kind}`)) break;
-        const row = kind === "entity" ? rows.get(target!) : stored.relations.get(target!);
-        const typeKey = kind === "entity" ? row?._entityTypeKey : row?._relationTypeKey;
-        const current = typeKey === write.typeKey ? row! : null;
-        if (current === null) {
-          // A stored target had a `before` at staging; a minted one had none.
-          if (write.before !== null) fault("missing", DELETED_SINCE);
-          else fault("dangling", neitherStored(null));
-        } else if (write.before !== null && drifted(loaded, write, current)) {
-          faults.push(driftFault(write));
-        }
-        break;
-      }
-    }
-  }
-  return { faults, targets: [...targets] };
+  const targets = objects.filter((object) => object.action !== "create").map((object) => object.objectId);
+  return { objects, faults: judge(loaded, objects, known, rows), targets, stored };
 }
 
 // ---------------------------------------------------------------------------
-// The review read (V41)
+// The review read
 // ---------------------------------------------------------------------------
 
-/** The keys of `values` the lens shows, document values as the reads stub
- * them. */
-function shownValues(values: Row, properties: Record<string, PropertyDef>): Row {
-  const shown = Object.fromEntries(Object.entries(values).filter(([key]) => Object.hasOwn(properties, key)));
-  return stubDocumentProperties(shown, properties);
+/** A before as the review shows it: null for a key the target lacked, a
+ * document as the read stub with the length it was recorded with. */
+function beforeView(before: Row, property: PropertyDef): unknown {
+  const value = Object.hasOwn(before, "value") ? before.value : null;
+  if (property.dataType !== "document" || !isRecordedDocument(value)) return value;
+  return { document: true, length: typeof value.length === "number" ? value.length : null };
 }
 
-/** A staged update's recorded values of `keys` as the review shows them:
- * null for a key the target lacked, a document as the read stub with the
- * length it was recorded with (null when it was recorded without one). */
-function recordedView(recorded: Row, keys: string[], properties: Record<string, PropertyDef>): Row {
-  const documents = documentPropertyKeys(properties);
-  return Object.fromEntries(
-    keys.map((key) => {
-      const value = recorded[key] ?? null;
-      if (!documents.has(key) || !isRecordedDocument(value)) return [key, value];
-      return [key, { document: true, length: typeof value.length === "number" ? value.length : null }];
-    }),
-  );
+/** A stored target's value of `key` as the review shows it as `current`:
+ * null for a key it lacks, a document as the read stub, its length from
+ * the hash and length the store read it as. */
+function currentView(stored: Row, key: string, property: PropertyDef): unknown {
+  const value = stored[key] ?? null;
+  if (property.dataType === "document" && isRecordedDocument(value)) return { document: true, length: value.length };
+  return value;
 }
 
-/** A stored target's values of `keys` as the review shows them as
- * `current`: null for a key it lacks, a document as the read stub, its
- * length from the hash and length the store read it as. */
-function currentView(stored: Row, keys: string[], properties: Record<string, PropertyDef>): Row {
-  const current = shownValues(Object.fromEntries(keys.map((key) => [key, stored[key] ?? null])), properties);
-  for (const key of keys) {
-    const value = stored[key];
-    if (properties[key]?.dataType === "document" && isRecordedDocument(value)) {
-      current[key] = { document: true, length: value.length };
-    }
-  }
-  return current;
+/** A staged value as the review shows it: a document as the read stub. */
+function afterView(value: unknown, property: PropertyDef): unknown {
+  if (property.dataType !== "document" || typeof value !== "string") return value;
+  return { document: true, length: cpLength(value) };
 }
 
 /**
- * Staged writes as the review shows them (V41): names resolved, `before`,
- * `current` and `after`, and the markers `pass` found on them, judged with
- * the creates it holds, against the stored rows `stored` holds: every
- * entity they name, relation ends included, and every relation they
- * update or delete. The staged arguments are not shown, and every
- * document value is a stub (`getStagedDocument` reads the staged text).
- * Through the lens: a hidden type keeps only seq, operation and markers,
- * and hidden properties and names are not returned.
+ * Staged objects as the review shows them, each judged with the objects at
+ * its relation ends and the stored rows it names: names resolved, its
+ * values with `before`, `current` and `after`, and the markers the pass
+ * finds, on a value when they concern one it shows, else on the object.
+ * Every document value is a stub (`getStagedDocument` reads the staged
+ * text). Through the lens: a hidden type keeps only id, kind, action,
+ * first touch and markers, and hidden properties and names are not
+ * returned.
  */
-function reviewPage(
+async function reviewOf(
   loaded: LoadedSchema,
-  writes: ChangesetWriteRecord[],
-  pass: Pick<LockFreePass, "faults" | "minted">,
-  stored: Stored,
-): StagedWriteView[] {
+  changesetId: string,
+  objects: StagedObjectRecord[],
+  store: RuntimeStore,
+): Promise<StagedObjectView[]> {
   const lens = loaded.scoped;
-  const markers = new Map<number, Marker[]>();
-  for (const fault of pass.faults) {
-    markers.set(fault.seq, [...(markers.get(fault.seq) ?? []), { kind: fault.kind, message: fault.message }]);
+  const known = await knownFor(changesetId, objects, store);
+  const stored = await storedRows(loaded, objects, known, store);
+  const faults = new Map<string, Violation[]>();
+  for (const fault of judge(loaded, objects, known, stored)) {
+    faults.set(fault.object!, [...(faults.get(fault.object!) ?? []), fault]);
   }
-  const mintedAs = (id: string | null, create: string): ChangesetWriteRecord | undefined => {
-    const write = id === null ? undefined : pass.minted.get(id);
-    return write?.operation === create ? write : undefined;
-  };
-
-  // The ends of each relation write: from its create, or the stored relation.
-  const relationEnds = new Map<number, [string, string]>();
-  const storedRelations = new Map<number, Row>();
-  for (const write of writes) {
-    if (!write.operation.endsWith("_relation") || lens.relationTypes[write.typeKey] === undefined) continue;
-    const create = write.operation === "create_relation" ? write : mintedAs(write.targetId, "create_relation");
-    if (create !== undefined) {
-      relationEnds.set(write.seq, [create.arguments.fromEntityId as string, create.arguments.toEntityId as string]);
-      continue;
-    }
-    const relation = stored.relations.get(write.targetId!);
-    if (relation?._relationTypeKey !== write.typeKey) continue;
-    storedRelations.set(write.seq, relation);
-    relationEnds.set(write.seq, [relation.fromEntityId as string, relation.toEntityId as string]);
-  }
-
-  // Raw rows: the name property is a string, never a document.
-  const rows = Object.fromEntries(stored.entities);
+  const marker = (fault: Violation): Marker => ({ kind: fault.kind, message: fault.message });
 
   const nameOf = (id: string): string | null => {
-    const row = rows[id];
-    const create = row === undefined ? mintedAs(id, "create_entity") : undefined;
+    // Raw rows: the name property is a string, never a document.
+    const row = stored.entities.get(id);
+    const create = row === undefined && createdHere(known, id) ? known.get(id) : undefined;
     const type = row !== undefined ? (row._entityTypeKey as string) : create?.typeKey;
     const nameProperty = type === undefined ? null : (lens.entityTypes[type]?.nameProperty ?? null);
     if (nameProperty === null) return null;
-    const value = row !== undefined ? row[nameProperty] : (create!.arguments.properties as Row | undefined)?.[nameProperty];
+    const value =
+      row !== undefined ? row[nameProperty] : create!.values.find((v) => v.propertyKey === nameProperty)?.value;
     return typeof value === "string" ? value : null;
   };
-  const end = (id: string): EndView => ({ id, name: nameOf(id) });
 
-  return writes.map((write) => {
-    const isEntity = write.operation.endsWith("_entity");
-    const type = isEntity ? lens.entityTypes[write.typeKey] : lens.relationTypes[write.typeKey];
-    const view: StagedWriteView = {
-      seq: write.seq,
-      operation: write.operation,
+  return objects.map((object) => {
+    const own = faults.get(object.objectId) ?? [];
+    const type = object.kind === "entity" ? lens.entityTypes[object.typeKey] : lens.relationTypes[object.typeKey];
+    const shown = type === undefined ? [] : object.values.filter((value) => Object.hasOwn(type.properties, value.propertyKey));
+    const keys = new Set(shown.map((value) => value.propertyKey));
+    const view: StagedObjectView = {
+      id: object.objectId,
+      kind: object.kind,
       type: null,
-      id: null,
-      createdAt: write.createdAt,
-      before: null,
-      current: null,
-      after: null,
-      markers: markers.get(write.seq) ?? [],
+      action: object.action,
+      firstTouchedAt: object.firstTouchedAt,
+      markers: own.filter((fault) => fault.property === undefined || !keys.has(fault.property)).map(marker),
+      values: [],
     };
     if (type === undefined) return view;
-
-    const id = (write.mintedId ?? write.targetId)!;
-    view.type = write.typeKey;
-    view.id = id;
-    const staged = (write.arguments.properties ?? {}) as Row;
-    if (write.operation.startsWith("create_") || write.operation.startsWith("update_")) {
-      view.after = shownValues(staged, type.properties);
-    }
-    if (write.operation.startsWith("update_") && write.before !== null) {
-      // A stored target: its values as staged against, and its values now,
-      // unless it is gone (or now of another type).
-      const keys = Object.keys(staged).filter((key) => Object.hasOwn(type.properties, key));
-      view.before = recordedView(write.before, keys, type.properties);
-      const target = isEntity
-        ? rows[id]?._entityTypeKey === write.typeKey
-          ? rows[id]
-          : undefined
-        : storedRelations.get(write.seq);
-      if (target !== undefined) view.current = currentView(target, keys, type.properties);
-    }
-    if (isEntity) {
-      view.name = nameOf(id);
+    view.type = object.typeKey;
+    const target = object.action === "update" ? storedTarget(object, stored) : undefined;
+    view.values = shown.map((value) => {
+      const property = type.properties[value.propertyKey]!;
+      return {
+        property: value.propertyKey,
+        before: value.before === null ? null : beforeView(value.before, property),
+        current: target === undefined ? null : currentView(target, value.propertyKey, property),
+        after: afterView(value.value, property),
+        markers: own.filter((fault) => fault.property === value.propertyKey).map(marker),
+      };
+    });
+    if (object.kind === "entity") {
+      view.name = nameOf(object.objectId);
     } else {
-      const ends = relationEnds.get(write.seq);
-      view.from = ends === undefined ? null : end(ends[0]);
-      view.to = ends === undefined ? null : end(ends[1]);
+      view.from = { id: object.fromId!, name: nameOf(object.fromId!) };
+      view.to = { id: object.toId!, name: nameOf(object.toId!) };
     }
     return view;
   });
 }
 
 // ---------------------------------------------------------------------------
-// Commit validation (V21, V22)
+// Commit validation
 // ---------------------------------------------------------------------------
 
 /** Step 1, after the lock: every stored target `FOR UPDATE`, and drift
- * re-checked on the rows as locked (V19), documents read as hash and
- * length. A target gone since the pass is left to the replay. */
+ * re-checked on the rows as locked, documents read as hash and length. A
+ * target gone since the pass is left to step 2. */
 async function driftUnderLock(loaded: LoadedSchema, pass: LockFreePass, bound: RuntimeStore): Promise<Violation[]> {
   if (pass.targets.length === 0) return [];
   const targets = await bound.lockTargets(pass.targets, documentKeysOf(loaded));
   const locked = new Map(targets.map((row) => [`${row.kind} ${row.id}`, row] as const));
   const violations: Violation[] = [];
-  for (const write of pass.writes) {
-    if (write.before === null || (write.operation !== "update_entity" && write.operation !== "update_relation")) continue;
-    const row = locked.get(`${write.operation === "update_entity" ? "entity" : "relation"} ${write.targetId}`);
-    if (row !== undefined && row.typeKey === write.typeKey && drifted(loaded, write, row.props)) {
-      violations.push(driftFault(write));
+  for (const object of pass.objects) {
+    if (object.action !== "update") continue;
+    const row = locked.get(`${object.kind} ${object.objectId}`);
+    if (row === undefined || row.typeKey !== object.typeKey) continue;
+    const defs = fullDefs(loaded, object);
+    for (const value of object.values) {
+      if (drifted(value, row.props, defs)) {
+        violations.push({ object: object.objectId, property: value.propertyKey, kind: "drift", message: DRIFTED });
+      }
     }
   }
   return violations;
@@ -1646,81 +1671,60 @@ function reaches(links: Map<string, ParentLink[]>, from: string, target: string)
   return false;
 }
 
-/** One entity a staged write touches inside the anchor's hierarchy. */
+/** One entity a staged object touches inside the anchor's hierarchy. */
 interface TouchedEnd {
   id: string;
-  /** Stored before the replay. */
+  /** Stored before the commit. */
   before: boolean;
 }
 
-/** What a staged write touches inside the anchor's hierarchy. */
+/** What a staged object touches inside the anchor's hierarchy. */
 interface Touch {
-  seq: number;
+  objectId: string;
   ends: TouchedEnd[];
 }
 
 /** The anchor of a changeset's ruleset, read fresh in the transaction,
- * and what its staged writes touch. */
+ * and what its staged objects touch. */
 interface Coverage {
   key: string;
   anchorId: string;
   readings: Record<string, ParentEnd>;
   touches: Touch[];
-  /** The seqs already refused before the replay: one violation each. */
-  refused: Set<number>;
+  /** The objects already refused before step 2: one violation each. */
+  refused: Set<string>;
 }
 
-/** The entities of the anchor's hierarchy a staged write touches: an
- * entity write its entity; a relation write both ends, a stored
- * relation's as stored before the replay. */
-async function touchOf(
-  loaded: LoadedSchema,
-  pass: LockFreePass,
-  types: Set<string>,
-  write: ChangesetWriteRecord,
-  bound: RuntimeStore,
-): Promise<Touch> {
+/** The entities of the anchor's hierarchy a staged object touches: an
+ * entity its entity; a relation both ends. */
+function touchOf(loaded: LoadedSchema, pass: LockFreePass, types: Set<string>, object: StagedObjectRecord): Touch {
   const ends: { id: string; type: string; before: boolean }[] = [];
   const storedBefore = (id: string): boolean => pass.stored.has(id);
-  if (write.operation.endsWith("_entity")) {
-    const id = (write.mintedId ?? write.targetId)!;
-    ends.push({ id, type: write.typeKey, before: write.mintedId === null && storedBefore(id) });
+  if (object.kind === "entity") {
+    const id = object.objectId;
+    ends.push({ id, type: object.typeKey, before: object.action !== "create" && storedBefore(id) });
   } else {
-    const rt = loaded.full.relationTypes[write.typeKey];
-    const mintedBy = write.targetId === null ? undefined : pass.minted.get(write.targetId);
-    const create =
-      write.operation === "create_relation" ? write : mintedBy?.operation === "create_relation" ? mintedBy : undefined;
-    let pair: [string, string, boolean, boolean] | null = null;
-    if (create !== undefined) {
-      const from = create.arguments.fromEntityId as string;
-      const to = create.arguments.toEntityId as string;
-      pair = [from, to, storedBefore(from), storedBefore(to)];
-    } else {
-      const relation = await bound.getRelation(write.typeKey, write.targetId!);
-      if (relation !== null) {
-        pair = [relation.fromEntityId as string, relation.toEntityId as string, true, true];
-      }
-    }
-    if (rt !== undefined && pair !== null) {
-      ends.push({ id: pair[0], type: rt.fromEntityTypeKey, before: pair[2] });
-      ends.push({ id: pair[1], type: rt.toEntityTypeKey, before: pair[3] });
+    const rt = loaded.full.relationTypes[object.typeKey];
+    if (rt !== undefined) {
+      ends.push({ id: object.fromId!, type: rt.fromEntityTypeKey, before: storedBefore(object.fromId!) });
+      ends.push({ id: object.toId!, type: rt.toEntityTypeKey, before: storedBefore(object.toId!) });
     }
   }
   return {
-    seq: write.seq,
+    objectId: object.objectId,
     ends: ends.filter((end) => types.has(end.type)).map(({ id, before }) => ({ id, before })),
   };
 }
 
 /**
- * Step 1, on a changeset started through a ruleset (V8, V42): the ruleset
- * read fresh, and the coverage before the replay. One violation on seq 0
- * (the changeset as a whole), and coverage is not checked, when the
- * ruleset is gone (`ruleset_gone`), its anchor deleted (`anchor_deleted`)
- * or at an entity the lens hides (`anchor_hidden`). Otherwise, as v1's
+ * Step 1, on a changeset started through a ruleset: the ruleset read
+ * fresh, and the coverage before step 2. One violation on the changeset as
+ * a whole, and coverage is not checked, when the ruleset is gone
+ * (`ruleset_gone`), its anchor deleted (`anchor_deleted`) or at an entity
+ * the lens hides (`anchor_hidden`). Otherwise, as the immediate writes'
  * `AnchorGuard` checks it: every touched entity of the anchor's hierarchy
- * stored now is covered (`outside_subtree`), and no staged delete takes
- * an entity any anchor points at (`deletes_anchor`).
+ * stored now is covered (`outside_subtree`), and no staged delete takes an
+ * entity any anchor points at (`deletes_anchor`).
  */
 async function anchorBefore(
   loaded: LoadedSchema,
@@ -1731,17 +1735,16 @@ async function anchorBefore(
   const record = await bound.rulesets().get(key);
   if (record === null) {
     return {
-      violations: [{ seq: 0, kind: "ruleset_gone", message: `Ruleset '${key}' no longer exists, so this changeset cannot be committed` }],
+      violations: [{ object: null, kind: "ruleset_gone", message: `Ruleset '${key}' no longer exists, so this changeset cannot be committed` }],
       coverage: null,
     };
   }
   const refusal = changesetAnchorRefusal(key, record, loaded);
-  if (refusal !== null) return { violations: [{ seq: 0, ...refusal }], coverage: null };
+  if (refusal !== null) return { violations: [{ object: null, ...refusal }], coverage: null };
   if (record.anchor === null) return { violations: [], coverage: null };
 
   const { types, readings } = hierarchyOf(record.anchor.type, loaded.full);
-  const touches: Touch[] = [];
-  for (const write of pass.writes) touches.push(await touchOf(loaded, pass, types, write, bound));
+  const touches = pass.objects.map((object) => touchOf(loaded, pass, types, object));
   const coverage: Coverage = { key, anchorId: record.anchor.id, readings, touches, refused: new Set() };
 
   const before = touches.flatMap((touch) => touch.ends.filter((end) => end.before).map((end) => end.id));
@@ -1750,42 +1753,41 @@ async function anchorBefore(
   for (const touch of touches) {
     if (touch.ends.some((end) => end.before && !reaches(links, end.id, coverage.anchorId))) {
       violations.push({
-        seq: touch.seq,
+        object: touch.objectId,
         kind: "outside_subtree",
         message: `Outside the anchor subtree of ruleset '${key}'`,
       });
     }
   }
-  const deletes = pass.writes.filter((write) => write.operation === "delete_entity");
+  const deletes = pass.objects.filter((object) => object.kind === "entity" && object.action === "delete");
   const anchors =
     deletes.length === 0 ? new Set() : new Set((await bound.rulesets().list()).map((ruleset) => ruleset.anchor?.id));
-  for (const write of deletes) {
-    if (anchors.has(write.targetId!)) {
+  for (const object of deletes) {
+    if (anchors.has(object.objectId)) {
       violations.push({
-        seq: write.seq,
+        object: object.objectId,
         kind: "deletes_anchor",
         message: "It is the anchor of a ruleset, so it cannot be deleted on this connection",
       });
     }
   }
-  for (const violation of violations) coverage.refused.add(violation.seq);
+  for (const violation of violations) coverage.refused.add(violation.object!);
   return { violations, coverage };
 }
 
 /** A parent link a staged relation create creates, with the role of its
  * child. */
 interface StagedLink {
-  seq: number;
   relationId: string;
   parentId: string;
   childId: string;
   childRole: string;
 }
 
-/** A relation end a staged write names, by its role, with the type its
- * relation type requires there. */
+/** A relation end a staged relation create names, by its role, with the
+ * type its relation type requires there. */
 interface StagedEnd {
-  seq: number;
+  relationId: string;
   role: Exclude<EndRole, "The parent">;
   id: string;
   type: string;
@@ -1794,36 +1796,37 @@ interface StagedEnd {
 
 /** The parent links and the relation ends the staged relation creates
  * name. */
-function stagedLinksAndEnds(loaded: LoadedSchema, writes: ChangesetWriteRecord[]): { links: StagedLink[]; ends: StagedEnd[] } {
+function stagedLinksAndEnds(loaded: LoadedSchema, objects: StagedObjectRecord[]): { links: StagedLink[]; ends: StagedEnd[] } {
   const links: StagedLink[] = [];
   const ends: StagedEnd[] = [];
-  for (const write of writes) {
-    if (write.operation !== "create_relation") continue;
-    const rt = loaded.full.relationTypes[write.typeKey];
+  for (const object of objects) {
+    if (object.kind !== "relation" || object.action !== "create") continue;
+    const rt = loaded.full.relationTypes[object.typeKey];
     if (rt === undefined) continue;
-    const from = write.arguments.fromEntityId as string;
-    const to = write.arguments.toEntityId as string;
-    ends.push({ seq: write.seq, role: "The source end", id: from, type: rt.fromEntityTypeKey, relationType: rt.key });
-    ends.push({ seq: write.seq, role: "The target end", id: to, type: rt.toEntityTypeKey, relationType: rt.key });
+    const relationId = object.objectId;
+    const from = object.fromId!;
+    const to = object.toId!;
+    ends.push({ relationId, role: "The source end", id: from, type: rt.fromEntityTypeKey, relationType: rt.key });
+    ends.push({ relationId, role: "The target end", id: to, type: rt.toEntityTypeKey, relationType: rt.key });
     if (rt.parent !== null) {
       const [parentId, childId, childRole] =
         rt.parent === "source" ? [from, to, "The target end"] : [to, from, "The source end"];
-      links.push({ seq: write.seq, relationId: write.mintedId!, parentId, childId, childRole });
+      links.push({ relationId, parentId, childId, childRole });
     }
   }
   return { links, ends };
 }
 
 /**
- * Step 3 (V21, V13): the rules over the end state, in the service, on the
- * bound store's neutral reads, after the replay. Messages name no id,
- * only roles, the relation type key and the ruleset key:
+ * Step 3: the rules over the end state, in the service, on the bound
+ * store's neutral reads, after step 2. Messages name no id, only roles,
+ * the relation type key and the ruleset key:
  *
  * - `has_children`: a child recorded by a staged entity delete (the delete
  *   capture) is neither deleted nor re-parented;
- * - `two_parents`, `cycle`: v1's parent rules, for every parent link the
- *   changeset creates and keeps, across every parent relation of the full
- *   schema;
+ * - `two_parents`, `cycle`: the immediate writes' parent rules, for every
+ *   parent link the changeset creates and keeps, across every parent
+ *   relation of the full schema;
  * - `endpoint_type`: a created relation's end is not of the type its
  *   relation type requires;
  * - `outside_subtree`: on a changeset whose ruleset has an anchor, a
@@ -1833,13 +1836,13 @@ function stagedLinksAndEnds(loaded: LoadedSchema, writes: ChangesetWriteRecord[]
 async function commitViolations(
   loaded: LoadedSchema,
   pass: LockFreePass,
-  replay: Replay,
+  applied: Applied,
   coverage: Coverage | null,
   bound: RuntimeStore,
 ): Promise<Violation[]> {
   const readings = parentReadings(loaded.full);
-  const { links, ends } = stagedLinksAndEnds(loaded, pass.writes);
-  const children = replay.deletedChildren.flatMap((deleted) => deleted.children.map((child) => child.childId));
+  const { links, ends } = stagedLinksAndEnds(loaded, pass.objects);
+  const children = applied.deletedChildren.flatMap((deleted) => deleted.children.map((child) => child.childId));
   const touched = coverage?.touches.flatMap((touch) => touch.ends.map((end) => end.id)) ?? [];
   const ids = new Set([...children, ...links.map((link) => link.childId), ...ends.map((end) => end.id), ...touched]);
   const types = await entityTypes([...ids], bound);
@@ -1847,24 +1850,20 @@ async function commitViolations(
 
   const remaining = children.filter((id) => types.has(id));
   const parented = new Set((await bound.parentsOf(remaining, readings)).map((link) => link.childId));
-  for (const deleted of replay.deletedChildren) {
+  for (const deleted of applied.deletedChildren) {
     if (deleted.children.some((child) => types.has(child.childId) && !parented.has(child.childId))) {
-      violations.push({
-        seq: deleted.seq,
-        kind: "has_children",
-        message: "Still has children",
-      });
+      violations.push({ object: deleted.objectId, kind: "has_children", message: "Still has children" });
     }
   }
 
-  // As v1: an end of the wrong type is not judged by the parent rules.
+  // As the immediate write: an end of the wrong type is not judged by the parent rules.
   const mistyped = new Set<string>();
   for (const end of ends) {
     const type = types.get(end.id);
     if (type !== undefined && type !== end.type) {
-      mistyped.add(`${end.seq} ${end.id}`);
+      mistyped.add(`${end.relationId} ${end.id}`);
       violations.push({
-        seq: end.seq,
+        object: end.relationId,
         kind: "endpoint_type",
         message: endpointTypeMessage(end.role, end.relationType),
       });
@@ -1874,8 +1873,8 @@ async function commitViolations(
   const kept = links.filter(
     (link) =>
       types.has(link.childId) &&
-      !mistyped.has(`${link.seq} ${link.childId}`) &&
-      !mistyped.has(`${link.seq} ${link.parentId}`),
+      !mistyped.has(`${link.relationId} ${link.childId}`) &&
+      !mistyped.has(`${link.relationId} ${link.parentId}`),
   );
   const walk = await ancestry(
     kept.map((link) => link.childId),
@@ -1886,14 +1885,10 @@ async function commitViolations(
     const own = walk.get(link.childId) ?? [];
     if (!own.some((stored) => stored.relationId === link.relationId)) continue;
     if (own.length > 1) {
-      violations.push({ seq: link.seq, kind: "two_parents", message: `${link.childRole} already has a parent` });
+      violations.push({ object: link.relationId, kind: "two_parents", message: `${link.childRole} already has a parent` });
     }
     if (reaches(walk, link.parentId, link.childId)) {
-      violations.push({
-        seq: link.seq,
-        kind: "cycle",
-        message: "This parent link would close a cycle",
-      });
+      violations.push({ object: link.relationId, kind: "cycle", message: "This parent link would close a cycle" });
     }
   }
 
@@ -1901,10 +1896,10 @@ async function commitViolations(
     const after = coverage.touches.flatMap((touch) => touch.ends.map((end) => end.id)).filter((id) => types.has(id));
     const walkAfter = await ancestry(after, coverage.readings, bound);
     for (const touch of coverage.touches) {
-      if (coverage.refused.has(touch.seq)) continue;
+      if (coverage.refused.has(touch.objectId)) continue;
       if (touch.ends.some((end) => types.has(end.id) && !reaches(walkAfter, end.id, coverage.anchorId))) {
         violations.push({
-          seq: touch.seq,
+          object: touch.objectId,
           kind: "outside_subtree",
           message: `Would be outside the anchor subtree of ruleset '${coverage.key}' after the commit`,
         });
@@ -1914,11 +1909,12 @@ async function commitViolations(
   return violations;
 }
 
-/** A 422 with the first violations by seq and their total (R4). */
+/** A 422 with the first violations and their total, those on the whole
+ * changeset first. */
 function violationsError(message: string, violations: Violation[]): ValidationError {
-  const bySeq = [...violations].sort((a, b) => a.seq - b.seq);
+  const ordered = [...violations.filter((v) => v.object === null), ...violations.filter((v) => v.object !== null)];
   return new ValidationError(message, {
-    violations: bySeq.slice(0, MAX_VIOLATIONS),
+    violations: ordered.slice(0, MAX_VIOLATIONS),
     total: violations.length,
   });
 }
@@ -1929,13 +1925,13 @@ function rejection(violations: Violation[]): ValidationError {
 }
 
 /**
- * Commit a changeset: everything it stages, or nothing (D3). With
- * `expectedVersion`, a changeset changed since (V40) is a 409. Another
- * commit on the ontology or in this process, a change running on the
- * changeset, or a row held past the lock timeout are 409s too, with
- * nothing persisted. A rejection is a 422 whose `details.violations` name
- * the seqs; the changeset stays as it was.
- * Committed, the changeset is gone.
+ * Commit a changeset: everything it stages, or nothing. With
+ * `expectedVersion`, a changeset changed since is a 409. Another commit on
+ * the ontology or in this process, a change running on the changeset, or
+ * a row held past the lock timeout are 409s too, with nothing persisted. A
+ * rejection is a 422 whose `details.violations` name the objects and
+ * properties; the changeset stays as it was. Committed, the changeset is
+ * gone.
  */
 export async function commitChangeset(
   lensKey: string,
@@ -1973,17 +1969,17 @@ export async function commitChangeset(
         if (drift.length > 0) throw new CommitRejected(drift);
         const anchor =
           record.rulesetKey === null ? null : await anchorBefore(loaded, record.rulesetKey, pass, bound);
-        // 2: the replay; 3: commit validation.
-        const replay = await replayJournal(loaded, search, record.id, bound);
-        if (replay.fault !== null) throw new CommitRejected([replay.fault]);
+        // 2: the phases; 3: commit validation.
+        const applied = await applyObjects(loaded, search, pass.objects, bound);
+        if (applied.fault !== null) throw new CommitRejected([applied.fault]);
         const violations = [
           ...(anchor?.violations ?? []),
-          ...(await commitViolations(loaded, pass, replay, anchor?.coverage ?? null, bound)),
+          ...(await commitViolations(loaded, pass, applied, anchor?.coverage ?? null, bound)),
         ];
         if (violations.length > 0) throw new CommitRejected(violations);
-        // 4: the journal goes with the changeset; COMMIT on return.
-        await bound.changesets().deleteWithJournal(record.id);
-        return { committed: replay.replayed, alreadyGone: replay.alreadyGone };
+        // 4: the staged objects go with the changeset; COMMIT on return.
+        await bound.changesets().deleteCommitted(record.id);
+        return { committed: applied.applied, alreadyGone: applied.alreadyGone };
       });
     } catch (error) {
       if (!(error instanceof CommitRejected)) throw error;

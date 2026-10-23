@@ -58,7 +58,7 @@ async function start(base = ALL, note?: string): Promise<string> {
   return res.body.id as string;
 }
 
-/** Stage one write: its journal body, answered 201. */
+/** Stage one call: its body, answered 201. */
 async function staged(base: string, cs: string, write: Row): Promise<Row> {
   const res = await call("POST", `${base}/changesets/${cs}/writes`, write);
   expect(res.status, JSON.stringify(res.body)).toBe(201);
@@ -127,7 +127,7 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
     expect(submitted.body).toMatchObject({ state: "submitted", version: draft.version + 1, note: "please review" });
     expect(Date.parse(submitted.body.submittedAt)).not.toBeNaN();
 
-    // Frozen: stage, unstage, discard and a second submit are 409s.
+    // Frozen: stage, unstage, cut, rebase, discard and a second submit are 409s.
     const refused = [
       await call("POST", `${ALL}/changesets/${cs}/writes`, {
         operation: "update_entity",
@@ -135,7 +135,9 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
         id: e.P1,
         properties: { name: "P1 x" },
       }),
-      await call("DELETE", `${ALL}/changesets/${cs}/writes/1`),
+      await call("DELETE", `${ALL}/changesets/${cs}/objects/${e.P2}`),
+      await call("DELETE", `${ALL}/changesets/${cs}/objects/${e.P2}/properties/name`),
+      await call("POST", `${ALL}/changesets/${cs}/objects/${e.P2}/rebase`, {}),
       await call("DELETE", `${ALL}/changesets/${cs}`),
     ];
     for (const res of refused) {
@@ -143,7 +145,7 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
       expect(res.body.error.message).toBe(`Changeset '${cs}' is submitted; unsubmit it first`);
     }
     expect((await submit(cs, "again")).status).toBe(409);
-    expect((await view(cs)).body).toMatchObject({ version: submitted.body.version, writeCount: 1 });
+    expect((await view(cs)).body).toMatchObject({ version: submitted.body.version, objectCount: 1 });
 
     // A stale version: 409, nothing persisted.
     const stale = await commit(cs, { expectedVersion: submitted.body.version - 1 });
@@ -191,7 +193,7 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
     expect(res.body.error).toMatchObject({
       code: "VALIDATION_ERROR",
       message: "The changeset was not submitted; it stays a draft",
-      details: { violations: [{ seq: 1, kind: "missing", message: "Deleted since this write was staged" }], total: 1 },
+      details: { violations: [{ object: e.Kim, kind: "missing", message: "Deleted since it was staged" }], total: 1 },
     });
     expect((await view(cs)).body).toMatchObject({ state: "draft", version: before.version, note: null });
   });
@@ -202,7 +204,7 @@ describe("submit, unsubmit, and the refusals while submitted (V7, V38, V40, R14)
     const submitted = (await submit(cs, "drop P3")).body;
     const res = await commit(cs, { expectedVersion: submitted.version });
     expect(res.status).toBe(422);
-    expect(res.body.error.details.violations[0]).toMatchObject({ seq: 1, kind: "has_children" });
+    expect(res.body.error.details.violations[0]).toMatchObject({ object: e.P3, kind: "has_children" });
     expect((await view(cs)).body).toMatchObject({ state: "submitted", version: submitted.version, note: "drop P3" });
     expect(await name("project", e.P3)).toBe("P3");
   });
@@ -283,10 +285,10 @@ describe("the list (V17, V41)", () => {
       id: viaRuleset,
       number: 2,
       state: "submitted",
-      version: 6,
+      version: 5,
       note: "review",
       ruleset: "agent-a",
-      writeCount: 4,
+      objectCount: 4,
       operations: { create_entity: 1, delete_entity: 1, create_relation: 2 },
       types: ["assigned_to", "has_task", "task"],
       notVisible: 0,
@@ -294,7 +296,7 @@ describe("the list (V17, V41)", () => {
       lastChangeAt: expect.any(String),
       submittedAt: expect.any(String),
     });
-    expect(all[2]).toMatchObject({ state: "draft", writeCount: 0, operations: {}, types: [], ruleset: null });
+    expect(all[2]).toMatchObject({ state: "draft", objectCount: 0, operations: {}, types: [], ruleset: null });
 
     expect((await list(AA)).map((c) => c.id)).toEqual([viaRuleset]);
     expect(await list(`${ALL}/rulesets/agent-b`)).toEqual([]);
@@ -322,135 +324,146 @@ describe("the list (V17, V41)", () => {
     expect((await call("DELETE", `${model}/lenses/${ops}/includes/entity-types/${project}`)).status).toBe(204);
 
     const [item] = await list(OPS);
-    expect(item).toMatchObject({ id: cs, types: ["customer"], notVisible: 1, writeCount: 2 });
+    expect(item).toMatchObject({ id: cs, types: ["customer"], notVisible: 1, objectCount: 2 });
     expect(JSON.stringify(item)).not.toContain("project");
 
-    // The review read of the same changeset names no hidden type either.
+    // The review read of the same changeset names no hidden type either: the
+    // object keeps only its id, the address to unstage it by.
     const read = (await view(cs, OPS)).body;
-    expect(read.writes[0]).toMatchObject({ seq: 1, type: null, id: null, before: null, current: null, after: null });
-    expect(read.writes[0].markers).toEqual([
-      { kind: "not_visible", message: "The type of this write is no longer visible through lens 'ops'" },
-    ]);
-    expect(read.writes[1]).toMatchObject({ type: "customer", name: "BETA", before: { name: "BETA" }, current: { name: "BETA" }, after: { name: "BETA Ops" } });
+    expect(read.objects[0]).toEqual({
+      id: e.P2,
+      kind: "entity",
+      type: null,
+      action: "update",
+      firstTouchedAt: expect.any(String),
+      markers: [{ kind: "not_visible", message: "The type of this entity is no longer visible through lens 'ops'" }],
+      values: [],
+    });
+    expect(read.objects[1]).toMatchObject({
+      type: "customer",
+      name: "BETA",
+      values: [{ property: "name", before: "BETA", current: "BETA", after: "BETA Ops" }],
+    });
     const text = JSON.stringify(read);
-    for (const hidden of ["project", "P2 Ops", e.P2]) expect(text).not.toContain(hidden);
+    for (const hidden of ["project", "P2 Ops"]) expect(text).not.toContain(hidden);
+    expect((await call("DELETE", `${OPS}/changesets/${cs}/objects/${e.P2}`)).status).toBe(204);
   });
 });
 
 describe("the review read (V41)", () => {
   beforeAll(fresh, 60_000);
 
-  it("names, before, current and after, and the drift, dangling and missing markers", async () => {
+  it("names, values with before, current and after, and the drift, dangling and missing markers", async () => {
     const cs = await start();
     await staged(ALL, cs, {
       operation: "update_entity",
       type: "project",
       id: e.P2,
       properties: { name: "P2 Website" },
-    }); // 1: drift
-    const p5 = (
-      await staged(ALL, cs, {
-        operation: "create_entity",
-        type: "project",
-        properties: { name: "P5" },
-        parentRelation: { type: "has_project", parentId: e.ACME, properties: {} },
-      })
-    ).id as string; // 2, 3: its entity unstaged below
-    const t9 = (
-      await staged(ALL, cs, {
-        operation: "create_entity",
-        type: "task",
-        properties: { name: "T9" },
-        parentRelation: { type: "has_task", parentId: p5, properties: { phase: "plan" } },
-      })
-    ).id as string; // 4, 5: its parent relation dangling
-    await staged(ALL, cs, {
+    }); // drift
+    const p5 = await staged(ALL, cs, {
+      operation: "create_entity",
+      type: "project",
+      properties: { name: "P5" },
+      parentRelation: { type: "has_project", parentId: e.ACME, properties: {} },
+    }); // its entity unstaged below
+    const t9 = await staged(ALL, cs, {
+      operation: "create_entity",
+      type: "task",
+      properties: { name: "T9" },
+      parentRelation: { type: "has_task", parentId: p5.id, properties: { phase: "plan" } },
+    }); // its parent relation dangling
+    const assigned = await staged(ALL, cs, {
       operation: "create_relation",
       type: "assigned_to",
       fromEntityId: e.T1,
       toEntityId: e.Kim,
-    }); // 6
-    await staged(ALL, cs, {
-      operation: "update_relation",
-      type: "has_task",
-      id: h.relations["P1 has_task T3"],
-      properties: { phase: "test" },
-    }); // 7
+    });
+    const link = h.relations["P1 has_task T3"]!;
+    await staged(ALL, cs, { operation: "update_relation", type: "has_task", id: link, properties: { phase: "test" } });
     await staged(ALL, cs, {
       operation: "update_entity",
       type: "person",
       id: e.Ben,
       properties: { name: "Ben B" },
-    }); // 8: missing
+    }); // missing
     await staged(ALL, cs, {
       operation: "update_entity",
       type: "task",
       id: e.T2,
       properties: { notes: "New notes" },
-    }); // 9: a document
-    expect((await call("DELETE", `${ALL}/changesets/${cs}/writes/2`)).status).toBe(204);
+    }); // a document
+    expect((await call("DELETE", `${ALL}/changesets/${cs}/objects/${p5.id}`)).status).toBe(204);
     expect((await call("PATCH", `${ALL}/entities/project/${e.P2}`, { name: "P2 Mobile" })).status).toBe(200);
     expect((await call("DELETE", `${ALL}/entities/person/${e.Ben}`)).status).toBe(204);
 
     const read = (await view(cs)).body;
-    expect(read).toMatchObject({ state: "draft", note: null, submittedAt: null, writeCount: 8 });
-    const bySeq = Object.fromEntries((read.writes as Row[]).map((w) => [w.seq, w]));
-    expect(Object.keys(bySeq).map(Number)).toEqual([1, 3, 4, 5, 6, 7, 8, 9]);
-
-    // Drift: current is no longer before, the value the write was staged against.
-    expect(bySeq[1]).toMatchObject({
-      type: "project",
-      id: e.P2,
-      name: "P2 Mobile",
-      before: { name: "P2" },
-      current: { name: "P2 Mobile" },
-      after: { name: "P2 Website" },
-    });
-    expect(bySeq[1].markers).toEqual([
-      { kind: "drift", message: "Changed since this write was staged" },
+    expect(read).toMatchObject({ state: "draft", note: null, submittedAt: null, objectCount: 8 });
+    const byId = Object.fromEntries((read.objects as Row[]).map((o) => [o.id, o]));
+    expect((read.objects as Row[]).map((o) => o.id)).toEqual([
+      e.P2,
+      p5.relation.id,
+      t9.id,
+      t9.relation.id,
+      assigned.id,
+      link,
+      e.Ben,
+      e.T2,
     ]);
-    expect(bySeq[3]).toMatchObject({
-      operation: "create_relation",
+
+    // Drift, on the value: current is no longer before, the value staged against.
+    expect(byId[e.P2]).toMatchObject({ kind: "entity", type: "project", action: "update", name: "P2 Mobile", markers: [] });
+    expect(byId[e.P2].values).toEqual([
+      {
+        property: "name",
+        before: "P2",
+        current: "P2 Mobile",
+        after: "P2 Website",
+        markers: [{ kind: "drift", message: "Changed since it was staged" }],
+      },
+    ]);
+    expect(byId[p5.relation.id]).toMatchObject({
+      kind: "relation",
+      action: "create",
       type: "has_project",
       from: { id: e.ACME, name: "ACME" },
-      to: { id: p5, name: null },
+      to: { id: p5.id, name: null },
+      markers: [{ kind: "dangling", message: "The target end is neither stored nor created in this changeset" }],
     });
-    expect(bySeq[3].markers).toEqual([
-      { kind: "dangling", message: "The target end is neither stored nor created in this changeset" },
-    ]);
-    expect(bySeq[4]).toMatchObject({ id: t9, name: "T9", after: { name: "T9" }, markers: [] });
-    expect(bySeq[5]).toMatchObject({
-      operation: "create_relation",
+    expect(byId[t9.id]).toMatchObject({ name: "T9", values: [{ property: "name", after: "T9" }], markers: [] });
+    expect(byId[t9.relation.id]).toMatchObject({
       type: "has_task",
-      from: { id: p5, name: null },
-      to: { id: t9, name: "T9" },
-      after: { phase: "plan" },
+      from: { id: p5.id, name: null },
+      to: { id: t9.id, name: "T9" },
+      values: [{ property: "phase", after: "plan" }],
+      markers: [{ kind: "dangling", message: "The source end is neither stored nor created in this changeset" }],
     });
-    expect(bySeq[5].markers).toEqual([
-      { kind: "dangling", message: "The source end is neither stored nor created in this changeset" },
-    ]);
-    expect(bySeq[6]).toMatchObject({ from: { id: e.T1, name: "T1" }, to: { id: e.Kim, name: "Kim" }, markers: [] });
-    expect(bySeq[7]).toMatchObject({
+    expect(byId[assigned.id]).toMatchObject({ from: { id: e.T1, name: "T1" }, to: { id: e.Kim, name: "Kim" }, markers: [], values: [] });
+    expect(byId[link]).toMatchObject({
+      action: "update",
       from: { id: e.P1, name: "P1" },
       to: { id: e.T3, name: "T3" },
-      before: { phase: "build" },
-      current: { phase: "build" },
-      after: { phase: "test" },
+      values: [{ property: "phase", before: "build", current: "build", after: "test", markers: [] }],
       markers: [],
     });
     // Gone since staging: before stays, there is no current.
-    expect(bySeq[8]).toMatchObject({ name: null, before: { name: "Ben" }, current: null, after: { name: "Ben B" } });
-    expect(bySeq[8].markers.map((m: Row) => m.kind)).toEqual(["missing"]);
-    expect(bySeq[9]).toMatchObject({
+    expect(byId[e.Ben]).toMatchObject({ name: null, values: [{ property: "name", before: "Ben", current: null, after: "Ben B" }] });
+    expect(byId[e.Ben].markers.map((m: Row) => m.kind)).toEqual(["missing"]);
+    expect(byId[e.T2]).toMatchObject({
       name: "T2",
-      before: { notes: { document: true, length: "Notes of T2".length } },
-      current: { notes: { document: true, length: "Notes of T2".length } },
-      after: { notes: { document: true, length: "New notes".length } },
+      values: [
+        {
+          property: "notes",
+          before: { document: true, length: "Notes of T2".length },
+          current: { document: true, length: "Notes of T2".length },
+          after: { document: true, length: "New notes".length },
+        },
+      ],
     });
 
-    // A page shows the markers of its own writes.
+    // A page shows the markers of its own objects.
     const page = (await call("GET", `${ALL}/changesets/${cs}?offset=1&limit=1`)).body;
-    expect(page.writes.map((w: Row) => [w.seq, w.markers.map((m: Row) => m.kind)])).toEqual([[3, ["dangling"]]]);
+    expect(page.objects.map((o: Row) => [o.id, o.markers.map((m: Row) => m.kind)])).toEqual([[p5.relation.id, ["dangling"]]]);
   });
 
   it("through a scoped lens: hidden names are not returned", async () => {
@@ -460,8 +473,8 @@ describe("the review read (V41)", () => {
     await staged(NO, cs, { operation: "update_entity", type: "task", id: e.T4, properties: { name: "T4 b" } });
     await staged(NO, cs, { operation: "create_relation", type: "has_subtask", fromEntityId: e.T4, toEntityId: e.T5 });
     const read = (await view(cs, NO)).body;
-    expect(read.writes[0]).toMatchObject({ name: "T4", before: { name: "T4" }, current: { name: "T4" }, after: { name: "T4 b" } });
-    expect(read.writes[1]).toMatchObject({ from: { id: e.T4, name: "T4" }, to: { id: e.T5, name: "T5" } });
+    expect(read.objects[0]).toMatchObject({ name: "T4", values: [{ property: "name", before: "T4", current: "T4", after: "T4 b" }] });
+    expect(read.objects[1]).toMatchObject({ from: { id: e.T4, name: "T4" }, to: { id: e.T5, name: "T5" } });
     const text = JSON.stringify(read);
     for (const hidden of ["P2", "project", "phase"]) expect(text).not.toContain(hidden);
   });

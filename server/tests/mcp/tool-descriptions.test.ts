@@ -153,13 +153,23 @@ describe("tool descriptions", () => {
     expect(runtime.get("create_entity")).not.toContain("anchor");
   });
 
-  const STAGEABLE = ["create_entity", "update_entity", "delete_entity", "create_relation", "update_relation", "delete_relation"];
+  const STAGEABLE = [
+    "create_entity",
+    "update_entity",
+    "delete_entity",
+    "create_relation",
+    "update_relation",
+    "delete_relation",
+    "edit_document",
+    "write_document",
+  ];
   const CHANGESET_TOOLS = [
     "start_changeset",
     "list_changesets",
     "get_changeset",
     "get_staged_document",
     "unstage",
+    "rebase",
     "submit_changeset",
     "unsubmit_changeset",
     "commit_changeset",
@@ -170,45 +180,46 @@ describe("tool descriptions", () => {
     required?: string[];
   };
 
-  it("the six stageable tools take an optional changeset_id and state the staged mode", () => {
+  it("the eight stageable tools take an optional changeset_id and state the staged mode", () => {
     for (const name of STAGEABLE) {
       expect(parameters(name).properties, name).toHaveProperty("changeset_id");
       expect(parameters(name).required ?? [], name).not.toContain("changeset_id");
       for (const map of [runtime, full]) {
         const text = map.get(name)!;
-        for (const part of ["'changeset_id'", "{seq, id}", "reads never see staged data", "id is final"]) {
+        for (const part of ["'changeset_id'", "reads never see staged data"]) {
           expect(text, name).toContain(part);
         }
+        expect(text, name).not.toMatch(/\bseq\b/);
       }
       expect(full.get(name), name).toContain("staging is refused while the anchor entity no longer exists");
     }
+    for (const name of STAGEABLE.slice(0, 6)) expect(runtime.get(name), name).toContain("the answer is {id}");
+    for (const name of ["edit_document", "write_document"]) {
+      const text = runtime.get(name)!;
+      expect(text).toContain("the answer is the edit's answer with id");
+      expect(text).toContain("The edit applies to the staged text of the property, or else the stored text");
+    }
+    expect(runtime.get("create_entity")).toContain("A staged create's id is final");
+    expect(runtime.get("update_entity")).toContain("The changeset holds one staged value per property");
+    expect(runtime.get("delete_entity")).toContain("the answer lists their ids as cascaded");
     for (const name of ["create_entity", "create_relation"]) {
       expect(runtime.get(name)).toContain("relation ends, parents and the hierarchy rules are checked at commit");
     }
-    // A create with a parent relation stages two writes; only create_entity says so.
+    // A create with a parent relation stages two objects; only create_entity says so.
     for (const map of [runtime, full, propose]) {
       expect(map.get("create_entity")).toContain(
-        "With 'parent_relation' and 'changeset_id', two writes are staged, the entity's and then its " +
-          "parent relation's, and the answer is {seq, id, relation: {seq, id}}",
+        "With 'parent_relation' and 'changeset_id', two objects are staged, the entity and its " +
+          "parent relation, and the answer is {id, relation: {id}}",
       );
-      for (const name of STAGEABLE.slice(1)) expect(map.get(name), name).not.toContain("relation: {seq, id}");
+      for (const name of STAGEABLE.slice(1)) expect(map.get(name), name).not.toContain("relation: {id}");
     }
-    for (const name of ["update_entity", "update_relation"]) {
-      expect(runtime.get(name)).toContain("the commit is rejected");
+    for (const name of ["update_entity", "update_relation", "edit_document", "write_document"]) {
+      expect(runtime.get(name)).toContain("the commit is rejected, until rebase accepts the change");
     }
     for (const name of ["delete_entity", "delete_relation"]) {
       const text = runtime.get(name)!;
       expect(text).toContain("Staging checks the type and that the target exists");
       expect(text.slice(text.indexOf("'changeset_id'"))).not.toMatch(/propert|current values/);
-    }
-  });
-
-  it("the document edit tools take no changeset_id and say they cannot be staged and refuse one", () => {
-    for (const name of ["edit_document", "write_document"]) {
-      expect(parameters(name).properties, name).not.toHaveProperty("changeset_id");
-      expect(runtime.get(name), name).toContain("always writes immediately and cannot be staged");
-      expect(runtime.get(name), name).toContain("a 'changeset_id' is refused and nothing is written");
-      expect(runtime.get(name), name).toContain("whole new value to update_entity with 'changeset_id'");
     }
   });
 
@@ -235,7 +246,10 @@ describe("tool descriptions", () => {
       "offset",
       "limit",
     ]);
-    expect(parameters("unstage").required).toEqual(["changeset_id", "seq"]);
+    expect(parameters("unstage").required).toEqual(["changeset_id", "object_id"]);
+    expect(Object.keys(parameters("unstage").properties ?? {})).toEqual(["changeset_id", "object_id", "property"]);
+    expect(parameters("rebase").required).toEqual(["changeset_id", "object_id"]);
+    expect(Object.keys(parameters("rebase").properties ?? {})).toEqual(["changeset_id", "object_id", "properties"]);
     expect(parameters("start_changeset").required ?? []).toEqual([]);
   });
 
@@ -243,12 +257,14 @@ describe("tool descriptions", () => {
     for (const map of [runtime, full, propose, none]) {
       const text = map.get("get_changeset")!;
       expect(text).not.toMatch(/argument|sha256|hash/);
-      expect(text).toContain("entity writes add name; relation writes add from and to {id, name}");
+      expect(text).not.toMatch(/\bseq\b/);
+      expect(text).toContain("an entity adds name, a relation from and to {id, name}");
+      expect(text).toContain("values lists its staged values [{property, before, current, after, markers}]");
       expect(text).not.toContain("{id, name, properties}");
       expect(text).toContain("Document values in before, current and after show as {document: true, length}");
       expect(text).toContain("get_staged_document reads the staged text");
       const staged = map.get("get_staged_document")!;
-      for (const part of ["last write staged", "'offset' and 'limit' are character-based", "totalLength", "Not found when no staged write", "a later staged write deletes the entity"]) {
+      for (const part of ["its staged value", "'offset' and 'limit' are character-based", "totalLength", "Not found when the changeset stages no value", "when it deletes the entity"]) {
         expect(staged).toContain(part);
       }
     }
@@ -263,14 +279,14 @@ describe("tool descriptions", () => {
     }
   });
 
-  it("the drift guidance is stated in get_changeset and commit_changeset, with no reflex restage", () => {
-    for (const map of [runtime, full, propose, none]) {
-      expect(map.get("get_changeset")).toContain("compare them, and restage only if your change still applies");
+  it("the drift guidance is stated in get_changeset and commit_changeset: compare, then rebase or unstage", () => {
+    for (const map of [runtime, full, propose]) {
+      expect(map.get("get_changeset")).toContain("compare them, then rebase to keep your value, or unstage it");
     }
+    expect(none.get("get_changeset")).toContain("drift (current differs from before: compare them)");
     for (const map of [runtime, full]) {
       const text = map.get("commit_changeset")!;
-      expect(text).toContain("On drift, compare before and current in get_changeset, and restage only if your change still applies");
-      expect(text).not.toContain("unstage and restage");
+      expect(text).toContain("On drift, compare before and current in get_changeset, then rebase to keep your value or unstage it");
     }
   });
 
@@ -287,10 +303,10 @@ describe("tool descriptions", () => {
       .filter((name) => allows(level, TOOLS[name]!.operation) || (TOOLS[name]!.stageable === true && allows(level, "stage")))
       .sort();
 
-  it("the tool list follows the operation table: 33 on the plain lens; 34, 31 and 20 at full, propose and none", () => {
-    expect(runtime.size).toBe(33);
-    expect(full.size).toBe(34);
-    expect(propose.size).toBe(31);
+  it("the tool list follows the operation table: 34 on the plain lens; 35, 34 and 20 at full, propose and none", () => {
+    expect(runtime.size).toBe(34);
+    expect(full.size).toBe(35);
+    expect(propose.size).toBe(34);
     expect(none.size).toBe(20);
     expect([...runtime.keys()].sort()).toEqual(allowed("full").filter((name) => name !== "get_ruleset"));
     for (const [level, map] of [["full", full], ["propose", propose], ["none", none]] as const) {
@@ -303,7 +319,7 @@ describe("tool descriptions", () => {
     }
   });
 
-  it("propose requires changeset_id and lists no commit or document edit (V29, R13)", () => {
+  it("propose requires changeset_id and lists no commit", () => {
     const params = (name: string) => proposeTools.find((tool) => tool.name === name)!.inputSchema as {
       properties?: Record<string, unknown>;
       required?: string[];
@@ -314,15 +330,11 @@ describe("tool descriptions", () => {
       expect(text, name).toContain("This connection has write access 'propose': it only stages, so 'changeset_id' is required");
       expect(text, name).toContain("staging is refused while the anchor entity no longer exists");
     }
-    for (const name of ["commit_changeset", "edit_document", "write_document"]) {
-      expect(propose.has(name), name).toBe(false);
-    }
-    expect([...propose.keys()].sort()).toEqual(
-      [...full.keys()].filter((name) => !["commit_changeset", "edit_document", "write_document"].includes(name)).sort(),
-    );
+    expect(propose.has("commit_changeset")).toBe(false);
+    expect([...propose.keys()].sort()).toEqual([...full.keys()].filter((name) => name !== "commit_changeset").sort());
     expect(propose.get("submit_changeset")).toContain("This connection has write access 'propose' and cannot commit");
     expect(propose.get("unsubmit_changeset")).not.toContain("committed again");
-    expect(propose.get("update_entity")).toContain("replaced whole: send the complete new text.");
+    expect(propose.get("update_entity")).toContain("prefer edit_document / write_document for partial edits");
   });
 
   it("none lists the reads and the changeset reads only", () => {
@@ -330,7 +342,7 @@ describe("tool descriptions", () => {
     for (const name of ["list_changesets", "get_changeset", "get_staged_document", "get_ruleset"]) {
       expect(none.has(name), name).toBe(true);
     }
-    for (const name of [...STAGEABLE, "edit_document", "write_document", ...CHANGESET_TOOLS.filter((name) => !none.has(name))]) {
+    for (const name of [...STAGEABLE, ...CHANGESET_TOOLS.filter((name) => !none.has(name))]) {
       expect(none.has(name), name).toBe(false);
     }
   });

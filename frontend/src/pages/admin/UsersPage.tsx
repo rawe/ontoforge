@@ -347,7 +347,7 @@ export function UsersPage() {
           </div>
         </div>
 
-        <div className="mt-8 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="mt-8 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
           <div className="min-w-0 space-y-3">
             <div className="relative max-w-sm">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -379,14 +379,16 @@ export function UsersPage() {
             ) : (
               <>
                 <div className="rounded-xl border">
-                  <Table>
+                  {/* Fixed columns: long names and emails truncate rather than widen the
+                      table; kind and last sign-in, also in the detail, leave on a phone. */}
+                  <Table className="table-fixed">
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Email or username</TableHead>
-                        <TableHead className="w-20">Kind</TableHead>
+                        <TableHead className="truncate">Name</TableHead>
+                        <TableHead className="truncate">Email or username</TableHead>
+                        <TableHead className="hidden w-20 sm:table-cell">Kind</TableHead>
                         <TableHead className="w-24">Status</TableHead>
-                        <TableHead className="w-28">Last sign-in</TableHead>
+                        <TableHead className="hidden w-28 sm:table-cell">Last sign-in</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -397,10 +399,11 @@ export function UsersPage() {
                           data-state={user.id === selected ? 'selected' : undefined}
                           onClick={() => select(user.id)}
                         >
-                          <TableCell className="text-[13px] font-medium">
+                          <TableCell className="truncate text-[13px] font-medium">
                             <button
                               type="button"
-                              className="text-left hover:underline focus-visible:outline-2 focus-visible:outline-ring/60"
+                              title={user.displayName}
+                              className="max-w-full truncate text-left hover:underline focus-visible:outline-2 focus-visible:outline-ring/60"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 select(user.id)
@@ -409,16 +412,19 @@ export function UsersPage() {
                               {user.displayName}
                             </button>
                           </TableCell>
-                          <TableCell className="text-[13px] text-muted-foreground">
+                          <TableCell
+                            className="truncate text-[13px] text-muted-foreground"
+                            title={userHandle(user) ?? undefined}
+                          >
                             {userHandle(user) ?? '—'}
                           </TableCell>
-                          <TableCell className="text-[13px]">
+                          <TableCell className="hidden text-[13px] sm:table-cell">
                             {user.kind === 'service' ? 'Service' : 'User'}
                           </TableCell>
                           <TableCell>
                             <StatusBadge status={user.status} />
                           </TableCell>
-                          <TableCell className="text-[12.5px]">
+                          <TableCell className="hidden text-[12.5px] sm:table-cell">
                             <LastSignIn at={user.lastLoginAt} />
                           </TableCell>
                         </TableRow>

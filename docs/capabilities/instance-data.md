@@ -37,23 +37,25 @@ Updates are partial (see [Partial updates](#partial-updates)). Delete is by type
 id, and takes three things with it:
 
 1. the entity;
-2. **every relation attached to it, in either direction** — including relations whose type
-   the current lens cannot see;
+2. **every relation attached to it, in either direction**;
 3. its entries in every [search index](search-indices.md#lifecycle) — its
    [document passages](documents.md) among them — and those of the relations deleted with
    it.
 
 Wherever the schema flags a parent relation, an entity that still has children is not
 deleted at all, for any client and through any lens
-([Leaf-only deletes](#leaf-only-deletes)). Otherwise nothing warns first and nothing is
-refused: the runtime cascade is silent, unlike the schema cascade protocol in
-[schema-modeling.md](schema-modeling.md). A caller that needs to know what would be lost
-must traverse first.
+([Leaf-only deletes](#leaf-only-deletes)). Nor is an entity with a relation attached
+whose type the lens does not show: a lens never removes what it does not show. The
+refusal is a conflict, "This entity has relations this lens does not show; it can only be
+deleted through a lens that shows them", and nothing is deleted. Otherwise nothing warns
+first and nothing is refused: the runtime cascade is silent, unlike the schema cascade
+protocol in [schema-modeling.md](schema-modeling.md). A caller that needs to know what
+would be lost must traverse first.
 
 Addressing an entity whose type the lens does not expose fails exactly as addressing a
 missing entity does: not found. A lens never reports that something exists but is hidden,
-with one bit of exception: refusing to delete an entity with children reveals that a
-child exists — never its type, id or count — even when the lens hides it.
+with one bit of exception: refusing to delete an entity reveals that a child, or a
+relation the lens hides, exists — never its type, id or count.
 
 ## Relations
 
@@ -143,8 +145,8 @@ ontology without a parent relation nothing is checked.
 The path of one entity is its [hierarchy path](../README.md#hierarchies): the
 entity's ancestors, root first, followed by the entity itself, each as its type key, id and
 name. A hierarchy root's path is the entity alone. Through a lens the path starts below
-the nearest ancestor whose type the lens hides, so it never names a hidden entity or one
-above it. `name` is the value of the type's name property, and null when unset or hidden by
+the nearest ancestor whose type the lens hides, or that is reached over a parent relation
+the lens hides, so it never names a hidden entity or one above it. `name` is the value of the type's name property, and null when unset or hidden by
 the lens. An entity of a type the lens hides, a missing entity, or an id of another type is
 not found, as on the entity read. On data that the accepted race left with two parents,
 the path lists every visible ancestor the walk reaches.

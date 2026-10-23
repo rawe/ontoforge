@@ -553,15 +553,15 @@ Semantics: [capabilities/instance-data.md](capabilities/instance-data.md).
 | GET | `/entities/{entityTypeKey}/{entityId}` | Read one entity | `fields` |
 | GET | `/entities/{entityTypeKey}/{entityId}/path` | The entity's hierarchy path through the lens | — |
 | PATCH | `/entities/{entityTypeKey}/{entityId}` | Partial update; an explicit null clears a property | — |
-| DELETE | `/entities/{entityTypeKey}/{entityId}` | Delete an entity and every relation attached to it; refused for an entity with children | — |
+| DELETE | `/entities/{entityTypeKey}/{entityId}` | Delete an entity and every relation attached to it; refused for an entity with children or with a relation the lens hides | — |
 
 `parentRelation` sits beside the property values in the flat create body as
 `{type, parentId, properties}`: the parent relation type's key, the parent's id and the
 relation's own properties, optional. The create answers the entity alone; faults come
 under `parentRelation.*` with the entity's own. The path answers
 `[{type, id, name}]`, root first and ending with the entity; an unknown, hidden or
-wrong-type entity is not found, as on the read. Deleting an entity that still has children
-answers `RESOURCE_CONFLICT`. Rules: [capabilities/instance-data.md](capabilities/instance-data.md#hierarchies).
+wrong-type entity is not found, as on the read. Deleting an entity that still has children,
+or that has a relation attached whose type the lens hides, answers `RESOURCE_CONFLICT`. Rules: [capabilities/instance-data.md](capabilities/instance-data.md#hierarchies).
 
 ### Documents
 
@@ -687,9 +687,10 @@ relation entries count; `filters` carries the `filter.*` keys of `GET /search` w
 the prefix, query paths included, each with a string value; `minScore`, 0–1, needs a
 mode that ranks semantically; `limit` counts entities, 1–100, default 10; `fields`
 projects each entity. The response carries `query`, `mode` and `hits`, each hit
-`entity`, `relativeScore` and `matched`. An unknown index key answers not found. A body
+`entity`, `relativeScore` and `matched`. A body
 of the wrong shape, or with a field not listed here, is rejected with `details.errors`;
-the request's rules — an index the lens cannot search at `indices.<i>`, a relation type
+the request's rules — an index the lens cannot search or that does not exist at
+`indices.<i>`, a relation type
 at `relations.<i>` — are collected under `details.fields`; a mode that needs a missing embedding provider answers
 `FEATURE_DISABLED`. Rules:
 [capabilities/search.md](capabilities/search.md#index-search).
@@ -1073,7 +1074,7 @@ Everything a client can do to instance data through one lens.
 | `update_entity` | Partial update; a null clears a property |
 | `edit_document` | Change part of a document by exact string replacement |
 | `write_document` | Overwrite a character range of a document; also inserts and appends |
-| `delete_entity` | Delete an entity and its relations; refused for an entity with children |
+| `delete_entity` | Delete an entity and its relations; refused for an entity with children or with a relation the lens hides |
 | `create_relation` | Connect two entities |
 | `list_relations` | List relations, optionally by source or target |
 | `get_relation` | Read one relation by id |

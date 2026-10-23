@@ -66,9 +66,10 @@ deliberate addition; narrowing it is a breaking change. The rule this enforces i
 Two boundaries are worth knowing rather than discovering:
 
 - The label requirement binds node patterns that **introduce a variable**. A fully
-  anonymous node pattern, and a relationship pattern with no type, are not flagged. They
-  widen what a pattern traverses, but nothing can be projected from them without a
-  variable, so they do not widen what is exposed. An inline property map, though,
+  anonymous node pattern, and a relationship pattern with no type, with a variable or
+  without, are not flagged. They match every type of their kind the lens shows and no
+  other, so they never reach, count or traverse what the lens hides. An inline property
+  map, though,
   requires an owner with a known type: the map's keys are property accesses, validated
   against the owner's type within the lens exactly as any other property access.
 - Parameter placeholders parse, but an ad-hoc query is executed with **no parameter values
@@ -123,9 +124,10 @@ by those names. A column's value is an entity, a relation, a scalar, or a list o
 those.
 
 Entities and relations come back as flat objects: their properties plus their system
-properties. Both are post-processed against the lens, and any property the lens does not
-expose for that type is removed. A query therefore cannot surface a hidden property even by
-projecting a whole node. Document properties are replaced by size stubs, though they remain
+properties. Both are post-processed against the lens, in a column of their own or at any
+depth inside a list or map, and any property the lens does not expose for that type is
+removed; one of a type the lens does not show reads as null. A query therefore cannot
+surface a hidden property even by projecting a whole node or collecting nodes. Document properties are replaced by size stubs, though they remain
 valid to reference inside the query itself — a predicate may test a document property even
 though its value is never returned intact ([documents.md](documents.md)).
 

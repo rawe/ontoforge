@@ -665,8 +665,8 @@ The adapter **may** assume, without re-checking:
 - Every entity type key, relation type key and property key in it exists and is visible
   through the requesting lens.
 - No write clause and no procedure call is present.
-- No node pattern is unlabelled, and no internal label or internal relationship type
-  appears.
+- No node pattern that introduces a variable is unlabelled, and no internal label or
+  internal relationship type appears.
 - The object carries everything a compiler needs: the parse tree, the token stream, the
   analysis that locates every type-key token and marks whether it names a node or a
   relationship, the scoped schema it was validated against, and the original query text
@@ -683,7 +683,9 @@ The adapter **must not** assume:
   adapter's to impose.
 
 Correspondingly, whatever the compilation style, the compiled statement must ask the
-database exactly what the validated query asks — only the names are translated.
+database exactly what the validated query asks — only the names are translated. A node
+pattern without a label and a relationship pattern without a type match only the types of
+their kind that the scoped schema shows, never one the lens hides.
 Results come back in schema vocabulary, so no reverse translation of names is required —
 the compiled query returns whatever the caller asked for, converted per the value rules
 above.

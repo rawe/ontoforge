@@ -30,7 +30,7 @@ export type RuntimeWrite =
     }
   | { operation: 'delete_relation'; type: string; id: string }
 
-/** A write staged into a changeset: its seq and the minted (create) or target id. */
+/** A write staged into a changeset: the id of the object it touched, minted by a create. */
 export interface StagedOutcome extends StagedAnswer {
   kind: 'staged'
   changesetId: string
@@ -61,6 +61,13 @@ export function stagePayload(write: RuntimeWrite): StageWritePayload {
     case 'delete_relation':
       return { operation: write.operation, type: write.type, id: write.id }
   }
+}
+
+/** The staged toast's text: "Staged", naming the staged relations an entity delete removed with it. */
+export function stagedText(answer: StagedAnswer): string {
+  const removed = answer.cascaded?.length ?? 0
+  if (removed === 0) return 'Staged'
+  return `Staged, with ${removed} staged ${removed === 1 ? 'relation' : 'relations'} at it removed`
 }
 
 export function stagedOutcome(changesetId: string, answer: StagedAnswer): StagedOutcome {

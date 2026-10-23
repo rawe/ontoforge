@@ -1,6 +1,6 @@
 /**
  * Pure helpers for the Workbench's Changesets page: the list order and the
- * sidebar count, what a list row and a staged write's row say, the
+ * sidebar count, what a list row and a staged object's card say, the
  * violations of a rejected commit and the note built from them, how the
  * bar names the pinned changeset, why the Explorer canvas does not edit
  * while one is pinned, and the values of an entity a changeset creates. No
@@ -13,14 +13,15 @@ import type {
   ChangesetState,
   ChangesetViolation,
   JsonValue,
-  StagedWriteView,
+  StagedObjectView,
+  StagedValueView,
 } from '../../api/types.ts'
 
 /** The longest note the server stores, in characters. */
 export const MAX_NOTE_LENGTH = 1000
 
-/** Writes per page of the review read: the API's default. */
-export const WRITES_PAGE_SIZE = 100
+/** Staged objects per page of the review read: the API's default. */
+export const OBJECTS_PAGE_SIZE = 100
 
 /** Why the Explorer canvas's connect and edge delete are off while a changeset is pinned. */
 export const EXPLORER_LIVE_ONLY_TEXT = 'Explorer edits are live only — leave the changeset to edit here'
@@ -40,9 +41,14 @@ export function operationLabel(operation: string): string {
   return operation.replace('_', ' ')
 }
 
+/** A staged object's operation, as the list counts it: "update_entity". */
+export function objectOperation(object: Pick<StagedObjectView, 'action' | 'kind'>): string {
+  return `${object.action}_${object.kind}`
+}
+
 const VERBS = ['create', 'update', 'delete'] as const
 
-/** The writes per verb, entity and relation together: "create 7 · delete 8". */
+/** The staged objects per action, entity and relation together: "create 7 · delete 8". */
 export function operationsSummary(operations: Readonly<Record<string, number>>): string {
   return VERBS.map((verb) => {
     const count = Object.entries(operations)
@@ -54,9 +60,9 @@ export function operationsSummary(operations: Readonly<Record<string, number>>):
     .join(' · ')
 }
 
-/** "5 writes", "1 write". */
-export function writesText(count: number): string {
-  return `${count.toLocaleString('en-US')} ${count === 1 ? 'write' : 'writes'}`
+/** "5 staged objects", "1 staged object". */
+export function objectsText(count: number): string {
+  return `${count.toLocaleString('en-US')} staged ${count === 1 ? 'object' : 'objects'}`
 }
 
 /** The lens-delete toast: "Lens deleted", "Lens deleted with 2 changesets". */
@@ -96,13 +102,13 @@ function isDocumentStub(value: JsonValue | undefined): boolean {
   return typeof value === 'object' && value !== null && !Array.isArray(value) && value.document === true
 }
 
-/** A stored or staged value, as the change column shows it. */
+/** A stored or staged value, as a staged object's card shows it. */
 export function valueText(value: JsonValue | undefined): string {
   if (value === undefined || value === null) return 'empty'
   if (typeof value === 'string') return `"${value}"`
   if (isDocumentStub(value)) {
     // The review read stubs document values, as the entity reads do; a
-    // write staged without a recorded length has none.
+    // before recorded without a length has none.
     const length = (value as Record<string, JsonValue>).length
     return typeof length === 'number' ? `document (${length} characters)` : 'document'
   }
@@ -110,46 +116,19 @@ export function valueText(value: JsonValue | undefined): string {
 }
 
 /**
- * The document properties a create or update of an entity sets, in the
- * order it sends them: each can be read as staged text. A staged null
- * removes the text and has nothing to read, and neither has an entity a
- * later write of `writes` (the page shown) deletes: a commit leaves no text.
+ * The document properties a staged entity create or update sets, in the
+ * order of its values: each can be read as staged text. A staged null
+ * removes the text and has nothing to read.
  */
-export function stagedDocumentKeys(write: StagedWriteView, writes: readonly StagedWriteView[] = []): string[] {
-  if (write.type === null || write.id === null) return []
-  if (write.operation !== 'create_entity' && write.operation !== 'update_entity') return []
-  const deletedLater = writes.some(
-    (other) =>
-      other.seq > write.seq && other.operation === 'delete_entity' && other.type === write.type && other.id === write.id,
-  )
-  if (deletedLater) return []
-  return Object.entries(write.after ?? {})
-    .filter(([, value]) => isDocumentStub(value))
-    .map(([key]) => key)
+export function stagedDocumentKeys(object: StagedObjectView): string[] {
+  if (object.type === null || object.kind !== 'entity' || object.action === 'delete') return []
+  return object.values.filter((value) => isDocumentStub(value.after)).map((value) => value.property)
 }
 
-/**
- * The values of an entity this changeset creates, as far as `writes` (the
- * page shown) tells: the create's values with the later updates of that id
- * folded in by seq (null removes a key). Null for any other write, and for
- * a create a later write on the page deletes.
- */
-export function stagedCreateValues(
-  write: StagedWriteView,
-  writes: readonly StagedWriteView[] = [],
-): Record<string, JsonValue> | null {
-  if (write.operation !== 'create_entity' || write.type === null || write.id === null) return null
-  const values: Record<string, JsonValue> = { ...write.after }
-  for (const other of writes) {
-    if (other.seq <= write.seq || other.type !== write.type || other.id !== write.id) continue
-    if (other.operation === 'delete_entity') return null
-    if (other.operation !== 'update_entity') continue
-    for (const [key, value] of Object.entries(other.after ?? {})) {
-      if (value === null) delete values[key]
-      else values[key] = value
-    }
-  }
-  return values
+/** The values of an entity this changeset creates; null for any other object. */
+export function stagedCreateValues(object: StagedObjectView): Record<string, JsonValue> | null {
+  if (object.action !== 'create' || object.kind !== 'entity' || object.type === null) return null
+  return Object.fromEntries(object.values.map((value) => [value.property, value.after]))
 }
 
 /** Beside a staged create while its changeset is not the pinned one. */
@@ -159,50 +138,31 @@ export const EXTEND_HINT_TEXT = 'Work in this changeset to extend it'
 export const STAGED_ONLY_TEXT =
   'It exists only in its changeset — work in that changeset to extend it. Nothing was written.'
 
-const valuesText = (values: Readonly<Record<string, JsonValue>>) =>
-  Object.entries(values)
-    .map(([key, value]) => `${key}: ${valueText(value)}`)
-    .join('; ')
+const endText = (end: ChangesetEnd | undefined) => (end === undefined ? '?' : (end.name ?? shortId(end.id)))
 
-const endText = (end: ChangesetEnd | null | undefined) =>
-  end === null || end === undefined ? '?' : (end.name ?? shortId(end.id))
+/** What a staged object is: an entity's name, "(new)" for a create, a relation's two ends. */
+export function targetText(object: StagedObjectView): string {
+  if (object.type === null) return '—'
+  if (object.kind === 'relation') return `${endText(object.from)} → ${endText(object.to)}`
+  const name = object.name ?? shortId(object.id)
+  return object.action === 'create' ? `${name} (new)` : name
+}
 
-/** The target column: an entity's name, "(new)" for a create, a relation's two ends. */
-export function targetText(write: StagedWriteView): string {
-  if (write.type === null || write.id === null) return '—'
-  if (write.operation.endsWith('_relation')) {
-    if (write.from === null && write.to === null) return shortId(write.id)
-    return `${endText(write.from)} → ${endText(write.to)}`
-  }
-  const name = write.name ?? shortId(write.id)
-  return write.operation === 'create_entity' ? `${name} (new)` : name
+/** Whether a staged value's stored value changed since its before was recorded. */
+export function hasDrift(value: StagedValueView): boolean {
+  return value.markers.some((marker) => marker.kind === 'drift')
 }
 
 /**
- * The change column: `before → after` per key for updates (only the staged
- * value when the target was created by this changeset), with the current
- * value where it differs on a drifted write; the set values for creates,
- * and "—" for deletes.
+ * One staged value's change: `before → after` on an update, with the
+ * current stored value where it drifted; the staged value alone on a create.
  */
-export function changeText(write: StagedWriteView): string {
-  if (write.type === null) return 'Not visible through this lens'
-  if (write.operation.startsWith('delete_')) return '—'
-  const after = write.after ?? {}
-  if (write.operation.startsWith('update_')) {
-    const before = write.before
-    if (before === null) return valuesText(after)
-    const drifted = write.markers.some((marker) => marker.kind === 'drift')
-    return Object.entries(after)
-      .map(([key, value]) => {
-        const change = `${key}: ${valueText(before[key])} → ${valueText(value)}`
-        const current = write.current?.[key]
-        return drifted && current !== undefined && JSON.stringify(current) !== JSON.stringify(before[key])
-          ? `${change} (now ${valueText(current)})`
-          : change
-      })
-      .join('; ')
-  }
-  return Object.keys(after).length === 0 ? '—' : valuesText(after)
+export function valueChangeText(object: StagedObjectView, value: StagedValueView): string {
+  if (object.action !== 'update') return valueText(value.after)
+  const change = `${valueText(value.before)} → ${valueText(value.after)}`
+  return hasDrift(value) && JSON.stringify(value.current) !== JSON.stringify(value.before)
+    ? `${change} (now ${valueText(value.current)})`
+    : change
 }
 
 /** A marker chip's text. */
@@ -237,24 +197,26 @@ export function violationLabel(kind: string): string | null {
 }
 
 /**
- * Where a violation's line starts, named by its row among `writes` (the page
- * shown) as the target column shows it: "#1 P2 Live: ". A row not on the
- * page, or not visible, goes unnamed; seq 0 is the whole changeset ("").
+ * Where a violation's line starts: the staged object among `objects` (the
+ * page shown) as its card names it, and the property: "P2 Live · name: ".
+ * An object not on the page, or not visible, goes unnamed; a violation of
+ * the whole changeset starts with nothing.
  */
-export function violationPrefix(violation: ChangesetViolation, writes: readonly StagedWriteView[] = []): string {
-  if (violation.seq === 0) return ''
-  const write = writes.find((w) => w.seq === violation.seq)
-  const name = write === undefined ? '—' : targetText(write)
-  return name === '—' ? `#${violation.seq} ` : `#${violation.seq} ${name}: `
+export function violationPrefix(violation: ChangesetViolation, objects: readonly StagedObjectView[] = []): string {
+  if (violation.object === null) return ''
+  const object = objects.find((candidate) => candidate.id === violation.object)
+  const name = object === undefined ? '—' : targetText(object)
+  const parts = [...(name === '—' ? [] : [name]), ...(violation.property === undefined ? [] : [violation.property])]
+  return parts.length === 0 ? '' : `${parts.join(' · ')}: `
 }
 
 /**
  * One violation for the note, with its raw kind:
- * "#1 P2 Live: drift — Changed since this write was staged". The panel shows
+ * "P2 Live · name: drift — Changed since it was staged". The panel shows
  * the same line with `violationLabel` in place of a ruleset kind.
  */
-export function violationLine(violation: ChangesetViolation, writes: readonly StagedWriteView[] = []): string {
-  return `${violationPrefix(violation, writes)}${violation.kind} — ${violation.message}`
+export function violationLine(violation: ChangesetViolation, objects: readonly StagedObjectView[] = []): string {
+  return `${violationPrefix(violation, objects)}${violation.kind} — ${violation.message}`
 }
 
 /**
@@ -264,10 +226,10 @@ export function violationLine(violation: ChangesetViolation, writes: readonly St
 export function violationsNote(
   violations: readonly ChangesetViolation[],
   total: number,
-  writes: readonly StagedWriteView[] = [],
+  objects: readonly StagedObjectView[] = [],
 ): string {
   const header = `Commit rejected: ${total} ${total === 1 ? 'violation' : 'violations'}`
-  const lines = [header, ...violations.map((violation) => violationLine(violation, writes))]
+  const lines = [header, ...violations.map((violation) => violationLine(violation, objects))]
   if (total > violations.length) lines.push(`… and ${total - violations.length} more`)
   const note = lines.join('\n')
   return note.length <= MAX_NOTE_LENGTH ? note : `${note.slice(0, MAX_NOTE_LENGTH - 1)}…`

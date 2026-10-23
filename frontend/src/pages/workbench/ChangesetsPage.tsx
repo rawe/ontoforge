@@ -6,7 +6,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { ChangesetStateChip } from '@/components/changesets/ChangesetStateChip'
 import { ChangesetExplainerButton } from '@/components/changesets/explainer/ChangesetExplainer'
-import { typesText, writesText } from '@/components/changesets/changesets'
+import { objectsText, typesText } from '@/components/changesets/changesets'
 import { PinChangesetButton } from '@/components/changesets/PinChangesetButton'
 import { StartChangesetDialog } from '@/components/changesets/StartChangesetDialog'
 import { absoluteTime, relativeTime } from '@/components/table/format'
@@ -28,7 +28,7 @@ const PIN_COLUMN = 'sticky right-0 bg-background'
 
 /**
  * `/o/:ontologyKey/w/:lensKey/changesets` — the lens's changesets, by number:
- * number, state, note, ruleset, writes, types and age. Everything is read
+ * number, state, note, ruleset, staged objects, types and age. Everything is read
  * through the current lens; a row opens the changeset's review. Start
  * changeset starts and pins one; a draft row pins it, the pinned row leaves
  * it. A "?" beside the title explains the workflow.
@@ -53,7 +53,7 @@ export function ChangesetsPage() {
       <PageHeader
         title="Changesets"
         meta={<ChangesetExplainerButton className="-ml-2" />}
-        description="Staged writes planned through this lens. Review one, then commit it or send it back."
+        description="Staged changes planned through this lens. Review one, then commit it or send it back."
         actions={
           <Button size="sm" onClick={() => setStartOpen(true)}>
             <Plus className="size-3.5" />
@@ -84,7 +84,7 @@ export function ChangesetsPage() {
                 <TableHead className="w-24">State</TableHead>
                 <TableHead className="min-w-48">Note</TableHead>
                 <TableHead className="w-28">Ruleset</TableHead>
-                <TableHead className="w-16 text-right">Writes</TableHead>
+                <TableHead className="w-16 text-right">Objects</TableHead>
                 <TableHead className="w-44">Types</TableHead>
                 <TableHead className="w-20 text-right">Age</TableHead>
                 <TableHead className={cn('w-52', PIN_COLUMN)} aria-label="Work in a changeset" />
@@ -113,8 +113,8 @@ export function ChangesetsPage() {
                   <TableCell className="font-mono text-[12.5px]">
                     {item.ruleset ?? <span className="text-muted-foreground">—</span>}
                   </TableCell>
-                  <TableCell className="text-right text-[13px] tabular-nums" title={writesText(item.writeCount)}>
-                    {item.writeCount.toLocaleString('en-US')}
+                  <TableCell className="text-right text-[13px] tabular-nums" title={objectsText(item.objectCount)}>
+                    {item.objectCount.toLocaleString('en-US')}
                   </TableCell>
                   <TableCell className="truncate text-[13px] text-muted-foreground">
                     {typesText(item.types, item.notVisible, typeName)}

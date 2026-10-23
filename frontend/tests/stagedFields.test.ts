@@ -1,19 +1,26 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { StagedEntity, StagedWriteView } from '../src/api/types.ts'
-import { deletedInChangeset, stagedFields } from '../src/components/entity/stagedFields.ts'
+import type { StagedEntity, StagedObjectView, StagedValueView } from '../src/api/types.ts'
+import { stagedFields } from '../src/components/entity/stagedFields.ts'
 
-const write = (seq: number, operation: StagedWriteView['operation'], extra: Partial<StagedWriteView> = {}): StagedWriteView => ({
-  seq,
-  operation,
-  type: 'task',
-  id: 'T1',
-  createdAt: '2026-10-21T10:00:00Z',
+const value = (property: string, extra: Partial<StagedValueView> = {}): StagedValueView => ({
+  property,
   before: null,
   current: null,
   after: null,
   markers: [],
   ...extra,
+})
+
+const object = (action: StagedObjectView['action'], values: StagedValueView[]): StagedObjectView => ({
+  id: 'T1',
+  kind: 'entity',
+  type: 'task',
+  action,
+  firstTouchedAt: '2026-10-21T10:00:00Z',
+  name: 'T1',
+  markers: [],
+  values,
 })
 
 const entity = (values: Record<string, StagedEntity['entity'][string]>): StagedEntity['entity'] => ({
@@ -23,83 +30,43 @@ const entity = (values: Record<string, StagedEntity['entity'][string]>): StagedE
 })
 
 test('stagedFields: nothing staged on the entity sets nothing', () => {
-  assert.deepEqual(stagedFields({ entity: entity({ name: 'T1' }), deleted: false, writes: [] }), {})
+  assert.deepEqual(stagedFields({ entity: entity({ name: 'T1' }), deleted: false, object: null }), {})
 })
 
-test('stagedFields: the keys of creates and updates, with the folded value', () => {
+test('stagedFields: the staged values, with the value a commit would leave', () => {
   const fields = stagedFields({
     entity: entity({ name: 'T1 b', notes: { document: true, length: 17 }, status: 'open' }),
     deleted: false,
-    writes: [
-      write(1, 'update_entity', { before: { name: 'T1' }, current: { name: 'T1' }, after: { name: 'T1 a' } }),
-      write(2, 'update_entity', {
-        before: { name: 'T1', cost: 3 },
-        current: { name: 'T1', cost: 3 },
-        after: { name: 'T1 b', notes: { document: true, length: 17 }, cost: null },
-      }),
-    ],
+    object: object('update', [
+      value('name', { before: 'T1', current: 'T1', after: 'T1 b' }),
+      value('notes', { after: { document: true, length: 17 } }),
+      value('cost', { before: 3, current: 3, after: null }),
+    ]),
   })
   assert.deepEqual(fields, {
     name: { value: 'T1 b', drift: null },
     notes: { value: { document: true, length: 17 }, drift: null },
-    // Removed by a staged null: not in the folded entity.
+    // Removed by a staged null: not in the entity a commit would leave.
     cost: { value: null, drift: null },
   })
 })
 
 test('stagedFields: a staged create sets its values; a delete sets none', () => {
-  const fields = stagedFields({
-    entity: entity({ name: 'T9' }),
-    deleted: true,
-    writes: [write(1, 'create_entity', { after: { name: 'T9' } }), write(2, 'delete_entity')],
-  })
-  assert.deepEqual(fields, { name: { value: 'T9', drift: null } })
+  const create = stagedFields({ entity: entity({ name: 'T9' }), deleted: false, object: object('create', [value('name', { after: 'T9' })]) })
+  assert.deepEqual(create, { name: { value: 'T9', drift: null } })
+  assert.deepEqual(stagedFields({ entity: entity({ name: 'T1' }), deleted: true, object: object('delete', []) }), {})
 })
 
-test('stagedFields: drift marks the keys whose stored value changed, and stays on later writes', () => {
-  const drift = { kind: 'drift', message: 'Changed since this write was staged' }
+test('stagedFields: drift sits on the values it was found on', () => {
+  const drift = { kind: 'drift', message: 'Changed since it was staged' }
   const fields = stagedFields({
     entity: entity({ name: 'T1 b', status: 'done' }),
     deleted: false,
-    writes: [
-      write(1, 'update_entity', {
-        before: { name: 'T1', status: 'open' },
-        current: { name: 'T1 live', status: 'open' },
-        after: { name: 'T1 a', status: 'done' },
-        markers: [drift],
-      }),
-      write(2, 'update_entity', { before: { name: 'T1 live' }, current: { name: 'T1 live' }, after: { name: 'T1 b' } }),
-    ],
+    object: object('update', [
+      value('name', { before: 'T1', current: 'T1 live', after: 'T1 b', markers: [drift] }),
+      value('status', { before: 'open', current: 'open', after: 'done', markers: [{ kind: 'replay', message: 'x' }] }),
+    ]),
   })
   assert.deepEqual(fields.name, { value: 'T1 b', drift })
   assert.deepEqual(fields.status, { value: 'done', drift: null })
-})
-
-test('stagedFields: a drift with no visible change marks every key the write sets', () => {
-  const drift = { kind: 'drift', message: 'Changed since this write was staged' }
-  const fields = stagedFields({
-    entity: entity({ name: 'T1 a' }),
-    deleted: false,
-    writes: [
-      write(1, 'update_entity', {
-        before: { name: 'T1' },
-        current: { name: 'T1' },
-        after: { name: 'T1 a' },
-        markers: [drift, { kind: 'not_visible', message: 'Hidden' }],
-      }),
-    ],
-  })
-  assert.deepEqual(fields.name.drift, drift)
-})
-
-test('deletedInChangeset: any staged delete, also with a later write', () => {
-  const none: StagedEntity = { entity: entity({}), deleted: false, writes: [write(1, 'update_entity', { after: { name: 'x' } })] }
-  assert.equal(deletedInChangeset(none), false)
-  const later: StagedEntity = {
-    entity: entity({ name: 'x' }),
-    deleted: false,
-    writes: [write(1, 'delete_entity'), write(2, 'update_entity', { after: { name: 'x' } })],
-  }
-  assert.equal(deletedInChangeset(later), true)
-  assert.equal(deletedInChangeset({ entity: entity({}), deleted: true, writes: [write(1, 'delete_entity')] }), true)
 })

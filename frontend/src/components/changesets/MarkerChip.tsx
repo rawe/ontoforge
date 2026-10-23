@@ -2,7 +2,7 @@ import type { ChangesetMarker } from '@/api/types'
 import { markerLabel } from '@/components/changesets/changesets'
 import { cn } from '@/lib/utils'
 
-/** A staged write's marker as a chip, its message on hover: drift in amber, the others in red. */
+/** A staged object's or value's marker as a chip, its message on hover: drift in amber, the others in red. */
 export function MarkerChip({ marker }: { marker: ChangesetMarker }) {
   return (
     <span

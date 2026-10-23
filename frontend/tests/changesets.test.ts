@@ -1,14 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { ChangesetListItem, ChangesetViolation, StagedWriteView } from '../src/api/types.ts'
+import type { ChangesetListItem, ChangesetViolation, StagedObjectView, StagedValueView } from '../src/api/types.ts'
 import {
   changesetLabel,
-  changeText,
+  hasDrift,
   isCommittedDataKey,
   isVersionMismatch,
   lensDeletedText,
   markerLabel,
   MAX_NOTE_LENGTH,
+  objectOperation,
+  objectsText,
   operationLabel,
   operationsSummary,
   shortId,
@@ -18,13 +20,13 @@ import {
   submittedCount,
   targetText,
   typesText,
+  valueChangeText,
   valueText,
   violationLabel,
   violationLine,
   violationPrefix,
   violationsNote,
   violationsOf,
-  writesText,
 } from '../src/components/changesets/changesets.ts'
 import { qk } from '../src/api/queryKeys.ts'
 
@@ -35,7 +37,7 @@ const item = (id: string, state: ChangesetListItem['state'], lastChangeAt: strin
   version: 2,
   note: null,
   ruleset: null,
-  writeCount: 1,
+  objectCount: 1,
   createdAt: '2026-10-19T10:00:00.000Z',
   lastChangeAt,
   submittedAt: state === 'submitted' ? lastChangeAt : null,
@@ -44,18 +46,28 @@ const item = (id: string, state: ChangesetListItem['state'], lastChangeAt: strin
   notVisible: 0,
 })
 
-const write = (over: Partial<StagedWriteView>): StagedWriteView => ({
-  seq: 1,
-  operation: 'update_entity',
-  type: 'project',
+const object = (over: Partial<StagedObjectView>): StagedObjectView => ({
   id: 'p-2000000-0000',
-  createdAt: '2026-10-19T10:00:00.000Z',
+  kind: 'entity',
+  type: 'project',
+  action: 'update',
+  firstTouchedAt: '2026-10-19T10:00:00.000Z',
+  markers: [],
+  values: [],
+  ...over,
+})
+
+const value = (over: Partial<StagedValueView>): StagedValueView => ({
+  property: 'name',
   before: null,
   current: null,
   after: null,
   markers: [],
   ...over,
 })
+
+const drift = [{ kind: 'drift', message: 'Changed since it was staged' }]
+const doc = (length: number | null) => ({ document: true, length })
 
 test('stateLabel names both states', () => {
   assert.equal(stateLabel('draft'), 'draft')
@@ -74,7 +86,7 @@ test('submittedCount counts only submitted changesets: the sidebar count', () =>
   )
 })
 
-test('operation texts: the label, the summary by verb, the write count', () => {
+test('operation texts: the label, the summary by verb, the object count', () => {
   assert.equal(operationLabel('create_entity'), 'create entity')
   assert.equal(operationLabel('delete_relation'), 'delete relation')
   assert.equal(
@@ -82,8 +94,9 @@ test('operation texts: the label, the summary by verb, the write count', () => {
     'create 2 · update 1 · delete 2',
   )
   assert.equal(operationsSummary({}), '')
-  assert.equal(writesText(1), '1 write')
-  assert.equal(writesText(1240), '1,240 writes')
+  assert.equal(objectOperation({ action: 'update', kind: 'relation' }), 'update_relation')
+  assert.equal(objectsText(1), '1 staged object')
+  assert.equal(objectsText(1240), '1,240 staged objects')
 })
 
 test('lensDeletedText names the deleted changesets only when there are any', () => {
@@ -111,13 +124,14 @@ test('valueText quotes strings, stubs documents, prints the rest', () => {
 })
 
 test('targetText: entity names, new creates, relation ends, ids when unnamed', () => {
-  assert.equal(targetText(write({ name: 'P2' })), 'P2')
-  assert.equal(targetText(write({ operation: 'create_entity', name: 'P4' })), 'P4 (new)')
-  assert.equal(targetText(write({ name: null, id: '7f3a9c00-0000' })), '7f3a9c00…')
+  assert.equal(targetText(object({ name: 'P2' })), 'P2')
+  assert.equal(targetText(object({ action: 'create', name: 'P4' })), 'P4 (new)')
+  assert.equal(targetText(object({ name: null, id: '7f3a9c00-0000' })), '7f3a9c00…')
   assert.equal(
     targetText(
-      write({
-        operation: 'delete_relation',
+      object({
+        kind: 'relation',
+        action: 'delete',
         type: 'has_task',
         from: { id: 'p1', name: 'P1' },
         to: { id: 't3', name: null },
@@ -125,105 +139,50 @@ test('targetText: entity names, new creates, relation ends, ids when unnamed', (
     ),
     'P1 → t3',
   )
-  assert.equal(
-    targetText(write({ operation: 'update_relation', type: 'has_task', id: 'r-12345678-x', from: null, to: null })),
-    'r-123456…',
-  )
-  assert.equal(targetText(write({ type: null, id: null })), '—')
+  assert.equal(targetText(object({ type: null })), '—')
   assert.equal(shortId('abc'), 'abc')
 })
 
-test('changeText: before → after for updates, set values for creates, — for deletes', () => {
+test('valueChangeText: before → after on an update, the staged value on a create', () => {
+  const update = object({})
+  assert.equal(valueChangeText(update, value({ before: 'P2', current: 'P2', after: 'P2 Website' })), '"P2" → "P2 Website"')
+  // A key the target lacked, and a staged null that removes the property.
+  assert.equal(valueChangeText(update, value({ before: null, after: 3 })), 'empty → 3')
+  assert.equal(valueChangeText(update, value({ before: 'x', after: null })), '"x" → empty')
   assert.equal(
-    changeText(write({ before: { name: 'P2' }, current: { name: 'P2' }, after: { name: 'P2 Website' } })),
-    'name: "P2" → "P2 Website"',
+    valueChangeText(update, value({ before: doc(3), current: doc(3), after: doc(5) })),
+    'document (3 characters) → document (5 characters)',
   )
-  // A target this changeset creates has no before.
-  assert.equal(changeText(write({ before: null, after: { name: 'T9 b' } })), 'name: "T9 b"')
-  // A target gone since staging keeps its before.
-  assert.equal(changeText(write({ before: { name: 'P2' }, after: { name: 'x' } })), 'name: "P2" → "x"')
-  assert.equal(
-    changeText(write({ before: { body: { document: true, length: 3 } }, current: { body: { document: true, length: 3 } }, after: { body: { document: true, length: 5 } } })),
-    'body: document (3 characters) → document (5 characters)',
-  )
-  // A write staged without a recorded length.
-  assert.equal(
-    changeText(write({ before: { body: { document: true, length: null } }, after: { body: { document: true, length: 5 } } })),
-    'body: document → document (5 characters)',
-  )
-  // A create's parent relation is its own row: a relation create from the parent to the new child.
-  const parentRow = write({
-    operation: 'create_relation',
-    type: 'has_task',
-    from: { id: 'p1', name: 'P1' },
-    to: { id: 't9', name: 'T9' },
-    after: { phase: 'build' },
-  })
-  assert.equal(targetText(parentRow), 'P1 → T9')
-  assert.equal(changeText(parentRow), 'phase: "build"')
-  assert.equal(changeText(write({ operation: 'create_relation', type: 'has_task', after: {} })), '—')
-  assert.equal(changeText(write({ operation: 'delete_entity' })), '—')
-  assert.equal(changeText(write({ type: null })), 'Not visible through this lens')
+  // A before recorded without a length.
+  assert.equal(valueChangeText(update, value({ before: doc(null), after: doc(5) })), 'document → document (5 characters)')
+  assert.equal(valueChangeText(object({ action: 'create' }), value({ after: 'T9' })), '"T9"')
 })
 
-test('changeText: a drifted update also shows the current value of each key that changed', () => {
-  const drift = [{ kind: 'drift', message: 'Changed since this write was staged' }]
+test('valueChangeText: a drifted value also shows its current stored value', () => {
+  const update = object({})
   assert.equal(
-    changeText(
-      write({
-        before: { name: 'P3 Renamed', code: 'X' },
-        current: { name: 'P3 Renamed from human', code: 'X' },
-        after: { name: 'P3 Second', code: 'Y' },
-        markers: drift,
-      }),
-    ),
-    'name: "P3 Renamed" → "P3 Second" (now "P3 Renamed from human"); code: "X" → "Y"',
+    valueChangeText(update, value({ before: 'P3', current: 'P3 live', after: 'P3 b', markers: drift })),
+    '"P3" → "P3 b" (now "P3 live")',
   )
-  // A document on drift: its current length.
   assert.equal(
-    changeText(
-      write({
-        before: { body: { document: true, length: 3 } },
-        current: { body: { document: true, length: 9 } },
-        after: { body: { document: true, length: 5 } },
-        markers: drift,
-      }),
-    ),
-    'body: document (3 characters) → document (5 characters) (now document (9 characters))',
+    valueChangeText(update, value({ before: doc(3), current: doc(9), after: doc(5), markers: drift })),
+    'document (3 characters) → document (5 characters) (now document (9 characters))',
   )
   // Without a drift marker the current value is not shown.
-  assert.equal(
-    changeText(write({ before: { name: 'A' }, current: { name: 'B' }, after: { name: 'C' } })),
-    'name: "A" → "C"',
-  )
+  assert.equal(valueChangeText(update, value({ before: 'A', current: 'B', after: 'C' })), '"A" → "C"')
+  assert.equal(hasDrift(value({ markers: drift })), true)
+  assert.equal(hasDrift(value({ markers: [{ kind: 'replay', message: 'x' }] })), false)
 })
 
-test('stagedDocumentKeys: the document properties an entity create or update sets', () => {
-  const doc = (length: number) => ({ document: true, length })
-  assert.deepEqual(
-    stagedDocumentKeys(write({ after: { name: 'T1', notes: doc(12), summary: doc(3) }, before: { name: 'x', notes: doc(4), summary: doc(1) } })),
-    ['notes', 'summary'],
-  )
-  assert.deepEqual(stagedDocumentKeys(write({ operation: 'create_entity', after: { name: 'T9', notes: doc(5) } })), ['notes'])
+test('stagedDocumentKeys: the document values an entity create or update sets', () => {
+  const values = [value({ property: 'name', after: 'T1' }), value({ property: 'notes', after: doc(12) }), value({ property: 'summary', after: doc(3) })]
+  assert.deepEqual(stagedDocumentKeys(object({ values })), ['notes', 'summary'])
+  assert.deepEqual(stagedDocumentKeys(object({ action: 'create', values })), ['notes', 'summary'])
   // A staged null removes the text: nothing to read.
-  assert.deepEqual(stagedDocumentKeys(write({ after: { notes: null } })), [])
-  assert.deepEqual(stagedDocumentKeys(write({ operation: 'delete_entity' })), [])
-  assert.deepEqual(stagedDocumentKeys(write({ operation: 'update_relation', after: { notes: doc(5) } })), [])
-  assert.deepEqual(stagedDocumentKeys(write({ type: null, id: null, after: null })), [])
-  // A later write that deletes the entity: a commit leaves no text to read.
-  const update = write({ seq: 2, after: { notes: doc(5) } })
-  const deleted = write({ seq: 4, operation: 'delete_entity' })
-  assert.deepEqual(stagedDocumentKeys(update, [update, deleted]), [])
-  // A delete of another entity, of another type, or before the write does not count.
-  assert.deepEqual(
-    stagedDocumentKeys(update, [
-      write({ seq: 1, operation: 'delete_entity' }),
-      update,
-      write({ seq: 5, operation: 'delete_entity', id: 'other' }),
-      write({ seq: 6, operation: 'delete_entity', type: 'task' }),
-    ]),
-    ['notes'],
-  )
+  assert.deepEqual(stagedDocumentKeys(object({ values: [value({ property: 'notes', after: null })] })), [])
+  assert.deepEqual(stagedDocumentKeys(object({ action: 'delete' })), [])
+  assert.deepEqual(stagedDocumentKeys(object({ kind: 'relation', values })), [])
+  assert.deepEqual(stagedDocumentKeys(object({ type: null })), [])
 })
 
 test('markerLabel names the markers', () => {
@@ -234,10 +193,11 @@ test('markerLabel names the markers', () => {
   assert.equal(markerLabel('replay'), 'invalid value')
 })
 
-const v = (seq: number, kind: string, message: string): ChangesetViolation => ({ seq, kind, message })
+const v = (id: string | null, kind: string, message: string, property?: string): ChangesetViolation =>
+  property === undefined ? { object: id, kind, message } : { object: id, property, kind, message }
 
 test('violationsOf reads a rejection, and nothing else', () => {
-  const violations = [v(3, 'has_children', "Entity 'p3' has children")]
+  const violations = [v('p3', 'has_children', 'Still has children')]
   assert.deepEqual(violationsOf({ violations, total: 1 }), { violations, total: 1 })
   assert.deepEqual(violationsOf({ violations }), { violations, total: 1 })
   assert.equal(violationsOf({ fields: { note: 'x' } }), null)
@@ -245,30 +205,29 @@ test('violationsOf reads a rejection, and nothing else', () => {
   assert.equal(violationsOf(undefined), null)
 })
 
-test('violationLine numbers a write and names its row; seq 0 is the whole changeset', () => {
-  const writes = [
-    write({ seq: 1, name: 'P2 Live' }),
-    write({ seq: 2, operation: 'create_relation', type: 'has_task', from: { id: 'p1', name: 'P1' }, to: { id: 't3', name: 'T3' } }),
-    write({ seq: 3, type: null, id: null }),
+test('violationLine names the staged object and the property; a changeset-wide one starts with nothing', () => {
+  const objects = [
+    object({ id: 'p2', name: 'P2 Live' }),
+    object({ id: 'r1', kind: 'relation', action: 'create', type: 'has_task', from: { id: 'p1', name: 'P1' }, to: { id: 't3', name: 'T3' } }),
+    object({ id: 'x', type: null }),
   ]
   assert.equal(
-    violationLine(v(1, 'drift', 'Changed since this write was staged'), writes),
-    '#1 P2 Live: drift — Changed since this write was staged',
+    violationLine(v('p2', 'drift', 'Changed since it was staged', 'name'), objects),
+    'P2 Live · name: drift — Changed since it was staged',
   )
   assert.equal(
-    violationLine(v(2, 'two_parents', 'The target end already has a parent'), writes),
-    '#2 P1 → T3: two_parents — The target end already has a parent',
+    violationLine(v('r1', 'two_parents', 'The target end already has a parent'), objects),
+    'P1 → T3: two_parents — The target end already has a parent',
   )
   // Not visible, or not on the page shown: unnamed.
-  assert.equal(violationLine(v(3, 'not_visible', 'x'), writes), '#3 not_visible — x')
-  assert.equal(violationLine(v(15, 'has_children', 'Still has children')), '#15 has_children — Still has children')
+  assert.equal(violationLine(v('x', 'not_visible', 'x'), objects), 'not_visible — x')
+  assert.equal(violationLine(v('elsewhere', 'replay', 'bad', 'budget')), 'budget: replay — bad')
   assert.equal(
-    violationLine(v(0, 'ruleset_gone', "Ruleset 'agent-a' no longer exists")),
+    violationLine(v(null, 'ruleset_gone', "Ruleset 'agent-a' no longer exists")),
     "ruleset_gone — Ruleset 'agent-a' no longer exists",
   )
-  assert.equal(violationPrefix(v(1, 'drift', 'x'), writes), '#1 P2 Live: ')
-  assert.equal(violationPrefix(v(15, 'drift', 'x')), '#15 ')
-  assert.equal(violationPrefix(v(0, 'ruleset_gone', 'x'), writes), '')
+  assert.equal(violationPrefix(v('p2', 'missing', 'x'), objects), 'P2 Live: ')
+  assert.equal(violationPrefix(v(null, 'ruleset_gone', 'x'), objects), '')
 })
 
 test('violationLabel names the five ruleset kinds for people, and only them', () => {
@@ -289,23 +248,23 @@ test('violationLabel names the five ruleset kinds for people, and only them', ()
 
 test('violationsNote (R12): header, one line each, the rest counted, cut to 1,000', () => {
   assert.equal(
-    violationsNote([v(1, 'has_children', 'Still has children')], 1, [write({ seq: 1, operation: 'delete_entity', name: 'P3' })]),
-    'Commit rejected: 1 violation\n#1 P3: has_children — Still has children',
+    violationsNote([v('p3', 'has_children', 'Still has children')], 1, [object({ id: 'p3', action: 'delete', name: 'P3' })]),
+    'Commit rejected: 1 violation\nP3: has_children — Still has children',
   )
   assert.equal(
-    violationsNote([v(1, 'drift', 'a'), v(2, 'dangling', 'b')], 140),
-    'Commit rejected: 140 violations\n#1 drift — a\n#2 dangling — b\n… and 138 more',
+    violationsNote([v('a', 'drift', 'a', 'name'), v('b', 'dangling', 'b')], 140),
+    'Commit rejected: 140 violations\nname: drift — a\ndangling — b\n… and 138 more',
   )
   // The note keeps the raw kinds: an agent reads it.
   assert.equal(
-    violationsNote([v(3, 'outside_subtree', "Outside the anchor subtree of ruleset 'agent-a'"), v(0, 'ruleset_gone', 'gone')], 2),
-    "Commit rejected: 2 violations\n#3 outside_subtree — Outside the anchor subtree of ruleset 'agent-a'\nruleset_gone — gone",
+    violationsNote([v('c', 'outside_subtree', "Outside the anchor subtree of ruleset 'agent-a'"), v(null, 'ruleset_gone', 'gone')], 2),
+    "Commit rejected: 2 violations\noutside_subtree — Outside the anchor subtree of ruleset 'agent-a'\nruleset_gone — gone",
   )
-  const long = Array.from({ length: 100 }, (_, i) => v(i + 1, 'has_children', `Entity ${'x'.repeat(30)} has children`))
+  const long = Array.from({ length: 100 }, (_, i) => v(`e${i}`, 'has_children', `Entity ${'x'.repeat(30)} has children`))
   const note = violationsNote(long, 100)
   assert.equal(note.length, MAX_NOTE_LENGTH)
   assert.ok(note.endsWith('…'))
-  assert.ok(note.startsWith('Commit rejected: 100 violations\n#1 '))
+  assert.ok(note.startsWith('Commit rejected: 100 violations\nhas_children — '))
 })
 
 test('isVersionMismatch tells the stale version from other 409s', () => {
@@ -345,17 +304,11 @@ test('changesetLabel names a changeset by its number and note, else its note or 
   assert.equal(changesetLabel({ id: '7f3a9c00-1111-2222', note: null }), '7f3a9c00…')
 })
 
-test('stagedCreateValues folds the page\'s later updates of a created id into its values', () => {
-  const create = write({ seq: 2, operation: 'create_entity', id: 'p-new', after: { name: 'P9', budget: 5, phase: 'a' } })
-  const rename = write({ seq: 4, id: 'p-new', after: { name: 'P9b', phase: null } })
-  const otherId = write({ seq: 5, id: 'p-other', after: { name: 'X' } })
-  const earlier = write({ seq: 1, id: 'p-new', after: { name: 'never' } })
-  assert.deepEqual(stagedCreateValues(create, [earlier, create, rename, otherId]), { name: 'P9b', budget: 5 })
-  assert.deepEqual(stagedCreateValues(create), { name: 'P9', budget: 5, phase: 'a' })
-  // Deleted later on the page: nothing to extend.
-  const deletion = write({ seq: 6, operation: 'delete_entity', id: 'p-new' })
-  assert.equal(stagedCreateValues(create, [create, rename, deletion]), null)
-  // Only creates of a visible type.
-  assert.equal(stagedCreateValues(rename), null)
-  assert.equal(stagedCreateValues(write({ operation: 'create_entity', type: null, id: 'p-new' })), null)
+test('stagedCreateValues: the values of an entity this changeset creates', () => {
+  const values = [value({ property: 'name', after: 'P9' }), value({ property: 'budget', after: 5 })]
+  assert.deepEqual(stagedCreateValues(object({ action: 'create', values })), { name: 'P9', budget: 5 })
+  // Only entity creates of a visible type.
+  assert.equal(stagedCreateValues(object({ values })), null)
+  assert.equal(stagedCreateValues(object({ action: 'create', kind: 'relation', values })), null)
+  assert.equal(stagedCreateValues(object({ action: 'create', type: null })), null)
 })

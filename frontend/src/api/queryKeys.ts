@@ -17,7 +17,7 @@
  *   ['rulesets', ontologyKey]                        the ontology's rulesets (lensless)
  *   ['rulesets', ontologyKey, lensKey, rulesetKey]   one ruleset through a lens (mount root)
  *   ['changesets', ontologyKey, lensKey]             the lens's changesets
- *   ['changesets', ontologyKey, lensKey, id, params] one changeset's review read (a page of writes)
+ *   ['changesets', ontologyKey, lensKey, id, params] one changeset's review read (a page of objects)
  *   ['changesets', ontologyKey, lensKey, id, ['document', typeKey, entityId, propertyKey]]
  *                                                    the staged text of one document property
  *   ['changesets', ontologyKey, lensKey, id, ['entity', typeKey, entityId]]

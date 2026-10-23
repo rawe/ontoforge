@@ -129,7 +129,7 @@ export function useChangesets(ontologyKey: string | undefined, lensKey: string |
   })
 }
 
-/** One changeset's review read: a page of its writes by seq, with names and markers. */
+/** One changeset's review read: a page of its staged objects by first touch, with names and markers. */
 export function useChangeset(
   ontologyKey: string,
   lensKey: string,
@@ -148,9 +148,9 @@ export function useChangeset(
 }
 
 /**
- * One entity as the pinned changeset leaves it, with its own staged writes;
- * nothing pinned, nothing read. Under the changeset's key, so every stage and
- * unstage refreshes it.
+ * One entity as the pinned changeset leaves it, with its staged object;
+ * nothing pinned, nothing read. Under the changeset's key, so every change of
+ * the changeset refreshes it.
  */
 export function useStagedEntity(
   ontologyKey: string,

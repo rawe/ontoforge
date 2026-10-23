@@ -29,8 +29,8 @@ interface DocumentViewerDialogProps {
   lensKey: string
   /** `null` keeps the dialog closed. */
   target: DocumentViewerTarget | null
-  /** Set: show the text a commit of this changeset would leave (its last
-   * staged write of the property) instead of the stored text. */
+  /** Set: show the text a commit of this changeset would leave (its staged
+   * value of the property) instead of the stored text. */
   changesetId?: string
   onClose: () => void
 }

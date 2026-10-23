@@ -43,12 +43,15 @@ spec:
               port: valkey
             periodSeconds: 10
             failureThreshold: 6
+          # Headroom above maxmemory: client buffers (a published state can be
+          # 8 MiB) and Valkey's own overhead are not counted in it, and an
+          # OOM kill silently ends every conversation.
           resources:
             requests:
               cpu: 100m
-              memory: 300Mi
+              memory: 384Mi
             limits:
-              memory: 320Mi
+              memory: 512Mi
 ---
 apiVersion: v1
 kind: Service

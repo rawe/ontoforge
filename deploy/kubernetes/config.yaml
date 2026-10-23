@@ -1,5 +1,6 @@
-# The server's one env file, mounted as /config/ontoforge.env (ENV_FILE), and
-# the secrets that come in as environment variables, which win over the file.
+# The server's one env file, mounted as /config/ontoforge.env (ENV_FILE). The
+# secrets come in as environment variables from the Secret ontoforge-secrets,
+# created out of band (README), and win over the file.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -15,6 +16,8 @@ data:
     # DB_PASSWORD comes from the Secret ontoforge-secrets.
 
     # --- Conversations: shared by every replica ---
+    # Without Valkey: THREAD_STORE=memory (the default), and exactly one replica.
+    # A VALKEY_URL carrying a password belongs in the Secret instead.
     THREAD_STORE=valkey
     VALKEY_URL=redis://valkey:6379
 
@@ -30,17 +33,3 @@ data:
     # AI_MODEL=example-model
     # AI_BASE_URL=https://llm.example.org/v1
     # EMBEDDING_API_KEY and AI_API_KEY come from the Secret ontoforge-secrets.
----
-# Placeholder values: create the real Secret out of band (kubectl create secret,
-# a sealed secret or an external secret operator), never from a committed file.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: ontoforge-secrets
-  labels:
-    app.kubernetes.io/name: ontoforge-server
-type: Opaque
-stringData:
-  DB_PASSWORD: change-me
-  # EMBEDDING_API_KEY: change-me
-  # AI_API_KEY: change-me

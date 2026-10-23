@@ -77,7 +77,8 @@ services:
       - noeviction
     ports:
       - "26379:6379"
-    mem_limit: 320m
+    # Headroom above maxmemory, as deploy/kubernetes/valkey.yaml.
+    mem_limit: 512m
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 3s

@@ -5,13 +5,18 @@ not run in CI; adapt it to your cluster.
 
 | File | Contains |
 |---|---|
-| `config.yaml` | ConfigMap `ontoforge-config` holding the one env file, Secret `ontoforge-secrets` with placeholders |
+| `config.yaml` | ConfigMap `ontoforge-config` holding the one env file |
 | `server.yaml` | Deployment `ontoforge-server` (2 replicas), Service, PodDisruptionBudget |
 | `valkey.yaml` | Valkey as a 1-replica StatefulSet without a volume, and its Service |
 
 ```sh
+kubectl create secret generic ontoforge-secrets --from-literal=DB_PASSWORD=…   # once
 kubectl apply -f deploy/kubernetes/      # after editing the placeholders
 ```
+
+The Secret is created out of band (as above, a sealed secret or an external secret
+operator) and never from a committed file, so applying the directory never replaces it.
+It also carries `EMBEDDING_API_KEY`, `AI_API_KEY`, and a `VALKEY_URL` with a password.
 
 ## What it assumes
 
@@ -21,11 +26,16 @@ kubectl apply -f deploy/kubernetes/      # after editing the placeholders
   the image with that release, pinned.
 - **One env file.** The ConfigMap key `ontoforge.env` is mounted at `/config` and named by
   `ENV_FILE`. Secrets come from `ontoforge-secrets` as environment variables, which win
-  over the file. Create the real Secret out of band; the committed values are placeholders.
+  over the file.
 - **Conversations live in Valkey**, shared by every replica, so the Service needs no
-  session affinity. Valkey keeps nothing on disk: restarting it ends every open
+  session affinity. Without Valkey the server runs as exactly one replica with
+  `THREAD_STORE=memory` (the default); more than one replica requires deploying Valkey and
+  setting `THREAD_STORE=valkey` and `VALKEY_URL`. Nothing checks this: a pod cannot see
+  the other replicas. Valkey keeps nothing on disk: restarting it ends every open
   conversation (clients get `THREAD_NOT_FOUND` and start a new one) and nothing else.
   `noeviction` makes a full store refuse new turns instead of dropping conversations.
+  The pod's memory limit (512 Mi) stays well above `maxmemory` (256 MB): client buffers
+  are not counted in it, and an OOM kill would end every conversation.
 - **Probes**: `/livez` for startup (up to 5 minutes, which covers a storage upgrade at
   boot) and liveness, `/readyz` for readiness.
 - **Shutdown**: `preStop` sleeps 5 s so the Service stops routing to the pod, then
@@ -33,8 +43,8 @@ kubectl apply -f deploy/kubernetes/      # after editing the placeholders
   `terminationGracePeriodSeconds: 45` stays above preStop + drain + closing the stores.
   Raise it together with `SHUTDOWN_DRAIN_SECONDS`.
 - **Rolling update** with `maxUnavailable: 0`, and a PodDisruptionBudget keeping one
-  server up during node drains. While an older release and this one run side by side,
-  make no design changes.
+  server up during node drains. Releases before storage version 9 (7.1 and older) do not
+  keep the design revision and must not run beside this one: stop them before upgrading.
 
 ## Not included
 

@@ -9,6 +9,7 @@ export interface Settings {
   DB_USER: string;
   DB_PASSWORD: string;
   PORT: number;
+  SHUTDOWN_DRAIN_SECONDS: number;
 
   EMBEDDING_PROVIDER: string | null;
   EMBEDDING_MODEL: string;
@@ -186,6 +187,9 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     DB_USER: str(env, "DB_USER", "postgres"),
     DB_PASSWORD: str(env, "DB_PASSWORD", "ontoforge_dev"),
     PORT: int(env, "PORT", 8000),
+    // How long a stopping server lets running requests and chat streams
+    // finish before it cuts them.
+    SHUTDOWN_DRAIN_SECONDS: positiveInt(env, "SHUTDOWN_DRAIN_SECONDS", 20),
 
     EMBEDDING_PROVIDER: embeddingProvider,
     EMBEDDING_MODEL: str(env, "EMBEDDING_MODEL", "bge-m3"),

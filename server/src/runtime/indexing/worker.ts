@@ -81,12 +81,16 @@ export interface SearchWorkOptions {
   maxAttempts?: number;
   /** The delay after an item's `attempts`-th failure. */
   backoffMs?: (attempts: number) => number;
+  /** Stops the pass before its next ontology and cancels its embedding
+   * requests. A batch it stops is not failed: its claim lapses with the lease. */
+  signal?: AbortSignal;
 }
 
 interface ResolvedOptions {
   batchSize: number;
   maxAttempts: number;
   backoffMs: (attempts: number) => number;
+  signal: AbortSignal | undefined;
 }
 
 function resolve(options: SearchWorkOptions): ResolvedOptions {
@@ -94,6 +98,7 @@ function resolve(options: SearchWorkOptions): ResolvedOptions {
     batchSize: options.batchSize ?? settings.SEARCH_WORKER_BATCH,
     maxAttempts: options.maxAttempts ?? settings.SEARCH_MAX_ATTEMPTS,
     backoffMs: options.backoffMs ?? ((attempts) => backoffDelayMs(attempts)),
+    signal: options.signal,
   };
 }
 
@@ -141,6 +146,7 @@ export async function drainOnce(options: SearchWorkOptions = {}): Promise<number
       : (await getOntologyRegistry().listOntologies()).map((row) => row["key"] as string);
   let processed = 0;
   for (const ontologyKey of keys) {
+    if (resolved.signal?.aborted) break;
     try {
       processed += await processOntology(ontologyKey, resolved);
     } catch (exc) {
@@ -189,7 +195,7 @@ async function processOntology(ontologyKey: string, options: ResolvedOptions): P
         const written =
           generation === undefined
             ? 0
-            : await processGeneration(store, runtime, context, generation, items, provider);
+            : await processGeneration(store, runtime, context, generation, items, provider, options.signal);
         await store.completeQueueItems(items);
         if (generation?.state === "building") {
           await store.recordGenerationProgress(generationId, { done: items.length });
@@ -198,6 +204,8 @@ async function processOntology(ontologyKey: string, options: ResolvedOptions): P
           throughput[generation.representation].record(written, Date.now() - started);
         }
       } catch (exc) {
+        // Stopped, not failed: the claim lapses with its lease.
+        if (options.signal?.aborted) continue;
         await failItems(store, items, exc, options);
       }
     }
@@ -254,6 +262,7 @@ async function processGeneration(
   generation: SearchGenerationRecord,
   items: ClaimedSearchQueueItem[],
   provider: EmbeddingProvider | null,
+  signal: AbortSignal | undefined,
 ): Promise<number> {
   const index = context.indices.find((i) => i.searchIndexId === generation.searchIndexId);
   if (index === undefined) return 0;
@@ -311,7 +320,7 @@ async function processGeneration(
     if (provider === null || provider.modelId !== generation.modelId) {
       throw new Error(`No embedding provider for model ${generation.modelId}`);
     }
-    vectors = await provider.embedBatch(changed.map((c) => c.text));
+    vectors = await provider.embedBatch(changed.map((c) => c.text), signal);
   }
 
   const writes: SearchEntryWrite[] = changed.map(({ entityId, part, text, textHash }, i) => ({
@@ -472,7 +481,9 @@ async function composeOneRelation(
 // ---------------------------------------------------------------------------
 
 class SearchWorker {
-  private running = false;
+  /** Aborted by `stop`: ends the loop and cancels the pass's embedding. */
+  private readonly stopped = new AbortController();
+  private stopping: Promise<void> | null = null;
   private loop: Promise<void> | null = null;
   /** Ends the current sleep, if the worker sleeps. */
   private wake: (() => void) | null = null;
@@ -480,13 +491,22 @@ class SearchWorker {
   private woken = false;
   private subscription: SearchWorkSubscription | null = null;
 
+  private get running(): boolean {
+    return !this.stopped.signal.aborted;
+  }
+
   start(): void {
-    this.running = true;
     this.loop = this.run();
   }
 
-  async stop(): Promise<void> {
-    this.running = false;
+  /** Stop once; every caller waits for the same stop. */
+  stop(): Promise<void> {
+    this.stopping ??= this.halt();
+    return this.stopping;
+  }
+
+  private async halt(): Promise<void> {
+    this.stopped.abort();
     this.woken = true;
     this.wake?.();
     await this.loop;
@@ -501,7 +521,7 @@ class SearchWorker {
       this.woken = false;
       let processed = 0;
       try {
-        processed = await drainOnce();
+        processed = await drainOnce({ signal: this.stopped.signal });
       } catch (exc) {
         console.warn(`Search worker pass failed: ${message(exc)}`);
       }
@@ -569,11 +589,14 @@ export async function startSearchWorker(): Promise<void> {
   worker.start();
 }
 
-/** Stop the worker after the pass it is in. Shutdown only. */
+/** Stop the worker: its pass ends before the next ontology, its embedding
+ * requests are cancelled. Shutdown only; a second call waits for the same
+ * stop. */
 export async function stopSearchWorker(): Promise<void> {
   const running = worker;
-  worker = null;
-  await running?.stop();
+  if (running === null) return;
+  await running.stop();
+  if (worker === running) worker = null;
 }
 
 // ---------------------------------------------------------------------------

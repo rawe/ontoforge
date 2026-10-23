@@ -51,7 +51,8 @@ fi
 
 BACKEND_PID=""
 FRONTEND_PID=""
-POSTGRES_STARTED_BY_US=false
+# Root Compose services this run started, stopped again on exit.
+STARTED_SERVICES=()
 
 cleanup() {
     echo ""
@@ -69,10 +70,10 @@ cleanup() {
         echo "  Backend stopped"
     fi
 
-    if [ "$POSTGRES_STARTED_BY_US" = true ]; then
-        docker compose -f "$ROOT_DIR/docker-compose.yml" stop postgres >/dev/null 2>&1
-        echo "  PostgreSQL stopped"
-    fi
+    for service in ${STARTED_SERVICES[@]+"${STARTED_SERVICES[@]}"}; do
+        docker compose -f "$ROOT_DIR/docker-compose.yml" stop "$service" >/dev/null 2>&1
+        echo "  $service stopped"
+    done
 
     echo "Done."
 }
@@ -105,20 +106,47 @@ echo "Config: $ENV_FILE"
 grep -E '^(DB_BACKEND|EMBEDDING_PROVIDER|AI_PROVIDER|AI_MODEL|AI_REASONING_EFFORT)=' \
     "$ENV_FILE" | sed 's|^|  |' || true
 
-# --- PostgreSQL ---
-if docker compose -f "$ROOT_DIR/docker-compose.yml" ps postgres 2>/dev/null | grep -q "running"; then
-    echo "PostgreSQL already running"
-else
-    echo "Starting PostgreSQL..."
-    docker compose -f "$ROOT_DIR/docker-compose.yml" up -d postgres
-    POSTGRES_STARTED_BY_US=true
+# A variable's value for this run: the shell's, else the env file's.
+setting() {
+    if [ -n "${!1:-}" ]; then
+        echo "${!1}"
+    else
+        grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2- || true
+    fi
+}
 
-    echo -n "Waiting for PostgreSQL to be healthy"
-    until docker compose -f "$ROOT_DIR/docker-compose.yml" ps postgres 2>/dev/null | grep -q "healthy"; do
+# Start a root Compose service unless it runs, and wait until it is healthy.
+start_service() {
+    if docker compose -f "$ROOT_DIR/docker-compose.yml" ps --status running --services 2>/dev/null | grep -qx "$1"; then
+        echo "$1 already running"
+        return
+    fi
+    echo "Starting $1..."
+    docker compose -f "$ROOT_DIR/docker-compose.yml" up -d "$1"
+    STARTED_SERVICES+=("$1")
+    echo -n "Waiting for $1 to be healthy"
+    until docker compose -f "$ROOT_DIR/docker-compose.yml" ps "$1" 2>/dev/null | grep -q "healthy"; do
         echo -n "."
         sleep 2
     done
     echo " ready"
+}
+
+# --- PostgreSQL and Valkey ---
+# Each only when the run uses it: another DB_URI or VALKEY_URL (the scale
+# harness's, say) leaves the dev container alone. Memory stays the default
+# thread store; THREAD_STORE=valkey with VALKEY_URL=redis://localhost:6379
+# uses this Valkey.
+DB_URI_RUN="$(setting DB_URI)"
+VALKEY_URL_RUN="$(setting VALKEY_URL)"
+SERVICES_LINE=""
+if [ -z "$DB_URI_RUN" ] || [[ "$DB_URI_RUN" == *":5432/"* ]]; then
+    start_service postgres
+    SERVICES_LINE+="  PostgreSQL localhost:5432"$'\n'
+fi
+if [ -z "$VALKEY_URL_RUN" ] || [[ "$VALKEY_URL_RUN" == *":6379"* ]]; then
+    start_service valkey
+    SERVICES_LINE+="  Valkey    localhost:6379"$'\n'
 fi
 
 # --- Backend ---
@@ -147,7 +175,7 @@ echo "All services running:"
 echo "  Frontend  http://localhost:5173"
 echo "  Backend   http://localhost:8000"
 echo "  API docs  http://localhost:8000/docs"
-echo "  PostgreSQL localhost:5432"
+printf "%s" "$SERVICES_LINE"
 echo ""
 echo "Press Ctrl+C to stop all services."
 

@@ -115,9 +115,11 @@ export class ValkeyThreadStore implements ThreadStore {
   }
 
   /**
-   * Connects and checks the Valkey before the server uses it: reachable, and
-   * evicting nothing (`maxmemory-policy noeviction`). Any failure closes the
-   * client and throws, naming the URL without its password.
+   * Connects and checks the Valkey before the server uses it: reachable,
+   * evicting nothing (`maxmemory-policy noeviction`), and able to run the
+   * scripts (loaded here: a Valkey before 7.2, a Redis before 7 or a service
+   * that restricts scripting refuses them). Any failure closes the client and
+   * throws, naming the URL without its password.
    */
   static async connect(url: string, lifetimes: StoreLifetimes = DEFAULT_LIFETIMES): Promise<ValkeyThreadStore> {
     const client = new Valkey(url, {
@@ -140,6 +142,7 @@ export class ValkeyThreadStore implements ThreadStore {
       if (policy !== "noeviction") {
         throw new Error(`maxmemory-policy must be noeviction, is ${policy ?? "unknown"}`);
       }
+      for (const lua of Object.values(SCRIPTS)) await client.script("LOAD", lua);
     } catch (error) {
       client.disconnect();
       throw new Error(

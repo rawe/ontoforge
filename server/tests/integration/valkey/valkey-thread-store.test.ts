@@ -1,8 +1,8 @@
 /**
- * The Valkey thread store against a real, disposable Valkey
- * (`env/test-valkey.env`): the contract suite with real expiry, plus what
- * only Valkey can do to it — a flush or a restart under a running turn, a
- * full memory, a dropped connection, a misconfigured eviction policy.
+ * The Valkey thread store against the dev Valkey, in a logical database of
+ * its own (`env/test-valkey.env`): the contract suite with real expiry, plus
+ * what only Valkey can do to it — a flush or a restart under a running turn,
+ * a full memory, a dropped connection, a misconfigured eviction policy.
  * Fails loudly when that Valkey is down, like the database suite.
  */
 
@@ -18,8 +18,10 @@ import type { ThreadBinding, Turn } from "../../../src/runtime/threads/threadSto
 import { ValkeyThreadStore } from "../../../src/runtime/threads/valkeyThreadStore.js";
 import { SUITE_LIFETIMES, threadStoreSuite } from "../../runtime/threads/threadStoreSuite.js";
 
-/** The container `env/test-valkey.env` describes; one test restarts it. */
-const CONTAINER = "ontoforge-hs-valkey-test";
+/** The dev Valkey's container (`docker-compose.yml`); one test pauses and restarts it. */
+const CONTAINER = "ontoforge-valkey-dev";
+/** The logical database the suite owns: it flushes this one only. */
+const DATABASE = "/15";
 const BINDING: ThreadBinding = { ontologyKey: "fair", lensKey: "visitor", kind: "agents", assistantKey: "guide" };
 const bytes = (text: string) => new Uint8Array(Buffer.from(text));
 
@@ -27,6 +29,9 @@ if (settings.THREAD_STORE !== "valkey" || settings.VALKEY_URL === null) {
   throw new Error("The Valkey suite runs with env/test-valkey.env (THREAD_STORE=valkey, VALKEY_URL)");
 }
 const url = settings.VALKEY_URL;
+if (new URL(url).pathname !== DATABASE) {
+  throw new Error(`The Valkey suite flushes its database: VALKEY_URL must name database ${DATABASE.slice(1)}`);
+}
 
 /** A plain client for what the store never does: flushing, configuring, inspecting. */
 let admin: Valkey;
@@ -41,7 +46,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await admin.flushall();
+  await admin.flushdb();
 });
 
 threadStoreSuite("valkey", async (lifetimes) => ({
@@ -100,7 +105,7 @@ describe("valkey thread store", () => {
   it("a flush under a running turn: publish is gone, renew and release refused, nothing reappears", async () => {
     const { threadId } = await store.create(BINDING);
     const turn = (await store.begin(threadId, BINDING)) as Turn;
-    await admin.flushall();
+    await admin.flushdb();
     expect(await store.publish(turn, bytes("late"))).toBe("gone");
     expect(await store.renew(turn)).toBe(false);
     await store.release(turn);
@@ -144,7 +149,12 @@ describe("valkey thread store", () => {
 
   it("a command on a dropped connection fails as a storage error; the client reconnects", async () => {
     const { threadId } = await store.create(BINDING);
-    await admin.client("KILL", "TYPE", "normal", "SKIPME", "yes");
+    // The suite's own connections only: those on its database, but this one.
+    const own = String(await admin.client("ID"));
+    const list = String(await admin.client("LIST"));
+    for (const [, id] of list.matchAll(/^id=(\d+) .* db=15 /gm)) {
+      if (id !== own) await admin.client("KILL", "ID", id!);
+    }
     await expect(store.read(threadId, BINDING)).rejects.toThrow(StoreError);
     await vi.waitFor(async () => expect(await store.read(threadId, BINDING)).toEqual({ state: null }), { timeout: 5000 });
   });
@@ -177,12 +187,24 @@ describe("valkey thread store", () => {
     await vi.waitFor(() => admin.ping(), { timeout: 5000 });
   }, 60_000);
 
-  it("refuses to connect to a Valkey that evicts or cannot be reached, without leaking the password", async () => {
+  it("refuses to connect to a Valkey that evicts, cannot run the scripts or cannot be reached, without leaking the password", async () => {
     await admin.config("SET", "maxmemory-policy", "allkeys-lru");
     try {
       await expect(ValkeyThreadStore.connect(url)).rejects.toThrow(/maxmemory-policy must be noeviction, is allkeys-lru/);
     } finally {
       await admin.config("SET", "maxmemory-policy", "noeviction");
+    }
+    // A Valkey that may not run scripts (as some managed services restrict them).
+    await admin.acl("SETUSER", "noscripts", "on", ">secret", "~*", "+@all", "-@scripting");
+    try {
+      const target = new URL(url);
+      target.username = "noscripts";
+      target.password = "secret";
+      const restricted = ValkeyThreadStore.connect(target.toString());
+      await expect(restricted).rejects.toThrow(/is not usable: .*NOPERM/);
+      await expect(restricted).rejects.not.toThrow(/secret/);
+    } finally {
+      await admin.acl("DELUSER", "noscripts");
     }
     const unreachable = ValkeyThreadStore.connect("redis://user:secret@127.0.0.1:1");
     await expect(unreachable).rejects.toThrow(/Valkey at redis:\/\/user:\*\*\*@127\.0\.0\.1:1/);

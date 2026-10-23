@@ -2,7 +2,7 @@
  * TanStack Query key scheme (see master spec):
  *
  *   ['auth', 'me']                                   mode + signed-in user (auth gate)
- *   ['users', 'list', search]                        user search (Users page, Access page)
+ *   ['users', 'list', search, limit]                 user search (Users page, Access page)
  *   ['users', 'detail', userId]                      one user with its assignments
  *   ['access', ontologyKey]                          every assignment within an ontology
  *   ['features']                                     staleTime Infinity
@@ -42,7 +42,7 @@ export const qk = {
   auth: { me: ['auth', 'me'] as const },
   /** Without arguments: every user query (list and detail). */
   users: ['users'] as const,
-  userList: (search: string) => ['users', 'list', search] as const,
+  userList: (search: string, limit: number) => ['users', 'list', search, limit] as const,
   user: (userId: string) => ['users', 'detail', userId] as const,
   access: (ontologyKey: string) => ['access', ontologyKey] as const,
 

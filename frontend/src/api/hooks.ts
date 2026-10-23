@@ -3,6 +3,7 @@ import { queryOptions, useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { displayLabel, nameProperties } from '@/lib/displayLabel'
 import { matchedViaText } from '@/lib/matchedVia'
+import * as auth from './auth'
 import * as model from './model'
 import * as registry from './registry'
 import * as server from './server'
@@ -11,6 +12,11 @@ import { listNavigators } from './navigators'
 import { listRetrievers } from './retrievers'
 import { qk } from './queryKeys'
 import type { AssistantKind, EntityInstance, Matched } from './types'
+
+/** The authentication mode and the signed-in user; refetched when a request answers 401. */
+export function useAuthMe() {
+  return useQuery({ queryKey: qk.auth.me, queryFn: auth.getMe })
+}
 
 /** Where clients reach the server, and its version — fetched once, never stale. */
 export function useServerInfo() {

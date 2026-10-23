@@ -21,6 +21,7 @@ import { useSidebarCollapsed } from '@/components/layout/sidebarCollapsed'
 import { NavItem, SidebarToggle } from '@/components/layout/SidebarItems'
 import { SurfaceToggle } from '@/components/layout/SurfaceToggle'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { UserMenu } from '@/components/auth/UserMenu'
 import { TypeDot } from '@/components/TypeChip'
 import {
   DropdownMenu,
@@ -298,6 +299,7 @@ export function Sidebar({
       >
         <SidebarToggle />
         <ThemeToggle />
+        <UserMenu />
       </div>
     </aside>
   )

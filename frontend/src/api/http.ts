@@ -3,7 +3,8 @@
  *
  * Every error answers in one envelope: `{"error": {"code", "message",
  * "details"?}}`. Anything else is reported as a bare `HTTP_ERROR`.
- * 204 responses resolve to `undefined`.
+ * 204 responses resolve to `undefined`. A 401 means the session ended: the
+ * handler set with `onUnauthenticated` hears of it (the sign-in screen).
  */
 
 export class ApiError extends Error {
@@ -46,7 +47,15 @@ export class ApiError extends Error {
   }
 }
 
+let unauthenticated: (() => void) | null = null
+
+/** Called whenever a response answers 401; the app shows its sign-in screen. */
+export function onUnauthenticated(handler: () => void) {
+  unauthenticated = handler
+}
+
 export async function parseError(res: Response): Promise<ApiError> {
+  if (res.status === 401) unauthenticated?.()
   let body: unknown
   try {
     body = await res.json()

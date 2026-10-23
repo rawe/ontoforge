@@ -10,6 +10,7 @@ import { NavItem, SidebarToggle } from '@/components/layout/SidebarItems'
 import { SurfaceToggle } from '@/components/layout/SurfaceToggle'
 import { useDocumentTitle } from '@/components/layout/useDocumentTitle'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { UserMenu } from '@/components/auth/UserMenu'
 import { Button } from '@/components/ui/button'
 import { readString, remove, storageKeys } from '@/lib/storage'
 import { cn } from '@/lib/utils'
@@ -80,6 +81,7 @@ export function StudioLayout() {
         >
           <SidebarToggle />
           <ThemeToggle />
+          <UserMenu />
         </div>
       </aside>
       <main className="min-w-0 flex-1 overflow-y-auto">

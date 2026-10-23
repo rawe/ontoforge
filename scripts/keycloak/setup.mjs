@@ -222,6 +222,13 @@ async function ensureRealm() {
 /** The audience every OntoForge access token carries. A realm optional scope: every client
  * — dynamically registered MCP clients included — may ask for it, and only a client that asks
  * gets a token OntoForge accepts. */
+/** In the token's `scope` claim, which the server requires; shown on the consent screen. */
+const SCOPE_ATTRIBUTES = {
+  'include.in.token.scope': 'true',
+  'display.on.consent.screen': 'true',
+  'consent.screen.text': 'Use OntoForge as you',
+};
+
 async function ensureAudienceScope() {
   const scopes = await api('GET', `/${REALM}/client-scopes`);
   let scope = scopes.find((s) => s.name === AUDIENCE);
@@ -241,7 +248,7 @@ async function ensureAudienceScope() {
       name: AUDIENCE,
       description: 'OntoForge API audience',
       protocol: 'openid-connect',
-      attributes: { 'include.in.token.scope': 'false', 'display.on.consent.screen': 'false' },
+      attributes: SCOPE_ATTRIBUTES,
       protocolMappers: [mapper],
     });
     scope = (await api('GET', `/${REALM}/client-scopes`)).find((s) => s.name === AUDIENCE);
@@ -254,6 +261,10 @@ async function ensureAudienceScope() {
     } else {
       await api('PUT', `/${REALM}/client-scopes/${scope.id}/protocol-mappers/models/${current.id}`, { ...current, config: mapper.config });
     }
+    await api('PUT', `/${REALM}/client-scopes/${scope.id}`, {
+      ...scope,
+      attributes: { ...scope.attributes, ...SCOPE_ATTRIBUTES },
+    });
     step(`client scope '${AUDIENCE}': reconciled`);
   }
   const defaults = await api('GET', `/${REALM}/default-default-client-scopes`);
@@ -455,6 +466,7 @@ async function verify(secrets, subjects) {
   const audience = [access.aud].flat();
   if (!audience.includes(AUDIENCE)) fail(`the service token's audience is ${JSON.stringify(access.aud)}, not '${AUDIENCE}'`);
   if (access.iss !== ISSUER) fail(`the service token's issuer is '${access.iss}'`);
+  if (!String(access.scope ?? '').split(' ').includes(AUDIENCE)) fail(`the service token's scope lacks '${AUDIENCE}'`);
   if (access.sub !== subjects.service) fail('the service token names another subject');
   // Exactly one of everything the script owns: a rerun must never duplicate.
   const clients = await api('GET', `/${REALM}/clients?max=1000`);

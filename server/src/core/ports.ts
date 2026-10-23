@@ -980,6 +980,10 @@ export interface ClaimedSearchQueueItem extends SearchQueueItem {
    * item again while it is leased changes it, and completing the claim
    * then leaves the item queued: the newer write is never lost. */
   token: string;
+  /** The lease this claim wrote — opaque, the claim's fencing token. A
+   * later claim of the item (a takeover of an expired lease) writes a
+   * later one, and the effects of the claim it replaced are dropped. */
+  lease: string;
 }
 
 /** The last failed attempt of a queued item. */
@@ -1445,24 +1449,38 @@ export interface SearchIndexStore {
 
   /** Insert or replace entries of one generation by identity. False (and
    * nothing written) when the generation is no longer building or ready.
-   * An identity may appear once per call. */
-  upsertEntries(generationId: string, entries: SearchEntryWrite[]): Promise<boolean>;
+   * An identity may appear once per call. With `claim` (the worker's
+   * claimed items of the generation), only the entities whose claimed
+   * items the claim still all holds are written; the others were taken
+   * over or withdrawn by a write, and stay as they are. */
+  upsertEntries(
+    generationId: string,
+    entries: SearchEntryWrite[],
+    claim?: ClaimedSearchQueueItem[],
+  ): Promise<boolean>;
 
   /** The stored text hashes of those of `parts` that exist. */
   readEntryHashes(generationId: string, parts: SearchEntryPart[]): Promise<SearchEntryHash[]>;
 
-  /** Delete entries of one generation by identity; the count deleted. */
-  deleteEntries(generationId: string, parts: SearchEntryPart[]): Promise<number>;
+  /** Delete entries of one generation by identity; the count deleted.
+   * `claim` as for `upsertEntries`. */
+  deleteEntries(
+    generationId: string,
+    parts: SearchEntryPart[],
+    claim?: ClaimedSearchQueueItem[],
+  ): Promise<number>;
 
   /** Delete one generation's entries of one entity, part kind and group
    * whose part id is not in `keepPartIds` — the passages past a shortened
-   * document, the relations that are gone. The count deleted. */
+   * document, the relations that are gone. The count deleted. `claim` as
+   * for `upsertEntries`. */
   deleteEntityPartsExcept(
     generationId: string,
     entityId: string,
     partKind: SearchPartKind,
     groupNo: number,
     keepPartIds: string[],
+    claim?: ClaimedSearchQueueItem[],
   ): Promise<number>;
 
   /** Delete an entity's entries in every generation of the ontology. */
@@ -1503,7 +1521,13 @@ export interface SearchIndexStore {
    * expired), attempts below `maxAttempts`, of a building or ready
    * generation — keyword items first, then oldest first. Semantic items
    * are claimed only for generations of `semanticModelId` (none when
-   * null). Items another worker holds are skipped, never waited for. */
+   * null). Items another worker holds are skipped, never waited for.
+   *
+   * A claim holds an item while the item still carries the claim's lease.
+   * Settling a claim (complete, fail, release) and the entry writes made
+   * for it act only on what it holds, and only for entities whose claimed
+   * items it all holds; what it lost was taken over, or withdrawn by a
+   * write that deleted it. */
   claimQueueItems(options: {
     limit: number;
     leaseSeconds: number;
@@ -1512,15 +1536,21 @@ export interface SearchIndexStore {
   }): Promise<ClaimedSearchQueueItem[]>;
 
   /** Remove processed items — unless one was enqueued again since its
-   * claim; that one stays, released for the next claim. */
-  completeQueueItems(items: ClaimedSearchQueueItem[]): Promise<void>;
+   * claim; that one stays, released for the next claim, like every other
+   * item still held. The count removed, and the count no longer held. */
+  completeQueueItems(items: ClaimedSearchQueueItem[]): Promise<{ completed: number; lost: number }>;
 
   /** Record a failed attempt: attempts + 1, the error, release the lease
-   * and hold each item back by its delay. */
+   * and hold each item back by its delay. The attempts of each item
+   * charged, and the count no longer held. */
   failQueueItems(
     failures: { item: ClaimedSearchQueueItem; delayMs: number }[],
     error: string,
-  ): Promise<void>;
+  ): Promise<{ attempts: number[]; lost: number }>;
+
+  /** Release the items still held, charging nothing: the next claim takes
+   * them at once. The count released. */
+  releaseQueueItems(items: ClaimedSearchQueueItem[]): Promise<number>;
 
   /** Pending and failed counts per generation that has queued items. */
   queueStats(maxAttempts: number): Promise<SearchQueueStats[]>;

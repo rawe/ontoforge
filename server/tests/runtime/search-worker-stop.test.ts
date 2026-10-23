@@ -1,8 +1,8 @@
 /**
  * A stopped search pass: it claims nothing more, and the batch it was in
- * when stopped is not failed — no attempt is charged, the claim lapses with
- * its lease. Stores are stubs; the pipeline itself is covered by
- * `tests/integration/postgres/search-pipeline.test.ts`.
+ * when stopped is not failed but released — no attempt is charged, the
+ * next claim takes it at once. Stores are stubs; the pipeline itself is
+ * covered by `tests/integration/postgres/search-pipeline.test.ts`.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,6 +11,7 @@ const store = {
   listGenerations: vi.fn(),
   completeQueueItems: vi.fn(),
   failQueueItems: vi.fn(),
+  releaseQueueItems: vi.fn(),
   recordGenerationProgress: vi.fn(),
   queueStats: vi.fn(),
   finishGeneration: vi.fn(),
@@ -45,11 +46,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   store.claimQueueItems.mockResolvedValue([item]);
   store.listGenerations.mockResolvedValue([generation]);
+  store.failQueueItems.mockResolvedValue({ attempts: [1], lost: 0 });
+  store.releaseQueueItems.mockResolvedValue(1);
   store.queueStats.mockResolvedValue([]);
 });
 
 describe("a stopped search pass", () => {
-  it("does not fail the batch it was stopped in", async () => {
+  it("releases the batch it was stopped in instead of failing it", async () => {
     const stop = new AbortController();
     runtime.getEntityById.mockImplementation(async () => {
       stop.abort();
@@ -58,12 +61,25 @@ describe("a stopped search pass", () => {
     await drainOnce({ ontologyKey: "o", signal: stop.signal });
     expect(store.failQueueItems).not.toHaveBeenCalled();
     expect(store.completeQueueItems).not.toHaveBeenCalled();
+    expect(store.releaseQueueItems).toHaveBeenCalledWith([item]);
+  });
+
+  it("releases a claimed generation it reaches after the stop", async () => {
+    const stop = new AbortController();
+    store.claimQueueItems.mockImplementation(async () => {
+      stop.abort();
+      return [item];
+    });
+    await drainOnce({ ontologyKey: "o", signal: stop.signal });
+    expect(runtime.getEntityById).not.toHaveBeenCalled();
+    expect(store.releaseQueueItems).toHaveBeenCalledWith([item]);
   });
 
   it("fails the same batch when it was not stopped", async () => {
     runtime.getEntityById.mockRejectedValue(new Error("connection reset"));
     await drainOnce({ ontologyKey: "o", signal: new AbortController().signal });
     expect(store.failQueueItems).toHaveBeenCalledTimes(1);
+    expect(store.releaseQueueItems).not.toHaveBeenCalled();
   });
 
   it("claims nothing once stopped", async () => {

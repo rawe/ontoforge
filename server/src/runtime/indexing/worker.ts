@@ -16,6 +16,9 @@
  * 4. Complete the claim. On failure: attempts + 1 and exponential backoff;
  *    after `SEARCH_MAX_ATTEMPTS` the item counts as failed and stays
  *    queued for status until a rebuild or a new write of its entity.
+ *    Every write and settlement is fenced by the claim's lease: what a
+ *    claim taken over (or withdrawn by a delete) would do is dropped. A
+ *    batch stopped by shutdown is released, not failed.
  * 5. Finish every building generation whose queue is empty: it becomes
  *    the one queries read.
  *
@@ -82,7 +85,8 @@ export interface SearchWorkOptions {
   /** The delay after an item's `attempts`-th failure. */
   backoffMs?: (attempts: number) => number;
   /** Stops the pass before its next ontology and cancels its embedding
-   * requests. A batch it stops is not failed: its claim lapses with the lease. */
+   * requests. A batch it stops is not failed but released: the next claim,
+   * here or in another process, takes it at once. */
   signal?: AbortSignal;
 }
 
@@ -189,6 +193,10 @@ async function processOntology(ontologyKey: string, options: ResolvedOptions): P
     );
     const byGeneration = groupBy(claimed, (item) => item.generationId);
     for (const [generationId, items] of byGeneration) {
+      if (options.signal?.aborted) {
+        await store.releaseQueueItems(items);
+        continue;
+      }
       const generation = generations.get(generationId);
       const started = Date.now();
       try {
@@ -196,16 +204,20 @@ async function processOntology(ontologyKey: string, options: ResolvedOptions): P
           generation === undefined
             ? 0
             : await processGeneration(store, runtime, context, generation, items, provider, options.signal);
-        await store.completeQueueItems(items);
-        if (generation?.state === "building") {
-          await store.recordGenerationProgress(generationId, { done: items.length });
+        const { completed, lost } = await store.completeQueueItems(items);
+        reportLost(generationId, lost, items.length);
+        if (generation?.state === "building" && completed > 0) {
+          await store.recordGenerationProgress(generationId, { done: completed });
         }
         if (generation !== undefined) {
           throughput[generation.representation].record(written, Date.now() - started);
         }
       } catch (exc) {
-        // Stopped, not failed: the claim lapses with its lease.
-        if (options.signal?.aborted) continue;
+        // Stopped, not failed: released for the next claim.
+        if (options.signal?.aborted) {
+          await store.releaseQueueItems(items);
+          continue;
+        }
         await failItems(store, items, exc, options);
       }
     }
@@ -222,14 +234,26 @@ async function failItems(
 ): Promise<void> {
   const error = message(exc);
   console.warn(`Search entries of generation ${items[0]!.generationId} failed: ${error}`);
-  await store.failQueueItems(
+  const { attempts, lost } = await store.failQueueItems(
     items.map((item) => ({ item, delayMs: options.backoffMs(item.attempts + 1) })),
     error,
   );
-  const exhausted = items.filter((item) => item.attempts + 1 >= options.maxAttempts).length;
+  reportLost(items[0]!.generationId, lost, items.length);
+  const exhausted = attempts.filter((count) => count >= options.maxAttempts).length;
   if (exhausted > 0) {
     await store.recordGenerationProgress(items[0]!.generationId, { failed: exhausted });
   }
+}
+
+/** One line when a claim lost items — taken over by another worker after
+ * its lease expired, or withdrawn by a write that deleted them: what this
+ * worker did for them was dropped. */
+function reportLost(generationId: string, lost: number, claimed: number): void {
+  if (lost === 0) return;
+  console.warn(
+    `Search claim lost: ${lost} of ${claimed} items of generation ${generationId} ` +
+      `taken over or withdrawn, effects dropped`,
+  );
 }
 
 /** Switch in every building generation with nothing left in its queue. A
@@ -254,7 +278,8 @@ async function finishBuilds(store: SearchIndexStore, maxAttempts: number): Promi
 
 /** Compose, hash-skip, embed and write the claimed items of one
  * generation. The count of entries written. Throws on any failure — the
- * caller fails the whole batch. */
+ * caller fails the whole batch. Every write carries the claim, so the
+ * store drops it for entities the claim no longer holds. */
 async function processGeneration(
   store: SearchIndexStore,
   runtime: RuntimeStore,
@@ -278,7 +303,7 @@ async function processGeneration(
     }
     for (const { partKind, groupNo, keep } of composed.replace) {
       deletions.push(() =>
-        store.deleteEntityPartsExcept(generation.generationId, entityId, partKind, groupNo, keep),
+        store.deleteEntityPartsExcept(generation.generationId, entityId, partKind, groupNo, keep, items),
       );
     }
     if (composed.gone.length > 0) {
@@ -286,6 +311,7 @@ async function processGeneration(
         store.deleteEntries(
           generation.generationId,
           composed.gone.map((part) => ({ entityId, ...part })),
+          items,
         ),
       );
     }
@@ -337,7 +363,7 @@ async function processGeneration(
     textHash,
     embedding: representation === "semantic" ? vectors[i]! : null,
   }));
-  if (!(await store.upsertEntries(generation.generationId, writes))) {
+  if (!(await store.upsertEntries(generation.generationId, writes, items))) {
     // The generation retired meanwhile: nothing left to do for it.
     return 0;
   }

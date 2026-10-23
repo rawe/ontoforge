@@ -54,7 +54,16 @@
  * transaction, then completes or fails the claim. An item's
  * `enqueued_at` is the claim's token: enqueueing an item again while it
  * is leased refreshes it, and the completion of the older claim leaves it
- * queued.
+ * queued. Its `lease_until` fences the claim: a claim takes an item only
+ * once `lease_until < now()` and writes `now()` plus the lease time, so
+ * every claim of an item writes a later lease than the one it replaces,
+ * and the lease identifies the claim (servers of the previous release
+ * claim the same way). Entry writes and the claim's completion, failure
+ * and release first lock the queue rows still carrying the claim's lease
+ * (`holdClaim`) and act only for entities whose claimed items are all
+ * still held — a takeover skips the locked rows, a write that deletes or
+ * re-enqueues one waits — so a worker whose claim was taken over, or
+ * whose entity was deleted while it composed, changes nothing.
  */
 
 import { toSql } from "pgvector";
@@ -143,11 +152,14 @@ const LIVE_STATES = "('building', 'ready')";
 /** A list of claimed items as a row source, aliased `c`. */
 const CLAIMED_SOURCE =
   "jsonb_to_recordset($1::jsonb) AS c(generation_id uuid, entity_id uuid, part_kind text, " +
-  "group_no integer, part_id text, token text, delay_ms double precision)";
+  "group_no integer, part_id text, token text, lease text, delay_ms double precision)";
 
 const CLAIMED_MATCH =
   "q.generation_id = c.generation_id AND q.entity_id = c.entity_id AND q.part_kind = c.part_kind " +
   "AND q.group_no = c.group_no AND q.part_id = c.part_id";
+
+/** The claimed item still carries the claim's lease: the claim holds it. */
+const CLAIM_HELD = "q.lease_until = c.lease::timestamptz";
 
 /** The table one generation's entries live in. */
 function partitionName(generationId: string): string {
@@ -648,6 +660,13 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     // build holds no lock a modeling change would wait for. Writers to the
     // table wait; a superseding change drops the table only afterwards.
     const built = await this.tx(async (querier) => {
+      // One build per generation at a time: a process that finds another
+      // building it skips, and a later pass finds the structure built.
+      const lock = await querier.query(
+        `SELECT pg_try_advisory_xact_lock(hashtextextended('ontoforge.search-build.' || $1, 0)) AS taken`,
+        [generationId],
+      );
+      if (lock.rows[0]?.["taken"] !== true) return false;
       const exists = await querier.query(`SELECT to_regclass($1) IS NOT NULL AS present`, [table]);
       if (exists.rows[0]?.["present"] !== true) return false;
       if (generation.representation === "semantic") {
@@ -745,11 +764,16 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   // Entries
   // ------------------------------------------------------------------
 
-  async upsertEntries(generationId: string, entries: SearchEntryWrite[]): Promise<boolean> {
+  async upsertEntries(
+    generationId: string,
+    writes: SearchEntryWrite[],
+    claim?: ClaimedSearchQueueItem[],
+  ): Promise<boolean> {
     if (!isUuid(generationId)) return false;
     return this.tx(async (querier) => {
       const generation = await liveGeneration(querier, generationId);
       if (generation === null) return false;
+      const entries = await heldOnly(querier, writes, claim);
       if (entries.length === 0) return true;
       const semantic = generation.representation === "semantic";
       if (semantic) {
@@ -822,14 +846,20 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     });
   }
 
-  async deleteEntries(generationId: string, parts: SearchEntryPart[]): Promise<number> {
+  async deleteEntries(
+    generationId: string,
+    parts: SearchEntryPart[],
+    claim?: ClaimedSearchQueueItem[],
+  ): Promise<number> {
     if (!isUuid(generationId) || parts.length === 0) return 0;
     return this.tx(async (querier) => {
       if ((await liveGeneration(querier, generationId)) === null) return 0;
+      const held = await heldOnly(querier, parts, claim);
+      if (held.length === 0) return 0;
       const result = await querier.query(
         `DELETE FROM ${partitionName(generationId)} e USING ${PARTS_SOURCE}
          WHERE e.generation_id = $1 AND ${PART_MATCH}`,
-        [generationId, partsJson(parts)],
+        [generationId, partsJson(held)],
       );
       return result.rowCount;
     });
@@ -841,10 +871,12 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     partKind: SearchPartKind,
     groupNo: number,
     keepPartIds: string[],
+    claim?: ClaimedSearchQueueItem[],
   ): Promise<number> {
     if (!isUuid(generationId) || !isUuid(entityId)) return 0;
     return this.tx(async (querier) => {
       if ((await liveGeneration(querier, generationId)) === null) return 0;
+      if ((await heldOnly(querier, [{ entityId }], claim)).length === 0) return 0;
       const result = await querier.query(
         `DELETE FROM ${partitionName(generationId)}
          WHERE entity_id = $1 AND part_kind = $2 AND group_no = $3
@@ -1023,7 +1055,7 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
        FROM claimable c
        WHERE ${CLAIMED_MATCH}
        RETURNING q.generation_id, q.entity_id, q.part_kind, q.group_no, q.part_id, q.attempts,
-                 q.enqueued_at::text AS token, c.representation`,
+                 q.enqueued_at::text AS token, q.lease_until::text AS lease, c.representation`,
       [options.limit, options.maxAttempts, options.semanticModelId, options.leaseSeconds],
     );
     return result.rows.map((row) => ({
@@ -1035,47 +1067,58 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
       representation: row["representation"] as SearchRepresentation,
       attempts: row["attempts"] as number,
       token: row["token"] as string,
+      lease: row["lease"] as string,
     }));
   }
 
-  async completeQueueItems(items: ClaimedSearchQueueItem[]): Promise<void> {
-    if (items.length === 0) return;
-    await this.tx(async (querier) => {
-      const claimed = claimedJson(items.map((item) => ({ item, delayMs: 0 })));
-      await querier.query(
+  async completeQueueItems(
+    items: ClaimedSearchQueueItem[],
+  ): Promise<{ completed: number; lost: number }> {
+    if (items.length === 0) return { completed: 0, lost: 0 };
+    return this.tx(async (querier) => {
+      const held = await holdClaim(querier, items);
+      const done = items.filter((item) => held.entities.has(item.entityId));
+      const removed = await querier.query(
         `DELETE FROM search_queue q USING ${CLAIMED_SOURCE}
-         WHERE ${CLAIMED_MATCH} AND q.enqueued_at = c.token::timestamptz`,
-        [claimed],
+         WHERE ${CLAIMED_MATCH} AND ${CLAIM_HELD} AND q.enqueued_at = c.token::timestamptz`,
+        [claimedJson(done.map((item) => ({ item, delayMs: 0 })))],
       );
-      // Enqueued again while leased: keep it, released for the next claim.
-      await querier.query(
-        `UPDATE search_queue q SET lease_until = NULL FROM ${CLAIMED_SOURCE} WHERE ${CLAIMED_MATCH}`,
-        [claimed],
-      );
+      // Enqueued again while leased, or of an entity partly lost: released
+      // for the next claim.
+      await releaseHeld(querier, items);
+      return { completed: removed.rowCount, lost: items.length - held.count };
     });
   }
 
   async failQueueItems(
     failures: { item: ClaimedSearchQueueItem; delayMs: number }[],
     error: string,
-  ): Promise<void> {
-    if (failures.length === 0) return;
-    await this.tx(async (querier) => {
-      const claimed = claimedJson(failures);
+  ): Promise<{ attempts: number[]; lost: number }> {
+    if (failures.length === 0) return { attempts: [], lost: 0 };
+    const items = failures.map(({ item }) => item);
+    return this.tx(async (querier) => {
+      const held = await holdClaim(querier, items);
       // An item enqueued again since its claim already starts afresh.
-      await querier.query(
+      const charged = await querier.query(
         `UPDATE search_queue q
          SET attempts = q.attempts + 1, last_error = $2, last_error_at = now(), lease_until = NULL,
              not_before = now() + make_interval(secs => c.delay_ms / 1000.0)
          FROM ${CLAIMED_SOURCE}
-         WHERE ${CLAIMED_MATCH} AND q.enqueued_at = c.token::timestamptz`,
-        [claimed, error.slice(0, 2000)],
+         WHERE ${CLAIMED_MATCH} AND ${CLAIM_HELD} AND q.enqueued_at = c.token::timestamptz
+         RETURNING q.attempts`,
+        [claimedJson(failures.filter(({ item }) => held.entities.has(item.entityId))), error.slice(0, 2000)],
       );
-      await querier.query(
-        `UPDATE search_queue q SET lease_until = NULL FROM ${CLAIMED_SOURCE} WHERE ${CLAIMED_MATCH}`,
-        [claimed],
-      );
+      await releaseHeld(querier, items);
+      return {
+        attempts: charged.rows.map((row) => row["attempts"] as number),
+        lost: items.length - held.count,
+      };
     });
+  }
+
+  async releaseQueueItems(items: ClaimedSearchQueueItem[]): Promise<number> {
+    if (items.length === 0) return 0;
+    return this.tx((querier) => releaseHeld(querier, items));
   }
 
   async queueStats(maxAttempts: number): Promise<SearchQueueStats[]> {
@@ -1383,9 +1426,59 @@ function claimedJson(failures: { item: ClaimedSearchQueueItem; delayMs: number }
       group_no: item.groupNo,
       part_id: item.partId,
       token: item.token,
+      lease: item.lease,
       delay_ms: delayMs,
     })),
   );
+}
+
+/**
+ * Lock the claimed items that still carry the claim's lease, for the rest
+ * of the transaction: a takeover skips them, a write that deletes or
+ * re-enqueues one waits. Their count, and the entities whose claimed
+ * items are all held — only for those does the claim still act. Once lost,
+ * an item is never held again: a later claim writes a later lease.
+ */
+async function holdClaim(
+  querier: Querier,
+  claim: ClaimedSearchQueueItem[],
+): Promise<{ count: number; entities: Set<string> }> {
+  const held = await querier.query(
+    `SELECT q.entity_id FROM search_queue q, ${CLAIMED_SOURCE}
+     WHERE ${CLAIMED_MATCH} AND ${CLAIM_HELD}
+     FOR UPDATE OF q`,
+    [claimedJson(claim.map((item) => ({ item, delayMs: 0 })))],
+  );
+  const missing = new Map<string, number>();
+  for (const item of claim) missing.set(item.entityId, (missing.get(item.entityId) ?? 0) + 1);
+  for (const row of held.rows) {
+    const entityId = row["entity_id"] as string;
+    missing.set(entityId, missing.get(entityId)! - 1);
+  }
+  const entities = new Set([...missing].filter(([, count]) => count === 0).map(([entityId]) => entityId));
+  return { count: held.rowCount, entities };
+}
+
+/** Of `values` (entries or parts), those of the entities the claim still
+ * holds; all of them without a claim. */
+async function heldOnly<T extends { entityId: string }>(
+  querier: Querier,
+  values: T[],
+  claim: ClaimedSearchQueueItem[] | undefined,
+): Promise<T[]> {
+  if (claim === undefined || values.length === 0) return values;
+  const { entities } = await holdClaim(querier, claim);
+  return values.filter((value) => entities.has(value.entityId));
+}
+
+/** Clear the lease of the claimed items still held; the count released. */
+async function releaseHeld(querier: Querier, claim: ClaimedSearchQueueItem[]): Promise<number> {
+  const released = await querier.query(
+    `UPDATE search_queue q SET lease_until = NULL FROM ${CLAIMED_SOURCE}
+     WHERE ${CLAIMED_MATCH} AND ${CLAIM_HELD}`,
+    [claimedJson(claim.map((item) => ({ item, delayMs: 0 })))],
+  );
+  return released.rowCount;
 }
 
 function toSettings(row: Row): SearchSettings {

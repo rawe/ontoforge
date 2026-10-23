@@ -6,7 +6,9 @@
  * It keeps the store contract exactly as the Valkey adapter does: states
  * are copied in and out, every write after `begin` is checked against the
  * turn's token, and a missing thread is never recreated. Expiry is applied
- * on every call; no timer runs. Its memory is bounded by `maxBytes`: a
+ * on every call; no timer runs. Activity moves a thread to the end of the
+ * map, so the map is ordered by deadline and expiry stops at the first
+ * live thread. Its memory is bounded by `maxBytes`: a
  * `create` or `publish` that would exceed it is refused, and no valid
  * thread is ever removed to make room — the analogue of Valkey's
  * `noeviction`.
@@ -68,7 +70,7 @@ export class MemoryThreadStore implements ThreadStore {
     this.reserve(entryBytes(null));
     const threadId = randomUUID();
     const copy = { ...binding };
-    this.entries.set(threadId, { binding: copy, state: null, deadline: this.clock() + this.lifetimes.idleMs, lease: null });
+    this.touch(threadId, { binding: copy, state: null, deadline: 0, lease: null });
     return { threadId, binding: { ...copy } };
   }
 
@@ -84,7 +86,7 @@ export class MemoryThreadStore implements ThreadStore {
     if (entry.lease && entry.lease.until > now) return "busy";
     const token = randomUUID();
     entry.lease = { token, until: now + this.lifetimes.leaseMs };
-    entry.deadline = now + this.lifetimes.idleMs;
+    this.touch(threadId, entry);
     return { threadId, token, state: entry.state?.slice() ?? null };
   }
 
@@ -104,8 +106,8 @@ export class MemoryThreadStore implements ThreadStore {
     const before = entryBytes(entry.state);
     this.reserve(entryBytes(state) - before);
     entry.state = state.slice();
-    entry.deadline = this.clock() + this.lifetimes.idleMs;
     entry.lease = null;
+    this.touch(turn.threadId, entry);
     return "published";
   }
 
@@ -116,14 +118,21 @@ export class MemoryThreadStore implements ThreadStore {
 
   async close(): Promise<void> {}
 
-  /** Removes every thread past its idle deadline, freeing its bytes. */
+  /** Renews a thread's idle deadline and moves it to the end of the map. */
+  private touch(threadId: string, entry: Entry): void {
+    entry.deadline = this.clock() + this.lifetimes.idleMs;
+    this.entries.delete(threadId);
+    this.entries.set(threadId, entry);
+  }
+
+  /** Removes every thread past its idle deadline, freeing its bytes: the
+   * oldest first, up to the first that is live. */
   private expire(): void {
     const now = this.clock();
     for (const [threadId, entry] of this.entries) {
-      if (entry.deadline <= now) {
-        this.entries.delete(threadId);
-        this.bytes -= entryBytes(entry.state);
-      }
+      if (entry.deadline > now) break;
+      this.entries.delete(threadId);
+      this.bytes -= entryBytes(entry.state);
     }
   }
 

@@ -13,6 +13,7 @@ import { useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { useRulesets, useRulesetView, useServerInfo } from '@/api/hooks'
 import type { Ruleset } from '@/api/types'
+import { useAccess } from '@/components/auth/useAccess'
 import { rulesetOptionLabel, rulesetRuleLines, type RulesetRuleLine } from '@/components/rulesets/rulesets'
 import { WriteAccessIcon } from '@/components/rulesets/WriteAccessChip'
 import { Button } from '@/components/ui/button'
@@ -307,7 +308,10 @@ export function ConnectPanel({ ontologyKey, lensKey }: { ontologyKey: string; le
   const info = useServerInfo()
   const [client, setClient] = useState<ConnectClient>('claude-code')
   const [servers, setServers] = useState<McpServerKey[]>(MCP_SERVERS.map((s) => s.key))
-  const [withToken, setWithToken] = useState(false)
+  // With sign-in on, OAuth-capable clients sign in through the browser instead of a token header.
+  const { authentication } = useAccess()
+  const [tokenChoice, setWithToken] = useState(false)
+  const withToken = tokenChoice && !authentication
   const rulesets = useRulesets(ontologyKey).data ?? []
   const [rulesetChoice, setRulesetChoice] = useState<string | null>(null)
   // A chosen ruleset that has since been deleted falls back to the plain lens.
@@ -361,12 +365,14 @@ export function ConnectPanel({ ontologyKey, lensKey }: { ontologyKey: string; le
             ))}
           </TabsList>
         </Tabs>
-        <div className="flex items-center gap-2">
-          <Switch id="connect-with-token" checked={withToken} onCheckedChange={setWithToken} />
-          <Label htmlFor="connect-with-token" className="text-[12px]">
-            Authorization header
-          </Label>
-        </div>
+        {!authentication && (
+          <div className="flex items-center gap-2">
+            <Switch id="connect-with-token" checked={withToken} onCheckedChange={setWithToken} />
+            <Label htmlFor="connect-with-token" className="text-[12px]">
+              Authorization header
+            </Label>
+          </div>
+        )}
       </div>
 
       {info.isPending ? (
@@ -394,6 +400,12 @@ export function ConnectPanel({ ontologyKey, lensKey }: { ontologyKey: string; le
           ) : (
             <>
               <p className="text-[12px] text-muted-foreground">{CLIENTS[client].where}</p>
+              {authentication && (
+                <p className="text-[12px] text-muted-foreground">
+                  OAuth-capable clients sign in through the browser on first connect; no token
+                  header is needed.
+                </p>
+              )}
               <CodeBlock
                 label={CLIENTS[client].file}
                 code={buildSnippet(client, {

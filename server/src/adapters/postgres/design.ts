@@ -13,7 +13,7 @@
  */
 
 import type { DesignRevision } from "../../core/ports.js";
-import { runQuery, type Querier } from "./errors.js";
+import { runQuery, toStoreError, type Querier } from "./errors.js";
 import { quoteIdent } from "./oql/bindings.js";
 
 /** How long a transaction waits for the design lock (and, after it, for
@@ -24,8 +24,10 @@ const LOCK_KEY = "hashtextextended('ontoforge.design.' || current_schema(), 0)";
 
 const REVISION = "SELECT ontology_id, revision FROM design_revision";
 
+/** A namespace without its revision row is a storage failure: every
+ * namespace gets one at creation or by storage step 9. */
 function toDesign(row: Record<string, unknown> | undefined): DesignRevision {
-  if (row === undefined) throw new Error("The namespace has no design revision");
+  if (row === undefined) throw toStoreError(new Error("The namespace has no design revision"));
   return { ontologyId: row["ontology_id"] as string, revision: row["revision"] as number };
 }
 

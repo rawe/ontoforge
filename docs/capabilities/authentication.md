@@ -1,151 +1,178 @@
 # Authentication
 
-With authentication on, every caller signs in through an OpenID provider, and OntoForge
-decides what each one may do from roles it assigned itself. With it off — the default —
-every caller may do everything.
+When authentication is enabled, callers authenticate through an OpenID Connect provider.
+OntoForge determines their permissions from roles assigned within OntoForge.
+Authentication is disabled by default; in that mode, requests are trusted and role
+checks are skipped.
 
-Vocabulary: [../README.md](../README.md#access). How a request is identified and judged:
-[../architecture.md](../architecture.md#authentication-and-authorization). The switch and
-its settings: the configuration table of the repository README.
+[Access terminology](../README.md#access).
+[Authentication and authorization architecture](../architecture.md#authentication-and-authorization).
+[Authentication configuration](../../README.md#authentication).
 
 ## What it does
 
-The provider says who a caller is; OntoForge says what it may do. A person or a service is
-a **principal**, bound to one verified identity at the provider — its issuer and subject —
-and never found by an email address or a name. What it may do are its **assignments**:
-each one role, held on the platform, on one ontology or on one lens. A principal without
-an assignment signs in and may do nothing.
+The provider authenticates callers; OntoForge determines their permissions. A
+**principal** represents a person or service and is identified by a verified
+issuer–subject pair, never by an email address or name. An **assignment** grants a
+principal one role on the platform, on a specific ontology, or on a specific lens. A
+principal without any assignments can sign in but has no access to ontologies or lenses.
 
-Every server of one deployment runs with authentication on, or every one with it off.
+All servers in a deployment must use the same authentication mode.
 
 ## Signing in
 
-Three ways in, one principal behind each:
+Three authentication methods resolve callers to principals:
 
-- **The web client.** Sign-in sends the browser to the provider and back to the server,
-  which starts a session and returns the person to the address they started from. The
-  server is the provider's client and keeps the session; the browser holds only a cookie.
-  A session ends after a configured time unused and at the latest 24 hours after sign-in;
-  each sign-in starts a new one. Signing out ends it and leads to the provider's sign-out
-  page. A request carrying the cookie that may change something must come from the
-  deployment's own address.
-- **REST with a bearer token.** An access token the provider issued for OntoForge's
-  audience and scope, in an `Authorization: Bearer` header. An ID token, a token of
-  another issuer, audience or scope, an expired one or one not signed by the provider's
-  keys is refused. A
-  request with a token is judged by the token alone, never by a cookie.
+- **The web client.** Sign-in redirects the browser to the provider and then back to the
+  server. The server starts a session and redirects the browser to the original page.
+  The server acts as the provider's client and stores the session; the browser stores
+  only a session cookie. Sessions expire after the configured period of inactivity or
+  24 hours after sign-in, whichever comes first. Each sign-in starts a new session.
+  Signing out ends the session and redirects the browser to the provider's sign-out
+  page, if available. State-changing requests authenticated by the session cookie must
+  originate from the deployment's own origin.
+- **REST with a bearer token.** Send an access token issued by the provider for
+  OntoForge's audience and required scope in the `Authorization` header using the
+  `Bearer` scheme. OntoForge rejects ID tokens, tokens with an invalid issuer or
+  audience, tokens missing the required scope, expired tokens, and tokens without a
+  valid signature from the provider. When a request includes a bearer token,
+  authentication uses that token alone and ignores any session cookie.
 - **MCP over OAuth.** The MCP mounts take bearer tokens only. A client without one is told
   where to sign in, registers itself at the provider and signs its user in through the
   browser. Its token names OntoForge's audience only when the client asks for OntoForge's
-  scope, which the mount advertises. A client connects through the deployment's public
-  address, because the resource it signs in for is named after that address.
+  scope, which the mount advertises. Clients must connect through the deployment's
+  public URL because that URL forms part of the OAuth resource identifier.
 
-**First sign-in.** The first time an identity signs in — in the browser or with a token —
-OntoForge creates its principal, with no role; concurrent first sign-ins create one. Later
-sign-ins find it by its identity. A browser sign-in refreshes the name, email and username
-shown, never the status or the roles. Nothing is linked by email: an identity at another
-provider, or a subject the provider reissued, is another principal.
+**First sign-in.** When a previously unknown identity first signs in, through the
+browser or with a bearer token, OntoForge creates a principal without any roles, except
+for the configured administrator described below. Concurrent first sign-ins for the
+same identity create only one principal. Later sign-ins resolve the principal by its
+issuer–subject pair. Browser sign-in updates the displayed name, email, and username.
+Status and roles remain unchanged, except for the configured administrator described
+below. Identities are never linked by email: a different issuer or subject value
+identifies a different principal.
 
-**The configured administrator.** The deployment's configuration names one identity at
-the provider. Whenever it signs in, it is made active and Platform Administrator if it is
-not. That is how the first administrator comes to exist, and how a platform whose
-administrators are locked out is recovered.
+**The configured administrator.** The deployment configuration identifies one account
+at the provider. On sign-in, OntoForge ensures that this principal is active and has the
+Platform Administrator role. This creates the initial administrator and provides a
+recovery path if the other administrators are locked out.
 
-**Disabled principals.** A disabled principal is refused on its next request, whichever
-way it came in. Its browser sign-in starts no session and says the account is disabled;
-signing in never enables it again. Disabling the account at the provider, or resetting
-its password there, does not end an OntoForge session; disabling it in OntoForge does.
+**Disabled principals.** Requests to protected resources are rejected when the principal
+is disabled, whether authentication uses a bearer token or a session cookie. Browser
+sign-in does not create a session and reports that the account is disabled. Signing in
+does not reactivate the principal, except for the configured administrator described
+above. Disabling an account or resetting its password at the provider does not
+invalidate an existing OntoForge session. Disabling the principal in OntoForge prevents
+further access to protected resources.
 
-Every request reads the principal's status and roles anew, on whichever server serves it,
-so a granted or revoked role and a changed status hold from the next request on.
+Each authenticated request to a protected resource loads the principal's current status
+and role assignments, regardless of which server handles it. Changes take effect on the
+next such request.
 
 ## Roles
 
-| Role | Held on | Allows |
+| Role | Scope | Permissions |
 |---|---|---|
-| Platform Administrator | The platform | [User management](#user-management) in full. Sees every ontology and every lens listed, to assign roles, but reads no design and no data by itself |
-| Ontology Creator | The platform | Creating ontologies; the creator becomes the administrator of each one it creates. Nothing in ontologies it did not create |
-| Ontology Administrator | One ontology | Its whole design — every modeling route and the modeling MCP mount — its rulesets, renaming and deleting it, and granting Reader and Writer on its lenses. No data without a lens role, which it may grant itself |
-| Reader | One lens | Everything that reads through the lens: schema, data, documents, search, queries, saved queries, assistants, its own threads and the lens's changesets; the lens's own design and the ontology's rulesets |
-| Writer | One lens | What a Reader may, and every write the lens allows: data, documents, staging, submitting and committing changesets |
+| Platform Administrator | The platform | Grants full access to [user management](#user-management). Allows the principal to list every ontology and lens to assign roles, but does not itself grant access to designs or data. |
+| Ontology Creator | The platform | Allows the principal to create ontologies. The creator is assigned the Ontology Administrator role on each new ontology. This role alone grants no access to other ontologies. |
+| Ontology Administrator | One ontology | Grants full access to the ontology's design through all modeling routes and the modeling MCP mount. Allows the principal to manage the ontology's rulesets, rename or delete the ontology, and grant Reader or Writer roles on its lenses. Access to data requires a lens role, which the principal may assign to itself. |
+| Reader | One lens | Allows read operations through the lens, including access to schema, data, documents, search, queries, saved queries, assistants, the principal's own threads, and changesets. Also grants read access to the lens's design and the ontology's rulesets. |
+| Writer | One lens | Grants all Reader permissions and allows all write operations permitted by the lens, including writes to data and documents and staging, checking, submitting, and committing changesets. |
 
-No role includes another. A principal holds at most one of Reader and Writer on a lens:
-granting one replaces the other. A Writer stays within everything the lens and the
-[ruleset](rulesets.md) of its URL limit: on a ruleset mount, the lower of the role and the
-ruleset's write access applies. Agents stay read-only whatever the role.
+Role assignments are independent: holding one role does not automatically assign
+another. A Writer nevertheless has all Reader permissions on the same lens. A principal
+can hold either Reader or Writer on a lens, but not both; granting one replaces the
+other. Writer permissions remain subject to the lens's restrictions and, on a ruleset
+mount, the [ruleset](rulesets.md) selected by the URL. The more restrictive of the role's
+and the ruleset's write permissions applies. Agents remain read-only regardless of the
+caller's role.
 
 ## What a caller sees
 
-An ontology a caller holds no role in, and a lens it holds no role on, answer not found,
-exactly as a key that does not exist: a caller learns no key it may not use. Administrators
-are the exception: a Platform Administrator knows every ontology and an Ontology
-Administrator every lens of its ontology. A caller refused something it may know of is
-forbidden: a Reader writing, a member of an ontology reading its design, an administrator
-reading data through a lens it holds no role on.
+Requests for ontologies or lenses that the caller is not allowed to discover return
+Not Found, just like requests for nonexistent resources. This avoids revealing their
+keys. Platform Administrators can discover every ontology and lens; Ontology
+Administrators can discover every lens in the ontologies they administer. If the caller
+can discover a resource but lacks permission for the requested operation, the request
+returns Forbidden. Examples include a Reader attempting a write, an ontology member
+without the Ontology Administrator role reading the ontology's design, or an
+administrator accessing data through a lens without a lens role.
 
-The list of ontologies holds those the caller holds a role in, every one for a Platform
-Administrator. The list of an ontology's lenses holds those the caller holds Reader or
-Writer on, every one for an administrator. A Reader or Writer reads a lens's design as
-its runtime serves it, without the inclusions it cannot serve; an administrator reads it
-as designed. A runtime MCP mount lists a Reader only the tools a ruleset with write
-access `none` lists ([rulesets.md](rulesets.md#write-access-through-the-interfaces)) and
-refuses a write tool it calls anyway.
+The ontology list contains ontologies in which the caller holds an Ontology
+Administrator role or a role on a lens; Platform Administrators see all ontologies. An
+ontology's lens list contains lenses on which the caller holds Reader or Writer;
+Platform Administrators and that ontology's administrators see all its lenses. Readers
+and Writers see the runtime view of a lens's design, with unsupported inclusions
+omitted. Ontology Administrators see the full design. For Readers, a runtime MCP mount
+lists only the tools available with ruleset write access `none`
+([Ruleset interfaces](rulesets.md#write-access-through-the-interfaces)). Attempts to call
+write tools are rejected.
 
-Without credentials, a caller reaches only sign-in, the deployment description
-(`/api/server`), the probes, the API description and the MCP resource metadata;
-everything else is refused as unauthenticated.
+Unauthenticated callers can access the authentication endpoints, the deployment
+description (`/api/server`), health probes, the API documentation, and MCP resource
+metadata. Protected endpoints reject requests without valid credentials.
 
 ## Ontologies and lenses
 
-Creating an ontology needs the Ontology Creator role, and its creator becomes its first
-Ontology Administrator. That role is written first: if it cannot be, no ontology is
-created, so none is ever left without an administrator. The modeling MCP mount's
-`ensure_ontology` creates nothing: a missing ontology is created through REST or the web
-client.
+Creating an ontology requires the Ontology Creator role. The creator is assigned the
+Ontology Administrator role on the new ontology. This assignment is stored before the
+ontology is created; if storing it fails, creation is aborted. This prevents creation of
+an ontology without an administrator. The modeling MCP tool `ensure_ontology` does not
+create missing ontologies; use REST or the web client to create them.
 
-Deleting an ontology or a lens, through any interface, removes the assignments held on
-it. One a failure leaves behind grants and reveals nothing: a role on a lens that no
-longer exists counts for nothing, and an ontology or lens created again under the same
-key is a new one, with no roles.
+Deleting an ontology or lens through any interface also removes its role assignments.
+If a failure leaves an assignment behind, that assignment grants neither access to nor
+visibility of the deleted resource. A role on a deleted lens has no effect. Recreating an
+ontology or lens under the same key creates a new resource that does not inherit the
+deleted resource's assignments.
 
 ## Threads and changesets
 
-An assistant thread belongs to the principal that started it as well as to its
-assistant: to anyone else, even a Writer of the same lens, its id is unknown
-([threads.md](threads.md)). Changesets stay shared within their lens: every Reader reads
-and checks them, every Writer may stage into, submit and commit them
-([changesets.md](changesets.md)).
+An assistant thread is associated with both its assistant and the principal that
+started it. Other principals, including Writers on the same lens, cannot access it and
+receive Not Found ([Threads](threads.md)). Changesets are shared within their lens:
+Readers can read them; Writers can also stage changes, run checks, submit them, and
+commit them, subject to the lens's and the selected ruleset's restrictions
+([Changesets](changesets.md)).
 
 ## User management
 
-Only with authentication on.
+User management is available only when authentication is enabled.
 
-- A **Platform Administrator** finds every principal by name, email or username, sees all
-  its roles, disables and enables it, admits services, and grants and revokes every role.
-  Only a Platform Administrator grants Ontology Administrator and the platform roles.
-- An **Ontology Administrator** finds principals as well, sees of each only the roles
-  within the ontologies it administers, and grants and revokes Reader and Writer on those
-  ontologies' lenses. It lists who holds which role in each of its ontologies.
-- No one disables their own account. Neither the last active Platform Administrator nor
-  the [configured administrator](#signing-in) can be disabled or stripped of the role:
-  the configured one would only be restored at its next sign-in, so the configuration is
-  changed first.
-- A **service** — a client signing in with its own credentials, not a person's — is a
-  principal like a person. It may be admitted under its subject before its first call, so
-  it can be given roles ahead. Otherwise its first call creates a role-less principal,
-  which admitting turns into the service as long as it holds no role.
-- Every change of a status or a role, and every role removed with a deleted ontology or
-  lens, is recorded with who made it.
+- A **Platform Administrator** can search for principals by name, email, or username;
+  view all their role assignments; enable or disable them; register services using **Admit service**; and grant
+  or revoke any role. Only Platform Administrators can grant the Ontology Administrator
+  role or platform-level roles.
+- An **Ontology Administrator** can also search for principals, but can view only their
+  role assignments within the ontologies the administrator manages. The administrator
+  can grant and revoke Reader and Writer roles on those ontologies' lenses and list role
+  assignments within each managed ontology.
+- Principals cannot disable their own accounts. The last active Platform Administrator
+  cannot be disabled or have that role revoked. The [configured administrator](#signing-in)
+  is also protected: change the configured administrator identity before disabling that
+  principal or revoking its Platform Administrator role. Otherwise, sign-in would restore
+  its active status and role.
+- A **service** is a client that authenticates with its own credentials rather than a
+  person's credentials. Like a person, it is represented by a principal. A Platform
+  Administrator can use **Admit service** to register the service by its subject before
+  its first request and assign roles in advance. Otherwise, its first request creates a principal without
+  roles. The administrator can later convert that principal to a service principal,
+  provided it still has no role assignments.
+- Changes to principal status and role assignments are audited, including assignments
+  removed when an ontology or lens is deleted. For changes made by a principal, the audit
+  record identifies that principal.
 
 Principals are never deleted. Accounts and passwords are managed at the provider.
 
 ## Authentication off
 
-Every request is trusted and nothing is checked; neither the provider nor the access
-database is needed. Sign-in, user management and the resource metadata do not exist —
-their routes answer not found, never anonymously — and the web client shows no sign-in, no
-user menu and no access pages. Assignments stored while authentication was on are kept for
-when it is on again. Threads have no owner.
+Requests are trusted without authentication or role checks; neither the provider nor
+the access database is required. Lens and ruleset restrictions still apply. Sign-in,
+user-management, and OAuth resource-metadata routes return Not Found rather than allowing
+anonymous access. The `/api/auth/me` endpoint remains available and reports that
+authentication is disabled. The web client hides sign-in, the user menu, and
+access-management pages. Existing role assignments are retained for when authentication
+is enabled again. Threads have no principal owner.
 
 ## Through the interfaces
 
@@ -155,6 +182,5 @@ when it is on again. Threads have no owner.
 | Whether authentication is on | `authentication` in `/api/server/info` and `/api/auth/me` | — | — |
 | User management | `/api/users` and an ontology's `access` | — | the Users page and the Studio's Access page |
 
-Routes, the challenge and the refusals: [../interfaces.md](../interfaces.md#sign-in).
-Screens and the controls each role sees:
-[../product-surface.md](../product-surface.md#signing-in).
+[Authentication endpoints](../interfaces.md#sign-in).
+[Role-specific UI controls](../product-surface.md#signing-in).

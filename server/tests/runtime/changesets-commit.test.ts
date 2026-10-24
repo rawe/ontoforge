@@ -26,6 +26,7 @@ import {
   hashedById,
   inTouchOrder,
   makeEntity,
+  makeFullSchema,
   makeRelation,
   makeUnscopedSchema,
   stagedObject,
@@ -305,6 +306,25 @@ describe("a fault while applying: 422, nothing persisted", () => {
     expect(store.changesetStore.touch.mock.invocationCallOrder[0]!).toBeGreaterThan(
       store.transaction.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("a staged entity delete with a relation the lens hides attached is a fault; nothing is deleted", async () => {
+    // The lens shows department only: belongs_to (department → company) is hidden.
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(
+      makeFullSchema({ lensKey: "depts", entityInclusions: [{ key: "department", properties: null }] }),
+    );
+    store.hasChildren.mockImplementation(async (_id: string, readings: Row) => readings.belongs_to === "source");
+    const loaded = await loadSchema("depts", asRuntimeStore(store));
+    const search = await loadSearchContext(store.ontologyKey, store.indices);
+
+    const applied = await applyObjects(loaded, search, [stagedObject(D1, "delete", "department")], asRuntimeStore(store));
+    expect(applied.fault).toEqual({
+      object: D1,
+      kind: "hidden_relations",
+      message: "This entity has relations this lens does not show; it can only be deleted through a lens that shows them",
+    });
+    expect(store.hasChildren).toHaveBeenCalledWith(D1, { belongs_to: "source" });
+    expect(store.deleteEntity).not.toHaveBeenCalled();
   });
 
   it("a reference the store refuses (FK) names the ends by their role, not the id", async () => {

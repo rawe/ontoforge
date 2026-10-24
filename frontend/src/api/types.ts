@@ -14,6 +14,8 @@ export interface ServerInfo {
   /** Where clients reach the server; null when the deployment configures none. */
   baseUrl: string | null
   version: string
+  /** Whether sign-in is required (a server before authentication omits it). */
+  authentication?: boolean
 }
 
 export interface Features {
@@ -506,6 +508,53 @@ export interface ToolCall {
   /** Client clock (ms) when the call and its result arrived; the stream carries no timing. */
   startedAt?: number
   finishedAt?: number
+}
+
+/* ------------------------------ authentication ------------------------------ */
+
+export type Role = 'platform_admin' | 'ontology_creator' | 'ontology_admin' | 'reader' | 'writer'
+
+/** A person signing in through the browser, or a service calling with a token. */
+export interface User {
+  id: string
+  kind: 'user' | 'service'
+  displayName: string
+  email: string | null
+  username: string | null
+  status: 'active' | 'disabled'
+  createdAt: string
+  lastLoginAt: string | null
+}
+
+/** One role of one principal: platform roles carry no keys, `ontology_admin` an ontology, Reader/Writer a lens. */
+export interface Assignment {
+  id: string
+  role: Role
+  ontologyKey: string | null
+  lensKey: string | null
+  ontologyId: string | null
+  lensId: string | null
+  createdAt: string
+}
+
+/** `GET /api/auth/me` — the mode, and with authentication on the signed-in user (or null). */
+export type AuthMe =
+  | { authentication: false }
+  | { authentication: true; user: User | null; assignments: Assignment[] }
+
+export interface UserDetail extends User {
+  assignments: Assignment[]
+}
+
+export interface AssignmentInput {
+  role: Role
+  ontologyKey?: string
+  lensKey?: string
+}
+
+/** One assignment within an ontology, with its holder (`GET /api/ontologies/:o/access`). */
+export interface AccessAssignment extends Assignment {
+  user: User
 }
 
 /* --------------------------------- registry --------------------------------- */

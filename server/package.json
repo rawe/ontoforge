@@ -34,7 +34,9 @@
     "fastify": "^5.10.0",
     "fastify-type-provider-zod": "^7.0.0",
     "iovalkey": "0.4.0",
+    "jose": "^6.2.13",
     "langchain": "^1.5.16",
+    "openid-client": "^6.8.8",
     "pg": "^8.23.0",
     "pgvector": "^0.3.0",
     "zod": "^4.4.3"

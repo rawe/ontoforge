@@ -1,6 +1,7 @@
 import { Box, Cable } from 'lucide-react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useFeatures, useLenses, useLensScope, useRuntimeSchema } from '@/api/hooks'
+import { useAccess } from '@/components/auth/useAccess'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { GuidedEmptyState } from '@/components/home/GuidedEmptyState'
@@ -19,6 +20,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 /** `/o/:ontologyKey/w/:lensKey` — Workbench Home: overview dashboard for one lens. */
 export function HomePage() {
   const { ontologyKey, lensKey } = useParams<{ ontologyKey: string; lensKey: string }>()
+  const access = useAccess()
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const { data: features } = useFeatures()
   const { data: lenses } = useLenses(ontologyKey)
@@ -86,7 +88,8 @@ export function HomePage() {
           title="Nothing in scope"
           description="This lens exposes no entity types. Adjust its scope in the Studio to get started."
           action={
-            lensId !== undefined && (
+            lensId !== undefined &&
+            access.canDesign(ontologyKey) && (
               <Button asChild size="sm">
                 <Link to={`/o/${ontologyKey}/studio/lenses/${lensId}`}>
                   <STUDIO_ICON className="size-3.5" /> Edit scope in Studio

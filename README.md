@@ -84,6 +84,10 @@ claude --mcp-config mcp-example.json
 }
 ```
 
+With authentication on, connect through the deployment's public address (`PUBLIC_URL`,
+e.g. `http://localhost:5173/mcp/ontologies/my_ontology/model`) and leave out any token:
+an OAuth-capable client signs in through the browser on first connect.
+
 ### Example: Runtime Server Quick Start
 
 Once connected to the runtime server, an AI assistant can work with your knowledge graph:
@@ -113,6 +117,16 @@ AI_MODEL=qwen3:8b ./dev.sh  # a shell variable still wins over the file
 Running the server directly honours the same rule: `ENV_FILE=<path> npm run dev` reads
 that file, and plain `npm run dev` reads `server/.env`. A named file that does not exist
 fails the boot rather than falling back to defaults.
+
+With authentication on, against a development Keycloak:
+
+```bash
+./dev.sh keycloak             # Keycloak on :8180 with realm, clients and test users; writes env/auth.local.env
+./dev.sh env/auth.local.env   # authentication on; sign in at http://localhost:5173
+```
+
+The test users, their generated passwords and how to reset Keycloak:
+[scripts/keycloak/USAGE.md](scripts/keycloak/USAGE.md).
 
 ### Prerequisites
 
@@ -246,8 +260,30 @@ The backend reads settings from environment variables (or a `.env` file in `serv
 | `SEARCH_WORKER_BATCH` | `64` | Queued search-indexing items the background worker claims per batch (positive integer) |
 | `SEARCH_POLL_MS` | `5000` | Milliseconds the background worker waits between queue checks when no wake-up notification arrives (positive integer) |
 | `CHANGESET_MAX_BYTES` | `33554432` (32 MiB) | The most bytes one changeset's staged values hold, document text included (positive integer) |
+| `PUBLIC_URL` | *(unset)* | The address browsers and clients reach the deployment at, reported by `/api/server/info` for client configuration. Required with `AUTH_ENABLED=true`: the browser's origin, whose `/api/auth/callback` is the sign-in callback and which the web client must be served from; it must be `https` unless its host is localhost |
 
 In Docker, `DB_URI` is set to `postgresql://postgres:5432/ontoforge` automatically via `docker-compose.yml`.
+
+### Authentication
+
+Off by default: every caller may do everything. With `AUTH_ENABLED=true` callers sign in
+through an OpenID provider and OntoForge's own roles decide what they may do
+([docs/capabilities/authentication.md](docs/capabilities/authentication.md)). Every
+variable below without a default is then required, as is `PUBLIC_URL`; a missing one, an
+unreachable provider or an unusable access database fails the boot. With it off they are
+not read. Every server of one deployment needs the same values.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUTH_ENABLED` | `false` | `true` turns sign-in and role checks on; any other value than `true` or `false` fails the boot |
+| `OIDC_ISSUER` | *(required)* | The provider's issuer URL, exactly as tokens carry it and browsers reach it; it must be `https` unless its host is localhost |
+| `OIDC_BACKCHANNEL_URL` | `OIDC_ISSUER` | Where this server reaches the provider when it cannot reach `OIDC_ISSUER` itself, such as from a container; tokens still name `OIDC_ISSUER` |
+| `OIDC_CLIENT_ID` | *(required)* | The confidential client the server signs browsers in with |
+| `OIDC_CLIENT_SECRET` | *(required)* | That client's secret; never in a committed file |
+| `OIDC_AUDIENCE` | *(required)* | The audience an access token must carry for REST and MCP; it must differ from `OIDC_CLIENT_ID` |
+| `AUTH_ADMIN_SUBJECT` | *(required)* | The subject, at `OIDC_ISSUER`, that is made an active Platform Administrator whenever it signs in |
+| `AUTH_SESSION_IDLE_SECONDS` | `28800` (8 h) | How long a browser session lasts unused; at most 24 hours after sign-in in any case (positive integer) |
+| `ACCESS_DB_URI` | *(required)* | `postgresql://` URL of the access database, which holds users and roles; the server creates it when missing. Its user and password are `DB_USER` and `DB_PASSWORD` unless the URL carries its own |
 
 ## Optional Features
 

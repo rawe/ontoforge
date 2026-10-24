@@ -122,9 +122,11 @@ import { loadDesign, retryOnDesignChange } from "./designWrite.js";
 import { docLengthKey, documentPropertyKeys, filterEntityProperties } from "./readHelpers.js";
 import { loadSchema, type LoadedSchema, type SearchContext } from "./schemaCache.js";
 import {
+  HIDDEN_RELATIONS_MESSAGE,
   applyDocumentEdit,
   documentSlice,
   endpointTypeMessage,
+  hasHiddenRelations,
   parentReadings,
   type DocumentEditBody,
   type EndRole,
@@ -1086,7 +1088,14 @@ function neitherStored(role: string): string {
 
 /** A staged object that cannot be applied; its message names only what
  * the caller sent. */
-class ApplyFault extends Error {}
+class ApplyFault extends Error {
+  constructor(
+    message: string,
+    readonly kind = "replay",
+  ) {
+    super(message);
+  }
+}
 
 /** Thrown inside the commit transaction to roll it back with these. */
 class CommitRejected extends Error {
@@ -1170,6 +1179,10 @@ async function applyOne(
         // its children recorded before the cascade erases them.
         const children = await bound.childrenOf([id], readings, true);
         applied.deletedChildren.push({ objectId: id, children });
+        // As the immediate delete: never remove a relation the lens hides.
+        if (await hasHiddenRelations(loaded, object.typeKey, id, bound)) {
+          throw new ApplyFault(HIDDEN_RELATIONS_MESSAGE, "hidden_relations");
+        }
         if (!(await bound.deleteEntity(write.entityTypeKey, write.entityId, plan(write.change)))) {
           applied.alreadyGone.push(id);
         }
@@ -1253,7 +1266,8 @@ export async function applyObjects(
         await applyOne(loaded, plan, readings, object, bound, applied);
       } catch (error) {
         if (error instanceof ApplyFault || error instanceof NotFoundError) {
-          applied.fault = { object: object.objectId, kind: "replay", message: applyMessage(object, error) };
+          const kind = error instanceof ApplyFault ? error.kind : "replay";
+          applied.fault = { object: object.objectId, kind, message: applyMessage(object, error) };
           return applied;
         }
         throw error;

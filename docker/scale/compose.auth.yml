@@ -1,0 +1,14 @@
+# Authentication on: the backends also join Keycloak's network (docker/keycloak/compose.yml),
+# so they reach it as http://keycloak:8080 (OIDC_BACKCHANNEL_URL in env/scale-auth.env).
+# `./dev.sh scale up <env-file>` adds this file when the env file sets AUTH_ENABLED=true.
+
+services:
+  backend-a:
+    networks: [default, keycloak]
+  backend-b:
+    networks: [default, keycloak]
+
+networks:
+  keycloak:
+    name: ontoforge-keycloak
+    external: true

@@ -142,6 +142,30 @@ describe("the scoping matrix", () => {
     expect(Object.keys(loaded.scoped.relationTypes)).toEqual(["works_for"]);
   });
 
+  it("row 4 — a relation inclusion whose endpoint type the lens hides is skipped", async () => {
+    // belongs_to is department -> company; department is not included.
+    const loaded = await loadSchema(
+      "lens",
+      asRuntimeStore(
+        storeWith(
+          makeFullSchema({
+            lensKey: "lens",
+            entityInclusions: [
+              { key: "person", properties: null },
+              { key: "company", properties: null },
+            ],
+            relationInclusions: [
+              { key: "works_for", properties: null },
+              { key: "belongs_to", properties: null },
+            ],
+          }),
+        ),
+      ),
+    );
+    expect(Object.keys(loaded.scoped.relationTypes)).toEqual(["works_for"]);
+    expect(Object.keys(loaded.full.relationTypes).sort()).toEqual(["belongs_to", "works_for"]);
+  });
+
   it("the cliff edge — the FIRST explicit relation inclusion drops every inferred one", async () => {
     // All three entity types in scope: both relation types are inferred.
     const inferred = await loadSchema(

@@ -12,11 +12,12 @@ much a thread and the store hold): [../architecture.md](../architecture.md#threa
 A message without a thread id starts a new thread, bound to the assistant it was sent to —
 its ontology, lens, kind and key. The answer names the thread's id first. A message with
 that id continues the thread. The id is random and unguessable; knowing it is what lets a
-client continue or read a thread — there are no users or owners.
+client continue or read a thread.
 
-A thread belongs to exactly one assistant. Sent to any other, its id is unknown, exactly
-as an id that never existed or has expired: the message is refused as not found before
-anything runs, and the client starts a new thread.
+A thread belongs to exactly one assistant and, with [authentication](authentication.md)
+on, to the principal that started it. Sent to any other assistant, or by any other
+principal, its id is unknown, exactly as an id that never existed or has expired: the
+message is refused as not found before anything runs, and the client starts a new thread.
 
 Each turn runs the assistant's **current** configuration. Saving an assistant does not end
 its threads; a client that wants a conversation under the new configuration only starts a

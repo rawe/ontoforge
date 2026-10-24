@@ -22,6 +22,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z, ZodError } from "zod";
 
+import type { AccessActor } from "../access/store.js";
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import { getModelingStore, getOntologyRegistry, getRuntimeStore } from "../core/ports.js";
 import type { ModelingStore } from "../core/ports.js";
@@ -248,8 +249,16 @@ const SEARCH_INDEX_RECORD =
 // ---------------------------------------------------------------------------
 
 /** Build the modeling MCP server bound to one ontology key. */
-export function createModelingMcpServer(ontologyKey: string): McpServer {
+/**
+ * The modeling server of one ontology. With authentication on — `actor`,
+ * the calling administrator — every tool needs the ontology's
+ * administrator (the mount's route check, which answers not found for a
+ * missing ontology), so `ensure_ontology` never creates one: an ontology
+ * is created over REST, where its creator becomes its administrator.
+ */
+export function createModelingMcpServer(ontologyKey: string, actor: AccessActor | null = null): McpServer {
   const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" });
+  const authentication = actor !== null;
 
   // The ONE registry-touching tool over MCP (`docs/decisions.md#interfaces`): with
   // no arguments it can only ever act on the binding the client already
@@ -262,7 +271,11 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         "no-op if it does. Takes no arguments — it acts only on the mount's own " +
         "ontology — and reports the ontology key and whether it created. A " +
         "created ontology starts bare (no types, no lenses, no data) and " +
-        "without a display name; naming happens over REST/UI.",
+        "without a display name; naming happens over REST/UI." +
+        (authentication
+          ? " This server requires sign-in: it creates no ontology; a missing one is created " +
+            "through the REST API or the web client."
+          : ""),
       inputSchema: {},
     },
     wrap("ensure_ontology", async () => {
@@ -924,6 +937,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         lens.lensId as string,
         store,
         await getRuntimeStore(ontologyKey),
+        actor,
       );
       return textResult(
         `Lens '${args.lens_key}' deleted successfully. Changesets deleted with it: ${changesetsDeleted}.`,

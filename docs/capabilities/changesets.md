@@ -156,6 +156,7 @@ the changeset change meanwhile.
 | `dangling` | An end of a staged relation create is neither stored nor created in this changeset, or an end of a staged relation is deleted in it |
 | `drift` | The current value of an update's key differs from its before |
 | `has_children` | A deleted entity still has children that the changeset neither deleted nor moved |
+| `hidden_relations` | A deleted entity has relations of a type the lens does not show ([delete](instance-data.md#entities)) |
 | `endpoint_type` | A relation end exists with the wrong entity type |
 | `two_parents`, `cycle` | A parent link the changeset creates breaks the [parent rules](instance-data.md#the-parent-rules) |
 | `outside_subtree` | On a changeset whose ruleset has an anchor, an entity of the anchor's hierarchy outside its [subtree](rulesets.md#the-anchors-hierarchy), before or after the commit |

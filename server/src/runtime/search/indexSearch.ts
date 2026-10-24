@@ -31,7 +31,7 @@
  */
 
 import { getEmbeddingProvider } from "../../core/embedding.js";
-import { NotFoundError, ValidationError } from "../../core/exceptions.js";
+import { ValidationError } from "../../core/exceptions.js";
 import type {
   FilterCondition,
   KeywordMatching,
@@ -564,8 +564,8 @@ export function indexStoreOf(store: RuntimeStore): SearchIndexStore {
 }
 
 /**
- * Search entities through chosen indices. Unknown index keys -> not found;
- * an index the lens may not search, an unknown relation type, an invalid
+ * Search entities through chosen indices. An index the lens may not
+ * search or that does not exist, an unknown relation type, an invalid
  * dimension -> validation error (collected, by field); a mode that needs
  * an embedding provider without one -> disabled feature.
  */
@@ -595,15 +595,12 @@ export async function searchByIndices(
     }
   }
 
-  const all = await indexStore.listIndices();
   const searchable = await searchableIndices(loaded, indexStore);
   let selected = searchable;
   if (request.indices !== undefined && request.indices !== null) {
     if (request.indices.length === 0) errors.indices = "Name at least one index, or omit indices";
-    const unknown = request.indices.filter((key) => !all.some((index) => index.key === key));
-    if (unknown.length > 0) {
-      throw new NotFoundError(`Search index '${unknown[0]}' not found`);
-    }
+    // An unknown key answers as one the lens cannot search: the lens does
+    // not tell which indices exist beyond it.
     request.indices.forEach((key, i) => {
       if (!searchable.some((index) => index.key === key)) {
         errors[`indices.${i}`] = `Search index '${key}' is not available in this lens`;

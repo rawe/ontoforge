@@ -23,14 +23,14 @@ call on. A changeset started through that URL belongs to its ruleset
 No rule narrows reads: a ruleset mount lists, reads, searches and queries exactly as the
 plain lens does.
 
-A ruleset is not authentication ([../decisions.md](../decisions.md#scope)). It guards
-against mistakes, not against a determined client, and every rule has the same two
-escapes:
+A ruleset is not access control; who may use a lens is decided by roles
+([authentication.md](authentication.md)). It guards against mistakes, not against a
+determined client, and every rule has the same two escapes:
 
 1. **The plain lens URL**, the ruleset mount URL without its ruleset, writes and commits
    as the lens allows.
-2. **The ruleset maintenance**, available to any REST client, changes or deletes the
-   ruleset.
+2. **The ruleset maintenance**, available to any REST client — with authentication on, to
+   the ontology's administrators — changes or deletes the ruleset.
 
 ## The record
 

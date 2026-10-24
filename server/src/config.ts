@@ -42,6 +42,29 @@ export interface Settings {
 
   SHARED_STATE: "memory" | "valkey";
   VALKEY_URL: string | null;
+
+  AUTH_ENABLED: boolean;
+  OIDC_ISSUER: string | null;
+  OIDC_BACKCHANNEL_URL: string | null;
+  OIDC_CLIENT_ID: string | null;
+  OIDC_CLIENT_SECRET: string | null;
+  OIDC_AUDIENCE: string | null;
+  AUTH_ADMIN_SUBJECT: string | null;
+  AUTH_SESSION_IDLE_SECONDS: number | null;
+  ACCESS_DB_URI: string | null;
+}
+
+/** The settings authentication runs on: present only when it is enabled. */
+export interface AuthSettings {
+  issuer: string;
+  backchannelUrl: string;
+  clientId: string;
+  clientSecret: string;
+  audience: string;
+  adminSubject: string;
+  sessionIdleSeconds: number;
+  accessDbUri: string;
+  publicUrl: string;
 }
 
 function str(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
@@ -120,6 +143,132 @@ function sharedState(env: NodeJS.ProcessEnv): Pick<Settings, "SHARED_STATE" | "V
     throw new Error("Environment variable VALKEY_URL is not a redis:// or rediss:// URL");
   }
   return { SHARED_STATE: "valkey", VALKEY_URL: url };
+}
+
+function httpUrl(name: string, value: string): string {
+  let protocol: string | null = null;
+  try {
+    protocol = new URL(value).protocol;
+  } catch {
+    // Reported below.
+  }
+  if (protocol !== "http:" && protocol !== "https:") {
+    throw new Error(`Environment variable ${name} is not an http(s) URL: '${value}'`);
+  }
+  return value.replace(/\/+$/, "");
+}
+
+/** Hosts a browser treats as secure over plain `http:`. */
+function isLoopback(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname.endsWith(".localhost")
+  );
+}
+
+/**
+ * A URL authentication relies on: https, or http on a loopback host only.
+ * `PUBLIC_URL`'s cookies are `Secure`, which a browser accepts over `http:`
+ * from a loopback host only — anywhere else the sign-in would silently
+ * never stick; the issuer's keys and tokens must not cross a network in
+ * the clear.
+ */
+function secureUrl(name: string, value: string): string {
+  const url = httpUrl(name, value);
+  const { protocol, hostname } = new URL(url);
+  if (protocol === "http:" && !isLoopback(hostname)) {
+    throw new Error(
+      `Environment variable ${name} must be an https URL when AUTH_ENABLED is 'true' ` +
+        `(http is allowed on localhost only): '${value}'`,
+    );
+  }
+  return url;
+}
+
+/**
+ * Authentication: `AUTH_ENABLED` is `true` or `false` (the default). When
+ * it is on, every variable it needs must be set — a missing one fails the
+ * boot rather than leaving a server that would have to run unprotected.
+ * When it is off, the others are not read: a preset may carry them.
+ */
+function auth(
+  env: NodeJS.ProcessEnv,
+): Pick<
+  Settings,
+  | "AUTH_ENABLED"
+  | "OIDC_ISSUER"
+  | "OIDC_BACKCHANNEL_URL"
+  | "OIDC_CLIENT_ID"
+  | "OIDC_CLIENT_SECRET"
+  | "OIDC_AUDIENCE"
+  | "AUTH_ADMIN_SUBJECT"
+  | "AUTH_SESSION_IDLE_SECONDS"
+  | "ACCESS_DB_URI"
+> {
+  const enabled = optOneOf(env, "AUTH_ENABLED", ["true", "false"]) === "true";
+  if (!enabled) {
+    return {
+      AUTH_ENABLED: false,
+      OIDC_ISSUER: null,
+      OIDC_BACKCHANNEL_URL: null,
+      OIDC_CLIENT_ID: null,
+      OIDC_CLIENT_SECRET: null,
+      OIDC_AUDIENCE: null,
+      AUTH_ADMIN_SUBJECT: null,
+      AUTH_SESSION_IDLE_SECONDS: null,
+      ACCESS_DB_URI: null,
+    };
+  }
+  const required = (name: string): string => {
+    const value = optStr(env, name);
+    if (value === null) {
+      throw new Error(`Environment variable ${name} is required when AUTH_ENABLED is 'true'`);
+    }
+    return value;
+  };
+  secureUrl("PUBLIC_URL", required("PUBLIC_URL"));
+  const issuer = secureUrl("OIDC_ISSUER", required("OIDC_ISSUER"));
+  // The back channel may be http anywhere: the server's own way to the issuer, e.g. in a container network.
+  const backchannel = optStr(env, "OIDC_BACKCHANNEL_URL");
+  const clientId = required("OIDC_CLIENT_ID");
+  const audience = required("OIDC_AUDIENCE");
+  // An ID token names the client as its audience: it must never pass as an API credential.
+  if (audience === clientId) {
+    throw new Error("Environment variable OIDC_AUDIENCE must differ from OIDC_CLIENT_ID");
+  }
+  const accessDb = required("ACCESS_DB_URI");
+  if (!/^postgres(ql)?:\/\//.test(accessDb)) {
+    throw new Error("Environment variable ACCESS_DB_URI is not a postgresql:// URL");
+  }
+  return {
+    AUTH_ENABLED: true,
+    OIDC_ISSUER: issuer,
+    OIDC_BACKCHANNEL_URL: backchannel === null ? null : httpUrl("OIDC_BACKCHANNEL_URL", backchannel),
+    OIDC_CLIENT_ID: clientId,
+    OIDC_CLIENT_SECRET: required("OIDC_CLIENT_SECRET"),
+    OIDC_AUDIENCE: audience,
+    AUTH_ADMIN_SUBJECT: required("AUTH_ADMIN_SUBJECT"),
+    AUTH_SESSION_IDLE_SECONDS: positiveInt(env, "AUTH_SESSION_IDLE_SECONDS", 8 * 60 * 60),
+    ACCESS_DB_URI: accessDb,
+  };
+}
+
+/** The authentication settings, or null when authentication is off. */
+export function authSettings(s: Settings): AuthSettings | null {
+  if (!s.AUTH_ENABLED) return null;
+  return {
+    issuer: s.OIDC_ISSUER!,
+    backchannelUrl: s.OIDC_BACKCHANNEL_URL ?? s.OIDC_ISSUER!,
+    clientId: s.OIDC_CLIENT_ID!,
+    clientSecret: s.OIDC_CLIENT_SECRET!,
+    audience: s.OIDC_AUDIENCE!,
+    adminSubject: s.AUTH_ADMIN_SUBJECT!,
+    sessionIdleSeconds: s.AUTH_SESSION_IDLE_SECONDS!,
+    accessDbUri: s.ACCESS_DB_URI!,
+    publicUrl: httpUrl("PUBLIC_URL", s.PUBLIC_URL!),
+  };
 }
 
 /** Where a provider is reached when no base URL is configured. */
@@ -228,6 +377,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     PUBLIC_URL: optStr(env, "PUBLIC_URL"),
 
     ...sharedState(env),
+    ...auth(env),
   };
 }
 

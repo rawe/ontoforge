@@ -4,16 +4,20 @@
 //
 //   node scripts/scale/scenarios.mjs [all | <scenario>…]
 //
-// Scenarios: continue, replace, valkey-reset, stale-schema, fencing, drain, upgrade.
+// Scenarios: continue, replace, valkey-reset, stale-schema, fencing, drain, upgrade
+// (authentication off), auth-session, auth-revoke, auth-bearer (authentication on).
 // Each prints PASS, FAIL or SKIP with its evidence; the exit code is 1 when any
 // selected scenario failed. They touch only the ontoforge-scale Compose project
 // and the seed ontology fx_people_basic, which they load when it is missing;
-// `upgrade` rewrites the storage of the harness database.
+// `upgrade` rewrites the storage of the harness database. The auth scenarios sign
+// the development Keycloak's test users in (scripts/auth/lib.mjs) and create and
+// delete an ontology of their own.
 
 import {
-  SEED, backendReady, chat, compose, composeAsync, ensureSeed, fakeControl, http, logsSince, modelPath,
-  readThread, readiness, runtimePath, sleep, sql, urls, waitFor,
+  SEED, authEnabled, backendReady, chat, compose, composeAsync, ensureSeed, fakeControl, http, logsSince, modelPath,
+  readThread, readiness, runtimePath, serviceByIp, sleep, sql, urls, waitFor,
 } from './lib.mjs';
+import { appLogin, call, deliverCallback, startAppLogin, userToken } from '../auth/lib.mjs';
 
 /** One scenario's checks and notes, printed as it goes. */
 class Run {
@@ -371,6 +375,113 @@ async function upgradeScenario(run) {
   }
 }
 
+// --- Authentication ------------------------------------------------------------
+
+/** Which backend answered a call through the LB (nginx's X-Upstream). */
+function upstreamName(answer) {
+  const ip = answer.upstream?.split(':')[0];
+  return (ip && serviceByIp()[ip]) ?? answer.upstream ?? '?';
+}
+
+const userOf = (answer) => answer.json?.user?.id ?? null;
+
+/**
+ * A browser session is shared state: signed in on A (login and callback on A), it is
+ * used on B, through the LB and through the frontend (PUBLIC_URL); a logout through B
+ * ends it on A. Cookie POSTs carry PUBLIC_URL's origin, as a browser on it would.
+ */
+async function authSessionScenario(run) {
+  const u = urls();
+  const { jar, callback } = await startAppLogin(u.a, 'reader');
+  const back = await deliverCallback(u.a, callback, jar);
+  if (!run.check('sign-in on A', back.status === 302 || back.status === 303,
+    `GET A /api/auth/login → Keycloak → callback ${new URL(callback).origin}/api/auth/callback delivered to A: HTTP ${back.status} → ${back.location}, cookies ${jar.names(u.a).join(', ')}`)) return;
+  const onA = await call(u.a, 'GET', '/api/auth/me', { jar });
+  const id = userOf(onA);
+  if (!run.check('session on A', id !== null, `HTTP ${onA.status}, user ${id}`)) return;
+  const onB = await call(u.b, 'GET', '/api/auth/me', { jar });
+  run.check('the same session on B', userOf(onB) === id, `HTTP ${onB.status}, user ${userOf(onB)}`);
+  const throughLb = [];
+  for (let i = 0; i < 4; i++) throughLb.push(await call(u.lb, 'GET', '/api/ontologies', { jar }));
+  run.check('the session through the LB', throughLb.every((r) => r.status === 200),
+    throughLb.map((r) => `${r.status} from ${upstreamName(r)}`).join(', '));
+  const front = await call(u.front, 'GET', '/api/auth/me', { jar });
+  run.check('the session through the frontend', userOf(front) === id, `HTTP ${front.status}, user ${userOf(front)}`);
+  const out = await call(u.b, 'POST', '/api/auth/logout', { jar, origin: u.front });
+  run.check('logout through B', out.status === 200 && typeof out.json?.logoutUrl === 'string', `HTTP ${out.status}`);
+  const afterA = await call(u.a, 'GET', '/api/auth/me', { jar });
+  run.check('the session ended on A', afterA.status === 200 && afterA.json?.user === null, `HTTP ${afterA.status}, user ${JSON.stringify(afterA.json?.user)}`);
+  const afterLb = await call(u.lb, 'GET', '/api/ontologies', { jar });
+  run.check('and through the LB', afterLb.status === 401, `HTTP ${afterLb.status} from ${upstreamName(afterLb)}`);
+}
+
+/**
+ * Assignments are read on every request: a lens role granted and revoked through A
+ * takes effect on B at once.
+ */
+async function authRevokeScenario(run) {
+  const u = urls();
+  const ontology = `scale_auth_${Date.now()}`;
+  const admin = await appLogin(u.a, 'admin');
+  const asAdmin = (method, path, body) => call(u.a, method, path, { jar: admin.jar, origin: u.front, body });
+  const adminMe = await call(u.a, 'GET', '/api/auth/me', { jar: admin.jar });
+  const adminId = userOf(adminMe);
+  if (!run.check('administrator signed in on A', adminId !== null, `HTTP ${adminMe.status}, user ${adminId}`)) return;
+  let creatorGrant = null;
+  let created = false;
+  try {
+    if (!(adminMe.json?.assignments ?? []).some((a) => a.role === 'ontology_creator')) {
+      const r = await asAdmin('POST', `/api/users/${adminId}/assignments`, { role: 'ontology_creator' });
+      creatorGrant = r.json?.id ?? null;
+      run.note(`administrator granted itself ontology_creator: HTTP ${r.status}`);
+    }
+    const o = await asAdmin('POST', '/api/ontologies', { key: ontology });
+    created = o.status === 201;
+    const lens = await asAdmin('POST', `/api/ontologies/${ontology}/model/lenses`, { key: 'l', name: 'l' });
+    const type = await asAdmin('POST', `/api/ontologies/${ontology}/model/entity-types`, { key: 'item', displayName: 'Item' });
+    if (!run.check('ontology, lens and type through A', created && lens.status === 201 && type.status === 201,
+      `${ontology}: HTTP ${o.status}/${lens.status}/${type.status}`)) return;
+
+    const reader = await appLogin(u.a, 'reader');
+    const readerId = userOf(await call(u.a, 'GET', '/api/auth/me', { jar: reader.jar }));
+    const granted = await asAdmin('POST', `/api/users/${readerId}/assignments`, { role: 'reader', ontologyKey: ontology, lensKey: 'l' });
+    if (!run.check('reader granted on A', granted.status === 201, `HTTP ${granted.status}, user ${readerId}, assignment ${granted.json?.id}`)) return;
+    const token = await userToken('reader');
+    const path = `/api/ontologies/${ontology}/runtime/lenses/l/entities/item?limit=1`;
+    const before = await call(u.b, 'GET', path, { token });
+    run.check('reader reads on B', before.status === 200, `HTTP ${before.status}`);
+    const revoked = await asAdmin('DELETE', `/api/users/${readerId}/assignments/${granted.json.id}`);
+    run.check('revoked on A', revoked.status === 204, `HTTP ${revoked.status}`);
+    const after = await call(u.b, 'GET', path, { token });
+    run.check('the next request on B is refused', after.status === 403 || after.status === 404, `HTTP ${after.status}`);
+    const lb = [await call(u.lb, 'GET', path, { token }), await call(u.lb, 'GET', path, { token })];
+    run.check('and through the LB', lb.every((r) => r.status === 403 || r.status === 404),
+      lb.map((r) => `${r.status} from ${upstreamName(r)}`).join(', '));
+  } finally {
+    if (created) run.note(`cleanup: ${ontology} deleted: HTTP ${(await asAdmin('DELETE', `/api/ontologies/${ontology}`)).status}`);
+    if (creatorGrant) await asAdmin('DELETE', `/api/users/${adminId}/assignments/${creatorGrant}`);
+  }
+}
+
+/** One user's bearer token is accepted by A and B alike; without it both refuse. */
+async function authBearerScenario(run) {
+  const u = urls();
+  const token = await userToken('reader');
+  const ids = [];
+  for (const [where, base] of [['A', u.a], ['B', u.b]]) {
+    const me = await call(base, 'GET', '/api/auth/me', { token });
+    const list = await call(base, 'GET', '/api/ontologies', { token });
+    const anonymous = await call(base, 'GET', '/api/ontologies');
+    ids.push(userOf(me));
+    run.check(`token accepted on ${where}`, userOf(me) !== null && list.status === 200 && anonymous.status === 401,
+      `me user ${userOf(me)}, /api/ontologies ${list.status} with the token, ${anonymous.status} without`);
+  }
+  run.check('A and B name the same user', ids[0] !== null && ids[0] === ids[1], ids.join(' / '));
+  const lb = [];
+  for (let i = 0; i < 4; i++) lb.push(await call(u.lb, 'GET', '/api/ontologies', { token }));
+  run.check('token through the LB', lb.every((r) => r.status === 200), lb.map((r) => `${r.status} from ${upstreamName(r)}`).join(', '));
+}
+
 const SCENARIOS = {
   continue: continueScenario,
   replace: replaceScenario,
@@ -379,7 +490,13 @@ const SCENARIOS = {
   fencing: fencingScenario,
   drain: drainScenario,
   upgrade: upgradeScenario,
+  'auth-session': authSessionScenario,
+  'auth-revoke': authRevokeScenario,
+  'auth-bearer': authBearerScenario,
 };
+
+/** Scenarios that need authentication on; every other one needs it off. */
+const AUTH_SCENARIOS = new Set(['auth-session', 'auth-revoke', 'auth-bearer']);
 
 // --- Main --------------------------------------------------------------------
 
@@ -396,7 +513,9 @@ if (!Object.values(ready).every((s) => s.ok)) {
   console.error('The harness is not ready — ./dev.sh scale up, then ./dev.sh scale status.');
   process.exit(2);
 }
-console.log(`Seed ${SEED.ontology}: ${await ensureSeed()}`);
+const auth = await authEnabled();
+if (auth) console.log('Authentication on: the auth scenarios run, the others skip.');
+else console.log(`Seed ${SEED.ontology}: ${await ensureSeed()}`);
 await fakeControl({ chatDelayMs: 0, holdEmbed: false });
 
 const results = [];
@@ -404,7 +523,13 @@ for (const name of selected) {
   console.log(`\n${name}`);
   const run = new Run(name);
   try {
-    await SCENARIOS[name](run);
+    if (AUTH_SCENARIOS.has(name) && !auth) {
+      run.skip('the stack runs without authentication (GET /api/auth/me → authentication:false); ./dev.sh scale up env/scale-auth.local.env');
+    } else if (!AUTH_SCENARIOS.has(name) && auth) {
+      run.skip('the stack runs with authentication on and this scenario calls without credentials; ./dev.sh scale up');
+    } else {
+      await SCENARIOS[name](run);
+    }
   } catch (error) {
     run.check('scenario ran', false, String(error?.stack ?? error));
   }

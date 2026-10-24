@@ -14,6 +14,8 @@ import {
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useChangesets, useFeatures, useLenses, useRulesets, useRuntimeSchema } from '@/api/hooks'
+import { useAccess } from '@/components/auth/useAccess'
+import { UserMenu } from '@/components/auth/UserMenu'
 import { deletedAnchorCount } from '@/components/rulesets/rulesets'
 import { submittedCount } from '@/components/changesets/changesets'
 import { OntologySwitcher } from '@/components/layout/OntologySwitcher'
@@ -48,7 +50,10 @@ function LensSwitcher({
   collapsed: boolean
 }) {
   const navigate = useNavigate()
-  const { data: lenses } = useLenses(ontologyKey)
+  const access = useAccess()
+  const { data: allLenses } = useLenses(ontologyKey)
+  // An administrator lists every lens, but opens only those it holds a role on.
+  const lenses = allLenses?.filter((l) => access.canRead(ontologyKey, l.key))
   const current = lenses?.find((o) => o.key === lensKey)
 
   return (
@@ -98,14 +103,18 @@ function LensSwitcher({
             {o.key === lensKey && <Check className="size-4 shrink-0" />}
           </DropdownMenuItem>
         ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={() => navigate(`/o/${ontologyKey}/studio/lenses`)}
-          className="gap-2"
-        >
-          <Settings2 className="size-4" />
-          Manage lenses…
-        </DropdownMenuItem>
+        {access.canDesign(ontologyKey) && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => navigate(`/o/${ontologyKey}/studio/lenses`)}
+              className="gap-2"
+            >
+              <Settings2 className="size-4" />
+              Manage lenses…
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -124,6 +133,7 @@ export function Sidebar({
   onSearch?: () => void
 }) {
   const { collapsed } = useSidebarCollapsed()
+  const access = useAccess()
   const { data: features } = useFeatures()
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const rulesets = useRulesets(ontologyKey)
@@ -148,12 +158,14 @@ export function Sidebar({
           surface="workbench"
           collapsed={collapsed}
         />
-        <SurfaceToggle
-          ontologyKey={ontologyKey}
-          lensKey={lensKey}
-          surface="workbench"
-          collapsed={collapsed}
-        />
+        {access.canDesign(ontologyKey) && (
+          <SurfaceToggle
+            ontologyKey={ontologyKey}
+            lensKey={lensKey}
+            surface="workbench"
+            collapsed={collapsed}
+          />
+        )}
         <LensSwitcher ontologyKey={ontologyKey} lensKey={lensKey} collapsed={collapsed} />
       </div>
 
@@ -195,39 +207,41 @@ export function Sidebar({
         </div>
       )}
 
-      <div className={cn('px-2 pb-1', collapsed && 'px-1.5')}>
-        {(() => {
-          const trigger = (
-            <button
-              type="button"
-              onClick={() => openQuickAdd()}
-              aria-label="New entity (c)"
-              className={cn(
-                'flex h-7 w-full items-center gap-2 rounded-md border border-input/60 px-2',
-                'text-[13px] text-muted-foreground transition-colors duration-100',
-                'hover:bg-sidebar-accent/60 hover:text-sidebar-foreground',
-                'focus-visible:outline-2 focus-visible:outline-ring/60',
-                collapsed && 'justify-center border-transparent px-0',
-              )}
-            >
-              <Plus className="size-3.5 shrink-0" />
-              {!collapsed && (
-                <>
-                  <span className="flex-1 text-left">New entity</span>
-                  <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">c</kbd>
-                </>
-              )}
-            </button>
-          )
-          if (!collapsed) return trigger
-          return (
-            <Tooltip>
-              <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-              <TooltipContent side="right">New entity — c</TooltipContent>
-            </Tooltip>
-          )
-        })()}
-      </div>
+      {access.canWrite(ontologyKey, lensKey) && (
+        <div className={cn('px-2 pb-1', collapsed && 'px-1.5')}>
+          {(() => {
+            const trigger = (
+              <button
+                type="button"
+                onClick={() => openQuickAdd()}
+                aria-label="New entity (c)"
+                className={cn(
+                  'flex h-7 w-full items-center gap-2 rounded-md border border-input/60 px-2',
+                  'text-[13px] text-muted-foreground transition-colors duration-100',
+                  'hover:bg-sidebar-accent/60 hover:text-sidebar-foreground',
+                  'focus-visible:outline-2 focus-visible:outline-ring/60',
+                  collapsed && 'justify-center border-transparent px-0',
+                )}
+              >
+                <Plus className="size-3.5 shrink-0" />
+                {!collapsed && (
+                  <>
+                    <span className="flex-1 text-left">New entity</span>
+                    <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">c</kbd>
+                  </>
+                )}
+              </button>
+            )
+            if (!collapsed) return trigger
+            return (
+              <Tooltip>
+                <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+                <TooltipContent side="right">New entity — c</TooltipContent>
+              </Tooltip>
+            )
+          })()}
+        </div>
+      )}
 
       <nav
         className={cn('flex flex-col gap-0.5 px-2 pt-1', collapsed && 'px-1.5')}
@@ -298,6 +312,7 @@ export function Sidebar({
       >
         <SidebarToggle />
         <ThemeToggle />
+        <UserMenu />
       </div>
     </aside>
   )

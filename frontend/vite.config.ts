@@ -28,6 +28,7 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:8000',
       '/mcp': 'http://localhost:8000',
+      '/.well-known/oauth-protected-resource': 'http://localhost:8000',
     },
   },
 })

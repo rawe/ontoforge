@@ -179,8 +179,8 @@ function walkChain(
     if (typeNames.length > 1) {
       pendingSurface("a relationship-type union");
     }
-    // No type written: the documented untyped case — it widens what the
-    // pattern traverses and projects nothing typed.
+    // No type written: the untyped case — it matches any relation type
+    // the lens shows, and no other (`typeCondition`).
     const typeKey = typeNames.length === 0 ? null : stripBackticks(typeNames[0]!.getText());
 
     const toRight = relPattern.GT() !== null;
@@ -195,10 +195,7 @@ function walkChain(
     const rel = newBinding(state, "relation", typeKey, variable);
     fresh.add(rel.alias);
 
-    const conds: JoinCondition[] = [];
-    if (typeKey !== null) {
-      conds.push({ sql: `${col(rel, "type_key")} = ${state.bindValue(typeKey)}`, outer: false });
-    }
+    const conds: JoinCondition[] = [typeCondition(rel, state)];
     if (detail !== null) {
       conds.push(...inlineConditions(detail.properties(), rel, state, walker, false));
     }
@@ -313,10 +310,7 @@ function bindNode(
 
   const binding = newBinding(state, "entity", typeKey, variable);
   fresh.add(binding.alias);
-  const conds: JoinCondition[] = [];
-  if (typeKey !== null) {
-    conds.push({ sql: `${col(binding, "type_key")} = ${state.bindValue(typeKey)}`, outer: false });
-  }
+  const conds: JoinCondition[] = [typeCondition(binding, state)];
   conds.push(...inlineConditions(node.properties(), binding, state, walker, false));
   if (viaRel !== undefined && viaRelColumn !== undefined) {
     conds.push({ sql: `${col(binding, "id")} = ${col(viaRel, viaRelColumn)}`, outer: false });
@@ -324,6 +318,21 @@ function bindNode(
   const entry: TableEntry = { table: `entity ${quoteIdent(binding.alias)}`, conds };
   emitted.entries.push(entry);
   return { binding, rebound: false, entry };
+}
+
+/**
+ * The type condition of a new pattern element: its label or relationship
+ * type, or — written without one — every type of its kind the lens shows.
+ * An untyped element therefore never reaches an entity or relation of a
+ * type the lens hides: not to project it, not to count or traverse it.
+ */
+function typeCondition(binding: TableBinding, state: CompileState): JoinCondition {
+  if (binding.typeKey !== null) {
+    return { sql: `${col(binding, "type_key")} = ${state.bindValue(binding.typeKey)}`, outer: false };
+  }
+  const types = binding.kind === "entity" ? state.schema.entityTypes : state.schema.relationTypes;
+  const keys = Object.keys(types).sort();
+  return { sql: `${col(binding, "type_key")} = ANY(${state.bindValue(keys)}::text[])`, outer: false };
 }
 
 function newBinding(

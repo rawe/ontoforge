@@ -192,9 +192,9 @@ the alternative. Adapter limitations are recorded in
 
 The index search ranks entities through chosen search indices — managed or custom —
 named by key; naming none searches every index the lens can search
-([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). A key no index has is
-not found; an index the lens cannot search, a switched-off managed one included, is a
-validation error naming it. Hits are entities of the indices' root types, ranked and
+([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). An index the lens
+cannot search, a switched-off managed one included, is a validation error naming it, and
+so is a key no index has: the lens does not tell which indices exist beyond it. Hits are entities of the indices' root types, ranked and
 grouped exactly as under [Ranking](#ranking): within one retrieval method the chosen
 indices merge by score, an entity counts once, scored by its best entry, and `hybrid`
 fuses the methods by reciprocal rank.

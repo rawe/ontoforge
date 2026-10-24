@@ -86,6 +86,40 @@ type Row = Record<string, unknown>;
  * only that one exists. */
 export const HAS_CHILDREN_MESSAGE = "This entity has children; delete them first";
 
+/** The refusal of an entity delete while a relation of a type the lens
+ * hides is attached to it: the delete would remove that relation unseen.
+ * It names no type, id or count. */
+export const HIDDEN_RELATIONS_MESSAGE =
+  "This entity has relations this lens does not show; it can only be deleted through a lens that shows them";
+
+/** The relation types the lens hides that an entity of `entityTypeKey`
+ * can take part in, as the readings of `RuntimeStore.hasChildren`: one
+ * for the source end, one for the target end; empty ones left out. */
+function hiddenRelationEnds(loaded: LoadedSchema, entityTypeKey: string): Record<string, ParentEnd>[] {
+  const asSource: Record<string, ParentEnd> = {};
+  const asTarget: Record<string, ParentEnd> = {};
+  for (const rt of Object.values(loaded.full.relationTypes)) {
+    if (rt.key in loaded.scoped.relationTypes) continue;
+    if (rt.fromEntityTypeKey === entityTypeKey) asSource[rt.key] = "source";
+    if (rt.toEntityTypeKey === entityTypeKey) asTarget[rt.key] = "target";
+  }
+  return [asSource, asTarget].filter((ends) => Object.keys(ends).length > 0);
+}
+
+/** Whether a relation of a type the lens hides is attached to the entity,
+ * at either end. No read when the lens hides none its type takes part in. */
+export async function hasHiddenRelations(
+  loaded: LoadedSchema,
+  entityTypeKey: string,
+  entityId: string,
+  store: RuntimeStore,
+): Promise<boolean> {
+  for (const ends of hiddenRelationEnds(loaded, entityTypeKey)) {
+    if (await store.hasChildren(entityId, ends)) return true;
+  }
+  return false;
+}
+
 /** Every parent relation of the FULL schema, as relation type key →
  * parent end: the parent rules hold across all of them, whatever the
  * lens shows. Empty when the ontology flags none. */
@@ -437,10 +471,11 @@ export interface PathStep {
 
 /**
  * The entity's path through the lens: root first, ending with the entity.
- * The walk follows every parent relation of the FULL schema; the lens then
- * cuts it, so the path starts below the nearest ancestor whose type the
- * lens hides and never names a hidden entity. A root's path is itself
- * alone. A hidden type or an unknown entity is not found, as `getEntity`.
+ * The walk follows only the parent relations the lens shows, and the lens
+ * cuts it again at the nearest ancestor whose type it hides: the path
+ * starts below a hidden parent relation or a hidden ancestor and never
+ * names either. A root's path is itself alone. A hidden type or an unknown
+ * entity is not found, as `getEntity`.
  *
  * On data the accepted race left with two parents the walk is no chain:
  * the path then lists every visible ancestor the walk reaches, in the
@@ -460,8 +495,10 @@ export async function getPath(
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
   }
 
-  // Nearest first: keep the ancestors below the first hidden one.
-  const ancestors = await store.getAncestors(entityId, parentReadings(loaded.full));
+  // The walk follows only the parent relations the lens shows, so it ends
+  // at the first step over one it hides. Nearest first: keep the
+  // ancestors below the first one of a hidden type.
+  const ancestors = await store.getAncestors(entityId, parentReadings(loaded.scoped));
   const hidden = ancestors.findIndex((ancestor) => !(ancestor.type in visibleTypes));
   const visible = hidden === -1 ? ancestors : ancestors.slice(0, hidden);
   const steps = [...visible.reverse(), { type: entityTypeKey, id: entityId }];
@@ -529,15 +566,16 @@ export async function updateEntity(
 }
 
 /**
- * Delete an entity, every relation attached to it in either direction —
- * including relations whose type the lens cannot see — and its search
- * data. Wherever the ontology flags a parent relation, only a leaf may go:
- * an entity with children over any parent relation of the full schema is
- * refused (409), through every lens, before the delete. Otherwise the
- * cascade is silent: nothing warns, nothing refuses. Through a ruleset
- * with an anchor the guard refuses first (`AnchorGuard.checkDelete`):
- * outside the anchor's subtree, then the anchor of any ruleset (422 on
- * `entityId`); "has children" comes last.
+ * Delete an entity, every relation attached to it in either direction, and
+ * its search data. Wherever the ontology flags a parent relation, only a
+ * leaf may go: an entity with children over any parent relation of the
+ * full schema is refused (409), through every lens, before the delete. An
+ * entity with a relation attached of a type the lens hides is refused too
+ * (409, `HIDDEN_RELATIONS_MESSAGE`): a lens never removes what it does not
+ * show. Through a ruleset with an anchor the guard refuses first
+ * (`AnchorGuard.checkDelete`): outside the anchor's subtree, then the
+ * anchor of any ruleset (422 on `entityId`); "has children", then the
+ * hidden relations, come last.
  */
 export async function deleteEntity(
   lensKey: string,
@@ -553,13 +591,17 @@ export async function deleteEntity(
     const write = prepareDeleteEntity(loaded, entityTypeKey, entityId);
     const readings = parentReadings(loaded.full);
     const flagged = Object.keys(readings).length > 0;
-    // A missing entity stays not-found, whatever its id has below it.
-    if (flagged && (await tx.getEntity(entityTypeKey, entityId)) === null) {
+    const hidesRelations = hiddenRelationEnds(loaded, entityTypeKey).length > 0;
+    // A missing entity stays not-found, whatever its id has attached.
+    if ((flagged || hidesRelations) && (await tx.getEntity(entityTypeKey, entityId)) === null) {
       throw new NotFoundError(`Entity '${entityId}' not found`);
     }
     await guard?.checkDelete(entityTypeKey, entityId);
     if (flagged && (await tx.hasChildren(entityId, readings))) {
       throw new ConflictError(HAS_CHILDREN_MESSAGE);
+    }
+    if (await hasHiddenRelations(loaded, entityTypeKey, entityId, tx)) {
+      throw new ConflictError(HIDDEN_RELATIONS_MESSAGE);
     }
 
     const deleted = await tx.deleteEntity(write.entityTypeKey, write.entityId, planSearchWrite(search.dependencies, write.change));
@@ -1105,10 +1147,8 @@ export interface NeighborhoodResult {
 
 /**
  * One entity plus its immediate neighbourhood. Relations whose type the
- * lens does not expose are dropped together with their neighbour. A
- * neighbour is filtered to the lens only when its own entity type is in
- * scope — an out-of-scope neighbour escapes property stripping (the
- * documented leak), though its document values are still stubbed.
+ * lens does not expose are dropped together with their neighbour; every
+ * kept relation and neighbour is filtered to the lens.
  */
 export async function getNeighbors(
   lensKey: string,
@@ -1144,43 +1184,41 @@ export async function getNeighbors(
     Object.assign(defs, etDef.properties);
   }
 
+  // The relation types to read: the requested one, if the lens shows it,
+  // else every type the lens shows — filtered in storage, before the limit,
+  // so hidden relations take no room in the page. A lens that shows every
+  // relation type needs no filter.
+  const shownRelationTypeKeys = Object.keys(loaded.scoped.relationTypes);
+  const relationTypeKeys =
+    relationTypeKey !== null
+      ? shownRelationTypeKeys.filter((key) => key === relationTypeKey)
+      : shownRelationTypeKeys.length < Object.keys(loaded.full.relationTypes).length
+        ? shownRelationTypeKeys
+        : null;
+
   const neighbors = await store.getNeighbors(
     entityId,
     direction,
-    relationTypeKey,
+    relationTypeKeys,
     limit,
     propertyDefsByType,
   );
 
-  // Filter neighbors by scoped relation types.
+  // Keep only neighbours over a relation type the lens exposes, to an
+  // entity type it exposes — the lens never serves a relation type into a
+  // hidden one, so the second test only fails closed.
   const filteredNeighbors: Row[] = [];
   for (const n of neighbors) {
     const rel = n.relation as Row;
-    const rtKey = rel._relationTypeKey as string | undefined;
-    if (rtKey && rtKey in loaded.scoped.relationTypes) {
-      const scopedRt = loaded.scoped.relationTypes[rtKey]!;
-      n.relation = filterRelationProperties(rel, scopedRt);
-      // Filter neighbor entity properties only when its own type is in scope.
-      const neighborEntity = n.entity as Row;
-      const neighborEtKey = neighborEntity._entityTypeKey as string | undefined;
-      if (neighborEtKey && neighborEtKey in loaded.scoped.entityTypes) {
-        n.entity = filterEntityProperties(
-          neighborEntity,
-          loaded.scoped.entityTypes[neighborEtKey]!,
-          fields,
-        );
-      } else if (neighborEtKey && neighborEtKey in loaded.full.entityTypes) {
-        // Type not in scope — still stub document values (never inline).
-        n.entity = stubDocumentProperties(
-          neighborEntity,
-          loaded.full.entityTypes[neighborEtKey]!.properties,
-          fields,
-        );
-      }
-      filteredNeighbors.push(n);
-    } else if (!rtKey) {
-      filteredNeighbors.push(n);
+    const neighborEntity = n.entity as Row;
+    const scopedRt = loaded.scoped.relationTypes[rel._relationTypeKey as string];
+    const scopedNeighborEt = loaded.scoped.entityTypes[neighborEntity._entityTypeKey as string];
+    if (scopedRt === undefined || scopedNeighborEt === undefined) {
+      continue;
     }
+    n.relation = filterRelationProperties(rel, scopedRt);
+    n.entity = filterEntityProperties(neighborEntity, scopedNeighborEt, fields);
+    filteredNeighbors.push(n);
   }
 
   // Filter the centre entity.
@@ -1253,12 +1291,15 @@ function isPlainObject(value: unknown): value is Row {
 /**
  * Filter out-of-scope properties and stub document values (in place).
  *
- * Node/relationship maps are stripped to scoped properties with document
- * values stubbed — per column, exactly as a read result is
- * (`docs/capabilities/ontology-lenses.md#what-scoping-cuts`). Scalar
- * columns of the form `var.property` that reference a document property
- * are stubbed as well; an ALIASED projection of a document property is
- * not of that form and returns the full text — the documented exception.
+ * Every entity and relation in a row — a column of its own, or at any
+ * depth inside a list or map (`collect(p)`, `[p]`, `{x: p}`) — is stripped
+ * to its type's scoped properties with document values stubbed, exactly as
+ * a read result is (`docs/capabilities/ontology-lenses.md#what-scoping-cuts`).
+ * One of a type the lens does not show becomes null: the compiler never
+ * matches one, so this only fails closed. Scalar columns of the form
+ * `var.property` that reference a document property are stubbed as well;
+ * an ALIASED projection of a document property is not of that form and
+ * returns the full text — the documented exception.
  */
 function postprocessQueryRows(
   rows: Row[],
@@ -1267,13 +1308,7 @@ function postprocessQueryRows(
 ): void {
   for (const row of rows) {
     for (const [col, value] of Object.entries(row)) {
-      if (isPlainObject(value)) {
-        const typeKey = resolveTypeKeyForValue(col, value, varMap, scoped);
-        if (typeKey === null) {
-          continue;
-        }
-        row[col] = stripOutOfScopeProps(value, typeKey, scoped);
-      } else if (typeof value === "string" && col.includes(".")) {
+      if (typeof value === "string" && col.includes(".")) {
         // Scalar projection like `RETURN p.bio` — stub document values.
         const dot = col.indexOf(".");
         const variable = col.slice(0, dot).trim();
@@ -1290,32 +1325,35 @@ function postprocessQueryRows(
         if (propDef !== undefined && propDef.dataType === "document") {
           row[col] = { document: true, length: cpLength(value) };
         }
+      } else {
+        row[col] = projectQueryValue(value, scoped);
       }
     }
   }
 }
 
-/** Figure out the schema type key for a map returned by the store. */
-function resolveTypeKeyForValue(
-  column: string,
-  value: Row,
-  varMap: Map<string, string | null>,
-  schema: SchemaCacheValue,
-): string | null {
-  // If the column is a known variable, use the pre-built mapping.
-  if (varMap.has(column)) {
-    return varMap.get(column)!;
+/** One projected value through the lens: lists and maps walked, every
+ * entity or relation in them (it carries its type key) stripped, and one
+ * of a type the lens does not show replaced by null. */
+function projectQueryValue(value: unknown, scoped: SchemaCacheValue): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => projectQueryValue(item, scoped));
   }
-  // Fallback: inspect _entityTypeKey or _relationTypeKey in the value.
-  const etk = value._entityTypeKey;
-  if (typeof etk === "string" && etk in schema.entityTypes) {
-    return etk;
+  if (!isPlainObject(value)) {
+    return value;
   }
-  const rtk = value._relationTypeKey;
-  if (typeof rtk === "string" && rtk in schema.relationTypes) {
-    return rtk;
+  if ("_entityTypeKey" in value) {
+    const etDef = scoped.entityTypes[value._entityTypeKey as string];
+    return etDef === undefined ? null : stripOutOfScopeProps(value, etDef.properties, true);
   }
-  return null;
+  if ("_relationTypeKey" in value) {
+    const rtDef = scoped.relationTypes[value._relationTypeKey as string];
+    return rtDef === undefined ? null : stripOutOfScopeProps(value, rtDef.properties, false);
+  }
+  for (const [key, item] of Object.entries(value)) {
+    value[key] = projectQueryValue(item, scoped);
+  }
+  return value;
 }
 
 // ---------------------------------------------------------------------------
@@ -1558,23 +1596,13 @@ export async function searchSavedQueries(
   return results;
 }
 
-/** Remove properties not in the scoped schema and stub documents. Unlike
- * entity reads, only the SYSTEM properties survive here — other
- * underscore-prefixed bookkeeping is stripped. */
-function stripOutOfScopeProps(value: Row, typeKey: string, schema: SchemaCacheValue): Row {
-  let allowed: Set<string>;
-  let result = value;
-  const etDef = schema.entityTypes[typeKey];
-  const rtDef = schema.relationTypes[typeKey];
-  if (etDef !== undefined) {
-    allowed = new Set([...Object.keys(etDef.properties), ...SYSTEM_PROPERTIES]);
-    // Stub document values before the helper `_doc_*_length` keys are stripped.
-    result = stubDocumentProperties(value, etDef.properties);
-  } else if (rtDef !== undefined) {
-    allowed = new Set([...Object.keys(rtDef.properties), ...SYSTEM_PROPERTIES]);
-  } else {
-    return value;
-  }
+/** Remove properties not in the scoped definitions and stub documents
+ * (of an entity). Unlike entity reads, only the SYSTEM properties survive
+ * here — other underscore-prefixed bookkeeping is stripped. */
+function stripOutOfScopeProps(value: Row, properties: Record<string, PropertyDef>, entity: boolean): Row {
+  const allowed = new Set([...Object.keys(properties), ...SYSTEM_PROPERTIES]);
+  // Stub document values before the helper `_doc_*_length` keys are stripped.
+  const result = entity ? stubDocumentProperties(value, properties) : value;
   for (const key of Object.keys(result)) {
     if (!allowed.has(key)) {
       delete result[key];

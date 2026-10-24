@@ -19,6 +19,11 @@
  *     list follows its write access (`createRuntimeMcpServer`); a tool
  *     call's server offers every tool, and the call's check judges it.
  *
+ * With authentication on, the route table lets in the modeling mount's
+ * Ontology Administrator and any role holder of a runtime mount's lens;
+ * a runtime server is built with the caller's role (`lensLevel`): a
+ * Reader lists and calls only reads, below the ruleset's level too.
+ *
  * Transport is Streamable HTTP, STATELESS, with plain JSON responses
  * (no SSE), per `docs/decisions.md#interfaces`: a fresh server +
  * transport pair serves each request, so one mount serves many clients
@@ -29,8 +34,10 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
+import { lensLevel } from "../access/authorize.js";
+import { accessOf, actorOf } from "../auth/plugin.js";
 import { NotFoundError } from "../core/exceptions.js";
-import { getRuntimeStore } from "../core/ports.js";
+import { getRuntimeStore, type WriteAccess } from "../core/ports.js";
 import { createModelingMcpServer } from "./modeling.js";
 import type { Binding } from "../runtime/writeAccess.js";
 import { createRuntimeMcpServer } from "./runtime.js";
@@ -69,6 +76,18 @@ async function handleMcpRequest(
   }
 }
 
+function callsTool(body: unknown): boolean {
+  return typeof body === "object" && body !== null && (body as { method?: unknown }).method === "tools/call";
+}
+
+/** The caller's role on a runtime mount's lens, and the level its tool
+ * list is built at: a tool call lists every tool, and the call's own
+ * check refuses what the role lacks — as for a ruleset's level. */
+async function roleOf(request: FastifyRequest, ontologyKey: string, lensKey: string): Promise<[WriteAccess, WriteAccess]> {
+  const role = await lensLevel(await accessOf(request), ontologyKey, lensKey);
+  return [role, callsTool(request.body) ? "full" : role];
+}
+
 /** The binding a ruleset mount's server is built with, once per request;
  * its level shapes the tool list. A request that lists tools reads the
  * ruleset; an unknown ontology or ruleset lists every tool, at 'full', and
@@ -77,8 +96,7 @@ async function handleMcpRequest(
  * reads the ruleset and refuses what its level lacks. So a client whose
  * list is older than the level gets the refusal, not an unknown tool. */
 async function bindingOf(ontologyKey: string, rulesetKey: string, body: unknown): Promise<Binding> {
-  const callsTool = typeof body === "object" && body !== null && (body as { method?: unknown }).method === "tools/call";
-  if (callsTool) return { rulesetKey, writeAccess: "full" };
+  if (callsTool(body)) return { rulesetKey, writeAccess: "full" };
   try {
     const record = await (await getRuntimeStore(ontologyKey)).rulesets().get(rulesetKey);
     return { rulesetKey, writeAccess: record?.writeAccess ?? "full" };
@@ -102,7 +120,7 @@ export function mountMcp(app: FastifyInstance): void {
       if (ontologyKey === "") {
         return reply.callNotFound();
       }
-      await handleMcpRequest(createModelingMcpServer(ontologyKey), request, reply);
+      await handleMcpRequest(createModelingMcpServer(ontologyKey, await actorOf(request)), request, reply);
     },
   });
 
@@ -119,7 +137,8 @@ export function mountMcp(app: FastifyInstance): void {
       if (ontologyKey === "" || lensKey === "") {
         return reply.callNotFound();
       }
-      await handleMcpRequest(createRuntimeMcpServer(ontologyKey, lensKey), request, reply);
+      const [role, listed] = await roleOf(request, ontologyKey, lensKey);
+      await handleMcpRequest(createRuntimeMcpServer(ontologyKey, lensKey, undefined, role, listed), request, reply);
     },
   });
 
@@ -137,7 +156,8 @@ export function mountMcp(app: FastifyInstance): void {
         return reply.callNotFound();
       }
       const binding = await bindingOf(ontologyKey, rulesetKey, request.body);
-      await handleMcpRequest(createRuntimeMcpServer(ontologyKey, lensKey, binding), request, reply);
+      const [role, listed] = await roleOf(request, ontologyKey, lensKey);
+      await handleMcpRequest(createRuntimeMcpServer(ontologyKey, lensKey, binding, role, listed), request, reply);
     },
   });
 }

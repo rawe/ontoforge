@@ -1,8 +1,8 @@
 /**
  * The path read over a mocked store: root first, ending with the entity,
- * walked over every parent relation of the FULL schema and cut by the
- * lens below the nearest hidden ancestor. Names come from one batch read;
- * a hidden type or an unknown entity is not found.
+ * walked over the parent relations the lens shows and cut by the lens
+ * below the nearest hidden ancestor. Names come from one batch read; a
+ * hidden type or an unknown entity is not found.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -147,8 +147,8 @@ describe("the path read", () => {
       { type: "person", id: "lea", name: "Lea" },
       { type: "person", id: "ben", name: "Ben" },
     ]);
-    // The walk still follows every parent relation of the full schema.
-    expect(holder.store.getAncestors.mock.calls).toEqual([["ben", READINGS]]);
+    // The walk follows only the parent relations the lens shows.
+    expect(holder.store.getAncestors.mock.calls).toEqual([["ben", { manages: "source" }]]);
     // Neither the hidden ancestor nor the visible one above it is named.
     expect(res.body).not.toContain("sales");
     expect(res.body).not.toContain("acme");
@@ -165,6 +165,35 @@ describe("the path read", () => {
     const res = await getPath("hr_view", "person", "lea");
 
     expect(res.json()).toEqual([{ type: "person", id: "lea", name: "Lea" }]);
+  });
+
+  it("a parent relation the lens hides cuts the path, though the ancestor's type shows", async () => {
+    // person and department shown, member_of and belongs_to explicitly;
+    // manages (person › person) is hidden.
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(
+      hierarchySchema({
+        entityInclusions: [
+          { key: "person", properties: null },
+          { key: "department", properties: null },
+          { key: "company", properties: null },
+        ],
+        relationInclusions: [
+          { key: "member_of", properties: null },
+          { key: "belongs_to", properties: null },
+        ],
+      }),
+    );
+    // The store walks what it is given: over manages, Ben's parent is Lea.
+    holder.store.getAncestors.mockImplementation(async (_id: string, readings: Row) =>
+      "manages" in readings ? [{ type: "person", id: "lea" }] : [],
+    );
+    stored();
+
+    const res = await getPath("hr_view", "person", "ben");
+
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toEqual([{ type: "person", id: "ben", name: "Ben" }]);
+    expect(res.body).not.toContain("lea");
   });
 
   it("a name property the lens hides gives a null name", async () => {

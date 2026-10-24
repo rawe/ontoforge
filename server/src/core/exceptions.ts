@@ -45,6 +45,32 @@ export class DesignChangedError extends ConflictError {
   }
 }
 
+/** No valid credential for a protected operation. -> 401 UNAUTHENTICATED;
+ * `invalidToken` when a bearer token was sent and rejected. */
+export class UnauthenticatedError extends OntoForgeError {
+  invalidToken: boolean;
+
+  constructor(message = "Sign in or send a valid bearer token", invalidToken = false) {
+    super(message);
+    this.invalidToken = invalidToken;
+  }
+}
+
+/** An authenticated caller lacks the role an operation needs. -> 403 FORBIDDEN */
+export class ForbiddenError extends OntoForgeError {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+/** The identity provider cannot be reached, so no credential can be
+ * checked; nothing is admitted. -> 503 PROVIDER_UNAVAILABLE */
+export class ProviderUnavailableError extends OntoForgeError {
+  constructor(message = "The identity provider cannot be reached; try again later") {
+    super(message);
+  }
+}
+
 /** Request or business-logic validation failed. -> 422 VALIDATION_ERROR */
 export class ValidationError extends OntoForgeError {
   details: Record<string, unknown> | null;

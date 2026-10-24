@@ -725,10 +725,14 @@ export interface RuntimeStore {
   // Graph traversal
   // ------------------------------------------------------------------
 
+  /** One page of neighbours over the named relation types only — the
+   * type filter applies before `limit`, so the page holds no relation the
+   * caller would drop. `null` reads every relation type; an empty list
+   * answers without touching storage. */
   getNeighbors(
     entityId: string,
     direction: string,
-    relationTypeKey: string | null,
+    relationTypeKeys: string[] | null,
     limit: number,
     propertyDefsByType: Record<string, Record<string, PropertyDef>>,
   ): Promise<Row[]>;

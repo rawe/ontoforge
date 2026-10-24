@@ -703,11 +703,11 @@ export class PostgresRuntimeStore implements RuntimeStore {
   async getNeighbors(
     entityId: string,
     direction: string,
-    relationTypeKey: string | null,
+    relationTypeKeys: string[] | null,
     limit: number,
     propertyDefsByType: Record<string, PropertyDefs>,
   ): Promise<Row[]> {
-    if (!isUuid(entityId)) {
+    if (!isUuid(entityId) || relationTypeKeys?.length === 0) {
       return [];
     }
 
@@ -717,7 +717,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
           querier,
           "outgoing",
           entityId,
-          relationTypeKey,
+          relationTypeKeys,
           limit,
           propertyDefsByType,
         );
@@ -729,7 +729,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
           querier,
           "incoming",
           entityId,
-          relationTypeKey,
+          relationTypeKeys,
           remaining,
           propertyDefsByType,
         );
@@ -741,7 +741,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
       { query: (text, params) => this.query(text, params) },
       direction === "outgoing" ? "outgoing" : "incoming",
       entityId,
-      relationTypeKey,
+      relationTypeKeys,
       limit,
       propertyDefsByType,
     );
@@ -1002,7 +1002,7 @@ async function neighborPage(
   querier: Querier,
   direction: "outgoing" | "incoming",
   entityId: string,
-  relationTypeKey: string | null,
+  relationTypeKeys: string[] | null,
   limit: number,
   propertyDefsByType: Record<string, PropertyDefs>,
 ): Promise<Row[]> {
@@ -1010,9 +1010,9 @@ async function neighborPage(
     direction === "outgoing" ? ["from_id", "to_id"] : ["to_id", "from_id"];
   const params: unknown[] = [entityId];
   let typeFilter = "";
-  if (relationTypeKey !== null) {
-    params.push(relationTypeKey);
-    typeFilter = ` AND r.type_key = $${params.length}`;
+  if (relationTypeKeys !== null) {
+    params.push(relationTypeKeys);
+    typeFilter = ` AND r.type_key = ANY($${params.length}::text[])`;
   }
   params.push(limit);
   const result = await querier.query(

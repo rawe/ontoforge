@@ -27,12 +27,14 @@ It also carries `EMBEDDING_API_KEY`, `AI_API_KEY`, and a `VALKEY_URL` with a pas
 - **One env file.** The ConfigMap key `ontoforge.env` is mounted at `/config` and named by
   `ENV_FILE`. Secrets come from `ontoforge-secrets` as environment variables, which win
   over the file.
-- **Shared state lives in Valkey** — the conversations, shared by every replica — so the
+- **Shared state lives in Valkey** — the conversations and, with authentication on, the
+  browser sessions, shared by every replica — so the
   Service needs no session affinity. Without Valkey the server runs as exactly one replica
   with `SHARED_STATE=memory` (the default); more than one replica requires deploying Valkey
   and setting `SHARED_STATE=valkey` and `VALKEY_URL`. Nothing checks this: a pod cannot see
   the other replicas. Valkey keeps nothing on disk: restarting it ends every open
-  conversation (clients get `THREAD_NOT_FOUND` and start a new one) and nothing else.
+  conversation (clients get `THREAD_NOT_FOUND` and start a new one) and every browser
+  session (users sign in again), and nothing else.
   `noeviction` makes a full store refuse new turns instead of dropping conversations.
   The pod's memory limit (512 Mi) stays well above `maxmemory` (256 MB): client buffers
   are not counted in it, and an OOM kill would end every conversation.

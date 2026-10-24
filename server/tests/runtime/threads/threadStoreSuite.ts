@@ -39,7 +39,7 @@ export const SUITE_LIFETIMES: StoreLifetimes = { idleMs: 400, leaseMs: 200 };
 const { idleMs: IDLE, leaseMs: LEASE } = SUITE_LIFETIMES;
 const MARGIN = 50;
 
-const BINDING: ThreadBinding = { ontologyKey: "fair", lensKey: "visitor", kind: "agents", assistantKey: "guide" };
+const BINDING: ThreadBinding = { ontologyKey: "fair", lensKey: "visitor", kind: "agents", assistantKey: "guide", owner: null };
 
 const bytes = (text: string) => new Uint8Array(Buffer.from(text));
 const text = (state: Uint8Array | null | undefined) => (state ? Buffer.from(state).toString() : state);
@@ -133,6 +133,20 @@ export function threadStoreSuite(name: string, factory: ThreadStoreFactory): voi
         }
         // The refused begins took no lease.
         expect(asTurn(await store.begin(threadId, BINDING)).state).toEqual(bytes("one"));
+      });
+
+      it("finds a thread only as its owner", async () => {
+        const owned = { ...BINDING, owner: "principal-a" };
+        const { threadId } = await store.create(owned);
+        expect(await store.read(threadId, owned)).toEqual({ state: null });
+        for (const other of [BINDING, { ...BINDING, owner: "principal-b" }]) {
+          expect(await store.read(threadId, other)).toBeNull();
+          expect(await store.begin(threadId, other)).toBeNull();
+        }
+        const { threadId: open } = await store.create(BINDING);
+        expect(await store.read(open, owned)).toBeNull();
+        expect(await store.begin(open, owned)).toBeNull();
+        expect(asTurn(await store.begin(threadId, owned)).state).toBeNull();
       });
 
       it("keeps threads apart", async () => {

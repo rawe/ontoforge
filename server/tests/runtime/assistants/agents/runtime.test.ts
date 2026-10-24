@@ -723,7 +723,8 @@ describe("entities event", () => {
         entity: makeEntity({ name: "Acme" }, "company", "c1") },
       { relation: { ...makeRelation({}, { relationId: "r2" }), direction: "incoming" },
         entity: makeEntity({ name: "Bob" }, "person", "p2") },
-      // A department leaks through an in-lens relation: no card, no link.
+      // A department over an in-lens relation (data the lens cannot
+      // produce): dropped, no card, no link.
       { relation: { ...makeRelation({}, { relationId: "r3" }), direction: "outgoing" },
         entity: makeEntity({ name: "Sales", code: "S" }, "department", "d1") },
     ]);
@@ -734,9 +735,9 @@ describe("entities event", () => {
 
     const events = await eventsOf("hr_view");
 
-    // The tool result still carries the leaked neighbour, unchanged.
+    // The tool result does not carry it either.
     const result = events.find((e) => e.type === "agent.tool_result")!.result as Row;
-    expect((result.neighbors as Row[]).map((n) => (n.entity as Row)._id)).toEqual(["c1", "p2", "d1"]);
+    expect((result.neighbors as Row[]).map((n) => (n.entity as Row)._id)).toEqual(["c1", "p2"]);
     const [event] = entityEvents(events);
     expect((event!.entities as Row[]).map((c) => [c.ref, c.id])).toEqual([["E1", "p1"], ["E2", "c1"], ["E3", "p2"]]);
     expect(event!.links).toEqual([

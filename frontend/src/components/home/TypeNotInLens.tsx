@@ -2,6 +2,7 @@ import { useQueries } from '@tanstack/react-query'
 import { EyeOff, Layers, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { runtimeSchemaQuery, useLenses } from '@/api/hooks'
+import { useAccess } from '@/components/auth/useAccess'
 import { STUDIO_ICON } from '@/components/layout/surfaceTargets'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -25,7 +26,8 @@ export function TypeNotInLens({
   className?: string
 }) {
   const { data: lenses } = useLenses(ontologyKey)
-  const others = (lenses ?? []).filter((l) => l.key !== lensKey)
+  const access = useAccess()
+  const others = (lenses ?? []).filter((l) => l.key !== lensKey && access.canRead(ontologyKey, l.key))
   const schemas = useQueries({
     queries: others.map((l) => runtimeSchemaQuery(ontologyKey, l.key)),
   })
@@ -58,7 +60,7 @@ export function TypeNotInLens({
               </Link>
             </Button>
           ))}
-          {lens !== undefined && (
+          {lens !== undefined && access.canDesign(ontologyKey) && (
             <Button asChild size="sm" variant="ghost">
               <Link to={`/o/${ontologyKey}/studio/lenses/${lens.lensId}`}>
                 <STUDIO_ICON className="size-3.5" /> Edit scope in Studio

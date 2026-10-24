@@ -54,6 +54,12 @@ const SearchIndexPage = lazy(() =>
 const TransferPage = lazy(() =>
   import('@/pages/studio/TransferPage').then((m) => ({ default: m.TransferPage })),
 )
+const UsersPage = lazy(() =>
+  import('@/pages/admin/UsersPage').then((m) => ({ default: m.UsersPage })),
+)
+const AccessPage = lazy(() =>
+  import('@/pages/studio/AccessPage').then((m) => ({ default: m.AccessPage })),
+)
 
 const suspended = (node: ReactNode) => (
   <Suspense fallback={<RouteFallback />}>{node}</Suspense>
@@ -64,6 +70,7 @@ const suspended = (node: ReactNode) => (
 // URL is the only source of truth for both keys.
 export const router = createBrowserRouter([
   { path: '/', element: <StartPage /> },
+  { path: '/admin/users', element: suspended(<UsersPage />) },
   {
     path: '/o/:ontologyKey/w/:lensKey',
     element: <WorkbenchLayout />,
@@ -97,6 +104,7 @@ export const router = createBrowserRouter([
       { path: 'search/new', element: suspended(<SearchIndexPage />) },
       { path: 'search/:key', element: suspended(<SearchIndexPage />) },
       { path: 'transfer', element: suspended(<TransferPage />) },
+      { path: 'access', element: suspended(<AccessPage />) },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

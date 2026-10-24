@@ -44,6 +44,7 @@ what rules bind it, and how it is reached from every interface.
 | [transfer](capabilities/transfer.md) | Schema export and import |
 | [rulesets](capabilities/rulesets.md) | Rulesets — named records holding the rules for the MCP clients of one URL: the record and its maintenance, ruleset mounts, write access, the anchor |
 | [changesets](capabilities/changesets.md) | Changesets — runtime writes staged over time and committed all or nothing: staging into a set of objects and values, the commit and its validation, binding, the review |
+| [authentication](capabilities/authentication.md) | Signing in through an OpenID provider, roles on the platform, an ontology or a lens, what a caller sees, user management, authentication off |
 
 ## Internal provider interfaces
 
@@ -139,6 +140,9 @@ built on another — in particular, MCP does not call REST.
   to one ontology and one lens — so a model never sees more than it was given.
 - **Web UI** — a start page managing the ontologies, then two surfaces per ontology
   mirroring the split: a schema studio and a data workbench.
+
+With [authentication](capabilities/authentication.md) on, every interface serves only
+callers who signed in, within the roles OntoForge assigned them. It is off by default.
 
 See [interfaces.md](interfaces.md).
 
@@ -482,6 +486,18 @@ also has an implicit **default navigator**. See
 new message and the thread's id, and the server continues from the turns the thread kept.
 See [capabilities/threads.md](capabilities/threads.md).
 
+### Access
+
+**Principal** — a person or a service as OntoForge knows it, bound to one verified
+identity at the OpenID provider: its issuer and subject. Active or disabled.
+
+**Role** — what a principal may do on one scope: **Platform Administrator** and **Ontology
+Creator** on the platform, **Ontology Administrator** on one ontology, **Reader** and
+**Writer** on one lens. No role includes another.
+
+**Assignment** — one role held by one principal on its scope. No assignment, no access.
+See [capabilities/authentication.md](capabilities/authentication.md).
+
 ### Internals
 
 **Persistence port** — the boundary every storage operation crosses. Above it, only
@@ -497,11 +513,16 @@ ontologies. Exactly one is active.
 design advances. See [architecture.md](architecture.md#design-revision).
 
 **Shared state** — what every server must see alike but may lose, such as the assistants'
-threads: in each server's own memory, or in one Valkey all servers share. See
+threads and the browser sessions: in each server's own memory, or in one Valkey all
+servers share. See
 [architecture.md](architecture.md#shared-state).
 
 **Thread store** — where every server keeps the assistants' threads, part of the shared
 state. See [architecture.md](architecture.md#thread-store).
+
+**Access database** — where principals, their identities and assignments are kept: a
+database of its own beside the ontology database, used only with authentication on. See
+[architecture.md](architecture.md#components).
 
 **Transfer format** — the versioned JSON representation of one ontology's design, used
 for export and import. Carries schema, lenses, assistants, saved queries, the

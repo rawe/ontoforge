@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
 
+import type { AccessActor } from "../access/store.js";
 import { getEmbeddingProvider } from "../core/embedding.js";
 import {
   CascadeRequiredError,
@@ -61,7 +62,7 @@ import {
 import { portableNavigator } from "./navigators.js";
 import { portable as portableRetriever } from "./retrievers.js";
 import { readSearchSettings, updateSearchSettings as changeSearchSettings } from "../runtime/indexing/settings.js";
-import { loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
+import { loadSchema, loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
   ExportPayload,
@@ -236,18 +237,24 @@ export async function updateLens(
  * own agent configurations, saved queries and changesets (handled in the
  * store), needs no consent, and leaves the schema and every instance
  * untouched. It reports how many changesets went with it (V42), counted
- * before the delete.
+ * before the delete. With authentication on (`actor`), the lens's role
+ * assignments go too, best effort: a leftover reveals nothing
+ * (`access/authorize.ts`).
  */
 export async function deleteLens(
   lensId: string,
   store: ModelingStore,
   runtime: RuntimeStore,
+  actor: AccessActor | null = null,
 ): Promise<{ changesetsDeleted: number }> {
   const changesetsDeleted = await lensChangesetCount(lensId, runtime);
   await store.changeDesign(async (s) => {
     if (!(await s.deleteLens(lensId))) {
       throw new NotFoundError(`Lens '${lensId}' not found`);
     }
+  });
+  await actor?.store.forgetLens(lensId, actor.principalId).catch((error: unknown) => {
+    console.error(`Removing the assignments of deleted lens '${lensId}' failed:`, error);
   });
   return { changesetsDeleted };
 }
@@ -837,6 +844,30 @@ export async function listIncludesEntityTypes(
   await resolveLens(store, lensId);
   const rows = await store.listIncludesTypes(lensId, "EntityType");
   return rows.map(toIncludeResponse);
+}
+
+/**
+ * A lens's type inclusions as its runtime serves them — what a Reader or
+ * Writer of the lens sees of its design: an inclusion whose key no longer
+ * resolves, a relation type into an entity type the lens hides and a
+ * property that no longer exists are left out, as the runtime's scope
+ * filtering leaves them out (`runtime/schemaCache.ts`).
+ */
+export async function listServedIncludes(
+  lensId: string,
+  typeKind: TypeKind,
+  store: ModelingStore,
+  runtime: RuntimeStore,
+): Promise<IncludeTypeResponseBody[]> {
+  const lens = await resolveLens(store, lensId);
+  const { scoped } = await loadSchema(lens.key as string, runtime);
+  const served = typeKind === "EntityType" ? scoped.entityTypes : scoped.relationTypes;
+  return (await store.listIncludesTypes(lensId, typeKind)).flatMap((row) => {
+    const type = served[row.key as string];
+    if (type === undefined) return [];
+    const { key, properties } = toIncludeResponse(row);
+    return [{ key, properties: properties === null ? null : properties.filter((p) => p in type.properties) }];
+  });
 }
 
 export async function updateIncludesEntityType(

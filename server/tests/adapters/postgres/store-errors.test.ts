@@ -358,6 +358,8 @@ describe("bypass prevention", () => {
   it("no adapter module imports the driver outside the door module", () => {
     // `errors.ts` owns the pool and the translation; a query module that
     // imported `pg` directly would silently reopen the untranslated gap.
+    // `accessStore.ts` is the door of the access database, a database of
+    // its own with its own pool, and translates its failures the same way.
     // (`.query(` cannot be the token — it legitimately appears everywhere.)
     const adapterDir = join(
       dirname(fileURLToPath(import.meta.url)),
@@ -372,7 +374,7 @@ describe("bypass prevention", () => {
             : [],
       );
     const offenders = sources(adapterDir)
-      .filter((name) => name !== "errors.ts")
+      .filter((name) => name !== "errors.ts" && name !== "accessStore.ts")
       .filter((name) => readFileSync(join(adapterDir, name), "utf8").includes('from "pg"'));
     expect(offenders).toEqual([]);
   });

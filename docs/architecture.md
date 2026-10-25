@@ -604,7 +604,9 @@ given in [decisions.md](decisions.md#deployment). Rebuild is where repair happen
 ontology at a time.
 
 The port opens only once these steps are done; from then on the liveness and readiness
-probes answer ([interfaces.md](interfaces.md#probes)).
+probes answer ([interfaces.md](interfaces.md#probes)). A configured metrics port opens
+right after it and stays open while the server drains
+([interfaces.md](interfaces.md#metrics)).
 
 ## Shutdown
 
@@ -634,6 +636,7 @@ per-ontology deployment configuration.
 | Search indexing | Attempts before a queued item counts as failed, worker batch size, polling interval | Defaults apply |
 | Shared state | Memory or Valkey, and how to reach Valkey | Memory |
 | Shutdown | How long a stopping server drains | Default applies |
+| Metrics | The port of its own that serves metrics | No metrics served |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
 | Decision model | Endpoint, model, credential | Entity identity comparison unavailable |
 | Public URL | The address clients reach the deployment at, reported to clients; with authentication on, the browser's origin | No address is reported; required with authentication on |

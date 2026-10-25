@@ -1,7 +1,7 @@
 # Interfaces
 
 The complete index of every way into the system: the ontology registry, two per-ontology
-REST surfaces, one server-wide route, two probes, two MCP servers, and — with
+REST surfaces, one server-wide route, two probes, a metrics endpoint, two MCP servers, and — with
 authentication on — sign-in and user management. Concepts and
 vocabulary: [README.md](README.md). Structure and error model: [architecture.md](architecture.md).
 What each operation *means* is in [capabilities/](capabilities/) — this document is the
@@ -355,6 +355,24 @@ the OpenAPI description and do not use the error envelope.
 Neither answers before startup is done ([architecture.md](architecture.md#startup)); while
 `/readyz` answers `503` the server finishes its running work
 ([architecture.md](architecture.md#shutdown)).
+
+## Metrics
+
+With `METRICS_PORT` set, the server serves its metrics on that port of its own, never on
+the client port ([decisions.md](decisions.md#deployment)). The route is not part of the
+OpenAPI description, takes no credential and does not use the error envelope.
+
+| Method | Path | Answers |
+|---|---|---|
+| GET | `/metrics` | Every metric of this server process in Prometheus text format |
+
+Each server process is scraped on its own. The metrics:
+
+| Metric | Type | Labels |
+|---|---|---|
+| `ontoforge_http_requests_total` | counter | `method`, `route` (the route template, or `unmatched`), `status` (the status code) |
+| `ontoforge_http_request_duration_seconds` | histogram | as above; a streamed response is timed to its end |
+| process metrics (`process_*`, `nodejs_*`) | as their library defines | none |
 
 ## Modeling REST
 

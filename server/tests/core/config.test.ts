@@ -112,6 +112,14 @@ describe("config env overrides", () => {
     }
   });
 
+  it("serves no metrics unless METRICS_PORT names a valid port", () => {
+    expect(loadSettings({}).METRICS_PORT).toBeNull();
+    expect(loadSettings({ METRICS_PORT: "9464" }).METRICS_PORT).toBe(9464);
+    for (const value of ["0", "65536", "metrics"]) {
+      expect(() => loadSettings({ METRICS_PORT: value })).toThrow(/METRICS_PORT/);
+    }
+  });
+
   it("accepts every reasoning effort level and rejects anything else", () => {
     for (const level of ["none", "low", "medium", "high"]) {
       expect(loadSettings({ AI_REASONING_EFFORT: level }).AI_REASONING_EFFORT).toBe(

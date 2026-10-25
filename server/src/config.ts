@@ -9,6 +9,7 @@ export interface Settings {
   DB_USER: string;
   DB_PASSWORD: string;
   PORT: number;
+  METRICS_PORT: number | null;
   SHUTDOWN_DRAIN_SECONDS: number;
 
   EMBEDDING_PROVIDER: string | null;
@@ -91,6 +92,16 @@ function positiveInt(env: NodeJS.ProcessEnv, name: string, fallback: number): nu
   const parsed = int(env, name, fallback);
   if (parsed < 1) {
     throw new Error(`Environment variable ${name} must be a positive integer: '${env[name]}'`);
+  }
+  return parsed;
+}
+
+function optPort(env: NodeJS.ProcessEnv, name: string): number | null {
+  const value = env[name];
+  if (value === undefined || value === "") return null;
+  const parsed = int(env, name, 0);
+  if (parsed < 1 || parsed > 65535) {
+    throw new Error(`Environment variable ${name} must be a port between 1 and 65535: '${value}'`);
   }
   return parsed;
 }
@@ -336,6 +347,8 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     DB_USER: str(env, "DB_USER", "postgres"),
     DB_PASSWORD: str(env, "DB_PASSWORD", "ontoforge_dev"),
     PORT: int(env, "PORT", 8000),
+    // The port of its own that serves `/metrics`; unset, metrics are not served.
+    METRICS_PORT: optPort(env, "METRICS_PORT"),
     // How long a stopping server lets running requests and chat streams
     // finish before it cuts them.
     SHUTDOWN_DRAIN_SECONDS: positiveInt(env, "SHUTDOWN_DRAIN_SECONDS", 20),

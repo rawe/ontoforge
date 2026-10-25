@@ -39,6 +39,7 @@ import {
   ValidationError,
 } from "./core/exceptions.js";
 import { mountMcp } from "./mcp/mount.js";
+import { observeRequests } from "./metrics.js";
 import { modelingRouter } from "./modeling/router.js";
 import { registryRouter } from "./registry/router.js";
 import { aiRouter } from "./runtime/aiRouter.js";
@@ -160,6 +161,7 @@ export async function createApp(shared?: SharedState, auth: AuthRuntime | null =
   const lifecycle = new Lifecycle();
   app.decorate("lifecycle", lifecycle);
   app.server.on("request", (_request, response) => lifecycle.track(response));
+  observeRequests(app);
   // Every route registered from here on: its handler counts until it settles.
   app.addHook("onRoute", (route) => {
     const handler = route.handler;

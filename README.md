@@ -253,6 +253,7 @@ The backend reads settings from environment variables (or a `.env` file in `serv
 | `DB_USER` | `postgres` | Database username |
 | `DB_PASSWORD` | `ontoforge_dev` | Database password |
 | `PORT` | `8000` | HTTP listen port |
+| `METRICS_PORT` | *(unset)* | Port of its own that serves `/metrics` in Prometheus text format; unset, no metrics are served. Expose it only to the internal network (port 1–65535) |
 | `SHUTDOWN_DRAIN_SECONDS` | `20` | Seconds a stopping server lets running requests and chat streams finish before it cuts them; readiness answers 503 meanwhile (positive integer) |
 | `SHARED_STATE` | `memory` | Where shared state such as assistant conversations lives: `memory` serves one server process; `valkey` is shared by every server naming the same Valkey |
 | `VALKEY_URL` | *(required with `SHARED_STATE=valkey`)* | `redis://` or `rediss://` URL of the shared Valkey, which must run without persistence and with `maxmemory-policy noeviction`; an unreachable Valkey, another eviction policy or a Valkey that cannot run the scripts fails the boot, and so does `VALKEY_URL` set without `SHARED_STATE=valkey` |

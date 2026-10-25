@@ -152,7 +152,8 @@ them all the same.
 | The Workbench of a lens | Its Readers, Proposers and Writers; anyone else sees "No access to this lens" |
 | Lens switcher, a type's links to other lenses | The lenses the user holds a role on |
 | Surface switch, "Manage lenses…", links into the Studio | The ontology's administrators |
-| New entity, quick add, editing, deleting, relating, documents' edit, the Explorer's connecting drag | Writers of the lens; Proposers while a changeset is pinned, into which every such write is staged |
+| New entity, quick add, editing, deleting, relating, documents' edit | Writers of the lens; Proposers while a changeset is pinned, into which every such write is staged |
+| The Explorer's connecting drag, which writes live only | Writers of the lens while no changeset is pinned |
 | Starting, pinning, editing, checking and submitting a changeset | Proposers and Writers of the lens; a Reader reviews |
 | Committing a changeset | Writers of the lens |
 | Ruleset maintenance | The ontology's administrators; everyone else uses the rulesets |
@@ -859,8 +860,8 @@ both types. When several are valid the user picks one, phrased as a concrete sen
 (this entity → relation → that entity) rather than as an abstract type list. A
 self-referential drag collapses the two identical directions to one option. Relation
 properties are then filled in, and the new edge appears without re-laying anything out.
-While a [changeset is pinned](#changesets), a drag only says that the canvas writes live
-and the changeset must be left first.
+While a [changeset is pinned](#changesets), nodes offer no connecting drag: the canvas
+writes live only, so the changeset must be left first.
 
 **Caps.** A soft cap of 150 nodes switches the node counter to a warning appearance and
 suggests clearing unpinned nodes. A hard cap of 300 refuses further additions with an

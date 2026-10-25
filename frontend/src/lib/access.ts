@@ -87,6 +87,15 @@ export function grantableRoles(access: Access): Role[] {
   return access.adminOntologies.length > 0 ? LENS_ROLES : []
 }
 
+/**
+ * Whether the Explorer offers its connecting drag: it writes live only,
+ * so a Writer while no changeset is pinned; never a Proposer, whose
+ * writes can only be staged.
+ */
+export function canConnectLive(access: Access, ontologyKey: string, lensKey: string, pinned: string | null): boolean {
+  return pinned === null && access.canWrite(ontologyKey, lensKey)
+}
+
 /** Removing takes the same right as granting. */
 export function canRemoveAssignment(access: Access, assignment: Assignment): boolean {
   if (access.isPlatformAdmin) return true

@@ -4,6 +4,7 @@ import type { AccessAssignment, Assignment, AuthMe, Role, User } from '../src/ap
 import {
   accessFrom,
   assignmentTarget,
+  canConnectLive,
   canRemoveAssignment,
   grantableRoles,
   groupAccess,
@@ -115,4 +116,22 @@ test('groupAccess splits administrators from lens roles, sorted by name', () => 
   assert.deepEqual(admins.map((a) => a.user.displayName), ['Bob'])
   assert.deepEqual(byLens.get('main')?.map((a) => a.user.displayName), ['Ada', 'Bob'])
   assert.deepEqual(byLens.get('side')?.map((a) => a.role), ['reader'])
+})
+
+test("the Explorer's connecting drag: a Writer with no changeset pinned, nobody else", () => {
+  const on = (role: Role) => accessFrom(signedIn(assignment(role, 'o', 'main')))
+  const cases: [Role, string | null, boolean][] = [
+    ['writer', null, true],
+    ['writer', 'cs1', false],
+    ['proposer', null, false],
+    ['proposer', 'cs1', false],
+    ['reader', null, false],
+    ['reader', 'cs1', false],
+  ]
+  for (const [role, pinned, expected] of cases) {
+    assert.equal(canConnectLive(on(role), 'o', 'main', pinned), expected, `${role}, pinned ${pinned}`)
+  }
+  assert.equal(canConnectLive(on('writer'), 'o', 'side', null), false)
+  assert.equal(canConnectLive(accessFrom({ authentication: false }), 'o', 'main', null), true)
+  assert.equal(canConnectLive(accessFrom({ authentication: false }), 'o', 'main', 'cs1'), false)
 })

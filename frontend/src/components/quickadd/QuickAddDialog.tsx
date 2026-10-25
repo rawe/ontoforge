@@ -9,7 +9,7 @@ import { qk } from '@/api/queryKeys'
 import { getPath } from '@/api/runtime'
 import type { JsonValue, SchemaProperty } from '@/api/types'
 import { useRuntimeWrites } from '@/api/writes'
-import { useAccess } from '@/components/auth/useAccess'
+import { useCanEdit } from '@/components/auth/useAccess'
 import { TypeChip } from '@/components/TypeChip'
 import { STAGED_ONLY_TEXT } from '@/components/changesets/changesets'
 import { formatPath, splitParentErrors } from '@/components/entity/hierarchy'
@@ -148,11 +148,11 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
   })
   const resetMutation = create.reset
 
-  // A Reader's lens offers no way to create; the shortcut and events do nothing.
-  const canWrite = useAccess().canWrite(ontologyKey, lensKey)
+  // A lens the user cannot edit offers no way to create; the shortcut and events do nothing.
+  const canEdit = useCanEdit(ontologyKey, lensKey)
   const openWith = useCallback(
     (detail: QuickAddDetail) => {
-      if (!canWrite) return
+      if (!canEdit) return
       setTypeKey(detail.typeKey)
       setParent(detail.parent)
       setPreScoped(detail.typeKey !== undefined)
@@ -161,7 +161,7 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
       resetMutation()
       setOpen(true)
     },
-    [resetMutation, canWrite],
+    [resetMutation, canEdit],
   )
 
   // openQuickAdd() events from anywhere.

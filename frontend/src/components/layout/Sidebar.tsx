@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useChangesets, useFeatures, useLenses, useRulesets, useRuntimeSchema } from '@/api/hooks'
-import { useAccess } from '@/components/auth/useAccess'
+import { useAccess, useCanEdit } from '@/components/auth/useAccess'
 import { UserMenu } from '@/components/auth/UserMenu'
 import { deletedAnchorCount } from '@/components/rulesets/rulesets'
 import { submittedCount } from '@/components/changesets/changesets'
@@ -134,6 +134,7 @@ export function Sidebar({
 }) {
   const { collapsed } = useSidebarCollapsed()
   const access = useAccess()
+  const canEdit = useCanEdit(ontologyKey, lensKey)
   const { data: features } = useFeatures()
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const rulesets = useRulesets(ontologyKey)
@@ -207,7 +208,7 @@ export function Sidebar({
         </div>
       )}
 
-      {access.canWrite(ontologyKey, lensKey) && (
+      {canEdit && (
         <div className={cn('px-2 pb-1', collapsed && 'px-1.5')}>
           {(() => {
             const trigger = (

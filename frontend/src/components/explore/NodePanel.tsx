@@ -23,7 +23,7 @@ import type {
   SchemaEntityType,
   SchemaRelationType,
 } from '@/api/types'
-import { useAccess } from '@/components/auth/useAccess'
+import { useCanEdit } from '@/components/auth/useAccess'
 import { DocumentBadge } from '@/components/DocumentBadge'
 import {
   DocumentViewerDialog,
@@ -89,7 +89,7 @@ export function NodePanel({
   onDeselect,
 }: NodePanelProps) {
   const displayLabel = useDisplayLabel()
-  const canWrite = useAccess().canWrite(ontologyKey, lensKey)
+  const canEdit = useCanEdit(ontologyKey, lensKey)
   const entity = node.data.entity
   const typeKey = entity._entityTypeKey
   const entityType = entityTypes.find((t) => t.key === typeKey)
@@ -185,7 +185,7 @@ export function NodePanel({
               </>
             )}
           </Button>
-          {canWrite && (
+          {canEdit && (
             <Button
               variant="outline"
               size="xs"

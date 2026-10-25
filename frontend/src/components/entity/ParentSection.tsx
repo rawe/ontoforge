@@ -8,7 +8,7 @@ import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
 import { useRuntimeWrites } from '@/api/writes'
 import type { EntityInstance, Neighbor, SchemaEntityType } from '@/api/types'
-import { useAccess } from '@/components/auth/useAccess'
+import { useCanEdit } from '@/components/auth/useAccess'
 import { TypeChip } from '@/components/TypeChip'
 import type { RelationInitial } from '@/components/entity/AddRelationDialog'
 import type { HierarchyLink } from '@/components/entity/hierarchy'
@@ -59,7 +59,7 @@ export function ParentSection({
   const displayLabel = useDisplayLabel()
   const queryClient = useQueryClient()
   const [unlinkTarget, setUnlinkTarget] = useState<Neighbor | null>(null)
-  const canWrite = useAccess().canWrite(ontologyKey, lensKey)
+  const canEdit = useCanEdit(ontologyKey, lensKey)
   const staging = usePinnedChangeset(ontologyKey, lensKey) !== null
   const typeKey = entity._entityTypeKey
 
@@ -119,7 +119,7 @@ export function ParentSection({
         <span className="truncate font-mono text-[11.5px] text-muted-foreground">
           {links.map((l) => l.relationType.key).join(' · ')}
         </span>
-        {canWrite && (
+        {canEdit && (
           <Button
             variant="ghost"
             size="icon-xs"
@@ -141,7 +141,7 @@ export function ParentSection({
       ) : rows.length === 0 ? (
         <div className="flex items-center justify-between px-4 py-3">
           <p className="text-[13px] text-muted-foreground">No parent: a root.</p>
-          {canWrite && (
+          {canEdit && (
             <Button variant="outline" size="xs" onClick={add}>
               <Plus className="size-3" /> Add
             </Button>
@@ -174,7 +174,7 @@ export function ParentSection({
                     {summary}
                   </span>
                 )}
-                {canWrite && (
+                {canEdit && (
                   <Button
                     variant="ghost"
                     size="icon-xs"

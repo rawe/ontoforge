@@ -35,8 +35,8 @@ export const TRUSTED: Access = { kind: "trusted" };
  * - `ontology-admin` — Ontology Administrator of the `:ontologyKey` in the path.
  * - `ontology-member` — any role within that ontology, or Platform Administrator.
  * - `lens` — a lens role on the lens in the path (`:lensKey`, or `:lensId` on modeling
- *   lens routes); `operation` from `runtime/writeAccess.ts`: `read` needs Reader or
- *   Writer, anything else Writer. `orAdmin` also lets the ontology's administrator in
+ *   lens routes); `operation` from `runtime/writeAccess.ts`, allowed when the lens role's
+ *   level allows it (`authorize.ts` `ROLE_LEVELS`). `orAdmin` also lets the ontology's administrator in
  *   (modeling reads of a lens), never for runtime routes.
  * - `user-admin` — Platform Administrator or an Ontology Administrator of any ontology;
  *   the user-management service narrows it.

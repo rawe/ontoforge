@@ -2,7 +2,9 @@
  * The runtime MCP server at the caller's role level (`mcp/runtime.ts`):
  * a Reader (level `none`) lists only the read tools, below a ruleset's
  * level too, and a write, stage or commit call is refused before any
- * store is opened, whatever list the client holds.
+ * store is opened, whatever list the client holds. A Proposer (level
+ * `propose`) lists what a `propose` ruleset lists, with `changeset_id`
+ * required, and its direct writes and commits are refused alike.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -35,6 +37,13 @@ async function connect(role: WriteAccess, binding?: Binding, listedRole: WriteAc
   const client = new Client({ name: "role-level-tests", version: "0.0.1" });
   await client.connect(clientTransport);
   return client;
+}
+
+async function tools(role: WriteAccess, binding?: Binding) {
+  const client = await connect(role, binding);
+  const list = (await client.listTools()).tools;
+  await client.close();
+  return list;
 }
 
 async function listed(role: WriteAccess, binding?: Binding): Promise<string[]> {
@@ -73,6 +82,51 @@ describe("the role level", () => {
     expect(await listed("full", { rulesetKey: "r", writeAccess: "propose" })).toEqual(
       Object.keys(TOOLS).filter((name) => name !== "commit_changeset").sort(),
     );
+  });
+
+  it("a Proposer lists what a propose ruleset lists, on the plain lens and below a ruleset", async () => {
+    const plain = Object.keys(TOOLS).filter((name) => name !== "get_ruleset" && name !== "commit_changeset").sort();
+    expect(await listed("propose")).toEqual(plain);
+    expect(await listed("propose", { rulesetKey: "r", writeAccess: "full" })).toEqual(
+      Object.keys(TOOLS).filter((name) => name !== "commit_changeset").sort(),
+    );
+    expect(await listed("propose", { rulesetKey: "r", writeAccess: "none" })).toEqual([...READS].sort());
+  });
+
+  it("a Proposer's write tools require changeset_id and say the connection only stages", async () => {
+    const createEntity = (await tools("propose")).find((tool) => tool.name === "create_entity")!;
+    expect(createEntity.inputSchema.required).toContain("changeset_id");
+    expect(createEntity.description).toContain("This connection has write access 'propose': it only stages");
+    const submit = (await tools("propose")).find((tool) => tool.name === "submit_changeset")!;
+    expect(submit.description).toContain("This connection has write access 'propose' and cannot commit");
+    const writer = (await tools("full")).find((tool) => tool.name === "create_entity")!;
+    expect(writer.inputSchema.required ?? []).not.toContain("changeset_id");
+  });
+
+  it("a Proposer's direct writes and commits are refused before any store opens; staging passes the role", async () => {
+    const client = await connect("propose", undefined, "full");
+    try {
+      for (const [name, args, message] of [
+        [
+          "create_entity",
+          { entity_type_key: "person", properties: { name: "Ann" } },
+          "cannot write directly; stage the write into a changeset",
+        ],
+        ["commit_changeset", { changeset_id: ID }, "cannot commit; submit the changeset, and a Writer commits it"],
+      ] as const) {
+        holder.opened = 0;
+        const result = (await client.callTool({ name, arguments: args })) as { isError?: boolean; content: { text: string }[] };
+        expect(result.isError, name).toBe(true);
+        expect(result.content[0]!.text, name).toBe(`Error executing tool ${name}: Proposer on lens 'all' ${message}`);
+        expect(holder.opened, name).toBe(0);
+      }
+      // A stage passes the role check and reaches the store.
+      holder.opened = 0;
+      await client.callTool({ name: "start_changeset", arguments: {} });
+      expect(holder.opened).toBeGreaterThan(0);
+    } finally {
+      await client.close();
+    }
   });
 
   it("a Reader's write, stage and commit calls are refused before any store opens; reads pass", async () => {

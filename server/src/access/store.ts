@@ -12,8 +12,16 @@
 export type PrincipalKind = "user" | "service";
 export type PrincipalStatus = "active" | "disabled";
 
-export const ROLES = ["platform_admin", "ontology_creator", "ontology_admin", "reader", "writer"] as const;
+export const ROLES = ["platform_admin", "ontology_creator", "ontology_admin", "reader", "proposer", "writer"] as const;
 export type Role = (typeof ROLES)[number];
+
+/** The roles held on one lens; a principal holds at most one per lens. */
+export const LENS_ROLES = ["reader", "proposer", "writer"] as const satisfies readonly Role[];
+export type LensRole = (typeof LENS_ROLES)[number];
+
+export function isLensRole(role: Role): role is LensRole {
+  return (LENS_ROLES as readonly Role[]).includes(role);
+}
 
 export interface Principal {
   id: string;
@@ -33,7 +41,7 @@ export interface Assignment {
   role: Role;
   /** Null for a platform role. */
   ontologyId: string | null;
-  /** Set for reader and writer only. */
+  /** Set for the lens roles only. */
   lensId: string | null;
   createdAt: Date;
   createdBy: string | null;
@@ -90,8 +98,8 @@ export interface AccessStore {
    * Platform Administrator (ConflictError). */
   setStatus(id: string, status: PrincipalStatus, actorId: string): Promise<Principal | null>;
   /**
-   * Idempotent. One lens role per principal and lens: Reader replaces Writer
-   * and the other way round.
+   * Idempotent. One lens role per principal and lens: granting Reader,
+   * Proposer or Writer replaces the other lens role held there.
    */
   assign(assignment: NewAssignment, actorId: string): Promise<Assignment>;
   /** The removed assignment, or null. Refuses to remove the last active Platform

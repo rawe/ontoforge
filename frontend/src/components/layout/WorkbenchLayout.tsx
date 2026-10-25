@@ -68,7 +68,7 @@ export function WorkbenchLayout() {
     return (
       <NoAccess
         title="No access to this lens"
-        description={`You hold no Reader or Writer role on lens "${lensKey}" of ontology "${ontologyKey}".`}
+        description={`You hold no Reader, Proposer or Writer role on lens "${lensKey}" of ontology "${ontologyKey}".`}
       />
     )
   }

@@ -5,7 +5,8 @@
  * the caller's subject. Covers the route checks (401, 403, 404), the
  * filtered lists, the creator becoming administrator, user management's
  * scope, deletes forgetting assignments, the runtime MCP mount at a
- * Reader's level and owned assistant threads.
+ * Reader's level, a Proposer's changesets a Writer commits and owned
+ * assistant threads.
  */
 
 import { randomUUID } from "node:crypto";
@@ -313,6 +314,51 @@ describe("authorization with authentication on", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     expect(res.status).toBe(403);
+  });
+
+  it("a Proposer stages and submits a changeset, cannot write directly nor commit; a Writer commits it", async () => {
+    expect((await as("carol", "GET", "/api/ontologies")).status).toBe(200);
+    await grant("creator", "carol", { role: "proposer", ontologyKey: "fair", lensKey: "visitor" });
+    expect((await as("carol", "GET", `${visitor}/schema`)).status).toBe(200);
+    const direct = await as("carol", "POST", `${visitor}/entities/a`, {});
+    expect(direct.status).toBe(403);
+    expect(direct.body.error).toEqual({
+      code: "FORBIDDEN",
+      message: "Proposer on lens 'visitor' cannot write directly; stage the write into a changeset",
+    });
+
+    const started = await as("carol", "POST", `${visitor}/changesets`, {});
+    expect(started.status).toBe(201);
+    const changeset = `${visitor}/changesets/${started.body.id as string}`;
+    const staged = await as("carol", "POST", `${changeset}/writes`, { operation: "create_entity", type: "a", properties: {} });
+    expect(staged.status, JSON.stringify(staged.body)).toBe(201);
+    expect((await as("carol", "POST", `${changeset}/check`)).status).toBe(200);
+    expect((await as("carol", "POST", `${changeset}/submit`, {})).status).toBe(200);
+    const commit = await as("carol", "POST", `${changeset}/commit`);
+    expect(commit.status).toBe(403);
+    expect(commit.body.error.message).toBe(
+      "Proposer on lens 'visitor' cannot commit; submit the changeset, and a Writer commits it",
+    );
+    expect((await as("bob", "POST", `${changeset}/commit`)).status).toBe(200);
+    expect(((await as("carol", "GET", `${visitor}/entities/a`)).body.items as Json[]).length).toBe(1);
+
+    // Its MCP mount offers what a 'propose' ruleset offers, and refuses the rest.
+    const client = await mcpAs("carol", "/mcp/ontologies/fair/runtime/lenses/visitor");
+    try {
+      const tools = (await client.listTools()).tools;
+      const names = tools.map((t) => t.name);
+      expect(names).toEqual(expect.arrayContaining(["start_changeset", "submit_changeset", "create_entity"]));
+      expect(names).not.toContain("commit_changeset");
+      expect(tools.find((t) => t.name === "create_entity")!.inputSchema.required).toContain("changeset_id");
+      const refused = (await client.callTool({ name: "commit_changeset", arguments: { changeset_id: started.body.id } })) as {
+        isError?: boolean;
+        content: { text: string }[];
+      };
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0]!.text).toContain("Proposer on lens 'visitor' cannot commit");
+    } finally {
+      await client.close();
+    }
   });
 
   it("deleting a lens over MCP removes its assignments too", async () => {

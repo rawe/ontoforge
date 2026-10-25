@@ -512,7 +512,7 @@ export interface ToolCall {
 
 /* ------------------------------ authentication ------------------------------ */
 
-export type Role = 'platform_admin' | 'ontology_creator' | 'ontology_admin' | 'reader' | 'writer'
+export type Role = 'platform_admin' | 'ontology_creator' | 'ontology_admin' | 'reader' | 'proposer' | 'writer'
 
 /** A person signing in through the browser, or a service calling with a token. */
 export interface User {
@@ -526,7 +526,7 @@ export interface User {
   lastLoginAt: string | null
 }
 
-/** One role of one principal: platform roles carry no keys, `ontology_admin` an ontology, Reader/Writer a lens. */
+/** One role of one principal: platform roles carry no keys, `ontology_admin` an ontology, the lens roles a lens. */
 export interface Assignment {
   id: string
   role: Role

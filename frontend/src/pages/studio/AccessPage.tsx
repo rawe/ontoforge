@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ROLE_LABELS, canRemoveAssignment, groupAccess } from '@/lib/access'
+import { LENS_ROLES, ROLE_LABELS, canRemoveAssignment, groupAccess } from '@/lib/access'
 
 const SEARCH_LIMIT = 8
 
@@ -110,7 +110,7 @@ function UserPicker({ value, onChange }: { value: User | null; onChange: (user: 
 
 /* ---------------------------------- add ------------------------------------- */
 
-/** User → lens → Reader or Writer. A user's role on a lens replaces the other one. */
+/** User → lens → Reader, Proposer or Writer. A user's role on a lens replaces the one held before. */
 function AddAccessForm({ ontologyKey }: { ontologyKey: string }) {
   const queryClient = useQueryClient()
   const { data: lenses } = useLenses(ontologyKey)
@@ -166,8 +166,11 @@ function AddAccessForm({ ontologyKey }: { ontologyKey: string }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="reader">{ROLE_LABELS.reader}</SelectItem>
-            <SelectItem value="writer">{ROLE_LABELS.writer}</SelectItem>
+            {LENS_ROLES.map((r) => (
+              <SelectItem key={r} value={r}>
+                {ROLE_LABELS[r]}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -237,7 +240,7 @@ function AccessSection({
 
 /**
  * `/o/:ontologyKey/studio/access` — who may use this ontology: its
- * administrators, and the Reader and Writer roles on each lens.
+ * administrators, and the lens roles on each lens.
  */
 export function AccessPage() {
   const { ontologyKey } = useParams<{ ontologyKey: string }>()
@@ -276,7 +279,7 @@ export function AccessPage() {
             />
             {lenses.length === 0 && (
               <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
-                <Layers className="size-4" /> No lenses yet: Reader and Writer roles are held on a lens.
+                <Layers className="size-4" /> No lenses yet: Reader, Proposer and Writer roles are held on a lens.
               </p>
             )}
             {lenses.map((lens) => (

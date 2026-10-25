@@ -40,7 +40,7 @@ export function ChangesetsPage() {
   const changesets = useChangesets(ontologyKey, lensKey)
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const [startOpen, setStartOpen] = useState(false)
-  const canWrite = useAccess().canWrite(ontologyKey ?? '', lensKey ?? '')
+  const canStage = useAccess().canStage(ontologyKey ?? '', lensKey ?? '')
 
   if (ontologyKey === undefined || lensKey === undefined) return null
 
@@ -57,7 +57,7 @@ export function ChangesetsPage() {
         meta={<ChangesetExplainerButton className="-ml-2" />}
         description="Staged changes planned through this lens. Review one, then commit it or send it back."
         actions={
-          canWrite ? (
+          canStage ? (
             <Button size="sm" onClick={() => setStartOpen(true)}>
               <Plus className="size-3.5" />
               Start changeset

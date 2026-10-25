@@ -86,6 +86,54 @@ describe("opening", () => {
     store = await openAccessStore(accessUrl(), settings.DB_USER, settings.DB_PASSWORD);
   });
 
+  it("upgrades a version 1 database: Proposer becomes assignable, the assignments stay", async () => {
+    const OLD = "ontoforge_access_upgrade_test";
+    await maintenance((c) => c.query(`DROP DATABASE IF EXISTS ${OLD} WITH (FORCE)`));
+    await maintenance((c) => c.query(`CREATE DATABASE ${OLD}`));
+    const principalId = randomUUID();
+    await connect(OLD, async (c) => {
+      // The version 1 layout of the assignment table and its constraints.
+      await c.query(`
+        CREATE TABLE access_storage_version (id boolean PRIMARY KEY DEFAULT true CHECK (id), version integer NOT NULL);
+        INSERT INTO access_storage_version (version) VALUES (1);
+        CREATE TABLE assignment (
+          id uuid PRIMARY KEY,
+          principal_id uuid NOT NULL,
+          role text NOT NULL CHECK (role IN ('platform_admin', 'ontology_creator', 'ontology_admin', 'reader', 'writer')),
+          ontology_id uuid,
+          lens_id uuid,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          created_by uuid,
+          CHECK (
+            (role IN ('platform_admin', 'ontology_creator') AND ontology_id IS NULL AND lens_id IS NULL) OR
+            (role = 'ontology_admin' AND ontology_id IS NOT NULL AND lens_id IS NULL) OR
+            (role IN ('reader', 'writer') AND ontology_id IS NOT NULL AND lens_id IS NOT NULL)
+          )
+        );
+        INSERT INTO assignment (id, principal_id, role) VALUES ('${randomUUID()}', '${principalId}', 'platform_admin');
+      `);
+    });
+    const url = new URL(accessUrl());
+    url.pathname = `/${OLD}`;
+    const upgraded = await openAccessStore(url.toString(), settings.DB_USER, settings.DB_PASSWORD);
+    try {
+      const user = await upgraded.signIn(ISSUER, "u", profile("u"), false);
+      const lens = { ontologyId: randomUUID(), lensId: randomUUID() };
+      await upgraded.assign({ principalId: user.id, role: "proposer", ...lens }, user.id);
+      expect((await upgraded.assignmentsOf(user.id)).map((a) => a.role)).toEqual(["proposer"]);
+      expect((await upgraded.assignmentsOf(principalId)).map((a) => a.role)).toEqual(["platform_admin"]);
+      const version = await connect(OLD, (c) => c.query("SELECT version FROM access_storage_version"));
+      expect(version.rows[0].version).toBe(2);
+      // A lens role still needs its lens.
+      await expect(
+        upgraded.assign({ principalId: user.id, role: "proposer", ontologyId: lens.ontologyId, lensId: null }, user.id),
+      ).rejects.toThrow();
+    } finally {
+      await upgraded.close();
+      await maintenance((c) => c.query(`DROP DATABASE IF EXISTS ${OLD} WITH (FORCE)`));
+    }
+  });
+
   it("opens concurrently from several servers", async () => {
     const stores = await Promise.all([1, 2, 3].map(() => openAccessStore(accessUrl(), settings.DB_USER, settings.DB_PASSWORD)));
     await Promise.all(stores.map((s) => s.close()));
@@ -154,7 +202,7 @@ describe("sign-in", () => {
 });
 
 describe("assignments", () => {
-  it("assigns idempotently and lets Reader and Writer on one lens replace each other", async () => {
+  it("assigns idempotently and lets the lens roles on one lens replace each other", async () => {
     const admin = await store.signIn(ISSUER, "admin", profile("admin"), true);
     const user = await store.signIn(ISSUER, "u", profile("u"), false);
     const ontologyId = randomUUID();
@@ -162,6 +210,8 @@ describe("assignments", () => {
     const reader = await store.assign({ principalId: user.id, role: "reader", ontologyId, lensId }, admin.id);
     const again = await store.assign({ principalId: user.id, role: "reader", ontologyId, lensId }, admin.id);
     expect(again.id).toBe(reader.id);
+    const proposer = await store.assign({ principalId: user.id, role: "proposer", ontologyId, lensId }, admin.id);
+    expect((await store.assignmentsOf(user.id)).map((a) => [a.role, a.id])).toEqual([["proposer", proposer.id]]);
     const writer = await store.assign({ principalId: user.id, role: "writer", ontologyId, lensId }, admin.id);
     const roles = await store.assignmentsOf(user.id);
     expect(roles.map((a) => [a.role, a.id])).toEqual([["writer", writer.id]]);

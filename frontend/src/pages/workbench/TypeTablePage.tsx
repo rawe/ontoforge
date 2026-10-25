@@ -24,7 +24,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useRuntimeSchema } from '@/api/hooks'
-import { useAccess } from '@/components/auth/useAccess'
+import { useCanEdit } from '@/components/auth/useAccess'
 import { qk } from '@/api/queryKeys'
 import { listEntities, type ListEntitiesParams } from '@/api/runtime'
 import { GONE_CHANGESET_TEXT } from '@/api/staging'
@@ -125,7 +125,7 @@ export function TypeTablePage() {
   const queryClient = useQueryClient()
   const writes = useRuntimeWrites(ontologyKey ?? '', lensKey ?? '')
   const pinned = usePinnedChangeset(ontologyKey ?? '', lensKey ?? '')
-  const canWrite = useAccess().canWrite(ontologyKey ?? '', lensKey ?? '')
+  const canEdit = useCanEdit(ontologyKey ?? '', lensKey ?? '')
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const type = schema.data?.entityTypes.find((t) => t.key === typeKey)
   const nameProperty = type?.nameProperty
@@ -351,8 +351,8 @@ export function TypeTablePage() {
       },
     ]
     // Selecting rows only leads to deleting them.
-    return canWrite ? defs : defs.filter((d) => d.id !== 'select')
-  }, [properties, navigate, ontologyKey, lensKey, typeKey, nameProperty, canWrite])
+    return canEdit ? defs : defs.filter((d) => d.id !== 'select')
+  }, [properties, navigate, ontologyKey, lensKey, typeKey, nameProperty, canEdit])
 
   const table = useReactTable({
     data: entities.data?.items ?? [],
@@ -516,12 +516,12 @@ export function TypeTablePage() {
           icon={Table2}
           title={`Add your first ${type.displayName.toLowerCase()}`}
           description={
-            canWrite
+            canEdit
               ? `No ${type.displayName.toLowerCase()} entities exist yet. Create one to get started — or press ⌘K to search and add from anywhere.`
               : `No ${type.displayName.toLowerCase()} entities exist yet.`
           }
           action={
-            canWrite ? (
+            canEdit ? (
               <Button asChild size="sm">
                 <Link to={`/o/${ontologyKey}/w/${lensKey}/t/${typeKey}?new=1`}>
                   <Plus className="size-3.5" />
@@ -561,7 +561,7 @@ export function TypeTablePage() {
                 CSV
               </Button>
               <ColumnVisibilityMenu table={table} />
-              {canWrite && (
+              {canEdit && (
                 <Button size="sm" className="h-8 gap-1.5 text-[13px]" onClick={() => openQuickAdd(typeKey)}>
                   <Plus className="size-3.5" />
                   New {type.displayName}

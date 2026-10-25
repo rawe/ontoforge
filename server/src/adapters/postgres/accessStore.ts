@@ -27,8 +27,8 @@ import type {
 import { ConflictError, OntoForgeError } from "../../core/exceptions.js";
 import { toStoreError } from "./errors.js";
 
-/** The layout this code creates. */
-export const ACCESS_STORAGE_VERSION = 1;
+/** The layout this code creates. 2 adds the Proposer lens role. */
+export const ACCESS_STORAGE_VERSION = 2;
 
 /** Any number; the boot of every server takes it before creating or upgrading. */
 const SCHEMA_LOCK = 4_711_001;
@@ -60,16 +60,11 @@ CREATE INDEX IF NOT EXISTS identity_principal ON identity (principal_id);
 CREATE TABLE IF NOT EXISTS assignment (
   id uuid PRIMARY KEY,
   principal_id uuid NOT NULL REFERENCES principal (id),
-  role text NOT NULL CHECK (role IN ('platform_admin', 'ontology_creator', 'ontology_admin', 'reader', 'writer')),
+  role text NOT NULL,
   ontology_id uuid,
   lens_id uuid,
   created_at timestamptz NOT NULL DEFAULT now(),
-  created_by uuid,
-  CHECK (
-    (role IN ('platform_admin', 'ontology_creator') AND ontology_id IS NULL AND lens_id IS NULL) OR
-    (role = 'ontology_admin' AND ontology_id IS NOT NULL AND lens_id IS NULL) OR
-    (role IN ('reader', 'writer') AND ontology_id IS NOT NULL AND lens_id IS NOT NULL)
-  )
+  created_by uuid
 );
 CREATE UNIQUE INDEX IF NOT EXISTS assignment_platform ON assignment (principal_id, role)
   WHERE ontology_id IS NULL;
@@ -79,6 +74,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS assignment_lens ON assignment (principal_id, l
   WHERE lens_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS assignment_principal ON assignment (principal_id);
 CREATE INDEX IF NOT EXISTS assignment_ontology_id ON assignment (ontology_id);
+-- The roles and their scopes, replaced whole on every boot: version 1
+-- stored them without Proposer under the names PostgreSQL gave them.
+ALTER TABLE assignment DROP CONSTRAINT IF EXISTS assignment_role_check;
+ALTER TABLE assignment DROP CONSTRAINT IF EXISTS assignment_check;
+ALTER TABLE assignment DROP CONSTRAINT IF EXISTS assignment_role;
+ALTER TABLE assignment ADD CONSTRAINT assignment_role CHECK (
+  (role IN ('platform_admin', 'ontology_creator') AND ontology_id IS NULL AND lens_id IS NULL) OR
+  (role = 'ontology_admin' AND ontology_id IS NOT NULL AND lens_id IS NULL) OR
+  (role IN ('reader', 'proposer', 'writer') AND ontology_id IS NOT NULL AND lens_id IS NOT NULL)
+);
 CREATE TABLE IF NOT EXISTS audit (
   id bigserial PRIMARY KEY,
   at timestamptz NOT NULL DEFAULT now(),
@@ -213,6 +218,9 @@ class PostgresAccessStore implements AccessStore {
         throw new Error(
           `access storage version ${current.rows[0].version} is newer than this server's ${ACCESS_STORAGE_VERSION}`,
         );
+      } else if ((current.rows[0].version as number) < ACCESS_STORAGE_VERSION) {
+        // The schema above brought it up to date.
+        await client.query("UPDATE access_storage_version SET version = $1", [ACCESS_STORAGE_VERSION]);
       }
       await client.query("COMMIT");
     } catch (error) {

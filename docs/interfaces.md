@@ -231,7 +231,7 @@ the role the route needs ([capabilities/authentication.md](capabilities/authenti
 | Every other modeling route, and the modeling MCP mount | Ontology Administrator |
 | `GET` of ruleset maintenance | Reader, Proposer or Writer on any lens of the ontology, or Ontology Administrator |
 | Every other ruleset maintenance route | Ontology Administrator |
-| Runtime routes, plain and below a ruleset, and the runtime MCP mounts | Reader, Proposer or Writer on the lens for a route that reads — chat, search, query and a changeset's check among them — Proposer or Writer for one that stages, Writer for every other; the operation of each is its ruleset [write access](capabilities/rulesets.md#write-access-levels) operation |
+| Runtime routes, plain and below a ruleset, and the runtime MCP mounts | Reader, Proposer or Writer on the lens for a route that reads — chat, search and query among them — Proposer or Writer for one that stages — a changeset's check among them — Writer for every other; the operation of each is its ruleset [write access](capabilities/rulesets.md#write-access-levels) operation |
 | `/api/users`, `/api/ontologies/{ontologyKey}/access` | Platform Administrator or an Ontology Administrator, narrowed per [route](#user-management) |
 
 A request without a valid credential answers `401 UNAUTHENTICATED` with a

@@ -147,7 +147,7 @@ export function ChangesetDetailPage() {
   const list = useChangesets(ontologyKey, lensKey)
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const pinned = usePinnedChangeset(ontologyKey!, lensKey!)
-  // A Reader reviews and checks; staging and submitting need Proposer or
+  // A Reader reviews; checking, staging and submitting need Proposer or
   // Writer; committing needs Writer.
   const access = useAccess()
   const canStage = access.canStage(ontologyKey!, lensKey!)
@@ -513,7 +513,7 @@ export function ChangesetDetailPage() {
         actions={
           <>
             <PinChangesetButton ontologyKey={ontologyKey} lensKey={lensKey} changeset={changeset} />
-            {checkButton}
+            {canStage && checkButton}
             {canStage && (
               <>
                 {submitted ? <Disabled reason={SUBMITTED_REASON}>{submitButton}</Disabled> : submitButton}

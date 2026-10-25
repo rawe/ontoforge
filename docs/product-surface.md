@@ -153,7 +153,7 @@ them all the same.
 | Lens switcher, a type's links to other lenses | The lenses the user holds a role on |
 | Surface switch, "Manage lenses…", links into the Studio | The ontology's administrators |
 | New entity, quick add, editing, deleting, relating, documents' edit, the Explorer's connecting drag | Writers of the lens; Proposers while a changeset is pinned, into which every such write is staged |
-| Starting, pinning, editing and submitting a changeset | Proposers and Writers of the lens; a Reader reviews and checks |
+| Starting, pinning, editing, checking and submitting a changeset | Proposers and Writers of the lens; a Reader reviews |
 | Committing a changeset | Writers of the lens |
 | Ruleset maintenance | The ontology's administrators; everyone else uses the rulesets |
 

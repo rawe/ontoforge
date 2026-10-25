@@ -75,16 +75,21 @@ next such request.
 |---|---|---|
 | Platform Administrator | The platform | Grants full access to [user management](#user-management). Allows the principal to list every ontology and lens to assign roles, but does not itself grant access to designs or data. |
 | Ontology Creator | The platform | Allows the principal to create ontologies. The creator is assigned the Ontology Administrator role on each new ontology. This role alone grants no access to other ontologies. |
-| Ontology Administrator | One ontology | Grants full access to the ontology's design through all modeling routes and the modeling MCP mount. Allows the principal to manage the ontology's rulesets, rename or delete the ontology, and grant Reader or Writer roles on its lenses. Access to data requires a lens role, which the principal may assign to itself. |
+| Ontology Administrator | One ontology | Grants full access to the ontology's design through all modeling routes and the modeling MCP mount. Allows the principal to manage the ontology's rulesets, rename or delete the ontology, and grant Reader, Proposer or Writer roles on its lenses. Access to data requires a lens role, which the principal may assign to itself. |
 | Reader | One lens | Allows read operations through the lens, including access to schema, data, documents, search, queries, saved queries, assistants, the principal's own threads, and changesets. Also grants read access to the lens's design and the ontology's rulesets. |
-| Writer | One lens | Grants all Reader permissions and allows all write operations permitted by the lens, including writes to data and documents and staging, checking, submitting, and committing changesets. |
+| Proposer | One lens | Grants all Reader permissions and allows proposing changes through changesets: starting them, staging writes into them, and checking, submitting, unsubmitting, and discarding them. Does not allow direct writes to data or documents, or committing a changeset; a Writer commits it. |
+| Writer | One lens | Grants all Proposer permissions and allows all write operations permitted by the lens, including direct writes to data and documents and committing changesets. |
 
 Role assignments are independent: holding one role does not automatically assign
-another. A Writer nevertheless has all Reader permissions on the same lens. A principal
-can hold either Reader or Writer on a lens, but not both; granting one replaces the
-other. Writer permissions remain subject to the lens's restrictions and, on a ruleset
-mount, the [ruleset](rulesets.md) selected by the URL. The more restrictive of the role's
-and the ruleset's write permissions applies. Agents remain read-only regardless of the
+another. On the same lens, a Proposer nevertheless has all Reader permissions, and a
+Writer all Proposer permissions. A principal holds at most one of Reader, Proposer and
+Writer on a lens; granting one replaces the one held before.
+
+Each lens role allows exactly what one level of a ruleset's
+[write access](rulesets.md#write-access-levels) allows: Reader `none`, Proposer
+`propose`, Writer `full`. Its permissions remain subject to the lens's restrictions and,
+on a ruleset mount, the [ruleset](rulesets.md) selected by the URL. The lower of the
+role's and the ruleset's level applies. Agents remain read-only regardless of the
 caller's role.
 
 ## What a caller sees
@@ -94,19 +99,23 @@ Not Found, just like requests for nonexistent resources. This avoids revealing t
 keys. Platform Administrators can discover every ontology and lens; Ontology
 Administrators can discover every lens in the ontologies they administer. If the caller
 can discover a resource but lacks permission for the requested operation, the request
-returns Forbidden. Examples include a Reader attempting a write, an ontology member
+returns Forbidden. Examples include a Reader attempting a write, a Proposer attempting a
+direct write or a commit, an ontology member
 without the Ontology Administrator role reading the ontology's design, or an
 administrator accessing data through a lens without a lens role.
 
 The ontology list contains ontologies in which the caller holds an Ontology
 Administrator role or a role on a lens; Platform Administrators see all ontologies. An
-ontology's lens list contains lenses on which the caller holds Reader or Writer;
-Platform Administrators and that ontology's administrators see all its lenses. Readers
-and Writers see the runtime view of a lens's design, with unsupported inclusions
-omitted. Ontology Administrators see the full design. For Readers, a runtime MCP mount
-lists only the tools available with ruleset write access `none`
-([Ruleset interfaces](rulesets.md#write-access-through-the-interfaces)). Attempts to call
-write tools are rejected.
+ontology's lens list contains lenses on which the caller holds a lens role; Platform
+Administrators and that ontology's administrators see all its lenses. Holders of a lens
+role see the runtime view of a lens's design, with unsupported inclusions omitted.
+Ontology Administrators see the full design. A runtime MCP mount lists only the tools
+its caller's role allows, as a ruleset of the role's level would
+([Ruleset interfaces](rulesets.md#write-access-through-the-interfaces)): for a Reader
+the reads, for a Proposer also the changeset tools but `commit_changeset`, with
+`changeset_id` required on every write tool. A call the role does not allow is refused
+as Forbidden, naming the role and, for a Proposer, the way round: stage the write into
+a changeset, or submit the changeset for a Writer to commit.
 
 Unauthenticated callers can access the authentication endpoints, the deployment
 description (`/api/server`), health probes, the API documentation, and MCP resource
@@ -131,9 +140,9 @@ deleted resource's assignments.
 An assistant thread is associated with both its assistant and the principal that
 started it. Other principals, including Writers on the same lens, cannot access it and
 receive Not Found ([Threads](threads.md)). Changesets are shared within their lens:
-Readers can read them; Writers can also stage changes, run checks, submit them, and
-commit them, subject to the lens's and the selected ruleset's restrictions
-([Changesets](changesets.md)).
+Readers can read them; Proposers can also start them, stage changes, run checks, and
+submit them; Writers can also commit them, a Proposer's included. All of it is subject to
+the lens's and the selected ruleset's restrictions ([Changesets](changesets.md)).
 
 ## User management
 
@@ -145,8 +154,8 @@ User management is available only when authentication is enabled.
   role or platform-level roles.
 - An **Ontology Administrator** can also search for principals, but can view only their
   role assignments within the ontologies the administrator manages. The administrator
-  can grant and revoke Reader and Writer roles on those ontologies' lenses and list role
-  assignments within each managed ontology.
+  can grant and revoke Reader, Proposer and Writer roles on those ontologies' lenses and
+  list role assignments within each managed ontology.
 - Principals cannot disable their own accounts. The last active Platform Administrator
   cannot be disabled or have that role revoked. The [configured administrator](#signing-in)
   is also protected: change the configured administrator identity before disabling that

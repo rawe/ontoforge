@@ -10,7 +10,11 @@
  *   no design, no data.
  * - Ontology Administrator: all modeling of its ontology, ruleset
  *   maintenance, rename and delete — no runtime data without a lens role.
- * - Reader reads through its lens; Writer does everything a lens allows.
+ * - The lens roles, each a write access level of the ruleset ladder
+ *   (`ROLE_LEVELS`): Reader reads through its lens (`none`); Proposer
+ *   also plans changes in changesets and submits them, but neither writes
+ *   directly nor commits (`propose`); Writer does everything a lens
+ *   allows (`full`).
  *
  * An ontology or lens the caller holds no role in answers not found, as
  * an unknown key does, so keys do not leak; a known one the caller lacks
@@ -19,9 +23,9 @@
 
 import { ForbiddenError, NotFoundError, UnauthenticatedError } from "../core/exceptions.js";
 import { getModelingStore, getOntologyRegistry, type WriteAccess } from "../core/ports.js";
-import type { Operation } from "../runtime/writeAccess.js";
+import { allows, type Operation } from "../runtime/writeAccess.js";
 import type { Access, Caller, Need } from "./caller.js";
-import type { Assignment } from "./store.js";
+import { isLensRole, type Assignment, type LensRole } from "./store.js";
 
 /** An ontology the caller may know about. */
 interface KnownOntology {
@@ -42,14 +46,39 @@ export function isOntologyAdmin(caller: Caller, ontologyId: string): boolean {
   return caller.assignments.some((a) => a.role === "ontology_admin" && a.ontologyId === ontologyId);
 }
 
-/** The caller's Reader or Writer assignment on one lens, if any. */
-export function lensRole(caller: Caller, lensId: string): Assignment | undefined {
-  return caller.assignments.find((a) => (a.role === "reader" || a.role === "writer") && a.lensId === lensId);
+/** The write access level each lens role gives: the ruleset ladder's. */
+export const ROLE_LEVELS: Record<LensRole, WriteAccess> = {
+  reader: "none",
+  proposer: "propose",
+  writer: "full",
+};
+
+/** The lens role whose level is `level`. */
+const ROLE_OF_LEVEL: Record<WriteAccess, string> = { none: "Reader", propose: "Proposer", full: "Writer" };
+
+/** The caller's lens role on one lens, if any. */
+export function lensRole(caller: Caller, lensId: string): (Assignment & { role: LensRole }) | undefined {
+  return caller.assignments.find((a): a is Assignment & { role: LensRole } => isLensRole(a.role) && a.lensId === lensId);
 }
 
-/** Whether a lens role allows an operation: Reader reads, Writer does everything. */
+/** Whether a lens role allows an operation: its level does. */
 function roleAllows(role: Assignment, operation: Operation): boolean {
-  return role.role === "writer" || operation === "read";
+  return isLensRole(role.role) && allows(ROLE_LEVELS[role.role], operation);
+}
+
+/**
+ * The refusal of an operation a lens role's level lacks, as a forbidden:
+ * a Reader cannot write at all; a Proposer is told the way round, as a
+ * `propose` ruleset tells its client (`writeAccess.ts`).
+ */
+export function roleRefusal(level: WriteAccess, lensLabel: string, operation: Operation): ForbiddenError {
+  const role = ROLE_OF_LEVEL[level];
+  if (level !== "propose") return new ForbiddenError(`${role} on lens '${lensLabel}' cannot write`);
+  return new ForbiddenError(
+    operation === "commit"
+      ? `${role} on lens '${lensLabel}' cannot commit; submit the changeset, and a Writer commits it`
+      : `${role} on lens '${lensLabel}' cannot write directly; stage the write into a changeset`,
+  );
 }
 
 export function ontologyNotFound(key: string): NotFoundError {
@@ -61,7 +90,7 @@ export function lensNotFound(key: string): NotFoundError {
 }
 
 /**
- * The caller's Reader and Writer roles in one ontology whose lens still
+ * The caller's lens roles in one ontology whose lens still
  * exists: a role a deleted lens left behind counts for nothing.
  */
 async function liveLensRoles(caller: Caller, ontology: KnownOntology): Promise<Assignment[]> {
@@ -164,27 +193,27 @@ async function authorizeLens(
   const role = lensRole(caller, lensId);
   if (role !== undefined) {
     if (roleAllows(role, operation)) return;
-    throw new ForbiddenError(`Reader on lens '${label}' cannot write`);
+    throw roleRefusal(ROLE_LEVELS[role.role], label, operation);
   }
   // Administrators know every lens of the ontology; anyone else learns nothing.
   if (admin || isPlatformAdmin(caller)) {
     if (params.lensId !== undefined && !(await lensExists(ontology.key, lensId))) throw lensNotFound(label);
-    throw new ForbiddenError(`This needs a Reader or Writer role on lens '${label}'`);
+    throw new ForbiddenError(`This needs a Reader, Proposer or Writer role on lens '${label}'`);
   }
   throw lensNotFound(label);
 }
 
 /**
- * The write access a caller's role gives on one lens: Writer `full`,
- * Reader (or no role) `none`; trusted access `full`. On a ruleset mount
- * the lower of this and the ruleset's level applies.
+ * The write access a caller's role gives on one lens (`ROLE_LEVELS`), no
+ * role `none`; trusted access `full`. On a ruleset mount the lower of this
+ * and the ruleset's level applies.
  */
 export async function lensLevel(access: Access, ontologyKey: string, lensKey: string): Promise<WriteAccess> {
   if (access.kind === "trusted") return "full";
   if (access.kind === "anonymous") return "none";
   const lensId = await lensIdOf(ontologyKey, lensKey);
   const role = lensId === null ? undefined : lensRole(access.caller, lensId);
-  return role?.role === "writer" ? "full" : "none";
+  return role === undefined ? "none" : ROLE_LEVELS[role.role];
 }
 
 /** Which of `ontologies` a caller sees listed: every one for trusted access

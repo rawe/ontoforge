@@ -14,7 +14,7 @@ import type {
   SchemaEntityType,
   SchemaRelationType,
 } from '@/api/types'
-import { useAccess } from '@/components/auth/useAccess'
+import { useCanEdit } from '@/components/auth/useAccess'
 import { TypeChip } from '@/components/TypeChip'
 import type { RelationInitial } from '@/components/entity/AddRelationDialog'
 import { relationPropsSummary } from '@/components/entity/relationProps'
@@ -78,7 +78,7 @@ export function RelationSection({
   const queryClient = useQueryClient()
   const [limit, setLimit] = useState(PAGE_SIZE)
   const [unlinkTarget, setUnlinkTarget] = useState<Neighbor | null>(null)
-  const canWrite = useAccess().canWrite(ontologyKey, lensKey)
+  const canEdit = useCanEdit(ontologyKey, lensKey)
   const staging = usePinnedChangeset(ontologyKey, lensKey) !== null
 
   const myTypeKey = entity._entityTypeKey
@@ -170,7 +170,7 @@ export function RelationSection({
           {count ?? '…'}
         </Badge>
         {childSection?.action}
-        {canWrite && (
+        {canEdit && (
           <Button
             variant="ghost"
             size="icon-xs"
@@ -204,7 +204,7 @@ export function RelationSection({
           <p className="text-[13px] text-muted-foreground">
             {childSection !== undefined ? 'No children yet.' : `No ${relationType.displayName} relations yet.`}
           </p>
-          {canWrite && (
+          {canEdit && (
             <Button
               variant="outline"
               size="xs"
@@ -248,7 +248,7 @@ export function RelationSection({
                     {summary}
                   </span>
                 )}
-                {canWrite && (
+                {canEdit && (
                   <Button
                     variant="ghost"
                     size="icon-xs"

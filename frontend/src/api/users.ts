@@ -23,7 +23,7 @@ export const setUserStatus = (userId: string, status: User['status']) =>
     body: { status },
   })
 
-/** Reader and Writer on one lens replace each other. */
+/** The lens roles on one lens replace each other. */
 export const addAssignment = (userId: string, body: AssignmentInput) =>
   request<Assignment>(`/api/users/${encodeURIComponent(userId)}/assignments`, {
     method: 'POST',

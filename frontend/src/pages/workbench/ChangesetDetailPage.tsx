@@ -74,7 +74,7 @@ const DRAFT_REASON = 'Only a submitted changeset can be unsubmitted'
 /** Why Submit is off while submitted. */
 const SUBMITTED_REASON = 'It is submitted already'
 /** Why a Reader cannot change staged objects. */
-const READER_REASON = 'Changing a changeset needs the Writer role on this lens'
+const READER_REASON = 'Changing a changeset needs the Proposer or Writer role on this lens'
 
 /** The violations panel's name and heading, by what was rejected. */
 const REJECTED = {
@@ -147,8 +147,11 @@ export function ChangesetDetailPage() {
   const list = useChangesets(ontologyKey, lensKey)
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const pinned = usePinnedChangeset(ontologyKey!, lensKey!)
-  // A Reader reviews and checks; staging, submitting and committing need Writer.
-  const canWrite = useAccess().canWrite(ontologyKey!, lensKey!)
+  // A Reader reviews; checking, staging and submitting need Proposer or
+  // Writer; committing needs Writer.
+  const access = useAccess()
+  const canStage = access.canStage(ontologyKey!, lensKey!)
+  const canCommit = access.canWrite(ontologyKey!, lensKey!)
   const displayLabel = useDisplayLabel()
 
   // The violations of a rejected commit, submit or check (with the version checked).
@@ -377,7 +380,7 @@ export function ChangesetDetailPage() {
    * it is the pinned changeset, else a hint.
    */
   const extendActions = (object: StagedObjectView) => {
-    const values = submitted || !canWrite ? null : stagedCreateValues(object)
+    const values = submitted || !canStage ? null : stagedCreateValues(object)
     const entityType = schema.data?.entityTypes.find((t) => t.key === object.type)
     if (values === null || entityType === undefined) return undefined
     if (pinned !== changeset.id) {
@@ -510,14 +513,16 @@ export function ChangesetDetailPage() {
         actions={
           <>
             <PinChangesetButton ontologyKey={ontologyKey} lensKey={lensKey} changeset={changeset} />
-            {checkButton}
-            {canWrite && (
+            {canStage && checkButton}
+            {canStage && (
               <>
                 {submitted ? <Disabled reason={SUBMITTED_REASON}>{submitButton}</Disabled> : submitButton}
-                <Button size="sm" disabled={busy} onClick={() => setCommitVersion(changeset.version)}>
-                  {commit.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-                  Commit
-                </Button>
+                {canCommit && (
+                  <Button size="sm" disabled={busy} onClick={() => setCommitVersion(changeset.version)}>
+                    {commit.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                    Commit
+                  </Button>
+                )}
                 {submitted ? unsubmitButton : <Disabled reason={DRAFT_REASON}>{unsubmitButton}</Disabled>}
                 {submitted ? <Disabled reason={FROZEN_REASON}>{discardButton}</Disabled> : discardButton}
               </>
@@ -565,7 +570,7 @@ export function ChangesetDetailPage() {
                   })}
                 </ul>
               </div>
-              {submitted && canWrite && (
+              {submitted && canStage && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -589,7 +594,7 @@ export function ChangesetDetailPage() {
                   key={object.id}
                   object={object}
                   type={typeLabel(object)}
-                  frozen={!canWrite ? READER_REASON : submitted ? FROZEN_REASON : null}
+                  frozen={!canStage ? READER_REASON : submitted ? FROZEN_REASON : null}
                   busy={busy}
                   onRemove={() =>
                     objectActions.remove.mutate(object.id, {

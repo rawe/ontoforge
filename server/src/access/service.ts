@@ -4,9 +4,10 @@
  *
  * Platform Administrators manage everything: accounts, their status,
  * every role. Ontology Administrators find users and grant or revoke
- * Reader and Writer on the lenses of the ontologies they administer; of a
- * user they see only the assignments within those ontologies. Every
- * change goes through the access store, which audits it.
+ * the lens roles — Reader, Proposer, Writer — on the lenses of the
+ * ontologies they administer; of a user they see only the assignments
+ * within those ontologies. Every change goes through the access store,
+ * which audits it.
  *
  * Assignments are stored by ontology and lens id; their keys are resolved
  * on every read, and an assignment whose ontology or lens no longer
@@ -17,7 +18,7 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from ".
 import { getModelingStore, getOntologyRegistry } from "../core/ports.js";
 import { isOntologyAdmin, isPlatformAdmin, knownOntology, lensNotFound, ontologyNotFound } from "./authorize.js";
 import type { Caller } from "./caller.js";
-import type { AccessStore, Assignment, Principal, PrincipalStatus, Role } from "./store.js";
+import { isLensRole, type AccessStore, type Assignment, type Principal, type PrincipalStatus, type Role } from "./store.js";
 
 export interface UserView {
   id: string;
@@ -127,7 +128,7 @@ function sees(caller: Caller, assignment: Assignment): boolean {
 function manages(caller: Caller, assignment: Pick<Assignment, "role" | "ontologyId">): boolean {
   if (isPlatformAdmin(caller)) return true;
   return (
-    (assignment.role === "reader" || assignment.role === "writer") &&
+    isLensRole(assignment.role) &&
     assignment.ontologyId !== null &&
     isOntologyAdmin(caller, assignment.ontologyId)
   );
@@ -198,7 +199,7 @@ async function grantOntology(caller: Caller, key: string): Promise<{ ontologyId:
   return { ontologyId: row.ontologyId as string, key };
 }
 
-/** Grants a role; idempotent. Reader and Writer on one lens replace each other. */
+/** Grants a role; idempotent. The lens roles on one lens replace each other. */
 export async function grant(
   store: AccessStore,
   caller: Caller,

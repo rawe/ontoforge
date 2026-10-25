@@ -226,12 +226,12 @@ the role the route needs ([capabilities/authentication.md](capabilities/authenti
 | `POST /api/ontologies` | Ontology Creator |
 | `GET /api/ontologies/{ontologyKey}` | Any role in the ontology, or Platform Administrator |
 | `PATCH`, `DELETE /api/ontologies/{ontologyKey}` | Ontology Administrator |
-| `GET .../model/lenses` | Any role in the ontology, or Platform Administrator; lists the lenses the caller holds Reader or Writer on, every one for an administrator |
-| `GET` of one lens and below it on the modeling surface | Reader or Writer on that lens, or Ontology Administrator |
+| `GET .../model/lenses` | Any role in the ontology, or Platform Administrator; lists the lenses the caller holds a lens role on, every one for an administrator |
+| `GET` of one lens and below it on the modeling surface | Reader, Proposer or Writer on that lens, or Ontology Administrator |
 | Every other modeling route, and the modeling MCP mount | Ontology Administrator |
-| `GET` of ruleset maintenance | Reader or Writer on any lens of the ontology, or Ontology Administrator |
+| `GET` of ruleset maintenance | Reader, Proposer or Writer on any lens of the ontology, or Ontology Administrator |
 | Every other ruleset maintenance route | Ontology Administrator |
-| Runtime routes, plain and below a ruleset, and the runtime MCP mounts | Reader or Writer on the lens for a route that reads — chat, search, query and a changeset's check among them — Writer for every other |
+| Runtime routes, plain and below a ruleset, and the runtime MCP mounts | Reader, Proposer or Writer on the lens for a route that reads — chat, search and query among them — Proposer or Writer for one that stages — a changeset's check among them — Writer for every other; the operation of each is its ruleset [write access](capabilities/rulesets.md#write-access-levels) operation |
 | `/api/users`, `/api/ontologies/{ontologyKey}/access` | Platform Administrator or an Ontology Administrator, narrowed per [route](#user-management) |
 
 A request without a valid credential answers `401 UNAUTHENTICATED` with a
@@ -332,7 +332,7 @@ off, every route here answers not found. Semantics and who may do what:
 | POST | `/api/users` | Admit a service under its subject at the provider, before its first call |
 | GET | `/api/users/{userId}` | Read one principal with the assignments the caller may see |
 | PATCH | `/api/users/{userId}` | Disable or enable a principal |
-| POST | `/api/users/{userId}/assignments` | Grant a role: platform roles without keys, Ontology Administrator with `ontologyKey`, Reader and Writer with `ontologyKey` and `lensKey`; idempotent |
+| POST | `/api/users/{userId}/assignments` | Grant a role: platform roles without keys, Ontology Administrator with `ontologyKey`, Reader, Proposer and Writer with `ontologyKey` and `lensKey`; idempotent |
 | DELETE | `/api/users/{userId}/assignments/{assignmentId}` | Revoke one assignment |
 | GET | `/api/ontologies/{ontologyKey}/access` | Every assignment within one ontology, each with its principal |
 
@@ -1054,8 +1054,8 @@ connection carries state.
 |---|---|---|
 | Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
 | Bound to | One ontology | One ontology and one lens |
-| Tools | 45 | 35; 36 on a ruleset mount, 35 with write access `propose`, 20 with `none` or for a Reader |
-| Sign-in, authentication on | Bearer token of an Ontology Administrator | Bearer token of a Reader or Writer on the lens |
+| Tools | 45 | 35; 36 on a ruleset mount, 35 with write access `propose`, 20 with `none` or for a Reader; 34 for a Proposer, 35 on a ruleset mount |
+| Sign-in, authentication on | Bearer token of an Ontology Administrator | Bearer token of a Reader, Proposer or Writer on the lens |
 
 ### How a mount is bound
 

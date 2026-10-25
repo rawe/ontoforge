@@ -40,7 +40,7 @@ import { z } from "zod";
 
 import { settings } from "../config.js";
 import { valueToText } from "../core/dataTypes.js";
-import { ForbiddenError } from "../core/exceptions.js";
+import { roleRefusal } from "../access/authorize.js";
 import { getRuntimeStore, type RuntimeStore, type WriteAccess } from "../core/ports.js";
 import { getRulesetView, readMountRuleset } from "../runtime/rulesets.js";
 import { filterRules } from "../runtime/readHelpers.js";
@@ -48,6 +48,7 @@ import * as changesets from "../runtime/changesets.js";
 import * as service from "../runtime/service.js";
 import {
   allows,
+  lower,
   checkOperation,
   listsTool,
   toolOperation,
@@ -181,9 +182,10 @@ type ToolFactory = <Args>(
 type Register = McpServer["registerTool"];
 
 /** The caller's role on the lens, before anything else: a Reader (level
- * `none`) only reads. Authentication off is `full`. */
+ * `none`) only reads, a Proposer (`propose`) only stages. Authentication
+ * off is `full`. */
 function checkRole(lensKey: string, roleLevel: WriteAccess, operation: Operation): void {
-  if (!allows(roleLevel, operation)) throw new ForbiddenError(`Reader on lens '${lensKey}' cannot write`);
+  if (!allows(roleLevel, operation)) throw roleRefusal(roleLevel, lensKey, operation);
 }
 
 /** The binding of the plain lens: no ruleset, full write access. */
@@ -204,9 +206,11 @@ const PLAIN_LENS: Binding = { rulesetKey: null, writeAccess: "full" };
  *
  * `roleLevel` is the caller's role on the lens (`access/authorize.ts`
  * `lensLevel`): every call first checks its operation against it, so a
- * Reader's write is refused as forbidden. The list keeps only what
- * `listedRoleLevel` allows too; a tool call's server lists at `full`, so
- * a refused call is refused by the check, not unknown.
+ * Reader's write, or a Proposer's direct write or commit, is refused as
+ * forbidden. The list keeps only what `listedRoleLevel` allows too, and
+ * the tools are described at the lower of it and the binding's level; a
+ * tool call's server lists at `full`, so a refused call is refused by the
+ * check, not unknown.
  */
 export function createRuntimeMcpServer(
   ontologyKey: string,
@@ -243,12 +247,15 @@ export function createRuntimeMcpServer(
     return registered;
   };
 
+  // What the list offers: the lower of the binding's level and the caller's role.
+  const offered = lower(binding.writeAccess, listedRoleLevel);
+
   /** Stage one write into a changeset of this lens (and ruleset). */
   const stageInto = async (open: Open, changesetId: string, write: changesets.StagedWrite): Promise<ToolResult> =>
     jsonResult(await changesets.stage(lensKey, rulesetKey, changesetId, write, await open()));
-  const staged = (kind: "create" | "update" | "delete" | "edit"): string => stagedMode(kind, binding);
+  const staged = (kind: "create" | "update" | "delete" | "edit"): string => stagedMode(kind, { rulesetKey, writeAccess: offered });
   // A level that cannot write directly only stages: every write names its changeset.
-  const changesetIdParam = allows(binding.writeAccess, "write") ? z.string().optional() : z.string();
+  const changesetIdParam = allows(offered, "write") ? z.string().optional() : z.string();
 
   if (rulesetKey !== null) {
     register(
@@ -1192,7 +1199,7 @@ export function createRuntimeMcpServer(
     }),
   );
 
-  registerChangesetTools(register, lists, lensKey, binding, tool);
+  registerChangesetTools(register, lists, lensKey, { rulesetKey, writeAccess: offered }, tool);
 
   return server;
 }
@@ -1222,7 +1229,7 @@ const VIOLATIONS =
 /**
  * The ten changeset tools: the same service functions as the REST routes,
  * through this mount's lens and ruleset, listed as the level allows
- * (`lists`).
+ * (`lists`) and described at `binding`'s level, the one the list offers.
  */
 function registerChangesetTools(
   register: Register,

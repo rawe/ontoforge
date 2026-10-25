@@ -19,6 +19,9 @@ export interface Access {
   /** The Studio of an ontology, its rulesets, rename and delete. */
   canDesign: (ontologyKey: string) => boolean
   canRead: (ontologyKey: string, lensKey: string) => boolean
+  /** Start, stage into and submit changesets: Proposers and Writers. */
+  canStage: (ontologyKey: string, lensKey: string) => boolean
+  /** Write at once and commit changesets: Writers only. */
   canWrite: (ontologyKey: string, lensKey: string) => boolean
 }
 
@@ -30,6 +33,7 @@ export const ALLOW_ALL: Access = {
   canManageUsers: false,
   canDesign: () => true,
   canRead: () => true,
+  canStage: () => true,
   canWrite: () => true,
 }
 
@@ -53,7 +57,8 @@ export function accessFrom(me: AuthMe | undefined): Access {
     adminOntologies,
     canManageUsers: has('platform_admin') || adminOntologies.length > 0,
     canDesign: (o) => adminOntologies.includes(o),
-    canRead: (o, l) => onLens(o, l, ['reader', 'writer']),
+    canRead: (o, l) => onLens(o, l, LENS_ROLES),
+    canStage: (o, l) => onLens(o, l, ['proposer', 'writer']),
     canWrite: (o, l) => onLens(o, l, ['writer']),
   }
 }
@@ -63,19 +68,32 @@ export const ROLE_LABELS: Record<Role, string> = {
   ontology_creator: 'Ontology Creator',
   ontology_admin: 'Ontology Administrator',
   reader: 'Reader',
+  proposer: 'Proposer',
   writer: 'Writer',
 }
 
+/** The roles held on one lens, weakest first; one per user and lens. */
+export const LENS_ROLES: Role[] = ['reader', 'proposer', 'writer']
+
 /** What a role is held on: the platform, one ontology, or one lens. */
 export function roleScope(role: Role): 'platform' | 'ontology' | 'lens' {
-  if (role === 'reader' || role === 'writer') return 'lens'
+  if (LENS_ROLES.includes(role)) return 'lens'
   return role === 'ontology_admin' ? 'ontology' : 'platform'
 }
 
-/** Platform Administrators grant every role; Ontology Administrators Reader and Writer. */
+/** Platform Administrators grant every role; Ontology Administrators the lens roles. */
 export function grantableRoles(access: Access): Role[] {
   if (access.isPlatformAdmin) return Object.keys(ROLE_LABELS) as Role[]
-  return access.adminOntologies.length > 0 ? ['reader', 'writer'] : []
+  return access.adminOntologies.length > 0 ? LENS_ROLES : []
+}
+
+/**
+ * Whether the Explorer offers its connecting drag: it writes live only,
+ * so a Writer while no changeset is pinned; never a Proposer, whose
+ * writes can only be staged.
+ */
+export function canConnectLive(access: Access, ontologyKey: string, lensKey: string, pinned: string | null): boolean {
+  return pinned === null && access.canWrite(ontologyKey, lensKey)
 }
 
 /** Removing takes the same right as granting. */
@@ -98,7 +116,7 @@ export function assignmentTarget(assignment: Assignment): string {
 
 /**
  * An ontology's access list split for the Access page: its administrators,
- * and the Reader/Writer assignments per lens key, each sorted by user name.
+ * and the lens role assignments per lens key, each sorted by user name.
  */
 export function groupAccess(assignments: readonly AccessAssignment[]): {
   admins: AccessAssignment[]

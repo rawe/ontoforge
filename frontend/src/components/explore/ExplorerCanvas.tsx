@@ -39,7 +39,8 @@ import { EXPLORER_LIVE_ONLY_TEXT } from '@/components/changesets/changesets'
 import { TypeDot } from '@/components/TypeChip'
 import { PARENT_COLOR } from '@/components/studio/graph/RelationTypeEdge'
 import { Button } from '@/components/ui/button'
-import { pinnedChangeset } from '@/lib/pinnedChangeset'
+import { canConnectLive } from '@/lib/access'
+import { pinnedChangeset, usePinnedChangeset } from '@/lib/pinnedChangeset'
 import { readRecents, type RecentEntity } from '@/lib/recents'
 import { citedCards, mapBounded, planAdd, relationsToFetch, type AddPlan } from './answerCanvas'
 import { AskDock, type Answer } from './AskDock'
@@ -136,8 +137,11 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
   /** The Hierarchy edges filter: only parent relations' edges show; no node moves. */
   const [hierarchyOnly, setHierarchyOnly] = useState(false)
   const [connectPair, setConnectPair] = useState<ConnectPair | null>(null)
-  // Dragging from node to node creates a relation: only on a lens one may write.
-  const canWrite = useAccess().canWrite(ontologyKey, lensKey)
+  // Dragging from node to node creates a relation, live only: a Writer
+  // while no changeset is pinned (`canConnectLive`).
+  const access = useAccess()
+  const pinned = usePinnedChangeset(ontologyKey, lensKey)
+  const canConnect = canConnectLive(access, ontologyKey, lensKey, pinned)
   const [edgePopover, setEdgePopover] = useState<{ id: string; x: number; y: number } | null>(null)
   const [relayouting, setRelayouting] = useState(false)
   const [recents] = useState<RecentEntity[]>(() => readRecents(ontologyKey, lensKey))
@@ -710,7 +714,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
-            nodesConnectable={canWrite}
+            nodesConnectable={canConnect}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}

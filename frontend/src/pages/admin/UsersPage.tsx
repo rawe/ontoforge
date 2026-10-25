@@ -70,7 +70,8 @@ function LastSignIn({ at }: { at: string | null }) {
 
 /**
  * Role → ontology → lens, as far as the role needs. Ontology Administrators
- * grant Reader or Writer on lenses of the ontologies they administer only.
+ * grant Reader, Proposer or Writer on lenses of the ontologies they
+ * administer only.
  */
 function AddRoleForm({ user }: { user: User }) {
   const queryClient = useQueryClient()
@@ -355,7 +356,7 @@ function UserDetail({ userId }: { userId: string }) {
 /**
  * `/admin/users` — find users, see and change their roles. Platform
  * Administrators manage every role and a user's status, and admit services; Ontology
- * Administrators grant Reader and Writer on lenses of their ontologies.
+ * Administrators grant the lens roles on lenses of their ontologies.
  */
 export function UsersPage() {
   const access = useAccess()
@@ -404,7 +405,7 @@ export function UsersPage() {
             <p className="text-[13px] text-muted-foreground">
               {access.isPlatformAdmin
                 ? 'Everyone who signed in or was added, with their roles.'
-                : 'Give users Reader or Writer roles on lenses of the ontologies you administer.'}
+                : 'Give users Reader, Proposer or Writer roles on lenses of the ontologies you administer.'}
             </p>
           </div>
           <div className="ml-auto shrink-0">

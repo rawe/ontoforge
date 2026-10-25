@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { useDisplayLabel } from '@/api/hooks'
 import * as runtime from '@/api/runtime'
 import type { EntityInstance, SchemaRelationType } from '@/api/types'
-import { useAccess } from '@/components/auth/useAccess'
+import { useCanEdit } from '@/components/auth/useAccess'
 import { EXPLORER_LIVE_ONLY_TEXT } from '@/components/changesets/changesets'
 import { invalidateNeighborhood } from '@/components/entity/useNeighborCounts'
 import { formatValue } from '@/components/schema/propertyDraft'
@@ -62,7 +62,7 @@ export function EdgePopover({
   const [confirming, setConfirming] = useState(false)
   // The canvas deletes live only; while a changeset is pinned it does not.
   const pinned = usePinnedChangeset(ontologyKey, lensKey) !== null
-  const canWrite = useAccess().canWrite(ontologyKey, lensKey)
+  const canEdit = useCanEdit(ontologyKey, lensKey)
 
   const relation = edge.data?.relation
 
@@ -201,7 +201,7 @@ export function EdgePopover({
         {pinned && (
           <p className="mr-auto text-[11.5px] text-muted-foreground">{EXPLORER_LIVE_ONLY_TEXT}</p>
         )}
-        {canWrite && (
+        {canEdit && (
           <Button
             variant="destructive"
             size="xs"

@@ -135,11 +135,11 @@ exists and every control is offered.
   choosing role, then ontology, then lens as far as the role needs. A Platform
   Administrator also disables and enables the user, may add every role, and admits a
   service by its name and its subject at the identity provider; an Ontology
-  Administrator sees and adds only Reader and Writer on the lenses of the ontologies it
-  administers.
+  Administrator sees and adds only Reader, Proposer and Writer on the lenses of the
+  ontologies it administers.
 - **Access** (`/o/{ontologyKey}/studio/access`), a Studio page: the ontology's
-  administrators, then each lens with who reads and who writes through it, each removable;
-  an add form picks a user by search, a lens and Reader or Writer.
+  administrators, then each lens with who reads, proposes and writes through it, each
+  removable; an add form picks a user by search, a lens and Reader, Proposer or Writer.
 
 **What each role sees.** Controls a role does not allow are not shown; the server refuses
 them all the same.
@@ -149,11 +149,13 @@ them all the same.
 | Start page | The ontologies the user holds a role in; on a card, the lenses the user holds a role on ("No lens assigned to you" when none) |
 | "+ New ontology" | Ontology Creators |
 | A card's Open Studio, Rename and Delete; the Studio itself | The ontology's administrators; anyone else opening the Studio sees "No access to the Studio" |
-| The Workbench of a lens | Its Readers and Writers; anyone else sees "No access to this lens" |
+| The Workbench of a lens | Its Readers, Proposers and Writers; anyone else sees "No access to this lens" |
 | Lens switcher, a type's links to other lenses | The lenses the user holds a role on |
 | Surface switch, "Manage lenses…", links into the Studio | The ontology's administrators |
-| New entity, quick add, editing, deleting, relating, documents' edit, the Explorer's connecting drag | Writers of the lens |
-| Starting, pinning, editing, submitting and committing a changeset | Writers of the lens; a Reader reviews and checks |
+| New entity, quick add, editing, deleting, relating, documents' edit | Writers of the lens; Proposers while a changeset is pinned, into which every such write is staged |
+| The Explorer's connecting drag, which writes live only | Writers of the lens while no changeset is pinned |
+| Starting, pinning, editing, checking and submitting a changeset | Proposers and Writers of the lens; a Reader reviews |
+| Committing a changeset | Writers of the lens |
 | Ruleset maintenance | The ontology's administrators; everyone else uses the rulesets |
 
 ---
@@ -858,8 +860,8 @@ both types. When several are valid the user picks one, phrased as a concrete sen
 (this entity → relation → that entity) rather than as an abstract type list. A
 self-referential drag collapses the two identical directions to one option. Relation
 properties are then filled in, and the new edge appears without re-laying anything out.
-While a [changeset is pinned](#changesets), a drag only says that the canvas writes live
-and the changeset must be left first.
+While a [changeset is pinned](#changesets), nodes offer no connecting drag: the canvas
+writes live only, so the changeset must be left first.
 
 **Caps.** A soft cap of 150 nodes switches the node counter to a warning appearance and
 suggests clearing unpinned nodes. A hard cap of 300 refuses further additions with an

@@ -4,6 +4,7 @@ import type { AccessAssignment, Assignment, AuthMe, Role, User } from '../src/ap
 import {
   accessFrom,
   assignmentTarget,
+  canConnectLive,
   canRemoveAssignment,
   grantableRoles,
   groupAccess,
@@ -58,6 +59,15 @@ test('a Writer reads and writes its lens only; a Reader only reads', () => {
   assert.equal(access.canManageUsers, false)
 })
 
+test('a Proposer reads and stages on its lens, but neither writes at once nor commits', () => {
+  const access = accessFrom(signedIn(assignment('proposer', 'o', 'main'), assignment('reader', 'o', 'side')))
+  assert.equal(access.canRead('o', 'main'), true)
+  assert.equal(access.canStage('o', 'main'), true)
+  assert.equal(access.canWrite('o', 'main'), false)
+  assert.equal(access.canStage('o', 'side'), false)
+  assert.equal(accessFrom(signedIn(assignment('writer', 'o', 'main'))).canStage('o', 'main'), true)
+})
+
 test('roles do not inherit: a Platform Administrator neither designs nor reads data', () => {
   const access = accessFrom(signedIn(assignment('platform_admin')))
   assert.equal(access.isPlatformAdmin, true)
@@ -65,17 +75,17 @@ test('roles do not inherit: a Platform Administrator neither designs nor reads d
   assert.equal(access.canDesign('o'), false)
   assert.equal(access.canRead('o', 'main'), false)
   assert.equal(access.canCreateOntology, false)
-  assert.equal(grantableRoles(access).length, 5)
+  assert.equal(grantableRoles(access).length, 6)
 })
 
-test('an Ontology Administrator designs its ontology and grants Reader/Writer on it', () => {
+test('an Ontology Administrator designs its ontology and grants the lens roles on it', () => {
   const access = accessFrom(signedIn(assignment('ontology_admin', 'o')))
   assert.equal(access.canDesign('o'), true)
   assert.equal(access.canDesign('p'), false)
   assert.equal(access.canRead('o', 'main'), false)
   assert.equal(access.canManageUsers, true)
   assert.deepEqual(access.adminOntologies, ['o'])
-  assert.deepEqual(grantableRoles(access), ['reader', 'writer'])
+  assert.deepEqual(grantableRoles(access), ['reader', 'proposer', 'writer'])
   assert.equal(canRemoveAssignment(access, assignment('reader', 'o', 'main')), true)
   assert.equal(canRemoveAssignment(access, assignment('writer', 'p', 'main')), false)
   assert.equal(canRemoveAssignment(access, assignment('ontology_admin', 'o')), false)
@@ -106,4 +116,22 @@ test('groupAccess splits administrators from lens roles, sorted by name', () => 
   assert.deepEqual(admins.map((a) => a.user.displayName), ['Bob'])
   assert.deepEqual(byLens.get('main')?.map((a) => a.user.displayName), ['Ada', 'Bob'])
   assert.deepEqual(byLens.get('side')?.map((a) => a.role), ['reader'])
+})
+
+test("the Explorer's connecting drag: a Writer with no changeset pinned, nobody else", () => {
+  const on = (role: Role) => accessFrom(signedIn(assignment(role, 'o', 'main')))
+  const cases: [Role, string | null, boolean][] = [
+    ['writer', null, true],
+    ['writer', 'cs1', false],
+    ['proposer', null, false],
+    ['proposer', 'cs1', false],
+    ['reader', null, false],
+    ['reader', 'cs1', false],
+  ]
+  for (const [role, pinned, expected] of cases) {
+    assert.equal(canConnectLive(on(role), 'o', 'main', pinned), expected, `${role}, pinned ${pinned}`)
+  }
+  assert.equal(canConnectLive(on('writer'), 'o', 'side', null), false)
+  assert.equal(canConnectLive(accessFrom({ authentication: false }), 'o', 'main', null), true)
+  assert.equal(canConnectLive(accessFrom({ authentication: false }), 'o', 'main', 'cs1'), false)
 })

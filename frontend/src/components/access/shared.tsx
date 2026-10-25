@@ -7,11 +7,11 @@ import { invalidateAccess } from '@/components/access/access'
 import { toastError } from '@/components/studio/lib'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ROLE_LABELS } from '@/lib/access'
+import { ROLE_LABELS, roleScope } from '@/lib/access'
 
 export function RoleBadge({ role }: { role: Role }) {
   return (
-    <Badge variant={role === 'writer' || role === 'reader' ? 'outline' : 'secondary'} className="text-[11px]">
+    <Badge variant={roleScope(role) === 'lens' ? 'outline' : 'secondary'} className="text-[11px]">
       {ROLE_LABELS[role]}
     </Badge>
   )

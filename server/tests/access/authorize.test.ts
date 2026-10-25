@@ -71,6 +71,7 @@ const PLATFORM_ADMIN = caller(["platform_admin"]);
 const CREATOR = caller(["ontology_creator"]);
 const ADMIN = caller(["ontology_admin", O_FAIR]);
 const READER = caller(["reader", O_FAIR, L_VISITOR]);
+const PROPOSER = caller(["proposer", O_FAIR, L_VISITOR]);
 const WRITER = caller(["writer", O_FAIR, L_VISITOR]);
 const NOBODY = caller();
 const LEFTOVER = caller(["reader", O_FAIR, L_GONE], ["writer", O_FAIR, L_GONE]);
@@ -78,6 +79,7 @@ const LEFTOVER = caller(["reader", O_FAIR, L_GONE], ["writer", O_FAIR, L_GONE]);
 const READ: Need = { kind: "lens", operation: "read" };
 const WRITE: Need = { kind: "lens", operation: "write" };
 const STAGE: Need = { kind: "lens", operation: "stage" };
+const COMMIT: Need = { kind: "lens", operation: "commit" };
 const DESIGN: Need = { kind: "lens", operation: "read", orAdmin: true };
 const FAIR = { ontologyKey: "fair" };
 const VISITOR = { ontologyKey: "fair", lensKey: "visitor" };
@@ -123,7 +125,7 @@ describe("authorize", () => {
 
   it("an ontology: members and Platform Administrators know it, anyone else gets not found", async () => {
     const member: Need = { kind: "ontology-member" };
-    for (const access of [PLATFORM_ADMIN, ADMIN, READER, WRITER]) expect(await outcome(access, member, FAIR)).toBe("ok");
+    for (const access of [PLATFORM_ADMIN, ADMIN, READER, PROPOSER, WRITER]) expect(await outcome(access, member, FAIR)).toBe("ok");
     expect(await outcome(NOBODY, member, FAIR)).toBe(404);
     expect(await outcome(CREATOR, member, FAIR)).toBe(404);
     expect(await outcome(ADMIN, member, { ontologyKey: "other" })).toBe(404);
@@ -151,6 +153,16 @@ describe("authorize", () => {
     expect(await outcome(NOBODY, READ, VISITOR)).toBe(404);
   });
 
+  it("a runtime lens: Proposer reads and stages, but neither writes directly nor commits", async () => {
+    expect(await outcome(PROPOSER, READ, VISITOR)).toBe("ok");
+    expect(await outcome(PROPOSER, STAGE, VISITOR)).toBe("ok");
+    expect(await outcome(PROPOSER, WRITE, VISITOR)).toBe(403);
+    expect(await outcome(PROPOSER, COMMIT, VISITOR)).toBe(403);
+    expect(await outcome(PROPOSER, READ, { ontologyKey: "fair", lensKey: "staff" })).toBe(404);
+    expect(await outcome(WRITER, COMMIT, VISITOR)).toBe("ok");
+    expect(await outcome(READER, COMMIT, VISITOR)).toBe(403);
+  });
+
   it("a lens the caller holds no role on is not found, as an unknown one", async () => {
     expect(await outcome(READER, READ, { ontologyKey: "fair", lensKey: "staff" })).toBe(404);
     expect(await outcome(READER, READ, { ontologyKey: "fair", lensKey: "nope" })).toBe(404);
@@ -160,6 +172,15 @@ describe("authorize", () => {
 
   it("the refusal says what is missing", async () => {
     await expect(authorize(READER, WRITE, VISITOR)).rejects.toThrow("Reader on lens 'visitor' cannot write");
+    await expect(authorize(PROPOSER, WRITE, VISITOR)).rejects.toThrow(
+      "Proposer on lens 'visitor' cannot write directly; stage the write into a changeset",
+    );
+    await expect(authorize(PROPOSER, COMMIT, VISITOR)).rejects.toThrow(
+      "Proposer on lens 'visitor' cannot commit; submit the changeset, and a Writer commits it",
+    );
+    await expect(authorize(ADMIN, READ, VISITOR)).rejects.toThrow(
+      "This needs a Reader, Proposer or Writer role on lens 'visitor'",
+    );
     await expect(authorize(NOBODY, READ, VISITOR)).rejects.toThrow("Ontology 'fair' not found");
     await expect(authorize(READER, READ, { ontologyKey: "fair", lensKey: "staff" })).rejects.toThrow(
       "Lens 'staff' not found",
@@ -176,6 +197,7 @@ describe("authorize", () => {
 
   it("the ruleset reads (no lens in the path): any lens role in the ontology, or its administrator", async () => {
     expect(await outcome(READER, DESIGN, FAIR)).toBe("ok");
+    expect(await outcome(PROPOSER, DESIGN, FAIR)).toBe("ok");
     expect(await outcome(ADMIN, DESIGN, FAIR)).toBe("ok");
     expect(await outcome(PLATFORM_ADMIN, DESIGN, FAIR)).toBe(403);
     expect(await outcome(NOBODY, DESIGN, FAIR)).toBe(404);
@@ -189,9 +211,11 @@ describe("authorize", () => {
 });
 
 describe("what handlers ask", () => {
-  it("lensLevel: Writer full, Reader and administrators none, trusted full", async () => {
+  it("lensLevel: Writer full, Proposer propose, Reader and administrators none, trusted full", async () => {
     expect(await lensLevel(TRUSTED, "fair", "visitor")).toBe("full");
     expect(await lensLevel(WRITER, "fair", "visitor")).toBe("full");
+    expect(await lensLevel(PROPOSER, "fair", "visitor")).toBe("propose");
+    expect(await lensLevel(PROPOSER, "fair", "staff")).toBe("none");
     expect(await lensLevel(READER, "fair", "visitor")).toBe("none");
     expect(await lensLevel(ADMIN, "fair", "visitor")).toBe("none");
     expect(await lensLevel(WRITER, "fair", "staff")).toBe("none");

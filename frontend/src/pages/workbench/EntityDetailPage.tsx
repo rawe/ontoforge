@@ -8,7 +8,7 @@ import { ApiError } from '@/api/http'
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
 import { useRuntimeWrites } from '@/api/writes'
-import { useAccess } from '@/components/auth/useAccess'
+import { useCanEdit } from '@/components/auth/useAccess'
 import { EmptyState } from '@/components/EmptyState'
 import { TypeNotInLens } from '@/components/home/TypeNotInLens'
 import { PageHeader } from '@/components/PageHeader'
@@ -69,7 +69,7 @@ export function EntityDetailPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const schema = useRuntimeSchema(ontologyKey, lensKey)
-  const canWrite = useAccess().canWrite(ontologyKey ?? '', lensKey ?? '')
+  const canEdit = useCanEdit(ontologyKey ?? '', lensKey ?? '')
 
   const entityQuery = useQuery({
     queryKey: qk.entity(ontologyKey ?? '', lensKey ?? '', typeKey ?? '', id ?? ''),
@@ -286,7 +286,7 @@ export function EntityDetailPage() {
         }
         actions={
           <>
-            {canWrite && (
+            {canEdit && (
               <Button
                 variant="outline"
                 size="sm"
@@ -303,7 +303,7 @@ export function EntityDetailPage() {
                 Open in Explorer
               </Link>
             </Button>
-            {canWrite && (
+            {canEdit && (
               <AlertDialog>
                 {hasChildren ? (
                   // A disabled button fires no pointer events: the wrapper carries the tooltip.
@@ -408,7 +408,7 @@ export function EntityDetailPage() {
                     onAdd={(initial) => setAddRelation({ open: true, initial })}
                     childSection={{
                       direction: link.direction,
-                      action: canWrite && (
+                      action: canEdit && (
                         <Button
                           variant="outline"
                           size="xs"

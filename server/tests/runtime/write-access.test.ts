@@ -23,6 +23,7 @@ import {
   allows,
   checkOperation,
   listsTool,
+  lower,
   routeOperation,
   toolOperation,
   type Operation,
@@ -82,6 +83,13 @@ describe("the levels and the check", () => {
     expect(allowed("none")).toEqual(["read"]);
     expect(allowed("propose")).toEqual(["read", "stage"]);
     expect(allowed("full")).toEqual(OPERATIONS);
+  });
+
+  it("lower picks the lower level on the ladder, either way round", () => {
+    expect(lower("full", "propose")).toBe("propose");
+    expect(lower("propose", "full")).toBe("propose");
+    expect(lower("propose", "none")).toBe("none");
+    expect(lower("full", "full")).toBe("full");
   });
 
   it("checkOperation passes what the level allows, and refuses the rest with a 409 saying what to do", () => {

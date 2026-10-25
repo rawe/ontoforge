@@ -134,6 +134,11 @@ export function allows(level: WriteAccess, operation: Operation): boolean {
   return LEVELS[level].has(operation);
 }
 
+/** The lower of two levels on the ladder: a ruleset's and a lens role's. */
+export function lower(a: WriteAccess, b: WriteAccess): WriteAccess {
+  return LEVELS[a].size <= LEVELS[b].size ? a : b;
+}
+
 function toolRow(name: string): ToolRow {
   const row = TOOLS[name];
   if (row === undefined) throw new Error(`Tool '${name}' has no row in the operation table`);

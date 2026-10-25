@@ -492,8 +492,8 @@ See [capabilities/threads.md](capabilities/threads.md).
 identity at the OpenID provider: its issuer and subject. Active or disabled.
 
 **Role** — what a principal may do on one scope: **Platform Administrator** and **Ontology
-Creator** on the platform, **Ontology Administrator** on one ontology, **Reader** and
-**Writer** on one lens. No role includes another.
+Creator** on the platform, **Ontology Administrator** on one ontology, **Reader**,
+**Proposer** and **Writer** on one lens. No role includes another.
 
 **Assignment** — one role held by one principal on its scope. No assignment, no access.
 See [capabilities/authentication.md](capabilities/authentication.md).

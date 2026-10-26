@@ -13,6 +13,9 @@ const MAX_ONTOLOGY_KEY_LENGTH = 59;
 const PAGE_SIZE = 200;
 const ENTITY_SYSTEM_FIELDS = ['_id', '_entityTypeKey', '_createdAt', '_updatedAt', '_identity'];
 const RELATION_SYSTEM_FIELDS = ['_id', '_relationTypeKey', '_createdAt', '_updatedAt'];
+// The most calls one staging request lists, and roughly the most JSON bytes.
+const STAGE_ITEMS = 1000;
+const STAGE_BYTES = 4 * 1024 * 1024;
 const INDEX_POLL_MS = 2000;
 const INDEX_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
 // Index states with nothing left to build: `unavailable` is a semantic-only
@@ -106,6 +109,60 @@ function without(record, fields) {
   return out;
 }
 
+// Write through changesets of one lens, committed in chunks: calls are
+// staged up to STAGE_ITEMS per request, and a full changeset is committed
+// and the next one started. Each call's answer goes to its `done` callback.
+function changesetWriter(baseUrl, prefix) {
+  let changeset = null;
+  let pending = [];
+  let bytes = 0;
+  let commits = 0;
+  const start = async () => {
+    if (changeset === null) changeset = (await request(baseUrl, 'POST', `${prefix}/changesets`, { note: 'Fixture load' })).id;
+  };
+  const commit = async () => {
+    if (changeset === null) return;
+    await request(baseUrl, 'POST', `${prefix}/changesets/${changeset}/commit`, {});
+    changeset = null;
+    commits++;
+  };
+  const stage = (writes) => request(baseUrl, 'POST', `${prefix}/changesets/${changeset}/writes`, writes);
+  const send = async () => {
+    if (pending.length === 0) return;
+    const batch = pending;
+    pending = [];
+    bytes = 0;
+    const writes = batch.map((item) => item.write);
+    await start();
+    let answers;
+    try {
+      answers = await stage(writes);
+    } catch (err) {
+      // Full: commit it, and stage the same calls into the next one.
+      if (!(err instanceof HttpError && err.status === 409 && err.message.includes('is full'))) throw err;
+      await commit();
+      await start();
+      answers = await stage(writes);
+    }
+    batch.forEach((item, i) => item.done?.(answers[i]));
+  };
+  return {
+    async add(write, done) {
+      const size = JSON.stringify(write).length;
+      if (pending.length >= STAGE_ITEMS || (pending.length > 0 && bytes + size > STAGE_BYTES)) await send();
+      pending.push({ write, done });
+      bytes += size;
+    },
+    async finish() {
+      await send();
+      await commit();
+    },
+    get commits() {
+      return commits;
+    },
+  };
+}
+
 // Search indices build their entries in the background after every write;
 // wait until no index has anything left to build. A timeout or failed
 // items only warn: the data is loaded and the worker keeps going.
@@ -157,29 +214,40 @@ async function load({ name, key, baseUrl, dir }) {
     console.log('  schema imported');
 
     const prefix = `/api/ontologies/${key}/runtime/lenses/${unscopedLensKey(schema)}`;
+    // The same loading path as the sync skill's import: chunked changesets,
+    // puts where an identity or a one-per-pair type can match.
+    const withIdentity = new Set(
+      (schema.entityTypes || []).filter((t) => (t.identityProperties || []).length > 0).map((t) => t.key),
+    );
+    const onePerPair = new Set((schema.relationTypes || []).filter((t) => t.onePerPair || t.parent).map((t) => t.key));
+    const writer = changesetWriter(baseUrl, prefix);
     const idMap = new Map();
     let entityCount = 0;
     for (const [typeKey, entities] of Object.entries(data.entities || {})) {
+      const operation = withIdentity.has(typeKey) ? 'put_entity' : 'create_entity';
       for (const entity of entities) {
-        const created = await request(baseUrl, 'POST', `${prefix}/entities/${typeKey}`, without(entity, ENTITY_SYSTEM_FIELDS));
-        idMap.set(entity._id, created._id);
+        const properties = without(entity, ENTITY_SYSTEM_FIELDS);
+        await writer.add({ operation, type: typeKey, properties }, (answer) => idMap.set(entity._id, answer.id));
         entityCount++;
       }
     }
+    await writer.finish();
     let relationCount = 0;
     for (const [typeKey, relations] of Object.entries(data.relations || {})) {
+      const operation = onePerPair.has(typeKey) ? 'put_relation' : 'create_relation';
       for (const relation of relations) {
         const fromEntityId = idMap.get(relation.fromEntityId);
         const toEntityId = idMap.get(relation.toEntityId);
         if (!fromEntityId || !toEntityId) {
           throw new Error(`relation ${typeKey} ${relation._id} points at an entity that is not in data.json`);
         }
-        const body = { ...without(relation, RELATION_SYSTEM_FIELDS), fromEntityId, toEntityId };
-        await request(baseUrl, 'POST', `${prefix}/relations/${typeKey}`, body);
+        const properties = without(relation, [...RELATION_SYSTEM_FIELDS, 'fromEntityId', 'toEntityId']);
+        await writer.add({ operation, type: typeKey, fromEntityId, toEntityId, properties });
         relationCount++;
       }
     }
-    console.log(`  data imported: ${entityCount} entities, ${relationCount} relations`);
+    await writer.finish();
+    console.log(`  data imported: ${entityCount} entities, ${relationCount} relations in ${writer.commits} commits`);
 
     await waitForSearchIndices(baseUrl, key);
   } catch (err) {

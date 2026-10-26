@@ -346,7 +346,8 @@ that principal into the service; one bound to a principal with a role answers
 
 One port serves everything. What a deployment exposes follows one rule: **what clients call
 is public, what the platform calls stays internal.** The ingress or reverse proxy in front
-of the server enforces it; the server itself serves every path on every request.
+of the server enforces it; the server itself serves every path on every request
+([decisions.md](decisions.md#deployment)).
 
 | Path | Exposed | Called by |
 |---|---|---|
@@ -395,7 +396,7 @@ use the error envelope.
 
 `route` is the route template (`/api/ontologies/:ontologyKey`), or `unmatched` for a request
 no route answers; `status` is the status code. No label carries an ontology, a lens, a
-principal or a raw path, so the number of series depends on the code alone. A streamed
+principal or a raw path ([decisions.md](decisions.md#deployment)). A streamed
 response is timed to its end.
 
 ## Modeling REST

@@ -327,7 +327,8 @@ into the Explorer focused on this entity.
    rather than lost.
 
 Endpoint errors from the server are surfaced as form-level errors, not silent failures; a
-second parent is named by the child's label ("T1 already has a parent").
+second parent is named by the child's label ("T1 already has a parent"), and a pair a
+one-per-pair relation type already links says "Already linked by this relation".
 
 ### Explore
 

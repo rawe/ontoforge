@@ -183,6 +183,8 @@ function AddRelationFlow({
                   [vars.target._id]: displayLabel(vars.target),
                 }),
           )
+        } else if (err.pairTaken) {
+          setFormError('Already linked by this relation: this type allows one link between the same two entities')
         } else {
           setFormError(err.message)
         }

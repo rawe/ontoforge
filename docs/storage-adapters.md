@@ -1011,7 +1011,9 @@ The queue works in plain SQL on `search_queue`:
   transaction that queued something; PostgreSQL delivers the notification only at commit.
   One channel serves the whole database. Each process `LISTEN`s on a dedicated connection
   outside the pool — a pooled connection would go back to the pool with the subscription
-  on it; a lost connection is logged and ends the subscription.
+  on it; a lost connection is logged and ends the subscription. That connection may go to
+  an address of its own, since a transaction-mode pooler in front of the pool cannot hold
+  a subscription.
 
 ## Index inventory
 

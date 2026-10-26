@@ -8,6 +8,8 @@ export interface Settings {
   DB_URI: string;
   DB_USER: string;
   DB_PASSWORD: string;
+  DB_POOL_SIZE: number;
+  DB_LISTEN_URI: string | null;
   PORT: number;
   SHUTDOWN_DRAIN_SECONDS: number;
 
@@ -335,6 +337,12 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     DB_URI: str(env, "DB_URI", "postgresql://localhost:5432/ontoforge"),
     DB_USER: str(env, "DB_USER", "postgres"),
     DB_PASSWORD: str(env, "DB_PASSWORD", "ontoforge_dev"),
+    // Connections the ontology database pool opens at most, per server.
+    DB_POOL_SIZE: positiveInt(env, "DB_POOL_SIZE", 10),
+    // Where the search worker's `LISTEN` connection goes; DB_URI when unset.
+    // A transaction-mode pooler cannot carry LISTEN, so behind one this
+    // names the database directly.
+    DB_LISTEN_URI: optStr(env, "DB_LISTEN_URI"),
     PORT: int(env, "PORT", 8000),
     // How long a stopping server lets running requests and chat streams
     // finish before it cuts them.

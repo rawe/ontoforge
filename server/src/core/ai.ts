@@ -30,6 +30,7 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOpenAI } from "@langchain/openai";
 
 import { settings } from "../config.js";
+import { ProviderCallMetrics } from "../metrics.js";
 
 /** A named language-model configuration belonging to one lens. */
 export interface AgentConfig {
@@ -108,6 +109,8 @@ export function createAiModel(
   // is the OpenAI-compatible spelling and OpenRouter accepts it directly,
   // normalizing it onto its own `reasoning.effort`; endpoints and models
   // that do not support it ignore the field.
+  // Every call is timed as a provider request (`metrics.ts`).
+  const callbacks = [new ProviderCallMetrics("ai")];
   const effort = settings.AI_REASONING_EFFORT;
   const reasoning =
     effort === null ? {} : { modelKwargs: { reasoning_effort: effort } };
@@ -121,6 +124,7 @@ export function createAiModel(
       ...retries,
       ...tokenLimit,
       ...reasoning,
+      callbacks,
     });
   }
   if (provider === "openai") {
@@ -135,6 +139,7 @@ export function createAiModel(
       ...retries,
       ...tokenLimit,
       ...reasoning,
+      callbacks,
     });
   }
   if (provider === "anthropic") {
@@ -149,6 +154,7 @@ export function createAiModel(
       maxTokens: options.maxTokens ?? ANTHROPIC_MAX_TOKENS,
       ...retries,
       ...anthropicReasoning(modelName, effort),
+      callbacks,
     });
   }
   throw new Error(`Unknown AI provider: '${provider}'`);

@@ -112,6 +112,16 @@ describe("config env overrides", () => {
     }
   });
 
+  it("sizes the pool from DB_POOL_SIZE and listens on DB_URI unless DB_LISTEN_URI is set", () => {
+    expect(loadSettings({}).DB_POOL_SIZE).toBe(10);
+    expect(loadSettings({ DB_POOL_SIZE: "25" }).DB_POOL_SIZE).toBe(25);
+    expect(() => loadSettings({ DB_POOL_SIZE: "0" })).toThrow(/DB_POOL_SIZE/);
+    expect(loadSettings({}).DB_LISTEN_URI).toBeNull();
+    expect(loadSettings({ DB_LISTEN_URI: "postgresql://db:5432/ontoforge" }).DB_LISTEN_URI).toBe(
+      "postgresql://db:5432/ontoforge",
+    );
+  });
+
   it("accepts every reasoning effort level and rejects anything else", () => {
     for (const level of ["none", "low", "medium", "high"]) {
       expect(loadSettings({ AI_REASONING_EFFORT: level }).AI_REASONING_EFFORT).toBe(

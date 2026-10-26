@@ -628,7 +628,7 @@ per-ontology deployment configuration.
 
 | Group | Purpose | Absent means |
 |---|---|---|
-| Storage | Which adapter, and how to reach the database | Server cannot start |
+| Storage | Which adapter, how to reach the database, pool size, and an optional separate address for the wake-up subscription | Server cannot start |
 | Embedding | Provider, model, endpoint, credential, vector width, request batching | Semantic search unavailable |
 | Documents | Chunk size and overlap | Defaults apply |
 | Search indexing | Attempts before a queued item counts as failed, worker batch size, polling interval | Defaults apply |

@@ -24,6 +24,7 @@
  */
 
 import { settings } from "../config.js";
+import { timeProviderCall } from "../metrics.js";
 
 export interface EmbeddingProvider {
   /** Vector width, needed for index DDL. */
@@ -141,17 +142,19 @@ abstract class HttpEmbeddingProvider implements EmbeddingProvider {
     body: unknown,
     signal: AbortSignal,
   ): Promise<unknown> {
-    const response = await this.fetchFn(url, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify(body),
-      signal,
+    return timeProviderCall("embedding", async () => {
+      const response = await this.fetchFn(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+        signal,
+      });
+      if (!response.ok) {
+        const detail = await responseText(response);
+        throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+      }
+      return response.json();
     });
-    if (!response.ok) {
-      const detail = await responseText(response);
-      throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
-    }
-    return response.json();
   }
 }
 

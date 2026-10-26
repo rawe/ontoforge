@@ -9,8 +9,9 @@
  * on `registry`.
  */
 
+import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 import type { FastifyInstance } from "fastify";
-import { collectDefaultMetrics, Counter, Histogram, Registry } from "prom-client";
+import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from "prom-client";
 
 export const registry = new Registry();
 
@@ -31,6 +32,120 @@ const httpDuration = new Histogram({
   buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
   registers: [registry],
 });
+
+const dbPoolConnections = new Gauge({
+  name: "ontoforge_db_pool_connections",
+  help: "Database pool connections by pool and state: total open, idle, and requests waiting for one.",
+  labelNames: ["pool", "state"] as const,
+  registers: [registry],
+  collect() {
+    for (const [name, read] of pools) {
+      const pool = read();
+      if (pool === null) continue;
+      this.set({ pool: name, state: "total" }, pool.totalCount);
+      this.set({ pool: name, state: "idle" }, pool.idleCount);
+      this.set({ pool: name, state: "waiting" }, pool.waitingCount);
+    }
+  },
+});
+
+const searchQueueItems = new Gauge({
+  name: "ontoforge_search_queue_items",
+  help: "Search queue items of every ontology, pending or failed for good, as of this server's last full worker pass.",
+  labelNames: ["state"] as const,
+  registers: [registry],
+});
+
+const searchItems = new Counter({
+  name: "ontoforge_search_items_total",
+  help: "Search queue items this server's worker processed, by outcome.",
+  labelNames: ["outcome"] as const,
+  registers: [registry],
+});
+
+const searchEntries = new Counter({
+  name: "ontoforge_search_entries_total",
+  help: "Search entries this server's worker wrote, by representation.",
+  labelNames: ["representation"] as const,
+  registers: [registry],
+});
+
+const providerDuration = new Histogram({
+  name: "ontoforge_provider_request_duration_seconds",
+  help: "Calls to an external model provider, by provider and outcome.",
+  labelNames: ["provider", "outcome"] as const,
+  buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
+  registers: [registry],
+});
+
+/** The connection counts a database pool reports. */
+export interface PoolCounts {
+  totalCount: number;
+  idleCount: number;
+  waitingCount: number;
+}
+
+/** Every pool reported, by name; `null` while that pool is closed. */
+const pools = new Map<string, () => PoolCounts | null>();
+
+/** Report the pool `read` returns under `name`, read at every scrape. */
+export function observePool(name: string, read: () => PoolCounts | null): void {
+  pools.set(name, read);
+}
+
+/** The search queue as one full worker pass saw it. */
+export function recordSearchQueue(pending: number, failed: number): void {
+  searchQueueItems.set({ state: "pending" }, pending);
+  searchQueueItems.set({ state: "failed" }, failed);
+}
+
+export function countSearchItems(outcome: "completed" | "failed" | "released", count: number): void {
+  if (count > 0) searchItems.inc({ outcome }, count);
+}
+
+export function countSearchEntries(representation: string, count: number): void {
+  if (count > 0) searchEntries.inc({ representation }, count);
+}
+
+/** The external model providers whose calls are timed. */
+export type Provider = "embedding" | "ai" | "decision";
+
+/** Time `call` as one request to `provider`; a throw counts as an error. */
+export async function timeProviderCall<T>(provider: Provider, call: () => Promise<T>): Promise<T> {
+  const end = providerDuration.startTimer({ provider });
+  try {
+    const result = await call();
+    end({ outcome: "ok" });
+    return result;
+  } catch (exc) {
+    end({ outcome: "error" });
+    throw exc;
+  }
+}
+
+/** Times every call of a LangChain chat model, streamed ones to their end. */
+export class ProviderCallMetrics extends BaseCallbackHandler {
+  name = "ontoforge-provider-metrics";
+  private readonly running = new Map<string, (labels: { outcome: string }) => void>();
+
+  constructor(private readonly provider: Provider) {
+    super();
+  }
+
+  override handleChatModelStart(_llm: unknown, _messages: unknown, runId: string): void {
+    this.running.set(runId, providerDuration.startTimer({ provider: this.provider }));
+  }
+
+  override handleLLMEnd(_output: unknown, runId: string): void {
+    this.running.get(runId)?.({ outcome: "ok" });
+    this.running.delete(runId);
+  }
+
+  override handleLLMError(_error: unknown, runId: string): void {
+    this.running.get(runId)?.({ outcome: "error" });
+    this.running.delete(runId);
+  }
+}
 
 /** The label a request without a matching route counts under. */
 export const UNMATCHED = "unmatched";

@@ -25,6 +25,7 @@ import type {
   Role,
 } from "../../access/store.js";
 import { ConflictError, OntoForgeError } from "../../core/exceptions.js";
+import { observePool } from "../../metrics.js";
 import { toStoreError } from "./errors.js";
 
 /** The layout this code creates. 2 adds the Proposer lens role. */
@@ -184,6 +185,7 @@ export async function openAccessStore(url: string, user: string, password: strin
   }
   const pool = new pg.Pool(config);
   pool.on("error", (error) => console.error(`Access database: ${error.message}`));
+  observePool("access", () => pool);
   const store = new PostgresAccessStore(pool);
   try {
     await store.migrate();

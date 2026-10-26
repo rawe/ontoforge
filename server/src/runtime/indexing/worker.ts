@@ -36,6 +36,7 @@
  */
 
 import { settings } from "../../config.js";
+import { countSearchEntries, countSearchItems, recordSearchQueue } from "../../metrics.js";
 import { getEmbeddingProvider, type EmbeddingProvider } from "../../core/embedding.js";
 import {
   getOntologyRegistry,
@@ -48,6 +49,7 @@ import {
   type SearchGenerationRecord,
   type SearchIndexStore,
   type SearchPartKind,
+  type SearchQueueStats,
   type SearchWorkSubscription,
 } from "../../core/ports.js";
 import type { PropertyDef } from "../../core/schemas.js";
@@ -153,17 +155,32 @@ export async function drainOnce(options: SearchWorkOptions = {}): Promise<number
       ? [options.ontologyKey]
       : (await getOntologyRegistry().listOntologies()).map((row) => row["key"] as string);
   let processed = 0;
+  // The queue as this pass saw it; reported only when it saw every ontology.
+  const queue: QueueCount = { pending: 0, failed: 0, complete: options.ontologyKey === undefined };
   for (const ontologyKey of keys) {
-    if (resolved.signal?.aborted) break;
+    if (resolved.signal?.aborted) {
+      queue.complete = false;
+      break;
+    }
     try {
-      processed += await processOntology(ontologyKey, resolved);
+      processed += await processOntology(ontologyKey, resolved, queue);
     } catch (exc) {
       // An ontology deleted mid-pass, a storage failure: the next pass
       // tries again; the others go on.
+      queue.complete = false;
       console.warn(`Search work in ontology '${ontologyKey}' failed: ${message(exc)}`);
     }
   }
+  if (queue.complete) recordSearchQueue(queue.pending, queue.failed);
   return processed;
+}
+
+/** Queue items summed over the ontologies of one pass. */
+interface QueueCount {
+  pending: number;
+  failed: number;
+  /** False once an ontology was skipped: the sum is then partial. */
+  complete: boolean;
 }
 
 /** Passes until one finds nothing to do — everything due is processed
@@ -197,7 +214,11 @@ async function reconcileIfMoved(store: SearchIndexStore): Promise<void> {
   }
 }
 
-async function processOntology(ontologyKey: string, options: ResolvedOptions): Promise<number> {
+async function processOntology(
+  ontologyKey: string,
+  options: ResolvedOptions,
+  queue: QueueCount,
+): Promise<number> {
   const store = await getSearchIndexStore(ontologyKey);
   await reconcileIfMoved(store);
   const provider = getEmbeddingProvider();
@@ -219,6 +240,7 @@ async function processOntology(ontologyKey: string, options: ResolvedOptions): P
     for (const [generationId, items] of byGeneration) {
       if (options.signal?.aborted) {
         await store.releaseQueueItems(items);
+        countSearchItems("released", items.length);
         continue;
       }
       const generation = generations.get(generationId);
@@ -230,23 +252,31 @@ async function processOntology(ontologyKey: string, options: ResolvedOptions): P
             : await processGeneration(store, runtime, context, generation, items, provider, options.signal);
         const { completed, lost } = await store.completeQueueItems(items);
         reportLost(generationId, lost, items.length);
+        countSearchItems("completed", completed);
         if (generation?.state === "building" && completed > 0) {
           await store.recordGenerationProgress(generationId, { done: completed });
         }
         if (generation !== undefined) {
           throughput[generation.representation].record(written, Date.now() - started);
+          countSearchEntries(generation.representation, written);
         }
       } catch (exc) {
         // Stopped, not failed: released for the next claim.
         if (options.signal?.aborted) {
           await store.releaseQueueItems(items);
+          countSearchItems("released", items.length);
           continue;
         }
         await failItems(store, items, exc, options);
+        countSearchItems("failed", items.length);
       }
     }
   }
-  await finishBuilds(store, options.maxAttempts);
+  const stats = await finishBuilds(store, options.maxAttempts);
+  for (const stat of stats) {
+    queue.pending += stat.pending;
+    queue.failed += stat.failed;
+  }
   return claimed.length;
 }
 
@@ -282,8 +312,9 @@ function reportLost(generationId: string, lost: number, claimed: number): void {
 
 /** Switch in every building generation with nothing left in its queue. A
  * build with items failed for good stays building — status reports it
- * failed, and the active generation keeps serving. */
-async function finishBuilds(store: SearchIndexStore, maxAttempts: number): Promise<void> {
+ * failed, and the active generation keeps serving. The queue stats it
+ * went by. */
+async function finishBuilds(store: SearchIndexStore, maxAttempts: number): Promise<SearchQueueStats[]> {
   const [generations, stats] = await Promise.all([
     store.listGenerations(),
     store.queueStats(maxAttempts),
@@ -294,6 +325,7 @@ async function finishBuilds(store: SearchIndexStore, maxAttempts: number): Promi
       await store.finishGeneration(generation.generationId);
     }
   }
+  return stats;
 }
 
 // ---------------------------------------------------------------------------
@@ -387,14 +419,16 @@ async function processGeneration(
     textHash,
     embedding: representation === "semantic" ? vectors[i]! : null,
   }));
-  if (!(await store.upsertEntries(generation.generationId, writes, items))) {
+  // Only what the claim still held is written: a lost claim's writes are dropped.
+  const written = await store.upsertEntries(generation.generationId, writes, items);
+  if (written === null) {
     // The generation retired meanwhile: nothing left to do for it.
     return 0;
   }
   for (const deletion of deletions) {
     await deletion();
   }
-  return writes.length;
+  return written;
 }
 
 interface ComposedItems {

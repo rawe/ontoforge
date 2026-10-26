@@ -252,6 +252,8 @@ The backend reads settings from environment variables (or a `.env` file in `serv
 | `DB_URI` | `postgresql://localhost:5432/ontoforge` | Database connection — the DSN carries host, port and database |
 | `DB_USER` | `postgres` | Database username |
 | `DB_PASSWORD` | `ontoforge_dev` | Database password |
+| `DB_POOL_SIZE` | `10` | Connections the ontology database pool of one server opens at most (positive integer) |
+| `DB_LISTEN_URI` | `DB_URI` | Where the search worker's wake-up subscription (`LISTEN`) connects; set it to the database itself when `DB_URI` names a transaction-mode pooler, which cannot hold a subscription |
 | `PORT` | `8000` | HTTP listen port |
 | `SHUTDOWN_DRAIN_SECONDS` | `20` | Seconds a stopping server lets running requests and chat streams finish before it cuts them; readiness answers 503 meanwhile (positive integer) |
 | `SHARED_STATE` | `memory` | Where shared state such as assistant conversations lives: `memory` serves one server process; `valkey` is shared by every server naming the same Valkey |

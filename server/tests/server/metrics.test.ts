@@ -11,7 +11,7 @@ vi.mock("../../src/core/ports.js", () => ({
   supportsKeywordRanking: async () => false,
 }));
 
-const { registry } = await import("../../src/metrics.js");
+const { observePool, ProviderCallMetrics, registry, timeProviderCall } = await import("../../src/metrics.js");
 
 let app: FastifyInstance;
 /** Resolved once `/test/slow` is entered; its handler then waits for `release`. */
@@ -92,5 +92,58 @@ describe("GET /metrics", () => {
   it("is not part of the OpenAPI description", async () => {
     const spec = (await app.inject({ url: "/openapi.json" })).json();
     expect(Object.keys(spec.paths)).not.toContain("/metrics");
+  });
+});
+
+/** The observation count of the provider histogram for these labels. */
+async function providerCalls(labels: Record<string, string>): Promise<number> {
+  const metric = await registry.getSingleMetric("ontoforge_provider_request_duration_seconds")!.get();
+  const match = metric.values.find(
+    (value) =>
+      value.metricName === "ontoforge_provider_request_duration_seconds_count" &&
+      Object.entries(labels).every(([name, wanted]) => value.labels[name] === wanted),
+  );
+  return match?.value ?? 0;
+}
+
+describe("provider metrics", () => {
+  it("time a call by its outcome, and pass its result or error through", async () => {
+    const ok = await providerCalls({ provider: "embedding", outcome: "ok" });
+    const error = await providerCalls({ provider: "embedding", outcome: "error" });
+    expect(await timeProviderCall("embedding", async () => 42)).toBe(42);
+    await expect(timeProviderCall("embedding", async () => Promise.reject(new Error("down")))).rejects.toThrow("down");
+    expect(await providerCalls({ provider: "embedding", outcome: "ok" })).toBe(ok + 1);
+    expect(await providerCalls({ provider: "embedding", outcome: "error" })).toBe(error + 1);
+  });
+
+  it("time a chat model call from its start to its end or error", async () => {
+    const handler = new ProviderCallMetrics("ai");
+    const ok = await providerCalls({ provider: "ai", outcome: "ok" });
+    const error = await providerCalls({ provider: "ai", outcome: "error" });
+    handler.handleChatModelStart({}, [], "run-1");
+    handler.handleChatModelStart({}, [], "run-2");
+    handler.handleLLMEnd({}, "run-1");
+    handler.handleLLMError(new Error("down"), "run-2");
+    handler.handleLLMEnd({}, "run-unknown");
+    expect(await providerCalls({ provider: "ai", outcome: "ok" })).toBe(ok + 1);
+    expect(await providerCalls({ provider: "ai", outcome: "error" })).toBe(error + 1);
+  });
+});
+
+describe("pool metrics", () => {
+  it("read a pool's counts at scrape time, and skip a closed one", async () => {
+    let counts: { totalCount: number; idleCount: number; waitingCount: number } | null = {
+      totalCount: 4,
+      idleCount: 1,
+      waitingCount: 2,
+    };
+    observePool("test", () => counts);
+    const body = (await app.inject({ url: "/metrics" })).body;
+    expect(body).toContain('ontoforge_db_pool_connections{pool="test",state="total"} 4');
+    expect(body).toContain('ontoforge_db_pool_connections{pool="test",state="waiting"} 2');
+    counts = { totalCount: 5, idleCount: 5, waitingCount: 0 };
+    expect((await app.inject({ url: "/metrics" })).body).toContain(
+      'ontoforge_db_pool_connections{pool="test",state="total"} 5',
+    );
   });
 });

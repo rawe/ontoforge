@@ -768,13 +768,13 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     generationId: string,
     writes: SearchEntryWrite[],
     claim?: ClaimedSearchQueueItem[],
-  ): Promise<boolean> {
-    if (!isUuid(generationId)) return false;
+  ): Promise<number | null> {
+    if (!isUuid(generationId)) return null;
     return this.tx(async (querier) => {
       const generation = await liveGeneration(querier, generationId);
-      if (generation === null) return false;
+      if (generation === null) return null;
       const entries = await heldOnly(querier, writes, claim);
-      if (entries.length === 0) return true;
+      if (entries.length === 0) return 0;
       const semantic = generation.representation === "semantic";
       if (semantic) {
         for (const entry of entries) {
@@ -819,7 +819,7 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
            text_hash = EXCLUDED.text_hash, embedding = EXCLUDED.embedding, tsv = EXCLUDED.tsv`,
         [generationId, JSON.stringify(rows)],
       );
-      return true;
+      return entries.length;
     });
   }
 

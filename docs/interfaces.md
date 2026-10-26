@@ -392,12 +392,22 @@ use the error envelope.
 |---|---|---|
 | `ontoforge_http_requests_total` | counter | `method`, `route`, `status` |
 | `ontoforge_http_request_duration_seconds` | histogram | `method`, `route`, `status` |
+| `ontoforge_db_pool_connections` | gauge | `pool` (`ontology`, `access`), `state` (`total`, `idle`, `waiting`) |
+| `ontoforge_search_queue_items` | gauge | `state` (`pending`, `failed`) |
+| `ontoforge_search_items_total` | counter | `outcome` (`completed`, `failed`, `released`) |
+| `ontoforge_search_entries_total` | counter | `representation` (`keyword`, `semantic`) |
+| `ontoforge_provider_request_duration_seconds` | histogram | `provider` (`embedding`, `ai`), `outcome` (`ok`, `error`) |
 | `process_*`, `nodejs_*` | as the client library defines them | none |
 
 `route` is the route template (`/api/ontologies/:ontologyKey`), or `unmatched` for a request
-no route answers; `status` is the status code, or `aborted` when the client left before any response was sent. No label carries an ontology, a lens, a
-principal or a raw path ([decisions.md](decisions.md#deployment)). A streamed
-response is timed to its end.
+no route answers; `status` is the status code, or `aborted` when the client left before any
+response was sent. No label carries an ontology, a lens, a principal or a raw path
+([decisions.md](decisions.md#deployment)). A streamed response or model call is timed to
+its end.
+
+The search counters count this server's worker; the queue is shared, so every server reports
+the same queue, as of its last pass over every ontology. A `failed` item there waits for a
+rebuild; one counted `failed` by the worker may still be retried.
 
 ## Modeling REST
 

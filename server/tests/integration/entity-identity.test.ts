@@ -485,6 +485,20 @@ describe("in a changeset", () => {
     }
   });
 
+  it("judges an identity a live write makes too long: the preview has none, review and submit report it", async () => {
+    const stored = await ok("POST", `${ALL}/entities/item`, { code: "A", year: 1 });
+    const cs = await start();
+    await staged(cs, { operation: "update_entity", type: "item", id: stored._id, properties: { code: "x".repeat(500) } });
+    expect((await ok("GET", `${ALL}/changesets/${cs}/entities/item/${stored._id}`)).entity._identity).toBe(`${"x".repeat(500)}~1`);
+    await ok("PATCH", `${ALL}/entities/item/${stored._id}`, { year: Number.MAX_SAFE_INTEGER });
+
+    expect((await ok("GET", `${ALL}/changesets/${cs}/entities/item/${stored._id}`)).entity._identity).toBeUndefined();
+    const review = await ok("GET", `${ALL}/changesets/${cs}`);
+    expect(JSON.stringify(review.objects[0])).toContain("The identity is longer than 512 characters");
+    const submitted = await call("POST", `${ALL}/changesets/${cs}/submit`, {});
+    expect(kinds(submitted.body)).toContain("replay");
+  });
+
   it("commits a swap of two identities, and a delete with a create of the same identity", async () => {
     const a = await ok("POST", `${ALL}/entities/item`, { code: "A", year: 1 });
     const b = await ok("POST", `${ALL}/entities/item`, { code: "B", year: 1 });

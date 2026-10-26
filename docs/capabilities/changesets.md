@@ -161,7 +161,7 @@ the changeset change meanwhile.
 | Kind | When |
 |---|---|
 | `not_visible` | The object's type, or a property it sets, is no longer visible through the lens |
-| `replay` | A value the lens no longer accepts, a value a create requires that is missing, or an object that could not be applied |
+| `replay` | A value the lens no longer accepts, a value a create requires that is missing, an update's values that over the stored ones now make no [identity](entity-identity.md#in-a-changeset), or an object that could not be applied |
 | `missing` | The stored target of an update is gone |
 | `dangling` | An end of a staged relation create is neither stored nor created in this changeset, or an end of a staged relation is deleted in it |
 | `drift` | The current value of an update's key differs from its before |

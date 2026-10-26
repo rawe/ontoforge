@@ -1201,7 +1201,8 @@ export async function getStagedEntity(
   }
   const identity = object === undefined ? null : givenIdentity(loaded, entityTypeKey, object.action, valuesOf(object), stored);
   if (identity !== null) entity._identity = identity;
-  else if (object?.action === "create") delete entity._identity;
+  // Values that make no identity leave none, never the stored one.
+  else if (object !== undefined && stagesIdentity(loaded, object)) delete entity._identity;
   const [view] = object === undefined ? [] : await reviewOf(loaded, record.id, [object], store);
   return { entity: filterEntityProperties(entity, type), deleted: object?.action === "delete", object: view ?? null };
 }
@@ -1769,6 +1770,24 @@ function drifted(value: StagedValueRecord, stored: Row, propertyDefs: Record<str
   return !isDeepStrictEqual(byHash(value.before!, document), byHash(now, document));
 }
 
+/** Whether a staged entity object gives its entity an identity of its
+ * own: a create, or an update that stages a value of an identity
+ * property. */
+function stagesIdentity(loaded: LoadedSchema, object: StagedObjectRecord): boolean {
+  const properties = identityPropertiesOfType(loaded, object.typeKey);
+  if (object.kind !== "entity" || object.action === "delete" || properties === null) return false;
+  return object.action === "create" || properties.some((property) => Object.hasOwn(valuesOf(object), property.key));
+}
+
+/** The identity faults of a staged update's values over its target's
+ * current stored row `row` (an empty string, a missing value, too long),
+ * as the commit meets them; none when it stages no identity property. */
+function identityFaultsOver(loaded: LoadedSchema, object: StagedObjectRecord, row: Row): FieldErrors {
+  const properties = identityPropertiesOfType(loaded, object.typeKey);
+  if (properties === null || !stagesIdentity(loaded, object)) return {};
+  return buildIdentity(properties, withoutNulls({ ...row, ...valuesOf(object) })).faults ?? {};
+}
+
 /** The defs of a staged object's type in the full schema. */
 function fullDefs(loaded: LoadedSchema, object: StagedObjectRecord): Record<string, PropertyDef> {
   const types = object.kind === "entity" ? loaded.full.entityTypes : loaded.full.relationTypes;
@@ -1810,7 +1829,8 @@ function judge(loaded: LoadedSchema, objects: StagedObjectRecord[], known: Known
       continue;
     }
     if (object.action === "delete") continue;
-    for (const [key, message] of Object.entries(fieldErrorsOf(loaded, object))) {
+    const errors = fieldErrorsOf(loaded, object);
+    for (const [key, message] of Object.entries(errors)) {
       fault("replay", `Instance validation failed: ${key}: ${message}`, key);
     }
     if (object.kind === "relation") {
@@ -1836,6 +1856,9 @@ function judge(loaded: LoadedSchema, objects: StagedObjectRecord[], known: Known
       const defs = fullDefs(loaded, object);
       for (const value of object.values) {
         if (drifted(value, row, defs)) fault("drift", DRIFTED, value.propertyKey);
+      }
+      for (const [key, message] of Object.entries(identityFaultsOver(loaded, object, row))) {
+        if (!Object.hasOwn(errors, key)) fault("replay", `Instance validation failed: ${key}: ${message}`, key);
       }
     }
   }

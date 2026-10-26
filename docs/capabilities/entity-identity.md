@@ -109,8 +109,9 @@ it, and an identity two entities would hold there is a conflict. The staged obje
 holds the id, never the identity: each staged entity's identity is built when it is
 needed, as the commit would build it then, from its staged values over the entity's
 current stored ones under the current definition. A live write to a value the changeset
-does not stage therefore moves the entity's identity in the changeset's view too. The
-review shows the identity each staged entity gets, before and after.
+does not stage therefore moves the entity's identity in the changeset's view too, and
+values it leaves unable to make one (too long, say) give the entity none there and are a
+`replay` fault. The review shows the identity each staged entity gets, before and after.
 
 Uniqueness is judged on the end state, so a changeset may swap two identities or delete an
 entity and create another with its identity. Two entities the changeset would leave with

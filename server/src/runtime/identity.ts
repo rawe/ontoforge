@@ -114,3 +114,21 @@ export function identityPropertiesOf(
   }
   return properties;
 }
+
+/** The values an identity is built from, by property key: the text form
+ * split back into its parts; null when no values build exactly it. */
+export function identityValues(properties: readonly IdentityProperty[], identity: string): Row | null {
+  const parts = identity.split(SEPARATOR);
+  if (parts.length !== properties.length) return null;
+  const values: Row = {};
+  properties.forEach((property, i) => {
+    const text = parts[i]!;
+    values[property.key] =
+      property.dataType === "integer"
+        ? /^-?\d+$/.test(text) ? Number(text) : null
+        : property.dataType === "date"
+          ? text
+          : text.replace(/%25|%7E/g, (escape) => (escape === "%25" ? "%" : "~"));
+  });
+  return buildIdentity(properties, values).identity === identity ? values : null;
+}

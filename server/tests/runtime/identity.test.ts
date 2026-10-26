@@ -14,6 +14,7 @@ import {
   IDENTITY_TOO_LONG,
   IDENTITY_VALUE_MISSING,
   identityPropertiesOf,
+  identityValues,
   MAX_IDENTITY_LENGTH,
 } from "../../src/runtime/identity.js";
 import { exactlyOne } from "../../src/runtime/service.js";
@@ -66,6 +67,13 @@ describe("the text form", () => {
     // An escape counts as the three characters it is.
     expect(buildIdentity([CODE], { code: "~".repeat(171) }).faults).toEqual({ code: IDENTITY_TOO_LONG });
     expect(buildIdentity([CODE], { code: "~".repeat(170) }).faults).toBeNull();
+  });
+
+  it("splits an identity back into the values that build exactly it", () => {
+    expect(identityValues([CODE, YEAR, DAY], "50%25%7Eoff~-7~2024-01-31")).toEqual({ code: "50%~off", year: -7, day: "2024-01-31" });
+    for (const other of ["A", "A~1~x", "A~01", "A~1.5", "A%~1", "A%7e~1", "~1"]) {
+      expect(identityValues([CODE, YEAR], other)).toBeNull();
+    }
   });
 
   it("finds the identity properties of a type only when every one is defined", () => {

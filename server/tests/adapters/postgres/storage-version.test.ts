@@ -78,8 +78,6 @@ const step10 = (namespace: string) => [
   expect.stringMatching(
     /^ALTER TABLE entity ADD CONSTRAINT entity_identity_unique UNIQUE \(type_key, identity\)\s+DEFERRABLE INITIALLY IMMEDIATE$/,
   ),
-  "ALTER TABLE changeset_object ADD COLUMN identity text",
-  "CREATE INDEX changeset_object_identity_idx ON changeset_object (changeset_id, type_key, identity)",
 ];
 
 const writes = (queries: string[]) => queries.filter((q) => /^(INSERT|DELETE|CREATE|LOCK TABLE)/.test(q));

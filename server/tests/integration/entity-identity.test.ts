@@ -343,6 +343,29 @@ describe("writes and addressing by identity", () => {
     expect(body.results[0].node._identity).toBe("A~1");
   });
 
+  it("keeps the identity in step with the values under concurrent updates of different identity properties", async () => {
+    for (let round = 0; round < 8; round++) {
+      const created = await ok("POST", `${ALL}/entities/item`, { code: `A${round}`, year: 1 });
+      const url = `${ALL}/entities/item/${created._id}`;
+      const updates = await Promise.all([call("PATCH", url, { code: `B${round}` }), call("PATCH", url, { year: 2 })]);
+      for (const update of updates) expect(update.status, JSON.stringify(update.body)).toBe(200);
+      const stored = await ok("GET", url);
+      expect(stored._identity).toBe(`B${round}~2`);
+      expect((await ok("GET", `${ALL}/entities/item/identity/${seg(`B${round}~2`)}`))._id).toBe(created._id);
+    }
+  });
+
+  it("addresses an identity of the longest form by path", async () => {
+    // 510 code points, each four UTF-8 bytes: the segment is 6,000 characters encoded.
+    const code = "😀".repeat(508);
+    const created = await ok("POST", `${ALL}/entities/item`, { code, year: 1 });
+    expect(created._identity).toBe(`${code}~1`);
+    expect((await ok("GET", `${ALL}/entities/item/identity/${seg(created._identity)}`))._id).toBe(created._id);
+    expect((await ok("GET", `${ALL}/entities/item/identity/${seg(created._identity)}/path`))[0].id).toBe(created._id);
+    const escaped = await ok("POST", `${ALL}/entities/item`, { code: "%~".repeat(85), year: 1 });
+    expect((await ok("GET", `${ALL}/entities/item/identity/${seg(escaped._identity)}`))._id).toBe(escaped._id);
+  });
+
   it("gives exactly one of several concurrent creates of one identity; the others are IDENTITY_TAKEN", async () => {
     const results = await Promise.all(Array.from({ length: 6 }, () => item({ code: "RACE", year: 1 })));
     expect(results.filter((r) => r.status === 201)).toHaveLength(1);
@@ -440,6 +463,26 @@ describe("in a changeset", () => {
 
     const both = await stage(cs, { operation: "update_entity", type: "item", id: stored._id, identity: "S~2", properties: {} });
     expect(both.status).toBe(422);
+  });
+
+  it("resolves by the identity the entity has now, after a live write to a value the changeset does not stage", async () => {
+    const stored = await ok("POST", `${ALL}/entities/item`, { code: "A", year: 1 });
+    const cs = await start();
+    await staged(cs, { operation: "update_entity", type: "item", id: stored._id, properties: { code: "B" } });
+    await ok("PATCH", `${ALL}/entities/item/${stored._id}`, { year: 2 });
+
+    expect((await ok("GET", `${ALL}/changesets/${cs}/entities/item/identity/B~2`)).entity._id).toBe(stored._id);
+    expect((await call("GET", `${ALL}/changesets/${cs}/entities/item/identity/B~1`)).status).toBe(404);
+    expect((await staged(cs, { operation: "update_entity", type: "item", identity: "B~2", properties: { weight: 1 } })).id).toBe(stored._id);
+    expect((await stage(cs, { operation: "update_entity", type: "item", identity: "B~1", properties: { weight: 1 } })).status).toBe(404);
+
+    // A staged create of B~2 now clashes with it, also on a review page
+    // that shows the create alone.
+    await staged(cs, { operation: "create_entity", type: "item", properties: { code: "B", year: 2 } });
+    for (const page of ["", "?offset=1&limit=1"]) {
+      const review = await ok("GET", `${ALL}/changesets/${cs}${page}`);
+      expect(review.objects.map((o: Row) => o.markers.map((m: Row) => m.kind)).flat()).toContain("duplicate_identity");
+    }
   });
 
   it("commits a swap of two identities, and a delete with a create of the same identity", async () => {

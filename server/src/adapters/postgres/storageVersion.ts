@@ -601,16 +601,14 @@ const STEPS: Step[] = [
     ],
   },
   {
-    // Entity identity: a type's identity properties, an entity's derived
-    // identity unique within its type, and a staged object's identity.
+    // Entity identity: a type's identity properties and an entity's
+    // derived identity, unique within its type.
     to: 10,
     actions: [
       `ALTER TABLE entity_type ADD COLUMN identity_properties text[]`,
       `ALTER TABLE entity ADD COLUMN identity text`,
       `ALTER TABLE entity ADD CONSTRAINT entity_identity_unique UNIQUE (type_key, identity)
   DEFERRABLE INITIALLY IMMEDIATE`,
-      `ALTER TABLE changeset_object ADD COLUMN identity text`,
-      `CREATE INDEX changeset_object_identity_idx ON changeset_object (changeset_id, type_key, identity)`,
     ],
   },
 ];

@@ -49,7 +49,7 @@ const BASE_COLS = `c.changeset_id, c.lens_id, c.number, c.ruleset_key, c.version
 const COLS = `${BASE_COLS},
        (SELECT count(*)::int FROM changeset_object o WHERE o.changeset_id = c.changeset_id) AS object_count`;
 
-const OBJECT_COLS = `object_id, kind, type_key, action, from_id, to_id, identity, first_touched_at`;
+const OBJECT_COLS = `object_id, kind, type_key, action, from_id, to_id, first_touched_at`;
 
 /** The version bump and last change of every mutation. */
 const BUMP = `version = c.version + 1, last_change_at = now()`;
@@ -88,7 +88,6 @@ function toObject(row: Row): StagedObjectRecord {
     action: row.action as StagedAction,
     fromId: row.from_id as string | null,
     toId: row.to_id as string | null,
-    identity: row.identity as string | null,
     firstTouchedAt: row.first_touched_at as Date,
     values: [],
   };
@@ -286,18 +285,59 @@ export class PostgresChangesetStore implements ChangesetStore {
     return result.rows.map((row) => row.object_id as string);
   }
 
-  /** On the `(changeset_id, type_key, identity)` index. */
-  async identified(id: string, typeKey: string, identity: string): Promise<string[]> {
+  /** The scan stays inside the changeset's own rows (the primary key's
+   * prefix), bounded by the cap on staged objects, and is matched in the
+   * database: only the matching objects are read out. */
+  async entityObjectsStaging(id: string, typeKey: string, values: Row): Promise<StagedObjectRecord[]> {
     if (!isUuid(id)) {
       return [];
     }
     const result = await this.query(
-      `SELECT object_id FROM changeset_object
-        WHERE changeset_id = $1 AND kind = 'entity' AND type_key = $2 AND identity = $3
+      `SELECT ${OBJECT_COLS} FROM changeset_object
+        WHERE changeset_id = $1 AND kind = 'entity' AND type_key = $2 AND action <> 'delete'
+          AND object_id IN (
+            SELECT v.object_id FROM changeset_value v
+             WHERE v.changeset_id = $1 AND v.property_key = ANY($3::text[])
+             GROUP BY v.object_id
+            HAVING bool_and(v.value = $4::jsonb -> v.property_key))
         ORDER BY first_touched_at, object_id`,
-      [id, typeKey, identity],
+      [id, typeKey, Object.keys(values), JSON.stringify(values)],
     );
-    return result.rows.map((row) => row.object_id as string);
+    return this.withValues(id, result.rows.map(toObject));
+  }
+
+  /** The scan stays inside the changeset's own rows (the primary key's
+   * prefix), bounded by the cap on staged objects. */
+  async entityObjectsKeyed(id: string, typeKey: string, keys: string[]): Promise<StagedObjectRecord[]> {
+    if (!isUuid(id)) {
+      return [];
+    }
+    const result = await this.query(
+      `SELECT ${OBJECT_COLS} FROM changeset_object
+        WHERE changeset_id = $1 AND kind = 'entity' AND type_key = $2
+        ORDER BY first_touched_at, object_id`,
+      [id, typeKey],
+    );
+    const objects = result.rows.map(toObject);
+    if (objects.length === 0) {
+      return objects;
+    }
+    const values = await this.query(
+      `SELECT object_id, property_key, value, before, bytes FROM changeset_value
+        WHERE changeset_id = $1 AND property_key = ANY($2::text[])
+        ORDER BY object_id, property_key`,
+      [id, keys],
+    );
+    const byId = new Map(objects.map((object) => [object.objectId, object] as const));
+    for (const row of values.rows) {
+      byId.get(row.object_id as string)?.values.push({
+        propertyKey: row.property_key as string,
+        value: row.value,
+        before: row.before as Row | null,
+        bytes: row.bytes as number,
+      });
+    }
+    return objects;
   }
 
   async stagedBytes(id: string): Promise<number> {
@@ -341,10 +381,10 @@ export class PostgresChangesetStore implements ChangesetStore {
       for (const object of change.objects ?? []) {
         await querier.query(
           `INSERT INTO changeset_object
-                  (changeset_id, object_id, kind, type_key, action, from_id, to_id, identity, first_touched_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, clock_timestamp())
-           ON CONFLICT (changeset_id, object_id) DO UPDATE SET action = EXCLUDED.action, identity = EXCLUDED.identity`,
-          [id, object.objectId, object.kind, object.typeKey, object.action, object.fromId, object.toId, object.identity],
+                  (changeset_id, object_id, kind, type_key, action, from_id, to_id, first_touched_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, clock_timestamp())
+           ON CONFLICT (changeset_id, object_id) DO UPDATE SET action = EXCLUDED.action`,
+          [id, object.objectId, object.kind, object.typeKey, object.action, object.fromId, object.toId],
         );
       }
       const values = change.values ?? [];

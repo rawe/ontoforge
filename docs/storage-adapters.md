@@ -545,7 +545,7 @@ itself. Every data write uses it, a changeset's commit included.
 The changeset store holds an ontology's [changesets](capabilities/changesets.md): per
 changeset its id, its lens, its number, the ruleset key of the URL that started it or none, a version, a
 note, the time it was submitted or none, and timestamps; per staged object its id, kind,
-type key, action, a relation's two ends, the identity it gives an entity or none, and the
+type key, action, a relation's two ends, and the
 time it was first touched; per staged
 value its property key, the value, the recorded before or none, and its size in bytes,
 all kept as given. The store evaluates no rule — the service does — except the state and
@@ -558,8 +558,10 @@ a change is never overwritten.
   list them bound the same way, by number, lowest first, with
   their counts per action and kind and the type keys they name; their staged objects
   with their values by first touch, paged; the staged objects of given ids; the staged
-  relations with an end at a given entity; the ids of its staged entity objects of a type
-  key with a given identity; the summed size of its staged values.
+  relations with an end at a given entity; its staged entity creates and updates of a type
+  key that stage a value under at least one of given keys and, under each of them they
+  stage, exactly the given value, with their values; its staged entity objects of a type
+  key with their values under given keys only; the summed size of its staged values.
 - **Changes.** Apply one change to a draft changeset at the version the service read, all
   or none: remove objects with their values, remove values, add objects or change their
   action, and write values whole; submit, a compare-and-set on the version of a draft
@@ -919,15 +921,16 @@ ruleset delete leaves the row; `submitted_at` is null for a draft; `number` an `
 `changeset_object` holds one row per staged object under the primary key
 `(changeset_id, object_id)`, its changeset a foreign key with delete cascade; `kind`,
 `type_key` and `action` are text, `from_id` and `to_id` a relation's ends, null for an
-entity, `identity` the identity the changeset gives an entity, or null, and `first_touched_at` the clock at its insert, so the objects one change adds
+entity, and `first_touched_at` the clock at its insert, so the objects one change adds
 keep their order. `changeset_value` holds one row per staged value under the primary key
 `(changeset_id, object_id, property_key)`, its object a foreign key with delete cascade;
 `value` is `jsonb`, JSON null removing the property; `before` is `jsonb`, `{"value": …}`
 for a stored value, `{}` for a key the target lacked and SQL null for a value of a
-create; the size `bytes` an `integer`. Three B-tree indexes serve them besides the primary
-keys: changesets by lens, staged objects by changeset and first touch, and staged objects
-by changeset, type key and identity. The staged
-relations at an entity are found by a scan of the changeset's own objects.
+create; the size `bytes` an `integer`. Two B-tree indexes serve them besides the primary
+keys: changesets by lens, and staged objects by changeset and first touch. The staged
+relations at an entity are found by a scan of the changeset's own objects, and the staged
+entities that stage given values by a scan of its own values, matched in the database, so
+only the matches are read out.
 
 Every change takes the changeset row `FOR UPDATE NOWAIT`, and states its state condition —
 `submitted_at IS NULL`, or not null for unsubmit — in the same statement, an applied

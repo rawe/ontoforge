@@ -71,6 +71,9 @@ Every create and update computes the entity's identity from the values it will h
   and, on `IDENTITY_TAKEN`, updates by identity.
 - An update that changes an identity property's value **renames** the identity, under the
   same check. The old identity is not kept: it no longer finds the entity.
+- An update locks the entity before it reads the values its identity is built from, so two
+  concurrent updates of different identity properties leave the identity in step with the
+  values.
 - An empty `string` value for an identity property is refused.
 
 ## Addressing by identity
@@ -103,7 +106,11 @@ where the lens shows it.
 [Changesets](changesets.md) resolve an identity once, at staging, in the changeset's view:
 an entity created, renamed or deleted in the changeset counts as the changeset would leave
 it, and an identity two entities would hold there is a conflict. The staged object then
-holds the id. The review shows the identity each staged entity gets, before and after.
+holds the id, never the identity: each staged entity's identity is built when it is
+needed, as the commit would build it then, from its staged values over the entity's
+current stored ones under the current definition. A live write to a value the changeset
+does not stage therefore moves the entity's identity in the changeset's view too. The
+review shows the identity each staged entity gets, before and after.
 
 Uniqueness is judged on the end state, so a changeset may swap two identities or delete an
 entity and create another with its identity. Two entities the changeset would leave with

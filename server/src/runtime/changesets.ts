@@ -107,7 +107,7 @@ import type { ParentEnd, PropertyDef } from "../core/schemas.js";
 import { planSearchWrite, type SearchChange } from "../core/searchDependencies.js";
 import { AnchorGuard, changesetAnchorRefusal, hierarchyOf } from "./anchorGuard.js";
 import { cpLength } from "./codePoints.js";
-import { buildIdentity } from "./identity.js";
+import { buildIdentity, identityValues } from "./identity.js";
 import {
   entityIdentity,
   identityPropertiesOfType,
@@ -466,9 +466,8 @@ function newObject(
   objectId: string,
   action: StagedAction,
   ends: [string, string] | null = null,
-  identity: string | null = null,
 ): NewStagedObject {
-  return { objectId, kind, typeKey, action, fromId: ends?.[0] ?? null, toId: ends?.[1] ?? null, identity };
+  return { objectId, kind, typeKey, action, fromId: ends?.[0] ?? null, toId: ends?.[1] ?? null };
 }
 
 function newValue(objectId: string, propertyKey: string, value: unknown, before: Row | null): NewStagedValue {
@@ -631,29 +630,24 @@ function withoutNulls(values: Row): Row {
 }
 
 /**
- * A merge into an entity, with the identity it leaves the entity set on
- * its staged object (`NewStagedObject.identity`): a create's always, an
- * update's when it stages a value of an identity property. Its value
- * faults (an empty string, too long) are refused as the immediate write
- * refuses them; uniqueness is left to the lock-free pass.
+ * A merge into an entity, refused on the value faults of the identity it
+ * leaves the entity with (an empty string, too long), as the immediate
+ * write refuses them: a create's always, an update's when it stages a
+ * value of an identity property. Uniqueness is left to the lock-free
+ * pass. Nothing is kept of the identity: it is built again from the
+ * values wherever it is needed.
  */
 function withIdentity(loaded: LoadedSchema, at: Target, typeKey: string, id: string, merge: Merge): Merge {
   const properties = identityPropertiesOfType(loaded, typeKey);
   if (isEmpty(merge.change) || properties === null) return merge;
   const action = at.object?.action ?? "update";
   const staged = valuesAfter(at.object, id, merge.change);
-  let identity: string | null = null;
   if (action === "create" || properties.some((property) => Object.hasOwn(staged, property.key))) {
     const errors: FieldErrors = {};
-    identity = entityIdentity(loaded, typeKey, withoutNulls({ ...(at.stored ?? {}), ...staged }), errors);
+    entityIdentity(loaded, typeKey, withoutNulls({ ...(at.stored ?? {}), ...staged }), errors);
     refuseOn(errors);
   }
-  if (at.object !== undefined && identity === at.object.identity) return merge;
-  const objects = [...(merge.change.objects ?? [])];
-  const own = objects.findIndex((object) => object.objectId === id);
-  if (own >= 0) objects[own] = { ...objects[own]!, identity };
-  else objects.push(newObject("entity", typeKey, id, action, null, identity));
-  return { ...merge, change: { ...merge.change, objects } };
+  return merge;
 }
 
 /** The 409 of an identity two entities have in a changeset's view. */
@@ -665,11 +659,8 @@ function ambiguous(changesetId: string, typeKey: string, identity: string): Conf
 
 /**
  * The id of the entity of a type that has `identity` in the changeset's
- * view: the stored entities with what this changeset creates, updates
- * and deletes over them. An entity it creates or renames is found by its
- * new identity; one it deletes or renames away is not found by its old
- * one. Null when none has it, or the lens does not show the type's whole
- * identity; two that have it are a 409.
+ * view (`holdersInView`). Null when none has it, or the lens does not
+ * show the type's whole identity; two that have it are a 409.
  */
 async function stagedEntityOf(
   loaded: LoadedSchema,
@@ -679,17 +670,94 @@ async function stagedEntityOf(
   store: RuntimeStore,
 ): Promise<string | null> {
   if ((loaded.scoped.entityTypes[typeKey]?.identityProperties ?? null) === null) return null;
-  const found = new Set(await store.changesets().identified(changesetId, typeKey, identity));
-  const holder = await store.getEntityByIdentity(typeKey, identity);
-  if (holder !== null && !found.has(holder._id as string)) {
-    const [object] = await store.changesets().objects(changesetId, [holder._id as string]);
-    const own = object?.kind === "entity" ? object : undefined;
-    // Kept: not staged, or an update that gives it no identity of its own.
-    if (own === undefined || (own.action === "update" && own.identity === null)) found.add(holder._id as string);
-  }
+  const found = await holdersInView(loaded, changesetId, typeKey, identity, store);
   if (found.size > 1) throw ambiguous(changesetId, typeKey, identity);
   const [id] = found;
   return id ?? null;
+}
+
+/**
+ * The ids of the entities of a type that have `identity` in the
+ * changeset's view: the stored entities with what this changeset
+ * creates, updates and deletes over them, each identity built as the
+ * commit would build it now: a create's from its values, an update's from
+ * its values over the entity's current stored ones, under the current
+ * definition. An entity it creates or renames is found by its new
+ * identity; one it deletes or renames away is not found by its old one;
+ * a live write to a value the changeset does not stage moves it.
+ *
+ * Only the candidates are read: the stored holder, and the staged objects
+ * that stage a part of `identity` and no other value of an identity
+ * property. Any other staged object either stages a value that builds
+ * another identity or stages none, and then keeps its stored one.
+ */
+async function holdersInView(
+  loaded: LoadedSchema,
+  changesetId: string,
+  typeKey: string,
+  identity: string,
+  store: RuntimeStore,
+): Promise<Set<string>> {
+  const properties = identityPropertiesOfType(loaded, typeKey);
+  const values = properties === null ? null : identityValues(properties, identity);
+  if (values === null) return new Set();
+  const holder = await store.getEntityByIdentity(typeKey, identity);
+  const candidates = await store.changesets().entityObjectsStaging(changesetId, typeKey, values);
+  const holderId = holder === null ? null : (holder._id as string);
+  let holderStaged = holderId !== null && candidates.some((object) => object.objectId === holderId);
+  if (holderId !== null && !holderStaged) {
+    const own = await store.changesets().objects(changesetId, [holderId]);
+    candidates.push(...own);
+    holderStaged = own.length > 0;
+  }
+  const updates = candidates.filter((object) => object.action === "update").map((object) => object.objectId);
+  const stored = updates.length === 0 ? new Map<string, Row>() : await storedEntities(loaded, updates, store);
+  const found = new Set<string>();
+  for (const object of candidates) {
+    if (identityAfter(loaded, object, stored.get(object.objectId)) === identity) found.add(object.objectId);
+  }
+  // Not staged: it keeps its stored identity.
+  if (holderId !== null && !holderStaged) found.add(holderId);
+  return found;
+}
+
+/**
+ * The identity each staged entity object of a type leaves its entity
+ * with (`identityAfter`), in one pass: the staged values of the identity
+ * properties only, and the current stored rows of the updates that stage
+ * one. An update that stages none keeps its stored identity, which a
+ * caller reads from the stored holders; it maps to undefined.
+ */
+async function stagedIdentities(
+  loaded: LoadedSchema,
+  changesetId: string,
+  typeKey: string,
+  store: RuntimeStore,
+): Promise<Map<string, string | null | undefined>> {
+  const keys = (identityPropertiesOfType(loaded, typeKey) ?? []).map((property) => property.key);
+  const objects = await store.changesets().entityObjectsKeyed(changesetId, typeKey, keys);
+  const partial = objects.filter((object) => object.action === "update" && object.values.length > 0);
+  const updates = partial.map((object) => object.objectId);
+  const stored = updates.length === 0 ? new Map<string, Row>() : await storedEntities(loaded, updates, store);
+  return new Map(
+    objects.map((object) => {
+      const keeps = object.action === "update" && object.values.length === 0;
+      return [object.objectId, keeps ? undefined : identityAfter(loaded, object, stored.get(object.objectId))] as const;
+    }),
+  );
+}
+
+/** The identity a staged entity object leaves its entity with, `stored`
+ * its target's current row (`holdersInView`): null for a delete, a
+ * target gone, or values that make none. */
+function identityAfter(loaded: LoadedSchema, object: StagedObjectRecord, stored: Row | undefined): string | null {
+  if (object.kind !== "entity" || object.action === "delete") return null;
+  if (object.action === "create") return givenIdentity(loaded, object.typeKey, "create", valuesOf(object), null);
+  if (stored === undefined || stored._entityTypeKey !== object.typeKey) return null;
+  const given = givenIdentity(loaded, object.typeKey, "update", valuesOf(object), stored);
+  if (given !== null) return given;
+  const touches = identityPropertiesOfType(loaded, object.typeKey)?.some((p) => Object.hasOwn(valuesOf(object), p.key));
+  return touches === true || typeof stored._identity !== "string" ? null : stored._identity;
 }
 
 /** The parent end's entity type of a parent relation type; null for any
@@ -802,7 +870,7 @@ async function mergeOf(
         ids,
       );
       refuseOn({ ...errors, ...faults });
-      const objects = [newObject("entity", write.typeKey, ids.entityId, "create", null, prepared.entity.identity)];
+      const objects = [newObject("entity", write.typeKey, ids.entityId, "create")];
       const entityValues = sent(prepared.entity.properties, write.properties);
       const values = Object.entries(entityValues).map(([key, value]) => newValue(ids.entityId, key, value, null));
       const input = write.parentRelation;
@@ -936,23 +1004,6 @@ function noValue(changesetId: string, objectId: string, propertyKey: string): No
   return new NotFoundError(`No value of '${propertyKey}' is staged for object '${objectId}' in changeset '${changesetId}'`);
 }
 
-/** The identity a staged entity is left with once its value of
- * `propertyKey` is cut, as the object to write when it changes. */
-async function recut(
-  loaded: LoadedSchema,
-  object: StagedObjectRecord,
-  propertyKey: string,
-  store: RuntimeStore,
-): Promise<ChangesetChange> {
-  if (object.kind !== "entity" || identityPropertiesOfType(loaded, object.typeKey) === null) return {};
-  const staged = valuesOf(object);
-  delete staged[propertyKey];
-  const stored = object.action === "update" ? await store.getEntity(object.typeKey, object.objectId) : null;
-  const identity = givenIdentity(loaded, object.typeKey, object.action, staged, stored);
-  if (identity === object.identity) return {};
-  return { objects: [newObject("entity", object.typeKey, object.objectId, object.action, null, identity)] };
-}
-
 /**
  * Take one staged object out with its values; with `propertyKey`, cut
  * only that value out, and an `update` left without values goes too.
@@ -976,7 +1027,7 @@ export async function unstage(
       throw noValue(changesetId, objectId, propertyKey);
     }
     const last = object.action === "update" && object.values.length === 1;
-    if (!last) change = { removeValues: [{ objectId: object.objectId, propertyKey }], ...(await recut(loaded, object, propertyKey, store)) };
+    if (!last) change = { removeValues: [{ objectId: object.objectId, propertyKey }] };
   }
   await applyChange(loaded, rulesetKey, record, change, store);
 }
@@ -1805,8 +1856,8 @@ function duplicateIdentity(loaded: LoadedSchema, typeKey: string, identity: stri
  * identity (`givenIdentity`) another entity has after the commit: one
  * staged in this changeset that gives it the same, or a stored one that
  * keeps it (not staged, or an update that gives none). `whole` when
- * `objects` is every staged object; otherwise the other staged objects
- * are found by the identity they were staged with.
+ * `objects` is every staged object; otherwise the identities the other
+ * staged objects leave are built now (`stagedIdentities`).
  */
 async function identityFaults(
   loaded: LoadedSchema,
@@ -1834,26 +1885,20 @@ async function identityFaults(
   const faults: Violation[] = [];
   for (const [typeKey, identities] of byType) {
     const holders = await store.entitiesWithIdentities(typeKey, [...identities.keys()]);
-    const unknown = whole ? [] : holders.map((holder) => holder.id).filter((id) => !byId.has(id));
-    const others = new Map(
-      (unknown.length === 0 ? [] : await store.changesets().objects(changesetId, unknown)).map(
-        (object) => [object.objectId, object] as const,
-      ),
-    );
+    const staged = whole ? null : await stagedIdentities(loaded, changesetId, typeKey, store);
     for (const [identity, ids] of identities) {
       const holding = new Set(ids);
-      if (!whole) {
-        for (const id of await store.changesets().identified(changesetId, typeKey, identity)) {
-          if (!byId.has(id)) holding.add(id);
-        }
+      for (const [id, after] of staged ?? []) {
+        if (after === identity && !byId.has(id)) holding.add(id);
       }
       for (const holder of holders) {
         if (holder.identity !== identity) continue;
-        const own = byId.get(holder.id) ?? others.get(holder.id);
+        const own = byId.get(holder.id);
+        // Kept: not staged, or an update that gives it no identity of its own.
         const keeps =
-          own === undefined ||
-          own.kind !== "entity" ||
-          (own.action === "update" && (byId.has(holder.id) ? !given.has(holder.id) : own.identity === null));
+          own === undefined
+            ? staged === null || staged.get(holder.id) === undefined
+            : own.kind !== "entity" || (own.action === "update" && !given.has(holder.id));
         if (keeps) holding.add(holder.id);
       }
       if (holding.size < 2) continue;

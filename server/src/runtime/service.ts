@@ -721,8 +721,9 @@ export async function getPath(
  * ruleset with an anchor, an entity of the anchor's hierarchy outside the
  * anchor's subtree is refused on `entityId`.
  *
- * An update that sets an identity property rebuilds the identity from the
- * stored values with the update over them (`updatedIdentity`): a rename,
+ * An update that sets an identity property locks the entity, then rebuilds
+ * the identity from the stored values with the update over them
+ * (`updatedIdentity`): a rename,
  * under the create's checks. The old identity names nothing from then on.
  */
 export async function updateEntity(
@@ -748,6 +749,9 @@ export async function updateEntity(
       Object.keys(errors).length === 0 &&
       touchesIdentity(identityPropertiesOfType(loaded, entityTypeKey), write)
     ) {
+      // Locked until the write: a concurrent update of another identity
+      // property waits, and then builds on this one's values.
+      await tx.lockTargets([entityId], {});
       const stored = await tx.getEntity(entityTypeKey, entityId);
       if (stored === null) {
         throw new NotFoundError(`Entity '${entityId}' not found`);

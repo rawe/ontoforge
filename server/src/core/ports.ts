@@ -1225,9 +1225,6 @@ export interface NewStagedObject {
   /** A relation's ends; null for an entity. */
   fromId: string | null;
   toId: string | null;
-  /** The identity this changeset gives the entity: a create's always, an
-   * update's when it stages an identity property value; null otherwise. */
-  identity: string | null;
 }
 
 /** One staged property value of a staged object: plain JSON, kept as
@@ -1259,7 +1256,7 @@ export interface ChangesetChange {
   removeObjects?: string[];
   removeValues?: { objectId: string; propertyKey: string }[];
   /** A new object is added, touched first now; an existing one gets the
-   * action and the identity given and keeps everything else. */
+   * action given and keeps everything else. */
   objects?: NewStagedObject[];
   /** Each value written whole, replacing the one stored under its key. */
   values?: NewStagedValue[];
@@ -1293,8 +1290,15 @@ export interface ChangesetStore {
   /** The ids of the staged relations with an end at `entityId`. */
   relationsAt(id: string, entityId: string): Promise<string[]>;
 
-  /** The ids of the staged entity objects of `typeKey` with `identity`. */
-  identified(id: string, typeKey: string, identity: string): Promise<string[]>;
+  /** The staged entity creates and updates of `typeKey` that stage a
+   * value under at least one key of `values` and, under each key of
+   * `values` they stage, exactly its value; with their values, by first
+   * touch. */
+  entityObjectsStaging(id: string, typeKey: string, values: Row): Promise<StagedObjectRecord[]>;
+
+  /** The staged entity objects of `typeKey`, each with its values under
+   * `keys` only, by first touch. */
+  entityObjectsKeyed(id: string, typeKey: string, keys: string[]): Promise<StagedObjectRecord[]>;
 
   /** The sum of the `bytes` of its staged values; 0 when it has none or
    * is gone. */

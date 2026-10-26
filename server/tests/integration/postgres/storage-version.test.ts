@@ -127,8 +127,6 @@ async function makeVersion5Layout(namespace: string): Promise<void> {
 /** Storage at version 9: no entity identity. Records no version —
  * `makeVersion8Layout` builds on it. */
 async function makeVersion9Layout(namespace: string): Promise<void> {
-  await runQuery(`DROP INDEX ${namespace}.changeset_object_identity_idx`);
-  await runQuery(`ALTER TABLE ${namespace}.changeset_object DROP COLUMN identity`);
   await runQuery(`ALTER TABLE ${namespace}.entity DROP CONSTRAINT entity_identity_unique`);
   await runQuery(`ALTER TABLE ${namespace}.entity DROP COLUMN identity`);
   await runQuery(`ALTER TABLE ${namespace}.entity_type DROP COLUMN identity_properties`);

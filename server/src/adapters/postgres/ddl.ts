@@ -305,13 +305,10 @@ export function ontologyDdlStatements(): string[] {
   from_id          uuid,                   -- a relation's ends; NULL for an entity
   to_id            uuid,
   first_touched_at timestamptz NOT NULL,
-  identity         text,                   -- the identity the changeset gives the entity; NULL: none
   CONSTRAINT changeset_object_pk PRIMARY KEY (changeset_id, object_id)
 )`,
   `CREATE INDEX IF NOT EXISTS changeset_object_touched_idx
   ON changeset_object (changeset_id, first_touched_at, object_id)`,
-  `CREATE INDEX IF NOT EXISTS changeset_object_identity_idx
-  ON changeset_object (changeset_id, type_key, identity)`,
 
   // One row per staged property value of a staged object.
   `CREATE TABLE IF NOT EXISTS changeset_value (

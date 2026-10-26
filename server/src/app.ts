@@ -45,6 +45,7 @@ import { registryRouter } from "./registry/router.js";
 import { aiRouter } from "./runtime/aiRouter.js";
 import { changesetRouter } from "./runtime/changesetRouter.js";
 import { decisionRouter } from "./runtime/decisionRouter.js";
+import { MAX_IDENTITY_LENGTH } from "./runtime/identity.js";
 import { runtimeRouter } from "./runtime/router.js";
 import { rulesetRouter, rulesetRuntimeRouter } from "./runtime/rulesetRouter.js";
 import { serverRouter } from "./server/router.js";
@@ -149,7 +150,10 @@ function sendError(
  * it the app runs without authentication. */
 export async function createApp(shared?: SharedState, auth: AuthRuntime | null = null): Promise<FastifyInstance> {
   const state = shared ?? (await openSharedState({ kind: "memory" }));
-  const app = Fastify({ logger: false });
+  // An identity is one path segment (`/entities/{type}/identity/{identity}`):
+  // its longest form, every code point four UTF-8 bytes percent-encoded,
+  // must route rather than hit the not-found handler.
+  const app = Fastify({ logger: false, routerOptions: { maxParamLength: MAX_IDENTITY_LENGTH * 12 } });
   app.addHook("onClose", () => state.close());
   app.decorate("auth", auth);
   if (auth !== null) {

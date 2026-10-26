@@ -680,11 +680,15 @@ export interface RuntimeStore {
     pairs: { fromId: string; toId: string }[],
   ): Promise<{ id: string; fromId: string; toId: string }[]>;
 
-  /** Lock the pair, source to target, of a one-per-pair relation type
-   * until the transaction ends, so that concurrent writes of it, on any
-   * server, take turns; then answer the id of a stored relation of the
-   * type linking it, or null. Only meaningful on a transaction's store. */
-  lockPair(relationTypeKey: string, fromEntityId: string, toEntityId: string): Promise<string | null>;
+  /** Lock the pairs, source to target, of a one-per-pair relation type
+   * until the transaction ends, so that concurrent writes of them, on any
+   * server, take turns; then answer the stored relations of the type that
+   * link them, as `relationsOfPairs`. Only meaningful on a transaction's
+   * store. */
+  lockPairs(
+    relationTypeKey: string,
+    pairs: { fromId: string; toId: string }[],
+  ): Promise<{ id: string; fromId: string; toId: string }[]>;
 
   /** When this transaction checks that an identity is unique within its
    * type: `deferred` at its end, `immediate` now (a duplicate is an
@@ -775,6 +779,38 @@ export interface RuntimeStore {
     relationId: string,
     search?: SearchWritePlan | null,
   ): Promise<boolean>;
+
+  // ------------------------------------------------------------------
+  // Batch writes
+  //
+  // Many writes of one kind in a few statements, as the commit of a
+  // changeset applies them; each row as the single write takes it, its
+  // own `search` plan included, queued in the same transaction exactly
+  // when its row is written (a delete's before it). A batch answers the
+  // ids it wrote; a row it did not write is left out. Only on a bound
+  // store.
+  // ------------------------------------------------------------------
+
+  /** As `createEntity`, each row. Under a deferred identity check a taken
+   * identity is judged at the transaction's end. */
+  createEntities(rows: EntityCreateRow[]): Promise<void>;
+
+  /** As `updateEntity`, each row; answers the ids updated, a row whose
+   * entity is gone left out. */
+  updateEntities(rows: EntityUpdateRow[]): Promise<string[]>;
+
+  /** As `deleteEntity`, each row; answers the ids deleted. */
+  deleteEntities(rows: InstanceDeleteRow[]): Promise<string[]>;
+
+  /** As `createRelation`, each row; answers the ids created, a row whose
+   * source or target entity does not exist left out. */
+  createRelations(rows: RelationCreateRow[]): Promise<string[]>;
+
+  /** As `updateRelation`, each row; answers the ids updated. */
+  updateRelations(rows: RelationUpdateRow[]): Promise<string[]>;
+
+  /** As `deleteRelation`, each row; answers the ids deleted. */
+  deleteRelations(rows: InstanceDeleteRow[]): Promise<string[]>;
 
   // ------------------------------------------------------------------
   // OQL
@@ -1099,6 +1135,56 @@ export interface IndexContentRequest {
  * stand for every generation of the index that is building or ready —
  * the adapter resolves them when it applies the plan.
  */
+/** One entity a batch creates (`createEntities`). */
+export interface EntityCreateRow {
+  entityTypeKey: string;
+  entityId: string;
+  properties: Row;
+  propertyDefs: Record<string, PropertyDef>;
+  identity: string | null;
+  search: SearchWritePlan | null;
+}
+
+/** One entity a batch updates (`updateEntities`); `identity` as for
+ * `updateEntity`. */
+export interface EntityUpdateRow {
+  entityTypeKey: string;
+  entityId: string;
+  setProperties: Row;
+  removeProperties: string[];
+  propertyDefs: Record<string, PropertyDef>;
+  identity?: string;
+  search: SearchWritePlan | null;
+}
+
+/** One relation a batch creates (`createRelations`). */
+export interface RelationCreateRow {
+  relationTypeKey: string;
+  relationId: string;
+  fromEntityId: string;
+  toEntityId: string;
+  properties: Row;
+  propertyDefs: Record<string, PropertyDef>;
+  search: SearchWritePlan | null;
+}
+
+/** One relation a batch updates (`updateRelations`). */
+export interface RelationUpdateRow {
+  relationTypeKey: string;
+  relationId: string;
+  setProperties: Row;
+  removeProperties: string[];
+  propertyDefs: Record<string, PropertyDef>;
+  search: SearchWritePlan | null;
+}
+
+/** One entity or relation a batch deletes, by its type key and id. */
+export interface InstanceDeleteRow {
+  typeKey: string;
+  id: string;
+  search: SearchWritePlan | null;
+}
+
 export interface SearchWritePlan {
   /** Parts of an entity to (re)compose. */
   entityParts: {

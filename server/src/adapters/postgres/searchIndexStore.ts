@@ -1289,9 +1289,10 @@ export async function deleteEntriesEverywhere(
   return deleted;
 }
 
-/** The relations an entity is an end of, as relation-part ids. */
-const RELATIONS_OF_ENTITY =
-  "part_kind = 'relation' AND part_id IN (SELECT id::text FROM relation WHERE from_id = $1 OR to_id = $1)";
+/** The relations the entities of `$1` are an end of, as relation-part ids. */
+const RELATIONS_OF_ENTITIES =
+  "part_kind = 'relation' AND part_id IN " +
+  "(SELECT id::text FROM relation WHERE from_id = ANY($1::uuid[]) OR to_id = ANY($1::uuid[]))";
 
 /**
  * Apply the search work of one write on the write's own transaction, so it
@@ -1306,15 +1307,35 @@ export async function applySearchWritePlan(
   plan: SearchWritePlan,
   ontologyKey: string,
 ): Promise<void> {
-  if (plan.deleteEntity !== null && isUuid(plan.deleteEntity)) {
-    const where = `entity_id = $1 OR (${RELATIONS_OF_ENTITY})`;
-    await querier.query(`DELETE FROM search_queue WHERE ${where}`, [plan.deleteEntity]);
-    await deleteEntriesEverywhere(querier, where, [plan.deleteEntity]);
+  await applySearchWritePlans(querier, [plan], ontologyKey);
+}
+
+/** The search work of many writes (a batch write's), as one write's
+ * (`applySearchWritePlan`): each part of the work one statement for all of
+ * them. */
+export async function applySearchWritePlans(
+  querier: Querier,
+  plans: SearchWritePlan[],
+  ontologyKey: string,
+): Promise<void> {
+  const plan = {
+    entityParts: plans.flatMap((one) => one.entityParts),
+    relationParts: plans.flatMap((one) => one.relationParts),
+    fanOut: plans.flatMap((one) => one.fanOut),
+  };
+  const deletedEntities = plans.flatMap((one) => (one.deleteEntity !== null && isUuid(one.deleteEntity) ? [one.deleteEntity] : []));
+  const deletedRelations = plans.flatMap((one) =>
+    one.deleteRelation !== null && isUuid(one.deleteRelation) ? [one.deleteRelation] : [],
+  );
+  if (deletedEntities.length > 0) {
+    const where = `entity_id = ANY($1::uuid[]) OR (${RELATIONS_OF_ENTITIES})`;
+    await querier.query(`DELETE FROM search_queue WHERE ${where}`, [deletedEntities]);
+    await deleteEntriesEverywhere(querier, where, [deletedEntities]);
   }
-  if (plan.deleteRelation !== null && isUuid(plan.deleteRelation)) {
-    const where = `part_kind = 'relation' AND part_id = $1`;
-    await querier.query(`DELETE FROM search_queue WHERE ${where}`, [plan.deleteRelation]);
-    await deleteEntriesEverywhere(querier, where, [plan.deleteRelation]);
+  if (deletedRelations.length > 0) {
+    const where = `part_kind = 'relation' AND part_id = ANY($1::text[])`;
+    await querier.query(`DELETE FROM search_queue WHERE ${where}`, [deletedRelations]);
+    await deleteEntriesEverywhere(querier, where, [deletedRelations]);
   }
 
   let queued = 0;

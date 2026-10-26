@@ -160,8 +160,9 @@ checked.
    anchor judged before anything is applied.
 4. **The phases.** The staged objects are applied in a fixed order: entity creates, entity
    updates, relation deletes, relation creates, relation updates, entity deletes. Each
-   object is one write, through the same store writes as the immediate path, each with its
-   search work. A delete whose target is already gone counts as done and is listed in the
+   phase is written in batches of up to 1,000 objects, each batch a few statements, each
+   object checked as the immediate write checks it and queuing the search work the
+   immediate write would. A delete whose target is already gone counts as done and is listed in the
    answer as already gone. An object that cannot be applied stops the commit.
 5. **Commit validation** over the end state, identities included, then the staged objects are deleted with the
    changeset, and everything persists at once.
@@ -172,7 +173,7 @@ Check and commit again", and the changeset is kept as it was. A check runs that 
 identity test before it rolls back, so it reports such a clash as `duplicate_identity`.
 
 A relation create of a [one-per-pair](schema-modeling.md#one-per-pair) type takes its
-pair's lock in the phases, as the immediate create does, after the relation deletes ran:
+pair's lock in the phases, as the immediate create does, the locks of a batch in one fixed order, after the relation deletes ran:
 a pair this changeset frees is free, and one another write linked after the pass is a
 `duplicate_pair` violation that stops the commit.
 

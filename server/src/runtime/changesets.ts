@@ -79,8 +79,8 @@
  *   target `FOR UPDATE` with drift re-checked, the anchor read fresh; the
  *   staged objects applied in fixed phases (entity creates, entity
  *   updates, relation deletes, relation creates, relation updates, entity
- *   deletes), each through the store's own write method with its search
- *   work; commit validation over the end state; the changeset deleted,
+ *   deletes), in batches through the store's batch writes with their
+ *   search work; commit validation over the end state; the changeset deleted,
  *   COMMIT. Any failure rolls all of it back; a rejection (422, the
  *   violations by object and property) then refreshes the last change and
  *   keeps the version. One commit runs at a time in one process.
@@ -1617,6 +1617,7 @@ export interface CheckAnswer extends CommitAnswer {
 
 const DRIFTED = "Changed since it was staged";
 const DELETED_SINCE = "Deleted since it was staged";
+const END_GONE = "The source or target end no longer exists";
 
 /** An end of a staged relation that is neither stored nor created in
  * this changeset. */
@@ -1672,118 +1673,197 @@ const PHASES: readonly (readonly [StagedKind, StagedAction])[] = [
   ["entity", "delete"],
 ];
 
-/** One staged object, applied through the store's write method with its
- * search work, as the immediate write runs it. */
-async function applyOne(
+/** The most staged objects one batch write of the commit carries. */
+const WRITE_BATCH = 1000;
+
+/** A staged object's fault while its batch is prepared or written. */
+class ObjectFault extends Error {
+  constructor(
+    readonly object: StagedObjectRecord,
+    readonly error: Error,
+  ) {
+    super(error.message);
+  }
+}
+
+/** `work` for one object, its fault carried with it. */
+function forObject<T>(object: StagedObjectRecord, work: () => T): T {
+  try {
+    return work();
+  } catch (error) {
+    if (error instanceof ApplyFault || error instanceof NotFoundError) throw new ObjectFault(object, error);
+    throw error;
+  }
+}
+
+/** The first object of `batch` the store did not write: `fault` on it. */
+function firstUnwritten(batch: StagedObjectRecord[], written: string[], fault: () => ApplyFault): void {
+  const done = new Set(written);
+  const missed = batch.find((object) => !done.has(object.objectId));
+  if (missed !== undefined) throw new ObjectFault(missed, fault());
+}
+
+/**
+ * One batch of staged objects of one phase, each prepared as the
+ * immediate write prepares it, then written through the store's batch
+ * write of the phase with its search work. The first object that cannot
+ * be applied, in staging order, is thrown as an `ObjectFault`; a fault of
+ * the batch write itself is laid on its first object.
+ */
+async function applyBatch(
   loaded: LoadedSchema,
   plan: (change: SearchChange) => SearchWritePlan | null,
   readings: Record<string, ParentEnd>,
-  object: StagedObjectRecord,
+  kind: StagedKind,
+  action: StagedAction,
+  batch: StagedObjectRecord[],
   bound: RuntimeStore,
   applied: Applied,
 ): Promise<void> {
-  const id = object.objectId;
-  const values = valuesOf(object);
-  if (object.kind === "entity") {
-    switch (object.action) {
-      case "create": {
-        const { errors, write } = prepareCreateEntity(loaded, object.typeKey, values, null, {
-          entityId: id,
+  const write = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      if (error instanceof ApplyFault || error instanceof NotFoundError) throw new ObjectFault(batch[0]!, error);
+      throw error;
+    }
+  };
+  if (kind === "entity" && action === "create") {
+    const rows = batch.map((object) =>
+      forObject(object, () => {
+        const { errors, write: prepared } = prepareCreateEntity(loaded, object.typeKey, valuesOf(object), null, {
+          entityId: object.objectId,
           relationId: randomUUID(),
         });
         faultOn(errors);
-        const e = write.entity;
-        await bound.createEntity(e.entityTypeKey, e.entityId, e.properties, e.propertyDefs, plan(e.change), e.identity);
-        if (e.identity !== null) applied.identities.push({ objectId: id, typeKey: object.typeKey, identity: e.identity });
-        return;
-      }
-      case "update": {
-        const { errors, write } = prepareUpdateEntity(loaded, object.typeKey, id, values);
+        const e = prepared.entity;
+        return { ...e, search: plan(e.change) };
+      }),
+    );
+    await write(() => bound.createEntities(rows));
+    for (const row of rows) {
+      if (row.identity !== null) applied.identities.push({ objectId: row.entityId, typeKey: row.entityTypeKey, identity: row.identity });
+    }
+    return;
+  }
+  if (kind === "entity" && action === "update") {
+    const prepared = batch.flatMap((object) =>
+      forObject(object, () => {
+        const { errors, write: update } = prepareUpdateEntity(loaded, object.typeKey, object.objectId, valuesOf(object));
         faultOn(errors);
-        if (write === null) return;
-        // The identity rebuilt under the definition now, from the row as locked.
+        return update === null ? [] : [{ object, update }];
+      }),
+    );
+    // The identity rebuilt under the definition now, from the rows as locked.
+    const rebuilds = prepared.filter(({ object, update }) =>
+      touchesIdentity(identityPropertiesOfType(loaded, object.typeKey), update),
+    );
+    const stored =
+      rebuilds.length === 0 ? {} : await bound.getEntitiesByIds(rebuilds.map(({ object }) => object.objectId), {});
+    const rows = prepared.map(({ object, update }) =>
+      forObject(object, () => {
         let identity: string | undefined;
-        if (touchesIdentity(identityPropertiesOfType(loaded, object.typeKey), write)) {
-          const stored = await bound.getEntity(object.typeKey, id);
-          if (stored === null) throw new ApplyFault(DELETED_SINCE);
-          identity = updatedIdentity(loaded, object.typeKey, stored, write, errors);
+        if (rebuilds.some((rebuild) => rebuild.object === object)) {
+          const row = stored[object.objectId];
+          if (row === undefined || row._entityTypeKey !== object.typeKey) throw new ApplyFault(DELETED_SINCE);
+          const errors: FieldErrors = {};
+          identity = updatedIdentity(loaded, object.typeKey, row, update, errors);
           faultOn(errors);
         }
-        const updated = await bound.updateEntity(
-          write.entityTypeKey,
-          write.entityId,
-          write.setProperties,
-          write.removeProperties,
-          write.propertyDefs,
-          plan(write.change),
-          identity,
+        return { ...update, identity, search: plan(update.change) };
+      }),
+    );
+    const written = await write(() => bound.updateEntities(rows));
+    firstUnwritten(
+      prepared.map(({ object }) => object),
+      written,
+      () => new ApplyFault(DELETED_SINCE),
+    );
+    for (const row of rows) {
+      if (row.identity !== undefined) applied.identities.push({ objectId: row.entityId, typeKey: row.entityTypeKey, identity: row.identity });
+    }
+    return;
+  }
+  if (kind === "entity") {
+    const rows = batch.map((object) =>
+      forObject(object, () => {
+        const prepared = prepareDeleteEntity(loaded, object.typeKey, object.objectId);
+        return { typeKey: prepared.entityTypeKey, id: prepared.entityId, search: plan(prepared.change) };
+      }),
+    );
+    // Delete capture: X locked, so no child can attach until COMMIT, and
+    // the children recorded before the cascade erases them.
+    const children = await bound.childrenOf(rows.map((row) => row.id), readings, true);
+    for (const object of batch) {
+      const own = children.filter((link) => link.parentId === object.objectId);
+      applied.deletedChildren.push({ objectId: object.objectId, children: own });
+    }
+    // As the immediate delete: never remove a relation the lens hides.
+    for (const object of batch) {
+      if (await hasHiddenRelations(loaded, object.typeKey, object.objectId, bound)) {
+        throw new ObjectFault(object, new ApplyFault(HIDDEN_RELATIONS_MESSAGE, "hidden_relations"));
+      }
+    }
+    const written = new Set(await write(() => bound.deleteEntities(rows)));
+    for (const row of rows) if (!written.has(row.id)) applied.alreadyGone.push(row.id);
+    return;
+  }
+  if (action === "create") {
+    const rows = batch.map((object) =>
+      forObject(object, () => {
+        const { errors, write: prepared } = prepareCreateRelation(
+          loaded,
+          object.typeKey,
+          object.fromId!,
+          object.toId!,
+          valuesOf(object),
+          object.objectId,
         );
-        if (updated === null) throw new ApplyFault(DELETED_SINCE);
-        if (identity !== undefined) applied.identities.push({ objectId: id, typeKey: object.typeKey, identity });
-        return;
-      }
-      case "delete": {
-        const write = prepareDeleteEntity(loaded, object.typeKey, id);
-        // Delete capture: X locked, so no child can attach until COMMIT, and
-        // its children recorded before the cascade erases them.
-        const children = await bound.childrenOf([id], readings, true);
-        applied.deletedChildren.push({ objectId: id, children });
-        // As the immediate delete: never remove a relation the lens hides.
-        if (await hasHiddenRelations(loaded, object.typeKey, id, bound)) {
-          throw new ApplyFault(HIDDEN_RELATIONS_MESSAGE, "hidden_relations");
-        }
-        if (!(await bound.deleteEntity(write.entityTypeKey, write.entityId, plan(write.change)))) {
-          applied.alreadyGone.push(id);
-        }
-        return;
-      }
-    }
-  }
-  switch (object.action) {
-    case "create": {
-      const { errors, write } = prepareCreateRelation(loaded, object.typeKey, object.fromId!, object.toId!, values, id);
-      faultOn(errors);
-      // Relation deletes ran before, so a pair this changeset frees is free.
-      if (
-        loaded.full.relationTypes[object.typeKey]?.onePerPair === true &&
-        (await bound.lockPair(object.typeKey, object.fromId!, object.toId!)) !== null
-      ) {
-        throw new ApplyFault(duplicatePair(object.typeKey), "duplicate_pair");
-      }
-      await bound.createRelation(
-        write.relationTypeKey,
-        write.relationId,
-        write.fromEntityId,
-        write.toEntityId,
-        write.properties,
-        write.propertyDefs,
-        plan(write.change),
+        faultOn(errors);
+        return { ...prepared, search: plan(prepared.change) };
+      }),
+    );
+    // Relation deletes ran before, so a pair this changeset frees is free.
+    const pairKey = (fromId: string, toId: string): string => `${fromId} ${toId}`;
+    for (const typeKey of new Set(batch.map((object) => object.typeKey))) {
+      if (loaded.full.relationTypes[typeKey]?.onePerPair !== true) continue;
+      const ofType = batch.filter((object) => object.typeKey === typeKey);
+      const held = await bound.lockPairs(
+        typeKey,
+        ofType.map((object) => ({ fromId: object.fromId!, toId: object.toId! })),
       );
-      return;
+      const taken = new Set(held.map((relation) => pairKey(relation.fromId, relation.toId)));
+      const first = ofType.find((object) => taken.has(pairKey(object.fromId!, object.toId!)));
+      if (first !== undefined) throw new ObjectFault(first, new ApplyFault(duplicatePair(typeKey), "duplicate_pair"));
     }
-    case "update": {
-      const { errors, write } = prepareUpdateRelation(loaded, object.typeKey, id, values);
-      faultOn(errors);
-      if (write === null) return;
-      const updated = await bound.updateRelation(
-        write.relationTypeKey,
-        write.relationId,
-        write.setProperties,
-        write.removeProperties,
-        write.propertyDefs,
-        plan(write.change),
-      );
-      if (updated === null) throw new ApplyFault(DELETED_SINCE);
-      return;
-    }
-    case "delete": {
-      const write = prepareDeleteRelation(loaded, object.typeKey, id);
-      if (!(await bound.deleteRelation(write.relationTypeKey, write.relationId, plan(write.change)))) {
-        applied.alreadyGone.push(id);
-      }
-      return;
-    }
+    const written = await write(() => bound.createRelations(rows));
+    firstUnwritten(batch, written, () => new ApplyFault(END_GONE));
+    return;
   }
+  if (action === "update") {
+    const prepared = batch.flatMap((object) =>
+      forObject(object, () => {
+        const { errors, write: update } = prepareUpdateRelation(loaded, object.typeKey, object.objectId, valuesOf(object));
+        faultOn(errors);
+        return update === null ? [] : [{ object, row: { ...update, search: plan(update.change) } }];
+      }),
+    );
+    const written = await write(() => bound.updateRelations(prepared.map(({ row }) => row)));
+    firstUnwritten(
+      prepared.map(({ object }) => object),
+      written,
+      () => new ApplyFault(DELETED_SINCE),
+    );
+    return;
+  }
+  const rows = batch.map((object) =>
+    forObject(object, () => {
+      const prepared = prepareDeleteRelation(loaded, object.typeKey, object.objectId);
+      return { typeKey: prepared.relationTypeKey, id: prepared.relationId, search: plan(prepared.change) };
+    }),
+  );
+  const written = new Set(await write(() => bound.deleteRelations(rows)));
+  for (const row of rows) if (!written.has(row.id)) applied.alreadyGone.push(row.id);
 }
 
 /** A fault's text. A relation create the store refuses as not found names
@@ -1791,20 +1871,22 @@ async function applyOne(
  * its text. */
 function applyMessage(object: StagedObjectRecord, error: Error): string {
   if (error instanceof NotFoundError && object.kind === "relation" && object.action === "create") {
-    return "The source or target end no longer exists";
+    return END_GONE;
   }
   return error.message;
 }
 
 /**
  * Step 2 of the commit: apply the staged objects on the bound store, phase
- * by phase (`PHASES`), each through its `prepare…` and the store's write
- * method, its search work queued in the same transaction. A staged entity
- * delete first locks the entity and records its children; a delete that
- * finds nothing is done, and noted. No savepoints: the first object that
- * fails ends the run as its `fault` (a target gone, a reference to an
- * entity that does not exist, a value the lens no longer accepts). Any
- * other error, a lock wait past the timeout among them, is thrown.
+ * by phase (`PHASES`), in batches of up to `WRITE_BATCH` (`applyBatch`):
+ * each object through its `prepare…`, each batch through the store's batch
+ * write of its phase, its search work queued in the same transaction. A
+ * staged entity delete first locks the entity and records its children; a
+ * delete that finds nothing is done, and noted. No savepoints: the first
+ * object that fails ends the run as its `fault` (a target gone, a
+ * reference to an entity that does not exist, a value the lens no longer
+ * accepts). Any other error, a lock wait past the timeout among them, is
+ * thrown.
  */
 export async function applyObjects(
   loaded: LoadedSchema,
@@ -1816,19 +1898,19 @@ export async function applyObjects(
   const plan = (change: SearchChange): SearchWritePlan | null => planSearchWrite(search.dependencies, change);
   const readings = parentReadings(loaded.full);
   for (const [kind, action] of PHASES) {
-    for (const object of objects) {
-      if (object.kind !== kind || object.action !== action) continue;
+    const phase = objects.filter((object) => object.kind === kind && object.action === action);
+    for (let i = 0; i < phase.length; i += WRITE_BATCH) {
+      const batch = phase.slice(i, i + WRITE_BATCH);
       try {
-        await applyOne(loaded, plan, readings, object, bound, applied);
+        await applyBatch(loaded, plan, readings, kind, action, batch, bound, applied);
       } catch (error) {
-        if (error instanceof ApplyFault || error instanceof NotFoundError) {
-          const kind = error instanceof ApplyFault ? error.kind : "replay";
-          applied.fault = { object: object.objectId, kind, message: applyMessage(object, error) };
-          return applied;
-        }
-        throw error;
+        if (!(error instanceof ObjectFault)) throw error;
+        const cause = error.error;
+        const faultKind = cause instanceof ApplyFault ? cause.kind : "replay";
+        applied.fault = { object: error.object.objectId, kind: faultKind, message: applyMessage(error.object, cause) };
+        return applied;
       }
-      applied.applied += 1;
+      applied.applied += batch.length;
     }
   }
   return applied;

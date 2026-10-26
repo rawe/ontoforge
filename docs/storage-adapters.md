@@ -283,10 +283,21 @@ count contract as entity listing, plus optional endpoint filters — restrict to
 leaving a given entity, or arriving at one, or both. Every relation read returns its two
 endpoint ids alongside its properties; endpoints are never updatable. Two operations serve
 one per pair: the stored relations of a type that link one of a set of pairs, source to
-target, as id and ends; and, inside a transaction, a lock on one pair of a type until the
-transaction ends, taken before it answers the id of a stored relation of the type linking
-that pair, or none. The lock is what makes two concurrent creates of a pair, on any
-servers, take turns.
+target, as id and ends; and, inside a transaction, a lock on each of a set of pairs of a
+type until the transaction ends, taken in one fixed order before it answers the stored
+relations of the type linking them. The lock is what makes two concurrent creates of a
+pair, on any servers, take turns.
+
+**Batch writes.** Inside a transaction, six operations write many instances of one kind at
+once, as the commit of a changeset applies its phases: entity creates, entity updates,
+entity deletes, relation creates, relation updates and relation deletes. Each row is what
+the single write takes, its own search write plan included, and the batch behaves as those
+writes one after the other would: the system properties set, the identity written when
+given, each plan queued exactly when its row is written, a delete's before it. Every batch
+but the entity create answers the ids it wrote; a row whose target is gone, or a relation
+create whose source or target entity does not exist, is left out rather than failing the
+batch. An adapter may write a batch in one statement or in many; the commit's speed comes
+from the former.
 
 **Hierarchy.** Three operations serve the parent relations. Each read takes the parent
 relations to follow as readings — relation type key to parent end — and with none answers

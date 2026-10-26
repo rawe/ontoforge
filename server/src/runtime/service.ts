@@ -1269,7 +1269,8 @@ export async function createRelation(
       throw new ValidationError("Instance validation failed", { fields: errors });
     }
 
-    if (fullRtForValidation.onePerPair && (await tx.lockPair(relationTypeKey, fromEntityId, toEntityId)) !== null) {
+    const pair = { fromId: fromEntityId, toId: toEntityId };
+    if (fullRtForValidation.onePerPair && (await tx.lockPairs(relationTypeKey, [pair])).length > 0) {
       throw new PairTakenError(relationTypeKey);
     }
 

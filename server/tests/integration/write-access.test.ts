@@ -362,6 +362,17 @@ describe("through a 'none' ruleset's URL (REST)", () => {
         { op: "str_replace", oldString: "Notes", newString: "Text" },
       ],
       ["GET /entities/:entityTypeKey/:entityId/neighbors", `/entities/task/${e.T1}/neighbors`],
+      ["GET /entities/:entityTypeKey/identity/:identity", "/entities/task/identity/T1"],
+      ["PATCH /entities/:entityTypeKey/identity/:identity", "/entities/task/identity/T1", { name: "T1 renamed" }],
+      ["DELETE /entities/:entityTypeKey/identity/:identity", "/entities/task/identity/T1"],
+      ["GET /entities/:entityTypeKey/identity/:identity/path", "/entities/task/identity/T1/path"],
+      ["GET /entities/:entityTypeKey/identity/:identity/documents/:propertyKey", "/entities/task/identity/T1/documents/notes"],
+      [
+        "PATCH /entities/:entityTypeKey/identity/:identity/documents/:propertyKey",
+        "/entities/task/identity/T1/documents/notes",
+        { op: "str_replace", oldString: "Notes", newString: "Text" },
+      ],
+      ["GET /entities/:entityTypeKey/identity/:identity/neighbors", "/entities/task/identity/T1/neighbors"],
       ["POST /query", "/query", { query: "MATCH (t:task) RETURN t" }],
       ["GET /saved-queries", "/saved-queries"],
       ["GET /saved-queries/search", "/saved-queries/search?q=task"],
@@ -376,6 +387,7 @@ describe("through a 'none' ruleset's URL (REST)", () => {
       ["GET /changesets/:changesetId", C],
       ["GET /changesets/:changesetId/documents/:entityTypeKey/:entityId/:propertyKey", `${C}/documents/task/${e.T1}/notes`],
       ["GET /changesets/:changesetId/entities/:entityTypeKey/:entityId", `${C}/entities/task/${task}`],
+      ["GET /changesets/:changesetId/entities/:entityTypeKey/identity/:identity", `${C}/entities/task/identity/T1`],
       ["DELETE /changesets/:changesetId", C],
       ["POST /changesets/:changesetId/writes", `${C}/writes`, taskUnder(e.P1, "T10")],
       ["DELETE /changesets/:changesetId/objects/:objectId", `${C}/objects/${task}`],
@@ -389,14 +401,20 @@ describe("through a 'none' ruleset's URL (REST)", () => {
   }
 
   /** The reads this test server cannot serve: no saved query, no
-   * embedding provider for the semantic saved-query search. */
+   * embedding provider for the semantic saved-query search, no entity
+   * type with an identity. */
   const UNSERVED: Record<string, number> = {
     "GET /saved-queries/search": 422,
     "POST /saved-queries/:queryKey/run": 404,
+    "GET /entities/:entityTypeKey/identity/:identity": 404,
+    "GET /entities/:entityTypeKey/identity/:identity/path": 404,
+    "GET /entities/:entityTypeKey/identity/:identity/documents/:propertyKey": 404,
+    "GET /entities/:entityTypeKey/identity/:identity/neighbors": 404,
+    "GET /changesets/:changesetId/entities/:entityTypeKey/identity/:identity": 404,
   };
   const VERBS = { write: "write directly", stage: "start or change a changeset", commit: "commit" } as const;
 
-  it("refuses the 7 writes, the 9 stage routes and the commit with 409; the 24 reads answer", async () => {
+  it("refuses the 10 writes, the 9 stage routes and the commit with 409; the 29 reads answer", async () => {
     const all = requests();
     expect(all.map(([route]) => route).sort()).toEqual(Object.keys(ROUTES).sort());
     const refused: string[] = [];
@@ -411,8 +429,8 @@ describe("through a 'none' ruleset's URL (REST)", () => {
         refused.push(route);
       }
     }
-    expect(refused).toHaveLength(17);
-    expect(all.length - refused.length).toBe(24);
+    expect(refused).toHaveLength(20);
+    expect(all.length - refused.length).toBe(29);
     // Nothing written, nothing staged, nothing started.
     expect((await rest("GET", `${ALL}/entities/task/${e.T1}`)).body.name).toBe("T1");
     expect((await rest("GET", `${ALL}/entities/task/${e.T1a1}`)).status).toBe(200);

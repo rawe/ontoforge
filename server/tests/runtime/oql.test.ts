@@ -318,14 +318,14 @@ describe("validation", () => {
   it("unknown entity property lists type properties plus system properties", () => {
     expect(validateQuery("MATCH (p:person) WHERE p.salary = 100 RETURN p")).toContain(
       "Unknown property 'salary' on entity type 'person'. " +
-        "Available: age, name, _createdAt, _entityTypeKey, _id, _relationTypeKey, _updatedAt",
+        "Available: age, name, _createdAt, _entityTypeKey, _id, _identity, _relationTypeKey, _updatedAt",
     );
   });
 
   it("unknown relation property lists type properties plus system properties", () => {
     expect(validateQuery("MATCH ()-[r:works_for]->() WHERE r.rating = 5 RETURN r")).toContain(
       "Unknown property 'rating' on relation type 'works_for'. " +
-        "Available: role, _createdAt, _entityTypeKey, _id, _relationTypeKey, _updatedAt",
+        "Available: role, _createdAt, _entityTypeKey, _id, _identity, _relationTypeKey, _updatedAt",
     );
   });
 
@@ -357,6 +357,7 @@ describe("validation", () => {
       "_createdAt",
       "_entityTypeKey",
       "_id",
+      "_identity",
       "_relationTypeKey",
       "_updatedAt",
     ]);
@@ -586,11 +587,11 @@ describe("surface rejections", () => {
   it("inline-map key unknown on the owner's type reuses the property message", () => {
     expect(validateQuery("MATCH (p:person {salary: 100}) RETURN p")).toContain(
       "Unknown property 'salary' on entity type 'person'. " +
-        "Available: age, name, _createdAt, _entityTypeKey, _id, _relationTypeKey, _updatedAt",
+        "Available: age, name, _createdAt, _entityTypeKey, _id, _identity, _relationTypeKey, _updatedAt",
     );
     expect(validateQuery("MATCH (:person)-[r:works_for {rating: 5}]->(:company) RETURN r")).toContain(
       "Unknown property 'rating' on relation type 'works_for'. " +
-        "Available: role, _createdAt, _entityTypeKey, _id, _relationTypeKey, _updatedAt",
+        "Available: role, _createdAt, _entityTypeKey, _id, _identity, _relationTypeKey, _updatedAt",
     );
   });
 

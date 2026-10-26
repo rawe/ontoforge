@@ -1612,7 +1612,9 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     displayName: et.displayName,
     description: optString(et.description),
     nameProperty: et.nameProperty,
-    identityProperties: (et.identityProperties as string[] | null | undefined) ?? null,
+    // Omitted for a type without an identity, so a design without one
+    // exports as before.
+    ...(identityOf(et) === null ? {} : { identityProperties: identityOf(et) }),
     properties: ((et.properties as Row[] | undefined) ?? []).map(exportProperty),
   }));
 

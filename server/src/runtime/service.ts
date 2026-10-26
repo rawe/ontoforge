@@ -1636,7 +1636,9 @@ function projectQueryValue(value: unknown, scoped: SchemaCacheValue): unknown {
   }
   if ("_entityTypeKey" in value) {
     const etDef = scoped.entityTypes[value._entityTypeKey as string];
-    return etDef === undefined ? null : stripOutOfScopeProps(value, etDef.properties, true);
+    return etDef === undefined
+      ? null
+      : stripOutOfScopeProps(value, etDef.properties, true, etDef.identityProperties !== null);
   }
   if ("_relationTypeKey" in value) {
     const rtDef = scoped.relationTypes[value._relationTypeKey as string];
@@ -1889,10 +1891,17 @@ export async function searchSavedQueries(
 }
 
 /** Remove properties not in the scoped definitions and stub documents
- * (of an entity). Unlike entity reads, only the SYSTEM properties survive
+ * (of an entity), and an identity the lens does not show whole. Unlike entity reads, only the SYSTEM properties survive
  * here — other underscore-prefixed bookkeeping is stripped. */
-function stripOutOfScopeProps(value: Row, properties: Record<string, PropertyDef>, entity: boolean): Row {
+function stripOutOfScopeProps(
+  value: Row,
+  properties: Record<string, PropertyDef>,
+  entity: boolean,
+  identityShown = false,
+): Row {
   const allowed = new Set([...Object.keys(properties), ...SYSTEM_PROPERTIES]);
+  // The identity only where the lens shows the type's whole identity.
+  if (!identityShown) allowed.delete(IDENTITY_FIELD);
   // Stub document values before the helper `_doc_*_length` keys are stripped.
   const result = entity ? stubDocumentProperties(value, properties) : value;
   for (const key of Object.keys(result)) {

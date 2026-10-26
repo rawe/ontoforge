@@ -48,7 +48,7 @@ export interface ScalarBinding {
 export type Binding = TableBinding | ScalarBinding;
 
 /** The columns a carried variable explodes into, per kind. */
-const ENTITY_COLUMNS = ["id", "type_key", "props", "created_at", "updated_at"] as const;
+const ENTITY_COLUMNS = ["id", "type_key", "props", "created_at", "updated_at", "identity"] as const;
 const RELATION_COLUMNS = [
   "id",
   "type_key",
@@ -101,11 +101,18 @@ export function col(binding: TableBinding, column: string): string {
  */
 export function projectedObject(binding: TableBinding): string {
   const typeKeyName = binding.kind === "entity" ? "_entityTypeKey" : "_relationTypeKey";
+  // An entity's `_identity` only when it has one; the service strips it
+  // where the lens does not show the whole identity.
+  const identity =
+    binding.kind === "entity"
+      ? ` || CASE WHEN ${col(binding, "identity")} IS NULL THEN '{}'::jsonb` +
+        ` ELSE jsonb_build_object('_identity', ${col(binding, "identity")}) END`
+      : "";
   return (
     `CASE WHEN ${col(binding, "id")} IS NULL THEN NULL ELSE jsonb_build_object(` +
     `'_id', ${col(binding, "id")}::text, '${typeKeyName}', ${col(binding, "type_key")}, ` +
     `'_createdAt', ${col(binding, "created_at")}, '_updatedAt', ${col(binding, "updated_at")})` +
-    ` || ${col(binding, "props")} END`
+    `${identity} || ${col(binding, "props")} END`
   );
 }
 

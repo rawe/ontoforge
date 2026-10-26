@@ -301,7 +301,7 @@ describe("PostgreSQL search query", () => {
       partKind: "relation",
       relationType: "works_for",
       relationId: adaAcme._id,
-      target: { id: acme._id, type: "company", label: "ACME" },
+      target: { id: acme._id, type: "company", label: "ACME", identity: null },
       snippet: "Ada CTO ACME",
       charOffset: null,
       charLength: null,

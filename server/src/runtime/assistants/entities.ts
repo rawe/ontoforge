@@ -22,6 +22,8 @@ export interface EntityCard {
   /** `E1`, `E2`, … in the order the turn met them; unique within a turn. */
   ref: string;
   id: string;
+  /** Its `_identity`, when its type has one the lens shows whole. */
+  identity?: string;
   /** The entity type's key. */
   type: string;
   typeName: string;
@@ -115,9 +117,11 @@ export function entityCard(
   type: EntityTypeDef,
   evidence: boolean,
 ): EntityCard {
+  const identity = type.identityProperties !== null && typeof entity._identity === "string" ? entity._identity : null;
   return {
     ref,
     id: String(entity._id),
+    ...(identity === null ? {} : { identity }),
     type: typeKey,
     typeName: type.displayName,
     label: entityLabel(entity, type),

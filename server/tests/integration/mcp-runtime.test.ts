@@ -1017,19 +1017,19 @@ describe("get_path", () => {
       const deep = await call(all, "get_path", { entity_type_key: "task", entity_id: ids.T1a });
       expect(deep.isError, text(deep)).toBeFalsy();
       expect(JSON.parse(text(deep))).toEqual([
-        { type: "customer", id: ids.ACME, name: "ACME" },
-        { type: "project", id: ids.P1, name: "P1" },
-        { type: "task", id: ids.T1, name: "T1" },
-        { type: "task", id: ids.T1a, name: "T1a" },
+        { type: "customer", id: ids.ACME, name: "ACME", identity: null },
+        { type: "project", id: ids.P1, name: "P1", identity: null },
+        { type: "task", id: ids.T1, name: "T1", identity: null },
+        { type: "task", id: ids.T1a, name: "T1a", identity: null },
       ]);
 
       const root = await call(all, "get_path", { entity_type_key: "customer", entity_id: ids.ACME });
-      expect(JSON.parse(text(root))).toEqual([{ type: "customer", id: ids.ACME, name: "ACME" }]);
+      expect(JSON.parse(text(root))).toEqual([{ type: "customer", id: ids.ACME, name: "ACME", identity: null }]);
 
       const cut = await call(delivery, "get_path", { entity_type_key: "task", entity_id: ids.T1a });
       expect(JSON.parse(text(cut))).toEqual([
-        { type: "task", id: ids.T1, name: "T1" },
-        { type: "task", id: ids.T1a, name: "T1a" },
+        { type: "task", id: ids.T1, name: "T1", identity: null },
+        { type: "task", id: ids.T1a, name: "T1a", identity: null },
       ]);
 
       const hidden = await call(delivery, "get_path", { entity_type_key: "project", entity_id: ids.P1 });

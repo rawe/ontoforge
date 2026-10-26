@@ -166,7 +166,7 @@ describe("PostgreSQL search pipeline", () => {
   }
 
   async function worksFor(from: string, to: string, role: string): Promise<string> {
-    const created = await service.createRelation(LENS, "works_for", from, to, { role }, runtime);
+    const created = await service.createRelation(LENS, "works_for", { fromEntityId: from, toEntityId: to }, { role }, runtime);
     return created._id as string;
   }
 

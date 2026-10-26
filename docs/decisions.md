@@ -342,6 +342,15 @@ a cost and an outage no one asked for.
 **A failed index ensure never stops the boot.** The state that makes an ensure fail is an
 unfinished rebuild, and refusing to start would take away the server needed to finish it.
 
+**Probes and metrics share the client port and are open to the server's access rules;
+keeping them internal is the ingress's job.** They are called by the platform on each
+server directly, and one port with one exposure rule is simpler than a listener of their
+own.
+
+**A metric's labels never carry an ontology, lens, principal or raw path; requests are
+labelled by route template.** The number of series then depends on the code alone, and
+metrics reveal nothing about what any ontology holds.
+
 ## Scope
 
 **Transfer moves one ontology's design into an existing ontology, never instance data and

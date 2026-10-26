@@ -7,8 +7,8 @@
  * are mapped into the same envelope: an unparsable JSON body answers
  * `400 INVALID_JSON`, a request-shape failure `422 VALIDATION_ERROR`.
  *
- * The probes `/livez` and `/readyz` sit outside `/api` and outside that
- * envelope; shutdown drains through the app's `lifecycle`.
+ * The probes `/livez` and `/readyz`, and `/metrics`, sit outside `/api` and
+ * outside that envelope; shutdown drains through the app's `lifecycle`.
  */
 
 import type { ServerResponse } from "node:http";
@@ -39,6 +39,7 @@ import {
   ValidationError,
 } from "./core/exceptions.js";
 import { mountMcp } from "./mcp/mount.js";
+import { serveMetrics } from "./metrics.js";
 import { modelingRouter } from "./modeling/router.js";
 import { registryRouter } from "./registry/router.js";
 import { aiRouter } from "./runtime/aiRouter.js";
@@ -160,6 +161,8 @@ export async function createApp(shared?: SharedState, auth: AuthRuntime | null =
   const lifecycle = new Lifecycle();
   app.decorate("lifecycle", lifecycle);
   app.server.on("request", (_request, response) => lifecycle.track(response));
+  // Before any route, so every route's requests are counted.
+  serveMetrics(app);
   // Every route registered from here on: its handler counts until it settles.
   app.addHook("onRoute", (route) => {
     const handler = route.handler;

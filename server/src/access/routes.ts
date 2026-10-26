@@ -48,8 +48,8 @@ export const LENS_ROUTES: Record<string, Operation> = {
   "POST /decisions/compare-entities": "read",
 };
 
-/** Outside `/api` and `/mcp`: probes, the API documentation, resource metadata. */
-const PUBLIC_PATHS = ["/livez", "/readyz", "/openapi.json", "/docs", "/.well-known"];
+/** Outside `/api` and `/mcp`: probes, metrics, the API documentation, resource metadata. */
+const PUBLIC_PATHS = ["/livez", "/readyz", "/metrics", "/openapi.json", "/docs", "/.well-known"];
 
 /** `path` is `prefix` or lies below it. */
 function within(path: string, prefix: string): boolean {

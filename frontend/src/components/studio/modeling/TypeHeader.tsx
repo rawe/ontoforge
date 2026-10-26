@@ -1,7 +1,7 @@
 /**
  * Header of an entity or relation type: display name and description edited
  * inline, the permanent key, a relation type's endpoints (jump links) and
- * parent end (`ParentField`), and an entity type's name property. `variant="page"` lays it out in a row for the
+ * parent end (`ParentField`), and an entity type's name property and identity (`IdentityField`). `variant="page"` lays it out in a row for the
  * classic type page; `variant="panel"` stacks it for the graph inspector.
  * Navigation is the surface's: endpoint chips call `onSelectType`.
  */
@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils'
 import { InlineText } from '../shared'
 import type { TypeRef } from './deleteContext'
 import { DescriptionText } from './DescriptionText'
+import { IdentityField } from './IdentityField'
 import { useSetNameProperty, useUpdateType } from './mutations'
 import { ParentField } from './ParentField'
 import { findType, useModelSchema, type TypeKind } from './useModelSchema'
@@ -71,6 +72,10 @@ export function TypeHeader({ ontologyKey, kind, typeId, variant, onSelectType }:
     </label>
   )
 
+  const identity = entity !== null && (
+    <IdentityField ontologyKey={ontologyKey} entityType={entity} variant={variant} />
+  )
+
   return (
     <div className={cn('grid', page ? 'gap-1' : 'gap-2')}>
       <div className={cn('flex flex-wrap items-center', page ? 'gap-3' : 'gap-2')}>
@@ -93,6 +98,7 @@ export function TypeHeader({ ontologyKey, kind, typeId, variant, onSelectType }:
         {page && endpoints}
         {page && parent}
         {page && nameProperty}
+        {page && identity}
       </div>
 
       {!page && displayName}
@@ -109,6 +115,7 @@ export function TypeHeader({ ontologyKey, kind, typeId, variant, onSelectType }:
       {!page && endpoints}
       {!page && parent}
       {!page && nameProperty}
+      {!page && identity}
     </div>
   )
 }

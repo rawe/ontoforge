@@ -3,6 +3,7 @@ import { ArrowUpRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import type { EntityCard } from '@/api/entities'
 import type { Turn } from '@/components/assistants/chat/chatModel'
+import { IdentityText } from '@/components/IdentityText'
 import { TypeChip } from '@/components/TypeChip'
 import { cn } from '@/lib/utils'
 import { groupByRole, roleInfo } from './entityModel'
@@ -123,6 +124,7 @@ function CardView({ card, href, selected, dimmed, onSelect, compact, aside, onHo
               {card.label}
             </button>
           : <Link to={href} title="Open the entity" className={cn(labelClass, 'hover:underline')}>{card.label}</Link>}
+        <IdentityText identity={card.identity} />
         {aside}
         <Link
           to={href}

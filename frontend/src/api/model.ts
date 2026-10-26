@@ -63,15 +63,17 @@ export const createEntityType = (ontologyKey: string, body: EntityTypeInput) =>
 export const getEntityType = (ontologyKey: string, entityTypeId: string) =>
   request<EntityType>(`${base(ontologyKey)}/entity-types/${entityTypeId}`)
 
+/** Setting an identity without `cascade`, when it needs one → 409 CASCADE_REQUIRED. */
 export const updateEntityType = (
   ontologyKey: string,
   entityTypeId: string,
   body: EntityTypeUpdate,
+  cascade = false,
 ) =>
-  request<EntityType>(`${base(ontologyKey)}/entity-types/${entityTypeId}`, {
-    method: 'PUT',
-    body,
-  })
+  request<EntityType>(
+    `${base(ontologyKey)}/entity-types/${entityTypeId}${buildQuery(cascade ? { cascade } : undefined)}`,
+    { method: 'PUT', body },
+  )
 
 /** Without `cascade`, a needed cascade → 409 CASCADE_REQUIRED. */
 export const deleteEntityType = (

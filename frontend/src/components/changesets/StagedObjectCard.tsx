@@ -1,8 +1,9 @@
-import { Check, FileText, Scissors, X } from 'lucide-react'
+import { Check, FileText, Fingerprint, Scissors, X } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { StagedObjectView } from '@/api/types'
 import {
   hasDrift,
+  identityChangeText,
   objectOperation,
   operationLabel,
   stagedDocumentKeys,
@@ -48,7 +49,8 @@ interface StagedObjectCardProps {
 }
 
 /**
- * One staged object: its action, what it is, its markers, and each staged
+ * One staged object: its action, what it is, its markers, the identity it
+ * gets (before → after on a rename), and each staged
  * value — before → after on an update, with the current stored value where
  * it drifted. On a draft it can be removed, a value cut (scissors), and a
  * drifted value's current stored value accepted as its before.
@@ -66,6 +68,7 @@ export function StagedObjectCard({
   className,
 }: StagedObjectCardProps) {
   const target = targetText(object)
+  const identityChange = identityChangeText(object)
   const documents = onView === undefined ? [] : stagedDocumentKeys(object)
   const frozenOr = (control: ReactNode) => (frozen === null ? control : <Disabled reason={frozen}>{control}</Disabled>)
   const off = frozen !== null || busy
@@ -101,6 +104,12 @@ export function StagedObjectCard({
           {marker.message}
         </p>
       ))}
+      {identityChange !== null && (
+        <p className="-mt-1 flex items-center gap-1.5 px-3 pb-1.5 text-[12px] text-muted-foreground">
+          <Fingerprint className="size-3" aria-hidden />
+          Identity <span className="font-mono text-foreground">{identityChange}</span>
+        </p>
+      )}
       {object.type === null && (
         <p className="px-3 pb-2 text-[12.5px] text-muted-foreground">Not visible through this lens</p>
       )}

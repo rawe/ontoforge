@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, ChevronRight, Lock, Plus, Tag, Trash2 } from 'lucide-react'
+import { Check, ChevronRight, Fingerprint, Lock, Plus, Tag, Trash2 } from 'lucide-react'
 import type { DataType, EntityType, PropertyDefinition } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -101,6 +101,7 @@ export function PropertiesEditor({
   if (type === undefined) return null
 
   const nameProperty = kind === 'entity-types' ? (type as EntityType).nameProperty : null
+  const identity = kind === 'entity-types' ? ((type as EntityType).identityProperties ?? []) : []
   const sorted = [...(properties ?? [])].sort((a, b) =>
     a.key === nameProperty ? -1 : b.key === nameProperty ? 1 : a.key.localeCompare(b.key),
   )
@@ -165,6 +166,7 @@ export function PropertiesEditor({
                 typeId={typeId}
                 property={p}
                 isName={p.key === nameProperty}
+                inIdentity={identity.includes(p.key)}
                 open={openId === p.propertyId}
                 flash={flash?.propertyId === p.propertyId}
                 onToggle={() => setOpenId(openId === p.propertyId ? null : p.propertyId)}
@@ -196,8 +198,14 @@ interface RowProps {
   typeId: string
   property: PropertyDefinition
   isName: boolean
+  /** Part of the type's identity: required, no default, not deletable. */
+  inIdentity: boolean
   wide: boolean
 }
+
+/** Why an identity property's required flag, default and delete are locked. */
+const IDENTITY_LOCK = 'Part of the identity: required, without a default. Remove it from the identity first.'
+
 
 const shownDefault = (p: PropertyDefinition) =>
   p.defaultValue === null ? null : String(p.defaultValue)
@@ -208,7 +216,7 @@ function PropertyRow({
   onToggle,
   ...rowProps
 }: RowProps & { open: boolean; flash: boolean; onToggle: () => void }) {
-  const { property: p, isName, wide } = rowProps
+  const { property: p, isName, inIdentity, wide } = rowProps
   const chevron = (
     <ChevronRight
       className={cn(
@@ -238,7 +246,7 @@ function PropertyRow({
       >
         {wide ? (
           <>
-            <KeyCell property={p} isName={isName} />
+            <KeyCell property={p} isName={isName} inIdentity={inIdentity} />
             <span className="truncate text-[13px]">{p.displayName}</span>
             <span>
               <Badge variant="secondary" className="font-mono text-[11px]">
@@ -262,7 +270,7 @@ function PropertyRow({
           <span className="flex items-center gap-1.5">
             {chevron}
             <span className="min-w-0 flex-1">
-              <KeyCell property={p} isName={isName} />
+              <KeyCell property={p} isName={isName} inIdentity={inIdentity} />
               <span className="block truncate text-[11.5px] text-muted-foreground">
                 {p.displayName}
               </span>
@@ -276,7 +284,15 @@ function PropertyRow({
   )
 }
 
-function KeyCell({ property: p, isName }: { property: PropertyDefinition; isName: boolean }) {
+function KeyCell({
+  property: p,
+  isName,
+  inIdentity,
+}: {
+  property: PropertyDefinition
+  isName: boolean
+  inIdentity: boolean
+}) {
   return (
     <span className="flex min-w-0 items-center gap-1 font-mono text-[12px]">
       <span className="truncate">{p.key}</span>
@@ -294,12 +310,21 @@ function KeyCell({ property: p, isName }: { property: PropertyDefinition; isName
           <Tag className="size-2.5" /> name
         </Badge>
       )}
+      {inIdentity && (
+        <Badge
+          variant="outline"
+          className="h-4 gap-0.5 px-1 font-sans text-[10px]"
+          title="Identity property — its value is part of the identity of instances of this type"
+        >
+          <Fingerprint className="size-2.5" /> identity
+        </Badge>
+      )}
     </span>
   )
 }
 
 /** Inline editor of one property; each field saves on its own. */
-function PropertyDetails({ ontologyKey, kind, typeId, property: p, isName, wide }: RowProps) {
+function PropertyDetails({ ontologyKey, kind, typeId, property: p, isName, inIdentity, wide }: RowProps) {
   const update = useUpdateProperty(ontologyKey, kind, typeId)
   const requestDelete = useRequestDelete()
   const stored = shownDefault(p)
@@ -328,6 +353,7 @@ function PropertyDetails({ ontologyKey, kind, typeId, property: p, isName, wide 
           key={stored ?? ''}
           dataType={p.dataType}
           stored={stored}
+          disabled={inIdentity}
           onCommit={(next, revert) =>
             update.mutate(
               { propertyId: p.propertyId, patch: { defaultValue: next } },
@@ -349,10 +375,14 @@ function PropertyDetails({ ontologyKey, kind, typeId, property: p, isName, wide 
           size="sm"
           checked={p.required}
           aria-label="Required"
+          disabled={inIdentity}
+          title={inIdentity ? IDENTITY_LOCK : undefined}
           onCheckedChange={(v) => update.mutate({ propertyId: p.propertyId, patch: { required: v } })}
         />
         Required
-        {p.required && p.defaultValue === null && (
+        {inIdentity ? (
+          <span className="text-[11px] text-muted-foreground">— part of the identity, locked</span>
+        ) : p.required && p.defaultValue === null && (
           <span className="text-[11px] text-muted-foreground">— must be supplied on create</span>
         )}
       </label>
@@ -365,7 +395,7 @@ function PropertyDetails({ ontologyKey, kind, typeId, property: p, isName, wide 
           <span className="font-mono">{p.dataType}</span> are permanent
         </span>
         <span className="flex-1" />
-        {isName ? (
+        {isName || inIdentity ? (
           <Tooltip>
             <TooltipTrigger asChild>
               {/* A disabled button gets no pointer events — the span carries the tooltip. */}
@@ -375,7 +405,9 @@ function PropertyDetails({ ontologyKey, kind, typeId, property: p, isName, wide 
                 </Button>
               </span>
             </TooltipTrigger>
-            <TooltipContent>Choose another name property first</TooltipContent>
+            <TooltipContent>
+              {isName ? 'Choose another name property first' : 'Remove it from the identity first'}
+            </TooltipContent>
           </Tooltip>
         ) : (
           <Button
@@ -402,13 +434,23 @@ function PropertyDetails({ ontologyKey, kind, typeId, property: p, isName, wide 
 function DefaultInput({
   dataType,
   stored,
+  disabled = false,
   onCommit,
 }: {
   dataType: DataType
   stored: string | null
+  /** An identity property has no default. */
+  disabled?: boolean
   onCommit: (next: string | null, revert: () => void) => void
 }) {
   const [draft, setDraft] = useState(stored ?? '')
+  if (disabled) {
+    return (
+      <span className="text-[13px] text-muted-foreground" title={IDENTITY_LOCK}>
+        No default — part of the identity
+      </span>
+    )
+  }
   return (
     <TypedValueInput
       dataType={dataType}

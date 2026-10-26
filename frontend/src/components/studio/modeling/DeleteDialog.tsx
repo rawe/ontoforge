@@ -122,7 +122,9 @@ function DeleteBody({ ontologyKey, target, onClose, onDeleted, onShowType }: Del
       : []
   const isNameProperty =
     property !== undefined && isEntity && (type as EntityType).nameProperty === property.key
-  const blocked = blocking.length > 0 || isNameProperty
+  const isIdentityProperty =
+    property !== undefined && isEntity && ((type as EntityType).identityProperties ?? []).includes(property.key)
+  const blocked = blocking.length > 0 || isNameProperty || isIdentityProperty
   const canDelete =
     !blocked && !pending && (target.what === 'property' || confirmText.trim() === type.key)
 
@@ -229,6 +231,13 @@ function DeleteBody({ ontologyKey, target, onClose, onDeleted, onShowType }: Del
         <p className="flex items-start gap-2 rounded-lg border border-(--tc-amber-border) bg-(--tc-amber-bg) p-3 text-[13px]">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-(--tc-amber)" />
           This is the name property of {type.displayName}. Choose another name property first.
+        </p>
+      )}
+
+      {isIdentityProperty && (
+        <p className="flex items-start gap-2 rounded-lg border border-(--tc-amber-border) bg-(--tc-amber-bg) p-3 text-[13px]">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-(--tc-amber)" />
+          This property is part of the identity of {type.displayName}. Remove it from the identity first.
         </p>
       )}
 

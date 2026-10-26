@@ -148,6 +148,14 @@ export function targetText(object: StagedObjectView): string {
   return object.action === 'create' ? `${name} (new)` : name
 }
 
+/** The identity a staged entity gets: "A~1 → B~1" on a rename, the new one
+ * alone on a create or a first identity; null when it keeps its identity. */
+export function identityChangeText(object: StagedObjectView): string | null {
+  if (object.identity === undefined) return null
+  const { before, after } = object.identity
+  return before === null ? after : `${before} → ${after}`
+}
+
 /** Whether a staged value's stored value changed since its before was recorded. */
 export function hasDrift(value: StagedValueView): boolean {
   return value.markers.some((marker) => marker.kind === 'drift')

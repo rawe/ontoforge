@@ -68,6 +68,9 @@ export interface SchemaEntityType {
   description: string | null
   /** Key of the string property that names instances; null when the lens hides it. */
   nameProperty: string | null
+  /** The ordered keys of the identity properties; null when the type has
+   * no identity or the lens does not show all of them. */
+  identityProperties: string[] | null
   properties: SchemaProperty[]
 }
 
@@ -150,7 +153,9 @@ export interface EntityInstance {
   _entityTypeKey: string
   _createdAt: string
   _updatedAt: string
-  [property: string]: JsonValue
+  /** The readable identity; absent when the type has none (or the lens hides it). */
+  _identity?: string
+  [property: string]: JsonValue | undefined
 }
 
 export interface RelationInstance {
@@ -307,6 +312,9 @@ export interface StagedObjectView {
   firstTouchedAt: string
   /** Entities: the name. */
   name?: string | null
+  /** Entities whose identity the changeset sets or changes: the stored
+   * identity (null on a create) and the one after. */
+  identity?: { before: string | null; after: string }
   /** Relations: the two ends. */
   from?: ChangesetEnd
   to?: ChangesetEnd
@@ -439,7 +447,7 @@ export interface Matched {
   relationType: string | null
   relationId: string | null
   /** The entity on the other end of a relation part. */
-  target: { id: string; type: string; label: string | null } | null
+  target: { id: string; type: string; label: string | null; identity: string | null } | null
   /** At most 200 characters of the matched entry text. */
   snippet: string
   /** Passages only. */
@@ -598,6 +606,8 @@ export interface EntityType {
   description: string | null
   /** Key of the string property that names instances — never null in modeling. */
   nameProperty: string
+  /** The ordered keys of the identity properties; null when it has none. */
+  identityProperties: string[] | null
   createdAt: string
   updatedAt: string
 }
@@ -827,6 +837,8 @@ export interface EntityTypeUpdate {
   description?: string
   /** Reassign to another string property of the type. */
   nameProperty?: string
+  /** Set (1 to 5 ordered keys of string, integer or date properties) or, with null, clear the identity. */
+  identityProperties?: string[] | null
 }
 
 /** Sparse update: an omitted field stays unchanged. */

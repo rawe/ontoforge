@@ -69,6 +69,16 @@ import { pinnedChangeset, usePinnedChangeset } from '@/lib/pinnedChangeset'
 
 const PAGE_SIZE = 25
 
+/** The identity as a filter subject: the server filters `_identity` as a string. */
+const IDENTITY_SUBJECT: SchemaProperty = {
+  key: '_identity',
+  displayName: 'Identity',
+  description: null,
+  dataType: 'string',
+  required: false,
+  defaultValue: null,
+}
+
 /** Sortable column header: label + asc/desc indicator. */
 function SortableHeader({
   label,
@@ -136,15 +146,17 @@ export function TypeTablePage() {
     return [...type.properties].sort((a, b) => Number(b.required) - Number(a.required))
   }, [type])
 
+  // The identity, a system property: a string column, sortable and filterable.
+  const hasIdentity = (type?.identityProperties ?? null) !== null
   const filterSubjects = useMemo<FilterSubjects>(
     () => ({
-      properties,
+      properties: hasIdentity ? [IDENTITY_SUBJECT, ...properties] : properties,
       relations:
         typeKey === undefined || schema.data === undefined
           ? []
           : relationSubjects(typeKey, schema.data.relationTypes, schema.data.entityTypes),
     }),
-    [properties, typeKey, schema.data],
+    [properties, typeKey, schema.data, hasIdentity],
   )
 
   const [page, setPage] = useState(0)
@@ -196,7 +208,12 @@ export function TypeTablePage() {
   // and never pulls document content.
   const params = useMemo<ListEntitiesParams>(() => {
     const sort = sorting[0]
-    const allIds = [...properties.map((p) => p.key), '_updatedAt', '_createdAt']
+    const allIds = [
+      ...(hasIdentity ? ['_identity'] : []),
+      ...properties.map((p) => p.key),
+      '_updatedAt',
+      '_createdAt',
+    ]
     const visibleIds = allIds.filter((id) => columnVisibility[id] !== false)
     const anyHidden = visibleIds.length < allIds.length
     const documentKeys = new Set(
@@ -210,9 +227,9 @@ export function TypeTablePage() {
       order: sort === undefined || sort.desc ? 'desc' : 'asc',
       ...(debouncedQ !== '' ? { q: debouncedQ } : {}),
       ...(anyHidden && !anyDocumentVisible ? { fields: ['_id', ...visibleIds] } : {}),
-      filter: filtersToParam(filters, properties),
+      filter: filtersToParam(filters, filterSubjects.properties),
     }
-  }, [sorting, properties, columnVisibility, page, debouncedQ, filters])
+  }, [sorting, properties, columnVisibility, page, debouncedQ, filters, hasIdentity, filterSubjects])
 
   const entities = useQuery({
     queryKey: qk.entities(ontologyKey ?? '', lensKey ?? '', typeKey ?? '', params),
@@ -258,6 +275,21 @@ export function TypeTablePage() {
           />
         ),
       },
+      ...(hasIdentity
+        ? [
+            {
+              id: '_identity',
+              accessorFn: (row: EntityInstance) => row._identity,
+              header: 'Identity',
+              cell: ({ row }: { row: { original: EntityInstance } }) =>
+                row.original._identity === undefined ? (
+                  <span className="text-muted-foreground/50">—</span>
+                ) : (
+                  <span className="font-mono text-[12px]">{row.original._identity}</span>
+                ),
+            } satisfies ColumnDef<EntityInstance>,
+          ]
+        : []),
       ...properties.map<ColumnDef<EntityInstance>>((p) => ({
         id: p.key,
         accessorFn: (row) => row[p.key],
@@ -352,7 +384,7 @@ export function TypeTablePage() {
     ]
     // Selecting rows only leads to deleting them.
     return canEdit ? defs : defs.filter((d) => d.id !== 'select')
-  }, [properties, navigate, ontologyKey, lensKey, typeKey, nameProperty, canEdit])
+  }, [properties, navigate, ontologyKey, lensKey, typeKey, nameProperty, canEdit, hasIdentity])
 
   const table = useReactTable({
     data: entities.data?.items ?? [],
@@ -427,6 +459,9 @@ export function TypeTablePage() {
     const visibleProps = properties.filter((p) => columnVisibility[p.key] !== false)
     const cols: { header: string; get: (e: EntityInstance) => unknown }[] = [
       { header: '_id', get: (e) => e._id },
+      ...(hasIdentity && columnVisibility['_identity'] !== false
+        ? [{ header: '_identity', get: (e: EntityInstance) => e._identity }]
+        : []),
       ...visibleProps.map((p) => ({
         header: p.key,
         get: (e: EntityInstance) => e[p.key],

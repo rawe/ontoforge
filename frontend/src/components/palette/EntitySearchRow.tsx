@@ -1,11 +1,13 @@
 import { useDisplayLabel, useMatchedVia } from '@/api/hooks'
 import type { EntityInstance, Matched, SearchMatch } from '@/api/types'
+import { IdentityText } from '@/components/IdentityText'
 import { TypeChip } from '@/components/TypeChip'
 
 /**
  * The rank is conveyed by list position only — no scores. A hit found by a
  * relation or passage entry gets one muted "matched via" line; servers
- * without `matched` keep the per-document `in <property>` badges.
+ * without `matched` keep the per-document `in <property>` badges. The
+ * entity's identity, when it has one, follows its label.
  */
 export function EntitySearchRow({
   entity,
@@ -26,6 +28,7 @@ export function EntitySearchRow({
       <span className="flex min-w-0 flex-wrap items-center gap-2">
         <TypeChip typeKey={entity._entityTypeKey} displayName={typeName} size="sm" />
         <span className="min-w-0 flex-1 truncate">{displayLabel(entity)}</span>
+        <IdentityText identity={entity._identity} />
         {matched === undefined &&
           matches
             .filter((m) => m.kind === 'document')

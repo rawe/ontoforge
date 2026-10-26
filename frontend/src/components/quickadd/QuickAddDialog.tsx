@@ -141,7 +141,10 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
       }
     },
     onError: (error) => {
-      if (!(error instanceof ApiError) || error.fieldErrors === undefined) {
+      if (
+        !(error instanceof ApiError) ||
+        (error.fieldErrors === undefined && error.identityTakenFields === undefined)
+      ) {
         toast.error(error.message)
       }
     },
@@ -202,7 +205,10 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
     enabled: open && parent !== undefined && parent.changesetId === undefined,
   })
 
-  const fieldErrors = create.error instanceof ApiError ? create.error.fieldErrors : undefined
+  const fieldErrors =
+    create.error instanceof ApiError
+      ? (create.error.fieldErrors ?? create.error.identityTakenFields)
+      : undefined
   const split =
     parent !== undefined && fieldErrors !== undefined ? splitParentErrors(fieldErrors) : undefined
   const serverErrors = split?.entity ?? fieldErrors

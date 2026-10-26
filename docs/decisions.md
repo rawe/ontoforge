@@ -97,6 +97,13 @@ storage error carrying a generated id.** A driver message names the vendor and i
 the id is what lets a reported failure be traced to the logged original.
 → [adr/0012](adr/0012-unexpected-storage-failures-become-storeerror.md)
 
+**A violation of the entity identity unique constraint is translated into a conflict; it is
+the one constraint violation that does not become the storage error.** Concurrent writes
+can take one identity between the service's check and the write, and only the database
+sees it; the caller must learn that the identity is taken, not that storage failed.
+→ [adr/0012](adr/0012-unexpected-storage-failures-become-storeerror.md),
+[adr/0033](adr/0033-identity-uniqueness-in-changesets-at-commit.md)
+
 **PostgreSQL is the only storage adapter, and the port carries only what it needs.** Every
 feature is built and tested once, against one implementation.
 → [adr/0025](adr/0025-postgresql-only-storage.md)
@@ -106,7 +113,7 @@ never a table per type.** A schema change stays pure data for instance storage, 
 runs against a live database per type or property.
 → [adr/0015](adr/0015-generic-jsonb-instance-tables.md)
 
-**Business rules validate in the service; storage DDL carries only identity, referential
+**Business rules validate in the service; storage DDL carries only primary keys, referential
 integrity, exactly-one-owner and uniqueness, plus the search-index tables' checks on their
 closed vocabularies.** Each business rule is enforced in one place, with no database
 backstop.
@@ -198,8 +205,10 @@ changes only its address.
 
 ## Schema and data
 
-**A schema edit never writes instance data.** Cleaning up instance data on a schema change
-would turn a schema edit into a write over all of it.
+**A schema edit never writes instance data; the one exception is an entity's derived
+identity, rebuilt when its type's identity changes.** Cleaning up instance data on a schema
+change would turn a schema edit into a write over all of it; the identity is derived from
+values a caller wrote and is never itself written by a caller.
 
 **Entity identity comparison is advisory: it never writes, merges, selects or ranks
 entities.** Its probabilities are model judgments, not calibrated guarantees, so acting on
@@ -218,6 +227,43 @@ reading what no longer exists, and the caller sees what a change breaks before i
 **Every entity type has exactly one name property, which cannot be removed while it is
 one; the server never picks a replacement.** Clients label an entity by that property's
 value alone, so a label never depends on guessing which property names a thing.
+
+## Entity identity
+
+**An entity type may declare an identity, an ordered list of one to five of its own
+`string`, `integer` or `date` properties; its value is unique within the type and is the
+entity's semantic identity, distinct from its id.** Clients that load data from another
+system, people and models then address an entity by values they recognise instead of an
+identifier only the server knows.
+→ [adr/0032](adr/0032-entity-identity-as-ordered-property-list.md)
+
+**Identity properties are required and have no default as their own stored flags, locked
+while they belong to the identity; lenses therefore always show a type's whole identity.**
+The schema then says what it means, with no hidden rule, and the existing lens inclusion
+rule keeps every identity complete wherever the type is shown.
+→ [adr/0032](adr/0032-entity-identity-as-ordered-property-list.md)
+
+**Ids remain the internal reference everywhere; an identity is an address that is resolved
+to an id where it is accepted, and is never stored as a reference.** An identity can change,
+an id never does, so everything stored keeps pointing at the same entity.
+
+**Identity and id are never mixed in one field or route: every id-addressed field and route
+has a separately named identity twin, and exactly one of a pair is given.** A value is then
+never guessed to be one or the other, and a text identity can never be mistaken for an id.
+
+**There is no create-or-update operation: a create refuses a taken identity, and updates
+never create.** Each call then does exactly what it says; an importer creates and, on a
+taken identity, updates by identity.
+
+**An identity may change by an ordinary update, under the same checks; the old identity is
+not kept as an alias.** A rename is then one write with one meaning, and an identity names
+at most one entity at any time.
+
+**In a changeset an identity is resolved at staging, and uniqueness is judged over the end
+state at the commit; a staged create whose identity was taken meanwhile fails the commit.**
+Ids are final at staging, so a plan may swap or replace identities, and what was reviewed
+is what gets committed.
+→ [adr/0033](adr/0033-identity-uniqueness-in-changesets-at-commit.md)
 
 ## Query
 

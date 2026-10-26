@@ -1,3 +1,7 @@
+import { request as httpRequest } from "node:http";
+import type { AddressInfo } from "node:net";
+import { setTimeout as sleep } from "node:timers/promises";
+
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -10,12 +14,24 @@ vi.mock("../../src/core/ports.js", () => ({
 const { registry } = await import("../../src/metrics.js");
 
 let app: FastifyInstance;
+/** Resolved once `/test/slow` is entered; its handler then waits for `release`. */
+let entered: Promise<void>;
+let enter = (): void => {};
+let release = (): void => {};
 
 beforeAll(async () => {
   app = await (await import("../../src/app.js")).createApp();
+  app.get("/test/slow", async () => {
+    enter();
+    await new Promise<void>((resolve) => (release = resolve));
+    return { done: true };
+  });
   await app.ready();
 });
-afterAll(async () => app.close());
+afterAll(async () => {
+  release();
+  await app.close();
+});
 
 /** The value of the request counter for these labels, 0 when it has none. */
 async function requests(labels: Record<string, string>): Promise<number> {
@@ -45,6 +61,20 @@ describe("request metrics", () => {
     const before = await requests({ route: "unmatched", status: "404" });
     await app.inject({ url: "/no/such/route" });
     expect(await requests({ route: "unmatched", status: "404" })).toBe(before + 1);
+  });
+
+  it("count a request whose client left before any response as aborted, never as 200", async () => {
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const { port } = app.server.address() as AddressInfo;
+    entered = new Promise((resolve) => (enter = resolve));
+    const client = httpRequest({ port, path: "/test/slow" });
+    client.on("error", () => {});
+    client.end();
+    await entered;
+    client.destroy();
+    for (let i = 0; i < 50 && (await requests({ route: "/test/slow" })) === 0; i++) await sleep(10);
+    expect(await requests({ route: "/test/slow", status: "aborted" })).toBe(1);
+    expect(await requests({ route: "/test/slow", status: "200" })).toBe(0);
   });
 });
 

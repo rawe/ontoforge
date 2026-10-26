@@ -395,7 +395,7 @@ use the error envelope.
 | `process_*`, `nodejs_*` | as the client library defines them | none |
 
 `route` is the route template (`/api/ontologies/:ontologyKey`), or `unmatched` for a request
-no route answers; `status` is the status code. No label carries an ontology, a lens, a
+no route answers; `status` is the status code, or `aborted` when the client left before any response was sent. No label carries an ontology, a lens, a
 principal or a raw path ([decisions.md](decisions.md#deployment)). A streamed
 response is timed to its end.
 

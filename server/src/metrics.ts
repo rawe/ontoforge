@@ -35,6 +35,9 @@ const httpDuration = new Histogram({
 /** The label a request without a matching route counts under. */
 export const UNMATCHED = "unmatched";
 
+/** The status of a request whose connection closed before any response was sent. */
+export const ABORTED = "aborted";
+
 /**
  * Count and time every request of `app` until its response closes —
  * closed, so hijacked chat streams and MCP count as well, timed to their
@@ -47,7 +50,8 @@ export function serveMetrics(app: FastifyInstance): void {
       const labels = {
         method: request.method,
         route: request.routeOptions.url ?? UNMATCHED,
-        status: String(reply.raw.statusCode),
+        // Before headers are sent, `statusCode` is only Node's default 200.
+        status: reply.raw.headersSent ? String(reply.raw.statusCode) : ABORTED,
       };
       httpRequests.inc(labels);
       end(labels);

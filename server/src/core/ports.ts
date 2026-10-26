@@ -157,23 +157,33 @@ export type FilterCondition =
   | PathExistenceCondition
   | RelationExistenceCondition;
 
-/** A parent rule the stored relations can break: an entity with more
- * than one parent relation, or an entity on a cycle (a self-loop
- * included). */
-export type ParentRule = "two_parents" | "cycle";
+/** A relation rule the stored relations can break: under the parent
+ * rules, an entity with more than one parent relation, or an entity on a
+ * cycle (a self-loop included); under one per pair, a source and target
+ * linked more than once by one relation type. */
+export type RelationRule = "two_parents" | "cycle" | "duplicate_pair";
 
-/** The violators of one parent rule: their count and the first five,
- * ordered by type and id. */
-export interface ParentViolation {
-  rule: ParentRule;
+/** The violators of one relation rule: their count and the first five
+ * entities, ordered by type and id. For `duplicate_pair` the count is the
+ * number of pairs and each entity is a pair's source. */
+export interface RelationRuleViolation {
+  rule: RelationRule;
   count: number;
   entities: { type: string; id: string }[];
 }
 
-/** A flag write's outcome: the relation type row written, or the
+/** The rules of one relation type: its parent end, or null, and whether
+ * one per pair holds. A parent end always holds one per pair. */
+export interface RelationRules {
+  parent: ParentEnd | null;
+  onePerPair: boolean;
+}
+
+/** A rules write's outcome: the relation type row written, or the
  * violations that refused it, with nothing written. Only rules with
- * violators appear, `two_parents` first. */
-export type ParentFlagWrite = { row: Row } | { violations: ParentViolation[] };
+ * violators appear, `two_parents` first, then `cycle`, then
+ * `duplicate_pair`. */
+export type RelationRulesWrite = { row: Row } | { violations: RelationRuleViolation[] };
 
 /**
  * The design revision of an ontology: its never-reused id and a number
@@ -291,12 +301,12 @@ export interface ModelingStore {
   // Relation types
   // ------------------------------------------------------------------
 
-  /** Relation type rows carry `parent`, the parent end, or null for an
-   * ordinary relation type. With a parent end, the create checks the
+  /** Relation type rows carry their [relation rules](RelationRules):
+   * `parent`, the parent end, or null for an ordinary relation type, and
+   * `onePerPair`, true whenever `parent` is set. The create checks the
    * relation rows already stored under the key (deleting a relation type
    * keeps its instances) in its own transaction, before the insert: any
-   * violator of the parent rules, read across every parent relation,
-   * refuses it and nothing is written. */
+   * violator of a rule it sets refuses it and nothing is written. */
   createRelationType(
     relationTypeId: string,
     key: string,
@@ -304,8 +314,8 @@ export interface ModelingStore {
     description: string | null,
     sourceEntityTypeKey: string,
     targetEntityTypeKey: string,
-    parent: ParentEnd | null,
-  ): Promise<ParentFlagWrite>;
+    rules: RelationRules,
+  ): Promise<RelationRulesWrite>;
 
   listRelationTypes(): Promise<Row[]>;
 
@@ -313,30 +323,33 @@ export interface ModelingStore {
 
   getRelationTypeByKey(key: string): Promise<Row | null>;
 
-  /** Null leaves a field unchanged. The parent end is written by
-   * `setRelationTypeParent`. */
+  /** Null leaves a field unchanged. The rules are written by
+   * `setRelationTypeRules`. */
   updateRelationType(
     relationTypeId: string,
     displayName: string | null,
     description: string | null,
   ): Promise<Row | null>;
 
-  /** The flag write. Setting or flipping the parent end counts, in one
-   * transaction, the violators of the parent rules across every parent
-   * relation under the new reading, then updates, or refuses and writes
-   * nothing. Null clears the flag and is never refused. Null result: no
+  /** The rules write: `rules` is the relation type's whole new rule set.
+   * In one transaction, a parent end set or flipped counts the violators
+   * of the parent rules across every parent relation under the new
+   * reading, and one per pair turned on counts the pairs the type's
+   * stored relations link twice; any violator refuses the write and
+   * nothing is written. Clearing a rule is never refused. Null result: no
    * such relation type. */
-  setRelationTypeParent(
+  setRelationTypeRules(
     relationTypeId: string,
-    parent: ParentEnd | null,
-  ): Promise<ParentFlagWrite | null>;
+    rules: RelationRules,
+  ): Promise<RelationRulesWrite | null>;
 
-  /** The violators of the parent rules in the stored relation rows, read
-   * across the stored parent relations together with `readings`
-   * (relation type key → parent end; a reading replaces the stored flag
-   * of its key). Empty when there are none. Import's validation pre-pass
-   * runs it before any write. */
-  findParentViolations(readings: Record<string, ParentEnd>): Promise<ParentViolation[]>;
+  /** The violators of the relation rules in the stored relation rows
+   * under `readings` (relation type key → its rules; a reading replaces
+   * the stored rules of its key): the parent rules read across the stored
+   * parent relations together with the readings' parent ends, and one per
+   * pair for each reading that holds it. Empty when there are none.
+   * Import's validation pre-pass runs it before any write. */
+  findRelationRuleViolations(readings: Record<string, RelationRules>): Promise<RelationRuleViolation[]>;
 
   deleteRelationType(relationTypeId: string): Promise<boolean>;
 
@@ -659,6 +672,19 @@ export interface RuntimeStore {
    * identity. Inside a transaction whose identity check is deferred
    * (`setIdentityCheck`) an identity may be held twice. */
   entitiesWithIdentities(entityTypeKey: string, identities: string[]): Promise<{ id: string; identity: string }[]>;
+
+  /** The stored relations of the type that link one of `pairs`, source
+   * to target, as id and ends; a pair may come back more than once. */
+  relationsOfPairs(
+    relationTypeKey: string,
+    pairs: { fromId: string; toId: string }[],
+  ): Promise<{ id: string; fromId: string; toId: string }[]>;
+
+  /** Lock the pair, source to target, of a one-per-pair relation type
+   * until the transaction ends, so that concurrent writes of it, on any
+   * server, take turns; then answer the id of a stored relation of the
+   * type linking it, or null. Only meaningful on a transaction's store. */
+  lockPair(relationTypeKey: string, fromEntityId: string, toEntityId: string): Promise<string | null>;
 
   /** When this transaction checks that an identity is unique within its
    * type: `deferred` at its end, `immediate` now (a duplicate is an
@@ -1299,6 +1325,10 @@ export interface ChangesetStore {
   /** The staged entity objects of `typeKey`, each with its values under
    * `keys` only, by first touch. */
   entityObjectsKeyed(id: string, typeKey: string, keys: string[]): Promise<StagedObjectRecord[]>;
+
+  /** The staged relation objects of `typeKey` whose ends, source to
+   * target, are one of `pairs`, without their values, by first touch. */
+  relationObjectsAt(id: string, typeKey: string, pairs: { fromId: string; toId: string }[]): Promise<StagedObjectRecord[]>;
 
   /** The sum of the `bytes` of its staged values; 0 when it has none or
    * is gone. */

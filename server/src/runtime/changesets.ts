@@ -1526,6 +1526,13 @@ async function applyOne(
     case "create": {
       const { errors, write } = prepareCreateRelation(loaded, object.typeKey, object.fromId!, object.toId!, values, id);
       faultOn(errors);
+      // Relation deletes ran before, so a pair this changeset frees is free.
+      if (
+        loaded.full.relationTypes[object.typeKey]?.onePerPair === true &&
+        (await bound.lockPair(object.typeKey, object.fromId!, object.toId!)) !== null
+      ) {
+        throw new ApplyFault(duplicatePair(object.typeKey), "duplicate_pair");
+      }
       await bound.createRelation(
         write.relationTypeKey,
         write.relationId,
@@ -1933,6 +1940,55 @@ async function identityFaults(
   return faults;
 }
 
+/** The fault of a pair another relation links after the commit. */
+function duplicatePair(typeKey: string): string {
+  return `Relation type '${typeKey}' is one per pair: another relation of it would link the same source and target`;
+}
+
+/**
+ * `duplicate_pair`, on each of `objects` that creates a relation of a
+ * one-per-pair type whose pair, source to target, another relation of the
+ * type links after the commit: a stored one this changeset does not
+ * delete, or another staged create.
+ */
+async function pairFaults(
+  loaded: LoadedSchema,
+  changesetId: string,
+  objects: StagedObjectRecord[],
+  store: RuntimeStore,
+): Promise<Violation[]> {
+  const pairKey = (fromId: string, toId: string): string => `${fromId} ${toId}`;
+  const byType = new Map<string, StagedObjectRecord[]>();
+  for (const object of objects) {
+    if (object.kind !== "relation" || object.action !== "create") continue;
+    if (loaded.scoped.relationTypes[object.typeKey] === undefined) continue;
+    if (loaded.full.relationTypes[object.typeKey]?.onePerPair !== true) continue;
+    byType.set(object.typeKey, [...(byType.get(object.typeKey) ?? []), object]);
+  }
+  const faults: Violation[] = [];
+  for (const [typeKey, creates] of byType) {
+    const pairs = [...new Map(creates.map((o) => [pairKey(o.fromId!, o.toId!), { fromId: o.fromId!, toId: o.toId! }])).values()];
+    const staged = await store.changesets().relationObjectsAt(changesetId, typeKey, pairs);
+    const deleted = new Set(staged.filter((o) => o.action === "delete").map((o) => o.objectId));
+    const holders = new Map<string, Set<string>>();
+    const hold = (key: string, id: string): void => {
+      holders.set(key, (holders.get(key) ?? new Set()).add(id));
+    };
+    for (const relation of await store.relationsOfPairs(typeKey, pairs)) {
+      if (!deleted.has(relation.id)) hold(pairKey(relation.fromId, relation.toId), relation.id);
+    }
+    for (const object of [...staged, ...creates]) {
+      if (object.action === "create") hold(pairKey(object.fromId!, object.toId!), object.objectId);
+    }
+    for (const object of creates) {
+      if ((holders.get(pairKey(object.fromId!, object.toId!))?.size ?? 0) > 1) {
+        faults.push({ object: object.objectId, kind: "duplicate_pair", message: duplicatePair(typeKey) });
+      }
+    }
+  }
+  return faults;
+}
+
 /**
  * The lock-free pass: one paged read of the staged objects and of the
  * stored rows they name, with no lock and no transaction, judged
@@ -1955,7 +2011,11 @@ export async function lockFreePass(
   const rows = await storedRows(loaded, objects, known, store);
   const stored = new Map([...rows.entities].map(([id, row]) => [id, row._entityTypeKey as string] as const));
   const targets = objects.filter((object) => object.action !== "create").map((object) => object.objectId);
-  const faults = [...judge(loaded, objects, known, rows), ...(await identityFaults(loaded, changesetId, objects, true, rows, store))];
+  const faults = [
+    ...judge(loaded, objects, known, rows),
+    ...(await identityFaults(loaded, changesetId, objects, true, rows, store)),
+    ...(await pairFaults(loaded, changesetId, objects, store)),
+  ];
   return { objects, faults, targets, stored };
 }
 
@@ -2021,7 +2081,11 @@ async function reviewOf(
   const known = await knownFor(changesetId, objects, store);
   const stored = await storedRows(loaded, objects, known, store);
   const faults = new Map<string, Violation[]>();
-  const judged = [...judge(loaded, objects, known, stored), ...(await identityFaults(loaded, changesetId, objects, false, stored, store))];
+  const judged = [
+    ...judge(loaded, objects, known, stored),
+    ...(await identityFaults(loaded, changesetId, objects, false, stored, store)),
+    ...(await pairFaults(loaded, changesetId, objects, store)),
+  ];
   for (const fault of judged) {
     faults.set(fault.object!, [...(faults.get(fault.object!) ?? []), fault]);
   }

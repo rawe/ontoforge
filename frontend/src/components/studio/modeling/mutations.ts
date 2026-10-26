@@ -26,7 +26,7 @@ import type {
 } from '@/api/types'
 import { invalidateModeling, toastError } from '../lib'
 import { useCascadeGuard } from './cascadeContext'
-import { parentViolationsOf } from './errors'
+import { relationRuleViolationsOf } from './errors'
 import { IDENTITY_CASCADE_NOTE, identityViolationsOf } from './identity'
 import type { TypeKind } from './useModelSchema'
 
@@ -99,7 +99,7 @@ export function useUpdateType(ontologyKey: string, kind: TypeKind, typeId: strin
 /**
  * Set, flip or clear (`null`) a relation type's parent end. A refusal for
  * broken parent rules is not toasted: the caller shows its report from the
- * mutation's error (`parentViolationsOf`).
+ * mutation's error (`relationRuleViolationsOf`).
  */
 export function useSetParent(ontologyKey: string, relationTypeId: string) {
   const queryClient = useQueryClient()
@@ -111,7 +111,27 @@ export function useSetParent(ontologyKey: string, relationTypeId: string) {
       toast.success(saved.parent === null ? 'Parent relation cleared' : 'Parent end saved')
     },
     onError: (error) => {
-      if (parentViolationsOf(error) === null) toastError(error)
+      if (relationRuleViolationsOf(error) === null) toastError(error)
+    },
+  })
+}
+
+/**
+ * Turn a relation type's one per pair on or off. A refusal by the stored
+ * data (a pair linked twice) is not toasted: the caller shows its report from
+ * the mutation's error (`relationRuleViolationsOf`).
+ */
+export function useSetOnePerPair(ontologyKey: string, relationTypeId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (onePerPair: boolean) =>
+      model.updateRelationType(ontologyKey, relationTypeId, { onePerPair }),
+    onSuccess: (saved) => {
+      invalidateModeling(queryClient)
+      toast.success(saved.onePerPair ? 'One per pair turned on' : 'One per pair turned off')
+    },
+    onError: (error) => {
+      if (relationRuleViolationsOf(error) === null) toastError(error)
     },
   })
 }

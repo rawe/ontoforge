@@ -187,8 +187,8 @@ defined in [architecture.md](architecture.md#error-model). Nothing is added per 
 
 MCP reports the same failures as tool errors. Because a tool error is a single string, the
 per-field detail that REST returns under `details.fields` is flattened into the message
-text, so a model still sees every offending field in one response. A refused parent flag
-carries its violation list under `details.violations`
+text, so a model still sees every offending field in one response. A refused relation
+rules write carries its violation list under `details.violations`
 ([architecture.md](architecture.md#error-model)); MCP reports its message, which states
 the count per rule. A rejected submit or commit of a changeset carries its own list there
 ([changesets](#changesets)); MCP appends each listed violation to the message.
@@ -216,6 +216,11 @@ answers `RESOURCE_CONFLICT` with `details.code` of `IDENTITY_TAKEN`, `details.id
 identity the stored entities cannot take answers `RESOURCE_CONFLICT` with
 `details.violations`, each `{rule, count, entities}`, the rule `missing_value`, `duplicate`
 or `too_long`.
+
+A relation create that would link a pair a [one-per-pair](capabilities/schema-modeling.md#one-per-pair)
+relation type already links answers `RESOURCE_CONFLICT` with `details.code` of
+`PAIR_TAKEN` and `details.relationTypeKey`; it never names the other relation
+([capabilities/instance-data.md](capabilities/instance-data.md#relations)).
 
 A data write whose ontology's design keeps changing while it runs, or a write or modeling
 change that waits too long for another one, answers `RESOURCE_CONFLICT` and has written
@@ -452,15 +457,16 @@ schema; see the addressing note above before using it. Semantics:
 
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
-| POST | `/relation-types` | Create a relation type; endpoints are named by entity type key and are fixed; `parent` optionally names the parent end | — |
-| GET | `/relation-types` | List the ontology's relation types, each with its `parent` | — |
+| POST | `/relation-types` | Create a relation type; endpoints are named by entity type key and are fixed; `parent` optionally names the parent end, `onePerPair` optionally turns one per pair on | — |
+| GET | `/relation-types` | List the ontology's relation types, each with its `parent` and `onePerPair` | — |
 | GET | `/relation-types/{relationTypeId}` | Read one relation type | — |
-| PUT | `/relation-types/{relationTypeId}` | Update display name, description or parent end (`parent`; null clears it) | — |
+| PUT | `/relation-types/{relationTypeId}` | Update display name, description, parent end (`parent`; null clears it) or one per pair (`onePerPair`) | — |
 | DELETE | `/relation-types/{relationTypeId}` | Delete a relation type and its properties | `cascade` |
 
-Setting or changing `parent`, on create or update, is refused with `RESOURCE_CONFLICT` and
-`details.violations` when the stored relations break the parent rules; nothing of the
-request is then written ([capabilities/schema-modeling.md](capabilities/schema-modeling.md#parent-relations)).
+Setting or changing `parent`, or turning `onePerPair` on, on create or update, is refused
+with `RESOURCE_CONFLICT` and `details.violations` when the stored relations break the
+rule; nothing of the request is then written. `onePerPair` false with a parent end is a
+field error ([capabilities/schema-modeling.md](capabilities/schema-modeling.md#relation-rules)).
 
 ### Property definitions
 
@@ -1171,8 +1177,8 @@ otherwise, reads included.
 | `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`), optionally with an identity (`identity_properties`) |
 | `update_entity_type` | Change display name, description, name property (`name_property`) or identity (`identity_properties`; null clears it); the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |
-| `create_relation_type` | Add a relation type between two entity types, optionally naming its parent end (`parent`) |
-| `update_relation_type` | Change display name, description or parent end (`parent`; null clears it); endpoints are immutable |
+| `create_relation_type` | Add a relation type between two entity types, optionally naming its parent end (`parent`) and turning one per pair on (`one_per_pair`) |
+| `update_relation_type` | Change display name, description, parent end (`parent`; null clears it) or one per pair (`one_per_pair`); endpoints are immutable |
 | `delete_relation_type` | Remove a relation type and its properties |
 | `add_property` | Define a property on an entity type or a relation type |
 | `update_property` | Change a property's metadata (`default_value`; null clears it); key and data type are immutable |

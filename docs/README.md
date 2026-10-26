@@ -185,6 +185,11 @@ and never changes.
 **Relation type** — a kind of directed, typed connection between two entity types. Its
 source and target entity types are fixed at creation.
 
+**Relation rule** — an optional constraint a relation type declares on its relations: the
+[parent end](#hierarchies), or **one per pair** — at most one relation of the type from
+one source entity to one target entity. See
+[capabilities/schema-modeling.md](capabilities/schema-modeling.md#relation-rules).
+
 **Property definition** — a named, typed field on one entity type or one relation type.
 Carries a data type, whether it is required, and an optional default.
 

@@ -146,6 +146,14 @@ export function createMockChangesetStore(): MockChangesetStore {
         .filter((object) => object.kind === "entity" && object.typeKey === typeKey)
         .map((object) => ({ ...object, values: object.values.filter((value) => keys.includes(value.propertyKey)) }));
     }),
+    relationObjectsAt: vi.fn(async (id: string, typeKey: string, pairs: { fromId: string; toId: string }[]) => {
+      const h = held.get(id);
+      if (h === undefined) return [];
+      return byTouch(h)
+        .filter((object) => object.kind === "relation" && object.typeKey === typeKey)
+        .filter((object) => pairs.some((pair) => pair.fromId === object.fromId && pair.toId === object.toId))
+        .map((object) => ({ ...object, values: [] }));
+    }),
     stagedBytes: vi.fn(async (id: string) => {
       const h = held.get(id);
       if (h === undefined) return 0;

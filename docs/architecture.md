@@ -125,8 +125,8 @@ agent ever spans two. The architecture makes that structural rather than checked
 - **Every ontology-scoped request names its ontology in the path**, and either addresses
   that ontology's schema (modeling) or its instance data through one lens (runtime) —
   never both. Three requests cross that line by a fixed amount, each named by its own
-  address: a parent flag change, a modeling request, reads the stored relations to refuse
-  and never writes them ([capabilities/schema-modeling.md](capabilities/schema-modeling.md#parent-relations));
+  address: a relation rules change, a modeling request, reads the stored relations to
+  refuse and never writes them ([capabilities/schema-modeling.md](capabilities/schema-modeling.md#relation-rules));
   a lens delete, a modeling request, deletes the lens's changesets
   ([capabilities/changesets.md](capabilities/changesets.md#binding)); and ruleset
   maintenance is runtime state addressed without a lens, whose put reads whether the
@@ -170,7 +170,7 @@ Per ontology. "Unique" here always means unique within the owning ontology.
 |---|---|---|
 | Lens | id, unique `key`, unique name | name, description, timestamps |
 | Entity type | id, unique `key` | display name, description, name property, identity properties (optional), timestamps |
-| Relation type | id, unique `key` | display name, source and target entity type keys, parent end (optional) |
+| Relation type | id, unique `key` | display name, source and target entity type keys, relation rules: parent end (optional), one per pair |
 | Property definition | id, `key` unique within its owner | data type, required, default; owned by exactly one entity type or relation type |
 | Search index | id, unique `key` | kind (default, passage or custom), root entity type, definition, timestamps |
 | Search settings | one per ontology | keyword language set, managed indices switched off |
@@ -553,11 +553,12 @@ another principal answers `404 RESOURCE_NOT_FOUND` with `details.code` of
 `THREAD_NOT_FOUND`, and a message to a thread still running `409 RESOURCE_CONFLICT` with
 `details.code` of `THREAD_BUSY` ([thread store](#thread-store)).
 
-**A refused parent flag carries its violations.** A parent flag change — on create,
-update or import — that the stored relations break answers `409 RESOURCE_CONFLICT` with
-`details.violations`: one entry per broken rule, `two_parents` or `cycle`, each with the
-`count` of offending entities and up to five of them as `{type, id}`
-([capabilities/schema-modeling.md](capabilities/schema-modeling.md#parent-relations)). The
+**A refused relation rules write carries its violations.** A relation rules change — on
+create, update or import — that the stored relations break answers `409
+RESOURCE_CONFLICT` with `details.violations`: one entry per broken rule, `two_parents`,
+`cycle` or `duplicate_pair`, each with the `count` of offending entities, or of pairs
+for `duplicate_pair`, and up to five entities as `{type, id}`, a pair by its source
+([capabilities/schema-modeling.md](capabilities/schema-modeling.md#relation-rules)). The
 message carries the counts, so an MCP caller sees them too.
 
 **`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its

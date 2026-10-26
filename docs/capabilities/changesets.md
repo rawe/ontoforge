@@ -140,6 +140,11 @@ commit is refused as a conflict, "An identity was taken meanwhile; nothing was p
 Check and commit again", and the changeset is kept as it was. A check runs that last
 identity test before it rolls back, so it reports such a clash as `duplicate_identity`.
 
+A relation create of a [one-per-pair](schema-modeling.md#one-per-pair) type takes its
+pair's lock in the phases, as the immediate create does, after the relation deletes ran:
+a pair this changeset frees is free, and one another write linked after the pass is a
+`duplicate_pair` violation that stops the commit.
+
 The commit answers how many staged objects it committed and the ids of the deletes already
 gone. A rejected commit persists nothing, keeps the changeset, its state and its version,
 and lists the violations of the step that rejected it, at most 100 with their total. Each
@@ -166,6 +171,7 @@ the changeset change meanwhile.
 | `dangling` | An end of a staged relation create is neither stored nor created in this changeset, or an end of a staged relation is deleted in it |
 | `drift` | The current value of an update's key differs from its before |
 | `duplicate_identity` | An entity the changeset gives an [identity](entity-identity.md#in-a-changeset) would share it with another entity after the commit |
+| `duplicate_pair` | A relation the changeset creates of a [one-per-pair](schema-modeling.md#one-per-pair) type would link the same source and target as another relation of the type after the commit: a stored one the changeset does not delete, or another staged create |
 | `has_children` | A deleted entity still has children that the changeset neither deleted nor moved |
 | `hidden_relations` | A deleted entity has relations of a type the lens does not show ([delete](instance-data.md#entities)) |
 | `endpoint_type` | A relation end exists with the wrong entity type |
@@ -176,7 +182,7 @@ the changeset change meanwhile.
 | `anchor_deleted` | The entity of its ruleset's anchor no longer exists, or its type was deleted; on the whole changeset |
 | `anchor_hidden` | The entity of its ruleset's anchor is one the lens hides; on the whole changeset |
 
-The first six are the lock-free pass's, and they are also what submit and every read of
+The first seven are the lock-free pass's, and they are also what submit and every read of
 a changeset's objects report. `drift` and `replay` sit on the value they concern, and a
 missing required value on its object; the others sit on the object. A property the lens
 hides is `not_visible` on its object and is never named. A violation's message names only
@@ -257,7 +263,8 @@ discarded, so one that vanished was committed — or its lens was deleted.
   it gives an entity (before and after, when it sets or changes one), its values —
   an update's before, current and after, a create's after — and the lock-free pass's
   faults as markers, on the value or on the object they concern:
-  `drift`, `dangling`, `missing`, `not_visible`, `replay`, `duplicate_identity`;
+  `drift`, `dangling`, `missing`, `not_visible`, `replay`, `duplicate_identity`,
+  `duplicate_pair`;
 - **the staged text of a document property**: its staged value, the text a commit would
   leave, on an entity stored or created by the changeset, whole or by character range, as
   a [document is read](documents.md#reading-a-slice). When nothing is staged for it, or

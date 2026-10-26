@@ -4,7 +4,7 @@
  */
 
 import { ApiError } from '../../../api/http.ts'
-import type { ParentViolation } from '../../../api/types.ts'
+import type { RelationRule, RelationRuleViolation } from '../../../api/types.ts'
 
 /**
  * Field errors of a failed write, by field name. Service validation errors
@@ -30,37 +30,46 @@ export function fieldErrorsOf(error: unknown): Record<string, string> {
 }
 
 /**
- * The broken parent rules of a refused flag write: a 409 whose
+ * The broken relation rules of a refused rules write: a 409 whose
  * `details.violations` lists them. Null for any other error.
  */
-export function parentViolationsOf(error: unknown): ParentViolation[] | null {
+export function relationRuleViolationsOf(error: unknown): RelationRuleViolation[] | null {
   if (!(error instanceof ApiError) || error.status !== 409) return null
   const violations = error.details?.violations
-  return Array.isArray(violations) ? (violations as ParentViolation[]) : null
+  return Array.isArray(violations) ? (violations as RelationRuleViolation[]) : null
 }
 
-const RULE_LABELS: Record<ParentViolation['rule'], string> = {
+/** The rules each relation rule checks, in the order a report lists them. */
+export const PARENT_RULES = ['two_parents', 'cycle'] as const satisfies readonly RelationRule[]
+export const ONE_PER_PAIR_RULES = ['duplicate_pair'] as const satisfies readonly RelationRule[]
+
+const RULE_LABELS: Record<RelationRule, string> = {
   two_parents: 'Two parents',
   cycle: 'Cycles',
+  duplicate_pair: 'Pairs linked more than once',
 }
 
 export interface RefusalLine {
-  rule: ParentViolation['rule']
-  /** "Two parents · 2 entities", "Cycles · none". */
+  rule: RelationRule
+  /** "Two parents · 2 entities", "Cycles · none", "Pairs linked more than once · 3 pairs". */
   summary: string
-  /** The first five breaking entities. */
-  entities: ParentViolation['entities']
+  /** The first five breaking entities; for a pair, its source. */
+  entities: RelationRuleViolation['entities']
   /** Breaking entities beyond the listed ones. */
   more: number
 }
 
-/** The refusal report: one line per parent rule, in a fixed order, a rule without violators as "none". */
-export function refusalReport(violations: readonly ParentViolation[]): RefusalLine[] {
-  return (['two_parents', 'cycle'] as const).map((rule) => {
+/** The refusal report: one line per rule of `rules`, in their order, a rule without violators as "none". */
+export function refusalReport(
+  violations: readonly RelationRuleViolation[],
+  rules: readonly RelationRule[] = PARENT_RULES,
+): RefusalLine[] {
+  return rules.map((rule) => {
     const v = violations.find((x) => x.rule === rule)
     const count = v?.count ?? 0
     const entities = v?.entities ?? []
-    const amount = count === 0 ? 'none' : `${count} ${count === 1 ? 'entity' : 'entities'}`
+    const [one, many] = rule === 'duplicate_pair' ? ['pair', 'pairs'] : ['entity', 'entities']
+    const amount = count === 0 ? 'none' : `${count} ${count === 1 ? one : many}`
     return { rule, summary: `${RULE_LABELS[rule]} · ${amount}`, entities, more: Math.max(0, count - entities.length) }
   })
 }

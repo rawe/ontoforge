@@ -76,6 +76,12 @@ Endpoint errors are collected alongside property errors and reported together. A
 relation of a parent relation is also checked against the
 [parent rules](#the-parent-rules), for every client, in the service.
 
+A relation create of a [one-per-pair](schema-modeling.md#one-per-pair) relation type
+whose source and target the type already links, in that direction, is refused once
+everything else is valid, with `409 RESOURCE_CONFLICT`, `details.code` `PAIR_TAKEN` and
+`details.relationTypeKey`; it never names the other relation. Two concurrent creates of
+one pair give exactly one relation and this conflict.
+
 **Endpoints are immutable.** An update that carries endpoint ids ignores them silently
 rather than rejecting the request; properties in the same payload still apply. Repointing a
 relation means deleting it and creating another, with a new id.

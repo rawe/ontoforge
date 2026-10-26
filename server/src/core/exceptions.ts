@@ -60,6 +60,18 @@ export class IdentityTakenError extends ConflictError {
   }
 }
 
+/** A relation of a one-per-pair relation type already links the pair a
+ * write would link. -> 409 RESOURCE_CONFLICT, `details.code`
+ * `PAIR_TAKEN` with the relation type; it never names the other relation. */
+export class PairTakenError extends ConflictError {
+  constructor(relationTypeKey: string) {
+    super(`Relation type '${relationTypeKey}' is one per pair: this source and target are already linked by it`, {
+      code: "PAIR_TAKEN",
+      relationTypeKey,
+    });
+  }
+}
+
 /** The ontology's design changed between the design a write checked
  * against and its commit; nothing was written. The write retries against
  * the new design and answers this only when it keeps changing. -> 409

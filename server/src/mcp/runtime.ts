@@ -815,7 +815,9 @@ export function createRuntimeMcpServer(
         "type whose `parent` names the parent end), every entity has at most one parent " +
         "across all parent relations and the hierarchy has no cycles: the create is " +
         "refused when the child end already has a parent, or when the parent end is the " +
-        "child itself or one of its descendants. Name each end by its id ('from_entity_id', " +
+        "child itself or one of its descendants. For a relation type with `onePerPair`, the " +
+        "create is refused when a relation of the type already links this source to this " +
+        "target. Name each end by its id ('from_entity_id', " +
         "'to_entity_id') or by its identity ('from_entity_identity', 'to_entity_identity'), " +
         "exactly one per end; prefer the identity when the end's type has one." +
         staged("create"),

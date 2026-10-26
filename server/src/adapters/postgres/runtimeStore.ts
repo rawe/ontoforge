@@ -471,6 +471,35 @@ export class PostgresRuntimeStore implements RuntimeStore {
     return result.rows.map((row) => ({ id: row.id as string, identity: row.identity as string }));
   }
 
+  async relationsOfPairs(
+    relationTypeKey: string,
+    pairs: { fromId: string; toId: string }[],
+  ): Promise<{ id: string; fromId: string; toId: string }[]> {
+    const valid = pairs.filter((pair) => isUuid(pair.fromId) && isUuid(pair.toId));
+    if (valid.length === 0) {
+      return [];
+    }
+    const result = await this.query(
+      `SELECT r.id, r.from_id, r.to_id
+         FROM relation r
+         JOIN unnest($2::uuid[], $3::uuid[]) AS p (from_id, to_id)
+           ON p.from_id = r.from_id AND p.to_id = r.to_id
+        WHERE r.type_key = $1
+        ORDER BY r.from_id, r.to_id, r.id`,
+      [relationTypeKey, valid.map((pair) => pair.fromId), valid.map((pair) => pair.toId)],
+    );
+    return result.rows.map((row) => ({ id: row.id as string, fromId: row.from_id as string, toId: row.to_id as string }));
+  }
+
+  async lockPair(relationTypeKey: string, fromEntityId: string, toEntityId: string): Promise<string | null> {
+    await this.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended('ontoforge.pair.' || current_schema() || '.' || $1 || '.' || $2 || '.' || $3, 0))`,
+      [relationTypeKey, fromEntityId, toEntityId],
+    );
+    const [found] = await this.relationsOfPairs(relationTypeKey, [{ fromId: fromEntityId, toId: toEntityId }]);
+    return found?.id ?? null;
+  }
+
   async setIdentityCheck(mode: "deferred" | "immediate"): Promise<void> {
     await this.query(`SET CONSTRAINTS ${IDENTITY_UNIQUE} ${mode === "deferred" ? "DEFERRED" : "IMMEDIATE"}`);
   }

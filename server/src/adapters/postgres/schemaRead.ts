@@ -36,7 +36,8 @@ export async function readTypesWithProperties(
   );
   const rts = await querier.query(
     `SELECT relation_type_id, key, display_name, description, created_at, updated_at,
-            source_entity_type_key AS source_key, target_entity_type_key AS target_key, parent
+            source_entity_type_key AS source_key, target_entity_type_key AS target_key, parent,
+            (one_per_pair OR parent IS NOT NULL) AS one_per_pair
      FROM relation_type ORDER BY key`,
   );
   const propertyCols = includePropertyTimestamps

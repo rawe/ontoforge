@@ -340,6 +340,27 @@ export class PostgresChangesetStore implements ChangesetStore {
     return objects;
   }
 
+  async relationObjectsAt(
+    id: string,
+    typeKey: string,
+    pairs: { fromId: string; toId: string }[],
+  ): Promise<StagedObjectRecord[]> {
+    const valid = pairs.filter((pair) => isUuid(pair.fromId) && isUuid(pair.toId));
+    if (!isUuid(id) || valid.length === 0) {
+      return [];
+    }
+    const result = await this.query(
+      `SELECT ${OBJECT_COLS.split(", ").map((column) => `o.${column.trim()}`).join(", ")}
+         FROM changeset_object o
+         JOIN unnest($3::uuid[], $4::uuid[]) AS p (from_id, to_id)
+           ON p.from_id = o.from_id AND p.to_id = o.to_id
+        WHERE o.changeset_id = $1 AND o.kind = 'relation' AND o.type_key = $2
+        ORDER BY o.first_touched_at, o.object_id`,
+      [id, typeKey, valid.map((pair) => pair.fromId), valid.map((pair) => pair.toId)],
+    );
+    return result.rows.map(toObject);
+  }
+
   async stagedBytes(id: string): Promise<number> {
     if (!isUuid(id)) {
       return 0;

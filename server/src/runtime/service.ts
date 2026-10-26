@@ -30,7 +30,7 @@ import { randomUUID } from "node:crypto";
 
 import { CoercionError, assertNoNulCharacter, coerceValue, valueToText } from "../core/dataTypes.js";
 import { getEmbeddingProvider } from "../core/embedding.js";
-import { ConflictError, IdentityTakenError, NotFoundError, ValidationError } from "../core/exceptions.js";
+import { ConflictError, IdentityTakenError, NotFoundError, PairTakenError, ValidationError } from "../core/exceptions.js";
 import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core/oql/index.js";
 import type { RuntimeStore } from "../core/ports.js";
 import type { ParentEnd, PropertyDef } from "../core/schemas.js";
@@ -221,6 +221,7 @@ function relationTypeDefToExport(rtDef: RelationTypeDef): Row {
     fromEntityTypeKey: rtDef.fromEntityTypeKey,
     toEntityTypeKey: rtDef.toEntityTypeKey,
     parent: rtDef.parent,
+    onePerPair: rtDef.onePerPair,
     properties: Object.values(rtDef.properties).map(propertyToExport),
   };
 }
@@ -1266,6 +1267,10 @@ export async function createRelation(
 
     if (Object.keys(errors).length > 0) {
       throw new ValidationError("Instance validation failed", { fields: errors });
+    }
+
+    if (fullRtForValidation.onePerPair && (await tx.lockPair(relationTypeKey, fromEntityId, toEntityId)) !== null) {
+      throw new PairTakenError(relationTypeKey);
     }
 
     const relation = await tx.createRelation(

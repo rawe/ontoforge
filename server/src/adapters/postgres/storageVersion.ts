@@ -47,7 +47,7 @@ import { quoteIdent } from "./oql/bindings.js";
 import { camelizeRow } from "./rows.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 10;
+export const STORAGE_VERSION = 11;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 1;
@@ -610,6 +610,11 @@ const STEPS: Step[] = [
       `ALTER TABLE entity ADD CONSTRAINT entity_identity_unique UNIQUE (type_key, identity)
   DEFERRABLE INITIALLY IMMEDIATE`,
     ],
+  },
+  {
+    // Relation rules: one per pair on a relation type.
+    to: 11,
+    actions: [`ALTER TABLE relation_type ADD COLUMN one_per_pair boolean NOT NULL DEFAULT false`],
   },
 ];
 

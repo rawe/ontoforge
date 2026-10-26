@@ -1452,17 +1452,17 @@ export interface SearchIndexStore {
   // Entries (the pipeline's surface)
   // ------------------------------------------------------------------
 
-  /** Insert or replace entries of one generation by identity. False (and
-   * nothing written) when the generation is no longer building or ready.
-   * An identity may appear once per call. With `claim` (the worker's
-   * claimed items of the generation), only the entities whose claimed
-   * items the claim still all holds are written; the others were taken
-   * over or withdrawn by a write, and stay as they are. */
+  /** Insert or replace entries of one generation by identity; the count
+   * written. Null (and nothing written) when the generation is no longer
+   * building or ready. An identity may appear once per call. With `claim`
+   * (the worker's claimed items of the generation), only the entities whose
+   * claimed items the claim still all holds are written; the others were
+   * taken over or withdrawn by a write, and stay as they are. */
   upsertEntries(
     generationId: string,
     entries: SearchEntryWrite[],
     claim?: ClaimedSearchQueueItem[],
-  ): Promise<boolean>;
+  ): Promise<number | null>;
 
   /** The stored text hashes of those of `parts` that exist. */
   readEntryHashes(generationId: string, parts: SearchEntryPart[]): Promise<SearchEntryHash[]>;

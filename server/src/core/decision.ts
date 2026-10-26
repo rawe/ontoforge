@@ -14,7 +14,6 @@
 import { z } from "zod";
 
 import { settings } from "../config.js";
-import { timeProviderCall } from "../metrics.js";
 
 /** Pick exactly one option; `criteria` maps option key → description (or null). */
 export interface ChoiceQuestion {
@@ -133,7 +132,7 @@ export function createDecisionModel(
         throw new Error("Decision requests require 1–32 questions, 2–255 options per choice and 2–10 levels per score");
       }
       const timeout = AbortSignal.timeout(TIMEOUT_MS);
-      const response = await timeProviderCall("decision", () => fetch(url, {
+      const response = await fetch(url, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -141,7 +140,7 @@ export function createDecisionModel(
         },
         body: JSON.stringify({ model: modelName, state, questions }),
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-      }));
+      });
       if (!response.ok) {
         const text = await response.text();
         let detail: unknown = text;

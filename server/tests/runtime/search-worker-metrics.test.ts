@@ -16,6 +16,10 @@ const store = {
   finishGeneration: vi.fn(),
   designRevision: vi.fn(),
   sweepGenerations: vi.fn(),
+  readEntryHashes: vi.fn(),
+  upsertEntries: vi.fn(),
+  deleteEntityPartsExcept: vi.fn(),
+  deleteEntries: vi.fn(),
 };
 const runtime = { getEntityById: vi.fn() };
 
@@ -28,8 +32,22 @@ vi.mock("../../src/core/ports.js", async (importOriginal) => ({
 vi.mock("../../src/runtime/schemaCache.js", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   loadSearchContextUncached: async () => ({
-    schema: { entityTypes: { person: { key: "person", properties: {} } }, relationTypes: {} },
-    indices: [{ searchIndexId: "i1", definition: { entityType: "person", relations: [] } }],
+    schema: {
+      entityTypes: { person: { key: "person", properties: { name: { key: "name", dataType: "string" } } } },
+      relationTypes: {},
+    },
+    indices: [
+      {
+        searchIndexId: "i1",
+        definition: {
+          entityType: "person",
+          fields: ["name"],
+          header: ["name"],
+          relations: [],
+          semantic: { template: null },
+        },
+      },
+    ],
   }),
 }));
 
@@ -58,6 +76,9 @@ beforeEach(() => {
   store.failQueueItems.mockResolvedValue({ attempts: [1], lost: 0 });
   store.releaseQueueItems.mockResolvedValue(1);
   store.designRevision.mockResolvedValue({ ontologyId: "o", revision: 1 });
+  store.readEntryHashes.mockResolvedValue([]);
+  store.completeQueueItems.mockResolvedValue({ completed: 1, lost: 0 });
+  runtime.getEntityById.mockResolvedValue({ _entityTypeKey: "person", name: "Ada" });
 });
 
 describe("search worker metrics", () => {
@@ -95,5 +116,31 @@ describe("search worker metrics", () => {
     const before = await value("ontoforge_search_items_total", { outcome: "released" });
     await drainOnce({ ontologyKey: "a", signal: stop.signal });
     expect(await value("ontoforge_search_items_total", { outcome: "released" })).toBe(before + 1);
+  });
+
+  it("count the entries a held claim wrote", async () => {
+    store.queueStats.mockResolvedValue([]);
+    store.claimQueueItems.mockResolvedValue([item]);
+    store.upsertEntries.mockImplementation(async (_generation: string, writes: unknown[]) => writes.length);
+    const before = await value("ontoforge_search_entries_total", { representation: "keyword" });
+    await drainOnce({ ontologyKey: "a", signal: new AbortController().signal });
+    expect(store.upsertEntries).toHaveBeenCalled();
+    const writes = store.upsertEntries.mock.calls[0]![1] as unknown[];
+    expect(writes.length).toBeGreaterThan(0);
+    expect(await value("ontoforge_search_entries_total", { representation: "keyword" })).toBe(
+      before + writes.length,
+    );
+  });
+
+  it("count no entries for a claim taken over, whose writes the store dropped", async () => {
+    store.queueStats.mockResolvedValue([]);
+    store.claimQueueItems.mockResolvedValue([item]);
+    store.upsertEntries.mockResolvedValue(0);
+    store.completeQueueItems.mockResolvedValue({ completed: 0, lost: 1 });
+    const before = await value("ontoforge_search_entries_total", { representation: "keyword" });
+    await drainOnce({ ontologyKey: "a", signal: new AbortController().signal });
+    expect(store.upsertEntries).toHaveBeenCalled();
+    expect((store.upsertEntries.mock.calls[0]![1] as unknown[]).length).toBeGreaterThan(0);
+    expect(await value("ontoforge_search_entries_total", { representation: "keyword" })).toBe(before);
   });
 });

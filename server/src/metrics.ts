@@ -108,7 +108,7 @@ export function countSearchEntries(representation: string, count: number): void 
 }
 
 /** The external model providers whose calls are timed. */
-export type Provider = "embedding" | "ai" | "decision";
+export type Provider = "embedding" | "ai";
 
 /** Time `call` as one request to `provider`; a throw counts as an error. */
 export async function timeProviderCall<T>(provider: Provider, call: () => Promise<T>): Promise<T> {

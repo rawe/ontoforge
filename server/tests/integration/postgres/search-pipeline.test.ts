@@ -709,10 +709,10 @@ describe("PostgreSQL search pipeline", () => {
     const [current] = await store.claimQueueItems(options);
     expect(current?.entityId).toBe(ada);
     expect(new Date(current!.lease).getTime()).toBeGreaterThan(new Date(stale!.lease).getTime());
-    expect(await store.upsertEntries(generationId, [selfEntry(ada, "Ada current")], [current!])).toBe(true);
+    expect(await store.upsertEntries(generationId, [selfEntry(ada, "Ada current")], [current!])).toBe(1);
 
-    // The stale owner resumes: nothing it does lands.
-    expect(await store.upsertEntries(generationId, [selfEntry(ada, "Ada stale")], [stale!])).toBe(true);
+    // The stale owner resumes: nothing it does lands, and it is told so.
+    expect(await store.upsertEntries(generationId, [selfEntry(ada, "Ada stale")], [stale!])).toBe(0);
     const self = { entityId: ada, partKind: "self" as const, groupNo: 0, partId: "" };
     expect(await store.deleteEntries(generationId, [self], [stale!])).toBe(0);
     expect(await store.deleteEntityPartsExcept(generationId, ada, "self", 0, [], [stale!])).toBe(0);

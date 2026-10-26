@@ -419,14 +419,16 @@ async function processGeneration(
     textHash,
     embedding: representation === "semantic" ? vectors[i]! : null,
   }));
-  if (!(await store.upsertEntries(generation.generationId, writes, items))) {
+  // Only what the claim still held is written: a lost claim's writes are dropped.
+  const written = await store.upsertEntries(generation.generationId, writes, items);
+  if (written === null) {
     // The generation retired meanwhile: nothing left to do for it.
     return 0;
   }
   for (const deletion of deletions) {
     await deletion();
   }
-  return writes.length;
+  return written;
 }
 
 interface ComposedItems {

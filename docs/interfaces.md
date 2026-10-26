@@ -396,7 +396,7 @@ use the error envelope.
 | `ontoforge_search_queue_items` | gauge | `state` (`pending`, `failed`) |
 | `ontoforge_search_items_total` | counter | `outcome` (`completed`, `failed`, `released`) |
 | `ontoforge_search_entries_total` | counter | `representation` (`keyword`, `semantic`) |
-| `ontoforge_provider_request_duration_seconds` | histogram | `provider` (`embedding`, `ai`, `decision`), `outcome` (`ok`, `error`) |
+| `ontoforge_provider_request_duration_seconds` | histogram | `provider` (`embedding`, `ai`), `outcome` (`ok`, `error`) |
 | `process_*`, `nodejs_*` | as the client library defines them | none |
 
 `route` is the route template (`/api/ontologies/:ontologyKey`), or `unmatched` for a request

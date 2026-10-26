@@ -84,7 +84,7 @@ describe("every registered route has a need", () => {
       counts[kind] = (counts[kind] ?? 0) + 1;
     }
     expect(counts).toEqual({
-      public: 18,
+      public: 19,
       "signed-in": 1,
       platform: 1,
       "user-admin": 7,
@@ -108,6 +108,7 @@ describe("needOf", () => {
 
   it.each([
     ["GET", "/livez", { kind: "public" }],
+    ["GET", "/metrics", { kind: "public" }],
     ["GET", "/docs/static/index.html", { kind: "public" }],
     ["OPTIONS", "*", { kind: "public" }],
     ["GET", "/api/server/info", { kind: "public" }],

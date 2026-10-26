@@ -342,15 +342,6 @@ a cost and an outage no one asked for.
 **A failed index ensure never stops the boot.** The state that makes an ensure fail is an
 unfinished rebuild, and refusing to start would take away the server needed to finish it.
 
-**Metrics are served in Prometheus text format on a port of their own, off unless
-configured, never on the client port.** Every route on the client port passes the access
-rules, while a scraper reaches the metrics port only from the deployment's internal network
-and needs no credential.
-
-**A metric's labels never carry an ontology, lens, principal or raw path; requests are
-labelled by route template.** The number of series then depends on the code alone, and
-metrics reveal nothing about what any ontology holds.
-
 ## Scope
 
 **Transfer moves one ontology's design into an existing ontology, never instance data and

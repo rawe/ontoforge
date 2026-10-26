@@ -21,7 +21,6 @@ import {
   initEmbeddingProvider,
 } from "./core/embedding.js";
 import { closeStores, ensureSemanticIndexes, initStores } from "./core/ports.js";
-import { startMetricsServer } from "./metrics.js";
 import { startSearchWorker, stopSearchWorker } from "./runtime/indexing/worker.js";
 import { openSharedState } from "./sharedState.js";
 
@@ -148,17 +147,11 @@ async function main(): Promise<void> {
   try {
     app = await startServer();
     await app.listen({ port: settings.PORT, host: "0.0.0.0" });
-    // After the client port, and open until the process exits: a draining
-    // server is still scraped.
-    if (settings.METRICS_PORT !== null) await startMetricsServer(settings.METRICS_PORT);
   } catch (error) {
     console.error("Startup failed:", error);
     process.exit(1);
   }
   console.log(`OntoForge server listening on port ${settings.PORT}`);
-  if (settings.METRICS_PORT !== null) {
-    console.log(`Metrics served on port ${settings.METRICS_PORT} at /metrics`);
-  }
 
   // Every signal joins the one shutdown; the first arms the hard exit.
   let stage: string | null = null;

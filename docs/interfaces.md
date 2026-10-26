@@ -1,7 +1,7 @@
 # Interfaces
 
 The complete index of every way into the system: the ontology registry, two per-ontology
-REST surfaces, one server-wide route, two probes, a metrics endpoint, two MCP servers, and — with
+REST surfaces, one server-wide route, two probes, a metrics route, two MCP servers, and — with
 authentication on — sign-in and user management. Concepts and
 vocabulary: [README.md](README.md). Structure and error model: [architecture.md](architecture.md).
 What each operation *means* is in [capabilities/](capabilities/) — this document is the
@@ -342,6 +342,25 @@ administrator, disabling either of them, or disabling oneself answers
 that principal into the service; one bound to a principal with a role answers
 `RESOURCE_CONFLICT`.
 
+## Exposure
+
+One port serves everything. What a deployment exposes follows one rule: **what clients call
+is public, what the platform calls stays internal.** The ingress or reverse proxy in front
+of the server enforces it; the server itself serves every path on every request.
+
+| Path | Exposed | Called by |
+|---|---|---|
+| `/api/*` | public | REST clients and the web client |
+| `/mcp/*` | public | MCP clients |
+| `/.well-known/*` | public | MCP clients finding where to sign in (authentication on) |
+| `/openapi.json` | public | Clients reading the contract or generating code from it |
+| `/docs/*` | optional | People browsing the same description |
+| `/livez`, `/readyz` | internal | The orchestrator, on each server directly |
+| `/metrics` | internal | The monitoring system, on each server directly |
+
+Probes and metrics describe one server process, so they are called on each server, never
+through a load balancer that would pick one at random.
+
 ## Probes
 
 Two routes outside `/api` for an orchestrator; they check no dependency, are not part of
@@ -352,27 +371,32 @@ the OpenAPI description and do not use the error envelope.
 | GET | `/livez` | `200` while the process answers requests |
 | GET | `/readyz` | `200` until the server starts shutting down, then `503` |
 
-Neither answers before startup is done ([architecture.md](architecture.md#startup)); while
-`/readyz` answers `503` the server finishes its running work
-([architecture.md](architecture.md#shutdown)).
+They are two because they trigger different actions: a failing liveness probe restarts the
+server, a failing readiness probe only stops new traffic to it. While shutting down, a
+server is ready no longer but still live, so it finishes its running requests and chat
+streams instead of being restarted in the middle of them
+([architecture.md](architecture.md#shutdown)). Neither answers before startup is done
+([architecture.md](architecture.md#startup)).
 
 ## Metrics
-
-With `METRICS_PORT` set, the server serves its metrics on that port of its own, never on
-the client port ([decisions.md](decisions.md#deployment)). The route is not part of the
-OpenAPI description, takes no credential and does not use the error envelope.
 
 | Method | Path | Answers |
 |---|---|---|
 | GET | `/metrics` | Every metric of this server process in Prometheus text format |
 
-Each server process is scraped on its own. The metrics:
+Like the probes it needs no credential, is not part of the OpenAPI description and does not
+use the error envelope.
 
 | Metric | Type | Labels |
 |---|---|---|
-| `ontoforge_http_requests_total` | counter | `method`, `route` (the route template, or `unmatched`), `status` (the status code) |
-| `ontoforge_http_request_duration_seconds` | histogram | as above; a streamed response is timed to its end |
-| process metrics (`process_*`, `nodejs_*`) | as their library defines | none |
+| `ontoforge_http_requests_total` | counter | `method`, `route`, `status` |
+| `ontoforge_http_request_duration_seconds` | histogram | `method`, `route`, `status` |
+| `process_*`, `nodejs_*` | as the client library defines them | none |
+
+`route` is the route template (`/api/ontologies/:ontologyKey`), or `unmatched` for a request
+no route answers; `status` is the status code. No label carries an ontology, a lens, a
+principal or a raw path, so the number of series depends on the code alone. A streamed
+response is timed to its end.
 
 ## Modeling REST
 

@@ -1,6 +1,3 @@
-import type { Server } from "node:http";
-import type { AddressInfo } from "node:net";
-
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -10,22 +7,15 @@ vi.mock("../../src/core/ports.js", () => ({
   supportsKeywordRanking: async () => false,
 }));
 
-const { registry, startMetricsServer } = await import("../../src/metrics.js");
+const { registry } = await import("../../src/metrics.js");
 
 let app: FastifyInstance;
-let server: Server;
-let base: string;
 
 beforeAll(async () => {
   app = await (await import("../../src/app.js")).createApp();
   await app.ready();
-  server = await startMetricsServer(0);
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
-afterAll(async () => {
-  server.close();
-  await app.close();
-});
+afterAll(async () => app.close());
 
 /** The value of the request counter for these labels, 0 when it has none. */
 async function requests(labels: Record<string, string>): Promise<number> {
@@ -58,20 +48,19 @@ describe("request metrics", () => {
   });
 });
 
-describe("metrics port", () => {
-  it("serves the registry in Prometheus text format at /metrics", async () => {
+describe("GET /metrics", () => {
+  it("serves the registry in Prometheus text format", async () => {
     await app.inject({ url: "/livez" });
-    const res = await fetch(`${base}/metrics`);
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toContain("text/plain");
-    const body = await res.text();
-    expect(body).toContain('ontoforge_http_requests_total{method="GET",route="/livez",status="200"}');
-    expect(body).toContain("ontoforge_http_request_duration_seconds_bucket");
-    expect(body).toContain("nodejs_eventloop_lag_seconds");
+    const res = await app.inject({ url: "/metrics" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/plain");
+    expect(res.body).toContain('ontoforge_http_requests_total{method="GET",route="/livez",status="200"}');
+    expect(res.body).toContain("ontoforge_http_request_duration_seconds_bucket");
+    expect(res.body).toContain("nodejs_eventloop_lag_seconds");
   });
 
-  it("answers 404 for anything else", async () => {
-    expect((await fetch(`${base}/`)).status).toBe(404);
-    expect((await fetch(`${base}/metrics`, { method: "POST" })).status).toBe(404);
+  it("is not part of the OpenAPI description", async () => {
+    const spec = (await app.inject({ url: "/openapi.json" })).json();
+    expect(Object.keys(spec.paths)).not.toContain("/metrics");
   });
 });

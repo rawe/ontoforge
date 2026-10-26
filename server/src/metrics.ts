@@ -1,20 +1,21 @@
 /**
- * Metrics in Prometheus text format, served on a port of their own
- * (`METRICS_PORT`) — never on the client port, so no route there and no
- * access rule changes for them.
+ * Metrics in Prometheus text format at `/metrics`, beside the probes on the
+ * client port. Like the probes it is for the platform, not for clients: the
+ * ingress keeps it internal (`docs/interfaces.md#exposure`).
  *
  * One registry per process holds every metric. Requests are labelled by
  * route template, never by raw path or ontology, so the number of series
- * depends on the code alone (`docs/decisions.md#deployment`). A new metric
- * is defined here and registered on `registry`.
+ * depends on the code alone. A new metric is defined here and registered
+ * on `registry`.
  */
-
-import { createServer, type Server } from "node:http";
 
 import type { FastifyInstance } from "fastify";
 import { collectDefaultMetrics, Counter, Histogram, Registry } from "prom-client";
 
 export const registry = new Registry();
+
+// Process metrics: CPU, memory, event-loop lag, garbage collection.
+collectDefaultMetrics({ register: registry });
 
 const httpRequests = new Counter({
   name: "ontoforge_http_requests_total",
@@ -36,9 +37,10 @@ export const UNMATCHED = "unmatched";
 
 /**
  * Count and time every request of `app` until its response closes —
- * closed, so hijacked chat streams and MCP count as well, timed to their end.
+ * closed, so hijacked chat streams and MCP count as well, timed to their
+ * end — and serve the registry at `GET /metrics`.
  */
-export function observeRequests(app: FastifyInstance): void {
+export function serveMetrics(app: FastifyInstance): void {
   app.addHook("onRequest", async (request, reply) => {
     const end = httpDuration.startTimer();
     reply.raw.once("close", () => {
@@ -51,34 +53,7 @@ export function observeRequests(app: FastifyInstance): void {
       end(labels);
     });
   });
-}
-
-/**
- * Listen on `port` and answer `GET /metrics` from the registry; anything
- * else answers 404. Also starts the process metrics (CPU, memory,
- * event-loop lag, garbage collection).
- */
-export async function startMetricsServer(port: number): Promise<Server> {
-  if (registry.getSingleMetric("process_cpu_seconds_total") === undefined) {
-    collectDefaultMetrics({ register: registry });
-  }
-  const server = createServer((request, response) => {
-    if (request.method !== "GET" || request.url?.split("?")[0] !== "/metrics") {
-      response.writeHead(404).end();
-      return;
-    }
-    registry.metrics().then(
-      (body) => response.writeHead(200, { "content-type": registry.contentType }).end(body),
-      (error: unknown) => {
-        console.error("Collecting metrics failed:", error);
-        response.writeHead(500).end();
-      },
-    );
-  });
-  server.listen(port, "0.0.0.0");
-  await new Promise<void>((resolve, reject) => {
-    server.once("listening", resolve);
-    server.once("error", reject);
-  });
-  return server;
+  app.get("/metrics", { schema: { hide: true } }, async (_request, reply) =>
+    reply.header("content-type", registry.contentType).send(await registry.metrics()),
+  );
 }

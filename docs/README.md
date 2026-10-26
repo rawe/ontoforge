@@ -40,6 +40,7 @@ what rules bind it, and how it is reached from every interface.
 | [navigators](capabilities/navigators.md) | Navigators — assistants that answer by walking the lens's graph: configuration, the pipeline of a turn, what the client sees, the default navigator |
 | [retrievers](capabilities/retrievers.md) | Retrievers — assistants that answer from a lens's search indices: configuration, validation, planning, retrieval, retrieve, diagnostics, the default retriever, portable JSON |
 | [threads](capabilities/threads.md) | Server-held assistant conversations: starting, continuing and reading a thread, atomic turns, lifetime |
+| [entity-identity](capabilities/entity-identity.md) | Ids and identities: declaring an identity, its text form, uniqueness, addressing by identity, renames, lenses, changesets |
 | [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
 | [transfer](capabilities/transfer.md) | Schema export and import |
 | [rulesets](capabilities/rulesets.md) | Rulesets — named records holding the rules for the MCP clients of one URL: the record and its maintenance, ruleset mounts, write access, the anchor |
@@ -120,7 +121,8 @@ served by the same process, and both address one ontology named in the path.
 | Scope | The whole ontology | Only what the lens exposes |
 | Changes | Rare, deliberate | Continuous |
 
-Runtime never edits the schema, and modeling never writes instance data. That is what
+Runtime never edits the schema, and modeling never writes instance data — except an
+entity's derived [identity](capabilities/entity-identity.md). That is what
 makes it safe to expose runtime to an autonomous agent while keeping modeling under human
 control.
 
@@ -230,8 +232,17 @@ searches; those inclusions never make a lens scoped.
 
 ### Data
 
-**Entity** — one instance of an entity type. Has a system-assigned identifier and the
-properties its type defines.
+**Entity** — one instance of an entity type. Has a system-assigned identifier (its id) and
+the properties its type defines, and an identity when its type declares one.
+
+**Identity** — an entity's semantic name within its type: the values of its type's
+identity properties in order, joined into one string (`_identity`), unique within the type.
+Derived, never written; it changes when those values change. The id stays the reference.
+See [capabilities/entity-identity.md](capabilities/entity-identity.md).
+
+**Identity properties** — the ordered list of 1 to 5 `string`, `integer` or `date`
+properties an entity type declares as its identity; required, without a default, and
+locked while they belong to it.
 
 **Relation** — one instance of a relation type, connecting two entities. Its endpoints
 are fixed once created; its properties are not.
@@ -489,7 +500,7 @@ See [capabilities/threads.md](capabilities/threads.md).
 ### Access
 
 **Principal** — a person or a service as OntoForge knows it, bound to one verified
-identity at the OpenID provider: its issuer and subject. Active or disabled.
+sign-in identity at the OpenID provider: its issuer and subject. Active or disabled.
 
 **Role** — what a principal may do on one scope: **Platform Administrator** and **Ontology
 Creator** on the platform, **Ontology Administrator** on one ontology, **Reader**,

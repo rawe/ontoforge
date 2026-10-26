@@ -154,7 +154,7 @@ composed text does not identify an individual property. Null must not be read as
 | `index` | The key of the index the entry belongs to |
 | `partKind` | `self` (own fields), `relation` or `passage` |
 | `relationType`, `relationId` | The relation of a relation entry; null otherwise |
-| `target` | For a relation entry, the entity at the relation's other end: `id`, `type` and `label`, the value of its name property — null when empty or hidden by the lens. Null otherwise |
+| `target` | For a relation entry, the entity at the relation's other end: `id`, `type`, `label`, the value of its name property — null when empty or hidden by the lens — and `identity`, its [identity](entity-identity.md) — null when it has none or the lens does not show it. Null otherwise |
 | `snippet` | The start of the entry's text, whitespace collapsed, at most 200 code points, an ellipsis marking a cut. Empty when the index reads a property the lens hides |
 | `charOffset`, `charLength` | A passage's coordinates in its document; null otherwise |
 

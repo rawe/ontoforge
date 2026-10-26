@@ -153,6 +153,14 @@ all three are returned on every read. One extra predicate is required on the ent
 side: whether any relation type currently names a given entity type as an endpoint. It
 backs the rule that an entity type in use cannot be deleted.
 
+**The identity.** An entity type carries its [identity](capabilities/entity-identity.md)
+properties, an ordered key list or none, written by a write of its own after the service
+checked it. Two operations serve it: read every stored entity of a type key, by id, with
+the stored values of given property keys; and write the derived identity of listed
+entities, or clear it on every entity of the type key. The identity's uniqueness is
+checked when the design change ends, so a write may pass through a duplicate, as when two
+entities swap identities. Deleting an entity type clears its orphaned entities' identities.
+
 **The parent flag.** A relation type's parent end is written on create and by its own flag
 write, which sets, changes or clears it. Both check the parent rules
 ([capabilities/schema-modeling.md](capabilities/schema-modeling.md#parent-relations))
@@ -239,6 +247,16 @@ write already carries for the conversion inward; an adapter whose storage distin
 those forms natively may ignore them. Update takes the properties to set and the property
 keys to remove as two separate inputs. Delete by type key and id, returning whether
 anything was deleted.
+
+Create and update also take an entity's identity, built by the service — never by the
+store. Rows carry it as `_identity` when the entity has one. The store enforces its
+uniqueness within the type key: a write that would duplicate one, a concurrent one
+included, raises the identity conflict, naming the type key and the identity, and writes
+nothing. Two reads serve it: the entity of a type key with exactly a given identity, and
+the ids and identities of a type key's entities holding any of given identities. Within a
+transaction the identity check may be deferred to its end, and made immediate again;
+the commit of a changeset defers it, so its phases may pass through a duplicate, and a
+check makes it immediate before it rolls back.
 
 Listing is the one read with real machinery. It takes the type key, the scoped property
 definitions, the parsed filter conditions, an optional text-search string with the string
@@ -527,7 +545,8 @@ itself. Every data write uses it, a changeset's commit included.
 The changeset store holds an ontology's [changesets](capabilities/changesets.md): per
 changeset its id, its lens, its number, the ruleset key of the URL that started it or none, a version, a
 note, the time it was submitted or none, and timestamps; per staged object its id, kind,
-type key, action, a relation's two ends and the time it was first touched; per staged
+type key, action, a relation's two ends, the identity it gives an entity or none, and the
+time it was first touched; per staged
 value its property key, the value, the recorded before or none, and its size in bytes,
 all kept as given. The store evaluates no rule — the service does — except the state and
 version a change needs, which it judges in the statement that writes, so a submit racing
@@ -539,7 +558,8 @@ a change is never overwritten.
   list them bound the same way, by number, lowest first, with
   their counts per action and kind and the type keys they name; their staged objects
   with their values by first touch, paged; the staged objects of given ids; the staged
-  relations with an end at a given entity; the summed size of its staged values.
+  relations with an end at a given entity; the ids of its staged entity objects of a type
+  key with a given identity; the summed size of its staged values.
 - **Changes.** Apply one change to a draft changeset at the version the service read, all
   or none: remove objects with their values, remove values, add objects or change their
   action, and write values whole; submit, a compare-and-set on the version of a draft
@@ -588,7 +608,7 @@ conflicts, but the store must itself enforce, within each ontology, uniqueness o
 lens's internal id, key and name; each entity type's internal id and key; each relation
 type's internal id and key; each property definition's internal id; each agent
 configuration's internal id; each saved query's internal id; each search index's key; and
-each entity instance's id — and, server-wide, each ontology's key and display name. A concurrent pair of writes
+each entity instance's id; each entity's identity within its type key — and, server-wide, each ontology's key and display name. A concurrent pair of writes
 must produce a conflict, not a duplicate. Lookup of instances by type key must be
 indexed — every listing depends on it.
 
@@ -651,7 +671,8 @@ be preserved exactly. Parameters are supplied separately and bound, never splice
 driver failures and converts them, so that no route into the store can bypass the
 translation. The catch is narrow: it converts driver exceptions only, letting domain
 exceptions raised inside the same scope — and ordinary programming errors — propagate
-unchanged. A lock the adapter cannot have — one taken without waiting, or one waited
+unchanged. A violated identity uniqueness is the identity conflict, not the storage error
+([decisions.md](decisions.md#storage)). A lock the adapter cannot have — one taken without waiting, or one waited
 for past a bounded wait — is the conflict error, not the storage error.
 
 ## The validated query
@@ -754,7 +775,7 @@ runs each missing upgrade step inside every `ont_*` namespace — then the step'
 server-wide statements, if it has any, once in `public` — and records the new version
 last. The upgrade is logged, and the server never backs up storage itself. The steps and
 both version constants live in the storage-version module beside the DDL; the current
-storage version is 9. Before that
+storage version is 10. Before that
 transaction the adapter logs the pgvector version — the installed one, or the one the
 extension would install — and warns when it predates 0.7, which has no
 `halfvec`: the search entry table cannot then be created, so an upgrade of an existing
@@ -777,7 +798,7 @@ per namespace:
 | Logical | Table | Joined by |
 |---|---|---|
 | Lens | `lens` | referenced by its inclusions, agents, saved queries, retrievers, navigators and changesets |
-| Entity type | `entity_type` | referenced by its property definitions and inclusions; its name property's key in `name_property`, a reference to `property_def` by entity type and key, checked at commit |
+| Entity type | `entity_type` | referenced by its property definitions and inclusions; its name property's key in `name_property`, a reference to `property_def` by entity type and key, checked at commit; its identity property keys in order in the nullable array `identity_properties` |
 | Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions; its parent end in the nullable `parent` column, `source` or `target`, with no check |
 | Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
 | Scope inclusion | `lens_includes` | its lens plus exactly one of three columns — entity type, relation type or search index; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array. Search-index rows reach the runtime schema read as index keys; the type-inclusion reads skip them |
@@ -831,7 +852,8 @@ tables by name.
 
 Two generic tables per namespace hold all of an ontology's instance data, however many
 types its schema declares: `entity` and `relation`. Each row carries its `uuid` id, its
-type key, its user properties as one `jsonb` document, and its timestamps — nothing
+type key, its user properties as one `jsonb` document, its timestamps, and on `entity` the
+derived `identity`, text, null for a type without one — nothing
 else: an entity carries no search data, which lives in the search-index tables alone
 (below). A schema change — a new type, a new property — is therefore pure data for
 instance storage: no table or column is ever created per type or property. The only DDL
@@ -846,6 +868,14 @@ entity removes its relations in either direction in the same statement, and a da
 endpoint is unrepresentable. The
 instance tables' type-key columns carry no foreign key to the schema tables — deleting a
 type deliberately orphans its instances, matching the documented deletion behaviour.
+
+The identity's uniqueness is the constraint `entity_identity_unique`,
+`UNIQUE (type_key, identity)`, `DEFERRABLE INITIALLY IMMEDIATE`; nulls never collide, so
+types without an identity are unaffected. A design change that writes identities, and the
+commit of a changeset, set it `DEFERRED` for their transaction; a check sets it `IMMEDIATE`
+before it rolls back. Its violation, `23505` on that constraint, translates to the identity
+conflict, the type key and identity read from the violation's detail. A violation the
+deferred check finds at `COMMIT` fails the commit as a conflict.
 
 Four B-tree indexes back the hot paths: entity rows by type key; relation rows by type
 key, by source entity and by target entity. Filters, sorts and text search evaluate jsonb expressions that cast a property to
@@ -889,13 +919,14 @@ ruleset delete leaves the row; `submitted_at` is null for a draft; `number` an `
 `changeset_object` holds one row per staged object under the primary key
 `(changeset_id, object_id)`, its changeset a foreign key with delete cascade; `kind`,
 `type_key` and `action` are text, `from_id` and `to_id` a relation's ends, null for an
-entity, and `first_touched_at` the clock at its insert, so the objects one change adds
+entity, `identity` the identity the changeset gives an entity, or null, and `first_touched_at` the clock at its insert, so the objects one change adds
 keep their order. `changeset_value` holds one row per staged value under the primary key
 `(changeset_id, object_id, property_key)`, its object a foreign key with delete cascade;
 `value` is `jsonb`, JSON null removing the property; `before` is `jsonb`, `{"value": …}`
 for a stored value, `{}` for a key the target lacked and SQL null for a value of a
-create; the size `bytes` an `integer`. Two B-tree indexes serve them besides the primary
-keys: changesets by lens, and staged objects by changeset and first touch. The staged
+create; the size `bytes` an `integer`. Three B-tree indexes serve them besides the primary
+keys: changesets by lens, staged objects by changeset and first touch, and staged objects
+by changeset, type key and identity. The staged
 relations at an entity are found by a scan of the changeset's own objects.
 
 Every change takes the changeset row `FOR UPDATE NOWAIT`, and states its state condition —
@@ -1018,7 +1049,7 @@ The queue works in plain SQL on `search_queue`:
 ## Index inventory
 
 Beyond the uniqueness constraints and the B-tree indexes above — the instance tables' four
-and the changeset tables' two — and the search-index tables' own indexes, one vector index
+and the changeset tables' three — and the search-index tables' own indexes, one vector index
 exists per namespace: an HNSW index, cosine, over `saved_query`'s dimensionless
 `embedding` column cast to the provider's width — a fixed name, full-table, for
 description search within the ontology. Registry create builds it when an embedding width

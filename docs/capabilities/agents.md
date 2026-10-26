@@ -13,7 +13,7 @@ with an agent fails.
 Everything here is runtime, and everything is scoped to one lens of one ontology
 ([ontology-lenses.md](ontology-lenses.md)). A model is given the lens's schema — the
 lens's name and key, the system properties, each entity type with its
-properties, their data types and required flags, and each relation type with its
+properties, their data types and required flags and its [identity](entity-identity.md) properties, and each relation type with its
 endpoints. Out-of-scope types are not merely filtered out of results; they are never
 described to the model in the first place — and nothing of any other ontology ever is.
 

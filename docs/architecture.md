@@ -155,7 +155,7 @@ Physical representation is the adapter's business; this is the logical shape.
 
 ### Server level
 
-| Kind | Identity | Notable fields |
+| Kind | Identifier | Notable fields |
 |---|---|---|
 | Ontology | id, `key` unique server-wide | display name (optional, unique server-wide), timestamps |
 
@@ -166,10 +166,10 @@ exactly one ontology.
 
 Per ontology. "Unique" here always means unique within the owning ontology.
 
-| Kind | Identity | Notable fields |
+| Kind | Identifier | Notable fields |
 |---|---|---|
 | Lens | id, unique `key`, unique name | name, description, timestamps |
-| Entity type | id, unique `key` | display name, description, name property, timestamps |
+| Entity type | id, unique `key` | display name, description, name property, identity properties (optional), timestamps |
 | Relation type | id, unique `key` | display name, source and target entity type keys, parent end (optional) |
 | Property definition | id, `key` unique within its owner | data type, required, default; owned by exactly one entity type or relation type |
 | Search index | id, unique `key` | kind (default, passage or custom), root entity type, definition, timestamps |
@@ -187,20 +187,22 @@ lens key, can exist independently in two ontologies.
 
 ### Instance level
 
-| Kind | Identity | Notable fields |
+| Kind | Identifier | Notable fields |
 |---|---|---|
-| Entity | `_id` | its type key, plus the properties its type defines |
+| Entity | `_id`; `_identity` unique within its type, when the type declares one | its type key, plus the properties its type defines |
 | Relation | `_id` | its type key, its two endpoint ids, plus its properties |
 | Ruleset | unique `key` | its rules: the anchor's entity (type key and id) or none, and the write access |
 | Changeset | id | its lens, its number, the ruleset key of the URL that started it (optional), version, note, submitted time (absent for a draft), timestamps |
-| Staged object | changeset + the entity or relation id | kind, type key, action, a relation's ends, first touch |
+| Staged object | changeset + the entity or relation id | kind, type key, action, a relation's ends, the identity it gives an entity, first touch |
 | Staged value | staged object + property key | the value, the before of an update |
 | Chunk | internal | fragment of one document property, with its offset and length, kept as a passage entry |
 | Search entry | internal | one indexed text of one entity in one generation of a search index — its own fields, one relation, or one chunk |
 
 System properties are server-managed, always readable, never writable: `_id`,
 `_createdAt`, `_updatedAt`, plus `_entityTypeKey` on entities and `_relationTypeKey` on
-relations. They are distinguished by a leading underscore, and since no user-defined key
+relations, and `_identity` on entities of a type with an identity — derived from the
+identity properties' values, the one system property a lens can withhold
+([entity identity](capabilities/entity-identity.md)). They are distinguished by a leading underscore, and since no user-defined key
 may begin with one, the namespaces cannot collide.
 
 That separation rests entirely on the key pattern being enforced, and one entry point does
@@ -217,10 +219,10 @@ never appear in a response.
 
 In the access database, with authentication on; nothing here belongs to an ontology.
 
-| Kind | Identity | Notable fields |
+| Kind | Identifier | Notable fields |
 |---|---|---|
 | Principal | id | kind (user or service), display name, email, username, status (active or disabled), last sign-in |
-| Identity | issuer + subject, unique | its principal |
+| Sign-in identity | issuer + subject, unique | its principal |
 | Assignment | id | its principal, role, ontology id (ontology and lens roles), lens id (lens roles), who granted it |
 | Audit entry | internal | who changed what, and when |
 
@@ -383,10 +385,10 @@ nothing below runs. What a caller experiences, and what each role allows:
 session cookie, never both: a bearer header decides alone, and the MCP mounts take bearer
 tokens only. A token is checked against the provider's published keys — issuer, audience,
 OntoForge's scope, expiry, an asymmetric signature, and no nonce, which only an ID token
-carries — and never sent to the provider to ask. Its identity, or
+carries — and never sent to the provider to ask. Its sign-in identity, or
 the session's, leads to the principal in the access database, read with its assignments
 afresh on every request, with no cache: a revoked role or a disabled principal is refused
-on the next request, on every server. An identity seen for the first time becomes a
+on the next request, on every server. A sign-in identity seen for the first time becomes a
 principal with no role, created once however many first requests race.
 
 **Browser sessions.** The server is the browser's OpenID client: authorization code with

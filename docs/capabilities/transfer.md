@@ -13,7 +13,7 @@ ontologies, transfer included.
 
 | Carried | Detail |
 |---|---|
-| Entity types | Key, display name, description, the key of its name property, and every property definition |
+| Entity types | Key, display name, description, the key of its name property, its [identity](entity-identity.md) properties (`identityProperties`, omitted when it has none), and every property definition |
 | Relation types | The same, plus the keys of the source and target entity types and the parent end, `parent`, null when unset |
 | Property definitions | Key, display name, description, data type, required flag, default |
 | Lenses | Key, name, description, their type inclusions — absent entirely for an unscoped lens — and the keys of the search indices they include |
@@ -192,6 +192,11 @@ Import is a write path, and the write-path rules apply to it:
   `string` properties; a missing or unsuitable one is rejected, naming the type.
 - `document` properties are permitted on entity types only. One on a relation type is
   rejected, naming the property and its type.
+- An entity type's `identityProperties` must follow the rules of a
+  [declared identity](entity-identity.md#declaring-an-identity): 1 to 5 distinct keys of
+  its own `string`, `integer` or `date` properties, each required and without a default.
+  Import never cascades, so a breach is rejected, naming the type. An older document has
+  no identities.
 - Every custom search index is validated against the payload's own schema, exactly as at
   definition time ([search-indices.md](search-indices.md#validation-and-limits)), and
   every switched-off key must name a managed index that schema derives. An invalid one

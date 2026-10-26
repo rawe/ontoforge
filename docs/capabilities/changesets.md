@@ -66,6 +66,11 @@ An entity delete also takes out every staged relation at that entity, which the 
 would delete with it, and answers their ids. An update, delete or document edit of an
 object this changeset deletes is refused as the immediate write refuses a missing target.
 
+- **Identities resolve at staging.** A call may name an entity by its
+  [identity](entity-identity.md#in-a-changeset) wherever it may name it by id. The
+  identity is resolved once, in the changeset's view — an entity created, renamed or
+  deleted here counts as this changeset leaves it — and the staged object holds the id.
+  An identity two entities hold in that view is refused as a conflict.
 - **Ids are final.** A staged create gets its id at staging, and it keeps it when
   committed. Later calls of the same changeset may name it: an update or delete of the
   created entity, a relation to it, a create beneath it.
@@ -127,8 +132,13 @@ checked.
    object is one write, through the same store writes as the immediate path, each with its
    search work. A delete whose target is already gone counts as done and is listed in the
    answer as already gone. An object that cannot be applied stops the commit.
-5. **Commit validation** over the end state, then the staged objects are deleted with the
+5. **Commit validation** over the end state, identities included, then the staged objects are deleted with the
    changeset, and everything persists at once.
+
+An identity another write took after the pass is caught when everything persists: the
+commit is refused as a conflict, "An identity was taken meanwhile; nothing was persisted.
+Check and commit again", and the changeset is kept as it was. A check runs that last
+identity test before it rolls back, so it reports such a clash as `duplicate_identity`.
 
 The commit answers how many staged objects it committed and the ids of the deletes already
 gone. A rejected commit persists nothing, keeps the changeset, its state and its version,
@@ -155,6 +165,7 @@ the changeset change meanwhile.
 | `missing` | The stored target of an update is gone |
 | `dangling` | An end of a staged relation create is neither stored nor created in this changeset, or an end of a staged relation is deleted in it |
 | `drift` | The current value of an update's key differs from its before |
+| `duplicate_identity` | An entity the changeset gives an [identity](entity-identity.md#in-a-changeset) would share it with another entity after the commit |
 | `has_children` | A deleted entity still has children that the changeset neither deleted nor moved |
 | `hidden_relations` | A deleted entity has relations of a type the lens does not show ([delete](instance-data.md#entities)) |
 | `endpoint_type` | A relation end exists with the wrong entity type |
@@ -165,7 +176,7 @@ the changeset change meanwhile.
 | `anchor_deleted` | The entity of its ruleset's anchor no longer exists, or its type was deleted; on the whole changeset |
 | `anchor_hidden` | The entity of its ruleset's anchor is one the lens hides; on the whole changeset |
 
-The first five are the lock-free pass's, and they are also what submit and every read of
+The first six are the lock-free pass's, and they are also what submit and every read of
 a changeset's objects report. `drift` and `replay` sit on the value they concern, and a
 missing required value on its object; the others sit on the object. A property the lens
 hides is `not_visible` on its object and is never named. A violation's message names only
@@ -242,15 +253,17 @@ discarded, so one that vanished was committed — or its lens was deleted.
   `create_entity` — and the type keys it names that the lens shows, with a count of the
   others;
 - **the staged objects** in the order the changeset first touched them, paged, each with
-  its action, the name of the entity or the names of the relation's ends, its values —
+  its action, the name of the entity or the names of the relation's ends, the identity
+  it gives an entity (before and after, when it sets or changes one), its values —
   an update's before, current and after, a create's after — and the lock-free pass's
   faults as markers, on the value or on the object they concern:
-  `drift`, `dangling`, `missing`, `not_visible`, `replay`;
+  `drift`, `dangling`, `missing`, `not_visible`, `replay`, `duplicate_identity`;
 - **the staged text of a document property**: its staged value, the text a commit would
   leave, on an entity stored or created by the changeset, whole or by character range, as
   a [document is read](documents.md#reading-a-slice). When nothing is staged for it, or
   the changeset deletes the entity, it is not found.
-- **one entity as the changeset leaves it**: a stored entity, or one the changeset
+- **one entity as the changeset leaves it**, by id or by identity in the changeset's
+  view: a stored entity, or one the changeset
   creates, with its staged values applied, before defaults, and marked deleted when the
   changeset deletes it; beside it its staged object, as the review shows it, markers
   included. Staged relations at it are not part of it. An entity neither stored nor

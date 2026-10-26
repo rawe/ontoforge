@@ -154,7 +154,7 @@ A turn streams its work before its answer:
   entities · reached Person at hop 2" — and, for the walk, which round. A step the turn
   does not need arrives once, as skipped, with a summary and no duration.
 - **The entities** — [as every assistant reports them](threads.md#the-entities-a-turn-met):
-  each with a ref unique in the turn, its type, label, up to six fields, its role — anchor, reached by the walk, or carried over from the previous answer — its
+  each with a ref unique in the turn, its type, label, identity when it has one, up to six fields, its role — anchor, reached by the walk, or carried over from the previous answer — its
   distance from the nearest anchor, why it is there ("Lena Fischer manages Kira Novak", or
   "Closest match for “Nordwind Robotics” — not the same name"), and whether it is evidence;
   and the relations between them, each naming the stored relation it stands for. They are

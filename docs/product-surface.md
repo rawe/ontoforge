@@ -213,7 +213,9 @@ select rows and delete them in bulk; open a row's detail; jump a row straight in
 Explorer; read a document property without leaving the table.
 
 Column order puts required properties first, then the rest, then updated and created (the
-created column starts hidden). Document values render as a size badge that opens the
+created column starts hidden). A type with an [identity](capabilities/entity-identity.md)
+the lens shows gets an Identity column, monospaced and shown by default, which sorts,
+filters with the string operators, and is part of the CSV export. Document values render as a size badge that opens the
 [document viewer](#document-viewer-and-editor) — never as inline content, and never as
 something the row click can swallow.
 
@@ -222,7 +224,7 @@ direction — and the operators on offer depend on it:
 
 | Subject | Operators |
 |---|---|
-| string property | contains, equals, does not equal, is set, is not set |
+| string property, or the identity | contains, equals, does not equal, is set, is not set |
 | integer, float, date or datetime property | equals, does not equal, ≥, ≤, between, is set, is not set |
 | boolean property | is, is set, is not set |
 | document property | is set, is not set |
@@ -251,7 +253,8 @@ create action) and "nothing matches" (with a clear-filters action).
 
 ### Entity detail
 
-Header: display label, type chip, creation and update timestamps, and actions to add a
+Header: display label, type chip, the entity's identity when it has one, creation and
+update timestamps, and actions to add a
 relation, open the entity in the Explorer, and delete it behind a confirmation that states
 the relations will go with it. Above the label, a breadcrumb shows the entity's
 [hierarchy path](capabilities/instance-data.md#the-path-read) from the path read —
@@ -268,6 +271,9 @@ the Explorer's empty state.
 saves that one field. Enter saves, Escape cancels, booleans save the moment they are
 toggled, and a save that would not change anything just closes the editor. Clearing a
 required property is refused client-side; server field errors appear under the field.
+Saving a changed identity property first asks for confirmation: "This renames the identity.
+Anything that addresses this entity by its old identity stops finding it." A taken identity
+shows under the field, naming the identity.
 Empty optional properties show as a dimmed placeholder and are editable.
 
 Document properties render last, as collapsed rows showing a size badge. Expanding fetches
@@ -295,7 +301,7 @@ Parent relations do not appear again among the relations below.
 
 **Relations.** One section per relation type that applies to this entity's type, with a
 direction indicator, an exact neighbour count, and the neighbours themselves — each a link
-to its detail page, with a compact summary of the relation's own properties and an unlink
+to its detail page, with its identity beside the label where it has one, with a compact summary of the relation's own properties and an unlink
 action behind a confirmation that states both entities survive. Sections page ten at a
 time up to two hundred. A section header and an empty section both offer to add a relation
 of that type, pre-selected.
@@ -310,8 +316,10 @@ into the Explorer focused on this entity.
    this entity's own label on the correct side. The step is skipped when there is exactly
    one possibility, or when it was pre-selected from a relation section.
 2. Pick the target entity. The picker searches only the type the chosen direction demands
-   — semantically when available, by substring otherwise — and offers to create a new
-   entity of that type inline, using the same schema-driven form as elsewhere. A newly
+   — semantically when available, by substring otherwise — showing each candidate's
+   identity beside its label, and offers to create a new entity of that type inline,
+   using the same schema-driven form as elsewhere; a taken identity shows under the
+   identity properties. A newly
    created entity is selected automatically.
 3. Fill the relation's own properties, if it has any. When the relation type has no
    properties this step is skipped and picking a target creates the relation immediately;
@@ -380,10 +388,11 @@ commit in its phases.
   operation, the version and the times, and the note. Below, the staged objects in the
   order they were first touched, a page of 100 at a time, each a card: its action, the
   type, the target by name — "(new)" for a create, `from → to` for a relation, a short id
-  when the lens shows no name — its markers, and its values: `key: before → after` for an
+  when the lens shows no name — its markers, the identity it gives an entity (`before →
+  after` on a rename, the new one alone on a create), and its values: `key: before → after` for an
   update, with the current value on drift as "(now …)", the values for a create. A marker
   chip with its message sits on the card or under the value it concerns, and tints the
-  card. An object the lens no longer shows says so; a document value shows its length, and a View action opens the staged text, as a
+  card; `duplicate identity` says which identity another entity would share. An object the lens no longer shows says so; a document value shows its length, and a View action opens the staged text, as a
   commit would leave it, in the [document viewer](#document-viewer-and-editor).
 - **On a draft**, each card offers Remove, taking the object out with its values; each
   value a scissors action, cutting it out; and a value with drift "Accept current",
@@ -504,7 +513,15 @@ the stored text returns with a hint saying so
 Immutable and labelled as such: the key, and a relation type's endpoints, shown as chips
 that jump to those entity types. On an entity type the header holds a "Name property"
 select offering the type's `string` properties, which reassigns the name property on
-change. On a relation type it holds a "Parent" select — none, the source or the target,
+change, and an "Identity" field showing the identity properties in order, or "—". It opens
+an editor that ticks 1 to 5 of the type's `string`, `integer` and `date` properties, orders
+them with up and down actions, shows an example of the text form, and saves or clears the
+identity. Setting one may open the [cascade confirmation](#cascade-confirmation), which
+then says the identity properties become required, lose their defaults and join every
+lens's list for the type. When the stored data refuses it, a report in place says nothing
+was changed and lists, per rule — without a value, sharing an identity, too long — the
+count and the first entities by short id, with Dismiss
+([capabilities/entity-identity.md](capabilities/entity-identity.md#declaring-an-identity)). On a relation type it holds a "Parent" select — none, the source or the target,
 named by their entity types — which sets or flips the
 [parent end](capabilities/schema-modeling.md#parent-relations) on change; clearing it asks
 for confirmation first. When the stored data refuses the change, a report replaces it:
@@ -518,7 +535,9 @@ details in place: display name, default (an input matched to the data type; empt
 clears the default), description and the required flag, each saved as it changes, with
 the key and data type stated as permanent. The name property's row carries a "Name" badge
 and its delete action is disabled, explaining that another name property must be chosen
-first. "Add property" opens an inline form — display name with a derived key, data type,
+first. An identity property's row carries an "Identity" badge; its required switch and
+default are disabled and its delete is blocked, each saying to remove it from the identity
+first, in the row and in the delete dialog. "Add property" opens an inline form — display name with a derived key, data type,
 required flag and default — which stays open after each add, clearing the name, key,
 required flag and default but keeping the data type; Escape closes it. Document is offered
 as a data type on entity types only. Adding a required property without a default may
@@ -747,7 +766,7 @@ within that type, an empty query lists that type's first entities, and Backspace
 empty input removes the scope. Prefixes are inert while a type scope is active.
 
 Entity results retain global ranking order. Each row carries a type chip and display
-label, and, when the hit was found through a relation or a passage, one muted
+label, the entity's identity beside it where it has one, and, when the hit was found through a relation or a passage, one muted
 [matched via](#matched-via) line beneath. No number, score bar, percentage, numeric aria
 label or passage text is displayed. The relation target picker uses the same search hook
 and row; its empty input lists the first ten entities. Both use ranked search whenever
@@ -788,7 +807,8 @@ relation or a passage carries one short line:
 
 - a relation entry — `via <label> → <target>`: the relation group's label from the lens's
   [search catalog](capabilities/search.md#the-search-catalog), else the relation type's
-  display name, and the target's label, else its truncated identifier;
+  display name, and the target's label, else its truncated identifier, followed by the
+  target's identity in parentheses where it has one;
 - a passage entry — `via passage in <property>`, the document property's display name;
 - the entity's own fields — no line.
 
@@ -809,7 +829,8 @@ those fields; under a staged create the row says the parent is new in the change
 Step two is the schema-driven
 form: required properties first, one input per data type, schema defaults pre-filled,
 empty optional properties omitted from the request entirely, all client-side coercion
-errors collected at once, and server field errors merged onto the matching fields. A
+errors collected at once, and server field errors merged onto the matching fields — a
+taken identity under each identity property. A
 "create and add another" option keeps the dialog open with a fresh form. Closing with
 unsaved input asks for confirmation first. On success a toast offers to open the new
 entity, unless the create was [staged](#changesets).
@@ -867,7 +888,8 @@ writes live only, so the changeset must be left first.
 suggests clearing unpinned nodes. A hard cap of 300 refuses further additions with an
 explanation; the addition is rejected as a whole, never partially applied.
 
-**Selection.** Selecting one node opens a side panel: the entity's scalar properties (up
+**Selection.** Selecting one node opens a side panel: the entity's label, type and
+identity where it has one, its scalar properties (up
 to six non-empty), its document properties as click-to-read entries, the per-relation-type
 expansion list, and actions to open the detail page, pin, connect, and remove from the
 canvas — the last labelled explicitly as *removing from the canvas, keeping the entity*.
@@ -1138,7 +1160,7 @@ appear before the answer. Three views, each with its count where it has one:
 
 - **Entities** — the cards, grouped as anchors (named in the question), carried over
   from the previous answer, and reached by the walk, each group explained in a line. A
-  card shows the type, the label, its ref, its distance, whether it was handed to the
+  card shows the type, the label, its identity where it has one, its ref, its distance, whether it was handed to the
   answer as evidence, why it is there — "Lena Fischer manages Kira Novak", or that it is
   only the closest match for a name the question used — up to six fields, and a link to
   the entity's page. A selected card is scrolled into view and marked.
@@ -1393,8 +1415,8 @@ left with nothing to read is deleted) — above a list of the affected lenses an
 the affected search indices. It offers to apply the change *with* the cascade, which
 re-runs the identical operation with explicit consent. Cancelling leaves nothing changed.
 The flow is attached wherever such a change can originate: deleting an entity or relation
-type, deleting a property, adding a required property, and deleting a custom search
-index. For a schema deletion, the [delete dialog](#type-page-classic-view) itself turns
+type, deleting a property, adding a required property, deleting a custom search
+index, and setting an entity type's identity, where it adds what the identity changes. For a schema deletion, the [delete dialog](#type-page-classic-view) itself turns
 into this confirmation. See
 [capabilities/schema-modeling.md](capabilities/schema-modeling.md#the-cascade-protocol).
 

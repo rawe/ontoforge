@@ -85,7 +85,8 @@ database. Four checks, all keyed on the scoped schema:
 - every relationship type must be a relation type the lens exposes;
 - every property access on a variable whose type is known must name a property of that
   type **within the lens**;
-- system properties are always permitted, on any variable, regardless of lens.
+- system properties are always permitted, on any variable, regardless of lens; `_identity`
+  is null on an entity whose type has no [identity](entity-identity.md) the lens shows.
 
 A type or property that exists in the ontology's schema but not in this lens is rejected
 identically to one that does not exist anywhere — same check, same wording, same

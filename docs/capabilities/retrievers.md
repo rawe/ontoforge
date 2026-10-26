@@ -24,7 +24,7 @@ configuration, the warnings of a conversion ([below](#converting-version-1-confi
 and timestamps. This release writes and runs configuration version 2.
 
 Saving a retriever changes nothing else: no schema, no instance, no index, no other lens.
-A save creates the retriever or replaces its name, description and configuration; its identity
+A save creates the retriever or replaces its name, description and configuration; its id
 and creation time stay, and its conversion warnings are cleared. Deleting a retriever removes
 it alone; deleting its lens deletes its retrievers. Retrievers are separate from the
 tool-using [agents](agents.md).
@@ -294,7 +294,7 @@ a configuration, the planner input cap and the plan checks apply, and every refu
 the question's. Cancelling the request stops further work.
 
 The response is the fused result list, best first. The order is the match grade: there is
-**no score**. Each result carries its identity, entity type and label — its name
+**no score**. Each result carries its id, entity type and label — its name
 property's value, or none — and two independent facts:
 
 - **Conditions** — the exact conditions it is proven to satisfy: the union, over every
@@ -363,7 +363,7 @@ a concurrent schema or lens change can leave the transferred retriever invalid, 
 next read reports.
 
 The portable form of one retriever is `{key, name, description, configVersion, config}` — no
-lens, identity, timestamps, warnings, vectors or conversation. Import creates the retriever in
+lens, id, timestamps, warnings, vectors or conversation. Import creates the retriever in
 the addressed lens, validates it there, and refuses an existing key. A version-1 export
 is converted first, its key renamed if needed among the keys the lens already holds. This is the way to take a retriever to another ontology.
 

@@ -35,6 +35,31 @@ export class ConflictError extends OntoForgeError {
   }
 }
 
+/** Another entity of the type has the identity a write would give an
+ * entity. -> 409 RESOURCE_CONFLICT, `details.code` `IDENTITY_TAKEN` with
+ * the identity and the type's identity properties; it never names the
+ * other entity. The adapter raises it without the properties (it knows
+ * only the constraint); the service fills them in (`withIdentityProperties`). */
+export class IdentityTakenError extends ConflictError {
+  readonly entityTypeKey: string;
+  readonly identity: string;
+
+  constructor(entityTypeKey: string, identity: string, properties: string[] | null = null) {
+    super(`Identity '${identity}' is already taken in entity type '${entityTypeKey}'`, {
+      code: "IDENTITY_TAKEN",
+      identity,
+      properties,
+    });
+    this.entityTypeKey = entityTypeKey;
+    this.identity = identity;
+  }
+
+  /** The same refusal, naming the type's identity properties. */
+  withIdentityProperties(properties: string[]): IdentityTakenError {
+    return new IdentityTakenError(this.entityTypeKey, this.identity, properties);
+  }
+}
+
 /** The ontology's design changed between the design a write checked
  * against and its commit; nothing was written. The write retries against
  * the new design and answers this only when it keeps changing. -> 409

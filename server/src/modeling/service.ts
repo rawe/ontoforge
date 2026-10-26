@@ -44,6 +44,12 @@ import {
 } from "../core/schemas.js";
 import { NAVIGATOR_CONFIG_VERSION, NavigatorConfig } from "../runtime/assistants/navigators/config.js";
 import { lensChangesetCount } from "../runtime/changesets.js";
+import {
+  buildIdentity,
+  IDENTITY_DATA_TYPES,
+  IDENTITY_TOO_LONG,
+  MAX_IDENTITY_PROPERTIES,
+} from "../runtime/identity.js";
 import { afterCommit, reconcileSearchGenerations } from "../runtime/indexing/generations.js";
 import { afterDesignChange, syncManagedDefinitions } from "../runtime/indexing/managed.js";
 import {
@@ -119,6 +125,7 @@ function toEntityTypeResponse(data: Row): EntityTypeResponseBody {
     displayName: data.displayName as string,
     description: optString(data.description),
     nameProperty: data.nameProperty as string,
+    identityProperties: (data.identityProperties as string[] | null | undefined) ?? null,
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
   };
@@ -264,6 +271,7 @@ export async function deleteLens(
 export async function createEntityType(
   body: EntityTypeCreateInput,
   store: ModelingStore,
+  cascade = false,
 ): Promise<EntityTypeResponseBody> {
   const data = await store.changeDesign(async (s) => {
     const existing = await s.getEntityTypeByKey(body.key);
@@ -271,13 +279,17 @@ export async function createEntityType(
       throw new ConflictError(`Entity type with key '${body.key}' already exists`);
     }
     const entityTypeId = randomUUID();
-    const data = await s.createEntityType(
+    let data = await s.createEntityType(
       entityTypeId,
       body.key,
       body.displayName,
       body.description ?? null,
       newNameProperty(body.nameProperty),
     );
+    const identityProperties = body.identityProperties ?? null;
+    if (identityProperties !== null) {
+      data = await setIdentity(s, data, identityProperties, cascade);
+    }
     await syncManagedDefinitions(s.searchIndices());
     return data;
   });
@@ -327,6 +339,7 @@ export async function updateEntityType(
   entityTypeId: string,
   body: EntityTypeUpdateInput,
   store: ModelingStore,
+  cascade = false,
 ): Promise<EntityTypeResponseBody> {
   const nameProperty = body.nameProperty ?? null;
   const { before, data } = await store.changeDesign(async (s) => {
@@ -341,7 +354,7 @@ export async function updateEntityType(
         throw notANameProperty(nameProperty, et.key as string);
       }
     }
-    const data = await s.updateEntityType(
+    let data = await s.updateEntityType(
       entityTypeId,
       body.displayName ?? null,
       body.description ?? null,
@@ -349,6 +362,10 @@ export async function updateEntityType(
     );
     if (!data) {
       throw new NotFoundError(`Entity type '${entityTypeId}' not found`);
+    }
+    // Omitted leaves the identity unchanged; an explicit null clears it.
+    if (body.identityProperties !== undefined) {
+      data = await setIdentity(s, data, body.identityProperties, cascade);
     }
     await syncManagedDefinitions(s.searchIndices());
     return { before, data };
@@ -358,6 +375,166 @@ export async function updateEntityType(
     (before.displayName !== data.displayName || before.nameProperty !== data.nameProperty);
   await afterSchemaChange(store, rendered ? [data.key as string] : []);
   return toEntityTypeResponse(data);
+}
+
+// --- Entity identity ---
+
+/** The 422 for an identity list that cannot be one. */
+function badIdentity(message: string): ValidationError {
+  return new ValidationError(message, { fields: { identityProperties: message } });
+}
+
+/** The keys of an entity type's identity, or null. */
+function identityOf(et: Row): string[] | null {
+  return (et.identityProperties as string[] | null | undefined) ?? null;
+}
+
+/**
+ * The refusal when the type's stored entities cannot take the identity:
+ * an entity without a value (or an empty one) for a listed property, two
+ * entities with one identity, an identity over the length limit. As a
+ * refused parent flag, `details.violations` names each kind with its
+ * count and its first five entities by id; nothing is written.
+ */
+function identityDataConflicts(
+  entityTypeKey: string,
+  violations: { rule: string; ids: string[] }[],
+): ConflictError {
+  const found = violations.filter((violation) => violation.ids.length > 0);
+  const counts = found.map((v) => `${v.rule}: ${v.ids.length}`).join(", ");
+  return new ConflictError(
+    `The stored entities of entity type '${entityTypeKey}' cannot take this identity (${counts})`,
+    {
+      violations: found.map((v) => ({
+        rule: v.rule,
+        count: v.ids.length,
+        entities: [...v.ids].sort().slice(0, 5).map((id) => ({ type: entityTypeKey, id })),
+      })),
+    },
+  );
+}
+
+/**
+ * Set, change or clear an entity type's identity inside the caller's
+ * design change, and rebuild the derived identity of every entity of the
+ * type (`docs/capabilities/entity-identity.md#declaring-an-identity`):
+ *
+ * 1. the list itself — 1 to 5 distinct keys of the type's own `string`,
+ *    `integer` or `date` properties — or a 422 on `identityProperties`;
+ * 2. the stored entities — a value for every listed property, no empty
+ *    string, unique and short enough identities — or a 409 naming them;
+ * 3. the cascade protocol: a listed property that is optional or has a
+ *    default, or that a lens allowlist for the type omits, needs consent;
+ *    with it the properties become required, lose their defaults and join
+ *    every allowlist for the type.
+ *
+ * Clearing is always allowed. Repeating the stored list changes nothing.
+ * Returns the type row as written.
+ */
+async function setIdentity(
+  s: ModelingStore,
+  et: Row,
+  requested: string[] | null,
+  cascade: boolean,
+): Promise<Row> {
+  const entityTypeId = et.entityTypeId as string;
+  const entityTypeKey = et.key as string;
+  const current = identityOf(et);
+  if (JSON.stringify(current) === JSON.stringify(requested)) return et;
+  if (requested === null) {
+    const written = await s.setEntityTypeIdentity(entityTypeId, null);
+    await s.writeEntityIdentities(entityTypeKey, null);
+    return written ?? et;
+  }
+
+  if (requested.length === 0 || requested.length > MAX_IDENTITY_PROPERTIES) {
+    throw badIdentity(`An identity has 1 to ${MAX_IDENTITY_PROPERTIES} properties`);
+  }
+  const duplicate = requested.find((key, index) => requested.indexOf(key) !== index);
+  if (duplicate !== undefined) {
+    throw badIdentity(`Property '${duplicate}' is listed twice in the identity`);
+  }
+  const properties = await s.listProperties(entityTypeId, "EntityType");
+  const byKey = new Map(properties.map((prop) => [prop.key as string, prop]));
+  for (const key of requested) {
+    const prop = byKey.get(key);
+    if (prop === undefined) {
+      throw badIdentity(`Property '${key}' not found on entity type '${entityTypeKey}'`);
+    }
+    if (!IDENTITY_DATA_TYPES.includes(prop.dataType as string)) {
+      throw badIdentity(
+        `Property '${key}' is a ${prop.dataType as string} property; an identity property is ` +
+          `${IDENTITY_DATA_TYPES.join(", ")}`,
+      );
+    }
+  }
+
+  // The stored entities, before any consent: no repair can mend them.
+  const identityProperties = requested.map((key) => ({ key, dataType: byKey.get(key)!.dataType as string }));
+  const missing: string[] = [];
+  const tooLong: string[] = [];
+  const holders = new Map<string, string[]>();
+  const built: { id: string; identity: string }[] = [];
+  for (const { id, values } of await s.readEntityValues(entityTypeKey, requested)) {
+    const result = buildIdentity(identityProperties, values);
+    if (result.faults !== null) {
+      const tooLongFault = Object.values(result.faults).includes(IDENTITY_TOO_LONG);
+      (tooLongFault ? tooLong : missing).push(id);
+      continue;
+    }
+    built.push({ id, identity: result.identity });
+    holders.set(result.identity, [...(holders.get(result.identity) ?? []), id]);
+  }
+  const duplicates = [...holders.values()].filter((ids) => ids.length > 1).flat();
+  if (missing.length + duplicates.length + tooLong.length > 0) {
+    throw identityDataConflicts(entityTypeKey, [
+      { rule: "missing_value", ids: missing },
+      { rule: "duplicate", ids: duplicates },
+      { rule: "too_long", ids: tooLong },
+    ]);
+  }
+
+  // The cascade protocol: the stored flags and every allowlist must hold
+  // the whole identity.
+  const unflagged = requested.filter((key) => {
+    const prop = byKey.get(key)!;
+    return prop.required !== true || (prop.defaultValue !== null && prop.defaultValue !== undefined);
+  });
+  const omitting = new Map<string, string[]>();
+  for (const key of requested) {
+    const lenses = await s.findLensesWithExplicitProperty("EntityType", entityTypeId, key);
+    if (lenses.length > 0) omitting.set(key, lenses);
+  }
+  const affectedLenses = [...new Set([...omitting.values()].flat())].sort();
+  if ((unflagged.length > 0 || affectedLenses.length > 0) && !cascade) {
+    const reasons = [
+      ...(unflagged.length > 0 ? [`${unflagged.map((k) => `'${k}'`).join(", ")} must become required without a default`] : []),
+      ...(affectedLenses.length > 0 ? [`${affectedLenses.length} lens(es) must show every identity property`] : []),
+    ];
+    throw new CascadeRequiredError(
+      `Setting the identity of entity type '${entityTypeKey}': ${reasons.join("; ")}. ` +
+        "Use ?cascade=true to apply.",
+      affectedLenses,
+    );
+  }
+  for (const key of unflagged) {
+    await s.updateProperty(entityTypeId, "EntityType", byKey.get(key)!.propertyId as string, null, null, true, null, true);
+  }
+  for (const key of omitting.keys()) {
+    await s.addPropertyToIncludesLists("EntityType", entityTypeId, key);
+  }
+
+  const written = await s.setEntityTypeIdentity(entityTypeId, requested);
+  await s.writeEntityIdentities(entityTypeKey, built);
+  return written ?? et;
+}
+
+/** The 409 for a change an identity property refuses while it is one. */
+function identityLocked(propertyKey: string, entityTypeKey: string, change: string): ConflictError {
+  return new ConflictError(
+    `Property '${propertyKey}' is part of the identity of entity type '${entityTypeKey}' and ` +
+      `cannot ${change}. Change the identity first.`,
+  );
 }
 
 export async function deleteEntityType(
@@ -661,6 +838,15 @@ export async function updateProperty(
   const { owner, renamed, data } = await store.changeDesign(async (s) => {
     const owner = await ensureOwnerExists(s, ownerId, typeKind);
     const before = await s.getProperty(ownerId, typeKind, propertyId);
+    // An identity property stays required without a default.
+    if (typeKind === "EntityType" && before !== null && identityOf(owner)?.includes(before.key as string)) {
+      if (body.required === false) {
+        throw identityLocked(before.key as string, owner.key as string, "become optional");
+      }
+      if (body.defaultValue !== null && body.defaultValue !== undefined) {
+        throw identityLocked(before.key as string, owner.key as string, "take a default");
+      }
+    }
     // An explicitly null defaultValue clears the default — the one exception
     // to sparse-update semantics. Omitted (`undefined`) means unchanged.
     const clearDefault = body.defaultValue === null;
@@ -710,6 +896,9 @@ export async function deleteProperty(
         `Property '${prop.key as string}' is the name property of entity type ` +
           `'${owner.key as string}'. Choose another name property first.`,
       );
+    }
+    if (typeKind === "EntityType" && identityOf(owner)?.includes(prop.key as string)) {
+      throw identityLocked(prop.key as string, owner.key as string, "be deleted");
     }
     // Lens allowlists never trigger the cascade protocol — without cascade
     // they are left holding an unresolvable key (harmless at runtime,
@@ -1423,6 +1612,9 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     displayName: et.displayName,
     description: optString(et.description),
     nameProperty: et.nameProperty,
+    // Omitted for a type without an identity, so a design without one
+    // exports as before.
+    ...(identityOf(et) === null ? {} : { identityProperties: identityOf(et) }),
     properties: ((et.properties as Row[] | undefined) ?? []).map(exportProperty),
   }));
 
@@ -1546,6 +1738,34 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * upgrade does. Import provisions no entries: the generations it
  * reconciles are built by the worker.
  */
+/** The import errors of one entity type's identity, against the payload's
+ * own properties: the rules a modeling write checks, the flags included,
+ * since import never cascades. */
+function importedIdentityErrors(et: z.infer<typeof ExportPayload>["entityTypes"][number]): string[] {
+  const identity = et.identityProperties ?? null;
+  if (identity === null) return [];
+  const subject = `Import error: the identity of entity type '${et.key}'`;
+  if (identity.length === 0 || identity.length > MAX_IDENTITY_PROPERTIES) {
+    return [`${subject} must have 1 to ${MAX_IDENTITY_PROPERTIES} properties`];
+  }
+  const errors: string[] = [];
+  identity.forEach((key, index) => {
+    if (identity.indexOf(key) !== index) {
+      errors.push(`${subject} lists '${key}' twice`);
+      return;
+    }
+    const prop = et.properties.find((candidate) => candidate.key === key);
+    if (prop === undefined) {
+      errors.push(`${subject} names '${key}', which is not one of its properties`);
+    } else if (!IDENTITY_DATA_TYPES.includes(prop.dataType)) {
+      errors.push(`${subject} names '${key}', a ${prop.dataType} property`);
+    } else if (!prop.required || (prop.defaultValue !== null && prop.defaultValue !== undefined)) {
+      errors.push(`${subject} names '${key}', which must be required and have no default`);
+    }
+  });
+  return errors;
+}
+
 export async function importSchema(
   body: unknown,
   store: ModelingStore,
@@ -1583,6 +1803,7 @@ export async function importSchema(
           `is not a ${NAME_PROPERTY_DATA_TYPE} property of that type`,
       );
     }
+    errors.push(...importedIdentityErrors(et));
     if (!SCHEMA_KEY_PATTERN.test(et.key)) {
       errors.push(badKey("entity type", et.key, schemaKeyPattern));
     }
@@ -1903,6 +2124,12 @@ export async function importSchema(
           prop.required,
           prop.defaultValue ?? null,
         );
+      }
+      // After its properties, before any lens: validated above, so only
+      // the entities a deleted type of the key left behind can refuse it.
+      const identity = et.identityProperties ?? null;
+      if (identity !== null) {
+        await setIdentity(target, (await target.getEntityType(etId))!, identity, false);
       }
     }
 

@@ -111,10 +111,10 @@ describe("the path read", () => {
 
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json()).toEqual([
-      { type: "company", id: "acme", name: "ACME" },
-      { type: "department", id: "sales", name: "Sales" },
-      { type: "person", id: "lea", name: "Lea" },
-      { type: "person", id: "ben", name: "Ben" },
+      { type: "company", id: "acme", name: "ACME", identity: null },
+      { type: "department", id: "sales", name: "Sales", identity: null },
+      { type: "person", id: "lea", name: "Lea", identity: null },
+      { type: "person", id: "ben", name: "Ben", identity: null },
     ]);
     expect(holder.store.getAncestors.mock.calls).toEqual([["ben", READINGS]]);
     expect(holder.store.getEntitiesByIds).toHaveBeenCalledTimes(1);
@@ -128,7 +128,7 @@ describe("the path read", () => {
     const res = await getPath("hr_view", "company", "acme");
 
     expect(res.statusCode, res.body).toBe(200);
-    expect(res.json()).toEqual([{ type: "company", id: "acme", name: "ACME" }]);
+    expect(res.json()).toEqual([{ type: "company", id: "acme", name: "ACME", identity: null }]);
   });
 
   it("a lens hiding a middle level: the path starts below the hidden ancestor", async () => {
@@ -144,8 +144,8 @@ describe("the path read", () => {
 
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json()).toEqual([
-      { type: "person", id: "lea", name: "Lea" },
-      { type: "person", id: "ben", name: "Ben" },
+      { type: "person", id: "lea", name: "Lea", identity: null },
+      { type: "person", id: "ben", name: "Ben", identity: null },
     ]);
     // The walk follows only the parent relations the lens shows.
     expect(holder.store.getAncestors.mock.calls).toEqual([["ben", { manages: "source" }]]);
@@ -164,7 +164,7 @@ describe("the path read", () => {
 
     const res = await getPath("hr_view", "person", "lea");
 
-    expect(res.json()).toEqual([{ type: "person", id: "lea", name: "Lea" }]);
+    expect(res.json()).toEqual([{ type: "person", id: "lea", name: "Lea", identity: null }]);
   });
 
   it("a parent relation the lens hides cuts the path, though the ancestor's type shows", async () => {
@@ -192,7 +192,7 @@ describe("the path read", () => {
     const res = await getPath("hr_view", "person", "ben");
 
     expect(res.statusCode, res.body).toBe(200);
-    expect(res.json()).toEqual([{ type: "person", id: "ben", name: "Ben" }]);
+    expect(res.json()).toEqual([{ type: "person", id: "ben", name: "Ben", identity: null }]);
     expect(res.body).not.toContain("lea");
   });
 
@@ -204,8 +204,8 @@ describe("the path read", () => {
     const res = await getPath("hr_view", "person", "ben");
 
     expect(res.json()).toEqual([
-      { type: "person", id: "lea", name: null },
-      { type: "person", id: "ben", name: null },
+      { type: "person", id: "lea", name: null, identity: null },
+      { type: "person", id: "ben", name: null, identity: null },
     ]);
   });
 

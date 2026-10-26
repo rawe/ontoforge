@@ -62,8 +62,9 @@ property, `key`, `dataType` and `required` give the field:
 | `datetime` | `string` | ISO date-time |
 | `document` | `string` on write, `{ document: true, length: number }` on read | read the content with the documents route |
 
-Every entity read also carries `_id`, `_entityTypeKey`, `_createdAt` and `_updatedAt`;
-a relation carries `_id`, `_relationTypeKey`, `fromEntityId` and `toEntityId`.
+Every entity read also carries `_id`, `_entityTypeKey`, `_createdAt` and `_updatedAt`,
+plus a read-only `_identity` string when its type declares an identity (see
+[runtime-api.md](runtime-api.md#entity-identity)); a relation carries `_id`, `_relationTypeKey`, `fromEntityId` and `toEntityId`.
 Generate the types once from the live schema and regenerate when the schema changes;
 the lens a scoped application uses decides which types and properties exist for it.
 

@@ -8,6 +8,8 @@
 
 import { vi, type Mock } from "vitest";
 
+import { isDeepStrictEqual } from "node:util";
+
 import type {
   ChangesetChange,
   ChangesetRecord,
@@ -56,7 +58,7 @@ export function createMockChangesetStore(): MockChangesetStore {
     }
     for (const object of change.objects ?? []) {
       const existing = h.objects.get(object.objectId);
-      if (existing !== undefined) existing.action = object.action;
+      if (existing !== undefined) Object.assign(existing, { action: object.action });
       else h.objects.set(object.objectId, { ...object, firstTouchedAt: tick(), values: [] });
     }
     for (const { objectId, ...value } of change.values ?? []) {
@@ -127,6 +129,22 @@ export function createMockChangesetStore(): MockChangesetStore {
       return byTouch(h)
         .filter((object) => object.kind === "relation" && (object.fromId === entityId || object.toId === entityId))
         .map((object) => object.objectId);
+    }),
+    entityObjectsStaging: vi.fn(async (id: string, typeKey: string, values: Record<string, unknown>) => {
+      const h = held.get(id);
+      if (h === undefined) return [];
+      return byTouch(h).filter((object) => {
+        if (object.kind !== "entity" || object.typeKey !== typeKey || object.action === "delete") return false;
+        const keyed = object.values.filter((value) => Object.hasOwn(values, value.propertyKey));
+        return keyed.length > 0 && keyed.every((value) => isDeepStrictEqual(value.value, values[value.propertyKey]));
+      });
+    }),
+    entityObjectsKeyed: vi.fn(async (id: string, typeKey: string, keys: string[]) => {
+      const h = held.get(id);
+      if (h === undefined) return [];
+      return byTouch(h)
+        .filter((object) => object.kind === "entity" && object.typeKey === typeKey)
+        .map((object) => ({ ...object, values: object.values.filter((value) => keys.includes(value.propertyKey)) }));
     }),
     stagedBytes: vi.fn(async (id: string) => {
       const h = held.get(id);

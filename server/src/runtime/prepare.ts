@@ -26,6 +26,7 @@ import { NotFoundError } from "../core/exceptions.js";
 import type { ParentEnd, PropertyDef } from "../core/schemas.js";
 import type { SearchChange } from "../core/searchDependencies.js";
 import { cpLength } from "./codePoints.js";
+import { buildIdentity, IDENTITY_FIELD, identityPropertiesOf, type IdentityProperty } from "./identity.js";
 import { docLengthKey, documentPropertyKeys } from "./readHelpers.js";
 import type { EntityTypeDef, LoadedSchema, RelationTypeDef } from "./schemaCache.js";
 
@@ -41,12 +42,14 @@ export interface Prepared<W> {
   write: W;
 }
 
-/** The arguments of an entity create, as the store takes them. */
+/** The arguments of an entity create, as the store takes them.
+ * `identity`: null when the type has none. */
 export interface EntityCreateArgs {
   entityTypeKey: string;
   entityId: string;
   properties: Row;
   propertyDefs: Record<string, PropertyDef>;
+  identity: string | null;
   change: SearchChange;
 }
 
@@ -66,7 +69,9 @@ export interface RelationCreateArgs {
 export interface ParentRelationInput {
   /** The parent relation type's key. */
   type: string;
-  /** The parent's id; its type follows from the relation type's parent end. */
+  /** The parent's id; its type follows from the relation type's parent end.
+   * The caller resolves a `parentIdentity` to it first
+   * (`resolveParentIdentity`). */
   parentId: string;
   /** The relation's own properties. */
   properties?: Row | undefined;
@@ -235,6 +240,84 @@ function splitPatch(coerced: Row): { setProperties: Row; removeProperties: strin
 }
 
 // ---------------------------------------------------------------------------
+// Entity identity
+// ---------------------------------------------------------------------------
+
+/** The fault of a write through a lens that hides part of the type's
+ * identity: no such write can name its entity, and the fault names no
+ * hidden property. */
+export const IDENTITY_HIDDEN = "This lens does not show the whole identity of this entity type";
+
+/** The identity properties of a type, from the FULL schema; null when
+ * the type has none. */
+export function identityPropertiesOfType(loaded: LoadedSchema, entityTypeKey: string): IdentityProperty[] | null {
+  const fullEt = loaded.full.entityTypes[entityTypeKey];
+  return fullEt === undefined ? null : identityPropertiesOf(fullEt.identityProperties, fullEt.properties);
+}
+
+/**
+ * The identity an entity will have with `values` (as it will be stored),
+ * or null with its faults added to `errors`: an empty string under its
+ * property, a too long identity under every identity property, a missing
+ * value only where validation reported nothing for the property already.
+ * Through a lens that hides part of the identity the fault is
+ * `IDENTITY_HIDDEN` under `_identity`. Null without a fault when the type
+ * has no identity.
+ */
+export function entityIdentity(
+  loaded: LoadedSchema,
+  entityTypeKey: string,
+  values: Row,
+  errors: FieldErrors,
+): string | null {
+  const properties = identityPropertiesOfType(loaded, entityTypeKey);
+  if (properties === null) return null;
+  if (loaded.scoped.entityTypes[entityTypeKey]?.identityProperties === null) {
+    errors[IDENTITY_FIELD] = IDENTITY_HIDDEN;
+    return null;
+  }
+  const built = buildIdentity(properties, values);
+  if (built.faults !== null) {
+    for (const [key, message] of Object.entries(built.faults)) {
+      errors[key] ??= message;
+    }
+    return null;
+  }
+  return built.identity;
+}
+
+/**
+ * The identity an update leaves an entity with, or `undefined` when the
+ * update touches no identity property and the identity stays: the stored
+ * values with the update's set over them and its removals taken out. Its
+ * faults join `errors`, as `entityIdentity` adds them.
+ */
+export function updatedIdentity(
+  loaded: LoadedSchema,
+  entityTypeKey: string,
+  stored: Row,
+  update: Pick<UpdateArgs, "setProperties" | "removeProperties">,
+  errors: FieldErrors,
+): string | undefined {
+  const properties = identityPropertiesOfType(loaded, entityTypeKey);
+  if (properties === null) return undefined;
+  if (!touchesIdentity(properties, update)) return undefined;
+  const values: Row = { ...stored, ...update.setProperties };
+  for (const key of update.removeProperties) delete values[key];
+  return entityIdentity(loaded, entityTypeKey, values, errors) ?? undefined;
+}
+
+/** Whether an update sets or removes an identity property. */
+export function touchesIdentity(
+  properties: IdentityProperty[] | null,
+  update: Pick<UpdateArgs, "setProperties" | "removeProperties">,
+): boolean {
+  return (properties ?? []).some(
+    (property) => property.key in update.setProperties || update.removeProperties.includes(property.key),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Entities
 // ---------------------------------------------------------------------------
 
@@ -334,6 +417,7 @@ export function prepareCreateEntity(
   if (fullEt !== undefined) {
     applyDefaults(coerced, fullEt.properties);
   }
+  const identity = entityIdentity(loaded, entityTypeKey, coerced, errors);
 
   // Document properties: store character counts alongside the values.
   const docKeys = fullEt !== undefined ? documentPropertyKeys(fullEt.properties) : new Set<string>();
@@ -357,6 +441,7 @@ export function prepareCreateEntity(
         entityId: ids.entityId,
         properties: coerced,
         propertyDefs: fullEt?.properties ?? {},
+        identity,
         change: { kind: "entityCreated", entityType: entityTypeKey, entityId: ids.entityId },
       },
       parent,

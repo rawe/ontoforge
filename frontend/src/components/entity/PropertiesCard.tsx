@@ -21,6 +21,16 @@ import {
   formatValue,
   valueToDraft,
 } from '@/components/schema/propertyDraft'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { displayLabel } from '@/lib/displayLabel'
 import { cn } from '@/lib/utils'
@@ -34,9 +44,15 @@ interface PropertyRowProps {
   property: SchemaProperty
   /** Set while the pinned changeset sets this property. */
   staged?: StagedField
+  /** Part of the type's identity: changing it renames the entity's identity. */
+  inIdentity?: boolean
 }
 
-function PropertyRow({ ontologyKey, lensKey, entity, property, staged }: PropertyRowProps) {
+/** The confirmation a change to an identity property asks for. */
+const RENAME_TEXT =
+  'This renames the identity. Anything that addresses this entity by its old identity stops finding it.'
+
+function PropertyRow({ ontologyKey, lensKey, entity, property, staged, inIdentity = false }: PropertyRowProps) {
   const queryClient = useQueryClient()
   const writes = useRuntimeWrites(ontologyKey, lensKey)
   // A user who cannot edit sees the values; the click-to-edit button is disabled.
@@ -44,6 +60,8 @@ function PropertyRow({ ontologyKey, lensKey, entity, property, staged }: Propert
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // A change to an identity property waits here for its confirmation.
+  const [renaming, setRenaming] = useState<{ value: JsonPrimitive | null } | null>(null)
   // Edits start from, and compare with, the value shown: the staged one, else the stored one.
   const shown = staged === undefined ? entity[property.key] : staged.value
 
@@ -70,7 +88,7 @@ function PropertyRow({ ontologyKey, lensKey, entity, property, staged }: Propert
     },
     onError: (err) => {
       if (err instanceof ApiError) {
-        setError(err.fieldErrors?.[property.key] ?? err.message)
+        setError((err.fieldErrors ?? err.identityTakenFields)?.[property.key] ?? err.message)
       } else {
         setError(err instanceof Error ? err.message : 'Save failed')
       }
@@ -103,6 +121,10 @@ function PropertyRow({ ontologyKey, lensKey, entity, property, staged }: Propert
     // No-op saves just close the editor.
     if (result.value === (shown ?? null)) {
       cancel()
+      return
+    }
+    if (inIdentity) {
+      setRenaming({ value: result.value })
       return
     }
     mutation.mutate(result.value)
@@ -184,6 +206,7 @@ function PropertyRow({ ontologyKey, lensKey, entity, property, staged }: Propert
             rendered === null && 'text-muted-foreground/50',
           )}
           aria-label={canEdit ? `Edit ${property.displayName}` : undefined}
+          title={inIdentity ? 'Part of the identity' : undefined}
         >
           {staged === undefined ? (
             (rendered ?? '—')
@@ -202,6 +225,26 @@ function PropertyRow({ ontologyKey, lensKey, entity, property, staged }: Propert
           )}
         </button>
       )}
+
+      <AlertDialog open={renaming !== null} onOpenChange={(open) => !open && setRenaming(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Change {property.displayName}?</AlertDialogTitle>
+            <AlertDialogDescription>{RENAME_TEXT}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (renaming !== null) mutation.mutate(renaming.value)
+                setRenaming(null)
+              }}
+            >
+              Rename
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -249,6 +292,7 @@ export function PropertiesCard({ ontologyKey, lensKey, entityType, entity, stage
               entity={entity}
               property={property}
               staged={staged?.fields[property.key]}
+              inIdentity={(entityType.identityProperties ?? []).includes(property.key)}
             />
           ))}
           {documentProperties.map((property) => (

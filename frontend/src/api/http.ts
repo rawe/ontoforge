@@ -40,6 +40,23 @@ export class ApiError extends Error {
     return Array.isArray(affected) ? (affected as string[]) : undefined
   }
 
+  /** The identity an `IDENTITY_TAKEN` conflict names, and the identity
+   * properties it is built from; null for any other error. */
+  get identityTaken(): { identity: string; properties: string[] } | null {
+    if (this.details?.code !== 'IDENTITY_TAKEN') return null
+    const properties = Array.isArray(this.details.properties) ? (this.details.properties as string[]) : []
+    return { identity: String(this.details.identity ?? ''), properties }
+  }
+
+  /** An `IDENTITY_TAKEN` conflict as field errors, one per identity
+   * property, so a form shows it inline; undefined for any other error. */
+  get identityTakenFields(): Record<string, string> | undefined {
+    const taken = this.identityTaken
+    if (taken === null) return undefined
+    const message = `Another entity of this type already has the identity '${taken.identity}'`
+    return Object.fromEntries(taken.properties.map((key) => [key, message]))
+  }
+
   /** Search indices affected by a `CASCADE_REQUIRED` conflict, if present. */
   get affectedIndices(): string[] | undefined {
     const affected = this.details?.affectedIndices

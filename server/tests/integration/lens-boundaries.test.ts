@@ -200,7 +200,7 @@ describe("the path through a lens hiding a parent relation", () => {
 
     const sub = await call("GET", `${base}/entities/task/${ids.T1a}/path`);
     expect(sub.status, sub.text).toBe(200);
-    expect(sub.body).toEqual([{ type: "task", id: ids.T1a, name: "T1a" }]);
+    expect(sub.body).toEqual([{ type: "task", id: ids.T1a, name: "T1a", identity: null }]);
 
     const top = await call("GET", `${base}/entities/task/${ids.T1}/path`);
     expect(top.body.map((step: Row) => step.name)).toEqual(["P1", "T1"]);

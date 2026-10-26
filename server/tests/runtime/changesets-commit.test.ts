@@ -285,7 +285,7 @@ describe("the phases", () => {
     const applied: Applied = await applyObjects(loaded, search, [stagedObject(D1, "delete", "department")], asRuntimeStore(store));
     expect(store.childrenOf).toHaveBeenCalledWith([D1], { belongs_to: "target" }, true);
     expect(store.childrenOf.mock.invocationCallOrder[0]!).toBeLessThan(store.deleteEntity.mock.invocationCallOrder[0]!);
-    expect(applied).toEqual({ applied: 1, alreadyGone: [], deletedChildren: [{ objectId: D1, children }], fault: null });
+    expect(applied).toEqual({ applied: 1, alreadyGone: [], deletedChildren: [{ objectId: D1, children }], identities: [], fault: null });
   });
 });
 

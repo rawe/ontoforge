@@ -102,7 +102,9 @@ function refusals(query: string): unknown {
 const PERSON_OBJECT =
   "CASE WHEN a.id IS NULL THEN NULL ELSE jsonb_build_object(" +
   "'_id', a.id::text, '_entityTypeKey', a.type_key, " +
-  "'_createdAt', a.created_at, '_updatedAt', a.updated_at) || a.props END";
+  "'_createdAt', a.created_at, '_updatedAt', a.updated_at)" +
+  " || CASE WHEN a.identity IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('_identity', a.identity) END" +
+  " || a.props END";
 
 // ---------------------------------------------------------------------------
 // The stage machine: one MATCH, one RETURN
@@ -150,7 +152,7 @@ describe("a single stage", () => {
         "JOIN relation r ON r.type_key = $2 AND r.from_id = a.id",
         "JOIN entity b ON b.type_key = $3 AND b.id = r.to_id",
         "WHERE a.type_key = $1",
-        "GROUP BY a.id, a.type_key, a.props, a.created_at, a.updated_at",
+        "GROUP BY a.id, a.type_key, a.props, a.created_at, a.updated_at, a.identity",
       ].join("\n"),
     );
   });
@@ -377,7 +379,7 @@ describe("WITH", () => {
       [
         "WITH s0 AS (",
         "SELECT a.id AS a__id, a.type_key AS a__type_key, a.props AS a__props," +
-          " a.created_at AS a__created_at, a.updated_at AS a__updated_at",
+          " a.created_at AS a__created_at, a.updated_at AS a__updated_at, a.identity AS a__identity",
         "FROM entity a",
         "WHERE a.type_key = $1",
         ")",
@@ -400,10 +402,10 @@ describe("WITH", () => {
       [
         "WITH s0 AS (",
         "SELECT a.id AS a__id, a.type_key AS a__type_key, a.props AS a__props," +
-          " a.created_at AS a__created_at, a.updated_at AS a__updated_at, count(*) AS n",
+          " a.created_at AS a__created_at, a.updated_at AS a__updated_at, a.identity AS a__identity, count(*) AS n",
         "FROM entity a",
         "WHERE a.type_key = $1",
-        "GROUP BY a.id, a.type_key, a.props, a.created_at, a.updated_at",
+        "GROUP BY a.id, a.type_key, a.props, a.created_at, a.updated_at, a.identity",
         ")",
         "SELECT s0.a__props->'name' AS \"a.name\", s0.n AS n",
         "FROM s0",
@@ -658,7 +660,7 @@ describe("ordering and paging", () => {
       [
         "WITH s0 AS (",
         "SELECT a.id AS a__id, a.type_key AS a__type_key, a.props AS a__props," +
-          " a.created_at AS a__created_at, a.updated_at AS a__updated_at," +
+          " a.created_at AS a__created_at, a.updated_at AS a__updated_at, a.identity AS a__identity," +
           " (a.props->'age')::numeric AS __ord0",
         "FROM entity a",
         "WHERE a.type_key = $1",
@@ -688,7 +690,7 @@ describe("ordering and paging", () => {
         [
           "WITH s0 AS (",
           "SELECT a.id AS a__id, a.type_key AS a__type_key, a.props AS a__props," +
-            " a.created_at AS a__created_at, a.updated_at AS a__updated_at," +
+            " a.created_at AS a__created_at, a.updated_at AS a__updated_at, a.identity AS a__identity," +
             " (a.props->'age')::numeric AS __ord0",
           "FROM entity a",
           "WHERE a.type_key = $1",
@@ -771,7 +773,7 @@ describe("the star projection", () => {
       [
         "WITH s0 AS (",
         "SELECT a.id AS a__id, a.type_key AS a__type_key, a.props AS a__props," +
-          " a.created_at AS a__created_at, a.updated_at AS a__updated_at",
+          " a.created_at AS a__created_at, a.updated_at AS a__updated_at, a.identity AS a__identity",
         "FROM entity a",
         "WHERE a.type_key = $1",
         ")",

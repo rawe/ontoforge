@@ -949,26 +949,26 @@ describe("the path read", () => {
 
   it("a deep entity over a self-relation chain: root first, ending with the entity", async () => {
     expect(await pathOf("all", "task", ids.T1a)).toEqual([
-      { type: "customer", id: ids.ACME, name: "ACME" },
-      { type: "project", id: ids.P1, name: "P1" },
-      { type: "task", id: ids.T1, name: "T1" },
-      { type: "task", id: ids.T1a, name: "T1a" },
+      { type: "customer", id: ids.ACME, name: "ACME", identity: null },
+      { type: "project", id: ids.P1, name: "P1", identity: null },
+      { type: "task", id: ids.T1, name: "T1", identity: null },
+      { type: "task", id: ids.T1a, name: "T1a", identity: null },
     ]);
   });
 
   it("an up-pointing parent relation is walked from its target", async () => {
     expect(await pathOf("all", "milestone", ids.M1)).toEqual([
-      { type: "customer", id: ids.ACME, name: "ACME" },
-      { type: "project", id: ids.P1, name: "P1" },
-      { type: "milestone", id: ids.M1, name: "M1" },
+      { type: "customer", id: ids.ACME, name: "ACME", identity: null },
+      { type: "project", id: ids.P1, name: "P1", identity: null },
+      { type: "milestone", id: ids.M1, name: "M1", identity: null },
     ]);
   });
 
   it("a root's path is the entity alone; an ordinary relation is no parent", async () => {
     expect(await pathOf("all", "customer", ids.ACME)).toEqual([
-      { type: "customer", id: ids.ACME, name: "ACME" },
+      { type: "customer", id: ids.ACME, name: "ACME", identity: null },
     ]);
-    expect(await pathOf("all", "person", ids.Ben)).toEqual([{ type: "person", id: ids.Ben, name: "Ben" }]);
+    expect(await pathOf("all", "person", ids.Ben)).toEqual([{ type: "person", id: ids.Ben, name: "Ben", identity: null }]);
   });
 
   it("a lens hiding the middle level: the path starts below the hidden ancestor", async () => {
@@ -976,13 +976,13 @@ describe("the path read", () => {
     const res = await path("delivery", "task", ids.T1a);
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json()).toEqual([
-      { type: "task", id: ids.T1, name: "T1" },
-      { type: "task", id: ids.T1a, name: "T1a" },
+      { type: "task", id: ids.T1, name: "T1", identity: null },
+      { type: "task", id: ids.T1a, name: "T1a", identity: null },
     ]);
     expect(res.body).not.toContain(ids.P1);
     expect(res.body).not.toContain(ids.ACME);
     expect(await pathOf("delivery", "customer", ids.ACME)).toEqual([
-      { type: "customer", id: ids.ACME, name: "ACME" },
+      { type: "customer", id: ids.ACME, name: "ACME", identity: null },
     ]);
     // portfolio sees the whole path above a milestone.
     expect((await pathOf("portfolio", "milestone", ids.M1)).map((step) => step.id)).toEqual([

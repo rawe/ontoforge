@@ -346,6 +346,10 @@ Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
   keys of the managed indices switched off (`<type>~default`, `<type>~<documentProperty>`).
   Managed indices are not carried; the imported schema derives them. Optional.
 - `nameProperty` — each entity type's name property, one of its own `string` properties.
+- `identityProperties` — an entity type's identity, the ordered keys of 1 to 5 of its
+  own `string`, `integer` or `date` properties, each required and without a default.
+  Absent when the type has none. Import never cascades: it refuses an identity whose
+  properties break these rules.
 - A lens without `includes` is **unscoped** and sees the whole schema. A scoped lens lists
   the type keys it exposes and optionally restricts the visible properties.
   `indexInclusions` lists the search indices a scoped lens searches, by key; an unscoped
@@ -387,8 +391,8 @@ instance-data transfer format.
 }
 ```
 
-On import, `_id`, `_entityTypeKey`, `_relationTypeKey`, `_createdAt`, and `_updatedAt`
-are stripped. Entity IDs in relations are remapped to the newly created IDs. Document
+On import, `_id`, `_entityTypeKey`, `_relationTypeKey`, `_createdAt`, `_updatedAt` and
+`_identity` are stripped; the server derives each entity's identity from its values. Entity IDs in relations are remapped to the newly created IDs. Document
 properties are exported with their full content, not as size stubs.
 
 ## Related Skills

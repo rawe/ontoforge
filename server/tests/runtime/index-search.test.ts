@@ -321,7 +321,7 @@ describe("matched", () => {
           partKind: "relation",
           relationType: "works_for",
           relationId: "rel-1",
-          target: { id: "co-1", type: "company", label: "N-co-1" },
+          target: { id: "co-1", type: "company", label: "N-co-1", identity: null },
           snippet: "Ada CTO ACME",
           charOffset: null,
           charLength: null,

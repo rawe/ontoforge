@@ -272,6 +272,15 @@ export class ExpressionWalker {
         "datetime",
       );
     }
+    if (property === "_identity") {
+      // An entity's identity column, where the lens shows the type's whole
+      // identity; null otherwise, as on a relation.
+      const shown =
+        binding.kind === "entity" &&
+        binding.typeKey !== null &&
+        (this.state.schema.entityTypes[binding.typeKey]?.identityProperties ?? null) !== null;
+      return scalar(shown ? col(binding, "identity") : "NULL::text", "string");
+    }
 
     if (binding.typeKey === null) {
       pendingSurface("property access on an untyped pattern element");

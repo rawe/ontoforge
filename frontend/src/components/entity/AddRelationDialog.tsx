@@ -211,8 +211,9 @@ function AddRelationFlow({
       pickTarget(created)
     },
     onError: (err) => {
-      if (err instanceof ApiError && err.fieldErrors !== undefined) {
-        setNewErrors(err.fieldErrors)
+      const fields = err instanceof ApiError ? (err.fieldErrors ?? err.identityTakenFields) : undefined
+      if (fields !== undefined) {
+        setNewErrors(fields)
       } else {
         setFormError(err instanceof Error ? err.message : 'Failed to create entity')
       }

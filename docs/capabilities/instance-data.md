@@ -12,7 +12,8 @@ one relation together, on every mount. There is no batch write and no transactio
 calls: a [changeset](changesets.md) stages writes call by call, and its commit persists
 all of them or none.
 
-Reads come in four shapes: one instance by id, a filtered and paginated list of one type,
+Reads come in four shapes: one instance by id (or an entity by its
+[identity](entity-identity.md)), a filtered and paginated list of one type,
 the immediate neighbourhood of one entity, and [OQL](oql.md) for anything a fixed shape
 cannot express. Matching by meaning is [search](search.md); long-text values are
 [documents](documents.md). Reads never see staged data.
@@ -52,6 +53,12 @@ first and nothing is refused: the runtime cascade is silent, unlike the schema c
 protocol in [schema-modeling.md](schema-modeling.md). A caller that needs to know what
 would be lost must traverse first.
 
+An entity of a type that declares an [identity](entity-identity.md) carries `_identity`,
+unique within the type. Every read, update, delete, path, neighbourhood and document route
+by id has a twin by identity, and a create or update that would give an entity a taken
+identity is refused with `IDENTITY_TAKEN`. There is no create-or-update. How identities are
+built, renamed and resolved is in [entity-identity.md](entity-identity.md).
+
 Addressing an entity whose type the lens does not expose fails exactly as addressing a
 missing entity does: not found. A lens never reports that something exists but is hidden,
 with one bit of exception: refusing to delete an entity reveals that a child, or a
@@ -59,8 +66,10 @@ relation the lens hides, exists — never its type, id or count.
 
 ## Relations
 
-A relation is created against one relation type with two endpoint ids and, optionally,
-property values. Both endpoints must already exist, and each endpoint's entity type must
+A relation is created against one relation type with two endpoints, each named by its id
+or by its [identity](entity-identity.md#addressing-by-identity) (`fromEntityId` or
+`fromEntityIdentity`, `toEntityId` or `toEntityIdentity`), and, optionally, property
+values. A relation list filters by either form of each end too. Both endpoints must already exist, and each endpoint's entity type must
 equal the relation type's declared source and target — checked against the full schema, not
 the lens, so a narrow lens cannot create an edge that is invalid under a wider one.
 Endpoint errors are collected alongside property errors and reported together. A
@@ -116,13 +125,14 @@ The checks lock nothing; the race this leaves is in
 ### The create with a parent relation
 
 An entity create may carry `parentRelation`: the key of a parent relation whose child end
-is the new entity's type, the parent's id, and optionally the relation's own properties.
+is the new entity's type, the parent's id (`parentId`) or identity (`parentIdentity`), and
+optionally the relation's own properties.
 The new entity and that relation are written in one transaction, or not at all; the
 relation runs from parent to child for a `source` parent end and from child to parent for
 a `target` one. The response is the created entity.
 
 It is validated exactly as a relation create, with every fault collected together with
-the entity's own under `parentRelation.type`, `parentRelation.parentId` and
+the entity's own under `parentRelation.type`, `parentRelation.parentId` (or `parentRelation.parentIdentity`) and
 `parentRelation.properties.<key>`: the relation type must be visible through the lens,
 must be a parent relation, and must have the entity's type at its child end; the parent
 must exist with the type of the parent end, checked against the full schema; the relation's
@@ -143,11 +153,11 @@ ontology without a parent relation nothing is checked.
 ### The path read
 
 The path of one entity is its [hierarchy path](../README.md#hierarchies): the
-entity's ancestors, root first, followed by the entity itself, each as its type key, id and
-name. A hierarchy root's path is the entity alone. Through a lens the path starts below
+entity's ancestors, root first, followed by the entity itself, each as its type key, id,
+identity and name. A hierarchy root's path is the entity alone. Through a lens the path starts below
 the nearest ancestor whose type the lens hides, or that is reached over a parent relation
 the lens hides, so it never names a hidden entity or one above it. `name` is the value of the type's name property, and null when unset or hidden by
-the lens. An entity of a type the lens hides, a missing entity, or an id of another type is
+the lens; `identity` is null when the type has none, or none the lens shows. An entity of a type the lens hides, a missing entity, or an id of another type is
 not found, as on the entity read. On data that the accepted race left with two parents,
 the path lists every visible ancestor the walk reaches.
 
@@ -164,6 +174,10 @@ sequence of them.
 | Required check *(creation)* | A required property that is absent or explicitly null and has no default is rejected. |
 | Defaults *(creation)* | Every property with a default that the caller did not supply receives it. |
 | Coercion | Each supplied value is converted to the property's declared data type, or rejected. |
+
+An entity of a type with an identity is also checked for its identity: no identity property
+may hold an empty string, the identity may be at most 512 code points, and no other entity
+of the type may hold it (`IDENTITY_TAKEN`, a conflict rather than a field error).
 
 **All errors are collected.** One rejected write names every offending field at once,
 keyed by property. This is contractual, not incidental — see
@@ -223,7 +237,8 @@ defaults are with the parameter in
 rejected, so there is no way to pull more than one capped page in a single call.
 
 **Sorting.** `sort` accepts any property key of the type as exposed by the lens, plus the
-creation and update timestamps, and defaults to the creation timestamp ascending. Anything
+creation and update timestamps and, on an entity type with an identity the lens shows,
+`_identity` (which also filters, as a `string` property), and defaults to the creation timestamp ascending. Anything
 else is a validation error naming the field. The timestamps are accepted both by their
 system names and by underscore-less aliases; the aliases exist only for sorting and name
 nothing in a response. Where instances lack the sort property, their relative position is
@@ -423,7 +438,9 @@ ontology names disjoint data that no operation here can reach.
 REST carries filters as `filter.<property>` query parameters and repeats `fields` per
 value; MCP takes a filters object and a list, with the same keys and the same operator
 suffixes. The parent relation of a create is `parentRelation` in the REST body and
-`parent_relation`, with `parent_id`, as the MCP argument; MCP names a fault by the REST
+`parent_relation`, with `parent_id` or `parent_identity`, as the MCP argument. The MCP
+tools that name an entity take `entity_identity` beside `entity_id`, and the relation tools
+`from_entity_identity` and `to_entity_identity` beside the ids; MCP names a fault by the REST
 key. Both reach the same service, so every rule above holds identically. MCP clamps
 `limit` and `offset` into range instead of rejecting them, where REST rejects out-of-range
 values.

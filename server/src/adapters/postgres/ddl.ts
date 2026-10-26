@@ -16,7 +16,7 @@
  * run their transactions inside it, so index DDL and catalog reads
  * (`current_schema()`) resolve within that ontology alone.
  *
- * The DDL carries structure only — identity, referential integrity,
+ * The DDL carries structure only — primary keys, referential integrity,
  * exactly-one-owner, uniqueness. Business rules validate in the service,
  * with no backstop CHECKs; the search tables check only their closed
  * vocabularies (index kind, representation, generation state). The
@@ -97,7 +97,8 @@ export function ontologyDdlStatements(): string[] {
   description    text,
   created_at     timestamptz NOT NULL DEFAULT now(),
   updated_at     timestamptz NOT NULL DEFAULT now(),
-  name_property  text        NOT NULL   -- key of the name property; FK added after property_def
+  name_property  text        NOT NULL,  -- key of the name property; FK added after property_def
+  identity_properties text[]             -- ordered keys of the identity properties; NULL = no identity
 )`,
 
   `CREATE TABLE IF NOT EXISTS relation_type (
@@ -239,7 +240,11 @@ export function ontologyDdlStatements(): string[] {
   type_key   text        NOT NULL,                           -- NO FK: deleting a type orphans its instances by design
   props      jsonb       NOT NULL DEFAULT '{}'::jsonb,       -- user properties; system props are columns, not keys here
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  identity   text,                                           -- derived by the service; NULL: the type has none
+  -- NULLs never collide, so types without an identity are unaffected.
+  -- Deferrable: a changeset commit defers it to the end of its transaction.
+  CONSTRAINT entity_identity_unique UNIQUE (type_key, identity) DEFERRABLE INITIALLY IMMEDIATE
   -- no search columns: entities are searched through search_entry
 )`,
   `CREATE INDEX IF NOT EXISTS entity_type_key_idx ON entity (type_key)`,

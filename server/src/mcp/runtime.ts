@@ -41,6 +41,7 @@ import { z } from "zod";
 import { settings } from "../config.js";
 import { valueToText } from "../core/dataTypes.js";
 import { roleRefusal } from "../access/authorize.js";
+import { ValidationError } from "../core/exceptions.js";
 import { getRuntimeStore, type RuntimeStore, type WriteAccess } from "../core/ports.js";
 import { getRulesetView, readMountRuleset } from "../runtime/rulesets.js";
 import { filterRules } from "../runtime/readHelpers.js";
@@ -168,6 +169,27 @@ function stagedMode(kind: "create" | "update" | "delete" | "edit", binding: Bind
   );
 }
 
+/** How an entity tool names its entity. */
+const ENTITY_ADDRESS =
+  " Name the entity by 'entity_id' or by 'entity_identity', exactly one. An entity type with " +
+  "identityProperties in the schema gives each entity a readable identity, the _identity its " +
+  "reads return; prefer it to the id when the type has one.";
+
+/** The arguments that name an entity. */
+interface EntityArgs {
+  entity_type_key: string;
+  entity_id?: string | undefined;
+  entity_identity?: string | undefined;
+}
+
+/** The fault of an entity named both by id and by identity, or by
+ * neither. */
+function exactlyOneOf(idArg: string, identityArg: string): ValidationError {
+  const fields = {};
+  service.exactlyOneFault(fields, idArg, identityArg);
+  return new ValidationError(`Give exactly one of ${idArg} and ${identityArg}`, { fields });
+}
+
 /** Open the store of one tool call: on a ruleset mount, after the
  * not-found checks and the call's operation against write access. */
 type Open = () => Promise<RuntimeStore>;
@@ -250,6 +272,13 @@ export function createRuntimeMcpServer(
   // What the list offers: the lower of the binding's level and the caller's role.
   const offered = lower(binding.writeAccess, listedRoleLevel);
 
+  /** The id of the entity an entity tool names (`ENTITY_ADDRESS`): an
+   * identity resolved through the lens, as on the REST identity routes. */
+  const entityOf = async (args: EntityArgs, store: RuntimeStore): Promise<string> => {
+    if (!service.exactlyOne(args.entity_id, args.entity_identity)) throw exactlyOneOf("entity_id", "entity_identity");
+    return args.entity_id ?? service.resolveEntityIdentity(lensKey, args.entity_type_key, args.entity_identity!, store);
+  };
+
   /** Stage one write into a changeset of this lens (and ruleset). */
   const stageInto = async (open: Open, changesetId: string, write: changesets.StagedWrite): Promise<ToolResult> =>
     jsonResult(await changesets.stage(lensKey, rulesetKey, changesetId, write, await open()));
@@ -313,7 +342,8 @@ export function createRuntimeMcpServer(
         "definitions. To place the new entity in a hierarchy in the same call, pass " +
         "'parent_relation': 'type' is a parent relation type (one whose `parent` " +
         "names the parent end) whose child end is this entity type; 'parent_id' is " +
-        "the parent, which must exist with the entity type at the parent end; " +
+        "the parent, which must exist with the entity type at the parent end ('parent_identity' " +
+        "names it by its identity instead, exactly one of the two); " +
         "'properties' are the relation's own, held to the same rules as entity " +
         "properties. Its faults are reported together with the entity's, and the " +
         "entity and its parent relation are stored together or not at all." +
@@ -334,7 +364,8 @@ export function createRuntimeMcpServer(
         parent_relation: z
           .object({
             type: z.string(),
-            parent_id: z.string(),
+            parent_id: z.string().optional(),
+            parent_identity: z.string().optional(),
             properties: z.record(z.string(), z.unknown()).optional(),
           })
           .optional(),
@@ -347,7 +378,12 @@ export function createRuntimeMcpServer(
         entity_type_key: string;
         properties: Record<string, unknown>;
         parent_relation?:
-          | { type: string; parent_id: string; properties?: Record<string, unknown> | undefined }
+          | {
+              type: string;
+              parent_id?: string | undefined;
+              parent_identity?: string | undefined;
+              properties?: Record<string, unknown> | undefined;
+            }
           | undefined;
         changeset_id?: string | undefined;
       }, open) => {
@@ -355,7 +391,12 @@ export function createRuntimeMcpServer(
         const parentRelation =
           parent === undefined
             ? null
-            : { type: parent.type, parentId: parent.parent_id, properties: parent.properties };
+            : {
+                type: parent.type,
+                parentId: parent.parent_id,
+                parentIdentity: parent.parent_identity,
+                properties: parent.properties,
+              };
         if (args.changeset_id !== undefined) {
           return stageInto(open, args.changeset_id, {
             operation: "create_entity",
@@ -444,10 +485,11 @@ export function createRuntimeMcpServer(
         "properties to include — only listed fields plus _id are returned. " +
         "Omit for all fields. Document properties appear as " +
         '{"document": true, "length": N} stubs — read their content with the ' +
-        "get_document tool.",
+        "get_document tool." + ENTITY_ADDRESS,
       inputSchema: {
         entity_type_key: z.string(),
-        entity_id: z.string(),
+        entity_id: z.string().optional(),
+        entity_identity: z.string().optional(),
         fields: z.array(z.string()).optional(),
       },
     },
@@ -455,14 +497,16 @@ export function createRuntimeMcpServer(
       "get_entity",
       async (args: {
         entity_type_key: string;
-        entity_id: string;
+        entity_id?: string | undefined;
+        entity_identity?: string | undefined;
         fields?: string[] | undefined;
       }, open) => {
+        const store = await open();
         const result = await service.getEntity(
           lensKey,
           args.entity_type_key,
-          args.entity_id,
-          await open(),
+          await entityOf(args, store),
+          store,
           args.fields ?? null,
         );
         return jsonResult(result);
@@ -478,19 +522,16 @@ export function createRuntimeMcpServer(
         "relations as [{type, id, name}], root first and ending with the entity " +
         "itself. A root's path is the entity alone. The path starts below the " +
         "nearest ancestor this connection cannot see, so it names only visible " +
-        "entities. name is null when the entity has no name value.",
+        "entities. name is null when the entity has no name value." + ENTITY_ADDRESS,
       inputSchema: {
         entity_type_key: z.string(),
-        entity_id: z.string(),
+        entity_id: z.string().optional(),
+        entity_identity: z.string().optional(),
       },
     },
-    tool("get_path", async (args: { entity_type_key: string; entity_id: string }, open) => {
-      const result = await service.getPath(
-        lensKey,
-        args.entity_type_key,
-        args.entity_id,
-        await open(),
-      );
+    tool("get_path", async (args: EntityArgs, open) => {
+      const store = await open();
+      const result = await service.getPath(lensKey, args.entity_type_key, await entityOf(args, store), store);
       return jsonResult(result);
     }),
   );
@@ -504,10 +545,11 @@ export function createRuntimeMcpServer(
         '— they appear as {"document": true, "length": N} stubs. ' +
         "'offset' and 'limit' are character-based; omit both to read the full " +
         "document. Use the charOffset/charLength from a search hit's " +
-        "matches, or from a search_by_index passage's matched, to read exactly the matching passage.",
+        "matches, or from a search_by_index passage's matched, to read exactly the matching passage." + ENTITY_ADDRESS,
       inputSchema: {
         entity_type_key: z.string(),
-        entity_id: z.string(),
+        entity_id: z.string().optional(),
+        entity_identity: z.string().optional(),
         property_key: z.string(),
         offset: z.number().optional(),
         limit: z.number().optional(),
@@ -517,7 +559,8 @@ export function createRuntimeMcpServer(
       "get_document",
       async (args: {
         entity_type_key: string;
-        entity_id: string;
+        entity_id?: string | undefined;
+        entity_identity?: string | undefined;
         property_key: string;
         offset?: number | undefined;
         limit?: number | undefined;
@@ -525,14 +568,15 @@ export function createRuntimeMcpServer(
         const offset = Math.max(0, args.offset ?? 0);
         const limit =
           args.limit === undefined || args.limit === null ? null : Math.max(1, args.limit);
+        const store = await open();
         const result = await service.getDocument(
           lensKey,
           args.entity_type_key,
-          args.entity_id,
+          await entityOf(args, store),
           args.property_key,
           offset,
           limit,
-          await open(),
+          store,
         );
         return jsonResult(result);
       },
@@ -547,10 +591,12 @@ export function createRuntimeMcpServer(
         "to remove it (fails for required properties). Document properties are " +
         "replaced whole here — prefer edit_document / write_document for partial edits " +
         "inside a document." +
+        ENTITY_ADDRESS +
         staged("update"),
       inputSchema: {
         entity_type_key: z.string(),
-        entity_id: z.string(),
+        entity_id: z.string().optional(),
+        entity_identity: z.string().optional(),
         properties: z.record(z.string(), z.unknown()),
         changeset_id: changesetIdParam,
       },
@@ -559,7 +605,8 @@ export function createRuntimeMcpServer(
       "update_entity",
       async (args: {
         entity_type_key: string;
-        entity_id: string;
+        entity_id?: string | undefined;
+        entity_identity?: string | undefined;
         properties: Record<string, unknown>;
         changeset_id?: string | undefined;
       }, open) => {
@@ -568,15 +615,17 @@ export function createRuntimeMcpServer(
             operation: "update_entity",
             typeKey: args.entity_type_key,
             id: args.entity_id,
+            identity: args.entity_identity,
             properties: args.properties,
           });
         }
+        const store = await open();
         const result = await service.updateEntity(
           lensKey,
           args.entity_type_key,
-          args.entity_id,
+          await entityOf(args, store),
           args.properties,
-          await open(),
+          store,
           rulesetKey,
         );
         return jsonResult(result);
@@ -594,10 +643,12 @@ export function createRuntimeMcpServer(
         "longer string with surrounding context, or set replace_all to true to " +
         "replace every occurrence. Returns the new totalLength, the edited " +
         "range, and ~200 chars of context around the edit for verification." +
+        ENTITY_ADDRESS +
         staged("edit"),
       inputSchema: {
         entity_type_key: z.string(),
-        entity_id: z.string(),
+        entity_id: z.string().optional(),
+        entity_identity: z.string().optional(),
         property_key: z.string(),
         old_string: z.string(),
         new_string: z.string(),
@@ -609,7 +660,8 @@ export function createRuntimeMcpServer(
       "edit_document",
       async (args: {
         entity_type_key: string;
-        entity_id: string;
+        entity_id?: string | undefined;
+        entity_identity?: string | undefined;
         property_key: string;
         old_string: string;
         new_string: string;
@@ -627,17 +679,19 @@ export function createRuntimeMcpServer(
             operation: "edit_document",
             typeKey: args.entity_type_key,
             id: args.entity_id,
+            identity: args.entity_identity,
             propertyKey: args.property_key,
             edit,
           });
         }
+        const store = await open();
         const result = await service.editDocument(
           lensKey,
           args.entity_type_key,
-          args.entity_id,
+          await entityOf(args, store),
           args.property_key,
           edit,
-          await open(),
+          store,
           rulesetKey,
         );
         return jsonResult(result);
@@ -656,10 +710,12 @@ export function createRuntimeMcpServer(
         "'expect' (the text currently in the range) to fail safely if the " +
         "document changed since it was read. Returns the new totalLength, the " +
         "edited range, and ~200 chars of context around the edit." +
+        ENTITY_ADDRESS +
         staged("edit"),
       inputSchema: {
         entity_type_key: z.string(),
-        entity_id: z.string(),
+        entity_id: z.string().optional(),
+        entity_identity: z.string().optional(),
         property_key: z.string(),
         offset: z.number(),
         length: z.number(),
@@ -672,7 +728,8 @@ export function createRuntimeMcpServer(
       "write_document",
       async (args: {
         entity_type_key: string;
-        entity_id: string;
+        entity_id?: string | undefined;
+        entity_identity?: string | undefined;
         property_key: string;
         offset: number;
         length: number;
@@ -692,17 +749,19 @@ export function createRuntimeMcpServer(
             operation: "edit_document",
             typeKey: args.entity_type_key,
             id: args.entity_id,
+            identity: args.entity_identity,
             propertyKey: args.property_key,
             edit,
           });
         }
+        const store = await open();
         const result = await service.editDocument(
           lensKey,
           args.entity_type_key,
-          args.entity_id,
+          await entityOf(args, store),
           args.property_key,
           edit,
-          await open(),
+          store,
           rulesetKey,
         );
         return jsonResult(result);
@@ -718,33 +777,32 @@ export function createRuntimeMcpServer(
         "relations (relation types whose `parent` names the parent end), an entity that " +
         "still has children is refused: delete its children first, bottom-up. A leaf, " +
         "or any entity in an ontology without parent relations, goes with its relations." +
+        ENTITY_ADDRESS +
         staged("delete") +
         " A staged entity delete also takes out every relation staged in the changeset at that " +
         "entity, and the answer lists their ids as cascaded.",
       inputSchema: {
         entity_type_key: z.string(),
-        entity_id: z.string(),
+        entity_id: z.string().optional(),
+        entity_identity: z.string().optional(),
         changeset_id: changesetIdParam,
       },
     },
-    tool("delete_entity", async (args: { entity_type_key: string; entity_id: string; changeset_id?: string | undefined }, open) => {
+    tool("delete_entity", async (args: EntityArgs & { changeset_id?: string | undefined }, open) => {
       if (args.changeset_id !== undefined) {
         return stageInto(open, args.changeset_id, {
           operation: "delete_entity",
           typeKey: args.entity_type_key,
           id: args.entity_id,
+          identity: args.entity_identity,
         });
       }
-      await service.deleteEntity(
-        lensKey,
-        args.entity_type_key,
-        args.entity_id,
-        await open(),
-        rulesetKey,
-      );
+      const store = await open();
+      const entityId = await entityOf(args, store);
+      await service.deleteEntity(lensKey, args.entity_type_key, entityId, store, rulesetKey);
       // This tool returns a message OBJECT, unlike the modeling delete
       // tools, which return bare strings. Wire contract — do not unify.
-      return jsonResult({ message: `Entity '${args.entity_id}' deleted successfully.` });
+      return jsonResult({ message: `Entity '${args.entity_identity ?? entityId}' deleted successfully.` });
     }),
   );
 
@@ -757,12 +815,16 @@ export function createRuntimeMcpServer(
         "type whose `parent` names the parent end), every entity has at most one parent " +
         "across all parent relations and the hierarchy has no cycles: the create is " +
         "refused when the child end already has a parent, or when the parent end is the " +
-        "child itself or one of its descendants." +
+        "child itself or one of its descendants. Name each end by its id ('from_entity_id', " +
+        "'to_entity_id') or by its identity ('from_entity_identity', 'to_entity_identity'), " +
+        "exactly one per end; prefer the identity when the end's type has one." +
         staged("create"),
       inputSchema: {
         relation_type_key: z.string(),
-        from_entity_id: z.string(),
-        to_entity_id: z.string(),
+        from_entity_id: z.string().optional(),
+        to_entity_id: z.string().optional(),
+        from_entity_identity: z.string().optional(),
+        to_entity_identity: z.string().optional(),
         properties: z.record(z.string(), z.unknown()).optional(),
         changeset_id: changesetIdParam,
       },
@@ -771,25 +833,31 @@ export function createRuntimeMcpServer(
       "create_relation",
       async (args: {
         relation_type_key: string;
-        from_entity_id: string;
-        to_entity_id: string;
+        from_entity_id?: string | undefined;
+        to_entity_id?: string | undefined;
+        from_entity_identity?: string | undefined;
+        to_entity_identity?: string | undefined;
         properties?: Record<string, unknown> | undefined;
         changeset_id?: string | undefined;
       }, open) => {
+        const ends = {
+          fromEntityId: args.from_entity_id,
+          toEntityId: args.to_entity_id,
+          fromEntityIdentity: args.from_entity_identity,
+          toEntityIdentity: args.to_entity_identity,
+        };
         if (args.changeset_id !== undefined) {
           return stageInto(open, args.changeset_id, {
             operation: "create_relation",
             typeKey: args.relation_type_key,
-            fromEntityId: args.from_entity_id,
-            toEntityId: args.to_entity_id,
+            ...ends,
             properties: args.properties ?? {},
           });
         }
         const result = await service.createRelation(
           lensKey,
           args.relation_type_key,
-          args.from_entity_id,
-          args.to_entity_id,
+          ends,
           args.properties ?? {},
           await open(),
           rulesetKey,
@@ -804,13 +872,16 @@ export function createRuntimeMcpServer(
     {
       description:
         "List relations of a type, optionally only those from or to one entity " +
-        "(from_entity_id, to_entity_id). " +
+        "(from_entity_id, to_entity_id, or by identity from_entity_identity, to_entity_identity; " +
+        "not both of a pair). " +
         filterRules({ contains: true, relations: false }) +
         " The properties are the relation's own.",
       inputSchema: {
         relation_type_key: z.string(),
         from_entity_id: z.string().optional(),
         to_entity_id: z.string().optional(),
+        from_entity_identity: z.string().optional(),
+        to_entity_identity: z.string().optional(),
         filters: z.record(z.string(), z.unknown()).optional(),
         sort: z.string().optional(),
         // A closed enum, matching REST: the direction is never caller text.
@@ -825,6 +896,8 @@ export function createRuntimeMcpServer(
         relation_type_key: string;
         from_entity_id?: string | undefined;
         to_entity_id?: string | undefined;
+        from_entity_identity?: string | undefined;
+        to_entity_identity?: string | undefined;
         filters?: Record<string, unknown> | undefined;
         sort?: string | undefined;
         order?: "asc" | "desc" | undefined;
@@ -846,8 +919,12 @@ export function createRuntimeMcpServer(
           offset,
           args.sort ?? "_createdAt",
           args.order ?? "asc",
-          args.from_entity_id ?? null,
-          args.to_entity_id ?? null,
+          {
+            fromEntityId: args.from_entity_id,
+            toEntityId: args.to_entity_id,
+            fromEntityIdentity: args.from_entity_identity,
+            toEntityIdentity: args.to_entity_identity,
+          },
           strFilters,
           await open(),
         );
@@ -956,10 +1033,11 @@ export function createRuntimeMcpServer(
         "and how. Returns the center entity plus all connected entities with their " +
         "connecting relations. Use 'fields' to project entity properties (neighbor " +
         "entities always include _entityTypeKey). Use 'relation_fields' to project " +
-        "relation properties.",
+        "relation properties." + ENTITY_ADDRESS,
       inputSchema: {
         entity_type_key: z.string(),
-        entity_id: z.string(),
+        entity_id: z.string().optional(),
+        entity_identity: z.string().optional(),
         direction: z.string().optional(),
         relation_type_key: z.string().optional(),
         limit: z.number().optional(),
@@ -971,7 +1049,8 @@ export function createRuntimeMcpServer(
       "get_neighbors",
       async (args: {
         entity_type_key: string;
-        entity_id: string;
+        entity_id?: string | undefined;
+        entity_identity?: string | undefined;
         direction?: string | undefined;
         relation_type_key?: string | undefined;
         limit?: number | undefined;
@@ -979,14 +1058,15 @@ export function createRuntimeMcpServer(
         relation_fields?: string[] | undefined;
       }, open) => {
         const limit = clamp(args.limit ?? 50, 1, 200);
+        const store = await open();
         const result = await service.getNeighbors(
           lensKey,
           args.entity_type_key,
-          args.entity_id,
+          await entityOf(args, store),
           args.direction ?? "both",
           args.relation_type_key ?? null,
           limit,
-          await open(),
+          store,
           args.fields ?? null,
           args.relation_fields ?? null,
         );

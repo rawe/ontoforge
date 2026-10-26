@@ -29,6 +29,7 @@ import {
   DocumentViewerDialog,
   type DocumentViewerTarget,
 } from '@/components/DocumentViewerDialog'
+import { IdentityText } from '@/components/IdentityText'
 import { TypeChip } from '@/components/TypeChip'
 import { AddRelationDialog } from '@/components/entity/AddRelationDialog'
 import { useNeighborCounts } from '@/components/entity/useNeighborCounts'
@@ -157,6 +158,7 @@ export function NodePanel({
                 displayName={entityType?.displayName ?? typeKey}
                 size="sm"
               />
+              <IdentityText identity={entity._identity} />
               {node.data.pinned && (
                 <Badge variant="secondary" className="gap-1 text-[10.5px]">
                   <Pin className="size-2.5" /> pinned

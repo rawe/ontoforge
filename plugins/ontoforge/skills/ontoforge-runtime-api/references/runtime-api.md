@@ -58,10 +58,10 @@ Entity and relation lists share one parameter vocabulary.
 |---|---|
 | `limit` | Page size, 1–200, default 50 |
 | `offset` | Rows to skip, default 0 |
-| `sort` | Property key, or `_createdAt` / `_updatedAt`; default `_createdAt`. The underscore may be omitted |
+| `sort` | Property key, or `_createdAt` / `_updatedAt`; default `_createdAt`. The underscore may be omitted. Entity lists of a type with an identity also sort by `_identity` (underscore required) |
 | `order` | `asc` or `desc`, default `asc` |
 | `q` | Case-insensitive substring across every `string` property in scope. **Entity lists only**; `document` properties are not searched |
-| `filter.{propertyKey}[__{op}]` | Property filter, repeatable |
+| `filter.{propertyKey}[__{op}]` | Property filter, repeatable. Entity lists of a type with an identity also filter on `_identity`, as a string |
 | `filter.{relationTypeKey}[:out\|:in].{propertyKey}[__{op}]` | Query path — a property of the related entity; entity lists and search, repeatable |
 | `filter.{relationTypeKey}[:out\|:in]@{propertyKey}[__{op}]` | Query path — a property stored on the relation itself; entity lists and search, repeatable |
 | `filter.{relationTypeKey}[:out\|:in]__exists` / `__missing` | Relation existence — whether any relation of the type exists; entity lists and search, repeatable |
@@ -164,7 +164,37 @@ types, relation types or property keys are unknown.
 - `DELETE /entities/{entityTypeKey}/{entityId}`
   Deletes the entity **and every relation attached to it**.
 
-Entity list and read always return `_id` regardless of projection.
+Entity list and read always return `_id` regardless of projection, and `_identity`
+where the entity has one.
+
+## Entity Identity
+
+An entity type may declare an **identity**: `identityProperties`, an ordered list of 1–5
+of its `string`, `integer` or `date` properties (shown on the schema reads; `null` when
+the type has none, or the lens does not show all of them). These properties are always
+required. An entity's identity is their values in that order, joined with `~`; in a
+`string` value `%` is written `%25` and `~` `%7E`. An `integer` is plain decimal, a
+`date` `YYYY-MM-DD`. Matching is exact: no trimming, no case folding.
+
+- Entity reads carry the identity as the read-only system property `_identity`. Never
+  send it in a write.
+- The identity is unique within the type. A create or update that would give an entity
+  another entity's identity answers `409 RESOURCE_CONFLICT` with
+  `details: {"code": "IDENTITY_TAKEN", "identity": "…", "properties": ["…"]}`.
+- The id stays the entity's reference everywhere. The identity is a second address, for
+  clients that know an entity by its values (an upstream key, a code and a year).
+- Every route below `/entities/{entityTypeKey}/{entityId}` has an identity twin below
+  `/entities/{entityTypeKey}/identity/{identity}` — read, update, delete, `/path`,
+  `/neighbors` and `/documents/{propertyKey}`. URL-encode the identity as one path
+  segment. An unknown identity answers `404`.
+- Where a body or query names an entity by id, an identity twin names it by identity:
+  `fromEntityIdentity` / `toEntityIdentity` beside `fromEntityId` / `toEntityId` on
+  relation create and list, `parentIdentity` beside `parentId` in `parentRelation`.
+  A pair takes one of its two, never both (`422`); where the end is required, exactly one.
+- There is no create-or-update: a create refuses a taken identity, and an update never
+  creates. To upsert, read by identity first, then create or update.
+- Changing an identity property's value renames the identity. The old identity is not
+  kept: it no longer finds the entity.
 
 ## Document Properties
 
@@ -229,7 +259,7 @@ Writes are unchanged: send the full string as a normal property value.
   `direction` is `outgoing`, `incoming` or `both` (default). `limit` is 1–200, default 50.
 
 Regardless of projection: the centre entity always carries `_id`; neighbour entities
-carry `_id` and `_entityTypeKey`; relations carry `_id`, `_relationTypeKey` and
+carry `_id` and `_entityTypeKey` (and `_identity` where they have one); relations carry `_id`, `_relationTypeKey` and
 `direction`.
 
 ## Search
@@ -511,7 +541,7 @@ There are exactly six codes:
 | Condition | Status | Code | `details` |
 |---|---|---|---|
 | Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — |
-| Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | — |
+| Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | `code: IDENTITY_TAKEN`, `identity`, `properties` for a taken identity |
 | Input rejected | 422 | `VALIDATION_ERROR` | `fields` map or `errors` list |
 | Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses` |
 | Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |

@@ -55,7 +55,7 @@ This is the single most common source of mistakes against the modeling surface.
 | Surface | Addressed by |
 |---|---|
 | Registry | Ontology key |
-| Runtime REST, everywhere | Keys — ontology key, lens key, ruleset key, type key, property key; instance ids for entities and relations |
+| Runtime REST, everywhere | Keys — ontology key, lens key, ruleset key, type key, property key; instance ids for entities and relations, or an entity's [identity](capabilities/entity-identity.md) on the identity twin of an entity route |
 | Modeling REST — lenses, entity types, relation types, properties, inclusions | **Internal identifiers**, not keys |
 | Modeling REST — agent configs, saved queries, retrievers, navigators | Lens key and the resource key |
 | Modeling REST — search indices | Index key — managed keys included, which carry `~` |
@@ -92,10 +92,10 @@ Entity and relation list routes share one parameter vocabulary.
 |---|---|
 | `limit` | Page size, 1–200, default 50 |
 | `offset` | Rows to skip, default 0 |
-| `sort` | Property key, or `_createdAt` / `_updatedAt`; default `_createdAt`. `createdAt` and `updatedAt` are accepted without the underscore |
+| `sort` | Property key, or `_createdAt` / `_updatedAt`; default `_createdAt`. `createdAt` and `updatedAt` are accepted without the underscore. Entity lists also take `_identity` where the type has an identity the lens shows |
 | `order` | `asc` or `desc`, default `asc` |
 | `q` | Case-insensitive substring match across every `string` property in scope; entity lists only, and `document` properties are not searched |
-| `filter.<propertyKey>[__<op>]` | Property filter, repeatable |
+| `filter.<propertyKey>[__<op>]` | Property filter, repeatable; on entity lists `_identity` filters as a `string` property where the type has an identity the lens shows |
 | `filter.<relationTypeKey>[:out\|:in].<propertyKey>[__<op>]` | Query path — filter by a property of the related entity; entity lists and search, repeatable |
 | `filter.<relationTypeKey>[:out\|:in]@<propertyKey>[__<op>]` | Query path — filter by a property stored on the relation itself; entity lists and search, repeatable |
 | `filter.<relationTypeKey>[:out\|:in]__exists` / `__missing` | Relation existence — whether any relation of the type exists; entity lists and search, repeatable |
@@ -128,7 +128,8 @@ comparison operator are each rejected; a request carrying several faulty
 filters is rejected once, every fault under its own filter key in `details.fields`. How a
 filter is evaluated, and the trap in the suffix rule, are in
 [capabilities/instance-data.md](capabilities/instance-data.md#listing). Relation lists
-additionally accept `fromEntityId` and `toEntityId`.
+additionally accept `fromEntityId` and `toEntityId`, or `fromEntityIdentity` and
+`toEntityIdentity`, at most one of each pair.
 
 A filter key on an entity list, or on search, may be a query path — `filter.works_for.name=Acme` for a
 property of the related entity, `filter.works_for@role=CTO` for a property stored on the
@@ -157,10 +158,12 @@ not on every request shape — the restrictions and their reasons are in
 
 | Route | Always returned regardless of projection |
 |---|---|
-| Entity list, entity read | `_id` |
-| Search | `_id`, `_entityTypeKey` |
-| Neighbours — the centre entity | `_id` |
-| Neighbours — neighbour entities | `_id`, `_entityTypeKey` |
+| Entity list, entity read | `_id`, `_identity` |
+| Search | `_id`, `_entityTypeKey`, `_identity` |
+| Neighbours — the centre entity | `_id`, `_identity` |
+| Neighbours — neighbour entities | `_id`, `_entityTypeKey`, `_identity` |
+
+`_identity` is there only where the entity has one the lens shows.
 | Neighbours — relations, via `relationFields` | `_id`, `_relationTypeKey`, `direction` |
 
 Projection has one non-obvious effect: naming a `document` property in `fields` returns its
@@ -205,6 +208,14 @@ An assistant thread that is unknown, expired, bound to another assistant or star
 another principal answers `RESOURCE_NOT_FOUND` with `details.code` of `THREAD_NOT_FOUND`;
 a message to a thread whose previous message is still being answered answers
 `RESOURCE_CONFLICT` with `details.code` of `THREAD_BUSY` ([assistant chat and threads](#assistant-chat-and-threads)).
+
+A create or update that would give an entity an identity another entity of its type holds
+answers `RESOURCE_CONFLICT` with `details.code` of `IDENTITY_TAKEN`, `details.identity` and
+`details.properties`, the type's identity property keys; it never names the other entity
+([capabilities/entity-identity.md](capabilities/entity-identity.md#writes)). Setting an
+identity the stored entities cannot take answers `RESOURCE_CONFLICT` with
+`details.violations`, each `{rule, count, entities}`, the rule `missing_value`, `duplicate`
+or `too_long`.
 
 A data write whose ontology's design keeps changing while it runs, or a write or modeling
 change that waits too long for another one, answers `RESOURCE_CONFLICT` and has written
@@ -431,10 +442,10 @@ schema; see the addressing note above before using it. Semantics:
 
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
-| POST | `/entity-types` | Create an entity type together with its name property (`nameProperty`, default `name`) | — |
+| POST | `/entity-types` | Create an entity type together with its name property (`nameProperty`, default `name`), optionally with an identity (`identityProperties`) | `cascade` |
 | GET | `/entity-types` | List the ontology's entity types | — |
 | GET | `/entity-types/{entityTypeId}` | Read one entity type | — |
-| PUT | `/entity-types/{entityTypeId}` | Update display name, description or name property (`nameProperty`) | — |
+| PUT | `/entity-types/{entityTypeId}` | Update display name, description, name property (`nameProperty`) or identity (`identityProperties`; null clears it) | `cascade` |
 | DELETE | `/entity-types/{entityTypeId}` | Delete an entity type and its properties | `cascade` |
 
 ### Relation types
@@ -684,6 +695,12 @@ visible properties. What a relation type carries:
 
 Semantics: [capabilities/instance-data.md](capabilities/instance-data.md).
 
+Every route below `/entities/{entityTypeKey}/{entityId}` — read, path, update, delete,
+documents and neighbours — has an identity twin below
+`/entities/{entityTypeKey}/identity/{identity}`, the identity URL-encoded as one segment,
+with the same parameters and answers; an unknown identity is not found
+([capabilities/entity-identity.md](capabilities/entity-identity.md#addressing-by-identity)).
+
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
 | POST | `/entities/{entityTypeKey}` | Create an entity, optionally with its parent relation (`parentRelation`) | — |
@@ -694,10 +711,11 @@ Semantics: [capabilities/instance-data.md](capabilities/instance-data.md).
 | DELETE | `/entities/{entityTypeKey}/{entityId}` | Delete an entity and every relation attached to it; refused for an entity with children or with a relation the lens hides | — |
 
 `parentRelation` sits beside the property values in the flat create body as
-`{type, parentId, properties}`: the parent relation type's key, the parent's id and the
-relation's own properties, optional. The create answers the entity alone; faults come
+`{type, parentId, properties}`: the parent relation type's key, the parent's id — or
+`parentIdentity`, its identity, in place of `parentId` — and the relation's own properties,
+optional. The create answers the entity alone; faults come
 under `parentRelation.*` with the entity's own. The path answers
-`[{type, id, name}]`, root first and ending with the entity; an unknown, hidden or
+`[{type, id, identity, name}]`, `identity` null where there is none, root first and ending with the entity; an unknown, hidden or
 wrong-type entity is not found, as on the read. Deleting an entity that still has children,
 or that has a relation attached whose type the lens hides, answers `RESOURCE_CONFLICT`. Rules: [capabilities/instance-data.md](capabilities/instance-data.md#hierarchies).
 
@@ -726,8 +744,8 @@ against a stale offset. Insert and append are the range form with zero length.
 
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
-| POST | `/relations/{relationTypeKey}` | Create a relation between two entities | — |
-| GET | `/relations/{relationTypeKey}` | List relations of one type | `limit`, `offset`, `sort`, `order`, `fromEntityId`, `toEntityId`, `filter.*` |
+| POST | `/relations/{relationTypeKey}` | Create a relation between two entities, each end by `fromEntityId` or `fromEntityIdentity`, `toEntityId` or `toEntityIdentity` | — |
+| GET | `/relations/{relationTypeKey}` | List relations of one type | `limit`, `offset`, `sort`, `order`, `fromEntityId`, `toEntityId`, `fromEntityIdentity`, `toEntityIdentity`, `filter.*` |
 | GET | `/relations/{relationTypeKey}/{relationId}` | Read one relation | — |
 | PATCH | `/relations/{relationTypeKey}/{relationId}` | Partial update of properties; endpoints cannot change | — |
 | DELETE | `/relations/{relationTypeKey}/{relationId}` | Delete a relation; its endpoints are untouched | — |
@@ -743,6 +761,7 @@ Semantics: [capabilities/changesets.md](capabilities/changesets.md).
 | GET | `/changesets/{changesetId}` | Read a changeset with its staged objects by first touch | `offset`, `limit` |
 | GET | `/changesets/{changesetId}/documents/{entityTypeKey}/{entityId}/{propertyKey}` | Read the text a commit would leave in a document property, whole or by character range | `offset`, `limit` |
 | GET | `/changesets/{changesetId}/entities/{entityTypeKey}/{entityId}` | Read one entity as the changeset leaves it, with its staged object | — |
+| GET | `/changesets/{changesetId}/entities/{entityTypeKey}/identity/{identity}` | The same, the entity named by its identity in the changeset's view | — |
 | DELETE | `/changesets/{changesetId}` | Discard a draft changeset; 204 | — |
 | POST | `/changesets/{changesetId}/writes` | Stage one call, its body discriminated by `operation`; 201 | — |
 | DELETE | `/changesets/{changesetId}/objects/{objectId}` | Unstage one staged object with its values; 204 | — |
@@ -758,7 +777,9 @@ A staged call's `operation` is one of seven, each with its keys and no other:
 `{type, id, properties?}`, `delete_entity` `{type, id}`, `create_relation`
 `{type, fromEntityId, toEntityId, properties?}`, `update_relation` `{type, id, properties?}`,
 `delete_relation` `{type, id}` and `edit_document` `{type, id, property}` with the body of
-the [document write](#documents); `type` is the type key, `id` the target, `properties`
+the [document write](#documents). On the entity operations `identity` may name the entity
+in place of `id`, and on `create_relation` `fromEntityIdentity` and `toEntityIdentity` the
+ends, resolved in the changeset's view; `type` is the type key, `id` the target, `properties`
 the values as one object, and `parentRelation` the immediate create's. Staging answers
 `{id}`, the staged object's id; a create with a parent relation adds `relation: {id}`, an
 entity delete that took out staged relations `cascaded`, their ids, and `edit_document`
@@ -766,7 +787,8 @@ the document write's answer beside `id`.
 
 `limit` of the changeset read is 1–500, default 100. A changeset carries `objectCount`, its
 number of staged objects; the read adds `objects`, each `{id, kind, type, action,
-firstTouchedAt, markers, values}`, with `name` for an entity and `from` and `to`, each
+firstTouchedAt, markers, values}`, with `name` for an entity, `identity` `{before, after}`
+for an entity the changeset gives an identity, and `from` and `to`, each
 `{id, name}`, for a relation, and each value `{property, before, current, after,
 markers}`, a document value as `{document: true, length}`. The list counts `operations`
 per `<action>_<kind>`. The staged document read pages and answers as the document read
@@ -1146,8 +1168,8 @@ otherwise, reads included.
 |---|---|
 | `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation. With authentication on it creates nothing |
 | `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries, retrievers and navigators. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
-| `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`) |
-| `update_entity_type` | Change display name, description or name property (`name_property`); the key is immutable |
+| `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`), optionally with an identity (`identity_properties`) |
+| `update_entity_type` | Change display name, description, name property (`name_property`) or identity (`identity_properties`; null clears it); the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |
 | `create_relation_type` | Add a relation type between two entity types, optionally naming its parent end (`parent`) |
 | `update_relation_type` | Change display name, description or parent end (`parent`; null clears it); endpoints are immutable |
@@ -1191,7 +1213,7 @@ otherwise, reads included.
 | `delete_saved_query` | Delete a saved query |
 
 The per-lens tools take a `lens_key` naming a lens of the bound ontology.
-`add_property`, `delete_property`, `delete_entity_type`,
+`create_entity_type`, `update_entity_type`, `add_property`, `delete_property`, `delete_entity_type`,
 `delete_relation_type` and `delete_search_index` take a `cascade` flag with the same
 meaning as the REST parameter. The search-index tools take the index key as
 `index_key` and a definition in the same wire format as REST, camelCase included.
@@ -1206,8 +1228,8 @@ Everything a client can do to instance data through one lens.
 | Tool | Purpose |
 |---|---|
 | `get_ruleset` | Ruleset mounts only: what the connection may do — key, write access, and the anchor with its type, id, name, state, visible and path |
-| `get_schema` | The scoped schema, as REST `/schema` returns it — the lens's key, name and description; types, properties, required flags, name properties |
-| `create_entity` | Create an entity, optionally with its parent relation (`parent_relation`: `type`, `parent_id`, `properties`) |
+| `get_schema` | The scoped schema, as REST `/schema` returns it — the lens's key, name and description; types, properties, required flags, name properties, identity properties |
+| `create_entity` | Create an entity, optionally with its parent relation (`parent_relation`: `type`, `parent_id` or `parent_identity`, `properties`) |
 | `list_entities` | List entities with search, filters, sorting, paging and projection |
 | `get_entity` | Read one entity by id |
 | `get_path` | An entity's hierarchy path through the lens, root first |
@@ -1241,6 +1263,12 @@ Everything a client can do to instance data through one lens.
 | `check_changeset` | Check a changeset: run the commit and roll it back |
 | `commit_changeset` | Commit a changeset, with an optional `expected_version` |
 | `discard_changeset` | Discard a draft changeset |
+
+`get_entity`, `get_path`, `get_document`, `update_entity`, `edit_document`,
+`write_document`, `delete_entity` and `get_neighbors` name the entity by `entity_id` or
+`entity_identity`, exactly one; `create_relation` names its ends by `from_entity_id` or
+`from_entity_identity` and `to_entity_id` or `to_entity_identity`, and `list_relations`
+filters by either. `get_staged_document` takes an id only.
 
 `create_entity`, `update_entity`, `delete_entity`, `create_relation`, `update_relation`,
 `delete_relation`, `edit_document` and `write_document` take an optional `changeset_id`:

@@ -50,6 +50,7 @@ export function CascadeDialog({ cascade, onClose }: CascadeDialogProps) {
         <AlertDialogHeader>
           <AlertDialogTitle>Cascade required</AlertDialogTitle>
           <AlertDialogDescription>
+            {cascade?.note !== undefined && <span className="mb-2 block">{cascade.note}</span>}
             {cascade !== null && affectedText(cascade)}
           </AlertDialogDescription>
         </AlertDialogHeader>

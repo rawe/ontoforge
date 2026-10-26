@@ -52,7 +52,13 @@ import pg from "pg";
 import type { PoolClient } from "pg";
 
 import { settings } from "../../config.js";
-import { ConflictError, NotFoundError, OntoForgeError, StoreError } from "../../core/exceptions.js";
+import {
+  ConflictError,
+  IdentityTakenError,
+  NotFoundError,
+  OntoForgeError,
+  StoreError,
+} from "../../core/exceptions.js";
 import type { Row } from "../../core/ports.js";
 import { observePool } from "../../metrics.js";
 import { quoteIdent } from "./oql/bindings.js";
@@ -448,12 +454,29 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
           return new ConflictError("Search index is already included in this lens");
         case "search_index_key_unique":
           return new ConflictError(`Search index with key '${value}' already exists`);
+        // The one constraint no pre-check fully guards: concurrent writes,
+        // and a changeset commit's deferred check (ADR 0033).
+        case IDENTITY_UNIQUE:
+          return identityTaken(exc.detail);
         default:
           return null;
       }
     default:
       return null;
   }
+}
+
+/** The entity identity's unique constraint, over `(type_key, identity)`. */
+export const IDENTITY_UNIQUE = "entity_identity_unique";
+
+/** The identity refusal for a violation of `IDENTITY_UNIQUE`: the type key
+ * and the identity from its DETAIL. A type key never holds `, `, so the
+ * identity is everything after the first one, whatever it holds. */
+function identityTaken(detail: string | undefined): IdentityTakenError {
+  const match = /^Key \(type_key, identity\)=\((?<type>[^,]*), (?<identity>.*)\) already exists/s.exec(
+    detail ?? "",
+  );
+  return new IdentityTakenError(match?.groups?.["type"] ?? "unknown", match?.groups?.["identity"] ?? "unknown");
 }
 
 /**

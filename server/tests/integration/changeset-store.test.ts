@@ -415,6 +415,46 @@ describe("ChangesetStore", () => {
     expect(await store.changesets().relationsAt(cs.id, "not-a-uuid")).toEqual([]);
   });
 
+  it("entityObjectsStaging and entityObjectsKeyed: the staged entities of a type by the values they stage", async () => {
+    const cs = await started();
+    const changesets = store.changesets();
+    const [full, part, other, gone, bare, removed] = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+    await apply(cs.id, {
+      objects: [
+        entity(full, "task"),
+        entity(part, "task", "update"),
+        entity(other, "task"),
+        entity(gone, "task", "delete"),
+        entity(bare, "task", "update"),
+        entity(removed, "task", "update"),
+        entity(randomUUID(), "person"),
+      ],
+      values: [
+        value(full, "title", "A"),
+        value(full, "year", 1),
+        value(part, "year", 1),
+        value(other, "title", "A"),
+        value(other, "year", 2),
+        value(bare, "notes", "x"),
+        value(removed, "year", null),
+      ],
+    });
+    const matching = await changesets.entityObjectsStaging(cs.id, "task", { title: "A", year: 1 });
+    expect(matching.map((object) => object.objectId)).toEqual([full, part]);
+    expect(matching[0]!.values.map((v) => v.propertyKey)).toEqual(["title", "year"]);
+    expect(await changesets.entityObjectsStaging(cs.id, "person", { title: "A" })).toEqual([]);
+
+    const keyed = await changesets.entityObjectsKeyed(cs.id, "task", ["year"]);
+    expect(keyed.map((object) => [object.objectId, object.values.map((v) => v.value)])).toEqual([
+      [full, [1]],
+      [part, [1]],
+      [other, [2]],
+      [gone, []],
+      [bare, []],
+      [removed, [null]],
+    ]);
+  });
+
   it("stagedBytes sums the bytes of the staged values now; a removed value's go with it", async () => {
     const cs = await started();
     const changesets = store.changesets();

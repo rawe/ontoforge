@@ -76,6 +76,7 @@ export const SYSTEM_PROPERTIES: ReadonlySet<string> = new Set([
   "_relationTypeKey",
   "_createdAt",
   "_updatedAt",
+  "_identity",
 ]);
 
 /** Internal labels that must not appear in user queries. */

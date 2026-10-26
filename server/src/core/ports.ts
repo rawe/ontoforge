@@ -266,7 +266,24 @@ export interface ModelingStore {
     nameProperty: string | null,
   ): Promise<Row | null>;
 
+  /** Also clears the derived identity of the type's orphaned entities,
+   * in the same transaction. */
   deleteEntityType(entityTypeId: string): Promise<boolean>;
+
+  /** Write the type's identity properties (ordered keys; null: no
+   * identity), checked by the service. Entity type rows carry
+   * `identityProperties`. Null result: no such type. */
+  setEntityTypeIdentity(entityTypeId: string, identityProperties: string[] | null): Promise<Row | null>;
+
+  /** Every stored entity of the type key, by id ascending, with the stored
+   * values of `propertyKeys` (absent keys left out): what the service
+   * builds the identities from. */
+  readEntityValues(entityTypeKey: string, propertyKeys: string[]): Promise<{ id: string; values: Row }[]>;
+
+  /** Write the derived identity of the entities listed (the service built
+   * each); null clears it on every entity of the type key. The identity's
+   * uniqueness is checked at the end of the design change. */
+  writeEntityIdentities(entityTypeKey: string, identities: { id: string; identity: string }[] | null): Promise<void>;
 
   isEntityTypeReferenced(entityTypeId: string): Promise<boolean>;
 
@@ -602,12 +619,17 @@ export interface RuntimeStore {
   // commits.
   // ------------------------------------------------------------------
 
+  /** `identity`: the entity's derived identity, built by the service;
+   * null when its type has none. A taken one raises the identity
+   * conflict (`IdentityTakenError`) and writes nothing. Entity rows carry
+   * `_identity` when the entity has one. */
   createEntity(
     entityTypeKey: string,
     entityId: string,
     properties: Row,
     propertyDefs: Record<string, PropertyDef>,
     search?: SearchWritePlan | null,
+    identity?: string | null,
   ): Promise<Row>;
 
   listEntities(
@@ -629,11 +651,29 @@ export interface RuntimeStore {
 
   getEntity(entityTypeKey: string, entityId: string): Promise<Row | null>;
 
+  /** The entity of the type whose identity is exactly `identity`, as
+   * `getEntity` returns it; null when none has it. */
+  getEntityByIdentity(entityTypeKey: string, identity: string): Promise<Row | null>;
+
+  /** The entities of the type that have one of `identities`, as id and
+   * identity. Inside a transaction whose identity check is deferred
+   * (`setIdentityCheck`) an identity may be held twice. */
+  entitiesWithIdentities(entityTypeKey: string, identities: string[]): Promise<{ id: string; identity: string }[]>;
+
+  /** When this transaction checks that an identity is unique within its
+   * type: `deferred` at its end, `immediate` now (a duplicate is an
+   * `IdentityTakenError`) and at every later statement. Only on a bound
+   * store. */
+  setIdentityCheck(mode: "deferred" | "immediate"): Promise<void>;
+
   getEntityById(
     entityId: string,
     propertyDefs: Record<string, PropertyDef>,
   ): Promise<Row | null>;
 
+  /** `identity`, when given, replaces the entity's identity (the service
+   * built it from the values the update leaves); omitted leaves it. A
+   * taken one raises the identity conflict, as `createEntity`. */
   updateEntity(
     entityTypeKey: string,
     entityId: string,
@@ -641,6 +681,7 @@ export interface RuntimeStore {
     removeProperties: string[],
     propertyDefs: Record<string, PropertyDef>,
     search?: SearchWritePlan | null,
+    identity?: string,
   ): Promise<Row | null>;
 
   deleteEntity(
@@ -774,6 +815,7 @@ export interface RuntimeStore {
       properties: Row;
       propertyDefs: Record<string, PropertyDef>;
       search?: SearchWritePlan | null;
+      identity?: string | null;
     },
     relation: {
       relationTypeKey: string;
@@ -1247,6 +1289,16 @@ export interface ChangesetStore {
 
   /** The ids of the staged relations with an end at `entityId`. */
   relationsAt(id: string, entityId: string): Promise<string[]>;
+
+  /** The staged entity creates and updates of `typeKey` that stage a
+   * value under at least one key of `values` and, under each key of
+   * `values` they stage, exactly its value; with their values, by first
+   * touch. */
+  entityObjectsStaging(id: string, typeKey: string, values: Row): Promise<StagedObjectRecord[]>;
+
+  /** The staged entity objects of `typeKey`, each with its values under
+   * `keys` only, by first touch. */
+  entityObjectsKeyed(id: string, typeKey: string, keys: string[]): Promise<StagedObjectRecord[]>;
 
   /** The sum of the `bytes` of its staged values; 0 when it has none or
    * is gone. */

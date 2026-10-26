@@ -15,7 +15,8 @@
  * `GET /:changesetId/documents/:entityTypeKey/:entityId/:propertyKey` the
  * staged text of one document property, with the document read's paging,
  * and `GET /:changesetId/entities/:entityTypeKey/:entityId` one entity as
- * a commit would leave it, with its staged object; `POST
+ * a commit would leave it, with its staged object (its twin
+ * `…/identity/:identity` names it by identity in the changeset's view); `POST
  * /:changesetId/submit` and `/unsubmit` hand it over and back, `POST
  * /:changesetId/check` runs the commit and rolls it back, and `POST
  * /:changesetId/commit` persists it all or nothing. No read outside these
@@ -39,6 +40,7 @@ import {
 
 const ChangesetParams = LensParams.extend({ changesetId: z.string() });
 const EntityParams = ChangesetParams.extend({ entityTypeKey: z.string(), entityId: z.string() });
+const IdentityParams = ChangesetParams.extend({ entityTypeKey: z.string(), identity: z.string() });
 const DocumentParams = EntityParams.extend({ propertyKey: z.string() });
 const ObjectParams = ChangesetParams.extend({ objectId: z.string() });
 const ValueParams = ObjectParams.extend({ propertyKey: z.string() });
@@ -63,9 +65,14 @@ const PageQuery = z.looseObject({
 
 const Properties = PropertyPayload.default({});
 
+/** The target entity of a staged update, delete or document edit: by
+ * `id` or by `identity`, exactly one (the service's 422). */
+const EntityTarget = { id: z.string().optional(), identity: z.string().optional() };
+
 /** One staged call: `type` is the entity or relation type key, `id` the
- * target of an update, delete or document edit; a document edit carries
- * the body of the document PATCH beside `property`. */
+ * target of an update, delete or document edit (an entity's, or its
+ * `identity`); a document edit carries the body of the document PATCH
+ * beside `property`. */
 const StagedWritePayload = z.discriminatedUnion("operation", [
   z.strictObject({
     operation: z.literal("create_entity"),
@@ -73,13 +80,15 @@ const StagedWritePayload = z.discriminatedUnion("operation", [
     properties: Properties,
     parentRelation: ParentRelationPayload.optional(),
   }),
-  z.strictObject({ operation: z.literal("update_entity"), type: z.string(), id: z.string(), properties: Properties }),
-  z.strictObject({ operation: z.literal("delete_entity"), type: z.string(), id: z.string() }),
+  z.strictObject({ operation: z.literal("update_entity"), type: z.string(), ...EntityTarget, properties: Properties }),
+  z.strictObject({ operation: z.literal("delete_entity"), type: z.string(), ...EntityTarget }),
   z.strictObject({
     operation: z.literal("create_relation"),
     type: z.string(),
-    fromEntityId: z.string(),
-    toEntityId: z.string(),
+    fromEntityId: z.string().optional(),
+    toEntityId: z.string().optional(),
+    fromEntityIdentity: z.string().optional(),
+    toEntityIdentity: z.string().optional(),
     properties: Properties,
   }),
   z.strictObject({ operation: z.literal("update_relation"), type: z.string(), id: z.string(), properties: Properties }),
@@ -87,7 +96,7 @@ const StagedWritePayload = z.discriminatedUnion("operation", [
   z.strictObject({
     operation: z.literal("edit_document"),
     type: z.string(),
-    id: z.string(),
+    ...EntityTarget,
     property: z.string(),
     ...DocumentEditFields,
   }),
@@ -104,18 +113,22 @@ function stagedWrite(body: z.infer<typeof StagedWritePayload>): changesets.Stage
         typeKey,
         fromEntityId: body.fromEntityId,
         toEntityId: body.toEntityId,
+        fromEntityIdentity: body.fromEntityIdentity,
+        toEntityIdentity: body.toEntityIdentity,
         properties: body.properties,
       };
     case "update_entity":
+      return { operation: body.operation, typeKey, id: body.id, identity: body.identity, properties: body.properties };
     case "update_relation":
       return { operation: body.operation, typeKey, id: body.id, properties: body.properties };
     case "delete_entity":
+      return { operation: body.operation, typeKey, id: body.id, identity: body.identity };
     case "delete_relation":
       return { operation: body.operation, typeKey, id: body.id };
     case "edit_document": {
       const { op, oldString, newString, replaceAll, offset, length, content, expect } = body;
       const edit = { op, oldString, newString, replaceAll, offset, length, content, expect };
-      return { operation: body.operation, typeKey, id: body.id, propertyKey: body.property, edit };
+      return { operation: body.operation, typeKey, id: body.id, identity: body.identity, propertyKey: body.property, edit };
     }
   }
 }
@@ -187,6 +200,20 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.changesetId,
         request.params.entityTypeKey,
         request.params.entityId,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.get(
+    "/:changesetId/entities/:entityTypeKey/identity/:identity",
+    { schema: { tags: ["runtime"], params: IdentityParams } },
+    async (request) =>
+      changesets.getStagedEntityByIdentity(
+        request.params.lensKey,
+        rulesetOf(request.params),
+        request.params.changesetId,
+        request.params.entityTypeKey,
+        request.params.identity,
         await getRuntimeStore(request.params.ontologyKey),
       ),
   );

@@ -15,6 +15,7 @@ import type {
   SchemaRelationType,
 } from '@/api/types'
 import { useCanEdit } from '@/components/auth/useAccess'
+import { IdentityText } from '@/components/IdentityText'
 import { TypeChip } from '@/components/TypeChip'
 import type { RelationInitial } from '@/components/entity/AddRelationDialog'
 import { relationPropsSummary } from '@/components/entity/relationProps'
@@ -243,6 +244,7 @@ export function RelationSection({
                 >
                   {displayLabel(neighbor.entity)}
                 </Link>
+                <IdentityText identity={neighbor.entity._identity} />
                 {summary !== '' && (
                   <span className="min-w-0 truncate text-[12px] text-muted-foreground">
                     {summary}

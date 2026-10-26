@@ -147,7 +147,9 @@ updating or deleting through an unexposed type answers *not found*.
 
 **Read results.** Every entity and relation in a response is stripped to the
 exposed properties. System properties always survive stripping — they are never
-part of a lens's declaration and never removable by one.
+part of a lens's declaration and never removable by one. The one exception is `_identity`: a lens
+that hides any of a type's [identity](entity-identity.md#through-a-lens) properties
+withholds it, and that type has no identity through the lens.
 
 Three behaviours follow from those three, and each is a place a reimplementation
 tends to leak:

@@ -43,13 +43,13 @@ Three authentication methods resolve callers to principals:
   scope, which the mount advertises. Clients must connect through the deployment's
   public URL because that URL forms part of the OAuth resource identifier.
 
-**First sign-in.** When a previously unknown identity first signs in, through the
+**First sign-in.** When a previously unknown sign-in identity first signs in, through the
 browser or with a bearer token, OntoForge creates a principal without any roles, except
 for the configured administrator described below. Concurrent first sign-ins for the
-same identity create only one principal. Later sign-ins resolve the principal by its
+same sign-in identity create only one principal. Later sign-ins resolve the principal by its
 issuer–subject pair. Browser sign-in updates the displayed name, email, and username.
 Status and roles remain unchanged, except for the configured administrator described
-below. Identities are never linked by email: a different issuer or subject value
+below. Sign-in identities are never linked by email: a different issuer or subject value
 identifies a different principal.
 
 **The configured administrator.** The deployment configuration identifies one account
@@ -158,7 +158,7 @@ User management is available only when authentication is enabled.
   list role assignments within each managed ontology.
 - Principals cannot disable their own accounts. The last active Platform Administrator
   cannot be disabled or have that role revoked. The [configured administrator](#signing-in)
-  is also protected: change the configured administrator identity before disabling that
+  is also protected: change the configured administrator's sign-in identity before disabling that
   principal or revoking its Platform Administrator role. Otherwise, sign-in would restore
   its active status and role.
 - A **service** is a client that authenticates with its own credentials rather than a

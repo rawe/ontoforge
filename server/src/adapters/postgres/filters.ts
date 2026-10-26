@@ -21,7 +21,8 @@
  * relation table with no value compared. The sort direction is a build-time literal
  * from a closed enum, never caller text, and every listing ORDER BY ends
  * with the `id` tie-break for deterministic pagination among equal sort
- * values. Callers guard endpoint ids with `isUuid()` first and
+ * values. `_identity` — the one system property a filter or sort may name
+ * besides the timestamps — reads the `identity` column. Callers guard endpoint ids with `isUuid()` first and
  * short-circuit off-format input to the empty page — the fragments here
  * assume server-format ids.
  */
@@ -127,6 +128,12 @@ function buildPropertyClause(
   container: string,
   params: unknown[],
 ): string {
+  if (isIdentity(condition.propertyKey, container)) {
+    const valueP = bind(params, condition.value);
+    return condition.op === "contains"
+      ? `position(lower($${valueP}) in lower(identity)) > 0`
+      : `identity ${OPERATORS[condition.op]} $${valueP}`;
+  }
   if (condition.op === "contains") {
     const valueP = bind(params, condition.value);
     const keyP = bind(params, condition.propertyKey);
@@ -145,8 +152,17 @@ function buildExistenceClause(
   container: string,
   params: unknown[],
 ): string {
+  if (isIdentity(propertyKey, container)) {
+    return exists ? "identity IS NOT NULL" : "identity IS NULL";
+  }
   const keyP = bind(params, propertyKey);
   return exists ? `${container} ? $${keyP}` : `NOT (${container} ? $${keyP})`;
+}
+
+/** The entity's identity, a system property: a column of the listed row,
+ * never a key of its `props`. */
+function isIdentity(propertyKey: string, container: string): boolean {
+  return propertyKey === "_identity" && container === "props";
 }
 
 /** The near and far endpoint columns of a relation row followed in the
@@ -225,6 +241,8 @@ export function buildOrderBy(
     sortExpr = "created_at";
   } else if (sortField === "_updatedAt") {
     sortExpr = "updated_at";
+  } else if (sortField === "_identity") {
+    sortExpr = "identity";
   } else {
     sortExpr = accessor(
       propertyDefs[sortField]?.dataType ?? "string",

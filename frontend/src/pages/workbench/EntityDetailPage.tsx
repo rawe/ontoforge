@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Anchor, Link2, Loader2, Plus, SearchX, Trash2, Waypoints } from 'lucide-react'
+import { AlertTriangle, Anchor, Fingerprint, Link2, Loader2, Plus, SearchX, Trash2, Waypoints } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -261,6 +261,15 @@ export function EntityDetailPage() {
         meta={
           <>
             <TypeChip typeKey={typeKey} displayName={entityType.displayName} size="sm" />
+            {entity._identity !== undefined && (
+              <span
+                className="inline-flex items-center gap-1 rounded-md border px-1.5 py-px font-mono text-[11.5px] text-muted-foreground"
+                title={`Identity — ${(entityType.identityProperties ?? []).join(' · ')}`}
+              >
+                <Fingerprint className="size-3 opacity-60" />
+                {entity._identity}
+              </span>
+            )}
             {anchorOf.length > 0 && (
               <Link
                 to={`/o/${ontologyKey}/w/${lensKey}/rulesets`}

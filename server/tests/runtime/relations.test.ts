@@ -129,6 +129,7 @@ describe("create relation", () => {
   });
 
   it("missing endpoints in the payload answer 422 in the standard envelope", async () => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     const res = await app.inject({
       method: "POST",
       url: "/api/ontologies/test_ont/runtime/lenses/hr_view/relations/works_for",
@@ -137,6 +138,7 @@ describe("create relation", () => {
 
     expect(res.statusCode).toBe(422);
     expect(res.json().error.code).toBe("VALIDATION_ERROR");
+    expect(res.json().error.details.fields.fromEntityId).toBe("Give exactly one of fromEntityId and fromEntityIdentity");
   });
 });
 

@@ -654,6 +654,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["modeling"],
         params: OntologyParams,
+        querystring: CascadeQuery,
         body: EntityTypeCreate,
         response: { 201: EntityTypeResponse },
       },
@@ -662,6 +663,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       const result = await service.createEntityType(
         request.body,
         await getModelingStore(request.params.ontologyKey),
+        request.query.cascade,
       );
       return reply.status(201).send(result);
     },
@@ -702,6 +704,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["modeling"],
         params: EntityTypeIdParams,
+        querystring: CascadeQuery,
         body: EntityTypeUpdate,
         response: { 200: EntityTypeResponse },
       },
@@ -711,6 +714,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.entityTypeId,
         request.body,
         await getModelingStore(request.params.ontologyKey),
+        request.query.cascade,
       ),
   );
 

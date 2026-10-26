@@ -9,6 +9,7 @@ import * as runtime from '@/api/runtime'
 import { useRuntimeWrites } from '@/api/writes'
 import type { EntityInstance, Neighbor, SchemaEntityType } from '@/api/types'
 import { useCanEdit } from '@/components/auth/useAccess'
+import { IdentityText } from '@/components/IdentityText'
 import { TypeChip } from '@/components/TypeChip'
 import type { RelationInitial } from '@/components/entity/AddRelationDialog'
 import type { HierarchyLink } from '@/components/entity/hierarchy'
@@ -164,6 +165,7 @@ export function ParentSection({
                 >
                   {displayLabel(neighbor.entity)}
                 </Link>
+                <IdentityText identity={neighbor.entity._identity} />
                 {links.length > 1 && (
                   <span className="font-mono text-[11px] text-muted-foreground">
                     {neighbor.relation._relationTypeKey}

@@ -38,8 +38,9 @@ something a reader would otherwise assume:
 - An entity has exactly one type. There is no multi-typing and no retyping.
 - No collection, enumeration, reference or nested-object data types. Every
   property holds one scalar; a "many" is modelled as a relation.
-- No uniqueness, range, pattern or cross-property constraints. `required` is the
-  only constraint a property definition can express.
+- No uniqueness, range, pattern or cross-property constraints on a property.
+  `required` is the only constraint a property definition can express; the one
+  uniqueness is an entity type's [identity](#the-identity).
 - No cardinality on relation types beyond the [parent rules](#parent-relations): any
   number of relations of a type may connect any pair of endpoint-compatible entities,
   except that across all parent relations an entity has at most one parent and no
@@ -98,6 +99,18 @@ may have no name. Relation types have none.
 
 A lens that hides the name property shows its type without one
 ([ontology-lenses.md](ontology-lenses.md)).
+
+### The identity
+
+An entity type may declare an **identity**: `identityProperties`, an ordered list of 1 to
+5 of its own `string`, `integer` or `date` properties whose values, joined, are unique
+within the type. Setting it checks the type's stored entities and may need the
+[cascade protocol](#the-cascade-protocol); the identity properties are then required,
+without a default, and locked: they cannot become optional, take a default or be
+deleted while they belong to the identity. Setting, changing or clearing it rebuilds
+every entity's derived identity — the one schema edit that writes instance data
+([rule](../decisions.md#schema-and-data)). The whole model is in
+[entity-identity.md](entity-identity.md).
 
 ### Parent relations
 
@@ -229,7 +242,7 @@ caller repeats it with explicit consent. Only lenses with explicit declarations 
 broken, so an unscoped lens never appears in any of this; managed search indices follow
 the schema by themselves and never appear either.
 
-Five changes can trigger it:
+Six changes can trigger it:
 
 | Change | Triggers when |
 |---|---|
@@ -238,6 +251,7 @@ Five changes can trigger it:
 | Create a required property with no default | any lens includes the owning type **with a property allowlist** that does not name the new key |
 | Delete a property | any custom index reads it — as an own, header, relation or target field |
 | Delete a custom search index | any lens includes it |
+| Set an entity type's [identity](#the-identity) | a listed property is optional or has a default, or any lens's allowlist for the type omits one |
 
 A custom index may also name an entity type as a group's target, but that type is an
 endpoint of the group's relation type, and an entity type that a relation type names
@@ -269,6 +283,10 @@ than forced, and the repair is mechanical:
 | Create a required property with no default | appends the new key to every allowlist for that type |
 | Delete a property | removes the key from every allowlist for that type, and from every custom index's own, header, relation and target fields |
 | Delete a custom search index | removes its inclusion from every lens that has one |
+| Set an entity type's identity | makes the listed properties required, removes their defaults, and appends them to every allowlist for that type |
+
+The identity is the one trigger that needs consent with no lens or index affected: an
+optional or defaulted property becoming an identity property changes the schema itself.
 
 What is left of a custom index stays consistent: a target type left with no field and a
 relation group left with no relation or target field are removed, and an index left with
@@ -288,7 +306,8 @@ a cleanup, not a consent.
 
 **Changing an existing property is never checked.** Making an optional property
 required, or clearing a required property's default, produces exactly the state
-the third trigger exists to prevent, and nothing stops it. Lens validation will
+the third trigger exists to prevent, and nothing stops it. (An identity property is
+already required without a default, and locked.) Lens validation will
 report the resulting lenses as invalid; nothing else will.
 
 ### Schema validation

@@ -2,7 +2,7 @@
 
 import { createContext, useContext } from 'react'
 
-export type CascadeGuard = (error: unknown, retry: () => void) => boolean
+export type CascadeGuard = (error: unknown, retry: () => void, note?: string) => boolean
 
 export const CascadeContext = createContext<CascadeGuard | null>(null)
 

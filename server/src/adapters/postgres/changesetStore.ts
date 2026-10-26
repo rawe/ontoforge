@@ -285,6 +285,61 @@ export class PostgresChangesetStore implements ChangesetStore {
     return result.rows.map((row) => row.object_id as string);
   }
 
+  /** The scan stays inside the changeset's own rows (the primary key's
+   * prefix), bounded by the cap on staged objects, and is matched in the
+   * database: only the matching objects are read out. */
+  async entityObjectsStaging(id: string, typeKey: string, values: Row): Promise<StagedObjectRecord[]> {
+    if (!isUuid(id)) {
+      return [];
+    }
+    const result = await this.query(
+      `SELECT ${OBJECT_COLS} FROM changeset_object
+        WHERE changeset_id = $1 AND kind = 'entity' AND type_key = $2 AND action <> 'delete'
+          AND object_id IN (
+            SELECT v.object_id FROM changeset_value v
+             WHERE v.changeset_id = $1 AND v.property_key = ANY($3::text[])
+             GROUP BY v.object_id
+            HAVING bool_and(v.value = $4::jsonb -> v.property_key))
+        ORDER BY first_touched_at, object_id`,
+      [id, typeKey, Object.keys(values), JSON.stringify(values)],
+    );
+    return this.withValues(id, result.rows.map(toObject));
+  }
+
+  /** The scan stays inside the changeset's own rows (the primary key's
+   * prefix), bounded by the cap on staged objects. */
+  async entityObjectsKeyed(id: string, typeKey: string, keys: string[]): Promise<StagedObjectRecord[]> {
+    if (!isUuid(id)) {
+      return [];
+    }
+    const result = await this.query(
+      `SELECT ${OBJECT_COLS} FROM changeset_object
+        WHERE changeset_id = $1 AND kind = 'entity' AND type_key = $2
+        ORDER BY first_touched_at, object_id`,
+      [id, typeKey],
+    );
+    const objects = result.rows.map(toObject);
+    if (objects.length === 0) {
+      return objects;
+    }
+    const values = await this.query(
+      `SELECT object_id, property_key, value, before, bytes FROM changeset_value
+        WHERE changeset_id = $1 AND property_key = ANY($2::text[])
+        ORDER BY object_id, property_key`,
+      [id, keys],
+    );
+    const byId = new Map(objects.map((object) => [object.objectId, object] as const));
+    for (const row of values.rows) {
+      byId.get(row.object_id as string)?.values.push({
+        propertyKey: row.property_key as string,
+        value: row.value,
+        before: row.before as Row | null,
+        bytes: row.bytes as number,
+      });
+    }
+    return objects;
+  }
+
   async stagedBytes(id: string): Promise<number> {
     if (!isUuid(id)) {
       return 0;

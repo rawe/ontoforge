@@ -49,7 +49,7 @@ A retriever's and a navigator's thread also keep what a follow-up question may r
 
 Every assistant reports the entities its turn met the same way, beside its own work: each
 real entity the lens shows, with a ref it keeps for the turn (`E1`, `E2`, …), its type,
-label and a few visible fields, whether it was handed to the model that wrote
+label, its [identity](entity-identity.md) when the lens shows one, and a few visible fields, whether it was handed to the model that wrote
 the answer — its **evidence** — and the stored relations between them. A client can open
 each one. Which entities an assistant reports is its own: an
 [agent](agents.md#live-tool-activity) the entities its entity tools returned, a

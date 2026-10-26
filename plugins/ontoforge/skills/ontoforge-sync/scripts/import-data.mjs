@@ -60,7 +60,7 @@ if (!lensKey) {
 }
 
 const ENTITY_SYSTEM = new Set([
-  '_id', '_entityTypeKey', '_createdAt', '_updatedAt',
+  '_id', '_entityTypeKey', '_createdAt', '_updatedAt', '_identity',
 ]);
 const RELATION_SYSTEM = new Set([
   '_id', '_relationTypeKey', '_createdAt', '_updatedAt',

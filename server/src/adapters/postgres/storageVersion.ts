@@ -47,7 +47,7 @@ import { quoteIdent } from "./oql/bindings.js";
 import { camelizeRow } from "./rows.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 9;
+export const STORAGE_VERSION = 10;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 1;
@@ -598,6 +598,17 @@ const STEPS: Step[] = [
 )`,
       `INSERT INTO design_revision (ontology_id, revision)
   SELECT ontology_id, 1 FROM public.ontology WHERE namespace = current_schema()`,
+    ],
+  },
+  {
+    // Entity identity: a type's identity properties and an entity's
+    // derived identity, unique within its type.
+    to: 10,
+    actions: [
+      `ALTER TABLE entity_type ADD COLUMN identity_properties text[]`,
+      `ALTER TABLE entity ADD COLUMN identity text`,
+      `ALTER TABLE entity ADD CONSTRAINT entity_identity_unique UNIQUE (type_key, identity)
+  DEFERRABLE INITIALLY IMMEDIATE`,
     ],
   },
 ];

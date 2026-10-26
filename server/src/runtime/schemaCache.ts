@@ -42,6 +42,9 @@ export interface EntityTypeDef {
   description: string | null;
   /** Key of the name property; null in a scoped schema whose lens hides it. */
   nameProperty: string | null;
+  /** The ordered keys of the identity properties; null when the type has
+   * no identity, and in a scoped schema whose lens hides one of them. */
+  identityProperties: string[] | null;
   properties: Record<string, PropertyDef>;
 }
 
@@ -371,6 +374,7 @@ function buildTypesFromRaw(
       displayName: et.displayName as string,
       description: (et.description as string | undefined) ?? null,
       nameProperty: (et.nameProperty as string | undefined) ?? null,
+      identityProperties: (et.identityProperties as string[] | null | undefined) ?? null,
       properties: toPropertyDefs(et.properties as Row[] | undefined),
     };
   }
@@ -446,6 +450,11 @@ export function applyScopeFiltering(
       // A lens that hides the name property shows the type without one.
       if (copy.nameProperty !== null && !(copy.nameProperty in copy.properties)) {
         copy.nameProperty = null;
+      }
+      // Nor does one that hides part of the identity show one: an identity
+      // the lens shows only in part would leak what it hides.
+      if (copy.identityProperties?.some((key) => !(key in copy.properties))) {
+        copy.identityProperties = null;
       }
       scoped.entityTypes[inclusion.key] = copy;
     }

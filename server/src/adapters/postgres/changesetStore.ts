@@ -49,7 +49,7 @@ const BASE_COLS = `c.changeset_id, c.lens_id, c.number, c.ruleset_key, c.version
 const COLS = `${BASE_COLS},
        (SELECT count(*)::int FROM changeset_object o WHERE o.changeset_id = c.changeset_id) AS object_count`;
 
-const OBJECT_COLS = `object_id, kind, type_key, action, from_id, to_id, first_touched_at`;
+const OBJECT_COLS = `object_id, kind, type_key, action, from_id, to_id, identity, first_touched_at`;
 
 /** The version bump and last change of every mutation. */
 const BUMP = `version = c.version + 1, last_change_at = now()`;
@@ -88,6 +88,7 @@ function toObject(row: Row): StagedObjectRecord {
     action: row.action as StagedAction,
     fromId: row.from_id as string | null,
     toId: row.to_id as string | null,
+    identity: row.identity as string | null,
     firstTouchedAt: row.first_touched_at as Date,
     values: [],
   };
@@ -285,6 +286,20 @@ export class PostgresChangesetStore implements ChangesetStore {
     return result.rows.map((row) => row.object_id as string);
   }
 
+  /** On the `(changeset_id, type_key, identity)` index. */
+  async identified(id: string, typeKey: string, identity: string): Promise<string[]> {
+    if (!isUuid(id)) {
+      return [];
+    }
+    const result = await this.query(
+      `SELECT object_id FROM changeset_object
+        WHERE changeset_id = $1 AND kind = 'entity' AND type_key = $2 AND identity = $3
+        ORDER BY first_touched_at, object_id`,
+      [id, typeKey, identity],
+    );
+    return result.rows.map((row) => row.object_id as string);
+  }
+
   async stagedBytes(id: string): Promise<number> {
     if (!isUuid(id)) {
       return 0;
@@ -326,10 +341,10 @@ export class PostgresChangesetStore implements ChangesetStore {
       for (const object of change.objects ?? []) {
         await querier.query(
           `INSERT INTO changeset_object
-                  (changeset_id, object_id, kind, type_key, action, from_id, to_id, first_touched_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, clock_timestamp())
-           ON CONFLICT (changeset_id, object_id) DO UPDATE SET action = EXCLUDED.action`,
-          [id, object.objectId, object.kind, object.typeKey, object.action, object.fromId, object.toId],
+                  (changeset_id, object_id, kind, type_key, action, from_id, to_id, identity, first_touched_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, clock_timestamp())
+           ON CONFLICT (changeset_id, object_id) DO UPDATE SET action = EXCLUDED.action, identity = EXCLUDED.identity`,
+          [id, object.objectId, object.kind, object.typeKey, object.action, object.fromId, object.toId, object.identity],
         );
       }
       const values = change.values ?? [];

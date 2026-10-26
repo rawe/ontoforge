@@ -52,6 +52,7 @@ import type { NewPropertyDef, ParentEnd, TypeKind } from "../../core/schemas.js"
 import * as vectorDdl from "./ddl.js";
 import { advanceDesign, holdDesignExclusive } from "./design.js";
 import {
+  IDENTITY_UNIQUE,
   runQuery,
   withBoundTransaction,
   withTransaction,
@@ -68,7 +69,8 @@ import { PostgresSearchIndexStore } from "./searchIndexStore.js";
 // denormalized keys, and embeddings stay out of returned rows.
 // (`LENS_COLS` comes from `schemaRead.ts`, shared with the runtime store.)
 const ENTITY_TYPE_COLS =
-  "entity_type_id, key, display_name, description, name_property, created_at, updated_at";
+  "entity_type_id, key, display_name, description, name_property, identity_properties, " +
+  "created_at, updated_at";
 const RELATION_TYPE_COLS =
   "relation_type_id, key, display_name, description, " +
   "source_entity_type_key, target_entity_type_key, parent, created_at, updated_at";
@@ -417,15 +419,76 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   /** One `DELETE`: property definitions and inclusions go via CASCADE;
-   * the endpoint FKs' RESTRICT backs the service's in-use rule. */
+   * the endpoint FKs' RESTRICT backs the service's in-use rule. The
+   * orphaned entities lose their identity in the same transaction, so
+   * they never block a later type of the same key. */
   async deleteEntityType(entityTypeId: string): Promise<boolean> {
     if (!isUuid(entityTypeId)) {
       return false;
     }
-    const result = await this.query(`DELETE FROM entity_type WHERE entity_type_id = $1`, [
-      entityTypeId,
-    ]);
-    return result.rowCount > 0;
+    return this.tx(async (querier) => {
+      const result = await querier.query(
+        `DELETE FROM entity_type WHERE entity_type_id = $1 RETURNING key`,
+        [entityTypeId],
+      );
+      const deleted = result.rows[0];
+      if (deleted === undefined) return false;
+      await querier.query(
+        `UPDATE entity SET identity = NULL WHERE type_key = $1 AND identity IS NOT NULL`,
+        [deleted.key],
+      );
+      return true;
+    });
+  }
+
+  async setEntityTypeIdentity(
+    entityTypeId: string,
+    identityProperties: string[] | null,
+  ): Promise<Row | null> {
+    if (!isUuid(entityTypeId)) {
+      return null;
+    }
+    const result = await this.query(
+      `UPDATE entity_type SET identity_properties = $2, updated_at = now()
+       WHERE entity_type_id = $1 RETURNING ${ENTITY_TYPE_COLS}`,
+      [entityTypeId, identityProperties],
+    );
+    return firstRowOrNull(result.rows);
+  }
+
+  /** The values one at a time from the jsonb, so no document is read. */
+  async readEntityValues(entityTypeKey: string, propertyKeys: string[]): Promise<{ id: string; values: Row }[]> {
+    const result = await this.query(
+      `SELECT id, (SELECT coalesce(jsonb_object_agg(k, props -> k), '{}'::jsonb)
+                     FROM unnest($2::text[]) AS k WHERE props ? k) AS values
+         FROM entity WHERE type_key = $1 ORDER BY id`,
+      [entityTypeKey, propertyKeys],
+    );
+    return result.rows.map((row) => ({ id: row.id as string, values: row.values as Row }));
+  }
+
+  /** One statement per call: the identities as two parallel arrays. The
+   * unique constraint is deferred to the end of the design change, so a
+   * rewrite that swaps two identities passes. */
+  async writeEntityIdentities(
+    entityTypeKey: string,
+    identities: { id: string; identity: string }[] | null,
+  ): Promise<void> {
+    if (identities === null) {
+      await this.query(`UPDATE entity SET identity = NULL WHERE type_key = $1 AND identity IS NOT NULL`, [
+        entityTypeKey,
+      ]);
+      return;
+    }
+    await this.tx(async (querier) => {
+      await querier.query(`SET CONSTRAINTS ${IDENTITY_UNIQUE} DEFERRED`);
+      await querier.query(
+        `UPDATE entity e SET identity = w.identity
+           FROM unnest($2::uuid[], $3::text[]) AS w (id, identity)
+          WHERE e.id = w.id AND e.type_key = $1 AND e.identity IS DISTINCT FROM w.identity`,
+        [entityTypeKey, identities.map((entry) => entry.id), identities.map((entry) => entry.identity)],
+      );
+    });
   }
 
   async isEntityTypeReferenced(entityTypeId: string): Promise<boolean> {

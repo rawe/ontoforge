@@ -72,6 +72,7 @@ import type { ParentEnd, PropertyDef } from "../../core/schemas.js";
 import { SAVED_QUERY_INDEX } from "./ddl.js";
 import { holdDesignShared, readDesign } from "./design.js";
 import {
+  IDENTITY_UNIQUE,
   runArrayQuery,
   runQuery,
   withBoundTransaction,
@@ -101,13 +102,13 @@ type PropertyDefs = Record<string, PropertyDef>;
 const NO_DEFS: PropertyDefs = {};
 
 // Read column lists.
-const ENTITY_COLS = "id, type_key, props, created_at, updated_at";
+const ENTITY_COLS = "id, type_key, props, created_at, updated_at, identity";
 const RELATION_COLS = "id, type_key, from_id, to_id, props, created_at, updated_at";
 
 // The two instance inserts, shared by the single creates and the create
 // with a parent relation.
-const INSERT_ENTITY = `INSERT INTO entity (id, type_key, props)
-       VALUES ($1, $2, $3::jsonb)
+const INSERT_ENTITY = `INSERT INTO entity (id, type_key, props, identity)
+       VALUES ($1, $2, $3::jsonb, $4)
        RETURNING ${ENTITY_COLS}`;
 const INSERT_RELATION = `INSERT INTO relation (id, type_key, from_id, to_id, props)
        VALUES ($1, $2, $3, $4, $5::jsonb)
@@ -119,13 +120,15 @@ const INSERT_RELATION = `INSERT INTO relation (id, type_key, from_id, to_id, pro
 const EMBEDDED = "embedding IS NOT NULL";
 
 /** One `entity` row → the port shape: system columns as underscore keys,
- * user properties spread from `props` (datetimes decoded per the defs). */
+ * user properties spread from `props` (datetimes decoded per the defs).
+ * `_identity` only when the entity has one. */
 function entityRow(row: Row, propertyDefs: PropertyDefs): Row {
   return {
     _id: row.id,
     _entityTypeKey: row.type_key,
     _createdAt: row.created_at,
     _updatedAt: row.updated_at,
+    ...(row.identity === null || row.identity === undefined ? {} : { _identity: row.identity }),
     ...fromJson(row.props as Row, propertyDefs),
   };
 }
@@ -375,10 +378,11 @@ export class PostgresRuntimeStore implements RuntimeStore {
     properties: Row,
     propertyDefs: PropertyDefs,
     search?: SearchWritePlan | null,
+    identity: string | null = null,
   ): Promise<Row> {
     const result = await this.write(
       INSERT_ENTITY,
-      [entityId, entityTypeKey, propsJson(properties, propertyDefs)],
+      [entityId, entityTypeKey, propsJson(properties, propertyDefs), identity],
       search,
     );
     return entityRow(result.rows[0]!, propertyDefs);
@@ -446,6 +450,31 @@ export class PostgresRuntimeStore implements RuntimeStore {
     return row === undefined ? null : entityRow(row, NO_DEFS);
   }
 
+  async getEntityByIdentity(entityTypeKey: string, identity: string): Promise<Row | null> {
+    const result = await this.query(
+      `SELECT ${ENTITY_COLS} FROM entity WHERE type_key = $1 AND identity = $2`,
+      [entityTypeKey, identity],
+    );
+    const row = result.rows[0];
+    return row === undefined ? null : entityRow(row, NO_DEFS);
+  }
+
+  /** One statement on the `(type_key, identity)` index. */
+  async entitiesWithIdentities(entityTypeKey: string, identities: string[]): Promise<{ id: string; identity: string }[]> {
+    if (identities.length === 0) {
+      return [];
+    }
+    const result = await this.query(
+      `SELECT id, identity FROM entity WHERE type_key = $1 AND identity = ANY($2::text[]) ORDER BY identity, id`,
+      [entityTypeKey, identities],
+    );
+    return result.rows.map((row) => ({ id: row.id as string, identity: row.identity as string }));
+  }
+
+  async setIdentityCheck(mode: "deferred" | "immediate"): Promise<void> {
+    await this.query(`SET CONSTRAINTS ${IDENTITY_UNIQUE} ${mode === "deferred" ? "DEFERRED" : "IMMEDIATE"}`);
+  }
+
   async getEntityById(entityId: string, propertyDefs: PropertyDefs): Promise<Row | null> {
     if (!isUuid(entityId)) {
       return null;
@@ -456,7 +485,8 @@ export class PostgresRuntimeStore implements RuntimeStore {
   }
 
   /** One statement covers the set/remove split; `updated_at` is always
-   * stamped (the service short-circuits true no-op payloads above). */
+   * stamped (the service short-circuits true no-op payloads above). The
+   * identity is written only when given. */
   async updateEntity(
     entityTypeKey: string,
     entityId: string,
@@ -464,16 +494,19 @@ export class PostgresRuntimeStore implements RuntimeStore {
     removeProperties: string[],
     propertyDefs: PropertyDefs,
     search?: SearchWritePlan | null,
+    identity?: string,
   ): Promise<Row | null> {
     if (!isUuid(entityId)) {
       return null;
     }
+    const params = [entityTypeKey, entityId, propsJson(setProperties, propertyDefs), removeProperties];
+    if (identity !== undefined) params.push(identity);
     const result = await this.write(
       `UPDATE entity
-       SET props = (props || $3::jsonb) - $4::text[], updated_at = now()
+       SET props = (props || $3::jsonb) - $4::text[], updated_at = now()${identity === undefined ? "" : ", identity = $5"}
        WHERE type_key = $1 AND id = $2
        RETURNING ${ENTITY_COLS}`,
-      [entityTypeKey, entityId, propsJson(setProperties, propertyDefs), removeProperties],
+      params,
       search,
     );
     const row = result.rows[0];
@@ -816,6 +849,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
       properties: Row;
       propertyDefs: PropertyDefs;
       search?: SearchWritePlan | null;
+      identity?: string | null;
     },
     relation: {
       relationTypeKey: string;
@@ -832,6 +866,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
         entity.entityId,
         entity.entityTypeKey,
         propsJson(entity.properties, entity.propertyDefs),
+        entity.identity ?? null,
       ]);
       if (entity.search !== null && entity.search !== undefined) {
         await applySearchWritePlan(querier, entity.search, this.ontologyKey);
@@ -912,7 +947,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
       return {};
     }
     const result = await this.query(
-      `SELECT e.id, e.type_key, e.created_at, e.updated_at, ${fingerprintedProps("e", "$2")}
+      `SELECT e.id, e.type_key, e.created_at, e.updated_at, e.identity, ${fingerprintedProps("e", "$2")}
          FROM entity e WHERE e.id = ANY($1::uuid[])`,
       [validIds, JSON.stringify(documentKeys)],
     );
@@ -1018,7 +1053,7 @@ async function neighborPage(
   const result = await querier.query(
     `SELECT r.id AS relation_id, r.type_key AS relation_type_key, r.props AS relation_props,
             r.created_at AS relation_created_at, r.updated_at AS relation_updated_at,
-            e.id, e.type_key, e.props, e.created_at, e.updated_at
+            e.id, e.type_key, e.props, e.created_at, e.updated_at, e.identity
      FROM relation r
      JOIN entity e ON e.id = r.${farColumn}
      WHERE r.${rootColumn} = $1${typeFilter}
@@ -1037,12 +1072,6 @@ async function neighborPage(
         propertyDefsByType[row.relation_type_key as string] ?? NO_DEFS,
       ),
     },
-    entity: {
-      _id: row.id,
-      _entityTypeKey: row.type_key,
-      _createdAt: row.created_at,
-      _updatedAt: row.updated_at,
-      ...fromJson(row.props as Row, propertyDefsByType[row.type_key as string] ?? NO_DEFS),
-    },
+    entity: entityRow(row, propertyDefsByType[row.type_key as string] ?? NO_DEFS),
   }));
 }

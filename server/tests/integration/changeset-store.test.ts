@@ -108,7 +108,7 @@ async function relationId(type: string, from: string, to: string): Promise<strin
 }
 
 function entity(objectId: string, typeKey: string, action: NewStagedObject["action"] = "create"): NewStagedObject {
-  return { objectId, kind: "entity", typeKey, action, fromId: null, toId: null };
+  return { objectId, kind: "entity", typeKey, action, fromId: null, toId: null, identity: null };
 }
 
 function relation(
@@ -117,7 +117,7 @@ function relation(
   ends: [string, string],
   action: NewStagedObject["action"] = "create",
 ): NewStagedObject {
-  return { objectId, kind: "relation", typeKey, action, fromId: ends[0], toId: ends[1] };
+  return { objectId, kind: "relation", typeKey, action, fromId: ends[0], toId: ends[1], identity: null };
 }
 
 function value(objectId: string, propertyKey: string, v: unknown, before: Row | null = null, bytes = 0): NewStagedValue {

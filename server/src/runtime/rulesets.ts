@@ -169,5 +169,7 @@ export async function getRulesetView(lensKey: string, rulesetKey: string, store:
     if (error instanceof NotFoundError) return deleted;
     throw error;
   }
-  return { key, writeAccess, anchor: { ...path[path.length - 1]!, state: "found", visible: true, path } };
+  // The ruleset view's steps are {type, id, name}, as `PathStep` says.
+  const steps = path.map(({ type, id, name }) => ({ type, id, name }));
+  return { key, writeAccess, anchor: { ...steps[steps.length - 1]!, state: "found", visible: true, path: steps } };
 }

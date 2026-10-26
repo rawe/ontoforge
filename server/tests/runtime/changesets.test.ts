@@ -96,6 +96,7 @@ function staged(overrides: Partial<StagedObjectRecord>): StagedObjectRecord {
     action: "create",
     fromId: null,
     toId: null,
+    identity: null,
     firstTouchedAt: NOW,
     values: [],
     ...overrides,

@@ -87,14 +87,19 @@ export const EntityTypeCreate = z.object({
   displayName: z.string(),
   description: z.string().nullable().optional(),
   nameProperty: z.string().regex(SCHEMA_KEY_PATTERN).max(MAX_KEY_LENGTH).default(DEFAULT_NAME_PROPERTY),
+  /** The ordered keys of the identity properties; absent or null for none.
+   * The service checks them, as on an update. */
+  identityProperties: z.array(z.string()).nullable().optional(),
 });
 
 /** `nameProperty` reassigns the name property to another `string` property
- * of the type. */
+ * of the type. `identityProperties` sets the identity; an explicit null
+ * clears it, omitted leaves it unchanged. */
 export const EntityTypeUpdate = z.object({
   displayName: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   nameProperty: z.string().nullable().optional(),
+  identityProperties: z.array(z.string()).nullable().optional(),
 });
 
 export const EntityTypeResponse = z.object({
@@ -104,6 +109,8 @@ export const EntityTypeResponse = z.object({
   description: z.string().nullable(),
   /** Key of the type's name property — never null. */
   nameProperty: z.string(),
+  /** The ordered keys of the identity properties; null for none. */
+  identityProperties: z.array(z.string()).nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -283,6 +290,9 @@ export const ExportEntityType = z.object({
   // Required — import checks it itself, collecting a missing one with the
   // other rule violations.
   nameProperty: z.string().optional(),
+  /** The ordered identity property keys; absent (a payload written before
+   * identities existed) or null for none. */
+  identityProperties: z.array(z.string()).nullable().optional(),
   properties: z.array(ExportProperty).default([]),
 });
 

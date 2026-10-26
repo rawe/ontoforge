@@ -220,6 +220,9 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     listEntities: vi.fn(async () => [[], 0]),
     getEntity: vi.fn(async () => null),
     getEntityById: vi.fn(async () => null),
+    getEntityByIdentity: vi.fn(async () => null),
+    entitiesWithIdentities: vi.fn(async () => []),
+    setIdentityCheck: vi.fn(async () => undefined),
     updateEntity: vi.fn(async () => null),
     deleteEntity: vi.fn(async () => false),
     getEntitiesByIds: vi.fn(async () => ({})),
@@ -269,6 +272,7 @@ export function stagedObject(
     action,
     fromId: ends?.[0] ?? null,
     toId: ends?.[1] ?? null,
+    identity: null,
     firstTouchedAt: NOW,
     values: Object.entries(values)
       .sort(([a], [b]) => a.localeCompare(b))

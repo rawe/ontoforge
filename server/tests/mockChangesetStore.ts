@@ -56,7 +56,7 @@ export function createMockChangesetStore(): MockChangesetStore {
     }
     for (const object of change.objects ?? []) {
       const existing = h.objects.get(object.objectId);
-      if (existing !== undefined) existing.action = object.action;
+      if (existing !== undefined) Object.assign(existing, { action: object.action, identity: object.identity });
       else h.objects.set(object.objectId, { ...object, firstTouchedAt: tick(), values: [] });
     }
     for (const { objectId, ...value } of change.values ?? []) {
@@ -126,6 +126,13 @@ export function createMockChangesetStore(): MockChangesetStore {
       if (h === undefined) return [];
       return byTouch(h)
         .filter((object) => object.kind === "relation" && (object.fromId === entityId || object.toId === entityId))
+        .map((object) => object.objectId);
+    }),
+    identified: vi.fn(async (id: string, typeKey: string, identity: string) => {
+      const h = held.get(id);
+      if (h === undefined) return [];
+      return byTouch(h)
+        .filter((object) => object.kind === "entity" && object.typeKey === typeKey && object.identity === identity)
         .map((object) => object.objectId);
     }),
     stagedBytes: vi.fn(async (id: string) => {

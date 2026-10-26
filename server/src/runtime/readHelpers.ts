@@ -4,6 +4,7 @@ import type { FilterCondition, FilterOperator, Row } from "../core/ports.js";
 import type { PropertyDef } from "../core/schemas.js";
 import type { EntityTypeDef, RelationTypeDef, SchemaCacheValue } from "./schemaCache.js";
 import { cpLength } from "./codePoints.js";
+import { IDENTITY_FIELD } from "./identity.js";
 import {
   isQueryPath,
   namesRelationType,
@@ -74,7 +75,9 @@ export function stubDocumentProperties(
 // Response property filtering and field projection
 // ---------------------------------------------------------------------------
 
-/** Filter entity properties to the scoped schema and stub document values. */
+/** Filter entity properties to the scoped schema and stub document values.
+ * `_identity` goes too when the lens shows no identity for the type: it
+ * hides part of it. */
 export function filterEntityProperties(
   entity: Row,
   scopedEt: EntityTypeDef,
@@ -82,6 +85,7 @@ export function filterEntityProperties(
 ): Row {
   const filtered: Row = {};
   for (const [k, v] of Object.entries(entity)) {
+    if (k === IDENTITY_FIELD && scopedEt.identityProperties === null) continue;
     if (k.startsWith("_") || k in scopedEt.properties) {
       filtered[k] = v;
     }
@@ -89,10 +93,11 @@ export function filterEntityProperties(
   return stubDocumentProperties(filtered, scopedEt.properties, fields);
 }
 
-export const ENTITY_ALWAYS_FIELDS: ReadonlySet<string> = new Set(["_id"]);
+export const ENTITY_ALWAYS_FIELDS: ReadonlySet<string> = new Set(["_id", IDENTITY_FIELD]);
 export const ENTITY_NEIGHBOR_ALWAYS_FIELDS: ReadonlySet<string> = new Set([
   "_id",
   "_entityTypeKey",
+  IDENTITY_FIELD,
 ]);
 export const RELATION_ALWAYS_FIELDS: ReadonlySet<string> = new Set([
   "_id",

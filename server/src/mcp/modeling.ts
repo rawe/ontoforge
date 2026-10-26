@@ -311,12 +311,19 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         "Add a new entity type to the schema. Key must be snake_case, unique within the ontology. " +
         "Also creates the type's name property — the string property that names its " +
-        "entities — under name_property (default 'name').",
+        "entities — under name_property (default 'name'). Optional " +
+        "identity_properties: the ordered keys (1 to 5) of the type's own string, integer or date " +
+        "properties whose values, joined with '~', name each entity uniquely within the type. They " +
+        "must be required with no default and shown by every lens allowlist for the type; with " +
+        "cascade=True the server makes them so, otherwise the call is refused. Refused too when " +
+        "stored entities lack a value or would share an identity.",
       inputSchema: {
         key: z.string(),
         display_name: z.string(),
         description: z.string().optional(),
         name_property: z.string().optional(),
+        identity_properties: z.array(z.string()).optional(),
+        cascade: z.boolean().optional(),
       },
     },
     wrap("create_entity_type", async (args: {
@@ -324,14 +331,21 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       display_name: string;
       description?: string | undefined;
       name_property?: string | undefined;
+      identity_properties?: string[] | undefined;
+      cascade?: boolean | undefined;
     }) => {
       const body = EntityTypeCreate.parse({
         key: args.key,
         displayName: args.display_name,
         description: args.description ?? null,
         nameProperty: args.name_property,
+        identityProperties: args.identity_properties ?? null,
       });
-      const result = await service.createEntityType(body, await getModelingStore(ontologyKey));
+      const result = await service.createEntityType(
+        body,
+        await getModelingStore(ontologyKey),
+        args.cascade ?? false,
+      );
       return jsonResult(result);
     }),
   );
@@ -340,13 +354,21 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "update_entity_type",
     {
       description:
-        "Update an entity type's display name, description or name property. Key is " +
-        "immutable. name_property must be the key of an existing string property of the type.",
+        "Update an entity type's display name, description, name property or identity. Key is " +
+        "immutable. name_property must be the key of an existing string property of the type. " +
+        "identity_properties: the ordered keys (1 to 5) of the type's own string, integer or date " +
+        "properties whose values, joined with '~', name each entity uniquely within the type. They " +
+        "must be required with no default and shown by every lens allowlist for the type; with " +
+        "cascade=True the server makes them so, otherwise the call is refused. Refused too when " +
+        "stored entities lack a value or would share an identity. null clears the identity; omitted leaves it unchanged. Changing the " +
+        "identity renames every entity's identity.",
       inputSchema: {
         entity_type_key: z.string(),
         display_name: z.string().optional(),
         description: z.string().optional(),
         name_property: z.string().optional(),
+        identity_properties: z.array(z.string()).nullable().optional(),
+        cascade: z.boolean().optional(),
       },
     },
     wrap("update_entity_type", async (args: {
@@ -354,6 +376,8 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       display_name?: string | undefined;
       description?: string | undefined;
       name_property?: string | undefined;
+      identity_properties?: string[] | null | undefined;
+      cascade?: boolean | undefined;
     }) => {
       const store = await getModelingStore(ontologyKey);
       const et = await resolveEntityType(store, args.entity_type_key);
@@ -361,8 +385,14 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         displayName: args.display_name ?? null,
         description: args.description ?? null,
         nameProperty: args.name_property ?? null,
+        identityProperties: args.identity_properties,
       });
-      const result = await service.updateEntityType(et.entityTypeId as string, body, store);
+      const result = await service.updateEntityType(
+        et.entityTypeId as string,
+        body,
+        store,
+        args.cascade ?? false,
+      );
       return jsonResult(result);
     }),
   );
@@ -551,7 +581,8 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         "Update a property's metadata. Key and data type are immutable after creation. " +
         "type_kind must be 'entity_type' or 'relation_type'. " +
-        "Omitted arguments stay unchanged; pass default_value as null to remove a default.",
+        "Omitted arguments stay unchanged; pass default_value as null to remove a default. " +
+        "A property in its entity type's identity cannot become optional or take a default.",
       inputSchema: {
         type_kind: z.string(),
         type_key: z.string(),
@@ -601,7 +632,8 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "type_kind must be 'entity_type' or 'relation_type'. " +
         "Use cascade=True to auto-remove from scoped lens property lists and from the " +
         "custom search indices that read it (required when an index reads it). " +
-        "An entity type's name property cannot be removed; reassign it first.",
+        "An entity type's name property cannot be removed; reassign it first. Nor can a " +
+        "property in the type's identity; change the identity first.",
       inputSchema: {
         type_kind: z.string(),
         type_key: z.string(),

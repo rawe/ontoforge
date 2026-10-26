@@ -769,7 +769,7 @@ Semantics: [capabilities/changesets.md](capabilities/changesets.md).
 | GET | `/changesets/{changesetId}/entities/{entityTypeKey}/{entityId}` | Read one entity as the changeset leaves it, with its staged object | — |
 | GET | `/changesets/{changesetId}/entities/{entityTypeKey}/identity/{identity}` | The same, the entity named by its identity in the changeset's view | — |
 | DELETE | `/changesets/{changesetId}` | Discard a draft changeset; 204 | — |
-| POST | `/changesets/{changesetId}/writes` | Stage one call, its body discriminated by `operation`; 201 | — |
+| POST | `/changesets/{changesetId}/writes` | Stage one call, its body discriminated by `operation`, or a list of up to 1,000; 201 | — |
 | DELETE | `/changesets/{changesetId}/objects/{objectId}` | Unstage one staged object with its values; 204 | — |
 | DELETE | `/changesets/{changesetId}/objects/{objectId}/properties/{propertyKey}` | Cut one staged value; 204 | — |
 | POST | `/changesets/{changesetId}/objects/{objectId}/rebase` | Rebase an update, with optional `properties`, the keys to rebase | — |
@@ -778,18 +778,24 @@ Semantics: [capabilities/changesets.md](capabilities/changesets.md).
 | POST | `/changesets/{changesetId}/check` | Check: run the commit and roll it back; no body | — |
 | POST | `/changesets/{changesetId}/commit` | Commit, with an optional `expectedVersion` | — |
 
-A staged call's `operation` is one of seven, each with its keys and no other:
+A staged call's `operation` is one of nine, each with its keys and no other:
 `create_entity` `{type, properties?, parentRelation?}`, `update_entity`
 `{type, id, properties?}`, `delete_entity` `{type, id}`, `create_relation`
 `{type, fromEntityId, toEntityId, properties?}`, `update_relation` `{type, id, properties?}`,
-`delete_relation` `{type, id}` and `edit_document` `{type, id, property}` with the body of
-the [document write](#documents). On the entity operations `identity` may name the entity
-in place of `id`, and on `create_relation` `fromEntityIdentity` and `toEntityIdentity` the
-ends, resolved in the changeset's view; `type` is the type key, `id` the target, `properties`
+`delete_relation` `{type, id}`, `edit_document` `{type, id, property}` with the body of
+the [document write](#documents), and the [puts](capabilities/changesets.md#put)
+`put_entity` `{type, properties?}` and `put_relation` `{type, fromEntityId, toEntityId,
+properties?}`. On the entity operations `identity` may name the entity
+in place of `id`, and on `create_relation` and `put_relation` `fromEntityIdentity` and
+`toEntityIdentity` the ends, resolved in the changeset's view; `type` is the type key, `id` the target, `properties`
 the values as one object, and `parentRelation` the immediate create's. Staging answers
 `{id}`, the staged object's id; a create with a parent relation adds `relation: {id}`, an
-entity delete that took out staged relations `cascaded`, their ids, and `edit_document`
-the document write's answer beside `id`.
+entity delete that took out staged relations `cascaded`, their ids, `edit_document`
+the document write's answer beside `id`, and a put `action`, `create` or `update`, what it
+staged. A body that is a list of calls answers the list of their answers, in order; when
+any call fails, nothing is staged and the `422 VALIDATION_ERROR` carries `details.items`,
+one `{item, code, message, details?}` per failed call, `item` its index in the list and
+`code` and `details` the envelope it alone would answer.
 
 `limit` of the changeset read is 1–500, default 100. A changeset carries `objectCount`, its
 number of staged objects; the read adds `objects`, each `{id, kind, type, action,
@@ -1313,7 +1319,6 @@ Reasonable things to look for that are absent everywhere — REST, MCP and the w
 | Absent | Consequence |
 |---|---|
 | Data-wipe endpoint | Instance data is removed one entity or relation at a time; deleting the whole ontology is the only bulk removal |
-| Bulk or batch write | Every create and update is a single object, except a create with a parent relation, which writes one entity and its one relation, on every mount; a changeset stages writes call by call and commits them together; import covers the design, not data |
 | Instance-data export | Transfer moves the design only; data leaves through queries or listing |
 | Single-property read on modeling | List the owning type's properties |
 | Cross-lens read | No route or tool sees two lenses at once |

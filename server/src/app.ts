@@ -2,10 +2,11 @@
  * Fastify application factory: routes, error handlers, CORS, OpenAPI.
  *
  * Every error response uses the one envelope
- * `{"error": {"code", "message", "details?"}}` with exactly nine codes —
+ * `{"error": {"code", "message", "details?"}}` with exactly ten codes —
  * see the error model in `docs/architecture.md`. Framework-level failures
  * are mapped into the same envelope: an unparsable JSON body answers
- * `400 INVALID_JSON`, a request-shape failure `422 VALIDATION_ERROR`.
+ * `400 INVALID_JSON`, a body over `REQUEST_BODY_LIMIT` `413
+ * PAYLOAD_TOO_LARGE`, a request-shape failure `422 VALIDATION_ERROR`.
  *
  * The probes `/livez` and `/readyz`, and `/metrics`, sit outside `/api` and
  * outside that envelope; shutdown drains through the app's `lifecycle`.
@@ -28,6 +29,7 @@ import { accessRouter } from "./access/router.js";
 import { challenge, classifyRoutes, guardRoutes } from "./auth/plugin.js";
 import { authRouter, resourceMetadataRouter } from "./auth/router.js";
 import type { AuthRuntime } from "./auth/runtime.js";
+import { settings } from "./config.js";
 import {
   CascadeRequiredError,
   ConflictError,
@@ -153,7 +155,11 @@ export async function createApp(shared?: SharedState, auth: AuthRuntime | null =
   // An identity is one path segment (`/entities/{type}/identity/{identity}`):
   // its longest form, every code point four UTF-8 bytes percent-encoded,
   // must route rather than hit the not-found handler.
-  const app = Fastify({ logger: false, routerOptions: { maxParamLength: MAX_IDENTITY_LENGTH * 12 } });
+  const app = Fastify({
+    logger: false,
+    bodyLimit: settings.REQUEST_BODY_LIMIT,
+    routerOptions: { maxParamLength: MAX_IDENTITY_LENGTH * 12 },
+  });
   app.addHook("onClose", () => state.close());
   app.decorate("auth", auth);
   if (auth !== null) {
@@ -296,6 +302,9 @@ export async function createApp(shared?: SharedState, auth: AuthRuntime | null =
       (error instanceof SyntaxError && frameworkError.statusCode === 400)
     ) {
       return sendError(reply, 400, "INVALID_JSON", "Request body is not valid JSON");
+    }
+    if (frameworkError.code === "FST_ERR_CTP_BODY_TOO_LARGE") {
+      return sendError(reply, 413, "PAYLOAD_TOO_LARGE", `Request body exceeds ${settings.REQUEST_BODY_LIMIT} bytes`);
     }
     // Framework-level request-shape failures map into the standard envelope.
     if (hasZodFastifySchemaValidationErrors(error)) {

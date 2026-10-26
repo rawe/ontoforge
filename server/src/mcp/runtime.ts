@@ -1334,7 +1334,7 @@ function registerChangesetTools(
         "write_document; reads never see staged data. The changeset is a set, not a history: " +
         "one staged object per entity or relation it touches, with its action (create, update " +
         "or delete) and one staged value per property, each later write merged in. It holds at " +
-        `most 10,000 staged objects, and at most ${settings.CHANGESET_MAX_BYTES} bytes of staged ` +
+        `most ${settings.CHANGESET_MAX_OBJECTS} staged objects, and at most ${settings.CHANGESET_MAX_BYTES} bytes of staged ` +
         "values as JSON, document text included. A draft changeset left unchanged for 7 days " +
         "expires and is deleted." +
         (rulesetKey !== null

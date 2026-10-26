@@ -51,7 +51,8 @@ start gets it again. Nothing looks a changeset up by its number; every call name
 
 Seven calls can be staged, with the values of their immediate counterparts: create, update
 and delete of an entity, and of a relation, and a
-[partial document write](documents.md#partial-writes). Each is merged into the set:
+[partial document write](documents.md#partial-writes). Beside them a [put](#put) stages a
+create or an update, whichever the data calls for. Each is merged into the set:
 
 | Call | What it does to the set |
 |---|---|
@@ -94,6 +95,36 @@ object this changeset deletes is refused as the immediate write refuses a missin
 - **One change at a time.** A staged call is merged into the changeset as it read it: one
   changed in between refuses the call as a conflict, with nothing staged, and the call can
   be sent again.
+
+### Put
+
+A put names what it writes by what identifies it, and becomes an ordinary create or update
+at staging. It exists only in a changeset; an immediate write is always an explicit create
+or update.
+
+- **An entity put** sends a type and values, and the values build the entity's
+  [identity](entity-identity.md). The entity that has that identity in the changeset's
+  view is updated, or else a new one is created. A type whose whole identity the lens does
+  not show, or values that build no identity, are refused with the create's field errors.
+- **A relation put** sends a type, both ends by id or identity, and values, on a relation
+  type that is [one per pair](schema-modeling.md#one-per-pair); on any other type it is
+  refused. The relation that links the pair in the changeset's view, stored and not
+  deleted here or created here, is updated, or else one is created.
+- **As an update,** a put keeps the keys it does not send, and a null removes a value.
+- **The set holds what it became.** The answer says which, as `action` `create` or
+  `update`; the review, the check and the commit see an ordinary create or update. An
+  identity or pair another write takes after staging is caught by the commit, as for any
+  create.
+
+### Many calls in one request
+
+A staging request may list up to 1,000 calls instead of one. They are staged in list order,
+so a later call may name an entity an earlier one creates, by id or by identity, and whole
+or not at all: every call is checked, and if any fails nothing is staged and the refusal
+names each failed call by its index in the list, with its own error. A refusal of the
+changeset itself — not found, submitted, full, changed in between — refuses the request as
+it refuses one call. The answer lists each call's answer in list order. Each call counts
+toward the changeset's [limits](#limits); a larger import commits in several changesets.
 
 ### Unstage, cut and rebase
 
@@ -282,8 +313,9 @@ its staged text is not found; a document value is shown only by its length.
 
 ## Limits
 
-- **At most 10,000 staged objects** per changeset; a call that would add more is refused
-  as a conflict.
+- **An object cap** per changeset, set in the server's
+  [configuration](../../README.md#configuration), by default 10,000 staged objects; a call
+  that would add more is refused as a conflict.
 - **A byte cap** per changeset, set in the server's
   [configuration](../../README.md#configuration): its staged values count as the UTF-8
   bytes of their JSON, the value and its before, document text included, and a call that

@@ -25,6 +25,8 @@ describe("config defaults", () => {
     expect(settings.DOCUMENT_CHUNK_OVERLAP).toBe(200);
 
     expect(settings.CHANGESET_MAX_BYTES).toBe(32 * 1024 * 1024);
+    expect(settings.CHANGESET_MAX_OBJECTS).toBe(10_000);
+    expect(settings.REQUEST_BODY_LIMIT).toBe(16 * 1024 * 1024);
 
     expect(settings.AI_PROVIDER).toBeNull();
     expect(settings.AI_MODEL).toBe("");
@@ -55,6 +57,8 @@ describe("config env overrides", () => {
       DOCUMENT_CHUNK_SIZE: "500",
       DOCUMENT_CHUNK_OVERLAP: "50",
       CHANGESET_MAX_BYTES: "1048576",
+      CHANGESET_MAX_OBJECTS: "500",
+      REQUEST_BODY_LIMIT: "2097152",
       AI_PROVIDER: "openai",
       AI_MODEL: "gpt",
       AI_BASE_URL: "http://ai:4321/v1",
@@ -79,6 +83,8 @@ describe("config env overrides", () => {
     expect(settings.DOCUMENT_CHUNK_SIZE).toBe(500);
     expect(settings.DOCUMENT_CHUNK_OVERLAP).toBe(50);
     expect(settings.CHANGESET_MAX_BYTES).toBe(1048576);
+    expect(settings.CHANGESET_MAX_OBJECTS).toBe(500);
+    expect(settings.REQUEST_BODY_LIMIT).toBe(2097152);
     expect(settings.AI_PROVIDER).toBe("openai");
     expect(settings.AI_MODEL).toBe("gpt");
     expect(settings.AI_BASE_URL).toBe("http://ai:4321/v1");
@@ -103,6 +109,8 @@ describe("config env overrides", () => {
       "EMBEDDING_BATCH_SIZE",
       "EMBEDDING_CONCURRENCY",
       "CHANGESET_MAX_BYTES",
+      "CHANGESET_MAX_OBJECTS",
+      "REQUEST_BODY_LIMIT",
       "SHUTDOWN_DRAIN_SECONDS",
     ]) {
       expect(() => loadSettings({ [name]: "0" })).toThrow(

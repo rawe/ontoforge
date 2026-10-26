@@ -528,7 +528,7 @@ Every error response has the same envelope:
 { "error": { "code": "...", "message": "...", "details": { } } }
 ```
 
-There are exactly nine top-level codes:
+There are exactly ten top-level codes:
 
 | Condition | Status | Code | `details` |
 |---|---|---|---|
@@ -537,15 +537,16 @@ There are exactly nine top-level codes:
 | The identity provider's keys cannot be fetched to check a token (authentication on) | 503 | `PROVIDER_UNAVAILABLE` | — |
 | Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — or `code` |
 | Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | —, `code` or `violations` |
-| Input rejected | 422 | `VALIDATION_ERROR` | `fields` map, `errors` list, or `violations` list with `total` |
+| Input rejected | 422 | `VALIDATION_ERROR` | `fields` map, `errors` list, `violations` list with `total`, or `items` list |
 | Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses`, `affectedIndices` |
 | Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
 | Malformed request body | 400 | `INVALID_JSON` | — |
+| Request body over the configured limit | 413 | `PAYLOAD_TOO_LARGE` | — |
 
 Four refinements:
 
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
-stays one of the nine. A request for an unavailable search strategy, search with no available strategy,
+stays one of the ten. A request for an unavailable search strategy, search with no available strategy,
 saved-query discovery with no embedding provider, an AI request with no
 language-model provider configured answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
 An assistant thread that is unknown, expired, bound to another assistant or started by

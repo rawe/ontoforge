@@ -29,6 +29,13 @@
  *   is read-modify-write: it is applied with a compare-and-set on the
  *   version it read, so a change in between is a 409 and nothing is
  *   written.
+ * - **Lists.** A staging request may list up to `MAX_BATCH_ITEMS` calls,
+ *   staged in list order in one transaction, whole or not at all
+ *   (`stageBatch`).
+ * - **Put** names an entity by the identity its values build, or a
+ *   relation of a one-per-pair type by its pair, and resolves now, in the
+ *   changeset's view, to an ordinary update of the one that has it, or
+ *   else an ordinary create. The set only ever holds creates and updates.
  * - **Merging.** A create adds its object and one value per key sent; a
  *   create with a parent relation adds the relation's object too. An
  *   update of a stored object adds an `update` object if none is staged
@@ -147,8 +154,8 @@ type Row = Record<string, unknown>;
 export const CHANGESET_IDLE_DAYS = 7;
 /** The longest note, in characters. */
 export const MAX_NOTE_LENGTH = 1000;
-/** The most staged objects one changeset holds. */
-export const MAX_STAGED_OBJECTS = 10_000;
+/** The most items one staging request lists. */
+export const MAX_BATCH_ITEMS = 1000;
 
 /** The size a staged value counts toward the byte cap
  * (`CHANGESET_MAX_BYTES`): the UTF-8 bytes of its value and its before as
@@ -176,7 +183,9 @@ export type StagedWrite =
   | ({ operation: "create_relation"; typeKey: string; properties: Row } & RelationEnds)
   | { operation: "update_relation"; typeKey: string; id: string; properties: Row }
   | { operation: "delete_relation"; typeKey: string; id: string }
-  | ({ operation: "edit_document"; typeKey: string; propertyKey: string; edit: DocumentEditBody } & EntityAddress);
+  | ({ operation: "edit_document"; typeKey: string; propertyKey: string; edit: DocumentEditBody } & EntityAddress)
+  | { operation: "put_entity"; typeKey: string; properties: Row }
+  | ({ operation: "put_relation"; typeKey: string; properties: Row } & RelationEnds);
 
 /** A stageable call with every entity named by id. */
 type ResolvedWrite =
@@ -187,6 +196,13 @@ type ResolvedWrite =
   | { operation: "update_relation"; typeKey: string; id: string; properties: Row }
   | { operation: "delete_relation"; typeKey: string; id: string }
   | { operation: "edit_document"; typeKey: string; id: string; propertyKey: string; edit: DocumentEditBody };
+
+/** A staged call resolved (`resolveWrite`): a put names what it became. */
+interface Resolved {
+  write: ResolvedWrite;
+  faults: FieldErrors;
+  put?: "create" | "update";
+}
 
 /** A changeset as every answer shows it. */
 export interface ChangesetView {
@@ -287,6 +303,8 @@ export type StagedAnswer = Row & {
   id: string;
   relation?: { id: string };
   cascaded?: string[];
+  /** A put's: what it staged. */
+  action?: "create" | "update";
 };
 
 function notFound(id: string): NotFoundError {
@@ -375,8 +393,9 @@ async function applyChange(
   record: ChangesetRecord,
   change: ChangesetChange,
   store: RuntimeStore,
-): Promise<void> {
-  if ((await store.changesets().apply(record.id, record.version, change)) !== null) return;
+): Promise<ChangesetRecord> {
+  const applied = await store.changesets().apply(record.id, record.version, change);
+  if (applied !== null) return applied;
   const now = await store.changesets().get(record.id, loaded.scoped.lensId, rulesetKey);
   if (now === null) throw notFound(record.id);
   if (now.submittedAt !== null) throw isSubmitted(record.id);
@@ -782,11 +801,32 @@ async function resolveWrite(
   changesetId: string,
   write: StagedWrite,
   store: RuntimeStore,
-): Promise<{ write: ResolvedWrite; faults: FieldErrors }> {
+): Promise<Resolved> {
   const faults: FieldErrors = {};
   const byIdentity = async (typeKey: string | null, identity: string): Promise<string | null> =>
     typeKey === null ? null : stagedEntityOf(loaded, changesetId, typeKey, identity, store);
   switch (write.operation) {
+    case "put_entity":
+      return resolvePutEntity(loaded, changesetId, write, store);
+    case "put_relation": {
+      const { operation: _put, ...rest } = write;
+      const created = await resolveWrite(loaded, changesetId, { ...rest, operation: "create_relation" }, store);
+      if (created.write.operation !== "create_relation") return created;
+      const rt = loaded.full.relationTypes[write.typeKey];
+      if (rt !== undefined && loaded.scoped.relationTypes[write.typeKey] !== undefined && !rt.onePerPair) {
+        throw new ValidationError("Instance validation failed", {
+          fields: { type: `Relation type '${write.typeKey}' is not one per pair; a put needs one` },
+        });
+      }
+      const { fromEntityId, toEntityId, properties, typeKey } = created.write;
+      // An end not found is the create's fault, reported by its merge.
+      const id =
+        rt === undefined || Object.keys(created.faults).length > 0
+          ? null
+          : await pairHolderInView(changesetId, typeKey, fromEntityId, toEntityId, store);
+      if (id === null) return { ...created, put: "create" };
+      return { write: { operation: "update_relation", typeKey, id, properties }, faults: {}, put: "update" };
+    }
     case "create_entity": {
       const request = write.parentRelation;
       if (request === null) return { write: { ...write, parentRelation: null }, faults };
@@ -849,6 +889,72 @@ async function resolveWrite(
     default:
       return { write, faults };
   }
+}
+
+/**
+ * A put of an entity: its identity built from its values as a create
+ * would build it, then the entity that has it in the changeset's view
+ * (`stagedEntityOf`) updated, or else a new one created. A type the lens
+ * shows no identity of, or values that build none, is refused.
+ */
+async function resolvePutEntity(
+  loaded: LoadedSchema,
+  changesetId: string,
+  write: Extract<StagedWrite, { operation: "put_entity" }>,
+  store: RuntimeStore,
+): Promise<Resolved> {
+  const { typeKey, properties } = write;
+  const ids = { entityId: randomUUID(), relationId: randomUUID() };
+  // The type's 404 first, as the create's.
+  const { errors, write: prepared } = prepareCreateEntity(loaded, typeKey, properties, null, ids);
+  const keys = (loaded.scoped.entityTypes[typeKey]?.identityProperties ?? null) === null
+    ? null
+    : (identityPropertiesOfType(loaded, typeKey) ?? []).map((property) => property.key);
+  if (keys === null) {
+    throw new ValidationError("Instance validation failed", {
+      fields: { type: `Entity type '${typeKey}' has no identity this lens shows; a put names its entity by identity` },
+    });
+  }
+  const identity = prepared.entity.identity;
+  if (identity === null) {
+    const fields = Object.fromEntries(Object.entries(errors).filter(([key]) => keys.includes(key)));
+    throw new ValidationError("Instance validation failed", { fields: Object.keys(fields).length > 0 ? fields : errors });
+  }
+  const id = await stagedEntityOf(loaded, changesetId, typeKey, identity, store);
+  if (id === null) {
+    return { write: { operation: "create_entity", typeKey, properties, parentRelation: null }, faults: {}, put: "create" };
+  }
+  return { write: { operation: "update_entity", typeKey, id, properties }, faults: {}, put: "update" };
+}
+
+/**
+ * The relation of a one-per-pair type that links the pair in the
+ * changeset's view: a stored one this changeset does not delete, or one it
+ * creates; null when none does. Two that do (stored data from before the
+ * rule, or creates the commit will refuse) are a 409.
+ */
+async function pairHolderInView(
+  changesetId: string,
+  typeKey: string,
+  fromId: string,
+  toId: string,
+  store: RuntimeStore,
+): Promise<string | null> {
+  const pairs = [{ fromId, toId }];
+  const staged = await store.changesets().relationObjectsAt(changesetId, typeKey, pairs);
+  const deleted = new Set(staged.filter((object) => object.action === "delete").map((object) => object.objectId));
+  const holders = new Set<string>();
+  for (const relation of await store.relationsOfPairs(typeKey, pairs)) {
+    if (!deleted.has(relation.id)) holders.add(relation.id);
+  }
+  for (const object of staged) if (object.action === "create") holders.add(object.objectId);
+  if (holders.size > 1) {
+    throw new ConflictError(
+      `More than one relation of type '${typeKey}' links this source and target in changeset '${changesetId}'`,
+    );
+  }
+  const [id] = holders;
+  return id ?? null;
 }
 
 /** One staged call as a change of the set, after its checks. */
@@ -955,6 +1061,52 @@ function isEmpty(change: ChangesetChange): boolean {
   return Object.values(change).every((part: unknown[] | undefined) => part === undefined || part.length === 0);
 }
 
+/** The draft a staging request stages into, as of its last change, and
+ * the bytes of its staged values once read. */
+interface Staging {
+  changeset: ChangesetRecord;
+  bytes: number | null;
+}
+
+/** A staged call's checks and merge (see the header): what it changes,
+ * and its answer. Nothing is applied yet. */
+async function mergeOne(
+  loaded: LoadedSchema,
+  changesetId: string,
+  write: StagedWrite,
+  store: RuntimeStore,
+): Promise<Merge> {
+  const resolved = await resolveWrite(loaded, changesetId, write, store);
+  const merge = await mergeOf(loaded, changesetId, resolved.write, resolved.faults, store);
+  return resolved.put === undefined ? merge : { ...merge, answer: { ...merge.answer, action: resolved.put } };
+}
+
+/** Apply a merge to the draft after the changeset's limits: a full
+ * changeset is a 409. A merge that changes nothing applies nothing. */
+async function applyMerge(
+  loaded: LoadedSchema,
+  rulesetKey: string | null,
+  at: Staging,
+  merge: Merge,
+  store: RuntimeStore,
+): Promise<void> {
+  const { id, objectCount } = at.changeset;
+  const maxObjects = settings.CHANGESET_MAX_OBJECTS;
+  if (merge.added > 0 && objectCount + merge.added > maxObjects) {
+    throw new ConflictError(`Changeset '${id}' is full: at most ${maxObjects} staged objects`);
+  }
+  const maxBytes = settings.CHANGESET_MAX_BYTES;
+  if (merge.grows > 0) {
+    at.bytes ??= await store.changesets().stagedBytes(id);
+    if (at.bytes + merge.grows > maxBytes) {
+      throw new ConflictError(`Changeset '${id}' is full: at most ${maxBytes} bytes of staged values`);
+    }
+  }
+  if (isEmpty(merge.change)) return;
+  at.changeset = await applyChange(loaded, rulesetKey, at.changeset, merge.change, store);
+  if (at.bytes !== null) at.bytes += merge.grows;
+}
+
 /**
  * Stage one call: its checks (see the header), then its merge into the
  * set, applied with a compare-and-set on the version read; a call that
@@ -974,17 +1126,82 @@ export async function stage(
   // The anchor deleted, or at an entity the lens hides: refused as every write.
   await AnchorGuard.checkStaging(rulesetKey, loaded, store);
 
-  const resolved = await resolveWrite(loaded, changeset.id, write, store);
-  const merge = await mergeOf(loaded, changeset.id, resolved.write, resolved.faults, store);
-  if (merge.added > 0 && changeset.objectCount + merge.added > MAX_STAGED_OBJECTS) {
-    throw new ConflictError(`Changeset '${changesetId}' is full: at most ${MAX_STAGED_OBJECTS} staged objects`);
-  }
-  const maxBytes = settings.CHANGESET_MAX_BYTES;
-  if (merge.grows > 0 && (await store.changesets().stagedBytes(changeset.id)) + merge.grows > maxBytes) {
-    throw new ConflictError(`Changeset '${changesetId}' is full: at most ${maxBytes} bytes of staged values`);
-  }
-  if (!isEmpty(merge.change)) await applyChange(loaded, rulesetKey, changeset, merge.change, store);
+  const merge = await mergeOne(loaded, changeset.id, write, store);
+  await applyMerge(loaded, rulesetKey, { changeset, bytes: null }, merge, store);
   return merge.answer;
+}
+
+/** One item of a staging request that failed: its index in the list, and
+ * the error it alone would answer. */
+export interface ItemFault {
+  item: number;
+  code: "VALIDATION_ERROR" | "RESOURCE_NOT_FOUND" | "RESOURCE_CONFLICT";
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+/** The fault of an item's own error; null for any other error, which
+ * fails the request as it is. */
+function itemFault(item: number, error: unknown): ItemFault | null {
+  const code =
+    error instanceof ValidationError
+      ? "VALIDATION_ERROR"
+      : error instanceof NotFoundError
+        ? "RESOURCE_NOT_FOUND"
+        : error instanceof ConflictError
+          ? "RESOURCE_CONFLICT"
+          : null;
+  if (code === null) return null;
+  const details = (error as ValidationError).details;
+  return { item, code, message: (error as Error).message, ...(details === null ? {} : { details }) };
+}
+
+/**
+ * Stage a list of calls, in list order and whole or not at all, in one
+ * transaction: each item sees what the items before it staged, so a later
+ * one may name an entity an earlier one creates. Every item is checked; if
+ * any fails, nothing is staged and the 422 names each failed item by its
+ * index (`ItemFault`). The changeset's own refusals — not found,
+ * submitted, full, changed in between — fail the request as for one call.
+ * Answers each item's answer, in item order.
+ */
+export async function stageBatch(
+  lensKey: string,
+  rulesetKey: string | null,
+  changesetId: string,
+  writes: StagedWrite[],
+  store: RuntimeStore,
+): Promise<StagedAnswer[]> {
+  const loaded = await loadSchema(lensKey, store);
+  const changeset = await loadDraft(loaded, rulesetKey, changesetId, store);
+  await AnchorGuard.checkStaging(rulesetKey, loaded, store);
+  return store.transaction(loaded.design, async (bound) => {
+    const at: Staging = { changeset, bytes: null };
+    const answers: StagedAnswer[] = [];
+    const faults: ItemFault[] = [];
+    for (const [item, write] of writes.entries()) {
+      let merge: Merge;
+      try {
+        merge = await mergeOne(loaded, changeset.id, write, bound);
+      } catch (error) {
+        const fault = itemFault(item, error);
+        if (fault === null) throw error;
+        faults.push(fault);
+        continue;
+      }
+      // Applied even after a failed item, so that the items after it are
+      // checked against what the items before staged; the transaction
+      // rolls it all back.
+      await applyMerge(loaded, rulesetKey, at, merge, bound);
+      answers.push(merge.answer);
+    }
+    if (faults.length > 0) {
+      throw new ValidationError(`${faults.length} of ${writes.length} items failed; nothing was staged`, {
+        items: faults,
+      });
+    }
+    return answers;
+  });
 }
 
 // ---------------------------------------------------------------------------

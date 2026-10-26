@@ -56,7 +56,8 @@ would be lost must traverse first.
 An entity of a type that declares an [identity](entity-identity.md) carries `_identity`,
 unique within the type. Every read, update, delete, path, neighbourhood and document route
 by id has a twin by identity, and a create or update that would give an entity a taken
-identity is refused with `IDENTITY_TAKEN`. There is no create-or-update. How identities are
+identity is refused with `IDENTITY_TAKEN`. There is no create-or-update outside a
+changeset's [put](changesets.md#put). How identities are
 built, renamed and resolved is in [entity-identity.md](entity-identity.md).
 
 Addressing an entity whose type the lens does not expose fails exactly as addressing a

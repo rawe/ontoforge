@@ -17,6 +17,7 @@ a separate access database holds principals and their access assignments.
 | [Project README](../README.md) | Getting started, configuration and development setup |
 | This file | Core concepts, glossary and where to find details |
 | [architecture.md](architecture.md) | System components, boundaries, invariants and flows |
+| [Runtime state implementation](implementation/runtime-state.md) | Contributor details of cache capacity, turn leases and navigator execution |
 | [interfaces.md](interfaces.md) | REST surfaces and MCP tools; exact schemas are in OpenAPI |
 | [storage-adapters.md](storage-adapters.md) | Persistence contract and PostgreSQL adapter |
 | [product-surface.md](product-surface.md) | Web UI screens and interactions |

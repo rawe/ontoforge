@@ -283,8 +283,8 @@ Each server process holds its own cache. Every entry is tagged with the
 current revision first and uses an entry only while it is still that revision, otherwise
 builds it again. A design change made on any server is therefore seen by the next request
 on every other, with no signal between them, and an ontology deleted and created again
-under its key never meets its predecessor's entries. The cache holds at most 512 lenses
-and 128 search contexts, dropping the least recently used first.
+under its key never meets its predecessor's entries. Each process bounds its cache;
+eviction changes what it must rebuild, not which design revision a request may use.
 
 ## Design revision
 
@@ -343,8 +343,8 @@ cascades: a deleted ontology, lens or assistant leaves its threads to retention.
 completed turn. A thread keeps at most 25 turns; older ones are removed. The model sees at
 most the last 8. A thread's state takes at most 8 MiB; a turn that would exceed it fails.
 
-**One turn per thread, atomic turns.** A turn holds its thread under a lease of 30 seconds,
-renewed every 10 while it runs; a message to a thread whose lease is held, on any server,
+**One turn per thread, atomic turns.** A turn holds its thread under a renewable lease;
+a message to a thread whose lease is held, on any server,
 is refused, never queued. The turn runs on a copy of the thread's state in its own process
 and stores the result once, when it completes — only while it still holds the lease, and
 ending the lease in the same step. A cancelled or failed turn stores nothing and releases
@@ -373,7 +373,7 @@ event ([interfaces](interfaces.md#assistant-chat-and-threads)). Runtime's assist
 kind-neutral helpers: the live trace of a fixed pipeline's steps, and the model calls —
 structured output for a decision, a stream for the answer.
 
-The [navigator](capabilities/navigators.md)'s turn is a fixed LangGraph pipeline. It
+The [navigator](capabilities/navigators.md)'s turn is a fixed pipeline. It
 announces its steps when the turn starts and traces each as it runs, in events prefixed
 with the navigator's name, and streams the entities its answer may use before the answer
 as the shared `entities` event ([interfaces.md](interfaces.md#assistant-chat-and-threads)).
@@ -623,3 +623,10 @@ Stated plainly, because its absence is a design position and not an oversight:
 
 Absences in the API surface itself — no data wipe, no instance-data export — are listed
 with their consequences in [interfaces.md](interfaces.md#what-is-not-exposed).
+
+## Further reading for implementers
+
+[Runtime state implementation](implementation/runtime-state.md) describes cache capacities,
+turn-lease timing and the implementation of navigator turn execution. These details support
+the consistency and ownership guarantees above; they are not needed to understand the
+system's component boundaries.

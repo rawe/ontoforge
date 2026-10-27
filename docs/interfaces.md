@@ -3,7 +3,8 @@
 The complete index of every way into the system: the ontology registry, two per-ontology
 REST surfaces, one server-wide route, two probes, a metrics route, two MCP servers, and — with
 authentication on — sign-in and user management. Concepts and
-vocabulary: [README.md](README.md). Structure and error model: [architecture.md](architecture.md).
+vocabulary: [README.md](README.md). System structure: [architecture.md](architecture.md).
+The shared wire error contract is [below](#errors).
 What each operation *means* is in [capabilities/](capabilities/) — this document is the
 map, not the semantics.
 

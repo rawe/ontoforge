@@ -140,7 +140,7 @@ allows for them, a `query` with up to three `variants` — further ones and empt
 dropped and long ones cut to 200 characters, never failing the plan — a `mode` —
 `semantic`, `keyword` or `hybrid` — exact `filters` with values, and an optional
 reference to previous results. One entry never holds two relations
-([../decisions.md](../decisions.md#search)), so a condition the user states a value
+([search indices](search-indices.md#entries)), so a condition the user states a value
 for is attached as an allowed filter of the result type to the sub-query searching that
 type; the planner splits into a further sub-query, fused per entity, only when the
 condition needs another relation group and no filter covers it. A question no index can
@@ -242,7 +242,7 @@ filters, not its query. It lists every supplied record for a pure exact list, ex
 `unsupportedReason` as a data gap and respects every limitation. It states facts in plain
 words — never sub-queries, filter ids or paths, index keys or entity ids — and tells
 results with the same name apart by their fields. Search evidence does not prove that a
-result fits ([../decisions.md](../decisions.md#search)).
+result fits ([search evidence](search.md#response)).
 
 ### Follow-up questions
 

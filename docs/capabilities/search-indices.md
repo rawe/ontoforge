@@ -5,8 +5,8 @@ type and the text composed for each entity of that type; ranked search ranks tho
 and returns the entities that own them. Every ranked search reads them
 ([search.md](search.md)).
 
-Vocabulary: [../README.md](../README.md#glossary). The rules these follow:
-[../decisions.md](../decisions.md).
+Vocabulary: [../README.md](../README.md#glossary). The system's structure:
+[../architecture.md](../architecture.md).
 
 ## What a search index is
 
@@ -46,7 +46,7 @@ type. An entity's entries are of three part kinds:
 
 **An entry never combines relations.** Each relation entry holds exactly one relation
 instance; two relation types, or two instances of one, never share an entry
-([../decisions.md](../decisions.md#search)). A question that spans two relations is
+([ADR 0023](../adr/0023-one-search-entry-per-relation-instance.md)). A question that spans two relations is
 answered by an exact filter or by fusing rankings at entity level, not by one entry.
 
 A search ranks entries and groups them by entity: the entity's best entry scores it and is
@@ -131,8 +131,7 @@ when the root type is the relation type's source, `incoming` when it is its targ
 names the relation's own properties to include (`fields`) and those of the entity at the
 other end (`target`, keyed by that entity's type — the relation type's other endpoint,
 the one key it can hold). A group reaches the root's relations and the entities on their
-other end, nothing further: one hop
-([../decisions.md](../decisions.md#search)).
+other end, nothing further: one hop.
 
 **Pairing is per relation instance.** Each relation of the group yields one entry of the
 entity on the root side, holding that relation's properties together with those of the

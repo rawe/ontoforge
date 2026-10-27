@@ -64,7 +64,7 @@ the map of everything else.
 | Every endpoint and MCP tool | [docs/interfaces.md](docs/interfaces.md) |
 | Implementing a storage backend | [docs/storage-adapters.md](docs/storage-adapters.md) |
 | What the web client offers | [docs/product-surface.md](docs/product-surface.md) |
-| Rules you may not violate | [docs/decisions.md](docs/decisions.md) |
+| Existing rules awaiting migration | [docs/decisions.md](docs/decisions.md), plus the owning documents it links to |
 
 ## Agent skills
 

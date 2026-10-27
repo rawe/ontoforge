@@ -20,7 +20,7 @@ a separate access database holds principals and their access assignments.
 | [interfaces.md](interfaces.md) | REST surfaces and MCP tools; exact schemas are in OpenAPI |
 | [storage-adapters.md](storage-adapters.md) | Persistence contract and PostgreSQL adapter |
 | [product-surface.md](product-surface.md) | Web UI screens and interactions |
-| [decisions.md](decisions.md) | Rules that constrain all of the above |
+| [decisions.md](decisions.md) | Remaining rules and links to their owning documents during migration |
 | [capabilities/](capabilities/) | One document per capability, end to end |
 | [workflows/](workflows/) | Procedures for working *on* OntoForge |
 | [adr/](adr/) | Context and trade-offs behind consequential architectural choices |

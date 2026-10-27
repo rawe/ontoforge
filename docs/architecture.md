@@ -480,7 +480,7 @@ Every search index keeps entries composed from the
 current state of entities — their own fields, their relations together with the entities
 at the other end, and the passages of their documents. Entries are built in the
 background, never on the request path, so search over them is eventually consistent
-([decisions.md](decisions.md#search)).
+([index lifecycle](capabilities/search-indices.md#lifecycle)).
 
 **Every write queues its work in its own transaction.** Entity and relation writes —
 create, update, delete, document edits — hand the store, with the write, the search work
@@ -510,7 +510,8 @@ and, for semantic entries, the embedding model, for keyword entries the keyword 
 set. When no generation matches, a new one is built from a full backfill beside the
 active one, which keeps serving until the new one is complete and takes its place in one
 step; one process at a time builds its search structure. An entry's semantic text is labelled with the schema's display names, unless the
-index renders it from a template; its keyword text holds values only ([decisions.md](decisions.md#search)).
+index renders it from a template; its keyword text holds values only
+([composition](capabilities/search-indices.md#composition)).
 
 **Managed indices follow the schema.** After every schema change the modeling side derives
 the managed indices again from the full schema — creating, updating and deleting their

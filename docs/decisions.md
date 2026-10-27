@@ -1,9 +1,11 @@
 # Rules
 
-This index collects current design rules and points to the documents that explain them.
-Rules stated here remain in force. System-wide invariants belong in architecture;
-feature-specific behavior belongs with its capability. Preserve the meaning of any rule
-when moving it and update its references.
+This is a temporary collection of current design rules and links to their detailed homes.
+Rules still stated here remain in force. The destination is to move every remaining rule
+to its owning architecture, capability, interface or operational document, and then retire
+this file once its content and references have been accounted for. No rule is intended to
+live here permanently. Do not add new rules here: document current behavior at its owning
+home, and preserve each existing rule's meaning and update its references when moving it.
 
 Not every choice needs an entry here or an ADR. The threshold for recording consequential,
 hard-to-reverse architectural choices is in

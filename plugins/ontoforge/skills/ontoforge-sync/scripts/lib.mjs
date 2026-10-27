@@ -131,15 +131,17 @@ export function changesetWriter(request, prefix, note) {
   const stage = (writes) => request('POST', `${prefix}/changesets/${changeset}/writes`, writes);
   // Stage one batch whole. Full: commit what this changeset holds and
   // stage the batch into the next one; a batch larger than an empty
-  // changeset holds is split in halves.
+  // changeset holds, or than the server's request body limit, is split in
+  // halves. Only a single call that does not fit fails.
   const sendBatch = async (batch) => {
     await start();
     let answers;
     try {
       answers = await stage(batch.map((item) => item.write));
     } catch (err) {
-      if (!(/-> 409: .*is full/s.test(err.message))) throw err;
-      if (stagedHere > 0) {
+      const tooLarge = /-> 413:/.test(err.message);
+      if (!tooLarge && !(/-> 409: .*is full/s.test(err.message))) throw err;
+      if (!tooLarge && stagedHere > 0) {
         await commit();
         return sendBatch(batch);
       }

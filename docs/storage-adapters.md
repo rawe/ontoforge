@@ -124,7 +124,7 @@ physical objects that way; a new adapter accepts them and maps them to whatever 
 
 | Operation | Obligation |
 |---|---|
-| Initialize | Open connections, verify the database is reachable, create every **server-wide** constraint and index the adapter needs, bring storage of an older storage version up to date ([decisions.md](decisions.md#storage)), and hand out the registry and the bound-store factories. Per-ontology storage is provisioned by registry create; at initialization only an upgrade reaches into it. Failure prevents the server from serving. |
+| Initialize | Open connections, verify the database is reachable, create every **server-wide** constraint and index the adapter needs, bring storage of an older storage version up to date, and hand out the registry and the bound-store factories. Per-ontology storage is provisioned by registry create; at initialization only an upgrade reaches into it. Failure prevents the server from serving. |
 | Close | Release connections. Idempotent. |
 | Ensure semantic indexes | Given a vector width, create every vector index the current schemas imply, for **every ontology the registry lists** — doing nothing when there are none. Called at startup only when an embedding provider is configured. |
 

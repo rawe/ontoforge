@@ -196,12 +196,12 @@ Full documentation starts at **[docs/README.md](docs/README.md)**:
 
 | | |
 |---|---|
-| [architecture.md](docs/architecture.md) | How the system is put together |
+| [architecture.md](docs/architecture.md) | System components, boundaries, invariants and flows |
 | [capabilities/](docs/capabilities/) | One document per capability, end to end |
-| [interfaces.md](docs/interfaces.md) | Every REST endpoint and MCP tool |
-| [storage-adapters.md](docs/storage-adapters.md) | What a storage backend must implement |
-| [product-surface.md](docs/product-surface.md) | What the web client offers |
-| [decisions.md](docs/decisions.md) | Rules that constrain the design |
+| [interfaces.md](docs/interfaces.md) | REST surfaces and MCP tools; exact schemas are in OpenAPI |
+| [storage-adapters.md](docs/storage-adapters.md) | Persistence contract and PostgreSQL adapter |
+| [product-surface.md](docs/product-surface.md) | Web UI screens and interactions |
+| [decisions.md](docs/decisions.md) | Remaining rules and links to their owning documents during migration |
 
 ## Project Structure
 
@@ -235,13 +235,14 @@ ontoforge/
 │   └── src/
 └── docs/
     ├── README.md                   # Concepts, glossary, documentation map
-    ├── architecture.md             # Components, data model, error model
+    ├── architecture.md             # Components, boundaries, invariants and flows
+    ├── implementation/             # Contributor details tied to the implementation
     ├── capabilities/               # One document per capability
-    ├── interfaces.md               # Every REST endpoint and MCP tool
-    ├── storage-adapters.md         # The persistence port contract
-    ├── product-surface.md          # What the web client offers
-    ├── decisions.md                # Binding design rules
-    ├── adr/                        # Rejected alternatives behind rules
+    ├── interfaces.md               # REST/MCP surfaces and shared error contract
+    ├── storage-adapters.md         # Persistence contract and PostgreSQL adapter
+    ├── product-surface.md          # Web UI screens and interactions
+    ├── decisions.md                # Temporary collection of rules awaiting migration
+    ├── adr/                        # Context and trade-offs of architectural choices
     └── workflows/                  # Procedures for working on OntoForge
 ```
 

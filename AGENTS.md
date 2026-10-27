@@ -8,6 +8,10 @@ OntoForge is a graph-native ontology studio for designing graph schemas and usin
 
 ## Design Principles
 
+Before changing system behavior, read [Architectural constraints](docs/architecture-constraints.md)
+and the relevant capability and interface sections. The constraints are the common
+architectural starting point; detailed feature rules stay with their owners.
+
 - **KISS** — Keep it simple. Prefer the simplest solution that meets the requirement.
 - **YAGNI** — You ain't gonna need it. Don't build for hypothetical future requirements.
 - **Every architectural decision requires user approval.** Never settle a design or architectural choice silently — always ask the user first. Only consequential, costly-to-reverse architectural choices warrant an ADR; use [docs/workflows/recording-decisions.md](docs/workflows/recording-decisions.md) to assess and record them.
@@ -61,6 +65,7 @@ the map of everything else.
 | Need | Read |
 |---|---|
 | Concepts and vocabulary | [docs/README.md](docs/README.md) |
+| Essential architectural constraints | [docs/architecture-constraints.md](docs/architecture-constraints.md) |
 | How it is put together | [docs/architecture.md](docs/architecture.md) |
 | What a capability does and its rules | [docs/capabilities/](docs/capabilities/) |
 | Every endpoint and MCP tool | [docs/interfaces.md](docs/interfaces.md) |

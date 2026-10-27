@@ -26,7 +26,10 @@ creating an ADR by default. If the trade-off is still unclear, raise it for revi
 
 ## Where information belongs
 
-- **System structure and major invariants:** [architecture.md](../architecture.md).
+- **Essential architectural constraints:** [architecture-constraints.md](../architecture-constraints.md),
+  the concise authoritative statements of boundaries contributors must preserve.
+- **System structure, mechanisms and flows:** [architecture.md](../architecture.md),
+  explaining how those constraints are realized.
 - **Feature behavior, constraints, limits and examples:** the owning document in
   [capabilities/](../capabilities/).
 - **Interface behavior and access:** [interfaces.md](../interfaces.md); the web client
@@ -41,6 +44,19 @@ The current [decisions.md](../decisions.md) is a temporary collection: its remai
 rules stay in force until moved to their owning documents, after which the file can be
 retired. Do not add new rules there. Preserve each rule's meaning and update its links;
 do not remove a rule just because it does not merit an ADR.
+
+## Keep the common constraints selective
+
+The constraints document is a required architectural starting point, not a replacement
+for reading the affected feature. Add an entry only when it protects an important
+architectural boundary or guarantee contributors need before designing changes. State
+the obligation, a short reason and a link to its explanation. A feature default, parameter
+limit, naming convention or implementation procedure belongs with its detailed owner.
+
+The threshold for a constraint and for an ADR are different: a constraint states what
+must hold now; an ADR preserves the context of a consequential choice. Neither requires
+creating the other automatically. Keep the detailed mechanism out of the constraints
+document and avoid a second authoritative statement of the same constraint elsewhere.
 
 ## Write an ADR
 

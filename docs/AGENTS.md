@@ -14,7 +14,8 @@ For the practical steps to add, update or move documentation, use
 4. **When redundancy exists, maintain consistency.** A brief summary can help a reader
    understand an interaction without leaving the page; link to the detailed home rather
    than repeating its full explanation. If accounts diverge, flag and investigate them.
-5. **Write at the right level.** Architecture explains system boundaries, responsibilities,
+5. **Write at the right level.** [Architectural constraints](architecture-constraints.md)
+   state the essential common obligations. Architecture explains system boundaries, responsibilities,
    invariants and important flows, without depending on or linking to source code. Capability
    documents describe what a feature does and its important rules, not a tour of its classes
    or functions. Implementation-focused guides may reference code when it helps their

@@ -7,6 +7,9 @@ This repo does not use a root `GLOSSARY.md`. When a skill refers to `GLOSSARY.md
 ## Before exploring, read these
 
 - **`docs/README.md`** — concepts, the documentation map and the [glossary](../README.md#glossary).
+- **[Architectural constraints](../architecture-constraints.md)** — the concise common
+  constraints to read before changing system behavior. Detailed rules remain in their
+  owning documents.
 - **The owning documents for the work** — read the relevant capability sections for
   behavior and rules, the interface or product sections for the surface being changed,
   and architecture or storage documentation when the change touches those boundaries.

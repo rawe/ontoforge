@@ -1,6 +1,6 @@
 # Access data in a database of its own
 
-Rule: [Access](../decisions.md#access)
+Current behavior: [Authentication and authorization](../architecture.md#authentication-and-authorization)
 
 ## Context
 

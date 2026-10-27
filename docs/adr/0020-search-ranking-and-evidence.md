@@ -1,6 +1,6 @@
 # Search ranking without an index bonus, and evidence kept apart from rank
 
-Rule: [Search](../decisions.md#search)
+Current behavior: [Search ranking](../capabilities/search.md#ranking) and [response evidence](../capabilities/search.md#response)
 
 ## Context
 

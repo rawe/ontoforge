@@ -1,6 +1,6 @@
 # Entity identity as an ordered list of the type's own properties
 
-Rule: [Entity identity](../decisions.md#entity-identity)
+Current behavior: [Declaring entity identity](../capabilities/entity-identity.md#declaring-an-identity)
 
 ## Context
 

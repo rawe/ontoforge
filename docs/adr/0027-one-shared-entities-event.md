@@ -1,6 +1,6 @@
 # One shared entities event for every assistant kind
 
-Rule: [Interfaces](../decisions.md#interfaces)
+Current behavior: [Entities met by a turn](../capabilities/threads.md#the-entities-a-turn-met)
 
 ## Context
 

@@ -1,6 +1,6 @@
 # One search entry per relation instance
 
-Rule: [Search](../decisions.md#search)
+Current behavior: [Search index entries](../capabilities/search-indices.md#entries)
 
 ## Context
 

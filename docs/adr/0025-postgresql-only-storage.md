@@ -1,6 +1,6 @@
 # PostgreSQL as the only storage adapter
 
-Rule: [Storage](../decisions.md#storage)
+Current behavior: [Storage adapters](../storage-adapters.md)
 
 ## Context
 

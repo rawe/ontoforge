@@ -1,6 +1,6 @@
 # Unexpected storage failures become one storage error with an error id
 
-Rule: [Storage](../decisions.md#storage)
+Current behavior: [Interface errors](../interfaces.md#errors)
 
 ## Context
 

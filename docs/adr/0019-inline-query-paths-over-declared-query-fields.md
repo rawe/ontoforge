@@ -1,6 +1,6 @@
 # Query paths inline in the filter key, not declared in the schema
 
-Rule: [Query](../decisions.md#query)
+Current behavior: [Query paths](../capabilities/instance-data.md#query-paths)
 
 ## Context
 

@@ -1,6 +1,6 @@
 # MCP runs in the server process over stateless JSON HTTP
 
-Rule: [Interfaces](../decisions.md#interfaces)
+Current behavior: [MCP interfaces](../interfaces.md#mcp)
 
 ## Context
 

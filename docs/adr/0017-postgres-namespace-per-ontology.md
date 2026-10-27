@@ -1,6 +1,6 @@
 # One PostgreSQL namespace per ontology
 
-Rule: [Storage](../decisions.md#storage)
+Current behavior: [Ontology isolation in PostgreSQL](../storage-adapters.md#how-ontologies-are-isolated)
 
 ## Context
 

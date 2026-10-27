@@ -1,6 +1,6 @@
 # Identity uniqueness in changesets judged at the commit, under a deferred constraint
 
-Rule: [Entity identity](../decisions.md#entity-identity), [Storage](../decisions.md#storage)
+Current behavior: [Identity in a changeset](../capabilities/entity-identity.md#in-a-changeset) and [storage obligations](../storage-adapters.md#obligations-beyond-storage)
 
 ## Context
 

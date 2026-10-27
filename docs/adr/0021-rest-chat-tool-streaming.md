@@ -1,6 +1,6 @@
 # One streaming response contract for REST chat
 
-Rule: [Interfaces](../decisions.md#interfaces)
+Current behavior: [Assistant chat and threads](../interfaces.md#assistant-chat-and-threads)
 
 ## Context
 

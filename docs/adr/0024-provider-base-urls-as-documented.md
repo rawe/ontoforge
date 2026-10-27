@@ -1,6 +1,6 @@
 # Provider base URLs as the provider documents them
 
-Rule: [Deployment](../decisions.md#deployment), [Naming](../decisions.md#naming)
+Current behavior: [Provider configuration](../../README.md#optional-features)
 
 ## Context
 

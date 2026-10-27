@@ -1,6 +1,6 @@
 # The server as the browser's OpenID client
 
-Rule: [Access](../decisions.md#access)
+Current behavior: [Signing in](../capabilities/authentication.md#signing-in)
 
 ## Context
 

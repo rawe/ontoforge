@@ -294,7 +294,7 @@ design change: one transaction that holds the ontology's design exclusively and 
 the revision, committing whole or not at all. Every data write, immediate or a changeset's
 commit, validates against the cached schema of the revision it read and then runs its
 checks, the write and its search work in one transaction that holds the design shared and
-first checks the revision is unchanged ([decisions.md](decisions.md#storage)). Shared holds
+first checks the revision is unchanged. Shared holds
 never wait for each other; a design change waits for running writes, and writes arriving
 meanwhile wait for it. When the revision moved, the write loads the schema again,
 validates again and retries; a design that keeps moving, or a wait of more than five
@@ -307,8 +307,8 @@ calls reads and writes against the design current at that call.
 
 Shared state is what every server must see alike but may lose: the assistants' threads
 ([thread store](#thread-store)) and, with authentication on, the browser sessions
-([authentication](#authentication-and-authorization)). It sits beside the persistence port rather than behind it
-([decisions.md](decisions.md#storage)), and one setting chooses where all of it lives:
+([authentication](#authentication-and-authorization)). It sits beside the persistence port rather than behind it,
+and one setting chooses where all of it lives:
 memory, which serves one server process, or Valkey, shared by every server that names it.
 A configured Valkey that does not answer, that would evict data rather than refuse it, or
 that cannot run the scripts fails the boot; nothing falls back to memory. Falling back
@@ -369,7 +369,7 @@ its modeling and runtime routes under `assistants/<kind>`, its own storage, its 
 of a configuration, its built-in default and its place in transfer under the lens's
 `assistants`. Every kind shares the
 [thread store](#thread-store), the chat request and stream frame, and the one `entities`
-event ([decisions.md](decisions.md#interfaces)). Runtime's assistant kit holds the
+event ([interfaces](interfaces.md#assistant-chat-and-threads)). Runtime's assistant kit holds the
 kind-neutral helpers: the live trace of a fixed pipeline's steps, and the model calls —
 structured output for a decision, a stream for the answer.
 
@@ -382,7 +382,7 @@ Its model calls are never retried.
 ## Authentication and authorization
 
 One startup setting turns authentication on for a server; every server of a deployment
-shares it ([decisions.md](decisions.md#system-shape)). Off, every request is trusted and
+shares it. Off, every request is trusted and
 nothing below runs. What a caller experiences, and what each role allows:
 [capabilities/authentication.md](capabilities/authentication.md).
 
@@ -539,7 +539,7 @@ Ordered, and failure at any step prevents serving:
 
 1. Connect storage, verify reachability, ensure the server-wide constraints and indexes
    exist, and bring storage of an older storage version up to date
-   ([decisions.md](decisions.md#storage)). Per-ontology storage is provisioned when an
+   ([storage lifecycle](storage-adapters.md#lifecycle)). Per-ontology storage is provisioned when an
    ontology is created; at boot only an upgrade reaches into it. Open the
    [shared state](#shared-state). With authentication on, open the access database:
    create it when it is missing and bring its schema up to date, once however many

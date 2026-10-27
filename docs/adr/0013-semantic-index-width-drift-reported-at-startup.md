@@ -1,6 +1,6 @@
 # Vector index width drift is reported at startup and repaired on rebuild
 
-Rule: [Deployment](../decisions.md#deployment)
+Current behavior: [Vector index width drift](../capabilities/search.md#vector-index-width-drift)
 
 ## Context
 

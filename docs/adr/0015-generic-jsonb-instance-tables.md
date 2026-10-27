@@ -1,6 +1,6 @@
 # Instance data in two generic jsonb tables
 
-Rule: [Storage](../decisions.md#storage)
+Current behavior: [PostgreSQL instance storage](../storage-adapters.md#how-instance-data-is-stored)
 
 ## Context
 

@@ -341,6 +341,12 @@ describe("authentication settings", () => {
     );
   });
 
+  it("keeps the issuer exactly as given, a trailing slash included", () => {
+    const settings = loadSettings({ ...enabled, OIDC_ISSUER: "https://tenant.login.example.com/" });
+    expect(settings.OIDC_ISSUER).toBe("https://tenant.login.example.com/");
+    expect(authSettings(settings)!.issuer).toBe("https://tenant.login.example.com/");
+  });
+
   it("allows an http PUBLIC_URL on a loopback host only", () => {
     for (const url of ["http://localhost:5173", "http://127.0.0.1:8000", "http://[::1]:5173", "http://app.localhost", "https://ontoforge.example.com"]) {
       expect(loadSettings({ ...enabled, PUBLIC_URL: url }).PUBLIC_URL, url).toBe(url);

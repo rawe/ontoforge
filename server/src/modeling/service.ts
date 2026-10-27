@@ -51,7 +51,7 @@ import {
   MAX_IDENTITY_PROPERTIES,
 } from "../runtime/identity.js";
 import { afterCommit, reconcileSearchGenerations } from "../runtime/indexing/generations.js";
-import { afterDesignChange, syncManagedDefinitions } from "../runtime/indexing/managed.js";
+import { afterDesignChange, refreshReaders, syncManagedDefinitions } from "../runtime/indexing/managed.js";
 import {
   applyIndexCascade,
   exportSearchIndices,
@@ -172,13 +172,13 @@ function toLensResponse(data: Row): LensResponseBody {
 
 /**
  * After a committed schema change whose design change synced the managed
- * search indices (`syncManagedDefinitions`): reconcile their generations
- * and refresh the indices that read a type in `refreshTypes` (a display
- * name or the name property changed).
+ * search indices (`syncManagedDefinitions`): reconcile their generations.
+ * Rendered text the change altered was re-queued in the change itself
+ * (`refreshReaders`).
  */
-async function afterSchemaChange(store: ModelingStore, refreshTypes: string[] = []): Promise<void> {
+async function afterSchemaChange(store: ModelingStore): Promise<void> {
   const indices = store.searchIndices();
-  await afterCommit(indices.ontologyKey, () => afterDesignChange(indices, refreshTypes));
+  await afterCommit(indices.ontologyKey, () => afterDesignChange(indices));
 }
 
 // --- Lens ---
@@ -342,7 +342,7 @@ export async function updateEntityType(
   cascade = false,
 ): Promise<EntityTypeResponseBody> {
   const nameProperty = body.nameProperty ?? null;
-  const { before, data } = await store.changeDesign(async (s) => {
+  const { data } = await store.changeDesign(async (s) => {
     const before = await s.getEntityType(entityTypeId);
     if (nameProperty !== null) {
       const et = before;
@@ -368,12 +368,13 @@ export async function updateEntityType(
       data = await setIdentity(s, data, body.identityProperties, cascade);
     }
     await syncManagedDefinitions(s.searchIndices());
+    const rendered =
+      before !== null &&
+      (before.displayName !== data.displayName || before.nameProperty !== data.nameProperty);
+    if (rendered) await refreshReaders(s.searchIndices(), [data.key as string]);
     return { before, data };
   });
-  const rendered =
-    before !== null &&
-    (before.displayName !== data.displayName || before.nameProperty !== data.nameProperty);
-  await afterSchemaChange(store, rendered ? [data.key as string] : []);
+  await afterSchemaChange(store);
   return toEntityTypeResponse(data);
 }
 
@@ -661,7 +662,7 @@ export async function updateRelationType(
   body: RelationTypeUpdateInput,
   store: ModelingStore,
 ): Promise<RelationTypeResponseBody> {
-  const { before, data } = await store.changeDesign(async (s) => {
+  const data = await store.changeDesign(async (s) => {
     const before = await s.getRelationType(relationTypeId);
     if (!before) {
       throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
@@ -689,11 +690,11 @@ export async function updateRelationType(
     if (!data) {
       throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
     }
-    return { before, data };
+    if (before.displayName !== data.displayName) {
+      await refreshReaders(s.searchIndices(), [data.key as string]);
+    }
+    return data;
   });
-  if (before.displayName !== data.displayName) {
-    await afterSchemaChange(store, [data.key as string]);
-  }
   return toRelationTypeResponse(data);
 }
 
@@ -835,7 +836,7 @@ export async function updateProperty(
   body: PropertyDefinitionUpdateInput,
   store: ModelingStore,
 ): Promise<PropertyDefinitionResponseBody> {
-  const { owner, renamed, data } = await store.changeDesign(async (s) => {
+  const { renamed, data } = await store.changeDesign(async (s) => {
     const owner = await ensureOwnerExists(s, ownerId, typeKind);
     const before = await s.getProperty(ownerId, typeKind, propertyId);
     // An identity property stays required without a default.
@@ -867,10 +868,11 @@ export async function updateProperty(
     if (typeKind === "EntityType" || renamed) {
       await syncManagedDefinitions(s.searchIndices());
     }
-    return { owner, renamed, data };
+    if (renamed) await refreshReaders(s.searchIndices(), [owner.key as string]);
+    return { renamed, data };
   });
   if (typeKind === "EntityType" || renamed) {
-    await afterSchemaChange(store, renamed ? [owner.key as string] : []);
+    await afterSchemaChange(store);
   }
   return toPropertyResponse(data);
 }

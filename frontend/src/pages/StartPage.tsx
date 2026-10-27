@@ -78,10 +78,12 @@ function CreateOntologyDialog({
         key,
         ...(name.trim() === '' ? {} : { displayName: name.trim() }),
       }),
-    onSuccess: (created) => {
+    onSuccess: async (created) => {
       void queryClient.invalidateQueries({ queryKey: qk.ontologies })
       toast.success(`Ontology "${created.displayName ?? created.key}" created`)
       onOpenChange(false)
+      // The creator now administers it: the Studio must see that role.
+      await queryClient.invalidateQueries({ queryKey: qk.auth.me })
       void navigate(`/o/${created.key}/studio`)
     },
     onError: (error) => {

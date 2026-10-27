@@ -154,8 +154,8 @@ start_service() {
 # --- PostgreSQL and Valkey ---
 # Each only when the run uses it: another DB_URI or VALKEY_URL (the scale
 # harness's, say) leaves the dev container alone. Memory stays the default
-# shared state; SHARED_STATE=valkey with VALKEY_URL=redis://localhost:6379
-# uses this Valkey.
+# shared state and starts no Valkey; SHARED_STATE=valkey with
+# VALKEY_URL=redis://localhost:6379 uses this Valkey.
 DB_URI_RUN="$(setting DB_URI)"
 VALKEY_URL_RUN="$(setting VALKEY_URL)"
 SERVICES_LINE=""
@@ -163,7 +163,7 @@ if [ -z "$DB_URI_RUN" ] || [[ "$DB_URI_RUN" == *":5432/"* ]]; then
     start_service postgres
     SERVICES_LINE+="  PostgreSQL localhost:5432"$'\n'
 fi
-if [ -z "$VALKEY_URL_RUN" ] || [[ "$VALKEY_URL_RUN" == *":6379"* ]]; then
+if [[ "$VALKEY_URL_RUN" == *":6379"* ]]; then
     start_service valkey
     SERVICES_LINE+="  Valkey    localhost:6379"$'\n'
 fi

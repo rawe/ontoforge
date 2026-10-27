@@ -52,7 +52,10 @@ function sendError(
 }
 
 export async function createApp(): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+  // Closing ends every open connection, streams included, so shutdown never
+  // waits on a chat or MCP stream. Fastify 5.12 does this only when the
+  // option is exactly `true`.
+  const app = Fastify({ logger: false, forceCloseConnections: true });
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);

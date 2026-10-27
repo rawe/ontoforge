@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runQuery, withTransaction } from "../../../src/adapters/postgres/errors.js";
+import { PostgresSearchIndexStore } from "../../../src/adapters/postgres/searchIndexStore.js";
 import { settings } from "../../../src/config.js";
 import { setEmbeddingProvider, type EmbeddingProvider } from "../../../src/core/embedding.js";
 import type {
@@ -625,6 +626,38 @@ describe("PostgreSQL search pipeline", () => {
     expect(changes.filter((c) => c.representation === "keyword").map((c) => c.action)).toEqual(["created"]);
     await drainSearchWork();
     expect((await active(index, "keyword")).generationId).not.toBe(before.generationId);
+  });
+
+  it("a design change between the representations of a rebuild: the missing one is rebuilt too", async () => {
+    await person("Ada", { email: "ada@example.org", age: 36 });
+    const index = await addIndex();
+    await drainSearchWork();
+    const before = { keyword: await active(index, "keyword"), semantic: await active(index, "semantic") };
+
+    // A design change commits once the keyword generation is created,
+    // so the semantic creation of that round is refused.
+    const create = PostgresSearchIndexStore.prototype.createGeneration;
+    let moved = false;
+    const spy = vi.spyOn(PostgresSearchIndexStore.prototype, "createGeneration").mockImplementation(async function (
+      this: PostgresSearchIndexStore,
+      ...args: Parameters<typeof create>
+    ) {
+      if (args[0].representation === "semantic" && !moved) {
+        moved = true;
+        await runQuery(`UPDATE ${NAMESPACE}.design_revision SET revision = revision + 1`);
+      }
+      return create.apply(this, args);
+    });
+    try {
+      const changes = await rebuildSearchIndex(ONTOLOGY_KEY, "employment");
+      const created = changes.filter((c) => c.indexKey === "employment" && c.action === "created");
+      expect(created.map((c) => c.representation)).toEqual(["keyword", "semantic"]);
+    } finally {
+      spy.mockRestore();
+    }
+    await drainSearchWork();
+    expect((await active(index, "keyword")).generationId).not.toBe(before.keyword.generationId);
+    expect((await active(index, "semantic")).generationId).not.toBe(before.semantic.generationId);
   });
 
   // ---------------------------------------------------------------------

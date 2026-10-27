@@ -42,6 +42,7 @@ not documentation of the system.
 - **Recording decisions** — [docs/workflows/recording-decisions.md](docs/workflows/recording-decisions.md): when an ADR is warranted, where current behavior belongs, and how to record a consequential architectural choice.
 - **Writing documentation** — [docs/workflows/documenting.md](docs/workflows/documenting.md): choose an owner and document type, preserve moved information, and review the result. Read it before adding or reorganizing documentation.
 - **Writing tool descriptions** — [docs/workflows/writing-tool-descriptions.md](docs/workflows/writing-tool-descriptions.md): self-contained parameter rules, caller-facing scope, description budget and checks for MCP and agent tools.
+- **Naming concepts and keys** — [docs/workflows/naming.md](docs/workflows/naming.md): consistent domain vocabulary and shared key rules across entrances.
 - **Development fixtures** — [fixtures/README.md](fixtures/README.md): load, save and unload known ontologies (schema + data) on a running server.
 
 Documentation of a single script stays beside that script (`scripts/USAGE.md`).
@@ -71,7 +72,6 @@ the map of everything else.
 | Every endpoint and MCP tool | [docs/interfaces.md](docs/interfaces.md) |
 | Implementing a storage backend | [docs/storage-adapters.md](docs/storage-adapters.md) |
 | What the web client offers | [docs/product-surface.md](docs/product-surface.md) |
-| Existing rules awaiting migration | [docs/decisions.md](docs/decisions.md), plus the owning documents it links to |
 
 ## Agent skills
 

@@ -1,6 +1,6 @@
 /**
  * The storage version and the whole upgrade path
- * (`docs/decisions.md#storage`).
+ * (`docs/storage-adapters.md#lifecycle`).
  *
  * One number in `public.storage_version` covers the whole server. The
  * boot transaction reads it under a database-wide advisory lock — so

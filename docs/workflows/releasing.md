@@ -41,8 +41,8 @@ say that the storage version rises.
 
 ## Storage upgrades
 
-The storage version is its own number, not the release version — the rule is in
-[decisions.md](../decisions.md#storage). It lives with its upgrade steps in
+The storage version is its own number, not the release version — see the
+[storage lifecycle](../storage-adapters.md#lifecycle). It lives with its upgrade steps in
 `server/src/adapters/postgres/storageVersion.ts`. Each step carries its own statements
 and shares nothing with the DDL, so a major release can delete the steps without
 touching anything else.

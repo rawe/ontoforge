@@ -22,7 +22,6 @@ a separate access database holds principals and their access assignments.
 | [interfaces.md](interfaces.md) | REST surfaces and MCP tools; exact schemas are in OpenAPI |
 | [storage-adapters.md](storage-adapters.md) | Persistence contract and PostgreSQL adapter |
 | [product-surface.md](product-surface.md) | Web UI screens and interactions |
-| [decisions.md](decisions.md) | Remaining rules and links to their owning documents during migration |
 | [capabilities/](capabilities/) | One document per capability, end to end |
 | [workflows/](workflows/) | Procedures for working *on* OntoForge |
 | [adr/](adr/) | Context and trade-offs behind consequential architectural choices |
@@ -32,6 +31,8 @@ or change a page and how to review a move. [Recording architectural decisions](w
 sets the separate threshold for an ADR.
 For MCP and agent tool authors, [writing tool descriptions](workflows/writing-tool-descriptions.md)
 covers the description contract and its checks.
+[Naming concepts and keys](workflows/naming.md) covers vocabulary across layers and shared
+validation rules for keyed resources.
 
 Capability documents explain feature behaviour, rules, limits and how to reach it. The
 interface and product documents describe the corresponding API and UI surfaces; the

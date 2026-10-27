@@ -84,6 +84,9 @@ the path**. A search-index inclusion names the index by key in both places, as e
 search-index route does.
 
 MCP has no such split — every tool takes keys and resolves them internally.
+Runtime and MCP address schema and design objects by key so callers, especially models,
+do not have to retain opaque identifiers for those objects. Modeling REST may use an
+identifier because its client has just created or listed the addressed object.
 
 ### JSON shape
 
@@ -91,6 +94,11 @@ Field names are `camelCase` in every REST body and in every MCP result. The valu
 name schema elements — ontology keys, lens keys, type keys, property keys — are
 `lower_snake_case`, because keys are a separate namespace from field names. MCP *tool
 parameters* are `snake_case`.
+
+Caller-facing names use schema vocabulary, not database-vendor or implementation-language
+vocabulary. Otherwise routes, fields, tools and errors would expose implementation details
+that callers could start depending on. Rejected values are described by their JSON type
+([errors](#errors)).
 
 Server-managed fields carry a leading underscore and are readable everywhere and writable
 nowhere. Their names, and the one field that breaks the underscore convention, are in
@@ -192,6 +200,14 @@ snake_case runtime query parameters.
 Other runtime parameters follow their documented names, including kind-prefixed
 `document.property` and `filter.<key>`.
 
+### Compatibility of names
+
+A rename of an API, MCP or configuration name is a hard cut: there is no deprecated alias
+or second spelling. Stored data and transfer payloads are upgraded instead. Two supported
+spellings would double every check and leave callers unsure which is current. This is the
+compatibility policy for names, not permission to change an architectural contract without
+review.
+
 ### Errors
 
 Every REST error response has the same envelope:
@@ -237,7 +253,9 @@ message carries the counts, so an MCP caller sees them too.
 **`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
 physical objects, which must not reach a client. The adapter logs the original against a
 generated `errorId` and returns only that id, so a reported failure can still be traced to
-its server-side record.
+its server-side record. This error does not promise that a failure is retryable. Expected
+domain conditions use their documented errors; arbitrary driver failures are not split
+into a speculative connection-loss category or a blanket constraint-conflict category.
 
 **What a caller holds no role in is not found.** An ontology or lens outside the caller's
 assignments answers `RESOURCE_NOT_FOUND`, as an unknown key does; `FORBIDDEN` is for what
@@ -421,8 +439,9 @@ that principal into the service; one bound to a principal with a role answers
 
 One port serves everything. What a deployment exposes follows one rule: **what clients call
 is public, what the platform calls stays internal.** The ingress or reverse proxy in front
-of the server enforces it; the server itself serves every path on every request
-([decisions.md](decisions.md#deployment)).
+of the server enforces it; the server itself serves every path under that route's access
+rules. Probes and metrics share the client port rather than a listener of their own:
+one port with one exposure rule keeps deployment simpler.
 
 | Path | Exposed | Called by |
 |---|---|---|
@@ -476,9 +495,9 @@ use the error envelope.
 
 `route` is the route template (`/api/ontologies/:ontologyKey`), or `unmatched` for a request
 no route answers; `status` is the status code, or `aborted` when the client left before any
-response was sent. No label carries an ontology, a lens, a principal or a raw path
-([decisions.md](decisions.md#deployment)). A streamed response or model call is timed to
-its end.
+response was sent. No label carries an ontology, a lens, a principal or a raw path. The
+number of series therefore depends on the code alone, and metrics do not disclose what
+an ontology holds. A streamed response or model call is timed to its end.
 
 The search counters count this server's worker; the queue is shared, so every server reports
 the same queue, as of its last pass over every ontology. A `failed` item there waits for a
@@ -997,8 +1016,17 @@ whose previous message is still being answered answers `RESOURCE_CONFLICT` with
 `details.code` `THREAD_BUSY`. Both are plain error responses before the stream opens, like every other
 refusal the kind lists; a busy message is never queued.
 
-**Stream.** Successful responses use `application/x-ndjson`: one complete JSON object per
-line, each with a `type`. The shared events mean the same for every kind:
+**Stream.** Every successful REST assistant chat uses `application/x-ndjson`; there is no
+non-streaming mode. Tool activity is visible while the turn runs. Each line is one complete
+JSON object with a `type`.
+
+The web client consumes this one streaming contract; an opt-in flag or separate endpoint
+for a non-streaming reply would maintain a second contract without a current consumer.
+Agent turns expose tool activity rather than token-streaming the agent reply: changing
+that would also change model invocation and expose framework events. This does not
+restrict the answer deltas that retrievers and navigators already send.
+
+The shared events mean the same for every kind:
 
 | Event `type` | Fields | Meaning |
 |---|---|---|
@@ -1014,15 +1042,27 @@ client reads the entity through the runtime; `evidence` says the entity was hand
 model that wrote the answer. A link's ends are cards of the same turn. Which entities a
 kind sends is in its section below.
 
+Only the shared `entities` event carries entity cards. A kind's own events and tool events
+never do: chat, citations and the Explorer can then treat every kind alike while tool
+activity stays generic. Per-kind entity events would require a card reader for every
+kind, including every new kind. Putting cards in native tool results would couple those
+generic events to a presentation and force consumers to inspect tools that return no
+entities. Shared cards do not imply shared relevance or provenance: kinds meet entities
+differently, while identity, label and whether the answer model saw the entity have a
+common meaning ([threads](capabilities/threads.md#the-entities-a-turn-met)).
+
 A kind's own events are named `<kind>.<event>` — `agent.…`, `retriever.…`, `navigator.…`; a client may
 ignore those it does not know. A writable stream has exactly one terminal `final` or
 `error`; EOF without one means an incomplete turn — so does a stream a stopping server
-cuts. A closed connection cancels the turn, and a cancelled or failed turn leaves nothing
+cuts. A closed connection cancels the turn so work nobody will receive stops, and a cancelled or failed turn leaves nothing
 in its thread. A turn whose result cannot be kept ends with `error`: `THREAD_NOT_FOUND`
 when its thread is gone meanwhile, `THREAD_BUSY` when it lost its hold on the thread,
 `VALIDATION_ERROR` when the thread grew too large to keep, `STORAGE_ERROR` when the thread
 store is full or fails. Unexpected failures after streaming begins have the generic `INTERNAL_ERROR` message `Internal Server Error`.
 Delivery bounds buffering and terminates stalled or oversized streams.
+
+There is no background continuation after a disconnect. Reconnection, replay or automatic
+reruns would require additional state and risk doing the same work twice.
 
 **Read a thread.** `200` with `threadId` and `messages` — the user messages and the
 assistant's answers in order, each `role` (`user` or `assistant`) and `content`, at most
@@ -1204,9 +1244,10 @@ every write. The MCP equivalent is the [ruleset mount](#how-a-mount-is-bound).
 ## MCP
 
 Two servers, mounted in the same process as REST and calling the same services directly.
-Both use the stateless-HTTP, plain-JSON transport required by
-[decisions.md](decisions.md#interfaces), so one mount serves many clients and no
-connection carries state.
+Both use stateless HTTP with plain JSON responses, so one mount serves many clients and
+no connection carries state. The deployment and transport choice is explained in
+[ADR 0005](adr/0005-mcp-in-process-stateless-http.md). Modeling and runtime remain separate
+servers: no client reaches both through one MCP connection.
 
 | | Modeling | Runtime |
 |---|---|---|

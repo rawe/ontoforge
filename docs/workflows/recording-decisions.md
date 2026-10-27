@@ -40,10 +40,9 @@ creating an ADR by default. If the trade-off is still unclear, raise it for revi
 - **Terms:** the [glossary](../README.md#glossary).
 - **The reasoning behind a hard-to-reverse architectural choice:** an ADR in [adr/](../adr/).
 
-The current [decisions.md](../decisions.md) is a temporary collection: its remaining
-rules stay in force until moved to their owning documents, after which the file can be
-retired. Do not add new rules there. Preserve each rule's meaning and update its links;
-do not remove a rule just because it does not merit an ADR.
+Current obligations do not need a decision-log entry to be enforceable. Keep the common
+architectural constraints concise and document feature and implementation rules at their
+owners; do not build a second general rule collection beside them.
 
 ## Keep the common constraints selective
 

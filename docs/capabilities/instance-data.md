@@ -188,8 +188,8 @@ may hold an empty string, the identity may be at most 512 code points, and no ot
 of the type may hold it (`IDENTITY_TAKEN`, a conflict rather than a field error).
 
 **All errors are collected.** One rejected write names every offending field at once,
-keyed by property. This is contractual, not incidental — see
-[decisions.md](../decisions.md#schema-and-data).
+keyed by property, so a caller can correct it in one round trip rather than discover
+faults one at a time.
 
 **Coercion is strict, and it is conversion, not guessing.** The write path applies the
 declared data type unchanged; the seven data types and exactly what each one accepts and
@@ -301,6 +301,9 @@ persons who hold a CTO employment; listing companies with
 began before 2025. No schema key may contain a dot, an at sign or a colon, so a path is
 never mistaken for a property key.
 
+A path needs no schema declaration beyond the relation it follows. This keeps a related
+property filter available as soon as its relation exists, without a second schema object
+to keep in sync, and avoids flattening relations into properties just to filter a list.
 For longer paths, [OQL](oql.md) supports multi-hop patterns. A retriever can also use
 its own configured exact filters of up to two hops
 ([retrievers.md](retrievers.md#the-configuration)).

@@ -54,6 +54,11 @@ something a reader would otherwise assume:
 
 ## Rules
 
+Schema edits change the design, not instance data. The only exception is rebuilding an
+entity's derived identity when its type's identity changes: identities come from values a
+caller wrote, not from a value callers can write directly. Otherwise cleaning instance
+data during a schema edit would turn that edit into a write over all of it.
+
 ### Keys and immutability
 
 Type keys and property keys follow the schema [key](../README.md) rule — lower snake
@@ -109,8 +114,7 @@ within the type. Setting it checks the type's stored entities and may need the
 [cascade protocol](#the-cascade-protocol); the identity properties are then required,
 without a default, and locked: they cannot become optional, take a default or be
 deleted while they belong to the identity. Setting, changing or clearing it rebuilds
-every entity's derived identity — the one schema edit that writes instance data
-([rule](../decisions.md#schema-and-data)). The whole model is in
+every entity's derived identity — the one schema edit that writes instance data. The whole model is in
 [entity-identity.md](entity-identity.md).
 
 ### Relation rules
@@ -162,7 +166,7 @@ cannot be turned off while the parent end is set — a field error on `onePerPai
 clearing the parent end leaves it on.
 
 These checks are the schema edits that read instance data. They read to refuse and never
-write ([../decisions.md](../decisions.md#schema-and-data)).
+write.
 
 ### One per pair
 

@@ -13,8 +13,8 @@ Every lens also has a
 [default retriever](#the-default-retriever), derived from its managed indices
 and never stored.
 
-Vocabulary: [../README.md](../README.md#glossary). The rules these follow:
-[../decisions.md](../decisions.md). Every route: [../interfaces.md](../interfaces.md).
+Vocabulary: [../README.md](../README.md#glossary). System structure:
+[../architecture.md](../architecture.md). Every route: [../interfaces.md](../interfaces.md).
 
 ## Ownership and persistence
 

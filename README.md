@@ -202,7 +202,6 @@ Full documentation starts at **[docs/README.md](docs/README.md)**:
 | [interfaces.md](docs/interfaces.md) | REST surfaces and MCP tools; exact schemas are in OpenAPI |
 | [storage-adapters.md](docs/storage-adapters.md) | Persistence contract and PostgreSQL adapter |
 | [product-surface.md](docs/product-surface.md) | Web UI screens and interactions |
-| [decisions.md](docs/decisions.md) | Remaining rules and links to their owning documents during migration |
 
 ## Project Structure
 
@@ -237,12 +236,12 @@ ontoforge/
 └── docs/
     ├── README.md                   # Concepts, glossary, documentation map
     ├── architecture.md             # Components, boundaries, invariants and flows
+    ├── architecture-constraints.md # Essential architectural guardrails
     ├── implementation/             # Contributor details tied to the implementation
     ├── capabilities/               # One document per capability
     ├── interfaces.md               # REST/MCP surfaces and shared error contract
     ├── storage-adapters.md         # Persistence contract and PostgreSQL adapter
     ├── product-surface.md          # Web UI screens and interactions
-    ├── decisions.md                # Temporary collection of rules awaiting migration
     ├── adr/                        # Context and trade-offs of architectural choices
     └── workflows/                  # Procedures for working on OntoForge
 ```
@@ -310,6 +309,14 @@ including its version for `openai` (`https://openrouter.ai/api/v1`). A base URL 
 startup with the corrected value in the message. This catches a misplaced API path at
 startup instead of a 404 on the first model call.
 
+For an OpenAI-compatible provider, appending `/v1` to a copied base would duplicate its
+version or lose a provider's API path; a provider serving below `/api/v1` cannot be
+represented by a bare host alone (another valid provider path is `/v1beta/openai`).
+Separate full request URLs for chat, model listing and
+embeddings would multiply settings instead of using the provider's documented API base.
+Accepting both versioned and unversioned forms would leave an unversioned value ambiguous,
+so the server validates one form rather than guessing which was intended.
+
 ### Semantic Search
 
 Find entities by meaning rather than exact keywords — within a single entity type or across all types at once. Available via REST, MCP, and the UI (command palette and entity pickers). Requires an embedding model.
@@ -343,8 +350,9 @@ Natural language query and conversational chat over your knowledge graph. These 
 | `AI_REASONING_EFFORT` | *(unset — model default)* | `none`, `low`, `medium` or `high` — how hard the model thinks |
 
 Thinking effort is a deployment-wide setting, not a per-agent setting: it controls the
-deployment's latency and cost budget. Its value is validated at boot so an unrecognized
-level does not appear to be a broken agent configuration.
+deployment's latency and cost budget. Keeping it out of individual agent configurations
+also avoids making a level that a model ignores look like a broken agent configuration.
+The configured value is validated at boot.
 
 **Recommended Ollama models** by available RAM (Apple Silicon / unified memory):
 

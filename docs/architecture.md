@@ -1,7 +1,6 @@
 # Architecture
 
-How OntoForge is put together. Concepts and vocabulary: [README.md](README.md). The rules
-this document obeys: [decisions.md](decisions.md).
+How OntoForge is put together. Concepts and vocabulary: [README.md](README.md).
 
 This document explains the system's components, boundaries, invariants and major flows.
 Feature behaviour and interface details are described in the linked capability and
@@ -16,7 +15,8 @@ two more.
 runtime API, both MCP servers and the OpenAPI description. There is no mode switch and no
 partial deployment: every instance serves everything, and any number of instances share one
 database and one [shared state](#shared-state) — and, with authentication on, one access
-database and one identity provider.
+database and one identity provider. The schema and the data it governs must not diverge
+between servers, nor may one server expose what another protects.
 
 **Web client** — a separate static application talking to the server over REST only. It
 holds no privileged path; anything it does can be done over the API. With authentication
@@ -24,7 +24,9 @@ on, it is served from the deployment's public address, which proxies the API to 
 server, so the browser's session cookie reaches the server.
 
 **Database** — one instance, holding every ontology's schema and instance data together.
-Reached only through the persistence port.
+Reached only through the persistence port. Keeping them in different stores would make
+schema changes distributed transactions without adding useful isolation; their physical
+separation inside the database is the adapter's business.
 
 **Storage adapter** — the single active implementation of that port. See
 [storage-adapters.md](storage-adapters.md).
@@ -209,8 +211,8 @@ identity properties' values, the one system property a lens can withhold
 ([entity identity](capabilities/entity-identity.md)). They are distinguished by a leading underscore, and since no user-defined key
 may begin with one, the namespaces cannot collide.
 
-That separation rests entirely on the key pattern being enforced, and one entry point does
-not enforce it — see the invariants below.
+The key pattern keeps user-defined properties separate from system properties;
+modeling writes and schema import both enforce it.
 
 Relation endpoint ids are the exception to the underscore convention: reads return them as
 `fromEntityId` and `toEntityId`, without a prefix, even though they are as
@@ -262,8 +264,9 @@ Scoping cuts in three places: schema reads omit what is out of scope, writes rej
 and read results are filtered — including individual columns of a query result.
 
 One asymmetry is deliberate and easy to get wrong when reimplementing: writes validate
-against the scoped schema but apply defaults from the full schema. Relation endpoint types are checked against the full schema for the same reason. The rule
-and what it buys are in [decisions.md](decisions.md#schema-and-data); the three operations
+against the scoped schema but apply defaults from the full schema, so a narrow lens cannot
+create data invalid under a wider one. Relation endpoint types are checked against the
+full schema for the same reason. The three operations
 that consult the full schema instead of the lens, and what each one costs a caller, are in
 [capabilities/ontology-lenses.md](capabilities/ontology-lenses.md#the-lensfull-schema-asymmetry).
 
@@ -397,7 +400,9 @@ on the next request, on every server. A sign-in identity seen for the first time
 principal with no role, created once however many first requests race.
 
 **Browser sessions.** The server is the browser's OpenID client: authorization code with
-PKCE, as a confidential client ([decisions.md](decisions.md#access)). A login in progress
+PKCE, as a confidential client ([ADR 0031](adr/0031-server-as-browser-openid-client.md)).
+The browser holds an HttpOnly cookie, not a provider token a script could take; no further
+component is deployed, and losing a session requires only a new sign-in. A login in progress
 keeps nothing on the server; it travels in a short-lived, sealed cookie that any server of
 the deployment can open. The session lives in the shared state, keyed by a digest of the
 cookie's random id, and expires after its idle time or at the latest 24 hours after
@@ -408,7 +413,8 @@ address's origin, and cross-origin browser calls are allowed without credentials
 **What a route needs.** Every route declares its need — public, any signed-in caller, a
 platform role, the administrator or any member of the ontology in its path, a role on the
 lens in its path for an operation, or user administration — when it is registered; a
-route without one fails the boot. Runtime routes take their operation from the same table
+route without one fails the boot, so a forgotten declaration cannot leave a route open.
+Runtime routes take their operation from the same table
 that classifies a ruleset's writes, so one table says what writes. Public routes resolve no
 caller and keep working whatever the provider or the access database does.
 
@@ -417,6 +423,14 @@ and tells handlers which ontologies and lenses a caller may see listed. The MCP 
 through it as REST does, and a runtime mount builds its tool list from the caller's role as
 from a ruleset's level. An assistant's tool calls run inside its chat request, already
 judged for that lens.
+
+Authorization belongs to OntoForge. Roles are assigned there only, never inferred from
+provider groups, administrator flags or email addresses: those may change or be reused
+outside OntoForge's control. The verified issuer and subject identify the principal;
+current assignments determine its rights. Principals and assignments must be durable and
+independent of ontology design, transfer or deletion, which is why they use their own
+access database and port. Moving that database to a separate instance changes only its
+address ([ADR 0030](adr/0030-access-database-of-its-own.md)).
 
 ## Request lifecycle
 
@@ -445,7 +459,8 @@ A runtime write, which is the longest path:
 Two properties of the validation step are contractual rather than incidental, and both are
 rules rather than implementation choices:
 
-**All errors are collected, not the first one** — [decisions.md](decisions.md#schema-and-data).
+**Validation collects every error before answering.** A caller can correct the rejected
+request in one round trip rather than discovering faults one at a time.
 
 **Coercion is strict.** Values are converted, never guessed. What each data type converts
 and what it refuses is in
@@ -561,11 +576,15 @@ Ordered, and failure at any step prevents serving:
 
 With authentication on, neither the access database nor the provider is optional: either
 failing fails the boot, and nothing falls back to running without authentication
-([decisions.md](decisions.md#access)). With it off, neither is touched.
+because a healthy-looking, unprotected server would expose every ontology. A failed
+authorization check refuses the protected request. With authentication off, neither
+dependency is touched.
 
 The registry walks in steps 4 and 5 do nothing when no ontology exists — a zero-ontology
-server boots clean. Note step 4 warns and does not repair — deliberately, for the reason
-given in [decisions.md](decisions.md#deployment). Rebuild is where repair happens, one
+server boots clean. Note step 4 warns and does not repair — deliberately, because repair
+drops the index and re-embeds its contents, a cost and outage the operator has not asked
+for ([vector index width drift](capabilities/search.md#vector-index-width-drift)).
+Rebuild is where repair happens, one
 ontology at a time.
 
 The port opens only once these steps are done; from then on the liveness and readiness
@@ -618,8 +637,8 @@ Provider setup and the wire contract are documented in
 
 Stated plainly, because its absence is a design position and not an oversight:
 
-- **No multi-tenancy.** An ontology isolates data but is not a tenant — the rule and
-  its reason are in [decisions.md](decisions.md#scope).
+- **No multi-tenancy.** Ontologies isolate data but are not tenants and carry no quota.
+  Introducing tenancy before a deployment needs it would guess at the tenant model.
 
 Absences in the API surface itself — no data wipe, no instance-data export — are listed
 with their consequences in [interfaces.md](interfaces.md#what-is-not-exposed).

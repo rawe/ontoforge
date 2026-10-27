@@ -37,6 +37,12 @@ against mistakes, not against a determined client, and every rule has the same t
 
 A ruleset maps its key to one value per rule.
 
+The fixed record is deliberate: each kind of rule occurs at most once. A list of typed
+rule rows would add store, request-body and editor complexity without avoiding the code,
+checks and documentation every new rule still needs. A ruleset is also not a client
+seat: one key can serve several clients, and giving it client identity semantics would
+confuse what is limited with who is connected.
+
 - **Key.** It follows the ruleset [key](../README.md) rule, at most 64 characters,
   and cannot be renamed. A key that breaks the rule is refused.
 - **Its rules.** A new ruleset takes each rule's default ([below](#the-rules)), and so
@@ -92,6 +98,13 @@ Every rule only takes away from what the lens allows, and a call must pass every
 Write access limits how a client may change data. Its levels stand on one ladder, each
 allowing what the one below allows and more. It holds whatever the other rules say, a
 deleted anchor included.
+
+The fixed levels make each permitted set explainable and testable. User-defined switches
+or free combinations would multiply the sets a client and maintainer must understand.
+The tool list, enforcement check and refusal text derive from the same operation table
+so separate per-limit checks do not drift apart. A different restriction, such as no
+deletes, belongs in a separate rule rather than another rung: the write-access ladder
+must remain one order, each level allowing everything below it.
 
 ### Write access levels
 

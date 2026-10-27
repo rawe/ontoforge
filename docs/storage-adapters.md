@@ -9,14 +9,17 @@ contract ([architecture.md](architecture.md#components)).
 
 This document is the contract an adapter must satisfy. Concepts and vocabulary:
 [README.md](README.md). Where the port sits in the system:
-[architecture.md](architecture.md). The rules that put it there:
-[decisions.md](decisions.md).
+[architecture.md](architecture.md).
 
 **One part binds; one describes.** Part 1 is normative: it binds every adapter. Part 2
 describes the adapter OntoForge ships — PostgreSQL, the only value `DB_BACKEND` accepts —
 in named technology. It binds nothing: nothing in it may be relied on by code above the
 port, and nothing in it constrains another adapter. The known limitations in observable
 behaviour are enumerated in one place, between the contract and the adapter part.
+
+PostgreSQL is the only shipped storage adapter. Features are built and tested against
+one implementation, and the port carries the operations it needs rather than speculative
+capabilities for other databases ([ADR 0025](adr/0025-postgresql-only-storage.md)).
 
 ---
 
@@ -91,7 +94,9 @@ existence condition names a property key; the path existence condition carries t
 resolved path as a comparison path, minus the data type, operator and value; the relation
 existence condition carries a relation type key and an explicit direction alone. The
 service resolves every path and relation subject above the port, so an adapter receives
-only valid, fully resolved conditions and never a key to interpret. A sort is a property
+only valid, fully resolved conditions and never a key to interpret. This keeps fault
+reporting independent of storage and makes the lens the complete horizon for resolving
+the path. A sort is a property
 key plus a direction; a text search is
 a string plus the list of property keys to match it against. No fragment of any query
 language enters or leaves the port. The one exception is the validated query object,
@@ -101,8 +106,8 @@ described below, which is opaque rather than textual.
 condition surfaces as the single storage error, carrying a generated id and no storage
 detail. The adapter logs the original — vendor name, driver code, message, stack —
 against that id. Expected conditions are not exceptions: a missing row is an empty result
-or an absent value, and a failed delete is a false return. See the error table in
-[architecture.md](architecture.md).
+or an absent value, and a failed delete is a false return. See the shared error contract
+in [interfaces.md](interfaces.md#errors).
 
 **An adapter declares whether its search evaluates relation conditions** — path
 conditions and relation existence conditions alike. One plain
@@ -133,9 +138,11 @@ serves, rather than requiring an operator to run migrations. The release defines
 storage layout, and only a storage-version upgrade changes it, except for vector indexes
 recreated by a rebuild and the entry storage of search-index generations, which have their
 own lifecycles. A release that raises the storage version starts only after all older
-servers have stopped. Within a major release line, upgrade steps only add; renaming,
+servers have stopped. The upgrade may cause downtime rather than requiring two releases
+to work against the same storage. Within a major release line, upgrade steps only add; renaming,
 removing or rewriting stored data waits for a major release, which keeps none of the
-earlier steps.
+earlier steps. Additive steps also let an older server left running by mistake keep
+working within that major line.
 
 ## The two store surfaces
 
@@ -145,7 +152,8 @@ shape of the data and the rules the adapter must honour, not per-operation signa
 "Unique" in this section always means unique within the bound ontology.
 
 Internal identifiers appear in this section because they are the store's own currency.
-They never reach a caller ([decisions.md](decisions.md#naming)).
+Runtime and MCP address schema and design objects by key; modeling REST may use internal
+identifiers ([interface addressing](interfaces.md#what-a-path-segment-identifies)).
 
 ### Schema side
 
@@ -654,7 +662,6 @@ that ontology alone, and registry delete removes them with the rest.
 **Vector index width reconciliation.** An index fixes its vector width when it is created,
 and a create-if-absent is a no-op against an index that already exists — the failure mode
 this produces, and why startup reports it instead of repairing it, are in
-[decisions.md](decisions.md#deployment) and
 [capabilities/search.md](capabilities/search.md#vector-index-width-drift). The adapter's
 obligation is threefold: before every create, read the existing index's configured width
 and compare it; on the startup path — which walks every registered ontology — report a
@@ -705,7 +712,12 @@ driver failures and converts them, so that no route into the store can bypass th
 translation. The catch is narrow: it converts driver exceptions only, letting domain
 exceptions raised inside the same scope — and ordinary programming errors — propagate
 unchanged. A violated identity uniqueness is the identity conflict, not the storage error
-([decisions.md](decisions.md#storage)). A lock the adapter cannot have — one taken without waiting, or one waited
+([entity identity](capabilities/entity-identity.md#in-a-changeset)). Concurrent writes can
+take an identity between the service's pre-check and the write; the database's final
+uniqueness check must tell the caller that the identity is taken, not that storage failed.
+Expected violations of other named constraints guarded by a service pre-check also
+translate to that check's domain error when a race defeats it; unanticipated constraint
+violations remain storage errors. A lock the adapter cannot have — one taken without waiting, or one waited
 for past a bounded wait — is the conflict error, not the storage error.
 
 ## The validated query
@@ -787,7 +799,7 @@ Business rules are validated in the service. The PostgreSQL DDL carries primary 
 referential integrity, exactly-one-owner and uniqueness constraints, plus the search-index
 tables' checks on their closed vocabularies; it does not backstop other business rules.
 Keyword search uses PostgreSQL's stock text-search configurations without an added
-compound or other dictionary.
+compound or other dictionary, so a deployment needs no custom database image.
 
 ## How ontologies are isolated
 
@@ -850,7 +862,8 @@ Every schema row carries a `uuid` primary key.
 
 Deleting a schema object cascades through the foreign keys — property definitions,
 inclusions, agents, saved queries, retrievers, navigators and changesets die with their
-owner. What the DDL may carry is a rule in [decisions.md](decisions.md#storage); the
+owner. The DDL enforces the structural constraints described at the start of this part;
+it does not add another layer of business-rule validation. The
 closed vocabularies the search-index tables check are index kind, representation and
 generation state. The uniqueness constraints on type keys act per namespace, which is
 exactly the per-ontology key scoping the contract requires.
@@ -898,8 +911,7 @@ else: an entity carries no search data, which lives in the search-index tables a
 instance storage: no table or column is ever created per type or property. The only DDL
 that follows a schema change is the entry table, with its indexes, of a search generation
 it starts (below). The deliberation behind this mapping is
-[adr/0015](adr/0015-generic-jsonb-instance-tables.md); the binding rule is in
-[decisions.md](decisions.md#storage).
+[adr/0015](adr/0015-generic-jsonb-instance-tables.md).
 
 The cascade contract on entity deletion is translated into foreign keys:
 relations reference their two endpoint entities with cascading deletes. Deleting an

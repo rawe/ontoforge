@@ -41,7 +41,6 @@ For example:
   stays beside that script.
 
 Architectural choices use the separate [decision workflow](recording-decisions.md).
-Do not add rules to the temporary `decisions.md` collection.
 The [architectural constraints](../architecture-constraints.md) are the shared starting
 point for changes to system behavior, not a destination for every new feature rule.
 

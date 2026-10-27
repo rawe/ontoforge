@@ -72,7 +72,8 @@ ordinary ones too. Its `onePerPair` is optional as well: without it, the relatio
 one per pair only when it is a parent relation.
 
 **Import upgrades older versions step by step.** It accepts two older versions and brings
-each up to the current one first, one version at a time: a `5.0` payload becomes a
+each up to the current one first, one version at a time, so an older export needs no
+external conversion tool: a `5.0` payload becomes a
 `6.0` one, a `6.0` payload a `7.0` one. Every other version is refused with a field
 error on the version naming the three it accepts:
 
@@ -180,8 +181,8 @@ behind them differ.
 For a caller this means: **an identifier obtained from the source ontology is meaningless
 against the target.** Any script, saved artifact or external reference that pins a type by
 identifier breaks across a transfer; one that pins it by key does not. This is the same
-reason keys are the only currency of the public surface — see
-[../decisions.md](../decisions.md#naming).
+reason runtime and MCP address schema and design objects by key; modeling REST may use
+internal identifiers ([path addressing](../interfaces.md#what-a-path-segment-identifies)).
 
 Instance identifiers are unaffected, since there are no instances in the payload.
 

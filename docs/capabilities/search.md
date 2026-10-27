@@ -74,6 +74,9 @@ Configuring a provider later builds the semantic entries in the background.
 
 ### Ranking
 
+The implementation trade-offs behind ranking and evidence are explained in
+[search ranking rationale](../implementation/search-ranking.md).
+
 Each searched index is ranked once per retrieval method the strategy uses — semantic,
 keyword, or both under `hybrid` — over the entries of its ready generation. Within one
 method the rankings of every searched index — all types, own fields and passages alike —
@@ -327,11 +330,18 @@ outside search indices against the provider's, and reports every mismatch as a w
 identifying the index by what it covers — saved-query descriptions — never by a physical
 index name, and naming rebuild as the remedy.
 
-Startup warns and does not repair; the reasoning is in
-[../decisions.md](../decisions.md#deployment). Rebuild does repair, in the three-phase
-order above — drop, regenerate, build. A startup ensure that cannot succeed, which is what
-an unfinished rebuild leaves behind, is reported against the ontology it belongs to and
-does not stop the server from starting.
+Startup warns and does not repair. Repair drops the index and re-embeds everything it
+covered, a cost and temporary loss of semantic search that starting the server should not
+incur without an explicit request. Rebuild does repair, in the three-phase order above —
+drop, regenerate, build. A startup ensure that cannot succeed, which is what an unfinished
+rebuild leaves behind, is reported against the ontology it belongs to and does not stop
+the server from starting: the server must remain available to finish the repair.
+
+An additional setting for startup repair would duplicate the existing distinction:
+startup reports, an explicit rebuild repairs. Recovery instructions alone would leave
+the drift invisible until an operation used the index; the startup warning exposes it
+before that first failure. A create-if-absent cannot repair a mismatched width because
+it leaves an existing index unchanged.
 
 ## Through the interfaces
 

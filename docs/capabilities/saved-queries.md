@@ -114,8 +114,7 @@ It would be an unreferenced declaration, and the definition would be rejected.
 | Parameter values coerce to their declared types | — | yes |
 
 Structural and cross-check failures are collected and reported together rather than one at
-a time, as validation is expected to (see
-[../decisions.md](../decisions.md#schema-and-data)). The OQL check at definition time is
+a time, so a caller can correct the rejected definition in one round trip. The OQL check at definition time is
 skipped when the lens's schema cannot be loaded; the run-time check is not, so a query stored
 that way still fails safely on first use.
 

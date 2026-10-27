@@ -15,9 +15,6 @@ This repo does not use a root `GLOSSARY.md`. When a skill refers to `GLOSSARY.md
   and architecture or storage documentation when the change touches those boundaries.
   Follow the map from the README; a link from another document is not a substitute for
   reading the owning explanation.
-- **`docs/decisions.md`** — existing rules that have not yet been moved and links to rules
-  that have. Rules still stated there remain in force; check the relevant sections as well
-  as their destinations.
 - **`docs/adr/`** — read relevant linked ADRs for the context and trade-offs of consequential
   architectural choices. An ADR does not replace the current behavior in its owning document.
 
@@ -35,7 +32,7 @@ If the concept you need isn't in the glossary yet, that's a signal — either yo
 
 ## Flag conflicts
 
-Check proposed changes against the relevant owning documents, the remaining rules in
-`docs/decisions.md` and applicable ADRs. Investigate disagreements with code and tests;
+Check proposed changes against the architectural constraints, the relevant owning
+documents and applicable ADRs. Investigate disagreements with code and tests;
 surface unresolved conflicts or changes to an architectural decision rather than silently
 overriding them.

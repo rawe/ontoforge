@@ -12,8 +12,8 @@ show every entity the answer may use before the answer arrives. Questions form a
 conversation held by the server as a [thread](threads.md). Every lens also has a
 [default navigator](#the-default-navigator), derived from the lens and never stored.
 
-Vocabulary: [../README.md](../README.md#glossary). The rules these follow:
-[../decisions.md](../decisions.md). Every route: [../interfaces.md](../interfaces.md).
+Vocabulary: [../README.md](../README.md#glossary). System structure:
+[../architecture.md](../architecture.md). Every route: [../interfaces.md](../interfaces.md).
 
 ## Ownership and persistence
 

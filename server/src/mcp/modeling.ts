@@ -260,7 +260,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
   const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" });
   const authentication = actor !== null;
 
-  // The ONE registry-touching tool over MCP (`docs/decisions.md#interfaces`): with
+  // The ONE registry-touching tool over MCP (`docs/interfaces.md#how-a-mount-is-bound`): with
   // no arguments it can only ever act on the binding the client already
   // holds — it cannot list, reach, rename, or delete anything.
   server.registerTool(

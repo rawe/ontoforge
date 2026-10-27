@@ -36,7 +36,7 @@ import { openSharedState } from "./sharedState.js";
  * 3. Initialize the language-model provider, if configured.
  * 4. If embeddings are enabled, reconcile vector index widths against the
  *    provider — every mismatch is WARNED about and nothing is repaired
- *    (`docs/decisions.md#deployment`); rebuild is where repair happens.
+ *    (`docs/capabilities/search.md#vector-index-width-drift`); rebuild is where repair happens.
  * 5. Start the search worker — it reconciles every ontology's index
  *    generations, then builds entries from the queue in the background.
  * 6. Start both MCP servers (mounted inside `createApp`).

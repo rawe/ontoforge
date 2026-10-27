@@ -178,8 +178,8 @@ broken under another:
 
 - **Defaults on create come from the full schema.** A property the lens hides
   cannot be written through it, yet if that property has a default the created
-  entity still receives it. Reason and rule:
-  [../decisions.md](../decisions.md#schema-and-data).
+  entity still receives it, so data created through a narrow lens remains valid under
+  a wider one ([write validation](instance-data.md#validation)).
 - **Relation endpoint checks use the full schema.** The source and target entity
   types a new relation is validated against are the type's real endpoints, not
   whatever the lens exposes.
@@ -324,7 +324,7 @@ allowlist is how an allowlist is changed there, which works because adding is an
 upsert. REST offers the explicit update as well.
 
 **The runtime MCP server is bound to exactly one ontology and one lens by its
-mount URL** ([../decisions.md](../decisions.md#interfaces)). A model never chooses
+mount URL** ([MCP binding](../interfaces.md#how-a-mount-is-bound)). A model never chooses
 a lens and can never reach across two — nor across two ontologies.
 
 What the web UI does with all of this is described in

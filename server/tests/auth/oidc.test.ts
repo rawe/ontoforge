@@ -10,7 +10,7 @@ import type { AddressInfo } from "node:net";
 import { exportJWK, generateKeyPair, SignJWT, type JWK } from "jose";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { connectOidc, type Oidc } from "../../src/auth/oidc.js";
+import { backchannelFetch, connectOidc, type Oidc } from "../../src/auth/oidc.js";
 import { ProviderUnavailableError } from "../../src/core/exceptions.js";
 import { SETTINGS } from "./fakes.js";
 
@@ -100,5 +100,23 @@ describe("verifying an access token", () => {
   it("fails as an unavailable provider when the key set answers an error", async () => {
     const oidc = await connect("fail");
     await expect(oidc.verifyAccessToken(await token())).rejects.toBeInstanceOf(ProviderUnavailableError);
+  });
+});
+
+describe("the back channel", () => {
+  it("takes what is addressed to an issuer ending in a slash", async () => {
+    const sent: string[] = [];
+    vi.stubGlobal("fetch", (url: string) => {
+      sent.push(url);
+      return Promise.resolve(new Response("{}"));
+    });
+    try {
+      const send = backchannelFetch("https://login.example.com/", "http://keycloak:8080");
+      await send("https://login.example.com/.well-known/openid-configuration");
+      await send("https://other.example.com/certs");
+      expect(sent).toEqual(["http://keycloak:8080/.well-known/openid-configuration", "https://other.example.com/certs"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

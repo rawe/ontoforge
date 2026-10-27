@@ -54,9 +54,11 @@ const ALGORITHMS = ["RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256
 /** A fetch that sends what is addressed to the issuer's URL to the back channel instead. */
 export function backchannelFetch(issuer: string, backchannel: string): typeof fetch {
   if (issuer === backchannel) return fetch;
+  // The issuer may end in a slash; the back channel never does.
+  const base = issuer.replace(/\/+$/, "");
   return (input, init) => {
     const url = input instanceof Request ? input.url : String(input);
-    const target = url === issuer || url.startsWith(`${issuer}/`) ? backchannel + url.slice(issuer.length) : url;
+    const target = url === base || url.startsWith(`${base}/`) ? backchannel + url.slice(base.length) : url;
     return input instanceof Request ? fetch(new Request(target, input), init) : fetch(target, init);
   };
 }

@@ -147,7 +147,8 @@ function sharedState(env: NodeJS.ProcessEnv): Pick<Settings, "SHARED_STATE" | "V
   return { SHARED_STATE: "valkey", VALKEY_URL: url };
 }
 
-function httpUrl(name: string, value: string): string {
+/** `value` checked as an http(s) URL, trailing slashes trimmed unless `exact`. */
+function httpUrl(name: string, value: string, exact = false): string {
   let protocol: string | null = null;
   try {
     protocol = new URL(value).protocol;
@@ -157,7 +158,7 @@ function httpUrl(name: string, value: string): string {
   if (protocol !== "http:" && protocol !== "https:") {
     throw new Error(`Environment variable ${name} is not an http(s) URL: '${value}'`);
   }
-  return value.replace(/\/+$/, "");
+  return exact ? value : value.replace(/\/+$/, "");
 }
 
 /** Hosts a browser treats as secure over plain `http:`. */
@@ -177,8 +178,8 @@ function isLoopback(hostname: string): boolean {
  * never stick; the issuer's keys and tokens must not cross a network in
  * the clear.
  */
-function secureUrl(name: string, value: string): string {
-  const url = httpUrl(name, value);
+function secureUrl(name: string, value: string, exact = false): string {
+  const url = httpUrl(name, value, exact);
   const { protocol, hostname } = new URL(url);
   if (protocol === "http:" && !isLoopback(hostname)) {
     throw new Error(
@@ -231,7 +232,8 @@ function auth(
     return value;
   };
   secureUrl("PUBLIC_URL", required("PUBLIC_URL"));
-  const issuer = secureUrl("OIDC_ISSUER", required("OIDC_ISSUER"));
+  // Exactly as given: tokens must carry this very string, a trailing slash included.
+  const issuer = secureUrl("OIDC_ISSUER", required("OIDC_ISSUER"), true);
   // The back channel may be http anywhere: the server's own way to the issuer, e.g. in a container network.
   const backchannel = optStr(env, "OIDC_BACKCHANNEL_URL");
   const clientId = required("OIDC_CLIENT_ID");

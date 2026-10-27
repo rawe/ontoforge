@@ -19,7 +19,8 @@
  *
  * Text a definition does not capture — display names, the name property
  * behind a passage header — is refreshed by re-queueing the entities of
- * every index that reads the changed type (`refreshTypes`).
+ * every index that reads the changed type, in the design change itself
+ * (`refreshReaders`): the queue commits with the change or not at all.
  *
  * A managed index can be switched off (search settings, `settings.ts`):
  * its row stays, it keeps no generations and no lens can search it.
@@ -36,7 +37,7 @@ import {
 } from "../../core/searchIndex.js";
 import { disabledDefaultsOf, disabledIndexKeys } from "../../core/searchPipeline.js";
 import { loadSearchContextUncached } from "../schemaCache.js";
-import { reconcileSearchGenerations, refreshSearchIndex } from "./generations.js";
+import { reconcileSearchGenerations, requeueIndex } from "./generations.js";
 
 /** What one sync changed, by index key. */
 export interface ManagedSync {
@@ -120,27 +121,27 @@ export async function syncManagedDefinitions(store: SearchIndexStore): Promise<M
 
 /**
  * After a design change committed: collect the tables of the generations
- * it removed (an entity type deletion takes its indices by cascade),
- * reconcile every index's generations, and refresh the indices that read
- * any of `refreshTypes` (entity or relation type keys whose display names
- * or name property changed). Returns the keys refreshed.
+ * it removed (an entity type deletion takes its indices by cascade) and
+ * reconcile every index's generations.
  */
-export async function afterDesignChange(
-  store: SearchIndexStore,
-  refreshTypes: readonly string[] = [],
-): Promise<string[]> {
-  const ontologyKey = store.ontologyKey;
+export async function afterDesignChange(store: SearchIndexStore): Promise<void> {
   await store.sweepGenerations();
-  await reconcileSearchGenerations(ontologyKey);
+  await reconcileSearchGenerations(store.ontologyKey);
+}
 
+/**
+ * Within a design change, through its `store`: re-queue the entities of
+ * every index that reads any of `types` (entity or relation type keys
+ * whose display names or name property change). Returns the keys refreshed.
+ */
+export async function refreshReaders(store: SearchIndexStore, types: readonly string[]): Promise<string[]> {
   const refreshed: string[] = [];
-  const types = new Set(refreshTypes);
-  if (types.size > 0) {
-    for (const index of await store.listIndices()) {
-      if (readsType(index.definition, types)) {
-        await refreshSearchIndex(ontologyKey, index.key);
-        refreshed.push(index.key);
-      }
+  const wanted = new Set(types);
+  if (wanted.size === 0) return refreshed;
+  for (const index of await store.listIndices()) {
+    if (readsType(index.definition, wanted)) {
+      await requeueIndex(store, index);
+      refreshed.push(index.key);
     }
   }
   return refreshed;

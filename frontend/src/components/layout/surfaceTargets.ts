@@ -6,6 +6,7 @@ import * as model from '@/api/model'
 import { qk } from '@/api/queryKeys'
 import type { Lens } from '@/api/types'
 import { useAccess } from '@/components/auth/useAccess'
+import type { Access } from '@/lib/access'
 import { readString, remove, storageKeys } from '@/lib/storage'
 import {
   pickLens,
@@ -124,15 +125,18 @@ export function useStudioTarget(ontologyKey: string, lensKey: string): Target {
  * Workbench landing for an ontology reached without a lens (the ontology
  * switcher): the lens `pickLens` chooses, or the Studio's lens list when the
  * ontology has none. A remembered key that no longer resolves is forgotten.
+ * Only lenses the user may read count, as in `useTargetLens`.
  */
 export async function workbenchLanding(
   queryClient: QueryClient,
   ontologyKey: string,
+  access: Access,
 ): Promise<string> {
-  const lenses = await queryClient.fetchQuery({
+  const all = await queryClient.fetchQuery({
     queryKey: qk.lenses(ontologyKey),
     queryFn: () => model.listLenses(ontologyKey),
   })
+  const lenses = all.filter((l) => access.canRead(ontologyKey, l.key))
   const remembered = readString(storageKeys.lastLens(ontologyKey))
   let unscoped = new Set<string>()
   if (!lenses.some((l) => l.key === remembered)) {

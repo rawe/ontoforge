@@ -40,6 +40,7 @@ import {
   reconcileSearchGenerations,
   refreshSearchIndex,
 } from "../../../src/runtime/indexing/generations.js";
+import { refreshReaders } from "../../../src/runtime/indexing/managed.js";
 import { getSearchIndexStatus } from "../../../src/runtime/indexing/status.js";
 import {
   drainOnce,
@@ -530,6 +531,28 @@ describe("PostgreSQL search pipeline", () => {
     await drainSearchWork();
     expect(provider.embedded.slice(embedded)).toEqual(["Person: Ada\nEmail: ada@example.org"]);
     expect((await active(index, "semantic")).state).toBe("ready");
+  });
+
+  it("re-queues the readers of a renamed type in the design change: with its commit or not at all", async () => {
+    await addIndex();
+    const ada = await person("Ada");
+    await worksFor(ada, await company("ACME"), "CTO");
+    await drainSearchWork();
+    expect(await queued()).toEqual([]);
+
+    await expect(
+      modeling.changeDesign(async (change) => {
+        expect(await refreshReaders(change.searchIndices(), ["company"])).toEqual(["employment"]);
+        throw new Error("rolled back");
+      }),
+    ).rejects.toThrow("rolled back");
+    expect(await queued()).toEqual([]);
+
+    expect(await modeling.changeDesign((change) => refreshReaders(change.searchIndices(), ["company"]))).toEqual([
+      "employment",
+    ]);
+    expect((await queued()).length).toBeGreaterThan(0);
+    expect(await modeling.changeDesign((change) => refreshReaders(change.searchIndices(), ["age_group"]))).toEqual([]);
   });
 
   it("retries with backoff, counts items failed for good, and a rebuild retries them", async () => {

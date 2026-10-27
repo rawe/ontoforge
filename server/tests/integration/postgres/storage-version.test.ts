@@ -124,10 +124,12 @@ async function makeVersion5Layout(namespace: string): Promise<void> {
 )`);
 }
 
-/** Storage at version 10: no one per pair on relation types. Records no
- * version — `makeVersion9Layout` builds on it. */
+/** Storage at version 10: no one per pair on relation types, and no index
+ * of staged values by value. Records no version — `makeVersion9Layout`
+ * builds on it. */
 async function makeVersion10Layout(namespace: string): Promise<void> {
   await runQuery(`ALTER TABLE ${namespace}.relation_type DROP COLUMN one_per_pair`);
+  await runQuery(`DROP INDEX ${namespace}.changeset_value_match_idx`);
 }
 
 /** Storage at version 9: no entity identity. Records no version —

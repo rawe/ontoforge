@@ -612,9 +612,13 @@ const STEPS: Step[] = [
     ],
   },
   {
-    // Relation rules: one per pair on a relation type.
+    // Relation rules: one per pair on a relation type; staged values found
+    // by value, for puts.
     to: 11,
-    actions: [`ALTER TABLE relation_type ADD COLUMN one_per_pair boolean NOT NULL DEFAULT false`],
+    actions: [
+      `ALTER TABLE relation_type ADD COLUMN one_per_pair boolean NOT NULL DEFAULT false`,
+      `CREATE INDEX changeset_value_match_idx ON changeset_value (changeset_id, property_key, md5(value::text))`,
+    ],
   },
 ];
 

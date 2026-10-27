@@ -323,6 +323,11 @@ export function ontologyDdlStatements(): string[] {
   CONSTRAINT changeset_value_object_fk FOREIGN KEY (changeset_id, object_id)
     REFERENCES changeset_object (changeset_id, object_id) ON DELETE CASCADE
 )`,
+  // Finds the staged objects that stage a value of a property, such as a
+  // part of an identity, without reading the whole changeset; by hash, so
+  // that a long document value fits.
+  `CREATE INDEX IF NOT EXISTS changeset_value_match_idx
+  ON changeset_value (changeset_id, property_key, md5(value::text))`,
 
   // --- Search indices ----------------------------------------------------
 

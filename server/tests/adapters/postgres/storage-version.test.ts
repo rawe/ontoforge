@@ -80,10 +80,12 @@ const step10 = (namespace: string) => [
   ),
 ];
 
-/** Step 11 in one namespace: one per pair on relation types. */
+/** Step 11 in one namespace: one per pair on relation types, and staged
+ * values found by value. */
 const step11 = (namespace: string) => [
   `SET LOCAL search_path TO ${namespace}, public`,
   "ALTER TABLE relation_type ADD COLUMN one_per_pair boolean NOT NULL DEFAULT false",
+  "CREATE INDEX changeset_value_match_idx ON changeset_value (changeset_id, property_key, md5(value::text))",
 ];
 
 const writes = (queries: string[]) => queries.filter((q) => /^(INSERT|DELETE|CREATE|LOCK TABLE)/.test(q));

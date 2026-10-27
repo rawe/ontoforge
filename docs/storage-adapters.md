@@ -950,12 +950,14 @@ keep their order. `changeset_value` holds one row per staged value under the pri
 `(changeset_id, object_id, property_key)`, its object a foreign key with delete cascade;
 `value` is `jsonb`, JSON null removing the property; `before` is `jsonb`, `{"value": …}`
 for a stored value, `{}` for a key the target lacked and SQL null for a value of a
-create; the size `bytes` an `integer`. Two B-tree indexes serve them besides the primary
-keys: changesets by lens, and staged objects by changeset and first touch. The staged
-relations at an entity are found by a scan of the changeset's own objects, and the staged
-entities that stage given values by a scan of its own values, and its staged relations of
-given pairs by a scan of its own objects, matched in the database, so only the matches are
-read out.
+create; the size `bytes` an `integer`. Three B-tree indexes serve them besides the primary
+keys: changesets by lens, staged objects by changeset and first touch, and staged values by
+changeset, property key and the `md5` of the value's text, so that a long document value
+fits. The staged entities that stage given values are found through that last index, one
+equality per key, so a put costs the same in an empty changeset as in a full one. The
+staged relations at an entity are found by a scan of the changeset's own objects, and its
+staged relations of given pairs by a scan of its own objects, matched in the database, so
+only the matches are read out.
 
 Every change takes the changeset row `FOR UPDATE NOWAIT`, and states its state condition —
 `submitted_at IS NULL`, or not null for unsubmit — in the same statement, an applied

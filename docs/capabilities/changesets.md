@@ -124,7 +124,8 @@ or not at all: every call is checked, and if any fails nothing is staged and the
 names each failed call by its index in the list, with its own error. A refusal of the
 changeset itself — not found, submitted, full, changed in between — refuses the request as
 it refuses one call. The answer lists each call's answer in list order. Each call counts
-toward the changeset's [limits](#limits); a larger import commits in several changesets.
+toward the changeset's [limits](#limits); a larger import commits in several changesets
+([bulk-inserts.md](bulk-inserts.md)).
 
 ### Unstage, cut and rebase
 

@@ -45,6 +45,7 @@ what rules bind it, and how it is reached from every interface.
 | [transfer](capabilities/transfer.md) | Schema export and import |
 | [rulesets](capabilities/rulesets.md) | Rulesets — named records holding the rules for the MCP clients of one URL: the record and its maintenance, ruleset mounts, write access, the anchor |
 | [changesets](capabilities/changesets.md) | Changesets — runtime writes staged over time and committed all or nothing: staging into a set of objects and values, the commit and its validation, binding, the review |
+| [bulk-inserts](capabilities/bulk-inserts.md) | Loading many entities and relations through changesets: lists of calls, puts by identity, chunks, failures and reruns, review |
 | [authentication](capabilities/authentication.md) | Signing in through an OpenID provider, roles on the platform, an ontology or a lens, what a caller sees, user management, authentication off |
 
 ## Internal provider interfaces

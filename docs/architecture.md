@@ -660,5 +660,5 @@ Stated plainly, because its absence is a design position and not an oversight:
 - **No multi-tenancy.** An ontology isolates data but is not a tenant — the rule and
   its reason are in [decisions.md](decisions.md#scope).
 
-Absences in the API surface itself — no bulk write, no instance-data export — are listed
+Absences in the API surface itself — no data wipe, no instance-data export — are listed
 with their consequences in [interfaces.md](interfaces.md#what-is-not-exposed).

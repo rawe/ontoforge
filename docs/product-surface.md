@@ -1520,7 +1520,7 @@ list request with a page size of one per Children section, which counts only the
 the lens shows; the server's refusal remains the rule, and a refused delete refreshes the
 counts.
 
-**Bulk delete is a client loop.** There is no bulk endpoint. Deleting a selection issues
+**Bulk delete is a client loop.** Deleting a selection issues
 one request at a time, sequentially, advancing a progress indicator and counting failures.
 The outcome is reported as a partial result when some failed. The selection is cleared and
 the list refreshed regardless of outcome. While a changeset is pinned each request stages

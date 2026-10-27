@@ -44,8 +44,8 @@ Documentation of a single script stays beside that script (`scripts/USAGE.md`).
 
 Start PostgreSQL and Valkey (`docker compose up -d`) before running `npm run dev` in `server/` and
 `frontend/`. The backend runs on `http://localhost:8000`. `./dev.sh [env-file]` does all
-three at once. `./dev.sh scale` runs two backends sharing one database and one Valkey
-([scripts/scale/USAGE.md](scripts/scale/USAGE.md)).
+three at once, starting Valkey only when the env file uses it. `./dev.sh scale` runs two
+backends sharing one database and one Valkey ([scripts/scale/USAGE.md](scripts/scale/USAGE.md)).
 
 Configuration comes from exactly one env file — the one `ENV_FILE` names, otherwise
 `server/.env`. Presets live in `env/`. A variable already set in the shell wins over the

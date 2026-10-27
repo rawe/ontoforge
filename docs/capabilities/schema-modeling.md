@@ -152,7 +152,7 @@ writes — relation creates, the create with a parent relation, leaf-only delete
 **Setting it, flipping it, or creating a relation type with it** checks the relations
 already stored under every parent relation, with the new reading in place of the old, as
 a [relation rule](#relation-rules) is checked: the violations are `two_parents` and
-`cycle` ([../architecture.md](../architecture.md#error-model)). Clearing it, or deleting a
+`cycle` ([../interfaces.md](../interfaces.md#errors)). Clearing it, or deleting a
 parent relation, is never refused; an update repeating the stored parent end is not a
 change and checks nothing.
 

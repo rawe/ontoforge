@@ -5,6 +5,9 @@ the same real-world entity. It uses a Decision provider, independently of the
 language-model and embedding providers. It does not find candidates, read their
 instance data, merge entities or write anything.
 
+For the declared property values that uniquely identify and address an entity, see
+[entity identity](entity-identity.md). That identity is distinct from this judgment.
+
 ## Input and context
 
 One request addresses an ontology and a lens and names one `entityTypeKey`. Both

@@ -1,6 +1,6 @@
 # OntoForge
 
-OntoForge is a graph-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. Storage sits behind a persistence port with a PostgreSQL adapter. One server holds many ontologies — totally isolated units, each with its own schema (entity types, relation types, properties), its lenses, saved queries, agents, and instance data; nothing spans two. Lenses are named views over one ontology's schema — either unscoped (full schema access) or scoped to a filtered subset of types and properties. The system provides a registry for managing ontologies plus dedicated, ontology-scoped REST and MCP interfaces for modeling and runtime, stores schema and data together in one database behind a persistence port, and supports JSON-based export and import of one ontology's design.
+OntoForge is a graph-native ontology studio for designing graph schemas and using them through generic, schema-driven APIs. Storage sits behind a persistence port with a PostgreSQL adapter. One server holds many ontologies — totally isolated units, each with its own schema (entity types, relation types, properties), its lenses, saved queries, agents, and instance data; nothing spans two. Lenses are named views over one ontology's schema — either unscoped (full schema access) or scoped to a filtered subset of types and properties. The system provides a registry for managing ontologies plus dedicated, ontology-scoped REST and MCP interfaces for modeling and runtime, stores ontology schema and data together in one ontology database behind a persistence port, and supports JSON-based export and import of one ontology's design. When authentication is on, a separate access database stores principals and assignments.
 
 ## Project Structure
 
@@ -10,12 +10,12 @@ OntoForge is a graph-native ontology studio for designing graph schemas and usin
 
 - **KISS** — Keep it simple. Prefer the simplest solution that meets the requirement.
 - **YAGNI** — You ain't gonna need it. Don't build for hypothetical future requirements.
-- **Every architectural decision requires user approval.** Never settle a design or architectural choice silently — always ask the user first. Record it as [docs/workflows/recording-decisions.md](docs/workflows/recording-decisions.md) describes.
+- **Every architectural decision requires user approval.** Never settle a design or architectural choice silently — always ask the user first. Only consequential, costly-to-reverse architectural choices warrant an ADR; use [docs/workflows/recording-decisions.md](docs/workflows/recording-decisions.md) to assess and record them.
 
 ## Documentation Principles
 
-1. **Consistency first.** All docs, code, and architecture must be consistent with each other. If an inconsistency is detected, STOP and ask the user — never silently resolve or ignore it.
-2. **Single source of truth.** Each piece of information belongs in exactly one place. Avoid redundancy by default. When a fact is needed elsewhere, reference the source — don't copy it.
+1. **Consistency first.** Docs, code, and architecture must agree. Investigate discrepancies against the relevant implementation and tests; report them and ask the user when the correct behavior or a design choice is uncertain. Do not silently resolve a design disagreement.
+2. **Single source of truth.** Give each detailed fact one authoritative home. A short, accurate summary may provide the context a reader needs elsewhere; link to the authoritative explanation for detail.
 
 The remaining principles for writing under `docs/` — progressive disclosure, redundancy,
 document lifecycle, status quo only, ontology storage neutrality — live in

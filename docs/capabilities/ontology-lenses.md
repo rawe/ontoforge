@@ -252,7 +252,8 @@ The lens still governs what a search returns:
 - **Hidden properties stay inside entry text.** An index may read a property the lens
   hides; its entries still carry the value, so it can still drive the ranking. The
   match's snippet is then withheld, and the label of a relation's target is withheld
-  when the lens hides the target's name property.
+  when the lens hides the target's name property. Entries are shared across lenses;
+  composing separate entries for each lens would multiply storage and embedding cost.
 - **The search catalog is projected too.** It lists only the indices the lens can
   search, and of each only the fields, relation groups and document the lens shows; a
   managed index's description names only those fields

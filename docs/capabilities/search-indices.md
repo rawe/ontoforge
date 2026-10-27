@@ -216,7 +216,9 @@ the header does not count — and at most **4 relation groups**, of one hop each
 no cap on the number of indices: the [cost preview](#cost-preview) shows what each one
 costs instead. The field cap bounds entry text, which dilutes a vector as it grows; each
 relation group multiplies entries. The limits bind custom indices only; managed indices
-are derived and never validated against them.
+are derived and never validated against them. A further hop would multiply both entry
+count and re-indexing work, since changes to related entities re-queue the relations
+pointing to them. One index on a highly connected type can cost more than many small ones.
 
 ### Changing a custom index
 
@@ -268,6 +270,9 @@ passage's chunk as `⟦passage⟧`, so the text shows which field lands where, u
 label, in which order. A kind the draft composes no entry of is absent: no own entry
 without an own text field, no group whose types no longer exist.
 
+The server runs this composition; clients do not reimplement it, so the outline cannot
+drift from what the index embeds and matches.
+
 Each relation part names its group, relation type, direction and target type. Each part
 says how its semantic text came about — labelled lines without a template, the
 template's text, or the labelled lines because every clause of the template dropped —
@@ -312,8 +317,7 @@ edit that changes no indexed value costs no embedding call.
 ## Lifecycle
 
 **Entries are built in the background.** A write commits without its entries; they
-follow asynchronously, so search is eventually consistent
-([../decisions.md](../decisions.md#search)):
+follow asynchronously, so search is eventually consistent:
 
 - a created entity is not searchable until its entries are built;
 - after an update, the entity's previous entries keep answering until they are replaced;

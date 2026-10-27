@@ -116,7 +116,9 @@ AI_MODEL=qwen3:8b ./dev.sh  # a shell variable still wins over the file
 
 Running the server directly honours the same rule: `ENV_FILE=<path> npm run dev` reads
 that file, and plain `npm run dev` reads `server/.env`. A named file that does not exist
-fails the boot rather than falling back to defaults.
+fails the boot rather than falling back to defaults. Files never layer and launchers do
+not carry configuration values, so a setting cannot come from a file the operator did
+not choose; an environment variable already set in the shell wins over the file.
 
 With authentication on, against a development Keycloak:
 
@@ -172,9 +174,10 @@ npm test
 ```
 
 This runs the unit tests only — they are mocked and need no running services.
-Integration tests are opt-in: they require a running database, and the semantic-search
-and AI suites also Ollama; see
-[docs/workflows/testing.md](docs/workflows/testing.md).
+Integration tests are opt-in. Their dependencies vary by suite; the database, model
+provider and shared-state requirements are listed in
+[docs/workflows/testing.md](docs/workflows/testing.md). The same guide links to the
+authentication checks and multi-server test harness.
 
 ## Architecture
 
@@ -302,11 +305,16 @@ Both features support these provider types:
 A base URL is written as the provider documents it: the host for `ollama`
 (`http://localhost:11434`) and `anthropic` (`https://api.anthropic.com`), the API base
 including its version for `openai` (`https://openrouter.ai/api/v1`). A base URL that breaks this rule stops the server at
-startup with the corrected value in the message.
+startup with the corrected value in the message. This catches a misplaced API path at
+startup instead of a 404 on the first model call.
 
 ### Semantic Search
 
 Find entities by meaning rather than exact keywords — within a single entity type or across all types at once. Available via REST, MCP, and the UI (command palette and entity pickers). Requires an embedding model.
+
+Each server uses one embedding model. Search merges indices by similarity, which is a
+single comparable scale only under one model; each semantic generation records the model
+it was built with ([search index lifecycle](docs/capabilities/search-indices.md#lifecycle)).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -332,6 +340,10 @@ Natural language query and conversational chat over your knowledge graph. These 
 | `AI_API_KEY` | *(unset)* | API key (required for `openai` and `anthropic`) |
 | `AI_REASONING_EFFORT` | *(unset — model default)* | `none`, `low`, `medium` or `high` — how hard the model thinks |
 
+Thinking effort is a deployment-wide setting, not a per-agent setting: it controls the
+deployment's latency and cost budget. Its value is validated at boot so an unrecognized
+level does not appear to be a broken agent configuration.
+
 **Recommended Ollama models** by available RAM (Apple Silicon / unified memory):
 
 | RAM | Model | Params | Memory Used |
@@ -356,6 +368,10 @@ git tag v1.0.0 && git push origin v1.0.0
 | `ghcr.io/rawe/ontoforge-ui:1.0.0` | React frontend (nginx) |
 
 Each image is also tagged `:latest`. See `Makefile` for manual builds and [`examples/docker-compose/`](examples/docker-compose/) for a ready-to-use setup.
+
+For a multi-server Kubernetes example, including its assumptions and limitations, see
+[deploy/kubernetes/README.md](deploy/kubernetes/README.md). The release and storage-upgrade
+procedure is in [docs/workflows/releasing.md](docs/workflows/releasing.md).
 
 ## License
 

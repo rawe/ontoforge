@@ -3,6 +3,10 @@
 How OntoForge is put together. Concepts and vocabulary: [README.md](README.md). The rules
 this document obeys: [decisions.md](decisions.md).
 
+This document explains the system's components, boundaries, invariants and major flows.
+Feature behaviour and interface details are described in the linked capability and
+interface documents; physical ontology storage is described in the adapter documentation.
+
 ## Components
 
 Four parts, two processes; with [authentication](#authentication-and-authorization) on,
@@ -307,7 +311,8 @@ Shared state is what every server must see alike but may lose: the assistants' t
 ([decisions.md](decisions.md#storage)), and one setting chooses where all of it lives:
 memory, which serves one server process, or Valkey, shared by every server that names it.
 A configured Valkey that does not answer, that would evict data rather than refuse it, or
-that cannot run the scripts fails the boot; nothing falls back to memory.
+that cannot run the scripts fails the boot; nothing falls back to memory. Falling back
+would split shared state between servers without an obvious failure.
 
 **What belongs there.** State another server must see, whose loss users recover from, and
 that expires on its own. Durable or authoritative state, and state that must commit with
@@ -481,8 +486,9 @@ background, never on the request path, so search over them is eventually consist
 create, update, delete, document edits — hand the store, with the write, the search work
 they cause: which parts of which entities to compose again. The store queues it in the
 write's transaction, so the work exists exactly when the write commits; the queue lives in
-the same database, behind the persistence port. A deletion removes the affected entries
-with the write instead of queueing anything. A change no index reads queues nothing.
+the same database, behind the persistence port, without an external queue or broker. A
+deletion removes the affected entries with the write instead of queueing anything. A
+change no index reads queues nothing.
 
 **A worker in every server process drains the queue.** It claims a batch under a
 time-limited lease — items another process holds are skipped, so any number of processes
@@ -522,55 +528,9 @@ new work. Ranked search reads the ready generations
 
 ## Error model
 
-Every error response has the same envelope:
-
-```json
-{ "error": { "code": "...", "message": "...", "details": { } } }
-```
-
-There are exactly ten top-level codes:
-
-| Condition | Status | Code | `details` |
-|---|---|---|---|
-| No valid credential (authentication on) | 401 | `UNAUTHENTICATED` | — |
-| The caller's roles do not allow it (authentication on) | 403 | `FORBIDDEN` | — |
-| The identity provider's keys cannot be fetched to check a token (authentication on) | 503 | `PROVIDER_UNAVAILABLE` | — |
-| Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — or `code` |
-| Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | —, `code` or `violations` |
-| Input rejected | 422 | `VALIDATION_ERROR` | `fields` map, `errors` list, `violations` list with `total`, or `items` list |
-| Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses`, `affectedIndices` |
-| Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
-| Malformed request body | 400 | `INVALID_JSON` | — |
-| Request body over the configured limit | 413 | `PAYLOAD_TOO_LARGE` | — |
-
-Four refinements:
-
-**`details.code` narrows, it does not replace.** Where it appears, the top-level code
-stays one of the ten. A request for an unavailable search strategy, search with no available strategy,
-saved-query discovery with no embedding provider, an AI request with no
-language-model provider configured answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
-An assistant thread that is unknown, expired, bound to another assistant or started by
-another principal answers `404 RESOURCE_NOT_FOUND` with `details.code` of
-`THREAD_NOT_FOUND`, and a message to a thread still running `409 RESOURCE_CONFLICT` with
-`details.code` of `THREAD_BUSY` ([thread store](#thread-store)).
-
-**A refused relation rules write carries its violations.** A relation rules change — on
-create, update or import — that the stored relations break answers `409
-RESOURCE_CONFLICT` with `details.violations`: one entry per broken rule, `two_parents`,
-`cycle` or `duplicate_pair`, each with the `count` of offending entities, or of pairs
-for `duplicate_pair`, and up to five entities as `{type, id}`, a pair by its source
-([capabilities/schema-modeling.md](capabilities/schema-modeling.md#relation-rules)). The
-message carries the counts, so an MCP caller sees them too.
-
-**`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
-physical objects, which must not reach a client. The adapter logs the original against a
-generated `errorId` and returns only that id, so a reported failure can still be traced to
-its server-side record.
-
-**What a caller holds no role in is not found.** An ontology or lens outside the caller's
-assignments answers `RESOURCE_NOT_FOUND`, as an unknown key does; `FORBIDDEN` is for what
-the caller may know of ([capabilities/authentication.md](capabilities/authentication.md#what-a-caller-sees)).
-A `401` carries a `WWW-Authenticate` challenge ([interfaces.md](interfaces.md#sign-in)).
+REST failures share an error envelope and a consistent taxonomy. MCP expresses the
+same failures as tool errors. The interface contract, including error codes and details,
+is in [Interfaces](interfaces.md#errors).
 
 ## Startup
 

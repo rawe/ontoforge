@@ -301,6 +301,10 @@ persons who hold a CTO employment; listing companies with
 began before 2025. No schema key may contain a dot, an at sign or a colon, so a path is
 never mistaken for a property key.
 
+For longer paths, [OQL](oql.md) supports multi-hop patterns. A retriever can also use
+its own configured exact filters of up to two hops
+([retrievers.md](retrievers.md#the-configuration)).
+
 - **Direction is derived, or marked.** When the listed type is only the relation type's
   source, the path is followed outgoing, to the target; when it is only the target,
   incoming, to the source. The relation segment may carry a direction marker, `:out` or

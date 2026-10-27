@@ -5,7 +5,9 @@ never changed. An entity type may also declare an **identity**: the values of so
 properties that name an entity the way people and other systems know it, such as a code
 and a year. The id stays the reference; the identity is a second way to address an entity.
 
-[Glossary](../README.md#data). [Rules](../decisions.md#entity-identity).
+[Glossary](../README.md#data). The rationale for the identity model and commit-time
+uniqueness is in [ADR 0032](../adr/0032-entity-identity-as-ordered-property-list.md) and
+[ADR 0033](../adr/0033-identity-uniqueness-in-changesets-at-commit.md).
 Not to be confused with [entity identity comparison](entity-identity-comparison.md), which
 judges whether two snapshots describe the same real-world thing and writes nothing.
 

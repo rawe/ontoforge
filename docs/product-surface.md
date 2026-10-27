@@ -8,6 +8,16 @@ section links to the capability document that owns them.
 This document is the capability inventory. It is complete on *what the product does* and
 deliberately silent on how it is built.
 
+## Find a screen or interaction
+
+| Need | Start here |
+|---|---|
+| Start page, Studio and Workbench orientation, sign-in | [The three levels](#the-three-levels) |
+| Working with data, queries, rulesets, changesets and assistants | [Workbench screens](#workbench-screens) |
+| Modeling, lenses, search configuration and transfer | [Studio screens](#studio-screens) |
+| Shared controls, editors, chat and document interactions | [Interaction models](#interaction-models) |
+| Availability, client state, links and keyboard access | [Feature gating](#feature-gating), [Client-side contracts](#client-side-contracts-the-api-does-not-imply), [Deep links](#deep-links), [Keyboard surface](#keyboard-surface) |
+
 ## The three levels
 
 The product mirrors the system's shape: a server holds ontologies, an ontology holds a
@@ -161,6 +171,10 @@ them all the same.
 ---
 
 ## Workbench screens
+
+Find the [home](#home), [type table](#type-table), [entity detail](#entity-detail),
+[Explorer](#explore), [query](#query), [rulesets](#rulesets), [changesets](#changesets),
+and [assistants](#assistants) screens below.
 
 ### Shell
 
@@ -459,6 +473,10 @@ footer holds the theme control and the collapse control. Like the Workbench side
 collapses to an icon rail whose entries name themselves on hover; both sidebars share one
 collapse preference.
 
+Find [schema](#schema), [type pages](#type-page-classic-view), [lenses](#lenses),
+[lens detail](#lens-detail), [search](#search), the [index designer](#index-designer),
+and [transfer](#transfer) below.
+
 ### Schema
 
 One page for the ontology's schema, in two views of the same types: the
@@ -752,6 +770,12 @@ Three operations, each with its own explanation. See
 ---
 
 ## Interaction models
+
+Find the [command palette](#command-palette), [quick add](#quick-add),
+[Explorer working set](#working-set), [query console](#query-console),
+[assistant panel](#assistants-panel), [assistant chat](#assistant-chat),
+[schema graph](#schema-graph), [scope editor](#scope-editor), and
+[document viewer and editor](#document-viewer-and-editor) below.
 
 ### Command palette
 

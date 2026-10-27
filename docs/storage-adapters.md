@@ -128,6 +128,15 @@ physical objects that way; a new adapter accepts them and maps them to whatever 
 | Close | Release connections. Idempotent. |
 | Ensure semantic indexes | Given a vector width, create every vector index the current schemas imply, for **every ontology the registry lists** — doing nothing when there are none. Called at startup only when an embedding provider is configured. |
 
+Storage carries its own version; the server upgrades older storage at startup before it
+serves, rather than requiring an operator to run migrations. The release defines the
+storage layout, and only a storage-version upgrade changes it, except for vector indexes
+recreated by a rebuild and the entry storage of search-index generations, which have their
+own lifecycles. A release that raises the storage version starts only after all older
+servers have stopped. Within a major release line, upgrade steps only add; renaming,
+removing or rewriting stored data waits for a major release, which keeps none of the
+earlier steps.
+
 ## The two store surfaces
 
 Two stores, matching the modeling/runtime split, each bound to one ontology. Neither
@@ -773,6 +782,12 @@ text form on the two point reads.
 > Everything below describes how the **PostgreSQL** adapter — the one `DB_BACKEND`
 > selects — satisfies Part 1. It is illustration, not contract. No name, convention or structure in
 > this part is part of the port, and a different adapter is free to share none of it.
+
+Business rules are validated in the service. The PostgreSQL DDL carries primary keys,
+referential integrity, exactly-one-owner and uniqueness constraints, plus the search-index
+tables' checks on their closed vocabularies; it does not backstop other business rules.
+Keyword search uses PostgreSQL's stock text-search configurations without an added
+compound or other dictionary.
 
 ## How ontologies are isolated
 

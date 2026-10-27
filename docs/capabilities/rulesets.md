@@ -24,8 +24,9 @@ No rule narrows reads: a ruleset mount lists, reads, searches and queries exactl
 plain lens does.
 
 A ruleset is not access control; who may use a lens is decided by roles
-([authentication.md](authentication.md)). It guards against mistakes, not against a
-determined client, and every rule has the same two escapes:
+([authentication.md](authentication.md#roles)). The role and the ruleset both limit
+write access when authentication is enabled; the lower level applies. A ruleset guards
+against mistakes, not against a determined client, and every rule has the same two escapes:
 
 1. **The plain lens URL**, the ruleset mount URL without its ruleset, writes and commits
    as the lens allows.

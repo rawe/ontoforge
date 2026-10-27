@@ -6,25 +6,28 @@ through generic, schema-driven APIs — no per-schema code is written or generat
 One server holds many **ontologies** — totally isolated units, each with its own schema,
 lenses, saved queries, assistants and instance data. Within an ontology the system has two
 halves. **Modeling** designs that ontology's schema. **Runtime** reads and writes its
-instance data through one lens. Both run in one server, over one database, and are
-reachable over REST, over MCP, and through a web UI.
+instance data through one lens. Both run in one server and are reachable over REST, over
+MCP, and through a web UI. Ontologies share an ontology database; with authentication on,
+a separate access database holds principals and their access assignments.
 
 ## Documentation map
 
 | Document | Answers |
 |---|---|
-| This file | What OntoForge is · core concepts · glossary |
-| [architecture.md](architecture.md) | How the system is put together |
-| [interfaces.md](interfaces.md) | Every REST endpoint and MCP tool |
-| [storage-adapters.md](storage-adapters.md) | What a storage backend must implement |
-| [product-surface.md](product-surface.md) | What the web UI does |
+| [Project README](../README.md) | Getting started, configuration and development setup |
+| This file | Core concepts, glossary and where to find details |
+| [architecture.md](architecture.md) | System components, boundaries, invariants and flows |
+| [interfaces.md](interfaces.md) | REST surfaces and MCP tools; exact schemas are in OpenAPI |
+| [storage-adapters.md](storage-adapters.md) | Persistence contract and PostgreSQL adapter |
+| [product-surface.md](product-surface.md) | Web UI screens and interactions |
 | [decisions.md](decisions.md) | Rules that constrain all of the above |
 | [capabilities/](capabilities/) | One document per capability, end to end |
 | [workflows/](workflows/) | Procedures for working *on* OntoForge |
-| [adr/](adr/) | Why alternatives to a rule in decisions.md were rejected |
+| [adr/](adr/) | Context and trade-offs behind consequential architectural choices |
 
-Each capability document answers the same three questions: what the capability does,
-what rules bind it, and how it is reached from every interface.
+Capability documents explain feature behaviour, rules, limits and how to reach it. The
+interface and product documents describe the corresponding API and UI surfaces; the
+capability remains the home for what the feature means.
 
 | Capability | Covers |
 |---|---|

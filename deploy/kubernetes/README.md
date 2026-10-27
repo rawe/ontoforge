@@ -65,4 +65,4 @@ and `/metrics` stay internal ([interfaces.md](../../docs/interfaces.md#exposure)
 The manifests validate against the Kubernetes 1.31 schemas (`kubeconform -strict`). They
 have not been applied to a cluster. The same behaviour — two servers, a shared Valkey,
 replacing a server, restarting Valkey — is exercised locally by the Compose harness
-(`./dev.sh scale …`, see `scripts/scale/USAGE.md`).
+(`./dev.sh scale …`, see [scripts/scale/USAGE.md](../../scripts/scale/USAGE.md)).

@@ -56,7 +56,10 @@ ontology's [keyword languages](#keyword-language).
 
 The default keyword matching is any-term keyword matching; `keyword` and `hybrid` always
 use the same one. `keyword-any` and `keyword-all` each fix one retrieval method, whatever
-the default is.
+the default is. Requiring every term by default would let one absent term empty the
+result; this matters for compound words and derivations, which stemming does not reduce.
+Matching is chosen by the strategy, not by a separate parameter. All-term means that
+every term must match; it still uses stemming and prefix matching.
 
 The default is the first available of `hybrid`, `keyword`, `semantic`. The feature report
 lists available strategies in the order `hybrid`, `keyword`, `keyword-any`,
@@ -104,7 +107,8 @@ A REST caller may supply a minimum similarity, a number from 0 to 1 on the
 `semanticSimilarity` scale below; absent means no floor. The floor is model-specific —
 what counts as related depends on the embedding model — so REST never chooses one. The
 MCP and agent search tools take none from the caller and instead apply a fixed floor of
-0.75 whenever the default strategy ranks semantically. A floor applies to semantic
+0.75 whenever the default strategy ranks semantically, because a model client cannot judge
+the raw scores. A floor applies to semantic
 entries only: each semantic ranking drops every entry measured below the floor before it
 is grouped by entity, so the floor applies to an entity's best semantic entry.
 Under `semantic` the filtered ranking is the result, and zero hits is a valid outcome.

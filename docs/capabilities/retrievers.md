@@ -7,8 +7,9 @@ runs a fixed pipeline — a planning model turns it into searches, the index sea
 them, an answer model writes the reply from what they found. Questions form a
 conversation held by the server as a [thread](threads.md). A question can also be
 [retrieved](#retrieve) instead: planned and searched, returning the found entities
-without an answer. Saving a retriever stores the configuration only: no vectors, no graph
-data, no conversation. Every lens also has a
+without an answer. Saving a retriever stores the configuration only: no per-retriever
+vectors, caches, graph data, snapshots or conversation that could drift from the indices.
+Every lens also has a
 [default retriever](#the-default-retriever), derived from its managed indices
 and never stored.
 

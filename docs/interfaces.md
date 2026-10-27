@@ -9,7 +9,18 @@ map, not the semantics.
 
 Exact request and response shapes are served by the running system as an OpenAPI
 description at `/openapi.json`, with a browsable rendering at `/docs`. No request or
-response bodies are reproduced here.
+response bodies are reproduced here except the shared error envelope.
+
+## Find an interface
+
+| Need | Start here |
+|---|---|
+| Addressing, filtering, errors and access | [Conventions](#conventions) |
+| Ontologies and deployment information | [Registry](#registry), [Server](#server) |
+| Sign-in, users and deployment health | [Sign-in](#sign-in), [User management](#user-management), [Exposure](#exposure), [Probes](#probes), [Metrics](#metrics) |
+| Design an ontology | [Modeling REST](#modeling-rest) |
+| Work with instance data through a lens | [Runtime REST](#runtime-rest), [Rulesets](#rulesets) |
+| Connect an MCP client | [MCP](#mcp) |
 
 ## Conventions
 
@@ -182,32 +193,79 @@ Other runtime parameters follow their documented names, including kind-prefixed
 
 ### Errors
 
-Every REST surface answers with the single error envelope and the nine-code taxonomy
-defined in [architecture.md](architecture.md#error-model). Nothing is added per route.
+Every REST error response has the same envelope:
+
+```json
+{ "error": { "code": "...", "message": "...", "details": { } } }
+```
+
+There are exactly ten top-level codes:
+
+| Condition | Status | Code | `details` |
+|---|---|---|---|
+| No valid credential (authentication on) | 401 | `UNAUTHENTICATED` | — |
+| The caller's roles do not allow it (authentication on) | 403 | `FORBIDDEN` | — |
+| The identity provider's keys cannot be fetched to check a token (authentication on) | 503 | `PROVIDER_UNAVAILABLE` | — |
+| Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — or `code` |
+| Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | —, `code` or `violations` |
+| Input rejected | 422 | `VALIDATION_ERROR` | `fields` map, `errors` list, `violations` list with `total`, or `items` list |
+| Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses`, `affectedIndices` |
+| Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
+| Malformed request body | 400 | `INVALID_JSON` | — |
+| Request body over the configured limit | 413 | `PAYLOAD_TOO_LARGE` | — |
+
+Four refinements:
+
+**`details.code` narrows, it does not replace.** Where it appears, the top-level code
+stays one of the ten. A request for an unavailable search strategy, search with no available strategy,
+saved-query discovery with no embedding provider, an AI request with no
+language-model provider configured answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
+An assistant thread that is unknown, expired, bound to another assistant or started by
+another principal answers `404 RESOURCE_NOT_FOUND` with `details.code` of
+`THREAD_NOT_FOUND`, and a message to a thread still running `409 RESOURCE_CONFLICT` with
+`details.code` of `THREAD_BUSY` ([thread store](architecture.md#thread-store)).
+
+**A refused relation rules write carries its violations.** A relation rules change — on
+create, update or import — that the stored relations break answers `409
+RESOURCE_CONFLICT` with `details.violations`: one entry per broken rule, `two_parents`,
+`cycle` or `duplicate_pair`, each with the `count` of offending entities, or of pairs
+for `duplicate_pair`, and up to five entities as `{type, id}`, a pair by its source
+([capabilities/schema-modeling.md](capabilities/schema-modeling.md#relation-rules)). The
+message carries the counts, so an MCP caller sees them too.
+
+**`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
+physical objects, which must not reach a client. The adapter logs the original against a
+generated `errorId` and returns only that id, so a reported failure can still be traced to
+its server-side record.
+
+**What a caller holds no role in is not found.** An ontology or lens outside the caller's
+assignments answers `RESOURCE_NOT_FOUND`, as an unknown key does; `FORBIDDEN` is for what
+the caller may know of ([capabilities/authentication.md](capabilities/authentication.md#what-a-caller-sees)).
+A `401` carries a `WWW-Authenticate` challenge ([sign-in](#sign-in)).
+
+When a value cannot be coerced, its field error names the expected schema type and
+describes the received value by its JSON type. The received value is raw wire data:
+an object or array is not an OntoForge data type, and types such as `date`, `datetime`
+and `document` have no corresponding JSON type. JSON names also avoid exposing the
+server's implementation language. Field errors are strings in `details.fields`, not
+structured expected/received objects; failures that do not involve a type use the same
+string-valued shape.
 
 MCP reports the same failures as tool errors. Because a tool error is a single string, the
 per-field detail that REST returns under `details.fields` is flattened into the message
 text, so a model still sees every offending field in one response. A refused relation
-rules write carries its violation list under `details.violations`
-([architecture.md](architecture.md#error-model)); MCP reports its message, which states
-the count per rule. A rejected submit or commit of a changeset carries its own list there
-([changesets](#changesets)); MCP appends each listed violation to the message.
+rules write carries its violation list under `details.violations`; MCP reports its
+message, which states the count per rule. A rejected submit or commit of a changeset
+carries its own list there ([changesets](#changesets)); MCP appends each listed violation
+to the message.
 
-Requesting an unavailable search strategy or a capability whose provider is not
-configured answers `VALIDATION_ERROR` with
-`details.code` of `FEATURE_DISABLED` — on the two routes that need an embedding provider,
-semantic search and saved-query search, and on AI execution and entity identity
-comparison alike. A client can therefore
-tell a switched-off capability from a rejected request. Model-free operations remain
-available: agent discovery, retriever management and navigator management do not
-require a language-model provider; execution requirements are listed with the routes below. Agent
-chat requires a language-model provider
+`FEATURE_DISABLED` applies to the two routes that need an embedding provider — semantic
+search and saved-query search — and to AI execution and entity identity comparison. A
+client can distinguish a switched-off capability from a rejected request. Model-free
+operations remain available: agent discovery, retriever management and navigator
+management do not require a language-model provider; execution requirements are listed
+with the routes below. Agent chat requires a language-model provider
 ([capabilities/agents.md](capabilities/agents.md)).
-
-An assistant thread that is unknown, expired, bound to another assistant or started by
-another principal answers `RESOURCE_NOT_FOUND` with `details.code` of `THREAD_NOT_FOUND`;
-a message to a thread whose previous message is still being answered answers
-`RESOURCE_CONFLICT` with `details.code` of `THREAD_BUSY` ([assistant chat and threads](#assistant-chat-and-threads)).
 
 A create or update that would give an entity an identity another entity of its type holds
 answers `RESOURCE_CONFLICT` with `details.code` of `IDENTITY_TAKEN`, `details.identity` and
@@ -431,6 +489,12 @@ Prefix `/api/ontologies/{ontologyKey}/model`. This surface covers one ontology's
 schema; see the addressing note above before using it. Semantics:
 [capabilities/schema-modeling.md](capabilities/schema-modeling.md) and
 [capabilities/ontology-lenses.md](capabilities/ontology-lenses.md).
+
+Find routes for [lenses](#lenses), [entity types](#entity-types),
+[relation types](#relation-types), [properties](#property-definitions),
+[scope inclusions](#scope-inclusions), [assistants](#agent-configurations),
+[saved queries](#saved-queries), [search indices](#search-indices), or
+[schema-wide operations](#schema-wide-operations).
 
 ### Lenses
 
@@ -681,6 +745,12 @@ data and no ontology identity — see
 Everything under `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`. An unknown
 ontology key answers not found before the lens is considered; an unknown lens key
 answers not found within the ontology.
+
+Find routes for [schema reads](#schema-introspection), [entities](#entities),
+[documents](#documents), [neighbours](#neighbours), [relations](#relations),
+[changesets](#changesets), [search](#search), [OQL](#query),
+[saved queries](#saved-queries-1), [identity comparison](#entity-identity-comparison),
+or [assistant chat and threads](#assistant-chat-and-threads).
 
 ### Schema introspection
 

@@ -251,9 +251,10 @@ an id never does, so everything stored keeps pointing at the same entity.
 has a separately named identity twin, and exactly one of a pair is given.** A value is then
 never guessed to be one or the other, and a text identity can never be mistaken for an id.
 
-**There is no create-or-update operation: a create refuses a taken identity, and updates
-never create.** Each call then does exactly what it says; an importer creates and, on a
-taken identity, updates by identity.
+**There is no create-or-update on immediate writes: a create refuses a taken identity, and
+updates never create. A staged put resolves at staging to an explicit create or update.**
+Each call then does exactly what it says, and a changeset only ever holds creates and
+updates a reviewer can tell apart; an importer stages puts.
 
 **An identity may change by an ordinary update, under the same checks; the old identity is
 not kept as an alias.** A rename is then one write with one meaning, and an identity names

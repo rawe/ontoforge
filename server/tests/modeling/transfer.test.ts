@@ -1145,8 +1145,10 @@ describe("the parent end", () => {
     holder.store.createLens.mockResolvedValue(LENS_DATA);
     const res = await postImport(flagged("target"));
     expect(res.statusCode, res.body).toBe(201);
-    expect(holder.store.findParentViolations).toHaveBeenCalledWith({ works_for: "target" });
-    expect(holder.store.createRelationType.mock.calls[0]![6]).toBe("target");
+    expect(holder.store.findRelationRuleViolations).toHaveBeenCalledWith({
+      works_for: { parent: "target", onePerPair: true },
+    });
+    expect(holder.store.createRelationType.mock.calls[0]![6]).toEqual({ parent: "target", onePerPair: true });
   });
 
   it.each([["absent", undefined], ["null", null]])(
@@ -1155,14 +1157,14 @@ describe("the parent end", () => {
       holder.store.createLens.mockResolvedValue(LENS_DATA);
       const res = await postImport(flagged(parent));
       expect(res.statusCode, res.body).toBe(201);
-      expect(holder.store.findParentViolations).not.toHaveBeenCalled();
-      expect(holder.store.createRelationType.mock.calls[0]![6]).toBeNull();
+      expect(holder.store.findRelationRuleViolations).not.toHaveBeenCalled();
+      expect(holder.store.createRelationType.mock.calls[0]![6]).toEqual({ parent: null, onePerPair: false });
     },
   );
 
   it("violators in the stored relations answer 409 with the violation list; nothing is written", async () => {
     const violations = [{ rule: "two_parents", count: 1, entities: [{ type: "person", id: "p-1" }] }];
-    holder.store.findParentViolations.mockResolvedValue(violations);
+    holder.store.findRelationRuleViolations.mockResolvedValue(violations);
     const res = await postImport(flagged("target"));
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe("RESOURCE_CONFLICT");
@@ -1175,8 +1177,48 @@ describe("the parent end", () => {
   it("rejects a parent end other than source or target with 422; nothing is written", async () => {
     const res = await postImport(flagged("middle"));
     expect(res.statusCode).toBe(422);
-    expect(holder.store.findParentViolations).not.toHaveBeenCalled();
+    expect(holder.store.findRelationRuleViolations).not.toHaveBeenCalled();
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
+  });
+});
+
+describe("one per pair", () => {
+  const paired = (onePerPair?: boolean): Record<string, unknown> => {
+    const [rt] = importPayload().relationTypes as Record<string, unknown>[];
+    return importPayload({ relationTypes: [onePerPair === undefined ? rt : { ...rt, onePerPair }] });
+  };
+
+  it("export carries it only where it is on", async () => {
+    const [rt] = FULL_SCHEMA.relationTypes;
+    holder.store.getFullSchema.mockResolvedValue({
+      ...FULL_SCHEMA,
+      relationTypes: [
+        { ...rt, parent: null, onePerPair: true },
+        { ...rt, key: "knows", parent: null, onePerPair: false },
+      ],
+    });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().relationTypes.map((r: { onePerPair?: unknown }) => r.onePerPair)).toEqual([true, undefined]);
+  });
+
+  it("import creates the relation type with it after checking the stored relations", async () => {
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const res = await postImport(paired(true));
+    expect(res.statusCode, res.body).toBe(201);
+    expect(holder.store.findRelationRuleViolations).toHaveBeenCalledWith({
+      works_for: { parent: null, onePerPair: true },
+    });
+    expect(holder.store.createRelationType.mock.calls[0]![6]).toEqual({ parent: null, onePerPair: true });
+  });
+
+  it("a pair the stored relations link twice answers 409; nothing is written", async () => {
+    const violations = [{ rule: "duplicate_pair", count: 1, entities: [{ type: "person", id: "p-1" }] }];
+    holder.store.findRelationRuleViolations.mockResolvedValue(violations);
+    const res = await postImport(paired(true));
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.details).toEqual({ violations });
+    expect(holder.store.createRelationType).not.toHaveBeenCalled();
   });
 });
 

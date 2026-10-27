@@ -327,7 +327,8 @@ into the Explorer focused on this entity.
    rather than lost.
 
 Endpoint errors from the server are surfaced as form-level errors, not silent failures; a
-second parent is named by the child's label ("T1 already has a parent").
+second parent is named by the child's label ("T1 already has a parent"), and a pair a
+one-per-pair relation type already links says "Already linked by this relation".
 
 ### Explore
 
@@ -521,13 +522,18 @@ then says the identity properties become required, lose their defaults and join 
 lens's list for the type. When the stored data refuses it, a report in place says nothing
 was changed and lists, per rule — without a value, sharing an identity, too long — the
 count and the first entities by short id, with Dismiss
-([capabilities/entity-identity.md](capabilities/entity-identity.md#declaring-an-identity)). On a relation type it holds a "Parent" select — none, the source or the target,
-named by their entity types — which sets or flips the
+([capabilities/entity-identity.md](capabilities/entity-identity.md#declaring-an-identity)). On a relation type it holds a "Rules" group with the
+[relation rules](capabilities/schema-modeling.md#relation-rules). A "Parent" select —
+none, the source or the target, named by their entity types — sets or flips the
 [parent end](capabilities/schema-modeling.md#parent-relations) on change; clearing it asks
-for confirmation first. When the stored data refuses the change, a report replaces it:
-nothing was changed, the count per rule — two parents, cycles — with the listed entities as
-Workbench links labelled by type and short id and "and N more" beyond them, a hint to fix
-the data in the Workbench and retry, and Dismiss. The select keeps the stored value.
+for confirmation first. A "One per pair" switch, its help "At most one link of this type
+between the same two entities", turns
+[one per pair](capabilities/schema-modeling.md#one-per-pair) on or off; while a parent end
+is set it shows on and locked, "Implied by the parent end". When the stored data refuses a
+change, a report replaces it: nothing was changed, the count per rule — two parents,
+cycles, or pairs linked more than once — with the listed entities as Workbench links
+labelled by type and short id and "and N more" beyond them, a hint to fix the data in the
+Workbench and retry, and Dismiss. The field keeps the stored value.
 
 The properties list puts the name property first, then the rest by key, with key, display
 name, data type, required flag, default and description per row. Clicking a row opens its
@@ -1240,7 +1246,8 @@ rest folds behind "+N more". A node's chevron collapses its list to a property c
 `H` collapses or expands every node, Shift+H only the selected one, and the collapsed
 lists are remembered per ontology. One edge per relation type, with an arrowhead at the
 target and the key as its label; a parent relation's edge is drawn thicker in the parent
-colour, violet, with a dot on its parent end. Relation types between the same two entity types, in
+colour, violet, with a dot on its parent end; another one-per-pair relation type's label
+carries a small "one per pair" badge. Relation types between the same two entity types, in
 either direction, curve apart so none overlap; self-relations are loops above their node,
 nesting outward; a label slides along its edge to stay clear of nodes and earlier labels.
 A relation type whose endpoint type is missing is not drawn. The canvas follows the app's
@@ -1309,7 +1316,8 @@ focus mode, then the selection.
 On the left of the [Schema](#schema) screen in both views: a search box, then the entity
 types (colour, display name, key, issue count, property count) and the relation types
 (display name, key, source → target, issue count, property count; a parent relation with
-a dot in the parent colour naming its parent end), each row expandable to
+a dot in the parent colour naming its parent end, another one-per-pair relation type with
+the "one per pair" badge), each row expandable to
 its properties — key, name-property tag, required marker, issue marker and data type. Clicking a type selects
 and reveals it; clicking a property selects its owner with that property opened. The
 selected row scrolls into view, and a property opened elsewhere expands its owner here.
@@ -1512,7 +1520,7 @@ list request with a page size of one per Children section, which counts only the
 the lens shows; the server's refusal remains the rule, and a refused delete refreshes the
 counts.
 
-**Bulk delete is a client loop.** There is no bulk endpoint. Deleting a selection issues
+**Bulk delete is a client loop.** Deleting a selection issues
 one request at a time, sequentially, advancing a progress indicator and counting failures.
 The outcome is reported as a partial result when some failed. The selection is cleared and
 the list refreshed regardless of outcome. While a changeset is pinned each request stages

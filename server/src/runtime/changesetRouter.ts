@@ -7,7 +7,8 @@
  * `POST /:changesetId/writes` stages one call, its body discriminated by
  * `operation`, and answers 201 `{id}` (a create with a parent relation
  * adds `relation: {id}`, an entity delete `cascaded`, a document edit the
- * document edit's answer). `DELETE /:changesetId/objects/:objectId`
+ * document edit's answer, a put `action`); a body that lists calls stages
+ * them whole or not at all and answers their answers in item order. `DELETE /:changesetId/objects/:objectId`
  * unstages one staged object, `DELETE …/objects/:objectId/properties/:propertyKey`
  * cuts one staged value, and `POST …/objects/:objectId/rebase` accepts the
  * stored values now as the befores. `GET /` lists the lens's changesets (a
@@ -69,6 +70,15 @@ const Properties = PropertyPayload.default({});
  * `id` or by `identity`, exactly one (the service's 422). */
 const EntityTarget = { id: z.string().optional(), identity: z.string().optional() };
 
+/** The ends of a staged relation create or put: each by id or by
+ * identity, exactly one (the service's 422). */
+const RelationEndFields = {
+  fromEntityId: z.string().optional(),
+  toEntityId: z.string().optional(),
+  fromEntityIdentity: z.string().optional(),
+  toEntityIdentity: z.string().optional(),
+};
+
 /** One staged call: `type` is the entity or relation type key, `id` the
  * target of an update, delete or document edit (an entity's, or its
  * `identity`); a document edit carries the body of the document PATCH
@@ -82,15 +92,7 @@ const StagedWritePayload = z.discriminatedUnion("operation", [
   }),
   z.strictObject({ operation: z.literal("update_entity"), type: z.string(), ...EntityTarget, properties: Properties }),
   z.strictObject({ operation: z.literal("delete_entity"), type: z.string(), ...EntityTarget }),
-  z.strictObject({
-    operation: z.literal("create_relation"),
-    type: z.string(),
-    fromEntityId: z.string().optional(),
-    toEntityId: z.string().optional(),
-    fromEntityIdentity: z.string().optional(),
-    toEntityIdentity: z.string().optional(),
-    properties: Properties,
-  }),
+  z.strictObject({ operation: z.literal("create_relation"), type: z.string(), ...RelationEndFields, properties: Properties }),
   z.strictObject({ operation: z.literal("update_relation"), type: z.string(), id: z.string(), properties: Properties }),
   z.strictObject({ operation: z.literal("delete_relation"), type: z.string(), id: z.string() }),
   z.strictObject({
@@ -100,6 +102,19 @@ const StagedWritePayload = z.discriminatedUnion("operation", [
     property: z.string(),
     ...DocumentEditFields,
   }),
+  z.strictObject({ operation: z.literal("put_entity"), type: z.string(), properties: Properties }),
+  z.strictObject({
+    operation: z.literal("put_relation"),
+    type: z.string(),
+    ...RelationEndFields,
+    properties: Properties,
+  }),
+]);
+
+/** One staged call, or a list of up to `MAX_BATCH_ITEMS`. */
+const StagingPayload = z.union([
+  StagedWritePayload,
+  z.array(StagedWritePayload).min(1).max(changesets.MAX_BATCH_ITEMS),
 ]);
 
 function stagedWrite(body: z.infer<typeof StagedWritePayload>): changesets.StagedWrite {
@@ -108,6 +123,7 @@ function stagedWrite(body: z.infer<typeof StagedWritePayload>): changesets.Stage
     case "create_entity":
       return { operation: body.operation, typeKey, properties: body.properties, parentRelation: body.parentRelation ?? null };
     case "create_relation":
+    case "put_relation":
       return {
         operation: body.operation,
         typeKey,
@@ -119,6 +135,8 @@ function stagedWrite(body: z.infer<typeof StagedWritePayload>): changesets.Stage
       };
     case "update_entity":
       return { operation: body.operation, typeKey, id: body.id, identity: body.identity, properties: body.properties };
+    case "put_entity":
+      return { operation: body.operation, typeKey, properties: body.properties };
     case "update_relation":
       return { operation: body.operation, typeKey, id: body.id, properties: body.properties };
     case "delete_entity":
@@ -234,15 +252,13 @@ export const changesetRouter: FastifyPluginAsyncZod = async (app) => {
 
   app.post(
     "/:changesetId/writes",
-    { schema: { tags: ["runtime"], params: ChangesetParams, body: StagedWritePayload } },
+    { schema: { tags: ["runtime"], params: ChangesetParams, body: StagingPayload } },
     async (request, reply) => {
-      const answer = await changesets.stage(
-        request.params.lensKey,
-        rulesetOf(request.params),
-        request.params.changesetId,
-        stagedWrite(request.body),
-        await getRuntimeStore(request.params.ontologyKey),
-      );
+      const { lensKey, changesetId, ontologyKey } = request.params;
+      const store = await getRuntimeStore(ontologyKey);
+      const answer = Array.isArray(request.body)
+        ? await changesets.stageBatch(lensKey, rulesetOf(request.params), changesetId, request.body.map(stagedWrite), store)
+        : await changesets.stage(lensKey, rulesetOf(request.params), changesetId, stagedWrite(request.body), store);
       return reply.status(201).send(answer);
     },
   );

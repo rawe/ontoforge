@@ -815,7 +815,9 @@ export function createRuntimeMcpServer(
         "type whose `parent` names the parent end), every entity has at most one parent " +
         "across all parent relations and the hierarchy has no cycles: the create is " +
         "refused when the child end already has a parent, or when the parent end is the " +
-        "child itself or one of its descendants. Name each end by its id ('from_entity_id', " +
+        "child itself or one of its descendants. For a relation type with `onePerPair`, the " +
+        "create is refused when a relation of the type already links this source to this " +
+        "target. Name each end by its id ('from_entity_id', " +
         "'to_entity_id') or by its identity ('from_entity_identity', 'to_entity_identity'), " +
         "exactly one per end; prefer the identity when the end's type has one." +
         staged("create"),
@@ -1332,7 +1334,7 @@ function registerChangesetTools(
         "write_document; reads never see staged data. The changeset is a set, not a history: " +
         "one staged object per entity or relation it touches, with its action (create, update " +
         "or delete) and one staged value per property, each later write merged in. It holds at " +
-        `most 10,000 staged objects, and at most ${settings.CHANGESET_MAX_BYTES} bytes of staged ` +
+        `most ${settings.CHANGESET_MAX_OBJECTS} staged objects, and at most ${settings.CHANGESET_MAX_BYTES} bytes of staged ` +
         "values as JSON, document text included. A draft changeset left unchanged for 7 days " +
         "expires and is deleted." +
         (rulesetKey !== null

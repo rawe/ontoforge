@@ -58,12 +58,17 @@ import type { ValidatedQuery } from "../../core/oql/index.js";
 import type {
   ChangesetStore,
   DesignRevision,
+  EntityCreateRow,
+  EntityUpdateRow,
   FilterCondition,
+  InstanceDeleteRow,
   LockedTarget,
   NavigatorStore,
   ParentLink,
   Row,
   RulesetStore,
+  RelationCreateRow,
+  RelationUpdateRow,
   RuntimeStore,
   SearchIndexStore,
   SearchWritePlan,
@@ -94,7 +99,7 @@ import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRea
 import { PostgresChangesetStore } from "./changesetStore.js";
 import { PostgresNavigatorStore } from "./navigatorStore.js";
 import { PostgresRulesetStore } from "./rulesetStore.js";
-import { applySearchWritePlan, PostgresSearchIndexStore } from "./searchIndexStore.js";
+import { applySearchWritePlan, applySearchWritePlans, PostgresSearchIndexStore } from "./searchIndexStore.js";
 import { distance, minScoreFloor, similarity, vectorParams, vectorSearch } from "./search.js";
 
 type PropertyDefs = Record<string, PropertyDef>;
@@ -170,6 +175,20 @@ function fingerprintedProps(alias: string, keysParam: string): string {
 /** The jsonb text for a props write: datetime `Date`s → ISO text. */
 function propsJson(properties: Row, propertyDefs: PropertyDefs): string {
   return JSON.stringify(toJson(properties, propertyDefs));
+}
+
+/** The plans of the rows of a batch write, those of `written` only when given. */
+function plansOf<T extends { search: SearchWritePlan | null }>(
+  rows: T[],
+  idOf: (row: T) => string,
+  written?: string[],
+): SearchWritePlan[] {
+  const ids = written === undefined ? null : new Set(written);
+  return rows.flatMap((row) => (row.search === null || (ids !== null && !ids.has(idOf(row))) ? [] : [row.search]));
+}
+
+function idsOf(result: DbResult): string[] {
+  return result.rows.map((row) => row["id"] as string);
 }
 
 export class PostgresRuntimeStore implements RuntimeStore {
@@ -471,6 +490,47 @@ export class PostgresRuntimeStore implements RuntimeStore {
     return result.rows.map((row) => ({ id: row.id as string, identity: row.identity as string }));
   }
 
+  async relationsOfPairs(
+    relationTypeKey: string,
+    pairs: { fromId: string; toId: string }[],
+  ): Promise<{ id: string; fromId: string; toId: string }[]> {
+    const valid = pairs.filter((pair) => isUuid(pair.fromId) && isUuid(pair.toId));
+    if (valid.length === 0) {
+      return [];
+    }
+    const result = await this.query(
+      `SELECT r.id, r.from_id, r.to_id
+         FROM relation r
+         JOIN unnest($2::uuid[], $3::uuid[]) AS p (from_id, to_id)
+           ON p.from_id = r.from_id AND p.to_id = r.to_id
+        WHERE r.type_key = $1
+        ORDER BY r.from_id, r.to_id, r.id`,
+      [relationTypeKey, valid.map((pair) => pair.fromId), valid.map((pair) => pair.toId)],
+    );
+    return result.rows.map((row) => ({ id: row.id as string, fromId: row.from_id as string, toId: row.to_id as string }));
+  }
+
+  /** One advisory lock per pair, in a fixed order so that two writers of
+   * overlapping pairs never wait on each other in a cycle. */
+  async lockPairs(
+    relationTypeKey: string,
+    pairs: { fromId: string; toId: string }[],
+  ): Promise<{ id: string; fromId: string; toId: string }[]> {
+    const keyed = new Map(pairs.filter((p) => isUuid(p.fromId) && isUuid(p.toId)).map((p) => [`${p.fromId} ${p.toId}`, p]));
+    const sorted = [...keyed.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, pair]) => pair);
+    if (sorted.length === 0) {
+      return [];
+    }
+    await this.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended(
+                'ontoforge.pair.' || current_schema() || '.' || $1 || '.' || p.from_id || '.' || p.to_id, 0))
+         FROM unnest($2::uuid[], $3::uuid[]) WITH ORDINALITY AS p (from_id, to_id, n)
+        ORDER BY p.n`,
+      [relationTypeKey, sorted.map((pair) => pair.fromId), sorted.map((pair) => pair.toId)],
+    );
+    return this.relationsOfPairs(relationTypeKey, sorted);
+  }
+
   async setIdentityCheck(mode: "deferred" | "immediate"): Promise<void> {
     await this.query(`SET CONSTRAINTS ${IDENTITY_UNIQUE} ${mode === "deferred" ? "DEFERRED" : "IMMEDIATE"}`);
   }
@@ -698,6 +758,144 @@ export class PostgresRuntimeStore implements RuntimeStore {
       "before",
     );
     return result.rowCount > 0;
+  }
+
+  // ------------------------------------------------------------------
+  // Batch writes: one statement per batch, its rows as one jsonb
+  // recordset, and the search work of the rows it wrote beside it.
+  // ------------------------------------------------------------------
+
+  async createEntities(rows: EntityCreateRow[]): Promise<void> {
+    if (rows.length === 0) {
+      return;
+    }
+    const records = rows.map((row) => ({
+      id: row.entityId,
+      type_key: row.entityTypeKey,
+      props: toJson(row.properties, row.propertyDefs),
+      identity: row.identity,
+    }));
+    await this.tx(async (querier) => {
+      await querier.query(
+        `INSERT INTO entity (id, type_key, props, identity)
+         SELECT p.id, p.type_key, p.props, p.identity
+           FROM jsonb_to_recordset($1::jsonb) AS p (id uuid, type_key text, props jsonb, identity text)`,
+        [JSON.stringify(records)],
+      );
+      await applySearchWritePlans(querier, plansOf(rows, (row) => row.entityId), this.ontologyKey);
+    });
+  }
+
+  async updateEntities(rows: EntityUpdateRow[]): Promise<string[]> {
+    const valid = rows.filter((row) => isUuid(row.entityId));
+    if (valid.length === 0) {
+      return [];
+    }
+    const records = valid.map((row) => ({
+      id: row.entityId,
+      type_key: row.entityTypeKey,
+      set_props: toJson(row.setProperties, row.propertyDefs),
+      remove_props: row.removeProperties,
+      has_identity: row.identity !== undefined,
+      identity: row.identity ?? null,
+    }));
+    return this.tx(async (querier) => {
+      const result = await querier.query(
+        `UPDATE entity e
+            SET props = (e.props || p.set_props) - p.remove_props, updated_at = now(),
+                identity = CASE WHEN p.has_identity THEN p.identity ELSE e.identity END
+           FROM jsonb_to_recordset($1::jsonb) AS p (id uuid, type_key text, set_props jsonb, remove_props text[],
+                                                    has_identity boolean, identity text)
+          WHERE e.type_key = p.type_key AND e.id = p.id
+         RETURNING e.id`,
+        [JSON.stringify(records)],
+      );
+      const written = idsOf(result);
+      await applySearchWritePlans(querier, plansOf(valid, (row) => row.entityId, written), this.ontologyKey);
+      return written;
+    });
+  }
+
+  /** The search work first, while the relations that cascade still exist. */
+  async deleteEntities(rows: InstanceDeleteRow[]): Promise<string[]> {
+    return this.deleteBatch("entity", rows);
+  }
+
+  /** A row whose end does not exist is not inserted, so no foreign key
+   * fails the batch. */
+  async createRelations(rows: RelationCreateRow[]): Promise<string[]> {
+    if (rows.length === 0) {
+      return [];
+    }
+    const records = rows.map((row) => ({
+      id: row.relationId,
+      type_key: row.relationTypeKey,
+      from_id: isUuid(row.fromEntityId) ? row.fromEntityId : null,
+      to_id: isUuid(row.toEntityId) ? row.toEntityId : null,
+      props: toJson(row.properties, row.propertyDefs),
+    }));
+    return this.tx(async (querier) => {
+      const result = await querier.query(
+        `INSERT INTO relation (id, type_key, from_id, to_id, props)
+         SELECT p.id, p.type_key, p.from_id, p.to_id, p.props
+           FROM jsonb_to_recordset($1::jsonb) AS p (id uuid, type_key text, from_id uuid, to_id uuid, props jsonb)
+          WHERE EXISTS (SELECT 1 FROM entity f WHERE f.id = p.from_id)
+            AND EXISTS (SELECT 1 FROM entity t WHERE t.id = p.to_id)
+         RETURNING id`,
+        [JSON.stringify(records)],
+      );
+      const written = idsOf(result);
+      await applySearchWritePlans(querier, plansOf(rows, (row) => row.relationId, written), this.ontologyKey);
+      return written;
+    });
+  }
+
+  async updateRelations(rows: RelationUpdateRow[]): Promise<string[]> {
+    const valid = rows.filter((row) => isUuid(row.relationId));
+    if (valid.length === 0) {
+      return [];
+    }
+    const records = valid.map((row) => ({
+      id: row.relationId,
+      type_key: row.relationTypeKey,
+      set_props: toJson(row.setProperties, row.propertyDefs),
+      remove_props: row.removeProperties,
+    }));
+    return this.tx(async (querier) => {
+      const result = await querier.query(
+        `UPDATE relation r
+            SET props = (r.props || p.set_props) - p.remove_props, updated_at = now()
+           FROM jsonb_to_recordset($1::jsonb) AS p (id uuid, type_key text, set_props jsonb, remove_props text[])
+          WHERE r.type_key = p.type_key AND r.id = p.id
+         RETURNING r.id`,
+        [JSON.stringify(records)],
+      );
+      const written = idsOf(result);
+      await applySearchWritePlans(querier, plansOf(valid, (row) => row.relationId, written), this.ontologyKey);
+      return written;
+    });
+  }
+
+  async deleteRelations(rows: InstanceDeleteRow[]): Promise<string[]> {
+    return this.deleteBatch("relation", rows);
+  }
+
+  private deleteBatch(table: "entity" | "relation", rows: InstanceDeleteRow[]): Promise<string[]> {
+    const valid = rows.filter((row) => isUuid(row.id));
+    if (valid.length === 0) {
+      return Promise.resolve([]);
+    }
+    return this.tx(async (querier) => {
+      await applySearchWritePlans(querier, plansOf(valid, (row) => row.id), this.ontologyKey);
+      const result = await querier.query(
+        `DELETE FROM ${table} x
+          USING unnest($1::text[], $2::uuid[]) AS p (type_key, id)
+          WHERE x.type_key = p.type_key AND x.id = p.id
+         RETURNING x.id`,
+        [valid.map((row) => row.typeKey), valid.map((row) => row.id)],
+      );
+      return idsOf(result);
+    });
   }
 
   // ------------------------------------------------------------------

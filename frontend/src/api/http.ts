@@ -57,6 +57,12 @@ export class ApiError extends Error {
     return Object.fromEntries(taken.properties.map((key) => [key, message]))
   }
 
+  /** A `PAIR_TAKEN` conflict: the pair is already linked by a relation of
+   * this one-per-pair type. */
+  get pairTaken(): boolean {
+    return this.details?.code === 'PAIR_TAKEN'
+  }
+
   /** Search indices affected by a `CASCADE_REQUIRED` conflict, if present. */
   get affectedIndices(): string[] | undefined {
     const affected = this.details?.affectedIndices

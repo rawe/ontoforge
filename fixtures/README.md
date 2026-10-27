@@ -30,7 +30,8 @@ node fixtures/fixture.mjs load people_basic --base-url http://localhost:8010
 The server is `--base-url`, else `ONTOFORGE_BASE_URL`, else `http://localhost:8000`.
 
 - **load** — creates `fx_<name>`, imports `schema.json` (its keyword languages
-  included), writes `data.json` through the schema's unscoped lens, then waits until
+  included), writes `data.json` through the schema's unscoped lens — staged into
+  changesets and committed in chunks, as the sync skill's import does — then waits until
   every search index of the ontology has built its entries, printing progress. Failed
   items are reported, and after 15 minutes the tool stops waiting with a warning — the
   data is loaded either way and the indices keep building in the background.

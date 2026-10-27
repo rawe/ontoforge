@@ -262,6 +262,8 @@ The backend reads settings from environment variables (or a `.env` file in `serv
 | `SEARCH_WORKER_BATCH` | `64` | Queued search-indexing items the background worker claims per batch (positive integer) |
 | `SEARCH_POLL_MS` | `5000` | Milliseconds the background worker waits between queue checks when no wake-up notification arrives (positive integer) |
 | `CHANGESET_MAX_BYTES` | `33554432` (32 MiB) | The most bytes one changeset's staged values hold, document text included (positive integer) |
+| `CHANGESET_MAX_OBJECTS` | `10000` | The most staged objects one changeset holds; a larger import commits in several changesets (positive integer) |
+| `REQUEST_BODY_LIMIT` | `16777216` (16 MiB) | The largest request body the server reads, in bytes, such as a staging request that lists many calls; a larger one answers `413 PAYLOAD_TOO_LARGE` (positive integer) |
 | `PUBLIC_URL` | *(unset)* | The address browsers and clients reach the deployment at, reported by `/api/server/info` for client configuration. Required with `AUTH_ENABLED=true`: the browser's origin, whose `/api/auth/callback` is the sign-in callback and which the web client must be served from; it must be `https` unless its host is localhost |
 
 In Docker, `DB_URI` is set to `postgresql://postgres:5432/ontoforge` automatically via `docker-compose.yml`.

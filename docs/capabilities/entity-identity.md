@@ -67,8 +67,8 @@ Every create and update computes the entity's identity from the values it will h
   RESOURCE_CONFLICT`, `details.code` `IDENTITY_TAKEN`, the identity and the identity
   property keys. Two concurrent creates of one identity give exactly one entity and this
   conflict, never a storage error.
-- There is no create-or-update. An update never creates; a client that loads data creates
-  and, on `IDENTITY_TAKEN`, updates by identity.
+- There is no create-or-update on immediate writes. An update never creates; a client that
+  loads data stages [puts](changesets.md#put), which resolve to a create or an update.
 - An update that changes an identity property's value **renames** the identity, under the
   same check. The old identity is not kept: it no longer finds the entity.
 - An update locks the entity before it reads the values its identity is built from, so two

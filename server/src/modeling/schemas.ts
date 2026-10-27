@@ -125,13 +125,17 @@ export const RelationTypeCreate = z.object({
   targetEntityTypeKey: z.string(),
   /** The parent end; absent or null makes an ordinary relation type. */
   parent: z.enum(PARENT_ENDS).nullable().optional(),
+  /** One per pair; absent means false, or true with a parent end. */
+  onePerPair: z.boolean().optional(),
 });
 
-/** An explicit null `parent` clears it; an omitted one leaves it unchanged. */
+/** An explicit null `parent` clears it; an omitted one or an omitted
+ * `onePerPair` leaves it unchanged. */
 export const RelationTypeUpdate = z.object({
   displayName: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   parent: z.enum(PARENT_ENDS).nullable().optional(),
+  onePerPair: z.boolean().optional(),
 });
 
 export const RelationTypeResponse = z.object({
@@ -143,6 +147,8 @@ export const RelationTypeResponse = z.object({
   targetEntityTypeKey: z.string(),
   /** The parent end; null for an ordinary relation type. */
   parent: z.enum(PARENT_ENDS).nullable(),
+  /** One per pair; always true with a parent end. */
+  onePerPair: z.boolean(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -305,6 +311,9 @@ export const ExportRelationType = z.object({
   /** The parent end; absent (a payload written before it existed) or null
    * for an ordinary relation type. */
   parent: z.enum(PARENT_ENDS).nullable().optional(),
+  /** One per pair; absent (a payload written before it existed) means
+   * false, or true with a parent end. */
+  onePerPair: z.boolean().optional(),
   properties: z.array(ExportProperty).default([]),
 });
 

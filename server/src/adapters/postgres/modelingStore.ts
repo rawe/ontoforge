@@ -7,9 +7,10 @@
  *   exceptions are `getFullSchema`, whose coherent-snapshot obligation
  *   is honoured with one REPEATABLE READ transaction through
  *   `withTransaction`, `createEntityType`, which writes the type and
- *   its name property in one transaction, and the parent flag writes
- *   (`createRelationType`, `setRelationTypeParent`), which count the
- *   parent-rule violators and then write, or refuse, in one transaction.
+ *   its name property in one transaction, and the relation rules writes
+ *   (`createRelationType`, `setRelationTypeRules`), which count the
+ *   violators of the rules they set and then write, or refuse, in one
+ *   transaction.
  * - Deletes are one `DELETE` each, `rowCount > 0` as the boolean —
  *   `ON DELETE CASCADE` carries the fan-out (property definitions,
  *   inclusions, agents, saved queries), and the endpoint FKs' `ON DELETE RESTRICT` backs the
@@ -42,9 +43,10 @@ import { toSql } from "pgvector";
 import type {
   ModelingStore,
   NavigatorStore,
-  ParentFlagWrite,
-  ParentRule,
-  ParentViolation,
+  RelationRule,
+  RelationRules,
+  RelationRulesWrite,
+  RelationRuleViolation,
   Row,
   SearchIndexStore,
 } from "../../core/ports.js";
@@ -73,7 +75,9 @@ const ENTITY_TYPE_COLS =
   "created_at, updated_at";
 const RELATION_TYPE_COLS =
   "relation_type_id, key, display_name, description, " +
-  "source_entity_type_key, target_entity_type_key, parent, created_at, updated_at";
+  "source_entity_type_key, target_entity_type_key, parent, " +
+  // A parent end always holds one per pair, whatever the column says.
+  "(one_per_pair OR parent IS NOT NULL) AS one_per_pair, created_at, updated_at";
 const PROPERTY_COLS =
   "property_id, key, display_name, description, data_type, required, default_value, " +
   "created_at, updated_at";
@@ -154,7 +158,7 @@ async function insertProperty(
   return camelizeRow(result.rows[0]!);
 }
 
-/** The most violators of one parent rule a refusal names. */
+/** The most violators of one relation rule a refusal names. */
 const VIOLATORS_SHOWN = 5;
 
 /**
@@ -171,7 +175,7 @@ const VIOLATORS_SHOWN = 5;
 async function parentViolations(
   querier: Querier,
   readings: Record<string, ParentEnd>,
-): Promise<ParentViolation[]> {
+): Promise<RelationRuleViolation[]> {
   const keys = Object.keys(readings);
   const result = await querier.query(
     `WITH RECURSIVE reading (type_key, parent) AS (
@@ -208,16 +212,70 @@ async function parentViolations(
      ORDER BY rank, n`,
     [keys, keys.map((key) => readings[key]!), VIOLATORS_SHOWN],
   );
-  const violations: ParentViolation[] = [];
-  for (const row of result.rows) {
+  return groupViolations(result.rows);
+}
+
+/** Violator rows (rule, total, type_key, id), in report order, as one
+ * violation per rule. */
+function groupViolations(rows: Row[]): RelationRuleViolation[] {
+  const violations: RelationRuleViolation[] = [];
+  for (const row of rows) {
     let violation = violations.at(-1);
     if (violation === undefined || violation.rule !== row.rule) {
-      violation = { rule: row.rule as ParentRule, count: Number(row.total), entities: [] };
+      violation = { rule: row.rule as RelationRule, count: Number(row.total), entities: [] };
       violations.push(violation);
     }
     violation.entities.push({ type: row.type_key as string, id: row.id as string });
   }
   return violations;
+}
+
+/**
+ * The pairs the stored relations of `keys` link more than once under one
+ * key, as one `duplicate_pair` violation: their count and the sources of
+ * the first pairs, ordered by type and id. Empty when there are none.
+ */
+async function duplicatePairs(querier: Querier, keys: string[]): Promise<RelationRuleViolation[]> {
+  if (keys.length === 0) return [];
+  const result = await querier.query(
+    `SELECT 'duplicate_pair' AS rule, total, type_key, id FROM (
+       SELECT e.type_key, d.from_id AS id,
+              count(*) OVER () AS total,
+              row_number() OVER (ORDER BY e.type_key, d.from_id, d.to_id) AS n
+         FROM (SELECT from_id, to_id FROM relation WHERE type_key = ANY($1::text[])
+                GROUP BY type_key, from_id, to_id HAVING count(*) > 1) d
+         JOIN entity e ON e.id = d.from_id
+     ) ranked
+     WHERE n <= $2
+     ORDER BY n`,
+    [keys, VIOLATORS_SHOWN],
+  );
+  return groupViolations(result.rows);
+}
+
+/** The violators a rules write refuses with: the parent rules when it
+ * sets or flips the parent end, one per pair when it turns that on. */
+async function rulesViolations(
+  querier: Querier,
+  key: string,
+  before: RelationRules,
+  after: RelationRules,
+): Promise<RelationRuleViolation[]> {
+  const violations: RelationRuleViolation[] = [];
+  if (after.parent !== null && after.parent !== before.parent) {
+    violations.push(...(await parentViolations(querier, { [key]: after.parent })));
+  }
+  // A parent end checked just now already refuses a pair linked twice,
+  // as a child with two parents.
+  if (after.onePerPair && !before.onePerPair && violations.length === 0) {
+    violations.push(...(await duplicatePairs(querier, [key])));
+  }
+  return violations;
+}
+
+/** The rules a relation type row carries. */
+function rulesOf(row: Row): RelationRules {
+  return { parent: (row.parent as ParentEnd | null) ?? null, onePerPair: row.onePerPair === true };
 }
 
 export class PostgresModelingStore implements ModelingStore {
@@ -519,22 +577,23 @@ export class PostgresModelingStore implements ModelingStore {
     description: string | null,
     sourceEntityTypeKey: string,
     targetEntityTypeKey: string,
-    parent: ParentEnd | null,
-  ): Promise<ParentFlagWrite> {
+    rules: RelationRules,
+  ): Promise<RelationRulesWrite> {
     return this.tx(async (querier) => {
-      if (parent !== null) {
-        const violations = await parentViolations(querier, { [key]: parent });
-        if (violations.length > 0) {
-          return { violations };
-        }
+      const violations = await rulesViolations(querier, key, { parent: null, onePerPair: false }, rules);
+      if (violations.length > 0) {
+        return { violations };
       }
       const result = await querier.query(
         `INSERT INTO relation_type
            (relation_type_id, key, display_name, description,
-            source_entity_type_key, target_entity_type_key, parent)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+            source_entity_type_key, target_entity_type_key, parent, one_per_pair)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING ${RELATION_TYPE_COLS}`,
-        [relationTypeId, key, displayName, description, sourceEntityTypeKey, targetEntityTypeKey, parent],
+        [
+          relationTypeId, key, displayName, description, sourceEntityTypeKey, targetEntityTypeKey,
+          rules.parent, rules.onePerPair || rules.parent !== null,
+        ],
       );
       return { row: camelizeRow(result.rows[0]!) };
     });
@@ -587,43 +646,49 @@ export class PostgresModelingStore implements ModelingStore {
     return firstRowOrNull(result.rows);
   }
 
-  /** One transaction: the type's key, the violators under the new
-   * reading, then the update unless there are any. Clearing skips the
-   * count. No lock: a racing relation write is accepted (A3). */
-  async setRelationTypeParent(
+  /** One transaction: the type's stored rules, the violators of the rules
+   * the write sets, then the update unless there are any. Clearing skips
+   * the count. No lock: a racing relation write is accepted (A3). */
+  async setRelationTypeRules(
     relationTypeId: string,
-    parent: ParentEnd | null,
-  ): Promise<ParentFlagWrite | null> {
+    rules: RelationRules,
+  ): Promise<RelationRulesWrite | null> {
     if (!isUuid(relationTypeId)) {
       return null;
     }
     return this.tx(async (querier) => {
-      if (parent !== null) {
-        const found = await querier.query(
-          `SELECT key FROM relation_type WHERE relation_type_id = $1`,
-          [relationTypeId],
-        );
-        const key = found.rows[0]?.key as string | undefined;
-        if (key === undefined) {
-          return null;
-        }
-        const violations = await parentViolations(querier, { [key]: parent });
-        if (violations.length > 0) {
-          return { violations };
-        }
+      const found = await querier.query(
+        `SELECT ${RELATION_TYPE_COLS} FROM relation_type WHERE relation_type_id = $1`,
+        [relationTypeId],
+      );
+      const before = firstRowOrNull(found.rows);
+      if (before === null) {
+        return null;
+      }
+      const violations = await rulesViolations(querier, before.key as string, rulesOf(before), rules);
+      if (violations.length > 0) {
+        return { violations };
       }
       const result = await querier.query(
-        `UPDATE relation_type SET parent = $2, updated_at = now()
+        `UPDATE relation_type SET parent = $2, one_per_pair = $3, updated_at = now()
          WHERE relation_type_id = $1 RETURNING ${RELATION_TYPE_COLS}`,
-        [relationTypeId, parent],
+        [relationTypeId, rules.parent, rules.onePerPair || rules.parent !== null],
       );
       const row = firstRowOrNull(result.rows);
       return row === null ? null : { row };
     });
   }
 
-  async findParentViolations(readings: Record<string, ParentEnd>): Promise<ParentViolation[]> {
-    return parentViolations({ query: (text, params) => this.query(text, params) }, readings);
+  async findRelationRuleViolations(readings: Record<string, RelationRules>): Promise<RelationRuleViolation[]> {
+    const querier: Querier = { query: (text, params) => this.query(text, params) };
+    const parents: Record<string, ParentEnd> = {};
+    for (const [key, rules] of Object.entries(readings)) if (rules.parent !== null) parents[key] = rules.parent;
+    const violations = Object.keys(parents).length > 0 ? await parentViolations(querier, parents) : [];
+    // A pair linked twice under a parent relation is already a child with two parents.
+    const pairKeys = Object.entries(readings)
+      .filter(([, rules]) => rules.onePerPair && rules.parent === null)
+      .map(([key]) => key);
+    return [...violations, ...(await duplicatePairs(querier, pairKeys))];
   }
 
   /** One `DELETE`: property definitions and inclusions go via CASCADE. */

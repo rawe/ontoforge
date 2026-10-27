@@ -1,14 +1,13 @@
 /**
- * A relation type's parent end, in its header: "Parent: — / Source (X) /
- * Target (Y)". Setting and flipping are written at once; the server checks
- * the stored data and may refuse, and the refusal report then shows in place
- * of the change (the flag is unchanged). Clearing is never refused and asks
- * once here. Renders a fragment: the field, then the report as its own row
- * (`basis-full` breaks the page header's row).
+ * A relation type's parent end, one of its relation rules
+ * (`RelationRulesField`): "Parent: — / Source (X) / Target (Y)". Setting and
+ * flipping are written at once; the server checks the stored data and may
+ * refuse, and the refusal report then shows in place of the change (the flag
+ * is unchanged). Clearing is never refused and asks once here. Renders a
+ * fragment: the field, then the report as its own row.
  */
 
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 import type { ParentEnd, RelationType } from '@/api/types'
 import {
   AlertDialog,
@@ -20,7 +19,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Button } from '@/components/ui/button'
 import {
   Select,
   SelectContent,
@@ -28,10 +26,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useTargetLens } from '@/components/layout/surfaceTargets'
 import { cn } from '@/lib/utils'
-import { parentViolationsOf, refusalReport } from './errors'
+import { PARENT_RULES, relationRuleViolationsOf } from './errors'
 import { useSetParent } from './mutations'
+import { RuleRefusalReport } from './RuleRefusalReport'
 import { useModelSchema } from './useModelSchema'
 
 /** The Select's value for an ordinary relation type (an item cannot be ''). */
@@ -54,7 +52,7 @@ export function ParentField({
     end === 'source'
       ? `Source (${nameOf(relation.sourceEntityTypeKey)})`
       : `Target (${nameOf(relation.targetEntityTypeKey)})`
-  const violations = parentViolationsOf(setParent.error)
+  const violations = relationRuleViolationsOf(setParent.error)
 
   return (
     <>
@@ -90,9 +88,11 @@ export function ParentField({
       </label>
 
       {violations !== null && setParent.variables != null && (
-        <RefusalReport
+        <RuleRefusalReport
           ontologyKey={ontologyKey}
-          attempted={endLabel(setParent.variables)}
+          title={`Parent ${endLabel(setParent.variables)} not saved: the stored data breaks the parent rules. Nothing was changed.`}
+          rules={PARENT_RULES}
+          hint="Every entity has at most one parent, and there are no cycles. Fix the data in the Workbench, then retry."
           violations={violations}
           nameOf={nameOf}
           onDismiss={() => setParent.reset()}
@@ -105,7 +105,7 @@ export function ParentField({
             <AlertDialogTitle>Clear the parent end of "{relation.key}"?</AlertDialogTitle>
             <AlertDialogDescription>
               It becomes an ordinary relation type. Its relations stay, and the parent rules no
-              longer apply to them.
+              longer apply to them. One per pair stays on until you turn it off.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -115,69 +115,5 @@ export function ParentField({
         </AlertDialogContent>
       </AlertDialog>
     </>
-  )
-}
-
-/** A count per parent rule and the first five breaking entities, each a Workbench link. */
-function RefusalReport({
-  ontologyKey,
-  attempted,
-  violations,
-  nameOf,
-  onDismiss,
-}: {
-  ontologyKey: string
-  attempted: string
-  violations: Parameters<typeof refusalReport>[0]
-  nameOf: (typeKey: string) => string
-  onDismiss: () => void
-}) {
-  // The lens the Studio's switch opens; null while it loads or when there is none.
-  const { lens } = useTargetLens(ontologyKey)
-  return (
-    <div
-      role="alert"
-      className="grid basis-full gap-1.5 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-[12px]"
-    >
-      <p className="font-medium text-destructive">
-        Parent {attempted} not saved: the stored data breaks the parent rules. Nothing was changed.
-      </p>
-      <ul className="grid gap-1">
-        {refusalReport(violations).map((line) => (
-          <li key={line.rule}>
-            <span className="font-medium">{line.summary}</span>
-            {line.entities.length > 0 && (
-              <span className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
-                {line.entities.map((e) => {
-                  const label = `${nameOf(e.type)} ${e.id.slice(0, 8)}`
-                  return lens === null ? (
-                    <span key={e.id} className="font-mono text-[11px]" title={e.id}>
-                      {label}
-                    </span>
-                  ) : (
-                    <Link
-                      key={e.id}
-                      to={`/o/${ontologyKey}/w/${lens.key}/e/${encodeURIComponent(e.type)}/${encodeURIComponent(e.id)}`}
-                      title={`Open in the Workbench (lens ${lens.name}) · ${e.id}`}
-                      className="font-mono text-[11px] text-primary hover:underline"
-                    >
-                      {label}
-                    </Link>
-                  )
-                })}
-                {line.more > 0 && <span className="text-muted-foreground">and {line.more} more</span>}
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-      <p className="text-muted-foreground">
-        Every entity has at most one parent, and there are no cycles. Fix the data in the
-        Workbench, then retry.
-      </p>
-      <Button variant="ghost" size="xs" className="justify-self-start" onClick={onDismiss}>
-        Dismiss
-      </Button>
-    </div>
   )
 }

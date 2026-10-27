@@ -587,7 +587,7 @@ Reasonable things to look for that are absent — do not generate calls for them
 | Absent | Consequence |
 |---|---|
 | Data-wipe endpoint | Instance data is removed one entity or relation at a time. Deleting the whole ontology is the only bulk removal, and that is a registry operation |
-| Bulk or batch write | Every create and update is a single object |
+| Immediate bulk write | Every immediate create and update is a single object; many objects are staged into a changeset, up to 1,000 calls per `POST …/changesets/{changesetId}/writes`, and committed together with `POST …/changesets/{changesetId}/commit` |
 | Instance-data export | The design exports; data leaves through listing or queries |
 | Health or readiness endpoint | Liveness must be inferred from a real request |
 | Cross-lens read | No route sees two lenses at once |

@@ -490,12 +490,12 @@ function Canvas() {
       const source = idOfKey.get(r.sourceEntityTypeKey)
       const target = idOfKey.get(r.targetEntityTypeKey)
       if (source === undefined || target === undefined || !boxes.has(source) || !boxes.has(target)) return []
-      return [{ id: r.relationTypeId, source, target, label: r.key, parent: r.parent }]
+      return [{ id: r.relationTypeId, source, target, label: r.key, parent: r.parent, onePerPair: r.onePerPair }]
     })
     // The relation type being named, dashed, to its target or the ghost.
     if (popover !== null && popover.mode !== 'entity' && boxes.has(popover.sourceId)) {
       const target = popover.mode === 'relation' ? popover.targetId : GHOST_ID
-      if (boxes.has(target)) ends.push({ id: PENDING_EDGE_ID, source: popover.sourceId, target, label: '…', parent: null })
+      if (boxes.has(target)) ends.push({ id: PENDING_EDGE_ID, source: popover.sourceId, target, label: '…', parent: null, onePerPair: false })
     }
     const shapes = edgeSpecs(ends)
     const shaped = ends.map((e) => ({ ...e, ...shapes.get(e.id)! }))
@@ -540,6 +540,7 @@ function Canvas() {
           dim,
           match,
           parent: e.parent,
+          onePerPair: e.onePerPair,
           onSelect: pending ? undefined : () => selectHere({ kind: 'relation-types', key: e.label }),
         },
       }

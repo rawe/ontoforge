@@ -244,6 +244,15 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     getRelationsByIds: vi.fn(async () => ({})),
     getEntityTypes: vi.fn(async () => ({})),
     lockTargets: vi.fn(async () => []),
+    relationsOfPairs: vi.fn(async () => []),
+    lockPairs: vi.fn(async () => []),
+    // The batch writes write every row they are given.
+    createEntities: vi.fn(async () => undefined),
+    updateEntities: vi.fn(async (rows: { entityId: string }[]) => rows.map((row) => row.entityId)),
+    deleteEntities: vi.fn(async (rows: { id: string }[]) => rows.map((row) => row.id)),
+    createRelations: vi.fn(async (rows: { relationId: string }[]) => rows.map((row) => row.relationId)),
+    updateRelations: vi.fn(async (rows: { relationId: string }[]) => rows.map((row) => row.relationId)),
+    deleteRelations: vi.fn(async (rows: { id: string }[]) => rows.map((row) => row.id)),
   };
   return store;
 }

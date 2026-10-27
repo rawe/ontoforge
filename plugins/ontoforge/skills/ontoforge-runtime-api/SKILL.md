@@ -104,8 +104,9 @@ A `401` means the token is missing or wrong. It carries no OntoForge error envel
   lenses is the one modeling read this skill makes.
 - Not the registry: creating, renaming or deleting ontologies. Listing them is the one
   registry read this skill makes.
-- Absent everywhere: there is no data-wipe endpoint, no bulk write, no instance-data
-  export and no health endpoint. Do not generate calls for them.
+- Absent everywhere: there is no data-wipe endpoint, no immediate bulk write (many
+  writes are staged in a changeset, see the references), no instance-data export and no
+  health endpoint. Do not generate calls for them.
 
 ## Output Style
 

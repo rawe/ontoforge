@@ -30,7 +30,7 @@ import {
 } from "../core/exceptions.js";
 import { RETRIEVER_CONFIG_VERSION, RetrieverConfig } from "../core/retriever.js";
 import { parseAndValidate } from "../core/oql/index.js";
-import type { ModelingStore, ParentViolation, RuntimeStore } from "../core/ports.js";
+import type { ModelingStore, RelationRules, RelationRuleViolation, RuntimeStore } from "../core/ports.js";
 import {
   DATA_TYPES,
   LENS_RESOURCE_KEY_PATTERN,
@@ -140,6 +140,7 @@ function toRelationTypeResponse(data: Row): RelationTypeResponseBody {
     sourceEntityTypeKey: data.sourceEntityTypeKey as string,
     targetEntityTypeKey: data.targetEntityTypeKey as string,
     parent: (data.parent as ParentEnd | null | undefined) ?? null,
+    onePerPair: data.onePerPair === true,
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
   };
@@ -588,16 +589,50 @@ export async function deleteEntityType(
 
 // --- Relation Type (Global) ---
 
-/** The 409 a parent flag write refuses with (A2): the stored relations
- * break the parent rules under the new reading. `details.violations`
+/** The 409 a relation rules write refuses with (A2): the stored
+ * relations break a rule under the new reading. `details.violations`
  * carries each broken rule's count and first entities; the message
  * carries the counts. */
-function parentRulesBroken(subject: string, violations: ParentViolation[]): ConflictError {
+function relationRulesBroken(subject: string, violations: RelationRuleViolation[]): ConflictError {
   const counts = violations.map((v) => `${v.rule}: ${v.count}`).join(", ");
   return new ConflictError(
-    `${subject}: the stored relations break the parent rules (${counts})`,
+    `${subject}: the stored relations break the relation rules (${counts})`,
     { violations },
   );
+}
+
+/** A relation type's rules after a create or an update, refused with a
+ * field error when one per pair is turned off on a parent relation. A
+ * parent end always holds one per pair; clearing the parent end keeps it. */
+function nextRules(before: RelationRules, parent: ParentEnd | null | undefined, onePerPair: boolean | undefined): RelationRules {
+  const nextParent = parent === undefined ? before.parent : parent;
+  if (nextParent !== null && onePerPair === false) {
+    throw new ValidationError("A parent relation is always one per pair", {
+      fields: { onePerPair: "A parent relation is always one per pair; clear the parent end first" },
+    });
+  }
+  return { parent: nextParent, onePerPair: onePerPair ?? (nextParent !== null || before.onePerPair) };
+}
+
+/** The rules an imported relation type carries: a parent end always
+ * holds one per pair, so a payload may leave it out there. */
+function importedRules(rt: { parent?: ParentEnd | null; onePerPair?: boolean }): RelationRules {
+  const parent = rt.parent ?? null;
+  return { parent, onePerPair: parent !== null || rt.onePerPair === true };
+}
+
+/** The rules a relation type row carries. */
+function rulesOfRow(row: Row): RelationRules {
+  return { parent: (row.parent as ParentEnd | null | undefined) ?? null, onePerPair: row.onePerPair === true };
+}
+
+/** The subject of a refused rules write, naming what it set. */
+function rulesSubject(prefix: string, key: string, rules: RelationRules): string {
+  const set = [
+    ...(rules.parent !== null ? [`parent end '${rules.parent}'`] : []),
+    ...(rules.onePerPair && rules.parent === null ? ["one per pair"] : []),
+  ].join(" and ");
+  return `${prefix === "" ? "Relation" : `${prefix}relation`} type '${key}' cannot take ${set}`;
 }
 
 export async function createRelationType(
@@ -619,6 +654,7 @@ export async function createRelationType(
       throw new ValidationError(`Target entity type '${body.targetEntityTypeKey}' not found`);
     }
     const relationTypeId = randomUUID();
+    const rules = nextRules({ parent: null, onePerPair: false }, body.parent ?? null, body.onePerPair);
     const written = await s.createRelationType(
       relationTypeId,
       body.key,
@@ -626,13 +662,10 @@ export async function createRelationType(
       body.description ?? null,
       body.sourceEntityTypeKey,
       body.targetEntityTypeKey,
-      body.parent ?? null,
+      rules,
     );
     if ("violations" in written) {
-      throw parentRulesBroken(
-        `Relation type '${body.key}' cannot be created with parent end '${body.parent}'`,
-        written.violations,
-      );
+      throw relationRulesBroken(rulesSubject("", body.key, rules), written.violations);
     }
     return written.row;
   });
@@ -668,18 +701,17 @@ export async function updateRelationType(
       throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
     }
     // An explicitly null parent clears it, as a property's default; omitted
-    // (`undefined`) means unchanged. A refused flag leaves the whole update
-    // unwritten.
-    if (body.parent !== undefined && body.parent !== before.parent) {
-      const written = await s.setRelationTypeParent(relationTypeId, body.parent);
+    // (`undefined`) means unchanged, and so does an omitted one per pair.
+    // A refused rule leaves the whole update unwritten.
+    const stored = rulesOfRow(before);
+    const rules = nextRules(stored, body.parent, body.onePerPair);
+    if (rules.parent !== stored.parent || rules.onePerPair !== stored.onePerPair) {
+      const written = await s.setRelationTypeRules(relationTypeId, rules);
       if (written === null) {
         throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
       }
       if ("violations" in written) {
-        throw parentRulesBroken(
-          `Relation type '${before.key as string}' cannot take parent end '${body.parent}'`,
-          written.violations,
-        );
+        throw relationRulesBroken(rulesSubject("", before.key as string, rules), written.violations);
       }
     }
     const data = await s.updateRelationType(
@@ -1627,6 +1659,9 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
     fromEntityTypeKey: rt.sourceKey,
     toEntityTypeKey: rt.targetKey,
     parent: (rt.parent as ParentEnd | null | undefined) ?? null,
+    // Omitted when off, so a design without it exports as before; a
+    // parent relation always carries it.
+    ...(rt.onePerPair === true ? { onePerPair: true } : {}),
     properties: ((rt.properties as Row[] | undefined) ?? []).map(exportProperty),
   }));
 
@@ -2082,17 +2117,20 @@ export async function importSchema(
       throw new ConflictError(conflicts.join("; "));
     }
 
-    // ---- Phase 3: the parent rules over the target's stored relations ----
+    // ---- Phase 3: the relation rules over the target's stored relations ----
     // Deleting a type keeps its instances, so relation rows may already be
-    // stored under an imported parent relation's key. They are read across
-    // the target's parent relations and the payload's together.
-    const parentReadings = Object.fromEntries(
-      payload.relationTypes.flatMap((rt) => (rt.parent ? [[rt.key, rt.parent]] : [])),
-    ) as Record<string, ParentEnd>;
-    if (Object.keys(parentReadings).length > 0) {
-      const violations = await target.findParentViolations(parentReadings);
+    // stored under an imported relation type's key. The parent rules are
+    // read across the target's parent relations and the payload's together.
+    const ruleReadings = Object.fromEntries(
+      payload.relationTypes.flatMap((rt) => {
+        const rules = importedRules(rt);
+        return rules.parent !== null || rules.onePerPair ? [[rt.key, rules]] : [];
+      }),
+    ) as Record<string, RelationRules>;
+    if (Object.keys(ruleReadings).length > 0) {
+      const violations = await target.findRelationRuleViolations(ruleReadings);
       if (violations.length > 0) {
-        throw parentRulesBroken("Import error: the imported parent relations are refused", violations);
+        throw relationRulesBroken("Import error: the imported relation rules are refused", violations);
       }
     }
 
@@ -2144,14 +2182,11 @@ export async function importSchema(
         rt.description ?? null,
         rt.fromEntityTypeKey,
         rt.toEntityTypeKey,
-        rt.parent ?? null,
+        importedRules(rt),
       );
       // Checked above; only a racing relation write can make it refuse now.
       if ("violations" in written) {
-        throw parentRulesBroken(
-          `Import error: relation type '${rt.key}' cannot be created with parent end '${rt.parent}'`,
-          written.violations,
-        );
+        throw relationRulesBroken(rulesSubject("Import error: ", rt.key, importedRules(rt)), written.violations);
       }
       for (const prop of rt.properties) {
         await target.createProperty(

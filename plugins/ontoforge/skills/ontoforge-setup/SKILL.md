@@ -158,6 +158,8 @@ These are the **only** environment variables recognized by the `ontoforge-server
 | `SEARCH_WORKER_BATCH` | no | `64` | Queued search-indexing items the background worker claims per batch (positive integer) |
 | `SEARCH_POLL_MS` | no | `5000` | Milliseconds the background search worker waits between queue checks when no wake-up arrives (positive integer) |
 | `CHANGESET_MAX_BYTES` | no | `33554432` (32 MiB) | The most bytes one changeset's staged writes hold, document text included (positive integer) |
+| `CHANGESET_MAX_OBJECTS` | no | `10000` | The most staged objects one changeset holds (positive integer) |
+| `REQUEST_BODY_LIMIT` | no | `16777216` (16 MiB) | The largest request body the server reads, in bytes; a larger one answers 413 (positive integer) |
 | `AI_PROVIDER` | no | *(disabled)* | `ollama`, `openai` or `anthropic` — omit to disable AI features |
 | `AI_MODEL` | with `AI_PROVIDER` | *(none)* | AI model name (must support tool calling) |
 | `AI_BASE_URL` | no | `http://localhost:11434` (`ollama`), `https://api.openai.com/v1` (`openai`), `https://api.anthropic.com` (`anthropic`) | AI API base as the provider documents it — the Ollama or Anthropic host, or the OpenAI-compatible base including its version |

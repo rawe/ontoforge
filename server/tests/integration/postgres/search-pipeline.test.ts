@@ -220,7 +220,7 @@ describe("PostgreSQL search pipeline", () => {
     await modeling.createEntityType(companyType, "company", "Company", null, newProperty("name", "string"));
     await modeling.createProperty(companyType, "EntityType", randomUUID(), "founded", "Founded", null, "integer", false, null);
     const worksForType = randomUUID();
-    await modeling.createRelationType(worksForType, "works_for", "Works for", null, "person", "company", null);
+    await modeling.createRelationType(worksForType, "works_for", "Works for", null, "person", "company", { parent: null, onePerPair: false });
     for (const key of ["role", "since"]) {
       await modeling.createProperty(worksForType, "RelationType", randomUUID(), key, key[0]!.toUpperCase() + key.slice(1), null, "string", false, null);
     }

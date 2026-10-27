@@ -14,7 +14,7 @@ ontologies, transfer included.
 | Carried | Detail |
 |---|---|
 | Entity types | Key, display name, description, the key of its name property, its [identity](entity-identity.md) properties (`identityProperties`, omitted when it has none), and every property definition |
-| Relation types | The same, plus the keys of the source and target entity types and the parent end, `parent`, null when unset |
+| Relation types | The same, plus the keys of the source and target entity types and their [relation rules](schema-modeling.md#relation-rules): the parent end, `parent`, null when unset, and `onePerPair`, omitted when off |
 | Property definitions | Key, display name, description, data type, required flag, default |
 | Lenses | Key, name, description, their type inclusions — absent entirely for an unscoped lens — and the keys of the search indices they include |
 | Assistants | Every assistant of every lens, one list per kind under the lens's `assistants`: its agents under `agents` — key, name, description, system prompt, tool allowlist — its retrievers under `retrievers` and its navigators under `navigators`, both in their portable form — key, name, description, configVersion, config |
@@ -68,7 +68,8 @@ The payload declares a format version, and export always writes the current one:
 The version is the format's own line, bumped only when the payload shape changes
 incompatibly. A relation type's `parent` is optional in `7.0`: without it, or with null,
 the relation type is an ordinary one, and the older versions' relation types import as
-ordinary ones too.
+ordinary ones too. Its `onePerPair` is optional as well: without it, the relation type is
+one per pair only when it is a parent relation.
 
 **Import upgrades older versions step by step.** It accepts two older versions and brings
 each up to the current one first, one version at a time: a `5.0` payload becomes a
@@ -147,15 +148,15 @@ Two consequences:
 - **Import validates before it writes.** The entire payload is checked first, in order:
   its format version, then the fields each upgrade reads, then the shape of the current
   version ([above](#the-format-version)), then every [rule](#what-import-validates), then
-  key conflicts, then the parent rules. Each step rejects on its own, and a later one runs
+  key conflicts, then the relation rules. Each step rejects on its own, and a later one runs
   only when the earlier ones pass — so rule violations and key conflicts are separate
   rejections: every rule violation is reported together in one validation error, and only
   a payload without violations is checked for conflicts, every conflicting key then
-  reported together in one conflict. The parent rules are checked like a
-  [flag change](schema-modeling.md#parent-relations): the payload's parent relations,
-  together with the target's own, are read against the relations already stored in the
-  target — which a deleted relation type leaves behind — and a violation is refused with
-  the same conflict and its list. A rejected payload writes
+  reported together in one conflict. The relation rules are checked like a
+  [rules change](schema-modeling.md#relation-rules): the payload's parent relations,
+  together with the target's own, and its one-per-pair relation types are read against
+  the relations already stored in the target — which a deleted relation type leaves
+  behind — and a violation is refused with the same conflict and its list. A rejected payload writes
   nothing. Only a clean payload starts writing, and the writing is one design change: a
   failure at any point, a crash included, leaves the target as it was.
 

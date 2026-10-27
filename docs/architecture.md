@@ -125,8 +125,8 @@ agent ever spans two. The architecture makes that structural rather than checked
 - **Every ontology-scoped request names its ontology in the path**, and either addresses
   that ontology's schema (modeling) or its instance data through one lens (runtime) —
   never both. Three requests cross that line by a fixed amount, each named by its own
-  address: a parent flag change, a modeling request, reads the stored relations to refuse
-  and never writes them ([capabilities/schema-modeling.md](capabilities/schema-modeling.md#parent-relations));
+  address: a relation rules change, a modeling request, reads the stored relations to
+  refuse and never writes them ([capabilities/schema-modeling.md](capabilities/schema-modeling.md#relation-rules));
   a lens delete, a modeling request, deletes the lens's changesets
   ([capabilities/changesets.md](capabilities/changesets.md#binding)); and ruleset
   maintenance is runtime state addressed without a lens, whose put reads whether the
@@ -170,7 +170,7 @@ Per ontology. "Unique" here always means unique within the owning ontology.
 |---|---|---|
 | Lens | id, unique `key`, unique name | name, description, timestamps |
 | Entity type | id, unique `key` | display name, description, name property, identity properties (optional), timestamps |
-| Relation type | id, unique `key` | display name, source and target entity type keys, parent end (optional) |
+| Relation type | id, unique `key` | display name, source and target entity type keys, relation rules: parent end (optional), one per pair |
 | Property definition | id, `key` unique within its owner | data type, required, default; owned by exactly one entity type or relation type |
 | Search index | id, unique `key` | kind (default, passage or custom), root entity type, definition, timestamps |
 | Search settings | one per ontology | keyword language set, managed indices switched off |
@@ -528,7 +528,7 @@ Every error response has the same envelope:
 { "error": { "code": "...", "message": "...", "details": { } } }
 ```
 
-There are exactly nine top-level codes:
+There are exactly ten top-level codes:
 
 | Condition | Status | Code | `details` |
 |---|---|---|---|
@@ -537,15 +537,16 @@ There are exactly nine top-level codes:
 | The identity provider's keys cannot be fetched to check a token (authentication on) | 503 | `PROVIDER_UNAVAILABLE` | — |
 | Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — or `code` |
 | Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | —, `code` or `violations` |
-| Input rejected | 422 | `VALIDATION_ERROR` | `fields` map, `errors` list, or `violations` list with `total` |
+| Input rejected | 422 | `VALIDATION_ERROR` | `fields` map, `errors` list, `violations` list with `total`, or `items` list |
 | Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses`, `affectedIndices` |
 | Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
 | Malformed request body | 400 | `INVALID_JSON` | — |
+| Request body over the configured limit | 413 | `PAYLOAD_TOO_LARGE` | — |
 
 Four refinements:
 
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
-stays one of the nine. A request for an unavailable search strategy, search with no available strategy,
+stays one of the ten. A request for an unavailable search strategy, search with no available strategy,
 saved-query discovery with no embedding provider, an AI request with no
 language-model provider configured answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
 An assistant thread that is unknown, expired, bound to another assistant or started by
@@ -553,11 +554,12 @@ another principal answers `404 RESOURCE_NOT_FOUND` with `details.code` of
 `THREAD_NOT_FOUND`, and a message to a thread still running `409 RESOURCE_CONFLICT` with
 `details.code` of `THREAD_BUSY` ([thread store](#thread-store)).
 
-**A refused parent flag carries its violations.** A parent flag change — on create,
-update or import — that the stored relations break answers `409 RESOURCE_CONFLICT` with
-`details.violations`: one entry per broken rule, `two_parents` or `cycle`, each with the
-`count` of offending entities and up to five of them as `{type, id}`
-([capabilities/schema-modeling.md](capabilities/schema-modeling.md#parent-relations)). The
+**A refused relation rules write carries its violations.** A relation rules change — on
+create, update or import — that the stored relations break answers `409
+RESOURCE_CONFLICT` with `details.violations`: one entry per broken rule, `two_parents`,
+`cycle` or `duplicate_pair`, each with the `count` of offending entities, or of pairs
+for `duplicate_pair`, and up to five entities as `{type, id}`, a pair by its source
+([capabilities/schema-modeling.md](capabilities/schema-modeling.md#relation-rules)). The
 message carries the counts, so an MCP caller sees them too.
 
 **`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
@@ -658,5 +660,5 @@ Stated plainly, because its absence is a design position and not an oversight:
 - **No multi-tenancy.** An ontology isolates data but is not a tenant — the rule and
   its reason are in [decisions.md](decisions.md#scope).
 
-Absences in the API surface itself — no bulk write, no instance-data export — are listed
+Absences in the API surface itself — no data wipe, no instance-data export — are listed
 with their consequences in [interfaces.md](interfaces.md#what-is-not-exposed).

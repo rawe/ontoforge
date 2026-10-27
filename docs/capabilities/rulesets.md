@@ -222,7 +222,7 @@ accepted:
 - **The parent rules** are checked once, in the service, against the cached schema. Two
   concurrent standalone parent-relation creates for the same child, or two that together
   close a cycle, can rarely both pass, and a child created while its parent is being
-  deleted can rarely end up a root. A later [flag change](schema-modeling.md#parent-relations)
+  deleted can rarely end up a root. A later [parent end change](schema-modeling.md#parent-relations)
   reports such data. A create with a parent relation cannot hit the first two: its new
   entity has no competing parent.
 - **The anchor** is read, and coverage walked, just before the write, in the write's

@@ -148,8 +148,9 @@ Update name and description. Delete.
 **Type management.** Entity types: create with id, key, display name, description; list;
 read by id; read by key; update display name and description; delete. Relation types: the
 same, plus the source and target entity type keys supplied at creation and never
-updatable, and an optional parent end, source or target, written by the flag write below;
-all three are returned on every read. One extra predicate is required on the entity type
+updatable, and the relation rules — an optional parent end, source or target, and one per
+pair — written by the rules write below; all four are returned on every read, one per pair
+read as on whenever a parent end is set. One extra predicate is required on the entity type
 side: whether any relation type currently names a given entity type as an endpoint. It
 backs the rule that an entity type in use cannot be deleted.
 
@@ -161,18 +162,21 @@ entities, or clear it on every entity of the type key. The identity's uniqueness
 checked when the design change ends, so a write may pass through a duplicate, as when two
 entities swap identities. Deleting an entity type clears its orphaned entities' identities.
 
-**The parent flag.** A relation type's parent end is written on create and by its own flag
-write, which sets, changes or clears it. Both check the parent rules
-([capabilities/schema-modeling.md](capabilities/schema-modeling.md#parent-relations))
-against the stored relations, in one transaction, before they write. The reading is every
-stored parent relation — relation type key to parent end — with the written key's new end
-in place of its stored one. Under it they count the entities that are the child end of
-more than one stored relation, and the entities on a cycle, a self-loop included; when either count is
-not zero they return each broken rule with its count and its first five entities, ordered
-by type and id, and write nothing. Clearing counts nothing and is never refused. The count
-must end on any stored data, cycles included, and takes no lock. A read-only variant
-counts the same for a given set of readings and writes nothing; import's validation runs
-it before any write.
+**The relation rules.** A relation type's rules are written on create and by its own rules
+write, which takes the whole new rule set: the parent end and one per pair. Both check the
+rules they set or turn on
+([capabilities/schema-modeling.md](capabilities/schema-modeling.md#relation-rules))
+against the stored relations, in one transaction, before they write. A parent end set or
+flipped is checked under a reading of every stored parent relation — relation type key to
+parent end — with the written key's new end in place of its stored one. Under it they
+count the entities that are the child end of more than one stored relation, and the
+entities on a cycle, a self-loop included. One per pair turned on counts the pairs, source
+to target, that more than one stored relation of the key links. When a count is not zero
+they return each broken rule with its count and its first five entities, ordered by type
+and id — a pair by its source — and write nothing. Clearing counts nothing and is never
+refused. The counts must end on any stored data, cycles included, and take no lock. A
+read-only variant counts the same for a given set of readings, each a key's rules, and
+writes nothing; import's validation runs it before any write.
 
 **Property management.** A property definition is owned by exactly one type, addressed by
 the owner's internal id plus the owner-kind discriminator. Create with id, key, display
@@ -277,7 +281,23 @@ endpoint entity ids and the property map. Read by type key and id. Update, with 
 set/remove split as entities. Delete. List, taking the same filter, sort, pagination and
 count contract as entity listing, plus optional endpoint filters — restrict to relations
 leaving a given entity, or arriving at one, or both. Every relation read returns its two
-endpoint ids alongside its properties; endpoints are never updatable.
+endpoint ids alongside its properties; endpoints are never updatable. Two operations serve
+one per pair: the stored relations of a type that link one of a set of pairs, source to
+target, as id and ends; and, inside a transaction, a lock on each of a set of pairs of a
+type until the transaction ends, taken in one fixed order before it answers the stored
+relations of the type linking them. The lock is what makes two concurrent creates of a
+pair, on any servers, take turns.
+
+**Batch writes.** Inside a transaction, six operations write many instances of one kind at
+once, as the commit of a changeset applies its phases: entity creates, entity updates,
+entity deletes, relation creates, relation updates and relation deletes. Each row is what
+the single write takes, its own search write plan included, and the batch behaves as those
+writes one after the other would: the system properties set, the identity written when
+given, each plan queued exactly when its row is written, a delete's before it. Every batch
+but the entity create answers the ids it wrote; a row whose target is gone, or a relation
+create whose source or target entity does not exist, is left out rather than failing the
+batch. An adapter may write a batch in one statement or in many; the commit's speed comes
+from the former.
 
 **Hierarchy.** Three operations serve the parent relations. Each read takes the parent
 relations to follow as readings — relation type key to parent end — and with none answers
@@ -561,7 +581,9 @@ a change is never overwritten.
   relations with an end at a given entity; its staged entity creates and updates of a type
   key that stage a value under at least one of given keys and, under each of them they
   stage, exactly the given value, with their values; its staged entity objects of a type
-  key with their values under given keys only; the summed size of its staged values.
+  key with their values under given keys only; its staged relation objects of a type key
+  whose ends, source to target, are one of given pairs, without values; the summed size of
+  its staged values.
 - **Changes.** Apply one change to a draft changeset at the version the service read, all
   or none: remove objects with their values, remove values, add objects or change their
   action, and write values whole; submit, a compare-and-set on the version of a draft
@@ -801,7 +823,7 @@ per namespace:
 |---|---|---|
 | Lens | `lens` | referenced by its inclusions, agents, saved queries, retrievers, navigators and changesets |
 | Entity type | `entity_type` | referenced by its property definitions and inclusions; its name property's key in `name_property`, a reference to `property_def` by entity type and key, checked at commit; its identity property keys in order in the nullable array `identity_properties` |
-| Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions; its parent end in the nullable `parent` column, `source` or `target`, with no check |
+| Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions; its parent end in the nullable `parent` column, `source` or `target`, with no check; one per pair in `one_per_pair`, read as on while `parent` is set |
 | Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
 | Scope inclusion | `lens_includes` | its lens plus exactly one of three columns — entity type, relation type or search index; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array. Search-index rows reach the runtime schema read as index keys; the type-inclusion reads skip them |
 | Agent | `assistant_agent` | its lens |
@@ -896,7 +918,9 @@ The hierarchy reads use no index beyond those four. The ancestor walk is one rec
 statement: each level is a `LATERAL` union of two probes, on the target entity for
 `source` readings and on the source entity for `target` readings, and a path array stops
 a branch at an entity already on it. The children lookup is two `EXISTS` probes on the
-same columns. The parent flag's count is one statement: the relation rows of the reading as
+same columns. The pair lock is a transaction-scoped advisory lock keyed by the namespace,
+the relation type key and the two ends, and the pair read joins the pairs to `relation` by
+both ends. The parent flag's count is one statement: the relation rows of the reading as
 child-to-parent edges, `two_parents` grouping them by child, `cycle` a recursive walk up
 from every entity that is also a parent, with the same path-array guard. The create with a
 parent relation inserts the entity, applies its plan, inserts the relation and applies its
@@ -926,10 +950,13 @@ keep their order. `changeset_value` holds one row per staged value under the pri
 `(changeset_id, object_id, property_key)`, its object a foreign key with delete cascade;
 `value` is `jsonb`, JSON null removing the property; `before` is `jsonb`, `{"value": …}`
 for a stored value, `{}` for a key the target lacked and SQL null for a value of a
-create; the size `bytes` an `integer`. Two B-tree indexes serve them besides the primary
-keys: changesets by lens, and staged objects by changeset and first touch. The staged
-relations at an entity are found by a scan of the changeset's own objects, and the staged
-entities that stage given values by a scan of its own values, matched in the database, so
+create; the size `bytes` an `integer`. Three B-tree indexes serve them besides the primary
+keys: changesets by lens, staged objects by changeset and first touch, and staged values by
+changeset, property key and the `md5` of the value's text, so that a long document value
+fits. The staged entities that stage given values are found through that last index, one
+equality per key, so a put costs the same in an empty changeset as in a full one. The
+staged relations at an entity are found by a scan of the changeset's own objects, and its
+staged relations of given pairs by a scan of its own objects, matched in the database, so
 only the matches are read out.
 
 Every change takes the changeset row `FOR UPDATE NOWAIT`, and states its state condition —

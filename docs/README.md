@@ -25,6 +25,10 @@ a separate access database holds principals and their access assignments.
 | [workflows/](workflows/) | Procedures for working *on* OntoForge |
 | [adr/](adr/) | Context and trade-offs behind consequential architectural choices |
 
+For contributors, [writing documentation](workflows/documenting.md) explains how to add
+or change a page and how to review a move. [Recording architectural decisions](workflows/recording-decisions.md)
+sets the separate threshold for an ADR.
+
 Capability documents explain feature behaviour, rules, limits and how to reach it. The
 interface and product documents describe the corresponding API and UI surfaces; the
 capability remains the home for what the feature means.

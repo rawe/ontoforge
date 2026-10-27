@@ -4,6 +4,9 @@ These continue the two principles in the root [AGENTS.md](../AGENTS.md) — *con
 first* and *single source of truth* — which apply everywhere. The ones below apply to
 writing under `docs/`, and keep their original numbering.
 
+For the practical steps to add, update or move documentation, use
+[Writing and updating documentation](workflows/documenting.md).
+
 3. **Progressive disclosure.** Give each topic one detailed home. Overviews introduce the
    essential ideas; capability documents explain observable behaviour, rules, limits and
    important failure cases; interface and product documents describe their respective

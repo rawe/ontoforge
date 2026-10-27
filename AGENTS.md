@@ -35,7 +35,8 @@ not documentation of the system.
 - **Testing** — [docs/workflows/testing.md](docs/workflows/testing.md): running unit and integration tests, prerequisites, conventions.
 - **Multi-agent test-and-fix cycles** — [docs/workflows/test-cycle.md](docs/workflows/test-cycle.md): agent roles, execution flow, fresh-state protocol, handover formats.
 - **Releasing** — [docs/workflows/releasing.md](docs/workflows/releasing.md). Read it before tagging a release.
-- **Recording decisions** — [docs/workflows/recording-decisions.md](docs/workflows/recording-decisions.md): what a decision is, rule or ADR, their formats. Read it before recording or changing a decision.
+- **Recording decisions** — [docs/workflows/recording-decisions.md](docs/workflows/recording-decisions.md): when an ADR is warranted, where current behavior belongs, and how to record a consequential architectural choice.
+- **Writing documentation** — [docs/workflows/documenting.md](docs/workflows/documenting.md): choose an owner and document type, preserve moved information, and review the result. Read it before adding or reorganizing documentation.
 - **Development fixtures** — [fixtures/README.md](fixtures/README.md): load, save and unload known ontologies (schema + data) on a running server.
 
 Documentation of a single script stays beside that script (`scripts/USAGE.md`).

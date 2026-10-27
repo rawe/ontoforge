@@ -1,5 +1,7 @@
 # Entity identity as an ordered list of the type's own properties
 
+Status: Accepted
+
 Current behavior: [Declaring entity identity](../capabilities/entity-identity.md#declaring-an-identity)
 
 ## Context
@@ -9,6 +11,23 @@ unique. A client loading data from another system could not find what it wrote b
 without keeping its own map of ids, and every repeated load risked duplicates; people and
 models had to carry opaque identifiers. Something the server enforces had to give an
 entity a readable address.
+
+## Decision
+
+Allow an entity type to declare one identity as an ordered list of its own properties.
+Derive a single readable address from their values, enforce its uniqueness within the
+type, and keep the server-assigned id as the stable reference. Identity properties are
+required when declared; a lens does not invent a partial identity or fallback address.
+
+## Consequences
+
+Clients can find an entity again without maintaining their own id map, and separate
+clients cannot create two stored entities of the type holding the same identity at once.
+An identity can be reused after deletion or a change of identity values. Changing an identity value
+changes its address without changing stored references. The model supports composite
+identities without client-specific concatenation, while deliberately avoiding several
+competing unique addresses, parent-dependent addresses or a separate external-reference
+store.
 
 ## Rejected
 

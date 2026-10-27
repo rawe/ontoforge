@@ -1,5 +1,7 @@
 # Instance data in two generic jsonb tables
 
+Status: Accepted
+
 Current behavior: [PostgreSQL instance storage](../storage-adapters.md#how-instance-data-is-stored)
 
 ## Context
@@ -7,6 +9,19 @@ Current behavior: [PostgreSQL instance storage](../storage-adapters.md#how-insta
 The PostgreSQL adapter needs a physical mapping for entities and relations whose shape is
 defined by a schema that changes at runtime. The choice decides whether a schema change
 stays pure data or becomes DDL run against a live database.
+
+## Decision
+
+The PostgreSQL adapter stores instances in two generic tables, one for entities and
+one for relations, with their schema-defined properties in JSONB rather than generating
+a table and native columns for each type.
+
+## Consequences
+
+An ontology schema change stays data rather than online instance-table DDL, avoiding
+per-type locking and type-migration work. The mapping gives up the native columns and
+best filter/sort performance of per-type tables; targeted expression indexes can close
+measured gaps without changing the generic model.
 
 ## Rejected
 

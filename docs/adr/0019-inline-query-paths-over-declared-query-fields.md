@@ -1,5 +1,7 @@
 # Query paths inline in the filter key, not declared in the schema
 
+Status: Accepted
+
 Current behavior: [Query paths](../capabilities/instance-data.md#query-paths)
 
 ## Context
@@ -8,6 +10,19 @@ A structured filter that can name only a property of the listed type leaves OQL 
 only way to filter across a relation. Modelers under that pressure flatten relations into
 properties, and the graph stops being the single source of truth. The question is whether
 a filterable hop is described in the schema or in the filter key itself.
+
+## Decision
+
+Express a filterable one-hop path inline in the entity-list or search filter key,
+resolved against the lens-scoped schema at query time. Do not create declared query-field
+objects in the ontology schema. Use OQL for longer general query patterns.
+
+## Consequences
+
+A relation becomes filterable when it exists, without another declaration, its own
+routes/tools, transfer representation or cascade lifecycle. Simple related-property
+filters do not require a full query language or encourage flattening relations into
+properties. The supported inline path remains deliberately limited to one hop.
 
 ## Rejected
 

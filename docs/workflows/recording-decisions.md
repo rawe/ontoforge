@@ -3,9 +3,7 @@
 This guide explains when to record an architectural decision and where the resulting
 information belongs. Approval and recording are separate: the root
 [AGENTS.md](../../AGENTS.md) states when to involve the user in an architectural choice.
-Existing ADRs were written under a broader threshold and are pending review against this
-guide. Their presence alone does not mean a similar new choice warrants an ADR; retain
-them until their useful content and links have been reviewed.
+An ADR is a record of a selected architectural choice, not the general repository rulebook.
 
 ## What deserves an ADR
 
@@ -67,6 +65,8 @@ reconstructing it from rejected options:
 ```markdown
 # <Decision title>
 
+Status: Proposed
+
 ## Context
 
 <The problem, relevant constraints and why a choice is needed.>
@@ -87,13 +87,21 @@ reconstructing it from rejected options:
 Keep only the context and alternatives needed to understand the trade-off. The current
 system's behavior and rules belong in their owning documents; an ADR explains why a
 major choice was made and does not replace them. Link to a relevant ADR where its
-rationale helps a reader, rather than requiring every rule to link to one. Existing ADRs
-may use an older format; do not rewrite them solely to match this template.
+rationale helps a reader, rather than requiring every rule to link to one. Mark the record
+Accepted after the architectural choice is approved. Do not invent dates for existing
+records or reformat an older record without improving its explanation.
 
 ## When a decision changes
 
 Update the current-state documentation and any affected links. Assess whether the new
-choice meets the ADR threshold; ordinary changes need no new ADR. Under the existing
-repository convention, revise or remove an ADR that no longer describes a decision in
-force. Git preserves the earlier record. Do not delete current behavior or constraints
-when removing a record of its rationale.
+choice meets the ADR threshold; ordinary changes need no new ADR. Preserve the decision
+and its original reasoning in an accepted record. A new qualifying architectural choice
+gets a new ADR; mark the earlier one Superseded and link the replacement. If a decision
+simply ceases to apply without a new qualifying choice, mark it Deprecated and explain
+the scope change, linking to the current owner where useful.
+
+Correct factual errors or clarify wording explicitly; do not rewrite an earlier decision
+as though a later choice had always applied. Current behavior belongs in the owning
+documentation, so a reader can distinguish it from the circumstances of the record.
+Retiring a minor record from an overbroad collection requires preserving its useful
+content and updating references; it must not erase a consequential decision's rationale.

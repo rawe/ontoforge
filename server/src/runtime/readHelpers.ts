@@ -463,7 +463,7 @@ const COMPARISON_SUFFIX_TEXT: Record<Exclude<FilterOperator, "eq">, string> = {
  * The filter rules `parseFilterConditions` enforces, in the words of a tool
  * description. Every tool taking `filters` includes this text rather than
  * pointing at another tool, so it stays complete when that tool is absent
- * (`docs/decisions.md#interfaces`). `contains` is false where substring
+ * (`docs/workflows/writing-tool-descriptions.md`). `contains` is false where substring
  * filters are rejected (search); `relations` is false where query paths and
  * relation subjects are not taken (relation lists).
  */

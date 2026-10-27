@@ -126,18 +126,8 @@ per-connection state, so one mount serves any number of HTTP clients.
 **Two MCP servers, one for modeling and one for runtime.** As in REST, no client can reach
 both through one connection.
 
-**An MCP or agent tool description states every rule of its own parameters and never
-defers one to another tool, which it may name only as a next step.** Tools are loaded and
-enabled one at a time, so a description that leans on another is incomplete the moment
-that tool is absent.
-
-**A tool description is at most 2000 characters, met by tightening the text, never by
-pointing at another tool.** Clients cut longer descriptions without notice, and everything
-after the cut is invisible to the caller.
-
-**A tool description carries caller-facing facts only: what a call accepts, what it returns
-and how it behaves.** Backend, storage and ranking internals mean nothing to the caller,
-and a rejection message already says what to do instead.
+[Writing tool descriptions](workflows/writing-tool-descriptions.md) owns the rules for
+self-contained, caller-facing descriptions, their character budget and the checks to run.
 
 **Agents are read-only: no write tool is grantable to an agent.** An agent acts on a
 model's judgment, and a write would change data on a guess.

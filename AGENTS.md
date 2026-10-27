@@ -37,6 +37,7 @@ not documentation of the system.
 - **Releasing** — [docs/workflows/releasing.md](docs/workflows/releasing.md). Read it before tagging a release.
 - **Recording decisions** — [docs/workflows/recording-decisions.md](docs/workflows/recording-decisions.md): when an ADR is warranted, where current behavior belongs, and how to record a consequential architectural choice.
 - **Writing documentation** — [docs/workflows/documenting.md](docs/workflows/documenting.md): choose an owner and document type, preserve moved information, and review the result. Read it before adding or reorganizing documentation.
+- **Writing tool descriptions** — [docs/workflows/writing-tool-descriptions.md](docs/workflows/writing-tool-descriptions.md): self-contained parameter rules, caller-facing scope, description budget and checks for MCP and agent tools.
 - **Development fixtures** — [fixtures/README.md](fixtures/README.md): load, save and unload known ontologies (schema + data) on a running server.
 
 Documentation of a single script stays beside that script (`scripts/USAGE.md`).

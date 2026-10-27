@@ -29,6 +29,8 @@ a separate access database holds principals and their access assignments.
 For contributors, [writing documentation](workflows/documenting.md) explains how to add
 or change a page and how to review a move. [Recording architectural decisions](workflows/recording-decisions.md)
 sets the separate threshold for an ADR.
+For MCP and agent tool authors, [writing tool descriptions](workflows/writing-tool-descriptions.md)
+covers the description contract and its checks.
 
 Capability documents explain feature behaviour, rules, limits and how to reach it. The
 interface and product documents describe the corresponding API and UI surfaces; the

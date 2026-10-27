@@ -153,7 +153,14 @@ export async function createApp(shared?: SharedState, auth: AuthRuntime | null =
   // An identity is one path segment (`/entities/{type}/identity/{identity}`):
   // its longest form, every code point four UTF-8 bytes percent-encoded,
   // must route rather than hit the not-found handler.
-  const app = Fastify({ logger: false, routerOptions: { maxParamLength: MAX_IDENTITY_LENGTH * 12 } });
+  // Closing ends every open connection, streams included: shutdown has
+  // drained them by then (`main.ts`). Fastify 5.12 does this only when the
+  // option is exactly `true`.
+  const app = Fastify({
+    logger: false,
+    forceCloseConnections: true,
+    routerOptions: { maxParamLength: MAX_IDENTITY_LENGTH * 12 },
+  });
   app.addHook("onClose", () => state.close());
   app.decorate("auth", auth);
   if (auth !== null) {

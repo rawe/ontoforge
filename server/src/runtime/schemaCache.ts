@@ -56,6 +56,8 @@ export interface RelationTypeDef {
   toEntityTypeKey: string;
   /** The parent end; null for an ordinary relation type. */
   parent: ParentEnd | null;
+  /** One per pair; always true with a parent end. */
+  onePerPair: boolean;
   properties: Record<string, PropertyDef>;
 }
 
@@ -386,6 +388,7 @@ function buildTypesFromRaw(
       fromEntityTypeKey: rt.sourceKey as string,
       toEntityTypeKey: rt.targetKey as string,
       parent: (rt.parent as ParentEnd | null | undefined) ?? null,
+      onePerPair: rt.onePerPair === true,
       properties: toPropertyDefs(rt.properties as Row[] | undefined),
     };
   }

@@ -39,6 +39,8 @@ const RT_DATA = {
   description: null,
   sourceEntityTypeKey: "person",
   targetEntityTypeKey: "company",
+  parent: null,
+  onePerPair: false,
   createdAt: NOW,
   updatedAt: NOW,
 };
@@ -203,7 +205,7 @@ describe("the parent end", () => {
     holder.store.getEntityTypeByKey
       .mockResolvedValueOnce(SOURCE_ET)
       .mockResolvedValueOnce(TARGET_ET);
-    holder.store.createRelationType.mockResolvedValue({ row: { ...RT_DATA, parent: "target" } });
+    holder.store.createRelationType.mockResolvedValue({ row: { ...RT_DATA, parent: "target", onePerPair: true } });
     const res = await app.inject({
       method: "POST",
       url: "/api/ontologies/onto/model/relation-types",
@@ -211,6 +213,7 @@ describe("the parent end", () => {
     });
     expect(res.statusCode).toBe(201);
     expect(res.json().parent).toBe("target");
+    expect(res.json().onePerPair).toBe(true);
     expect(holder.store.createRelationType).toHaveBeenCalledWith(
       expect.any(String),
       "works_for",
@@ -218,7 +221,7 @@ describe("the parent end", () => {
       null,
       "person",
       "company",
-      "target",
+      { parent: "target", onePerPair: true },
     );
   });
 
@@ -233,7 +236,7 @@ describe("the parent end", () => {
       payload: CREATE_PAYLOAD,
     });
     expect(created.json().parent).toBeNull();
-    expect(holder.store.createRelationType.mock.calls[0]![6]).toBeNull();
+    expect(holder.store.createRelationType.mock.calls[0]![6]).toEqual({ parent: null, onePerPair: false });
 
     holder.store.getRelationType.mockResolvedValue({ ...RT_DATA, parent: null });
     const read = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/relation-types/rt-1" });
@@ -246,11 +249,11 @@ describe("the parent end", () => {
   it.each([
     ["sets it", null, { parent: "source" }, "source"],
     ["flips it", "source", { parent: "target" }, "target"],
-    ["clears it on an explicit null", "source", { parent: null }, null],
-  ] as const)("update %s through the flag write", async (_case, stored, payload, parent) => {
-    holder.store.getRelationType.mockResolvedValue({ ...RT_DATA, parent: stored });
-    holder.store.setRelationTypeParent.mockResolvedValue({ row: { ...RT_DATA, parent } });
-    holder.store.updateRelationType.mockResolvedValue({ ...RT_DATA, parent });
+    ["clears it on an explicit null, keeping one per pair", "source", { parent: null }, null],
+  ] as const)("update %s through the rules write", async (_case, stored, payload, parent) => {
+    holder.store.getRelationType.mockResolvedValue({ ...RT_DATA, parent: stored, onePerPair: stored !== null });
+    holder.store.setRelationTypeRules.mockResolvedValue({ row: { ...RT_DATA, parent, onePerPair: true } });
+    holder.store.updateRelationType.mockResolvedValue({ ...RT_DATA, parent, onePerPair: true });
     const res = await app.inject({
       method: "PUT",
       url: "/api/ontologies/onto/model/relation-types/rt-1",
@@ -258,14 +261,15 @@ describe("the parent end", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().parent).toBe(parent);
-    expect(holder.store.setRelationTypeParent).toHaveBeenCalledWith("rt-1", parent);
+    expect(holder.store.setRelationTypeRules).toHaveBeenCalledWith("rt-1", { parent, onePerPair: true });
   });
 
   it.each([
     ["omitted", { displayName: "Owns" }],
     ["the stored one", { parent: "source", displayName: "Owns" }],
-  ])("update leaves the flag unwritten when it is %s", async (_case, payload) => {
-    holder.store.getRelationType.mockResolvedValue({ ...RT_DATA, parent: "source" });
+    ["one per pair on, as the parent end holds it", { onePerPair: true, displayName: "Owns" }],
+  ])("update leaves the rules unwritten when they are %s", async (_case, payload) => {
+    holder.store.getRelationType.mockResolvedValue({ ...RT_DATA, parent: "source", onePerPair: true });
     holder.store.updateRelationType.mockResolvedValue({ ...RT_DATA, displayName: "Owns", parent: "source" });
     const res = await app.inject({
       method: "PUT",
@@ -273,7 +277,7 @@ describe("the parent end", () => {
       payload,
     });
     expect(res.statusCode).toBe(200);
-    expect(holder.store.setRelationTypeParent).not.toHaveBeenCalled();
+    expect(holder.store.setRelationTypeRules).not.toHaveBeenCalled();
     expect(holder.store.updateRelationType).toHaveBeenCalledWith("rt-1", "Owns", null);
   });
 
@@ -282,9 +286,9 @@ describe("the parent end", () => {
     { rule: "cycle", count: 2, entities: [{ type: "task", id: "t-1" }, { type: "task", id: "t-2" }] },
   ];
 
-  it("a refused flag write answers 409 with the violation list and writes nothing else", async () => {
-    holder.store.getRelationType.mockResolvedValue({ ...RT_DATA, parent: "source" });
-    holder.store.setRelationTypeParent.mockResolvedValue({ violations: VIOLATIONS });
+  it("a refused rules write answers 409 with the violation list and writes nothing else", async () => {
+    holder.store.getRelationType.mockResolvedValue({ ...RT_DATA, parent: "source", onePerPair: true });
+    holder.store.setRelationTypeRules.mockResolvedValue({ violations: VIOLATIONS });
     const res = await app.inject({
       method: "PUT",
       url: "/api/ontologies/onto/model/relation-types/rt-1",
@@ -313,7 +317,7 @@ describe("the parent end", () => {
     expect(res.json().error.details).toEqual({ violations: VIOLATIONS.slice(0, 1) });
   });
 
-  it("the flag write of a type deleted meanwhile answers 404", async () => {
+  it("the rules write of a type deleted meanwhile answers 404", async () => {
     holder.store.getRelationType.mockResolvedValue({ ...RT_DATA, parent: null });
     const res = await app.inject({
       method: "PUT",
@@ -333,7 +337,72 @@ describe("the parent end", () => {
     expect(res.json().error.code).toBe("VALIDATION_ERROR");
     expect(holder.store.createRelationType).not.toHaveBeenCalled();
     expect(holder.store.updateRelationType).not.toHaveBeenCalled();
-    expect(holder.store.setRelationTypeParent).not.toHaveBeenCalled();
+    expect(holder.store.setRelationTypeRules).not.toHaveBeenCalled();
+  });
+});
+
+describe("one per pair", () => {
+  it("create passes it to the store and returns it", async () => {
+    holder.store.getEntityTypeByKey
+      .mockResolvedValueOnce(SOURCE_ET)
+      .mockResolvedValueOnce(TARGET_ET);
+    holder.store.createRelationType.mockResolvedValue({ row: { ...RT_DATA, onePerPair: true } });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/ontologies/onto/model/relation-types",
+      payload: { ...CREATE_PAYLOAD, onePerPair: true },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().onePerPair).toBe(true);
+    expect(holder.store.createRelationType.mock.calls[0]![6]).toEqual({ parent: null, onePerPair: true });
+  });
+
+  it.each([
+    ["turns it on", false, true],
+    ["turns it off", true, false],
+  ] as const)("update %s through the rules write", async (_case, stored, onePerPair) => {
+    holder.store.getRelationType.mockResolvedValue({ ...RT_DATA, onePerPair: stored });
+    holder.store.setRelationTypeRules.mockResolvedValue({ row: { ...RT_DATA, onePerPair } });
+    holder.store.updateRelationType.mockResolvedValue({ ...RT_DATA, onePerPair });
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/ontologies/onto/model/relation-types/rt-1",
+      payload: { onePerPair },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().onePerPair).toBe(onePerPair);
+    expect(holder.store.setRelationTypeRules).toHaveBeenCalledWith("rt-1", { parent: null, onePerPair });
+  });
+
+  it.each([
+    ["create", "POST", { ...CREATE_PAYLOAD, parent: "source", onePerPair: false }],
+    ["update", "PUT", { onePerPair: false }],
+  ] as const)("%s refuses it off with a parent end, with a field error", async (_case, method, payload) => {
+    holder.store.getRelationType.mockResolvedValue({ ...RT_DATA, parent: "source", onePerPair: true });
+    holder.store.getEntityTypeByKey.mockResolvedValueOnce(SOURCE_ET).mockResolvedValueOnce(TARGET_ET);
+    const res = await app.inject({
+      method,
+      url: `/api/ontologies/onto/model/relation-types${method === "PUT" ? "/rt-1" : ""}`,
+      payload,
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.fields.onePerPair).toContain("always one per pair");
+    expect(holder.store.createRelationType).not.toHaveBeenCalled();
+    expect(holder.store.setRelationTypeRules).not.toHaveBeenCalled();
+  });
+
+  it("a refused turn on answers 409 with the duplicate pairs", async () => {
+    const violations = [{ rule: "duplicate_pair", count: 3, entities: [{ type: "person", id: "p-1" }] }];
+    holder.store.getRelationType.mockResolvedValue(RT_DATA);
+    holder.store.setRelationTypeRules.mockResolvedValue({ violations });
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/ontologies/onto/model/relation-types/rt-1",
+      payload: { onePerPair: true },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.message).toContain("cannot take one per pair");
+    expect(res.json().error.details).toEqual({ violations });
   });
 });
 

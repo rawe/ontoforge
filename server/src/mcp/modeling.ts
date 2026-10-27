@@ -427,8 +427,11 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "Add a new relation type connecting two entity types. Source and target are " +
         "specified by entity type key. parent ('source' or 'target') makes it a parent " +
         "relation: the entity at that end is the parent of the entity at the other. " +
-        "Omit it for an ordinary relation type. A parent end is refused when relations " +
-        "already stored under the key would give an entity two parents or form a cycle.",
+        "Omit it for an ordinary relation type. one_per_pair true allows at most one " +
+        "relation of the type from one source entity to one target entity; a parent " +
+        "relation always has it, and false is refused with a parent end. A parent end is " +
+        "refused when relations already stored under the key would give an entity two " +
+        "parents or form a cycle, and one_per_pair when they link one pair twice.",
       inputSchema: {
         key: z.string(),
         display_name: z.string(),
@@ -436,6 +439,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         target_entity_type_key: z.string(),
         description: z.string().optional(),
         parent: z.enum(PARENT_ENDS).optional(),
+        one_per_pair: z.boolean().optional(),
       },
     },
     wrap("create_relation_type", async (args: {
@@ -445,6 +449,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       target_entity_type_key: string;
       description?: string | undefined;
       parent?: ParentEnd | undefined;
+      one_per_pair?: boolean | undefined;
     }) => {
       const body = RelationTypeCreate.parse({
         key: args.key,
@@ -453,6 +458,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         sourceEntityTypeKey: args.source_entity_type_key,
         targetEntityTypeKey: args.target_entity_type_key,
         parent: args.parent ?? null,
+        onePerPair: args.one_per_pair,
       });
       const result = await service.createRelationType(body, await getModelingStore(ontologyKey));
       return jsonResult(result);
@@ -463,16 +469,23 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "update_relation_type",
     {
       description:
-        "Update a relation type's display name, description or parent end. Source/target " +
-        "endpoints are immutable. parent 'source' or 'target' sets the parent end, null " +
-        "clears it (an ordinary relation type again), and omitting it leaves it unchanged. " +
-        "Setting or changing it is refused when the stored relations would then give an " +
-        "entity two parents or form a cycle; clearing it is never refused.",
+        "Update a relation type's display name, description, parent end or one per pair. " +
+        "Source/target endpoints are immutable. parent 'source' or 'target' sets the " +
+        "parent end, null clears it (an ordinary relation type again), and omitting it " +
+        "leaves it unchanged. one_per_pair true allows at most one relation of the type " +
+        "from one source entity to one target entity, false allows any number; omitting " +
+        "it leaves it unchanged. A parent relation always has one_per_pair: setting a " +
+        "parent end turns it on, clearing the parent end keeps it on, and false is refused " +
+        "while a parent end is set. Setting or changing the parent end is refused when the " +
+        "stored relations would then give an entity two parents or form a cycle, and " +
+        "turning one_per_pair on when they link one pair twice; clearing either is never " +
+        "refused.",
       inputSchema: {
         relation_type_key: z.string(),
         display_name: z.string().optional(),
         description: z.string().optional(),
         parent: z.enum(PARENT_ENDS).nullable().optional(),
+        one_per_pair: z.boolean().optional(),
       },
     },
     wrap("update_relation_type", async (args: {
@@ -480,6 +493,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       display_name?: string | undefined;
       description?: string | undefined;
       parent?: ParentEnd | null | undefined;
+      one_per_pair?: boolean | undefined;
     }) => {
       const store = await getModelingStore(ontologyKey);
       const rt = await resolveRelationType(store, args.relation_type_key);
@@ -487,6 +501,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         displayName: args.display_name ?? null,
         description: args.description ?? null,
         parent: args.parent,
+        onePerPair: args.one_per_pair,
       });
       const result = await service.updateRelationType(rt.relationTypeId as string, body, store);
       return jsonResult(result);

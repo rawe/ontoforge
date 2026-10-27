@@ -29,6 +29,8 @@ export interface Settings {
   SEARCH_POLL_MS: number;
 
   CHANGESET_MAX_BYTES: number;
+  CHANGESET_MAX_OBJECTS: number;
+  REQUEST_BODY_LIMIT: number;
 
   AI_PROVIDER: string | null;
   AI_MODEL: string;
@@ -372,6 +374,10 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
 
     // The most bytes one changeset's staged values hold (`valueBytes`).
     CHANGESET_MAX_BYTES: positiveInt(env, "CHANGESET_MAX_BYTES", 32 * 1024 * 1024),
+    // The most staged objects one changeset holds.
+    CHANGESET_MAX_OBJECTS: positiveInt(env, "CHANGESET_MAX_OBJECTS", 10_000),
+    // The largest request body the server reads, in bytes.
+    REQUEST_BODY_LIMIT: positiveInt(env, "REQUEST_BODY_LIMIT", 16 * 1024 * 1024),
 
     AI_PROVIDER: aiProvider,
     AI_MODEL: aiModel(env, aiProvider),

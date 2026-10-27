@@ -100,6 +100,90 @@ export async function paginate(baseUrl, path, pageSize = 200) {
   return items;
 }
 
+/** The most calls one staging request lists, and roughly the most JSON bytes. */
+const STAGE_ITEMS = 1000;
+const STAGE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Write through changesets of one lens, committed in chunks: calls are staged
+ * up to 1,000 per request, and when a changeset is full it is committed and
+ * the next one started. `request(method, path, body)` returns the parsed
+ * answer and throws on a non-2xx answer with `-> <status>: <message>` in its
+ * message. Each call's answer goes to its `done` callback once staged.
+ */
+export function changesetWriter(request, prefix, note) {
+  let changeset = null;
+  let pending = [];
+  let bytes = 0;
+  let commits = 0;
+  let stagedHere = 0;
+
+  const start = async () => {
+    if (changeset === null) changeset = (await request('POST', `${prefix}/changesets`, { note })).id;
+  };
+  const commit = async () => {
+    if (changeset === null) return;
+    await request('POST', `${prefix}/changesets/${changeset}/commit`, {});
+    changeset = null;
+    stagedHere = 0;
+    commits++;
+  };
+  const stage = (writes) => request('POST', `${prefix}/changesets/${changeset}/writes`, writes);
+  // Stage one batch whole. Full: commit what this changeset holds and
+  // stage the batch into the next one; a batch larger than an empty
+  // changeset holds, or than the server's request body limit, is split in
+  // halves. Only a single call that does not fit fails.
+  const sendBatch = async (batch) => {
+    await start();
+    let answers;
+    try {
+      answers = await stage(batch.map((item) => item.write));
+    } catch (err) {
+      const tooLarge = /-> 413:/.test(err.message);
+      if (!tooLarge && !(/-> 409: .*is full/s.test(err.message))) throw err;
+      if (!tooLarge && stagedHere > 0) {
+        await commit();
+        return sendBatch(batch);
+      }
+      if (batch.length === 1) throw err;
+      const half = Math.ceil(batch.length / 2);
+      await sendBatch(batch.slice(0, half));
+      return sendBatch(batch.slice(half));
+    }
+    stagedHere += batch.length;
+    batch.forEach((item, i) => item.done?.(answers[i]));
+  };
+  const send = async () => {
+    if (pending.length === 0) return;
+    const batch = pending;
+    pending = [];
+    bytes = 0;
+    await sendBatch(batch);
+  };
+
+  return {
+    /** Queue one staging call; `done(answer)` runs once it is staged. */
+    async add(write, done) {
+      const size = JSON.stringify(write).length;
+      if (pending.length >= STAGE_ITEMS || (pending.length > 0 && bytes + size > STAGE_BYTES)) await send();
+      pending.push({ write, done });
+      bytes += size;
+    },
+    /** Stage what is queued and commit the last changeset. */
+    async finish() {
+      await send();
+      await commit();
+    },
+    /** The draft changeset in use, if any: what a failed run leaves behind. */
+    get changeset() {
+      return changeset;
+    },
+    get commits() {
+      return commits;
+    },
+  };
+}
+
 /**
  * Pick an unscoped lens (no includes) from an export payload — the only lens that
  * sees the whole schema. Returns null when the ontology has none; a scoped lens is

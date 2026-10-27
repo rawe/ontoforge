@@ -8,9 +8,10 @@ is reachable, the property definitions decide what is valid. Nothing is written 
 
 One entity or one relation per call, with one exception: a
 [create with a parent relation](#the-create-with-a-parent-relation) writes one entity and
-one relation together, on every mount. There is no batch write and no transaction spanning
-calls: a [changeset](changesets.md) stages writes call by call, and its commit persists
-all of them or none.
+one relation together, on every mount. No transaction spans immediate calls: many writes
+go together through a [changeset](changesets.md), which stages them, many calls to a
+request, and whose commit persists all of them or none
+([bulk-inserts.md](bulk-inserts.md)).
 
 Reads come in four shapes: one instance by id (or an entity by its
 [identity](entity-identity.md)), a filtered and paginated list of one type,
@@ -56,7 +57,8 @@ would be lost must traverse first.
 An entity of a type that declares an [identity](entity-identity.md) carries `_identity`,
 unique within the type. Every read, update, delete, path, neighbourhood and document route
 by id has a twin by identity, and a create or update that would give an entity a taken
-identity is refused with `IDENTITY_TAKEN`. There is no create-or-update. How identities are
+identity is refused with `IDENTITY_TAKEN`. There is no create-or-update outside a
+changeset's [put](changesets.md#put). How identities are
 built, renamed and resolved is in [entity-identity.md](entity-identity.md).
 
 Addressing an entity whose type the lens does not expose fails exactly as addressing a
@@ -75,6 +77,12 @@ the lens, so a narrow lens cannot create an edge that is invalid under a wider o
 Endpoint errors are collected alongside property errors and reported together. A
 relation of a parent relation is also checked against the
 [parent rules](#the-parent-rules), for every client, in the service.
+
+A relation create of a [one-per-pair](schema-modeling.md#one-per-pair) relation type
+whose source and target the type already links, in that direction, is refused once
+everything else is valid, with `409 RESOURCE_CONFLICT`, `details.code` `PAIR_TAKEN` and
+`details.relationTypeKey`; it never names the other relation. Two concurrent creates of
+one pair give exactly one relation and this conflict.
 
 **Endpoints are immutable.** An update that carries endpoint ids ignores them silently
 rather than rejecting the request; properties in the same payload still apply. Repointing a

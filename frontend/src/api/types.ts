@@ -82,6 +82,8 @@ export interface SchemaRelationType {
   toEntityTypeKey: string
   /** The parent end; null for an ordinary relation type. */
   parent: ParentEnd | null
+  /** One per pair; absent when off. A parent relation always has it. */
+  onePerPair?: boolean
   properties: SchemaProperty[]
 }
 
@@ -624,16 +626,21 @@ export interface RelationType {
   targetEntityTypeKey: string
   /** The parent end; null for an ordinary relation type. */
   parent: ParentEnd | null
+  /** At most one relation of the type from one source entity to one target entity; always true with a parent end. */
+  onePerPair: boolean
   createdAt: string
   updatedAt: string
 }
 
-/** One broken parent rule in a refused flag write (409 `details.violations`). */
-export interface ParentViolation {
-  rule: 'two_parents' | 'cycle'
-  /** Every entity that breaks the rule. */
+/** A relation rule the stored data can break: the parent rules, and one per pair. */
+export type RelationRule = 'two_parents' | 'cycle' | 'duplicate_pair'
+
+/** One broken relation rule in a refused rules write (409 `details.violations`). */
+export interface RelationRuleViolation {
+  rule: RelationRule
+  /** Every entity that breaks the rule; for `duplicate_pair`, every pair linked twice. */
   count: number
-  /** The first five of them. */
+  /** The first five of them; for `duplicate_pair`, each pair's source. */
   entities: { type: string; id: string }[]
 }
 
@@ -847,6 +854,8 @@ export interface RelationTypeUpdate {
   description?: string
   /** Set or flip the parent end; null clears it. */
   parent?: ParentEnd | null
+  /** Turn one per pair on or off; refused off while a parent end is set. */
+  onePerPair?: boolean
 }
 
 /** Create body of a property. The server stores defaults as strings. */

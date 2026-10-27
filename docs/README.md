@@ -45,6 +45,7 @@ what rules bind it, and how it is reached from every interface.
 | [transfer](capabilities/transfer.md) | Schema export and import |
 | [rulesets](capabilities/rulesets.md) | Rulesets — named records holding the rules for the MCP clients of one URL: the record and its maintenance, ruleset mounts, write access, the anchor |
 | [changesets](capabilities/changesets.md) | Changesets — runtime writes staged over time and committed all or nothing: staging into a set of objects and values, the commit and its validation, binding, the review |
+| [bulk-inserts](capabilities/bulk-inserts.md) | Loading many entities and relations through changesets: lists of calls, puts by identity, chunks, failures and reruns, review |
 | [authentication](capabilities/authentication.md) | Signing in through an OpenID provider, roles on the platform, an ontology or a lens, what a caller sees, user management, authentication off |
 
 ## Internal provider interfaces
@@ -184,6 +185,11 @@ and never changes.
 
 **Relation type** — a kind of directed, typed connection between two entity types. Its
 source and target entity types are fixed at creation.
+
+**Relation rule** — an optional constraint a relation type declares on its relations: the
+[parent end](#hierarchies), or **one per pair** — at most one relation of the type from
+one source entity to one target entity. See
+[capabilities/schema-modeling.md](capabilities/schema-modeling.md#relation-rules).
 
 **Property definition** — a named, typed field on one entity type or one relation type.
 Carries a data type, whether it is required, and an optional default.

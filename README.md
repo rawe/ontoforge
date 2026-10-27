@@ -181,10 +181,12 @@ authentication checks and multi-server test harness.
 
 ## Architecture
 
-OntoForge is a modular monolith backed by a single database holding every ontology's
-schema and instance data. All database access goes through a persistence port with
+OntoForge is a modular monolith. One ontology database holds every ontology's
+schema and instance data. Ontology storage goes through a persistence port with
 per-ontology bound stores, implemented by the PostgreSQL adapter (one PostgreSQL schema
-per ontology).
+per ontology). With authentication enabled, principals and assignments live in a
+separate access database. Threads and browser sessions use the separate shared-state
+interfaces described in [architecture](docs/architecture.md#shared-state).
 
 - **Registry** — ontologies as manageable units (`/api/ontologies`)
 - **Modeling** — one ontology's schema, lenses, validation, export/import (`/api/ontologies/{ontologyKey}/model`)
@@ -297,7 +299,10 @@ not read. Every server of one deployment needs the same values.
 
 ## Optional Features
 
-OntoForge has two optional features — **semantic search** and **AI-powered runtime** — that require an external model provider. Both are disabled by default and all core functionality (schema modeling, entity/relation CRUD, MCP) works without them.
+**Semantic search** and **AI-powered runtime** are optional model-backed capabilities.
+Both are disabled by default; schema modeling, entity/relation CRUD and MCP work without
+them. [Entity identity comparison](#entity-identity-comparison) uses its own independent
+Decision provider.
 
 Both features support these provider types:
 
@@ -305,7 +310,7 @@ Both features support these provider types:
 - **`openai`** — any OpenAI-compatible API (OpenAI, Azure, OpenRouter, OVHcloud, LiteLLM, vLLM, etc.). Requires an API key.
 - **`anthropic`** — Claude models through Anthropic's own API. AI-powered runtime only; Anthropic offers no embeddings. Requires an API key.
 
-A base URL is written as the provider documents it: the host for `ollama`
+An AI or embedding base URL is written as the provider documents it: the host for `ollama`
 (`http://localhost:11434`) and `anthropic` (`https://api.anthropic.com`), the API base
 including its version for `openai` (`https://openrouter.ai/api/v1`). A base URL that breaks this rule stops the server at
 startup with the corrected value in the message. This catches a misplaced API path at
@@ -365,6 +370,21 @@ The configured value is validated at boot.
 | ~32 GB+ | `qwen3:32b` | 32B dense | ~22 GB |
 
 Account for OS and other services (Docker, PostgreSQL) when choosing a model — pick one tier below your total RAM to leave headroom.
+
+### Entity identity comparison
+
+The optional [identity comparison](docs/capabilities/entity-identity-comparison.md)
+capability uses a Decision provider independently of AI chat and embeddings. Its
+[provider contract](docs/providers/decision-api.md) is distinct from those providers.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DECISION_BASE_URL` | *(unset — disabled)* | Provider base URL before `/v1/systemone` |
+| `DECISION_MODEL` | `jev-1.13.0` | Provider model identifier |
+| `DECISION_API_KEY` | `TYPESAFE_API_KEY` when set, otherwise none | Optional Bearer credential; an explicit `DECISION_API_KEY` takes precedence |
+
+Startup installs the configured client without contacting the provider. The provider
+guide describes programmatic use and an example deployment.
 
 ## Container Images
 

@@ -3,13 +3,13 @@
 A lens is a named aperture onto one ontology's schema. It decides what a
 runtime caller can see, name and write — and nothing else.
 
-Vocabulary: [../README.md](../README.md). The schema it looks at:
+Vocabulary: [glossary](../glossary.md). The schema it looks at:
 [schema-modeling.md](schema-modeling.md).
 
 ## What a lens is
 
 A lens belongs to exactly one ontology. It has a key, a name and an optional
-description. The key follows the schema [key](../README.md) rule at up to 64
+description. The key follows the schema [key](../glossary.md#schema-and-design) rule at up to 64
 characters, is chosen at creation, is never updatable, and is what every interface uses
 to address the lens — always together with its ontology, because lens keys are unique
 only within their ontology: every ontology can have its own `default`. The name is

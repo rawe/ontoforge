@@ -5,7 +5,7 @@ then committed together: all of them persist, or none does. A client plans a cha
 many objects — a move, a subtree delete, a nested create — can hand the plan over with a
 note, and a person commits it after reviewing it.
 
-Vocabulary: [../README.md](../README.md#changesets). The writes it stages:
+Vocabulary: [glossary](../glossary.md#changesets). The writes it stages:
 [instance-data.md](instance-data.md) and [documents.md](documents.md#partial-writes).
 
 ## What it does

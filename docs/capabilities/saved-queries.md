@@ -70,7 +70,7 @@ in bindings and no entity type key. A final search step returns the plain search
 
 ### Identity and ownership
 
-- Query keys follow the lens-resource [key](../README.md) rule — hyphens are allowed,
+- Query keys follow the lens-resource [key](../glossary.md#schema-and-design) rule — hyphens are allowed,
   unlike in type and property keys — at up to 64 characters.
 - A key is unique within its lens. Two lenses may each hold a `people_by_skill`.
 - Writing a saved query is an upsert on that key: it creates or replaces wholesale.

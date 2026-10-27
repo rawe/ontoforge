@@ -1,6 +1,7 @@
 # Architecture
 
-How OntoForge is put together. Concepts and vocabulary: [README.md](README.md).
+How OntoForge is put together. [Concepts](concepts.md) explain the mental model; the
+[glossary](glossary.md) defines its terms.
 
 This document explains the system's components, boundaries, invariants and major flows.
 Feature behaviour and interface details are described in the linked capability and
@@ -241,9 +242,9 @@ Enforced in the service layer on every write path, whichever interface it arrive
 is the summary; each one is stated with its consequences in
 [capabilities/schema-modeling.md](capabilities/schema-modeling.md).
 
-- Ontology keys follow the schema [key](README.md) rule and are at most 59 characters;
+- Ontology keys follow the schema [key](glossary.md#schema-and-design) rule and are at most 59 characters;
   ontology keys and display names are unique server-wide.
-- Type and property keys follow the schema [key](README.md) rule and are at most 64
+- Type and property keys follow the schema [key](glossary.md#schema-and-design) rule and are at most 64
   characters, on every path that sets them — the modeling interfaces and import alike.
 - Entity type keys, relation type keys, lens keys and lens names are unique within
   their ontology. Property keys are unique within their owning type.

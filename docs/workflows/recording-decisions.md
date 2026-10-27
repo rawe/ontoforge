@@ -35,7 +35,7 @@ creating an ADR by default. If the trade-off is still unclear, raise it for revi
 - **Storage contract and implementation:** [storage-adapters.md](../storage-adapters.md).
 - **Configuration and procedures:** the configuration table in the root
   [README.md](../../README.md) and the relevant [workflow](./).
-- **Terms:** the [glossary](../README.md#glossary).
+- **Terms:** the [glossary](../glossary.md).
 - **The reasoning behind a hard-to-reverse architectural choice:** an ADR in [adr/](../adr/).
 
 Current obligations do not need a decision-log entry to be enforceable. Keep the common

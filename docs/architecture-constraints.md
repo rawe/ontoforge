@@ -10,7 +10,7 @@ as well before changing a feature. This page is not a catalogue of every feature
 **Model and use an ontology through generic, schema-driven operations; do not add
 per-schema code or generated APIs.** Types, properties and relations are design data,
 so changing an ontology does not require an application deployment.
-See [the central idea](README.md#the-central-idea).
+See [the central idea](concepts.md#the-central-idea).
 
 ## Ontology isolation
 

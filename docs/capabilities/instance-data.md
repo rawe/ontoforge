@@ -160,7 +160,7 @@ ontology without a parent relation nothing is checked.
 
 ### The path read
 
-The path of one entity is its [hierarchy path](../README.md#hierarchies): the
+The path of one entity is its [hierarchy path](../glossary.md#hierarchies): the
 entity's ancestors, root first, followed by the entity itself, each as its type key, id,
 identity and name. A hierarchy root's path is the entity alone. Through a lens the path starts below
 the nearest ancestor whose type the lens hides, or that is reached over a parent relation

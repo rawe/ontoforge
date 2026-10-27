@@ -8,7 +8,7 @@ it follows stay in those two documents: [puts](changesets.md#put),
 [staging many calls](changesets.md#many-calls-in-one-request), and
 [changeset limits](changesets.md#limits), along with the identity rules.
 
-Vocabulary: [../README.md](../README.md#changesets). Routes:
+Vocabulary: [glossary](../glossary.md#changesets). Routes:
 [../interfaces.md](../interfaces.md#changesets).
 
 ## When to use it

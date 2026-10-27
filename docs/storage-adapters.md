@@ -7,8 +7,8 @@ small registry port. Below it, exactly one adapter knows a database. The access 
 do what when authentication is on, sits behind a port of its own and is not part of this
 contract ([architecture.md](architecture.md#components)).
 
-This document is the contract an adapter must satisfy. Concepts and vocabulary:
-[README.md](README.md). Where the port sits in the system:
+This document is the contract an adapter must satisfy. [Concepts](concepts.md) explain the
+mental model; the [glossary](glossary.md) defines its terms. Where the port sits in the system:
 [architecture.md](architecture.md).
 
 **One part binds; one describes.** Part 1 is normative: it binds every adapter. Part 2

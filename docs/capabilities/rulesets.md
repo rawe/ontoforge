@@ -6,7 +6,7 @@ data, or where it may write — and [the rules](#the-rules) lists them. A rulese
 limits nothing writes as the plain lens URL does, and reaches only the changesets started
 through it.
 
-Vocabulary: [../README.md](../README.md#rulesets). Parent relations, on which the anchor
+Vocabulary: [glossary](../glossary.md#rulesets). Parent relations, on which the anchor
 rests: [schema-modeling.md](schema-modeling.md#parent-relations) and
 [instance-data.md](instance-data.md#hierarchies). The changesets that write access
 `propose` works through: [changesets.md](changesets.md).
@@ -43,7 +43,7 @@ checks and documentation every new rule still needs. A ruleset is also not a cli
 seat: one key can serve several clients, and giving it client identity semantics would
 confuse what is limited with who is connected.
 
-- **Key.** It follows the ruleset [key](../README.md) rule, at most 64 characters,
+- **Key.** It follows the ruleset [key](../glossary.md#schema-and-design) rule, at most 64 characters,
   and cannot be renamed. A key that breaks the rule is refused.
 - **Its rules.** A new ruleset takes each rule's default ([below](#the-rules)), and so
   limits nothing.

@@ -234,7 +234,9 @@ ontoforge/
 │   ├── package.json                # Web client (Workbench + Studio): React 19 + TypeScript + Vite
 │   └── src/
 └── docs/
-    ├── README.md                   # Concepts, glossary, documentation map
+    ├── README.md                   # Reading paths and documentation map
+    ├── concepts.md                 # Mental model and relationships
+    ├── glossary.md                 # Shared vocabulary
     ├── architecture.md             # Components, boundaries, invariants and flows
     ├── architecture-constraints.md # Essential architectural guardrails
     ├── implementation/             # Contributor details tied to the implementation

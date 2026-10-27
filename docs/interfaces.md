@@ -2,8 +2,9 @@
 
 The complete index of every way into the system: the ontology registry, two per-ontology
 REST surfaces, one server-wide route, two probes, a metrics route, two MCP servers, and — with
-authentication on — sign-in and user management. Concepts and
-vocabulary: [README.md](README.md). System structure: [architecture.md](architecture.md).
+authentication on — sign-in and user management. [Concepts](concepts.md) explain the mental
+model; the [glossary](glossary.md) defines its terms. System structure:
+[architecture.md](architecture.md).
 The shared wire error contract is [below](#errors).
 What each operation *means* is in [capabilities/](capabilities/) — this document is the
 map, not the semantics.
@@ -350,7 +351,7 @@ auto-created.
 | PATCH | `/api/ontologies/{ontologyKey}` | Rename — the display name only; the key is immutable |
 | DELETE | `/api/ontologies/{ontologyKey}` | Hard cascade delete of the ontology and everything it contains |
 
-Keys follow the schema [key](README.md) rule at up to 59 characters and are unique
+Keys follow the schema [key](glossary.md#schema-and-design) rule at up to 59 characters and are unique
 server-wide, as are display names. Delete is a plain request with no API-level guard —
 the web client adds its own confirmation, callers of the API get none.
 

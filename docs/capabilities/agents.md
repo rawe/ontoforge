@@ -5,7 +5,7 @@ as agents.
 
 **All of it requires a configured language-model provider.** With none configured, every
 operation that would run a model is rejected. Clients are expected to check the server's
-feature flags first and hide what is unavailable — see [../README.md](../README.md). One
+feature flags first and hide what is unavailable — see [optional capabilities](../concepts.md#optional-capabilities). One
 asymmetry to know when reimplementing: listing agents and reading a thread back do not
 run a model, so they keep answering normally on a server with no provider. Only a chat
 with an agent fails.
@@ -33,7 +33,7 @@ An **agent** is a named language-model configuration belonging to one lens:
 
 | Field | Meaning |
 |---|---|
-| Key | Addresses the agent within its lens. A lens-resource [key](../README.md), at most 64 characters |
+| Key | Addresses the agent within its lens. A lens-resource [key](../glossary.md#schema-and-design), at most 64 characters |
 | Name | Human-readable label |
 | Description | What it is for |
 | System prompt | Replaces the built-in chat prompt |

@@ -12,13 +12,13 @@ show every entity the answer may use before the answer arrives. Questions form a
 conversation held by the server as a [thread](threads.md). Every lens also has a
 [default navigator](#the-default-navigator), derived from the lens and never stored.
 
-Vocabulary: [../README.md](../README.md#glossary). System structure:
+Vocabulary: [glossary](../glossary.md). System structure:
 [../architecture.md](../architecture.md). Every route: [../interfaces.md](../interfaces.md).
 
 ## Ownership and persistence
 
 A navigator belongs to exactly one lens of one ontology. Its key is unique among the
-lens's navigators and follows the lens-resource [key](../README.md) rule, at most 64
+lens's navigators and follows the lens-resource [key](../glossary.md#schema-and-design) rule, at most 64
 characters. It carries a name (1 to 200 characters), an optional description (a save
 accepts up to 4,000 characters), a configuration version, the configuration and timestamps. This release
 writes and runs configuration version 1.

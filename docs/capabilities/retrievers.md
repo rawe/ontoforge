@@ -13,13 +13,13 @@ Every lens also has a
 [default retriever](#the-default-retriever), derived from its managed indices
 and never stored.
 
-Vocabulary: [../README.md](../README.md#glossary). System structure:
+Vocabulary: [glossary](../glossary.md). System structure:
 [../architecture.md](../architecture.md). Every route: [../interfaces.md](../interfaces.md).
 
 ## Ownership and persistence
 
 A retriever belongs to exactly one lens of one ontology. Its key is unique in that lens and
-follows the lens-resource [key](../README.md) rule, at most 64 characters. It carries a
+follows the lens-resource [key](../glossary.md#schema-and-design) rule, at most 64 characters. It carries a
 name (1 to 200 characters), an optional description, a configuration version, the
 configuration, the warnings of a conversion ([below](#converting-version-1-configurations))
 and timestamps. This release writes and runs configuration version 2.

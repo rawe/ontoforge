@@ -2,11 +2,13 @@
 
 How the engineering skills should consume this repo's domain documentation when exploring the codebase.
 
-This repo does not use a root `GLOSSARY.md`. When a skill refers to `GLOSSARY.md` or "the glossary", read the glossary section of `docs/README.md` ([docs/README.md#glossary](../README.md#glossary)) instead.
+This repo does not use a root `GLOSSARY.md`. When a skill refers to `GLOSSARY.md` or "the glossary", read [docs/glossary.md](../glossary.md) instead.
 
 ## Before exploring, read these
 
-- **`docs/README.md`** — concepts, the documentation map and the [glossary](../README.md#glossary).
+- **`docs/README.md`** — reading paths and the documentation map. Read the
+  [concepts](../concepts.md) for the mental model and use the [glossary](../glossary.md)
+  for the project vocabulary.
 - **[Architectural constraints](../architecture-constraints.md)** — the concise common
   constraints to read before changing system behavior. Detailed rules remain in their
   owning documents.
@@ -26,7 +28,7 @@ rather than automatically using a skill's ADR format.
 
 ## Use the glossary's vocabulary
 
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in the [glossary](../README.md#glossary). Don't drift to synonyms the glossary avoids.
+When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in the [glossary](../glossary.md). Don't drift to synonyms the glossary avoids.
 
 If the concept you need isn't in the glossary yet, that's a signal — either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
 

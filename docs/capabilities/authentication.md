@@ -5,7 +5,7 @@ OntoForge determines their permissions from roles assigned within OntoForge.
 Authentication is disabled by default; in that mode, requests are trusted and role
 checks are skipped.
 
-[Access terminology](../README.md#access).
+[Access terminology](../glossary.md#access).
 [Authentication and authorization architecture](../architecture.md#authentication-and-authorization).
 [Authentication configuration](../../README.md#authentication).
 

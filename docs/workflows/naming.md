@@ -1,7 +1,7 @@
 # Naming concepts and keys
 
 Use this guide when adding a domain concept or keyed resource. The
-[glossary](../README.md#glossary) owns the vocabulary; the
+[glossary](../glossary.md) owns the vocabulary; the
 [interface conventions](../interfaces.md#what-a-path-segment-identifies) explain how
 clients address resources.
 

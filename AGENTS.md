@@ -60,12 +60,13 @@ file; a named file that is missing fails the boot.
 
 ## Documentation
 
-Start at [docs/README.md](docs/README.md) for the full picture — concepts, glossary and
-the map of everything else.
+Start at [docs/README.md](docs/README.md) for reading paths and the documentation map.
+The [concepts](docs/concepts.md) explain the mental model; the [glossary](docs/glossary.md)
+defines the vocabulary.
 
 | Need | Read |
 |---|---|
-| Concepts and vocabulary | [docs/README.md](docs/README.md) |
+| Concepts and vocabulary | [Concepts](docs/concepts.md) and [glossary](docs/glossary.md) |
 | Essential architectural constraints | [docs/architecture-constraints.md](docs/architecture-constraints.md) |
 | How it is put together | [docs/architecture.md](docs/architecture.md) |
 | What a capability does and its rules | [docs/capabilities/](docs/capabilities/) |

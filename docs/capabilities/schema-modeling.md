@@ -4,7 +4,7 @@ Designing one ontology's schema: entity types, relation types and property
 definitions. Everything runtime permits is derived from it, so this is the only
 place where the shape of the graph is decided.
 
-Vocabulary: [../README.md](../README.md). Layering and invariants:
+Vocabulary: [glossary](../glossary.md). Layering and invariants:
 [../architecture.md](../architecture.md).
 
 ## What it does
@@ -61,7 +61,7 @@ data during a schema edit would turn that edit into a write over all of it.
 
 ### Keys and immutability
 
-Type keys and property keys follow the schema [key](../README.md) rule — lower snake
+Type keys and property keys follow the schema [key](../glossary.md#schema-and-design) rule — lower snake
 case, starting with a letter — and are at most 64 characters.
 The leading-letter requirement is load-bearing: system properties
 are distinguished by a leading underscore, so no user key can ever collide with

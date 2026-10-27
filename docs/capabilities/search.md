@@ -43,7 +43,7 @@ and whose match names the property and the passage.
 ### Strategies and availability
 
 Each strategy is a composition of retrieval methods; the methods are defined in the
-[glossary](../README.md#glossary). Keyword ranking is stemmed full-text ranking in the
+[glossary](../glossary.md). Keyword ranking is stemmed full-text ranking in the
 ontology's [keyword languages](#keyword-language).
 
 | Strategy | Requirement | Retrieval methods |

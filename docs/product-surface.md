@@ -1,8 +1,9 @@
 # Product surface
 
 What the web client offers. It is a static application that reaches the server over REST
-only and holds no privileged path — see [architecture.md](architecture.md). Concepts and
-vocabulary: [README.md](README.md). Capability semantics are not repeated here; each
+only and holds no privileged path — see [architecture.md](architecture.md). [Concepts](concepts.md)
+explain the mental model; the [glossary](glossary.md) defines its terms. Capability semantics
+are not repeated here; each
 section links to the capability document that owns them.
 
 This document is the capability inventory. It is complete on *what the product does* and

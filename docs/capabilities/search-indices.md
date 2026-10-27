@@ -5,7 +5,7 @@ type and the text composed for each entity of that type; ranked search ranks tho
 and returns the entities that own them. Every ranked search reads them
 ([search.md](search.md)).
 
-Vocabulary: [../README.md](../README.md#glossary). The system's structure:
+Vocabulary: [glossary](../glossary.md). The system's structure:
 [../architecture.md](../architecture.md).
 
 ## What a search index is

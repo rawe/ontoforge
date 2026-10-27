@@ -154,6 +154,12 @@ export async function refreshSearchIndex(ontologyKey: string, indexKey: string):
   if (index === null) {
     throw new NotFoundError(`Search index '${indexKey}' not found`);
   }
+  return requeueIndex(store, index);
+}
+
+/** Re-queue every entity of `index` into its current generations through
+ * `store` — a design change's own store queues in that change. */
+export async function requeueIndex(store: SearchIndexStore, index: SearchIndexRecord): Promise<number> {
   const live = (await store.listGenerations(index.searchIndexId))
     .filter((g) => g.state === "building" || g.state === "ready")
     .map((g) => g.generationId);

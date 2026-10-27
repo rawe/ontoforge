@@ -162,8 +162,9 @@ import. Relations referencing unknown entities are skipped with a warning. If `-
 omitted, the script uses an unscoped lens and stops when the ontology has none. The lens
 must expose every type and property the file carries — a scoped lens rejects what it hides.
 
-**API used**: `GET /api/ontologies/{ontologyKey}/model/export` (identities and
-one-per-pair types), `POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/changesets`,
+**API used**: `GET /api/ontologies/{ontologyKey}/model/export` (only to pick a lens when
+`--lens` is omitted), `GET /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/schema`
+(identities and one-per-pair types), `POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/changesets`,
 `POST …/changesets/{id}/writes` with a list of `put_entity`, `create_entity`,
 `put_relation` or `create_relation` calls, and `POST …/changesets/{id}/commit`
 

@@ -116,6 +116,7 @@ export function changesetWriter(request, prefix, note) {
   let pending = [];
   let bytes = 0;
   let commits = 0;
+  let stagedHere = 0;
 
   const start = async () => {
     if (changeset === null) changeset = (await request('POST', `${prefix}/changesets`, { note })).id;
@@ -124,27 +125,38 @@ export function changesetWriter(request, prefix, note) {
     if (changeset === null) return;
     await request('POST', `${prefix}/changesets/${changeset}/commit`, {});
     changeset = null;
+    stagedHere = 0;
     commits++;
   };
   const stage = (writes) => request('POST', `${prefix}/changesets/${changeset}/writes`, writes);
+  // Stage one batch whole. Full: commit what this changeset holds and
+  // stage the batch into the next one; a batch larger than an empty
+  // changeset holds is split in halves.
+  const sendBatch = async (batch) => {
+    await start();
+    let answers;
+    try {
+      answers = await stage(batch.map((item) => item.write));
+    } catch (err) {
+      if (!(/-> 409: .*is full/s.test(err.message))) throw err;
+      if (stagedHere > 0) {
+        await commit();
+        return sendBatch(batch);
+      }
+      if (batch.length === 1) throw err;
+      const half = Math.ceil(batch.length / 2);
+      await sendBatch(batch.slice(0, half));
+      return sendBatch(batch.slice(half));
+    }
+    stagedHere += batch.length;
+    batch.forEach((item, i) => item.done?.(answers[i]));
+  };
   const send = async () => {
     if (pending.length === 0) return;
     const batch = pending;
     pending = [];
     bytes = 0;
-    const writes = batch.map((item) => item.write);
-    await start();
-    let answers;
-    try {
-      answers = await stage(writes);
-    } catch (err) {
-      // Full: commit it, and stage the same calls into the next one.
-      if (!/-> 409: .*is full/s.test(err.message)) throw err;
-      await commit();
-      await start();
-      answers = await stage(writes);
-    }
-    batch.forEach((item, i) => item.done?.(answers[i]));
+    await sendBatch(batch);
   };
 
   return {

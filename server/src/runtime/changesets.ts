@@ -819,9 +819,10 @@ async function resolveWrite(
         });
       }
       const { fromEntityId, toEntityId, properties, typeKey } = created.write;
-      // An end not found is the create's fault, reported by its merge.
+      // A type the lens hides, or an end not found, is the create's fault,
+      // reported by its merge; nothing is read of its relations.
       const id =
-        rt === undefined || Object.keys(created.faults).length > 0
+        rt === undefined || loaded.scoped.relationTypes[typeKey] === undefined || Object.keys(created.faults).length > 0
           ? null
           : await pairHolderInView(changesetId, typeKey, fromEntityId, toEntityId, store);
       if (id === null) return { ...created, put: "create" };
@@ -1104,7 +1105,10 @@ async function applyMerge(
   }
   if (isEmpty(merge.change)) return;
   at.changeset = await applyChange(loaded, rulesetKey, at.changeset, merge.change, store);
-  if (at.bytes !== null) at.bytes += merge.grows;
+  // A change that removes values frees bytes `grows` does not count: read
+  // them again when next needed.
+  const removes = (merge.change.removeValues?.length ?? 0) + (merge.change.removeObjects?.length ?? 0) > 0;
+  if (at.bytes !== null) at.bytes = removes ? null : at.bytes + merge.grows;
 }
 
 /**
@@ -2445,6 +2449,19 @@ async function reviewOf(
 // Commit validation
 // ---------------------------------------------------------------------------
 
+/** The pair locks of every staged relation create of a one-per-pair type,
+ * type by type in key order (the phases take them again, holding them
+ * already). */
+async function lockStagedPairs(loaded: LoadedSchema, objects: StagedObjectRecord[], bound: RuntimeStore): Promise<void> {
+  const byType = new Map<string, { fromId: string; toId: string }[]>();
+  for (const object of objects) {
+    if (object.kind !== "relation" || object.action !== "create") continue;
+    if (loaded.full.relationTypes[object.typeKey]?.onePerPair !== true) continue;
+    byType.set(object.typeKey, [...(byType.get(object.typeKey) ?? []), { fromId: object.fromId!, toId: object.toId! }]);
+  }
+  for (const typeKey of [...byType.keys()].sort()) await bound.lockPairs(typeKey, byType.get(typeKey)!);
+}
+
 /** Step 1, after the lock: every stored target `FOR UPDATE`, and drift
  * re-checked on the rows as locked, documents read as hash and length. A
  * target gone since the pass is left to step 2. */
@@ -2893,6 +2910,9 @@ async function commitRun(
       if (locked.version !== record.version) {
         throw new ConflictError(`Changeset '${changesetId}' changed during the commit; try again`);
       }
+      // The pairs before any row, in the order an immediate relation create
+      // takes them, so that the two never wait on each other in a cycle.
+      await lockStagedPairs(loaded, pass.objects, bound);
       const drift = await driftUnderLock(loaded, pass, bound);
       if (drift.length > 0) throw new CommitRejected(drift);
       const anchor =

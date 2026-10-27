@@ -1236,6 +1236,11 @@ export async function createRelation(
 
     // Endpoint validation against the FULL schema's declared source/target.
     const fullRtForValidation = loaded.full.relationTypes[relationTypeKey] ?? scopedRt;
+    // The pair is locked before any row the checks below lock, in the order
+    // a changeset commit takes them; a taken pair is refused after them.
+    const pairTaken =
+      fullRtForValidation.onePerPair &&
+      (await tx.lockPairs(relationTypeKey, [{ fromId: fromEntityId, toId: toEntityId }])).length > 0;
     const fromError = await endpointError(
       tx,
       loaded.full,
@@ -1269,10 +1274,7 @@ export async function createRelation(
       throw new ValidationError("Instance validation failed", { fields: errors });
     }
 
-    const pair = { fromId: fromEntityId, toId: toEntityId };
-    if (fullRtForValidation.onePerPair && (await tx.lockPairs(relationTypeKey, [pair])).length > 0) {
-      throw new PairTakenError(relationTypeKey);
-    }
+    if (pairTaken) throw new PairTakenError(relationTypeKey);
 
     const relation = await tx.createRelation(
       write.relationTypeKey,

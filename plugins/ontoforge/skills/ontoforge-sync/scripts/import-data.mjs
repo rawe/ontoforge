@@ -43,17 +43,15 @@ if (!data.formatVersion) {
   die('Invalid data file: missing formatVersion field.');
 }
 
-// The design: the lens to write through (an unscoped one unless named), and
-// which types a rerun can match — entity types with an identity, relation
-// types that are one per pair.
-let design;
-try {
-  design = await api(baseUrl, `${modelPath(ontologyKey)}/export`);
-} catch (err) {
-  die(`Cannot read the design of ontology "${ontologyKey}": ${err.message}`);
-}
+// Resolve the lens the runtime API writes through: an unscoped one unless named.
 let lensKey = flags.lens;
 if (!lensKey) {
+  let design;
+  try {
+    design = await api(baseUrl, `${modelPath(ontologyKey)}/export`);
+  } catch (err) {
+    die(`Cannot read the design of ontology "${ontologyKey}": ${err.message}`);
+  }
   lensKey = pickLensKey(design);
   if (!lensKey) {
     die(
@@ -63,11 +61,20 @@ if (!lensKey) {
   }
   console.error(`Using lens: ${lensKey}`);
 }
+
+// Which types a rerun can match, as the lens shows them: entity types with
+// an identity, relation types that are one per pair.
+let lensSchema;
+try {
+  lensSchema = await api(baseUrl, `${runtimePath(ontologyKey, lensKey)}/schema`);
+} catch (err) {
+  die(`Cannot read the schema of lens "${lensKey}": ${err.message}`);
+}
 const withIdentity = new Set(
-  (design.entityTypes || []).filter((type) => (type.identityProperties || []).length > 0).map((type) => type.key),
+  (lensSchema.entityTypes || []).filter((type) => (type.identityProperties || []).length > 0).map((type) => type.key),
 );
 const onePerPair = new Set(
-  (design.relationTypes || []).filter((type) => type.onePerPair || type.parent).map((type) => type.key),
+  (lensSchema.relationTypes || []).filter((type) => type.onePerPair || type.parent).map((type) => type.key),
 );
 
 const ENTITY_SYSTEM = new Set([

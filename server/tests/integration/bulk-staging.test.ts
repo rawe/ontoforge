@@ -151,6 +151,25 @@ describe("a staging request that lists its calls", () => {
     }
   });
 
+  it("counts the bytes a batch frees: a large value replaced within one request fits", async () => {
+    const cs = await start();
+    const [big] = await stage(cs, [person({ name: "Big", email: "x".repeat(600) })]);
+    const cap = settings.CHANGESET_MAX_BYTES;
+    settings.CHANGESET_MAX_BYTES = 1000;
+    try {
+      const answers = await stage(cs, [
+        // Read the staged bytes first, then free some.
+        person({ name: "Small" }),
+        { operation: "delete_entity", type: "person", id: big!.id },
+        person({ name: "Other", email: "y".repeat(600) }),
+      ]);
+      expect(answers).toHaveLength(3);
+      expect(await objectCount(cs)).toBe(2);
+    } finally {
+      settings.CHANGESET_MAX_BYTES = cap;
+    }
+  });
+
   it("answers 413 for a body over the configured limit", async () => {
     const limit = settings.REQUEST_BODY_LIMIT;
     settings.REQUEST_BODY_LIMIT = 1000;
@@ -209,6 +228,30 @@ describe("a put of an entity", () => {
 });
 
 describe("a put of a relation", () => {
+  it("on a type the lens hides is not found, whatever links the pair", async () => {
+    await setOnePerPair();
+    const res = await call("POST", `${MODEL}/lenses`, { key: "no_links", name: "No links" });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    for (const key of ["person", "company"]) {
+      const included = await call("POST", `${MODEL}/lenses/${res.body.lensId}/includes/entity-types`, { key });
+      expect(included.status, JSON.stringify(included.body)).toBe(201);
+    }
+    // Listing one relation type hides the others.
+    await call("POST", `${MODEL}/lenses/${res.body.lensId}/includes/relation-types`, { key: "manages" });
+    invalidateLoadedSchemaCache();
+    const first = await start();
+    await stage(first, [person({ name: "Alice" }), company("Acme"), employment("Alice", "Acme")]);
+    await commit(first);
+
+    const hidden = runtimePrefix("test_ont", "no_links");
+    const cs = (await call("POST", `${hidden}/changesets`)).body.id as string;
+    const linked = await call("POST", `${hidden}/changesets/${cs}/writes`, employment("Alice", "Acme"));
+    const unlinked = await call("POST", `${hidden}/changesets/${cs}/writes`, employment("Alice", "Nowhere"));
+    expect(linked.status).toBe(404);
+    expect(unlinked.status).toBe(404);
+    expect(linked.body.error.message).toBe(unlinked.body.error.message);
+  });
+
   it("is refused on a relation type that is not one per pair", async () => {
     const cs = await start();
     await stage(cs, [person({ name: "Alice" }), company("Acme")]);

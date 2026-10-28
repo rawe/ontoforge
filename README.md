@@ -51,7 +51,7 @@ OntoForge exposes two MCP servers for AI-assisted workflows — one for schema d
 
 ### Modeling Server
 
-Design and iterate on one ontology's schema. Tools for managing entity types, relation types, properties, lenses, search indices and search settings, validation, and export/import — plus the argument-less `ensure_ontology`, which creates the mount's own ontology if it does not exist yet.
+Design and iterate on one ontology's schema. Tools for managing entity types, relation types, properties, lenses, search indices and search settings, validation, and export/import — plus the argument-less `ensure_ontology`, which creates the mount's own ontology if it does not exist yet (only with authentication off; with it on, the tool creates nothing).
 
 **Endpoint:** `http://localhost:8000/mcp/ontologies/{ontologyKey}/model`
 

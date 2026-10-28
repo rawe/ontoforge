@@ -93,8 +93,9 @@ The same capabilities are exposed three ways, over one service layer. No interfa
 built on another — in particular, MCP does not call REST.
 
 - **REST** — the complete surface. Registry CRUD at the top, then schema design and
-  instance data under per-ontology route prefixes. The only interface that manages
-  ontologies.
+  instance data under per-ontology route prefixes. The only interface for the registry,
+  with one exception: with authentication off, a modeling MCP mount's argument-less
+  `ensure_ontology` creates the mount's own ontology.
 - **MCP** — two servers, one for modeling and one for runtime, for AI clients. Each
   mount is bound by its URL — the modeling server to one ontology, the runtime server
   to one ontology and one lens — so a model never sees more than it was given.

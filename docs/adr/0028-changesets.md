@@ -62,8 +62,13 @@ plan, and ending a changeset does not add a retained-record or tombstone lifecyc
 - **Applying the plan through the service's write functions.** Their per-call graph rules
   would have to be set aside for intermediate states the plan passes through, which
   changes seven signatures, and it is the slowest way to apply it.
-- **Set-based SQL for the commit.** It writes the write semantics a second time, beside
-  the immediate path's, for a speed the store writes have not been shown to lack.
+- **Set-based SQL for the commit.** Rejected at the time: it would write the write
+  semantics a second time, beside the immediate path's, for a speed the store writes had
+  not been shown to lack. *Since superseded:* bulk staging made the commit's speed matter,
+  so the commit now applies each phase through batch writes on the port, which behave as
+  the single writes in sequence; the write semantics stay defined once, at the port. See
+  [the commit](../capabilities/changesets.md#the-commit) and
+  [the data side](../storage-adapters.md#data-side) of the storage contract.
 - **Submit running commit validation.** A plan with a fault its proposer cannot fix could
   never be handed over.
 - **A tombstone, or the kept row, of an ended changeset.** It adds a second lifecycle and

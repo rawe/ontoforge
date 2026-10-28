@@ -1043,14 +1043,8 @@ client reads the entity through the runtime; `evidence` says the entity was hand
 model that wrote the answer. A link's ends are cards of the same turn. Which entities a
 kind sends is in its section below.
 
-Only the shared `entities` event carries entity cards. A kind's own events and tool events
-never do: chat, citations and the Explorer can then treat every kind alike while tool
-activity stays generic. Per-kind entity events would require a card reader for every
-kind, including every new kind. Putting cards in native tool results would couple those
-generic events to a presentation and force consumers to inspect tools that return no
-entities. Shared cards do not imply shared relevance or provenance: kinds meet entities
-differently, while identity, label and whether the answer model saw the entity have a
-common meaning ([threads](capabilities/threads.md#the-entities-a-turn-met)).
+Only the shared `entities` event carries entity cards; a kind's own events and tool events
+never do ([why](capabilities/threads.md#the-entities-a-turn-met)).
 
 A kind's own events are named `<kind>.<event>` — `agent.…`, `retriever.…`, `navigator.…`; a client may
 ignore those it does not know. A writable stream has exactly one terminal `final` or

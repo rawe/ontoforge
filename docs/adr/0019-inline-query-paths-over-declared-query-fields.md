@@ -1,7 +1,5 @@
 # Query paths inline in the filter key, not declared in the schema
 
-Status: Accepted
-
 Current behavior: [Query paths](../capabilities/instance-data.md#query-paths)
 
 ## Context

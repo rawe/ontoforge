@@ -1,7 +1,5 @@
 # Changesets stored as one record per staged object and per staged value, committed in fixed phases under a lock
 
-Status: Accepted
-
 Current behavior: [Changesets](../capabilities/changesets.md) and [changeset storage](../storage-adapters.md#the-changeset-store)
 
 ## Context
@@ -17,8 +15,10 @@ steps and rolls them back, holding the commit lock while it runs.
 
 Persist a changeset as a set of staged objects and individually addressable staged
 values, bound to one lens, rather than a journal of calls or one whole-plan document.
-Commit the plan atomically in fixed dependency phases under a lock; a check runs the
-same validation and commit steps and rolls them back. Keep the captured before-state
+Commit the plan atomically in fixed dependency phases under a lock, each phase applied
+through batch writes on the port that behave as the single writes in sequence, so the
+write semantics stay defined once; a check runs the same validation and commit steps and
+rolls them back. Keep the captured before-state
 until the caller explicitly rebases it. Do not hold a database transaction open while
 the plan is being built.
 
@@ -62,13 +62,6 @@ plan, and ending a changeset does not add a retained-record or tombstone lifecyc
 - **Applying the plan through the service's write functions.** Their per-call graph rules
   would have to be set aside for intermediate states the plan passes through, which
   changes seven signatures, and it is the slowest way to apply it.
-- **Set-based SQL for the commit.** Rejected at the time: it would write the write
-  semantics a second time, beside the immediate path's, for a speed the store writes had
-  not been shown to lack. *Since superseded:* bulk staging made the commit's speed matter,
-  so the commit now applies each phase through batch writes on the port, which behave as
-  the single writes in sequence; the write semantics stay defined once, at the port. See
-  [the commit](../capabilities/changesets.md#the-commit) and
-  [the data side](../storage-adapters.md#data-side) of the storage contract.
 - **Submit running commit validation.** A plan with a fault its proposer cannot fix could
   never be handed over.
 - **A tombstone, or the kept row, of an ended changeset.** It adds a second lifecycle and

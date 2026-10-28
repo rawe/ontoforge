@@ -65,7 +65,7 @@ reconstructing it from rejected options:
 ```markdown
 # <Decision title>
 
-Status: Proposed
+Current behavior: <links to the owning documents>
 
 ## Context
 
@@ -87,21 +87,17 @@ Status: Proposed
 Keep only the context and alternatives needed to understand the trade-off. The current
 system's behavior and rules belong in their owning documents; an ADR explains why a
 major choice was made and does not replace them. Link to a relevant ADR where its
-rationale helps a reader, rather than requiring every rule to link to one. Mark the record
-Accepted after the architectural choice is approved. Do not invent dates for existing
-records or reformat an older record without improving its explanation.
+rationale helps a reader, rather than requiring every rule to link to one. Write the
+record once the architectural choice is approved; it carries no status or date. Do not
+reformat an older record without improving its explanation.
 
 ## When a decision changes
 
-Update the current-state documentation and any affected links. Assess whether the new
-choice meets the ADR threshold; ordinary changes need no new ADR. Preserve the decision
-and its original reasoning in an accepted record. A new qualifying architectural choice
-gets a new ADR; mark the earlier one Superseded and link the replacement. If a decision
-simply ceases to apply without a new qualifying choice, mark it Deprecated and explain
-the scope change, linking to the current owner where useful.
+`adr/` holds only decisions in force; git keeps the history. Update the current-state
+documentation and any affected links, then rewrite or delete the ADR so it states the
+decision as it now stands. Assess whether the new choice meets the ADR threshold:
+ordinary changes need no new ADR, and a new qualifying choice may get its own.
 
-Correct factual errors or clarify wording explicitly; do not rewrite an earlier decision
-as though a later choice had always applied. Current behavior belongs in the owning
-documentation, so a reader can distinguish it from the circumstances of the record.
-Retiring a minor record from an overbroad collection requires preserving its useful
-content and updating references; it must not erase a consequential decision's rationale.
+Removing a record from `adr/` requires moving its useful content to the owning documents
+and updating references; it must not erase a consequential decision's rationale that
+still applies.

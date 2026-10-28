@@ -1,7 +1,5 @@
 # Access data in a database of its own
 
-Status: Accepted
-
 Current behavior: [Authentication and authorization](../architecture.md#authentication-and-authorization)
 
 ## Context

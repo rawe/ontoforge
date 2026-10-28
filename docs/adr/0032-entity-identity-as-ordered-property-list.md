@@ -1,7 +1,5 @@
 # Entity identity as an ordered list of the type's own properties
 
-Status: Accepted
-
 Current behavior: [Declaring entity identity](../capabilities/entity-identity.md#declaring-an-identity)
 
 ## Context

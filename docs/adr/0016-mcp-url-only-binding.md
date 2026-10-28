@@ -1,7 +1,5 @@
 # MCP binding by URL only, no registry over MCP
 
-Status: Accepted
-
 Current behavior: [MCP mount binding](../interfaces.md#how-a-mount-is-bound)
 
 ## Context

@@ -1,7 +1,5 @@
 # Instance data in two generic jsonb tables
 
-Status: Accepted
-
 Current behavior: [PostgreSQL instance storage](../storage-adapters.md#how-instance-data-is-stored)
 
 ## Context

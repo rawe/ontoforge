@@ -1,7 +1,5 @@
 # PostgreSQL as the only storage adapter
 
-Status: Accepted
-
 Current behavior: [Storage adapters](../storage-adapters.md)
 
 ## Context

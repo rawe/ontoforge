@@ -1,7 +1,5 @@
 # One search entry per relation instance
 
-Status: Accepted
-
 Current behavior: [Search index entries](../capabilities/search-indices.md#entries)
 
 ## Context

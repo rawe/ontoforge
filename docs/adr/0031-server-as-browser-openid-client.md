@@ -1,7 +1,5 @@
 # The server as the browser's OpenID client
 
-Status: Accepted
-
 Current behavior: [Signing in](../capabilities/authentication.md#signing-in)
 
 ## Context

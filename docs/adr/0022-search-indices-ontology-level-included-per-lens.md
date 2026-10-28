@@ -1,7 +1,5 @@
 # Search indices are ontology-level and included per lens
 
-Status: Accepted
-
 Current behavior: [Search index ownership](../capabilities/search-indices.md#what-a-search-index-is) and [lens search](../capabilities/ontology-lenses.md#search-through-a-lens)
 
 ## Context

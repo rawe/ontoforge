@@ -1,7 +1,5 @@
 # MCP runs in the server process over stateless JSON HTTP
 
-Status: Accepted
-
 Current behavior: [MCP interfaces](../interfaces.md#mcp)
 
 ## Context

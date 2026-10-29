@@ -1,7 +1,7 @@
 /**
  * Search over search indices (spec §8). One engine serves the index search (`searchByIndices`,
- * by index keys) and the default search (`searchThroughIndices`, the
- * `GET search` parameters mapped onto default and passage indices):
+ * by index keys) and the default search (`searchThroughIndices`, its
+ * request mapped onto default and passage indices):
  *
  * 1. The indices: those requested, or all, among the ones the lens may
  *    search (`availableIndices`).

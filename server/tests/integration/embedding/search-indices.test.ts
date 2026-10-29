@@ -15,6 +15,7 @@ import { createApp } from "../../../src/app.js";
 import { closeStores, getRuntimeStore, initStores } from "../../../src/core/ports.js";
 import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
+import { search, type SearchRequest } from "../../../src/runtime/search/entry.js";
 import { searchByIndices } from "../../../src/runtime/search/indexSearch.js";
 import { wipeDatabase } from "../reset.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
@@ -36,10 +37,9 @@ describe.skipIf(!ollamaUp)("search indices (Ollama)", () => {
     return res.json();
   }
 
-  async function find(params: Record<string, string>): Promise<Row> {
-    const res = await app.inject({ url: `${RUNTIME}/search?${new URLSearchParams(params)}` });
-    expect(res.statusCode, res.body).toBe(200);
-    return res.json();
+  /** The default search. */
+  async function find(request: SearchRequest): Promise<Row> {
+    return search("all", request, await getRuntimeStore(O));
   }
 
   beforeAll(async () => {
@@ -120,7 +120,7 @@ describe.skipIf(!ollamaUp)("search indices (Ollama)", () => {
   });
 
   it("semantic search over passage indices returns the passage that matched", async () => {
-    const body = await find({ q: "beekeeping and vegetable gardening", strategy: "semantic", in: "document" });
+    const body = await find({ query: "beekeeping and vegetable gardening", strategy: "semantic", in: ["document"] });
     const top = body.hits[0];
     expect(top.entity._id).toBe(ids["Bob Miller"]);
     expect(top.matched).toMatchObject({ index: "person~bio", partKind: "passage", charOffset: 0 });
@@ -131,12 +131,12 @@ describe.skipIf(!ollamaUp)("search indices (Ollama)", () => {
   });
 
   it("the semantic leg crosses languages: a German query finds the English passage", async () => {
-    const body = await find({ q: "Bienenzucht im Garten", strategy: "semantic", in: "document" });
+    const body = await find({ query: "Bienenzucht im Garten", strategy: "semantic", in: ["document"] });
     expect(body.hits[0].entity._id).toBe(ids["Bob Miller"]);
   });
 
   it("hybrid search ranks across default and passage indices, one match per index", async () => {
-    const body = await find({ q: "Ada analytical engines", strategy: "hybrid" });
+    const body = await find({ query: "Ada analytical engines", strategy: "hybrid" });
     const top = body.hits[0];
     expect(top.entity._id).toBe(ids["Ada Lovelace"]);
     expect(new Set(top.matches.map((m: Row) => m.kind))).toEqual(new Set(["properties", "document"]));

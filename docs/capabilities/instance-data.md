@@ -95,11 +95,10 @@ Relations carry no document properties (the schema forbids them there) and are n
 hit of [search](search.md): hits are entities. A relation is composed into search entries
 only by a custom search index with a relation group on its type — one entry per relation,
 with the entity at its other end, owned by the entity on the index's root side
-([search-indices.md](search-indices.md#relation-groups)). The index search through such
-an index — `POST search`, or the MCP `search_by_index` tool — makes relations
-searchable: an entity ranks by its relation entries too, and the
-hit names the relation that matched and the entity at its other end
-([search.md](search.md#index-search)). Relations themselves are reachable by listing, by
+([search-indices.md](search-indices.md#relation-groups)). A search through such an index — the entity search `POST search/entities` naming it, or
+the MCP `search_by_index` tool — makes relations searchable: an entity ranks by its
+relation entries too, and the result names the relation that matched and the entity at
+its other end ([search.md](search.md#entity-search)). Relations themselves are reachable by listing, by
 traversal and by [OQL](oql.md).
 
 ## Hierarchies

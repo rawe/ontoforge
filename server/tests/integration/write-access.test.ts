@@ -346,9 +346,7 @@ describe("through a 'none' ruleset's URL (REST)", () => {
       ["GET /schema/entity-types/:key", "/schema/entity-types/task"],
       ["GET /schema/relation-types", "/schema/relation-types"],
       ["GET /schema/relation-types/:key", "/schema/relation-types/has_task"],
-      ["GET /search", "/search?q=T1"],
       ["GET /search-indices", "/search-indices"],
-      ["POST /search", "/search", { query: "T1" }],
       ["POST /search/entities", "/search/entities", { query: "T1" }],
       ["POST /search/passages", "/search/passages", { query: "T1" }],
       ["POST /entities/:entityTypeKey", "/entities/person", { name: "Ann" }],
@@ -416,7 +414,7 @@ describe("through a 'none' ruleset's URL (REST)", () => {
   };
   const VERBS = { write: "write directly", stage: "start or change a changeset", commit: "commit" } as const;
 
-  it("refuses the 10 writes, the 9 stage routes and the commit with 409; the 31 reads answer", async () => {
+  it("refuses the 10 writes, the 9 stage routes and the commit with 409; the 29 reads answer", async () => {
     const all = requests();
     expect(all.map(([route]) => route).sort()).toEqual(Object.keys(ROUTES).sort());
     const refused: string[] = [];
@@ -432,7 +430,7 @@ describe("through a 'none' ruleset's URL (REST)", () => {
       }
     }
     expect(refused).toHaveLength(20);
-    expect(all.length - refused.length).toBe(31);
+    expect(all.length - refused.length).toBe(29);
     // Nothing written, nothing staged, nothing started.
     expect((await rest("GET", `${ALL}/entities/task/${e.T1}`)).body.name).toBe("T1");
     expect((await rest("GET", `${ALL}/entities/task/${e.T1a1}`)).status).toBe(200);

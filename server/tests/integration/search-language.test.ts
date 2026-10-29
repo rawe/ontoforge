@@ -41,6 +41,16 @@ async function post(url: string, payload: object) {
 const putSettings = (payload: object) =>
   app.inject({ method: "PUT", url: `${model}/search-settings`, payload });
 const getSettings = async () => (await app.inject({ url: `${model}/search-settings` })).json();
+/** The entities a keyword entity search finds through one index, in rank order. */
+async function found(query: string, index: string, match: "any" | "all" = "any"): Promise<string[]> {
+  const res = await app.inject({
+    method: "POST",
+    url: `${runtime}/search/entities`,
+    payload: { query, indices: [index], keyword: { match } },
+  });
+  expect(res.statusCode, res.body).toBe(200);
+  return res.json().items.map((item: any) => item.entity._id);
+}
 
 it("the registry takes no language and answers none; export carries the keyword language set", async () => {
   // A language a client still sends is ignored, like any unknown field.
@@ -104,13 +114,7 @@ describe("search settings", () => {
     const german = await post(`${runtime}/entities/listing`, { name: "Die Häuser am See" });
     const english = await post(`${runtime}/entities/listing`, { name: "Many studies of lakes" });
     await drainSearchWork();
-    const ids = async (q: string) => {
-      const res = await app.inject({
-        url: `${runtime}/search?${new URLSearchParams({ q, in: "properties", strategy: "keyword" })}`,
-      });
-      expect(res.statusCode, res.body).toBe(200);
-      return res.json().hits.map((h: any) => h.entity._id);
-    };
+    const ids = (q: string) => found(q, "listing~default");
     const keywordLanguagesOfGenerations = async () =>
       (await (await getSearchIndexStore("language_test")).listGenerations())
         .filter((g) => g.representation === "keyword" && g.state !== "retired")
@@ -157,10 +161,8 @@ describe("search settings", () => {
       body: "Häuser werden gebaut.",
     });
     await drainSearchWork();
-    for (const kind of ["properties", "document"]) {
-      const res = await app.inject({ url: `${runtime}/search?q=Haus&in=${kind}` });
-      expect(res.statusCode, res.body).toBe(200);
-      expect(res.json().hits[0].entity._id).toBe(entity._id);
+    for (const index of ["paper~default", "paper~body"]) {
+      expect((await found("Haus", index))[0]).toBe(entity._id);
     }
   });
 
@@ -184,25 +186,18 @@ describe("search settings", () => {
       body: "We are buying old houses.",
     });
     await drainSearchWork();
-    const ids = async (q: string, kind: string, strategy = "keyword") => {
-      const res = await app.inject({
-        url: `${runtime}/search?${new URLSearchParams({ q, in: kind, strategy })}`,
-      });
-      expect(res.statusCode, res.body).toBe(200);
-      return res.json().hits.map((h: any) => h.entity._id);
-    };
-    for (const kind of ["properties", "document"]) {
+    for (const index of ["listing~default", "listing~body"]) {
       // German inflections find the German text, English ones the English text.
-      expect(await ids("Haus", kind)).toEqual([german._id]);
-      expect(await ids("Häusern", kind)).toEqual([german._id]);
-      expect(await ids("house", kind)).toEqual([english._id]);
+      expect(await found("Haus", index)).toEqual([german._id]);
+      expect(await found("Häusern", index)).toEqual([german._id]);
+      expect(await found("house", index)).toEqual([english._id]);
     }
-    expect(await ids("kaufen", "document")).toEqual([german._id]);
-    expect(await ids("buy", "document")).toEqual([english._id]);
+    expect(await found("kaufen", "listing~body")).toEqual([german._id]);
+    expect(await found("buy", "listing~body")).toEqual([english._id]);
     // Every term must match in one language: German and English terms mixed
     // match nothing under all-term matching, either under any-term.
-    expect(await ids("Haus lake", "properties", "keyword-all")).toEqual([]);
-    expect((await ids("Haus lake", "properties", "keyword-any")).sort()).toEqual(
+    expect(await found("Haus lake", "listing~default", "all")).toEqual([]);
+    expect((await found("Haus lake", "listing~default", "any")).sort()).toEqual(
       [german._id, english._id].sort(),
     );
   });
@@ -216,13 +211,7 @@ describe("search settings", () => {
     await post(`${runtime}/entities/service`, { name: "Analyse eines Marktes" });
     await post(`${runtime}/entities/service`, { name: "The retail toolbox" });
     await drainSearchWork();
-    const ids = async (q: string) => {
-      const res = await app.inject({
-        url: `${runtime}/search?${new URLSearchParams({ q, in: "properties", strategy: "keyword-any" })}`,
-      });
-      expect(res.statusCode, res.body).toBe(200);
-      return res.json().hits.map((h: any) => h.entity._id);
-    };
+    const ids = (q: string) => found(q, "service~default");
     // English would stem "für" and "eines" ("ein", a prefix of
     // "Einzelhändler"), German "the": each is a stop word of the set.
     expect(await ids("Marktforschung für Einzelhändler")).toEqual([research._id]);

@@ -170,8 +170,8 @@ resolved with the same direction rules
 `sort` rejects paths, and relation lists take neither paths nor relation subjects. The
 MCP `filters` object takes path and relation keys as ordinary keys.
 
-Semantic search accepts filters through the same `filter.` syntax, but not all of them, and
-not on every request shape — the restrictions and their reasons are in
+Ranked search accepts the same filter keys — in its `filter` object, without the
+`filter.` prefix — but not all of them; the restrictions and their reasons are in
 [capabilities/search.md](../capabilities/search.md#scope-and-filters).
 
 ### Field projection
@@ -182,7 +182,7 @@ not on every request shape — the restrictions and their reasons are in
 | Route | Always returned regardless of projection |
 |---|---|
 | Entity list, entity read | `_id`, `_identity` |
-| Search | `_id`, `_entityTypeKey`, `_identity` |
+| MCP search tools | `_id`, `_entityTypeKey`, `_identity` |
 | Neighbours — the centre entity | `_id`, `_identity` |
 | Neighbours — neighbour entities | `_id`, `_entityTypeKey`, `_identity` |
 
@@ -194,14 +194,13 @@ raw content inline instead of the usual size stub. See
 [capabilities/documents.md](../capabilities/documents.md).
 
 Projection is available on entity list and read, on neighbours (as `fields` and
-`relationFields`) and on search. Relation list and relation read do not take it.
+`relationFields`) and on the MCP search tools. Relation list and relation read do not
+take it.
 
 ### Naming irregularities
 
-`min_score` on saved-query discovery and `min_similarity` on search are the two
-snake_case runtime query parameters.
-Other runtime parameters follow their documented names, including kind-prefixed
-`document.property` and `filter.<key>`.
+`min_score` on saved-query discovery is the one snake_case runtime query parameter.
+Other runtime parameters follow their documented names, including `filter.<key>`.
 
 ### Compatibility of names
 
@@ -237,8 +236,8 @@ There are exactly ten top-level codes:
 Four refinements:
 
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
-stays one of the ten. A request for an unavailable search strategy, search with no available strategy,
-saved-query discovery with no embedding provider, an AI request with no
+stays one of the ten. A search with a `semantic` block and no embedding provider, a search tool with no
+available strategy, saved-query discovery with no embedding provider, an AI request with no
 language-model provider configured answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
 An assistant thread that is unknown, expired, bound to another assistant or started by
 another principal answers `404 RESOURCE_NOT_FOUND` with `details.code` of

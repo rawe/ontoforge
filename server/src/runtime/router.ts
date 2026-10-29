@@ -61,32 +61,6 @@ const ListQuery = z.looseObject({
 
 const ReadQuery = z.looseObject({ fields: FieldsParam });
 
-const SearchQuery = z.looseObject({
-  q: z.string(),
-  type: z.string().optional(),
-  limit: z.coerce.number().default(10),
-  fields: FieldsParam,
-  in: z.union([z.string(), z.array(z.string())]).optional(),
-  strategy: z.string().optional(),
-  min_similarity: z.coerce.number().optional(),
-  "document.property": z.union([z.string(), z.array(z.string())]).optional(),
-});
-
-/** `POST /search` — the index search. Only the shape is checked here;
- * bounds, keys and modes are domain rules (`searchByIndices`), reported
- * by field. `filters` carries the `filter.*` keys of `GET /search`
- * without the prefix. */
-const IndexSearchPayload = z.strictObject({
-  indices: z.array(z.string()).optional(),
-  query: z.string(),
-  mode: z.string().optional(),
-  relations: z.array(z.string()).optional(),
-  filters: z.record(z.string(), z.string()).optional(),
-  minScore: z.number().optional(),
-  limit: z.number().optional(),
-  fields: z.array(z.string()).optional(),
-});
-
 /** `POST /search/entities` — the entity search. Only the shape is checked
  * here; bounds, keys and methods are domain rules (`searchEntities`),
  * reported at the request's own paths. `filter` carries the `filter.*`
@@ -263,31 +237,6 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.get(
-    "/search",
-    { schema: { tags: ["runtime"], params: LensParams, querystring: SearchQuery } },
-    async (request) => {
-      const q = request.query;
-      return service.search(
-        request.params.lensKey,
-        {
-          query: q.q,
-          type: q.type ?? null,
-          limit: q.limit,
-          fields: q.fields ?? null,
-          in: (q.in === undefined ? null : Array.isArray(q.in) ? q.in : [q.in]) as
-            | import("./search/request.js").SearchKind[]
-            | null,
-          strategy: (q.strategy ?? null) as import("./search/strategies.js").SearchStrategy | null,
-          minSimilarity: q.min_similarity ?? null,
-          filter: parseFilters(q),
-          document: { property: q["document.property"] as string | undefined },
-        },
-        await getRuntimeStore(request.params.ontologyKey),
-      );
-    },
-  );
-
-  app.get(
     "/search-indices",
     { schema: { tags: ["runtime"], params: LensParams } },
     async (request) =>
@@ -295,19 +244,6 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.lensKey,
         await getRuntimeStore(request.params.ontologyKey),
       ),
-  );
-
-  app.post(
-    "/search",
-    { schema: { tags: ["runtime"], params: LensParams, body: IndexSearchPayload } },
-    async (request) => {
-      const body = request.body;
-      return service.searchByIndices(
-        request.params.lensKey,
-        { ...body, mode: body.mode as import("./search/indexSearch.js").SearchMode | undefined },
-        await getRuntimeStore(request.params.ontologyKey),
-      );
-    },
   );
 
   app.post(

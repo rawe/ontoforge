@@ -156,7 +156,7 @@ describe("the levels and the check", () => {
 });
 
 describe("the tables cannot drift", () => {
-  it("ROUTES are exactly the routes the ruleset mirror registers (51)", async () => {
+  it("ROUTES are exactly the routes the ruleset mirror registers (49)", async () => {
     const prefix = "/api/ontologies/:ontologyKey/runtime/lenses/:lensKey/rulesets/:rulesetKey";
     const app = Fastify();
     app.setValidatorCompiler(validatorCompiler);
@@ -172,7 +172,7 @@ describe("the tables cannot drift", () => {
     await app.ready();
     await app.close();
     expect([...registered].sort()).toEqual(Object.keys(ROUTES).sort());
-    expect(registered.size).toBe(51);
+    expect(registered.size).toBe(49);
   });
 
   it("TOOLS are exactly the tools of a ruleset mount at full (36)", async () => {
@@ -245,9 +245,7 @@ describe("the REST mirror", () => {
     "GET /schema/entity-types/:key": ["/schema/entity-types/person"],
     "GET /schema/relation-types": ["/schema/relation-types"],
     "GET /schema/relation-types/:key": ["/schema/relation-types/works_for"],
-    "GET /search": ["/search?q=ann"],
     "GET /search-indices": ["/search-indices"],
-    "POST /search": ["/search", { query: "ann" }],
     "POST /search/entities": ["/search/entities", { query: "ann" }],
     "POST /search/passages": ["/search/passages", { query: "ann" }],
     "POST /entities/:entityTypeKey": ["/entities/person", { name: "Ann" }],
@@ -326,17 +324,17 @@ describe("the REST mirror", () => {
     return refused;
   }
 
-  it("full answers all 51", async () => {
+  it("full answers all 49", async () => {
     expect(await refusedAt("full")).toEqual([]);
   });
 
-  it("propose refuses the 10 immediate writes and the commit: 40 / 11", async () => {
+  it("propose refuses the 10 immediate writes and the commit: 38 / 11", async () => {
     const refused = await refusedAt("propose");
     expect(refused.map((route) => ROUTES[route])).toEqual([...Array(10).fill("write"), "commit"]);
-    expect(Object.keys(ROUTES).length - refused.length).toBe(40);
+    expect(Object.keys(ROUTES).length - refused.length).toBe(38);
   });
 
-  it("none refuses every write, stage and commit: 31 / 20; the changeset reads still answer", async () => {
+  it("none refuses every write, stage and commit: 29 / 20; the changeset reads still answer", async () => {
     const refused = await refusedAt("none");
     expect(refused).toEqual(Object.keys(ROUTES).filter((route) => ROUTES[route] !== "read"));
     expect(refused).toHaveLength(20);

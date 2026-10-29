@@ -14,9 +14,11 @@ import { getEmbeddingProvider } from "../../../src/core/embedding.js";
 import {
   closeStores,
   ensureSemanticIndexes,
+  getRuntimeStore,
   initStores,
 } from "../../../src/core/ports.js";
 import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
+import { search } from "../../../src/runtime/search/entry.js";
 import { wipeDatabase } from "../reset.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
 import { defineEntityProperty } from "../fixture.js";
@@ -257,8 +259,8 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
       });
       const run = await client.callTool({ name: "run_saved_query", arguments: { query_key: "only-search" } }) as { content: { text: string }[]; isError?: boolean };
       expect(run.isError).toBeUndefined();
-      const direct = await inject("GET", "/api/ontologies/test_ont/runtime/lenses/sq_test/search?q=Python&type=skill&limit=2");
-      expect(JSON.parse(run.content[0]!.text)).toEqual(direct.body);
+      const direct = await search("sq_test", { query: "Python", type: "skill", limit: 2 }, await getRuntimeStore("test_ont"));
+      expect(JSON.parse(run.content[0]!.text)).toEqual(JSON.parse(JSON.stringify(direct)));
       const result = (await client.callTool({
         name: "search_saved_queries",
         arguments: { query: "who is an expert in a programming topic" },

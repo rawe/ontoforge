@@ -166,12 +166,12 @@ An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
 `get_relation`, `get_path`, `get_ruleset`, `list_changesets`, `get_changeset` and
 `get_staged_document` — being
 read-only is not sufficient to be grantable. The two search tools
-return the REST envelope and take no strategy and no `min_similarity`; they apply the
+return the default search's envelope and take no strategy and no similarity floor; they apply the
 fixed floor of [capabilities/search.md](../capabilities/search.md#similarity-floor) whenever
 the default strategy ranks semantically, echoed as `minSimilarity`. MCP also accepts
 filters and fields. See [capabilities/agents.md](../capabilities/agents.md).
 
-`search_by_index` is the index search of `POST /search`, on MCP only. It takes `query`,
+`search_by_index` runs the index search, on MCP only. It takes `query`,
 `index` — one index key or a list, absent for every index the lens can search —
 `relations`, `limit`, `filters` and `fields`, but no mode and no `minScore`: it runs the
 default mode under the same fixed floor and answers `query`, `mode`, `minSimilarity` and

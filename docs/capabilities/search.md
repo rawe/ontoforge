@@ -1,12 +1,13 @@
 # Search
 
 The entity list filters by a literal term. Ranked search ranks entities or passages for a
-query, in four forms: the **default search** over the managed indices of the types it
-searches, the **index search** through [search indices](search-indices.md) named by key,
-the [**entity search**](#entity-search), which reads a scope of types or named indices
-with the methods the request chooses, and the [**passage search**](#passage-search),
-which ranks the passages of documents the same way. No server operation falls back to
-another.
+query, in four forms: the [**entity search**](#entity-search), which reads a scope of
+types or named indices with the methods the request chooses, the
+[**passage search**](#passage-search), which ranks the passages of documents the same
+way, and two that only the MCP and agent tools and the saved-query search step run — the
+**default search** over the managed indices of the types it searches and the **index
+search** through [search indices](search-indices.md) named by key. No server operation
+falls back to another.
 
 ## Literal matching
 
@@ -18,10 +19,11 @@ See [instance-data.md](instance-data.md#query-paths) for property and query-path
 
 ## Ranked search
 
-This section describes the default search; the [index search](#index-search) shares its
-ranking, floor and `matched`. Three independent dimensions select a default search's
-ranking: scope (one entity type or every type the
-lens exposes), search kind (properties, document, or both), and strategy. The query is
+This section describes the default search, which the MCP and agent search tools and the
+saved-query search step run; the [index search](#index-search) shares its ranking, floor
+and `matched`. Three independent dimensions select a default search's ranking: scope
+(one entity type or every type the lens exposes), search kind (properties, document, or
+both), and strategy, always the default one. The query is
 plain words, not an engine query language. The limit counts entities, from 1 to 100,
 default 10; search has no paging or offset.
 
@@ -109,8 +111,9 @@ entities with many matching entries each can return fewer hits than the limit.
 
 ### Similarity floor
 
-A REST caller may supply a minimum similarity, a number from 0 to 1 on the
-`semanticSimilarity` scale below; absent means no floor. The floor is model-specific —
+A REST caller may supply a minimum similarity in the `semantic` block of the
+[entity](#entity-search) or [passage search](#passage-search), a number from 0 to 1 on
+the `semanticSimilarity` scale below; absent means no floor. The floor is model-specific —
 what counts as related depends on the embedding model — so REST never chooses one. The
 MCP and agent search tools take none from the caller and instead apply a fixed floor of
 0.75 whenever the default strategy ranks semantically, because a model client cannot judge
@@ -119,9 +122,7 @@ entries only: each semantic ranking drops every entry measured below the floor b
 is grouped by entity, so the floor applies to an entity's best semantic entry.
 Under `semantic` the filtered ranking is the result, and zero hits is a valid outcome.
 Under `hybrid` only the semantic rankings are filtered; keyword-only hits are untouched
-and keep an unmeasured similarity, which is not a negative. Under `keyword`, `keyword-any`
-or `keyword-all`, requested or reached as the default, the floor has nothing to apply
-to and is a validation error naming the parameter rather than silently ignored.
+and keep an unmeasured similarity, which is not a negative.
 
 ### Response
 
@@ -172,9 +173,8 @@ It names the entry, never which retrieval method found it.
 
 Callers should inspect entity values and read passages before making claims from them.
 Related content can provide a useful starting entity for graph traversal without
-containing the requested answer. Over REST there is no automatic similarity floor; only a
-caller sets one. The MCP and agent search tools apply the fixed floor described under
-[Similarity floor](#similarity-floor).
+containing the requested answer. The MCP and agent search tools apply the fixed floor
+described under [Similarity floor](#similarity-floor).
 
 Entities carry every lens-exposed property by default, with document values stubbed.
 Projection works as on the entity list, including raw document text when explicitly
@@ -217,16 +217,15 @@ and passage entries always do, and an empty list ranks no relation entry. A rela
 the lens does not expose is a validation error. Relation entries the lens cannot see are
 skipped whatever is named.
 
-**Mode, not strategy.** The index search takes a mode — `semantic`, `keyword` or
-`hybrid`, the keyword legs using the default keyword matching — and defaults to the first
-available: `hybrid` with an embedding provider, `keyword` without one. A mode that needs
-a provider without one is rejected as a disabled feature.
+**Mode, not strategy.** The index search runs the first available mode — `hybrid` with
+an embedding provider, `keyword` without one — the keyword legs using the default
+keyword matching.
 
 The other parameters follow the default search: exact [filters](#scope-and-filters),
-which narrow the chosen indices to those whose root type declares every key; a minimum
-score, a [similarity floor](#similarity-floor) under the same rules, a validation error
-under `keyword`; a limit counting entities, 1 to 100, default 10; and a projection of
-each entity. Every validation failure is collected and reported by field.
+which narrow the chosen indices to those whose root type declares every key; the
+tools' fixed [similarity floor](#similarity-floor); a limit counting entities, 1 to 100,
+default 10; and a projection of each entity. Every validation failure is collected and
+reported by field.
 
 The response carries `query`, `mode` and `hits`; each hit carries `entity`,
 `relativeScore` and `matched` as defined under [Response](#response), and no `matches`.
@@ -423,17 +422,17 @@ the server from starting: the server must remain available to finish the repair.
 
 ## Through the interfaces
 
-The full contract is in [../interfaces/](../interfaces/README.md). REST `GET /search`, MCP,
-agent tools and saved-query search steps use the default search and the same envelope.
+The full contract is in [../interfaces/](../interfaces/README.md). REST
+`POST /search/entities` is the [entity search](#entity-search), `POST /search/passages`
+the [passage search](#passage-search), and `GET /search-indices` the catalog; neither
+search has an MCP or agent tool yet.
+
+MCP, agent tools and saved-query search steps use the default search and its envelope.
 MCP and agents expose `search` (both kinds) and `search_documents` (documents only, every
 hit carrying a passage); neither tool takes a strategy or a floor — both apply the fixed
 floor whenever the default strategy ranks semantically and echo it as `minSimilarity`,
 null under a keyword default. Both allow an omitted entity type.
-MCP additionally accepts filters and fields.
-
-REST `POST /search` is the index search, and `GET /search-indices` the catalog. REST
-`POST /search/entities` is the [entity search](#entity-search) and `POST /search/passages`
-the [passage search](#passage-search); neither has an MCP or agent tool yet. On MCP,
+MCP additionally accepts filters and fields. On MCP,
 `list_search_indices` answers the catalog, and `search_by_index` runs the index search
 over one index key, a list, or every index the lens can search, under the default mode,
 with the same fixed floor echoed as `minSimilarity`, optionally narrowed to named

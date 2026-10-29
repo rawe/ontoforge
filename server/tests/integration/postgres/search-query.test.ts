@@ -28,6 +28,7 @@ import { reconcileSearchGenerations } from "../../../src/runtime/indexing/genera
 import { getSearchIndexStatus } from "../../../src/runtime/indexing/status.js";
 import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache, loadSchema } from "../../../src/runtime/schemaCache.js";
+import { search as defaultSearch } from "../../../src/runtime/search/entry.js";
 import { rankThroughIndices, searchByIndices } from "../../../src/runtime/search/indexSearch.js";
 import { fakeEmbeddingProvider } from "../../fakeEmbedding.js";
 import { wipeDatabase } from "../reset.js";
@@ -357,9 +358,7 @@ describe("PostgreSQL search query", () => {
     const acme = await post(`${rt}/entities/company`, { name: "Graph" });
     const bob = await post(`${rt}/entities/person`, { name: "Bob", bio: "Graph graph graph graph." });
     await drainSearchWork({ ontologyKey: O });
-    const res = await app.inject({ url: `${rt}/search?q=graph&strategy=keyword` });
-    expect(res.statusCode, res.body).toBe(200);
-    const hits = res.json().hits as Row[];
+    const hits = (await defaultSearch("all", { query: "graph", strategy: "keyword" }, await getRuntimeStore(O))).hits as Row[];
     // The tops of the three indices do not tie: their keyword scores order them.
     expect(new Set(hits.map((h) => h.entity._id))).toEqual(new Set([ada._id, acme._id, bob._id]));
     expect(hits.map((h) => h.relativeScore)).toEqual([...hits.map((h) => h.relativeScore)].sort((a, b) => b - a));

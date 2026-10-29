@@ -21,11 +21,15 @@ import type {
   CommitResult,
   DocumentContentResponse,
   EntityInstance,
+  EntitySearchBody,
+  EntitySearchResponse,
   JsonValue,
   ListResponse,
   NeighborDirection,
   NeighborsResponse,
   ParentRelationInput,
+  PassageSearchBody,
+  PassageSearchResponse,
   PathStep,
   QueryResult,
   RelationInstance,
@@ -247,6 +251,20 @@ export const search = (ontologyKey: string, lensKey: string, params: SearchParam
 /** The search indices this lens can search. */
 export const listSearchCatalog = (ontologyKey: string, lensKey: string) =>
   request<SearchCatalogEntry[]>(`${base(ontologyKey, lensKey)}/search-indices`)
+
+/** Rank entities for a query text through a scope of search indices. */
+export const searchEntities = (ontologyKey: string, lensKey: string, body: EntitySearchBody) =>
+  request<EntitySearchResponse>(`${base(ontologyKey, lensKey)}/search/entities`, {
+    method: 'POST',
+    body,
+  })
+
+/** Rank passages of documents for a query text through a scope of search indices. */
+export const searchPassages = (ontologyKey: string, lensKey: string, body: PassageSearchBody) =>
+  request<PassageSearchResponse>(`${base(ontologyKey, lensKey)}/search/passages`, {
+    method: 'POST',
+    body,
+  })
 
 /* ----------------------------------- query ----------------------------------- */
 

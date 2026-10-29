@@ -47,15 +47,18 @@ function inputTypeFor(dataType: DataType): string {
  * relation type in one direction — an operator it offers, and value(s);
  * applying calls `onAdd` with a FilterCondition. A subject holds one
  * condition, so the popover says when applying replaces an active one.
+ * `excludedOps` keeps operators a caller's endpoint rejects out of the list.
  */
 export function FilterPopover({
   subjects,
   active,
   onAdd,
+  excludedOps = [],
 }: {
   subjects: FilterSubjects
   active: readonly FilterCondition[]
   onAdd: (condition: FilterCondition) => void
+  excludedOps?: readonly FilterOpUi[]
 }) {
   const [open, setOpen] = useState(false)
   const [selectedKey, setSelectedKey] = useState<string>()
@@ -73,8 +76,12 @@ export function FilterPopover({
       : relation !== undefined
         ? relationSubject(relation)
         : undefined
+  const offered = (dataType: DataType | undefined) =>
+    (dataType !== undefined ? opsForDataType(dataType) : RELATION_OPS).filter(
+      (o) => !excludedOps.includes(o),
+    )
   const ops: readonly FilterOpUi[] =
-    property !== undefined ? opsForDataType(property.dataType) : relation !== undefined ? RELATION_OPS : []
+    property !== undefined ? offered(property.dataType) : relation !== undefined ? offered(undefined) : []
   const shape = op !== undefined ? OP_VALUE[op] : undefined
   const replaces = active.some((f) => subjectKey(f.subject) === selectedKey)
 
@@ -96,7 +103,7 @@ export function FilterPopover({
     setValue('')
     setValue2('')
     const p = subjects.properties.find((x) => x.key === key)
-    const nextOp = p !== undefined ? opsForDataType(p.dataType)[0] : RELATION_OPS[0]
+    const nextOp = offered(p?.dataType)[0]
     setOp(nextOp)
     if (nextOp !== undefined && OP_VALUE[nextOp] === 'boolean') setValue('true')
   }

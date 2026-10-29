@@ -467,6 +467,88 @@ export interface SearchResponse {
   hits: SearchHit[]
 }
 
+/** The body `POST /search/entities` takes; `POST /search/passages` adds to it. */
+export interface EntitySearchBody {
+  query: string
+  /** One scope field at a time; none searches every type the lens shows. */
+  types?: string[]
+  indices?: string[]
+  keyword?: { match?: 'any' | 'all' }
+  semantic?: { minSimilarity?: number }
+  /** The entity list's `filter.*` keys without the prefix. */
+  filter?: Record<string, string>
+  limit?: number
+}
+
+export interface PassageSearchBody extends EntitySearchBody {
+  /** Document properties as `type.property`. */
+  documents?: string[]
+  perEntity?: number
+  text?: boolean
+}
+
+/** What could not run, or what a named scope could not serve. */
+export interface SearchLimitation {
+  code: 'not-searchable' | 'switched-off' | 'not-ready' | 'filter-excludes-all-types'
+  message: string
+  method?: Representation
+  indices?: string[]
+  types?: string[]
+  /** Named document properties, as `type.property`. */
+  documents?: string[]
+}
+
+/** An entity as a search names it; `name` is null when it has none or the lens hides it. */
+export interface EntityReference {
+  _id: string
+  _entityTypeKey: string
+  name: string | null
+}
+
+export interface EntitySearchItem {
+  rank: number
+  entity: EntityReference
+  /** The best entry that found the entity. */
+  match: {
+    index: string
+    part: 'self' | 'relation' | 'passage'
+    /** Null when the index reads a property the lens hides. */
+    snippet: string | null
+    /** Passages: the document, null when the lens hides it. */
+    property?: string | null
+    charOffset?: number
+    charLength?: number
+    /** Relations: the relation type and the entity at its other end. */
+    relationType?: string
+    target?: EntityReference
+  }
+}
+
+export interface EntitySearchResponse {
+  ran: Representation[]
+  items: EntitySearchItem[]
+  limitations: SearchLimitation[]
+}
+
+export interface PassageSearchItem {
+  rank: number
+  entity: EntityReference
+  passage: {
+    property: string
+    ordinal: number
+    charOffset: number
+    charLength: number
+    /** Absent when the request sent `text: false`. */
+    text?: string
+  }
+}
+
+export interface PassageSearchResponse {
+  ran: Representation[]
+  items: PassageSearchItem[]
+  limitations: SearchLimitation[]
+}
+
 /* ----------------------------- runtime — documents ---------------------------- */
 
 /** Slice of a document property (`length` = actual returned characters). */

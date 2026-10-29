@@ -1,9 +1,10 @@
 # Search
 
 The entity list filters by a literal term. Ranked search ranks entities for a query, in
-two forms: the **default search** over the managed indices of the types it searches, and
-the **index search** through [search indices](search-indices.md) named by key. No server
-operation falls back to another.
+three forms: the **default search** over the managed indices of the types it searches, the
+**index search** through [search indices](search-indices.md) named by key, and the
+[**entity search**](#entity-search), which reads a scope of types or named indices with the
+methods the request chooses. No server operation falls back to another.
 
 ## Literal matching
 
@@ -272,6 +273,53 @@ until their successors are ready ([search-indices.md](search-indices.md#lifecycl
 Transfer carries the set, and import replaces the target's with it
 ([transfer.md](transfer.md)).
 
+## Entity search
+
+The entity search ranks entities for one query text through a scope of
+[search indices](search-indices.md), by the methods the request chooses, restricted by
+exact filters. Ranking, grouping and fusion are those under [Ranking](#ranking). Only the
+order is returned, never a score.
+
+**Scope.** Without `types` or `indices` it reads every type the lens shows, through the
+managed indices of that type the lens can search
+([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). `types` reads the
+managed indices of the named types. `indices` reads exactly the named indices, custom
+ones included; a custom index is read only when named. One scope field at a time. A type
+the lens does not show, or an index the lens cannot search, is a validation error at its
+position. A named type with no managed index to search contributes nothing and is
+reported as a limitation.
+
+**Methods.** One block per method: `keyword` with its matching, `any` (default) or
+`all`, and `semantic` with its [similarity floor](#similarity-floor). The blocks sent
+choose the methods, and two methods are fused by reciprocal rank. With neither block, both
+run, or keyword alone when no embedding provider is installed. A `semantic` block without
+an embedding provider is rejected as a disabled feature. A method that cannot run on an
+index — switched off by the index definition, or without a ready generation
+([search-indices.md](search-indices.md#lifecycle)) — finds nothing there and is reported
+as a limitation, never as an error.
+
+**Filters** follow [Scope and filters](#scope-and-filters). They are checked against the
+scope's types, and a type that does not declare every key drops out. With no type left,
+the result is empty and carries a limitation.
+
+**Items.** An item names the entity — `_id`, `_entityTypeKey`, `name` — and the best entry
+that found it: its index, its part (`self`, `relation` or `passage`) and a snippet. A
+passage adds the document and the passage's place in it; a relation adds the relation
+type and the entity at its other end. The snippet is withheld when the index reads a
+property the lens hides; a passage's document is null when the lens hides it; relation
+entries the lens cannot see are skipped. An entity deleted after ranking is left out, so
+a page may be shorter than the limit.
+
+**Limitations.** `ran` lists the methods that ran on at least one index. Each limitation
+names its code:
+
+| Code | Meaning |
+|---|---|
+| `not-searchable` | Named types without a managed index the lens can search |
+| `switched-off` | The index definition switches the method off on these indices |
+| `not-ready` | No ready generation of the method on these indices |
+| `filter-excludes-all-types` | No type of the scope declares every filter key |
+
 ## Rebuild
 
 Search indices keep themselves current, a changed embedding model included
@@ -346,7 +394,8 @@ floor whenever the default strategy ranks semantically and echo it as `minSimila
 null under a keyword default. Both allow an omitted entity type.
 MCP additionally accepts filters and fields.
 
-REST `POST /search` is the index search, and `GET /search-indices` the catalog. On MCP,
+REST `POST /search` is the index search, and `GET /search-indices` the catalog. REST
+`POST /search/entities` is the [entity search](#entity-search); it has no MCP or agent tool yet. On MCP,
 `list_search_indices` answers the catalog, and `search_by_index` runs the index search
 over one index key, a list, or every index the lens can search, under the default mode,
 with the same fixed floor echoed as `minSimilarity`, optionally narrowed to named

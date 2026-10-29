@@ -87,6 +87,20 @@ const IndexSearchPayload = z.strictObject({
   fields: z.array(z.string()).optional(),
 });
 
+/** `POST /search/entities` — the entity search. Only the shape is checked
+ * here; bounds, keys and methods are domain rules (`searchEntities`),
+ * reported at the request's own paths. `filter` carries the `filter.*`
+ * keys of the entity list without the prefix. */
+const EntitySearchPayload = z.strictObject({
+  query: z.string(),
+  types: z.array(z.string()).optional(),
+  indices: z.array(z.string()).optional(),
+  keyword: z.strictObject({ match: z.string().optional() }).optional(),
+  semantic: z.strictObject({ minSimilarity: z.number().optional() }).optional(),
+  filter: z.record(z.string(), z.string()).optional(),
+  limit: z.number().optional(),
+});
+
 /** Arbitrary property payloads: shape is decided by the schema at runtime,
  * so the only static rule is "a JSON object". */
 export const PropertyPayload = z.record(z.string(), z.unknown());
@@ -285,6 +299,17 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         await getRuntimeStore(request.params.ontologyKey),
       );
     },
+  );
+
+  app.post(
+    "/search/entities",
+    { schema: { tags: ["runtime"], params: LensParams, body: EntitySearchPayload } },
+    async (request) =>
+      service.searchEntities(
+        request.params.lensKey,
+        request.body,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
   );
 
   // --- Entity instance CRUD ---

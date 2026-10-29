@@ -92,7 +92,7 @@ describe("every registered route has a need", () => {
       "ontology-member": 2,
       "ontology-admin": 62,
       "lens:read+admin": 14,
-      "lens:read": 74,
+      "lens:read": 76,
       "lens:stage": 18,
       "lens:commit": 2,
       "lens:write": 20,

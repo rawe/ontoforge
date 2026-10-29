@@ -159,6 +159,7 @@ Semantics: [capabilities/search.md](../capabilities/search.md).
 | GET | `/search` | Rank entities by properties, document passages, or both | `q`, `type`, repeatable `in`, `strategy`, `min_similarity`, `document.property`, `limit`, `fields`, `filter.*` |
 | GET | `/search-indices` | The lens's search catalog: the indices it can search, projected through it | — |
 | POST | `/search` | Rank entities through chosen search indices | body: `indices`, `query`, `mode`, `relations`, `filters`, `minScore`, `limit`, `fields` |
+| POST | `/search/entities` | Rank entities for a query text through a scope of search indices | body: `query`, `types`, `indices`, `keyword`, `semantic`, `filter`, `limit` |
 
 `q` is required. Omit `type` for cross-type search; `in` accepts `properties` and
 `document`, defaulting to both. `strategy` accepts `semantic`, `keyword`, `keyword-any`,
@@ -194,6 +195,22 @@ the request's rules — an index the lens cannot search or that does not exist a
 at `relations.<i>` — are collected under `details.fields`; a mode that needs a missing embedding provider answers
 `FEATURE_DISABLED`. Rules:
 [capabilities/search.md](../capabilities/search.md#index-search).
+
+`POST /search/entities` takes a JSON body. `query` is required and non-empty. `types`
+(entity type keys) or `indices` (index keys), not both, choose the scope. The blocks
+`keyword: {match}`, `any` or `all`, and `semantic: {minSimilarity}`, 0–1, choose the
+methods; with neither, the best available runs. `filter` carries the `filter.*` keys of the
+entity list without the prefix; `limit` counts entities, 1–100, default 10. The response
+carries `ran`, `items` and `limitations`. Each item has `rank`, from 1, `entity`
+`{_id, _entityTypeKey, name}` and `match` `{index, part, snippet}`, plus `property` (null
+when the lens hides the document), `charOffset`, `charLength` for a passage and
+`relationType`, `target` for a relation. Each limitation has `code` and `message` and,
+where they apply, `method`, `indices`, `types`. A body of the wrong shape, or with a field
+not listed here, is rejected with `details.errors`. The request's rules are collected under
+`details.fields` at the request's own paths: `query`, `types.<i>`, `indices.<i>`,
+`keyword.match`, `semantic.minSimilarity`, `filter.<key>`, `limit`. A `semantic` block
+without an embedding provider answers `FEATURE_DISABLED`. Rules:
+[capabilities/search.md](../capabilities/search.md#entity-search).
 
 ## Query
 

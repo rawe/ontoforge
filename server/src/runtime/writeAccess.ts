@@ -78,7 +78,7 @@ export const TOOLS: Record<string, ToolRow> = {
 };
 
 /** Every route of the ruleset REST mirror, as "METHOD /path" below the
- * mount. Three POST routes only read. */
+ * mount. Four POST routes only read. */
 export const ROUTES: Record<string, Operation> = {
   "GET /": "read",
   "GET /schema": "read",
@@ -89,6 +89,7 @@ export const ROUTES: Record<string, Operation> = {
   "GET /search": "read",
   "GET /search-indices": "read",
   "POST /search": "read",
+  "POST /search/entities": "read",
   "POST /entities/:entityTypeKey": "write",
   "GET /entities/:entityTypeKey": "read",
   "GET /entities/:entityTypeKey/:entityId": "read",

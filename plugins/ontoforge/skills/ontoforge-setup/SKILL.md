@@ -128,7 +128,7 @@ Then continue with **MCP Configuration** below.
 
 ### OntoForge UI Environment Variable
 
-The `ontoforge-ui` container runs nginx, which proxies `/api` and `/mcp` requests to the backend. The backend URL must be set via an environment variable so nginx knows where to forward these requests.
+The `ontoforge-ui` container runs nginx, which proxies `/api` requests to the backend. The backend URL must be set via an environment variable so nginx knows where to forward these requests.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|

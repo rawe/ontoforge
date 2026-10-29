@@ -9,7 +9,7 @@ server's installed SDK (`server/node_modules`, so `npm install` in `server/` fir
 
 ```sh
 ./dev.sh keycloak                      # Keycloak on :8180, test users, env/*.local.env
-./dev.sh env/auth.local.env            # server :8000 + Vite :5173 (PUBLIC_URL), authentication on
+./dev.sh env/auth.local.env            # server :8000 (PUBLIC_URL) + Vite :5173 (WEB_CLIENT_URL), authentication on
 ```
 
 The checks read the test users' passwords, the service client's secret and the Keycloak
@@ -21,15 +21,15 @@ user and assignment ids, claim names and values other than the token itself.
 
 ```sh
 node scripts/auth/lib.mjs --self-check     # Keycloak only: tokens and their claims, DCR + consent
-node scripts/auth/e2e.mjs                  # against http://localhost:5173
-node scripts/auth/e2e.mjs --base http://localhost:13000          # the scale stack's frontend
+node scripts/auth/e2e.mjs                  # web client http://localhost:5173, server http://localhost:8000
+node scripts/auth/e2e.mjs --base http://localhost:13000 --public-url http://localhost:18000   # the scale stack
 node scripts/auth/e2e.mjs --idle-seconds 20                      # server booted with AUTH_SESSION_IDLE_SECONDS=20
 ```
 
 | Option | Default | |
 |---|---|---|
-| `--base <url>` | `http://localhost:5173` | where requests go: PUBLIC_URL of the server under test |
-| `--public-url <url>` | `--base` | the origin cookie POSTs carry (`Origin`) and MCP resources are named after |
+| `--base <url>` | `http://localhost:5173` | the web client's address (`WEB_CLIENT_URL`) of the server under test: browser sign-in, REST and the `Origin` of cookie POSTs |
+| `--public-url <url>` | `http://localhost:8000` | the server's address (`PUBLIC_URL`): MCP connects here, resources are named after it, `/api/server/info` reports it |
 | `--idle-seconds N` | — | runs the expiry check: waits N + 2 s, then the session must be gone |
 | `--no-fresh-user` | — | skips the concurrent first sign-ins (no throwaway Keycloak user) |
 
@@ -49,16 +49,16 @@ client registered at Keycloak is deleted again.
 
 | Step | Checks |
 |---|---|
-| server | `/api/server/info` reports `authentication: true`; `/api/auth/me` without credentials answers `user: null` (200) |
+| server | `/api/server/info` reports `authentication: true` and `PUBLIC_URL` as `baseUrl`; `/api/auth/me` without credentials answers `user: null` (200) |
 | browser sign-in (admin) | `/api/auth/login` → Keycloak form → `/api/auth/callback` → redirect to `returnTo`, session cookie; `/api/auth/me` names `admin`, Platform Administrator by `AUTH_ADMIN_SUBJECT` |
 | first and repeat sign-in | `newcomer` signs in with no assignments and lists no ontology ("no access assigned"); on a fresh access database the first sign-in creates exactly one user (else SKIP: it existed); a second sign-in reuses the same id |
 | concurrent first sign-ins | a throwaway Keycloak user signs in 5 times; the 5 callbacks land at once; one user id, one local user |
-| logout and CSRF | logout without `Origin` and with a foreign one → 403, the session survives; with `Origin` = PUBLIC_URL → 200 and a `logoutUrl` at the issuer; afterwards `/api/auth/me` → `user: null`, a protected route → 401 |
+| logout and CSRF | logout without `Origin` and with a foreign one → 403, the session survives; with `Origin` = WEB_CLIENT_URL → 200 and a `logoutUrl` at the issuer; afterwards `/api/auth/me` → `user: null`, a protected route → 401 |
 | CSRF on another route | a cookie `POST /api/ontologies` with a foreign `Origin` → 403 |
 | setup | the administrator (granting itself `ontology_creator` when needed) creates the ontology, two lenses and a type through its session; `reader` and `writer` sign in and get Reader / Writer on lens A |
 | REST with bearer tokens | reader reads lens A (200), writes (403), lens B (404); writer writes lens A (201), lens B (404); reader lists only its ontology and only lens A; 401 with `WWW-Authenticate: Bearer…` for no token, a token without audience `ontoforge-api`, garbage, a forged expired token, an ID token, a token of realm `master`, a token with a broken signature |
 | service principal | the client-credentials token before admission → 403/404; `POST /api/users` admits it (201, or 409 on a rerun) and `/api/auth/me` names it a `service`; after a Reader grant → 200 |
-| MCP OAuth | an unauthenticated `POST` to the runtime mount → 401 with `resource_metadata=`; that document names the issuer and the mount; a real SDK client (`Client` + `StreamableHTTPClientTransport` + an `OAuthClientProvider`) discovers, registers at Keycloak, is authorized as `reader` (consent accepted, loopback redirect), lists only read tools, calls `list_entities`, and is refused `create_entity` |
+| MCP OAuth | at `PUBLIC_URL`: an unauthenticated `POST` to the runtime mount → 401 with `resource_metadata=`; that document names the issuer and the mount; a real SDK client (`Client` + `StreamableHTTPClientTransport` + an `OAuthClientProvider`) discovers, registers at Keycloak, is authorized as `reader` (consent accepted, loopback redirect), lists only read tools, calls `list_entities`, and is refused `create_entity` |
 | revocation | the reader's Reader grant is revoked; its next request with the same token → 403/404 |
 | disabling | writer disabled → its next request 403, a new browser sign-in ends at `/?login=disabled` without a session; enabled again → it writes again |
 | user management | list, search, one user with its assignments, an ontology's access list; a non-administrator listing users → 403 |

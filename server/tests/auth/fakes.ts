@@ -14,7 +14,8 @@ import type { AuthSettings } from "../../src/config.js";
 import { ProviderUnavailableError } from "../../src/core/exceptions.js";
 
 export const ISSUER = "http://localhost:8180/realms/ontoforge";
-export const PUBLIC_URL = "http://localhost:5173";
+export const PUBLIC_URL = "http://localhost:8000";
+export const WEB_CLIENT_URL = "http://localhost:5173";
 export const ADMIN_SUBJECT = "admin-sub";
 
 export const SETTINGS: AuthSettings = {
@@ -27,6 +28,7 @@ export const SETTINGS: AuthSettings = {
   sessionIdleSeconds: 3600,
   accessDbUri: "postgresql://localhost:5432/ontoforge_access_test",
   publicUrl: PUBLIC_URL,
+  webClientUrl: WEB_CLIENT_URL,
 };
 
 export function identified(subject: string): Identified {

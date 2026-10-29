@@ -20,7 +20,8 @@ server from source on :8000 that joins the two containers.
 
 With authentication on — `./dev.sh scale up env/scale-auth.local.env`, written by
 `./dev.sh keycloak`, which must run first — `up` also starts the frontend (the backends'
-`PUBLIC_URL`, `http://localhost:13000`) and adds `docker/scale/compose.auth.yml`: the
+`WEB_CLIENT_URL`, `http://localhost:13000`; their `PUBLIC_URL` is the load balancer,
+`http://localhost:18000`) and adds `docker/scale/compose.auth.yml`: the
 backends join Keycloak's network `ontoforge-keycloak` and reach it as `http://keycloak:8080`.
 `down`, `reset`, `logs` and `status` work the same either way. Sign in through
 `http://localhost:13000`.

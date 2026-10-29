@@ -188,7 +188,7 @@ export async function authEnabled(base = urls().a) {
   return me.status === 200 && me.json?.authentication === true;
 }
 
-/** The status of every published service; the frontend too when authentication is on (it is PUBLIC_URL). */
+/** The status of every published service; the frontend too when authentication is on (it is WEB_CLIENT_URL). */
 export async function readiness() {
   const u = urls();
   const fake = await http('GET', `${u.fake}/control`, undefined, { timeoutMs: 3000 });

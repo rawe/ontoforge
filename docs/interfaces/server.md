@@ -40,7 +40,7 @@ deployment.
 
 | Field | Type | Reports |
 |---|---|---|
-| `baseUrl` | string or null | The address clients reach this server at, without a trailing slash; REST and MCP paths are appended to it. Taken from the deployment's configured public address; `null` when none is configured |
+| `baseUrl` | string or null | The address clients reach this server at, without a trailing slash; REST and MCP paths are appended to it. Taken from the server's configured public address; `null` when none is configured |
 | `version` | string | The server's release version |
 | `authentication` | boolean | Authentication is on: callers sign in, and roles decide what they may do |
 
@@ -57,12 +57,13 @@ deployment.
 
 Prefix `/api/auth`. The browser's sign-in, with the server as the provider's client.
 Semantics: [capabilities/authentication.md](../capabilities/authentication.md#signing-in).
-`me` exists with authentication off too; the others only with it on.
+`me` exists with authentication off too; the others only with it on and a web client
+address configured.
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/auth/me` | Whether authentication is on, and who is signed in with their roles |
-| GET | `/api/auth/login` | Start a browser sign-in: redirects to the provider; `returnTo`, a path on the deployment's own address, is where the browser lands afterwards |
+| GET | `/api/auth/login` | Start a browser sign-in: redirects to the provider; `returnTo`, a path on the web client's address, is where the browser lands afterwards |
 | GET | `/api/auth/callback` | Where the provider sends the browser back: starts the session and redirects to `returnTo` |
 | POST | `/api/auth/logout` | End the session; answers `logoutUrl`, the provider's sign-out page, for the browser to open |
 
@@ -75,10 +76,10 @@ failed sign-in lands on `/?login=failed`, that of a disabled principal on
 **MCP clients** discover the provider through the protected-resource metadata
 (RFC 9728): an MCP mount's `401` challenge names `resource_metadata`, the document at
 `/.well-known/oauth-protected-resource` followed by the mount's path, and the scope
-OntoForge's audience comes with. The document names the mount on the deployment's public
+OntoForge's audience comes with. The document names the mount on the server's public
 address as `resource`, the provider as its authorization server, and that scope; the bare
 `/.well-known/oauth-protected-resource` describes the server. A client connects through
-the public address, signs in at the provider and sends its access token as a bearer
+the server's public address, signs in at the provider and sends its access token as a bearer
 header on every request; MCP takes no cookie.
 
 ## User management

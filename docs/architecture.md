@@ -19,10 +19,13 @@ database and one [shared state](#shared-state) — and, with authentication on, 
 database and one identity provider. The schema and the data it governs must not diverge
 between servers, nor may one server expose what another protects.
 
-**Web client** — a separate static application talking to the server over REST only. It
-holds no privileged path; anything it does can be done over the API. With authentication
-on, it is served from the deployment's public address, which proxies the API to the
-server, so the browser's session cookie reaches the server.
+**Web client** — the browser client that ships with OntoForge, for working with it
+conveniently. It is one client among others: everything it does goes through the REST API,
+which any other client can use as well, as MCP clients use the MCP servers. It is static,
+built files any HTTP server can serve, with no server-side code of its own; whatever serves
+it forwards `/api` to the server and answers other unknown paths with `index.html`. Because
+it cannot keep a secret, the server signs its browser in
+([Authentication and authorization](#authentication-and-authorization)).
 
 **Database** — one instance, holding every ontology's schema and instance data together.
 Reached only through the persistence port. Keeping them in different stores would make
@@ -400,16 +403,18 @@ afresh on every request, with no cache: a revoked role or a disabled principal i
 on the next request, on every server. A sign-in identity seen for the first time becomes a
 principal with no role, created once however many first requests race.
 
-**Browser sessions.** The server is the browser's OpenID client: authorization code with
-PKCE, as a confidential client ([ADR 0031](adr/0031-server-as-browser-openid-client.md)).
+**Browser sessions.** The web client has no server side, so the server is its browser's
+OpenID client: authorization code with PKCE, as a confidential client ([ADR 0031](adr/0031-server-as-browser-openid-client.md)).
 The browser holds an HttpOnly cookie, not a provider token a script could take; no further
 component is deployed, and losing a session requires only a new sign-in. A login in progress
 keeps nothing on the server; it travels in a short-lived, sealed cookie that any server of
 the deployment can open. The session lives in the shared state, keyed by a digest of the
 cookie's random id, and expires after its idle time or at the latest 24 hours after
-sign-in. Both cookies are HttpOnly, Secure and SameSite=Lax, named after the public
-address's port. A cookie request that may change something must carry the public
+sign-in. Both cookies are HttpOnly, Secure and SameSite=Lax, named after the web client
+address's port. A cookie request that may change something must carry the web client
 address's origin, and cross-origin browser calls are allowed without credentials only.
+Browser sessions exist only when the deployment names a web client address; without one,
+the server accepts bearer tokens only.
 
 **What a route needs.** Every route declares its need — public, any signed-in caller, a
 platform role, the administrator or any member of the ontology in its path, a role on the
@@ -621,7 +626,8 @@ per-ontology deployment configuration.
 | Shutdown | How long a stopping server drains | Default applies |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
 | Decision model | Endpoint, model, credential | Entity identity comparison unavailable |
-| Public URL | The address clients reach the deployment at, reported to clients; with authentication on, the browser's origin | No address is reported; required with authentication on |
+| Public URL | The address API and MCP clients reach the server at, reported to clients; MCP resources are named after it | No address is reported; required with authentication on |
+| Web client URL | With authentication on, the address the web client is served from, where browser sign-in runs | No browser sign-in; bearer tokens only |
 | Authentication | On or off; the identity provider, how this server reaches it, the client and its secret, the audience, the configured administrator, the session idle time, the access database | Off: every caller trusted |
 
 Exact variable names are in the repository README; they are deployment surface, not

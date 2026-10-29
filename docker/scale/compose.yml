@@ -127,7 +127,7 @@ services:
       context: ../../frontend
     image: ontoforge-scale/frontend:dev
     environment:
-      # Where the frontend's own nginx proxies /api and /mcp (not server configuration).
+      # Where the frontend's own nginx proxies /api (not server configuration).
       BACKEND_URL: http://lb:80
     ports:
       - "13000:80"

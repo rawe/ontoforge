@@ -56,6 +56,7 @@ export interface Settings {
   AUTH_ADMIN_SUBJECT: string | null;
   AUTH_SESSION_IDLE_SECONDS: number | null;
   ACCESS_DB_URI: string | null;
+  WEB_CLIENT_URL: string | null;
 }
 
 /** The settings authentication runs on: present only when it is enabled. */
@@ -68,7 +69,10 @@ export interface AuthSettings {
   adminSubject: string;
   sessionIdleSeconds: number;
   accessDbUri: string;
+  /** The server's address: MCP clients sign in for resources under it. */
   publicUrl: string;
+  /** The web client's address, where browser sign-in runs; null: no browser sign-in. */
+  webClientUrl: string | null;
 }
 
 function str(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
@@ -175,10 +179,10 @@ function isLoopback(hostname: string): boolean {
 
 /**
  * A URL authentication relies on: https, or http on a loopback host only.
- * `PUBLIC_URL`'s cookies are `Secure`, which a browser accepts over `http:`
- * from a loopback host only — anywhere else the sign-in would silently
- * never stick; the issuer's keys and tokens must not cross a network in
- * the clear.
+ * `WEB_CLIENT_URL`'s cookies are `Secure`, which a browser accepts over
+ * `http:` from a loopback host only — anywhere else the sign-in would
+ * silently never stick; the issuer's keys and the tokens sent to
+ * `PUBLIC_URL` must not cross a network in the clear.
  */
 function secureUrl(name: string, value: string, exact = false): string {
   const url = httpUrl(name, value, exact);
@@ -211,6 +215,7 @@ function auth(
   | "AUTH_ADMIN_SUBJECT"
   | "AUTH_SESSION_IDLE_SECONDS"
   | "ACCESS_DB_URI"
+  | "WEB_CLIENT_URL"
 > {
   const enabled = optOneOf(env, "AUTH_ENABLED", ["true", "false"]) === "true";
   if (!enabled) {
@@ -224,6 +229,7 @@ function auth(
       AUTH_ADMIN_SUBJECT: null,
       AUTH_SESSION_IDLE_SECONDS: null,
       ACCESS_DB_URI: null,
+      WEB_CLIENT_URL: null,
     };
   }
   const required = (name: string): string => {
@@ -234,6 +240,8 @@ function auth(
     return value;
   };
   secureUrl("PUBLIC_URL", required("PUBLIC_URL"));
+  // Optional: a server without a web client accepts bearer tokens only.
+  const webClient = optStr(env, "WEB_CLIENT_URL");
   // Exactly as given: tokens must carry this very string, a trailing slash included.
   const issuer = secureUrl("OIDC_ISSUER", required("OIDC_ISSUER"), true);
   // The back channel may be http anywhere: the server's own way to the issuer, e.g. in a container network.
@@ -258,6 +266,7 @@ function auth(
     AUTH_ADMIN_SUBJECT: required("AUTH_ADMIN_SUBJECT"),
     AUTH_SESSION_IDLE_SECONDS: positiveInt(env, "AUTH_SESSION_IDLE_SECONDS", 8 * 60 * 60),
     ACCESS_DB_URI: accessDb,
+    WEB_CLIENT_URL: webClient === null ? null : secureUrl("WEB_CLIENT_URL", webClient),
   };
 }
 
@@ -274,6 +283,7 @@ export function authSettings(s: Settings): AuthSettings | null {
     sessionIdleSeconds: s.AUTH_SESSION_IDLE_SECONDS!,
     accessDbUri: s.ACCESS_DB_URI!,
     publicUrl: httpUrl("PUBLIC_URL", s.PUBLIC_URL!),
+    webClientUrl: s.WEB_CLIENT_URL === null ? null : httpUrl("WEB_CLIENT_URL", s.WEB_CLIENT_URL),
   };
 }
 

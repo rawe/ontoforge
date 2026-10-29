@@ -84,8 +84,8 @@ claude --mcp-config mcp-example.json
 }
 ```
 
-With authentication on, connect through the deployment's public address (`PUBLIC_URL`,
-e.g. `http://localhost:5173/mcp/ontologies/my_ontology/model`) and leave out any token:
+With authentication on, connect through the server's public address (`PUBLIC_URL`,
+e.g. `http://localhost:8000/mcp/ontologies/my_ontology/model`) and leave out any token:
 an OAuth-capable client signs in through the browser on first connect.
 
 ### Example: Runtime Server Quick Start
@@ -272,7 +272,7 @@ The backend reads settings from environment variables (or a `.env` file in `serv
 | `CHANGESET_MAX_BYTES` | `33554432` (32 MiB) | The most bytes one changeset's staged values hold, document text included (positive integer) |
 | `CHANGESET_MAX_OBJECTS` | `10000` | The most staged objects one changeset holds; a larger import commits in several changesets (positive integer) |
 | `REQUEST_BODY_LIMIT` | `16777216` (16 MiB) | The largest request body the server reads, in bytes, such as a staging request that lists many calls; a larger one answers `413 PAYLOAD_TOO_LARGE` (positive integer) |
-| `PUBLIC_URL` | *(unset)* | The address browsers and clients reach the deployment at, reported by `/api/server/info` for client configuration. Required with `AUTH_ENABLED=true`: the browser's origin, whose `/api/auth/callback` is the sign-in callback and which the web client must be served from; it must be `https` unless its host is localhost |
+| `PUBLIC_URL` | *(unset)* | The address API and MCP clients reach the server at, reported by `/api/server/info` for client configuration. Required with `AUTH_ENABLED=true`: MCP resources are named after it, so MCP clients connect through it; it must then be `https` unless its host is localhost |
 
 In Docker, `DB_URI` is set to `postgresql://postgres:5432/ontoforge` automatically via `docker-compose.yml`.
 
@@ -293,6 +293,7 @@ not read. Every server of one deployment needs the same values.
 | `OIDC_CLIENT_ID` | *(required)* | The confidential client the server signs browsers in with |
 | `OIDC_CLIENT_SECRET` | *(required)* | That client's secret; never in a committed file |
 | `OIDC_AUDIENCE` | *(required)* | The audience an access token must carry for REST and MCP; it must differ from `OIDC_CLIENT_ID` |
+| `WEB_CLIENT_URL` | *(unset)* | The address the browser loads the web client from, which forwards `/api` to this server. Browser sign-in runs there: `/api/auth/callback` under it is the sign-in callback registered at the provider, and a signed-in change must come from it. Unset: no browser sign-in; callers send bearer tokens. It must be `https` unless its host is localhost |
 | `AUTH_ADMIN_SUBJECT` | *(required)* | The subject, at `OIDC_ISSUER`, that is made an active Platform Administrator whenever it signs in |
 | `AUTH_SESSION_IDLE_SECONDS` | `28800` (8 h) | How long a browser session lasts unused; at most 24 hours after sign-in in any case (positive integer) |
 | `ACCESS_DB_URI` | *(required)* | `postgresql://` URL of the access database, which holds users and roles; the server creates it when missing. Its user and password are `DB_USER` and `DB_PASSWORD` unless the URL carries its own |

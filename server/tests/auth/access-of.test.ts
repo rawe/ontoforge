@@ -10,7 +10,7 @@ import type { Access } from "../../src/access/caller.js";
 import { accessOf, classifyRoutes } from "../../src/auth/plugin.js";
 import type { AuthRuntime } from "../../src/auth/runtime.js";
 import { ForbiddenError, UnauthenticatedError } from "../../src/core/exceptions.js";
-import { ADMIN_SUBJECT, fakeRuntime, identified, PUBLIC_URL, type Fakes } from "./fakes.js";
+import { ADMIN_SUBJECT, fakeRuntime, identified, WEB_CLIENT_URL, type Fakes } from "./fakes.js";
 
 const SESSION_COOKIE = "ontoforge_session_5173";
 
@@ -93,7 +93,7 @@ describe("accessOf", () => {
     const cookie = `${SESSION_COOKIE}=${id}`;
     expect(await ask({ method: "POST", headers: { cookie } })).toMatchObject({ error: "forbidden" });
     expect(await ask({ method: "POST", headers: { cookie, origin: "http://evil.example.com" } })).toMatchObject({ error: "forbidden" });
-    expect(await ask({ method: "POST", headers: { cookie, origin: PUBLIC_URL } })).toMatchObject({ kind: "caller" });
+    expect(await ask({ method: "POST", headers: { cookie, origin: WEB_CLIENT_URL } })).toMatchObject({ kind: "caller" });
     expect(await ask({ method: "GET", headers: { cookie, origin: "http://evil.example.com" } })).toMatchObject({ kind: "caller" });
   });
 

@@ -255,8 +255,8 @@ message carries the counts, so an MCP caller sees them too.
 physical objects, which must not reach a client. The adapter logs the original against a
 generated `errorId` and returns only that id, so a reported failure can still be traced to
 its server-side record. This error does not promise that a failure is retryable. Expected
-domain conditions use their documented errors; arbitrary driver failures are not split
-into a speculative connection-loss category or a blanket constraint-conflict category.
+domain conditions use their documented errors
+([ADR 0012](adr/0012-unexpected-storage-failures-become-storeerror.md)).
 
 **What a caller holds no role in is not found.** An ontology or lens outside the caller's
 assignments answers `RESOURCE_NOT_FOUND`, as an unknown key does; `FORBIDDEN` is for what
@@ -264,12 +264,9 @@ the caller may know of ([capabilities/authentication.md](capabilities/authentica
 A `401` carries a `WWW-Authenticate` challenge ([sign-in](#sign-in)).
 
 When a value cannot be coerced, its field error names the expected schema type and
-describes the received value by its JSON type. The received value is raw wire data:
-an object or array is not an OntoForge data type, and types such as `date`, `datetime`
-and `document` have no corresponding JSON type. JSON names also avoid exposing the
-server's implementation language. Field errors are strings in `details.fields`, not
-structured expected/received objects; failures that do not involve a type use the same
-string-valued shape.
+describes the received value by its JSON type. Field errors are strings in
+`details.fields`; failures that do not involve a type use the same string-valued shape
+([ADR 0014](adr/0014-received-values-named-by-their-json-type.md)).
 
 MCP reports the same failures as tool errors. Because a tool error is a single string, the
 per-field detail that REST returns under `details.fields` is flattened into the message
@@ -1021,11 +1018,8 @@ refusal the kind lists; a busy message is never queued.
 non-streaming mode. Tool activity is visible while the turn runs. Each line is one complete
 JSON object with a `type`.
 
-The web client consumes this one streaming contract; an opt-in flag or separate endpoint
-for a non-streaming reply would maintain a second contract without a current consumer.
-Agent turns expose tool activity rather than token-streaming the agent reply: changing
-that would also change model invocation and expose framework events. This does not
-restrict the answer deltas that retrievers and navigators already send.
+Agent turns stream their tool activity, not the agent reply; retrievers and navigators
+send answer deltas ([ADR 0021](adr/0021-rest-chat-tool-streaming.md)).
 
 The shared events mean the same for every kind:
 
@@ -1056,8 +1050,7 @@ when its thread is gone meanwhile, `THREAD_BUSY` when it lost its hold on the th
 store is full or fails. Unexpected failures after streaming begins have the generic `INTERNAL_ERROR` message `Internal Server Error`.
 Delivery bounds buffering and terminates stalled or oversized streams.
 
-There is no background continuation after a disconnect. Reconnection, replay or automatic
-reruns would require additional state and risk doing the same work twice.
+There is no background continuation after a disconnect.
 
 **Read a thread.** `200` with `threadId` and `messages` — the user messages and the
 assistant's answers in order, each `role` (`user` or `assistant`) and `content`, at most

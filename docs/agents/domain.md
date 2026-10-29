@@ -17,14 +17,14 @@ This repo does not use a root `GLOSSARY.md`. When a skill refers to `GLOSSARY.md
   and architecture or storage documentation when the change touches those boundaries.
   Follow the map from the README; a link from another document is not a substitute for
   reading the owning explanation.
-- **`docs/adr/`** — read relevant linked ADRs for the context and trade-offs of consequential
-  architectural choices. An ADR does not replace the current behavior in its owning document.
+- **`docs/adr/`** — read relevant linked ADRs for the alternatives weighed behind a
+  decision. An ADR does not replace the current behavior in its owning document.
 
 ## Recording decisions
 
-Every architectural decision requires user approval. Only qualifying consequential,
-costly-to-reverse choices need an ADR; apply [recording decisions](../workflows/recording-decisions.md)
-rather than automatically using a skill's ADR format.
+Every architectural decision requires user approval. Record it as
+[recording decisions](../workflows/recording-decisions.md) describes, rather than
+automatically using a skill's ADR format.
 
 ## Use the glossary's vocabulary
 

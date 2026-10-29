@@ -14,15 +14,15 @@ architectural starting point; detailed feature rules stay with their owners.
 
 - **KISS** — Keep it simple. Prefer the simplest solution that meets the requirement.
 - **YAGNI** — You ain't gonna need it. Don't build for hypothetical future requirements.
-- **Every architectural decision requires user approval.** Never settle a design or architectural choice silently — always ask the user first. Only consequential, costly-to-reverse architectural choices warrant an ADR; use [docs/workflows/recording-decisions.md](docs/workflows/recording-decisions.md) to assess and record them.
+- **Every architectural decision requires user approval.** Never settle a design or architectural choice silently — always ask the user first. Record it as [docs/workflows/recording-decisions.md](docs/workflows/recording-decisions.md) describes.
 
 ## Documentation Principles
 
-1. **Consistency first.** Docs, code, and architecture must agree. Investigate discrepancies against the relevant implementation and tests; report them and ask the user when the correct behavior or a design choice is uncertain. Do not silently resolve a design disagreement.
-2. **Single source of truth.** Give each detailed fact one authoritative home. A short, accurate summary may provide the context a reader needs elsewhere; link to the authoritative explanation for detail.
+1. **Consistency first.** Docs, code, and architecture must agree. When they disagree, investigate against the implementation and tests first, and fix what is clearly wrong. Ask the user only when the correct behavior or a design choice stays unclear; never settle a design disagreement silently.
+2. **Single source of truth.** Each fact has exactly one home, given by the structure in [docs/AGENTS.md](docs/AGENTS.md). Elsewhere, name the concept and link to its home — don't copy it.
 
-The remaining principles for writing under `docs/` — progressive disclosure, redundancy,
-document lifecycle, status quo only, ontology storage neutrality — live in
+The remaining principles for writing under `docs/` — progressive disclosure, one home per
+fact, the right level, linking, status quo only, ontology storage neutrality — live in
 [docs/AGENTS.md](docs/AGENTS.md). Read it before writing under `docs/`.
 
 ## Git Commits
@@ -39,7 +39,7 @@ not documentation of the system.
 - **Testing** — [docs/workflows/testing.md](docs/workflows/testing.md): running unit and integration tests, prerequisites, conventions.
 - **Multi-agent test-and-fix cycles** — [docs/workflows/test-cycle.md](docs/workflows/test-cycle.md): agent roles, execution flow, fresh-state protocol, handover formats.
 - **Releasing** — [docs/workflows/releasing.md](docs/workflows/releasing.md). Read it before tagging a release.
-- **Recording decisions** — [docs/workflows/recording-decisions.md](docs/workflows/recording-decisions.md): when an ADR is warranted, where current behavior belongs, and how to record a consequential architectural choice.
+- **Recording decisions** — [docs/workflows/recording-decisions.md](docs/workflows/recording-decisions.md): where an approved decision is written down, when it gets an ADR, and the ADR format.
 - **Writing documentation** — [docs/workflows/documenting.md](docs/workflows/documenting.md): choose an owner and document type, preserve moved information, and review the result. Read it before adding or reorganizing documentation.
 - **Writing tool descriptions** — [docs/workflows/writing-tool-descriptions.md](docs/workflows/writing-tool-descriptions.md): self-contained parameter rules, caller-facing scope, description budget and checks for MCP and agent tools.
 - **Naming concepts and keys** — [docs/workflows/naming.md](docs/workflows/naming.md): consistent domain vocabulary and shared key rules across entrances.

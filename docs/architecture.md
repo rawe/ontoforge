@@ -4,7 +4,7 @@ How OntoForge is put together. [Concepts](concepts.md) explain the mental model;
 [glossary](glossary.md) defines its terms.
 
 This document explains the system's components, boundaries, invariants and major flows.
-Feature behaviour and interface details are described in the linked capability and
+Feature behavior and interface details are described in the linked capability and
 interface documents; physical ontology storage is described in the adapter documentation.
 
 ## Components

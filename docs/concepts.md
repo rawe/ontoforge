@@ -85,7 +85,7 @@ makes it safe to expose runtime to an autonomous agent while keeping modeling un
 control.
 
 Runtime is *derived*: everything it permits follows from the schema and the lens. When
-the schema changes, runtime behaviour changes with it, with no separate configuration.
+the schema changes, runtime behavior changes with it, with no separate configuration.
 
 ## Interfaces
 

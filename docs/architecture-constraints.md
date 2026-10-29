@@ -84,9 +84,6 @@ see. See [components](architecture.md#components) and
 
 ## Maintaining this document
 
-Add a constraint only when it protects an important architectural boundary or guarantee
-that contributors need before designing changes. State the obligation, its reason and
-where to understand it further. Feature defaults, parameter limits, procedures and local
-implementation choices belong in their owning documents. Changing a constraint is an
-architectural choice; apply [recording architectural decisions](workflows/recording-decisions.md)
-to determine whether its rationale warrants an ADR.
+Adding or changing a constraint is an architectural decision; record it as
+[recording architectural decisions](workflows/recording-decisions.md#architectural-constraint)
+describes.

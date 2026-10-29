@@ -27,17 +27,17 @@ through generic APIs and a web application.
 | [product-surface.md](product-surface.md) | Web UI screens and interactions |
 | [capabilities/](capabilities/) | One document per capability, end to end |
 | [workflows/](workflows/) | Procedures for working *on* OntoForge |
-| [adr/](adr/) | Context and trade-offs behind consequential architectural choices |
+| [adr/](adr/) | The alternatives weighed behind a decision |
 
 For contributors, [writing documentation](workflows/documenting.md) explains how to add
 or change a page and how to review a move. [Recording architectural decisions](workflows/recording-decisions.md)
-sets the separate threshold for an ADR.
+says where a decision is written down and when it gets an ADR.
 For MCP and agent tool authors, [writing tool descriptions](workflows/writing-tool-descriptions.md)
 covers the description contract and its checks.
 [Naming concepts and keys](workflows/naming.md) covers vocabulary across layers and shared
 validation rules for keyed resources.
 
-Capability documents explain feature behaviour, rules, limits and how to reach it. The
+Capability documents explain feature behavior, rules, limits and how to reach it. The
 interface and product documents describe the corresponding API and UI surfaces; the
 capability remains the home for what the feature means.
 

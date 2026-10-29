@@ -64,11 +64,7 @@ meets entities differently. What is shared is the entity's identity and label an
 it was handed to the answer model; kind-specific context keeps its own meaning.
 
 All kinds use the shared `entities` event for these cards; a kind's own events and tool
-events do not carry the cards. Clients can therefore handle the same cards without a reader
-per assistant kind, while tool events keep each tool's native result. Per-kind entity
-events were rejected because every kind, including every new one, would need its own card
-reader; cards inside native tool results were rejected because they would couple generic
-tool events to a presentation and make consumers inspect tools that return no entities.
+events do not carry the cards ([ADR 0027](../adr/0027-one-shared-entities-event.md)).
 
 ## Lifetime
 

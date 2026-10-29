@@ -246,7 +246,7 @@ ontoforge/
     ├── interfaces.md               # REST/MCP surfaces and shared error contract
     ├── storage-adapters.md         # Persistence contract and PostgreSQL adapter
     ├── product-surface.md          # Web UI screens and interactions
-    ├── adr/                        # Context and trade-offs of architectural choices
+    ├── adr/                        # Alternatives weighed behind decisions
     └── workflows/                  # Procedures for working on OntoForge
 ```
 
@@ -314,15 +314,8 @@ An AI or embedding base URL is written as the provider documents it: the host fo
 (`http://localhost:11434`) and `anthropic` (`https://api.anthropic.com`), the API base
 including its version for `openai` (`https://openrouter.ai/api/v1`). A base URL that breaks this rule stops the server at
 startup with the corrected value in the message. This catches a misplaced API path at
-startup instead of a 404 on the first model call.
-
-For an OpenAI-compatible provider, appending `/v1` to a copied base would duplicate its
-version or lose a provider's API path; a provider serving below `/api/v1` cannot be
-represented by a bare host alone (another valid provider path is `/v1beta/openai`).
-Separate full request URLs for chat, model listing and
-embeddings would multiply settings instead of using the provider's documented API base.
-Accepting both versioned and unversioned forms would leave an unversioned value ambiguous,
-so the server validates one form rather than guessing which was intended.
+startup instead of a 404 on the first model call
+([ADR 0024](docs/adr/0024-provider-base-urls-as-documented.md)).
 
 ### Semantic Search
 

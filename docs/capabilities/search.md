@@ -56,10 +56,9 @@ ontology's [keyword languages](#keyword-language).
 
 The default keyword matching is any-term keyword matching; `keyword` and `hybrid` always
 use the same one. `keyword-any` and `keyword-all` each fix one retrieval method, whatever
-the default is. Requiring every term by default would let one absent term empty the
-result; this matters for compound words and derivations, which stemming does not reduce.
-Matching is chosen by the strategy, not by a separate parameter. All-term means that
-every term must match; it still uses stemming and prefix matching.
+the default is. Matching is chosen by the strategy, not by a separate parameter.
+All-term means that every term must match; it still uses stemming and prefix matching
+([ADR 0026](../adr/0026-any-term-keyword-matching.md)).
 
 The default is the first available of `hybrid`, `keyword`, `semantic`. The feature report
 lists available strategies in the order `hybrid`, `keyword`, `keyword-any`,
@@ -74,8 +73,8 @@ Configuring a provider later builds the semantic entries in the background.
 
 ### Ranking
 
-The implementation trade-offs behind ranking and evidence are explained in
-[search ranking rationale](../implementation/search-ranking.md).
+The alternatives weighed for ranking and evidence are in
+[ADR 0020](../adr/0020-search-ranking-and-evidence.md).
 
 Each searched index is ranked once per retrieval method the strategy uses — semantic,
 keyword, or both under `hybrid` — over the entries of its ready generation. Within one
@@ -330,18 +329,11 @@ outside search indices against the provider's, and reports every mismatch as a w
 identifying the index by what it covers — saved-query descriptions — never by a physical
 index name, and naming rebuild as the remedy.
 
-Startup warns and does not repair. Repair drops the index and re-embeds everything it
-covered, a cost and temporary loss of semantic search that starting the server should not
-incur without an explicit request. Rebuild does repair, in the three-phase order above —
+Startup warns and does not repair
+([ADR 0013](../adr/0013-semantic-index-width-drift-reported-at-startup.md)). Rebuild does repair, in the three-phase order above —
 drop, regenerate, build. A startup ensure that cannot succeed, which is what an unfinished
 rebuild leaves behind, is reported against the ontology it belongs to and does not stop
 the server from starting: the server must remain available to finish the repair.
-
-An additional setting for startup repair would duplicate the existing distinction:
-startup reports, an explicit rebuild repairs. Recovery instructions alone would leave
-the drift invisible until an operation used the index; the startup warning exposes it
-before that first failure. A create-if-absent cannot repair a mismatched width because
-it leaves an existing index unchanged.
 
 ## Through the interfaces
 

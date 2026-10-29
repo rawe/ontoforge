@@ -1,4 +1,6 @@
-import { getEmbeddingProvider } from "../../core/embedding.js";
+import { deploymentMethods, type SearchCapabilities } from "./availability.js";
+import type { SearchRepresentation } from "../../core/searchIndex.js";
+export type { SearchCapabilities } from "./availability.js";
 export const SEARCH_STRATEGIES = [
   "semantic", "keyword", "keyword-any", "keyword-all", "hybrid",
 ] as const;
@@ -9,39 +11,23 @@ const KEYWORD_ONLY: ReadonlySet<SearchStrategy> = new Set(["keyword", "keyword-a
 export function ranksSemantically(strategy: SearchStrategy): boolean {
   return !KEYWORD_ONLY.has(strategy);
 }
-export interface SearchCapabilities {
-  supportsKeywordRanking(): boolean;
-}
 interface Strategy {
   key: SearchStrategy;
-  available(store: SearchCapabilities): boolean;
+  /** The methods it runs; it is available when the deployment runs them all. */
+  methods: SearchRepresentation[];
 }
-/** Fixed preference order; every listed strategy has requirements. */
+/** Fixed preference order. */
 export const strategies: Strategy[] = [
-  {
-    key: "hybrid",
-    available: (store: SearchCapabilities) =>
-      Boolean(getEmbeddingProvider()) && store.supportsKeywordRanking(),
-  },
-  {
-    key: "keyword",
-    available: (store: SearchCapabilities) => store.supportsKeywordRanking(),
-  },
-  {
-    key: "keyword-any",
-    available: (store: SearchCapabilities) => store.supportsKeywordRanking(),
-  },
-  {
-    key: "keyword-all",
-    available: (store: SearchCapabilities) => store.supportsKeywordRanking(),
-  },
-  {
-    key: "semantic",
-    available: () => Boolean(getEmbeddingProvider()),
-  },
+  { key: "hybrid", methods: ["semantic", "keyword"] },
+  { key: "keyword", methods: ["keyword"] },
+  { key: "keyword-any", methods: ["keyword"] },
+  { key: "keyword-all", methods: ["keyword"] },
+  { key: "semantic", methods: ["semantic"] },
 ];
+/** The strategies the deployment can run (`availability.ts`), in preference order. */
 export function availableStrategies(store: SearchCapabilities): SearchStrategy[] {
-  return strategies.filter((s) => s.available(store)).map((s) => s.key);
+  const methods = deploymentMethods(store);
+  return strategies.filter((s) => s.methods.every((method) => methods.includes(method))).map((s) => s.key);
 }
 /** The fixed similarity floor the MCP and agent search tools apply. The caller cannot set
  * it; the envelope echoes it as `minSimilarity`. */

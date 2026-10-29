@@ -4,7 +4,8 @@
  * store — single-method raw scores, fusion and its one tie rule,
  * `matched`, the refetch per cut, the similarity floor, restrictions
  * pushed into the search nodes, append, provenance by sub-query and query
- * text, one embedding per query text.
+ * text, one embedding per query text, and the empty rankings and
+ * limitations of search nodes that cannot run.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -241,8 +242,8 @@ describe("the executor", () => {
     fuse(group(merge(...keys.map((key) => sem(key)))), group(merge(...keys.map((key) => kw(key)))));
   // The entity search's hits: one search per entity.
   const run = async (tree: TreeNode) =>
-    (await executeSearchTree(loaded, indexStore, indices, tree)).map((hit) => hit.provenance[0]!.hit!);
-  const runTree = (tree: TreeNode) => executeSearchTree(loaded, indexStore, indices, tree);
+    (await executeSearchTree(loaded, indexStore, indices, tree)).hits.map((hit) => hit.provenance[0]!.hit!);
+  const runTree = async (tree: TreeNode) => (await executeSearchTree(loaded, indexStore, indices, tree)).hits;
   const rrf = (rank: number) => 1 / (RRF_K + rank);
 
   it("one method keeps the raw scores, merged across indices; equal scores by entity id", async () => {
@@ -290,6 +291,55 @@ describe("the executor", () => {
     const hits = await run(cut(hybrid("person~default")));
     expect(hits.map((hit) => [hit.entityId, hit.score])).toEqual([["a", 2.5]]);
     expect(embed).not.toHaveBeenCalled();
+  });
+
+  it("a search node that cannot run returns an empty ranking: the tree ranks as the one without it, noted per reason and method", async () => {
+    // Semantic: building on person~default, none on company~default, switched off on a keyword-only index.
+    const KEYWORD_ONLY = { ...NOTES, key: "person~kw", definition: { ...NOTES.definition, semantic: { enabled: false, template: null } } };
+    const all = new Map([...indices, [KEYWORD_ONLY.key, KEYWORD_ONLY] as const]);
+    generations = generations
+      .filter((g) => g.generationId !== "company~default/semantic")
+      .map((g) => (g.generationId === "person~default/semantic" ? { ...g, state: "building" as const } : g));
+    lists["person~default/keyword"] = [entry("a", 2), entry("b", 1)];
+    lists["person~notes/semantic"] = [entry("b", 0.8)];
+    lists["company~default/keyword"] = [entry("c", 1.5)];
+    const keys = ["person~default", "person~notes", "company~default"];
+    const result = await executeSearchTree(loaded, indexStore, all, cut(hybrid(...keys, KEYWORD_ONLY.key)));
+    const runnable = await executeSearchTree(
+      loaded,
+      indexStore,
+      all,
+      cut(fuse(group(sem("person~notes")), group(merge(...[...keys, KEYWORD_ONLY.key].map((key) => kw(key)))))),
+    );
+    expect(result.hits).toEqual(runnable.hits);
+    expect(result.limitations).toEqual([
+      { code: "not-ready", method: "semantic", indices: ["person~default", "company~default"] },
+      { code: "switched-off", method: "semantic", indices: ["person~kw"] },
+    ]);
+    expect(runnable.limitations).toEqual([]);
+  });
+
+  it("semantic that cannot run anywhere leaves keyword's raw scores; without a provider it is noted so", async () => {
+    lists["person~default/keyword"] = [entry("a", 2.5), entry("b", 1)];
+    setEmbeddingProvider(null);
+    const result = await executeSearchTree(loaded, indexStore, indices, cut(hybrid("person~default", "company~default")));
+    expect(result.hits.map((hit) => [hit.entityId, hit.provenance[0]!.hit!.score])).toEqual([
+      ["a", 2.5],
+      ["b", 1],
+    ]);
+    expect(result.limitations).toEqual([
+      { code: "no-provider", method: "semantic", indices: ["person~default", "company~default"] },
+    ]);
+    // Nothing to run: an empty root, every search node noted.
+    generations = [];
+    const both = fuse(cut(group(kw("person~default"))), cut(group(kw("company~default"))));
+    const none = await executeSearchTree(loaded, indexStore, indices, cut(both));
+    expect(none).toEqual({
+      hits: [],
+      limitations: [{ code: "not-ready", method: "keyword", indices: ["person~default", "company~default"] }],
+    });
+    // Only the first tree's two keyword search nodes ranked.
+    expect(rank).toHaveBeenCalledTimes(2);
   });
 
   it("a method that runs but finds nothing still fuses: the other's hits score by reciprocal rank", async () => {

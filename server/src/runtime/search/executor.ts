@@ -3,13 +3,14 @@
  * generations:
  *
  * 1. Each search node gets the ready generation of its index in its method
- *    — semantic only of the embedding model in use — and every restrict
- *    above it, pushed into its own database query: the filters' exact
- *    conditions and ids of its root type, with the lens's hidden relation
- *    and target types. A search node without a ready generation, or whose
- *    index does not enable its method, contributes nothing; a layer left
- *    with a single input passes it on — a hybrid search with one method to
- *    run keeps that method's scores.
+ *    (`availability.ts`, from the generations read once per tree) and every
+ *    restrict above it, pushed into its own database query: the filters'
+ *    exact conditions and ids of its root type, with the lens's hidden
+ *    relation and target types. A search node that cannot run returns an
+ *    empty ranking and is noted as a limitation, one per reason and method
+ *    naming its indices; a fuse left with a single ranking of search nodes
+ *    that ran passes it on — a hybrid search with one method to run keeps
+ *    that method's scores.
  * 2. Each semantic query text is embedded once; the search nodes run in
  *    parallel, each first fetching `limit × 4` entries of the nearest cut
  *    above it (its depth). A semantic floor drops the entries below it
@@ -40,6 +41,7 @@ import type { SearchRepresentation } from "../../core/searchIndex.js";
 import { byScore, fuseModes, mergeByScore, RRF_K, type FusedHit, type ModeRanking } from "../../core/searchQuery.js";
 import { isSearchNode, searchMethod, type CutNode, type SearchNode, type TreeNode } from "../../core/searchTree.js";
 import type { LoadedSchema } from "../schemaCache.js";
+import { indexAvailability, type Unavailable } from "./availability.js";
 import type { EngineHit, IndexMatch } from "./indexSearch.js";
 
 /** Entries a search node first fetches per entity its cut keeps. */
@@ -47,6 +49,20 @@ const OVERFETCH_FACTOR = 4;
 
 /** The most entries one search node fetches. */
 const ENTRY_FETCH_CAP = 1000;
+
+/** What a tree run returns: the root ranking and what could not run. */
+export interface TreeResult {
+  hits: TreeHit[];
+  limitations: Limitation[];
+}
+
+/** The search nodes of one method that could not run for one reason: their
+ * indices, in tree order. */
+export interface Limitation {
+  code: Unavailable["reason"];
+  method: SearchRepresentation;
+  indices: string[];
+}
 
 /** One entity of the root ranking, with what found it. */
 export interface TreeHit {
@@ -106,11 +122,14 @@ interface Item extends TreeHit {
 }
 
 /** A node's ranking: the entries of one method; entities with the method
- * rankings they come from; or entities above that, with what found them. */
-type Combined =
+ * rankings they come from; or entities above that, with what found them.
+ * `ran` is false for the empty ranking of a search node that cannot run,
+ * and of what combines only such. */
+type Combined = (
   | { unit: "entries"; method: SearchRepresentation; entries: FoundEntry[] }
   | { unit: "entities"; rankings: ModeRanking<FoundEntry>[]; hits: FusedHit<FoundEntry>[] }
-  | { unit: "items"; items: Item[] };
+  | { unit: "items"; items: Item[] }
+) & { ran: boolean };
 
 /** Run a valid tree; `indices` holds every index its search nodes name. */
 export async function executeSearchTree(
@@ -118,12 +137,18 @@ export async function executeSearchTree(
   indexStore: SearchIndexStore,
   indices: ReadonlyMap<string, SearchIndexRecord>,
   tree: TreeNode,
-): Promise<TreeHit[]> {
+): Promise<TreeResult> {
   const provider = getEmbeddingProvider();
   const searches = planSearches(tree, indices);
+  const limitations: Limitation[] = [];
   if (searches.length > 0) {
-    const ready = (await indexStore.listGenerations()).filter((g) => g.state === "ready");
-    for (const search of searches) search.generation = generationOf(search, ready, provider?.modelId);
+    // Read for this tree only: any instance's worker may build them.
+    const generations = await indexStore.listGenerations();
+    for (const search of searches) {
+      const availability = indexAvailability(search.index, search.method, generations);
+      if (availability.runs) search.generation = availability.generation;
+      else note(limitations, availability.reason, search);
+    }
   }
 
   const vectors = new Map<string, number[]>();
@@ -177,12 +202,23 @@ export async function executeSearchTree(
     );
     combined = combineTree(tree, searches, fetched);
   }
-  if (combined.root === null) return [];
-  return itemsOf(combined.root, searches).map(({ entityId, entityType, provenance }) => ({
+  const hits = itemsOf(combined.root, searches).map(({ entityId, entityType, provenance }) => ({
     entityId,
     entityType,
     provenance,
   }));
+  return { hits, limitations };
+}
+
+/** A search node that cannot run, in the limitation of its reason and
+ * method. */
+function note(limitations: Limitation[], code: Limitation["code"], search: Planned): void {
+  let limitation = limitations.find((l) => l.code === code && l.method === search.method);
+  if (limitation === undefined) {
+    limitation = { code, method: search.method, indices: [] };
+    limitations.push(limitation);
+  }
+  if (!limitation.indices.includes(search.index.key)) limitation.indices.push(search.index.key);
 }
 
 /** The search nodes in tree order, each with the restrictions pushed down
@@ -229,22 +265,6 @@ function planSearches(tree: TreeNode, indices: ReadonlyMap<string, SearchIndexRe
   return searches;
 }
 
-/** The ready generation a search node ranks: of its index in its method,
- * semantic of the model in use; none when the index does not enable it. */
-function generationOf(
-  search: Planned,
-  ready: SearchGenerationRecord[],
-  modelId: string | undefined,
-): SearchGenerationRecord | undefined {
-  if (!search.index.definition[search.method].enabled) return undefined;
-  return ready.find(
-    (g) =>
-      g.searchIndexId === search.index.searchIndexId &&
-      g.representation === search.method &&
-      (search.method === "keyword" || g.modelId === modelId),
-  );
-}
-
 /** A filter as the restriction of its entity type. */
 function restrictionOf(filter: TreeNode): { entityType: string; restriction: Restriction } {
   if (filter.kind !== "filter") throw new Error(`'${filter.kind}' is not a filter`);
@@ -265,50 +285,47 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
   const searchOf = new Map(searches.map((search, i) => [search.node as TreeNode, i] as const));
   const counts = new Map<CutNode, number>();
 
-  /** A node's ranking, bottom-up; null when no search node below it runs. */
-  const combine = (node: TreeNode): Combined | null => {
-    const inputs = (nodes: TreeNode[]) => nodes.map(combine).filter((input): input is Combined => input !== null);
+  /** A node's ranking, bottom-up. */
+  const combine = (node: TreeNode): Combined => {
     switch (node.kind) {
       case "keywordSearch":
       case "semanticSearch": {
         const search = searchOf.get(node)!;
         const own = fetched[search]!;
-        if (own === null) return null;
+        if (own === null) return { unit: "entries", method: searchMethod(node), entries: [], ran: false };
         // Best first, as the port ranks them; equal scores keep their order.
         const entries = mergeByScore([own.entries.map((entry) => ({ ...entry, search }))]);
-        return { unit: "entries", method: searchMethod(node), entries };
+        return { unit: "entries", method: searchMethod(node), entries, ran: true };
       }
       case "merge": {
-        const merged = inputs(node.inputs).map(entriesOf);
-        if (merged.length === 0) return null;
+        const merged = node.inputs.map(combine).map(entriesOf);
         const entries = mergeByScore(merged.map((input) => input.entries));
-        return { unit: "entries", method: merged[0]!.method, entries };
+        return { unit: "entries", method: merged[0]!.method, entries, ran: merged.some((input) => input.ran) };
       }
       case "group": {
         if (node.key !== "entity") throw new Error("Passages cannot be ranked yet");
-        const grouped = combine(node.input);
-        if (grouped === null) return null;
-        const input = entriesOf(grouped);
+        const input = entriesOf(combine(node.input));
         const rankings = [{ representation: input.method, entries: input.entries }];
-        return { unit: "entities", rankings, hits: fuseModes(rankings) };
+        return { unit: "entities", rankings, hits: fuseModes(rankings), ran: input.ran };
       }
       case "fuse": {
-        const fused = inputs(node.inputs);
-        if (fused.length <= 1) return fused[0] ?? null;
+        const all = node.inputs.map(combine);
+        // The empty rankings of what cannot run do not count.
+        const fused = all.filter((input) => input.ran);
+        if (fused.length <= 1) return fused[0] ?? all[0]!;
         // The methods of one search fuse by their entries; anything else
         // as rankings of entities.
         if (fused.every((input) => input.unit === "entities" && input.rankings.length === 1)) {
           const rankings = fused.flatMap((input) => (input.unit === "entities" ? input.rankings : []));
-          return { unit: "entities", rankings, hits: fuseModes(rankings) };
+          return { unit: "entities", rankings, hits: fuseModes(rankings), ran: true };
         }
-        return { unit: "items", items: fuseItems(fused.map((input) => itemsOf(input, searches))) };
+        return { unit: "items", items: fuseItems(fused.map((input) => itemsOf(input, searches))), ran: true };
       }
       case "restrict":
         // Pushed into the search nodes.
         return combine(node.input);
       case "append": {
-        const input = node.input === null ? null : combine(node.input);
-        const items = input === null ? [] : itemsOf(input, searches);
+        const items = node.input === null ? [] : itemsOf(combine(node.input), searches);
         const listed = new Set(items.map((item) => item.entityId));
         for (const filter of node.filters) {
           if (filter.kind !== "filter" || filter.ids === null) throw new Error("An append lists the ids of its filters");
@@ -320,18 +337,19 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
             items.push({ entityId, entityType: filter.entityType, score: 0, similarity: null, provenance: [provenance] });
           }
         }
-        return { unit: "items", items };
+        // A list, whether or not its search ran.
+        return { unit: "items", items, ran: true };
       }
       case "cut": {
         const input = combine(node.input);
-        if (input === null) return null;
         if (input.unit === "entries") throw new Error("A cut ranks entities");
         if (input.unit === "items") {
           counts.set(node, input.items.length);
-          return { unit: "items", items: input.items.slice(0, node.limit) };
+          return { unit: "items", items: input.items.slice(0, node.limit), ran: input.ran };
         }
         counts.set(node, input.hits.length);
-        return { unit: "items", items: itemsOf({ ...input, hits: input.hits.slice(0, node.limit) }, searches) };
+        const items = itemsOf({ ...input, hits: input.hits.slice(0, node.limit) }, searches);
+        return { unit: "items", items, ran: input.ran };
       }
       default:
         throw new Error(`A search tree with '${node.kind}' here cannot run`);

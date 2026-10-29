@@ -108,6 +108,8 @@ beforeEach(() => {
   });
   const schema = makeFullSchema({ lensKey: "all" });
   runtime = createMockRuntimeStore();
+  // As the PostgreSQL adapter: keyword ranking, so hybrid is the default.
+  runtime.supportsKeywordRanking.mockReturnValue(true);
   runtime.getFullSchemaWithLensInclusions.mockResolvedValue(schema);
   runtime.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
     Object.fromEntries(ids.map((id) => [id, { _id: id, _entityTypeKey: "person", name: `N-${id}`, age: 3 }])),

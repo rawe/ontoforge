@@ -360,7 +360,7 @@ export async function retrieveQuestion(
   const { plan, notes } = await planQuestion({
     retriever,
     scope,
-    modes: availableModes(),
+    modes: availableModes(retriever.scope.store),
     message: query,
     history: [],
     previous: undefined,
@@ -403,7 +403,7 @@ export async function chat(
   const timings: Record<string, number> = {};
   const io: ModelCall[] = [];
   const scope: RetrievalScope = { ...retriever.scope, signal };
-  const modes = availableModes();
+  const modes = availableModes(retriever.scope.store);
   let firstDelta = false;
   let searchCalls = 0;
   const { model, plannerModel } = models();

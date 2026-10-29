@@ -211,8 +211,11 @@ ones, without a match, as long as the sub-query holds fewer than 100 entities; e
 ranked entity stays. A sub-query without a query lists them only. The answer is told when
 allowed entities were left out.
 
-An index whose build state is not `ready` still answers, and the answer is told that
-results may be incomplete ([search-indices.md](search-indices.md#status)).
+A search by a method an index has no ready generation for — still building, or none yet;
+for semantic, one of the embedding model in use — finds nothing in that index, and the
+answer is told that results may be incomplete, naming those indices. An index that
+answers while its status is `stale` or `failed` gets no such note
+([search-indices.md](search-indices.md#status)).
 
 ### Evidence and the answer
 

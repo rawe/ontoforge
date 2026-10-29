@@ -382,13 +382,20 @@ describe("sub-query search", () => {
     );
   });
 
-  it("notes indices that are not fully built and the planner's unsupported reason", async () => {
-    const building = { ...scope(), lens: { ...LENS, catalog: CATALOG.map((e) => (e.key === "person_employment" ? { ...e, status: "building" as const } : e)) } };
+  it("notes the indices a search node could not run on for want of a ready generation, and the planner's unsupported reason", async () => {
+    // person_employment's semantic generation is still building.
+    const generations = CATALOG.flatMap((entry) => [generation(entry.key, "semantic"), generation(entry.key, "keyword")]).map((g) =>
+      g.generationId === "person_employment/semantic" ? { ...g, state: "building" as const } : g,
+    );
+    const building = { ...scope(), indexStore: { ...indexStore, listGenerations: async () => generations } as SearchIndexStore };
     const retrieval = await retrieve(building, { subQueries: [subQuery({})], unsupportedReason: "No salaries." });
     expect(retrieval.limitations).toEqual([
       "No salaries.",
       "Search indices not fully built (person_employment); results may be incomplete.",
     ]);
+    // A catalog status other than ready, with every search node run: no note.
+    const statusOnly = { ...scope(), lens: { ...LENS, catalog: CATALOG.map((e) => (e.key === "person_employment" ? { ...e, status: "building" as const } : e)) } };
+    expect((await retrieve(statusOnly, { subQueries: [subQuery({})], unsupportedReason: null })).limitations).toEqual([]);
   });
 });
 

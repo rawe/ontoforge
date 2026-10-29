@@ -22,6 +22,7 @@ import {
   TOOL_MIN_SIMILARITY_GUIDANCE,
   toolMinSimilarity,
 } from "../../search/strategies.js";
+import { deploymentMethods } from "../../search/availability.js";
 
 import { randomUUID } from "node:crypto";
 
@@ -41,7 +42,6 @@ import { createAgent, createMiddleware } from "langchain";
 import { z } from "zod";
 
 import { DEFAULT_AGENT_CONFIG, type AgentConfig } from "../../../core/ai.js";
-import { getEmbeddingProvider } from "../../../core/embedding.js";
 import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
 import type { RuntimeStore } from "../../../core/ports.js";
 import type { StreamEvent } from "../../chatStream.js";
@@ -607,7 +607,7 @@ Never make up answers — only use data from tool results. If the data doesn't c
  * dropped without an embedding provider — for the default agent and
  * explicit allowlists alike. */
 export function resolveChatToolNames(agentConfig: AgentConfig, store: RuntimeStore): string[] {
-  const hasEmbedding = getEmbeddingProvider() !== null;
+  const hasEmbedding = deploymentMethods(store).includes("semantic");
   const hasSearch = availableStrategies(store).length > 0;
   return (agentConfig.tools ?? CHAT_TOOLS).filter(
     (t) =>

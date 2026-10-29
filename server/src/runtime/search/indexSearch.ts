@@ -7,7 +7,8 @@
  *    search (`availableIndices`).
  * 2. Per index × representation of the mode, rank the entries of the
  *    active (ready) generation — semantic entries only of the embedding
- *    model in use. A generation still building contributes nothing. The
+ *    model in use. One that cannot run (`availability.ts`), such as a
+ *    generation still building, contributes an empty ranking. The
  *    exact filters and the lens's hidden relation and target types (and
  *    a `relations` choice) restrict the ranking itself; a relation entry
  *    the lens cannot see is skipped, never rebuilt.
@@ -64,7 +65,8 @@ import {
 } from "../readHelpers.js";
 import { listSearchIndexStatuses } from "../indexing/status.js";
 import { loadSchema, type LoadedSchema } from "../schemaCache.js";
-import { executeSearchTree, type TreeHit } from "./executor.js";
+import { deploymentMethods, offeredMethods, type SearchCapabilities } from "./availability.js";
+import { executeSearchTree, type TreeResult } from "./executor.js";
 import { relativeScore } from "./fusion.js";
 import { resolveSearchFilters } from "./request.js";
 
@@ -161,10 +163,13 @@ export async function searchableIndices(
   );
 }
 
-/** The search modes the server can run, in preference order — the first
- * is the default. */
-export function availableModes(): SearchMode[] {
-  return getEmbeddingProvider() === null ? ["keyword"] : ["hybrid", "keyword", "semantic"];
+/** The search modes the deployment can run (`availability.ts`), in
+ * preference order — the first is the default. */
+export function availableModes(store: SearchCapabilities): SearchMode[] {
+  const methods = deploymentMethods(store);
+  return (["hybrid", "keyword", "semantic"] as const).filter((mode) =>
+    mode === "hybrid" ? methods.length === 2 : methods.includes(mode),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -189,8 +194,8 @@ export interface SearchIndexCatalogEntry {
   /** The document an index reads passages of — null when it reads none,
    * or the lens hides it. */
   documentProperty: string | null;
-  /** The representations the index has enabled that can rank now:
-   * semantic only with an embedding provider. */
+  /** The representations the index has enabled that can rank once built
+   * (`offeredMethods`): semantic only with an embedding provider. */
   modes: SearchRepresentation[];
   status: SearchIndexState;
 }
@@ -211,7 +216,6 @@ export async function searchIndexCatalog(
     listSearchIndexStatuses(indexStore.ontologyKey),
   ]);
   const stateOf = new Map(statuses.map((status) => [status.key, status.state] as const));
-  const semantic = getEmbeddingProvider() !== null;
   return indices.map((index) => {
     const { definition } = index;
     const root = loaded.scoped.entityTypes[definition.entityType]!;
@@ -249,9 +253,7 @@ export async function searchIndexCatalog(
       fields,
       relations,
       documentProperty: document !== null && document in root.properties ? document : null,
-      modes: (["semantic", "keyword"] as const).filter(
-        (representation) => definition[representation].enabled && (representation === "keyword" || semantic),
-      ),
+      modes: offeredMethods(index),
       status: stateOf.get(index.key) ?? "stale",
     };
   });
@@ -283,7 +285,7 @@ export async function rankThroughIndices(
     relations: request.relations,
     limit: request.limit,
   });
-  const hits = await runSearchTree(loaded, indexStore, request.targets.map((target) => target.index), tree);
+  const { hits } = await runSearchTree(loaded, indexStore, request.targets.map((target) => target.index), tree);
   // One search: its hit is the entity's.
   return hits.map((hit) => hit.provenance[0]!.hit!);
 }
@@ -295,7 +297,7 @@ export async function runSearchTree(
   indexStore: SearchIndexStore,
   indices: readonly SearchIndexRecord[],
   tree: TreeNode,
-): Promise<TreeHit[]> {
+): Promise<TreeResult> {
   const violations = validateSearchTree(tree, {
     indices: new Set(indices.map((index) => index.key)),
     entityTypes: new Set(Object.keys(loaded.scoped.entityTypes)),
@@ -479,7 +481,7 @@ export async function searchByIndices(
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
     errors.limit = "Expected integer from 1 to 100";
   }
-  const modes = availableModes();
+  const modes = availableModes(store);
   const mode = request.mode ?? modes[0]!;
   if (!(SEARCH_MODES as readonly string[]).includes(mode)) errors.mode = "Expected semantic, keyword or hybrid";
   const minScore = request.minScore ?? null;

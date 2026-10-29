@@ -48,7 +48,7 @@ deployment.
 
 | Field | Type | Reports |
 |---|---|---|
-| `semanticSearch` | boolean | An embedding provider is configured |
+| `semanticSearch` | boolean | This server has an embedding provider installed, so semantic ranking can run |
 | `searchStrategies` | list | The available search strategies, in preference order |
 | `ai` | boolean | A language-model provider is configured; gates the `/ai` routes |
 | `decisions` | boolean | A Decision provider is configured; gates the `/decisions` routes |

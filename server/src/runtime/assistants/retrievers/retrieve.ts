@@ -30,7 +30,7 @@ import type { KeywordBlock, MethodBlocks, SemanticBlock, TreeNode } from "../../
 import { entityCard, EntityRefs, type EntityCard } from "../entities.js";
 import { filterEntityProperties } from "../../readHelpers.js";
 import type { LoadedSchema } from "../../schemaCache.js";
-import type { TreeHit } from "../../search/executor.js";
+import type { Limitation, TreeHit } from "../../search/executor.js";
 import { describeMatches, runSearchTree, type Matched } from "../../search/indexSearch.js";
 import { filterCondition, relationName, type RetrieverLens } from "./config.js";
 import { MAX_LISTED_VALUES, sameValue, type FilterValues, type Plan, type Previous, type SubQuery } from "./plan.js";
@@ -361,10 +361,11 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
   }
   const tree = planTree(scope, plan, resolved.map((sub) => sub.restrictions));
   let hits: TreeHit[] = [];
+  let unrun: Limitation[] = [];
   if (tree !== null) {
     scope.signal.throwIfAborted();
     const started = performance.now();
-    hits = await runSearchTree(scope.loaded, scope.indexStore, scope.records, tree);
+    ({ hits, limitations: unrun } = await runSearchTree(scope.loaded, scope.indexStore, scope.records, tree));
     retrieval.searchMs = performance.now() - started;
   }
   retrieval.searchCalls = plan.subQueries.reduce(
@@ -392,9 +393,12 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
     }
   }
 
+  // The indices a search node could not run on for want of a ready
+  // generation.
+  const unbuilt = new Set(unrun.flatMap((limitation) => (limitation.code === "not-ready" ? limitation.indices : [])));
   const building = [...new Set(plan.subQueries.flatMap((sub) => sub.indices))].flatMap((key) => {
     const entry = scope.lens.catalog.find((candidate) => candidate.key === key);
-    return entry === undefined || entry.status === "ready" ? [] : [entry.name];
+    return entry === undefined || !unbuilt.has(key) ? [] : [entry.name];
   });
   if (building.length > 0) {
     retrieval.limitations.push(

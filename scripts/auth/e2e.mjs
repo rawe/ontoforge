@@ -3,7 +3,7 @@
 // development Keycloak: browser sign-in, sessions, CSRF, bearer tokens, roles, revocation,
 // disabling, user management and MCP OAuth with a real MCP SDK client. See USAGE.md.
 //
-//   node scripts/auth/e2e.mjs [--base http://localhost:5173] [--public-url <origin>]
+//   node scripts/auth/e2e.mjs [--base http://localhost:5173] [--public-url http://localhost:8000]
 //                             [--idle-seconds N] [--no-fresh-user]
 //
 // Prints PASS, FAIL or SKIP per check with its evidence (statuses, ids — never a token or a
@@ -20,8 +20,11 @@ const option = (name, fallback) => {
   const i = process.argv.indexOf(name);
   return i < 0 ? fallback : process.argv[i + 1];
 };
+// The web client's address (WEB_CLIENT_URL): browser sign-in, cookies and REST go here.
 const BASE = option('--base', 'http://localhost:5173').replace(/\/$/, '');
-const ORIGIN = new URL(option('--public-url', BASE)).origin;
+const ORIGIN = new URL(BASE).origin;
+// The server's address (PUBLIC_URL): MCP clients connect and sign in here.
+const PUBLIC = option('--public-url', 'http://localhost:8000').replace(/\/$/, '');
 const IDLE = option('--idle-seconds', null);
 const FRESH_USER = !process.argv.includes('--no-fresh-user');
 const FOREIGN = 'http://evil.example';
@@ -97,6 +100,7 @@ async function serverStep() {
   const info = await call(BASE, 'GET', '/api/server/info');
   check('server info names authentication', info.status === 200 && info.json?.authentication === true,
     `${said(info)}, authentication ${info.json?.authentication}`);
+  check('server info reports PUBLIC_URL as its address', info.json?.baseUrl === PUBLIC, `baseUrl ${info.json?.baseUrl}`);
   const anonymous = await me({});
   check('/api/auth/me without credentials', anonymous.status === 200 && anonymous.json?.authentication === true && anonymous.json?.user === null,
     `${said(anonymous)}, user ${JSON.stringify(anonymous.json?.user)}`);
@@ -176,7 +180,7 @@ async function logoutStep() {
   check('session survives the refused logouts', still.json?.user?.id === before.json.user.id, `user ${still.json?.user?.id}`);
   const out = await call(BASE, 'POST', '/api/auth/logout', { jar, origin: ORIGIN });
   const logoutUrl = out.json?.logoutUrl;
-  check('logout with Origin = PUBLIC_URL', out.status === 200 && typeof logoutUrl === 'string' && logoutUrl.startsWith(ISSUER),
+  check('logout with Origin = WEB_CLIENT_URL', out.status === 200 && typeof logoutUrl === 'string' && logoutUrl.startsWith(ISSUER),
     `${said(out)}, logoutUrl ${logoutUrl ? new URL(logoutUrl).pathname : '-'}`);
   const after = await me({ jar });
   check('session ended: /api/auth/me', after.status === 200 && after.json?.user === null, `${said(after)}, user ${JSON.stringify(after.json?.user)}`);
@@ -296,7 +300,7 @@ async function mcpStep() {
     jsonrpc: '2.0', id: 1, method: 'initialize',
     params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'e2e', version: '1' } },
   };
-  const anonymous = await call(BASE, 'POST', mount, { body: initialize, headers: { accept: 'application/json, text/event-stream' } });
+  const anonymous = await call(PUBLIC, 'POST', mount, { body: initialize, headers: { accept: 'application/json, text/event-stream' } });
   const header = anonymous.headers.get('www-authenticate') ?? '';
   const metadataUrl = /resource_metadata="([^"]+)"/.exec(header)?.[1];
   check('unauthenticated MCP call → 401 with resource_metadata', anonymous.status === 401 && !!metadataUrl,
@@ -304,11 +308,11 @@ async function mcpStep() {
   if (metadataUrl) {
     const doc = await fetch(metadataUrl).then(async (res) => ({ status: res.status, json: await res.json().catch(() => null) }), () => ({ status: 0 }));
     check('protected-resource metadata names the issuer and this mount',
-      doc.status === 200 && doc.json?.authorization_servers?.includes(ISSUER) && doc.json?.resource === `${ORIGIN}${mount}`,
+      doc.status === 200 && doc.json?.authorization_servers?.includes(ISSUER) && doc.json?.resource === `${PUBLIC}${mount}`,
       `HTTP ${doc.status}, resource ${doc.json?.resource}, authorization_servers ${JSON.stringify(doc.json?.authorization_servers)}, scopes ${JSON.stringify(doc.json?.scopes_supported)}`);
   }
 
-  const mcp = await connectMcp(`${BASE}${mount}`, 'reader');
+  const mcp = await connectMcp(`${PUBLIC}${mount}`, 'reader');
   try {
     check('MCP SDK client authorized as reader (discovery, registration, consent, code + PKCE)', true,
       `registered client ${mcp.registration.clientId ?? 'unknown'}`);
@@ -438,7 +442,7 @@ const STEPS = [
 
 // --- Main --------------------------------------------------------------------------------
 
-console.log(`Authentication e2e against ${BASE} (PUBLIC_URL origin ${ORIGIN}), run ${stamp}`);
+console.log(`Authentication e2e: web client ${BASE}, server ${PUBLIC}, run ${stamp}`);
 const probe = await me({});
 if (probe.status !== 200 || probe.json?.authentication !== true) {
   console.error(probe.status === 0

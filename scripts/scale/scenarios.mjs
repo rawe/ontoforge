@@ -387,8 +387,8 @@ const userOf = (answer) => answer.json?.user?.id ?? null;
 
 /**
  * A browser session is shared state: signed in on A (login and callback on A), it is
- * used on B, through the LB and through the frontend (PUBLIC_URL); a logout through B
- * ends it on A. Cookie POSTs carry PUBLIC_URL's origin, as a browser on it would.
+ * used on B, through the LB and through the frontend (WEB_CLIENT_URL); a logout through B
+ * ends it on A. Cookie POSTs carry WEB_CLIENT_URL's origin, as a browser on it would.
  */
 async function authSessionScenario(run) {
   const u = urls();

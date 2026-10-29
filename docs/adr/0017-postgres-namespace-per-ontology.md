@@ -1,6 +1,6 @@
 # One PostgreSQL namespace per ontology
 
-Current behavior: [Ontology isolation in PostgreSQL](../storage-adapters.md#how-ontologies-are-isolated)
+Current behavior: [Ontology isolation in PostgreSQL](../storage-adapters/postgresql.md#how-ontologies-are-isolated)
 
 ## Context
 

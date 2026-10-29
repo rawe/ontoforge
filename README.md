@@ -202,7 +202,7 @@ Full documentation starts at **[docs/README.md](docs/README.md)**:
 | [Architectural constraints](docs/architecture-constraints.md) | Essential boundaries to preserve when changing the system |
 | [capabilities/](docs/capabilities/) | One document per capability, end to end |
 | [interfaces](docs/interfaces/README.md) | REST surfaces and MCP tools; exact schemas are in OpenAPI |
-| [storage-adapters.md](docs/storage-adapters.md) | Persistence contract and PostgreSQL adapter |
+| [storage-adapters](docs/storage-adapters/README.md) | Persistence contract and PostgreSQL adapter |
 | [product-surface.md](docs/product-surface.md) | Web UI screens and interactions |
 
 ## Project Structure
@@ -244,7 +244,7 @@ ontoforge/
     ├── implementation/             # Contributor details tied to the implementation
     ├── capabilities/               # One document per capability
     ├── interfaces/                 # REST, MCP and the shared conventions
-    ├── storage-adapters.md         # Persistence contract and PostgreSQL adapter
+    ├── storage-adapters/           # Persistence contract and PostgreSQL adapter
     ├── product-surface.md          # Web UI screens and interactions
     ├── adr/                        # Alternatives weighed behind decisions
     └── workflows/                  # Procedures for working on OntoForge

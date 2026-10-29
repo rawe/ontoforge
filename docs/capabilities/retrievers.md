@@ -88,7 +88,7 @@ and move, until its next save.
 
 Version 1 configured retrievers by result buckets with search fields and hard or soft
 conditions. A version-1 configuration is converted to version 2 wherever one arrives: in
-storage brought up to date ([../storage-adapters.md](../storage-adapters.md)), in a
+storage brought up to date ([../storage-adapters/](../storage-adapters/README.md)), in a
 single-retriever import, and in a `5.0` [transfer](transfer.md) payload.
 
 - Each bucket searches its type's default index when it searched a non-document field,

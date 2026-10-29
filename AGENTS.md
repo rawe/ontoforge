@@ -71,7 +71,7 @@ defines the vocabulary.
 | How it is put together | [docs/architecture.md](docs/architecture.md) |
 | What a capability does and its rules | [docs/capabilities/](docs/capabilities/) |
 | Every endpoint and MCP tool | [docs/interfaces/](docs/interfaces/README.md) |
-| Implementing a storage backend | [docs/storage-adapters.md](docs/storage-adapters.md) |
+| Implementing a storage backend | [docs/storage-adapters/](docs/storage-adapters/README.md) |
 | What the web client offers | [docs/product-surface.md](docs/product-surface.md) |
 
 ## Agent skills

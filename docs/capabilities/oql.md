@@ -23,7 +23,7 @@ active database speaks is the adapter's private business: invisible to callers, 
 error messages, and not part of this contract. Acceptance and validation therefore do not
 depend on the backend; where the execution of an accepted query is known to fall short of
 this contract, the shortfall is enumerated in
-[../storage-adapters.md](../storage-adapters.md#known-limitations).
+[../storage-adapters/](../storage-adapters/README.md#known-limitations).
 
 ## The read-only guarantee
 

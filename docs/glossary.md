@@ -355,7 +355,7 @@ See [capabilities/authentication.md](capabilities/authentication.md).
 **Persistence port** — the boundary every ontology storage operation crosses. Above it, only
 schema vocabulary, through stores bound to one ontology and a separate registry port;
 below it, one adapter that knows a specific database. See
-[storage-adapters.md](storage-adapters.md).
+[storage-adapters/](storage-adapters/README.md).
 
 **Adapter** — an implementation of the port for one database. Owns physical naming, query
 compilation, index management, error translation, and the physical isolation between

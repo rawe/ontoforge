@@ -121,4 +121,4 @@ one identity are a `duplicate_identity` fault on submit, on the review and on ch
 violation at commit. A staged create whose identity another write took after staging fails
 the commit; nothing is persisted, and checking and committing again reports it.
 
-[Storage of the identity](../storage-adapters.md) is the adapter's business.
+[Storage of the identity](../storage-adapters/README.md) is the adapter's business.

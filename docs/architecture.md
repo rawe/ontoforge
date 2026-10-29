@@ -30,7 +30,7 @@ schema changes distributed transactions without adding useful isolation; their p
 separation inside the database is the adapter's business.
 
 **Storage adapter** — the single active implementation of that port. See
-[storage-adapters.md](storage-adapters.md).
+[storage-adapters/](storage-adapters/README.md).
 
 **Access database** — with authentication on, a PostgreSQL database of its own beside the
 ontology database: principals, their identities, role assignments and the audit of every
@@ -148,7 +148,7 @@ agent ever spans two. The architecture makes that structural rather than checked
   same way.
 - **The physical isolation mechanism is the adapter's private business.** Nothing above
   the port knows how an ontology's data is kept apart from its neighbours'; the contract
-  and the adapter's mechanism are in [storage-adapters.md](storage-adapters.md).
+  and the adapter's mechanism are in [storage-adapters/](storage-adapters/README.md).
 
 The registry — not any storage catalog — is the authoritative list of ontologies. Zero
 ontologies is a valid server state: a fresh server starts empty, nothing is auto-created
@@ -483,7 +483,7 @@ as the immediate path.
 database transaction: every operation of that store, and of the ruleset and changeset
 stores it hands out, uses the transaction's one connection, and taking a second connection
 inside it is a programming error
-([storage-adapters.md](storage-adapters.md#transactions)).
+([storage-adapters/](storage-adapters/contract.md#transactions)).
 
 **The commit lock.** Each ontology has one commit lock, held only by commits and checks
 and only for their transaction; a second commit on the ontology is refused at once rather
@@ -555,7 +555,7 @@ Ordered, and failure at any step prevents serving:
 
 1. Connect storage, verify reachability, ensure the server-wide constraints and indexes
    exist, and bring storage of an older storage version up to date
-   ([storage lifecycle](storage-adapters.md#lifecycle)). Per-ontology storage is provisioned when an
+   ([storage lifecycle](storage-adapters/contract.md#lifecycle)). Per-ontology storage is provisioned when an
    ontology is created; at boot only an upgrade reaches into it. Open the
    [shared state](#shared-state). With authentication on, open the access database:
    create it when it is missing and bring its schema up to date, once however many

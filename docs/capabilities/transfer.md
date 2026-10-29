@@ -105,7 +105,7 @@ entity type: the first `string` property among `name`, `title`, `label` and
 order. A type without any `string` property is given a new non-required `string`
 property `name` — `name_2`, `name_3`, … when `name` is taken — and that becomes its name
 property. The same derivation brings storage written before name properties existed up to
-date ([../storage-adapters.md](../storage-adapters.md)).
+date ([../storage-adapters/](../storage-adapters/README.md)).
 
 **Each version reads only its own fields.** An upgrade checks the fields it reads and
 reports a malformed one at its path in the payload's own version, every offending path

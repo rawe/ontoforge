@@ -192,7 +192,7 @@ rejected. An existence key naming a bare relation type narrows the set to the ty
 relation touches, as a query path does. Path conditions and relation existence conditions
 are accepted only where the adapter declares support; rejection names the entity list as
 the alternative. Adapter limitations are recorded in
-[../storage-adapters.md](../storage-adapters.md).
+[../storage-adapters/](../storage-adapters/README.md).
 
 ## Index search
 
@@ -261,7 +261,7 @@ Matches across languages come from semantic ranking. No request names a language
 The set belongs to the ontology's design, not to the registry: creating an ontology names
 no language, and a new one starts with German and English. One whose storage was upgraded
 from an earlier layout starts with the single language it was created with
-([../storage-adapters.md](../storage-adapters.md#how-ontologies-are-isolated)). The set
+([../storage-adapters/](../storage-adapters/postgresql.md#how-ontologies-are-isolated)). The set
 is read and changed through the ontology's search settings in modeling
 ([../interfaces/](../interfaces/modeling-rest.md#search-settings)); a change is validated whole
 before anything is written and accepts the languages in any order, kept in the order

@@ -16,7 +16,7 @@ For the practical steps to add, update or move documentation, use
    - **Feature behavior, rules, limits and examples:** its document in [capabilities/](capabilities/).
    - **Interface behavior and access:** [interfaces/](interfaces/README.md); the web client in
      [product-surface.md](product-surface.md).
-   - **Storage contract and implementation:** [storage-adapters.md](storage-adapters.md).
+   - **Storage contract and implementation:** [storage-adapters/](storage-adapters/README.md).
    - **Contributor details tied to the implementation:** [implementation/](implementation/).
    - **Configuration variables and defaults:** the configuration table in the root
      [README.md](../README.md); procedures in [workflows/](workflows/).
@@ -41,4 +41,4 @@ For the practical steps to add, update or move documentation, use
    history, no dates, no migration notes — git holds history. A rule may carry a brief
    reason; the alternatives weighed for a decision live only in its ADR, which the owning
    document links ([recording decisions](workflows/recording-decisions.md)).
-8. **Ontology-storage-neutral above the adapter.** Only `storage-adapters.md` describes how a backend stores ontologies. Every other document describes behavior that holds for any ontology storage adapter. A rule or ADR that is about the ontology storage choice names it.
+8. **Ontology-storage-neutral above the adapter.** Only `storage-adapters/` describes how a backend stores ontologies. Every other document describes behavior that holds for any ontology storage adapter. A rule or ADR that is about the ontology storage choice names it.

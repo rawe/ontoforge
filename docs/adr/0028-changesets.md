@@ -1,6 +1,6 @@
 # Changesets stored as one record per staged object and per staged value, committed in fixed phases under a lock
 
-Current behavior: [Changesets](../capabilities/changesets.md) and [changeset storage](../storage-adapters.md#the-changeset-store)
+Current behavior: [Changesets](../capabilities/changesets.md) and [changeset storage](../storage-adapters/contract.md#the-changeset-store)
 
 ## Context
 

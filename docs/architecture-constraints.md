@@ -38,7 +38,7 @@ coupled to the storage engine. The web client uses REST and has no privileged pa
 Access storage and shared state have their own narrow ports beside the ontology
 persistence port; they do not bypass it to reach ontology data.
 See [layers](architecture.md#layers), [components](architecture.md#components) and
-[the persistence contract](storage-adapters.md#bound-stores-and-the-registry).
+[the persistence contract](storage-adapters/contract.md#bound-stores-and-the-registry).
 
 ## Schema and write consistency
 

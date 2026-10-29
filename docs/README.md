@@ -23,7 +23,7 @@ through generic APIs and a web application.
 | [architecture.md](architecture.md) | System components, boundaries, invariants and flows |
 | [Runtime state implementation](implementation/runtime-state.md) | Contributor details of cache capacity, turn leases and navigator execution |
 | [interfaces/](interfaces/README.md) | REST surfaces and MCP tools; exact schemas are in OpenAPI |
-| [storage-adapters.md](storage-adapters.md) | Persistence contract and PostgreSQL adapter |
+| [storage-adapters/](storage-adapters/README.md) | Persistence contract and PostgreSQL adapter |
 | [product-surface.md](product-surface.md) | Web UI screens and interactions |
 | [capabilities/](capabilities/) | One document per capability, end to end |
 | [workflows/](workflows/) | Procedures for working *on* OntoForge |

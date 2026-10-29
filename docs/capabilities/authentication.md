@@ -37,7 +37,9 @@ Three authentication methods resolve callers to principals:
   `Bearer` scheme. OntoForge rejects ID tokens, tokens with an invalid issuer or
   audience, tokens missing the required scope, expired tokens, and tokens without a
   valid signature from the provider. When a request includes a bearer token,
-  authentication uses that token alone and ignores any session cookie.
+  authentication uses that token alone and ignores any session cookie. This is how every
+  other client calls OntoForge, including a frontend with a server side of its own that
+  signs its users in at the provider and sends their tokens.
 - **MCP over OAuth.** The MCP mounts take bearer tokens only. A client without one is told
   where to sign in, registers itself at the provider and signs its user in through the
   browser. Its token names OntoForge's audience only when the client asks for OntoForge's

@@ -6,26 +6,28 @@
  *    (`availability.ts`, from the generations read once per tree) and every
  *    restrict above it, pushed into its own database query: the filters'
  *    exact conditions and ids of its root type, with the lens's hidden
- *    relation and target types. A search node that cannot run returns an
- *    empty ranking and is noted as a limitation, one per reason and method
- *    naming its indices; a fuse left with a single ranking of search nodes
- *    that ran passes it on — a hybrid search with one method to run keeps
- *    that method's scores.
+ *    relation and target types and the node's parts. A search node that
+ *    cannot run returns an empty ranking and is noted as a limitation, one
+ *    per reason and method naming its indices; a fuse left with a single
+ *    ranking of search nodes that ran passes it on — a hybrid search with
+ *    one method to run keeps that method's scores.
  * 2. Each semantic query text is embedded once; the search nodes run in
  *    parallel, each first fetching `limit × 4` entries of the nearest cut
  *    above it (its depth). A semantic floor drops the entries below it
  *    after the fetch.
  * 3. Bottom-up (`core/searchQuery.ts`): merge by raw score, group by
- *    entity — the best entry scores it — and fuse by reciprocal rank, the
- *    one tie rule for every fuse (`byScore`). If a cut gets fewer than
- *    `limit` entities, its search nodes not yet exhausted fetch once more,
- *    up to a fixed cap — never more — and the tree is combined again.
- * 4. A cut keeps its first `limit` entities; an append adds its filters'
- *    ids the ranking missed. Each entity of the root carries what found it:
- *    per search — sub-query and query text — the hit, per index.
+ *    entity or by passage — entity, document, chunk ordinal; the best
+ *    entry scores it — and fuse by reciprocal rank, the one tie rule for
+ *    every fuse (`byScore`). If a cut gets fewer than `limit` items, its
+ *    search nodes not yet exhausted fetch once more, up to a fixed cap —
+ *    never more — and the tree is combined again.
+ * 4. A cut keeps its first `limit` items, at most `perEntity` passages per
+ *    entity; an append adds its filters' ids the ranking missed. Each item
+ *    of the root carries what found it: per search — sub-query and query
+ *    text — the hit, per index.
  *
- * It runs the trees the compilers build today; passage results come with
- * the search that needs them.
+ * It runs the trees the compilers build today: passages rank only as the
+ * methods of one search, fused.
  */
 
 import { getEmbeddingProvider } from "../../core/embedding.js";
@@ -37,9 +39,17 @@ import type {
   SearchIndexRecord,
   SearchIndexStore,
 } from "../../core/ports.js";
+import { documentField } from "../../core/searchComposition.js";
 import type { SearchRepresentation } from "../../core/searchIndex.js";
 import { byScore, fuseModes, mergeByScore, RRF_K, type FusedHit, type ModeRanking } from "../../core/searchQuery.js";
-import { isSearchNode, searchMethod, type CutNode, type SearchNode, type TreeNode } from "../../core/searchTree.js";
+import {
+  isSearchNode,
+  searchMethod,
+  type CutNode,
+  type GroupNode,
+  type SearchNode,
+  type TreeNode,
+} from "../../core/searchTree.js";
 import type { LoadedSchema } from "../schemaCache.js";
 import { indexAvailability, type Unavailable } from "./availability.js";
 import type { EngineHit, IndexMatch } from "./indexSearch.js";
@@ -64,7 +74,8 @@ export interface Limitation {
   indices: string[];
 }
 
-/** One entity of the root ranking, with what found it. */
+/** One item of the root ranking — an entity, or a passage of one, its
+ * hit's entry — with what found it. */
 export interface TreeHit {
   entityId: string;
   entityType: string;
@@ -72,7 +83,7 @@ export interface TreeHit {
   provenance: Provenance[];
 }
 
-/** One search's part in an entity of the root ranking. */
+/** One search's part in an item of the root ranking. */
 export interface Provenance {
   /** The plan's sub-query; null when the tree has none. */
   subQuery: number | null;
@@ -112,7 +123,7 @@ interface Fetched {
 /** An entry with the search node it came from. */
 type FoundEntry = RankedSearchEntry & { search: number };
 
-/** An entity of a ranking above the methods' fusion. */
+/** An item of a ranking above the methods' fusion. */
 interface Item extends TreeHit {
   /** Its order's score: raw, or the reciprocal ranks summed. */
   score: number;
@@ -121,14 +132,21 @@ interface Item extends TreeHit {
   similarity: number | null;
 }
 
-/** A node's ranking: the entries of one method; entities with the method
- * rankings they come from; or entities above that, with what found them.
- * `ran` is false for the empty ranking of a search node that cannot run,
- * and of what combines only such. */
+/** A node's ranking: the entries of one method; entities or passages —
+ * `key`, each named by `keyOf` — with the method rankings they come from;
+ * or items above that, with what found them. `ran` is false for the empty
+ * ranking of a search node that cannot run, and of what combines only
+ * such. */
 type Combined = (
   | { unit: "entries"; method: SearchRepresentation; entries: FoundEntry[] }
-  | { unit: "entities"; rankings: ModeRanking<FoundEntry>[]; hits: FusedHit<FoundEntry>[] }
-  | { unit: "items"; items: Item[] }
+  | {
+      unit: "grouped";
+      key: GroupNode["key"];
+      keyOf: (entry: FoundEntry) => string;
+      rankings: ModeRanking<FoundEntry>[];
+      hits: FusedHit<FoundEntry>[];
+    }
+  | { unit: "items"; key: GroupNode["key"]; items: Item[] }
 ) & { ran: boolean };
 
 /** Run a valid tree; `indices` holds every index its search nodes name. */
@@ -176,6 +194,7 @@ export async function executeSearchTree(
       relationTypes:
         own === null ? lensRelations : own.filter((key) => lensRelations === null || lensRelations.includes(key)),
       targetTypes,
+      ...(search.node.parts === undefined ? {} : { partKinds: search.node.parts }),
       limit,
     });
     const floor = search.node.kind === "semanticSearch" ? (search.node.minSimilarity ?? null) : null;
@@ -188,7 +207,7 @@ export async function executeSearchTree(
   let fetched = await Promise.all(
     searches.map((search) => (search.generation === undefined ? null : fetchSearch(search, depth(search)))),
   );
-  let combined = combineTree(tree, searches, fetched);
+  let combined = combineTree(tree, searches, fetched, loaded);
   // Once more, the search nodes not yet exhausted under a cut that came
   // out short.
   const short = (search: Planned, i: number) =>
@@ -200,7 +219,7 @@ export async function executeSearchTree(
     fetched = await Promise.all(
       searches.map((search, i) => (short(search, i) ? fetchSearch(search, ENTRY_FETCH_CAP) : (fetched[i] ?? null))),
     );
-    combined = combineTree(tree, searches, fetched);
+    combined = combineTree(tree, searches, fetched, loaded);
   }
   const hits = itemsOf(combined.root, searches).map(({ entityId, entityType, provenance }) => ({
     entityId,
@@ -280,10 +299,28 @@ function both(a: Restriction | undefined, b: Restriction): Restriction {
   };
 }
 
-/** The root's ranking, and per cut the entities its input ranked. */
-function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | null)[]) {
+/** The root's ranking, and per cut the items its input ranked, as many
+ * per entity as it keeps. */
+function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | null)[], loaded: LoadedSchema) {
   const searchOf = new Map(searches.map((search, i) => [search.node as TreeNode, i] as const));
   const counts = new Map<CutNode, number>();
+  // The document each search node's index reads, once.
+  const documents = new Map<number, string | null>();
+  const documentOf = (search: number) => {
+    if (!documents.has(search)) documents.set(search, documentField(searches[search]!.index.definition, loaded.full));
+    return documents.get(search)!;
+  };
+  /** What an entry is an item of: its entity, or its passage. Keys hold
+   * no `/`. */
+  const keyOf = (key: GroupNode["key"]) => (entry: FoundEntry) => {
+    if (key === "entity") return entry.entityId;
+    if (entry.partKind !== "passage") throw new Error("A passage group takes passage entries only");
+    return `${entry.entityId}/${documentOf(entry.search)}/${entry.partId}`;
+  };
+  const grouped = (key: GroupNode["key"], rankings: ModeRanking<FoundEntry>[], ran: boolean): Combined => {
+    const itemOf = keyOf(key);
+    return { unit: "grouped", key, keyOf: itemOf, rankings, hits: fuseModes(rankings, itemOf), ran };
+  };
 
   /** A node's ranking, bottom-up. */
   const combine = (node: TreeNode): Combined => {
@@ -303,10 +340,8 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
         return { unit: "entries", method: merged[0]!.method, entries, ran: merged.some((input) => input.ran) };
       }
       case "group": {
-        if (node.key !== "entity") throw new Error("Passages cannot be ranked yet");
         const input = entriesOf(combine(node.input));
-        const rankings = [{ representation: input.method, entries: input.entries }];
-        return { unit: "entities", rankings, hits: fuseModes(rankings), ran: input.ran };
+        return grouped(node.key, [{ representation: input.method, entries: input.entries }], input.ran);
       }
       case "fuse": {
         const all = node.inputs.map(combine);
@@ -315,11 +350,17 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
         if (fused.length <= 1) return fused[0] ?? all[0]!;
         // The methods of one search fuse by their entries; anything else
         // as rankings of entities.
-        if (fused.every((input) => input.unit === "entities" && input.rankings.length === 1)) {
-          const rankings = fused.flatMap((input) => (input.unit === "entities" ? input.rankings : []));
-          return { unit: "entities", rankings, hits: fuseModes(rankings), ran: true };
+        const methods = fused.flatMap((input) =>
+          input.unit === "grouped" && input.rankings.length === 1 ? [input] : [],
+        );
+        if (methods.length === fused.length) {
+          return grouped(methods[0]!.key, methods.flatMap((input) => input.rankings), true);
         }
-        return { unit: "items", items: fuseItems(fused.map((input) => itemsOf(input, searches))), ran: true };
+        if (fused.some((input) => input.unit !== "entries" && input.key === "passage")) {
+          throw new Error("Passages fuse only as the methods of one search");
+        }
+        const items = fuseItems(fused.map((input) => itemsOf(input, searches)));
+        return { unit: "items", key: "entity", items, ran: true };
       }
       case "restrict":
         // Pushed into the search nodes.
@@ -338,18 +379,20 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
           }
         }
         // A list, whether or not its search ran.
-        return { unit: "items", items, ran: true };
+        return { unit: "items", key: "entity", items, ran: true };
       }
       case "cut": {
         const input = combine(node.input);
-        if (input.unit === "entries") throw new Error("A cut ranks entities");
+        if (input.unit === "entries") throw new Error("A cut ranks entities or passages");
         if (input.unit === "items") {
-          counts.set(node, input.items.length);
-          return { unit: "items", items: input.items.slice(0, node.limit), ran: input.ran };
+          const items = perEntity(input.items, node.perEntity);
+          counts.set(node, items.length);
+          return { unit: "items", key: input.key, items: items.slice(0, node.limit), ran: input.ran };
         }
-        counts.set(node, input.hits.length);
-        const items = itemsOf({ ...input, hits: input.hits.slice(0, node.limit) }, searches);
-        return { unit: "items", items, ran: input.ran };
+        const hits = perEntity(input.hits, node.perEntity);
+        counts.set(node, hits.length);
+        const items = itemsOf({ ...input, hits: hits.slice(0, node.limit) }, searches);
+        return { unit: "items", key: input.key, items, ran: input.ran };
       }
       default:
         throw new Error(`A search tree with '${node.kind}' here cannot run`);
@@ -358,19 +401,30 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
   return { root: combine(tree), counts };
 }
 
+/** At most `cap` items per entity, in rank order; no cap: all. */
+function perEntity<T extends { entityId: string }>(items: readonly T[], cap: number | undefined): T[] {
+  if (cap === undefined) return [...items];
+  const kept = new Map<string, number>();
+  return items.filter((item) => {
+    const count = (kept.get(item.entityId) ?? 0) + 1;
+    kept.set(item.entityId, count);
+    return count <= cap;
+  });
+}
+
 function entriesOf(input: Combined): Extract<Combined, { unit: "entries" }> {
   if (input.unit !== "entries") throw new Error("Only entries merge and group yet");
   return input;
 }
 
-/** A ranking's entities with what found them: a fusion of methods hit by
+/** A ranking's items with what found them: a fusion of methods hit by
  * hit, its search — the matched search node's sub-query and query text —
  * as their provenance. */
 function itemsOf(input: Combined, searches: Planned[]): Item[] {
   if (input.unit === "items") return input.items;
-  if (input.unit === "entries") throw new Error("Only grouped entities rank above a group");
+  if (input.unit === "entries") throw new Error("Only grouped items rank above a group");
   return input.hits.map((hit) => {
-    const hitOf = toEngineHit(hit, searches, input.rankings);
+    const hitOf = toEngineHit(hit, searches, input.rankings, input.keyOf);
     const { node } = searches[hit.matched.entry.search]!;
     return {
       entityId: hit.entityId,
@@ -415,9 +469,15 @@ function plain({ search: _search, ...entry }: FoundEntry): RankedSearchEntry {
   return entry;
 }
 
-function toEngineHit(hit: FusedHit<FoundEntry>, searches: Planned[], rankings: ModeRanking<FoundEntry>[]): EngineHit {
+function toEngineHit(
+  hit: FusedHit<FoundEntry>,
+  searches: Planned[],
+  rankings: ModeRanking<FoundEntry>[],
+  keyOf: (entry: FoundEntry) => string,
+): EngineHit {
   const matchedSearch = searches[hit.matched.entry.search]!;
-  // The entity's entries per method, the matched method first; per index
+  const item = keyOf(hit.matched.entry);
+  // The item's entries per method, the matched method first; per index
   // the first of them — the best of the method it ranks best in —
   // represents it, and is measured wherever a search node fetched that
   // very entry.
@@ -428,7 +488,7 @@ function toEngineHit(hit: FusedHit<FoundEntry>, searches: Planned[], rankings: M
   );
   const own = ordered.map((ranking) => ({
     representation: ranking.representation,
-    entries: ranking.entries.filter((entry) => entry.entityId === hit.entityId),
+    entries: ranking.entries.filter((entry) => keyOf(entry) === item),
   }));
   const primaries = new Map<string, FoundEntry>();
   for (const { entries } of own) {

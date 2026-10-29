@@ -350,6 +350,7 @@ describe("through a 'none' ruleset's URL (REST)", () => {
       ["GET /search-indices", "/search-indices"],
       ["POST /search", "/search", { query: "T1" }],
       ["POST /search/entities", "/search/entities", { query: "T1" }],
+      ["POST /search/passages", "/search/passages", { query: "T1" }],
       ["POST /entities/:entityTypeKey", "/entities/person", { name: "Ann" }],
       ["GET /entities/:entityTypeKey", "/entities/task"],
       ["GET /entities/:entityTypeKey/:entityId", `/entities/task/${e.T1}`],
@@ -415,7 +416,7 @@ describe("through a 'none' ruleset's URL (REST)", () => {
   };
   const VERBS = { write: "write directly", stage: "start or change a changeset", commit: "commit" } as const;
 
-  it("refuses the 10 writes, the 9 stage routes and the commit with 409; the 30 reads answer", async () => {
+  it("refuses the 10 writes, the 9 stage routes and the commit with 409; the 31 reads answer", async () => {
     const all = requests();
     expect(all.map(([route]) => route).sort()).toEqual(Object.keys(ROUTES).sort());
     const refused: string[] = [];
@@ -431,7 +432,7 @@ describe("through a 'none' ruleset's URL (REST)", () => {
       }
     }
     expect(refused).toHaveLength(20);
-    expect(all.length - refused.length).toBe(30);
+    expect(all.length - refused.length).toBe(31);
     // Nothing written, nothing staged, nothing started.
     expect((await rest("GET", `${ALL}/entities/task/${e.T1}`)).body.name).toBe("T1");
     expect((await rest("GET", `${ALL}/entities/task/${e.T1a1}`)).status).toBe(200);

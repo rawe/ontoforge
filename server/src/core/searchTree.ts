@@ -15,7 +15,7 @@
  * Pure — no storage, no I/O.
  */
 
-import type { FilterCondition, KeywordMatching } from "./ports.js";
+import type { FilterCondition, KeywordMatching, SearchPartKind } from "./ports.js";
 import type { SearchRepresentation } from "./searchIndex.js";
 
 // ---------------------------------------------------------------------------
@@ -57,6 +57,8 @@ export interface KeywordSearchNode {
   /** Relation types whose relation entries count; null: every one the
    * lens shows. */
   relations: string[] | null;
+  /** The entry parts that count; absent: every part. */
+  parts?: SearchPartKind[];
   /** The plan's sub-query the search belongs to — set by the planner
    * compiler only, carried into provenance. */
   subQuery?: number;
@@ -72,6 +74,7 @@ export interface SemanticSearchNode {
   minSimilarity?: number;
   /** As a keyword search's. */
   relations: string[] | null;
+  parts?: SearchPartKind[];
   subQuery?: number;
 }
 
@@ -130,11 +133,14 @@ export interface AppendNode {
   subQuery?: number;
 }
 
-/** The ranking's first `limit` items. */
+/** The ranking's first `limit` items — of passages at most `perEntity`
+ * per entity, in rank order. */
 export interface CutNode {
   kind: "cut";
   input: TreeNode;
   limit: number;
+  /** Passages only, 1..limit; absent: no cap. */
+  perEntity?: number;
 }
 
 export type TreeNode =
@@ -326,6 +332,9 @@ function typeOf(
         return refuse("R5", "A floor lives in a semantic search; keyword scores have none");
       }
       if (node.text.trim() === "") return refuse("shape", "A search node needs a query text");
+      if (node.parts !== undefined && node.parts.length === 0) {
+        return refuse("shape", "A search node's parts name at least one part");
+      }
       if (node.kind === "keywordSearch") {
         return { unit: "entries", scoreKind: { kind: "keywordScore", text: node.text, match: node.match } };
       }
@@ -401,10 +410,17 @@ function typeOf(
       if (!Number.isInteger(node.limit) || node.limit < 1 || node.limit > 100) {
         refuse("shape", "A cut's limit is an integer from 1 to 100");
       }
+      const perEntity = node.perEntity;
+      if (perEntity !== undefined && !(Number.isInteger(perEntity) && perEntity >= 1 && perEntity <= node.limit)) {
+        refuse("shape", "A cut's perEntity is an integer from 1 to its limit");
+      }
       const [input] = rankings(inputs, false) ?? [];
       if (input === undefined) return null;
       if (input.unit === "entries") {
         return refuse("R2", "A search node reaches the root through exactly one group; these entries are not grouped");
+      }
+      if (perEntity !== undefined && input.unit !== "passages") {
+        return refuse("shape", "perEntity cuts a ranking of passages");
       }
       return input;
     }
@@ -449,6 +465,7 @@ function label(node: TreeNode): string {
           ? [`minSimilarity ${node.minSimilarity}`]
           : []),
         ...(node.relations === null ? [] : [`relations ${canonical([...node.relations].sort())}`]),
+        ...(node.parts === undefined ? [] : [`parts ${canonical([...node.parts].sort())}`]),
         ...subQuery(node),
       ].join(", ")})`;
     case "filter":
@@ -462,7 +479,10 @@ function label(node: TreeNode): string {
     case "append":
       return `append(${[`until ${node.until}`, ...subQuery(node)].join(", ")})`;
     case "cut":
-      return `cut(limit ${node.limit})`;
+      return `cut(${[
+        `limit ${node.limit}`,
+        ...(node.perEntity === undefined ? [] : [`perEntity ${node.perEntity}`]),
+      ].join(", ")})`;
     default:
       return node.kind;
   }

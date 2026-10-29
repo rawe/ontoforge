@@ -6,8 +6,8 @@
  * left out.
  */
 
-import type { FilterCondition } from "./ports.js";
-import type { FilterNode, MethodBlocks, SearchNode, TreeNode } from "./searchTree.js";
+import type { FilterCondition, SearchPartKind } from "./ports.js";
+import type { FilterNode, GroupNode, MethodBlocks, SearchNode, TreeNode } from "./searchTree.js";
 
 /** One index an entity search ranks, with what restricts it. */
 export interface EntitySearchTarget {
@@ -46,6 +46,49 @@ export interface EntitySearch {
  * entity type, as one restrict; cut to the limit.
  */
 export function compileEntitySearch(search: EntitySearch): TreeNode {
+  return { kind: "cut", input: restricted(search.targets, fusedMethods(search, "entity")), limit: search.limit };
+}
+
+/** One index a passage search ranks, with the conditions on its root
+ * type — alike for every target of one type. */
+export type PassageSearchTarget = Pick<EntitySearchTarget, "index" | "entityType" | "conditions">;
+
+export interface PassageSearch {
+  text: string;
+  /** At least one; each reads a document. */
+  targets: PassageSearchTarget[];
+  /** At least one block. */
+  methods: MethodBlocks;
+  limit: number;
+  /** At most this many passages per entity; null: no cap. */
+  perEntity: number | null;
+}
+
+/**
+ * The tree of a passage search: as an entity search's, but each search
+ * node counts passage entries only and groups them by passage — entity,
+ * document, chunk ordinal — so two indices over one document yield one
+ * passage; cut to the limit, at most `perEntity` per entity.
+ */
+export function compilePassageSearch(search: PassageSearch): TreeNode {
+  const targets = search.targets.map((target) => ({ ...target, entityIds: null, relations: null }));
+  const ranked = fusedMethods({ ...search, targets, relations: null }, "passage", ["passage"]);
+  return {
+    kind: "cut",
+    input: restricted(targets, ranked),
+    limit: search.limit,
+    ...(search.perEntity === null ? {} : { perEntity: search.perEntity }),
+  };
+}
+
+/** Per method (semantic first), a search node per target, merged by score
+ * and grouped by the result unit; two methods fused by reciprocal rank —
+ * one keeps its scores. */
+function fusedMethods(
+  search: Pick<EntitySearch, "text" | "targets" | "methods" | "relations" | "subQuery">,
+  key: GroupNode["key"],
+  parts?: SearchPartKind[],
+): TreeNode {
   const groups: TreeNode[] = [];
   for (const method of ["semantic", "keyword"] as const) {
     const block = search.methods[method];
@@ -55,21 +98,23 @@ export function compileEntitySearch(search: EntitySearch): TreeNode {
         index: target.index,
         text: search.text,
         relations: relationsOf(search.relations, target.relations),
+        ...(parts === undefined ? {} : { parts: [...parts] }),
         ...(search.subQuery === undefined ? {} : { subQuery: search.subQuery }),
       };
       return method === "semantic"
         ? { kind: "semanticSearch", ...common, ...search.methods.semantic }
         : { kind: "keywordSearch", ...common, match: search.methods.keyword!.match };
     });
-    groups.push({ kind: "group", key: "entity", input: single(searches, (inputs) => ({ kind: "merge", inputs })) });
+    groups.push({ kind: "group", key, input: single(searches, (inputs) => ({ kind: "merge", inputs })) });
   }
-  const ranked = single(groups, (inputs) => ({ kind: "fuse", inputs }));
-  const filters = restrictions(search.targets);
-  return {
-    kind: "cut",
-    input: filters.length === 0 ? ranked : { kind: "restrict", input: ranked, filters },
-    limit: search.limit,
-  };
+  return single(groups, (inputs) => ({ kind: "fuse", inputs }));
+}
+
+/** The ranking under the targets' restrictions, per entity type, as one
+ * restrict. */
+function restricted(targets: EntitySearchTarget[], ranked: TreeNode): TreeNode {
+  const filters = restrictions(targets);
+  return filters.length === 0 ? ranked : { kind: "restrict", input: ranked, filters };
 }
 
 /** One sub-query of a retriever's plan, its restrictions resolved. */
@@ -140,7 +185,7 @@ export function compilePlannedSearch(search: PlannedSearch): TreeNode | null {
 
 /** One input as itself, several combined. */
 function single(inputs: TreeNode[], combine: (inputs: TreeNode[]) => TreeNode): TreeNode {
-  if (inputs.length === 0) throw new Error("An entity search ranks at least one index by at least one method");
+  if (inputs.length === 0) throw new Error("A search ranks at least one index by at least one method");
   return inputs.length === 1 ? inputs[0]! : combine(inputs);
 }
 

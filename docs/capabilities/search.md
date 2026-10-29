@@ -1,10 +1,12 @@
 # Search
 
-The entity list filters by a literal term. Ranked search ranks entities for a query, in
-three forms: the **default search** over the managed indices of the types it searches, the
-**index search** through [search indices](search-indices.md) named by key, and the
-[**entity search**](#entity-search), which reads a scope of types or named indices with the
-methods the request chooses. No server operation falls back to another.
+The entity list filters by a literal term. Ranked search ranks entities or passages for a
+query, in four forms: the **default search** over the managed indices of the types it
+searches, the **index search** through [search indices](search-indices.md) named by key,
+the [**entity search**](#entity-search), which reads a scope of types or named indices
+with the methods the request chooses, and the [**passage search**](#passage-search),
+which ranks the passages of documents the same way. No server operation falls back to
+another.
 
 ## Literal matching
 
@@ -299,8 +301,9 @@ index — switched off by the index definition, or without a ready generation
 as a limitation, never as an error.
 
 **Filters** follow [Scope and filters](#scope-and-filters). They are checked against the
-scope's types, and a type that does not declare every key drops out. With no type left,
-the result is empty and carries a limitation.
+scope's types, and a type that does not declare every key — or that a query-path key does
+not resolve from — drops out. A key that no type of the scope resolves is a validation
+error. With no type left, the result is empty and carries a limitation.
 
 **Items.** An item names the entity — `_id`, `_entityTypeKey`, `name` — and the best entry
 that found it: its index, its part (`self`, `relation` or `passage`) and a snippet. A
@@ -315,10 +318,41 @@ names its code:
 
 | Code | Meaning |
 |---|---|
-| `not-searchable` | Named types without a managed index the lens can search |
+| `not-searchable` | Named types — in the passage search also named documents — without a managed index the lens can search |
 | `switched-off` | The index definition switches the method off on these indices |
 | `not-ready` | No ready generation of the method on these indices |
 | `filter-excludes-all-types` | No type of the scope declares every filter key |
+
+## Passage search
+
+The passage search ranks passages — chunks of [documents](documents.md#chunking) — for
+one query text, through a scope of search indices that read a document. Methods, filters
+and limitations are those of the [entity search](#entity-search); only the result unit
+differs. Only the order is returned, never a score.
+
+**Scope.** Only an index over a document the lens shows can be searched: a passage
+returns its text. Without `types`, `documents` or `indices` it reads every type the lens
+shows, through its managed passage indices. `types` reads the managed passage indices of
+the named types, `documents` (`type.property`) the managed passage index of each named
+document, and `indices` exactly the named indices, custom ones included; a custom index is
+read only when named. One scope field at a time. A type or property the lens does not
+show, a property that is not a document, or an index without a document the lens shows is
+a validation error at its position. A named type or document with no managed passage
+index to search contributes nothing and is reported as a limitation.
+
+**What counts.** Only passage entries count; the own-field and relation entries of a
+custom index are ignored. A passage is one chunk of one document of one entity, so two
+indices over the same document find the same passages, and each counts once, by its best
+entry. The limit counts passages. `perEntity`, from 1 to the limit, keeps at most that
+many passages per entity, in rank order; without it, there is no cap per entity.
+
+**Filters** apply to the entity that owns the document.
+
+**Items.** An item names the entity — `_id`, `_entityTypeKey`, `name` — and the passage:
+its document, its chunk ordinal, its character offset and length, and its text. The text
+is read when the search answers, from the document as it is then, at that offset and
+length; it never includes the header the stored entry carries. `text: false` leaves it
+out. An entity deleted after ranking is left out, so a page may be shorter than the limit.
 
 ## Rebuild
 
@@ -395,7 +429,8 @@ null under a keyword default. Both allow an omitted entity type.
 MCP additionally accepts filters and fields.
 
 REST `POST /search` is the index search, and `GET /search-indices` the catalog. REST
-`POST /search/entities` is the [entity search](#entity-search); it has no MCP or agent tool yet. On MCP,
+`POST /search/entities` is the [entity search](#entity-search) and `POST /search/passages`
+the [passage search](#passage-search); neither has an MCP or agent tool yet. On MCP,
 `list_search_indices` answers the catalog, and `search_by_index` runs the index search
 over one index key, a list, or every index the lens can search, under the default mode,
 with the same fixed floor echoed as `minSimilarity`, optionally narrowed to named

@@ -92,8 +92,10 @@ export async function validateRequest(
  * Validate search filters against the types they may apply to and narrow
  * those types: each key is checked against the types declaring it (with
  * `fixedType`, against the given types whatever declares it), and the
- * type set is the intersection over all keys. Failures are collected into
- * `errors`. Returns the remaining types, each with its parsed conditions.
+ * type set is the intersection over all keys. With `pathsDropOut`, a type
+ * a query path does not resolve from cannot satisfy it and drops out,
+ * unless no type resolves it. Failures are collected into `errors`.
+ * Returns the remaining types, each with its parsed conditions.
  */
 export function resolveSearchFilters(
   filter: Record<string, string>,
@@ -102,6 +104,7 @@ export function resolveSearchFilters(
   loaded: LoadedSchema,
   store: RuntimeStore,
   errors: Record<string, string>,
+  { pathsDropOut = false }: { pathsDropOut?: boolean } = {},
 ): SearchedType[] {
   const eligible = new Map(
     types.map(([key, def]) => [
@@ -122,12 +125,18 @@ export function resolveSearchFilters(
       const rt = loaded.scoped.relationTypes[key.split(/[.@]/)[0]!.replace(/:(in|out)$/, "")];
       return rt !== undefined && (rt.fromEntityTypeKey === tk || rt.toEntityTypeKey === tk);
     };
-    const declaring = fixedType
+    let declaring = fixedType
       ? types
       : types.filter(([tk, def]) => {
           if (!isQueryPath(key) && key in def.properties) return true;
           return (isQueryPath(key) || existence) && touches(tk);
         });
+    if (pathsDropOut && isQueryPath(key)) {
+      const use = existence ? "existence" : "comparison";
+      const resolving = declaring.filter(([tk]) => !("message" in resolveQueryPath(key, tk, loaded.scoped, use)));
+      // None resolves it: every type's fault is reported.
+      if (resolving.length > 0) declaring = resolving;
+    }
     if (!declaring.length) errors[expr] = `Unknown filter property or relation type: '${key}'`;
     const dataTypes = new Set<string>();
     for (const [tk, def] of declaring) {

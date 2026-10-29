@@ -101,6 +101,15 @@ const EntitySearchPayload = z.strictObject({
   limit: z.number().optional(),
 });
 
+/** `POST /search/passages` — the passage search: the entity search's body
+ * with `documents` (`type.property`) as a scope, `perEntity` and `text`.
+ * Rules as there (`searchPassages`). */
+const PassageSearchPayload = EntitySearchPayload.extend({
+  documents: z.array(z.string()).optional(),
+  perEntity: z.number().optional(),
+  text: z.boolean().optional(),
+});
+
 /** Arbitrary property payloads: shape is decided by the schema at runtime,
  * so the only static rule is "a JSON object". */
 export const PropertyPayload = z.record(z.string(), z.unknown());
@@ -306,6 +315,17 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
     { schema: { tags: ["runtime"], params: LensParams, body: EntitySearchPayload } },
     async (request) =>
       service.searchEntities(
+        request.params.lensKey,
+        request.body,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.post(
+    "/search/passages",
+    { schema: { tags: ["runtime"], params: LensParams, body: PassageSearchPayload } },
+    async (request) =>
+      service.searchPassages(
         request.params.lensKey,
         request.body,
         await getRuntimeStore(request.params.ontologyKey),

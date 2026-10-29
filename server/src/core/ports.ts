@@ -1048,6 +1048,8 @@ export interface SearchEntryQuery {
    * target type too; null lists every type. Other entries always rank. */
   relationTypes: string[] | null;
   targetTypes: string[] | null;
+  /** Rank only entries of these parts; absent or null: of every part. */
+  partKinds?: readonly SearchPartKind[] | null;
   limit: number;
 }
 

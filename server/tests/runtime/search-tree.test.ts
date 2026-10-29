@@ -4,8 +4,9 @@
  * store — single-method raw scores, fusion and its one tie rule,
  * `matched`, the refetch per cut, the similarity floor, restrictions
  * pushed into the search nodes, append, provenance by sub-query and query
- * text, one embedding per query text, and the empty rankings and
- * limitations of search nodes that cannot run.
+ * text, one embedding per query text, the empty rankings and
+ * limitations of search nodes that cannot run, and passages: grouped by
+ * entity, document and chunk ordinal, capped per entity.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -478,5 +479,78 @@ describe("the executor", () => {
       ["person~default/keyword", 1000],
     ]);
     expect(hits.map((hit) => hit.entityId)).toEqual(["a", "c0", "c1", "c2"]);
+  });
+
+  describe("passages", () => {
+    // person~body and person~mix read the document body, person~notes the document notes.
+    const reading = (key: string, fields: string[]): SearchIndexRecord => {
+      const base = record(key, "person");
+      return { ...base, definition: { ...base.definition, fields } };
+    };
+    const BODY = reading("person~body", ["body"]);
+    const MIX = reading("person~mix", ["name", "body"]);
+    const DOC_NOTES = reading("person~doc", ["notes"]);
+    const passageIndices = new Map([BODY, MIX, DOC_NOTES].map((index) => [index.key, index] as const));
+    const documents = {
+      ...loaded,
+      full: {
+        entityTypes: {
+          person: {
+            properties: { name: { dataType: "string" }, body: { dataType: "document" }, notes: { dataType: "document" } },
+          },
+        },
+      },
+    } as unknown as LoadedSchema;
+    const passage = (entityId: string, score: number, ordinal: string): RankedSearchEntry => ({
+      ...entry(entityId, score, ordinal),
+      partKind: "passage",
+      startChar: 0,
+      charLength: 5,
+    });
+    const only = <T extends KeywordSearchNode | SemanticSearchNode>(node: T): T => ({ ...node, parts: ["passage"] });
+    const passages = (...inputs: TreeNode[]): TreeNode => ({ kind: "group", key: "passage", input: merge(...inputs) });
+    const runPassages = async (tree: TreeNode) =>
+      (await executeSearchTree(documents, indexStore, passageIndices, tree)).hits.map((hit) => {
+        const { index, entry } = hit.provenance[0]!.hit!.matched;
+        return [hit.entityId, index.key, entry.partId];
+      });
+
+    beforeEach(() => {
+      for (const index of [BODY, MIX, DOC_NOTES]) {
+        generations.push(generation(index, "semantic"), generation(index, "keyword"));
+      }
+    });
+
+    it("a passage is entity, document and chunk ordinal: two indices over one document collapse, by the best entry", async () => {
+      lists["person~body/keyword"] = [passage("a", 3, "0"), passage("a", 2, "1"), passage("b", 1, "0")];
+      lists["person~mix/keyword"] = [passage("a", 2.5, "0"), passage("b", 1.5, "0")];
+      lists["person~doc/keyword"] = [passage("a", 0.5, "0")];
+      const searches = [kw("person~body"), kw("person~mix"), kw("person~doc")].map(only);
+      expect(await runPassages(cut(passages(...searches)))).toEqual([
+        ["a", "person~body", "0"],
+        ["a", "person~body", "1"],
+        ["b", "person~mix", "0"],
+        ["a", "person~doc", "0"],
+      ]);
+      // Only passage entries are ranked.
+      expect(rank.mock.calls.every(([query]) => JSON.stringify(query.partKinds) === '["passage"]')).toBe(true);
+      // At most perEntity per entity, in rank order.
+      const capped: TreeNode = { kind: "cut", input: passages(...searches), limit: 10, perEntity: 1 };
+      expect(await runPassages(capped)).toEqual([
+        ["a", "person~body", "0"],
+        ["b", "person~mix", "0"],
+      ]);
+    });
+
+    it("two methods fuse passage by passage, by the one tie rule", async () => {
+      lists["person~body/semantic"] = [passage("a", 0.9, "1"), passage("a", 0.8, "0")];
+      lists["person~body/keyword"] = [passage("a", 3, "0"), passage("a", 2, "1")];
+      const tree = cut(fuse(passages(only(sem("person~body"))), passages(only(kw("person~body")))));
+      // Equal sums of reciprocal ranks: the better semantic similarity first.
+      expect(await runPassages(tree)).toEqual([
+        ["a", "person~body", "1"],
+        ["a", "person~body", "0"],
+      ]);
+    });
   });
 });

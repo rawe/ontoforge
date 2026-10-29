@@ -278,6 +278,37 @@ export function entitySearchContract(embedding: boolean, enabled = true) {
       ]);
     });
 
+    it("a query path drops out the types it does not resolve from; one no type resolves is an error", async () => {
+      // No scope: person and company. works_for:out leaves person only.
+      const atAcme = await found({ query: "ACME Foo Ada Bob", keyword: {}, filter: { "works_for:out.name": "ACME" } });
+      expect(idsOf(atAcme)).toEqual([ids.ada]);
+      expect(atAcme.limitations).toEqual([]);
+      // From company it is works_for:in: Foo employs Bob.
+      expect(idsOf(await found({ query: "ACME Foo", keyword: {}, filter: { "works_for:in.name": "Bob" } }))).toEqual([
+        ids.foo,
+      ]);
+      // The path drops company, city drops person.
+      const nobody = await found({
+        query: "ACME Ada",
+        keyword: {},
+        filter: { "works_for:out.name": "ACME", city: "Berlin" },
+      });
+      expect(nobody).toEqual({
+        ran: [],
+        items: [],
+        limitations: [
+          {
+            code: "filter-excludes-all-types",
+            message: "No searched entity type declares every filter key",
+            types: ["company", "person"],
+          },
+        ],
+      });
+      expect(Object.keys(await fields({ query: "x", filter: { "works_for:out.ghost": "1" } }))).toEqual([
+        "filter.works_for:out.ghost",
+      ]);
+    });
+
     it("collects every broken rule at the request's own path; the body is strict", async () => {
       expect(
         await fields({

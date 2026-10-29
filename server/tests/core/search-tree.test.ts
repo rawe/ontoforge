@@ -1,7 +1,8 @@
 /**
  * The search tree, pure part: the values its nodes yield (unit and score
  * kind), the rules R1–R8 with every violation at its path, the canonical
- * printout, and the entity and planner compilers' canonical shapes.
+ * printout, and the entity, passage and planner compilers' canonical
+ * shapes.
  */
 
 import { describe, expect, it } from "vitest";
@@ -9,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import type { FilterCondition } from "../../src/core/ports.js";
 import {
   compileEntitySearch,
+  compilePassageSearch,
   compilePlannedSearch,
   type EntitySearch,
   type EntitySearchTarget,
@@ -370,5 +372,63 @@ describe("planner compiler", () => {
       ["append(until 100, sub-query 1)", '├─ filter(person, ids ["p1"])', "└─ filter(report, ids [])"].join("\n"),
     );
     expect(compile(sub({ texts: [] }))).toBeNull();
+  });
+});
+
+describe("passage compiler", () => {
+  const rules = (tree: TreeNode) => validateSearchTree(tree, context).map(({ rule, path }) => ({ rule, path }));
+
+  it("passage entries only, grouped by passage, fused; cut to the limit, at most perEntity per entity", () => {
+    const tree = compilePassageSearch({
+      text: "q",
+      targets: [
+        { index: "report~body", entityType: "report", conditions: AGE },
+        { index: "employment", entityType: "person", conditions: [] },
+      ],
+      methods: { semantic: {}, keyword: { match: "any" } },
+      limit: 10,
+      perEntity: 2,
+    });
+    expect(validateSearchTree(tree, context)).toEqual([]);
+    expect(treeValue(tree, context)).toMatchObject({ unit: "passages", scoreKind: { kind: "rankOnly" } });
+    expect(printSearchTree(tree)).toBe(
+      [
+        "cut(limit 10, perEntity 2)",
+        "└─ restrict",
+        "   ├─ fuse",
+        "   │  ├─ group(passage)",
+        "   │  │  └─ merge",
+        '   │  │     ├─ semanticSearch(report~body, "q", parts ["passage"])',
+        '   │  │     └─ semanticSearch(employment, "q", parts ["passage"])',
+        "   │  └─ group(passage)",
+        "   │     └─ merge",
+        '   │        ├─ keywordSearch(report~body, "q", match any, parts ["passage"])',
+        '   │        └─ keywordSearch(employment, "q", match any, parts ["passage"])',
+        '   └─ filter(report, where [{"dataType":"integer","kind":"property","op":"gte","propertyKey":"age","value":20}])',
+      ].join("\n"),
+    );
+    const uncapped = compilePassageSearch({
+      text: "q",
+      targets: [{ index: "report~body", entityType: "report", conditions: [] }],
+      methods: { keyword: { match: "all" } },
+      limit: 5,
+      perEntity: null,
+    });
+    expect(printSearchTree(uncapped)).toBe(
+      ["cut(limit 5)", "└─ group(passage)", '   └─ keywordSearch(report~body, "q", match all, parts ["passage"])'].join("\n"),
+    );
+  });
+
+  it("perEntity cuts passages only, 1 to the limit; parts name at least one part", () => {
+    const passages = group({ ...keyword("report~body"), parts: ["passage"] }, "passage");
+    expect(rules({ kind: "cut", input: passages, limit: 5, perEntity: 5 })).toEqual([]);
+    expect(rules({ kind: "cut", input: passages, limit: 5, perEntity: 6 })).toEqual([{ rule: "shape", path: "" }]);
+    expect(rules({ kind: "cut", input: passages, limit: 5, perEntity: 0 })).toEqual([{ rule: "shape", path: "" }]);
+    expect(rules({ kind: "cut", input: group(keyword("report~body")), limit: 5, perEntity: 1 })).toEqual([
+      { rule: "shape", path: "" },
+    ]);
+    expect(rules(cut(group({ ...keyword("report~body"), parts: [] }, "passage")))).toEqual([
+      { rule: "shape", path: "input.input" },
+    ]);
   });
 });

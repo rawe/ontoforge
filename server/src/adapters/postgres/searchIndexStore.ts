@@ -973,6 +973,10 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
         params.push(query.targetTypes);
         where.push(`(s.target_type IS NULL OR s.target_type = ANY($${params.length}::text[]))`);
       }
+      if (query.partKinds !== undefined && query.partKinds !== null) {
+        params.push(query.partKinds);
+        where.push(`s.part_kind = ANY($${params.length}::text[])`);
+      }
       const filters = buildFilterClauses(query.conditions, params);
       if (filters.length > 0) {
         where.push(

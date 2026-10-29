@@ -169,7 +169,7 @@ export interface ModeHit<E> {
   entry: E;
 }
 
-/** One entity of the fused ranking. */
+/** One item of the fused ranking: an entity, or a passage of one. */
 export interface FusedHit<E> {
   entityId: string;
   /** One mode: the best entry's own score (similarity or keyword score);
@@ -192,13 +192,18 @@ export function mergeByScore<E extends { score: number }>(lists: readonly (reado
   return lists.flat().sort((a, b) => b.score - a.score);
 }
 
-/** Each entity once, with its best entry, in ranking order. Entries come
- * best first, so the first of an entity is its best. */
-export function groupByEntity<E extends { entityId: string }>(entries: readonly E[]): E[] {
+/** Each entity once — or each item `keyOf` names — with its best entry,
+ * in ranking order. Entries come best first, so the first of an item is
+ * its best. */
+export function groupByEntity<E extends { entityId: string }>(
+  entries: readonly E[],
+  keyOf: (entry: E) => string = (entry) => entry.entityId,
+): E[] {
   const seen = new Set<string>();
   return entries.filter((entry) => {
-    if (seen.has(entry.entityId)) return false;
-    seen.add(entry.entityId);
+    const key = keyOf(entry);
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }
@@ -209,19 +214,21 @@ export function groupByEntity<E extends { entityId: string }>(entries: readonly 
  * across the modes — hybrid only; a single mode keeps its own scores. One
  * entity found by several indices of one mode counts once. Equal sums:
  * the one tie rule (`byScore`), by the best semantic entry; one mode's
- * equal scores by entity id.
+ * equal scores by entity id. With `keyOf` the items are what it names —
+ * passages — instead of entities.
  */
 export function fuseModes<E extends { entityId: string; score: number }>(
   rankings: readonly ModeRanking<E>[],
+  keyOf: (entry: E) => string = (entry) => entry.entityId,
 ): FusedHit<E>[] {
   const fused = new Map<string, FusedHit<E>>();
   for (const ranking of rankings) {
-    groupByEntity(ranking.entries).forEach((entry, i) => {
+    groupByEntity(ranking.entries, keyOf).forEach((entry, i) => {
       const hit: ModeHit<E> = { representation: ranking.representation, rank: i + 1, entry };
       const contribution = rankings.length === 1 ? entry.score : 1 / (RRF_K + hit.rank);
-      const prior = fused.get(entry.entityId);
+      const prior = fused.get(keyOf(entry));
       if (prior === undefined) {
-        fused.set(entry.entityId, { entityId: entry.entityId, score: contribution, matched: hit, modes: [hit] });
+        fused.set(keyOf(entry), { entityId: entry.entityId, score: contribution, matched: hit, modes: [hit] });
         return;
       }
       prior.score += contribution;

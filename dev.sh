@@ -25,7 +25,7 @@ fi
 # Drives the Compose project in docker/scale/compose.yml and the scripts in
 # scripts/scale/ (see scripts/scale/USAGE.md). The backends' configuration is
 # one env file, env/scale.env unless `up` names another preset. An env file with
-# AUTH_ENABLED=true also starts the frontend (profile ui, the PUBLIC_URL
+# AUTH_ENABLED=true also starts the frontend (profile ui, the WEB_CLIENT_URL
 # http://localhost:13000) and joins the backends to Keycloak's network
 # (docker/scale/compose.auth.yml); the other subcommands work either way.
 if [ "${1:-}" = "scale" ]; then

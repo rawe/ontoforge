@@ -4,7 +4,7 @@ import { clearedCookie, cookieNames, loginCookie, newSessionId, sessionCookie } 
 import { normalizeReturnTo } from "../../src/auth/router.js";
 
 describe("cookie names", () => {
-  it("carry the port of PUBLIC_URL, the scheme's default when it names none", () => {
+  it("carry the port of WEB_CLIENT_URL, the scheme's default when it names none", () => {
     expect(cookieNames("http://localhost:5173")).toEqual({
       session: "ontoforge_session_5173",
       login: "ontoforge_login_5173",

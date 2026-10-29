@@ -28,7 +28,8 @@ import { wipeDatabase } from "./reset.js";
 
 const DATABASE = "ontoforge_access_test";
 const ISSUER = "http://issuer.test/realms/x";
-const PUBLIC_URL = "http://localhost:5173";
+const PUBLIC_URL = "http://localhost:8000";
+const WEB_CLIENT_URL = "http://localhost:5173";
 
 function accessUrl(): string {
   const url = new URL(settings.DB_URI);
@@ -100,7 +101,7 @@ beforeAll(async () => {
   access = await openAccessStore(accessUrl(), settings.DB_USER, settings.DB_PASSWORD);
   await truncate();
   const auth = {
-    settings: { issuer: ISSUER, adminSubject: "admin", publicUrl: PUBLIC_URL, clientSecret: "x".repeat(32) },
+    settings: { issuer: ISSUER, adminSubject: "admin", publicUrl: PUBLIC_URL, webClientUrl: WEB_CLIENT_URL, clientSecret: "x".repeat(32) },
     oidc: {
       issuer: ISSUER,
       verifyAccessToken: async (token: string) => ({

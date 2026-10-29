@@ -6,7 +6,7 @@ Current behavior: [Signing in](../capabilities/authentication.md#signing-in)
 
 With authentication on, a person signs in at the identity provider in the browser and then
 uses the web client as themselves. The web client is static, served behind a proxy on the
-deployment's own address, and its calls must carry the person's identity to the server
+web client's address, and its calls must carry the person's identity to the server
 without exposing a credential a script could take.
 
 ## Decision

@@ -275,7 +275,7 @@ describe("shared state configuration", () => {
 describe("authentication settings", () => {
   const enabled = {
     AUTH_ENABLED: "true",
-    PUBLIC_URL: "http://localhost:5173/",
+    PUBLIC_URL: "http://localhost:8000/",
     OIDC_ISSUER: "http://localhost:8180/realms/ontoforge",
     OIDC_CLIENT_ID: "ontoforge-web",
     OIDC_CLIENT_SECRET: "s3cret",
@@ -288,6 +288,7 @@ describe("authentication settings", () => {
     const settings = loadSettings({ OIDC_ISSUER: "not a url", AUTH_SESSION_IDLE_SECONDS: "never" });
     expect(settings.AUTH_ENABLED).toBe(false);
     expect(settings.OIDC_ISSUER).toBeNull();
+    expect(loadSettings({ WEB_CLIENT_URL: "not a url" }).WEB_CLIENT_URL).toBeNull();
     expect(settings.AUTH_SESSION_IDLE_SECONDS).toBeNull();
     expect(authSettings(settings)).toBeNull();
   });
@@ -308,7 +309,8 @@ describe("authentication settings", () => {
       adminSubject: "4f1c",
       sessionIdleSeconds: 28800,
       accessDbUri: "postgresql://localhost:5432/ontoforge_access",
-      publicUrl: "http://localhost:5173",
+      publicUrl: "http://localhost:8000",
+      webClientUrl: null,
     });
     expect(
       authSettings(
@@ -363,5 +365,17 @@ describe("authentication settings", () => {
       expect(() => loadSettings({ ...enabled, PUBLIC_URL: url }), url).toThrow(/PUBLIC_URL must be an https URL/);
     }
     expect(loadSettings({ PUBLIC_URL: "http://ontoforge.example.com" }).PUBLIC_URL).toBe("http://ontoforge.example.com");
+  });
+
+  it("takes WEB_CLIENT_URL as optional, an http one on a loopback host only", () => {
+    expect(authSettings(loadSettings(enabled))!.webClientUrl).toBeNull();
+    const settings = loadSettings({ ...enabled, WEB_CLIENT_URL: "http://localhost:5173/" });
+    expect(settings.WEB_CLIENT_URL).toBe("http://localhost:5173");
+    expect(authSettings(settings)).toMatchObject({ publicUrl: "http://localhost:8000", webClientUrl: "http://localhost:5173" });
+    expect(loadSettings({ ...enabled, WEB_CLIENT_URL: "https://studio.example.com" }).WEB_CLIENT_URL).toBe("https://studio.example.com");
+    expect(() => loadSettings({ ...enabled, WEB_CLIENT_URL: "ftp://x" })).toThrow(/WEB_CLIENT_URL/);
+    expect(() => loadSettings({ ...enabled, WEB_CLIENT_URL: "http://studio.example.com" })).toThrow(
+      /WEB_CLIENT_URL must be an https URL/,
+    );
   });
 });

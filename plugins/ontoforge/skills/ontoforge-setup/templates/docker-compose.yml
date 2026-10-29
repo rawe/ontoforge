@@ -50,7 +50,7 @@ services:
     ports:
       - "3000:80"
     environment:
-      # Required — the UI container proxies /api and /mcp requests to the
+      # Required — the UI container proxies /api requests to the
       # backend via nginx. Set this to the Docker-internal URL of the
       # ontoforge-server service. The value must match the service name
       # used in this compose file (here: ontoforge-server).

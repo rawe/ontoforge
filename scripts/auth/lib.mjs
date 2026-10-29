@@ -54,7 +54,7 @@ const passwordOf = (username) => secret(`USER_${username.toUpperCase()}_PASSWORD
 
 /**
  * Cookies by host name, as a browser keeps them: ports do not separate cookies (OntoForge
- * names its session cookie after PUBLIC_URL's port for that reason), paths do.
+ * names its session cookie after WEB_CLIENT_URL's port for that reason), paths do.
  */
 export class CookieJar {
   constructor() { this.hosts = new Map(); }
@@ -344,7 +344,7 @@ export async function deleteKeycloakUser(id) {
 /**
  * One OntoForge call; never throws for an HTTP status (`status` 0: no answer). `jar` sends the
  * session cookie, `token` a bearer token, `origin` the Origin header (cookie POSTs need
- * PUBLIC_URL's origin). Answers {status, json, text, headers, upstream}.
+ * WEB_CLIENT_URL's origin). Answers {status, json, text, headers, upstream}.
  */
 export async function call(base, method, path, { body, jar, token, origin, headers = {} } = {}) {
   const url = `${base}${path}`;
@@ -400,7 +400,7 @@ export async function appLogin(base, username, { deliverTo = base, ...options } 
 // --- MCP -------------------------------------------------------------------------
 
 /**
- * Connects a real MCP SDK client to `serverUrl` (an MCP mount behind PUBLIC_URL) as `username`:
+ * Connects a real MCP SDK client to `serverUrl` (an MCP mount under PUBLIC_URL) as `username`:
  * the SDK discovers the protected-resource metadata and Keycloak, registers itself dynamically,
  * and sends the user to the authorization URL; `keycloakLogin` stands in for the browser
  * (consent included), the redirect reaches a loopback listener, and the SDK exchanges the code.

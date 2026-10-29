@@ -90,8 +90,9 @@ async function resolve(request: FastifyRequest): Promise<Access> {
   const header = request.headers.authorization;
   const bearer = header === undefined ? null : /^Bearer(?:\s+(.*))?$/is.exec(header.trim());
   if (bearer !== null) return bearerAccess(auth, bearer[1]?.trim() ?? "");
-  if (isMcpRoute(request)) return ANONYMOUS;
-  const sessionId = readCookie(request, cookieNames(auth.settings.publicUrl).session);
+  const { webClientUrl } = auth.settings;
+  if (isMcpRoute(request) || webClientUrl === null) return ANONYMOUS;
+  const sessionId = readCookie(request, cookieNames(webClientUrl).session);
   if (sessionId === null) return ANONYMOUS;
   return sessionAccess(auth, request, sessionId);
 }
@@ -147,10 +148,11 @@ async function sessionAccess(auth: AuthRuntime, request: FastifyRequest, session
   return { kind: "caller", caller: { principal, assignments, via: "session" } };
 }
 
-/** A request carrying the session cookie that may change state must come from `PUBLIC_URL`'s origin. */
+/** A request carrying the session cookie that may change state must come from `WEB_CLIENT_URL`'s origin. */
 export function checkOrigin(auth: AuthRuntime, request: FastifyRequest): void {
   if (SAFE_METHODS.has(request.method)) return;
-  if (request.headers.origin !== new URL(auth.settings.publicUrl).origin) {
+  const { webClientUrl } = auth.settings;
+  if (webClientUrl === null || request.headers.origin !== new URL(webClientUrl).origin) {
     throw new ForbiddenError("A signed-in change must come from this deployment's own origin");
   }
 }

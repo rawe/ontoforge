@@ -2,6 +2,7 @@ import { FileStack, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useChangesets, useRuntimeSchema } from '@/api/hooks'
+import { useAccess } from '@/components/auth/useAccess'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { ChangesetStateChip } from '@/components/changesets/ChangesetStateChip'
@@ -39,6 +40,7 @@ export function ChangesetsPage() {
   const changesets = useChangesets(ontologyKey, lensKey)
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const [startOpen, setStartOpen] = useState(false)
+  const canStage = useAccess().canStage(ontologyKey ?? '', lensKey ?? '')
 
   if (ontologyKey === undefined || lensKey === undefined) return null
 
@@ -55,10 +57,12 @@ export function ChangesetsPage() {
         meta={<ChangesetExplainerButton className="-ml-2" />}
         description="Staged changes planned through this lens. Review one, then commit it or send it back."
         actions={
-          <Button size="sm" onClick={() => setStartOpen(true)}>
-            <Plus className="size-3.5" />
-            Start changeset
-          </Button>
+          canStage ? (
+            <Button size="sm" onClick={() => setStartOpen(true)}>
+              <Plus className="size-3.5" />
+              Start changeset
+            </Button>
+          ) : undefined
         }
       />
 

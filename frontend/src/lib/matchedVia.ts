@@ -45,7 +45,9 @@ export function matchedViaText(
       schema?.relationTypes.find((r) => r.key === relationType)?.displayName ??
       relationType
     const target = matched.target
-    const targetLabel = target === null ? null : (target.label ?? target.id.slice(0, 12))
+    const targetName = target === null ? null : (target.label ?? target.id.slice(0, 12))
+    const targetLabel =
+      targetName === null || target?.identity == null ? targetName : `${targetName} (${target.identity})`
     if (label === null) return targetLabel === null ? null : `via ${targetLabel}`
     return targetLabel === null ? `via ${label}` : `via ${label} → ${targetLabel}`
   }

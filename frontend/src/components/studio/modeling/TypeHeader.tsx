@@ -1,7 +1,7 @@
 /**
  * Header of an entity or relation type: display name and description edited
  * inline, the permanent key, a relation type's endpoints (jump links) and
- * parent end (`ParentField`), and an entity type's name property. `variant="page"` lays it out in a row for the
+ * relation rules (`RelationRulesField`), and an entity type's name property and identity (`IdentityField`). `variant="page"` lays it out in a row for the
  * classic type page; `variant="panel"` stacks it for the graph inspector.
  * Navigation is the surface's: endpoint chips call `onSelectType`.
  */
@@ -21,8 +21,9 @@ import { cn } from '@/lib/utils'
 import { InlineText } from '../shared'
 import type { TypeRef } from './deleteContext'
 import { DescriptionText } from './DescriptionText'
+import { IdentityField } from './IdentityField'
 import { useSetNameProperty, useUpdateType } from './mutations'
-import { ParentField } from './ParentField'
+import { RelationRulesField } from './RelationRulesField'
 import { findType, useModelSchema, type TypeKind } from './useModelSchema'
 
 interface TypeHeaderProps {
@@ -56,8 +57,8 @@ export function TypeHeader({ ontologyKey, kind, typeId, variant, onSelectType }:
   const endpoints = relation !== null && (
     <Endpoints ontologyKey={ontologyKey} relation={relation} onSelectType={onSelectType} />
   )
-  const parent = relation !== null && (
-    <ParentField ontologyKey={ontologyKey} relation={relation} variant={variant} />
+  const rules = relation !== null && (
+    <RelationRulesField ontologyKey={ontologyKey} relation={relation} variant={variant} />
   )
   const nameProperty = entity !== null && (
     <label
@@ -69,6 +70,10 @@ export function TypeHeader({ ontologyKey, kind, typeId, variant, onSelectType }:
       Name property
       <NamePropertySelect ontologyKey={ontologyKey} entityType={entity} />
     </label>
+  )
+
+  const identity = entity !== null && (
+    <IdentityField ontologyKey={ontologyKey} entityType={entity} variant={variant} />
   )
 
   return (
@@ -91,8 +96,9 @@ export function TypeHeader({ ontologyKey, kind, typeId, variant, onSelectType }:
           {type.key}
         </Badge>
         {page && endpoints}
-        {page && parent}
+        {page && rules}
         {page && nameProperty}
+        {page && identity}
       </div>
 
       {!page && displayName}
@@ -107,8 +113,9 @@ export function TypeHeader({ ontologyKey, kind, typeId, variant, onSelectType }:
       />
 
       {!page && endpoints}
-      {!page && parent}
+      {!page && rules}
       {!page && nameProperty}
+      {!page && identity}
     </div>
   )
 }

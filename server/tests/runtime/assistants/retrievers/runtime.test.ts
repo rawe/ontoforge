@@ -36,8 +36,8 @@ import {
   retrieveQuestion,
   type RunnableRetriever,
 } from "../../../../src/runtime/assistants/retrievers/runtime.js";
-import { MemoryThreadStore } from "../../../../src/runtime/threads/memoryThreadStore.js";
 import { TURNS_PER_THREAD, TURNS_THE_MODEL_SEES, type GraphThread } from "../../../../src/runtime/threads/threadStore.js";
+import { graphValues, newGraphThread } from "../../threads/graphThread.js";
 import { CONFIG, LENS, SCHEMA } from "./fixture.js";
 
 const store = {
@@ -73,12 +73,9 @@ const sub = (overrides: Record<string, unknown> = {}) => ({
 });
 const planned = (subQueries: unknown[]) => ({ content: JSON.stringify({ subQueries, unsupportedReason: null }), usage_metadata: { input_tokens: 1, output_tokens: 2 } });
 
-const threads = new MemoryThreadStore();
-
 /** A new thread of the retriever, as a chat without a thread id starts one. */
 async function newThread(): Promise<GraphThread> {
-  const { threadId } = await threads.create({ ontologyKey: "o", lensKey: "all", kind: "retrievers", assistantKey: "people" });
-  return { checkpointer: threads.checkpointer, threadId };
+  return newGraphThread();
 }
 
 /** One question, on a new thread unless one is given. */
@@ -415,7 +412,7 @@ describe("retriever pipeline", () => {
 
   it("the thread keeps the questions, the answers and what a follow-up may refer to — no working values", async () => {
     const { thread } = await run("Everyone in Berlin", false);
-    const values = (await threads.values(thread.threadId))!;
+    const values = await graphValues(thread);
     // Working values are not kept; keys of the graph's own start with "__".
     const kept = Object.entries(values).filter(([key, value]) => value !== undefined && !key.startsWith("__"));
     expect(kept.map(([key]) => key).sort()).toEqual(["messages", "verified"]);
@@ -435,7 +432,7 @@ describe("retriever pipeline", () => {
   it(`a thread keeps at most ${TURNS_PER_THREAD} turns`, async () => {
     const thread = await newThread();
     for (let i = 1; i <= TURNS_PER_THREAD + 2; i++) await run(`Everyone in Berlin ${i}`, false, thread);
-    const messages = (await threads.values(thread.threadId))!.messages as { text: string }[];
+    const messages = (await graphValues(thread)).messages as { text: string }[];
     expect(messages).toHaveLength(2 * TURNS_PER_THREAD);
     expect(messages[0]!.text).toBe("Everyone in Berlin 3");
   });

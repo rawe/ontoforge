@@ -62,8 +62,9 @@ property, `key`, `dataType` and `required` give the field:
 | `datetime` | `string` | ISO date-time |
 | `document` | `string` on write, `{ document: true, length: number }` on read | read the content with the documents route |
 
-Every entity read also carries `_id`, `_entityTypeKey`, `_createdAt` and `_updatedAt`;
-a relation carries `_id`, `_relationTypeKey`, `fromEntityId` and `toEntityId`.
+Every entity read also carries `_id`, `_entityTypeKey`, `_createdAt` and `_updatedAt`,
+plus a read-only `_identity` string when its type declares an identity (see
+[runtime-api.md](runtime-api.md#entity-identity)); a relation carries `_id`, `_relationTypeKey`, `fromEntityId` and `toEntityId`.
 Generate the types once from the live schema and regenerate when the schema changes;
 the lens a scoped application uses decides which types and properties exist for it.
 
@@ -72,10 +73,14 @@ the lens a scoped application uses decides which types and properties exist for 
 **Paging.** Lists answer `{ items, total, limit, offset }` with `limit` at most 200.
 Loop on `offset` until `offset + items.length >= total` (`allEntities` in the template).
 
-**Writing many objects.** There is no bulk write: every create and update is one
-request. Send them with modest concurrency, create entities before the relations that
-reference their new `_id`, and remember that a failure midway leaves what was already
-written — the API has no transaction across requests.
+**Writing many objects.** Immediate writes are one object per request, and a failure
+midway leaves what was already written. For many objects, start a changeset
+(`POST …/changesets`), stage up to 1,000 calls per `POST …/changesets/{changesetId}/writes`
+— entities before the relations that name them — and commit it
+(`POST …/changesets/{changesetId}/commit`), which persists all of it or nothing. A
+`put_entity` updates the entity whose identity its values build, or creates it, so a
+rerun does not duplicate. A changeset holds 10,000 objects by default: commit and start
+another when the server answers that it is full.
 
 **Reading after writing.** CRUD reads see a write at once. Search does not: index
 entries are built in the background, so a new or changed entity reaches `GET /search`

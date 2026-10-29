@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 // Import instance data into one ontology from a JSON file, remapping entity
 // IDs. The data is written through one lens, so the lens must expose every
-// type and property the file carries.
+// type and property the file carries. It is staged into changesets and
+// committed in chunks; entities whose type has an identity, and relations
+// of one-per-pair types, are staged as puts, so a rerun updates them.
 
 import { readFileSync } from 'node:fs';
 import {
   api,
+  changesetWriter,
   die,
   getBaseUrl,
   getOntologyKey,
@@ -59,48 +62,72 @@ if (!lensKey) {
   console.error(`Using lens: ${lensKey}`);
 }
 
+// Which types a rerun can match, as the lens shows them: entity types with
+// an identity, relation types that are one per pair.
+let lensSchema;
+try {
+  lensSchema = await api(baseUrl, `${runtimePath(ontologyKey, lensKey)}/schema`);
+} catch (err) {
+  die(`Cannot read the schema of lens "${lensKey}": ${err.message}`);
+}
+const withIdentity = new Set(
+  (lensSchema.entityTypes || []).filter((type) => (type.identityProperties || []).length > 0).map((type) => type.key),
+);
+const onePerPair = new Set(
+  (lensSchema.relationTypes || []).filter((type) => type.onePerPair || type.parent).map((type) => type.key),
+);
+
 const ENTITY_SYSTEM = new Set([
-  '_id', '_entityTypeKey', '_createdAt', '_updatedAt',
+  '_id', '_entityTypeKey', '_createdAt', '_updatedAt', '_identity',
 ]);
 const RELATION_SYSTEM = new Set([
   '_id', '_relationTypeKey', '_createdAt', '_updatedAt',
 ]);
 
 const prefix = runtimePath(ontologyKey, lensKey);
+const writer = changesetWriter(
+  (method, path, body) => api(baseUrl, path, { method, body: JSON.stringify(body) }),
+  prefix,
+  `Data import from ${file}`,
+);
 
 try {
-  // Phase 1: Create entities and build old-ID -> new-ID map
+  // Phase 1: Stage entities and build old-ID -> new-ID map. A put matches
+  // the entity an earlier run wrote by its identity.
   const idMap = new Map();
   let entityCount = 0;
+  let updated = 0;
 
   for (const [typeKey, entities] of Object.entries(data.entities || {})) {
+    const operation = withIdentity.has(typeKey) ? 'put_entity' : 'create_entity';
     for (const entity of entities) {
       const oldId = entity._id;
-      const props = {};
+      const properties = {};
       for (const [k, v] of Object.entries(entity)) {
-        if (!ENTITY_SYSTEM.has(k)) props[k] = v;
+        if (!ENTITY_SYSTEM.has(k)) properties[k] = v;
       }
-
-      const created = await api(
-        baseUrl,
-        `${prefix}/entities/${encodeURIComponent(typeKey)}`,
-        { method: 'POST', body: JSON.stringify(props) },
-      );
-      idMap.set(oldId, created._id);
+      await writer.add({ operation, type: typeKey, properties }, (answer) => {
+        idMap.set(oldId, answer.id);
+        if (answer.action === 'update') updated++;
+      });
       entityCount++;
     }
-    console.error(`  ${typeKey}: ${entities.length} entities created`);
+    console.error(`  ${typeKey}: ${entities.length} entities staged`);
   }
+  // The relations name the entities by their new ids, staged by now.
+  await writer.finish();
 
-  // Phase 2: Create relations with remapped entity IDs
+  // Phase 2: Stage relations with remapped entity IDs; a put on a
+  // one-per-pair type updates the relation an earlier run wrote.
   let relationCount = 0;
   let skipped = 0;
 
   for (const [typeKey, relations] of Object.entries(data.relations || {})) {
+    const operation = onePerPair.has(typeKey) ? 'put_relation' : 'create_relation';
     for (const relation of relations) {
-      const fromId = idMap.get(relation.fromEntityId);
-      const toId = idMap.get(relation.toEntityId);
-      if (!fromId || !toId) {
+      const fromEntityId = idMap.get(relation.fromEntityId);
+      const toEntityId = idMap.get(relation.toEntityId);
+      if (!fromEntityId || !toEntityId) {
         skipped++;
         console.error(
           `  Warning: skipping relation (missing entity mapping for ${relation.fromEntityId} -> ${relation.toEntityId})`,
@@ -108,29 +135,35 @@ try {
         continue;
       }
 
-      const props = { fromEntityId: fromId, toEntityId: toId };
+      const properties = {};
       for (const [k, v] of Object.entries(relation)) {
         if (!RELATION_SYSTEM.has(k) && k !== 'fromEntityId' && k !== 'toEntityId') {
-          props[k] = v;
+          properties[k] = v;
         }
       }
-
-      await api(
-        baseUrl,
-        `${prefix}/relations/${encodeURIComponent(typeKey)}`,
-        { method: 'POST', body: JSON.stringify(props) },
-      );
+      await writer.add({ operation, type: typeKey, fromEntityId, toEntityId, properties }, (answer) => {
+        if (answer.action === 'update') updated++;
+      });
       relationCount++;
     }
-    console.error(`  ${typeKey}: ${relations.length} relations created`);
+    console.error(`  ${typeKey}: ${relations.length} relations staged`);
   }
+  await writer.finish();
 
-  console.error(`Done: ${entityCount} entities, ${relationCount} relations imported.`);
+  console.error(
+    `Done: ${entityCount} entities, ${relationCount} relations imported in ${writer.commits} commits` +
+      (updated ? ` (${updated} of them updated what was already there).` : '.'),
+  );
   if (skipped) console.error(`  ${skipped} relations skipped (missing entity references).`);
   console.error(
     'Search indices build the imported entities\' search entries in the background; ' +
       'GET /model/search-indices shows their progress.',
   );
 } catch (err) {
-  die(err.message);
+  const left = writer.changeset ? ` Changeset ${writer.changeset} was left as a draft; nothing in it was committed.` : '';
+  die(
+    `${err.message}\n${writer.commits} changesets were committed before this.${left} Running the import ` +
+      'again updates the entities with an identity and the relations of one-per-pair types it already ' +
+      'wrote, and creates everything else again.',
+  );
 }

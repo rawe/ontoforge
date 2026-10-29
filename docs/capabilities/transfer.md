@@ -13,8 +13,8 @@ ontologies, transfer included.
 
 | Carried | Detail |
 |---|---|
-| Entity types | Key, display name, description, the key of its name property, and every property definition |
-| Relation types | The same, plus the keys of the source and target entity types and the parent end, `parent`, null when unset |
+| Entity types | Key, display name, description, the key of its name property, its [identity](entity-identity.md) properties (`identityProperties`, omitted when it has none), and every property definition |
+| Relation types | The same, plus the keys of the source and target entity types and their [relation rules](schema-modeling.md#relation-rules): the parent end, `parent`, null when unset, and `onePerPair`, omitted when off |
 | Property definitions | Key, display name, description, data type, required flag, default |
 | Lenses | Key, name, description, their type inclusions — absent entirely for an unscoped lens — and the keys of the search indices they include |
 | Assistants | Every assistant of every lens, one list per kind under the lens's `assistants`: its agents under `agents` — key, name, description, system prompt, tool allowlist — its retrievers under `retrievers` and its navigators under `navigators`, both in their portable form — key, name, description, configVersion, config |
@@ -68,10 +68,12 @@ The payload declares a format version, and export always writes the current one:
 The version is the format's own line, bumped only when the payload shape changes
 incompatibly. A relation type's `parent` is optional in `7.0`: without it, or with null,
 the relation type is an ordinary one, and the older versions' relation types import as
-ordinary ones too.
+ordinary ones too. Its `onePerPair` is optional as well: without it, the relation type is
+one per pair only when it is a parent relation.
 
 **Import upgrades older versions step by step.** It accepts two older versions and brings
-each up to the current one first, one version at a time: a `5.0` payload becomes a
+each up to the current one first, one version at a time, so an older export needs no
+external conversion tool: a `5.0` payload becomes a
 `6.0` one, a `6.0` payload a `7.0` one. Every other version is refused with a field
 error on the version naming the three it accepts:
 
@@ -103,7 +105,7 @@ entity type: the first `string` property among `name`, `title`, `label` and
 order. A type without any `string` property is given a new non-required `string`
 property `name` — `name_2`, `name_3`, … when `name` is taken — and that becomes its name
 property. The same derivation brings storage written before name properties existed up to
-date ([../storage-adapters.md](../storage-adapters.md)).
+date ([../storage-adapters/](../storage-adapters/README.md)).
 
 **Each version reads only its own fields.** An upgrade checks the fields it reads and
 reports a malformed one at its path in the payload's own version, every offending path
@@ -123,7 +125,7 @@ Import writes into the ontology the request addresses. The target may be bare or
 populated, but it must exist: **import never creates its target.** Creating an ontology
 is a registry operation — over REST or the web UI, or, for an MCP client that owns its
 mount, `ensure_ontology` followed by `import_schema`
-([../interfaces.md](../interfaces.md)).
+([../interfaces/](../interfaces/README.md)).
 
 **Cloning** is therefore a composition, not a feature: export ontology A, create
 ontology B, import into B — the same design over an empty graph. There is no first-class
@@ -147,18 +149,17 @@ Two consequences:
 - **Import validates before it writes.** The entire payload is checked first, in order:
   its format version, then the fields each upgrade reads, then the shape of the current
   version ([above](#the-format-version)), then every [rule](#what-import-validates), then
-  key conflicts, then the parent rules. Each step rejects on its own, and a later one runs
+  key conflicts, then the relation rules. Each step rejects on its own, and a later one runs
   only when the earlier ones pass — so rule violations and key conflicts are separate
   rejections: every rule violation is reported together in one validation error, and only
   a payload without violations is checked for conflicts, every conflicting key then
-  reported together in one conflict. The parent rules are checked like a
-  [flag change](schema-modeling.md#parent-relations): the payload's parent relations,
-  together with the target's own, are read against the relations already stored in the
-  target — which a deleted relation type leaves behind — and a violation is refused with
-  the same conflict and its list. A rejected payload writes
-  nothing. Only a clean payload starts writing. The residual risk is a crash mid-write,
-  which can leave a partial schema; a retry after cleanup then behaves like a fresh
-  import.
+  reported together in one conflict. The relation rules are checked like a
+  [rules change](schema-modeling.md#relation-rules): the payload's parent relations,
+  together with the target's own, and its one-per-pair relation types are read against
+  the relations already stored in the target — which a deleted relation type leaves
+  behind — and a violation is refused with the same conflict and its list. A rejected payload writes
+  nothing. Only a clean payload starts writing, and the writing is one design change: a
+  failure at any point, a crash included, leaves the target as it was.
 
 ### Replacing an existing design
 
@@ -180,8 +181,8 @@ behind them differ.
 For a caller this means: **an identifier obtained from the source ontology is meaningless
 against the target.** Any script, saved artifact or external reference that pins a type by
 identifier breaks across a transfer; one that pins it by key does not. This is the same
-reason keys are the only currency of the public surface — see
-[../decisions.md](../decisions.md#naming).
+reason runtime and MCP address schema and design objects by key; modeling REST may use
+internal identifiers ([path addressing](../interfaces/README.md#what-a-path-segment-identifies)).
 
 Instance identifiers are unaffected, since there are no instances in the payload.
 
@@ -193,6 +194,11 @@ Import is a write path, and the write-path rules apply to it:
   `string` properties; a missing or unsuitable one is rejected, naming the type.
 - `document` properties are permitted on entity types only. One on a relation type is
   rejected, naming the property and its type.
+- An entity type's `identityProperties` must follow the rules of a
+  [declared identity](entity-identity.md#declaring-an-identity): 1 to 5 distinct keys of
+  its own `string`, `integer` or `date` properties, each required and without a default.
+  Import never cascades, so a breach is rejected, naming the type. An older document has
+  no identities.
 - Every custom search index is validated against the payload's own schema, exactly as at
   definition time ([search-indices.md](search-indices.md#validation-and-limits)), and
   every switched-off key must name a managed index that schema derives. An invalid one
@@ -245,10 +251,9 @@ artefacts and computes embeddings, all within the target ontology.
   index gets its generations, which the worker builds in the background
   ([search-indices.md](search-indices.md#lifecycle)); with no instance data imported,
   there is nothing to build until data is written.
-- **Embedding.** Each imported saved query's description is embedded as it is written, so
-  the queries are semantically discoverable immediately. Nothing else is embedded — there
-  is no instance data to embed.
-- **Cache invalidation.** Import clears the schema cache, as any modeling change does.
+- **Embedding.** Each imported saved query's description is embedded before anything is
+  written, so the queries are semantically discoverable immediately. Nothing else is
+  embedded — there is no instance data to embed.
 - **Retrievers** are written last, once the indices exist. They embed nothing; a
   `5.0` payload's converted agents keep their conversion warnings, key renames among them
   ([above](#the-format-version)).
@@ -259,7 +264,7 @@ Import answers with the lenses it created.
 
 Both operations are modeling operations on one ontology, so both live under the
 ontology's modeling surface and neither takes a lens. Complete operation index:
-[../interfaces.md](../interfaces.md).
+[../interfaces/](../interfaces/README.md).
 
 | | Export | Import |
 |---|---|---|

@@ -43,7 +43,7 @@ and whose match names the property and the passage.
 ### Strategies and availability
 
 Each strategy is a composition of retrieval methods; the methods are defined in the
-[glossary](../README.md#glossary). Keyword ranking is stemmed full-text ranking in the
+[glossary](../glossary.md). Keyword ranking is stemmed full-text ranking in the
 ontology's [keyword languages](#keyword-language).
 
 | Strategy | Requirement | Retrieval methods |
@@ -56,7 +56,9 @@ ontology's [keyword languages](#keyword-language).
 
 The default keyword matching is any-term keyword matching; `keyword` and `hybrid` always
 use the same one. `keyword-any` and `keyword-all` each fix one retrieval method, whatever
-the default is.
+the default is. Matching is chosen by the strategy, not by a separate parameter.
+All-term means that every term must match; it still uses stemming and prefix matching
+([ADR 0026](../adr/0026-any-term-keyword-matching.md)).
 
 The default is the first available of `hybrid`, `keyword`, `semantic`. The feature report
 lists available strategies in the order `hybrid`, `keyword`, `keyword-any`,
@@ -70,6 +72,9 @@ Without a provider no semantic entries are built, and keyword search works on it
 Configuring a provider later builds the semantic entries in the background.
 
 ### Ranking
+
+The alternatives weighed for ranking and evidence are in
+[ADR 0020](../adr/0020-search-ranking-and-evidence.md).
 
 Each searched index is ranked once per retrieval method the strategy uses — semantic,
 keyword, or both under `hybrid` — over the entries of its ready generation. Within one
@@ -104,7 +109,8 @@ A REST caller may supply a minimum similarity, a number from 0 to 1 on the
 `semanticSimilarity` scale below; absent means no floor. The floor is model-specific —
 what counts as related depends on the embedding model — so REST never chooses one. The
 MCP and agent search tools take none from the caller and instead apply a fixed floor of
-0.75 whenever the default strategy ranks semantically. A floor applies to semantic
+0.75 whenever the default strategy ranks semantically, because a model client cannot judge
+the raw scores. A floor applies to semantic
 entries only: each semantic ranking drops every entry measured below the floor before it
 is grouped by entity, so the floor applies to an entity's best semantic entry.
 Under `semantic` the filtered ranking is the result, and zero hits is a valid outcome.
@@ -154,7 +160,7 @@ composed text does not identify an individual property. Null must not be read as
 | `index` | The key of the index the entry belongs to |
 | `partKind` | `self` (own fields), `relation` or `passage` |
 | `relationType`, `relationId` | The relation of a relation entry; null otherwise |
-| `target` | For a relation entry, the entity at the relation's other end: `id`, `type` and `label`, the value of its name property — null when empty or hidden by the lens. Null otherwise |
+| `target` | For a relation entry, the entity at the relation's other end: `id`, `type`, `label`, the value of its name property — null when empty or hidden by the lens — and `identity`, its [identity](entity-identity.md) — null when it has none or the lens does not show it. Null otherwise |
 | `snippet` | The start of the entry's text, whitespace collapsed, at most 200 code points, an ellipsis marking a cut. Empty when the index reads a property the lens hides |
 | `charOffset`, `charLength` | A passage's coordinates in its document; null otherwise |
 
@@ -186,15 +192,15 @@ rejected. An existence key naming a bare relation type narrows the set to the ty
 relation touches, as a query path does. Path conditions and relation existence conditions
 are accepted only where the adapter declares support; rejection names the entity list as
 the alternative. Adapter limitations are recorded in
-[../storage-adapters.md](../storage-adapters.md).
+[../storage-adapters/](../storage-adapters/README.md).
 
 ## Index search
 
 The index search ranks entities through chosen search indices — managed or custom —
 named by key; naming none searches every index the lens can search
-([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). A key no index has is
-not found; an index the lens cannot search, a switched-off managed one included, is a
-validation error naming it. Hits are entities of the indices' root types, ranked and
+([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). An index the lens
+cannot search, a switched-off managed one included, is a validation error naming it, and
+so is a key no index has: the lens does not tell which indices exist beyond it. Hits are entities of the indices' root types, ranked and
 grouped exactly as under [Ranking](#ranking): within one retrieval method the chosen
 indices merge by score, an entity counts once, scored by its best entry, and `hybrid`
 fuses the methods by reciprocal rank.
@@ -255,9 +261,9 @@ Matches across languages come from semantic ranking. No request names a language
 The set belongs to the ontology's design, not to the registry: creating an ontology names
 no language, and a new one starts with German and English. One whose storage was upgraded
 from an earlier layout starts with the single language it was created with
-([../storage-adapters.md](../storage-adapters.md#how-ontologies-are-isolated)). The set
+([../storage-adapters/](../storage-adapters/postgresql.md#how-ontologies-are-isolated)). The set
 is read and changed through the ontology's search settings in modeling
-([../interfaces.md](../interfaces.md#search-settings)); a change is validated whole
+([../interfaces/](../interfaces/modeling-rest.md#search-settings)); a change is validated whole
 before anything is written and accepts the languages in any order, kept in the order
 German, English. Changing it builds a new keyword generation of every index in the background —
 keyword entries need no embedding calls — and the previous generations keep answering
@@ -323,15 +329,15 @@ outside search indices against the provider's, and reports every mismatch as a w
 identifying the index by what it covers — saved-query descriptions — never by a physical
 index name, and naming rebuild as the remedy.
 
-Startup warns and does not repair; the reasoning is in
-[../decisions.md](../decisions.md#deployment). Rebuild does repair, in the three-phase
-order above — drop, regenerate, build. A startup ensure that cannot succeed, which is what
-an unfinished rebuild leaves behind, is reported against the ontology it belongs to and
-does not stop the server from starting.
+Startup warns and does not repair
+([ADR 0013](../adr/0013-semantic-index-width-drift-reported-at-startup.md)). Rebuild does repair, in the three-phase order above —
+drop, regenerate, build. A startup ensure that cannot succeed, which is what an unfinished
+rebuild leaves behind, is reported against the ontology it belongs to and does not stop
+the server from starting: the server must remain available to finish the repair.
 
 ## Through the interfaces
 
-The full contract is in [../interfaces.md](../interfaces.md). REST `GET /search`, MCP,
+The full contract is in [../interfaces/](../interfaces/README.md). REST `GET /search`, MCP,
 agent tools and saved-query search steps use the default search and the same envelope.
 MCP and agents expose `search` (both kinds) and `search_documents` (documents only, every
 hit carrying a passage); neither tool takes a strategy or a floor — both apply the fixed
@@ -353,4 +359,4 @@ score, description-only embedding, and embedding-provider requirement.
 The palette and relation picker use ranked search whenever the strategy list is nonempty,
 falling back to literal entity lists otherwise. Neither displays a score or passage text;
 what they show of a hit is in
-[../product-surface.md](../product-surface.md#matched-via).
+[../product-surface/](../product-surface/finding-and-collecting.md#matched-via).

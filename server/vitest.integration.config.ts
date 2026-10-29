@@ -10,11 +10,12 @@ import { defineConfig } from "vitest/config";
 // running with no provider. Run them separately via
 // `npm run test:integration:embedding` (requires Ollama with
 // bge-m3) and `npm run test:integration:ai` (requires Ollama
-// with the `AI_MODEL` default).
+// with the `AI_MODEL` default). The Valkey suite (`tests/integration/valkey/`)
+// needs a Valkey instead of the database: `npm run test:integration:valkey`.
 export default defineConfig({
   test: {
     include: ["tests/integration/**/*.test.ts"],
-    exclude: ["tests/integration/embedding/**", "tests/integration/ai/**", "tests/integration/decision/**", "node_modules/**"],
+    exclude: ["tests/integration/embedding/**", "tests/integration/ai/**", "tests/integration/decision/**", "tests/integration/valkey/**", "node_modules/**"],
     // Suite-level hard reset: a virgin database, once per invocation.
     globalSetup: ["tests/integration/global-setup.ts"],
     // The suite wipes the database and reboots the adapter; run serially.

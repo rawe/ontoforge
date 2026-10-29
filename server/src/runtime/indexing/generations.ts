@@ -12,7 +12,9 @@
  * schema, the language set or the embedding model changed — as long as
  * the caller reconciles after the change:
  *
- * - the worker, at start (model change, language change, upgrade);
+ * - the worker, at start (model change, language change, upgrade) and
+ *   whenever an ontology's design revision moved since it last
+ *   reconciled it (a post-commit reconcile that failed, `afterCommit`);
  * - modeling, after index CRUD, search-settings changes, schema changes
  *   and imports (`reconcileSearchGenerations`);
  * - a manual rebuild, which forces new generations (`rebuildSearchIndex`).
@@ -26,6 +28,13 @@
  * switched-off managed index (search settings). Semantic entries
  * need an embedding provider: without one no semantic generation is
  * created, and existing ones are left as they are.
+ *
+ * A reconciliation reads the design revision before anything else and
+ * creates and retires only while the design is still that revision: what
+ * it read can then be no older than the revision, and a design change
+ * committed meanwhile reconciles again after its own commit. Two
+ * processes reconciling the same revision create one generation: the
+ * second finds the first's match.
  */
 
 import { randomUUID } from "node:crypto";
@@ -34,6 +43,7 @@ import { getEmbeddingProvider } from "../../core/embedding.js";
 import { ConflictError, NotFoundError } from "../../core/exceptions.js";
 import {
   getSearchIndexStore,
+  type DesignRevision,
   type NewSearchGeneration,
   type SearchGenerationRecord,
   type SearchIndexRecord,
@@ -42,7 +52,6 @@ import {
 import type { KeywordLanguageSet } from "../../core/keywordLanguage.js";
 import { definitionHash, type SearchRepresentation } from "../../core/searchIndex.js";
 import { disabledIndexKeys } from "../../core/searchPipeline.js";
-import { invalidateSearchContext } from "../schemaCache.js";
 
 const REPRESENTATIONS: readonly SearchRepresentation[] = ["keyword", "semantic"];
 
@@ -56,16 +65,15 @@ export interface GenerationChange {
 
 /**
  * Bring every index of an ontology to matching generations (see the
- * module comment). Indices named in `force` get new generations whether
- * or not one matches. Also forgets the ontology's cached search context,
- * so writes plan against the current definitions. Returns what changed.
+ * module comment). The representations `force` names per index key get
+ * new generations whether or not one matches. Returns what changed.
  */
 export async function reconcileSearchGenerations(
   ontologyKey: string,
-  force: readonly string[] = [],
+  force: ReadonlyMap<string, ReadonlySet<SearchRepresentation>> = new Map(),
 ): Promise<GenerationChange[]> {
-  invalidateSearchContext(ontologyKey);
   const store = await getSearchIndexStore(ontologyKey);
+  const design = await store.designRevision();
   const [indices, generations, settings] = await Promise.all([
     store.listIndices(),
     store.listGenerations(),
@@ -79,8 +87,9 @@ export async function reconcileSearchGenerations(
     );
     changes.push(
       ...(await reconcileIndex(store, index, live, {
+        design,
         keywordLanguages: settings.keywordLanguages,
-        force: force.includes(index.key),
+        force: force.get(index.key) ?? new Set(),
         disabled: disabled.has(index.key),
       })),
     );
@@ -88,9 +97,31 @@ export async function reconcileSearchGenerations(
   return changes;
 }
 
+/**
+ * Run the work that follows a committed design change — sweeping,
+ * reconciling, refreshing — as best effort: the change stands, so a
+ * failure (a lock wait over the timeout, a storage error) is logged, not
+ * answered. The worker reconciles every ontology whose design revision
+ * moved since it last did (`worker.ts`), which heals a failed or cut-off
+ * run.
+ */
+export async function afterCommit(ontologyKey: string, work: () => Promise<unknown>): Promise<void> {
+  try {
+    await work();
+  } catch (exc) {
+    console.warn(
+      `Search work after a design change of ontology '${ontologyKey}' failed; the worker reconciles later: ` +
+        (exc instanceof Error ? exc.message : String(exc)),
+    );
+  }
+}
+
 /** Force new generations of one index — every enabled representation —
  * and rebuild them from scratch. Retries what failed. Unknown key ->
- * not found; a switched-off managed index -> conflict. */
+ * not found; a switched-off managed index -> conflict. A design change
+ * committed meanwhile refuses a forced creation (its own reconcile does
+ * not force): the rebuild then runs again for the representations still
+ * missing, and after three tries it is a conflict. */
 export async function rebuildSearchIndex(
   ontologyKey: string,
   indexKey: string,
@@ -102,7 +133,26 @@ export async function rebuildSearchIndex(
   if (disabledIndexKeys(await store.getSearchSettings()).has(indexKey)) {
     throw new ConflictError(`Search index '${indexKey}' is switched off`);
   }
-  return reconcileSearchGenerations(ontologyKey, [indexKey]);
+  const rebuilt = new Set<SearchRepresentation>();
+  const changes: GenerationChange[] = [];
+  for (let attempt = 1; ; attempt++) {
+    const before = await store.designRevision();
+    // Read again each time: a design change meanwhile may have switched a representation.
+    const index = await store.getIndex(indexKey);
+    if (index === null) return changes;
+    const missing = new Set(rebuildable(index).filter((representation) => !rebuilt.has(representation)));
+    if (missing.size === 0) return changes;
+    const round = await reconcileSearchGenerations(ontologyKey, new Map([[indexKey, missing]]));
+    changes.push(...round);
+    for (const change of round) {
+      if (change.indexKey === indexKey && change.action === "created") rebuilt.add(change.representation);
+    }
+    if ([...missing].every((representation) => rebuilt.has(representation))) return changes;
+    if ((await store.designRevision()).revision === before.revision) return changes;
+    if (attempt === 3) {
+      throw new ConflictError(`The design of ontology '${ontologyKey}' kept changing; rebuild again`);
+    }
+  }
 }
 
 /** Re-queue every entity of an index into its current generations — for
@@ -115,7 +165,12 @@ export async function refreshSearchIndex(ontologyKey: string, indexKey: string):
   if (index === null) {
     throw new NotFoundError(`Search index '${indexKey}' not found`);
   }
-  invalidateSearchContext(ontologyKey);
+  return requeueIndex(store, index);
+}
+
+/** Re-queue every entity of `index` into its current generations through
+ * `store` — a design change's own store queues in that change. */
+export async function requeueIndex(store: SearchIndexStore, index: SearchIndexRecord): Promise<number> {
   const live = (await store.listGenerations(index.searchIndexId))
     .filter((g) => g.state === "building" || g.state === "ready")
     .map((g) => g.generationId);
@@ -126,9 +181,11 @@ async function reconcileIndex(
   store: SearchIndexStore,
   index: SearchIndexRecord,
   live: SearchGenerationRecord[],
-  { keywordLanguages, force, disabled }: {
+  { design, keywordLanguages, force, disabled }: {
+    design: DesignRevision;
     keywordLanguages: KeywordLanguageSet;
-    force: boolean;
+    /** The representations to build anew whether or not one matches. */
+    force: ReadonlySet<SearchRepresentation>;
     disabled: boolean;
   },
 ): Promise<GenerationChange[]> {
@@ -144,7 +201,7 @@ async function reconcileIndex(
     const generations = live.filter((g) => g.representation === representation);
     if (disabled || !index.definition[representation].enabled) {
       for (const generation of generations) {
-        if (await store.retireGeneration(generation.generationId)) {
+        if (await store.retireGeneration(generation.generationId, design)) {
           change(representation, "retired", generation.generationId);
         }
       }
@@ -163,23 +220,36 @@ async function reconcileIndex(
     };
     const building = generations.find((g) => g.state === "building");
     const ready = generations.find((g) => g.state === "ready");
-    if (!force) {
+    const forced = force.has(representation);
+    if (!forced) {
       if (building !== undefined && matches(building, wanted)) continue;
       if (ready !== undefined && matches(ready, wanted)) {
         // The active generation is current: a build towards something
         // else (a definition since changed back) is not wanted.
-        if (building !== undefined && (await store.retireGeneration(building.generationId))) {
+        if (building !== undefined && (await store.retireGeneration(building.generationId, design))) {
           change(representation, "retired", building.generationId);
         }
         continue;
       }
     }
     const created = await store.createGeneration(wanted, {
+      design,
       backfillEntityType: index.definition.entityType,
+      force: forced,
     });
     if (created !== null) change(representation, "created", created.generationId);
   }
   return changes;
+}
+
+/** The representations of `index` that have generations: the enabled
+ * ones, semantic only with an embedding provider. */
+function rebuildable(index: SearchIndexRecord): SearchRepresentation[] {
+  const provider = getEmbeddingProvider();
+  return REPRESENTATIONS.filter(
+    (representation) =>
+      index.definition[representation].enabled && (representation === "keyword" || provider !== null),
+  );
 }
 
 /** Whether a generation holds what `wanted` describes. */

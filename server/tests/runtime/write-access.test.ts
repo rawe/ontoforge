@@ -23,6 +23,7 @@ import {
   allows,
   checkOperation,
   listsTool,
+  lower,
   routeOperation,
   toolOperation,
   type Operation,
@@ -82,6 +83,13 @@ describe("the levels and the check", () => {
     expect(allowed("none")).toEqual(["read"]);
     expect(allowed("propose")).toEqual(["read", "stage"]);
     expect(allowed("full")).toEqual(OPERATIONS);
+  });
+
+  it("lower picks the lower level on the ladder, either way round", () => {
+    expect(lower("full", "propose")).toBe("propose");
+    expect(lower("propose", "full")).toBe("propose");
+    expect(lower("propose", "none")).toBe("none");
+    expect(lower("full", "full")).toBe("full");
   });
 
   it("checkOperation passes what the level allows, and refuses the rest with a 409 saying what to do", () => {
@@ -148,7 +156,7 @@ describe("the levels and the check", () => {
 });
 
 describe("the tables cannot drift", () => {
-  it("ROUTES are exactly the routes the ruleset mirror registers (41)", async () => {
+  it("ROUTES are exactly the routes the ruleset mirror registers (49)", async () => {
     const prefix = "/api/ontologies/:ontologyKey/runtime/lenses/:lensKey/rulesets/:rulesetKey";
     const app = Fastify();
     app.setValidatorCompiler(validatorCompiler);
@@ -164,7 +172,7 @@ describe("the tables cannot drift", () => {
     await app.ready();
     await app.close();
     expect([...registered].sort()).toEqual(Object.keys(ROUTES).sort());
-    expect(registered.size).toBe(41);
+    expect(registered.size).toBe(49);
   });
 
   it("TOOLS are exactly the tools of a ruleset mount at full (36)", async () => {
@@ -191,7 +199,7 @@ let level: WriteAccess;
 beforeEach(() => {
   holder.store = createMockRuntimeStore();
   invalidateLoadedSchemaCache();
-  holder.store.indices.readFullSchema.mockResolvedValue(makeFullSchema());
+  holder.store.indices.readFullSchema.mockResolvedValue({ ...makeFullSchema(), indices: [] });
   holder.store.getFullSchemaWithLensInclusions.mockImplementation(async (lensKey: string) =>
     lensKey === "all" ? makeFullSchema({ lensKey }) : null,
   );
@@ -252,6 +260,16 @@ describe("the REST mirror", () => {
       { op: "str_replace", oldString: "a", newString: "b" },
     ],
     "GET /entities/:entityTypeKey/:entityId/neighbors": [`/entities/person/${ID}/neighbors`],
+    "GET /entities/:entityTypeKey/identity/:identity": ["/entities/person/identity/ann"],
+    "PATCH /entities/:entityTypeKey/identity/:identity": ["/entities/person/identity/ann", { name: "Ann" }],
+    "DELETE /entities/:entityTypeKey/identity/:identity": ["/entities/person/identity/ann"],
+    "GET /entities/:entityTypeKey/identity/:identity/path": ["/entities/person/identity/ann/path"],
+    "GET /entities/:entityTypeKey/identity/:identity/documents/:propertyKey": ["/entities/person/identity/ann/documents/bio"],
+    "PATCH /entities/:entityTypeKey/identity/:identity/documents/:propertyKey": [
+      "/entities/person/identity/ann/documents/bio",
+      { op: "str_replace", oldString: "a", newString: "b" },
+    ],
+    "GET /entities/:entityTypeKey/identity/:identity/neighbors": ["/entities/person/identity/ann/neighbors"],
     "POST /query": ["/query", { query: "MATCH (p:person) RETURN p" }],
     "GET /saved-queries": ["/saved-queries"],
     "GET /saved-queries/search": ["/saved-queries/search?q=ann"],
@@ -266,6 +284,7 @@ describe("the REST mirror", () => {
     "GET /changesets/:changesetId": [CS],
     "GET /changesets/:changesetId/documents/:entityTypeKey/:entityId/:propertyKey": [`${CS}/documents/person/${ID}/bio`],
     "GET /changesets/:changesetId/entities/:entityTypeKey/:entityId": [`${CS}/entities/person/${ID}`],
+    "GET /changesets/:changesetId/entities/:entityTypeKey/identity/:identity": [`${CS}/entities/person/identity/ann`],
     "DELETE /changesets/:changesetId": [CS],
     "POST /changesets/:changesetId/writes": [
       `${CS}/writes`,
@@ -305,20 +324,20 @@ describe("the REST mirror", () => {
     return refused;
   }
 
-  it("full answers all 41", async () => {
+  it("full answers all 49", async () => {
     expect(await refusedAt("full")).toEqual([]);
   });
 
-  it("propose refuses the 7 immediate writes and the commit: 33 / 8", async () => {
+  it("propose refuses the 10 immediate writes and the commit: 38 / 11", async () => {
     const refused = await refusedAt("propose");
-    expect(refused.map((route) => ROUTES[route])).toEqual([...Array(7).fill("write"), "commit"]);
-    expect(Object.keys(ROUTES).length - refused.length).toBe(33);
+    expect(refused.map((route) => ROUTES[route])).toEqual([...Array(10).fill("write"), "commit"]);
+    expect(Object.keys(ROUTES).length - refused.length).toBe(38);
   });
 
-  it("none refuses every write, stage and commit: 24 / 17; the changeset reads still answer", async () => {
+  it("none refuses every write, stage and commit: 29 / 20; the changeset reads still answer", async () => {
     const refused = await refusedAt("none");
     expect(refused).toEqual(Object.keys(ROUTES).filter((route) => ROUTES[route] !== "read"));
-    expect(refused).toHaveLength(17);
+    expect(refused).toHaveLength(20);
     expect(refused).not.toContain("GET /changesets/:changesetId/entities/:entityTypeKey/:entityId");
     for (const spy of Object.values(writes)) expect(spy).not.toHaveBeenCalled();
   });

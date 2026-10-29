@@ -18,7 +18,7 @@ import { recordedDocument, valueBytes } from "../../src/runtime/changesets.js";
 import { createMockRulesetStore, type MockRulesetStore } from "../mockRulesetStore.js";
 import { createMockChangesetStore, type MockChangesetStore } from "../mockChangesetStore.js";
 import { createMockNavigatorStore, type MockNavigatorStore } from "../mockNavigatorStore.js";
-import { createMockSearchIndexStore, type MockSearchIndexStore } from "../mockSearchIndexStore.js";
+import { createMockSearchIndexStore, TEST_DESIGN, type MockSearchIndexStore } from "../mockSearchIndexStore.js";
 
 export const NOW = new Date("2025-01-01T12:00:00.000Z");
 
@@ -31,7 +31,8 @@ interface InclusionRow {
 
 /**
  * Build a full-schema payload as returned by the runtime store's
- * `getFullSchemaWithLensInclusions`. With no inclusions the lens is fully unscoped.
+ * `getFullSchemaWithLensInclusions` — of `TEST_DESIGN`, the revision the
+ * mock stores answer. With no inclusions the lens is fully unscoped.
  */
 export function makeFullSchema(options?: {
   lensKey?: string;
@@ -109,6 +110,7 @@ export function makeFullSchema(options?: {
     ],
     entityInclusions: options?.entityInclusions ?? [],
     relationInclusions: options?.relationInclusions ?? [],
+    design: TEST_DESIGN,
   };
 }
 
@@ -179,7 +181,8 @@ export function makeRelation(
  * one non-method member, the store's ontology binding, stays a value; the
  * search-index, navigator, ruleset and changeset stores it hands out are
  * mocks too (`indices`, `navigatorStore`, `rulesetStore`, `changesetStore`).
- * `transaction` hands its work the mock itself. */
+ * Every design read answers `TEST_DESIGN`; `transaction` hands its work the
+ * mock itself. */
 export type MockRuntimeStore = {
   [K in Exclude<keyof RuntimeStore, "ontologyKey">]: Mock;
 } & {
@@ -206,7 +209,8 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     navigators: vi.fn(() => navigatorStore),
     rulesets: vi.fn(() => rulesetStore),
     changesets: vi.fn(() => changesetStore),
-    transaction: vi.fn(async (work: (bound: RuntimeStore) => Promise<unknown>) => work(store)),
+    designRevision: vi.fn(async () => TEST_DESIGN),
+    transaction: vi.fn(async (_design: unknown, work: (bound: RuntimeStore) => Promise<unknown>) => work(store)),
     supportsKeywordRanking: vi.fn(() => false),
     supportsSearchPathConditions: vi.fn(() => false),
     getFullSchemaWithLensInclusions: vi.fn(async () => null),
@@ -216,6 +220,9 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     listEntities: vi.fn(async () => [[], 0]),
     getEntity: vi.fn(async () => null),
     getEntityById: vi.fn(async () => null),
+    getEntityByIdentity: vi.fn(async () => null),
+    entitiesWithIdentities: vi.fn(async () => []),
+    setIdentityCheck: vi.fn(async () => undefined),
     updateEntity: vi.fn(async () => null),
     deleteEntity: vi.fn(async () => false),
     getEntitiesByIds: vi.fn(async () => ({})),
@@ -237,6 +244,15 @@ export function createMockRuntimeStore(ontologyKey = "test_ont"): MockRuntimeSto
     getRelationsByIds: vi.fn(async () => ({})),
     getEntityTypes: vi.fn(async () => ({})),
     lockTargets: vi.fn(async () => []),
+    relationsOfPairs: vi.fn(async () => []),
+    lockPairs: vi.fn(async () => []),
+    // The batch writes write every row they are given.
+    createEntities: vi.fn(async () => undefined),
+    updateEntities: vi.fn(async (rows: { entityId: string }[]) => rows.map((row) => row.entityId)),
+    deleteEntities: vi.fn(async (rows: { id: string }[]) => rows.map((row) => row.id)),
+    createRelations: vi.fn(async (rows: { relationId: string }[]) => rows.map((row) => row.relationId)),
+    updateRelations: vi.fn(async (rows: { relationId: string }[]) => rows.map((row) => row.relationId)),
+    deleteRelations: vi.fn(async (rows: { id: string }[]) => rows.map((row) => row.id)),
   };
   return store;
 }
@@ -265,6 +281,7 @@ export function stagedObject(
     action,
     fromId: ends?.[0] ?? null,
     toId: ends?.[1] ?? null,
+    identity: null,
     firstTouchedAt: NOW,
     values: Object.entries(values)
       .sort(([a], [b]) => a.localeCompare(b))

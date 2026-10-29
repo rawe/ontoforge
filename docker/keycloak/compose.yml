@@ -1,0 +1,54 @@
+# Development identity provider: one Keycloak for the solo stack (./dev.sh) and the
+# shared-state harness (./dev.sh scale). Started, provisioned and verified by
+#
+#   ./dev.sh keycloak            (scripts/keycloak/setup.mjs, see scripts/keycloak/USAGE.md)
+#
+# The issuer is http://localhost:8180/realms/ontoforge for every caller: the browser and a
+# server on the host reach it directly; a server in a container joins this project's network
+# and reaches it as http://keycloak:8080, which OIDC_BACKCHANNEL_URL names. KC_HOSTNAME fixes
+# the issuer; KC_HOSTNAME_BACKCHANNEL_DYNAMIC lets the back-channel endpoints (token, keys)
+# follow the host a server asked on.
+name: ontoforge-keycloak
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: ["start-dev"]
+    environment:
+      # Read from env/keycloak.local.env (`--env-file`), which the setup script generates
+      # and which is never committed. Keycloak documents this account as temporary: the
+      # script replaces it by a permanent administrator and deletes it.
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:?run ./dev.sh keycloak}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?run ./dev.sh keycloak}
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      # The H2 dev-file database lives in the volume below.
+      KC_DB: dev-file
+    ports:
+      - "127.0.0.1:8180:8080"
+    volumes:
+      - data:/opt/keycloak/data
+    mem_limit: 1g
+    healthcheck:
+      # The image has no curl; bash's /dev/tcp asks the management port for readiness.
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '"status": *"UP"' <&3
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  data:
+
+# A fixed name, so the shared-state harness's backends can join it (docker/scale/compose.auth.yml)
+# and reach Keycloak as http://keycloak:8080.
+networks:
+  default:
+    name: ontoforge-keycloak

@@ -16,7 +16,7 @@
  * run their transactions inside it, so index DDL and catalog reads
  * (`current_schema()`) resolve within that ontology alone.
  *
- * The DDL carries structure only — identity, referential integrity,
+ * The DDL carries structure only — primary keys, referential integrity,
  * exactly-one-owner, uniqueness. Business rules validate in the service,
  * with no backstop CHECKs; the search tables check only their closed
  * vocabularies (index kind, representation, generation state). The
@@ -97,7 +97,8 @@ export function ontologyDdlStatements(): string[] {
   description    text,
   created_at     timestamptz NOT NULL DEFAULT now(),
   updated_at     timestamptz NOT NULL DEFAULT now(),
-  name_property  text        NOT NULL   -- key of the name property; FK added after property_def
+  name_property  text        NOT NULL,  -- key of the name property; FK added after property_def
+  identity_properties text[]             -- ordered keys of the identity properties; NULL = no identity
 )`,
 
   `CREATE TABLE IF NOT EXISTS relation_type (
@@ -111,7 +112,8 @@ export function ontologyDdlStatements(): string[] {
                                      REFERENCES entity_type (key) ON DELETE RESTRICT,
   created_at             timestamptz NOT NULL DEFAULT now(),
   updated_at             timestamptz NOT NULL DEFAULT now(),
-  parent                 text        -- the parent end, 'source' or 'target'; NULL = ordinary
+  parent                 text,       -- the parent end, 'source' or 'target'; NULL = ordinary
+  one_per_pair           boolean     NOT NULL DEFAULT false -- read as true while parent is set
 )`,
 
   `CREATE TABLE IF NOT EXISTS property_def (
@@ -239,7 +241,11 @@ export function ontologyDdlStatements(): string[] {
   type_key   text        NOT NULL,                           -- NO FK: deleting a type orphans its instances by design
   props      jsonb       NOT NULL DEFAULT '{}'::jsonb,       -- user properties; system props are columns, not keys here
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  identity   text,                                           -- derived by the service; NULL: the type has none
+  -- NULLs never collide, so types without an identity are unaffected.
+  -- Deferrable: a changeset commit defers it to the end of its transaction.
+  CONSTRAINT entity_identity_unique UNIQUE (type_key, identity) DEFERRABLE INITIALLY IMMEDIATE
   -- no search columns: entities are searched through search_entry
 )`,
   `CREATE INDEX IF NOT EXISTS entity_type_key_idx ON entity (type_key)`,
@@ -317,12 +323,31 @@ export function ontologyDdlStatements(): string[] {
   CONSTRAINT changeset_value_object_fk FOREIGN KEY (changeset_id, object_id)
     REFERENCES changeset_object (changeset_id, object_id) ON DELETE CASCADE
 )`,
+  // Finds the staged objects that stage a value of a property, such as a
+  // part of an identity, without reading the whole changeset; by hash, so
+  // that a long document value fits.
+  `CREATE INDEX IF NOT EXISTS changeset_value_match_idx
+  ON changeset_value (changeset_id, property_key, md5(value::text))`,
 
   // --- Search indices ----------------------------------------------------
 
   ...searchStorageStatements(),
   `INSERT INTO search_settings (keyword_languages)
   VALUES (ARRAY[${DEFAULT_KEYWORD_LANGUAGES.map(literal).join(", ")}])`,
+
+  // --- Design revision ---------------------------------------------------
+
+  // One row: the ontology's never-reused id and the number every design
+  // change advances (`design.ts`). Filled from the registry row, which the
+  // creating transaction inserted first.
+  `CREATE TABLE IF NOT EXISTS design_revision (
+  singleton   boolean NOT NULL DEFAULT true CONSTRAINT design_revision_pk PRIMARY KEY
+                      CONSTRAINT design_revision_singleton CHECK (singleton),
+  ontology_id uuid    NOT NULL,
+  revision    integer NOT NULL
+)`,
+  `INSERT INTO design_revision (ontology_id, revision)
+  SELECT ontology_id, 1 FROM public.ontology WHERE namespace = current_schema()`,
 ];
 }
 

@@ -8,24 +8,18 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
-    # Reverse-proxy API and MCP requests to the backend server.
-    # The frontend app uses relative paths (/api/..., /mcp/...) for all
-    # backend calls. Without these proxy rules the requests would hit
-    # nginx's try_files fallback and return index.html instead of JSON.
+    # Reverse-proxy API requests to the backend server. The frontend app
+    # uses relative paths (/api/...) for all backend calls, so the browser's
+    # session cookie reaches the server. Without this rule the requests would
+    # hit nginx's try_files fallback and return index.html instead of JSON.
+    # MCP clients connect to the server directly, never through here.
     location /api/ {
         proxy_pass ${BACKEND_URL};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /mcp/ {
-        proxy_pass ${BACKEND_URL};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $http_host;
     }
 
     location / {

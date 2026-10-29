@@ -61,7 +61,7 @@ let rulesets: Record<string, RulesetRecord>;
 beforeEach(() => {
   holder.store = createMockRuntimeStore();
   invalidateLoadedSchemaCache();
-  holder.store.indices.readFullSchema.mockResolvedValue(makeFullSchema());
+  holder.store.indices.readFullSchema.mockResolvedValue({ ...makeFullSchema(), indices: [] });
   // Lenses `all` (unscoped) and `no_person` (company only).
   holder.store.getFullSchemaWithLensInclusions.mockImplementation(async (lensKey: string) => {
     if (lensKey === "all") return makeFullSchema({ lensKey });

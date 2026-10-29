@@ -2,7 +2,7 @@
  * Server routes, mounted at `/api/server` — the one phase-neutral
  * surface: read-only reads describing the deployment. Ontology-scoped
  * operations never live here, and server-wide data operations do not exist
- * (`docs/interfaces.md`).
+ * (`docs/interfaces/`).
  */
 
 import { supportsKeywordRanking } from "../core/ports.js";
@@ -18,6 +18,7 @@ import { SERVER_VERSION } from "../version.js";
 const InfoResponse = z.object({
   baseUrl: z.string().nullable(),
   version: z.string(),
+  authentication: z.boolean(),
 });
 
 const FeaturesResponse = z.object({
@@ -40,6 +41,7 @@ export const serverRouter: FastifyPluginAsyncZod = async (app) => {
     async () => ({
       baseUrl: settings.PUBLIC_URL?.replace(/\/+$/, "") ?? null,
       version: SERVER_VERSION,
+      authentication: app.auth !== null,
     }),
   );
 

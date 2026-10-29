@@ -1,6 +1,6 @@
 # PostgreSQL as the only storage adapter
 
-Rule: [Storage](../decisions.md#storage)
+Current behavior: [Storage adapters](../storage-adapters/README.md)
 
 ## Context
 
@@ -9,6 +9,19 @@ PostgreSQL. A second adapter such as Neo4j needs features of its own (its own se
 storage, reserved type keys, a cap of one ontology) and a conformance run of its own.
 Building every feature for two databases pulls focus from the features; the aim is to get
 each right in one reference implementation first.
+
+## Decision
+
+Ship and maintain PostgreSQL as the only storage adapter while retaining the persistence
+port. Keep only the port capabilities the shipped implementation needs; do not retain
+an unmaintained Neo4j adapter or speculative branches for a future backend.
+
+## Consequences
+
+Features are developed, documented and tested against one reference implementation
+rather than two divergent storage contracts. Other database backends are not promised.
+The port remains a relatively cheap seam that isolates services from storage details
+and leaves another adapter possible when there is an actual need.
 
 ## Rejected
 

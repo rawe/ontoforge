@@ -8,7 +8,7 @@
  * Every request names its ontology and lens in the path and runs against
  * a runtime store bound to that ontology — an unknown ontology key
  * answers 404 before any route logic runs. Below the lens the surface is
- * addressed by KEYS everywhere (`docs/interfaces.md`). Routers parse and
+ * addressed by KEYS everywhere (`docs/interfaces/`). Routers parse and
  * shape only; every domain rule lives in `service.ts`, shared with the
  * runtime MCP server.
  *
@@ -37,6 +37,8 @@ export function rulesetOf(params: object): string | null {
 const TypeKeyParams = LensParams.extend({ key: z.string() });
 const EntityTypeParams = LensParams.extend({ entityTypeKey: z.string() });
 const EntityParams = EntityTypeParams.extend({ entityId: z.string() });
+/** An entity by identity: one URL-encoded path segment, decoded once. */
+const IdentityParams = EntityTypeParams.extend({ identity: z.string() });
 
 /** `fields` is repeated rather than comma-separated; one occurrence arrives
  * as a bare string and is normalized to a single-element list. */
@@ -47,7 +49,7 @@ const FieldsParam = z
 
 // Unknown keys (the `filter.*` family) pass through untyped and are picked
 // up by `parseFilters`; the declared parameters carry the bounds and
-// defaults documented in `docs/interfaces.md`.
+// defaults documented in `docs/interfaces/`.
 const ListQuery = z.looseObject({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
@@ -92,7 +94,9 @@ export const PropertyPayload = z.record(z.string(), z.unknown());
 /** The parent relation an entity is created under. */
 export const ParentRelationPayload = z.object({
   type: z.string(),
-  parentId: z.string(),
+  /** Exactly one of the two names the parent; the service checks it. */
+  parentId: z.string().optional(),
+  parentIdentity: z.string().optional(),
   properties: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -104,6 +108,7 @@ const EntityCreatePayload = z.looseObject({
 });
 
 const DocumentParams = EntityParams.extend({ propertyKey: z.string() });
+const IdentityDocumentParams = IdentityParams.extend({ propertyKey: z.string() });
 
 export const DocumentReadQuery = z.looseObject({
   offset: z.coerce.number().int().min(0).default(0),
@@ -128,7 +133,7 @@ export const DocumentEditFields = {
 
 const DocumentEditPayload = z.looseObject(DocumentEditFields);
 
-/** OQL query request: the query text, nothing else (`docs/interfaces.md`). */
+/** OQL query request: the query text, nothing else (`docs/interfaces/`). */
 const QueryPayload = z.looseObject({ query: z.string().min(1) });
 
 const SavedQueryRunParams = LensParams.extend({ queryKey: z.string() });
@@ -139,7 +144,7 @@ const SavedQueryRunPayload = z.looseObject({
 });
 
 /** `GET /saved-queries/search` — bounds and defaults per
- * `docs/interfaces.md`, including the `min_score` snake_case irregularity. */
+ * `docs/interfaces/`, including the `min_score` snake_case irregularity. */
 const SavedQuerySearchQuery = z.looseObject({
   q: z.string().min(1),
   limit: z.coerce.number().int().min(1).max(20).default(3),
@@ -149,11 +154,14 @@ const SavedQuerySearchQuery = z.looseObject({
 const RelationTypeParams = LensParams.extend({ relationTypeKey: z.string() });
 const RelationParams = RelationTypeParams.extend({ relationId: z.string() });
 
-/** Relation creation names its two endpoints; everything else in the body
- * is a property value. */
+/** Relation creation names its two endpoints, each by id or by identity
+ * (exactly one, checked by the service); everything else in the body is a
+ * property value. */
 const RelationCreatePayload = z.looseObject({
-  fromEntityId: z.string(),
-  toEntityId: z.string(),
+  fromEntityId: z.string().optional(),
+  toEntityId: z.string().optional(),
+  fromEntityIdentity: z.string().optional(),
+  toEntityIdentity: z.string().optional(),
 });
 
 /** Relation lists take NO free-text `q` and NO `fields` projection — only
@@ -166,6 +174,8 @@ const RelationListQuery = z.looseObject({
   order: z.enum(["asc", "desc"]).default("asc"),
   fromEntityId: z.string().optional(),
   toEntityId: z.string().optional(),
+  fromEntityIdentity: z.string().optional(),
+  toEntityIdentity: z.string().optional(),
 });
 
 const NeighborsQuery = z.looseObject({
@@ -317,111 +327,154 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
-  app.get(
-    "/entities/:entityTypeKey/:entityId",
-    { schema: { tags: ["runtime"], params: EntityParams, querystring: ReadQuery } },
-    async (request) =>
-      service.getEntity(
-        request.params.lensKey,
-        request.params.entityTypeKey,
-        request.params.entityId,
-        await getRuntimeStore(request.params.ontologyKey),
-        request.query.fields ?? null,
+  // --- One entity, by id and by identity ---
+  //
+  // Every route that names an entity by id has an identity twin below
+  // `/entities/:entityTypeKey/identity/:identity`: the identity is resolved
+  // to the id through the lens first (`resolveEntityIdentity`), then the
+  // route runs as by id. Ids are UUIDs, so the static `identity` segment
+  // never shadows one.
+
+  /** Register one entity route twice: by id, and by identity. The handler
+   * reads the entity's id through `entityIdOf` only; the identity route's
+   * params schema (`byIdentity`) carries `identity` in place of `entityId`. */
+  const twin = <Params extends z.ZodObject>(
+    register: (path: string, params: Params, entityIdOf: (params: object) => Promise<string>) => void,
+    suffix: string,
+    byId: Params,
+    byIdentity: z.ZodObject,
+  ): void => {
+    register(`/entities/:entityTypeKey/:entityId${suffix}`, byId, async (params) => (params as { entityId: string }).entityId);
+    register(`/entities/:entityTypeKey/identity/:identity${suffix}`, byIdentity as Params, async (params) => {
+      const { ontologyKey, lensKey, entityTypeKey, identity } = params as z.infer<typeof IdentityParams>;
+      return service.resolveEntityIdentity(lensKey, entityTypeKey, identity, await getRuntimeStore(ontologyKey));
+    });
+  };
+
+  twin(
+    (path, params, entityIdOf) =>
+      app.get(path, { schema: { tags: ["runtime"], params, querystring: ReadQuery } }, async (request) =>
+        service.getEntity(
+          request.params.lensKey,
+          request.params.entityTypeKey,
+          await entityIdOf(request.params),
+          await getRuntimeStore(request.params.ontologyKey),
+          request.query.fields ?? null,
+        ),
       ),
+    "",
+    EntityParams,
+    IdentityParams,
   );
 
-  app.patch(
-    "/entities/:entityTypeKey/:entityId",
-    { schema: { tags: ["runtime"], params: EntityParams, body: PropertyPayload } },
-    async (request) =>
-      service.updateEntity(
-        request.params.lensKey,
-        request.params.entityTypeKey,
-        request.params.entityId,
-        request.body,
-        await getRuntimeStore(request.params.ontologyKey),
-        rulesetOf(request.params),
+  twin(
+    (path, params, entityIdOf) =>
+      app.patch(path, { schema: { tags: ["runtime"], params, body: PropertyPayload } }, async (request) =>
+        service.updateEntity(
+          request.params.lensKey,
+          request.params.entityTypeKey,
+          await entityIdOf(request.params),
+          request.body,
+          await getRuntimeStore(request.params.ontologyKey),
+          rulesetOf(request.params),
+        ),
       ),
+    "",
+    EntityParams,
+    IdentityParams,
   );
 
-  app.delete(
-    "/entities/:entityTypeKey/:entityId",
-    { schema: { tags: ["runtime"], params: EntityParams } },
-    async (request, reply) => {
-      await service.deleteEntity(
-        request.params.lensKey,
-        request.params.entityTypeKey,
-        request.params.entityId,
-        await getRuntimeStore(request.params.ontologyKey),
-        rulesetOf(request.params),
-      );
-      return reply.status(204).send();
-    },
+  twin(
+    (path, params, entityIdOf) =>
+      app.delete(path, { schema: { tags: ["runtime"], params } }, async (request, reply) => {
+        await service.deleteEntity(
+          request.params.lensKey,
+          request.params.entityTypeKey,
+          await entityIdOf(request.params),
+          await getRuntimeStore(request.params.ontologyKey),
+          rulesetOf(request.params),
+        );
+        return reply.status(204).send();
+      }),
+    "",
+    EntityParams,
+    IdentityParams,
   );
 
-  app.get(
-    "/entities/:entityTypeKey/:entityId/path",
-    { schema: { tags: ["runtime"], params: EntityParams } },
-    async (request) =>
-      service.getPath(
-        request.params.lensKey,
-        request.params.entityTypeKey,
-        request.params.entityId,
-        await getRuntimeStore(request.params.ontologyKey),
+  twin(
+    (path, params, entityIdOf) =>
+      app.get(path, { schema: { tags: ["runtime"], params } }, async (request) =>
+        service.getPath(
+          request.params.lensKey,
+          request.params.entityTypeKey,
+          await entityIdOf(request.params),
+          await getRuntimeStore(request.params.ontologyKey),
+        ),
       ),
+    "/path",
+    EntityParams,
+    IdentityParams,
   );
 
   // --- Document properties ---
 
-  app.get(
-    "/entities/:entityTypeKey/:entityId/documents/:propertyKey",
-    { schema: { tags: ["runtime"], params: DocumentParams, querystring: DocumentReadQuery } },
-    async (request) =>
-      service.getDocument(
-        request.params.lensKey,
-        request.params.entityTypeKey,
-        request.params.entityId,
-        request.params.propertyKey,
-        request.query.offset,
-        request.query.limit ?? null,
-        await getRuntimeStore(request.params.ontologyKey),
+  twin(
+    (path, params, entityIdOf) =>
+      app.get(path, { schema: { tags: ["runtime"], params, querystring: DocumentReadQuery } }, async (request) =>
+        service.getDocument(
+          request.params.lensKey,
+          request.params.entityTypeKey,
+          await entityIdOf(request.params),
+          request.params.propertyKey,
+          request.query.offset,
+          request.query.limit ?? null,
+          await getRuntimeStore(request.params.ontologyKey),
+        ),
       ),
+    "/documents/:propertyKey",
+    DocumentParams,
+    IdentityDocumentParams,
   );
 
-  app.patch(
-    "/entities/:entityTypeKey/:entityId/documents/:propertyKey",
-    { schema: { tags: ["runtime"], params: DocumentParams, body: DocumentEditPayload } },
-    async (request) =>
-      service.editDocument(
-        request.params.lensKey,
-        request.params.entityTypeKey,
-        request.params.entityId,
-        request.params.propertyKey,
-        request.body,
-        await getRuntimeStore(request.params.ontologyKey),
-        rulesetOf(request.params),
+  twin(
+    (path, params, entityIdOf) =>
+      app.patch(path, { schema: { tags: ["runtime"], params, body: DocumentEditPayload } }, async (request) =>
+        service.editDocument(
+          request.params.lensKey,
+          request.params.entityTypeKey,
+          await entityIdOf(request.params),
+          request.params.propertyKey,
+          request.body,
+          await getRuntimeStore(request.params.ontologyKey),
+          rulesetOf(request.params),
+        ),
       ),
+    "/documents/:propertyKey",
+    DocumentParams,
+    IdentityDocumentParams,
   );
 
   // --- Graph traversal ---
 
-  app.get(
-    "/entities/:entityTypeKey/:entityId/neighbors",
-    { schema: { tags: ["runtime"], params: EntityParams, querystring: NeighborsQuery } },
-    async (request) => {
-      const { relationTypeKey, direction, limit, fields, relationFields } = request.query;
-      return service.getNeighbors(
-        request.params.lensKey,
-        request.params.entityTypeKey,
-        request.params.entityId,
-        direction,
-        relationTypeKey ?? null,
-        limit,
-        await getRuntimeStore(request.params.ontologyKey),
-        fields ?? null,
-        relationFields ?? null,
-      );
-    },
+  twin(
+    (path, params, entityIdOf) =>
+      app.get(path, { schema: { tags: ["runtime"], params, querystring: NeighborsQuery } }, async (request) => {
+        const { relationTypeKey, direction, limit, fields, relationFields } = request.query;
+        return service.getNeighbors(
+          request.params.lensKey,
+          request.params.entityTypeKey,
+          await entityIdOf(request.params),
+          direction,
+          relationTypeKey ?? null,
+          limit,
+          await getRuntimeStore(request.params.ontologyKey),
+          fields ?? null,
+          relationFields ?? null,
+        );
+      }),
+    "/neighbors",
+    EntityParams,
+    IdentityParams,
   );
 
   // --- OQL query ---
@@ -482,12 +535,11 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
       schema: { tags: ["runtime"], params: RelationTypeParams, body: RelationCreatePayload },
     },
     async (request, reply) => {
-      const { fromEntityId, toEntityId, ...userProps } = request.body;
+      const { fromEntityId, toEntityId, fromEntityIdentity, toEntityIdentity, ...userProps } = request.body;
       const result = await service.createRelation(
         request.params.lensKey,
         request.params.relationTypeKey,
-        fromEntityId,
-        toEntityId,
+        { fromEntityId, toEntityId, fromEntityIdentity, toEntityIdentity },
         userProps,
         await getRuntimeStore(request.params.ontologyKey),
         rulesetOf(request.params),
@@ -500,7 +552,8 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
     "/relations/:relationTypeKey",
     { schema: { tags: ["runtime"], params: RelationTypeParams, querystring: RelationListQuery } },
     async (request) => {
-      const { limit, offset, sort, order, fromEntityId, toEntityId } = request.query;
+      const { limit, offset, sort, order, fromEntityId, toEntityId, fromEntityIdentity, toEntityIdentity } =
+        request.query;
       const filters = parseFilters(request.query as Record<string, unknown>);
       return service.listRelations(
         request.params.lensKey,
@@ -509,8 +562,7 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         offset,
         sort,
         order,
-        fromEntityId ?? null,
-        toEntityId ?? null,
+        { fromEntityId, toEntityId, fromEntityIdentity, toEntityIdentity },
         filters,
         await getRuntimeStore(request.params.ontologyKey),
       );

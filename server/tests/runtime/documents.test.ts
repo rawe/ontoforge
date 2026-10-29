@@ -16,6 +16,7 @@ import {
   makeEntity,
   type MockRuntimeStore,
 } from "./helpers.js";
+import { TEST_DESIGN } from "../mockSearchIndexStore.js";
 
 const BIO = "# Biography\n\nAda Lovelace wrote about the analytical engine. ".repeat(30); // ~1800 chars
 
@@ -46,6 +47,7 @@ function makeDocSchema(entityInclusions?: Row[]): Row {
     relationTypes: [],
     entityInclusions: entityInclusions ?? [],
     relationInclusions: [],
+    design: TEST_DESIGN,
   };
 }
 

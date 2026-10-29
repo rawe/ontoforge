@@ -7,6 +7,7 @@ import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
 import type { EntityInstance, SchemaProperty } from '@/api/types'
 import { useRuntimeWrites } from '@/api/writes'
+import { useCanEdit } from '@/components/auth/useAccess'
 import { MarkerChip } from '@/components/changesets/MarkerChip'
 import { DocumentBadge } from '@/components/DocumentBadge'
 import { DocumentViewerDialog } from '@/components/DocumentViewerDialog'
@@ -58,6 +59,7 @@ export function DocumentPropertyRow({
 }: DocumentPropertyRowProps) {
   const queryClient = useQueryClient()
   const writes = useRuntimeWrites(ontologyKey, lensKey)
+  const canEdit = useCanEdit(ontologyKey, lensKey)
   const stub = entity[property.key]
   const hasValue = isDocumentStub(stub)
   const stagedStub = staged !== undefined && isDocumentStub(staged.value) ? staged.value : null
@@ -194,15 +196,17 @@ export function DocumentPropertyRow({
               <span className="text-muted-foreground/50">—</span>
             )}
           </button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-6 text-muted-foreground"
-            onClick={openEditor}
-            aria-label={`Edit ${property.displayName}`}
-          >
-            <Pencil className="size-3" />
-          </Button>
+          {canEdit && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 text-muted-foreground"
+              onClick={openEditor}
+              aria-label={`Edit ${property.displayName}`}
+            >
+              <Pencil className="size-3" />
+            </Button>
+          )}
         </div>
 
         {staged !== undefined && (

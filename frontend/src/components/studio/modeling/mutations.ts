@@ -26,7 +26,8 @@ import type {
 } from '@/api/types'
 import { invalidateModeling, toastError } from '../lib'
 import { useCascadeGuard } from './cascadeContext'
-import { parentViolationsOf } from './errors'
+import { relationRuleViolationsOf } from './errors'
+import { IDENTITY_CASCADE_NOTE, identityViolationsOf } from './identity'
 import type { TypeKind } from './useModelSchema'
 
 /**
@@ -98,7 +99,7 @@ export function useUpdateType(ontologyKey: string, kind: TypeKind, typeId: strin
 /**
  * Set, flip or clear (`null`) a relation type's parent end. A refusal for
  * broken parent rules is not toasted: the caller shows its report from the
- * mutation's error (`parentViolationsOf`).
+ * mutation's error (`relationRuleViolationsOf`).
  */
 export function useSetParent(ontologyKey: string, relationTypeId: string) {
   const queryClient = useQueryClient()
@@ -110,7 +111,27 @@ export function useSetParent(ontologyKey: string, relationTypeId: string) {
       toast.success(saved.parent === null ? 'Parent relation cleared' : 'Parent end saved')
     },
     onError: (error) => {
-      if (parentViolationsOf(error) === null) toastError(error)
+      if (relationRuleViolationsOf(error) === null) toastError(error)
+    },
+  })
+}
+
+/**
+ * Turn a relation type's one per pair on or off. A refusal by the stored
+ * data (a pair linked twice) is not toasted: the caller shows its report from
+ * the mutation's error (`relationRuleViolationsOf`).
+ */
+export function useSetOnePerPair(ontologyKey: string, relationTypeId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (onePerPair: boolean) =>
+      model.updateRelationType(ontologyKey, relationTypeId, { onePerPair }),
+    onSuccess: (saved) => {
+      invalidateModeling(queryClient)
+      toast.success(saved.onePerPair ? 'One per pair turned on' : 'One per pair turned off')
+    },
+    onError: (error) => {
+      if (relationRuleViolationsOf(error) === null) toastError(error)
     },
   })
 }
@@ -127,6 +148,32 @@ export function useSetNameProperty(ontologyKey: string, entityTypeId: string) {
     },
     onError: toastError,
   })
+}
+
+/**
+ * Set or clear (`null`) an entity type's identity. A needed cascade opens
+ * the page's cascade dialog, which re-sends it with `cascade=true`; a
+ * refusal by the stored data is not toasted: the caller shows its report
+ * from the mutation's error (`identityViolationsOf`).
+ */
+export function useSetIdentity(ontologyKey: string, entityTypeId: string) {
+  const queryClient = useQueryClient()
+  const guard = useCascadeGuard()
+  const mutation = useMutation({
+    mutationFn: ({ identityProperties, cascade }: { identityProperties: string[] | null; cascade: boolean }) =>
+      model.updateEntityType(ontologyKey, entityTypeId, { identityProperties }, cascade),
+    onSuccess: (saved) => {
+      invalidateModeling(queryClient)
+      toast.success(saved.identityProperties === null ? 'Identity cleared' : 'Identity saved')
+    },
+  })
+  const set = (identityProperties: string[] | null, cascade = false) => {
+    mutation.mutateAsync({ identityProperties, cascade }).catch((error: unknown) => {
+      if (guard(error, () => set(identityProperties, true), IDENTITY_CASCADE_NOTE)) return
+      if (identityViolationsOf(error) === null) toastError(error)
+    })
+  }
+  return { set, error: mutation.error, isPending: mutation.isPending, reset: mutation.reset }
 }
 
 /** Mark every modeling cache stale, then refetch only one type's property list. */

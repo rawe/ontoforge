@@ -1,6 +1,6 @@
 /**
  * The storage version and the whole upgrade path
- * (`docs/decisions.md#storage`).
+ * (`docs/storage-adapters/contract.md#lifecycle`).
  *
  * One number in `public.storage_version` covers the whole server. The
  * boot transaction reads it under a database-wide advisory lock — so
@@ -47,7 +47,7 @@ import { quoteIdent } from "./oql/bindings.js";
 import { camelizeRow } from "./rows.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 8;
+export const STORAGE_VERSION = 11;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 1;
@@ -585,10 +585,45 @@ const STEPS: Step[] = [
       `ALTER TABLE ruleset ADD COLUMN write_access text NOT NULL DEFAULT 'full'`,
     ],
   },
+  {
+    // The design revision: the ontology's id and the number every design
+    // change advances, starting at 1.
+    to: 9,
+    actions: [
+      `CREATE TABLE design_revision (
+  singleton   boolean NOT NULL DEFAULT true CONSTRAINT design_revision_pk PRIMARY KEY
+                      CONSTRAINT design_revision_singleton CHECK (singleton),
+  ontology_id uuid    NOT NULL,
+  revision    integer NOT NULL
+)`,
+      `INSERT INTO design_revision (ontology_id, revision)
+  SELECT ontology_id, 1 FROM public.ontology WHERE namespace = current_schema()`,
+    ],
+  },
+  {
+    // Entity identity: a type's identity properties and an entity's
+    // derived identity, unique within its type.
+    to: 10,
+    actions: [
+      `ALTER TABLE entity_type ADD COLUMN identity_properties text[]`,
+      `ALTER TABLE entity ADD COLUMN identity text`,
+      `ALTER TABLE entity ADD CONSTRAINT entity_identity_unique UNIQUE (type_key, identity)
+  DEFERRABLE INITIALLY IMMEDIATE`,
+    ],
+  },
+  {
+    // Relation rules: one per pair on a relation type; staged values found
+    // by value, for puts.
+    to: 11,
+    actions: [
+      `ALTER TABLE relation_type ADD COLUMN one_per_pair boolean NOT NULL DEFAULT false`,
+      `CREATE INDEX changeset_value_match_idx ON changeset_value (changeset_id, property_key, md5(value::text))`,
+    ],
+  },
 ];
 
 /** Serializes the boot DDL and upgrade of every server on one database. */
-const LOCK = `SELECT pg_advisory_xact_lock(hashtextextended('ontoforge.storage', 0))`;
+const LOCK_KEY = `hashtextextended('ontoforge.storage', 0)`;
 
 /** The recorded version; `null` for an empty database. */
 async function recordedVersion(querier: Querier): Promise<number | null> {
@@ -619,7 +654,11 @@ export async function bringStorageUpToDate(
   querier: Querier,
   serverDdl: readonly string[],
 ): Promise<void> {
-  await querier.query(LOCK);
+  const free = await querier.query(`SELECT pg_try_advisory_xact_lock(${LOCK_KEY}) AS locked`);
+  if (free.rows[0]!["locked"] !== true) {
+    console.log("Waiting for another server to bring the storage up to date.");
+    await querier.query(`SELECT pg_advisory_xact_lock(${LOCK_KEY})`);
+  }
   const recorded = await recordedVersion(querier);
   if (recorded !== null && recorded > STORAGE_VERSION) {
     throw new Error(

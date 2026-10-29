@@ -5,17 +5,20 @@
  * modeling store bound to it — an unknown ontology key answers 404
  * before any route logic runs. Within the ontology the surface
  * addresses types and properties by INTERNAL IDENTIFIER, not key
- * (`docs/interfaces.md`, "What a path segment identifies"). Routers
+ * (`docs/interfaces/`, "What a path segment identifies"). Routers
  * parse and shape only — every domain rule lives in `service.ts`,
  * shared with the modeling MCP server.
  */
 
 import { Readable } from "node:stream";
 
+import type { FastifyRequest } from "fastify";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
-import { getModelingStore, getRuntimeStore } from "../core/ports.js";
+import { isOntologyAdmin, lensFilter } from "../access/authorize.js";
+import { accessOf, actorOf } from "../auth/plugin.js";
+import { getModelingStore, getOntologyRegistry, getRuntimeStore } from "../core/ports.js";
 import { navigatorModelingRouter } from "./navigatorRouter.js";
 import { retrieverModelingRouter } from "./retrieverRouter.js";
 import {
@@ -68,7 +71,7 @@ const RelationTypePropertyParams = OntologyParams.extend({
 });
 
 // Assistants and saved queries are the modeling exceptions addressed by
-// KEY, not internal identifier (`docs/interfaces.md`).
+// KEY, not internal identifier (`docs/interfaces/`).
 const LensKeyParams = OntologyParams.extend({ lensKey: z.string() });
 const AssistantKeyParams = OntologyParams.extend({ lensKey: z.string(), assistantKey: z.string() });
 const QueryKeyParams = OntologyParams.extend({ lensKey: z.string(), queryKey: z.string() });
@@ -84,6 +87,18 @@ const CascadeQuery = z.object({
     .default("false")
     .transform((value) => value === "true" || value === "1"),
 });
+
+/**
+ * Whether the request reads a lens's inclusions as the runtime serves them:
+ * with authentication on, a Reader or Writer of the lens who does not
+ * administer the ontology sees no more of the design than its lens shows.
+ */
+async function readsAsServed(request: FastifyRequest, ontologyKey: string): Promise<boolean> {
+  const access = await accessOf(request);
+  if (access.kind !== "caller") return false;
+  const ontology = await getOntologyRegistry().getOntology(ontologyKey);
+  return ontology === null || !isOntologyAdmin(access.caller, ontology.ontologyId as string);
+}
 
 /** Routes mounted at `/api/ontologies/:ontologyKey/model`. */
 export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
@@ -117,7 +132,15 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         response: { 200: z.array(LensResponse) },
       },
     },
-    async (request) => service.listLenses(await getModelingStore(request.params.ontologyKey)),
+    async (request) => {
+      const lenses = await service.listLenses(await getModelingStore(request.params.ontologyKey));
+      // With authentication on: the lenses the caller holds a role on, every one for administrators.
+      const access = await accessOf(request);
+      if (access.kind === "trusted") return lenses;
+      const ontology = await getOntologyRegistry().getOntology(request.params.ontologyKey);
+      const visible = lensFilter(access, ontology?.ontologyId as string);
+      return lenses.filter((lens) => visible(lens.lensId));
+    },
   );
 
   app.get(
@@ -167,6 +190,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.lensId,
         await getModelingStore(request.params.ontologyKey),
         await getRuntimeStore(request.params.ontologyKey),
+        await actorOf(request),
       ),
   );
 
@@ -203,11 +227,14 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         response: { 200: z.array(IncludeTypeResponse) },
       },
     },
-    async (request) =>
-      service.listIncludesEntityTypes(
-        request.params.lensId,
-        await getModelingStore(request.params.ontologyKey),
-      ),
+    async (request) => {
+      const { lensId, ontologyKey } = request.params;
+      const store = await getModelingStore(ontologyKey);
+      if (await readsAsServed(request, ontologyKey)) {
+        return service.listServedIncludes(lensId, "EntityType", store, await getRuntimeStore(ontologyKey));
+      }
+      return service.listIncludesEntityTypes(lensId, store);
+    },
   );
 
   app.put(
@@ -276,11 +303,14 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         response: { 200: z.array(IncludeTypeResponse) },
       },
     },
-    async (request) =>
-      service.listIncludesRelationTypes(
-        request.params.lensId,
-        await getModelingStore(request.params.ontologyKey),
-      ),
+    async (request) => {
+      const { lensId, ontologyKey } = request.params;
+      const store = await getModelingStore(ontologyKey);
+      if (await readsAsServed(request, ontologyKey)) {
+        return service.listServedIncludes(lensId, "RelationType", store, await getRuntimeStore(ontologyKey));
+      }
+      return service.listIncludesRelationTypes(lensId, store);
+    },
   );
 
   app.put(
@@ -352,11 +382,14 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         response: { 200: z.array(IncludeSearchIndex) },
       },
     },
-    async (request) =>
-      searchIndices.listLensIndexInclusions(
-        request.params.lensId,
-        await getModelingStore(request.params.ontologyKey),
-      ),
+    async (request) => {
+      const { lensId, ontologyKey } = request.params;
+      const store = await getModelingStore(ontologyKey);
+      if (await readsAsServed(request, ontologyKey)) {
+        return searchIndices.listServedLensIndexInclusions(lensId, store, await getRuntimeStore(ontologyKey));
+      }
+      return searchIndices.listLensIndexInclusions(lensId, store);
+    },
   );
 
   app.delete(
@@ -621,6 +654,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["modeling"],
         params: OntologyParams,
+        querystring: CascadeQuery,
         body: EntityTypeCreate,
         response: { 201: EntityTypeResponse },
       },
@@ -629,6 +663,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       const result = await service.createEntityType(
         request.body,
         await getModelingStore(request.params.ontologyKey),
+        request.query.cascade,
       );
       return reply.status(201).send(result);
     },
@@ -669,6 +704,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ["modeling"],
         params: EntityTypeIdParams,
+        querystring: CascadeQuery,
         body: EntityTypeUpdate,
         response: { 200: EntityTypeResponse },
       },
@@ -678,6 +714,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.entityTypeId,
         request.body,
         await getModelingStore(request.params.ontologyKey),
+        request.query.cascade,
       ),
   );
 

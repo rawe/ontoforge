@@ -134,6 +134,7 @@ describe("PostgreSQL search-index storage", () => {
     return (await store.createIndex(randomUUID(), "custom", definition(key)))!;
   }
 
+  // Forced: these generations share one definition hash on purpose.
   async function semantic(index: SearchIndexRecord, dimensions = 3): Promise<string> {
     const generationId = randomUUID();
     await store.createGeneration({
@@ -144,7 +145,7 @@ describe("PostgreSQL search-index storage", () => {
       modelId: "fake:model:3",
       dimensions,
       languages: null,
-    });
+    }, { design: await store.designRevision(), force: true });
     return generationId;
   }
 
@@ -158,7 +159,7 @@ describe("PostgreSQL search-index storage", () => {
       modelId: null,
       dimensions: null,
       languages: ["german", "english"],
-    });
+    }, { design: await store.designRevision(), force: true });
     return generationId;
   }
 
@@ -229,9 +230,9 @@ describe("PostgreSQL search-index storage", () => {
     expect(await partitionTables()).toEqual({ [table(first)]: false });
     expect(await constraintNames(table(first))).toEqual([`${table(first)}_bound`, `${table(first)}_pk`]);
 
-    expect(await store.upsertEntries(first, [entry(ALICE, "Alice", [1, 0, 0]), entry(BOB, "Bob", [0, 1, 0])])).toBe(true);
+    expect(await store.upsertEntries(first, [entry(ALICE, "Alice", [1, 0, 0]), entry(BOB, "Bob", [0, 1, 0])])).toBe(2);
     // Replaced by identity, not added.
-    expect(await store.upsertEntries(first, [entry(ALICE, "Alice Liddell", [1, 1, 0])])).toBe(true);
+    expect(await store.upsertEntries(first, [entry(ALICE, "Alice Liddell", [1, 1, 0])])).toBe(1);
     const hashes = await store.readEntryHashes(first, [
       { entityId: ALICE, partKind: "self", groupNo: 0, partId: "" },
       { entityId: ALICE, partKind: "self", groupNo: 1, partId: "" },
@@ -262,9 +263,9 @@ describe("PostgreSQL search-index storage", () => {
 
     // A second generation replaces it.
     const second = await semantic(index);
-    expect(await store.upsertEntries(second, [entry(BOB, "Bob", [0, 0, 1])])).toBe(true);
+    expect(await store.upsertEntries(second, [entry(BOB, "Bob", [0, 0, 1])])).toBe(1);
     // Writes still reach the active generation while the next one builds.
-    expect(await store.upsertEntries(first, [entry(BOB, "Bob B.", [0, 1, 1])])).toBe(true);
+    expect(await store.upsertEntries(first, [entry(BOB, "Bob B.", [0, 1, 1])])).toBe(1);
     expect(await store.finishGeneration(second)).toBe(true);
 
     expect((await store.getGeneration(first))?.state).toBe("retired");
@@ -272,7 +273,7 @@ describe("PostgreSQL search-index storage", () => {
     expect(await partitionTables()).toEqual({ [table(second)]: true });
     expect(await parentRows(first)).toEqual([]);
     expect(await parentRows(second)).toEqual([BOB]);
-    expect(await store.upsertEntries(first, [entry(BOB, "Bob", [0, 0, 1])])).toBe(false);
+    expect(await store.upsertEntries(first, [entry(BOB, "Bob", [0, 0, 1])])).toBeNull();
     expect((await store.listGenerations(index.searchIndexId)).map((g) => [g.generationId, g.state])).toEqual([
       [first, "retired"],
       [second, "ready"],
@@ -302,7 +303,7 @@ describe("PostgreSQL search-index storage", () => {
   it("a keyword generation stems each entry in every language of its set, under a GIN index", async () => {
     const index = await newIndex();
     const generation = await keyword(index);
-    expect(await store.upsertEntries(generation, [entry(ALICE, "Die Häuser are running", null)])).toBe(true);
+    expect(await store.upsertEntries(generation, [entry(ALICE, "Die Häuser are running", null)])).toBe(1);
     expect(await store.finishGeneration(generation)).toBe(true);
 
     const tsv = await runQuery(
@@ -330,7 +331,7 @@ describe("PostgreSQL search-index storage", () => {
     expect(await partitionTables()).toEqual({ [table(fresh)]: false });
     expect(await queueCount()).toBe(0);
     expect(await store.finishGeneration(stale)).toBe(false);
-    expect(await store.upsertEntries(stale, [entry(ALICE, "Alice", [1, 0, 0])])).toBe(false);
+    expect(await store.upsertEntries(stale, [entry(ALICE, "Alice", [1, 0, 0])])).toBeNull();
     expect(await store.readEntryHashes(stale, [{ entityId: ALICE, partKind: "self", groupNo: 0, partId: "" }])).toEqual([]);
 
     // The other representation is a separate lifecycle.

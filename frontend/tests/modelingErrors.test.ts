@@ -1,7 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { ApiError } from '../src/api/http.ts'
-import { fieldErrorsOf, parentViolationsOf, refusalReport } from '../src/components/studio/modeling/errors.ts'
+import {
+  fieldErrorsOf,
+  ONE_PER_PAIR_RULES,
+  refusalReport,
+  relationRuleViolationsOf,
+} from '../src/components/studio/modeling/errors.ts'
 
 const validation = (details: Record<string, unknown>) =>
   new ApiError(422, 'VALIDATION_ERROR', 'Request validation failed', details)
@@ -55,19 +60,19 @@ test('anything that is not an ApiError has no field errors', () => {
 const refused = (violations: unknown) =>
   new ApiError(409, 'RESOURCE_CONFLICT', 'breaks the parent rules', { violations })
 
-test('parentViolationsOf reads details.violations of a 409', () => {
+test('relationRuleViolationsOf reads details.violations of a 409', () => {
   const violations = [{ rule: 'two_parents', count: 1, entities: [{ type: 'customer', id: 'c1' }] }]
-  assert.deepEqual(parentViolationsOf(refused(violations)), violations)
+  assert.deepEqual(relationRuleViolationsOf(refused(violations)), violations)
 })
 
-test('parentViolationsOf is null for any other error', () => {
-  assert.equal(parentViolationsOf(new ApiError(409, 'RESOURCE_CONFLICT', 'exists')), null)
-  assert.equal(parentViolationsOf(refused('nope')), null)
+test('relationRuleViolationsOf is null for any other error', () => {
+  assert.equal(relationRuleViolationsOf(new ApiError(409, 'RESOURCE_CONFLICT', 'exists')), null)
+  assert.equal(relationRuleViolationsOf(refused('nope')), null)
   assert.equal(
-    parentViolationsOf(new ApiError(422, 'VALIDATION_ERROR', 'bad', { violations: [] })),
+    relationRuleViolationsOf(new ApiError(422, 'VALIDATION_ERROR', 'bad', { violations: [] })),
     null,
   )
-  assert.equal(parentViolationsOf(new Error('boom')), null)
+  assert.equal(relationRuleViolationsOf(new Error('boom')), null)
 })
 
 test('refusalReport lists both rules in order, a rule without violators as none', () => {
@@ -77,6 +82,21 @@ test('refusalReport lists both rules in order, a rule without violators as none'
   assert.deepEqual(report, [
     { rule: 'two_parents', summary: 'Two parents · none', entities: [], more: 0 },
     { rule: 'cycle', summary: 'Cycles · 1 entity', entities: [{ type: 'task', id: 't1' }], more: 0 },
+  ])
+})
+
+test('refusalReport lists the rules it is given, counting pairs for one per pair', () => {
+  const report = refusalReport(
+    [{ rule: 'duplicate_pair', count: 2, entities: [{ type: 'person', id: 'p1' }] }],
+    ONE_PER_PAIR_RULES,
+  )
+  assert.deepEqual(report, [
+    {
+      rule: 'duplicate_pair',
+      summary: 'Pairs linked more than once · 2 pairs',
+      entities: [{ type: 'person', id: 'p1' }],
+      more: 1,
+    },
   ])
 })
 

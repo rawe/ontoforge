@@ -31,7 +31,7 @@
  */
 
 import { getEmbeddingProvider } from "../../core/embedding.js";
-import { NotFoundError, ValidationError } from "../../core/exceptions.js";
+import { ValidationError } from "../../core/exceptions.js";
 import type {
   FilterCondition,
   KeywordMatching,
@@ -80,8 +80,10 @@ export interface Matched {
   relationType: string | null;
   relationId: string | null;
   /** The entity on the other end of a relation entry; its label is its
-   * name property's value (null when empty or hidden by the lens). */
-  target: { id: string; type: string; label: string | null } | null;
+   * name property's value (null when empty or hidden by the lens), its
+   * identity its `_identity` (null when it has none or the lens does not
+   * show the type's whole identity). */
+  target: { id: string; type: string; label: string | null; identity: string | null } | null;
   /** At most 200 characters of the entry's text; empty when the index
    * reads properties the lens hides. */
   snippet: string;
@@ -460,7 +462,7 @@ export async function describeMatches(
   store: RuntimeStore,
   hits: EngineHit[],
 ): Promise<Map<string, Matched>> {
-  const labels = await targetLabels(
+  const targets = await targetsOf(
     loaded,
     store,
     hits.map((hit) => hit.matched.entry),
@@ -486,7 +488,8 @@ export async function describeMatches(
           : {
               id: entry.targetId,
               type: entry.targetType,
-              label: labels.get(entry.targetId) ?? null,
+              label: targets.get(entry.targetId)?.label ?? null,
+              identity: targets.get(entry.targetId)?.identity ?? null,
             },
       snippet: hidesText(index) ? "" : snippet(entry.text),
       charOffset: entry.partKind === "passage" ? entry.startChar : null,
@@ -496,30 +499,33 @@ export async function describeMatches(
   return described;
 }
 
-/** The name-property values of the target entities, by id — through the
- * lens: a hidden name property gives no label. */
-async function targetLabels(
+/** The name-property values and the identities of the target entities,
+ * by id — through the lens: a hidden name property gives no label, an
+ * identity the lens does not show whole no identity. */
+async function targetsOf(
   loaded: LoadedSchema,
   store: RuntimeStore,
   entries: RankedSearchEntry[],
-): Promise<Map<string, string>> {
+): Promise<Map<string, { label: string | null; identity: string | null }>> {
   const byType = new Map<string, Set<string>>();
   for (const entry of entries) {
     if (entry.targetId === null || entry.targetType === null) continue;
     byType.set(entry.targetType, (byType.get(entry.targetType) ?? new Set()).add(entry.targetId));
   }
-  const labels = new Map<string, string>();
+  const targets = new Map<string, { label: string | null; identity: string | null }>();
   for (const [type, ids] of byType) {
     const nameProperty = loaded.scoped.entityTypes[type]?.nameProperty ?? null;
+    const identityShown = (loaded.scoped.entityTypes[type]?.identityProperties ?? null) !== null;
     const fullType = loaded.full.entityTypes[type];
-    if (nameProperty === null || fullType === undefined) continue;
+    if ((nameProperty === null && !identityShown) || fullType === undefined) continue;
     const rows = await store.getEntitiesByIds([...ids], fullType.properties);
     for (const [id, row] of Object.entries(rows)) {
-      const value = row[nameProperty];
-      if (typeof value === "string" && value !== "") labels.set(id, value);
+      const value = nameProperty === null ? null : row[nameProperty];
+      const identity = identityShown && typeof row._identity === "string" ? row._identity : null;
+      targets.set(id, { label: typeof value === "string" && value !== "" ? value : null, identity });
     }
   }
-  return labels;
+  return targets;
 }
 
 // ---------------------------------------------------------------------------
@@ -564,8 +570,8 @@ export function indexStoreOf(store: RuntimeStore): SearchIndexStore {
 }
 
 /**
- * Search entities through chosen indices. Unknown index keys -> not found;
- * an index the lens may not search, an unknown relation type, an invalid
+ * Search entities through chosen indices. An index the lens may not
+ * search or that does not exist, an unknown relation type, an invalid
  * dimension -> validation error (collected, by field); a mode that needs
  * an embedding provider without one -> disabled feature.
  */
@@ -595,15 +601,12 @@ export async function searchByIndices(
     }
   }
 
-  const all = await indexStore.listIndices();
   const searchable = await searchableIndices(loaded, indexStore);
   let selected = searchable;
   if (request.indices !== undefined && request.indices !== null) {
     if (request.indices.length === 0) errors.indices = "Name at least one index, or omit indices";
-    const unknown = request.indices.filter((key) => !all.some((index) => index.key === key));
-    if (unknown.length > 0) {
-      throw new NotFoundError(`Search index '${unknown[0]}' not found`);
-    }
+    // An unknown key answers as one the lens cannot search: the lens does
+    // not tell which indices exist beyond it.
     request.indices.forEach((key, i) => {
       if (!searchable.some((index) => index.key === key)) {
         errors[`indices.${i}`] = `Search index '${key}' is not available in this lens`;

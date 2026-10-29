@@ -9,6 +9,7 @@ import {
 } from '@xyflow/react'
 import type { ParentEnd } from '@/api/types'
 import { cn } from '@/lib/utils'
+import { OnePerPairBadge } from '../modeling/OnePerPairField'
 import { edgeGeometry, type Box, type EdgeShape } from './geometry'
 import { NODE_WIDTH } from './layout'
 
@@ -24,6 +25,8 @@ export interface RelationEdgeData extends EdgeShape, Record<string, unknown> {
   match?: boolean
   /** The parent end of a parent relation; null or absent for an ordinary one. */
   parent?: ParentEnd | null
+  /** One per pair; marked on the label only off a parent relation, which has its own mark. */
+  onePerPair?: boolean
   onSelect?: () => void
 }
 
@@ -47,7 +50,8 @@ const boxOf = (n: InternalNode): Box => ({
  * the relation key as a label on a solid background. Clicking the label
  * selects the relation type, like clicking the line. A parent relation is
  * violet and thicker, with a dot on its parent end; its arrowhead still
- * points at the target.
+ * points at the target. Another one-per-pair relation type's label carries
+ * the one-per-pair badge.
  */
 function RelationTypeEdgeInner({ id, source, target, data, selected, markerEnd }: EdgeProps<RelationFlowEdge>) {
   const s = useInternalNode(source)
@@ -101,7 +105,10 @@ function RelationTypeEdgeInner({ id, source, target, data, selected, markerEnd }
             data.onSelect?.()
           }}
         >
-          {data.label}
+          <span className="inline-flex items-center gap-1">
+            {data.label}
+            {data.onePerPair === true && parent === null && <OnePerPairBadge className="px-0.5 text-[8.5px] leading-3" />}
+          </span>
         </button>
       </EdgeLabelRenderer>
     </>

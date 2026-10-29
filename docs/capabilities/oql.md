@@ -10,7 +10,7 @@ being handed the database.
 **Normative anchor.** OQL's reference is the ISO GQL standard and its GPML pattern
 sublanguage. It is not defined by, and does not track, any storage vendor's query
 language. Where an implementation's own dialect and the standard disagree, the standard
-wins. The rule and its reasoning are in [../decisions.md](../decisions.md#query).
+wins. The parser's grammar is openCypher-shaped; GQL decides what is correct.
 
 **Written in keys.** Node labels are entity type keys, relationship types are relation
 type keys, and property names are property keys — exactly as declared in the schema, in
@@ -23,7 +23,7 @@ active database speaks is the adapter's private business: invisible to callers, 
 error messages, and not part of this contract. Acceptance and validation therefore do not
 depend on the backend; where the execution of an accepted query is known to fall short of
 this contract, the shortfall is enumerated in
-[../storage-adapters.md](../storage-adapters.md#known-limitations).
+[../storage-adapters/](../storage-adapters/README.md#known-limitations).
 
 ## The read-only guarantee
 
@@ -42,8 +42,7 @@ transaction mode. Four categories:
 The language is a closed enumeration: what is named here is the whole surface. Any
 construct or function the grammar parses but this enumeration does not name is rejected
 at validation with a hint naming the supported alternative. Widening the surface is a
-deliberate addition; narrowing it is a breaking change. The rule this enforces is in
-[../decisions.md](../decisions.md#query).
+deliberate addition; narrowing it is a breaking change.
 
 - **Clauses.** MATCH, OPTIONAL MATCH, WHERE, WITH, RETURN, ORDER BY with ASC and DESC,
   SKIP, LIMIT, and AS aliases. A query carries at most one WITH, so a pipeline is at
@@ -66,9 +65,10 @@ deliberate addition; narrowing it is a breaking change. The rule this enforces i
 Two boundaries are worth knowing rather than discovering:
 
 - The label requirement binds node patterns that **introduce a variable**. A fully
-  anonymous node pattern, and a relationship pattern with no type, are not flagged. They
-  widen what a pattern traverses, but nothing can be projected from them without a
-  variable, so they do not widen what is exposed. An inline property map, though,
+  anonymous node pattern, and a relationship pattern with no type, with a variable or
+  without, are not flagged. They match every type of their kind the lens shows and no
+  other, so they never reach, count or traverse what the lens hides. An inline property
+  map, though,
   requires an owner with a known type: the map's keys are property accesses, validated
   against the owner's type within the lens exactly as any other property access.
 - Parameter placeholders parse, but an ad-hoc query is executed with **no parameter values
@@ -84,7 +84,8 @@ database. Four checks, all keyed on the scoped schema:
 - every relationship type must be a relation type the lens exposes;
 - every property access on a variable whose type is known must name a property of that
   type **within the lens**;
-- system properties are always permitted, on any variable, regardless of lens.
+- system properties are always permitted, on any variable, regardless of lens; `_identity`
+  is null on an entity whose type has no [identity](entity-identity.md) the lens shows.
 
 A type or property that exists in the ontology's schema but not in this lens is rejected
 identically to one that does not exist anywhere — same check, same wording, same
@@ -123,9 +124,10 @@ by those names. A column's value is an entity, a relation, a scalar, or a list o
 those.
 
 Entities and relations come back as flat objects: their properties plus their system
-properties. Both are post-processed against the lens, and any property the lens does not
-expose for that type is removed. A query therefore cannot surface a hidden property even by
-projecting a whole node. Document properties are replaced by size stubs, though they remain
+properties. Both are post-processed against the lens, in a column of their own or at any
+depth inside a list or map, and any property the lens does not expose for that type is
+removed; one of a type the lens does not show reads as null. A query therefore cannot
+surface a hidden property even by projecting a whole node or collecting nodes. Document properties are replaced by size stubs, though they remain
 valid to reference inside the query itself — a predicate may test a document property even
 though its value is never returned intact ([documents.md](documents.md)).
 
@@ -142,7 +144,7 @@ connects.** Relation reads outside OQL do return them; query results do not.
 A client that needs to draw a graph from query results must therefore reconstruct endpoints
 itself, from the relation type's declared source and target and the entities in the same
 row. The reconstruction the web client performs, including how it resolves ambiguity, is in
-[../product-surface.md](../product-surface.md#client-side-contracts-the-api-does-not-imply).
+[../product-surface/](../product-surface/client-contracts.md#client-side-contracts-the-api-does-not-imply).
 
 ### Ordering and paging
 
@@ -159,7 +161,7 @@ the same carve-out the list operations state.
 
 ## Through the interfaces
 
-Complete operation and tool index: [../interfaces.md](../interfaces.md).
+Complete operation and tool index: [../interfaces/](../interfaces/README.md).
 
 | Reached by | How |
 |---|---|

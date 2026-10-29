@@ -8,6 +8,8 @@ import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
 import { useRuntimeWrites } from '@/api/writes'
 import type { EntityInstance, Neighbor, SchemaEntityType } from '@/api/types'
+import { useCanEdit } from '@/components/auth/useAccess'
+import { IdentityText } from '@/components/IdentityText'
 import { TypeChip } from '@/components/TypeChip'
 import type { RelationInitial } from '@/components/entity/AddRelationDialog'
 import type { HierarchyLink } from '@/components/entity/hierarchy'
@@ -58,6 +60,7 @@ export function ParentSection({
   const displayLabel = useDisplayLabel()
   const queryClient = useQueryClient()
   const [unlinkTarget, setUnlinkTarget] = useState<Neighbor | null>(null)
+  const canEdit = useCanEdit(ontologyKey, lensKey)
   const staging = usePinnedChangeset(ontologyKey, lensKey) !== null
   const typeKey = entity._entityTypeKey
 
@@ -117,15 +120,17 @@ export function ParentSection({
         <span className="truncate font-mono text-[11.5px] text-muted-foreground">
           {links.map((l) => l.relationType.key).join(' · ')}
         </span>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="ml-auto"
-          aria-label="Add a parent"
-          onClick={add}
-        >
-          <Plus className="size-3.5" />
-        </Button>
+        {canEdit && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="ml-auto"
+            aria-label="Add a parent"
+            onClick={add}
+          >
+            <Plus className="size-3.5" />
+          </Button>
+        )}
       </header>
 
       {pending ? (
@@ -137,9 +142,11 @@ export function ParentSection({
       ) : rows.length === 0 ? (
         <div className="flex items-center justify-between px-4 py-3">
           <p className="text-[13px] text-muted-foreground">No parent: a root.</p>
-          <Button variant="outline" size="xs" onClick={add}>
-            <Plus className="size-3" /> Add
-          </Button>
+          {canEdit && (
+            <Button variant="outline" size="xs" onClick={add}>
+              <Plus className="size-3" /> Add
+            </Button>
+          )}
         </div>
       ) : (
         <ul className="divide-y divide-border/60">
@@ -158,6 +165,7 @@ export function ParentSection({
                 >
                   {displayLabel(neighbor.entity)}
                 </Link>
+                <IdentityText identity={neighbor.entity._identity} />
                 {links.length > 1 && (
                   <span className="font-mono text-[11px] text-muted-foreground">
                     {neighbor.relation._relationTypeKey}
@@ -168,15 +176,17 @@ export function ParentSection({
                     {summary}
                   </span>
                 )}
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="ml-auto opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-                  aria-label={`Remove relation to ${displayLabel(neighbor.entity)}`}
-                  onClick={() => setUnlinkTarget(neighbor)}
-                >
-                  <Unlink className="size-3.5 text-muted-foreground" />
-                </Button>
+                {canEdit && (
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="ml-auto opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                    aria-label={`Remove relation to ${displayLabel(neighbor.entity)}`}
+                    onClick={() => setUnlinkTarget(neighbor)}
+                  >
+                    <Unlink className="size-3.5 text-muted-foreground" />
+                  </Button>
+                )}
               </li>
             )
           })}

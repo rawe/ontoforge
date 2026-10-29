@@ -5,7 +5,8 @@
  * type selects and reveals it; clicking a property also opens and flashes its
  * row in the inspector or on the classic page. `/` focuses the search from
  * anywhere on the page. Type rows show their lint issue count, property rows
- * an amber dot; a parent relation type's row carries the violet parent dot.
+ * an amber dot; a parent relation type's row carries the violet parent dot,
+ * and another one-per-pair relation type's row the one-per-pair badge.
  * Collapses to a thin rail, stored per ontology.
  */
 
@@ -34,6 +35,7 @@ import { useModelSchema, type TypeKind } from '../modeling/useModelSchema'
 import { WarnDot } from '../modeling/WarnDot'
 import type { SchemaSelection } from './schemaUrl'
 import { useSchemaWorkspace, type PropertyRequest } from './workspaceContext'
+import { OnePerPairBadge } from '../modeling/OnePerPairField'
 
 /** The outline row of a type (`data-outline`, and the expanded set). */
 const rowId = (sel: SchemaSelection) => `${sel.kind}:${sel.key}`
@@ -257,6 +259,7 @@ function OutlinePanel({
                   )}
                   <span className="truncate font-medium">{r.displayName}</span>
                   <span className="truncate font-mono text-[10px] text-muted-foreground">{r.key}</span>
+                  {r.onePerPair && r.parent === null && <OnePerPairBadge />}
                 </span>
                 <span className="flex min-w-0 items-center gap-1 font-mono text-[10.5px] text-muted-foreground">
                   <TypeDot typeKey={r.sourceEntityTypeKey} className="size-1.5" />

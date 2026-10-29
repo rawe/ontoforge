@@ -24,7 +24,7 @@ const catalogEntry = (patch: Partial<SearchCatalogEntry>): SearchCatalogEntry =>
 
 const employment = matched({
   index: 'person_employment', partKind: 'relation', relationType: 'works_for', relationId: 'r1',
-  target: { id: '0123456789abcdef', type: 'company', label: 'ACME' },
+  target: { id: '0123456789abcdef', type: 'company', label: 'ACME', identity: null },
 })
 
 test('no matched (old server) and self parts give no line', () => {
@@ -49,9 +49,14 @@ test('without a group label the relation type display name is used, else its key
 })
 
 test('a target without a label falls back to its truncated id; no target drops the arrow', () => {
-  const noLabel = { ...employment, target: { id: '0123456789abcdef', type: 'company', label: null } }
+  const noLabel = { ...employment, target: { id: '0123456789abcdef', type: 'company', label: null, identity: null } }
   assert.equal(matchedViaText(noLabel, schema), 'via Works for → 0123456789ab')
   assert.equal(matchedViaText({ ...employment, target: null }, schema), 'via Works for')
+})
+
+test("a target's identity follows its label", () => {
+  const identified = { ...employment, target: { id: '0123456789abcdef', type: 'company', label: 'ACME', identity: 'C-7' } }
+  assert.equal(matchedViaText(identified, schema), 'via Works for → ACME (C-7)')
 })
 
 test('a passage names the document property display name from the catalog', () => {

@@ -1,6 +1,6 @@
 # One shared entities event for every assistant kind
 
-Rule: [Interfaces](../decisions.md#interfaces)
+Current behavior: [The entities a turn met](../capabilities/threads.md#the-entities-a-turn-met)
 
 ## Context
 
@@ -8,6 +8,11 @@ Agents, retrievers and navigators all meet real entities while answering, and th
 lets a person open them, see them cited and add them to the Explorer. The kinds differ in
 everything else: an agent runs tools, a retriever plans and searches, a navigator walks
 the graph.
+
+## Decision
+
+Every assistant kind reports the entities it met through one shared `entities` event,
+carrying identity, label and whether the entity reached the answer model.
 
 ## Rejected
 

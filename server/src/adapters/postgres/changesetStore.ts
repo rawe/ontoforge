@@ -285,6 +285,93 @@ export class PostgresChangesetStore implements ChangesetStore {
     return result.rows.map((row) => row.object_id as string);
   }
 
+  /** The objects are found by their values (`changeset_value_match_idx`),
+   * never by reading the whole changeset, so that a batch of puts stays
+   * linear: those that stage one of `values`, kept when every value of
+   * those keys they stage matches. */
+  async entityObjectsStaging(id: string, typeKey: string, values: Row): Promise<StagedObjectRecord[]> {
+    if (!isUuid(id) || Object.keys(values).length === 0) {
+      return [];
+    }
+    // One equality per key on all three columns of the index, which the
+    // planner prefers even before the rows staged here have statistics.
+    const keys = Object.keys(values);
+    const hits = keys
+      .map((_, i) => `SELECT object_id FROM changeset_value
+          WHERE changeset_id = $1 AND property_key = $${i * 2 + 4}
+            AND md5(value::text) = md5($${i * 2 + 5}::jsonb::text) AND value = $${i * 2 + 5}::jsonb`)
+      .join(" UNION ");
+    const result = await this.query(
+      `WITH hit AS MATERIALIZED (${hits})
+       SELECT ${OBJECT_COLS.split(", ").map((column) => `o.${column.trim()}`).join(", ")}
+         FROM hit h
+         JOIN changeset_object o ON o.changeset_id = $1 AND o.object_id = h.object_id
+        WHERE o.kind = 'entity' AND o.type_key = $2 AND o.action <> 'delete'
+          AND NOT EXISTS (
+            SELECT 1 FROM changeset_value w
+             WHERE w.changeset_id = $1 AND w.object_id = h.object_id
+               AND w.property_key = ANY($3::text[]) AND w.value <> $${keys.length * 2 + 4}::jsonb -> w.property_key)
+        ORDER BY o.first_touched_at, o.object_id`,
+      [id, typeKey, keys, ...keys.flatMap((key) => [key, JSON.stringify(values[key])]), JSON.stringify(values)],
+    );
+    return this.withValues(id, result.rows.map(toObject));
+  }
+
+  /** The scan stays inside the changeset's own rows (the primary key's
+   * prefix), bounded by the cap on staged objects. */
+  async entityObjectsKeyed(id: string, typeKey: string, keys: string[]): Promise<StagedObjectRecord[]> {
+    if (!isUuid(id)) {
+      return [];
+    }
+    const result = await this.query(
+      `SELECT ${OBJECT_COLS} FROM changeset_object
+        WHERE changeset_id = $1 AND kind = 'entity' AND type_key = $2
+        ORDER BY first_touched_at, object_id`,
+      [id, typeKey],
+    );
+    const objects = result.rows.map(toObject);
+    if (objects.length === 0) {
+      return objects;
+    }
+    const values = await this.query(
+      `SELECT object_id, property_key, value, before, bytes FROM changeset_value
+        WHERE changeset_id = $1 AND property_key = ANY($2::text[])
+        ORDER BY object_id, property_key`,
+      [id, keys],
+    );
+    const byId = new Map(objects.map((object) => [object.objectId, object] as const));
+    for (const row of values.rows) {
+      byId.get(row.object_id as string)?.values.push({
+        propertyKey: row.property_key as string,
+        value: row.value,
+        before: row.before as Row | null,
+        bytes: row.bytes as number,
+      });
+    }
+    return objects;
+  }
+
+  async relationObjectsAt(
+    id: string,
+    typeKey: string,
+    pairs: { fromId: string; toId: string }[],
+  ): Promise<StagedObjectRecord[]> {
+    const valid = pairs.filter((pair) => isUuid(pair.fromId) && isUuid(pair.toId));
+    if (!isUuid(id) || valid.length === 0) {
+      return [];
+    }
+    const result = await this.query(
+      `SELECT ${OBJECT_COLS.split(", ").map((column) => `o.${column.trim()}`).join(", ")}
+         FROM changeset_object o
+         JOIN unnest($3::uuid[], $4::uuid[]) AS p (from_id, to_id)
+           ON p.from_id = o.from_id AND p.to_id = o.to_id
+        WHERE o.changeset_id = $1 AND o.kind = 'relation' AND o.type_key = $2
+        ORDER BY o.first_touched_at, o.object_id`,
+      [id, typeKey, valid.map((pair) => pair.fromId), valid.map((pair) => pair.toId)],
+    );
+    return result.rows.map(toObject);
+  }
+
   async stagedBytes(id: string): Promise<number> {
     if (!isUuid(id)) {
       return 0;
@@ -296,24 +383,40 @@ export class PostgresChangesetStore implements ChangesetStore {
     return result.rows[0]!.bytes as number;
   }
 
+  /** Two round trips for a staged call, which a batch makes once per
+   * item: the row taken and bumped in one statement, the objects and
+   * values written in another. The object count is the one before the
+   * change, net of the objects it removes and adds. */
   async apply(id: string, expectedVersion: number, change: ChangesetChange): Promise<ChangesetRecord | null> {
-    const row = await this.mutate(id, async (querier) => {
-      // Under the row lock the state and the version cannot change.
-      const result = await querier.query(
-        `UPDATE changeset c SET ${BUMP}
-          WHERE c.changeset_id = $1 AND c.version = $2 AND c.submitted_at IS NULL
-          RETURNING c.changeset_id`,
-        [id, expectedVersion],
-      );
-      if (result.rowCount === 0) {
+    if (!isUuid(id)) {
+      return null;
+    }
+    return this.tx(async (querier) => {
+      let bumped: DbResult;
+      try {
+        // Under the row lock the state and the version cannot change.
+        bumped = await querier.query(
+          `WITH held AS (SELECT changeset_id FROM changeset WHERE changeset_id = $1 FOR UPDATE NOWAIT)
+           UPDATE changeset c SET ${BUMP} FROM held
+            WHERE c.changeset_id = held.changeset_id AND c.version = $2 AND c.submitted_at IS NULL
+            RETURNING ${COLS}`,
+          [id, expectedVersion],
+        );
+      } catch (exc) {
+        throw exc instanceof ConflictError ? new ConflictError(busy(id)) : exc;
+      }
+      const row = bumped.rows[0];
+      if (row === undefined) {
         return null;
       }
+      let count = row.object_count as number;
       const removeObjects = change.removeObjects ?? [];
       if (removeObjects.length > 0) {
-        await querier.query(
+        const removed = await querier.query(
           `DELETE FROM changeset_object WHERE changeset_id = $1 AND object_id = ANY($2::uuid[])`,
           [id, removeObjects],
         );
+        count -= removed.rowCount;
       }
       const removeValues = change.removeValues ?? [];
       if (removeValues.length > 0) {
@@ -323,26 +426,38 @@ export class PostgresChangesetStore implements ChangesetStore {
           [id, removeValues.map((value) => value.objectId), removeValues.map((value) => value.propertyKey)],
         );
       }
-      for (const object of change.objects ?? []) {
-        await querier.query(
-          `INSERT INTO changeset_object
-                  (changeset_id, object_id, kind, type_key, action, from_id, to_id, first_touched_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, clock_timestamp())
-           ON CONFLICT (changeset_id, object_id) DO UPDATE SET action = EXCLUDED.action`,
-          [id, object.objectId, object.kind, object.typeKey, object.action, object.fromId, object.toId],
-        );
-      }
+      const objects = change.objects ?? [];
       const values = change.values ?? [];
-      if (values.length > 0) {
-        await querier.query(
-          `INSERT INTO changeset_value (changeset_id, object_id, property_key, value, before, bytes)
-           SELECT $1, v.object_id, v.property_key, v.value, v.before, v.bytes
-             FROM unnest($2::uuid[], $3::text[], $4::jsonb[], $5::jsonb[], $6::integer[])
-                  AS v(object_id, property_key, value, before, bytes)
-           ON CONFLICT (changeset_id, object_id, property_key)
-           DO UPDATE SET value = EXCLUDED.value, before = EXCLUDED.before, bytes = EXCLUDED.bytes`,
+      if (objects.length > 0 || values.length > 0) {
+        // The values' objects are written first, in the same statement:
+        // its foreign key is checked at its end. Objects are touched in
+        // list order.
+        const written = await querier.query(
+          `WITH objects AS (
+             INSERT INTO changeset_object
+                    (changeset_id, object_id, kind, type_key, action, from_id, to_id, first_touched_at)
+             SELECT $1, o.object_id, o.kind, o.type_key, o.action, o.from_id, o.to_id, clock_timestamp()
+               FROM unnest($2::uuid[], $3::text[], $4::text[], $5::text[], $6::uuid[], $7::uuid[])
+                    WITH ORDINALITY AS o(object_id, kind, type_key, action, from_id, to_id, n)
+              ORDER BY o.n
+             ON CONFLICT (changeset_id, object_id) DO UPDATE SET action = EXCLUDED.action
+             RETURNING (xmax = 0) AS added),
+           staged AS (
+             INSERT INTO changeset_value (changeset_id, object_id, property_key, value, before, bytes)
+             SELECT $1, v.object_id, v.property_key, v.value, v.before, v.bytes
+               FROM unnest($8::uuid[], $9::text[], $10::jsonb[], $11::jsonb[], $12::integer[])
+                    AS v(object_id, property_key, value, before, bytes)
+             ON CONFLICT (changeset_id, object_id, property_key)
+             DO UPDATE SET value = EXCLUDED.value, before = EXCLUDED.before, bytes = EXCLUDED.bytes)
+           SELECT count(*) FILTER (WHERE added)::int AS added FROM objects`,
           [
             id,
+            objects.map((object) => object.objectId),
+            objects.map((object) => object.kind),
+            objects.map((object) => object.typeKey),
+            objects.map((object) => object.action),
+            objects.map((object) => object.fromId),
+            objects.map((object) => object.toId),
             values.map((value) => value.objectId),
             values.map((value) => value.propertyKey),
             values.map((value) => JSON.stringify(value.value)),
@@ -350,10 +465,10 @@ export class PostgresChangesetStore implements ChangesetStore {
             values.map((value) => value.bytes),
           ],
         );
+        count += written.rows[0]!.added as number;
       }
-      return (await querier.query(`SELECT ${COLS} FROM changeset c WHERE c.changeset_id = $1`, [id])).rows[0]!;
+      return toChangeset({ ...row, object_count: count });
     });
-    return row === null ? null : toChangeset(row);
   }
 
   async submit(id: string, expectedVersion: number, note: string | null): Promise<ChangesetRecord | null> {
@@ -405,13 +520,15 @@ export class PostgresChangesetStore implements ChangesetStore {
     );
   }
 
-  async sweep(olderThan: Date): Promise<number> {
+  async sweep(idleMs: number): Promise<number> {
+    // The cutoff by now(), the clock that wrote last_change_at.
     const result = await this.query(
       `DELETE FROM changeset
         WHERE changeset_id IN (SELECT changeset_id FROM changeset
-                                WHERE submitted_at IS NULL AND last_change_at < $1
+                                WHERE submitted_at IS NULL
+                                  AND last_change_at < now() - $1::bigint * interval '1 millisecond'
                                 FOR UPDATE SKIP LOCKED)`,
-      [olderThan],
+      [idleMs],
     );
     return result.rowCount;
   }

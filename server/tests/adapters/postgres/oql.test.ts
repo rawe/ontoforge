@@ -102,7 +102,9 @@ function refusals(query: string): unknown {
 const PERSON_OBJECT =
   "CASE WHEN a.id IS NULL THEN NULL ELSE jsonb_build_object(" +
   "'_id', a.id::text, '_entityTypeKey', a.type_key, " +
-  "'_createdAt', a.created_at, '_updatedAt', a.updated_at) || a.props END";
+  "'_createdAt', a.created_at, '_updatedAt', a.updated_at)" +
+  " || CASE WHEN a.identity IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('_identity', a.identity) END" +
+  " || a.props END";
 
 // ---------------------------------------------------------------------------
 // The stage machine: one MATCH, one RETURN
@@ -150,7 +152,7 @@ describe("a single stage", () => {
         "JOIN relation r ON r.type_key = $2 AND r.from_id = a.id",
         "JOIN entity b ON b.type_key = $3 AND b.id = r.to_id",
         "WHERE a.type_key = $1",
-        "GROUP BY a.id, a.type_key, a.props, a.created_at, a.updated_at",
+        "GROUP BY a.id, a.type_key, a.props, a.created_at, a.updated_at, a.identity",
       ].join("\n"),
     );
   });
@@ -245,16 +247,26 @@ describe("fixed-depth patterns", () => {
     );
   });
 
-  it("omits the type condition for a relationship pattern with no type", () => {
-    expect(sql("MATCH (a:person)-[]->(b:company) RETURN b.name")).toContain(
-      "JOIN relation _r0 ON _r0.from_id = a.id",
-    );
+  it("holds a relationship pattern with no type to the lens's relation types", () => {
+    const query = "MATCH (a:person)-[r]->(b:company) RETURN b.name";
+    expect(sql(query)).toContain("JOIN relation r ON r.type_key = ANY($2::text[]) AND r.from_id = a.id");
+    expect(binds(query)).toEqual(["person", ["knows", "works_for"], "company"]);
   });
 
-  it("omits the type condition for a fully anonymous node pattern", () => {
-    expect(sql("MATCH (a:person)-[:works_for]->() RETURN a.name")).toContain(
-      "JOIN entity _e1 ON _e1.id = _r0.to_id",
-    );
+  it("holds a fully anonymous node pattern to the lens's entity types", () => {
+    const query = "MATCH (a:person)-[:works_for]->() RETURN a.name";
+    expect(sql(query)).toContain("JOIN entity _e1 ON _e1.type_key = ANY($3::text[]) AND _e1.id = _r0.to_id");
+    expect(binds(query)).toEqual(["person", "works_for", ["company", "person"]]);
+  });
+
+  it("an untyped relationship in a lens without relation types matches nothing", () => {
+    const query = "MATCH (a:person)-[]-() RETURN count(*)";
+    const compiled = compileOql(parseAndValidate(query, { ...SCHEMA, relationTypes: {} }));
+    expect(compiled.binds.map((b) => (b.kind === "value" ? b.value : null))).toEqual([
+      "person",
+      [],
+      ["company", "person"],
+    ]);
   });
 
   it("quotes an alias that collides with a SQL keyword", () => {
@@ -367,7 +379,7 @@ describe("WITH", () => {
       [
         "WITH s0 AS (",
         "SELECT a.id AS a__id, a.type_key AS a__type_key, a.props AS a__props," +
-          " a.created_at AS a__created_at, a.updated_at AS a__updated_at",
+          " a.created_at AS a__created_at, a.updated_at AS a__updated_at, a.identity AS a__identity",
         "FROM entity a",
         "WHERE a.type_key = $1",
         ")",
@@ -390,10 +402,10 @@ describe("WITH", () => {
       [
         "WITH s0 AS (",
         "SELECT a.id AS a__id, a.type_key AS a__type_key, a.props AS a__props," +
-          " a.created_at AS a__created_at, a.updated_at AS a__updated_at, count(*) AS n",
+          " a.created_at AS a__created_at, a.updated_at AS a__updated_at, a.identity AS a__identity, count(*) AS n",
         "FROM entity a",
         "WHERE a.type_key = $1",
-        "GROUP BY a.id, a.type_key, a.props, a.created_at, a.updated_at",
+        "GROUP BY a.id, a.type_key, a.props, a.created_at, a.updated_at, a.identity",
         ")",
         "SELECT s0.a__props->'name' AS \"a.name\", s0.n AS n",
         "FROM s0",
@@ -648,7 +660,7 @@ describe("ordering and paging", () => {
       [
         "WITH s0 AS (",
         "SELECT a.id AS a__id, a.type_key AS a__type_key, a.props AS a__props," +
-          " a.created_at AS a__created_at, a.updated_at AS a__updated_at," +
+          " a.created_at AS a__created_at, a.updated_at AS a__updated_at, a.identity AS a__identity," +
           " (a.props->'age')::numeric AS __ord0",
         "FROM entity a",
         "WHERE a.type_key = $1",
@@ -678,7 +690,7 @@ describe("ordering and paging", () => {
         [
           "WITH s0 AS (",
           "SELECT a.id AS a__id, a.type_key AS a__type_key, a.props AS a__props," +
-            " a.created_at AS a__created_at, a.updated_at AS a__updated_at," +
+            " a.created_at AS a__created_at, a.updated_at AS a__updated_at, a.identity AS a__identity," +
             " (a.props->'age')::numeric AS __ord0",
           "FROM entity a",
           "WHERE a.type_key = $1",
@@ -761,7 +773,7 @@ describe("the star projection", () => {
       [
         "WITH s0 AS (",
         "SELECT a.id AS a__id, a.type_key AS a__type_key, a.props AS a__props," +
-          " a.created_at AS a__created_at, a.updated_at AS a__updated_at",
+          " a.created_at AS a__created_at, a.updated_at AS a__updated_at, a.identity AS a__identity",
         "FROM entity a",
         "WHERE a.type_key = $1",
         ")",

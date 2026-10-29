@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query'
-import { ApiError } from './http'
+import { ApiError, onUnauthenticated } from './http'
+import { qk } from './queryKeys'
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -14,3 +15,6 @@ export const queryClient = new QueryClient({
     },
   },
 })
+
+// An ended session refetches the auth state, which brings up the sign-in screen.
+onUnauthenticated(() => void queryClient.invalidateQueries({ queryKey: qk.auth.me }))

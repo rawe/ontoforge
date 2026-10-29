@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { loadSettings } from "../../src/config.js";
+import { authSettings, loadSettings } from "../../src/config.js";
 
 describe("config defaults", () => {
   const settings = loadSettings({});
@@ -11,6 +11,7 @@ describe("config defaults", () => {
     expect(settings.DB_USER).toBe("postgres");
     expect(settings.DB_PASSWORD).toBe("ontoforge_dev");
     expect(settings.PORT).toBe(8000);
+    expect(settings.SHUTDOWN_DRAIN_SECONDS).toBe(20);
 
     expect(settings.EMBEDDING_PROVIDER).toBeNull();
     expect(settings.EMBEDDING_MODEL).toBe("bge-m3");
@@ -24,6 +25,8 @@ describe("config defaults", () => {
     expect(settings.DOCUMENT_CHUNK_OVERLAP).toBe(200);
 
     expect(settings.CHANGESET_MAX_BYTES).toBe(32 * 1024 * 1024);
+    expect(settings.CHANGESET_MAX_OBJECTS).toBe(10_000);
+    expect(settings.REQUEST_BODY_LIMIT).toBe(16 * 1024 * 1024);
 
     expect(settings.AI_PROVIDER).toBeNull();
     expect(settings.AI_MODEL).toBe("");
@@ -43,6 +46,7 @@ describe("config env overrides", () => {
       DB_USER: "admin",
       DB_PASSWORD: "secret",
       PORT: "9001",
+      SHUTDOWN_DRAIN_SECONDS: "45",
       EMBEDDING_PROVIDER: "ollama",
       EMBEDDING_MODEL: "custom-model",
       EMBEDDING_BASE_URL: "http://embed:1234",
@@ -53,6 +57,8 @@ describe("config env overrides", () => {
       DOCUMENT_CHUNK_SIZE: "500",
       DOCUMENT_CHUNK_OVERLAP: "50",
       CHANGESET_MAX_BYTES: "1048576",
+      CHANGESET_MAX_OBJECTS: "500",
+      REQUEST_BODY_LIMIT: "2097152",
       AI_PROVIDER: "openai",
       AI_MODEL: "gpt",
       AI_BASE_URL: "http://ai:4321/v1",
@@ -66,6 +72,7 @@ describe("config env overrides", () => {
     expect(settings.DB_USER).toBe("admin");
     expect(settings.DB_PASSWORD).toBe("secret");
     expect(settings.PORT).toBe(9001);
+    expect(settings.SHUTDOWN_DRAIN_SECONDS).toBe(45);
     expect(settings.EMBEDDING_PROVIDER).toBe("ollama");
     expect(settings.EMBEDDING_MODEL).toBe("custom-model");
     expect(settings.EMBEDDING_BASE_URL).toBe("http://embed:1234");
@@ -76,6 +83,8 @@ describe("config env overrides", () => {
     expect(settings.DOCUMENT_CHUNK_SIZE).toBe(500);
     expect(settings.DOCUMENT_CHUNK_OVERLAP).toBe(50);
     expect(settings.CHANGESET_MAX_BYTES).toBe(1048576);
+    expect(settings.CHANGESET_MAX_OBJECTS).toBe(500);
+    expect(settings.REQUEST_BODY_LIMIT).toBe(2097152);
     expect(settings.AI_PROVIDER).toBe("openai");
     expect(settings.AI_MODEL).toBe("gpt");
     expect(settings.AI_BASE_URL).toBe("http://ai:4321/v1");
@@ -100,12 +109,25 @@ describe("config env overrides", () => {
       "EMBEDDING_BATCH_SIZE",
       "EMBEDDING_CONCURRENCY",
       "CHANGESET_MAX_BYTES",
+      "CHANGESET_MAX_OBJECTS",
+      "REQUEST_BODY_LIMIT",
+      "SHUTDOWN_DRAIN_SECONDS",
     ]) {
       expect(() => loadSettings({ [name]: "0" })).toThrow(
         new RegExp(`${name} must be a positive integer`),
       );
       expect(() => loadSettings({ [name]: "-2" })).toThrow(new RegExp(name));
     }
+  });
+
+  it("sizes the pool from DB_POOL_SIZE and listens on DB_URI unless DB_LISTEN_URI is set", () => {
+    expect(loadSettings({}).DB_POOL_SIZE).toBe(10);
+    expect(loadSettings({ DB_POOL_SIZE: "25" }).DB_POOL_SIZE).toBe(25);
+    expect(() => loadSettings({ DB_POOL_SIZE: "0" })).toThrow(/DB_POOL_SIZE/);
+    expect(loadSettings({}).DB_LISTEN_URI).toBeNull();
+    expect(loadSettings({ DB_LISTEN_URI: "postgresql://db:5432/ontoforge" }).DB_LISTEN_URI).toBe(
+      "postgresql://db:5432/ontoforge",
+    );
   });
 
   it("accepts every reasoning effort level and rejects anything else", () => {
@@ -223,5 +245,137 @@ describe("decision provider configuration", () => {
       .DECISION_API_KEY).toBe("explicit-key");
     expect(loadSettings({ DECISION_API_KEY: "", TYPESAFE_API_KEY: "provider-key" })
       .DECISION_API_KEY).toBe("provider-key");
+  });
+});
+
+describe("shared state configuration", () => {
+  it("keeps shared state in memory by default", () => {
+    const settings = loadSettings({});
+    expect(settings.SHARED_STATE).toBe("memory");
+    expect(settings.VALKEY_URL).toBeNull();
+  });
+
+  it("takes a Valkey with its URL", () => {
+    const settings = loadSettings({ SHARED_STATE: "valkey", VALKEY_URL: "redis://valkey:6379" });
+    expect(settings.SHARED_STATE).toBe("valkey");
+    expect(settings.VALKEY_URL).toBe("redis://valkey:6379");
+    expect(loadSettings({ SHARED_STATE: "valkey", VALKEY_URL: "rediss://u:p@valkey:6380/0" }).VALKEY_URL)
+      .toBe("rediss://u:p@valkey:6380/0");
+  });
+
+  it("fails the boot for an unknown store, a missing or malformed URL, and a URL without the switch", () => {
+    expect(() => loadSettings({ SHARED_STATE: "redis" })).toThrow(/SHARED_STATE/);
+    expect(() => loadSettings({ SHARED_STATE: "valkey" })).toThrow(/VALKEY_URL is required/);
+    expect(() => loadSettings({ SHARED_STATE: "valkey", VALKEY_URL: "http://valkey:6379" })).toThrow(/VALKEY_URL/);
+    expect(() => loadSettings({ VALKEY_URL: "redis://valkey:6379" })).toThrow(/SHARED_STATE is not 'valkey'/);
+    expect(() => loadSettings({ SHARED_STATE: "memory", VALKEY_URL: "redis://valkey:6379" })).toThrow(/VALKEY_URL/);
+  });
+});
+
+describe("authentication settings", () => {
+  const enabled = {
+    AUTH_ENABLED: "true",
+    PUBLIC_URL: "http://localhost:8000/",
+    OIDC_ISSUER: "http://localhost:8180/realms/ontoforge",
+    OIDC_CLIENT_ID: "ontoforge-web",
+    OIDC_CLIENT_SECRET: "s3cret",
+    OIDC_AUDIENCE: "ontoforge-api",
+    AUTH_ADMIN_SUBJECT: "4f1c",
+    ACCESS_DB_URI: "postgresql://localhost:5432/ontoforge_access",
+  };
+
+  it("is off by default and then reads none of its variables", () => {
+    const settings = loadSettings({ OIDC_ISSUER: "not a url", AUTH_SESSION_IDLE_SECONDS: "never" });
+    expect(settings.AUTH_ENABLED).toBe(false);
+    expect(settings.OIDC_ISSUER).toBeNull();
+    expect(loadSettings({ WEB_CLIENT_URL: "not a url" }).WEB_CLIENT_URL).toBeNull();
+    expect(settings.AUTH_SESSION_IDLE_SECONDS).toBeNull();
+    expect(authSettings(settings)).toBeNull();
+  });
+
+  it("accepts only true or false", () => {
+    expect(() => loadSettings({ AUTH_ENABLED: "yes" })).toThrow(/AUTH_ENABLED/);
+    expect(loadSettings({ AUTH_ENABLED: "false" }).AUTH_ENABLED).toBe(false);
+  });
+
+  it("reads every variable when on", () => {
+    const auth = authSettings(loadSettings(enabled))!;
+    expect(auth).toEqual({
+      issuer: "http://localhost:8180/realms/ontoforge",
+      backchannelUrl: "http://localhost:8180/realms/ontoforge",
+      clientId: "ontoforge-web",
+      clientSecret: "s3cret",
+      audience: "ontoforge-api",
+      adminSubject: "4f1c",
+      sessionIdleSeconds: 28800,
+      accessDbUri: "postgresql://localhost:5432/ontoforge_access",
+      publicUrl: "http://localhost:8000",
+      webClientUrl: null,
+    });
+    expect(
+      authSettings(
+        loadSettings({ ...enabled, OIDC_BACKCHANNEL_URL: "http://host.docker.internal:8180/realms/ontoforge/", AUTH_SESSION_IDLE_SECONDS: "60" }),
+      ),
+    ).toMatchObject({ backchannelUrl: "http://host.docker.internal:8180/realms/ontoforge", sessionIdleSeconds: 60 });
+  });
+
+  it("fails the boot naming each missing variable when on", () => {
+    for (const name of Object.keys(enabled).filter((n) => n !== "AUTH_ENABLED")) {
+      const env: Record<string, string> = { ...enabled };
+      delete env[name];
+      expect(() => loadSettings(env), name).toThrow(new RegExp(name));
+    }
+  });
+
+  it("refuses malformed URLs", () => {
+    expect(() => loadSettings({ ...enabled, OIDC_ISSUER: "localhost:8180" })).toThrow(/OIDC_ISSUER/);
+    expect(() => loadSettings({ ...enabled, PUBLIC_URL: "ftp://x" })).toThrow(/PUBLIC_URL/);
+    expect(() => loadSettings({ ...enabled, ACCESS_DB_URI: "mysql://x/y" })).toThrow(/ACCESS_DB_URI/);
+    expect(() => loadSettings({ ...enabled, OIDC_BACKCHANNEL_URL: "nope" })).toThrow(/OIDC_BACKCHANNEL_URL/);
+    expect(() => loadSettings({ ...enabled, AUTH_SESSION_IDLE_SECONDS: "0" })).toThrow(/AUTH_SESSION_IDLE_SECONDS/);
+  });
+
+  it("refuses an API audience an ID token would carry: the client id", () => {
+    expect(() => loadSettings({ ...enabled, OIDC_AUDIENCE: "ontoforge-web" })).toThrow(/OIDC_AUDIENCE must differ from OIDC_CLIENT_ID/);
+  });
+
+  it("allows an http issuer on a loopback host only; the back channel anywhere", () => {
+    expect(loadSettings({ ...enabled, OIDC_ISSUER: "https://login.example.com/realms/x" }).OIDC_ISSUER).toBe(
+      "https://login.example.com/realms/x",
+    );
+    expect(() => loadSettings({ ...enabled, OIDC_ISSUER: "http://keycloak.example.com/realms/x" })).toThrow(
+      /OIDC_ISSUER must be an https URL/,
+    );
+    expect(loadSettings({ ...enabled, OIDC_BACKCHANNEL_URL: "http://keycloak:8080/realms/ontoforge" }).OIDC_BACKCHANNEL_URL).toBe(
+      "http://keycloak:8080/realms/ontoforge",
+    );
+  });
+
+  it("keeps the issuer exactly as given, a trailing slash included", () => {
+    const settings = loadSettings({ ...enabled, OIDC_ISSUER: "https://tenant.login.example.com/" });
+    expect(settings.OIDC_ISSUER).toBe("https://tenant.login.example.com/");
+    expect(authSettings(settings)!.issuer).toBe("https://tenant.login.example.com/");
+  });
+
+  it("allows an http PUBLIC_URL on a loopback host only", () => {
+    for (const url of ["http://localhost:5173", "http://127.0.0.1:8000", "http://[::1]:5173", "http://app.localhost", "https://ontoforge.example.com"]) {
+      expect(loadSettings({ ...enabled, PUBLIC_URL: url }).PUBLIC_URL, url).toBe(url);
+    }
+    for (const url of ["http://ontoforge.example.com", "http://192.168.1.5:5173", "http://localhost.example.com"]) {
+      expect(() => loadSettings({ ...enabled, PUBLIC_URL: url }), url).toThrow(/PUBLIC_URL must be an https URL/);
+    }
+    expect(loadSettings({ PUBLIC_URL: "http://ontoforge.example.com" }).PUBLIC_URL).toBe("http://ontoforge.example.com");
+  });
+
+  it("takes WEB_CLIENT_URL as optional, an http one on a loopback host only", () => {
+    expect(authSettings(loadSettings(enabled))!.webClientUrl).toBeNull();
+    const settings = loadSettings({ ...enabled, WEB_CLIENT_URL: "http://localhost:5173/" });
+    expect(settings.WEB_CLIENT_URL).toBe("http://localhost:5173");
+    expect(authSettings(settings)).toMatchObject({ publicUrl: "http://localhost:8000", webClientUrl: "http://localhost:5173" });
+    expect(loadSettings({ ...enabled, WEB_CLIENT_URL: "https://studio.example.com" }).WEB_CLIENT_URL).toBe("https://studio.example.com");
+    expect(() => loadSettings({ ...enabled, WEB_CLIENT_URL: "ftp://x" })).toThrow(/WEB_CLIENT_URL/);
+    expect(() => loadSettings({ ...enabled, WEB_CLIENT_URL: "http://studio.example.com" })).toThrow(
+      /WEB_CLIENT_URL must be an https URL/,
+    );
   });
 });

@@ -69,7 +69,7 @@ async function hold(
     ready = resolve;
     failed = reject;
   });
-  const done = on.transaction(async (bound) => {
+  const done = on.transaction(await on.designRevision(), async (bound) => {
     try {
       await during(bound);
     } catch (exc) {
@@ -166,7 +166,7 @@ describe("transaction: a store bound to one connection", () => {
   it("a return commits every write: entity, search queue rows, ruleset and changeset", async () => {
     const { id, plan } = await plannedTask();
     const changesetId = randomUUID();
-    const seen = await store.transaction(async (bound) => {
+    const seen = await store.transaction(await store.designRevision(), async (bound) => {
       await bound.createEntity("task", id, { name: "Bound" }, {}, plan);
       await bound.rulesets().save("bound-a", { anchor: { type: "task", id } });
       await bound.changesets().start({ id: changesetId, lensId: lenses.all!, rulesetKey: null, note: null });
@@ -191,7 +191,7 @@ describe("transaction: a store bound to one connection", () => {
   it("a throw rolls back everything the bound store wrote, search queue rows included", async () => {
     const { id, plan } = await plannedTask();
     const changesetId = randomUUID();
-    const promise = store.transaction(async (bound) => {
+    const promise = store.transaction(await store.designRevision(), async (bound) => {
       await bound.createEntity("task", id, { name: "Gone" }, {}, plan);
       await bound.createRelation("has_task", randomUUID(), ids.P2, id, {}, {});
       await bound.rulesets().save("bound-b", { anchor: { type: "task", id } });
@@ -211,7 +211,7 @@ describe("transaction: a store bound to one connection", () => {
 
   it("a driver error inside rolls back too", async () => {
     const id = randomUUID();
-    const promise = store.transaction(async (bound) => {
+    const promise = store.transaction(await store.designRevision(), async (bound) => {
       await bound.createEntity("task", id, { name: "Gone" }, {});
       // The FK fails: no such parent.
       await bound.createRelation("has_task", randomUUID(), randomUUID(), id, {}, {});
@@ -222,10 +222,10 @@ describe("transaction: a store bound to one connection", () => {
 
   it("a pool checkout inside fails loudly, never as a second connection", async () => {
     const id = randomUUID();
-    await store.transaction(async (bound) => {
+    await store.transaction(await store.designRevision(), async (bound) => {
       await bound.createEntity("task", id, { name: "Inside" }, {});
       // A nested transaction.
-      await expect(bound.transaction(async () => undefined)).rejects.toThrow(
+      await expect(bound.transaction(await bound.designRevision(), async () => undefined)).rejects.toThrow(
         "Pool checkout inside a bound transaction",
       );
       // The schema read wants its own REPEATABLE READ.
@@ -415,6 +415,46 @@ describe("ChangesetStore", () => {
     expect(await store.changesets().relationsAt(cs.id, "not-a-uuid")).toEqual([]);
   });
 
+  it("entityObjectsStaging and entityObjectsKeyed: the staged entities of a type by the values they stage", async () => {
+    const cs = await started();
+    const changesets = store.changesets();
+    const [full, part, other, gone, bare, removed] = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+    await apply(cs.id, {
+      objects: [
+        entity(full, "task"),
+        entity(part, "task", "update"),
+        entity(other, "task"),
+        entity(gone, "task", "delete"),
+        entity(bare, "task", "update"),
+        entity(removed, "task", "update"),
+        entity(randomUUID(), "person"),
+      ],
+      values: [
+        value(full, "title", "A"),
+        value(full, "year", 1),
+        value(part, "year", 1),
+        value(other, "title", "A"),
+        value(other, "year", 2),
+        value(bare, "notes", "x"),
+        value(removed, "year", null),
+      ],
+    });
+    const matching = await changesets.entityObjectsStaging(cs.id, "task", { title: "A", year: 1 });
+    expect(matching.map((object) => object.objectId)).toEqual([full, part]);
+    expect(matching[0]!.values.map((v) => v.propertyKey)).toEqual(["title", "year"]);
+    expect(await changesets.entityObjectsStaging(cs.id, "person", { title: "A" })).toEqual([]);
+
+    const keyed = await changesets.entityObjectsKeyed(cs.id, "task", ["year"]);
+    expect(keyed.map((object) => [object.objectId, object.values.map((v) => v.value)])).toEqual([
+      [full, [1]],
+      [part, [1]],
+      [other, [2]],
+      [gone, []],
+      [bare, []],
+      [removed, [null]],
+    ]);
+  });
+
   it("stagedBytes sums the bytes of the staged values now; a removed value's go with it", async () => {
     const cs = await started();
     const changesets = store.changesets();
@@ -510,8 +550,7 @@ describe("ChangesetStore", () => {
     await age(idle.id, "8 days");
     await age(submitted.id, "8 days");
 
-    const cutoff = new Date(Date.now() - 7 * 24 * 3_600_000);
-    expect(await changesets.sweep(cutoff)).toBe(1);
+    expect(await changesets.sweep(7 * 24 * 3_600_000)).toBe(1);
     expect(await changesets.get(idle.id, lenses.all!, null)).toBeNull();
     expect(await sql(`SELECT 1 FROM changeset_object WHERE changeset_id = $1`, [idle.id])).toEqual([]);
     expect(await sql(`SELECT 1 FROM changeset_value WHERE changeset_id = $1`, [idle.id])).toEqual([]);
@@ -588,7 +627,7 @@ describe("ChangesetStore", () => {
       }
       // touch and sweep skip the held row without waiting.
       expect(await settlesWithin(changesets.touch(cs.id), 2_000)).toBe(true);
-      expect(await changesets.sweep(new Date())).toBe(0);
+      expect(await changesets.sweep(0)).toBe(0);
       // Reads never wait.
       expect(await read(cs.id)).toMatchObject({ version: before.version });
       expect(await changesets.page(cs.id, 0, 10)).toHaveLength(1);
@@ -613,9 +652,9 @@ describe("ChangesetStore", () => {
     it("answers the changeset, or null when it is gone", async () => {
       const cs = await started();
       await apply(cs.id, newTask());
-      const locked = await store.transaction((bound) => bound.changesets().lockForCommit(cs.id));
+      const locked = await store.transaction(await store.designRevision(), (bound) => bound.changesets().lockForCommit(cs.id));
       expect(locked).toMatchObject({ id: cs.id, version: 2, objectCount: 1 });
-      expect(await store.transaction((bound) => bound.changesets().lockForCommit(randomUUID()))).toBeNull();
+      expect(await store.transaction(await store.designRevision(), (bound) => bound.changesets().lockForCommit(randomUUID()))).toBeNull();
     });
 
     it("a second commit on the same ontology is a ConflictError at once; another ontology is not blocked", async () => {
@@ -631,12 +670,12 @@ describe("ChangesetStore", () => {
 
       const holder = await hold(store, (bound) => bound.changesets().lockForCommit(first.id));
       try {
-        const promise = store.transaction((bound) => bound.changesets().lockForCommit(second.id));
+        const promise = store.transaction(await store.designRevision(), (bound) => bound.changesets().lockForCommit(second.id));
         expect(await settlesWithin(promise, 2_000)).toBe(true);
         await expect(promise).rejects.toBeInstanceOf(ConflictError);
         await expect(promise).rejects.toThrow("Another commit is running; try again");
 
-        const parallel = other.transaction((bound) => bound.changesets().lockForCommit(elsewhere.id));
+        const parallel = other.transaction(await other.designRevision(), (bound) => bound.changesets().lockForCommit(elsewhere.id));
         expect(await settlesWithin(parallel, 2_000)).toBe(true);
         expect(await parallel).toMatchObject({ id: elsewhere.id });
       } finally {
@@ -644,7 +683,7 @@ describe("ChangesetStore", () => {
         await holder.done;
       }
       // Released with the transaction.
-      expect(await store.transaction((bound) => bound.changesets().lockForCommit(second.id))).toMatchObject({
+      expect(await store.transaction(await store.designRevision(), (bound) => bound.changesets().lockForCommit(second.id))).toMatchObject({
         id: second.id,
       });
     });
@@ -653,7 +692,7 @@ describe("ChangesetStore", () => {
       const cs = await started();
       const holder = await hold(store, (bound) => bound.changesets().apply(cs.id, cs.version, newTask()));
       try {
-        const promise = store.transaction((bound) => bound.changesets().lockForCommit(cs.id));
+        const promise = store.transaction(await store.designRevision(), (bound) => bound.changesets().lockForCommit(cs.id));
         expect(await settlesWithin(promise, 2_000)).toBe(true);
         await expect(promise).rejects.toThrow("Another commit is running; try again");
       } finally {
@@ -840,7 +879,7 @@ describe("neutral reads", () => {
     });
 
     it("lockTargets: a locked entity's document as its fingerprint", async () => {
-      await store.transaction(async (bound) => {
+      await store.transaction(await store.designRevision(), async (bound) => {
         const [target] = await bound.lockTargets([ids.T1], DOCS);
         expect(target).toEqual({
           id: ids.T1,

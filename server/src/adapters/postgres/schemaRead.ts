@@ -30,12 +30,14 @@ export async function readTypesWithProperties(
   includePropertyTimestamps: boolean,
 ): Promise<{ entityTypes: Row[]; relationTypes: Row[] }> {
   const ets = await querier.query(
-    `SELECT entity_type_id, key, display_name, description, name_property, created_at, updated_at
+    `SELECT entity_type_id, key, display_name, description, name_property, identity_properties,
+            created_at, updated_at
      FROM entity_type ORDER BY key`,
   );
   const rts = await querier.query(
     `SELECT relation_type_id, key, display_name, description, created_at, updated_at,
-            source_entity_type_key AS source_key, target_entity_type_key AS target_key, parent
+            source_entity_type_key AS source_key, target_entity_type_key AS target_key, parent,
+            (one_per_pair OR parent IS NOT NULL) AS one_per_pair
      FROM relation_type ORDER BY key`,
   );
   const propertyCols = includePropertyTimestamps

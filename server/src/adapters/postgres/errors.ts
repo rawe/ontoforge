@@ -52,8 +52,15 @@ import pg from "pg";
 import type { PoolClient } from "pg";
 
 import { settings } from "../../config.js";
-import { ConflictError, NotFoundError, OntoForgeError, StoreError } from "../../core/exceptions.js";
+import {
+  ConflictError,
+  IdentityTakenError,
+  NotFoundError,
+  OntoForgeError,
+  StoreError,
+} from "../../core/exceptions.js";
 import type { Row } from "../../core/ports.js";
+import { observePool } from "../../metrics.js";
 import { quoteIdent } from "./oql/bindings.js";
 
 /** A statement result with every driver type stripped. */
@@ -87,10 +94,12 @@ const boundWork = new AsyncLocalStorage<true>();
  * `connectionString` plus discrete credentials mixed, whose merge
  * semantics are a version-dependent sharp edge in `pg`. Credentials ride
  * separately in `DB_USER`/`DB_PASSWORD`; libpq env vars are not used.
- * Pool knobs stay at `pg` defaults.
+ * The pool opens at most `DB_POOL_SIZE` connections; its counts are
+ * reported as metrics.
  */
 export async function initPool(): Promise<void> {
-  pool = new pg.Pool(connectionConfig());
+  pool = new pg.Pool({ ...connectionConfig(settings.DB_URI), max: settings.DB_POOL_SIZE });
+  observePool("ontology", () => pool);
   try {
     await pool.query("SELECT 1");
   } catch (exc) {
@@ -101,9 +110,9 @@ export async function initPool(): Promise<void> {
   }
 }
 
-/** The discrete connection settings parsed from the config surface. */
-function connectionConfig(): pg.ClientConfig {
-  const url = new URL(settings.DB_URI);
+/** The discrete connection settings for `uri`, credentials from the config surface. */
+function connectionConfig(uri: string): pg.ClientConfig {
+  const url = new URL(uri);
   return {
     host: url.hostname,
     port: url.port === "" ? 5432 : Number(url.port),
@@ -122,12 +131,14 @@ export interface Listener {
 
 /**
  * Door three: `LISTEN` on one channel over a dedicated connection — a
- * pooled one would be handed back with the subscription on it. Each
- * notification's payload goes to `onNotify`. A lost connection is logged
+ * pooled one would be handed back with the subscription on it. It goes to
+ * `DB_LISTEN_URI` when set: a transaction-mode pooler in front of `DB_URI`
+ * cannot hold a subscription. Each notification's payload goes to
+ * `onNotify`. A lost connection is logged
  * and ends the subscription (`closed`); the caller subscribes again.
  */
 export async function listen(channel: string, onNotify: (payload: string) => void): Promise<Listener> {
-  const client = new pg.Client(connectionConfig());
+  const client = new pg.Client(connectionConfig(settings.DB_LISTEN_URI ?? settings.DB_URI));
   let closed = false;
   client.on("notification", (message) => {
     if (message.channel === channel) onNotify(message.payload ?? "");
@@ -443,12 +454,29 @@ function translateConstraint(exc: pg.DatabaseError): OntoForgeError | null {
           return new ConflictError("Search index is already included in this lens");
         case "search_index_key_unique":
           return new ConflictError(`Search index with key '${value}' already exists`);
+        // The one constraint no pre-check fully guards: concurrent writes,
+        // and a changeset commit's deferred check (ADR 0033).
+        case IDENTITY_UNIQUE:
+          return identityTaken(exc.detail);
         default:
           return null;
       }
     default:
       return null;
   }
+}
+
+/** The entity identity's unique constraint, over `(type_key, identity)`. */
+export const IDENTITY_UNIQUE = "entity_identity_unique";
+
+/** The identity refusal for a violation of `IDENTITY_UNIQUE`: the type key
+ * and the identity from its DETAIL. A type key never holds `, `, so the
+ * identity is everything after the first one, whatever it holds. */
+function identityTaken(detail: string | undefined): IdentityTakenError {
+  const match = /^Key \(type_key, identity\)=\((?<type>[^,]*), (?<identity>.*)\) already exists/s.exec(
+    detail ?? "",
+  );
+  return new IdentityTakenError(match?.groups?.["type"] ?? "unknown", match?.groups?.["identity"] ?? "unknown");
 }
 
 /**

@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Download, RefreshCw, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
-import { ApiError } from '@/api/http'
+import { ApiError, parseError } from '@/api/http'
 import { useFeatures } from '@/api/hooks'
 import type { JsonValue } from '@/api/types'
 import { PageHeader } from '@/components/PageHeader'
@@ -46,16 +46,7 @@ async function rebuildSearchDataStream(
   const res = await fetch(`/api/ontologies/${ontologyKey}/model/rebuild-search-data`, {
     method: 'POST',
   })
-  if (!res.ok) {
-    let message = `${res.status} ${res.statusText}`
-    try {
-      const body = (await res.json()) as { error?: { message?: string } }
-      if (body.error?.message !== undefined) message = body.error.message
-    } catch {
-      /* not JSON */
-    }
-    throw new Error(message)
-  }
+  if (!res.ok) throw await parseError(res)
   if (res.body === null) throw new Error('Empty response')
   const reader = res.body.getReader()
   const decoder = new TextDecoder()

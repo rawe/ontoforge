@@ -3,7 +3,8 @@
  * envelope (`details.code` alongside 422 VALIDATION_ERROR), the list
  * answering without a provider, the built-in default addressed by its key,
  * the chat stream, and chat on threads: starting, continuing, refusing an
- * unknown or busy thread, atomic turns, and reading a thread back.
+ * unknown or busy thread, atomic turns, reading a thread back, and threads
+ * shared by servers over one store.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -13,6 +14,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { DEFAULT_AGENT_CONFIG, setAiModel } from "../../src/core/ai.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { NotFoundError, StoreError } from "../../src/core/exceptions.js";
+import { MemoryThreadStore } from "../../src/runtime/threads/memoryThreadStore.js";
+import type { Turn } from "../../src/runtime/threads/threadStore.js";
 import { FakeToolCallingModel, toolCallMessage } from "./aiHelpers.js";
 import {
   createMockRuntimeStore,
@@ -540,6 +543,85 @@ describe("chat on threads", () => {
       const missing = await read(agent, id);
       expect(missing.statusCode).toBe(404);
       expect(missing.json().error.details).toEqual({ code: "THREAD_NOT_FOUND" });
+    }
+  });
+});
+
+describe("threads shared by servers", () => {
+  const post = (on: FastifyInstance, agent: string, payload: Record<string, unknown>) =>
+    on.inject({ method: "POST", url: `${chatPath}/${agent}/chat`, payload });
+  const readOn = async (on: FastifyInstance, threadId: string) =>
+    (await on.inject({ method: "GET", url: `${chatPath}/_default/threads/${threadId}` })).json().messages;
+
+  it("a read during a running turn shows the last completed turn", async () => {
+    const entered = gate();
+    const release = gate();
+    const model = new FakeToolCallingModel([new AIMessage("Alice is here."), new AIMessage("She is 30.")]);
+    model.beforeResponse = async () => {
+      if (model.calls.length === 1) {
+        entered.resolve();
+        await release.promise;
+      }
+    };
+    setAiModel(model);
+    const threadId = events((await post(app, "_default", { message: "Who is here?" })).body)[0].threadId as string;
+    const client = await connectChat("/_default/chat", undefined, { message: "How old is she?", threadId });
+    try {
+      await entered.promise;
+      expect(await readOn(app, threadId)).toEqual([
+        { role: "user", content: "Who is here?" },
+        { role: "assistant", content: "Alice is here." },
+      ]);
+      release.resolve();
+      expect(await client.next()).toEqual({ type: "final", reply: "She is 30." });
+    } finally {
+      release.resolve();
+      await client.reader.cancel();
+    }
+    expect(await readOn(app, threadId)).toHaveLength(4);
+  });
+
+  it("two servers sharing one store continue each other's threads", async () => {
+    const { createApp } = await import("../../src/app.js");
+    const shared = { threads: new MemoryThreadStore(), close: async () => {} };
+    const [a, b] = [await createApp(shared), await createApp(shared)];
+    try {
+      const model = new FakeToolCallingModel([new AIMessage("Alice is here."), new AIMessage("She is 30.")]);
+      setAiModel(model);
+      const threadId = events((await post(a, "_default", { message: "Who is here?" })).body)[0].threadId as string;
+      const second = events((await post(b, "_default", { message: "How old is she?", threadId })).body);
+      expect(second).toEqual([{ type: "thread", threadId }, { type: "final", reply: "She is 30." }]);
+      expect(model.calls[1]!.map((m) => String(m.content)).slice(1)).toEqual(["Who is here?", "Alice is here.", "How old is she?"]);
+      expect(await readOn(a, threadId)).toHaveLength(4);
+    } finally {
+      await a.close();
+      await b.close();
+    }
+  });
+
+  it("a turn that lost its thread ends in an error event and changes nothing", async () => {
+    const { createApp } = await import("../../src/app.js");
+    let outcome: "taken" | "gone" = "taken";
+    class Losing extends MemoryThreadStore {
+      override async publish(turn: Turn, _state: Uint8Array) {
+        await this.release(turn);
+        return outcome;
+      }
+    }
+    const losing = await createApp({ threads: new Losing(), close: async () => {} });
+    try {
+      setAiModel(new FakeToolCallingModel([new AIMessage("Lost")]));
+      const taken = events((await post(losing, "_default", { message: "Hi" })).body);
+      expect(taken.at(-1)).toEqual({ type: "error", error: {
+        code: "RESOURCE_CONFLICT", message: "A message to this thread is still being answered; wait for it to finish.",
+        details: { code: "THREAD_BUSY" },
+      } });
+      expect(await readOn(losing, taken[0].threadId)).toEqual([]);
+      outcome = "gone";
+      const gone = events((await post(losing, "_default", { message: "Hi" })).body);
+      expect(gone.at(-1)!.error.details).toEqual({ code: "THREAD_NOT_FOUND" });
+    } finally {
+      await losing.close();
     }
   });
 });

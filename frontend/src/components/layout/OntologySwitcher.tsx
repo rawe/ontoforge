@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Check, ChevronsUpDown, Settings2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useOntologies } from '@/api/hooks'
+import { useAccess } from '@/components/auth/useAccess'
 import { workbenchLanding } from '@/components/layout/surfaceTargets'
 import { Logo } from '@/components/Logo'
 import {
@@ -30,6 +31,7 @@ export function OntologySwitcher({
 }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const access = useAccess()
   const { data: ontologies } = useOntologies()
   const current = ontologies?.find((o) => o.key === ontologyKey)
 
@@ -38,7 +40,7 @@ export function OntologySwitcher({
       void navigate(`/o/${key}/studio`)
       return
     }
-    void workbenchLanding(queryClient, key)
+    void workbenchLanding(queryClient, key, access)
       .catch(() => `/o/${key}/studio`)
       .then((target) => navigate(target))
   }

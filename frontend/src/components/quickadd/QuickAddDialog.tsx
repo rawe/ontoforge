@@ -9,6 +9,7 @@ import { qk } from '@/api/queryKeys'
 import { getPath } from '@/api/runtime'
 import type { JsonValue, SchemaProperty } from '@/api/types'
 import { useRuntimeWrites } from '@/api/writes'
+import { useCanEdit } from '@/components/auth/useAccess'
 import { TypeChip } from '@/components/TypeChip'
 import { STAGED_ONLY_TEXT } from '@/components/changesets/changesets'
 import { formatPath, splitParentErrors } from '@/components/entity/hierarchy'
@@ -140,15 +141,21 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
       }
     },
     onError: (error) => {
-      if (!(error instanceof ApiError) || error.fieldErrors === undefined) {
+      if (
+        !(error instanceof ApiError) ||
+        (error.fieldErrors === undefined && error.identityTakenFields === undefined)
+      ) {
         toast.error(error.message)
       }
     },
   })
   const resetMutation = create.reset
 
+  // A lens the user cannot edit offers no way to create; the shortcut and events do nothing.
+  const canEdit = useCanEdit(ontologyKey, lensKey)
   const openWith = useCallback(
     (detail: QuickAddDetail) => {
+      if (!canEdit) return
       setTypeKey(detail.typeKey)
       setParent(detail.parent)
       setPreScoped(detail.typeKey !== undefined)
@@ -157,7 +164,7 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
       resetMutation()
       setOpen(true)
     },
-    [resetMutation],
+    [resetMutation, canEdit],
   )
 
   // openQuickAdd() events from anywhere.
@@ -198,7 +205,10 @@ export function QuickAddDialog({ ontologyKey, lensKey }: { ontologyKey: string; 
     enabled: open && parent !== undefined && parent.changesetId === undefined,
   })
 
-  const fieldErrors = create.error instanceof ApiError ? create.error.fieldErrors : undefined
+  const fieldErrors =
+    create.error instanceof ApiError
+      ? (create.error.fieldErrors ?? create.error.identityTakenFields)
+      : undefined
   const split =
     parent !== undefined && fieldErrors !== undefined ? splitParentErrors(fieldErrors) : undefined
   const serverErrors = split?.entity ?? fieldErrors

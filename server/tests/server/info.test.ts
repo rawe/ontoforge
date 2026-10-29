@@ -22,7 +22,7 @@ describe("GET /api/server/info", () => {
     settings.PUBLIC_URL = null;
     const res = await app.inject({ url: "/api/server/info" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ baseUrl: null, version });
+    expect(res.json()).toEqual({ baseUrl: null, version, authentication: false });
   });
 
   it("reports PUBLIC_URL as the base URL without a trailing slash", async () => {

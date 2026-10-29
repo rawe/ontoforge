@@ -1,7 +1,7 @@
 /**
  * Neighbourhood traversal with scope filtering over a mocked store.
  * Ported from `tests/runtime/test_neighbors.py`, plus the projection rows
- * of `docs/interfaces.md#field-projection` and the documented out-of-scope
+ * of `docs/interfaces/README.md#field-projection` and the documented out-of-scope
  * neighbour leak (`docs/capabilities/instance-data.md#traversal`).
  */
 
@@ -174,12 +174,13 @@ describe("scope filtering", () => {
     expect(rel.direction).toBe("outgoing");
   });
 
-  it("the documented leak: an out-of-scope neighbour escapes property stripping", async () => {
-    // A lens exposing person and belongs_to (department -> company) but NOT
-    // department: the department neighbour comes back with ALL properties.
+  it("a relation type into an entity type the lens hides is not served, nor its neighbour", async () => {
+    // A lens including person, company and belongs_to (department ->
+    // company) but NOT department: belongs_to is dropped from the lens, so
+    // the department neighbour never comes back.
     holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(
       makeFullSchema({
-        lensKey: "leaky_view",
+        lensKey: "narrow_view",
         entityInclusions: [
           { key: "person", properties: ["name"] },
           { key: "company", properties: null },
@@ -200,14 +201,11 @@ describe("scope filtering", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/ontologies/test_ont/runtime/lenses/leaky_view/entities/company/ent-2/neighbors",
+      url: "/api/ontologies/test_ont/runtime/lenses/narrow_view/entities/company/ent-2/neighbors",
     });
 
     expect(res.statusCode).toBe(200);
-    const neighbour = res.json().neighbors[0].entity;
-    // Both properties leak through, unstripped.
-    expect(neighbour.name).toBe("R&D");
-    expect(neighbour.code).toBe("RD-1");
+    expect(res.json().neighbors).toEqual([]);
   });
 
   it("an unscoped lens returns neighbours of every relation type", async () => {
@@ -287,10 +285,82 @@ describe("addressing", () => {
     expect(holder.store.getNeighbors).toHaveBeenCalledWith(
       "ent-1",
       "outgoing",
-      "works_for",
+      ["works_for"],
       5,
       expect.any(Object), // the full-schema per-type-key defs map, for row decoding
     );
+  });
+
+  it("reads only the relation types a scoped lens shows, and every type through an unscoped one", async () => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
+    holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }, "person", "ent-1"));
+    await app.inject({
+      method: "GET",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/ent-1/neighbors",
+    });
+    expect(holder.store.getNeighbors).toHaveBeenLastCalledWith(
+      "ent-1", "both", ["works_for"], 50, expect.any(Object),
+    );
+
+    await app.inject({
+      method: "GET",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/ent-1/neighbors?relationTypeKey=belongs_to",
+    });
+    expect(holder.store.getNeighbors).toHaveBeenLastCalledWith(
+      "ent-1", "both", [], 50, expect.any(Object),
+    );
+
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
+    invalidateLoadedSchemaCache();
+    await app.inject({
+      method: "GET",
+      url: "/api/ontologies/test_ont/runtime/lenses/full_lens/entities/person/ent-1/neighbors",
+    });
+    expect(holder.store.getNeighbors).toHaveBeenLastCalledWith(
+      "ent-1", "both", null, 50, expect.any(Object),
+    );
+  });
+
+  it("hidden relations do not use up the limit", async () => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
+    holder.store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }, "person", "ent-1"));
+    // Five hidden relations stored ahead of two visible ones; the store
+    // filters by the types it is given, then takes the limit.
+    const stored = [
+      ...[1, 2, 3, 4, 5].map((n) =>
+        makeNeighbor({
+          relationTypeKey: "belongs_to",
+          direction: "outgoing",
+          neighborEntityTypeKey: "company",
+          neighborId: `hidden-${n}`,
+        }),
+      ),
+      ...[1, 2].map((n) =>
+        makeNeighbor({
+          relationTypeKey: "works_for",
+          direction: "outgoing",
+          neighborEntityTypeKey: "company",
+          neighborId: `visible-${n}`,
+        }),
+      ),
+    ];
+    holder.store.getNeighbors.mockImplementation(
+      async (_id: string, _direction: string, keys: string[] | null, limit: number) =>
+        stored
+          .filter((n) => keys === null || keys.includes((n.relation as Row)._relationTypeKey as string))
+          .slice(0, limit),
+    );
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/ent-1/neighbors?limit=3",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().neighbors.map((n: Row) => (n.entity as Row)._id)).toEqual([
+      "visible-1",
+      "visible-2",
+    ]);
   });
 
   it("an unknown relationTypeKey yields no neighbours, not an error", async () => {

@@ -19,6 +19,7 @@ import {
   stateLabel,
   submittedCount,
   targetText,
+  identityChangeText,
   typesText,
   valueChangeText,
   valueText,
@@ -121,6 +122,12 @@ test('valueText quotes strings, stubs documents, prints the rest', () => {
   assert.equal(valueText(true), 'true')
   assert.equal(valueText({ document: true, length: 120 }), 'document (120 characters)')
   assert.equal(valueText(['a']), '["a"]')
+})
+
+test('identityChangeText: a rename shows before → after, a new identity alone, none without', () => {
+  assert.equal(identityChangeText(object({ identity: { before: 'A~1', after: 'B~1' } })), 'A~1 → B~1')
+  assert.equal(identityChangeText(object({ action: 'create', identity: { before: null, after: 'A~1' } })), 'A~1')
+  assert.equal(identityChangeText(object({})), null)
 })
 
 test('targetText: entity names, new creates, relation ends, ids when unnamed', () => {

@@ -350,7 +350,7 @@ describe("step 1: under the lock", () => {
     expect(store.lockTargets.mock.invocationCallOrder[0]!).toBeGreaterThan(
       store.changesetStore.lockForCommit.mock.invocationCallOrder[0]!,
     );
-    expect(store.updateEntity).not.toHaveBeenCalled();
+    expect(store.updateEntities).not.toHaveBeenCalled();
   });
 
   it("a document is re-read under the lock as its hash and length, and compared by its hash", async () => {
@@ -372,7 +372,7 @@ describe("step 1: under the lock", () => {
     store.changesetStore.lockForCommit.mockResolvedValue(changeset({ version: 8 }));
     const error = await commit().catch((e: unknown) => e);
     expect(error).toEqual(new ConflictError(`Changeset '${CS}' changed during the commit; try again`));
-    expect(store.updateEntity).not.toHaveBeenCalled();
+    expect(store.updateEntities).not.toHaveBeenCalled();
   });
 });
 
@@ -413,7 +413,7 @@ describe("step 3: the end state", () => {
     changesetOf([relate("belongs_to", NEW_REL, D1, BETA), stagedObject(R1, "delete", "belongs_to", {}, [D1, ACME])]);
     parents[D1] = [link("belongs_to", NEW_REL, BETA, D1)];
     expect(await commit()).toMatchObject({ committed: 2 });
-    expect(store.deleteRelation.mock.invocationCallOrder.at(-1)!).toBeLessThan(store.createRelation.mock.invocationCallOrder.at(-1)!);
+    expect(store.deleteRelations.mock.invocationCallOrder.at(-1)!).toBeLessThan(store.createRelations.mock.invocationCallOrder.at(-1)!);
   });
 
   it("two_parents on a create staged with its parent relation: each relation names its child end", async () => {

@@ -1,6 +1,6 @@
 # Vector index width drift is reported at startup and repaired on rebuild
 
-Rule: [Deployment](../decisions.md#deployment)
+Current behavior: [Vector index width drift](../capabilities/search.md#vector-index-width-drift)
 
 ## Context
 
@@ -8,6 +8,11 @@ A vector index fixes its width when created, and the idempotent DDL that ensures
 at startup does nothing against one that already exists. A changed embedding model
 therefore leaves a vector index outside search indices rejecting every new vector, with
 no symptom until the first operation that touches it fails.
+
+## Decision
+
+Startup warns about every width mismatch and repairs nothing; the search-data rebuild
+repairs.
 
 ## Rejected
 

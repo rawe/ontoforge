@@ -15,7 +15,6 @@ import { settings } from "../../src/config.js";
 import { ConflictError, NotFoundError, ValidationError } from "../../src/core/exceptions.js";
 import type { ChangesetRecord, StagedObjectRecord } from "../../src/core/ports.js";
 import {
-  MAX_STAGED_OBJECTS,
   discardChangeset,
   rebase,
   recordedBefore,
@@ -167,8 +166,7 @@ describe("start", () => {
     store.rulesetStore.get.mockResolvedValue({ key: "agent-a", anchor: null, anchorFound: false });
     const started = await startChangeset("full_lens", "agent-a", "g1", asRuntimeStore(store));
     expect(store.changesetStore.sweep).toHaveBeenCalledTimes(1);
-    const [cutoff] = store.changesetStore.sweep.mock.calls[0]!;
-    expect(Date.now() - (cutoff as Date).getTime()).toBeGreaterThanOrEqual(7 * 24 * 3_600_000 - 1_000);
+    expect(store.changesetStore.sweep).toHaveBeenCalledWith(7 * 24 * 3_600_000);
     const [input] = store.changesetStore.start.mock.calls[0]!;
     expect(input).toMatchObject({ lensId: "lens-1", rulesetKey: "agent-a", note: "g1" });
     expect(input.id).toMatch(UUID);
@@ -270,7 +268,7 @@ describe("staging checks", () => {
 
   it("the object cap: an object past it is a 409; a merge into a staged object is not", async () => {
     store.changesetStore.seed(changeset(), [staged({ action: "create", values: [value("name", "A")] })]);
-    store.changesetStore.get.mockResolvedValue(changeset({ objectCount: MAX_STAGED_OBJECTS }));
+    store.changesetStore.get.mockResolvedValue(changeset({ objectCount: settings.CHANGESET_MAX_OBJECTS }));
     await expect(
       stageOn({ operation: "create_entity", typeKey: "person", properties: { name: "B" }, parentRelation: null }),
     ).rejects.toThrow(new ConflictError(`Changeset '${CS}' is full: at most 10000 staged objects`));
@@ -279,7 +277,7 @@ describe("staging checks", () => {
   });
 
   it("the object cap counts both objects of a create with a parent relation", async () => {
-    store.changesetStore.get.mockResolvedValue(changeset({ objectCount: MAX_STAGED_OBJECTS - 1 }));
+    store.changesetStore.get.mockResolvedValue(changeset({ objectCount: settings.CHANGESET_MAX_OBJECTS - 1 }));
     await expect(stageOn(UNDER_ACME)).rejects.toThrow(
       new ConflictError(`Changeset '${CS}' is full: at most 10000 staged objects`),
     );

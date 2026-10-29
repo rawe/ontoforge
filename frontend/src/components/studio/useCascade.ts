@@ -8,21 +8,24 @@ export interface CascadeState {
   affectedIndices: string[]
   /** Re-runs the operation with `cascade=true`. */
   retry: () => void
+  /** What else the cascade does, in words, when the write says. */
+  note?: string
 }
 
 /**
- * State + guard for the CASCADE_REQUIRED (409) flow. Call `guard(error, retry)`
+ * State + guard for the CASCADE_REQUIRED (409) flow. Call `guard(error, retry, note?)`
  * in a mutation's error handler: it captures cascade conflicts (returning true)
  * so the `CascadeDialog` can offer the cascading retry.
  */
 export function useCascade() {
   const [cascade, setCascade] = useState<CascadeState | null>(null)
-  const guard = (error: unknown, retry: () => void): boolean => {
+  const guard = (error: unknown, retry: () => void, note?: string): boolean => {
     if (isCascadeError(error)) {
       setCascade({
         affectedLenses: error.affectedLenses ?? [],
         affectedIndices: error.affectedIndices ?? [],
         retry,
+        ...(note === undefined ? {} : { note }),
       })
       return true
     }

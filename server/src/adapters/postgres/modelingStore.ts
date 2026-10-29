@@ -7,9 +7,10 @@
  *   exceptions are `getFullSchema`, whose coherent-snapshot obligation
  *   is honoured with one REPEATABLE READ transaction through
  *   `withTransaction`, `createEntityType`, which writes the type and
- *   its name property in one transaction, and the parent flag writes
- *   (`createRelationType`, `setRelationTypeParent`), which count the
- *   parent-rule violators and then write, or refuse, in one transaction.
+ *   its name property in one transaction, and the relation rules writes
+ *   (`createRelationType`, `setRelationTypeRules`), which count the
+ *   violators of the rules they set and then write, or refuse, in one
+ *   transaction.
  * - Deletes are one `DELETE` each, `rowCount > 0` as the boolean —
  *   `ON DELETE CASCADE` carries the fan-out (property definitions,
  *   inclusions, agents, saved queries), and the endpoint FKs' `ON DELETE RESTRICT` backs the
@@ -23,6 +24,13 @@
  *   before any statement; off-format input short-circuits to the
  *   method's not-found shape.
  *
+ * - `changeDesign` opens one transaction that holds the design
+ *   exclusively and advances its revision (`design.ts`), and hands its
+ *   work a store bound to that connection: every method above, and the
+ *   search-index and navigator stores it hands out, run on it. Bound,
+ *   `getFullSchema` reads at READ COMMITTED: the exclusive hold keeps the
+ *   design still.
+ *
  * The saved-query index methods are `ddl.ts`'s — physical naming and
  * index DDL live there, beside the init DDL. The vector-index inventory
  * is the saved-query index alone; search-index generations keep their
@@ -35,15 +43,25 @@ import { toSql } from "pgvector";
 import type {
   ModelingStore,
   NavigatorStore,
-  ParentFlagWrite,
-  ParentRule,
-  ParentViolation,
+  RelationRule,
+  RelationRules,
+  RelationRulesWrite,
+  RelationRuleViolation,
   Row,
   SearchIndexStore,
 } from "../../core/ports.js";
 import type { NewPropertyDef, ParentEnd, TypeKind } from "../../core/schemas.js";
 import * as vectorDdl from "./ddl.js";
-import { runQuery, withTransaction, type DbResult, type IsolationLevel, type Querier } from "./errors.js";
+import { advanceDesign, holdDesignExclusive } from "./design.js";
+import {
+  IDENTITY_UNIQUE,
+  runQuery,
+  withBoundTransaction,
+  withTransaction,
+  type DbResult,
+  type IsolationLevel,
+  type Querier,
+} from "./errors.js";
 import { camelizeRow, camelizeRows, isUuid } from "./rows.js";
 import { LENS_COLS, readTypesWithProperties, splitInclusions } from "./schemaRead.js";
 import { PostgresNavigatorStore } from "./navigatorStore.js";
@@ -53,10 +71,13 @@ import { PostgresSearchIndexStore } from "./searchIndexStore.js";
 // denormalized keys, and embeddings stay out of returned rows.
 // (`LENS_COLS` comes from `schemaRead.ts`, shared with the runtime store.)
 const ENTITY_TYPE_COLS =
-  "entity_type_id, key, display_name, description, name_property, created_at, updated_at";
+  "entity_type_id, key, display_name, description, name_property, identity_properties, " +
+  "created_at, updated_at";
 const RELATION_TYPE_COLS =
   "relation_type_id, key, display_name, description, " +
-  "source_entity_type_key, target_entity_type_key, parent, created_at, updated_at";
+  "source_entity_type_key, target_entity_type_key, parent, " +
+  // A parent end always holds one per pair, whatever the column says.
+  "(one_per_pair OR parent IS NOT NULL) AS one_per_pair, created_at, updated_at";
 const PROPERTY_COLS =
   "property_id, key, display_name, description, data_type, required, default_value, " +
   "created_at, updated_at";
@@ -137,7 +158,7 @@ async function insertProperty(
   return camelizeRow(result.rows[0]!);
 }
 
-/** The most violators of one parent rule a refusal names. */
+/** The most violators of one relation rule a refusal names. */
 const VIOLATORS_SHOWN = 5;
 
 /**
@@ -154,7 +175,7 @@ const VIOLATORS_SHOWN = 5;
 async function parentViolations(
   querier: Querier,
   readings: Record<string, ParentEnd>,
-): Promise<ParentViolation[]> {
+): Promise<RelationRuleViolation[]> {
   const keys = Object.keys(readings);
   const result = await querier.query(
     `WITH RECURSIVE reading (type_key, parent) AS (
@@ -191,11 +212,17 @@ async function parentViolations(
      ORDER BY rank, n`,
     [keys, keys.map((key) => readings[key]!), VIOLATORS_SHOWN],
   );
-  const violations: ParentViolation[] = [];
-  for (const row of result.rows) {
+  return groupViolations(result.rows);
+}
+
+/** Violator rows (rule, total, type_key, id), in report order, as one
+ * violation per rule. */
+function groupViolations(rows: Row[]): RelationRuleViolation[] {
+  const violations: RelationRuleViolation[] = [];
+  for (const row of rows) {
     let violation = violations.at(-1);
     if (violation === undefined || violation.rule !== row.rule) {
-      violation = { rule: row.rule as ParentRule, count: Number(row.total), entities: [] };
+      violation = { rule: row.rule as RelationRule, count: Number(row.total), entities: [] };
       violations.push(violation);
     }
     violation.entities.push({ type: row.type_key as string, id: row.id as string });
@@ -203,12 +230,62 @@ async function parentViolations(
   return violations;
 }
 
+/**
+ * The pairs the stored relations of `keys` link more than once under one
+ * key, as one `duplicate_pair` violation: their count and the sources of
+ * the first pairs, ordered by type and id. Empty when there are none.
+ */
+async function duplicatePairs(querier: Querier, keys: string[]): Promise<RelationRuleViolation[]> {
+  if (keys.length === 0) return [];
+  const result = await querier.query(
+    `SELECT 'duplicate_pair' AS rule, total, type_key, id FROM (
+       SELECT e.type_key, d.from_id AS id,
+              count(*) OVER () AS total,
+              row_number() OVER (ORDER BY e.type_key, d.from_id, d.to_id) AS n
+         FROM (SELECT from_id, to_id FROM relation WHERE type_key = ANY($1::text[])
+                GROUP BY type_key, from_id, to_id HAVING count(*) > 1) d
+         JOIN entity e ON e.id = d.from_id
+     ) ranked
+     WHERE n <= $2
+     ORDER BY n`,
+    [keys, VIOLATORS_SHOWN],
+  );
+  return groupViolations(result.rows);
+}
+
+/** The violators a rules write refuses with: the parent rules when it
+ * sets or flips the parent end, one per pair when it turns that on. */
+async function rulesViolations(
+  querier: Querier,
+  key: string,
+  before: RelationRules,
+  after: RelationRules,
+): Promise<RelationRuleViolation[]> {
+  const violations: RelationRuleViolation[] = [];
+  if (after.parent !== null && after.parent !== before.parent) {
+    violations.push(...(await parentViolations(querier, { [key]: after.parent })));
+  }
+  // A parent end checked just now already refuses a pair linked twice,
+  // as a child with two parents.
+  if (after.onePerPair && !before.onePerPair && violations.length === 0) {
+    violations.push(...(await duplicatePairs(querier, [key])));
+  }
+  return violations;
+}
+
+/** The rules a relation type row carries. */
+function rulesOf(row: Row): RelationRules {
+  return { parent: (row.parent as ParentEnd | null) ?? null, onePerPair: row.onePerPair === true };
+}
+
 export class PostgresModelingStore implements ModelingStore {
   /** Bound to one ontology's namespace; unbound (tests only) runs against
-   * the connection's default namespace. */
+   * the connection's default namespace. `bound`: the connection of the
+   * design change `changeDesign` opened. */
   constructor(
     private readonly namespace?: string,
     private readonly ontologyKey: string = "",
+    private readonly bound?: Querier,
   ) {}
 
   /** The search-index store of the same ontology. */
@@ -216,26 +293,38 @@ export class PostgresModelingStore implements ModelingStore {
     if (this.namespace === undefined) {
       throw new Error("An unbound modeling store has no search indices");
     }
-    return new PostgresSearchIndexStore(this.namespace, this.ontologyKey);
+    return new PostgresSearchIndexStore(this.namespace, this.ontologyKey, this.bound);
   }
 
   navigators(): NavigatorStore {
     if (this.namespace === undefined) {
       throw new Error("An unbound modeling store has no navigators");
     }
-    return new PostgresNavigatorStore(this.namespace);
+    return new PostgresNavigatorStore(this.namespace, this.bound);
+  }
+
+  changeDesign<T>(work: (store: ModelingStore) => Promise<T>): Promise<T> {
+    if (this.bound !== undefined) return work(this);
+    return withBoundTransaction(async (querier) => {
+      await holdDesignExclusive(querier);
+      await advanceDesign(querier);
+      return work(new PostgresModelingStore(this.namespace, this.ontologyKey, querier));
+    }, this.namespace);
   }
 
   /** Door one, carrying this store's binding. */
   private query(text: string, params?: unknown[]): Promise<DbResult> {
+    if (this.bound !== undefined) return this.bound.query(text, params);
     return runQuery(text, params, this.namespace);
   }
 
-  /** Door two, carrying this store's binding. */
+  /** Door two, carrying this store's binding. A bound store runs `work`
+   * on its own transaction, whatever the isolation asked for. */
   private tx<T>(
     work: (querier: Querier) => Promise<T>,
     isolation: IsolationLevel = "READ COMMITTED",
   ): Promise<T> {
+    if (this.bound !== undefined) return work(this.bound);
     return withTransaction(work, isolation, this.namespace);
   }
 
@@ -388,15 +477,76 @@ export class PostgresModelingStore implements ModelingStore {
   }
 
   /** One `DELETE`: property definitions and inclusions go via CASCADE;
-   * the endpoint FKs' RESTRICT backs the service's in-use rule. */
+   * the endpoint FKs' RESTRICT backs the service's in-use rule. The
+   * orphaned entities lose their identity in the same transaction, so
+   * they never block a later type of the same key. */
   async deleteEntityType(entityTypeId: string): Promise<boolean> {
     if (!isUuid(entityTypeId)) {
       return false;
     }
-    const result = await this.query(`DELETE FROM entity_type WHERE entity_type_id = $1`, [
-      entityTypeId,
-    ]);
-    return result.rowCount > 0;
+    return this.tx(async (querier) => {
+      const result = await querier.query(
+        `DELETE FROM entity_type WHERE entity_type_id = $1 RETURNING key`,
+        [entityTypeId],
+      );
+      const deleted = result.rows[0];
+      if (deleted === undefined) return false;
+      await querier.query(
+        `UPDATE entity SET identity = NULL WHERE type_key = $1 AND identity IS NOT NULL`,
+        [deleted.key],
+      );
+      return true;
+    });
+  }
+
+  async setEntityTypeIdentity(
+    entityTypeId: string,
+    identityProperties: string[] | null,
+  ): Promise<Row | null> {
+    if (!isUuid(entityTypeId)) {
+      return null;
+    }
+    const result = await this.query(
+      `UPDATE entity_type SET identity_properties = $2, updated_at = now()
+       WHERE entity_type_id = $1 RETURNING ${ENTITY_TYPE_COLS}`,
+      [entityTypeId, identityProperties],
+    );
+    return firstRowOrNull(result.rows);
+  }
+
+  /** The values one at a time from the jsonb, so no document is read. */
+  async readEntityValues(entityTypeKey: string, propertyKeys: string[]): Promise<{ id: string; values: Row }[]> {
+    const result = await this.query(
+      `SELECT id, (SELECT coalesce(jsonb_object_agg(k, props -> k), '{}'::jsonb)
+                     FROM unnest($2::text[]) AS k WHERE props ? k) AS values
+         FROM entity WHERE type_key = $1 ORDER BY id`,
+      [entityTypeKey, propertyKeys],
+    );
+    return result.rows.map((row) => ({ id: row.id as string, values: row.values as Row }));
+  }
+
+  /** One statement per call: the identities as two parallel arrays. The
+   * unique constraint is deferred to the end of the design change, so a
+   * rewrite that swaps two identities passes. */
+  async writeEntityIdentities(
+    entityTypeKey: string,
+    identities: { id: string; identity: string }[] | null,
+  ): Promise<void> {
+    if (identities === null) {
+      await this.query(`UPDATE entity SET identity = NULL WHERE type_key = $1 AND identity IS NOT NULL`, [
+        entityTypeKey,
+      ]);
+      return;
+    }
+    await this.tx(async (querier) => {
+      await querier.query(`SET CONSTRAINTS ${IDENTITY_UNIQUE} DEFERRED`);
+      await querier.query(
+        `UPDATE entity e SET identity = w.identity
+           FROM unnest($2::uuid[], $3::text[]) AS w (id, identity)
+          WHERE e.id = w.id AND e.type_key = $1 AND e.identity IS DISTINCT FROM w.identity`,
+        [entityTypeKey, identities.map((entry) => entry.id), identities.map((entry) => entry.identity)],
+      );
+    });
   }
 
   async isEntityTypeReferenced(entityTypeId: string): Promise<boolean> {
@@ -427,22 +577,23 @@ export class PostgresModelingStore implements ModelingStore {
     description: string | null,
     sourceEntityTypeKey: string,
     targetEntityTypeKey: string,
-    parent: ParentEnd | null,
-  ): Promise<ParentFlagWrite> {
+    rules: RelationRules,
+  ): Promise<RelationRulesWrite> {
     return this.tx(async (querier) => {
-      if (parent !== null) {
-        const violations = await parentViolations(querier, { [key]: parent });
-        if (violations.length > 0) {
-          return { violations };
-        }
+      const violations = await rulesViolations(querier, key, { parent: null, onePerPair: false }, rules);
+      if (violations.length > 0) {
+        return { violations };
       }
       const result = await querier.query(
         `INSERT INTO relation_type
            (relation_type_id, key, display_name, description,
-            source_entity_type_key, target_entity_type_key, parent)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+            source_entity_type_key, target_entity_type_key, parent, one_per_pair)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING ${RELATION_TYPE_COLS}`,
-        [relationTypeId, key, displayName, description, sourceEntityTypeKey, targetEntityTypeKey, parent],
+        [
+          relationTypeId, key, displayName, description, sourceEntityTypeKey, targetEntityTypeKey,
+          rules.parent, rules.onePerPair || rules.parent !== null,
+        ],
       );
       return { row: camelizeRow(result.rows[0]!) };
     });
@@ -495,43 +646,49 @@ export class PostgresModelingStore implements ModelingStore {
     return firstRowOrNull(result.rows);
   }
 
-  /** One transaction: the type's key, the violators under the new
-   * reading, then the update unless there are any. Clearing skips the
-   * count. No lock: a racing relation write is accepted (A3). */
-  async setRelationTypeParent(
+  /** One transaction: the type's stored rules, the violators of the rules
+   * the write sets, then the update unless there are any. Clearing skips
+   * the count. No lock: a racing relation write is accepted (A3). */
+  async setRelationTypeRules(
     relationTypeId: string,
-    parent: ParentEnd | null,
-  ): Promise<ParentFlagWrite | null> {
+    rules: RelationRules,
+  ): Promise<RelationRulesWrite | null> {
     if (!isUuid(relationTypeId)) {
       return null;
     }
     return this.tx(async (querier) => {
-      if (parent !== null) {
-        const found = await querier.query(
-          `SELECT key FROM relation_type WHERE relation_type_id = $1`,
-          [relationTypeId],
-        );
-        const key = found.rows[0]?.key as string | undefined;
-        if (key === undefined) {
-          return null;
-        }
-        const violations = await parentViolations(querier, { [key]: parent });
-        if (violations.length > 0) {
-          return { violations };
-        }
+      const found = await querier.query(
+        `SELECT ${RELATION_TYPE_COLS} FROM relation_type WHERE relation_type_id = $1`,
+        [relationTypeId],
+      );
+      const before = firstRowOrNull(found.rows);
+      if (before === null) {
+        return null;
+      }
+      const violations = await rulesViolations(querier, before.key as string, rulesOf(before), rules);
+      if (violations.length > 0) {
+        return { violations };
       }
       const result = await querier.query(
-        `UPDATE relation_type SET parent = $2, updated_at = now()
+        `UPDATE relation_type SET parent = $2, one_per_pair = $3, updated_at = now()
          WHERE relation_type_id = $1 RETURNING ${RELATION_TYPE_COLS}`,
-        [relationTypeId, parent],
+        [relationTypeId, rules.parent, rules.onePerPair || rules.parent !== null],
       );
       const row = firstRowOrNull(result.rows);
       return row === null ? null : { row };
     });
   }
 
-  async findParentViolations(readings: Record<string, ParentEnd>): Promise<ParentViolation[]> {
-    return parentViolations({ query: (text, params) => this.query(text, params) }, readings);
+  async findRelationRuleViolations(readings: Record<string, RelationRules>): Promise<RelationRuleViolation[]> {
+    const querier: Querier = { query: (text, params) => this.query(text, params) };
+    const parents: Record<string, ParentEnd> = {};
+    for (const [key, rules] of Object.entries(readings)) if (rules.parent !== null) parents[key] = rules.parent;
+    const violations = Object.keys(parents).length > 0 ? await parentViolations(querier, parents) : [];
+    // A pair linked twice under a parent relation is already a child with two parents.
+    const pairKeys = Object.entries(readings)
+      .filter(([, rules]) => rules.onePerPair && rules.parent === null)
+      .map(([key]) => key);
+    return [...violations, ...(await duplicatePairs(querier, pairKeys))];
   }
 
   /** One `DELETE`: property definitions and inclusions go via CASCADE. */

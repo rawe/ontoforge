@@ -16,13 +16,19 @@
  * 4. Complete the claim. On failure: attempts + 1 and exponential backoff;
  *    after `SEARCH_MAX_ATTEMPTS` the item counts as failed and stays
  *    queued for status until a rebuild or a new write of its entity.
+ *    Every write and settlement is fenced by the claim's lease: what a
+ *    claim taken over (or withdrawn by a delete) would do is dropped. A
+ *    batch stopped by shutdown is released, not failed.
  * 5. Finish every building generation whose queue is empty: it becomes
  *    the one queries read.
  *
  * Between passes it sleeps until an enqueue notifies it or the polling
  * interval (`SEARCH_POLL_MS`) passes. At start it syncs every ontology's
  * managed indices, sweeps leftover partitions and reconciles the
- * generations (`managed.ts`, `generations.ts`). Tests drive passes directly (`drainSearchWork`).
+ * generations (`managed.ts`, `generations.ts`); a pass sweeps and
+ * reconciles an ontology again whenever its design revision moved since
+ * this process last did, so a design change whose own reconcile failed
+ * gets its generations all the same. Tests drive passes directly (`drainSearchWork`).
  *
  * The worker measures entries written per second per representation —
  * a moving average, kept in memory — for the cost preview
@@ -30,6 +36,7 @@
  */
 
 import { settings } from "../../config.js";
+import { countSearchEntries, countSearchItems, recordSearchQueue } from "../../metrics.js";
 import { getEmbeddingProvider, type EmbeddingProvider } from "../../core/embedding.js";
 import {
   getOntologyRegistry,
@@ -42,6 +49,7 @@ import {
   type SearchGenerationRecord,
   type SearchIndexStore,
   type SearchPartKind,
+  type SearchQueueStats,
   type SearchWorkSubscription,
 } from "../../core/ports.js";
 import type { PropertyDef } from "../../core/schemas.js";
@@ -63,6 +71,7 @@ import {
 } from "../../core/searchPipeline.js";
 import { loadSearchContextUncached, type SearchContext } from "../schemaCache.js";
 import { chunkDocument } from "../search/chunking.js";
+import { reconcileSearchGenerations } from "./generations.js";
 import { syncManagedSearchIndices } from "./managed.js";
 
 type Row = Record<string, unknown>;
@@ -81,12 +90,17 @@ export interface SearchWorkOptions {
   maxAttempts?: number;
   /** The delay after an item's `attempts`-th failure. */
   backoffMs?: (attempts: number) => number;
+  /** Stops the pass before its next ontology and cancels its embedding
+   * requests. A batch it stops is not failed but released: the next claim,
+   * here or in another process, takes it at once. */
+  signal?: AbortSignal;
 }
 
 interface ResolvedOptions {
   batchSize: number;
   maxAttempts: number;
   backoffMs: (attempts: number) => number;
+  signal: AbortSignal | undefined;
 }
 
 function resolve(options: SearchWorkOptions): ResolvedOptions {
@@ -94,6 +108,7 @@ function resolve(options: SearchWorkOptions): ResolvedOptions {
     batchSize: options.batchSize ?? settings.SEARCH_WORKER_BATCH,
     maxAttempts: options.maxAttempts ?? settings.SEARCH_MAX_ATTEMPTS,
     backoffMs: options.backoffMs ?? ((attempts) => backoffDelayMs(attempts)),
+    signal: options.signal,
   };
 }
 
@@ -140,16 +155,32 @@ export async function drainOnce(options: SearchWorkOptions = {}): Promise<number
       ? [options.ontologyKey]
       : (await getOntologyRegistry().listOntologies()).map((row) => row["key"] as string);
   let processed = 0;
+  // The queue as this pass saw it; reported only when it saw every ontology.
+  const queue: QueueCount = { pending: 0, failed: 0, complete: options.ontologyKey === undefined };
   for (const ontologyKey of keys) {
+    if (resolved.signal?.aborted) {
+      queue.complete = false;
+      break;
+    }
     try {
-      processed += await processOntology(ontologyKey, resolved);
+      processed += await processOntology(ontologyKey, resolved, queue);
     } catch (exc) {
       // An ontology deleted mid-pass, a storage failure: the next pass
       // tries again; the others go on.
+      queue.complete = false;
       console.warn(`Search work in ontology '${ontologyKey}' failed: ${message(exc)}`);
     }
   }
+  if (queue.complete) recordSearchQueue(queue.pending, queue.failed);
   return processed;
+}
+
+/** Queue items summed over the ontologies of one pass. */
+interface QueueCount {
+  pending: number;
+  failed: number;
+  /** False once an ontology was skipped: the sum is then partial. */
+  complete: boolean;
 }
 
 /** Passes until one finds nothing to do — everything due is processed
@@ -164,8 +195,32 @@ export async function drainSearchWork(options: SearchWorkOptions = {}): Promise<
   }
 }
 
-async function processOntology(ontologyKey: string, options: ResolvedOptions): Promise<number> {
+/** Per ontology key the design this process last reconciled, as
+ * `ontologyId:revision`. */
+const reconciled = new Map<string, string>();
+
+/** Sweep and reconcile an ontology when its design moved since this
+ * process last did. A failure is logged and retried by the next pass. */
+async function reconcileIfMoved(store: SearchIndexStore): Promise<void> {
+  try {
+    const design = await store.designRevision();
+    const tag = `${design.ontologyId}:${design.revision}`;
+    if (reconciled.get(store.ontologyKey) === tag) return;
+    await store.sweepGenerations();
+    await reconcileSearchGenerations(store.ontologyKey);
+    reconciled.set(store.ontologyKey, tag);
+  } catch (exc) {
+    console.warn(`Search generations of ontology '${store.ontologyKey}' not reconciled: ${message(exc)}`);
+  }
+}
+
+async function processOntology(
+  ontologyKey: string,
+  options: ResolvedOptions,
+  queue: QueueCount,
+): Promise<number> {
   const store = await getSearchIndexStore(ontologyKey);
+  await reconcileIfMoved(store);
   const provider = getEmbeddingProvider();
   const claimed = await store.claimQueueItems({
     limit: options.batchSize,
@@ -183,26 +238,45 @@ async function processOntology(ontologyKey: string, options: ResolvedOptions): P
     );
     const byGeneration = groupBy(claimed, (item) => item.generationId);
     for (const [generationId, items] of byGeneration) {
+      if (options.signal?.aborted) {
+        await store.releaseQueueItems(items);
+        countSearchItems("released", items.length);
+        continue;
+      }
       const generation = generations.get(generationId);
       const started = Date.now();
       try {
         const written =
           generation === undefined
             ? 0
-            : await processGeneration(store, runtime, context, generation, items, provider);
-        await store.completeQueueItems(items);
-        if (generation?.state === "building") {
-          await store.recordGenerationProgress(generationId, { done: items.length });
+            : await processGeneration(store, runtime, context, generation, items, provider, options.signal);
+        const { completed, lost } = await store.completeQueueItems(items);
+        reportLost(generationId, lost, items.length);
+        countSearchItems("completed", completed);
+        if (generation?.state === "building" && completed > 0) {
+          await store.recordGenerationProgress(generationId, { done: completed });
         }
         if (generation !== undefined) {
           throughput[generation.representation].record(written, Date.now() - started);
+          countSearchEntries(generation.representation, written);
         }
       } catch (exc) {
+        // Stopped, not failed: released for the next claim.
+        if (options.signal?.aborted) {
+          await store.releaseQueueItems(items);
+          countSearchItems("released", items.length);
+          continue;
+        }
         await failItems(store, items, exc, options);
+        countSearchItems("failed", items.length);
       }
     }
   }
-  await finishBuilds(store, options.maxAttempts);
+  const stats = await finishBuilds(store, options.maxAttempts);
+  for (const stat of stats) {
+    queue.pending += stat.pending;
+    queue.failed += stat.failed;
+  }
   return claimed.length;
 }
 
@@ -214,20 +288,33 @@ async function failItems(
 ): Promise<void> {
   const error = message(exc);
   console.warn(`Search entries of generation ${items[0]!.generationId} failed: ${error}`);
-  await store.failQueueItems(
+  const { attempts, lost } = await store.failQueueItems(
     items.map((item) => ({ item, delayMs: options.backoffMs(item.attempts + 1) })),
     error,
   );
-  const exhausted = items.filter((item) => item.attempts + 1 >= options.maxAttempts).length;
+  reportLost(items[0]!.generationId, lost, items.length);
+  const exhausted = attempts.filter((count) => count >= options.maxAttempts).length;
   if (exhausted > 0) {
     await store.recordGenerationProgress(items[0]!.generationId, { failed: exhausted });
   }
 }
 
+/** One line when a claim lost items — taken over by another worker after
+ * its lease expired, or withdrawn by a write that deleted them: what this
+ * worker did for them was dropped. */
+function reportLost(generationId: string, lost: number, claimed: number): void {
+  if (lost === 0) return;
+  console.warn(
+    `Search claim lost: ${lost} of ${claimed} items of generation ${generationId} ` +
+      `taken over or withdrawn, effects dropped`,
+  );
+}
+
 /** Switch in every building generation with nothing left in its queue. A
  * build with items failed for good stays building — status reports it
- * failed, and the active generation keeps serving. */
-async function finishBuilds(store: SearchIndexStore, maxAttempts: number): Promise<void> {
+ * failed, and the active generation keeps serving. The queue stats it
+ * went by. */
+async function finishBuilds(store: SearchIndexStore, maxAttempts: number): Promise<SearchQueueStats[]> {
   const [generations, stats] = await Promise.all([
     store.listGenerations(),
     store.queueStats(maxAttempts),
@@ -238,6 +325,7 @@ async function finishBuilds(store: SearchIndexStore, maxAttempts: number): Promi
       await store.finishGeneration(generation.generationId);
     }
   }
+  return stats;
 }
 
 // ---------------------------------------------------------------------------
@@ -246,7 +334,8 @@ async function finishBuilds(store: SearchIndexStore, maxAttempts: number): Promi
 
 /** Compose, hash-skip, embed and write the claimed items of one
  * generation. The count of entries written. Throws on any failure — the
- * caller fails the whole batch. */
+ * caller fails the whole batch. Every write carries the claim, so the
+ * store drops it for entities the claim no longer holds. */
 async function processGeneration(
   store: SearchIndexStore,
   runtime: RuntimeStore,
@@ -254,6 +343,7 @@ async function processGeneration(
   generation: SearchGenerationRecord,
   items: ClaimedSearchQueueItem[],
   provider: EmbeddingProvider | null,
+  signal: AbortSignal | undefined,
 ): Promise<number> {
   const index = context.indices.find((i) => i.searchIndexId === generation.searchIndexId);
   if (index === undefined) return 0;
@@ -269,7 +359,7 @@ async function processGeneration(
     }
     for (const { partKind, groupNo, keep } of composed.replace) {
       deletions.push(() =>
-        store.deleteEntityPartsExcept(generation.generationId, entityId, partKind, groupNo, keep),
+        store.deleteEntityPartsExcept(generation.generationId, entityId, partKind, groupNo, keep, items),
       );
     }
     if (composed.gone.length > 0) {
@@ -277,6 +367,7 @@ async function processGeneration(
         store.deleteEntries(
           generation.generationId,
           composed.gone.map((part) => ({ entityId, ...part })),
+          items,
         ),
       );
     }
@@ -311,7 +402,7 @@ async function processGeneration(
     if (provider === null || provider.modelId !== generation.modelId) {
       throw new Error(`No embedding provider for model ${generation.modelId}`);
     }
-    vectors = await provider.embedBatch(changed.map((c) => c.text));
+    vectors = await provider.embedBatch(changed.map((c) => c.text), signal);
   }
 
   const writes: SearchEntryWrite[] = changed.map(({ entityId, part, text, textHash }, i) => ({
@@ -328,14 +419,16 @@ async function processGeneration(
     textHash,
     embedding: representation === "semantic" ? vectors[i]! : null,
   }));
-  if (!(await store.upsertEntries(generation.generationId, writes))) {
+  // Only what the claim still held is written: a lost claim's writes are dropped.
+  const written = await store.upsertEntries(generation.generationId, writes, items);
+  if (written === null) {
     // The generation retired meanwhile: nothing left to do for it.
     return 0;
   }
   for (const deletion of deletions) {
     await deletion();
   }
-  return writes.length;
+  return written;
 }
 
 interface ComposedItems {
@@ -402,7 +495,7 @@ async function composeItems(
           ? await runtime.getNeighbors(
               entityId,
               group.direction,
-              group.relationType,
+              [group.relationType],
               ALL_RELATIONS,
               definitionsByType,
             )
@@ -472,7 +565,9 @@ async function composeOneRelation(
 // ---------------------------------------------------------------------------
 
 class SearchWorker {
-  private running = false;
+  /** Aborted by `stop`: ends the loop and cancels the pass's embedding. */
+  private readonly stopped = new AbortController();
+  private stopping: Promise<void> | null = null;
   private loop: Promise<void> | null = null;
   /** Ends the current sleep, if the worker sleeps. */
   private wake: (() => void) | null = null;
@@ -480,13 +575,22 @@ class SearchWorker {
   private woken = false;
   private subscription: SearchWorkSubscription | null = null;
 
+  private get running(): boolean {
+    return !this.stopped.signal.aborted;
+  }
+
   start(): void {
-    this.running = true;
     this.loop = this.run();
   }
 
-  async stop(): Promise<void> {
-    this.running = false;
+  /** Stop once; every caller waits for the same stop. */
+  stop(): Promise<void> {
+    this.stopping ??= this.halt();
+    return this.stopping;
+  }
+
+  private async halt(): Promise<void> {
+    this.stopped.abort();
     this.woken = true;
     this.wake?.();
     await this.loop;
@@ -501,7 +605,7 @@ class SearchWorker {
       this.woken = false;
       let processed = 0;
       try {
-        processed = await drainOnce();
+        processed = await drainOnce({ signal: this.stopped.signal });
       } catch (exc) {
         console.warn(`Search worker pass failed: ${message(exc)}`);
       }
@@ -569,11 +673,14 @@ export async function startSearchWorker(): Promise<void> {
   worker.start();
 }
 
-/** Stop the worker after the pass it is in. Shutdown only. */
+/** Stop the worker: its pass ends before the next ontology, its embedding
+ * requests are cancelled. Shutdown only; a second call waits for the same
+ * stop. */
 export async function stopSearchWorker(): Promise<void> {
   const running = worker;
-  worker = null;
-  await running?.stop();
+  if (running === null) return;
+  await running.stop();
+  if (worker === running) worker = null;
 }
 
 // ---------------------------------------------------------------------------

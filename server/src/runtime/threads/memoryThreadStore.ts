@@ -1,346 +1,160 @@
 /**
- * The in-memory thread store. Threads live in this process only: a restart
- * loses them all, and clients recover through the not-found answer.
+ * The in-memory thread store. Threads live in this process only, so it
+ * serves one server process: a restart loses them all, and clients recover
+ * through the not-found answer.
  *
- * Checkpoints are held serialised (the saver's serde), so nothing a caller
- * passes in or gets back is shared with the store. Per thread and checkpoint
- * namespace only the latest checkpoint and its pending writes are kept,
- * plus — while a turn runs — a copy of the state the turn started from.
- * Retention is applied on every read and write; no timer runs.
+ * It keeps the store contract exactly as the Valkey adapter does: states
+ * are copied in and out, every write after `begin` is checked against the
+ * turn's token, and a missing thread is never recreated. Expiry is applied
+ * on every call; no timer runs. Activity moves a thread to the end of the
+ * map, so the map is ordered by deadline and expiry stops at the first
+ * live thread. Its memory is bounded by `maxBytes`: a
+ * `create` or `publish` that would exceed it is refused, and no valid
+ * thread is ever removed to make room — the analogue of Valkey's
+ * `noeviction`.
  */
 
 import { randomUUID } from "node:crypto";
 
+import { StoreError } from "../../core/exceptions.js";
 import {
-  BaseCheckpointSaver,
-  copyCheckpoint,
-  getCheckpointId,
-  WRITES_IDX_MAP,
-  type ChannelVersions,
-  type Checkpoint,
-  type CheckpointListOptions,
-  type CheckpointMetadata,
-  type CheckpointPendingWrite,
-  type CheckpointTuple,
-  type PendingWrite,
-} from "@langchain/langgraph-checkpoint";
-import type { RunnableConfig } from "@langchain/core/runnables";
-
-import { NotFoundError } from "../../core/exceptions.js";
-import {
-  THREAD_IDLE_LIFETIME_MS,
+  checkStateSize,
+  DEFAULT_LIFETIMES,
+  sameBinding,
   type Clock,
+  type StoreLifetimes,
   type Thread,
   type ThreadBinding,
   type ThreadStore,
+  type Turn,
 } from "./threadStore.js";
 
-/**
- * At most this many threads are held in memory; reaching it removes the
- * thread unused the longest. Bounds the process's memory use whatever the
- * number of conversations.
- */
-export const THREAD_CAP = 100;
+/** The most bytes the store holds by default, over all threads. */
+export const MEMORY_STORE_MAX_BYTES = 256 * 1024 * 1024;
 
-/** A serde result: type tag and bytes. Never mutated once stored. */
-type Serialised = [string, Uint8Array];
-
-interface StoredCheckpoint {
-  id: string;
-  parentId: string | undefined;
-  checkpoint: Serialised;
-  metadata: Serialised;
-}
-
-interface StoredWrite {
-  taskId: string;
-  channel: string;
-  value: Serialised;
-}
-
-/** One thread's checkpoint state, per checkpoint namespace. */
-interface ThreadState {
-  /** The latest checkpoint per namespace. */
-  checkpoints: Map<string, StoredCheckpoint>;
-  /** Pending writes per namespace, keyed by checkpoint id, then `taskId,idx`. */
-  writes: Map<string, Map<string, Map<string, StoredWrite>>>;
-}
+/** Every thread counts at least this many bytes, so empty threads are bounded too. */
+const MIN_THREAD_BYTES = 1024;
 
 interface Entry {
-  thread: Thread;
-  locked: boolean;
-  state: ThreadState;
-  /** The state the running turn started from; `null` outside a turn. */
-  turnStart: ThreadState | null;
+  binding: ThreadBinding;
+  state: Uint8Array | null;
+  /** Expires at this time unless renewed by activity. */
+  deadline: number;
+  lease: { token: string; until: number } | null;
 }
 
-function emptyState(): ThreadState {
-  return { checkpoints: new Map(), writes: new Map() };
-}
+const entryBytes = (state: Uint8Array | null) => Math.max(MIN_THREAD_BYTES, state?.byteLength ?? 0);
 
-/** A structural copy; the serialised bytes are immutable and shared. */
-function copyState(state: ThreadState): ThreadState {
-  const writes = new Map<string, Map<string, Map<string, StoredWrite>>>();
-  for (const [ns, byCheckpoint] of state.writes) {
-    writes.set(ns, new Map([...byCheckpoint].map(([id, byTask]) => [id, new Map(byTask)])));
-  }
-  return { checkpoints: new Map(state.checkpoints), writes };
-}
-
-function sameBinding(a: ThreadBinding, b: ThreadBinding): boolean {
-  return (
-    a.ontologyKey === b.ontologyKey &&
-    a.lensKey === b.lensKey &&
-    a.kind === b.kind &&
-    a.assistantKey === b.assistantKey
-  );
-}
-
-function copyThread(thread: Thread): Thread {
-  return { ...thread, binding: { ...thread.binding } };
-}
-
-/** The registry and every thread's state; shared by the store and its saver. */
-class Threads {
-  readonly entries = new Map<string, Entry>();
-
-  constructor(readonly clock: Clock) {}
-
-  /** Applies retention, then returns the live entry or `undefined`. */
-  get(threadId: string | undefined): Entry | undefined {
-    this.expire();
-    return threadId === undefined ? undefined : this.entries.get(threadId);
-  }
-
-  /** Removes every thread idle for the lifetime, checkpoints and all. */
-  expire(): void {
-    const now = this.clock();
-    for (const [threadId, entry] of this.entries) {
-      if (now - entry.thread.lastUsedAt >= THREAD_IDLE_LIFETIME_MS) this.entries.delete(threadId);
-    }
-  }
-
-  /** Removes the threads unused the longest until one more fits under the cap. */
-  makeRoom(): void {
-    while (this.entries.size >= THREAD_CAP) {
-      let oldest: Entry | undefined;
-      for (const entry of this.entries.values()) {
-        if (!oldest || entry.thread.lastUsedAt < oldest.thread.lastUsedAt) oldest = entry;
-      }
-      this.entries.delete(oldest!.thread.threadId);
-    }
-  }
-}
-
-/**
- * LangGraph's checkpoint-saver contract over the store's threads. Keeps only
- * the latest checkpoint per thread and namespace; a thread must be
- * registered before a graph can write to it.
- */
-class MemoryCheckpointSaver extends BaseCheckpointSaver {
-  constructor(private readonly threads: Threads) {
-    super();
-  }
-
-  async getTuple(config: RunnableConfig): Promise<CheckpointTuple | undefined> {
-    const threadId = config.configurable?.thread_id as string | undefined;
-    const ns = (config.configurable?.checkpoint_ns as string | undefined) ?? "";
-    const checkpointId = getCheckpointId(config);
-    const state = this.threads.get(threadId)?.state;
-    const stored = state?.checkpoints.get(ns);
-    if (!state || !stored || (checkpointId && stored.id !== checkpointId)) return undefined;
-    return this.tuple(threadId!, ns, stored, state);
-  }
-
-  async *list(config: RunnableConfig, options?: CheckpointListOptions): AsyncGenerator<CheckpointTuple> {
-    const { before, filter } = options ?? {};
-    let limit = options?.limit;
-    const threadId = config.configurable?.thread_id as string | undefined;
-    const configNs = config.configurable?.checkpoint_ns as string | undefined;
-    const configId = config.configurable?.checkpoint_id as string | undefined;
-    const beforeId = before?.configurable?.checkpoint_id as string | undefined;
-    this.threads.expire();
-    const threadIds = threadId !== undefined ? [threadId] : [...this.threads.entries.keys()];
-    for (const id of threadIds) {
-      const state = this.threads.entries.get(id)?.state;
-      if (!state) continue;
-      for (const [ns, stored] of [...state.checkpoints]) {
-        if (configNs !== undefined && ns !== configNs) continue;
-        if (configId && stored.id !== configId) continue;
-        if (beforeId && stored.id >= beforeId) continue;
-        const tuple = await this.tuple(id, ns, stored, state);
-        const metadata = tuple.metadata as Record<string, unknown>;
-        if (filter && !Object.entries(filter).every(([key, value]) => metadata[key] === value)) continue;
-        if (limit !== undefined) {
-          if (limit <= 0) return;
-          limit -= 1;
-        }
-        yield tuple;
-      }
-    }
-  }
-
-  async put(
-    config: RunnableConfig,
-    checkpoint: Checkpoint,
-    metadata: CheckpointMetadata,
-    _newVersions: ChannelVersions,
-  ): Promise<RunnableConfig> {
-    const threadId = config.configurable?.thread_id as string | undefined;
-    const ns = (config.configurable?.checkpoint_ns as string | undefined) ?? "";
-    const [serialisedCheckpoint, serialisedMetadata] = await Promise.all([
-      this.serde.dumpsTyped(copyCheckpoint(checkpoint)),
-      this.serde.dumpsTyped(metadata),
-    ]);
-    const entry = this.threads.get(threadId);
-    if (!entry) throw new NotFoundError("Thread not found");
-    entry.state.checkpoints.set(ns, {
-      id: checkpoint.id,
-      parentId: config.configurable?.checkpoint_id as string | undefined,
-      checkpoint: serialisedCheckpoint,
-      metadata: serialisedMetadata,
-    });
-    // Only the latest checkpoint is kept, so only its pending writes are.
-    const byCheckpoint = entry.state.writes.get(ns);
-    for (const id of byCheckpoint?.keys() ?? []) {
-      if (id !== checkpoint.id) byCheckpoint!.delete(id);
-    }
-    return { configurable: { thread_id: threadId, checkpoint_ns: ns, checkpoint_id: checkpoint.id } };
-  }
-
-  async putWrites(config: RunnableConfig, writes: PendingWrite[], taskId: string): Promise<void> {
-    const threadId = config.configurable?.thread_id as string | undefined;
-    const ns = (config.configurable?.checkpoint_ns as string | undefined) ?? "";
-    const checkpointId = config.configurable?.checkpoint_id as string | undefined;
-    if (checkpointId === undefined) throw new Error("Pending writes need a checkpoint_id");
-    const values = await Promise.all(writes.map(([, value]) => this.serde.dumpsTyped(value)));
-    const entry = this.threads.get(threadId);
-    if (!entry) throw new NotFoundError("Thread not found");
-    let byCheckpoint = entry.state.writes.get(ns);
-    if (!byCheckpoint) entry.state.writes.set(ns, (byCheckpoint = new Map()));
-    let byTask = byCheckpoint.get(checkpointId);
-    if (!byTask) byCheckpoint.set(checkpointId, (byTask = new Map()));
-    writes.forEach(([channel], idx) => {
-      // Special channels (error, interrupt, …) take fixed negative slots and
-      // may be overwritten; regular writes are written once.
-      const slot = WRITES_IDX_MAP[channel] ?? idx;
-      const key = `${taskId},${slot}`;
-      if (slot >= 0 && byTask!.has(key)) return;
-      byTask!.set(key, { taskId, channel, value: values[idx]! });
-    });
-  }
-
-  async deleteThread(threadId: string): Promise<void> {
-    const entry = this.threads.get(threadId);
-    if (entry) entry.state = emptyState();
-  }
-
-  private async tuple(
-    threadId: string,
-    ns: string,
-    stored: StoredCheckpoint,
-    state: ThreadState,
-  ): Promise<CheckpointTuple> {
-    const writes = [...(state.writes.get(ns)?.get(stored.id)?.values() ?? [])];
-    const pendingWrites: CheckpointPendingWrite[] = await Promise.all(
-      writes.map(
-        async ({ taskId, channel, value }): Promise<CheckpointPendingWrite> => [
-          taskId,
-          channel,
-          await this.serde.loadsTyped(...value),
-        ],
-      ),
-    );
-    const tuple: CheckpointTuple = {
-      config: { configurable: { thread_id: threadId, checkpoint_ns: ns, checkpoint_id: stored.id } },
-      checkpoint: (await this.serde.loadsTyped(...stored.checkpoint)) as Checkpoint,
-      metadata: (await this.serde.loadsTyped(...stored.metadata)) as CheckpointMetadata,
-      pendingWrites,
-    };
-    if (stored.parentId !== undefined) {
-      tuple.parentConfig = {
-        configurable: { thread_id: threadId, checkpoint_ns: ns, checkpoint_id: stored.parentId },
-      };
-    }
-    return tuple;
-  }
+export interface MemoryThreadStoreOptions {
+  clock?: Clock;
+  lifetimes?: StoreLifetimes;
+  maxBytes?: number;
 }
 
 /** The thread store held in this process's memory. */
 export class MemoryThreadStore implements ThreadStore {
-  readonly checkpointer: BaseCheckpointSaver;
-  private readonly threads: Threads;
+  private readonly entries = new Map<string, Entry>();
+  private readonly clock: Clock;
+  private readonly lifetimes: StoreLifetimes;
+  private readonly maxBytes: number;
+  private bytes = 0;
 
-  constructor(clock: Clock = Date.now) {
-    this.threads = new Threads(clock);
-    this.checkpointer = new MemoryCheckpointSaver(this.threads);
+  constructor({ clock = Date.now, lifetimes = DEFAULT_LIFETIMES, maxBytes = MEMORY_STORE_MAX_BYTES }: MemoryThreadStoreOptions = {}) {
+    this.clock = clock;
+    this.lifetimes = lifetimes;
+    this.maxBytes = maxBytes;
   }
 
   async create(binding: ThreadBinding): Promise<Thread> {
-    this.threads.expire();
-    this.threads.makeRoom();
-    const now = this.threads.clock();
-    const thread: Thread = {
-      threadId: randomUUID(),
-      binding: {
-        ontologyKey: binding.ontologyKey,
-        lensKey: binding.lensKey,
-        kind: binding.kind,
-        assistantKey: binding.assistantKey,
-      },
-      createdAt: now,
-      lastUsedAt: now,
-    };
-    this.threads.entries.set(thread.threadId, { thread, locked: false, state: emptyState(), turnStart: null });
-    return copyThread(thread);
+    this.expire();
+    this.reserve(entryBytes(null));
+    const threadId = randomUUID();
+    const copy = { ...binding };
+    this.touch(threadId, { binding: copy, state: null, deadline: 0, lease: null });
+    return { threadId, binding: { ...copy } };
   }
 
-  async find(threadId: string, binding: ThreadBinding): Promise<Thread | null> {
-    const entry = this.threads.get(threadId);
-    return entry && sameBinding(entry.thread.binding, binding) ? copyThread(entry.thread) : null;
+  async read(threadId: string, binding: ThreadBinding): Promise<{ state: Uint8Array | null } | null> {
+    const entry = this.live(threadId, binding);
+    return entry ? { state: entry.state?.slice() ?? null } : null;
   }
 
-  async acquire(threadId: string): Promise<boolean> {
-    const entry = this.threads.get(threadId);
-    if (!entry) throw new NotFoundError("Thread not found");
-    if (entry.locked) return false;
-    entry.locked = true;
-    entry.thread.lastUsedAt = this.threads.clock();
+  async begin(threadId: string, binding: ThreadBinding): Promise<Turn | "busy" | null> {
+    const entry = this.live(threadId, binding);
+    if (!entry) return null;
+    const now = this.clock();
+    if (entry.lease && entry.lease.until > now) return "busy";
+    const token = randomUUID();
+    entry.lease = { token, until: now + this.lifetimes.leaseMs };
+    this.touch(threadId, entry);
+    return { threadId, token, state: entry.state?.slice() ?? null };
+  }
+
+  async renew(turn: Turn): Promise<boolean> {
+    const entry = this.owned(turn);
+    if (!entry) return false;
+    entry.lease!.until = this.clock() + this.lifetimes.leaseMs;
     return true;
   }
 
-  async release(threadId: string): Promise<void> {
-    const entry = this.threads.get(threadId);
-    if (!entry) return;
-    entry.locked = false;
-    entry.thread.lastUsedAt = this.threads.clock();
+  async publish(turn: Turn, state: Uint8Array): Promise<"published" | "taken" | "gone"> {
+    checkStateSize(state);
+    this.expire();
+    const entry = this.entries.get(turn.threadId);
+    if (!entry) return "gone";
+    if (!this.owned(turn)) return "taken";
+    const before = entryBytes(entry.state);
+    this.reserve(entryBytes(state) - before);
+    entry.state = state.slice();
+    entry.lease = null;
+    this.touch(turn.threadId, entry);
+    return "published";
   }
 
-  async beginTurn(threadId: string): Promise<void> {
-    const entry = this.threads.get(threadId);
-    if (!entry) throw new NotFoundError("Thread not found");
-    entry.turnStart = copyState(entry.state);
+  async release(turn: Turn): Promise<void> {
+    const entry = this.owned(turn);
+    if (entry) entry.lease = null;
   }
 
-  async commitTurn(threadId: string): Promise<void> {
-    const entry = this.threads.get(threadId);
-    if (entry) entry.turnStart = null;
+  /** Renews a thread's idle deadline and moves it to the end of the map. */
+  private touch(threadId: string, entry: Entry): void {
+    entry.deadline = this.clock() + this.lifetimes.idleMs;
+    this.entries.delete(threadId);
+    this.entries.set(threadId, entry);
   }
 
-  async rollbackTurn(threadId: string): Promise<void> {
-    const entry = this.threads.get(threadId);
-    if (!entry?.turnStart) return;
-    entry.state = entry.turnStart;
-    entry.turnStart = null;
+  /** Removes every thread past its idle deadline, freeing its bytes: the
+   * oldest first, up to the first that is live. */
+  private expire(): void {
+    const now = this.clock();
+    for (const [threadId, entry] of this.entries) {
+      if (entry.deadline > now) break;
+      this.entries.delete(threadId);
+      this.bytes -= entryBytes(entry.state);
+    }
   }
 
-  async values(threadId: string): Promise<Record<string, unknown> | null> {
-    const entry = this.threads.get(threadId);
-    if (!entry) return null;
-    const stored = entry.state.checkpoints.get("");
-    if (!stored) return {};
-    // Deserialised from the stored bytes: a fresh copy every time.
-    const checkpoint = (await this.checkpointer.serde.loadsTyped(...stored.checkpoint)) as Checkpoint;
-    return checkpoint.channel_values;
+  /** Accounts `delta` more bytes, or refuses when they would not fit. */
+  private reserve(delta: number): void {
+    if (this.bytes + delta > this.maxBytes) {
+      const error = new StoreError("Thread store is full");
+      console.error(`Storage failure ${error.errorId}: thread store is full (${this.maxBytes} bytes)`);
+      throw error;
+    }
+    this.bytes += delta;
+  }
+
+  private live(threadId: string, binding: ThreadBinding): Entry | undefined {
+    this.expire();
+    const entry = this.entries.get(threadId);
+    return entry && sameBinding(entry.binding, binding) ? entry : undefined;
+  }
+
+  /** The turn's thread while `turn` holds its live lease. */
+  private owned(turn: Turn): Entry | undefined {
+    this.expire();
+    const entry = this.entries.get(turn.threadId);
+    const lease = entry?.lease;
+    return lease && lease.token === turn.token && lease.until > this.clock() ? entry : undefined;
   }
 }

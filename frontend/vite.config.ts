@@ -27,7 +27,6 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': 'http://localhost:8000',
-      '/mcp': 'http://localhost:8000',
     },
   },
 })

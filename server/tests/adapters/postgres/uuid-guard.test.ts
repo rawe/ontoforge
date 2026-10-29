@@ -56,7 +56,7 @@ describe("off-format ids short-circuit to the not-found shape, database untouche
     expect(await store.updateLens("nope", "n", null)).toBeNull();
     expect(await store.updateEntityType("nope", "n", null)).toBeNull();
     expect(await store.updateRelationType("nope", "n", null)).toBeNull();
-    expect(await store.setRelationTypeParent("nope", "source")).toBeNull();
+    expect(await store.setRelationTypeRules("nope", { parent: "source", onePerPair: true })).toBeNull();
     expect(await store.updateProperty("nope", "EntityType", VALID, "n", null, null, null, false)).toBeNull();
     expect(await store.updateProperty(VALID, "EntityType", "nope", "n", null, null, null, false)).toBeNull();
     expect(fakeDb.queries).toEqual([]);

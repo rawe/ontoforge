@@ -23,11 +23,13 @@ import type {
   SchemaEntityType,
   SchemaRelationType,
 } from '@/api/types'
+import { useCanEdit } from '@/components/auth/useAccess'
 import { DocumentBadge } from '@/components/DocumentBadge'
 import {
   DocumentViewerDialog,
   type DocumentViewerTarget,
 } from '@/components/DocumentViewerDialog'
+import { IdentityText } from '@/components/IdentityText'
 import { TypeChip } from '@/components/TypeChip'
 import { AddRelationDialog } from '@/components/entity/AddRelationDialog'
 import { useNeighborCounts } from '@/components/entity/useNeighborCounts'
@@ -88,6 +90,7 @@ export function NodePanel({
   onDeselect,
 }: NodePanelProps) {
   const displayLabel = useDisplayLabel()
+  const canEdit = useCanEdit(ontologyKey, lensKey)
   const entity = node.data.entity
   const typeKey = entity._entityTypeKey
   const entityType = entityTypes.find((t) => t.key === typeKey)
@@ -155,6 +158,7 @@ export function NodePanel({
                 displayName={entityType?.displayName ?? typeKey}
                 size="sm"
               />
+              <IdentityText identity={entity._identity} />
               {node.data.pinned && (
                 <Badge variant="secondary" className="gap-1 text-[10.5px]">
                   <Pin className="size-2.5" /> pinned
@@ -183,14 +187,16 @@ export function NodePanel({
               </>
             )}
           </Button>
-          <Button
-            variant="outline"
-            size="xs"
-            disabled={applicable.length === 0}
-            onClick={() => setAddRelationOpen(true)}
-          >
-            <Link2 className="size-3" /> Connect
-          </Button>
+          {canEdit && (
+            <Button
+              variant="outline"
+              size="xs"
+              disabled={applicable.length === 0}
+              onClick={() => setAddRelationOpen(true)}
+            >
+              <Link2 className="size-3" /> Connect
+            </Button>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

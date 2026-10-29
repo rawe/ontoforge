@@ -18,8 +18,8 @@ import {
   describeSchema,
   runAgentChat,
 } from "../../../../src/runtime/assistants/agents/runtime.js";
-import { MemoryThreadStore } from "../../../../src/runtime/threads/memoryThreadStore.js";
 import { TURNS_PER_THREAD, TURNS_THE_MODEL_SEES, type GraphThread } from "../../../../src/runtime/threads/threadStore.js";
+import { graphValues, newGraphThread } from "../../threads/graphThread.js";
 import { invalidateLoadedSchemaCache, loadSchema } from "../../../../src/runtime/schemaCache.js";
 import { FakeToolCallingModel, toolCallMessage } from "../../aiHelpers.js";
 import {
@@ -37,12 +37,9 @@ import {
 
 type Row = Record<string, unknown>;
 
-const threads = new MemoryThreadStore();
-
 /** A new thread of the default agent, as a chat without a thread id starts one. */
 async function newThread(): Promise<GraphThread> {
-  const { threadId } = await threads.create({ ontologyKey: "o", lensKey: "full_lens", kind: "agents", assistantKey: "_default" });
-  return { checkpointer: threads.checkpointer, threadId };
+  return newGraphThread();
 }
 
 /** One turn with the built-in default agent, on a new thread unless one is given. */
@@ -606,7 +603,7 @@ describe("chat trace and turns on a thread", () => {
       await aiChat("full_lens", `question ${i}`, asRuntimeStore(store), thread);
     }
 
-    const messages = (await threads.values(thread.threadId))!.messages as HumanMessage[];
+    const messages = (await graphValues(thread)).messages as HumanMessage[];
     const questions = messages.filter((m) => m.getType() === "human").map((m) => String(m.content));
     expect(questions).toHaveLength(TURNS_PER_THREAD);
     expect(questions[0]).toBe("question 3");
@@ -726,7 +723,8 @@ describe("entities event", () => {
         entity: makeEntity({ name: "Acme" }, "company", "c1") },
       { relation: { ...makeRelation({}, { relationId: "r2" }), direction: "incoming" },
         entity: makeEntity({ name: "Bob" }, "person", "p2") },
-      // A department leaks through an in-lens relation: no card, no link.
+      // A department over an in-lens relation (data the lens cannot
+      // produce): dropped, no card, no link.
       { relation: { ...makeRelation({}, { relationId: "r3" }), direction: "outgoing" },
         entity: makeEntity({ name: "Sales", code: "S" }, "department", "d1") },
     ]);
@@ -737,9 +735,9 @@ describe("entities event", () => {
 
     const events = await eventsOf("hr_view");
 
-    // The tool result still carries the leaked neighbour, unchanged.
+    // The tool result does not carry it either.
     const result = events.find((e) => e.type === "agent.tool_result")!.result as Row;
-    expect((result.neighbors as Row[]).map((n) => (n.entity as Row)._id)).toEqual(["c1", "p2", "d1"]);
+    expect((result.neighbors as Row[]).map((n) => (n.entity as Row)._id)).toEqual(["c1", "p2"]);
     const [event] = entityEvents(events);
     expect((event!.entities as Row[]).map((c) => [c.ref, c.id])).toEqual([["E1", "p1"], ["E2", "c1"], ["E3", "p2"]]);
     expect(event!.links).toEqual([

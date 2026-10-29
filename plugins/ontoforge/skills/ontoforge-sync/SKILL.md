@@ -149,16 +149,24 @@ node scripts/import-data.mjs <file> [--ontology <key>] [--lens <key>] [--base-ur
 | `--lens` | no (auto-detected) | Lens key the data is written through |
 | `--base-url` | no, see Connection | OntoForge server URL |
 
-The import creates all entities first (building a map from old IDs to new IDs), then
-creates all relations using the remapped IDs. Relations referencing unknown entities are
-skipped with a warning. The import is not all-or-nothing: when it stops midway the
-ontology is half-filled — ask the user, then delete the ontology, recreate it and rerun
-from the schema import. If `--lens` is omitted, the script uses an unscoped lens and stops
-when the ontology has none. The lens must expose every type and property the file
-carries — a scoped lens rejects what it hides.
+The import stages all entities first (building a map from old IDs to new IDs), then all
+relations using the remapped IDs, into changesets: up to 1,000 calls per request, and a
+changeset committed whenever it is full, so a large file takes a few commits. Each commit
+is all-or-nothing; the import as a whole is not. An entity whose type has an identity is
+staged as a put, which updates the entity that already has that identity, and so is a
+relation of a one-per-pair type, which updates the relation that already links the pair;
+everything else is created. Running the import again after it stopped midway therefore
+repairs what has an identity or a one-per-pair type, and creates everything else again — for
+such data, ask the user, then delete the ontology, recreate it and rerun from the schema
+import. Relations referencing unknown entities are skipped with a warning. If `--lens` is
+omitted, the script uses an unscoped lens and stops when the ontology has none. The lens
+must expose every type and property the file carries — a scoped lens rejects what it hides.
 
-**API used**: `POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/entities/{type}`,
-`POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/relations/{type}`
+**API used**: `GET /api/ontologies/{ontologyKey}/model/export` (only to pick a lens when
+`--lens` is omitted), `GET /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/schema`
+(identities and one-per-pair types), `POST /api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/changesets`,
+`POST …/changesets/{id}/writes` with a list of `put_entity`, `create_entity`,
+`put_relation` or `create_relation` calls, and `POST …/changesets/{id}/commit`
 
 ### Rebuild Search Data
 
@@ -346,6 +354,10 @@ Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
   keys of the managed indices switched off (`<type>~default`, `<type>~<documentProperty>`).
   Managed indices are not carried; the imported schema derives them. Optional.
 - `nameProperty` — each entity type's name property, one of its own `string` properties.
+- `identityProperties` — an entity type's identity, the ordered keys of 1 to 5 of its
+  own `string`, `integer` or `date` properties, each required and without a default.
+  Absent when the type has none. Import never cascades: it refuses an identity whose
+  properties break these rules.
 - A lens without `includes` is **unscoped** and sees the whole schema. A scoped lens lists
   the type keys it exposes and optionally restricts the visible properties.
   `indexInclusions` lists the search indices a scoped lens searches, by key; an unscoped
@@ -387,8 +399,8 @@ instance-data transfer format.
 }
 ```
 
-On import, `_id`, `_entityTypeKey`, `_relationTypeKey`, `_createdAt`, and `_updatedAt`
-are stripped. Entity IDs in relations are remapped to the newly created IDs. Document
+On import, `_id`, `_entityTypeKey`, `_relationTypeKey`, `_createdAt`, `_updatedAt` and
+`_identity` are stripped; the server derives each entity's identity from its values. Entity IDs in relations are remapped to the newly created IDs. Document
 properties are exported with their full content, not as size stubs.
 
 ## Related Skills

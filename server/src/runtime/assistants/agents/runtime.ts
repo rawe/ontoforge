@@ -114,6 +114,9 @@ export function describeSchema(schema: SchemaCacheValue): string {
       desc += `: ${et.description}`;
     }
     lines.push(desc);
+    if (et.identityProperties !== null) {
+      lines.push(`    identity (_identity): ${et.identityProperties.join(", ")}`);
+    }
     for (const p of Object.values(et.properties)) {
       const req = p.required ? " (required)" : "";
       lines.push(`    - ${p.key}: ${p.dataType}${req}`);
@@ -260,8 +263,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         0,
         "_createdAt",
         "asc",
-        null,
-        null,
+        {},
         {},
         store,
       ),

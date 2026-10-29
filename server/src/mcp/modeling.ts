@@ -11,7 +11,7 @@
  * schema belongs to no lens. Tools take KEYS (never internal
  * identifiers) plus a `type_kind` discriminator for properties, and
  * resolve keys to internal ids per call (never cached). Tool parameters
- * are snake_case on the wire (`docs/interfaces.md`, "JSON shape").
+ * are snake_case on the wire (`docs/interfaces/`, "JSON shape").
  *
  * Tools call the modeling services directly — never HTTP to the REST
  * routes; a second path would be a second contract. Failures are reported
@@ -22,6 +22,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z, ZodError } from "zod";
 
+import type { AccessActor } from "../access/store.js";
 import { NotFoundError, ValidationError } from "../core/exceptions.js";
 import { getModelingStore, getOntologyRegistry, getRuntimeStore } from "../core/ports.js";
 import type { ModelingStore } from "../core/ports.js";
@@ -248,10 +249,18 @@ const SEARCH_INDEX_RECORD =
 // ---------------------------------------------------------------------------
 
 /** Build the modeling MCP server bound to one ontology key. */
-export function createModelingMcpServer(ontologyKey: string): McpServer {
+/**
+ * The modeling server of one ontology. With authentication on — `actor`,
+ * the calling administrator — every tool needs the ontology's
+ * administrator (the mount's route check, which answers not found for a
+ * missing ontology), so `ensure_ontology` never creates one: an ontology
+ * is created over REST, where its creator becomes its administrator.
+ */
+export function createModelingMcpServer(ontologyKey: string, actor: AccessActor | null = null): McpServer {
   const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" });
+  const authentication = actor !== null;
 
-  // The ONE registry-touching tool over MCP (`docs/decisions.md#interfaces`): with
+  // The ONE registry-touching tool over MCP (`docs/interfaces/mcp.md#how-a-mount-is-bound`): with
   // no arguments it can only ever act on the binding the client already
   // holds — it cannot list, reach, rename, or delete anything.
   server.registerTool(
@@ -262,7 +271,11 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         "no-op if it does. Takes no arguments — it acts only on the mount's own " +
         "ontology — and reports the ontology key and whether it created. A " +
         "created ontology starts bare (no types, no lenses, no data) and " +
-        "without a display name; naming happens over REST/UI.",
+        "without a display name; naming happens over REST/UI." +
+        (authentication
+          ? " This server requires sign-in: it creates no ontology; a missing one is created " +
+            "through the REST API or the web client."
+          : ""),
       inputSchema: {},
     },
     wrap("ensure_ontology", async () => {
@@ -298,12 +311,19 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       description:
         "Add a new entity type to the schema. Key must be snake_case, unique within the ontology. " +
         "Also creates the type's name property — the string property that names its " +
-        "entities — under name_property (default 'name').",
+        "entities — under name_property (default 'name'). Optional " +
+        "identity_properties: the ordered keys (1 to 5) of the type's own string, integer or date " +
+        "properties whose values, joined with '~', name each entity uniquely within the type. They " +
+        "must be required with no default and shown by every lens allowlist for the type; with " +
+        "cascade=True the server makes them so, otherwise the call is refused. Refused too when " +
+        "stored entities lack a value or would share an identity.",
       inputSchema: {
         key: z.string(),
         display_name: z.string(),
         description: z.string().optional(),
         name_property: z.string().optional(),
+        identity_properties: z.array(z.string()).optional(),
+        cascade: z.boolean().optional(),
       },
     },
     wrap("create_entity_type", async (args: {
@@ -311,14 +331,21 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       display_name: string;
       description?: string | undefined;
       name_property?: string | undefined;
+      identity_properties?: string[] | undefined;
+      cascade?: boolean | undefined;
     }) => {
       const body = EntityTypeCreate.parse({
         key: args.key,
         displayName: args.display_name,
         description: args.description ?? null,
         nameProperty: args.name_property,
+        identityProperties: args.identity_properties ?? null,
       });
-      const result = await service.createEntityType(body, await getModelingStore(ontologyKey));
+      const result = await service.createEntityType(
+        body,
+        await getModelingStore(ontologyKey),
+        args.cascade ?? false,
+      );
       return jsonResult(result);
     }),
   );
@@ -327,13 +354,21 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "update_entity_type",
     {
       description:
-        "Update an entity type's display name, description or name property. Key is " +
-        "immutable. name_property must be the key of an existing string property of the type.",
+        "Update an entity type's display name, description, name property or identity. Key is " +
+        "immutable. name_property must be the key of an existing string property of the type. " +
+        "identity_properties: the ordered keys (1 to 5) of the type's own string, integer or date " +
+        "properties whose values, joined with '~', name each entity uniquely within the type. They " +
+        "must be required with no default and shown by every lens allowlist for the type; with " +
+        "cascade=True the server makes them so, otherwise the call is refused. Refused too when " +
+        "stored entities lack a value or would share an identity. null clears the identity; omitted leaves it unchanged. Changing the " +
+        "identity renames every entity's identity.",
       inputSchema: {
         entity_type_key: z.string(),
         display_name: z.string().optional(),
         description: z.string().optional(),
         name_property: z.string().optional(),
+        identity_properties: z.array(z.string()).nullable().optional(),
+        cascade: z.boolean().optional(),
       },
     },
     wrap("update_entity_type", async (args: {
@@ -341,6 +376,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       display_name?: string | undefined;
       description?: string | undefined;
       name_property?: string | undefined;
+      identity_properties?: string[] | null | undefined;
+      cascade?: boolean | undefined;
     }) => {
       const store = await getModelingStore(ontologyKey);
       const et = await resolveEntityType(store, args.entity_type_key);
@@ -348,8 +385,14 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         displayName: args.display_name ?? null,
         description: args.description ?? null,
         nameProperty: args.name_property ?? null,
+        identityProperties: args.identity_properties,
       });
-      const result = await service.updateEntityType(et.entityTypeId as string, body, store);
+      const result = await service.updateEntityType(
+        et.entityTypeId as string,
+        body,
+        store,
+        args.cascade ?? false,
+      );
       return jsonResult(result);
     }),
   );
@@ -384,8 +427,11 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         "Add a new relation type connecting two entity types. Source and target are " +
         "specified by entity type key. parent ('source' or 'target') makes it a parent " +
         "relation: the entity at that end is the parent of the entity at the other. " +
-        "Omit it for an ordinary relation type. A parent end is refused when relations " +
-        "already stored under the key would give an entity two parents or form a cycle.",
+        "Omit it for an ordinary relation type. one_per_pair true allows at most one " +
+        "relation of the type from one source entity to one target entity; a parent " +
+        "relation always has it, and false is refused with a parent end. A parent end is " +
+        "refused when relations already stored under the key would give an entity two " +
+        "parents or form a cycle, and one_per_pair when they link one pair twice.",
       inputSchema: {
         key: z.string(),
         display_name: z.string(),
@@ -393,6 +439,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         target_entity_type_key: z.string(),
         description: z.string().optional(),
         parent: z.enum(PARENT_ENDS).optional(),
+        one_per_pair: z.boolean().optional(),
       },
     },
     wrap("create_relation_type", async (args: {
@@ -402,6 +449,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       target_entity_type_key: string;
       description?: string | undefined;
       parent?: ParentEnd | undefined;
+      one_per_pair?: boolean | undefined;
     }) => {
       const body = RelationTypeCreate.parse({
         key: args.key,
@@ -410,6 +458,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         sourceEntityTypeKey: args.source_entity_type_key,
         targetEntityTypeKey: args.target_entity_type_key,
         parent: args.parent ?? null,
+        onePerPair: args.one_per_pair,
       });
       const result = await service.createRelationType(body, await getModelingStore(ontologyKey));
       return jsonResult(result);
@@ -420,16 +469,23 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
     "update_relation_type",
     {
       description:
-        "Update a relation type's display name, description or parent end. Source/target " +
-        "endpoints are immutable. parent 'source' or 'target' sets the parent end, null " +
-        "clears it (an ordinary relation type again), and omitting it leaves it unchanged. " +
-        "Setting or changing it is refused when the stored relations would then give an " +
-        "entity two parents or form a cycle; clearing it is never refused.",
+        "Update a relation type's display name, description, parent end or one per pair. " +
+        "Source/target endpoints are immutable. parent 'source' or 'target' sets the " +
+        "parent end, null clears it (an ordinary relation type again), and omitting it " +
+        "leaves it unchanged. one_per_pair true allows at most one relation of the type " +
+        "from one source entity to one target entity, false allows any number; omitting " +
+        "it leaves it unchanged. A parent relation always has one_per_pair: setting a " +
+        "parent end turns it on, clearing the parent end keeps it on, and false is refused " +
+        "while a parent end is set. Setting or changing the parent end is refused when the " +
+        "stored relations would then give an entity two parents or form a cycle, and " +
+        "turning one_per_pair on when they link one pair twice; clearing either is never " +
+        "refused.",
       inputSchema: {
         relation_type_key: z.string(),
         display_name: z.string().optional(),
         description: z.string().optional(),
         parent: z.enum(PARENT_ENDS).nullable().optional(),
+        one_per_pair: z.boolean().optional(),
       },
     },
     wrap("update_relation_type", async (args: {
@@ -437,6 +493,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       display_name?: string | undefined;
       description?: string | undefined;
       parent?: ParentEnd | null | undefined;
+      one_per_pair?: boolean | undefined;
     }) => {
       const store = await getModelingStore(ontologyKey);
       const rt = await resolveRelationType(store, args.relation_type_key);
@@ -444,6 +501,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         displayName: args.display_name ?? null,
         description: args.description ?? null,
         parent: args.parent,
+        onePerPair: args.one_per_pair,
       });
       const result = await service.updateRelationType(rt.relationTypeId as string, body, store);
       return jsonResult(result);
@@ -538,7 +596,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
       description:
         "Update a property's metadata. Key and data type are immutable after creation. " +
         "type_kind must be 'entity_type' or 'relation_type'. " +
-        "Omitted arguments stay unchanged; pass default_value as null to remove a default.",
+        "Omitted arguments stay unchanged; pass default_value as null to remove a default. " +
+        "A property in its entity type's identity cannot become optional or take a default.",
       inputSchema: {
         type_kind: z.string(),
         type_key: z.string(),
@@ -588,7 +647,8 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         "type_kind must be 'entity_type' or 'relation_type'. " +
         "Use cascade=True to auto-remove from scoped lens property lists and from the " +
         "custom search indices that read it (required when an index reads it). " +
-        "An entity type's name property cannot be removed; reassign it first.",
+        "An entity type's name property cannot be removed; reassign it first. Nor can a " +
+        "property in the type's identity; change the identity first.",
       inputSchema: {
         type_kind: z.string(),
         type_key: z.string(),
@@ -924,6 +984,7 @@ export function createModelingMcpServer(ontologyKey: string): McpServer {
         lens.lensId as string,
         store,
         await getRuntimeStore(ontologyKey),
+        actor,
       );
       return textResult(
         `Lens '${args.lens_key}' deleted successfully. Changesets deleted with it: ${changesetsDeleted}.`,

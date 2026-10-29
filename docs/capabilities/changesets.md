@@ -5,7 +5,7 @@ then committed together: all of them persist, or none does. A client plans a cha
 many objects — a move, a subtree delete, a nested create — can hand the plan over with a
 note, and a person commits it after reviewing it.
 
-Vocabulary: [../README.md](../README.md#changesets). The writes it stages:
+Vocabulary: [glossary](../glossary.md#changesets). The writes it stages:
 [instance-data.md](instance-data.md) and [documents.md](documents.md#partial-writes).
 
 ## What it does
@@ -51,7 +51,8 @@ start gets it again. Nothing looks a changeset up by its number; every call name
 
 Seven calls can be staged, with the values of their immediate counterparts: create, update
 and delete of an entity, and of a relation, and a
-[partial document write](documents.md#partial-writes). Each is merged into the set:
+[partial document write](documents.md#partial-writes). Beside them a [put](#put) stages a
+create or an update, whichever the data calls for. Each is merged into the set:
 
 | Call | What it does to the set |
 |---|---|
@@ -66,6 +67,11 @@ An entity delete also takes out every staged relation at that entity, which the 
 would delete with it, and answers their ids. An update, delete or document edit of an
 object this changeset deletes is refused as the immediate write refuses a missing target.
 
+- **Identities resolve at staging.** A call may name an entity by its
+  [identity](entity-identity.md#in-a-changeset) wherever it may name it by id. The
+  identity is resolved once, in the changeset's view — an entity created, renamed or
+  deleted here counts as this changeset leaves it — and the staged object holds the id.
+  An identity two entities hold in that view is refused as a conflict.
 - **Ids are final.** A staged create gets its id at staging, and it keeps it when
   committed. Later calls of the same changeset may name it: an update or delete of the
   created entity, a relation to it, a create beneath it.
@@ -89,6 +95,37 @@ object this changeset deletes is refused as the immediate write refuses a missin
 - **One change at a time.** A staged call is merged into the changeset as it read it: one
   changed in between refuses the call as a conflict, with nothing staged, and the call can
   be sent again.
+
+### Put
+
+A put names what it writes by what identifies it, and becomes an ordinary create or update
+at staging. It exists only in a changeset; an immediate write is always an explicit create
+or update.
+
+- **An entity put** sends a type and values, and the values build the entity's
+  [identity](entity-identity.md). The entity that has that identity in the changeset's
+  view is updated, or else a new one is created. A type whose whole identity the lens does
+  not show, or values that build no identity, are refused with the create's field errors.
+- **A relation put** sends a type, both ends by id or identity, and values, on a relation
+  type that is [one per pair](schema-modeling.md#one-per-pair); on any other type it is
+  refused. The relation that links the pair in the changeset's view, stored and not
+  deleted here or created here, is updated, or else one is created.
+- **As an update,** a put keeps the keys it does not send, and a null removes a value.
+- **The set holds what it became.** The answer says which, as `action` `create` or
+  `update`; the review, the check and the commit see an ordinary create or update. An
+  identity or pair another write takes after staging is caught by the commit, as for any
+  create.
+
+### Many calls in one request
+
+A staging request may list up to 1,000 calls instead of one. They are staged in list order,
+so a later call may name an entity an earlier one creates, by id or by identity, and whole
+or not at all: every call is checked, and if any fails nothing is staged and the refusal
+names each failed call by its index in the list, with its own error. A refusal of the
+changeset itself — not found, submitted, full, changed in between — refuses the request as
+it refuses one call. The answer lists each call's answer in list order. Each call counts
+toward the changeset's [limits](#limits); a larger import commits in several changesets
+([bulk-inserts.md](bulk-inserts.md)).
 
 ### Unstage, cut and rebase
 
@@ -124,11 +161,22 @@ checked.
    anchor judged before anything is applied.
 4. **The phases.** The staged objects are applied in a fixed order: entity creates, entity
    updates, relation deletes, relation creates, relation updates, entity deletes. Each
-   object is one write, through the same store writes as the immediate path, each with its
-   search work. A delete whose target is already gone counts as done and is listed in the
+   phase is written in batches of up to 1,000 objects, each batch a few statements, each
+   object checked as the immediate write checks it and queuing the search work the
+   immediate write would. A delete whose target is already gone counts as done and is listed in the
    answer as already gone. An object that cannot be applied stops the commit.
-5. **Commit validation** over the end state, then the staged objects are deleted with the
+5. **Commit validation** over the end state, identities included, then the staged objects are deleted with the
    changeset, and everything persists at once.
+
+An identity another write took after the pass is caught when everything persists: the
+commit is refused as a conflict, "An identity was taken meanwhile; nothing was persisted.
+Check and commit again", and the changeset is kept as it was. A check runs that last
+identity test before it rolls back, so it reports such a clash as `duplicate_identity`.
+
+A relation create of a [one-per-pair](schema-modeling.md#one-per-pair) type takes its
+pair's lock in the phases, as the immediate create does, the locks of a batch in one fixed order, after the relation deletes ran:
+a pair this changeset frees is free, and one another write linked after the pass is a
+`duplicate_pair` violation that stops the commit.
 
 The commit answers how many staged objects it committed and the ids of the deletes already
 gone. A rejected commit persists nothing, keeps the changeset, its state and its version,
@@ -151,11 +199,14 @@ the changeset change meanwhile.
 | Kind | When |
 |---|---|
 | `not_visible` | The object's type, or a property it sets, is no longer visible through the lens |
-| `replay` | A value the lens no longer accepts, a value a create requires that is missing, or an object that could not be applied |
+| `replay` | A value the lens no longer accepts, a value a create requires that is missing, an update's values that over the stored ones now make no [identity](entity-identity.md#in-a-changeset), or an object that could not be applied |
 | `missing` | The stored target of an update is gone |
 | `dangling` | An end of a staged relation create is neither stored nor created in this changeset, or an end of a staged relation is deleted in it |
 | `drift` | The current value of an update's key differs from its before |
+| `duplicate_identity` | An entity the changeset gives an [identity](entity-identity.md#in-a-changeset) would share it with another entity after the commit |
+| `duplicate_pair` | A relation the changeset creates of a [one-per-pair](schema-modeling.md#one-per-pair) type would link the same source and target as another relation of the type after the commit: a stored one the changeset does not delete, or another staged create |
 | `has_children` | A deleted entity still has children that the changeset neither deleted nor moved |
+| `hidden_relations` | A deleted entity has relations of a type the lens does not show ([delete](instance-data.md#entities)) |
 | `endpoint_type` | A relation end exists with the wrong entity type |
 | `two_parents`, `cycle` | A parent link the changeset creates breaks the [parent rules](instance-data.md#the-parent-rules) |
 | `outside_subtree` | On a changeset whose ruleset has an anchor, an entity of the anchor's hierarchy outside its [subtree](rulesets.md#the-anchors-hierarchy), before or after the commit |
@@ -164,7 +215,7 @@ the changeset change meanwhile.
 | `anchor_deleted` | The entity of its ruleset's anchor no longer exists, or its type was deleted; on the whole changeset |
 | `anchor_hidden` | The entity of its ruleset's anchor is one the lens hides; on the whole changeset |
 
-The first five are the lock-free pass's, and they are also what submit and every read of
+The first seven are the lock-free pass's, and they are also what submit and every read of
 a changeset's objects report. `drift` and `replay` sit on the value they concern, and a
 missing required value on its object; the others sit on the object. A property the lens
 hides is `not_visible` on its object and is never named. A violation's message names only
@@ -241,15 +292,18 @@ discarded, so one that vanished was committed — or its lens was deleted.
   `create_entity` — and the type keys it names that the lens shows, with a count of the
   others;
 - **the staged objects** in the order the changeset first touched them, paged, each with
-  its action, the name of the entity or the names of the relation's ends, its values —
+  its action, the name of the entity or the names of the relation's ends, the identity
+  it gives an entity (before and after, when it sets or changes one), its values —
   an update's before, current and after, a create's after — and the lock-free pass's
   faults as markers, on the value or on the object they concern:
-  `drift`, `dangling`, `missing`, `not_visible`, `replay`;
+  `drift`, `dangling`, `missing`, `not_visible`, `replay`, `duplicate_identity`,
+  `duplicate_pair`;
 - **the staged text of a document property**: its staged value, the text a commit would
   leave, on an entity stored or created by the changeset, whole or by character range, as
   a [document is read](documents.md#reading-a-slice). When nothing is staged for it, or
   the changeset deletes the entity, it is not found.
-- **one entity as the changeset leaves it**: a stored entity, or one the changeset
+- **one entity as the changeset leaves it**, by id or by identity in the changeset's
+  view: a stored entity, or one the changeset
   creates, with its staged values applied, before defaults, and marked deleted when the
   changeset deletes it; beside it its staged object, as the review shows it, markers
   included. Staged relations at it are not part of it. An entity neither stored nor
@@ -261,8 +315,9 @@ its staged text is not found; a document value is shown only by its length.
 
 ## Limits
 
-- **At most 10,000 staged objects** per changeset; a call that would add more is refused
-  as a conflict.
+- **An object cap** per changeset, set in the server's
+  [configuration](../../README.md#configuration), by default 10,000 staged objects; a call
+  that would add more is refused as a conflict.
 - **A byte cap** per changeset, set in the server's
   [configuration](../../README.md#configuration): its staged values count as the UTF-8
   bytes of their JSON, the value and its before, document text included, and a call that
@@ -297,10 +352,10 @@ database connection for its whole run, and every row it touches waits as long.
 | Start, list, read, unstage, cut, rebase, check, submit, unsubmit, commit, discard | routes under `changesets` of a runtime mount | eleven changeset tools | the Workbench's Changesets page: start, list, review with the staged text of a document, remove an object, cut a value, accept current, check, submit, unsubmit, commit, discard; an entity's page, as the pinned changeset leaves it |
 | Stage | `writes` of one changeset | the six write tools and the two document tools with `changeset_id` | the Workbench's writes while a changeset is pinned, except the Explorer canvas's |
 
-Routes and tools: [../interfaces.md](../interfaces.md#changesets). No MCP tool reads one
+Routes and tools: [../interfaces/](../interfaces/runtime-rest.md#changesets). No MCP tool reads one
 entity as the changeset leaves it. An MCP mount keeps no changeset of its own: every call
 names one by `changeset_id`, and a call that forgets it writes immediately, unless the
 ruleset's [write access](rulesets.md#write-access-through-the-interfaces) requires
 `changeset_id`. In the Workbench a person pins a
 draft, and the Workbench's writes stage into it until they leave it
-([../product-surface.md](../product-surface.md#changesets)).
+([../product-surface/](../product-surface/workbench.md#changesets)).

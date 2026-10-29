@@ -181,24 +181,24 @@ export async function saveRetriever(
   store: ModelingStore,
   runtime: RuntimeStore,
 ): Promise<[RetrieverResponse, boolean]> {
-  const indices = requireSearchIndices(store);
   checkKey(key);
   const parsed = RetrieverWriteBody.parse(body);
   const { lensId, lens } = await lensOf(lensKey, store, runtime);
   const config = requireValid(parsed.configVersion, parsed.config, lens);
-  const [retriever, created] = await indices.saveRetriever(
-    lensId,
-    {
-      retrieverId: randomUUID(),
-      key,
-      name: parsed.name,
-      description: parsed.description,
-      configVersion: RETRIEVER_CONFIG_VERSION,
-      config,
-      warnings: [],
-    },
-    false,
-  );
+  const [retriever, created] = await store.changeDesign((s) =>
+    requireSearchIndices(s).saveRetriever(
+      lensId,
+      {
+        retrieverId: randomUUID(),
+        key,
+        name: parsed.name,
+        description: parsed.description,
+        configVersion: RETRIEVER_CONFIG_VERSION,
+        config,
+        warnings: [],
+      },
+      false,
+    ));
   return [toResponse(retriever, lensKey, lens), created];
 }
 
@@ -234,29 +234,31 @@ export async function importRetriever(
   }
   checkKey(key);
   const valid = requireValid(RETRIEVER_CONFIG_VERSION, config, lens);
-  const [retriever] = await indices.saveRetriever(
-    lensId,
-    {
-      retrieverId: randomUUID(),
-      key,
-      name: parsed.name,
-      description: parsed.description,
-      configVersion: RETRIEVER_CONFIG_VERSION,
-      config: valid,
-      warnings,
-    },
-    true,
-  );
+  const [retriever] = await store.changeDesign((s) =>
+    requireSearchIndices(s).saveRetriever(
+      lensId,
+      {
+        retrieverId: randomUUID(),
+        key,
+        name: parsed.name,
+        description: parsed.description,
+        configVersion: RETRIEVER_CONFIG_VERSION,
+        config: valid,
+        warnings,
+      },
+      true,
+    ));
   return toResponse(retriever, lensKey, lens);
 }
 
 export async function deleteRetriever(lensKey: string, key: string, store: ModelingStore): Promise<void> {
-  const indices = requireSearchIndices(store);
-  const found = await store.getLensByKey(lensKey);
-  if (!found) throw new NotFoundError(`Lens '${lensKey}' not found`);
-  if (!(await indices.deleteRetriever(found.lensId as string, key))) {
-    throw new NotFoundError(`Retriever '${key}' not found`);
-  }
+  await store.changeDesign(async (s) => {
+    const found = await s.getLensByKey(lensKey);
+    if (!found) throw new NotFoundError(`Lens '${lensKey}' not found`);
+    if (!(await requireSearchIndices(s).deleteRetriever(found.lensId as string, key))) {
+      throw new NotFoundError(`Retriever '${key}' not found`);
+    }
+  });
 }
 
 /** Copy or move a retriever to a lens and key of the same ontology. The
@@ -277,16 +279,20 @@ export async function transferRetriever(
   const retriever = await stored(indices, source.lensId as string, key);
   const { lensId: targetLensId, lens } = await lensOf(target.targetLensKey, store, runtime);
   requireValid(retriever.configVersion, retriever.config, lens);
-  if (await indices.getRetriever(targetLensId, target.targetKey)) {
-    throw new ConflictError(`Retriever '${target.targetKey}' already exists in the target lens`);
-  }
-  const moved = await indices.transferRetriever(
-    source.lensId as string,
-    key,
-    targetLensId,
-    target.targetKey,
-    copy ? randomUUID() : null,
-    JSON.stringify([retriever.configVersion, retriever.config]),
-  );
+  const moved = await store.changeDesign(async (s) => {
+    const indices = requireSearchIndices(s);
+    if (await indices.getRetriever(targetLensId, target.targetKey)) {
+      throw new ConflictError(`Retriever '${target.targetKey}' already exists in the target lens`);
+    }
+    // The configuration checked above must still be the stored one.
+    return indices.transferRetriever(
+      source.lensId as string,
+      key,
+      targetLensId,
+      target.targetKey,
+      copy ? randomUUID() : null,
+      JSON.stringify([retriever.configVersion, retriever.config]),
+    );
+  });
   return toResponse(moved, target.targetLensKey, lens);
 }

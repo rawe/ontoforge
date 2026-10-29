@@ -98,6 +98,13 @@ export const ROUTES: Record<string, Operation> = {
   "GET /entities/:entityTypeKey/:entityId/documents/:propertyKey": "read",
   "PATCH /entities/:entityTypeKey/:entityId/documents/:propertyKey": "write",
   "GET /entities/:entityTypeKey/:entityId/neighbors": "read",
+  "GET /entities/:entityTypeKey/identity/:identity": "read",
+  "PATCH /entities/:entityTypeKey/identity/:identity": "write",
+  "DELETE /entities/:entityTypeKey/identity/:identity": "write",
+  "GET /entities/:entityTypeKey/identity/:identity/path": "read",
+  "GET /entities/:entityTypeKey/identity/:identity/documents/:propertyKey": "read",
+  "PATCH /entities/:entityTypeKey/identity/:identity/documents/:propertyKey": "write",
+  "GET /entities/:entityTypeKey/identity/:identity/neighbors": "read",
   "POST /query": "read",
   "GET /saved-queries": "read",
   "GET /saved-queries/search": "read",
@@ -112,6 +119,7 @@ export const ROUTES: Record<string, Operation> = {
   "GET /changesets/:changesetId": "read",
   "GET /changesets/:changesetId/documents/:entityTypeKey/:entityId/:propertyKey": "read",
   "GET /changesets/:changesetId/entities/:entityTypeKey/:entityId": "read",
+  "GET /changesets/:changesetId/entities/:entityTypeKey/identity/:identity": "read",
   "DELETE /changesets/:changesetId": "stage",
   "POST /changesets/:changesetId/writes": "stage",
   "DELETE /changesets/:changesetId/objects/:objectId": "stage",
@@ -132,6 +140,11 @@ export interface Binding {
 
 export function allows(level: WriteAccess, operation: Operation): boolean {
   return LEVELS[level].has(operation);
+}
+
+/** The lower of two levels on the ladder: a ruleset's and a lens role's. */
+export function lower(a: WriteAccess, b: WriteAccess): WriteAccess {
+  return LEVELS[a].size <= LEVELS[b].size ? a : b;
 }
 
 function toolRow(name: string): ToolRow {

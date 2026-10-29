@@ -7,7 +7,8 @@
  * Managed indices (default, passage) are listed beside the custom ones
  * but never written here — they follow the schema
  * (`runtime/indexing/managed.ts`) and are only switched (search
- * settings). Every write reconciles the generations, so a new or changed
+ * settings). Every write is a design change (`ModelingStore.changeDesign`)
+ * and reconciles the generations after its commit, so a new or changed
  * definition gets new generations that the worker builds.
  *
  * Definitions are parsed here, not by the routes: a malformed draft
@@ -27,6 +28,7 @@ import {
 } from "../core/exceptions.js";
 import type {
   ModelingStore,
+  RuntimeStore,
   SearchIndexRecord,
   SearchIndexStore,
   SearchQueueError,
@@ -53,10 +55,15 @@ import {
   type SearchIndexStatus,
 } from "../core/searchPipeline.js";
 import { lensIndexFindings } from "../core/searchQuery.js";
-import { rebuildSearchIndex as rebuildGenerations, reconcileSearchGenerations } from "../runtime/indexing/generations.js";
+import {
+  afterCommit,
+  rebuildSearchIndex as rebuildGenerations,
+  reconcileSearchGenerations,
+} from "../runtime/indexing/generations.js";
 import { getSearchIndexStatus, listSearchIndexStatuses } from "../runtime/indexing/status.js";
 import { searchEntryRates } from "../runtime/indexing/worker.js";
-import { invalidateLoadedSchemaCache, loadSearchContextUncached } from "../runtime/schemaCache.js";
+import { loadSchema, loadSearchContextUncached } from "../runtime/schemaCache.js";
+import { searchableIndices } from "../runtime/search/indexSearch.js";
 import type {
   ExportSearchIndicesInput,
   IncludeSearchIndexBody,
@@ -290,11 +297,14 @@ async function estimateCost(
 // Writes
 // ---------------------------------------------------------------------------
 
-/** After a change of the definitions: forget the cached schema views and
- * bring the generations in step (a new or changed definition builds). */
-async function afterIndexChange(indices: SearchIndexStore): Promise<void> {
-  invalidateLoadedSchemaCache();
-  await reconcileSearchGenerations(indices.ontologyKey);
+/** After a committed change of the definitions: sweep the tables of the
+ * generations it removed when `sweep`, and bring the generations in step
+ * (a new or changed definition builds). Best effort (`afterCommit`). */
+async function afterIndexChange(indices: SearchIndexStore, sweep = false): Promise<void> {
+  await afterCommit(indices.ontologyKey, async () => {
+    if (sweep) await indices.sweepGenerations();
+    await reconcileSearchGenerations(indices.ontologyKey);
+  });
 }
 
 /**
@@ -306,13 +316,16 @@ export async function createSearchIndex(
   body: Record<string, unknown>,
   store: ModelingStore,
 ): Promise<SearchIndexResponseBody> {
-  const indices = requireSearchIndices(store);
-  const { definition } = await validDefinition(indices, body);
-  if ((await indices.getIndex(definition.key)) !== null) {
-    throw new ConflictError(`Search index with key '${definition.key}' already exists`);
-  }
-  await indices.createIndex(randomUUID(), "custom", definition);
-  await afterIndexChange(indices);
+  const definition = await store.changeDesign(async (s) => {
+    const indices = requireSearchIndices(s);
+    const { definition } = await validDefinition(indices, body);
+    if ((await indices.getIndex(definition.key)) !== null) {
+      throw new ConflictError(`Search index with key '${definition.key}' already exists`);
+    }
+    await indices.createIndex(randomUUID(), "custom", definition);
+    return definition;
+  });
+  await afterIndexChange(requireSearchIndices(store));
   return getSearchIndex(definition.key, store);
 }
 
@@ -341,14 +354,16 @@ export async function updateSearchIndex(
   body: Record<string, unknown>,
   store: ModelingStore,
 ): Promise<SearchIndexResponseBody> {
-  const indices = requireSearchIndices(store);
-  await customIndex(indices, key);
-  if (body.key !== undefined && body.key !== key) {
-    throw invalid([{ path: "key", message: `Must be the index's key '${key}'` }]);
-  }
-  const { definition } = await validDefinition(indices, { ...body, key });
-  await indices.updateIndexDefinition(key, definition);
-  await afterIndexChange(indices);
+  await store.changeDesign(async (s) => {
+    const indices = requireSearchIndices(s);
+    await customIndex(indices, key);
+    if (body.key !== undefined && body.key !== key) {
+      throw invalid([{ path: "key", message: `Must be the index's key '${key}'` }]);
+    }
+    const { definition } = await validDefinition(indices, { ...body, key });
+    await indices.updateIndexDefinition(key, definition);
+  });
+  await afterIndexChange(requireSearchIndices(store));
   return getSearchIndex(key, store);
 }
 
@@ -362,18 +377,21 @@ export async function deleteSearchIndex(
   cascade: boolean,
   store: ModelingStore,
 ): Promise<void> {
-  const indices = requireSearchIndices(store);
-  await customIndex(indices, key);
-  const lenses = await indices.findLensesIncludingIndex(key);
-  if (lenses.length > 0 && !cascade) {
-    throw new CascadeRequiredError(
-      `Search index is included by ${lenses.length} lens(es).`,
-      lenses,
-      [],
-    );
-  }
-  await indices.deleteIndex(key);
-  await afterIndexChange(indices);
+  await store.changeDesign(async (s) => {
+    const indices = requireSearchIndices(s);
+    await customIndex(indices, key);
+    const lenses = await indices.findLensesIncludingIndex(key);
+    if (lenses.length > 0 && !cascade) {
+      throw new CascadeRequiredError(
+        `Search index is included by ${lenses.length} lens(es).`,
+        lenses,
+        [],
+      );
+    }
+    await indices.deleteIndex(key);
+  });
+  // The index's tables go with the sweep.
+  await afterIndexChange(requireSearchIndices(store), true);
 }
 
 /** Force new generations of an index and answer its status (the build
@@ -408,6 +426,24 @@ export async function listLensIndexInclusions(
   return (await indices.listLensIndexInclusions(lensId)).map((key) => ({ key }));
 }
 
+/** The indices a lens includes and its runtime searches — what a Reader or
+ * Writer of the lens sees of its design. */
+export async function listServedLensIndexInclusions(
+  lensId: string,
+  store: ModelingStore,
+  runtime: RuntimeStore,
+): Promise<IncludeSearchIndexBody[]> {
+  const lens = await store.getLens(lensId);
+  if (lens === null) {
+    throw new NotFoundError(`Lens '${lensId}' not found`);
+  }
+  const loaded = await loadSchema(lens.key as string, runtime);
+  const searchable = new Set((await searchableIndices(loaded, runtime.searchIndices())).map((index) => index.key));
+  return (await requireSearchIndices(store).listLensIndexInclusions(lensId))
+    .filter((key) => searchable.has(key))
+    .map((key) => ({ key }));
+}
+
 /**
  * Include an index in a lens. A scoped lens must expose the index's root
  * type — include it, or, with relation inclusions only, expose every
@@ -421,28 +457,29 @@ export async function includeIndexInLens(
   body: IncludeSearchIndexBody,
   store: ModelingStore,
 ): Promise<IncludeSearchIndexBody> {
-  const indices = requireSearchIndices(store);
-  await existingLens(store, lensId);
-  const index = await indices.getIndex(body.key);
-  if (index === null) {
-    throw new NotFoundError(`Search index '${body.key}' not found`);
-  }
-  const root = index.definition.entityType;
-  const entityInclusions = await store.listIncludesTypes(lensId, "EntityType");
-  if (entityInclusions.length > 0 && !entityInclusions.some((inc) => inc.key === root)) {
-    throw new ValidationError(
-      `Root entity type '${root}' of search index '${body.key}' is not included in this lens`,
-      { fields: { key: `Include entity type '${root}' first` } },
-    );
-  }
-  if ((await indices.listLensIndexInclusions(lensId)).includes(body.key)) {
-    throw new ConflictError("Search index is already included in this lens");
-  }
-  if (!(await indices.includeIndexInLens(lensId, body.key))) {
-    throw new NotFoundError(`Search index '${body.key}' not found`);
-  }
-  invalidateLoadedSchemaCache();
-  return { key: body.key };
+  return store.changeDesign(async (s) => {
+    const indices = requireSearchIndices(s);
+    await existingLens(s, lensId);
+    const index = await indices.getIndex(body.key);
+    if (index === null) {
+      throw new NotFoundError(`Search index '${body.key}' not found`);
+    }
+    const root = index.definition.entityType;
+    const entityInclusions = await s.listIncludesTypes(lensId, "EntityType");
+    if (entityInclusions.length > 0 && !entityInclusions.some((inc) => inc.key === root)) {
+      throw new ValidationError(
+        `Root entity type '${root}' of search index '${body.key}' is not included in this lens`,
+        { fields: { key: `Include entity type '${root}' first` } },
+      );
+    }
+    if ((await indices.listLensIndexInclusions(lensId)).includes(body.key)) {
+      throw new ConflictError("Search index is already included in this lens");
+    }
+    if (!(await indices.includeIndexInLens(lensId, body.key))) {
+      throw new NotFoundError(`Search index '${body.key}' not found`);
+    }
+    return { key: body.key };
+  });
 }
 
 /** Remove an index inclusion; not included -> not found. */
@@ -451,12 +488,12 @@ export async function excludeIndexFromLens(
   key: string,
   store: ModelingStore,
 ): Promise<void> {
-  const indices = requireSearchIndices(store);
-  await existingLens(store, lensId);
-  if (!(await indices.excludeIndexFromLens(lensId, key))) {
-    throw new NotFoundError(`Search index '${key}' is not included in this lens`);
-  }
-  invalidateLoadedSchemaCache();
+  await store.changeDesign(async (s) => {
+    await existingLens(s, lensId);
+    if (!(await requireSearchIndices(s).excludeIndexFromLens(lensId, key))) {
+      throw new NotFoundError(`Search index '${key}' is not included in this lens`);
+    }
+  });
 }
 
 /**
@@ -525,7 +562,7 @@ export async function planIndexCascade(
 
 /** Apply a planned cascade: delete the indices it deletes (their lens
  * inclusions go with them), store the changed definitions. The caller
- * reconciles afterwards (the schema sync does). */
+ * sweeps and reconciles after the commit (`afterDesignChange`). */
 export async function applyIndexCascade(store: ModelingStore, plan: IndexCascadePlan): Promise<void> {
   const indices = store.searchIndices();
   for (const key of plan.deleted) await indices.deleteIndex(key);

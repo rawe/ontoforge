@@ -8,7 +8,10 @@ export interface Settings {
   DB_URI: string;
   DB_USER: string;
   DB_PASSWORD: string;
+  DB_POOL_SIZE: number;
+  DB_LISTEN_URI: string | null;
   PORT: number;
+  SHUTDOWN_DRAIN_SECONDS: number;
 
   EMBEDDING_PROVIDER: string | null;
   EMBEDDING_MODEL: string;
@@ -26,6 +29,8 @@ export interface Settings {
   SEARCH_POLL_MS: number;
 
   CHANGESET_MAX_BYTES: number;
+  CHANGESET_MAX_OBJECTS: number;
+  REQUEST_BODY_LIMIT: number;
 
   AI_PROVIDER: string | null;
   AI_MODEL: string;
@@ -38,6 +43,36 @@ export interface Settings {
   DECISION_API_KEY: string | null;
 
   PUBLIC_URL: string | null;
+
+  SHARED_STATE: "memory" | "valkey";
+  VALKEY_URL: string | null;
+
+  AUTH_ENABLED: boolean;
+  OIDC_ISSUER: string | null;
+  OIDC_BACKCHANNEL_URL: string | null;
+  OIDC_CLIENT_ID: string | null;
+  OIDC_CLIENT_SECRET: string | null;
+  OIDC_AUDIENCE: string | null;
+  AUTH_ADMIN_SUBJECT: string | null;
+  AUTH_SESSION_IDLE_SECONDS: number | null;
+  ACCESS_DB_URI: string | null;
+  WEB_CLIENT_URL: string | null;
+}
+
+/** The settings authentication runs on: present only when it is enabled. */
+export interface AuthSettings {
+  issuer: string;
+  backchannelUrl: string;
+  clientId: string;
+  clientSecret: string;
+  audience: string;
+  adminSubject: string;
+  sessionIdleSeconds: number;
+  accessDbUri: string;
+  /** The server's address: MCP clients sign in for resources under it. */
+  publicUrl: string;
+  /** The web client's address, where browser sign-in runs; null: no browser sign-in. */
+  webClientUrl: string | null;
 }
 
 function str(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
@@ -86,6 +121,170 @@ function optOneOf(
     );
   }
   return value;
+}
+
+/**
+ * Where shared state such as assistant conversations lives: `memory` serves
+ * one process only, `valkey` is shared by every server naming the same
+ * `VALKEY_URL`. A URL without the switch fails the boot — it would otherwise
+ * quietly run each server on its own memory.
+ */
+function sharedState(env: NodeJS.ProcessEnv): Pick<Settings, "SHARED_STATE" | "VALKEY_URL"> {
+  const store = optOneOf(env, "SHARED_STATE", ["memory", "valkey"]) ?? "memory";
+  const url = optStr(env, "VALKEY_URL");
+  if (store === "memory") {
+    if (url !== null) {
+      throw new Error("Environment variable VALKEY_URL is set but SHARED_STATE is not 'valkey'");
+    }
+    return { SHARED_STATE: "memory", VALKEY_URL: null };
+  }
+  if (url === null) {
+    throw new Error("Environment variable VALKEY_URL is required when SHARED_STATE is 'valkey'");
+  }
+  let protocol: string | null = null;
+  try {
+    protocol = new URL(url).protocol;
+  } catch {
+    // Reported below.
+  }
+  if (protocol !== "redis:" && protocol !== "rediss:") {
+    throw new Error("Environment variable VALKEY_URL is not a redis:// or rediss:// URL");
+  }
+  return { SHARED_STATE: "valkey", VALKEY_URL: url };
+}
+
+/** `value` checked as an http(s) URL, trailing slashes trimmed unless `exact`. */
+function httpUrl(name: string, value: string, exact = false): string {
+  let protocol: string | null = null;
+  try {
+    protocol = new URL(value).protocol;
+  } catch {
+    // Reported below.
+  }
+  if (protocol !== "http:" && protocol !== "https:") {
+    throw new Error(`Environment variable ${name} is not an http(s) URL: '${value}'`);
+  }
+  return exact ? value : value.replace(/\/+$/, "");
+}
+
+/** Hosts a browser treats as secure over plain `http:`. */
+function isLoopback(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname.endsWith(".localhost")
+  );
+}
+
+/**
+ * A URL authentication relies on: https, or http on a loopback host only.
+ * `WEB_CLIENT_URL`'s cookies are `Secure`, which a browser accepts over
+ * `http:` from a loopback host only — anywhere else the sign-in would
+ * silently never stick; the issuer's keys and the tokens sent to
+ * `PUBLIC_URL` must not cross a network in the clear.
+ */
+function secureUrl(name: string, value: string, exact = false): string {
+  const url = httpUrl(name, value, exact);
+  const { protocol, hostname } = new URL(url);
+  if (protocol === "http:" && !isLoopback(hostname)) {
+    throw new Error(
+      `Environment variable ${name} must be an https URL when AUTH_ENABLED is 'true' ` +
+        `(http is allowed on localhost only): '${value}'`,
+    );
+  }
+  return url;
+}
+
+/**
+ * Authentication: `AUTH_ENABLED` is `true` or `false` (the default). When
+ * it is on, every variable it needs must be set — a missing one fails the
+ * boot rather than leaving a server that would have to run unprotected.
+ * When it is off, the others are not read: a preset may carry them.
+ */
+function auth(
+  env: NodeJS.ProcessEnv,
+): Pick<
+  Settings,
+  | "AUTH_ENABLED"
+  | "OIDC_ISSUER"
+  | "OIDC_BACKCHANNEL_URL"
+  | "OIDC_CLIENT_ID"
+  | "OIDC_CLIENT_SECRET"
+  | "OIDC_AUDIENCE"
+  | "AUTH_ADMIN_SUBJECT"
+  | "AUTH_SESSION_IDLE_SECONDS"
+  | "ACCESS_DB_URI"
+  | "WEB_CLIENT_URL"
+> {
+  const enabled = optOneOf(env, "AUTH_ENABLED", ["true", "false"]) === "true";
+  if (!enabled) {
+    return {
+      AUTH_ENABLED: false,
+      OIDC_ISSUER: null,
+      OIDC_BACKCHANNEL_URL: null,
+      OIDC_CLIENT_ID: null,
+      OIDC_CLIENT_SECRET: null,
+      OIDC_AUDIENCE: null,
+      AUTH_ADMIN_SUBJECT: null,
+      AUTH_SESSION_IDLE_SECONDS: null,
+      ACCESS_DB_URI: null,
+      WEB_CLIENT_URL: null,
+    };
+  }
+  const required = (name: string): string => {
+    const value = optStr(env, name);
+    if (value === null) {
+      throw new Error(`Environment variable ${name} is required when AUTH_ENABLED is 'true'`);
+    }
+    return value;
+  };
+  secureUrl("PUBLIC_URL", required("PUBLIC_URL"));
+  // Optional: a server without a web client accepts bearer tokens only.
+  const webClient = optStr(env, "WEB_CLIENT_URL");
+  // Exactly as given: tokens must carry this very string, a trailing slash included.
+  const issuer = secureUrl("OIDC_ISSUER", required("OIDC_ISSUER"), true);
+  // The back channel may be http anywhere: the server's own way to the issuer, e.g. in a container network.
+  const backchannel = optStr(env, "OIDC_BACKCHANNEL_URL");
+  const clientId = required("OIDC_CLIENT_ID");
+  const audience = required("OIDC_AUDIENCE");
+  // An ID token names the client as its audience: it must never pass as an API credential.
+  if (audience === clientId) {
+    throw new Error("Environment variable OIDC_AUDIENCE must differ from OIDC_CLIENT_ID");
+  }
+  const accessDb = required("ACCESS_DB_URI");
+  if (!/^postgres(ql)?:\/\//.test(accessDb)) {
+    throw new Error("Environment variable ACCESS_DB_URI is not a postgresql:// URL");
+  }
+  return {
+    AUTH_ENABLED: true,
+    OIDC_ISSUER: issuer,
+    OIDC_BACKCHANNEL_URL: backchannel === null ? null : httpUrl("OIDC_BACKCHANNEL_URL", backchannel),
+    OIDC_CLIENT_ID: clientId,
+    OIDC_CLIENT_SECRET: required("OIDC_CLIENT_SECRET"),
+    OIDC_AUDIENCE: audience,
+    AUTH_ADMIN_SUBJECT: required("AUTH_ADMIN_SUBJECT"),
+    AUTH_SESSION_IDLE_SECONDS: positiveInt(env, "AUTH_SESSION_IDLE_SECONDS", 8 * 60 * 60),
+    ACCESS_DB_URI: accessDb,
+    WEB_CLIENT_URL: webClient === null ? null : secureUrl("WEB_CLIENT_URL", webClient),
+  };
+}
+
+/** The authentication settings, or null when authentication is off. */
+export function authSettings(s: Settings): AuthSettings | null {
+  if (!s.AUTH_ENABLED) return null;
+  return {
+    issuer: s.OIDC_ISSUER!,
+    backchannelUrl: s.OIDC_BACKCHANNEL_URL ?? s.OIDC_ISSUER!,
+    clientId: s.OIDC_CLIENT_ID!,
+    clientSecret: s.OIDC_CLIENT_SECRET!,
+    audience: s.OIDC_AUDIENCE!,
+    adminSubject: s.AUTH_ADMIN_SUBJECT!,
+    sessionIdleSeconds: s.AUTH_SESSION_IDLE_SECONDS!,
+    accessDbUri: s.ACCESS_DB_URI!,
+    publicUrl: httpUrl("PUBLIC_URL", s.PUBLIC_URL!),
+    webClientUrl: s.WEB_CLIENT_URL === null ? null : httpUrl("WEB_CLIENT_URL", s.WEB_CLIENT_URL),
+  };
 }
 
 /** Where a provider is reached when no base URL is configured. */
@@ -152,7 +351,16 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     DB_URI: str(env, "DB_URI", "postgresql://localhost:5432/ontoforge"),
     DB_USER: str(env, "DB_USER", "postgres"),
     DB_PASSWORD: str(env, "DB_PASSWORD", "ontoforge_dev"),
+    // Connections the ontology database pool opens at most, per server.
+    DB_POOL_SIZE: positiveInt(env, "DB_POOL_SIZE", 10),
+    // Where the search worker's `LISTEN` connection goes; DB_URI when unset.
+    // A transaction-mode pooler cannot carry LISTEN, so behind one this
+    // names the database directly.
+    DB_LISTEN_URI: optStr(env, "DB_LISTEN_URI"),
     PORT: int(env, "PORT", 8000),
+    // How long a stopping server lets running requests and chat streams
+    // finish before it cuts them.
+    SHUTDOWN_DRAIN_SECONDS: positiveInt(env, "SHUTDOWN_DRAIN_SECONDS", 20),
 
     EMBEDDING_PROVIDER: embeddingProvider,
     EMBEDDING_MODEL: str(env, "EMBEDDING_MODEL", "bge-m3"),
@@ -176,6 +384,10 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
 
     // The most bytes one changeset's staged values hold (`valueBytes`).
     CHANGESET_MAX_BYTES: positiveInt(env, "CHANGESET_MAX_BYTES", 32 * 1024 * 1024),
+    // The most staged objects one changeset holds.
+    CHANGESET_MAX_OBJECTS: positiveInt(env, "CHANGESET_MAX_OBJECTS", 10_000),
+    // The largest request body the server reads, in bytes.
+    REQUEST_BODY_LIMIT: positiveInt(env, "REQUEST_BODY_LIMIT", 16 * 1024 * 1024),
 
     AI_PROVIDER: aiProvider,
     AI_MODEL: aiModel(env, aiProvider),
@@ -189,6 +401,9 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     DECISION_API_KEY: optStr(env, "DECISION_API_KEY") ?? optStr(env, "TYPESAFE_API_KEY"),
 
     PUBLIC_URL: optStr(env, "PUBLIC_URL"),
+
+    ...sharedState(env),
+    ...auth(env),
   };
 }
 

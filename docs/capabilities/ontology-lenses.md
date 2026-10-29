@@ -3,13 +3,13 @@
 A lens is a named aperture onto one ontology's schema. It decides what a
 runtime caller can see, name and write — and nothing else.
 
-Vocabulary: [../README.md](../README.md). The schema it looks at:
+Vocabulary: [glossary](../glossary.md). The schema it looks at:
 [schema-modeling.md](schema-modeling.md).
 
 ## What a lens is
 
 A lens belongs to exactly one ontology. It has a key, a name and an optional
-description. The key follows the schema [key](../README.md) rule at up to 64
+description. The key follows the schema [key](../glossary.md#schema-and-design) rule at up to 64
 characters, is chosen at creation, is never updatable, and is what every interface uses
 to address the lens — always together with its ontology, because lens keys are unique
 only within their ontology: every ontology can have its own `default`. The name is
@@ -90,8 +90,10 @@ The italic in that last rule is a real ordering hazard. A lens with no entity
 inclusions yet accepts any relation type inclusion unchecked; adding entity
 inclusions afterwards can leave an included relation type whose endpoints are not
 exposed. Import writes inclusions without applying any of the four rules at all.
-In both cases the result is a lens that validation reports as invalid but that the
-runtime will still load and serve.
+In both cases the result is a lens that validation reports as invalid. The runtime still
+loads and serves it, but never such a relation type: it is skipped like an inclusion
+naming a type that no longer exists, so no relation type of a lens leads to an entity type
+the lens hides.
 
 ## The scoping matrix
 
@@ -145,7 +147,9 @@ updating or deleting through an unexposed type answers *not found*.
 
 **Read results.** Every entity and relation in a response is stripped to the
 exposed properties. System properties always survive stripping — they are never
-part of a lens's declaration and never removable by one.
+part of a lens's declaration and never removable by one. The one exception is `_identity`: a lens
+that hides any of a type's [identity](entity-identity.md#through-a-lens) properties
+withholds it, and that type has no identity through the lens.
 
 Three behaviours follow from those three, and each is a place a reimplementation
 tends to leak:
@@ -157,19 +161,13 @@ tends to leak:
   validation before execution — the lens is enforced when the query is parsed, not
   only when its rows come back. See [oql.md](oql.md).
 - **Traversal drops what the lens does not acknowledge.** A neighbour reached
-  through a relation type the lens does not expose is omitted from the
-  neighbourhood entirely, not returned with an empty relation.
+  through a relation type the lens does not expose, or of an entity type it does not
+  expose, is omitted from the neighbourhood entirely, not returned with an empty
+  relation.
 - **Search is restricted to exposed types**, and passage search only to exposed
   document properties, through the search indices the lens may search
   ([below](#search-through-a-lens)). Each index is ranked on its own, so outside types
   do not consume a narrow lens's candidate budget ([search.md](search.md)).
-
-Filtering is applied per type, not per response, and that has one visible
-consequence during traversal: a neighbour whose own entity type is out of scope
-escapes property stripping ([instance-data.md](instance-data.md)). Under the
-matrix that combination cannot arise from the interactive paths — it needs an
-inclusion set written past the endpoint check, via import or the ordering hazard
-above.
 
 ## The lens/full-schema asymmetry
 
@@ -180,8 +178,8 @@ broken under another:
 
 - **Defaults on create come from the full schema.** A property the lens hides
   cannot be written through it, yet if that property has a default the created
-  entity still receives it. Reason and rule:
-  [../decisions.md](../decisions.md#schema-and-data).
+  entity still receives it, so data created through a narrow lens remains valid under
+  a wider one ([write validation](instance-data.md#validation)).
 - **Relation endpoint checks use the full schema.** The source and target entity
   types a new relation is validated against are the type's real endpoints, not
   whatever the lens exposes.
@@ -190,10 +188,12 @@ broken under another:
   [anchor's hierarchy](rulesets.md#the-anchors-hierarchy) and whether an entity is covered
   all follow every parent relation of the ontology, those the lens hides included. A
   narrow lens therefore cannot give an entity a second parent, close a cycle through a
-  relation it hides, or delete a parent whose children it cannot see. The lens cuts only
-  what is shown: a [path](instance-data.md#the-path-read) starts below the nearest
-  ancestor it hides, and through a ruleset with an anchor a hierarchy type into which it
-  shows no parent relation cannot be created.
+  relation it hides, or delete a parent whose children it cannot see. Nor does a lens
+  delete an entity with any relation attached that it hides
+  ([delete](instance-data.md#entities)). The lens cuts only what is shown: a
+  [path](instance-data.md#the-path-read) starts below the nearest ancestor it hides, or
+  the nearest parent relation it hides, and through a ruleset with an anchor a hierarchy
+  type into which it shows no parent relation cannot be created.
 - **Search entries are composed from the full schema's properties.** A scoped
   lens's ranking can therefore be driven by text it cannot see — a result may be
   highly ranked for reasons invisible through that lens. This is inherent to
@@ -252,7 +252,8 @@ The lens still governs what a search returns:
 - **Hidden properties stay inside entry text.** An index may read a property the lens
   hides; its entries still carry the value, so it can still drive the ranking. The
   match's snippet is then withheld, and the label of a relation's target is withheld
-  when the lens hides the target's name property.
+  when the lens hides the target's name property. Entries are shared across lenses;
+  composing separate entries for each lens would multiply storage and embedding cost.
 - **The search catalog is projected too.** It lists only the indices the lens can
   search, and of each only the fields, relation groups and document the lens shows; a
   managed index's description names only those fields
@@ -298,12 +299,12 @@ Sharing stops at the ontology boundary: lenses of two ontologies share nothing,
 whatever their keys.
 
 A lens is assembled once per process, cached under its ontology and lens keys, and
-discarded after any modeling change; the caching rules and their one operational
-limit are in [../architecture.md](../architecture.md).
+used only while the ontology's design is unchanged; the caching rules are in
+[../architecture.md](../architecture.md#schema-cache).
 
 ## Through the interfaces
 
-Full index: [../interfaces.md](../interfaces.md).
+Full index: [../interfaces/](../interfaces/README.md).
 
 Defining a lens is a modeling operation; using one is a runtime operation. The two
 never mix — that separation is what makes it safe to hand an autonomous agent a
@@ -323,8 +324,8 @@ allowlist is how an allowlist is changed there, which works because adding is an
 upsert. REST offers the explicit update as well.
 
 **The runtime MCP server is bound to exactly one ontology and one lens by its
-mount URL** ([../decisions.md](../decisions.md#interfaces)). A model never chooses
+mount URL** ([MCP binding](../interfaces/mcp.md#how-a-mount-is-bound)). A model never chooses
 a lens and can never reach across two — nor across two ontologies.
 
 What the web UI does with all of this is described in
-[../product-surface.md](../product-surface.md).
+[../product-surface/](../product-surface/README.md).

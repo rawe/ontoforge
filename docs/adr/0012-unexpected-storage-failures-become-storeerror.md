@@ -1,12 +1,17 @@
 # Unexpected storage failures become one storage error with an error id
 
-Rule: [Storage](../decisions.md#storage)
+Current behavior: [Errors](../interfaces/README.md#errors)
 
 ## Context
 
 An unexpected driver failure has to reach the caller as something. Passed through, it
 names the vendor and its physical objects; swallowed, it becomes a bare 500 that cannot
 be traced back to the stack that produced it.
+
+## Decision
+
+An unexpected storage failure answers `STORAGE_ERROR` with a generated `errorId` only; the
+adapter logs the original against that id.
 
 ## Rejected
 

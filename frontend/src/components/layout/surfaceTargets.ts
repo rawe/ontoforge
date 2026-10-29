@@ -5,6 +5,8 @@ import { lensScopeQuery, useLenses, useRuntimeSchema } from '@/api/hooks'
 import * as model from '@/api/model'
 import { qk } from '@/api/queryKeys'
 import type { Lens } from '@/api/types'
+import { useAccess } from '@/components/auth/useAccess'
+import type { Access } from '@/lib/access'
 import { readString, remove, storageKeys } from '@/lib/storage'
 import {
   pickLens,
@@ -34,9 +36,12 @@ export interface Target {
 /**
  * The lens the Workbench opens when the address names none (see `pickLens`);
  * null while the lenses, or the scopes that decide between them, still load.
+ * Only lenses the user may read count.
  */
 export function useTargetLens(ontologyKey: string): { lenses: Lens[] | undefined; lens: Lens | null } {
-  const { data: lenses } = useLenses(ontologyKey)
+  const access = useAccess()
+  const { data: all } = useLenses(ontologyKey)
+  const lenses = all?.filter((l) => access.canRead(ontologyKey, l.key))
   const remembered = readString(storageKeys.lastLens(ontologyKey))
   const rememberedValid = lenses?.some((l) => l.key === remembered) ?? false
   // Scopes are only needed to find an unscoped lens when none is remembered.
@@ -59,6 +64,7 @@ export function useTargetLens(ontologyKey: string): { lenses: Lens[] | undefined
 export function useWorkbenchTarget(ontologyKey: string): Target | null {
   const { pathname, search } = useLocation()
   const { lenses, lens: picked } = useTargetLens(ontologyKey)
+  const { data: all } = useLenses(ontologyKey)
   const context = studioContext(pathname, search)
   const lens =
     context.kind === 'lens' ? (lenses?.find((l) => l.lensId === context.lensId) ?? picked) : picked
@@ -68,7 +74,10 @@ export function useWorkbenchTarget(ontologyKey: string): Target | null {
   if (lenses !== undefined && lenses.length === 0) {
     return {
       to: `/o/${ontologyKey}/studio/lenses`,
-      hint: 'No lens yet — create one to use the Workbench',
+      hint:
+        all !== undefined && all.length > 0
+          ? 'No lens assigned to you — opens the lens list'
+          : 'No lens yet — create one to use the Workbench',
       unavailable: true,
     }
   }
@@ -116,15 +125,18 @@ export function useStudioTarget(ontologyKey: string, lensKey: string): Target {
  * Workbench landing for an ontology reached without a lens (the ontology
  * switcher): the lens `pickLens` chooses, or the Studio's lens list when the
  * ontology has none. A remembered key that no longer resolves is forgotten.
+ * Only lenses the user may read count, as in `useTargetLens`.
  */
 export async function workbenchLanding(
   queryClient: QueryClient,
   ontologyKey: string,
+  access: Access,
 ): Promise<string> {
-  const lenses = await queryClient.fetchQuery({
+  const all = await queryClient.fetchQuery({
     queryKey: qk.lenses(ontologyKey),
     queryFn: () => model.listLenses(ontologyKey),
   })
+  const lenses = all.filter((l) => access.canRead(ontologyKey, l.key))
   const remembered = readString(storageKeys.lastLens(ontologyKey))
   let unscoped = new Set<string>()
   if (!lenses.some((l) => l.key === remembered)) {

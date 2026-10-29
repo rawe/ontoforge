@@ -29,6 +29,13 @@
  *   is read-modify-write: it is applied with a compare-and-set on the
  *   version it read, so a change in between is a 409 and nothing is
  *   written.
+ * - **Lists.** A staging request may list up to `MAX_BATCH_ITEMS` calls,
+ *   staged in list order in one transaction, whole or not at all
+ *   (`stageBatch`).
+ * - **Put** names an entity by the identity its values build, or a
+ *   relation of a one-per-pair type by its pair, and resolves now, in the
+ *   changeset's view, to an ordinary update of the one that has it, or
+ *   else an ordinary create. The set only ever holds creates and updates.
  * - **Merging.** A create adds its object and one value per key sent; a
  *   create with a parent relation adds the relation's object too. An
  *   update of a stored object adds an `update` object if none is staged
@@ -72,8 +79,8 @@
  *   target `FOR UPDATE` with drift re-checked, the anchor read fresh; the
  *   staged objects applied in fixed phases (entity creates, entity
  *   updates, relation deletes, relation creates, relation updates, entity
- *   deletes), each through the store's own write method with its search
- *   work; commit validation over the end state; the changeset deleted,
+ *   deletes), in batches through the store's batch writes with their
+ *   search work; commit validation over the end state; the changeset deleted,
  *   COMMIT. Any failure rolls all of it back; a rejection (422, the
  *   violations by object and property) then refreshes the last change and
  *   keeps the version. One commit runs at a time in one process.
@@ -88,10 +95,11 @@ import { isDeepStrictEqual } from "node:util";
 
 import { CoercionError, assertNoNulCharacter } from "../core/dataTypes.js";
 import { settings } from "../config.js";
-import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
+import { ConflictError, IdentityTakenError, NotFoundError, ValidationError } from "../core/exceptions.js";
 import type {
   ChangesetChange,
   ChangesetRecord,
+  DesignRevision,
   NewStagedObject,
   NewStagedValue,
   ParentLink,
@@ -106,26 +114,38 @@ import type { ParentEnd, PropertyDef } from "../core/schemas.js";
 import { planSearchWrite, type SearchChange } from "../core/searchDependencies.js";
 import { AnchorGuard, changesetAnchorRefusal, hierarchyOf } from "./anchorGuard.js";
 import { cpLength } from "./codePoints.js";
+import { buildIdentity, identityValues } from "./identity.js";
 import {
+  entityIdentity,
+  identityPropertiesOfType,
   prepareCreateEntity,
   prepareCreateRelation,
   prepareDeleteEntity,
   prepareDeleteRelation,
   prepareUpdateEntity,
   prepareUpdateRelation,
+  touchesIdentity,
+  updatedIdentity,
   type FieldErrors,
   type ParentRelationInput,
   type UpdateArgs,
 } from "./prepare.js";
+import { loadDesign, retryOnDesignChange } from "./designWrite.js";
 import { docLengthKey, documentPropertyKeys, filterEntityProperties } from "./readHelpers.js";
-import { loadSchema, loadSearchContext, type LoadedSchema, type SearchContext } from "./schemaCache.js";
+import { loadSchema, type LoadedSchema, type SearchContext } from "./schemaCache.js";
 import {
+  HIDDEN_RELATIONS_MESSAGE,
   applyDocumentEdit,
   documentSlice,
   endpointTypeMessage,
+  exactlyOne,
+  exactlyOneFault,
+  hasHiddenRelations,
   parentReadings,
   type DocumentEditBody,
   type EndRole,
+  type ParentRelationRequest,
+  type RelationEnds,
 } from "./service.js";
 
 type Row = Record<string, unknown>;
@@ -134,8 +154,8 @@ type Row = Record<string, unknown>;
 export const CHANGESET_IDLE_DAYS = 7;
 /** The longest note, in characters. */
 export const MAX_NOTE_LENGTH = 1000;
-/** The most staged objects one changeset holds. */
-export const MAX_STAGED_OBJECTS = 10_000;
+/** The most items one staging request lists. */
+export const MAX_BATCH_ITEMS = 1000;
 
 /** The size a staged value counts toward the byte cap
  * (`CHANGESET_MAX_BYTES`): the UTF-8 bytes of its value and its before as
@@ -147,9 +167,28 @@ export function valueBytes(value: unknown, before: Row | null): number {
 
 const IDLE_MS = CHANGESET_IDLE_DAYS * 24 * 3_600_000;
 
+/** The entity a staged call names: by id or by identity, exactly one. */
+export interface EntityAddress {
+  id?: string | null | undefined;
+  identity?: string | null | undefined;
+}
+
 /** One stageable call, as the entrances hand it over: the values of the
- * matching immediate write. */
+ * matching immediate write. An entity may be named by identity wherever
+ * the immediate write takes one (`resolveWrite`). */
 export type StagedWrite =
+  | { operation: "create_entity"; typeKey: string; properties: Row; parentRelation: ParentRelationRequest | null }
+  | ({ operation: "update_entity"; typeKey: string; properties: Row } & EntityAddress)
+  | ({ operation: "delete_entity"; typeKey: string } & EntityAddress)
+  | ({ operation: "create_relation"; typeKey: string; properties: Row } & RelationEnds)
+  | { operation: "update_relation"; typeKey: string; id: string; properties: Row }
+  | { operation: "delete_relation"; typeKey: string; id: string }
+  | ({ operation: "edit_document"; typeKey: string; propertyKey: string; edit: DocumentEditBody } & EntityAddress)
+  | { operation: "put_entity"; typeKey: string; properties: Row }
+  | ({ operation: "put_relation"; typeKey: string; properties: Row } & RelationEnds);
+
+/** A stageable call with every entity named by id. */
+type ResolvedWrite =
   | { operation: "create_entity"; typeKey: string; properties: Row; parentRelation: ParentRelationInput | null }
   | { operation: "update_entity"; typeKey: string; id: string; properties: Row }
   | { operation: "delete_entity"; typeKey: string; id: string }
@@ -157,6 +196,13 @@ export type StagedWrite =
   | { operation: "update_relation"; typeKey: string; id: string; properties: Row }
   | { operation: "delete_relation"; typeKey: string; id: string }
   | { operation: "edit_document"; typeKey: string; id: string; propertyKey: string; edit: DocumentEditBody };
+
+/** A staged call resolved (`resolveWrite`): a put names what it became. */
+interface Resolved {
+  write: ResolvedWrite;
+  faults: FieldErrors;
+  put?: "create" | "update";
+}
 
 /** A changeset as every answer shows it. */
 export interface ChangesetView {
@@ -216,6 +262,9 @@ export interface StagedObjectView {
   firstTouchedAt: Date;
   /** Entities: the name. */
   name?: string | null;
+  /** Entities whose identity the changeset sets or changes, when the lens
+   * shows it: the stored identity (null on a create) and the one after. */
+  identity?: { before: string | null; after: string };
   /** Relations: the two ends. */
   from?: EndView;
   to?: EndView;
@@ -254,6 +303,8 @@ export type StagedAnswer = Row & {
   id: string;
   relation?: { id: string };
   cascaded?: string[];
+  /** A put's: what it staged. */
+  action?: "create" | "update";
 };
 
 function notFound(id: string): NotFoundError {
@@ -278,11 +329,6 @@ function toView(record: ChangesetRecord): ChangesetView {
     lastChangeAt: record.lastChangeAt,
     submittedAt: record.submittedAt,
   };
-}
-
-/** Draft changesets last changed before this are expired. */
-function expiryCutoff(): Date {
-  return new Date(Date.now() - IDLE_MS);
 }
 
 /** A valid note, or null; over the cap, or holding a NUL, is a 422. */
@@ -319,10 +365,9 @@ async function loadChangeset(
   const changesets = store.changesets();
   const record = await changesets.get(id, loaded.scoped.lensId, rulesetKey);
   if (record === null) throw notFound(id);
-  const cutoff = expiryCutoff();
-  if (record.submittedAt === null && record.lastChangeAt < cutoff) {
-    await changesets.sweep(cutoff);
-    throw notFound(id);
+  // A draft expires by the database's clock: whether it has is the sweep's to say.
+  if (record.submittedAt === null && (await changesets.sweep(IDLE_MS)) > 0) {
+    if ((await changesets.get(id, loaded.scoped.lensId, rulesetKey)) === null) throw notFound(id);
   }
   return record;
 }
@@ -348,8 +393,9 @@ async function applyChange(
   record: ChangesetRecord,
   change: ChangesetChange,
   store: RuntimeStore,
-): Promise<void> {
-  if ((await store.changesets().apply(record.id, record.version, change)) !== null) return;
+): Promise<ChangesetRecord> {
+  const applied = await store.changesets().apply(record.id, record.version, change);
+  if (applied !== null) return applied;
   const now = await store.changesets().get(record.id, loaded.scoped.lensId, rulesetKey);
   if (now === null) throw notFound(record.id);
   if (now.submittedAt !== null) throw isSubmitted(record.id);
@@ -375,7 +421,7 @@ export async function startChangeset(
   await checkRulesetExists(rulesetKey, store);
   const valid = validNote(note);
   const changesets = store.changesets();
-  await changesets.sweep(expiryCutoff());
+  await changesets.sweep(IDLE_MS);
   const record = await changesets.start({ id: randomUUID(), lensId: loaded.scoped.lensId, rulesetKey: rulesetKey, note: valid });
   return toView(record);
 }
@@ -562,11 +608,362 @@ async function deleteMerge(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Identity in a changeset
+// ---------------------------------------------------------------------------
+
+/**
+ * The identity a staged entity create or update gives its entity, under
+ * the definition now: a create's over its values, an update's over the
+ * stored values with its own over them (a null removing one) when it
+ * stages a value of an identity property. Null when it gives none: a
+ * delete, a type without an identity, an update that stages no identity
+ * property, or values that make no identity (a fault the replay reports).
+ */
+function givenIdentity(
+  loaded: LoadedSchema,
+  typeKey: string,
+  action: StagedAction,
+  staged: Row,
+  stored: Row | null,
+): string | null {
+  if (action === "delete") return null;
+  const properties = identityPropertiesOfType(loaded, typeKey);
+  if (properties === null) return null;
+  if (action === "update" && !properties.some((property) => Object.hasOwn(staged, property.key))) return null;
+  return buildIdentity(properties, withoutNulls({ ...(stored ?? {}), ...staged })).identity;
+}
+
+/** The staged values of the object `id` once `change` is applied to
+ * `object`, a null removing a key. */
+function valuesAfter(object: StagedObjectRecord | undefined, id: string, change: ChangesetChange): Row {
+  const values = new Map(Object.entries(object === undefined ? {} : valuesOf(object)));
+  for (const removed of change.removeValues ?? []) if (removed.objectId === id) values.delete(removed.propertyKey);
+  for (const value of change.values ?? []) if (value.objectId === id) values.set(value.propertyKey, value.value);
+  return Object.fromEntries(values);
+}
+
+/** `values` without the keys whose value is null. */
+function withoutNulls(values: Row): Row {
+  return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== null));
+}
+
+/**
+ * A merge into an entity, refused on the value faults of the identity it
+ * leaves the entity with (an empty string, too long), as the immediate
+ * write refuses them: a create's always, an update's when it stages a
+ * value of an identity property. Uniqueness is left to the lock-free
+ * pass. Nothing is kept of the identity: it is built again from the
+ * values wherever it is needed.
+ */
+function withIdentity(loaded: LoadedSchema, at: Target, typeKey: string, id: string, merge: Merge): Merge {
+  const properties = identityPropertiesOfType(loaded, typeKey);
+  if (isEmpty(merge.change) || properties === null) return merge;
+  const action = at.object?.action ?? "update";
+  const staged = valuesAfter(at.object, id, merge.change);
+  if (action === "create" || properties.some((property) => Object.hasOwn(staged, property.key))) {
+    const errors: FieldErrors = {};
+    entityIdentity(loaded, typeKey, withoutNulls({ ...(at.stored ?? {}), ...staged }), errors);
+    refuseOn(errors);
+  }
+  return merge;
+}
+
+/** The 409 of an identity two entities have in a changeset's view. */
+function ambiguous(changesetId: string, typeKey: string, identity: string): ConflictError {
+  return new ConflictError(
+    `More than one entity of type '${typeKey}' has the identity '${identity}' in changeset '${changesetId}'`,
+  );
+}
+
+/**
+ * The id of the entity of a type that has `identity` in the changeset's
+ * view (`holdersInView`). Null when none has it, or the lens does not
+ * show the type's whole identity; two that have it are a 409.
+ */
+async function stagedEntityOf(
+  loaded: LoadedSchema,
+  changesetId: string,
+  typeKey: string,
+  identity: string,
+  store: RuntimeStore,
+): Promise<string | null> {
+  if ((loaded.scoped.entityTypes[typeKey]?.identityProperties ?? null) === null) return null;
+  const found = await holdersInView(loaded, changesetId, typeKey, identity, store);
+  if (found.size > 1) throw ambiguous(changesetId, typeKey, identity);
+  const [id] = found;
+  return id ?? null;
+}
+
+/**
+ * The ids of the entities of a type that have `identity` in the
+ * changeset's view: the stored entities with what this changeset
+ * creates, updates and deletes over them, each identity built as the
+ * commit would build it now: a create's from its values, an update's from
+ * its values over the entity's current stored ones, under the current
+ * definition. An entity it creates or renames is found by its new
+ * identity; one it deletes or renames away is not found by its old one;
+ * a live write to a value the changeset does not stage moves it.
+ *
+ * Only the candidates are read: the stored holder, and the staged objects
+ * that stage a part of `identity` and no other value of an identity
+ * property. Any other staged object either stages a value that builds
+ * another identity or stages none, and then keeps its stored one.
+ */
+async function holdersInView(
+  loaded: LoadedSchema,
+  changesetId: string,
+  typeKey: string,
+  identity: string,
+  store: RuntimeStore,
+): Promise<Set<string>> {
+  const properties = identityPropertiesOfType(loaded, typeKey);
+  const values = properties === null ? null : identityValues(properties, identity);
+  if (values === null) return new Set();
+  const holder = await store.getEntityByIdentity(typeKey, identity);
+  const candidates = await store.changesets().entityObjectsStaging(changesetId, typeKey, values);
+  const holderId = holder === null ? null : (holder._id as string);
+  let holderStaged = holderId !== null && candidates.some((object) => object.objectId === holderId);
+  if (holderId !== null && !holderStaged) {
+    const own = await store.changesets().objects(changesetId, [holderId]);
+    candidates.push(...own);
+    holderStaged = own.length > 0;
+  }
+  const updates = candidates.filter((object) => object.action === "update").map((object) => object.objectId);
+  const stored = updates.length === 0 ? new Map<string, Row>() : await storedEntities(loaded, updates, store);
+  const found = new Set<string>();
+  for (const object of candidates) {
+    if (identityAfter(loaded, object, stored.get(object.objectId)) === identity) found.add(object.objectId);
+  }
+  // Not staged: it keeps its stored identity.
+  if (holderId !== null && !holderStaged) found.add(holderId);
+  return found;
+}
+
+/**
+ * The identity each staged entity object of a type leaves its entity
+ * with (`identityAfter`), in one pass: the staged values of the identity
+ * properties only, and the current stored rows of the updates that stage
+ * one. An update that stages none keeps its stored identity, which a
+ * caller reads from the stored holders; it maps to undefined.
+ */
+async function stagedIdentities(
+  loaded: LoadedSchema,
+  changesetId: string,
+  typeKey: string,
+  store: RuntimeStore,
+): Promise<Map<string, string | null | undefined>> {
+  const keys = (identityPropertiesOfType(loaded, typeKey) ?? []).map((property) => property.key);
+  const objects = await store.changesets().entityObjectsKeyed(changesetId, typeKey, keys);
+  const partial = objects.filter((object) => object.action === "update" && object.values.length > 0);
+  const updates = partial.map((object) => object.objectId);
+  const stored = updates.length === 0 ? new Map<string, Row>() : await storedEntities(loaded, updates, store);
+  return new Map(
+    objects.map((object) => {
+      const keeps = object.action === "update" && object.values.length === 0;
+      return [object.objectId, keeps ? undefined : identityAfter(loaded, object, stored.get(object.objectId))] as const;
+    }),
+  );
+}
+
+/** The identity a staged entity object leaves its entity with, `stored`
+ * its target's current row (`holdersInView`): null for a delete, a
+ * target gone, or values that make none. */
+function identityAfter(loaded: LoadedSchema, object: StagedObjectRecord, stored: Row | undefined): string | null {
+  if (object.kind !== "entity" || object.action === "delete") return null;
+  if (object.action === "create") return givenIdentity(loaded, object.typeKey, "create", valuesOf(object), null);
+  if (stored === undefined || stored._entityTypeKey !== object.typeKey) return null;
+  const given = givenIdentity(loaded, object.typeKey, "update", valuesOf(object), stored);
+  if (given !== null) return given;
+  const touches = identityPropertiesOfType(loaded, object.typeKey)?.some((p) => Object.hasOwn(valuesOf(object), p.key));
+  return touches === true || typeof stored._identity !== "string" ? null : stored._identity;
+}
+
+/** The parent end's entity type of a parent relation type; null for any
+ * other relation type. */
+function parentTypeOf(loaded: LoadedSchema, relationTypeKey: string): string | null {
+  const rt = loaded.full.relationTypes[relationTypeKey];
+  if (rt === undefined || rt.parent === null) return null;
+  return rt.parent === "source" ? rt.fromEntityTypeKey : rt.toEntityTypeKey;
+}
+
+/**
+ * A staged call with every entity it names by identity resolved to an id
+ * in the changeset's view (`stagedEntityOf`), and the faults of the
+ * fields that name them, joined to the call's own field errors: both or
+ * neither of a pair under both of its fields; a relation end or a parent
+ * no entity has as the immediate write's not found, under its identity
+ * field. The target of an update, delete or document edit by identity
+ * that is not found is the immediate route's 404.
+ */
+async function resolveWrite(
+  loaded: LoadedSchema,
+  changesetId: string,
+  write: StagedWrite,
+  store: RuntimeStore,
+): Promise<Resolved> {
+  const faults: FieldErrors = {};
+  const byIdentity = async (typeKey: string | null, identity: string): Promise<string | null> =>
+    typeKey === null ? null : stagedEntityOf(loaded, changesetId, typeKey, identity, store);
+  switch (write.operation) {
+    case "put_entity":
+      return resolvePutEntity(loaded, changesetId, write, store);
+    case "put_relation": {
+      const { operation: _put, ...rest } = write;
+      const created = await resolveWrite(loaded, changesetId, { ...rest, operation: "create_relation" }, store);
+      if (created.write.operation !== "create_relation") return created;
+      const rt = loaded.full.relationTypes[write.typeKey];
+      if (rt !== undefined && loaded.scoped.relationTypes[write.typeKey] !== undefined && !rt.onePerPair) {
+        throw new ValidationError("Instance validation failed", {
+          fields: { type: `Relation type '${write.typeKey}' is not one per pair; a put needs one` },
+        });
+      }
+      const { fromEntityId, toEntityId, properties, typeKey } = created.write;
+      // A type the lens hides, or an end not found, is the create's fault,
+      // reported by its merge; nothing is read of its relations.
+      const id =
+        rt === undefined || loaded.scoped.relationTypes[typeKey] === undefined || Object.keys(created.faults).length > 0
+          ? null
+          : await pairHolderInView(changesetId, typeKey, fromEntityId, toEntityId, store);
+      if (id === null) return { ...created, put: "create" };
+      return { write: { operation: "update_relation", typeKey, id, properties }, faults: {}, put: "update" };
+    }
+    case "create_entity": {
+      const request = write.parentRelation;
+      if (request === null) return { write: { ...write, parentRelation: null }, faults };
+      const { parentId, parentIdentity, ...rest } = request;
+      let id = parentId ?? null;
+      if (!exactlyOne(parentId, parentIdentity)) {
+        exactlyOneFault(faults, "parentRelation.parentId", "parentRelation.parentIdentity");
+        id = "";
+      } else if (parentIdentity !== null && parentIdentity !== undefined) {
+        const parentType = parentTypeOf(loaded, request.type);
+        id = await byIdentity(parentType, parentIdentity);
+        // A relation type that is no parent relation is reported on `type`.
+        if (id === null && parentType !== null) {
+          faults["parentRelation.parentIdentity"] = `Parent entity '${parentIdentity}' not found`;
+        }
+      }
+      return { write: { ...write, parentRelation: { ...rest, parentId: id ?? "" } }, faults };
+    }
+    case "create_relation": {
+      const rt = loaded.full.relationTypes[write.typeKey];
+      const end = async (
+        idField: "fromEntityId" | "toEntityId",
+        identityField: "fromEntityIdentity" | "toEntityIdentity",
+        type: string | null,
+        label: string,
+      ): Promise<string> => {
+        const id = write[idField];
+        const identity = write[identityField];
+        if (!exactlyOne(id, identity)) {
+          exactlyOneFault(faults, idField, identityField);
+          return "";
+        }
+        if (id !== null && id !== undefined) return id;
+        const found = await byIdentity(type, identity!);
+        if (found === null) faults[identityField] = `${label} entity '${identity}' not found`;
+        return found ?? "";
+      };
+      const fromEntityId = await end("fromEntityId", "fromEntityIdentity", rt?.fromEntityTypeKey ?? null, "Source");
+      const toEntityId = await end("toEntityId", "toEntityIdentity", rt?.toEntityTypeKey ?? null, "Target");
+      const { fromEntityIdentity: _from, toEntityIdentity: _to, ...rest } = write;
+      return { write: { ...rest, fromEntityId, toEntityId }, faults };
+    }
+    case "update_entity":
+    case "delete_entity":
+    case "edit_document": {
+      const { id, identity, ...rest } = write;
+      if (!exactlyOne(id, identity)) {
+        const errors: FieldErrors = {};
+        exactlyOneFault(errors, "id", "identity");
+        throw new ValidationError("Instance validation failed", { fields: errors });
+      }
+      if (id !== null && id !== undefined) return { write: { ...rest, id }, faults };
+      if (loaded.scoped.entityTypes[write.typeKey] === undefined) {
+        throw new NotFoundError(`Entity type '${write.typeKey}' not found`);
+      }
+      const found = await byIdentity(write.typeKey, identity!);
+      if (found === null) throw new NotFoundError(`Entity '${identity}' not found`);
+      return { write: { ...rest, id: found }, faults };
+    }
+    default:
+      return { write, faults };
+  }
+}
+
+/**
+ * A put of an entity: its identity built from its values as a create
+ * would build it, then the entity that has it in the changeset's view
+ * (`stagedEntityOf`) updated, or else a new one created. A type the lens
+ * shows no identity of, or values that build none, is refused.
+ */
+async function resolvePutEntity(
+  loaded: LoadedSchema,
+  changesetId: string,
+  write: Extract<StagedWrite, { operation: "put_entity" }>,
+  store: RuntimeStore,
+): Promise<Resolved> {
+  const { typeKey, properties } = write;
+  const ids = { entityId: randomUUID(), relationId: randomUUID() };
+  // The type's 404 first, as the create's.
+  const { errors, write: prepared } = prepareCreateEntity(loaded, typeKey, properties, null, ids);
+  const keys = (loaded.scoped.entityTypes[typeKey]?.identityProperties ?? null) === null
+    ? null
+    : (identityPropertiesOfType(loaded, typeKey) ?? []).map((property) => property.key);
+  if (keys === null) {
+    throw new ValidationError("Instance validation failed", {
+      fields: { type: `Entity type '${typeKey}' has no identity this lens shows; a put names its entity by identity` },
+    });
+  }
+  const identity = prepared.entity.identity;
+  if (identity === null) {
+    const fields = Object.fromEntries(Object.entries(errors).filter(([key]) => keys.includes(key)));
+    throw new ValidationError("Instance validation failed", { fields: Object.keys(fields).length > 0 ? fields : errors });
+  }
+  const id = await stagedEntityOf(loaded, changesetId, typeKey, identity, store);
+  if (id === null) {
+    return { write: { operation: "create_entity", typeKey, properties, parentRelation: null }, faults: {}, put: "create" };
+  }
+  return { write: { operation: "update_entity", typeKey, id, properties }, faults: {}, put: "update" };
+}
+
+/**
+ * The relation of a one-per-pair type that links the pair in the
+ * changeset's view: a stored one this changeset does not delete, or one it
+ * creates; null when none does. Two that do (stored data from before the
+ * rule, or creates the commit will refuse) are a 409.
+ */
+async function pairHolderInView(
+  changesetId: string,
+  typeKey: string,
+  fromId: string,
+  toId: string,
+  store: RuntimeStore,
+): Promise<string | null> {
+  const pairs = [{ fromId, toId }];
+  const staged = await store.changesets().relationObjectsAt(changesetId, typeKey, pairs);
+  const deleted = new Set(staged.filter((object) => object.action === "delete").map((object) => object.objectId));
+  const holders = new Set<string>();
+  for (const relation of await store.relationsOfPairs(typeKey, pairs)) {
+    if (!deleted.has(relation.id)) holders.add(relation.id);
+  }
+  for (const object of staged) if (object.action === "create") holders.add(object.objectId);
+  if (holders.size > 1) {
+    throw new ConflictError(
+      `More than one relation of type '${typeKey}' links this source and target in changeset '${changesetId}'`,
+    );
+  }
+  const [id] = holders;
+  return id ?? null;
+}
+
 /** One staged call as a change of the set, after its checks. */
 async function mergeOf(
   loaded: LoadedSchema,
   changesetId: string,
-  write: StagedWrite,
+  write: ResolvedWrite,
+  faults: FieldErrors,
   store: RuntimeStore,
 ): Promise<Merge> {
   switch (write.operation) {
@@ -579,7 +976,7 @@ async function mergeOf(
         write.parentRelation,
         ids,
       );
-      refuseOn(errors);
+      refuseOn({ ...errors, ...faults });
       const objects = [newObject("entity", write.typeKey, ids.entityId, "create")];
       const entityValues = sent(prepared.entity.properties, write.properties);
       const values = Object.entries(entityValues).map(([key, value]) => newValue(ids.entityId, key, value, null));
@@ -606,7 +1003,7 @@ async function mergeOf(
         write.properties,
         relationId,
       );
-      refuseOn(errors);
+      refuseOn({ ...errors, ...faults });
       const values = Object.entries(sent(prepared.properties, write.properties)).map(([key, value]) =>
         newValue(relationId, key, value, null),
       );
@@ -625,7 +1022,8 @@ async function mergeOf(
       refuseOn(errors);
       const at = await target(changesetId, "entity", write.typeKey, write.id, store);
       const defs = loaded.full.entityTypes[write.typeKey]?.properties ?? {};
-      return patchMerge(at, "entity", write.typeKey, write.id, patchOf(prepared), defs);
+      const merge = patchMerge(at, "entity", write.typeKey, write.id, patchOf(prepared), defs);
+      return withIdentity(loaded, at, write.typeKey, write.id, merge);
     }
     case "update_relation": {
       const { errors, write: prepared } = prepareUpdateRelation(loaded, write.typeKey, write.id, write.properties);
@@ -664,6 +1062,55 @@ function isEmpty(change: ChangesetChange): boolean {
   return Object.values(change).every((part: unknown[] | undefined) => part === undefined || part.length === 0);
 }
 
+/** The draft a staging request stages into, as of its last change, and
+ * the bytes of its staged values once read. */
+interface Staging {
+  changeset: ChangesetRecord;
+  bytes: number | null;
+}
+
+/** A staged call's checks and merge (see the header): what it changes,
+ * and its answer. Nothing is applied yet. */
+async function mergeOne(
+  loaded: LoadedSchema,
+  changesetId: string,
+  write: StagedWrite,
+  store: RuntimeStore,
+): Promise<Merge> {
+  const resolved = await resolveWrite(loaded, changesetId, write, store);
+  const merge = await mergeOf(loaded, changesetId, resolved.write, resolved.faults, store);
+  return resolved.put === undefined ? merge : { ...merge, answer: { ...merge.answer, action: resolved.put } };
+}
+
+/** Apply a merge to the draft after the changeset's limits: a full
+ * changeset is a 409. A merge that changes nothing applies nothing. */
+async function applyMerge(
+  loaded: LoadedSchema,
+  rulesetKey: string | null,
+  at: Staging,
+  merge: Merge,
+  store: RuntimeStore,
+): Promise<void> {
+  const { id, objectCount } = at.changeset;
+  const maxObjects = settings.CHANGESET_MAX_OBJECTS;
+  if (merge.added > 0 && objectCount + merge.added > maxObjects) {
+    throw new ConflictError(`Changeset '${id}' is full: at most ${maxObjects} staged objects`);
+  }
+  const maxBytes = settings.CHANGESET_MAX_BYTES;
+  if (merge.grows > 0) {
+    at.bytes ??= await store.changesets().stagedBytes(id);
+    if (at.bytes + merge.grows > maxBytes) {
+      throw new ConflictError(`Changeset '${id}' is full: at most ${maxBytes} bytes of staged values`);
+    }
+  }
+  if (isEmpty(merge.change)) return;
+  at.changeset = await applyChange(loaded, rulesetKey, at.changeset, merge.change, store);
+  // A change that removes values frees bytes `grows` does not count: read
+  // them again when next needed.
+  const removes = (merge.change.removeValues?.length ?? 0) + (merge.change.removeObjects?.length ?? 0) > 0;
+  if (at.bytes !== null) at.bytes = removes ? null : at.bytes + merge.grows;
+}
+
 /**
  * Stage one call: its checks (see the header), then its merge into the
  * set, applied with a compare-and-set on the version read; a call that
@@ -683,16 +1130,82 @@ export async function stage(
   // The anchor deleted, or at an entity the lens hides: refused as every write.
   await AnchorGuard.checkStaging(rulesetKey, loaded, store);
 
-  const merge = await mergeOf(loaded, changeset.id, write, store);
-  if (merge.added > 0 && changeset.objectCount + merge.added > MAX_STAGED_OBJECTS) {
-    throw new ConflictError(`Changeset '${changesetId}' is full: at most ${MAX_STAGED_OBJECTS} staged objects`);
-  }
-  const maxBytes = settings.CHANGESET_MAX_BYTES;
-  if (merge.grows > 0 && (await store.changesets().stagedBytes(changeset.id)) + merge.grows > maxBytes) {
-    throw new ConflictError(`Changeset '${changesetId}' is full: at most ${maxBytes} bytes of staged values`);
-  }
-  if (!isEmpty(merge.change)) await applyChange(loaded, rulesetKey, changeset, merge.change, store);
+  const merge = await mergeOne(loaded, changeset.id, write, store);
+  await applyMerge(loaded, rulesetKey, { changeset, bytes: null }, merge, store);
   return merge.answer;
+}
+
+/** One item of a staging request that failed: its index in the list, and
+ * the error it alone would answer. */
+export interface ItemFault {
+  item: number;
+  code: "VALIDATION_ERROR" | "RESOURCE_NOT_FOUND" | "RESOURCE_CONFLICT";
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+/** The fault of an item's own error; null for any other error, which
+ * fails the request as it is. */
+function itemFault(item: number, error: unknown): ItemFault | null {
+  const code =
+    error instanceof ValidationError
+      ? "VALIDATION_ERROR"
+      : error instanceof NotFoundError
+        ? "RESOURCE_NOT_FOUND"
+        : error instanceof ConflictError
+          ? "RESOURCE_CONFLICT"
+          : null;
+  if (code === null) return null;
+  const details = (error as ValidationError).details;
+  return { item, code, message: (error as Error).message, ...(details === null ? {} : { details }) };
+}
+
+/**
+ * Stage a list of calls, in list order and whole or not at all, in one
+ * transaction: each item sees what the items before it staged, so a later
+ * one may name an entity an earlier one creates. Every item is checked; if
+ * any fails, nothing is staged and the 422 names each failed item by its
+ * index (`ItemFault`). The changeset's own refusals — not found,
+ * submitted, full, changed in between — fail the request as for one call.
+ * Answers each item's answer, in item order.
+ */
+export async function stageBatch(
+  lensKey: string,
+  rulesetKey: string | null,
+  changesetId: string,
+  writes: StagedWrite[],
+  store: RuntimeStore,
+): Promise<StagedAnswer[]> {
+  const loaded = await loadSchema(lensKey, store);
+  const changeset = await loadDraft(loaded, rulesetKey, changesetId, store);
+  await AnchorGuard.checkStaging(rulesetKey, loaded, store);
+  return store.transaction(loaded.design, async (bound) => {
+    const at: Staging = { changeset, bytes: null };
+    const answers: StagedAnswer[] = [];
+    const faults: ItemFault[] = [];
+    for (const [item, write] of writes.entries()) {
+      let merge: Merge;
+      try {
+        merge = await mergeOne(loaded, changeset.id, write, bound);
+      } catch (error) {
+        const fault = itemFault(item, error);
+        if (fault === null) throw error;
+        faults.push(fault);
+        continue;
+      }
+      // Applied even after a failed item, so that the items after it are
+      // checked against what the items before staged; the transaction
+      // rolls it all back.
+      await applyMerge(loaded, rulesetKey, at, merge, bound);
+      answers.push(merge.answer);
+    }
+    if (faults.length > 0) {
+      throw new ValidationError(`${faults.length} of ${writes.length} items failed; nothing was staged`, {
+        items: faults,
+      });
+    }
+    return answers;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -907,8 +1420,32 @@ export async function getStagedEntity(
     if (value === null) delete entity[propertyKey];
     else entity[propertyKey] = value;
   }
+  const identity = object === undefined ? null : givenIdentity(loaded, entityTypeKey, object.action, valuesOf(object), stored);
+  if (identity !== null) entity._identity = identity;
+  // Values that make no identity leave none, never the stored one.
+  else if (object !== undefined && stagesIdentity(loaded, object)) delete entity._identity;
   const [view] = object === undefined ? [] : await reviewOf(loaded, record.id, [object], store);
   return { entity: filterEntityProperties(entity, type), deleted: object?.action === "delete", object: view ?? null };
+}
+
+/** `getStagedEntity` of the entity a changeset's view gives `identity`
+ * (`stagedEntityOf`): none is not found, two a 409. */
+export async function getStagedEntityByIdentity(
+  lensKey: string,
+  rulesetKey: string | null,
+  changesetId: string,
+  entityTypeKey: string,
+  identity: string,
+  store: RuntimeStore,
+): Promise<StagedEntityView> {
+  const loaded = await loadSchema(lensKey, store);
+  const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
+  if (loaded.scoped.entityTypes[entityTypeKey] === undefined) {
+    throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
+  }
+  const id = await stagedEntityOf(loaded, record.id, entityTypeKey, identity, store);
+  if (id === null) throw new NotFoundError(`Entity '${identity}' not found`);
+  return getStagedEntity(lensKey, rulesetKey, changesetId, entityTypeKey, id, store);
 }
 
 /**
@@ -924,7 +1461,7 @@ export async function listChangesets(
   const loaded = await loadSchema(lensKey, store);
   await checkRulesetExists(rulesetKey, store);
   const changesets = store.changesets();
-  await changesets.sweep(expiryCutoff());
+  await changesets.sweep(IDLE_MS);
   const lens = loaded.scoped;
   const shown = (key: string): boolean => Object.hasOwn(lens.entityTypes, key) || Object.hasOwn(lens.relationTypes, key);
   return (await changesets.list(lens.lensId, rulesetKey)).map((summary) => {
@@ -948,11 +1485,11 @@ export async function listChangesets(
 }
 
 /** How many changesets a lens delete takes with it, counted before the
- * delete; an expired draft changeset is gone already. */
+ * delete; an expired draft changeset is swept first. */
 export async function lensChangesetCount(lensId: string, store: RuntimeStore): Promise<number> {
-  const cutoff = expiryCutoff();
-  const summaries = await store.changesets().list(lensId, null);
-  return summaries.filter((summary) => summary.submittedAt !== null || summary.lastChangeAt >= cutoff).length;
+  const changesets = store.changesets();
+  await changesets.sweep(IDLE_MS);
+  return (await changesets.list(lensId, null)).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -1056,6 +1593,9 @@ export interface Applied {
   /** Each staged entity delete's children over the parent relations,
    * read with the entity locked, just before its delete. */
   deletedChildren: { objectId: string; children: ParentLink[] }[];
+  /** The identity each staged entity create, and each update that
+   * rebuilt one, gave its entity. */
+  identities: { objectId: string; typeKey: string; identity: string }[];
   /** The object that could not be applied; nothing after it ran. */
   fault: Violation | null;
 }
@@ -1081,6 +1621,7 @@ export interface CheckAnswer extends CommitAnswer {
 
 const DRIFTED = "Changed since it was staged";
 const DELETED_SINCE = "Deleted since it was staged";
+const END_GONE = "The source or target end no longer exists";
 
 /** An end of a staged relation that is neither stored nor created in
  * this changeset. */
@@ -1090,7 +1631,14 @@ function neitherStored(role: string): string {
 
 /** A staged object that cannot be applied; its message names only what
  * the caller sent. */
-class ApplyFault extends Error {}
+class ApplyFault extends Error {
+  constructor(
+    message: string,
+    readonly kind = "replay",
+  ) {
+    super(message);
+  }
+}
 
 /** Thrown inside the commit transaction to roll it back with these. */
 class CommitRejected extends Error {
@@ -1129,96 +1677,197 @@ const PHASES: readonly (readonly [StagedKind, StagedAction])[] = [
   ["entity", "delete"],
 ];
 
-/** One staged object, applied through the store's write method with its
- * search work, as the immediate write runs it. */
-async function applyOne(
+/** The most staged objects one batch write of the commit carries. */
+const WRITE_BATCH = 1000;
+
+/** A staged object's fault while its batch is prepared or written. */
+class ObjectFault extends Error {
+  constructor(
+    readonly object: StagedObjectRecord,
+    readonly error: Error,
+  ) {
+    super(error.message);
+  }
+}
+
+/** `work` for one object, its fault carried with it. */
+function forObject<T>(object: StagedObjectRecord, work: () => T): T {
+  try {
+    return work();
+  } catch (error) {
+    if (error instanceof ApplyFault || error instanceof NotFoundError) throw new ObjectFault(object, error);
+    throw error;
+  }
+}
+
+/** The first object of `batch` the store did not write: `fault` on it. */
+function firstUnwritten(batch: StagedObjectRecord[], written: string[], fault: () => ApplyFault): void {
+  const done = new Set(written);
+  const missed = batch.find((object) => !done.has(object.objectId));
+  if (missed !== undefined) throw new ObjectFault(missed, fault());
+}
+
+/**
+ * One batch of staged objects of one phase, each prepared as the
+ * immediate write prepares it, then written through the store's batch
+ * write of the phase with its search work. The first object that cannot
+ * be applied, in staging order, is thrown as an `ObjectFault`; a fault of
+ * the batch write itself is laid on its first object.
+ */
+async function applyBatch(
   loaded: LoadedSchema,
   plan: (change: SearchChange) => SearchWritePlan | null,
   readings: Record<string, ParentEnd>,
-  object: StagedObjectRecord,
+  kind: StagedKind,
+  action: StagedAction,
+  batch: StagedObjectRecord[],
   bound: RuntimeStore,
   applied: Applied,
 ): Promise<void> {
-  const id = object.objectId;
-  const values = valuesOf(object);
-  if (object.kind === "entity") {
-    switch (object.action) {
-      case "create": {
-        const { errors, write } = prepareCreateEntity(loaded, object.typeKey, values, null, {
-          entityId: id,
+  const write = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      if (error instanceof ApplyFault || error instanceof NotFoundError) throw new ObjectFault(batch[0]!, error);
+      throw error;
+    }
+  };
+  if (kind === "entity" && action === "create") {
+    const rows = batch.map((object) =>
+      forObject(object, () => {
+        const { errors, write: prepared } = prepareCreateEntity(loaded, object.typeKey, valuesOf(object), null, {
+          entityId: object.objectId,
           relationId: randomUUID(),
         });
         faultOn(errors);
-        const e = write.entity;
-        await bound.createEntity(e.entityTypeKey, e.entityId, e.properties, e.propertyDefs, plan(e.change));
-        return;
-      }
-      case "update": {
-        const { errors, write } = prepareUpdateEntity(loaded, object.typeKey, id, values);
+        const e = prepared.entity;
+        return { ...e, search: plan(e.change) };
+      }),
+    );
+    await write(() => bound.createEntities(rows));
+    for (const row of rows) {
+      if (row.identity !== null) applied.identities.push({ objectId: row.entityId, typeKey: row.entityTypeKey, identity: row.identity });
+    }
+    return;
+  }
+  if (kind === "entity" && action === "update") {
+    const prepared = batch.flatMap((object) =>
+      forObject(object, () => {
+        const { errors, write: update } = prepareUpdateEntity(loaded, object.typeKey, object.objectId, valuesOf(object));
         faultOn(errors);
-        if (write === null) return;
-        const updated = await bound.updateEntity(
-          write.entityTypeKey,
-          write.entityId,
-          write.setProperties,
-          write.removeProperties,
-          write.propertyDefs,
-          plan(write.change),
-        );
-        if (updated === null) throw new ApplyFault(DELETED_SINCE);
-        return;
-      }
-      case "delete": {
-        const write = prepareDeleteEntity(loaded, object.typeKey, id);
-        // Delete capture: X locked, so no child can attach until COMMIT, and
-        // its children recorded before the cascade erases them.
-        const children = await bound.childrenOf([id], readings, true);
-        applied.deletedChildren.push({ objectId: id, children });
-        if (!(await bound.deleteEntity(write.entityTypeKey, write.entityId, plan(write.change)))) {
-          applied.alreadyGone.push(id);
+        return update === null ? [] : [{ object, update }];
+      }),
+    );
+    // The identity rebuilt under the definition now, from the rows as locked.
+    const rebuilds = prepared.filter(({ object, update }) =>
+      touchesIdentity(identityPropertiesOfType(loaded, object.typeKey), update),
+    );
+    const stored =
+      rebuilds.length === 0 ? {} : await bound.getEntitiesByIds(rebuilds.map(({ object }) => object.objectId), {});
+    const rows = prepared.map(({ object, update }) =>
+      forObject(object, () => {
+        let identity: string | undefined;
+        if (rebuilds.some((rebuild) => rebuild.object === object)) {
+          const row = stored[object.objectId];
+          if (row === undefined || row._entityTypeKey !== object.typeKey) throw new ApplyFault(DELETED_SINCE);
+          const errors: FieldErrors = {};
+          identity = updatedIdentity(loaded, object.typeKey, row, update, errors);
+          faultOn(errors);
         }
-        return;
+        return { ...update, identity, search: plan(update.change) };
+      }),
+    );
+    const written = await write(() => bound.updateEntities(rows));
+    firstUnwritten(
+      prepared.map(({ object }) => object),
+      written,
+      () => new ApplyFault(DELETED_SINCE),
+    );
+    for (const row of rows) {
+      if (row.identity !== undefined) applied.identities.push({ objectId: row.entityId, typeKey: row.entityTypeKey, identity: row.identity });
+    }
+    return;
+  }
+  if (kind === "entity") {
+    const rows = batch.map((object) =>
+      forObject(object, () => {
+        const prepared = prepareDeleteEntity(loaded, object.typeKey, object.objectId);
+        return { typeKey: prepared.entityTypeKey, id: prepared.entityId, search: plan(prepared.change) };
+      }),
+    );
+    // Delete capture: X locked, so no child can attach until COMMIT, and
+    // the children recorded before the cascade erases them.
+    const children = await bound.childrenOf(rows.map((row) => row.id), readings, true);
+    for (const object of batch) {
+      const own = children.filter((link) => link.parentId === object.objectId);
+      applied.deletedChildren.push({ objectId: object.objectId, children: own });
+    }
+    // As the immediate delete: never remove a relation the lens hides.
+    for (const object of batch) {
+      if (await hasHiddenRelations(loaded, object.typeKey, object.objectId, bound)) {
+        throw new ObjectFault(object, new ApplyFault(HIDDEN_RELATIONS_MESSAGE, "hidden_relations"));
       }
     }
+    const written = new Set(await write(() => bound.deleteEntities(rows)));
+    for (const row of rows) if (!written.has(row.id)) applied.alreadyGone.push(row.id);
+    return;
   }
-  switch (object.action) {
-    case "create": {
-      const { errors, write } = prepareCreateRelation(loaded, object.typeKey, object.fromId!, object.toId!, values, id);
-      faultOn(errors);
-      await bound.createRelation(
-        write.relationTypeKey,
-        write.relationId,
-        write.fromEntityId,
-        write.toEntityId,
-        write.properties,
-        write.propertyDefs,
-        plan(write.change),
+  if (action === "create") {
+    const rows = batch.map((object) =>
+      forObject(object, () => {
+        const { errors, write: prepared } = prepareCreateRelation(
+          loaded,
+          object.typeKey,
+          object.fromId!,
+          object.toId!,
+          valuesOf(object),
+          object.objectId,
+        );
+        faultOn(errors);
+        return { ...prepared, search: plan(prepared.change) };
+      }),
+    );
+    // Relation deletes ran before, so a pair this changeset frees is free.
+    const pairKey = (fromId: string, toId: string): string => `${fromId} ${toId}`;
+    for (const typeKey of new Set(batch.map((object) => object.typeKey))) {
+      if (loaded.full.relationTypes[typeKey]?.onePerPair !== true) continue;
+      const ofType = batch.filter((object) => object.typeKey === typeKey);
+      const held = await bound.lockPairs(
+        typeKey,
+        ofType.map((object) => ({ fromId: object.fromId!, toId: object.toId! })),
       );
-      return;
+      const taken = new Set(held.map((relation) => pairKey(relation.fromId, relation.toId)));
+      const first = ofType.find((object) => taken.has(pairKey(object.fromId!, object.toId!)));
+      if (first !== undefined) throw new ObjectFault(first, new ApplyFault(duplicatePair(typeKey), "duplicate_pair"));
     }
-    case "update": {
-      const { errors, write } = prepareUpdateRelation(loaded, object.typeKey, id, values);
-      faultOn(errors);
-      if (write === null) return;
-      const updated = await bound.updateRelation(
-        write.relationTypeKey,
-        write.relationId,
-        write.setProperties,
-        write.removeProperties,
-        write.propertyDefs,
-        plan(write.change),
-      );
-      if (updated === null) throw new ApplyFault(DELETED_SINCE);
-      return;
-    }
-    case "delete": {
-      const write = prepareDeleteRelation(loaded, object.typeKey, id);
-      if (!(await bound.deleteRelation(write.relationTypeKey, write.relationId, plan(write.change)))) {
-        applied.alreadyGone.push(id);
-      }
-      return;
-    }
+    const written = await write(() => bound.createRelations(rows));
+    firstUnwritten(batch, written, () => new ApplyFault(END_GONE));
+    return;
   }
+  if (action === "update") {
+    const prepared = batch.flatMap((object) =>
+      forObject(object, () => {
+        const { errors, write: update } = prepareUpdateRelation(loaded, object.typeKey, object.objectId, valuesOf(object));
+        faultOn(errors);
+        return update === null ? [] : [{ object, row: { ...update, search: plan(update.change) } }];
+      }),
+    );
+    const written = await write(() => bound.updateRelations(prepared.map(({ row }) => row)));
+    firstUnwritten(
+      prepared.map(({ object }) => object),
+      written,
+      () => new ApplyFault(DELETED_SINCE),
+    );
+    return;
+  }
+  const rows = batch.map((object) =>
+    forObject(object, () => {
+      const prepared = prepareDeleteRelation(loaded, object.typeKey, object.objectId);
+      return { typeKey: prepared.relationTypeKey, id: prepared.relationId, search: plan(prepared.change) };
+    }),
+  );
+  const written = new Set(await write(() => bound.deleteRelations(rows)));
+  for (const row of rows) if (!written.has(row.id)) applied.alreadyGone.push(row.id);
 }
 
 /** A fault's text. A relation create the store refuses as not found names
@@ -1226,20 +1875,22 @@ async function applyOne(
  * its text. */
 function applyMessage(object: StagedObjectRecord, error: Error): string {
   if (error instanceof NotFoundError && object.kind === "relation" && object.action === "create") {
-    return "The source or target end no longer exists";
+    return END_GONE;
   }
   return error.message;
 }
 
 /**
  * Step 2 of the commit: apply the staged objects on the bound store, phase
- * by phase (`PHASES`), each through its `prepare…` and the store's write
- * method, its search work queued in the same transaction. A staged entity
- * delete first locks the entity and records its children; a delete that
- * finds nothing is done, and noted. No savepoints: the first object that
- * fails ends the run as its `fault` (a target gone, a reference to an
- * entity that does not exist, a value the lens no longer accepts). Any
- * other error, a lock wait past the timeout among them, is thrown.
+ * by phase (`PHASES`), in batches of up to `WRITE_BATCH` (`applyBatch`):
+ * each object through its `prepare…`, each batch through the store's batch
+ * write of its phase, its search work queued in the same transaction. A
+ * staged entity delete first locks the entity and records its children; a
+ * delete that finds nothing is done, and noted. No savepoints: the first
+ * object that fails ends the run as its `fault` (a target gone, a
+ * reference to an entity that does not exist, a value the lens no longer
+ * accepts). Any other error, a lock wait past the timeout among them, is
+ * thrown.
  */
 export async function applyObjects(
   loaded: LoadedSchema,
@@ -1247,22 +1898,23 @@ export async function applyObjects(
   objects: StagedObjectRecord[],
   bound: RuntimeStore,
 ): Promise<Applied> {
-  const applied: Applied = { applied: 0, alreadyGone: [], deletedChildren: [], fault: null };
+  const applied: Applied = { applied: 0, alreadyGone: [], deletedChildren: [], identities: [], fault: null };
   const plan = (change: SearchChange): SearchWritePlan | null => planSearchWrite(search.dependencies, change);
   const readings = parentReadings(loaded.full);
   for (const [kind, action] of PHASES) {
-    for (const object of objects) {
-      if (object.kind !== kind || object.action !== action) continue;
+    const phase = objects.filter((object) => object.kind === kind && object.action === action);
+    for (let i = 0; i < phase.length; i += WRITE_BATCH) {
+      const batch = phase.slice(i, i + WRITE_BATCH);
       try {
-        await applyOne(loaded, plan, readings, object, bound, applied);
+        await applyBatch(loaded, plan, readings, kind, action, batch, bound, applied);
       } catch (error) {
-        if (error instanceof ApplyFault || error instanceof NotFoundError) {
-          applied.fault = { object: object.objectId, kind: "replay", message: applyMessage(object, error) };
-          return applied;
-        }
-        throw error;
+        if (!(error instanceof ObjectFault)) throw error;
+        const cause = error.error;
+        const faultKind = cause instanceof ApplyFault ? cause.kind : "replay";
+        applied.fault = { object: error.object.objectId, kind: faultKind, message: applyMessage(error.object, cause) };
+        return applied;
       }
-      applied.applied += 1;
+      applied.applied += batch.length;
     }
   }
   return applied;
@@ -1428,6 +2080,24 @@ function drifted(value: StagedValueRecord, stored: Row, propertyDefs: Record<str
   return !isDeepStrictEqual(byHash(value.before!, document), byHash(now, document));
 }
 
+/** Whether a staged entity object gives its entity an identity of its
+ * own: a create, or an update that stages a value of an identity
+ * property. */
+function stagesIdentity(loaded: LoadedSchema, object: StagedObjectRecord): boolean {
+  const properties = identityPropertiesOfType(loaded, object.typeKey);
+  if (object.kind !== "entity" || object.action === "delete" || properties === null) return false;
+  return object.action === "create" || properties.some((property) => Object.hasOwn(valuesOf(object), property.key));
+}
+
+/** The identity faults of a staged update's values over its target's
+ * current stored row `row` (an empty string, a missing value, too long),
+ * as the commit meets them; none when it stages no identity property. */
+function identityFaultsOver(loaded: LoadedSchema, object: StagedObjectRecord, row: Row): FieldErrors {
+  const properties = identityPropertiesOfType(loaded, object.typeKey);
+  if (properties === null || !stagesIdentity(loaded, object)) return {};
+  return buildIdentity(properties, withoutNulls({ ...row, ...valuesOf(object) })).faults ?? {};
+}
+
 /** The defs of a staged object's type in the full schema. */
 function fullDefs(loaded: LoadedSchema, object: StagedObjectRecord): Record<string, PropertyDef> {
   const types = object.kind === "entity" ? loaded.full.entityTypes : loaded.full.relationTypes;
@@ -1469,7 +2139,8 @@ function judge(loaded: LoadedSchema, objects: StagedObjectRecord[], known: Known
       continue;
     }
     if (object.action === "delete") continue;
-    for (const [key, message] of Object.entries(fieldErrorsOf(loaded, object))) {
+    const errors = fieldErrorsOf(loaded, object);
+    for (const [key, message] of Object.entries(errors)) {
       fault("replay", `Instance validation failed: ${key}: ${message}`, key);
     }
     if (object.kind === "relation") {
@@ -1495,6 +2166,126 @@ function judge(loaded: LoadedSchema, objects: StagedObjectRecord[], known: Known
       const defs = fullDefs(loaded, object);
       for (const value of object.values) {
         if (drifted(value, row, defs)) fault("drift", DRIFTED, value.propertyKey);
+      }
+      for (const [key, message] of Object.entries(identityFaultsOver(loaded, object, row))) {
+        if (!Object.hasOwn(errors, key)) fault("replay", `Instance validation failed: ${key}: ${message}`, key);
+      }
+    }
+  }
+  return faults;
+}
+
+/** The fault of an identity another entity has after the commit. */
+function duplicateIdentity(loaded: LoadedSchema, typeKey: string, identity: string): string {
+  // Named only where the lens shows the whole identity.
+  const shown = (loaded.scoped.entityTypes[typeKey]?.identityProperties ?? null) !== null;
+  return shown
+    ? `Another entity of type '${typeKey}' would have the identity '${identity}'`
+    : `Another entity of type '${typeKey}' would have the same identity`;
+}
+
+/**
+ * `duplicate_identity`, on each of `objects` that gives its entity an
+ * identity (`givenIdentity`) another entity has after the commit: one
+ * staged in this changeset that gives it the same, or a stored one that
+ * keeps it (not staged, or an update that gives none). `whole` when
+ * `objects` is every staged object; otherwise the identities the other
+ * staged objects leave are built now (`stagedIdentities`).
+ */
+async function identityFaults(
+  loaded: LoadedSchema,
+  changesetId: string,
+  objects: StagedObjectRecord[],
+  whole: boolean,
+  stored: Stored,
+  store: RuntimeStore,
+): Promise<Violation[]> {
+  const byId = new Map(objects.map((object) => [object.objectId, object] as const));
+  const given = new Map<string, string>();
+  const byType = new Map<string, Map<string, string[]>>();
+  for (const object of objects) {
+    if (object.kind !== "entity" || object.action === "delete") continue;
+    if (loaded.scoped.entityTypes[object.typeKey] === undefined) continue;
+    const row = object.action === "update" ? storedTarget(object, stored) : null;
+    if (row === undefined) continue;
+    const identity = givenIdentity(loaded, object.typeKey, object.action, valuesOf(object), row);
+    if (identity === null) continue;
+    given.set(object.objectId, identity);
+    const identities = byType.get(object.typeKey) ?? new Map<string, string[]>();
+    identities.set(identity, [...(identities.get(identity) ?? []), object.objectId]);
+    byType.set(object.typeKey, identities);
+  }
+  const faults: Violation[] = [];
+  for (const [typeKey, identities] of byType) {
+    const holders = await store.entitiesWithIdentities(typeKey, [...identities.keys()]);
+    const staged = whole ? null : await stagedIdentities(loaded, changesetId, typeKey, store);
+    for (const [identity, ids] of identities) {
+      const holding = new Set(ids);
+      for (const [id, after] of staged ?? []) {
+        if (after === identity && !byId.has(id)) holding.add(id);
+      }
+      for (const holder of holders) {
+        if (holder.identity !== identity) continue;
+        const own = byId.get(holder.id);
+        // Kept: not staged, or an update that gives it no identity of its own.
+        const keeps =
+          own === undefined
+            ? staged === null || staged.get(holder.id) === undefined
+            : own.kind !== "entity" || (own.action === "update" && !given.has(holder.id));
+        if (keeps) holding.add(holder.id);
+      }
+      if (holding.size < 2) continue;
+      for (const id of ids) {
+        faults.push({ object: id, kind: "duplicate_identity", message: duplicateIdentity(loaded, typeKey, identity) });
+      }
+    }
+  }
+  return faults;
+}
+
+/** The fault of a pair another relation links after the commit. */
+function duplicatePair(typeKey: string): string {
+  return `Relation type '${typeKey}' is one per pair: another relation of it would link the same source and target`;
+}
+
+/**
+ * `duplicate_pair`, on each of `objects` that creates a relation of a
+ * one-per-pair type whose pair, source to target, another relation of the
+ * type links after the commit: a stored one this changeset does not
+ * delete, or another staged create.
+ */
+async function pairFaults(
+  loaded: LoadedSchema,
+  changesetId: string,
+  objects: StagedObjectRecord[],
+  store: RuntimeStore,
+): Promise<Violation[]> {
+  const pairKey = (fromId: string, toId: string): string => `${fromId} ${toId}`;
+  const byType = new Map<string, StagedObjectRecord[]>();
+  for (const object of objects) {
+    if (object.kind !== "relation" || object.action !== "create") continue;
+    if (loaded.scoped.relationTypes[object.typeKey] === undefined) continue;
+    if (loaded.full.relationTypes[object.typeKey]?.onePerPair !== true) continue;
+    byType.set(object.typeKey, [...(byType.get(object.typeKey) ?? []), object]);
+  }
+  const faults: Violation[] = [];
+  for (const [typeKey, creates] of byType) {
+    const pairs = [...new Map(creates.map((o) => [pairKey(o.fromId!, o.toId!), { fromId: o.fromId!, toId: o.toId! }])).values()];
+    const staged = await store.changesets().relationObjectsAt(changesetId, typeKey, pairs);
+    const deleted = new Set(staged.filter((o) => o.action === "delete").map((o) => o.objectId));
+    const holders = new Map<string, Set<string>>();
+    const hold = (key: string, id: string): void => {
+      holders.set(key, (holders.get(key) ?? new Set()).add(id));
+    };
+    for (const relation of await store.relationsOfPairs(typeKey, pairs)) {
+      if (!deleted.has(relation.id)) hold(pairKey(relation.fromId, relation.toId), relation.id);
+    }
+    for (const object of [...staged, ...creates]) {
+      if (object.action === "create") hold(pairKey(object.fromId!, object.toId!), object.objectId);
+    }
+    for (const object of creates) {
+      if ((holders.get(pairKey(object.fromId!, object.toId!))?.size ?? 0) > 1) {
+        faults.push({ object: object.objectId, kind: "duplicate_pair", message: duplicatePair(typeKey) });
       }
     }
   }
@@ -1523,7 +2314,12 @@ export async function lockFreePass(
   const rows = await storedRows(loaded, objects, known, store);
   const stored = new Map([...rows.entities].map(([id, row]) => [id, row._entityTypeKey as string] as const));
   const targets = objects.filter((object) => object.action !== "create").map((object) => object.objectId);
-  return { objects, faults: judge(loaded, objects, known, rows), targets, stored };
+  const faults = [
+    ...judge(loaded, objects, known, rows),
+    ...(await identityFaults(loaded, changesetId, objects, true, rows, store)),
+    ...(await pairFaults(loaded, changesetId, objects, store)),
+  ];
+  return { objects, faults, targets, stored };
 }
 
 // ---------------------------------------------------------------------------
@@ -1553,6 +2349,21 @@ function afterView(value: unknown, property: PropertyDef): unknown {
   return { document: true, length: cpLength(value) };
 }
 
+/** The identity a staged entity create or update sets or changes, as
+ * the review shows it; null when it gives none, or none different, or
+ * the lens does not show the type's whole identity. */
+function identityView(
+  loaded: LoadedSchema,
+  object: StagedObjectRecord,
+  stored: Row | null | undefined,
+): StagedObjectView["identity"] | null {
+  if ((loaded.scoped.entityTypes[object.typeKey]?.identityProperties ?? null) === null) return null;
+  if (stored === undefined) return null;
+  const after = givenIdentity(loaded, object.typeKey, object.action, valuesOf(object), stored);
+  const before = typeof stored?._identity === "string" ? stored._identity : null;
+  return after === null || after === before ? null : { before, after };
+}
+
 /**
  * Staged objects as the review shows them, each judged with the objects at
  * its relation ends and the stored rows it names: names resolved, its
@@ -1573,7 +2384,12 @@ async function reviewOf(
   const known = await knownFor(changesetId, objects, store);
   const stored = await storedRows(loaded, objects, known, store);
   const faults = new Map<string, Violation[]>();
-  for (const fault of judge(loaded, objects, known, stored)) {
+  const judged = [
+    ...judge(loaded, objects, known, stored),
+    ...(await identityFaults(loaded, changesetId, objects, false, stored, store)),
+    ...(await pairFaults(loaded, changesetId, objects, store)),
+  ];
+  for (const fault of judged) {
     faults.set(fault.object!, [...(faults.get(fault.object!) ?? []), fault]);
   }
   const marker = (fault: Violation): Marker => ({ kind: fault.kind, message: fault.message });
@@ -1619,6 +2435,8 @@ async function reviewOf(
     });
     if (object.kind === "entity") {
       view.name = nameOf(object.objectId);
+      const identity = identityView(loaded, object, object.action === "update" ? storedTarget(object, stored) : null);
+      if (identity !== null) view.identity = identity;
     } else {
       view.from = { id: object.fromId!, name: nameOf(object.fromId!) };
       view.to = { id: object.toId!, name: nameOf(object.toId!) };
@@ -1630,6 +2448,19 @@ async function reviewOf(
 // ---------------------------------------------------------------------------
 // Commit validation
 // ---------------------------------------------------------------------------
+
+/** The pair locks of every staged relation create of a one-per-pair type,
+ * type by type in key order (the phases take them again, holding them
+ * already). */
+async function lockStagedPairs(loaded: LoadedSchema, objects: StagedObjectRecord[], bound: RuntimeStore): Promise<void> {
+  const byType = new Map<string, { fromId: string; toId: string }[]>();
+  for (const object of objects) {
+    if (object.kind !== "relation" || object.action !== "create") continue;
+    if (loaded.full.relationTypes[object.typeKey]?.onePerPair !== true) continue;
+    byType.set(object.typeKey, [...(byType.get(object.typeKey) ?? []), { fromId: object.fromId!, toId: object.toId! }]);
+  }
+  for (const typeKey of [...byType.keys()].sort()) await bound.lockPairs(typeKey, byType.get(typeKey)!);
+}
 
 /** Step 1, after the lock: every stored target `FOR UPDATE`, and drift
  * re-checked on the rows as locked, documents read as hash and length. A
@@ -1927,6 +2758,53 @@ async function commitViolations(
   return violations;
 }
 
+/**
+ * Commit validation's `duplicate_identity`: each identity a staged object
+ * gave its entity that two entities hold after the phases. The identity
+ * check is deferred in the commit's transaction, so the phases may hold
+ * one twice; this read sees every entity committed meanwhile.
+ */
+async function identityViolations(loaded: LoadedSchema, applied: Applied, bound: RuntimeStore): Promise<Violation[]> {
+  const byType = new Map<string, string[]>();
+  for (const given of applied.identities) byType.set(given.typeKey, [...(byType.get(given.typeKey) ?? []), given.identity]);
+  const held = new Set<string>();
+  for (const [typeKey, identities] of byType) {
+    const counts = new Map<string, number>();
+    for (const holder of await bound.entitiesWithIdentities(typeKey, [...new Set(identities)])) {
+      counts.set(holder.identity, (counts.get(holder.identity) ?? 0) + 1);
+    }
+    for (const [identity, count] of counts) if (count > 1) held.add(`${typeKey} ${identity}`);
+  }
+  return applied.identities
+    .filter((given) => held.has(`${given.typeKey} ${given.identity}`))
+    .map((given) => ({
+      object: given.objectId,
+      kind: "duplicate_identity",
+      message: duplicateIdentity(loaded, given.typeKey, given.identity),
+    }));
+}
+
+/** A check's last step before it rolls back: the deferred identity check
+ * run now, where the commit's COMMIT would run it; a duplicate is
+ * `duplicate_identity` on the staged objects that gave the identity. */
+async function identityCheckNow(loaded: LoadedSchema, applied: Applied, bound: RuntimeStore): Promise<Violation[]> {
+  try {
+    await bound.setIdentityCheck("immediate");
+    return [];
+  } catch (error) {
+    if (!(error instanceof IdentityTakenError)) throw error;
+    const { entityTypeKey, identity } = error;
+    const objects = applied.identities.filter((given) => given.typeKey === entityTypeKey && given.identity === identity);
+    const message = duplicateIdentity(loaded, entityTypeKey, identity);
+    if (objects.length === 0) return [{ object: null, kind: "duplicate_identity", message }];
+    return objects.map((given) => ({ object: given.objectId, kind: "duplicate_identity", message }));
+  }
+}
+
+/** The 409 of an identity an immediate write took after the commit's
+ * checks: nothing was persisted. */
+const IDENTITY_TAKEN_MEANWHILE = "An identity was taken meanwhile; nothing was persisted. Check and commit again";
+
 /** A 422 with the first violations and their total, those on the whole
  * changeset first. */
 function violationsError(message: string, violations: Violation[], extra: Record<string, unknown> = {}): ValidationError {
@@ -1991,60 +2869,88 @@ async function runCommit(
   if (runningCommits >= MAX_RUNNING_COMMITS) {
     throw new ConflictError("Too many commits are running; try again");
   }
-  const staleVersion = (version: number): ConflictError =>
-    new ConflictError(`Changeset '${changesetId}' changed since you looked: version ${version}, not ${expectedVersion}`);
   runningCommits += 1;
   try {
-    // 0a: before BEGIN, holding nothing. Nothing inside reaches the pool.
-    const loaded = await loadSchema(lensKey, store);
-    const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
-    if (expectedVersion !== undefined && record.version !== expectedVersion) throw staleVersion(record.version);
-    const search = await loadSearchContext(store.ontologyKey, store.searchIndices());
-    try {
-      // 0b: the lock-free pass; a fault rejects with no lock taken.
-      const pass = await lockFreePass(loaded, record.id, store);
-      if (pass.faults.length > 0) throw new CommitRejected(pass.faults);
-      const answer = await store.transaction(async (bound) => {
-        // 1: the commit lock and the row, the version, then the targets
-        // and drift under the lock, and the anchor read fresh.
-        const locked = await bound.changesets().lockForCommit(record.id);
-        if (locked === null) throw notFound(changesetId);
-        if (expectedVersion !== undefined && locked.version !== expectedVersion) throw staleVersion(locked.version);
-        if (locked.version !== record.version) {
-          throw new ConflictError(`Changeset '${changesetId}' changed during the commit; try again`);
-        }
-        const drift = await driftUnderLock(loaded, pass, bound);
-        if (drift.length > 0) throw new CommitRejected(drift);
-        const anchor =
-          record.rulesetKey === null ? null : await anchorBefore(loaded, record.rulesetKey, pass, bound);
-        // 2: the phases; 3: commit validation.
-        const applied = await applyObjects(loaded, search, pass.objects, bound);
-        if (applied.fault !== null) throw new CommitRejected([applied.fault]);
-        const violations = [
-          ...(anchor?.violations ?? []),
-          ...(await commitViolations(loaded, pass, applied, anchor?.coverage ?? null, bound)),
-        ];
-        if (violations.length > 0) throw new CommitRejected(violations);
-        const answer = { committed: applied.applied, alreadyGone: applied.alreadyGone };
-        // A check rolls back here.
-        if (check) throw new CheckPassed(answer);
-        // 4: the staged objects go with the changeset; COMMIT on return.
-        await bound.changesets().deleteCommitted(record.id);
-        return answer;
-      });
-      return { version: record.version, answer };
-    } catch (error) {
-      if (error instanceof CheckPassed) return { version: record.version, answer: error.answer };
-      if (!(error instanceof CommitRejected)) throw error;
-      if (check) {
-        throw violationsError(`Checked version ${record.version}: the commit would be rejected`, error.violations, {
-          version: record.version,
-        });
-      }
-      await store.changesets().touch(record.id);
-      throw rejection(error.violations);
-    }
+    // Every run validates against the design it loaded and commits only
+    // while it is still that design; a change in between runs it again.
+    return await retryOnDesignChange(store, (current) =>
+      commitRun(lensKey, rulesetKey, changesetId, expectedVersion, check, store, current));
   } finally {
     runningCommits -= 1;
+  }
+}
+
+/** One run of the commit's steps against the design revision `current`. */
+async function commitRun(
+  lensKey: string,
+  rulesetKey: string | null,
+  changesetId: string,
+  expectedVersion: number | undefined,
+  check: boolean,
+  store: RuntimeStore,
+  current: DesignRevision,
+): Promise<{ version: number; answer: CommitAnswer }> {
+  const staleVersion = (version: number): ConflictError =>
+    new ConflictError(`Changeset '${changesetId}' changed since you looked: version ${version}, not ${expectedVersion}`);
+  // 0a: before BEGIN, holding nothing. Nothing inside reaches the pool.
+  const { loaded, search } = await loadDesign(lensKey, store, current);
+  const record = await loadChangeset(loaded, rulesetKey, changesetId, store);
+  if (expectedVersion !== undefined && record.version !== expectedVersion) throw staleVersion(record.version);
+  try {
+    // 0b: the lock-free pass; a fault rejects with no lock taken.
+    const pass = await lockFreePass(loaded, record.id, store);
+    if (pass.faults.length > 0) throw new CommitRejected(pass.faults);
+    // The transaction first holds the design shared and checks it.
+    const answer = await store.transaction(loaded.design, async (bound) => {
+      // 1: the commit lock and the row, the version, then the targets
+      // and drift under the lock, and the anchor read fresh.
+      const locked = await bound.changesets().lockForCommit(record.id);
+      if (locked === null) throw notFound(changesetId);
+      if (expectedVersion !== undefined && locked.version !== expectedVersion) throw staleVersion(locked.version);
+      if (locked.version !== record.version) {
+        throw new ConflictError(`Changeset '${changesetId}' changed during the commit; try again`);
+      }
+      // The pairs before any row, in the order an immediate relation create
+      // takes them, so that the two never wait on each other in a cycle.
+      await lockStagedPairs(loaded, pass.objects, bound);
+      const drift = await driftUnderLock(loaded, pass, bound);
+      if (drift.length > 0) throw new CommitRejected(drift);
+      const anchor =
+        record.rulesetKey === null ? null : await anchorBefore(loaded, record.rulesetKey, pass, bound);
+      // 2: the phases, the identity check deferred to COMMIT, so a swap
+      // may hold an identity twice for a moment; 3: commit validation.
+      await bound.setIdentityCheck("deferred");
+      const applied = await applyObjects(loaded, search, pass.objects, bound);
+      if (applied.fault !== null) throw new CommitRejected([applied.fault]);
+      const violations = [
+        ...(anchor?.violations ?? []),
+        ...(await commitViolations(loaded, pass, applied, anchor?.coverage ?? null, bound)),
+        ...(await identityViolations(loaded, applied, bound)),
+      ];
+      if (violations.length > 0) throw new CommitRejected(violations);
+      const answer = { committed: applied.applied, alreadyGone: applied.alreadyGone };
+      // A check rolls back here, its deferred identity check run first.
+      if (check) {
+        const taken = await identityCheckNow(loaded, applied, bound);
+        if (taken.length > 0) throw new CommitRejected(taken);
+        throw new CheckPassed(answer);
+      }
+      // 4: the staged objects go with the changeset; COMMIT on return.
+      await bound.changesets().deleteCommitted(record.id);
+      return answer;
+    });
+    return { version: record.version, answer };
+  } catch (error) {
+    if (error instanceof CheckPassed) return { version: record.version, answer: error.answer };
+    // The deferred identity check failed at COMMIT: the changeset stays as it was.
+    if (error instanceof IdentityTakenError) throw new ConflictError(IDENTITY_TAKEN_MEANWHILE);
+    if (!(error instanceof CommitRejected)) throw error;
+    if (check) {
+      throw violationsError(`Checked version ${record.version}: the commit would be rejected`, error.violations, {
+        version: record.version,
+      });
+    }
+    await store.changesets().touch(record.id);
+    throw rejection(error.violations);
   }
 }

@@ -9,7 +9,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
-import { NotFoundError } from "../../src/core/exceptions.js";
 import type {
   RankedSearchEntry,
   SearchEntryQuery,
@@ -163,8 +162,10 @@ describe("index resolution", () => {
     ]);
   });
 
-  it("an unknown index is not found; one the lens may not search is a validation error", async () => {
-    await expect(search({ query: "x", indices: ["ghost"] })).rejects.toBeInstanceOf(NotFoundError);
+  it("an unknown index answers exactly as one the lens may not search: a validation error", async () => {
+    await expect(search({ query: "x", indices: ["ghost"] })).rejects.toMatchObject({
+      details: { fields: { "indices.0": "Search index 'ghost' is not available in this lens" } },
+    });
     disabled = { "company~default": true };
     await expect(search({ query: "x", indices: ["person~default", "company~default"] })).rejects.toMatchObject({
       details: { fields: { "indices.1": expect.stringContaining("not available") } },
@@ -320,7 +321,7 @@ describe("matched", () => {
           partKind: "relation",
           relationType: "works_for",
           relationId: "rel-1",
-          target: { id: "co-1", type: "company", label: "N-co-1" },
+          target: { id: "co-1", type: "company", label: "N-co-1", identity: null },
           snippet: "Ada CTO ACME",
           charOffset: null,
           charLength: null,

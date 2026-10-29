@@ -1,7 +1,7 @@
 /**
  * The commit over mocked stores: the order of its steps, the version
  * check, the staged objects applied in fixed phases through the store's
- * write methods, idempotent deletes, the delete capture, a fault rolled
+ * batch write methods, idempotent deletes, the delete capture, a fault rolled
  * back as a 422, the errors that stay 409s, the process limit, and the
  * check: the same steps rolled back, with nothing touched. The
  * stored entities the objects name answer the lock-free pass
@@ -26,6 +26,7 @@ import {
   hashedById,
   inTouchOrder,
   makeEntity,
+  makeFullSchema,
   makeRelation,
   makeUnscopedSchema,
   stagedObject,
@@ -99,13 +100,7 @@ beforeEach(() => {
   store.getFullSchemaWithLensInclusions.mockResolvedValue(schema());
   staged = [];
   store.getRelationsByIds.mockResolvedValue({ [R2]: makeRelation({ role: "dev" }, { relationId: R2, fromEntityId: P1, toEntityId: ACME }) });
-  store.createEntity.mockImplementation(async (type: string, id: string) => makeEntity({}, type, id));
   store.createEntityWithParent.mockResolvedValue({ entity: makeEntity(), relation: makeRelation() });
-  store.updateEntity.mockResolvedValue(makeEntity());
-  store.deleteEntity.mockResolvedValue(true);
-  store.createRelation.mockResolvedValue(makeRelation());
-  store.updateRelation.mockResolvedValue(makeRelation());
-  store.deleteRelation.mockResolvedValue(true);
   store.getEntitiesByIdsHashed.mockImplementation(async (ids: string[], documentKeys: Record<string, string[]>) =>
     hashedById(STORED, ids, documentKeys),
   );
@@ -125,6 +120,11 @@ function commit(expectedVersion?: number) {
   return commitChangeset("full_lens", null, CS, expectedVersion, asRuntimeStore(store));
 }
 
+/** The first row of the first batch a batch write method was given. */
+function firstRow(method: "createEntities" | "updateEntities" | "deleteEntities" | "createRelations" | "updateRelations" | "deleteRelations"): Row {
+  return (store[method].mock.calls[0] as unknown as Row[][])[0]![0]!;
+}
+
 /** The store write methods in the order they were called. */
 function writeOrder(): string[] {
   const methods = [
@@ -135,6 +135,12 @@ function writeOrder(): string[] {
     "createRelation",
     "updateRelation",
     "deleteRelation",
+    "createEntities",
+    "updateEntities",
+    "deleteEntities",
+    "createRelations",
+    "updateRelations",
+    "deleteRelations",
   ] as const;
   return methods
     .flatMap((method) => store[method].mock.invocationCallOrder.map((order) => [order, method] as const))
@@ -163,7 +169,7 @@ describe("the steps", () => {
     expect(cs.page).toHaveBeenCalledTimes(1);
     expect(cs.page.mock.invocationCallOrder[0]!).toBeLessThan(transaction);
     expect(cs.deleteCommitted).toHaveBeenCalledWith(CS);
-    expect(cs.deleteCommitted.mock.invocationCallOrder[0]!).toBeGreaterThan(store.deleteEntity.mock.invocationCallOrder[0]!);
+    expect(cs.deleteCommitted.mock.invocationCallOrder[0]!).toBeGreaterThan(store.deleteEntities.mock.invocationCallOrder[0]!);
     expect(cs.touch).not.toHaveBeenCalled();
   });
 
@@ -209,19 +215,35 @@ describe("the phases", () => {
     changesetOf(sixObjects());
     await commit();
     expect(writeOrder()).toEqual([
-      "createEntity",
-      "updateEntity",
-      "deleteRelation",
-      "createRelation",
-      "updateRelation",
-      "deleteEntity",
+      "createEntities",
+      "updateEntities",
+      "deleteRelations",
+      "createRelations",
+      "updateRelations",
+      "deleteEntities",
     ]);
-    expect(store.createEntity.mock.calls[0]!.slice(0, 3)).toEqual(["department", NEW, { name: "Ops" }]);
-    expect(store.updateEntity.mock.calls[0]!.slice(0, 4)).toEqual(["person", P1, { age: 41 }, []]);
-    expect(store.deleteRelation.mock.calls[0]!.slice(0, 2)).toEqual(["works_for", R3]);
-    expect(store.createRelation.mock.calls[0]!.slice(0, 5)).toEqual(["works_for", R1, P1, ACME, { role: "dev" }]);
-    expect(store.updateRelation.mock.calls[0]!.slice(0, 4)).toEqual(["works_for", R2, { role: "lead" }, []]);
-    expect(store.deleteEntity.mock.calls[0]!.slice(0, 2)).toEqual(["department", D1]);
+    expect(firstRow("createEntities")).toMatchObject({ entityTypeKey: "department", entityId: NEW, properties: { name: "Ops" } });
+    expect(firstRow("updateEntities")).toMatchObject({
+      entityTypeKey: "person",
+      entityId: P1,
+      setProperties: { age: 41 },
+      removeProperties: [],
+    });
+    expect(firstRow("deleteRelations")).toMatchObject({ typeKey: "works_for", id: R3 });
+    expect(firstRow("createRelations")).toMatchObject({
+      relationTypeKey: "works_for",
+      relationId: R1,
+      fromEntityId: P1,
+      toEntityId: ACME,
+      properties: { role: "dev" },
+    });
+    expect(firstRow("updateRelations")).toMatchObject({
+      relationTypeKey: "works_for",
+      relationId: R2,
+      setProperties: { role: "lead" },
+      removeProperties: [],
+    });
+    expect(firstRow("deleteEntities")).toMatchObject({ typeKey: "department", id: D1 });
   });
 
   it("an entity created with a relation onto it, and another entity deleted: create, relation, then the delete", async () => {
@@ -231,9 +253,14 @@ describe("the phases", () => {
       stagedObject(NEW, "create", "department", { name: ["Ops"] }),
     ]);
     expect(await commit()).toEqual({ committed: 3, alreadyGone: [] });
-    expect(writeOrder()).toEqual(["createEntity", "createRelation", "deleteEntity"]);
-    expect(store.createEntity.mock.calls[0]!.slice(0, 2)).toEqual(["department", NEW]);
-    expect(store.createRelation.mock.calls[0]!.slice(0, 4)).toEqual(["belongs_to", NEW_REL, NEW, ACME]);
+    expect(writeOrder()).toEqual(["createEntities", "createRelations", "deleteEntities"]);
+    expect(firstRow("createEntities")).toMatchObject({ entityTypeKey: "department", entityId: NEW });
+    expect(firstRow("createRelations")).toMatchObject({
+      relationTypeKey: "belongs_to",
+      relationId: NEW_REL,
+      fromEntityId: NEW,
+      toEntityId: ACME,
+    });
     expect(store.createEntityWithParent).not.toHaveBeenCalled();
   });
 
@@ -243,15 +270,30 @@ describe("the phases", () => {
       stagedObject(P1, "update", "person", { email: [null, undefined] }),
     ]);
     await commit();
-    expect(store.createEntity.mock.calls[0]!.slice(0, 3)).toEqual(["person", NEW, { name: "Ann", active: true }]);
-    expect(store.updateEntity.mock.calls[0]!.slice(0, 4)).toEqual(["person", P1, {}, ["email"]]);
+    expect(firstRow("createEntities")).toMatchObject({ entityId: NEW, properties: { name: "Ann", active: true } });
+    expect(firstRow("updateEntities")).toMatchObject({ entityId: P1, setProperties: {}, removeProperties: ["email"] });
   });
 
-  it("each object is one store write: a create carries every value of the set", async () => {
-    changesetOf([stagedObject(NEW, "create", "person", { name: ["Ann"], age: [3], email: ["a@x"] })]);
+  it("each object is one row of its phase's batch: a create carries every value of the set", async () => {
+    changesetOf([
+      stagedObject(NEW, "create", "person", { name: ["Ann"], age: [3], email: ["a@x"] }),
+      stagedObject(D1, "create", "department", { name: ["Ops"] }),
+    ]);
     await commit();
-    expect(store.createEntity).toHaveBeenCalledTimes(1);
-    expect(store.createEntity.mock.calls[0]![2]).toEqual({ name: "Ann", age: 3, email: "a@x", active: true });
+    expect(store.createEntities).toHaveBeenCalledTimes(1);
+    const rows = store.createEntities.mock.calls[0]![0] as Row[];
+    expect(rows.map((row) => row.entityId)).toEqual([NEW, D1]);
+    expect(rows[0]!.properties).toEqual({ name: "Ann", age: 3, email: "a@x", active: true });
+  });
+
+  it("writes a phase in batches of 1,000", async () => {
+    changesetOf(
+      Array.from({ length: 1001 }, (_, i) =>
+        stagedObject(`00000000-0000-4000-8000-${String(i).padStart(12, "0")}`, "delete", "works_for", {}, [P1, ACME]),
+      ),
+    );
+    expect(await commit()).toMatchObject({ committed: 1001 });
+    expect(store.deleteRelations.mock.calls.map((call) => (call[0] as Row[]).length)).toEqual([1000, 1]);
   });
 
   it("reads the staged objects page by page, once", async () => {
@@ -268,8 +310,8 @@ describe("the phases", () => {
   });
 
   it("a delete that finds nothing is done, and noted as already gone", async () => {
-    store.deleteEntity.mockResolvedValue(false);
-    store.deleteRelation.mockResolvedValue(false);
+    store.deleteEntities.mockResolvedValue([]);
+    store.deleteRelations.mockResolvedValue([]);
     changesetOf(sixObjects());
     expect(await commit()).toEqual({ committed: 6, alreadyGone: [R3, D1] });
     expect(store.changesetStore.deleteCommitted).toHaveBeenCalled();
@@ -283,14 +325,14 @@ describe("the phases", () => {
 
     const applied: Applied = await applyObjects(loaded, search, [stagedObject(D1, "delete", "department")], asRuntimeStore(store));
     expect(store.childrenOf).toHaveBeenCalledWith([D1], { belongs_to: "target" }, true);
-    expect(store.childrenOf.mock.invocationCallOrder[0]!).toBeLessThan(store.deleteEntity.mock.invocationCallOrder[0]!);
-    expect(applied).toEqual({ applied: 1, alreadyGone: [], deletedChildren: [{ objectId: D1, children }], fault: null });
+    expect(store.childrenOf.mock.invocationCallOrder[0]!).toBeLessThan(store.deleteEntities.mock.invocationCallOrder[0]!);
+    expect(applied).toEqual({ applied: 1, alreadyGone: [], deletedChildren: [{ objectId: D1, children }], identities: [], fault: null });
   });
 });
 
 describe("a fault while applying: 422, nothing persisted", () => {
   it("a target gone since staging rejects on its object; later phases do not run", async () => {
-    store.updateEntity.mockResolvedValue(null);
+    store.updateEntities.mockResolvedValue([]);
     changesetOf(sixObjects());
     const error = await rejected(commit());
     expect(error.message).toBe("The commit was rejected; nothing was persisted");
@@ -298,7 +340,7 @@ describe("a fault while applying: 422, nothing persisted", () => {
       violations: [{ object: P1, kind: "replay", message: "Deleted since it was staged" }],
       total: 1,
     });
-    expect(store.createRelation).not.toHaveBeenCalled();
+    expect(store.createRelations).not.toHaveBeenCalled();
     expect(store.changesetStore.deleteCommitted).not.toHaveBeenCalled();
     // After the rollback, the last change is refreshed; the version stays.
     expect(store.changesetStore.touch).toHaveBeenCalledWith(CS);
@@ -307,8 +349,33 @@ describe("a fault while applying: 422, nothing persisted", () => {
     );
   });
 
-  it("a reference the store refuses (FK) names the ends by their role, not the id", async () => {
-    store.createRelation.mockRejectedValue(new NotFoundError(`Entity '${ACME}' not found`));
+  it("a staged entity delete with a relation the lens hides attached is a fault; nothing is deleted", async () => {
+    // The lens shows department only: belongs_to (department → company) is hidden.
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(
+      makeFullSchema({ lensKey: "depts", entityInclusions: [{ key: "department", properties: null }] }),
+    );
+    store.hasChildren.mockImplementation(async (_id: string, readings: Row) => readings.belongs_to === "source");
+    const loaded = await loadSchema("depts", asRuntimeStore(store));
+    const search = await loadSearchContext(store.ontologyKey, store.indices);
+
+    const applied = await applyObjects(loaded, search, [stagedObject(D1, "delete", "department")], asRuntimeStore(store));
+    expect(applied.fault).toEqual({
+      object: D1,
+      kind: "hidden_relations",
+      message: "This entity has relations this lens does not show; it can only be deleted through a lens that shows them",
+    });
+    expect(store.hasChildren).toHaveBeenCalledWith(D1, { belongs_to: "source" });
+    expect(store.deleteEntities).not.toHaveBeenCalled();
+  });
+
+  it("a relation the store does not create, or refuses (FK), names the ends by their role, not the id", async () => {
+    store.createRelations.mockResolvedValue([]);
+    changesetOf(sixObjects());
+    expect((await rejected(commit())).details!.violations).toEqual([
+      { object: R1, kind: "replay", message: "The source or target end no longer exists" },
+    ]);
+
+    store.createRelations.mockRejectedValue(new NotFoundError(`Entity '${ACME}' not found`));
     changesetOf(sixObjects());
     expect((await rejected(commit())).details!.violations).toEqual([
       { object: R1, kind: "replay", message: "The source or target end no longer exists" },
@@ -326,7 +393,7 @@ describe("a fault while applying: 422, nothing persisted", () => {
     const [violation] = (await rejected(commit())).details!.violations as Row[];
     expect(violation).toMatchObject({ object: P1, property: "age", kind: "replay" });
     expect(violation!.message).toMatch(/^Instance validation failed: age: /);
-    expect(store.updateEntity).not.toHaveBeenCalled();
+    expect(store.updateEntities).not.toHaveBeenCalled();
   });
 
   it("a type the lens no longer shows is found by the lock-free pass, before BEGIN", async () => {
@@ -338,7 +405,7 @@ describe("a fault while applying: 422, nothing persisted", () => {
   });
 
   it("a lock wait past the timeout stays a 409, and is no rejection", async () => {
-    store.updateEntity.mockRejectedValue(new ConflictError("Another operation holds this data; try again"));
+    store.updateEntities.mockRejectedValue(new ConflictError("Another operation holds this data; try again"));
     changesetOf(sixObjects());
     await expect(commit()).rejects.toThrow(ConflictError);
     expect(store.changesetStore.touch).not.toHaveBeenCalled();
@@ -382,12 +449,12 @@ describe("the check", () => {
     expect(await check()).toEqual({ version: 7, committed: 6, alreadyGone: [] });
     expect(store.changesetStore.lockForCommit).toHaveBeenCalledWith(CS);
     expect(writeOrder()).toEqual([
-      "createEntity",
-      "updateEntity",
-      "deleteRelation",
-      "createRelation",
-      "updateRelation",
-      "deleteEntity",
+      "createEntities",
+      "updateEntities",
+      "deleteRelations",
+      "createRelations",
+      "updateRelations",
+      "deleteEntities",
     ]);
     // The transaction ends in a throw: the store rolls it back.
     await expect(store.transaction.mock.results[0]!.value).rejects.toThrow();
@@ -396,13 +463,13 @@ describe("the check", () => {
   });
 
   it("a submitted changeset checks too, and already gone deletes are answered", async () => {
-    store.deleteEntity.mockResolvedValue(false);
+    store.deleteEntities.mockResolvedValue([]);
     changesetOf([stagedObject(D1, "delete", "department")]);
     expect(await check({ submittedAt: NOW, version: 9 })).toEqual({ version: 9, committed: 1, alreadyGone: [D1] });
   });
 
   it("a fault while applying is the commit's 422 with the version checked, and no touch", async () => {
-    store.updateEntity.mockResolvedValue(null);
+    store.updateEntities.mockResolvedValue([]);
     changesetOf(sixObjects());
     const error = await rejected(check());
     expect(error.message).toBe("Checked version 7: the commit would be rejected");

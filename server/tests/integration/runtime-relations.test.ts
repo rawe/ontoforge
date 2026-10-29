@@ -5,8 +5,9 @@
  *
  * Beyond the CRUD round trip: endpoint validation against the FULL schema,
  * lens-dropping of out-of-scope relation types, the shared direction
- * budget, both neighbour projections, the entity-delete cascade that
- * removes relations the lens cannot see, and the parent rules on a
+ * budget, both neighbour projections, the entity-delete cascade (and its
+ * refusal through a lens that cannot see a relation it would remove), and
+ * the parent rules on a
  * relation create, with the hierarchy reads beneath them.
  */
 
@@ -563,7 +564,7 @@ describe("neighbours", () => {
 });
 
 describe("entity delete cascade", () => {
-  it("removes attached relations in both directions, including cross-lens ones", async () => {
+  it("removes attached relations in both directions; a lens that cannot see one is refused", async () => {
     await addFoundedBy();
     const alice = await createEntity("test_lens", "person", { name: "Alice" });
     const bob = await createEntity("test_lens", "person", { name: "Bob" });
@@ -584,10 +585,17 @@ describe("entity delete cascade", () => {
       toEntityId: acme._id,
     });
 
-    // Delete Alice THROUGH THE NARROW LENS, which cannot see founded_by.
-    const del = await app.inject({
+    // Through the narrow lens, which cannot see founded_by: refused.
+    const narrow = await app.inject({
       method: "DELETE",
       url: `/api/ontologies/test_ont/runtime/lenses/hr_view/entities/person/${alice._id}`,
+    });
+    expect(narrow.statusCode).toBe(409);
+
+    // Through the wide lens.
+    const del = await app.inject({
+      method: "DELETE",
+      url: `/api/ontologies/test_ont/runtime/lenses/test_lens/entities/person/${alice._id}`,
     });
     expect(del.statusCode).toBe(204);
 

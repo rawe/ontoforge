@@ -15,7 +15,6 @@ import { randomUUID } from "node:crypto";
 import { getEmbeddingProvider } from "../core/embedding.js";
 import { ConflictError, NotFoundError } from "../core/exceptions.js";
 import type { OntologyRegistry } from "../core/ports.js";
-import { invalidateLoadedSchemaCache } from "../runtime/schemaCache.js";
 import type { OntologyCreateInput, OntologyRenameInput, OntologyResponseBody } from "./schemas.js";
 
 type Row = Record<string, unknown>;
@@ -39,9 +38,12 @@ function toOntologyResponse(data: Row): OntologyResponseBody {
   };
 }
 
+/** Creates an ontology under `ontologyId` — new unless the caller chose it
+ * beforehand, to name it before it exists (its creator's assignment). */
 export async function createOntology(
   body: OntologyCreateInput,
   registry: OntologyRegistry,
+  ontologyId: string = randomUUID(),
 ): Promise<OntologyResponseBody> {
   const displayName = body.displayName ?? null;
   const existingKey = await registry.getOntology(body.key);
@@ -55,7 +57,7 @@ export async function createOntology(
     }
   }
   const dimensions = getEmbeddingProvider()?.dimensions ?? null;
-  const data = await registry.createOntology(randomUUID(), body.key, displayName, dimensions);
+  const data = await registry.createOntology(ontologyId, body.key, displayName, dimensions);
   return toOntologyResponse(data);
 }
 
@@ -103,8 +105,6 @@ export async function deleteOntology(
   if (!deleted) {
     throw new NotFoundError(`Ontology '${key}' not found`);
   }
-  // The cascade destroyed the ontology's lenses; cached runtime schemas
-  // built over them must not survive it (wholesale, like every modeling
-  // mutation).
-  invalidateLoadedSchemaCache();
+  // Cached runtime schemas of the ontology are never used again: an
+  // ontology created under the key has another id (`DesignRevision`).
 }

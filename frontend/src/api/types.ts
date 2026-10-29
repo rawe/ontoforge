@@ -14,6 +14,8 @@ export interface ServerInfo {
   /** Where clients reach the server; null when the deployment configures none. */
   baseUrl: string | null
   version: string
+  /** Whether sign-in is required (a server before authentication omits it). */
+  authentication?: boolean
 }
 
 export interface Features {
@@ -66,6 +68,9 @@ export interface SchemaEntityType {
   description: string | null
   /** Key of the string property that names instances; null when the lens hides it. */
   nameProperty: string | null
+  /** The ordered keys of the identity properties; null when the type has
+   * no identity or the lens does not show all of them. */
+  identityProperties: string[] | null
   properties: SchemaProperty[]
 }
 
@@ -77,6 +82,8 @@ export interface SchemaRelationType {
   toEntityTypeKey: string
   /** The parent end; null for an ordinary relation type. */
   parent: ParentEnd | null
+  /** One per pair; absent when off. A parent relation always has it. */
+  onePerPair?: boolean
   properties: SchemaProperty[]
 }
 
@@ -148,7 +155,9 @@ export interface EntityInstance {
   _entityTypeKey: string
   _createdAt: string
   _updatedAt: string
-  [property: string]: JsonValue
+  /** The readable identity; absent when the type has none (or the lens hides it). */
+  _identity?: string
+  [property: string]: JsonValue | undefined
 }
 
 export interface RelationInstance {
@@ -305,6 +314,9 @@ export interface StagedObjectView {
   firstTouchedAt: string
   /** Entities: the name. */
   name?: string | null
+  /** Entities whose identity the changeset sets or changes: the stored
+   * identity (null on a create) and the one after. */
+  identity?: { before: string | null; after: string }
   /** Relations: the two ends. */
   from?: ChangesetEnd
   to?: ChangesetEnd
@@ -437,7 +449,7 @@ export interface Matched {
   relationType: string | null
   relationId: string | null
   /** The entity on the other end of a relation part. */
-  target: { id: string; type: string; label: string | null } | null
+  target: { id: string; type: string; label: string | null; identity: string | null } | null
   /** At most 200 characters of the matched entry text. */
   snippet: string
   /** Passages only. */
@@ -508,6 +520,53 @@ export interface ToolCall {
   finishedAt?: number
 }
 
+/* ------------------------------ authentication ------------------------------ */
+
+export type Role = 'platform_admin' | 'ontology_creator' | 'ontology_admin' | 'reader' | 'proposer' | 'writer'
+
+/** A person signing in through the browser, or a service calling with a token. */
+export interface User {
+  id: string
+  kind: 'user' | 'service'
+  displayName: string
+  email: string | null
+  username: string | null
+  status: 'active' | 'disabled'
+  createdAt: string
+  lastLoginAt: string | null
+}
+
+/** One role of one principal: platform roles carry no keys, `ontology_admin` an ontology, the lens roles a lens. */
+export interface Assignment {
+  id: string
+  role: Role
+  ontologyKey: string | null
+  lensKey: string | null
+  ontologyId: string | null
+  lensId: string | null
+  createdAt: string
+}
+
+/** `GET /api/auth/me` — the mode, and with authentication on the signed-in user (or null). */
+export type AuthMe =
+  | { authentication: false }
+  | { authentication: true; user: User | null; assignments: Assignment[] }
+
+export interface UserDetail extends User {
+  assignments: Assignment[]
+}
+
+export interface AssignmentInput {
+  role: Role
+  ontologyKey?: string
+  lensKey?: string
+}
+
+/** One assignment within an ontology, with its holder (`GET /api/ontologies/:o/access`). */
+export interface AccessAssignment extends Assignment {
+  user: User
+}
+
 /* --------------------------------- registry --------------------------------- */
 
 export interface Ontology {
@@ -549,6 +608,8 @@ export interface EntityType {
   description: string | null
   /** Key of the string property that names instances — never null in modeling. */
   nameProperty: string
+  /** The ordered keys of the identity properties; null when it has none. */
+  identityProperties: string[] | null
   createdAt: string
   updatedAt: string
 }
@@ -565,16 +626,21 @@ export interface RelationType {
   targetEntityTypeKey: string
   /** The parent end; null for an ordinary relation type. */
   parent: ParentEnd | null
+  /** At most one relation of the type from one source entity to one target entity; always true with a parent end. */
+  onePerPair: boolean
   createdAt: string
   updatedAt: string
 }
 
-/** One broken parent rule in a refused flag write (409 `details.violations`). */
-export interface ParentViolation {
-  rule: 'two_parents' | 'cycle'
-  /** Every entity that breaks the rule. */
+/** A relation rule the stored data can break: the parent rules, and one per pair. */
+export type RelationRule = 'two_parents' | 'cycle' | 'duplicate_pair'
+
+/** One broken relation rule in a refused rules write (409 `details.violations`). */
+export interface RelationRuleViolation {
+  rule: RelationRule
+  /** Every entity that breaks the rule; for `duplicate_pair`, every pair linked twice. */
   count: number
-  /** The first five of them. */
+  /** The first five of them; for `duplicate_pair`, each pair's source. */
   entities: { type: string; id: string }[]
 }
 
@@ -778,6 +844,8 @@ export interface EntityTypeUpdate {
   description?: string
   /** Reassign to another string property of the type. */
   nameProperty?: string
+  /** Set (1 to 5 ordered keys of string, integer or date properties) or, with null, clear the identity. */
+  identityProperties?: string[] | null
 }
 
 /** Sparse update: an omitted field stays unchanged. */
@@ -786,6 +854,8 @@ export interface RelationTypeUpdate {
   description?: string
   /** Set or flip the parent end; null clears it. */
   parent?: ParentEnd | null
+  /** Turn one per pair on or off; refused off while a parent end is set. */
+  onePerPair?: boolean
 }
 
 /** Create body of a property. The server stores defaults as strings. */

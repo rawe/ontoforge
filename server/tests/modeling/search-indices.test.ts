@@ -18,7 +18,9 @@ import type {
   SearchQueueStats,
   SearchSettings,
 } from "../../src/core/ports.js";
+import { ConflictError } from "../../src/core/exceptions.js";
 import { SearchIndexDefinition } from "../../src/core/searchIndex.js";
+import { TEST_DESIGN } from "../mockSearchIndexStore.js";
 import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.js";
 
 const holder: { store: MockModelingStore; indices: ReturnType<typeof fakeIndexStore> | null } = {
@@ -34,12 +36,14 @@ vi.mock("../../src/core/ports.js", () => ({
 
 const reconcile = vi.hoisted(() => vi.fn(async () => []));
 const rebuild = vi.hoisted(() => vi.fn(async () => []));
-vi.mock("../../src/runtime/indexing/generations.js", () => ({
+vi.mock("../../src/runtime/indexing/generations.js", async (importOriginal) => ({
+  afterCommit: (await importOriginal<typeof import("../../src/runtime/indexing/generations.js")>()).afterCommit,
   reconcileSearchGenerations: reconcile,
   rebuildSearchIndex: rebuild,
 }));
-const sync = vi.hoisted(() => vi.fn(async () => ({ created: [], updated: [], deleted: [], refreshed: [] })));
-vi.mock("../../src/runtime/indexing/managed.js", () => ({ syncManagedSearchIndices: sync }));
+const sync = vi.hoisted(() => vi.fn(async () => ({ created: [], updated: [], deleted: [] })));
+const after = vi.hoisted(() => vi.fn(async () => []));
+vi.mock("../../src/runtime/indexing/managed.js", () => ({ syncManagedDefinitions: sync, afterDesignChange: after }));
 
 const MODEL = "/api/ontologies/onto/model";
 const INDICES = `${MODEL}/search-indices`;
@@ -143,7 +147,12 @@ function fakeIndexStore() {
     excludeIndexFromLens: vi.fn(async (lensId: string, key: string) => inclusions.get(lensId)?.delete(key) ?? false),
     getSearchSettings: vi.fn(async () => settings),
     setSearchSettings: vi.fn(async (next: SearchSettings) => (settings = next)),
-    readFullSchema: vi.fn(async () => RAW_SCHEMA),
+    designRevision: vi.fn(async () => TEST_DESIGN),
+    readFullSchema: vi.fn(async () => ({
+      ...RAW_SCHEMA,
+      indices: [...indices.values()].sort((a, b) => a.key.localeCompare(b.key)),
+      design: TEST_DESIGN,
+    })),
     listIndices: vi.fn(async () => [...indices.values()].sort((a, b) => a.key.localeCompare(b.key))),
     getIndex: vi.fn(async (key: string) => indices.get(key) ?? null),
     createIndex: vi.fn(async (id: string, kind: SearchIndexRecord["kind"], definition: SearchIndexDefinition) => {
@@ -157,6 +166,7 @@ function fakeIndexStore() {
       return updated;
     }),
     deleteIndex: vi.fn(async (key: string) => indices.delete(key)),
+    sweepGenerations: vi.fn(async () => undefined),
     findLensesIncludingIndex: vi.fn(async (_key: string): Promise<string[]> => []),
     measureIndexContent: vi.fn(async (_request: IndexContentRequest) => ({
       entities: 10,
@@ -193,6 +203,7 @@ beforeEach(() => {
   reconcile.mockClear();
   rebuild.mockClear();
   sync.mockClear();
+  after.mockClear();
 });
 
 describe("reads", () => {
@@ -250,6 +261,16 @@ describe("create", () => {
     expect(res.json()).toMatchObject({ key: "staff", kind: "custom", enabled: true });
     expect(indices.createIndex).toHaveBeenCalledWith(expect.any(String), "custom", expect.objectContaining({ key: "staff" }));
     expect(reconcile).toHaveBeenCalledWith("onto");
+  });
+
+  it("answers the committed index when its reconciliation fails: the worker makes it good", async () => {
+    withSearchIndices();
+    reconcile.mockRejectedValueOnce(new ConflictError("Another operation holds this data; try again"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const res = await app.inject({ method: "POST", url: INDICES, payload: { ...EMPLOYMENT, key: "staff", relations: [] } });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("the worker reconciles later"));
+    warn.mockRestore();
   });
 
   it("reports schema issues as details.fields by dotted path", async () => {
@@ -451,6 +472,7 @@ describe("the cascade of schema removals", () => {
     expect(res.statusCode, res.body).toBe(204);
     expect(indices.deleteIndex).toHaveBeenCalledWith("employment");
     expect(sync).toHaveBeenCalled();
+    expect(after).toHaveBeenCalled();
   });
 
   it("deleting a grouped relation type removes the group", async () => {
@@ -468,6 +490,7 @@ describe("the cascade of schema removals", () => {
       expect.objectContaining({ fields: ["name", "bio"], relations: [] }),
     );
     expect(sync).toHaveBeenCalled();
+    expect(after).toHaveBeenCalled();
   });
 
   it("deleting a property a custom index reads is a new trigger; lenses listing it are named", async () => {
@@ -573,16 +596,13 @@ describe("lens index inclusions", () => {
     expect((await app.inject({ method: "POST", url: noLens, payload: { key: "employment" } })).statusCode).toBe(404);
   });
 
-  it("every change forgets the cached lens schemas", async () => {
-    const schemaCache = await import("../../src/runtime/schemaCache.js");
-    const invalidate = vi.spyOn(schemaCache, "invalidateLoadedSchemaCache");
+  it("every change is a design change", async () => {
     withSearchIndices();
     withLens(["person"]);
     await app.inject({ method: "POST", url: LENS_INDICES, payload: { key: "employment" } });
-    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(holder.store.changeDesign).toHaveBeenCalledTimes(1);
     await app.inject({ method: "DELETE", url: `${LENS_INDICES}/employment` });
-    expect(invalidate).toHaveBeenCalledTimes(2);
-    invalidate.mockRestore();
+    expect(holder.store.changeDesign).toHaveBeenCalledTimes(2);
   });
 });
 

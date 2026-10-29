@@ -22,11 +22,11 @@
  *    driver types. The sole exception is the validated-query object from
  *    `core/oql`, which crosses the port opaque and is compiled by the
  *    adapter.
- * 2. Each method owns its connection. The one exception is the store
- *    `RuntimeStore.transaction` hands to its work: every method of that
- *    store, and of the ruleset and changeset stores it hands out, runs on
- *    the transaction's one connection, and a pool checkout inside it is
- *    an assertion failure.
+ * 2. Each method owns its connection. The exceptions are the stores
+ *    `RuntimeStore.transaction` and `ModelingStore.changeDesign` hand to
+ *    their work: every method of that store, and of the stores it hands
+ *    out, runs on the transaction's one connection, and a pool checkout
+ *    inside it is an assertion failure.
  * 3. Filtering, search, and sorting inputs are structured values, never
  *    query fragments.
  * 4. Driver exceptions never cross the port; adapters raise the domain
@@ -157,28 +157,49 @@ export type FilterCondition =
   | PathExistenceCondition
   | RelationExistenceCondition;
 
-/** A parent rule the stored relations can break: an entity with more
- * than one parent relation, or an entity on a cycle (a self-loop
- * included). */
-export type ParentRule = "two_parents" | "cycle";
+/** A relation rule the stored relations can break: under the parent
+ * rules, an entity with more than one parent relation, or an entity on a
+ * cycle (a self-loop included); under one per pair, a source and target
+ * linked more than once by one relation type. */
+export type RelationRule = "two_parents" | "cycle" | "duplicate_pair";
 
-/** The violators of one parent rule: their count and the first five,
- * ordered by type and id. */
-export interface ParentViolation {
-  rule: ParentRule;
+/** The violators of one relation rule: their count and the first five
+ * entities, ordered by type and id. For `duplicate_pair` the count is the
+ * number of pairs and each entity is a pair's source. */
+export interface RelationRuleViolation {
+  rule: RelationRule;
   count: number;
   entities: { type: string; id: string }[];
 }
 
-/** A flag write's outcome: the relation type row written, or the
+/** The rules of one relation type: its parent end, or null, and whether
+ * one per pair holds. A parent end always holds one per pair. */
+export interface RelationRules {
+  parent: ParentEnd | null;
+  onePerPair: boolean;
+}
+
+/** A rules write's outcome: the relation type row written, or the
  * violations that refused it, with nothing written. Only rules with
- * violators appear, `two_parents` first. */
-export type ParentFlagWrite = { row: Row } | { violations: ParentViolation[] };
+ * violators appear, `two_parents` first, then `cycle`, then
+ * `duplicate_pair`. */
+export type RelationRulesWrite = { row: Row } | { violations: RelationRuleViolation[] };
+
+/**
+ * The design revision of an ontology: its never-reused id and a number
+ * every design change advances. A recreated ontology starts again at 1,
+ * so only the pair tells two designs apart. Caches tag what they hold
+ * with it; data writes check theirs under the design guard.
+ */
+export interface DesignRevision {
+  ontologyId: string;
+  revision: number;
+}
 
 /**
  * The modeling side of the persistence port: schema persistence.
  *
- * Capability grouping follows `docs/storage-adapters.md` ("The two store
+ * Capability grouping follows `docs/storage-adapters/stores.md` ("The two store
  * surfaces"); the section comments below mirror it.
  */
 export interface ModelingStore {
@@ -188,6 +209,15 @@ export interface ModelingStore {
 
   /** The navigator store of the same ontology. */
   navigators(): NavigatorStore;
+
+  /** Run `work` as one design change: one transaction that holds the
+   * ontology's design exclusively — data writes and other design changes
+   * wait — and advances its revision; COMMIT when `work` returns,
+   * ROLLBACK (the revision included) when it throws. The store handed to
+   * `work`, and the search-index and navigator stores it hands out, run
+   * on that transaction (contract rule 2). On a store already inside a
+   * design change, `work` runs on it. */
+  changeDesign<T>(work: (store: ModelingStore) => Promise<T>): Promise<T>;
 
   // ------------------------------------------------------------------
   // Lenses
@@ -246,7 +276,24 @@ export interface ModelingStore {
     nameProperty: string | null,
   ): Promise<Row | null>;
 
+  /** Also clears the derived identity of the type's orphaned entities,
+   * in the same transaction. */
   deleteEntityType(entityTypeId: string): Promise<boolean>;
+
+  /** Write the type's identity properties (ordered keys; null: no
+   * identity), checked by the service. Entity type rows carry
+   * `identityProperties`. Null result: no such type. */
+  setEntityTypeIdentity(entityTypeId: string, identityProperties: string[] | null): Promise<Row | null>;
+
+  /** Every stored entity of the type key, by id ascending, with the stored
+   * values of `propertyKeys` (absent keys left out): what the service
+   * builds the identities from. */
+  readEntityValues(entityTypeKey: string, propertyKeys: string[]): Promise<{ id: string; values: Row }[]>;
+
+  /** Write the derived identity of the entities listed (the service built
+   * each); null clears it on every entity of the type key. The identity's
+   * uniqueness is checked at the end of the design change. */
+  writeEntityIdentities(entityTypeKey: string, identities: { id: string; identity: string }[] | null): Promise<void>;
 
   isEntityTypeReferenced(entityTypeId: string): Promise<boolean>;
 
@@ -254,12 +301,12 @@ export interface ModelingStore {
   // Relation types
   // ------------------------------------------------------------------
 
-  /** Relation type rows carry `parent`, the parent end, or null for an
-   * ordinary relation type. With a parent end, the create checks the
+  /** Relation type rows carry their [relation rules](RelationRules):
+   * `parent`, the parent end, or null for an ordinary relation type, and
+   * `onePerPair`, true whenever `parent` is set. The create checks the
    * relation rows already stored under the key (deleting a relation type
    * keeps its instances) in its own transaction, before the insert: any
-   * violator of the parent rules, read across every parent relation,
-   * refuses it and nothing is written. */
+   * violator of a rule it sets refuses it and nothing is written. */
   createRelationType(
     relationTypeId: string,
     key: string,
@@ -267,8 +314,8 @@ export interface ModelingStore {
     description: string | null,
     sourceEntityTypeKey: string,
     targetEntityTypeKey: string,
-    parent: ParentEnd | null,
-  ): Promise<ParentFlagWrite>;
+    rules: RelationRules,
+  ): Promise<RelationRulesWrite>;
 
   listRelationTypes(): Promise<Row[]>;
 
@@ -276,30 +323,33 @@ export interface ModelingStore {
 
   getRelationTypeByKey(key: string): Promise<Row | null>;
 
-  /** Null leaves a field unchanged. The parent end is written by
-   * `setRelationTypeParent`. */
+  /** Null leaves a field unchanged. The rules are written by
+   * `setRelationTypeRules`. */
   updateRelationType(
     relationTypeId: string,
     displayName: string | null,
     description: string | null,
   ): Promise<Row | null>;
 
-  /** The flag write. Setting or flipping the parent end counts, in one
-   * transaction, the violators of the parent rules across every parent
-   * relation under the new reading, then updates, or refuses and writes
-   * nothing. Null clears the flag and is never refused. Null result: no
+  /** The rules write: `rules` is the relation type's whole new rule set.
+   * In one transaction, a parent end set or flipped counts the violators
+   * of the parent rules across every parent relation under the new
+   * reading, and one per pair turned on counts the pairs the type's
+   * stored relations link twice; any violator refuses the write and
+   * nothing is written. Clearing a rule is never refused. Null result: no
    * such relation type. */
-  setRelationTypeParent(
+  setRelationTypeRules(
     relationTypeId: string,
-    parent: ParentEnd | null,
-  ): Promise<ParentFlagWrite | null>;
+    rules: RelationRules,
+  ): Promise<RelationRulesWrite | null>;
 
-  /** The violators of the parent rules in the stored relation rows, read
-   * across the stored parent relations together with `readings`
-   * (relation type key → parent end; a reading replaces the stored flag
-   * of its key). Empty when there are none. Import's validation pre-pass
-   * runs it before any write. */
-  findParentViolations(readings: Record<string, ParentEnd>): Promise<ParentViolation[]>;
+  /** The violators of the relation rules in the stored relation rows
+   * under `readings` (relation type key → its rules; a reading replaces
+   * the stored rules of its key): the parent rules read across the stored
+   * parent relations together with the readings' parent ends, and one per
+   * pair for each reading that holds it. Empty when there are none.
+   * Import's validation pre-pass runs it before any write. */
+  findRelationRuleViolations(readings: Record<string, RelationRules>): Promise<RelationRuleViolation[]>;
 
   deleteRelationType(relationTypeId: string): Promise<boolean>;
 
@@ -476,7 +526,7 @@ export interface ModelingStore {
 /**
  * The runtime side of the persistence port: instance-data persistence.
  *
- * Capability grouping follows `docs/storage-adapters.md` ("The two store
+ * Capability grouping follows `docs/storage-adapters/stores.md` ("The two store
  * surfaces"); the section comments below mirror it.
  *
  * Filter-taking methods (`listEntities`, `listRelations`, and the
@@ -503,7 +553,7 @@ export interface SearchedProperty {
 
 /** The keyword retrieval method: any admits a row carrying any query term, all
  * requires every query term; both match each term as a prefix. Contract:
- * `docs/storage-adapters.md`, "The search-index store" (ranking entries). */
+ * `docs/storage-adapters/search-index-store.md` (ranking entries). */
 export type KeywordMatching = "any" | "all";
 
 export interface RuntimeStore {
@@ -528,10 +578,13 @@ export interface RuntimeStore {
   // Schema reading (for the runtime schema cache)
   // ------------------------------------------------------------------
 
+  /** The ontology's current design revision; takes no lock. */
+  designRevision(): Promise<DesignRevision>;
+
   /** Unfiltered: the adapter never applies the inclusions. Null when no
-   * lens has the key. Contract: `docs/storage-adapters.md`, "Schema reading".
+   * lens has the key. Contract: `docs/storage-adapters/stores.md`, "Schema reading".
    * Carries `searchIndexInclusions`, the keys of the indices the lens
-   * includes. */
+   * includes, and `design`, the design revision of the same snapshot. */
   getFullSchemaWithLensInclusions(lensKey: string): Promise<Row | null>;
 
   getAgentConfigs(lensKey: string): Promise<Row[]>;
@@ -559,13 +612,16 @@ export interface RuntimeStore {
   // ------------------------------------------------------------------
 
   /** Run `work` on a store bound to one transaction on one connection:
-   * COMMIT when it returns, ROLLBACK when it throws. Every read and write
-   * of the bound store, its ruleset and changeset stores included, uses
-   * that connection (contract rule 2's exception). Anything that would
-   * take a second connection inside it — a nested `transaction`,
-   * `getFullSchemaWithLensInclusions` (its own REPEATABLE READ), the
-   * search-index or navigator store — is an assertion failure. */
-  transaction<T>(work: (store: RuntimeStore) => Promise<T>): Promise<T>;
+   * COMMIT when it returns, ROLLBACK when it throws. The transaction first
+   * holds the ontology's design shared — design changes wait for it, other
+   * writes do not — and throws `DesignChangedError` unless the design is
+   * still `design`, so nothing commits against a design that changed.
+   * Every read and write of the bound store, its ruleset and changeset
+   * stores included, uses that connection (contract rule 2's exception).
+   * Anything that would take a second connection inside it — a nested
+   * `transaction`, `getFullSchemaWithLensInclusions` (its own REPEATABLE
+   * READ), the search-index or navigator store — is an assertion failure. */
+  transaction<T>(design: DesignRevision, work: (store: RuntimeStore) => Promise<T>): Promise<T>;
 
   // ------------------------------------------------------------------
   // Entity instances
@@ -576,12 +632,17 @@ export interface RuntimeStore {
   // commits.
   // ------------------------------------------------------------------
 
+  /** `identity`: the entity's derived identity, built by the service;
+   * null when its type has none. A taken one raises the identity
+   * conflict (`IdentityTakenError`) and writes nothing. Entity rows carry
+   * `_identity` when the entity has one. */
   createEntity(
     entityTypeKey: string,
     entityId: string,
     properties: Row,
     propertyDefs: Record<string, PropertyDef>,
     search?: SearchWritePlan | null,
+    identity?: string | null,
   ): Promise<Row>;
 
   listEntities(
@@ -603,11 +664,46 @@ export interface RuntimeStore {
 
   getEntity(entityTypeKey: string, entityId: string): Promise<Row | null>;
 
+  /** The entity of the type whose identity is exactly `identity`, as
+   * `getEntity` returns it; null when none has it. */
+  getEntityByIdentity(entityTypeKey: string, identity: string): Promise<Row | null>;
+
+  /** The entities of the type that have one of `identities`, as id and
+   * identity. Inside a transaction whose identity check is deferred
+   * (`setIdentityCheck`) an identity may be held twice. */
+  entitiesWithIdentities(entityTypeKey: string, identities: string[]): Promise<{ id: string; identity: string }[]>;
+
+  /** The stored relations of the type that link one of `pairs`, source
+   * to target, as id and ends; a pair may come back more than once. */
+  relationsOfPairs(
+    relationTypeKey: string,
+    pairs: { fromId: string; toId: string }[],
+  ): Promise<{ id: string; fromId: string; toId: string }[]>;
+
+  /** Lock the pairs, source to target, of a one-per-pair relation type
+   * until the transaction ends, so that concurrent writes of them, on any
+   * server, take turns; then answer the stored relations of the type that
+   * link them, as `relationsOfPairs`. Only meaningful on a transaction's
+   * store. */
+  lockPairs(
+    relationTypeKey: string,
+    pairs: { fromId: string; toId: string }[],
+  ): Promise<{ id: string; fromId: string; toId: string }[]>;
+
+  /** When this transaction checks that an identity is unique within its
+   * type: `deferred` at its end, `immediate` now (a duplicate is an
+   * `IdentityTakenError`) and at every later statement. Only on a bound
+   * store. */
+  setIdentityCheck(mode: "deferred" | "immediate"): Promise<void>;
+
   getEntityById(
     entityId: string,
     propertyDefs: Record<string, PropertyDef>,
   ): Promise<Row | null>;
 
+  /** `identity`, when given, replaces the entity's identity (the service
+   * built it from the values the update leaves); omitted leaves it. A
+   * taken one raises the identity conflict, as `createEntity`. */
   updateEntity(
     entityTypeKey: string,
     entityId: string,
@@ -615,6 +711,7 @@ export interface RuntimeStore {
     removeProperties: string[],
     propertyDefs: Record<string, PropertyDef>,
     search?: SearchWritePlan | null,
+    identity?: string,
   ): Promise<Row | null>;
 
   deleteEntity(
@@ -684,6 +781,38 @@ export interface RuntimeStore {
   ): Promise<boolean>;
 
   // ------------------------------------------------------------------
+  // Batch writes
+  //
+  // Many writes of one kind in a few statements, as the commit of a
+  // changeset applies them; each row as the single write takes it, its
+  // own `search` plan included, queued in the same transaction exactly
+  // when its row is written (a delete's before it). A batch answers the
+  // ids it wrote; a row it did not write is left out. Only on a bound
+  // store.
+  // ------------------------------------------------------------------
+
+  /** As `createEntity`, each row. Under a deferred identity check a taken
+   * identity is judged at the transaction's end. */
+  createEntities(rows: EntityCreateRow[]): Promise<void>;
+
+  /** As `updateEntity`, each row; answers the ids updated, a row whose
+   * entity is gone left out. */
+  updateEntities(rows: EntityUpdateRow[]): Promise<string[]>;
+
+  /** As `deleteEntity`, each row; answers the ids deleted. */
+  deleteEntities(rows: InstanceDeleteRow[]): Promise<string[]>;
+
+  /** As `createRelation`, each row; answers the ids created, a row whose
+   * source or target entity does not exist left out. */
+  createRelations(rows: RelationCreateRow[]): Promise<string[]>;
+
+  /** As `updateRelation`, each row; answers the ids updated. */
+  updateRelations(rows: RelationUpdateRow[]): Promise<string[]>;
+
+  /** As `deleteRelation`, each row; answers the ids deleted. */
+  deleteRelations(rows: InstanceDeleteRow[]): Promise<string[]>;
+
+  // ------------------------------------------------------------------
   // OQL
   // ------------------------------------------------------------------
 
@@ -699,10 +828,14 @@ export interface RuntimeStore {
   // Graph traversal
   // ------------------------------------------------------------------
 
+  /** One page of neighbours over the named relation types only — the
+   * type filter applies before `limit`, so the page holds no relation the
+   * caller would drop. `null` reads every relation type; an empty list
+   * answers without touching storage. */
   getNeighbors(
     entityId: string,
     direction: string,
-    relationTypeKey: string | null,
+    relationTypeKeys: string[] | null,
     limit: number,
     propertyDefsByType: Record<string, Record<string, PropertyDef>>,
   ): Promise<Row[]>;
@@ -744,6 +877,7 @@ export interface RuntimeStore {
       properties: Row;
       propertyDefs: Record<string, PropertyDef>;
       search?: SearchWritePlan | null;
+      identity?: string | null;
     },
     relation: {
       relationTypeKey: string;
@@ -954,6 +1088,10 @@ export interface ClaimedSearchQueueItem extends SearchQueueItem {
    * item again while it is leased changes it, and completing the claim
    * then leaves the item queued: the newer write is never lost. */
   token: string;
+  /** The lease this claim wrote — opaque, the claim's fencing token. A
+   * later claim of the item (a takeover of an expired lease) writes a
+   * later one, and the effects of the claim it replaced are dropped. */
+  lease: string;
 }
 
 /** The last failed attempt of a queued item. */
@@ -997,6 +1135,56 @@ export interface IndexContentRequest {
  * stand for every generation of the index that is building or ready —
  * the adapter resolves them when it applies the plan.
  */
+/** One entity a batch creates (`createEntities`). */
+export interface EntityCreateRow {
+  entityTypeKey: string;
+  entityId: string;
+  properties: Row;
+  propertyDefs: Record<string, PropertyDef>;
+  identity: string | null;
+  search: SearchWritePlan | null;
+}
+
+/** One entity a batch updates (`updateEntities`); `identity` as for
+ * `updateEntity`. */
+export interface EntityUpdateRow {
+  entityTypeKey: string;
+  entityId: string;
+  setProperties: Row;
+  removeProperties: string[];
+  propertyDefs: Record<string, PropertyDef>;
+  identity?: string;
+  search: SearchWritePlan | null;
+}
+
+/** One relation a batch creates (`createRelations`). */
+export interface RelationCreateRow {
+  relationTypeKey: string;
+  relationId: string;
+  fromEntityId: string;
+  toEntityId: string;
+  properties: Row;
+  propertyDefs: Record<string, PropertyDef>;
+  search: SearchWritePlan | null;
+}
+
+/** One relation a batch updates (`updateRelations`). */
+export interface RelationUpdateRow {
+  relationTypeKey: string;
+  relationId: string;
+  setProperties: Row;
+  removeProperties: string[];
+  propertyDefs: Record<string, PropertyDef>;
+  search: SearchWritePlan | null;
+}
+
+/** One entity or relation a batch deletes, by its type key and id. */
+export interface InstanceDeleteRow {
+  typeKey: string;
+  id: string;
+  search: SearchWritePlan | null;
+}
+
 export interface SearchWritePlan {
   /** Parts of an entity to (re)compose. */
   entityParts: {
@@ -1214,6 +1402,20 @@ export interface ChangesetStore {
   /** The ids of the staged relations with an end at `entityId`. */
   relationsAt(id: string, entityId: string): Promise<string[]>;
 
+  /** The staged entity creates and updates of `typeKey` that stage a
+   * value under at least one key of `values` and, under each key of
+   * `values` they stage, exactly its value; with their values, by first
+   * touch. */
+  entityObjectsStaging(id: string, typeKey: string, values: Row): Promise<StagedObjectRecord[]>;
+
+  /** The staged entity objects of `typeKey`, each with its values under
+   * `keys` only, by first touch. */
+  entityObjectsKeyed(id: string, typeKey: string, keys: string[]): Promise<StagedObjectRecord[]>;
+
+  /** The staged relation objects of `typeKey` whose ends, source to
+   * target, are one of `pairs`, without their values, by first touch. */
+  relationObjectsAt(id: string, typeKey: string, pairs: { fromId: string; toId: string }[]): Promise<StagedObjectRecord[]>;
+
   /** The sum of the `bytes` of its staged values; 0 when it has none or
    * is gone. */
   stagedBytes(id: string): Promise<number>;
@@ -1240,9 +1442,10 @@ export interface ChangesetStore {
    * another transaction holds the row. */
   touch(id: string): Promise<void>;
 
-  /** Delete the draft changesets of the ontology last changed before
-   * `olderThan`, skipping any whose row is held; how many. */
-  sweep(olderThan: Date): Promise<number>;
+  /** Delete the draft changesets of the ontology last changed more than
+   * `idleMs` ago by the database's clock, skipping any whose row is held;
+   * how many. */
+  sweep(idleMs: number): Promise<number>;
 
   /** Inside a bound store only: the ontology's commit lock, a
    * transaction-scoped advisory lock taken with try semantics, then the
@@ -1259,6 +1462,9 @@ export interface ChangesetStore {
 export interface SearchIndexStore {
   /** The ontology this store is bound to. */
   readonly ontologyKey: string;
+
+  /** The ontology's current design revision; takes no lock. */
+  designRevision(): Promise<DesignRevision>;
 
   // ------------------------------------------------------------------
   // Settings
@@ -1358,9 +1564,14 @@ export interface SearchIndexStore {
   // ------------------------------------------------------------------
 
   /**
-   * Start a building generation. A generation still building for the same
-   * index and representation is superseded: it retires with its queued
-   * work and entries. Null when the index does not exist.
+   * Start a building generation, holding the ontology's design
+   * exclusively, so no data write runs between the backfill and the
+   * generation becoming visible to writes. A generation still building for
+   * the same index and representation is superseded: it retires with its
+   * queued work and entries. Null, with nothing created, when the index
+   * does not exist, when the design is no longer `design` (the change that
+   * moved it reconciles), or — unless `force` — when a building or ready
+   * generation of the index and representation already matches.
    *
    * `backfillEntityType` queues every entity of that type (one `entity`
    * item each) in the same transaction and sets `total` to their count —
@@ -1368,7 +1579,7 @@ export interface SearchIndexStore {
    */
   createGeneration(
     generation: NewSearchGeneration,
-    options?: { backfillEntityType?: string },
+    options: { design: DesignRevision; backfillEntityType?: string; force?: boolean },
   ): Promise<SearchGenerationRecord | null>;
 
   getGeneration(generationId: string): Promise<SearchGenerationRecord | null>;
@@ -1396,8 +1607,9 @@ export interface SearchIndexStore {
 
   /** Retire a building or ready generation that no definition wants any
    * more (a representation switched off, a definition changed back), with
-   * its queued work and entries. False when it is neither. */
-  retireGeneration(generationId: string): Promise<boolean>;
+   * its queued work and entries. False when it is neither, or when the
+   * design is no longer `design`. */
+  retireGeneration(generationId: string, design: DesignRevision): Promise<boolean>;
 
   /** Remove the entries storage of every generation that is neither
    * building nor ready — what an interrupted retirement or an entity type
@@ -1408,26 +1620,40 @@ export interface SearchIndexStore {
   // Entries (the pipeline's surface)
   // ------------------------------------------------------------------
 
-  /** Insert or replace entries of one generation by identity. False (and
-   * nothing written) when the generation is no longer building or ready.
-   * An identity may appear once per call. */
-  upsertEntries(generationId: string, entries: SearchEntryWrite[]): Promise<boolean>;
+  /** Insert or replace entries of one generation by identity; the count
+   * written. Null (and nothing written) when the generation is no longer
+   * building or ready. An identity may appear once per call. With `claim`
+   * (the worker's claimed items of the generation), only the entities whose
+   * claimed items the claim still all holds are written; the others were
+   * taken over or withdrawn by a write, and stay as they are. */
+  upsertEntries(
+    generationId: string,
+    entries: SearchEntryWrite[],
+    claim?: ClaimedSearchQueueItem[],
+  ): Promise<number | null>;
 
   /** The stored text hashes of those of `parts` that exist. */
   readEntryHashes(generationId: string, parts: SearchEntryPart[]): Promise<SearchEntryHash[]>;
 
-  /** Delete entries of one generation by identity; the count deleted. */
-  deleteEntries(generationId: string, parts: SearchEntryPart[]): Promise<number>;
+  /** Delete entries of one generation by identity; the count deleted.
+   * `claim` as for `upsertEntries`. */
+  deleteEntries(
+    generationId: string,
+    parts: SearchEntryPart[],
+    claim?: ClaimedSearchQueueItem[],
+  ): Promise<number>;
 
   /** Delete one generation's entries of one entity, part kind and group
    * whose part id is not in `keepPartIds` — the passages past a shortened
-   * document, the relations that are gone. The count deleted. */
+   * document, the relations that are gone. The count deleted. `claim` as
+   * for `upsertEntries`. */
   deleteEntityPartsExcept(
     generationId: string,
     entityId: string,
     partKind: SearchPartKind,
     groupNo: number,
     keepPartIds: string[],
+    claim?: ClaimedSearchQueueItem[],
   ): Promise<number>;
 
   /** Delete an entity's entries in every generation of the ontology. */
@@ -1454,7 +1680,9 @@ export interface SearchIndexStore {
 
   /** Every type and property of the ontology — what the worker composes
    * entries against: `{ entityTypes, relationTypes }` as rows, the shape
-   * `RuntimeStore.getFullSchemaWithLensInclusions` returns them in. */
+   * `RuntimeStore.getFullSchemaWithLensInclusions` returns them in — with
+   * the index definitions (`indices`) and the design revision (`design`)
+   * of the same snapshot. */
   readFullSchema(): Promise<Row>;
 
   /** Queue every entity of a type, as one `entity` item each, into the
@@ -1466,7 +1694,13 @@ export interface SearchIndexStore {
    * expired), attempts below `maxAttempts`, of a building or ready
    * generation — keyword items first, then oldest first. Semantic items
    * are claimed only for generations of `semanticModelId` (none when
-   * null). Items another worker holds are skipped, never waited for. */
+   * null). Items another worker holds are skipped, never waited for.
+   *
+   * A claim holds an item while the item still carries the claim's lease.
+   * Settling a claim (complete, fail, release) and the entry writes made
+   * for it act only on what it holds, and only for entities whose claimed
+   * items it all holds; what it lost was taken over, or withdrawn by a
+   * write that deleted it. */
   claimQueueItems(options: {
     limit: number;
     leaseSeconds: number;
@@ -1475,15 +1709,21 @@ export interface SearchIndexStore {
   }): Promise<ClaimedSearchQueueItem[]>;
 
   /** Remove processed items — unless one was enqueued again since its
-   * claim; that one stays, released for the next claim. */
-  completeQueueItems(items: ClaimedSearchQueueItem[]): Promise<void>;
+   * claim; that one stays, released for the next claim, like every other
+   * item still held. The count removed, and the count no longer held. */
+  completeQueueItems(items: ClaimedSearchQueueItem[]): Promise<{ completed: number; lost: number }>;
 
   /** Record a failed attempt: attempts + 1, the error, release the lease
-   * and hold each item back by its delay. */
+   * and hold each item back by its delay. The attempts of each item
+   * charged, and the count no longer held. */
   failQueueItems(
     failures: { item: ClaimedSearchQueueItem; delayMs: number }[],
     error: string,
-  ): Promise<void>;
+  ): Promise<{ attempts: number[]; lost: number }>;
+
+  /** Release the items still held, charging nothing: the next claim takes
+   * them at once. The count released. */
+  releaseQueueItems(items: ClaimedSearchQueueItem[]): Promise<number>;
 
   /** Pending and failed counts per generation that has queued items. */
   queueStats(maxAttempts: number): Promise<SearchQueueStats[]>;

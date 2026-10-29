@@ -461,46 +461,31 @@ describe("entity create with a parent relation", () => {
     });
   });
 
-  it("a parent of another type that the lens hides: refused without naming that type", async () => {
+  it("a parent relation into a type the lens hides is not served: its type is not found", async () => {
+    // belongs_to is included explicitly, its parent end's type (company) is
+    // not, so the lens drops belongs_to.
     holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(
       withParents({
         entityInclusions: [{ key: "department", properties: null }],
         relationInclusions: [{ key: "belongs_to", properties: null }],
       }),
     );
-    holder.store.getEntityById.mockResolvedValueOnce(makeEntity({ name: "Lea" }, "person", "lea"));
+    for (const parent of [makeEntity({ name: "Acme" }, "company", "acme"), makeEntity({ name: "Lea" }, "person", "lea")]) {
+      holder.store.getEntityById.mockResolvedValueOnce(parent);
 
-    const res = await createEntity("hr_view", "department", {
-      name: "Sales",
-      parentRelation: { type: "belongs_to", parentId: "lea" },
-    });
+      const res = await createEntity("hr_view", "department", {
+        name: "Sales",
+        parentRelation: { type: "belongs_to", parentId: parent._id },
+      });
 
-    expect(res.statusCode).toBe(422);
-    expect(res.json().error.details.fields).toEqual({
-      "parentRelation.parentId": "The parent does not have the type relation type 'belongs_to' requires",
-    });
-    expect(res.body).not.toContain("person");
+      expect(res.statusCode).toBe(422);
+      expect(res.json().error.details.fields).toEqual({
+        "parentRelation.type": "Relation type 'belongs_to' not found",
+      });
+      expect(res.body).not.toContain("company");
+      expect(res.body).not.toContain("person");
+    }
     expect(holder.store.createEntityWithParent).not.toHaveBeenCalled();
-  });
-
-  it("a parent whose type the lens hides is checked against the full schema, as a relation create's ends are", async () => {
-    // The relation type is included explicitly, its parent end's type is not.
-    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(
-      withParents({
-        entityInclusions: [{ key: "department", properties: null }],
-        relationInclusions: [{ key: "belongs_to", properties: null }],
-      }),
-    );
-    holder.store.getEntityById.mockResolvedValueOnce(makeEntity({ name: "Acme" }, "company", "acme"));
-    echoWrite();
-
-    const res = await createEntity("hr_view", "department", {
-      name: "Sales",
-      parentRelation: { type: "belongs_to", parentId: "acme" },
-    });
-
-    expect(res.statusCode, res.body).toBe(201);
-    expect(holder.store.createEntityWithParent).toHaveBeenCalledTimes(1);
   });
 
   it("a malformed parentRelation fails request validation", async () => {

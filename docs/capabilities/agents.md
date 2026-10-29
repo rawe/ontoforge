@@ -5,7 +5,7 @@ as agents.
 
 **All of it requires a configured language-model provider.** With none configured, every
 operation that would run a model is rejected. Clients are expected to check the server's
-feature flags first and hide what is unavailable — see [../README.md](../README.md). One
+feature flags first and hide what is unavailable — see [optional capabilities](../concepts.md#optional-capabilities). One
 asymmetry to know when reimplementing: listing agents and reading a thread back do not
 run a model, so they keep answering normally on a server with no provider. Only a chat
 with an agent fails.
@@ -13,7 +13,7 @@ with an agent fails.
 Everything here is runtime, and everything is scoped to one lens of one ontology
 ([ontology-lenses.md](ontology-lenses.md)). A model is given the lens's schema — the
 lens's name and key, the system properties, each entity type with its
-properties, their data types and required flags, and each relation type with its
+properties, their data types and required flags and its [identity](entity-identity.md) properties, and each relation type with its
 endpoints. Out-of-scope types are not merely filtered out of results; they are never
 described to the model in the first place — and nothing of any other ontology ever is.
 
@@ -33,7 +33,7 @@ An **agent** is a named language-model configuration belonging to one lens:
 
 | Field | Meaning |
 |---|---|
-| Key | Addresses the agent within its lens. A lens-resource [key](../README.md), at most 64 characters |
+| Key | Addresses the agent within its lens. A lens-resource [key](../glossary.md#schema-and-design), at most 64 characters |
 | Name | Human-readable label |
 | Description | What it is for |
 | System prompt | Replaces the built-in chat prompt |
@@ -49,10 +49,11 @@ know it: it is not listed, read or written there.
 
 - **Agent tools are the read-only subset, always.** The allowlist is validated against
   that set, so a write tool name is not merely ignored — it is rejected at definition
-  time and at import. Why agents are read-only: [decisions.md](../decisions.md#interfaces).
+  time and at import. An agent acts on a model's judgment; granting a write tool would
+  let that judgment change stored data.
 - The grantable set is *narrower* than the read tools available over MCP — being read-only
   is not sufficient to be grantable. The tools are named, and the read-only one left out
-  of the set is called out, in [../interfaces.md](../interfaces.md#runtime-tools).
+  of the set is called out, in [../interfaces/](../interfaces/mcp.md#runtime-tools).
 - **An agent reads documents by passage.** `search_documents` returns entities with
   document matches naming the property and character range. `get_document` reads those
   coordinates. MCP exposes the same document-search tool; neither surface takes a strategy
@@ -70,8 +71,7 @@ know it: it is not listed, read or written there.
   message is handed back to the model as the tool's result, so it can correct itself and
   retry within the same turn. Only errors outside that pair abort.
 - Agents belong to a lens: keys are unique within it, deleting the lens deletes them, and
-  they travel with it through [transfer](transfer.md). Defining or deleting one
-  invalidates the schema cache.
+  they travel with it through [transfer](transfer.md).
 
 ### Live tool activity
 
@@ -81,7 +81,7 @@ part of the product, not diagnostics. Repeated calls remain distinguishable, and
 parallel call does not hide another's result. Schema-invalid arguments and recoverable
 validation/not-found failures remain visible while the model corrects them. The assistant
 answer appears once, complete, after tool work finishes; a turn using no tools still
-produces an answer. The wire contract lives in [interfaces](../interfaces.md#ai).
+produces an answer. The wire contract lives in [interfaces](../interfaces/assistants-rest.md#ai).
 
 Beside a successful result of an entity tool — reading, listing, searching entities or
 document passages, or an entity's neighbours — the turn reports the entities it returned
@@ -111,7 +111,7 @@ adds to the rules there:
 ## Through the interfaces
 
 Configuring agents is modeling; running them is runtime. Complete operation index:
-[../interfaces.md](../interfaces.md).
+[../interfaces/](../interfaces/README.md).
 
 | | Where | Operations |
 |---|---|---|

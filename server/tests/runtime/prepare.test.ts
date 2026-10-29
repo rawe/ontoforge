@@ -113,6 +113,7 @@ describe("prepareCreateEntity", () => {
       properties: { name: "7", size: 42, status: "open", secret: "hidden-default" },
       propertyDefs: fullDefs(schema, "note"),
       change: { kind: "entityCreated", entityType: "note", entityId: "ent-new" },
+      identity: null,
     });
   });
 

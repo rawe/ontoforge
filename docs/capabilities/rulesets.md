@@ -6,7 +6,7 @@ data, or where it may write — and [the rules](#the-rules) lists them. A rulese
 limits nothing writes as the plain lens URL does, and reaches only the changesets started
 through it.
 
-Vocabulary: [../README.md](../README.md#rulesets). Parent relations, on which the anchor
+Vocabulary: [glossary](../glossary.md#rulesets). Parent relations, on which the anchor
 rests: [schema-modeling.md](schema-modeling.md#parent-relations) and
 [instance-data.md](instance-data.md#hierarchies). The changesets that write access
 `propose` works through: [changesets.md](changesets.md).
@@ -23,20 +23,22 @@ call on. A changeset started through that URL belongs to its ruleset
 No rule narrows reads: a ruleset mount lists, reads, searches and queries exactly as the
 plain lens does.
 
-A ruleset is not authentication ([../decisions.md](../decisions.md#scope)). It guards
-against mistakes, not against a determined client, and every rule has the same two
-escapes:
+A ruleset is not access control; who may use a lens is decided by roles
+([authentication.md](authentication.md#roles)). The role and the ruleset both limit
+write access when authentication is enabled; the lower level applies. A ruleset guards
+against mistakes, not against a determined client, and every rule has the same two escapes:
 
 1. **The plain lens URL**, the ruleset mount URL without its ruleset, writes and commits
    as the lens allows.
-2. **The ruleset maintenance**, available to any REST client, changes or deletes the
-   ruleset.
+2. **The ruleset maintenance**, available to any REST client — with authentication on, to
+   the ontology's administrators — changes or deletes the ruleset.
 
 ## The record
 
-A ruleset maps its key to one value per rule.
+A ruleset maps its key to one value per rule; why a fixed record and one ladder:
+[ADR 0029](../adr/0029-rulesets.md).
 
-- **Key.** It follows the ruleset [key](../README.md) rule, at most 64 characters,
+- **Key.** It follows the ruleset [key](../glossary.md#schema-and-design) rule, at most 64 characters,
   and cannot be renamed. A key that breaks the rule is refused.
 - **Its rules.** A new ruleset takes each rule's default ([below](#the-rules)), and so
   limits nothing.
@@ -51,7 +53,7 @@ A ruleset maps its key to one value per rule.
 ### Maintenance
 
 Rulesets are maintained without a lens, under the ontology's runtime prefix: list, read,
-put and delete ([../interfaces.md](../interfaces.md#rulesets)).
+put and delete ([../interfaces/](../interfaces/runtime-rest.md#rulesets)).
 
 - **Put** creates the ruleset or changes it, and answers the record with each rule's
   value. It sets each rule the body names and keeps the others; a new ruleset takes the
@@ -64,7 +66,7 @@ put and delete ([../interfaces.md](../interfaces.md#rulesets)).
 ## Ruleset mounts
 
 A ruleset mount adds `/rulesets/{rulesetKey}` to a runtime mount URL, on MCP and as a REST
-mirror of the runtime routes ([../interfaces.md](../interfaces.md#ruleset-mounts)). Every
+mirror of the runtime routes ([../interfaces/](../interfaces/runtime-rest.md#ruleset-mounts)). Every
 call on it checks the ontology, then the lens, then the ruleset, reading the ruleset
 afresh, so an unknown ruleset is not found on every call, reads included. Then its rules
 are checked: write access first, whose refusal wins, then the anchor.
@@ -136,7 +138,7 @@ changesets committable there.
   that stages but does not write lists the eight write tools with `changeset_id` required.
   A call of a tool the level does not list, for example after the level was lowered,
   answers the refusal above. The tool count per level is in
-  [../interfaces.md](../interfaces.md#mcp).
+  [MCP interfaces](../interfaces/mcp.md).
 - **Web UI:** the Write access section of the Rulesets page's dialog, the level's chip on
   its row, and a line on the Connect panel.
 
@@ -216,21 +218,19 @@ again, whichever URL the commit comes through ([changesets.md](changesets.md#bin
 
 ### Accepted races
 
-Neither the parent rules nor the anchor locks anything. Three races follow, and are
+Neither the parent rules nor the anchor locks anything. Two races follow, and are
 accepted:
 
 - **The parent rules** are checked once, in the service, against the cached schema. Two
   concurrent standalone parent-relation creates for the same child, or two that together
   close a cycle, can rarely both pass, and a child created while its parent is being
-  deleted can rarely end up a root. A later [flag change](schema-modeling.md#parent-relations)
+  deleted can rarely end up a root. A later [parent end change](schema-modeling.md#parent-relations)
   reports such data. A create with a parent relation cannot hit the first two: its new
   entity has no competing parent.
-- **The anchor** is read, and coverage walked, just before the write, not inside the
-  write's transaction. A write can still commit when, during the call, a person moves or
+- **The anchor** is read, and coverage walked, just before the write, in the write's
+  transaction but without locking anything. A write can still commit when, during the call, a person moves or
   removes the anchor or deletes its entity, or a plain-lens client moves an entity out of
   the subtree. The next call sees the current state.
-- **Several server instances** each check against their own cached schema
-  ([../architecture.md](../architecture.md#schema-cache)).
 
 Each write through a ruleset with an anchor costs a read of the ruleset and a walk per end
 it checks, one step per level of the hierarchy.
@@ -249,7 +249,7 @@ it checks, one step per level of the hierarchy.
 
 - **MCP:** on a ruleset mount, `create_entity`'s description states the rule for
   hierarchy types. MCP flattens the field key into the error text, as for every field
-  error ([../interfaces.md](../interfaces.md#errors)).
+  error ([../interfaces/](../interfaces/README.md#errors)).
 - **Web UI:** the Anchor section of the Rulesets page's dialog, with the entity picker, the
   anchor's path on its row, a line on the Connect panel, and a chip on the anchor's entity
   page.
@@ -266,4 +266,4 @@ it checks, one step per level of the hierarchy.
 to an [agent](agents.md).
 
 The Workbench itself writes through the plain lens. What its Rulesets page and the Connect
-panel offer is in [../product-surface.md](../product-surface.md#rulesets).
+panel offer is in [../product-surface/](../product-surface/workbench.md#rulesets).

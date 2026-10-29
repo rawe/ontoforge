@@ -10,7 +10,7 @@
  * Two ways to call them:
  * - `embed(text)` — one text; a failed call is LOGGED and yields `null`, and
  *   the caller proceeds without a vector — an embedding failure never fails
- *   a write (`docs/storage-adapters.md#keeping-search-data-current`).
+ *   a write.
  * - `embedBatch(texts)` — many texts, sent `EMBEDDING_BATCH_SIZE` per request
  *   with up to `EMBEDDING_CONCURRENCY` requests in flight; vectors come back
  *   in input order. A failed request THROWS, so a caller that retries can
@@ -24,6 +24,7 @@
  */
 
 import { settings } from "../config.js";
+import { timeProviderCall } from "../metrics.js";
 
 export interface EmbeddingProvider {
   /** Vector width, needed for index DDL. */
@@ -141,17 +142,19 @@ abstract class HttpEmbeddingProvider implements EmbeddingProvider {
     body: unknown,
     signal: AbortSignal,
   ): Promise<unknown> {
-    const response = await this.fetchFn(url, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify(body),
-      signal,
+    return timeProviderCall("embedding", async () => {
+      const response = await this.fetchFn(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+        signal,
+      });
+      if (!response.ok) {
+        const detail = await responseText(response);
+        throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+      }
+      return response.json();
     });
-    if (!response.ok) {
-      const detail = await responseText(response);
-      throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
-    }
-    return response.json();
   }
 }
 

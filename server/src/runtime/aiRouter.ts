@@ -10,7 +10,7 @@
  *
  * There are deliberately NO MCP tools for chat — an MCP
  * client is itself a language model and gets the underlying tools
- * directly (`docs/interfaces.md`).
+ * directly (`docs/interfaces/`).
  */
 
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
@@ -53,10 +53,9 @@ export const aiRouter: FastifyPluginAsyncZod<{ threads: ThreadStore }> = async (
     async (request, reply) => {
       const store = await getRuntimeStore(request.params.ontologyKey);
       const config = await agents.prepareChat(request.params.lensKey, store, request.params.assistantKey);
-      const threadId = await openThread(threads, threadBinding(request.params, "agents"), request.body.threadId);
-      return sendChatStream(reply, { threads, threadId }, (execution) => agents.runAgentChat(
-        config, request.params.lensKey, request.body.message, store,
-        { checkpointer: threads.checkpointer, threadId }, execution,
+      const turn = await openThread(threads, await threadBinding(request, "agents"), request.body.threadId);
+      return sendChatStream(reply, { threads, turn }, (execution, thread) => agents.runAgentChat(
+        config, request.params.lensKey, request.body.message, store, thread, execution,
       ));
     },
   );
@@ -67,7 +66,7 @@ export const aiRouter: FastifyPluginAsyncZod<{ threads: ThreadStore }> = async (
     { schema: { tags: ["ai"], params: ThreadParams } },
     async (request) => {
       await loadSchema(request.params.lensKey, await getRuntimeStore(request.params.ontologyKey));
-      return readThread(threads, threadBinding(request.params, "agents"), request.params.threadId);
+      return readThread(threads, await threadBinding(request, "agents"), request.params.threadId);
     },
   );
 };

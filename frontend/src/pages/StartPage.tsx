@@ -8,6 +8,8 @@ import { ApiError } from '@/api/http'
 import { useLenses, useOntologies } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
 import type { Ontology } from '@/api/types'
+import { useAccess } from '@/components/auth/useAccess'
+import { UserMenu } from '@/components/auth/UserMenu'
 import { EmptyState } from '@/components/EmptyState'
 import { STUDIO_ICON } from '@/components/layout/surfaceTargets'
 import { Logo } from '@/components/Logo'
@@ -76,10 +78,12 @@ function CreateOntologyDialog({
         key,
         ...(name.trim() === '' ? {} : { displayName: name.trim() }),
       }),
-    onSuccess: (created) => {
+    onSuccess: async (created) => {
       void queryClient.invalidateQueries({ queryKey: qk.ontologies })
       toast.success(`Ontology "${created.displayName ?? created.key}" created`)
       onOpenChange(false)
+      // The creator now administers it: the Studio must see that role.
+      await queryClient.invalidateQueries({ queryKey: qk.auth.me })
       void navigate(`/o/${created.key}/studio`)
     },
     onError: (error) => {
@@ -241,7 +245,11 @@ function RenameOntologyDialog({
 /** One ontology: name + key, lens links into the workbench, Open Studio, ⋯ menu. */
 function OntologyCard({ ontology }: { ontology: Ontology }) {
   const queryClient = useQueryClient()
-  const { data: lenses } = useLenses(ontology.key)
+  const access = useAccess()
+  const canDesign = access.canDesign(ontology.key)
+  const { data: allLenses } = useLenses(ontology.key)
+  // An administrator lists every lens, but opens only those it holds a role on.
+  const lenses = allLenses?.filter((l) => access.canRead(ontology.key, l.key))
   const [renameOpen, setRenameOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
 
@@ -268,33 +276,41 @@ function OntologyCard({ ontology }: { ontology: Ontology }) {
             {ontology.key}
           </div>
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Actions for ${label}`}
-              className="-mr-1 -mt-1 text-muted-foreground"
-            >
-              <Ellipsis className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-40">
-            <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
-              <Pencil className="size-4" /> Rename
-            </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
-              <Trash2 className="size-4" /> Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {canDesign && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Actions for ${label}`}
+                className="-mr-1 -mt-1 text-muted-foreground"
+              >
+                <Ellipsis className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40">
+              <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
+                <Pencil className="size-4" /> Rename
+              </DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
+                <Trash2 className="size-4" /> Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
       <div className="mt-3 flex-1">
         <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           Lenses
         </p>
         {lenses === undefined && <Skeleton className="mt-1.5 h-6 w-28 rounded-md" />}
-        {lenses !== undefined && lenses.length === 0 && (
+        {lenses !== undefined && lenses.length === 0 && allLenses?.length !== 0 && (
+          <p className="mt-1.5 text-[13px] text-muted-foreground">No lens assigned to you.</p>
+        )}
+        {allLenses?.length === 0 && !canDesign && (
+          <p className="mt-1.5 text-[13px] text-muted-foreground">No lenses yet.</p>
+        )}
+        {allLenses?.length === 0 && canDesign && (
           <p className="mt-1.5 text-[13px] text-muted-foreground">
             No lenses yet.{' '}
             <Link
@@ -321,13 +337,15 @@ function OntologyCard({ ontology }: { ontology: Ontology }) {
           </div>
         )}
       </div>
-      <div className="mt-4">
-        <Button asChild variant="outline" size="sm">
-          <Link to={`/o/${ontology.key}/studio`}>
-            <STUDIO_ICON className="size-3.5" /> Open Studio
-          </Link>
-        </Button>
-      </div>
+      {canDesign && (
+        <div className="mt-4">
+          <Button asChild variant="outline" size="sm">
+            <Link to={`/o/${ontology.key}/studio`}>
+              <STUDIO_ICON className="size-3.5" /> Open Studio
+            </Link>
+          </Button>
+        </div>
+      )}
 
       <RenameOntologyDialog
         ontology={ontology}
@@ -364,6 +382,7 @@ function OntologyCard({ ontology }: { ontology: Ontology }) {
  */
 export function StartPage() {
   const { data: ontologies, isPending } = useOntologies()
+  const { canCreateOntology } = useAccess()
   const [createOpen, setCreateOpen] = useState(false)
 
   return (
@@ -378,10 +397,13 @@ export function StartPage() {
               lenses and data.
             </p>
           </div>
-          <div className="ml-auto shrink-0">
-            <Button size="sm" onClick={() => setCreateOpen(true)}>
-              <Plus className="size-3.5" /> New ontology
-            </Button>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {canCreateOntology && (
+              <Button size="sm" onClick={() => setCreateOpen(true)}>
+                <Plus className="size-3.5" /> New ontology
+              </Button>
+            )}
+            <UserMenu side="bottom" />
           </div>
         </div>
         <div className="mt-8">
@@ -395,11 +417,17 @@ export function StartPage() {
             <EmptyState
               icon={Boxes}
               title="No ontologies yet"
-              description="Create an ontology to start modeling a schema."
+              description={
+                canCreateOntology
+                  ? 'Create an ontology to start modeling a schema.'
+                  : 'No ontology is shared with you yet.'
+              }
               action={
-                <Button onClick={() => setCreateOpen(true)}>
-                  <Plus className="size-4" /> New ontology
-                </Button>
+                canCreateOntology ? (
+                  <Button onClick={() => setCreateOpen(true)}>
+                    <Plus className="size-4" /> New ontology
+                  </Button>
+                ) : undefined
               }
             />
           )}

@@ -1,8 +1,10 @@
-import { ArrowLeftRight, Layers, Search, SearchX, Shapes } from 'lucide-react'
+import { ArrowLeftRight, Layers, Search, SearchX, Shapes, ShieldCheck } from 'lucide-react'
 import { useEffect } from 'react'
 import { Link, Outlet, useParams } from 'react-router-dom'
 import { useLenses, useOntologies } from '@/api/hooks'
 import { ApiError } from '@/api/http'
+import { NoAccess } from '@/components/auth/NoAccess'
+import { useAccess } from '@/components/auth/useAccess'
 import { EmptyState } from '@/components/EmptyState'
 import { OntologySwitcher } from '@/components/layout/OntologySwitcher'
 import { useSidebarCollapsed } from '@/components/layout/sidebarCollapsed'
@@ -10,6 +12,7 @@ import { NavItem, SidebarToggle } from '@/components/layout/SidebarItems'
 import { SurfaceToggle } from '@/components/layout/SurfaceToggle'
 import { useDocumentTitle } from '@/components/layout/useDocumentTitle'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { UserMenu } from '@/components/auth/UserMenu'
 import { Button } from '@/components/ui/button'
 import { readString, remove, storageKeys } from '@/lib/storage'
 import { cn } from '@/lib/utils'
@@ -18,6 +21,7 @@ import { cn } from '@/lib/utils'
 export function StudioLayout() {
   const { ontologyKey } = useParams<{ ontologyKey: string }>()
   const { collapsed } = useSidebarCollapsed()
+  const access = useAccess()
   // The lens list answers 404 for an unknown ontology and validates the remembered lens.
   const lenses = useLenses(ontologyKey)
   const notFound = lenses.error instanceof ApiError && lenses.error.status === 404
@@ -32,6 +36,15 @@ export function StudioLayout() {
   useDocumentTitle(ontology === undefined ? undefined : `Studio · ${ontology.displayName ?? ontology.key}`)
 
   if (ontologyKey === undefined) return null
+
+  if (!access.canDesign(ontologyKey)) {
+    return (
+      <NoAccess
+        title="No access to the Studio"
+        description={`Designing ontology "${ontologyKey}" needs its Ontology Administrator role.`}
+      />
+    )
+  }
 
   if (notFound) {
     return (
@@ -70,6 +83,9 @@ export function StudioLayout() {
           <NavItem to={`${base}/lenses`} label="Lenses" icon={Layers} collapsed={collapsed} />
           <NavItem to={`${base}/search`} label="Search" icon={Search} collapsed={collapsed} />
           <NavItem to={`${base}/transfer`} label="Transfer" icon={ArrowLeftRight} collapsed={collapsed} />
+          {access.authentication && (
+            <NavItem to={`${base}/access`} label="Access" icon={ShieldCheck} collapsed={collapsed} />
+          )}
         </nav>
         <div className="flex-1" />
         <div
@@ -80,6 +96,7 @@ export function StudioLayout() {
         >
           <SidebarToggle />
           <ThemeToggle />
+          <UserMenu />
         </div>
       </aside>
       <main className="min-w-0 flex-1 overflow-y-auto">

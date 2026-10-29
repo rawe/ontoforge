@@ -4,7 +4,7 @@ Designing one ontology's schema: entity types, relation types and property
 definitions. Everything runtime permits is derived from it, so this is the only
 place where the shape of the graph is decided.
 
-Vocabulary: [../README.md](../README.md). Layering and invariants:
+Vocabulary: [glossary](../glossary.md). Layering and invariants:
 [../architecture.md](../architecture.md).
 
 ## What it does
@@ -24,7 +24,7 @@ and no generated code.
 | Object | Identity | Fixed at creation | Editable afterwards |
 |---|---|---|---|
 | Entity type | key, unique within the ontology | key | display name, description, name property |
-| Relation type | key, unique within the ontology | key, source entity type, target entity type | display name, description, parent end |
+| Relation type | key, unique within the ontology | key, source entity type, target entity type | display name, description, [relation rules](#relation-rules) |
 | Property definition | key, unique within its owning type | key, data type, owning type | display name, description, required flag, default |
 
 Every type carries a mandatory display name and an optional description. Both are
@@ -38,12 +38,14 @@ something a reader would otherwise assume:
 - An entity has exactly one type. There is no multi-typing and no retyping.
 - No collection, enumeration, reference or nested-object data types. Every
   property holds one scalar; a "many" is modelled as a relation.
-- No uniqueness, range, pattern or cross-property constraints. `required` is the
-  only constraint a property definition can express.
-- No cardinality on relation types beyond the [parent rules](#parent-relations): any
+- No uniqueness, range, pattern or cross-property constraints on a property.
+  `required` is the only constraint a property definition can express; the one
+  uniqueness is an entity type's [identity](#the-identity).
+- No cardinality on relation types beyond the [relation rules](#relation-rules): any
   number of relations of a type may connect any pair of endpoint-compatible entities,
   except that across all parent relations an entity has at most one parent and no
-  hierarchy closes a cycle.
+  hierarchy closes a cycle, and a one-per-pair relation type links one source to one
+  target at most once.
 - No computed, derived or server-generated user properties.
 - No renaming. A key, a data type and a relation type's endpoints are permanent;
   changing any of them means creating a new object.
@@ -52,9 +54,14 @@ something a reader would otherwise assume:
 
 ## Rules
 
+Schema edits change the design, not instance data. The only exception is rebuilding an
+entity's derived identity when its type's identity changes: identities come from values a
+caller wrote, not from a value callers can write directly. Otherwise cleaning instance
+data during a schema edit would turn that edit into a write over all of it.
+
 ### Keys and immutability
 
-Type keys and property keys follow the schema [key](../README.md) rule — lower snake
+Type keys and property keys follow the schema [key](../glossary.md#schema-and-design) rule — lower snake
 case, starting with a letter — and are at most 64 characters.
 The leading-letter requirement is load-bearing: system properties
 are distinguished by a leading underscore, so no user key can ever collide with
@@ -74,7 +81,7 @@ Updates are sparse: a field omitted from an update body is left unchanged. One
 consequence is that a description cannot be cleared, only replaced, because an
 explicit null is indistinguishable from omission. A property's default value and a
 relation type's parent end are the two exceptions — sending either explicitly as null
-clears it.
+clears it. A relation type's `onePerPair` is a boolean, so `false` turns it off.
 
 ### The name property
 
@@ -99,6 +106,32 @@ may have no name. Relation types have none.
 A lens that hides the name property shows its type without one
 ([ontology-lenses.md](ontology-lenses.md)).
 
+### The identity
+
+An entity type may declare an **identity**: `identityProperties`, an ordered list of 1 to
+5 of its own `string`, `integer` or `date` properties whose values, joined, are unique
+within the type. Setting it checks the type's stored entities and may need the
+[cascade protocol](#the-cascade-protocol); the identity properties are then required,
+without a default, and locked: they cannot become optional, take a default or be
+deleted while they belong to the identity. Setting, changing or clearing it rebuilds
+every entity's derived identity — the one schema edit that writes instance data. The whole model is in
+[entity-identity.md](entity-identity.md).
+
+### Relation rules
+
+A **relation rule** is an optional constraint a relation type declares on its relations.
+There are two, a closed set: the **parent end** ([below](#parent-relations)) and **one
+per pair** ([below](#one-per-pair)). Both are set, changed and cleared on create and on
+update, and every read of a relation type returns both. A rule set or turned on is
+checked against the relations already stored under the key, in one transaction with the
+write: when they break it, the write is refused with a conflict whose
+`details.violations` names each broken rule with its count and its first five entities,
+ordered by type and id, and nothing of the request is written. No consent overrides the
+refusal — the data must be repaired first. Clearing a rule is never refused. A relation
+type that does not exist yet can still have stored relations, because deleting a
+relation type keeps its instances ([below](#deletion)). Both rules bind every write of a
+relation, immediate or [staged](changesets.md#commit-validation), in the service.
+
 ### Parent relations
 
 A relation type may name one of its ends as the **parent end**: `parent` is `source` or
@@ -120,20 +153,36 @@ writes — relation creates, the create with a parent relation, leaf-only delete
 [instance-data.md](instance-data.md#hierarchies); how they bind a ruleset's anchor, in
 [rulesets.md](rulesets.md#anchor).
 
-**The flag can be set, changed and cleared** at any time, on create and on update, and
-every read of a relation type returns it. Setting it, flipping it, or creating a relation
-type with it checks the relations already stored under every parent relation, with the
-new reading in place of the old: when they break a parent rule, the change is refused with
-a conflict and nothing is written. No consent overrides the refusal — the data must be
-repaired first. The refusal lists each broken rule with its count of offending entities
-and the first five of them, ordered by type and id
-([../architecture.md](../architecture.md#error-model)). A relation type that does not exist
-yet can still have stored relations, because deleting a relation type keeps its instances
-([below](#deletion)). Clearing the flag, or deleting a flagged relation type, is never
-refused; an update repeating the stored flag is not a change and checks nothing.
+**Setting it, flipping it, or creating a relation type with it** checks the relations
+already stored under every parent relation, with the new reading in place of the old, as
+a [relation rule](#relation-rules) is checked: the violations are `two_parents` and
+`cycle` ([../interfaces/](../interfaces/README.md#errors)). Clearing it, or deleting a
+parent relation, is never refused; an update repeating the stored parent end is not a
+change and checks nothing.
 
-This check is the one schema edit that reads instance data. It reads to refuse and never
-writes ([../decisions.md](../decisions.md#schema-and-data)).
+A parent relation is always one per pair: a child has one parent, so no pair can hold
+two of its relations. Setting a parent end turns [one per pair](#one-per-pair) on, it
+cannot be turned off while the parent end is set — a field error on `onePerPair` — and
+clearing the parent end leaves it on.
+
+These checks are the schema edits that read instance data. They read to refuse and never
+write.
+
+### One per pair
+
+`onePerPair` true allows at most one relation of the type from one source entity to one
+target entity; false, the default, allows any number. The pair is ordered: on a
+self-relation such as `knows` (person → person), A to B and B to A are two pairs.
+
+Turning it on is refused while the stored relations of the type link a pair more than
+once: the violation `duplicate_pair` counts those pairs and names the source entity of
+the first five. A relation create of a pair the type already links is refused
+([instance-data.md](instance-data.md#relations)).
+
+Parallel relations of one type make sense where a relation carries what tells them
+apart, such as two employment periods with their own start and end; such a type leaves
+one per pair off, or becomes an entity type of its own. A plain link, such as membership
+or location, turns it on, so loading the same data twice cannot link a pair twice.
 
 ### Data types
 
@@ -229,7 +278,7 @@ caller repeats it with explicit consent. Only lenses with explicit declarations 
 broken, so an unscoped lens never appears in any of this; managed search indices follow
 the schema by themselves and never appear either.
 
-Five changes can trigger it:
+Six changes can trigger it:
 
 | Change | Triggers when |
 |---|---|
@@ -238,6 +287,7 @@ Five changes can trigger it:
 | Create a required property with no default | any lens includes the owning type **with a property allowlist** that does not name the new key |
 | Delete a property | any custom index reads it — as an own, header, relation or target field |
 | Delete a custom search index | any lens includes it |
+| Set an entity type's [identity](#the-identity) | a listed property is optional or has a default, or any lens's allowlist for the type omits one |
 
 A custom index may also name an entity type as a group's target, but that type is an
 endpoint of the group's relation type, and an entity type that a relation type names
@@ -269,6 +319,10 @@ than forced, and the repair is mechanical:
 | Create a required property with no default | appends the new key to every allowlist for that type |
 | Delete a property | removes the key from every allowlist for that type, and from every custom index's own, header, relation and target fields |
 | Delete a custom search index | removes its inclusion from every lens that has one |
+| Set an entity type's identity | makes the listed properties required, removes their defaults, and appends them to every allowlist for that type |
+
+The identity is the one trigger that needs consent with no lens or index affected: an
+optional or defaulted property becoming an identity property changes the schema itself.
 
 What is left of a custom index stays consistent: a target type left with no field and a
 relation group left with no relation or target field are removed, and an index left with
@@ -288,7 +342,8 @@ a cleanup, not a consent.
 
 **Changing an existing property is never checked.** Making an optional property
 required, or clearing a required property's default, produces exactly the state
-the third trigger exists to prevent, and nothing stops it. Lens validation will
+the third trigger exists to prevent, and nothing stops it. (An identity property is
+already required without a default, and locked.) Lens validation will
 report the resulting lenses as invalid; nothing else will.
 
 ### Schema validation
@@ -318,19 +373,19 @@ type against the enumeration, so an invalid data type can reach storage that no
 interactive path would have accepted ([transfer.md](transfer.md)).
 
 Neither operation inspects instance data. Entities stranded by a deleted type are
-invisible to both, and so are relations that break the parent rules; only a
-[flag change](#parent-relations) reports those.
+invisible to both, and so are relations that break the relation rules; only a
+[rules change](#relation-rules) reports those.
 
 ## Through the interfaces
 
-Full index: [../interfaces.md](../interfaces.md). Every entrance below addresses
+Full index: [../interfaces/](../interfaces/README.md). Every entrance below addresses
 one ontology — REST in the path, MCP through the mount's binding.
 
 The same service enforces every rule above regardless of entrance, including the
 cascade protocol. One detail does not survive the crossing: the structured lists of
 affected lens and index keys reach a REST caller in the error body, while an MCP caller
 receives only the refusal message — which names the affected custom indices, but not the
-lenses — and must ask which lenses include the type. A refused parent flag likewise
+lenses — and must ask which lenses include the type. A refused relation rules write likewise
 reaches MCP as its message, with the count per rule but without the listed entities.
 
 | Operation group | REST | Modeling MCP | Web UI |
@@ -346,7 +401,7 @@ Two differences between the entrances are contractual, not cosmetic:
 **Addressing differs.** The modeling MCP tools take keys throughout; the modeling
 REST routes take internal identifiers for types and properties. Exactly which
 path segment is which is tabulated in
-[../interfaces.md](../interfaces.md#what-a-path-segment-identifies), and it is the
+[../interfaces/](../interfaces/README.md#what-a-path-segment-identifies), and it is the
 commonest mistake made against this surface.
 
 **MCP folds the two property owners into one tool set.** Where REST has parallel
@@ -355,4 +410,4 @@ tools discriminated by an argument. The rules applied are identical, including t
 rejection of `document` on a relation type.
 
 The web UI reaches all of this over REST and holds no privileged path; what it
-offers is described in [../product-surface.md](../product-surface.md).
+offers is described in [../product-surface/](../product-surface/README.md).

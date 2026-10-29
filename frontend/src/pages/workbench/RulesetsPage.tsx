@@ -20,6 +20,7 @@ import { useRuntimeSchema, useRulesets, useRulesetView, useServerInfo } from '@/
 import { qk } from '@/api/queryKeys'
 import * as runtime from '@/api/runtime'
 import type { Ruleset, RulesetView } from '@/api/types'
+import { useAccess } from '@/components/auth/useAccess'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
 import { RulesetDialog, type RulesetDialogTarget } from '@/components/rulesets/RulesetDialog'
@@ -75,6 +76,8 @@ export function RulesetsPage() {
   const rulesets = useRulesets(ontologyKey)
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const info = useServerInfo()
+  // Rulesets are maintained by the ontology's administrators; members use them.
+  const canDesign = useAccess().canDesign(ontologyKey ?? '')
 
   const [dialogTarget, setDialogTarget] = useState<RulesetDialogTarget | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Ruleset | null>(null)
@@ -116,10 +119,12 @@ export function RulesetsPage() {
         meta={<RulesetExplainerButton className="-ml-2" />}
         description="An AI client's own MCP URL, with rules it must follow: what it may do, and where."
         actions={
-          <Button size="sm" disabled={schema.data === undefined} onClick={() => setDialogTarget({ mode: 'create' })}>
-            <Plus className="size-3.5" />
-            New ruleset
-          </Button>
+          canDesign ? (
+            <Button size="sm" disabled={schema.data === undefined} onClick={() => setDialogTarget({ mode: 'create' })}>
+              <Plus className="size-3.5" />
+              New ruleset
+            </Button>
+          ) : undefined
         }
       />
 
@@ -166,7 +171,8 @@ export function RulesetsPage() {
                     lensKey={lensKey}
                     ruleset={ruleset}
                     typeName={typeName}
-                    canEdit={schema.data !== undefined}
+                    canEdit={schema.data !== undefined && canDesign}
+                    canDelete={canDesign}
                     onCopy={() => copyUrl(ruleset)}
                     onEdit={() => setDialogTarget({ mode: 'edit', ruleset })}
                     onDelete={() => {
@@ -322,6 +328,7 @@ interface RulesetRowProps {
   ruleset: Ruleset
   typeName: (typeKey: string) => string
   canEdit: boolean
+  canDelete: boolean
   onCopy: () => void
   onEdit: () => void
   onDelete: () => void
@@ -333,6 +340,7 @@ function RulesetRow({
   ruleset,
   typeName,
   canEdit,
+  canDelete,
   onCopy,
   onEdit,
   onDelete,
@@ -388,7 +396,7 @@ function RulesetRow({
                   <DropdownMenuSeparator />
                 </>
               )}
-              <DropdownMenuItem variant="destructive" onSelect={onDelete}>
+              <DropdownMenuItem variant="destructive" disabled={!canDelete} onSelect={onDelete}>
                 <Trash2 className="size-4" />
                 Delete
               </DropdownMenuItem>

@@ -3,7 +3,8 @@
  *
  * Every error answers in one envelope: `{"error": {"code", "message",
  * "details"?}}`. Anything else is reported as a bare `HTTP_ERROR`.
- * 204 responses resolve to `undefined`.
+ * 204 responses resolve to `undefined`. A 401 means the session ended: the
+ * handler set with `onUnauthenticated` hears of it (the sign-in screen).
  */
 
 export class ApiError extends Error {
@@ -39,6 +40,29 @@ export class ApiError extends Error {
     return Array.isArray(affected) ? (affected as string[]) : undefined
   }
 
+  /** The identity an `IDENTITY_TAKEN` conflict names, and the identity
+   * properties it is built from; null for any other error. */
+  get identityTaken(): { identity: string; properties: string[] } | null {
+    if (this.details?.code !== 'IDENTITY_TAKEN') return null
+    const properties = Array.isArray(this.details.properties) ? (this.details.properties as string[]) : []
+    return { identity: String(this.details.identity ?? ''), properties }
+  }
+
+  /** An `IDENTITY_TAKEN` conflict as field errors, one per identity
+   * property, so a form shows it inline; undefined for any other error. */
+  get identityTakenFields(): Record<string, string> | undefined {
+    const taken = this.identityTaken
+    if (taken === null) return undefined
+    const message = `Another entity of this type already has the identity '${taken.identity}'`
+    return Object.fromEntries(taken.properties.map((key) => [key, message]))
+  }
+
+  /** A `PAIR_TAKEN` conflict: the pair is already linked by a relation of
+   * this one-per-pair type. */
+  get pairTaken(): boolean {
+    return this.details?.code === 'PAIR_TAKEN'
+  }
+
   /** Search indices affected by a `CASCADE_REQUIRED` conflict, if present. */
   get affectedIndices(): string[] | undefined {
     const affected = this.details?.affectedIndices
@@ -46,7 +70,15 @@ export class ApiError extends Error {
   }
 }
 
+let unauthenticated: (() => void) | null = null
+
+/** Called whenever a response answers 401; the app shows its sign-in screen. */
+export function onUnauthenticated(handler: () => void) {
+  unauthenticated = handler
+}
+
 export async function parseError(res: Response): Promise<ApiError> {
+  if (res.status === 401) unauthenticated?.()
   let body: unknown
   try {
     body = await res.json()

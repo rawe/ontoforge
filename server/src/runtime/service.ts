@@ -10,7 +10,7 @@
  * - ALL errors are collected — one rejected write names every offending
  *   field at once in `details.fields`.
  * - Writes validate against the LENS; defaults come from the FULL schema
- *   (`docs/decisions.md#schema-and-data`). A hidden property with a default is
+ *   (`docs/capabilities/instance-data.md#validation`). A hidden property with a default is
  *   applied; a hidden property in the payload is an unknown property.
  *
  * The seven write functions take the ruleset key of a ruleset mount as
@@ -20,21 +20,27 @@
  * Six of them (entity and relation create, update, delete) compose their
  * write through a pure `prepare…` (`prepare.ts`), then run what reads
  * storage here: load schema → guard → `prepare…` → reads and checks →
- * search plan → store call.
+ * search plan → store call. Everything after the schema load runs in one
+ * transaction checked against the design revision the schema was loaded
+ * with (`designWrite.ts`): a design change in between makes the write
+ * reload and run again, never commit against the old design.
  */
 
 import { randomUUID } from "node:crypto";
 
 import { CoercionError, assertNoNulCharacter, coerceValue, valueToText } from "../core/dataTypes.js";
 import { getEmbeddingProvider } from "../core/embedding.js";
-import { ConflictError, NotFoundError, ValidationError } from "../core/exceptions.js";
+import { ConflictError, IdentityTakenError, NotFoundError, PairTakenError, ValidationError } from "../core/exceptions.js";
 import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core/oql/index.js";
-import type { RuntimeStore, SearchWritePlan } from "../core/ports.js";
+import type { RuntimeStore } from "../core/ports.js";
 import type { ParentEnd, PropertyDef } from "../core/schemas.js";
-import { planSearchWrite, type SearchChange } from "../core/searchDependencies.js";
+import { planSearchWrite } from "../core/searchDependencies.js";
 import { AnchorGuard } from "./anchorGuard.js";
 import { cpIndexOf, cpLength, cpSlice, countOccurrences } from "./codePoints.js";
+import { writeWithDesign } from "./designWrite.js";
+import { IDENTITY_FIELD } from "./identity.js";
 import {
+  identityPropertiesOfType,
   prepareCreateEntity,
   prepareCreateRelation,
   prepareDeleteEntity,
@@ -43,12 +49,14 @@ import {
   prepareUpdateRelation,
   scopedEntityType,
   scopedRelationType,
+  touchesIdentity,
+  updatedIdentity,
+  type FieldErrors,
   type ParentRelationInput,
 } from "./prepare.js";
 import { isQueryPath } from "./queryPaths.js";
 import {
   loadSchema,
-  loadSearchContext,
   type EntityTypeDef,
   type LoadedSchema,
   type RelationTypeDef,
@@ -75,21 +83,6 @@ export { searchByIndices, searchIndexCatalog } from "./search/indexSearch.js";
 type Row = Record<string, unknown>;
 
 // ---------------------------------------------------------------------------
-// Search work of a write
-// ---------------------------------------------------------------------------
-
-/**
- * The search work a write causes, handed to the store with the write so
- * both commit together; the search worker (`runtime/indexing/`) builds
- * the entries from it later. Null when no index reads what the write
- * changes.
- */
-async function searchPlan(store: RuntimeStore, change: SearchChange): Promise<SearchWritePlan | null> {
-  const context = await loadSearchContext(store.ontologyKey, store.searchIndices());
-  return planSearchWrite(context.dependencies, change);
-}
-
-// ---------------------------------------------------------------------------
 // Parent relations
 // ---------------------------------------------------------------------------
 
@@ -97,6 +90,40 @@ async function searchPlan(store: RuntimeStore, change: SearchChange): Promise<Se
  * It names no type, id or count, so a lens hiding the children reveals
  * only that one exists. */
 export const HAS_CHILDREN_MESSAGE = "This entity has children; delete them first";
+
+/** The refusal of an entity delete while a relation of a type the lens
+ * hides is attached to it: the delete would remove that relation unseen.
+ * It names no type, id or count. */
+export const HIDDEN_RELATIONS_MESSAGE =
+  "This entity has relations this lens does not show; it can only be deleted through a lens that shows them";
+
+/** The relation types the lens hides that an entity of `entityTypeKey`
+ * can take part in, as the readings of `RuntimeStore.hasChildren`: one
+ * for the source end, one for the target end; empty ones left out. */
+function hiddenRelationEnds(loaded: LoadedSchema, entityTypeKey: string): Record<string, ParentEnd>[] {
+  const asSource: Record<string, ParentEnd> = {};
+  const asTarget: Record<string, ParentEnd> = {};
+  for (const rt of Object.values(loaded.full.relationTypes)) {
+    if (rt.key in loaded.scoped.relationTypes) continue;
+    if (rt.fromEntityTypeKey === entityTypeKey) asSource[rt.key] = "source";
+    if (rt.toEntityTypeKey === entityTypeKey) asTarget[rt.key] = "target";
+  }
+  return [asSource, asTarget].filter((ends) => Object.keys(ends).length > 0);
+}
+
+/** Whether a relation of a type the lens hides is attached to the entity,
+ * at either end. No read when the lens hides none its type takes part in. */
+export async function hasHiddenRelations(
+  loaded: LoadedSchema,
+  entityTypeKey: string,
+  entityId: string,
+  store: RuntimeStore,
+): Promise<boolean> {
+  for (const ends of hiddenRelationEnds(loaded, entityTypeKey)) {
+    if (await store.hasChildren(entityId, ends)) return true;
+  }
+  return false;
+}
 
 /** Every parent relation of the FULL schema, as relation type key →
  * parent end: the parent rules hold across all of them, whatever the
@@ -115,6 +142,16 @@ export function parentReadings(schema: SchemaCacheValue): Record<string, ParentE
 // Document properties (stub read model)
 // ---------------------------------------------------------------------------
 
+/** How `_identity` filters: as a `string` property. */
+const IDENTITY_FILTER_DEF: PropertyDef = {
+  key: IDENTITY_FIELD,
+  displayName: IDENTITY_FIELD,
+  description: null,
+  dataType: "string",
+  required: false,
+  defaultValue: null,
+};
+
 const SYSTEM_SORT_FIELDS: Record<string, string> = {
   createdAt: "_createdAt",
   updatedAt: "_updatedAt",
@@ -123,14 +160,19 @@ const SYSTEM_SORT_FIELDS: Record<string, string> = {
 };
 
 /** Accept any scoped property key plus the timestamps — by their system
- * names or their underscore-less aliases (which exist only for sorting). */
+ * names or their underscore-less aliases (which exist only for sorting) —
+ * and, with `identity`, `_identity`. */
 export function validateSortField(
   sort: string,
   propertyDefs: Record<string, PropertyDef>,
+  identity = false,
 ): string {
   const system = SYSTEM_SORT_FIELDS[sort];
   if (system !== undefined) {
     return system;
+  }
+  if (identity && sort === IDENTITY_FIELD) {
+    return IDENTITY_FIELD;
   }
   if (sort in propertyDefs) {
     return sort;
@@ -166,6 +208,7 @@ function entityTypeDefToExport(etDef: EntityTypeDef): Row {
     displayName: etDef.displayName,
     description: etDef.description,
     nameProperty: etDef.nameProperty,
+    identityProperties: etDef.identityProperties,
     properties: Object.values(etDef.properties).map(propertyToExport),
   };
 }
@@ -178,6 +221,7 @@ function relationTypeDefToExport(rtDef: RelationTypeDef): Row {
     fromEntityTypeKey: rtDef.fromEntityTypeKey,
     toEntityTypeKey: rtDef.toEntityTypeKey,
     parent: rtDef.parent,
+    onePerPair: rtDef.onePerPair,
     properties: Object.values(rtDef.properties).map(propertyToExport),
   };
 }
@@ -241,6 +285,9 @@ export async function getRelationType(
 // Entity instance CRUD
 // ---------------------------------------------------------------------------
 
+/** An end filter no entity can match: an identity that names none. */
+const NO_ENTITY = "no-entity";
+
 export interface PaginatedResult {
   items: Row[];
   total: number;
@@ -287,6 +334,146 @@ async function endpointError(
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Entity identity
+// ---------------------------------------------------------------------------
+
+/**
+ * The id of the entity of a type that has `identity`, through the lens:
+ * null when the lens does not show the type or its whole identity, or no
+ * entity has it. Exact match: no trimming, no case folding.
+ */
+export async function entityIdOfIdentity(
+  loaded: LoadedSchema,
+  entityTypeKey: string,
+  identity: string,
+  store: RuntimeStore,
+): Promise<string | null> {
+  if ((loaded.scoped.entityTypes[entityTypeKey]?.identityProperties ?? null) === null) return null;
+  const entity = await store.getEntityByIdentity(entityTypeKey, identity);
+  return entity === null ? null : (entity._id as string);
+}
+
+/** The not-found of an identity address. */
+function identityNotFound(identity: string): NotFoundError {
+  return new NotFoundError(`Entity '${identity}' not found`);
+}
+
+/**
+ * The id an identity route addresses (`/entities/{type}/identity/{identity}`):
+ * a type the lens does not show is not found, as on the id route, and so
+ * is an identity no entity has, or one the lens does not show whole.
+ */
+export async function resolveEntityIdentity(
+  lensKey: string,
+  entityTypeKey: string,
+  identity: string,
+  store: RuntimeStore,
+): Promise<string> {
+  const loaded = await loadSchema(lensKey, store);
+  scopedEntityType(loaded, entityTypeKey);
+  const id = await entityIdOfIdentity(loaded, entityTypeKey, identity, store);
+  if (id === null) throw identityNotFound(identity);
+  return id;
+}
+
+/** The fault of a reference given both by id and by identity, or by
+ * neither, under both fields of the pair. */
+export function exactlyOneFault(errors: FieldErrors, idField: string, identityField: string): void {
+  const message = `Give exactly one of ${idField.split(".").pop()} and ${identityField.split(".").pop()}`;
+  errors[idField] = message;
+  errors[identityField] = message;
+}
+
+/** Whether exactly one of an id and an identity is given. */
+export function exactlyOne(id: string | null | undefined, identity: string | null | undefined): boolean {
+  return (id === null || id === undefined) !== (identity === null || identity === undefined);
+}
+
+/**
+ * The refusal of an identity another entity of the type holds, checked
+ * before a write that gives `entityId` the identity: `IDENTITY_TAKEN`,
+ * naming the identity and the type's identity properties, never the
+ * other entity. The unique constraint catches a concurrent write
+ * (`claimed`).
+ */
+export async function claimIdentity(
+  loaded: LoadedSchema,
+  store: RuntimeStore,
+  entityTypeKey: string,
+  entityId: string,
+  identity: string | null | undefined,
+): Promise<void> {
+  if (identity === null || identity === undefined) return;
+  const holder = await store.getEntityByIdentity(entityTypeKey, identity);
+  if (holder !== null && holder._id !== entityId) {
+    throw new IdentityTakenError(entityTypeKey, identity, identityKeys(loaded, entityTypeKey));
+  }
+}
+
+/** The identity property keys of a type, from the full schema. */
+function identityKeys(loaded: LoadedSchema, entityTypeKey: string): string[] {
+  return (identityPropertiesOfType(loaded, entityTypeKey) ?? []).map((property) => property.key);
+}
+
+/** A store write that gives an entity an identity: a concurrent write
+ * that took it first answers as the pre-check would have
+ * (`claimIdentity`). */
+export async function claimed<T>(loaded: LoadedSchema, entityTypeKey: string, write: Promise<T>): Promise<T> {
+  try {
+    return await write;
+  } catch (error) {
+    if (error instanceof IdentityTakenError) {
+      throw error.withIdentityProperties(identityKeys(loaded, entityTypeKey));
+    }
+    throw error;
+  }
+}
+
+/** The parent relation of a create as a caller names it: the parent by
+ * id or by identity, exactly one. */
+export interface ParentRelationRequest {
+  type: string;
+  parentId?: string | null | undefined;
+  parentIdentity?: string | null | undefined;
+  properties?: Row | undefined;
+}
+
+/**
+ * The parent relation of a create with its parent as an id
+ * (`ParentRelationInput`), its faults added to `errors`: both or neither
+ * of `parentId` and `parentIdentity` under both; an identity no entity of
+ * the parent end's type has, through the lens, under `parentIdentity`, as
+ * a parent id that is not found. `resolved` is false when the parent end
+ * is not to be checked further.
+ */
+export async function resolveParentRelation(
+  loaded: LoadedSchema,
+  request: ParentRelationRequest | null,
+  store: RuntimeStore,
+  errors: FieldErrors,
+): Promise<{ input: ParentRelationInput | null; resolved: boolean }> {
+  if (request === null) return { input: null, resolved: true };
+  const { parentId, parentIdentity, ...rest } = request;
+  if (!exactlyOne(parentId, parentIdentity)) {
+    exactlyOneFault(errors, "parentRelation.parentId", "parentRelation.parentIdentity");
+    return { input: { ...rest, parentId: "" }, resolved: false };
+  }
+  if (parentId !== null && parentId !== undefined) {
+    return { input: { ...rest, parentId }, resolved: true };
+  }
+  const rt = loaded.full.relationTypes[request.type];
+  const parentType =
+    rt === undefined || rt.parent === null ? null : rt.parent === "source" ? rt.fromEntityTypeKey : rt.toEntityTypeKey;
+  const id = parentType === null ? null : await entityIdOfIdentity(loaded, parentType, parentIdentity!, store);
+  if (id === null) {
+    // A relation type that is no parent relation is reported on `type`.
+    if (parentType !== null) errors["parentRelation.parentIdentity"] = `Parent entity '${parentIdentity}' not found`;
+    return { input: { ...rest, parentId: "" }, resolved: false };
+  }
+  return { input: { ...rest, parentId: id }, resolved: true };
+}
+
 /**
  * Create an entity (`prepareCreateEntity`): validate against the SCOPED
  * properties, apply defaults from the FULL schema, maintain document
@@ -296,66 +483,85 @@ async function endpointError(
  * that names its parent: one 422 carries the faults of both, and both rows
  * are written in one transaction. Its parent end is checked here as a
  * relation create checks its ends (`endpointError`), under
- * `parentRelation.parentId`. The response is the entity alone, as without
- * it. Through a ruleset with an anchor, an entity of the anchor's hierarchy
- * must name a covered parent this way (`AnchorGuard.checkCreate`); its faults join the
- * others.
+ * `parentRelation.parentId`, or under `parentRelation.parentIdentity` when
+ * the parent is named by identity (`resolveParentRelation`). The response
+ * is the entity alone, as without it. Through a ruleset with an anchor, an
+ * entity of the anchor's hierarchy must name a covered parent this way
+ * (`AnchorGuard.checkCreate`); its faults join the others.
+ *
+ * The entity's identity, when its type has one, is built from the values
+ * as stored; once every other fault is clear, an identity another entity
+ * holds refuses the create (`claimIdentity`). A create never updates.
  */
 export async function createEntity(
   lensKey: string,
   entityTypeKey: string,
   body: Row,
   store: RuntimeStore,
-  parentRelation: ParentRelationInput | null = null,
+  parentRelation: ParentRelationRequest | null = null,
   rulesetKey: string | null = null,
 ): Promise<Row> {
-  const loaded = await loadSchema(lensKey, store);
-  const scopedEt = scopedEntityType(loaded, entityTypeKey);
-  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
+  const ids = { entityId: randomUUID(), relationId: randomUUID() };
+  return writeWithDesign(lensKey, store, async (tx, loaded, search) => {
+    const scopedEt = scopedEntityType(loaded, entityTypeKey);
+    const guard = await AnchorGuard.open(rulesetKey, loaded, tx);
 
-  const { errors, write } = prepareCreateEntity(loaded, entityTypeKey, body, parentRelation, {
-    entityId: randomUUID(),
-    relationId: randomUUID(),
-  });
-  if (write.parent !== null) {
-    const { parentId, parentType } = write.parent;
-    const parentError = await endpointError(store, loaded.full, parentId, parentType, write.parent.relation.relationTypeKey, "Parent");
-    if (parentError !== null) {
-      errors["parentRelation.parentId"] = parentError;
+    const parentFaults: FieldErrors = {};
+    const parent = await resolveParentRelation(loaded, parentRelation, tx, parentFaults);
+    const { errors, write } = prepareCreateEntity(loaded, entityTypeKey, body, parent.input, ids);
+    Object.assign(errors, parentFaults);
+    if (write.parent !== null && parent.resolved) {
+      const { parentId, parentType } = write.parent;
+      const parentError = await endpointError(tx, loaded.full, parentId, parentType, write.parent.relation.relationTypeKey, "Parent");
+      if (parentError !== null) {
+        errors["parentRelation.parentId"] = parentError;
+      }
     }
-  }
-  await guard?.checkCreate(entityTypeKey, parentRelation, errors);
-  if (Object.keys(errors).length > 0) {
-    throw new ValidationError("Instance validation failed", { fields: errors });
-  }
+    if (parent.resolved) {
+      await guard?.checkCreate(entityTypeKey, parent.input, errors);
+    }
+    if (Object.keys(errors).length > 0) {
+      throw new ValidationError("Instance validation failed", { fields: errors });
+    }
 
-  const e = write.entity;
-  const entitySearch = await searchPlan(store, e.change);
-  if (write.parent === null) {
-    const entity = await store.createEntity(e.entityTypeKey, e.entityId, e.properties, e.propertyDefs, entitySearch);
+    const e = write.entity;
+    await claimIdentity(loaded, tx, e.entityTypeKey, e.entityId, e.identity);
+    const entitySearch = planSearchWrite(search.dependencies, e.change);
+    if (write.parent === null) {
+      const entity = await claimed(
+        loaded,
+        e.entityTypeKey,
+        tx.createEntity(e.entityTypeKey, e.entityId, e.properties, e.propertyDefs, entitySearch, e.identity),
+      );
+      return filterEntityProperties(entity, scopedEt);
+    }
+
+    const r = write.parent.relation;
+    const { entity } = await claimed(
+      loaded,
+      e.entityTypeKey,
+      tx.createEntityWithParent(
+        {
+          entityTypeKey: e.entityTypeKey,
+          entityId: e.entityId,
+          properties: e.properties,
+          propertyDefs: e.propertyDefs,
+          search: entitySearch,
+          identity: e.identity,
+        },
+        {
+          relationTypeKey: r.relationTypeKey,
+          relationId: r.relationId,
+          fromEntityId: r.fromEntityId,
+          toEntityId: r.toEntityId,
+          properties: r.properties,
+          propertyDefs: r.propertyDefs,
+          search: planSearchWrite(search.dependencies, r.change),
+        },
+      ),
+    );
     return filterEntityProperties(entity, scopedEt);
-  }
-
-  const r = write.parent.relation;
-  const { entity } = await store.createEntityWithParent(
-    {
-      entityTypeKey: e.entityTypeKey,
-      entityId: e.entityId,
-      properties: e.properties,
-      propertyDefs: e.propertyDefs,
-      search: entitySearch,
-    },
-    {
-      relationTypeKey: r.relationTypeKey,
-      relationId: r.relationId,
-      fromEntityId: r.fromEntityId,
-      toEntityId: r.toEntityId,
-      properties: r.properties,
-      propertyDefs: r.propertyDefs,
-      search: await searchPlan(store, r.change),
-    },
-  );
-  return filterEntityProperties(entity, scopedEt);
+  });
 }
 
 export async function listEntities(
@@ -393,8 +599,12 @@ export async function listEntities(
     .filter((p) => p.dataType === "string")
     .map((p) => p.key);
 
-  const sortField = validateSortField(sort, scopedEt.properties);
-  const conditions = parseFilterConditions(filters, scopedEt.properties, entityTypeKey, {
+  // `_identity` sorts and filters as a string property where the lens
+  // shows the type's identity.
+  const identity = scopedEt.identityProperties !== null;
+  const sortField = validateSortField(sort, scopedEt.properties, identity);
+  const filterDefs = identity ? { ...scopedEt.properties, [IDENTITY_FIELD]: IDENTITY_FILTER_DEF } : scopedEt.properties;
+  const conditions = parseFilterConditions(filters, filterDefs, entityTypeKey, {
     pathSchema: loaded.scoped,
   });
 
@@ -441,19 +651,22 @@ export async function getEntity(
 }
 
 /** One step of an entity's path. `name` is the value of the type's name
- * property; null when it is unset or the lens hides it. */
+ * property; null when it is unset or the lens hides it. `identity` is the
+ * entity's identity; null when its type has none or the lens hides it. */
 export interface PathStep {
   type: string;
   id: string;
+  identity: string | null;
   name: string | null;
 }
 
 /**
  * The entity's path through the lens: root first, ending with the entity.
- * The walk follows every parent relation of the FULL schema; the lens then
- * cuts it, so the path starts below the nearest ancestor whose type the
- * lens hides and never names a hidden entity. A root's path is itself
- * alone. A hidden type or an unknown entity is not found, as `getEntity`.
+ * The walk follows only the parent relations the lens shows, and the lens
+ * cuts it again at the nearest ancestor whose type it hides: the path
+ * starts below a hidden parent relation or a hidden ancestor and never
+ * names either. A root's path is itself alone. A hidden type or an unknown
+ * entity is not found, as `getEntity`.
  *
  * On data the accepted race left with two parents the walk is no chain:
  * the path then lists every visible ancestor the walk reaches, in the
@@ -473,8 +686,10 @@ export async function getPath(
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
   }
 
-  // Nearest first: keep the ancestors below the first hidden one.
-  const ancestors = await store.getAncestors(entityId, parentReadings(loaded.full));
+  // The walk follows only the parent relations the lens shows, so it ends
+  // at the first step over one it hides. Nearest first: keep the
+  // ancestors below the first one of a hidden type.
+  const ancestors = await store.getAncestors(entityId, parentReadings(loaded.scoped));
   const hidden = ancestors.findIndex((ancestor) => !(ancestor.type in visibleTypes));
   const visible = hidden === -1 ? ancestors : ancestors.slice(0, hidden);
   const steps = [...visible.reverse(), { type: entityTypeKey, id: entityId }];
@@ -489,7 +704,13 @@ export async function getPath(
   return steps.map((step) => {
     const nameProperty = visibleTypes[step.type]?.nameProperty ?? null;
     const value = nameProperty === null ? undefined : rows[step.id]?.[nameProperty];
-    return { type: step.type, id: step.id, name: typeof value === "string" ? value : null };
+    const identity = (visibleTypes[step.type]?.identityProperties ?? null) === null ? undefined : rows[step.id]?._identity;
+    return {
+      type: step.type,
+      id: step.id,
+      identity: typeof identity === "string" ? identity : null,
+      name: typeof value === "string" ? value : null,
+    };
   });
 }
 
@@ -500,6 +721,11 @@ export async function getPath(
  * returns the current state without advancing `_updatedAt`. Through a
  * ruleset with an anchor, an entity of the anchor's hierarchy outside the
  * anchor's subtree is refused on `entityId`.
+ *
+ * An update that sets an identity property locks the entity, then rebuilds
+ * the identity from the stored values with the update over them
+ * (`updatedIdentity`): a rename,
+ * under the create's checks. The old identity names nothing from then on.
  */
 export async function updateEntity(
   lensKey: string,
@@ -509,48 +735,70 @@ export async function updateEntity(
   store: RuntimeStore,
   rulesetKey: string | null = null,
 ): Promise<Row> {
-  const loaded = await loadSchema(lensKey, store);
-  const scopedEt = scopedEntityType(loaded, entityTypeKey);
-  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
+  return writeWithDesign(lensKey, store, async (tx, loaded, search) => {
+    const scopedEt = scopedEntityType(loaded, entityTypeKey);
+    const guard = await AnchorGuard.open(rulesetKey, loaded, tx);
 
-  const { errors, write } = prepareUpdateEntity(loaded, entityTypeKey, entityId, body);
-  const outside = (await guard?.entityError(entityTypeKey, entityId)) ?? null;
-  if (outside !== null) {
-    errors.entityId = outside;
-  }
-  if (Object.keys(errors).length > 0) {
-    throw new ValidationError("Instance validation failed", { fields: errors });
-  }
+    const { errors, write } = prepareUpdateEntity(loaded, entityTypeKey, entityId, body);
+    const outside = (await guard?.entityError(entityTypeKey, entityId)) ?? null;
+    if (outside !== null) {
+      errors.entityId = outside;
+    }
+    let identity: string | undefined;
+    if (
+      write !== null &&
+      Object.keys(errors).length === 0 &&
+      touchesIdentity(identityPropertiesOfType(loaded, entityTypeKey), write)
+    ) {
+      // Locked until the write: a concurrent update of another identity
+      // property waits, and then builds on this one's values.
+      await tx.lockTargets([entityId], {});
+      const stored = await tx.getEntity(entityTypeKey, entityId);
+      if (stored === null) {
+        throw new NotFoundError(`Entity '${entityId}' not found`);
+      }
+      identity = updatedIdentity(loaded, entityTypeKey, stored, write, errors);
+    }
+    if (Object.keys(errors).length > 0) {
+      throw new ValidationError("Instance validation failed", { fields: errors });
+    }
 
-  if (write === null) {
-    return getEntity(lensKey, entityTypeKey, entityId, store);
-  }
+    await claimIdentity(loaded, tx, entityTypeKey, entityId, identity);
+    const entity =
+      write === null
+        ? await tx.getEntity(entityTypeKey, entityId)
+        : await claimed(
+            loaded,
+            entityTypeKey,
+            tx.updateEntity(
+              write.entityTypeKey,
+              write.entityId,
+              write.setProperties,
+              write.removeProperties,
+              write.propertyDefs,
+              planSearchWrite(search.dependencies, write.change),
+              identity,
+            ),
+          );
+    if (entity === null) {
+      throw new NotFoundError(`Entity '${entityId}' not found`);
+    }
 
-  const entity = await store.updateEntity(
-    write.entityTypeKey,
-    write.entityId,
-    write.setProperties,
-    write.removeProperties,
-    write.propertyDefs,
-    await searchPlan(store, write.change),
-  );
-  if (entity === null) {
-    throw new NotFoundError(`Entity '${entityId}' not found`);
-  }
-
-  return filterEntityProperties(entity, scopedEt);
+    return filterEntityProperties(entity, scopedEt);
+  });
 }
 
 /**
- * Delete an entity, every relation attached to it in either direction —
- * including relations whose type the lens cannot see — and its search
- * data. Wherever the ontology flags a parent relation, only a leaf may go:
- * an entity with children over any parent relation of the full schema is
- * refused (409), through every lens, before the delete. Otherwise the
- * cascade is silent: nothing warns, nothing refuses. Through a ruleset
- * with an anchor the guard refuses first (`AnchorGuard.checkDelete`):
- * outside the anchor's subtree, then the anchor of any ruleset (422 on
- * `entityId`); "has children" comes last.
+ * Delete an entity, every relation attached to it in either direction, and
+ * its search data. Wherever the ontology flags a parent relation, only a
+ * leaf may go: an entity with children over any parent relation of the
+ * full schema is refused (409), through every lens, before the delete. An
+ * entity with a relation attached of a type the lens hides is refused too
+ * (409, `HIDDEN_RELATIONS_MESSAGE`): a lens never removes what it does not
+ * show. Through a ruleset with an anchor the guard refuses first
+ * (`AnchorGuard.checkDelete`): outside the anchor's subtree, then the
+ * anchor of any ruleset (422 on `entityId`); "has children", then the
+ * hidden relations, come last.
  */
 export async function deleteEntity(
   lensKey: string,
@@ -559,26 +807,31 @@ export async function deleteEntity(
   store: RuntimeStore,
   rulesetKey: string | null = null,
 ): Promise<void> {
-  const loaded = await loadSchema(lensKey, store);
-  scopedEntityType(loaded, entityTypeKey);
-  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
+  await writeWithDesign(lensKey, store, async (tx, loaded, search) => {
+    scopedEntityType(loaded, entityTypeKey);
+    const guard = await AnchorGuard.open(rulesetKey, loaded, tx);
 
-  const write = prepareDeleteEntity(loaded, entityTypeKey, entityId);
-  const readings = parentReadings(loaded.full);
-  const flagged = Object.keys(readings).length > 0;
-  // A missing entity stays not-found, whatever its id has below it.
-  if (flagged && (await store.getEntity(entityTypeKey, entityId)) === null) {
-    throw new NotFoundError(`Entity '${entityId}' not found`);
-  }
-  await guard?.checkDelete(entityTypeKey, entityId);
-  if (flagged && (await store.hasChildren(entityId, readings))) {
-    throw new ConflictError(HAS_CHILDREN_MESSAGE);
-  }
+    const write = prepareDeleteEntity(loaded, entityTypeKey, entityId);
+    const readings = parentReadings(loaded.full);
+    const flagged = Object.keys(readings).length > 0;
+    const hidesRelations = hiddenRelationEnds(loaded, entityTypeKey).length > 0;
+    // A missing entity stays not-found, whatever its id has attached.
+    if ((flagged || hidesRelations) && (await tx.getEntity(entityTypeKey, entityId)) === null) {
+      throw new NotFoundError(`Entity '${entityId}' not found`);
+    }
+    await guard?.checkDelete(entityTypeKey, entityId);
+    if (flagged && (await tx.hasChildren(entityId, readings))) {
+      throw new ConflictError(HAS_CHILDREN_MESSAGE);
+    }
+    if (await hasHiddenRelations(loaded, entityTypeKey, entityId, tx)) {
+      throw new ConflictError(HIDDEN_RELATIONS_MESSAGE);
+    }
 
-  const deleted = await store.deleteEntity(write.entityTypeKey, write.entityId, await searchPlan(store, write.change));
-  if (!deleted) {
-    throw new NotFoundError(`Entity '${entityId}' not found`);
-  }
+    const deleted = await tx.deleteEntity(write.entityTypeKey, write.entityId, planSearchWrite(search.dependencies, write.change));
+    if (!deleted) {
+      throw new NotFoundError(`Entity '${entityId}' not found`);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -597,8 +850,20 @@ async function loadDocumentValue(
   entityId: string,
   propertyKey: string,
   store: RuntimeStore,
-): Promise<{ value: string; loaded: Awaited<ReturnType<typeof loadSchema>> }> {
+): Promise<string> {
   const loaded = await loadSchema(lensKey, store);
+  return documentValue(loaded, entityTypeKey, entityId, propertyKey, store);
+}
+
+/** The current value of a scoped document property, read through `store`
+ * (`loadDocumentValue`). */
+async function documentValue(
+  loaded: LoadedSchema,
+  entityTypeKey: string,
+  entityId: string,
+  propertyKey: string,
+  store: RuntimeStore,
+): Promise<string> {
   const scopedEt = loaded.scoped.entityTypes[entityTypeKey];
   if (scopedEt === undefined) {
     throw new NotFoundError(`Entity type '${entityTypeKey}' not found`);
@@ -617,7 +882,7 @@ async function loadDocumentValue(
   }
 
   const value = entity[propertyKey];
-  return { value: typeof value === "string" ? value : "", loaded };
+  return typeof value === "string" ? value : "";
 }
 
 /**
@@ -635,7 +900,7 @@ export async function getDocument(
   limit: number | null,
   store: RuntimeStore,
 ): Promise<Row> {
-  const { value } = await loadDocumentValue(
+  const value = await loadDocumentValue(
     lensKey,
     entityTypeKey,
     entityId,
@@ -803,38 +1068,34 @@ export async function editDocument(
   store: RuntimeStore,
   rulesetKey: string | null = null,
 ): Promise<Row> {
-  const { value, loaded } = await loadDocumentValue(
-    lensKey,
-    entityTypeKey,
-    entityId,
-    propertyKey,
-    store,
-  );
-  await (await AnchorGuard.open(rulesetKey, loaded, store))?.checkEntity(entityTypeKey, entityId);
+  return writeWithDesign(lensKey, store, async (tx, loaded, search) => {
+    const value = await documentValue(loaded, entityTypeKey, entityId, propertyKey, tx);
+    await (await AnchorGuard.open(rulesetKey, loaded, tx))?.checkEntity(entityTypeKey, entityId);
 
-  const edited = applyDocumentEdit(propertyKey, value, body);
-  const setProps: Row = {
-    [propertyKey]: edited.value,
-    [docLengthKey(propertyKey)]: cpLength(edited.value),
-  };
-  const fullEt = loaded.full.entityTypes[entityTypeKey];
-  const entity = await store.updateEntity(
-    entityTypeKey,
-    entityId,
-    setProps,
-    [],
-    fullEt?.properties ?? {},
-    await searchPlan(store, {
-      kind: "entityUpdated",
-      entityType: entityTypeKey,
+    const edited = applyDocumentEdit(propertyKey, value, body);
+    const setProps: Row = {
+      [propertyKey]: edited.value,
+      [docLengthKey(propertyKey)]: cpLength(edited.value),
+    };
+    const fullEt = loaded.full.entityTypes[entityTypeKey];
+    const entity = await tx.updateEntity(
+      entityTypeKey,
       entityId,
-      changedKeys: [propertyKey],
-    }),
-  );
-  if (entity === null) {
-    throw new NotFoundError(`Entity '${entityId}' not found`);
-  }
-  return edited.answer;
+      setProps,
+      [],
+      fullEt?.properties ?? {},
+      planSearchWrite(search.dependencies, {
+        kind: "entityUpdated",
+        entityType: entityTypeKey,
+        entityId,
+        changedKeys: [propertyKey],
+      }),
+    );
+    if (entity === null) {
+      throw new NotFoundError(`Entity '${entityId}' not found`);
+    }
+    return edited.answer;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -884,88 +1145,156 @@ async function checkParentRules(
   }
 }
 
+/** A relation's two ends as a caller names them: each by id or by
+ * identity, exactly one of each pair. */
+export interface RelationEnds {
+  fromEntityId?: string | null | undefined;
+  toEntityId?: string | null | undefined;
+  fromEntityIdentity?: string | null | undefined;
+  toEntityIdentity?: string | null | undefined;
+}
+
+/**
+ * The ids of a relation's ends (`RelationEnds`), each end's faults added
+ * to `errors`: both or neither of a pair under both of its fields; an
+ * identity no entity of the end's declared type has, through the lens,
+ * under its identity field, as an end id that is not found. A null id is
+ * not to be checked further.
+ */
+async function resolveRelationEnds(
+  loaded: LoadedSchema,
+  relationTypeKey: string,
+  ends: RelationEnds,
+  store: RuntimeStore,
+  errors: FieldErrors,
+): Promise<{ fromEntityId: string | null; toEntityId: string | null }> {
+  const rt = loaded.full.relationTypes[relationTypeKey];
+  const resolve = async (end: "from" | "to"): Promise<string | null> => {
+    const [idField, identityField, label] =
+      end === "from"
+        ? (["fromEntityId", "fromEntityIdentity", "Source"] as const)
+        : (["toEntityId", "toEntityIdentity", "Target"] as const);
+    const id = ends[idField];
+    const identity = ends[identityField];
+    if (!exactlyOne(id, identity)) {
+      exactlyOneFault(errors, idField, identityField);
+      return null;
+    }
+    if (id !== null && id !== undefined) return id;
+    const type = rt === undefined ? null : end === "from" ? rt.fromEntityTypeKey : rt.toEntityTypeKey;
+    const resolved = type === null ? null : await entityIdOfIdentity(loaded, type, identity!, store);
+    if (resolved === null) {
+      errors[identityField] = `${label} entity '${identity}' not found`;
+    }
+    return resolved;
+  };
+  return { fromEntityId: await resolve("from"), toEntityId: await resolve("to") };
+}
+
 /**
  * Create a relation (`prepareCreateRelation`): validate properties against
  * the SCOPED definitions, apply defaults from the FULL schema, and check
  * that both endpoints exist and their entity types equal the relation
  * type's declared source/target — checked against the FULL schema, not the
  * lens, so a narrow lens cannot create an edge that is invalid under a
- * wider one. For a parent relation
- * type the parent rules follow (`checkParentRules`). Through a ruleset with
- * an anchor the guard checks the ends and refuses a standalone parent relation of the
- * anchor's hierarchy (`AnchorGuard.checkRelationCreate`). Endpoint, guard
- * and rule errors are collected alongside property errors in ONE response.
+ * wider one. Each end is named by id or by identity (`RelationEnds`). For
+ * a parent relation type the parent rules follow (`checkParentRules`).
+ * Through a ruleset with an anchor the guard checks the ends and refuses a
+ * standalone parent relation of the anchor's hierarchy
+ * (`AnchorGuard.checkRelationCreate`). Endpoint, guard and rule errors are
+ * collected alongside property errors in ONE response.
  */
 export async function createRelation(
   lensKey: string,
   relationTypeKey: string,
-  fromEntityId: string,
-  toEntityId: string,
+  ends: RelationEnds,
   userProps: Row,
   store: RuntimeStore,
   rulesetKey: string | null = null,
 ): Promise<Row> {
-  const loaded = await loadSchema(lensKey, store);
-  const scopedRt = scopedRelationType(loaded, relationTypeKey);
-  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
+  const relationId = randomUUID();
+  return writeWithDesign(lensKey, store, async (tx, loaded, search) => {
+    const scopedRt = scopedRelationType(loaded, relationTypeKey);
+    const guard = await AnchorGuard.open(rulesetKey, loaded, tx);
 
-  const { errors, write } = prepareCreateRelation(
-    loaded,
-    relationTypeKey,
-    fromEntityId,
-    toEntityId,
-    userProps,
-    randomUUID(),
-  );
+    const endFaults: FieldErrors = {};
+    const resolved = await resolveRelationEnds(loaded, relationTypeKey, ends, tx, endFaults);
+    const fromEntityId = resolved.fromEntityId ?? "";
+    const toEntityId = resolved.toEntityId ?? "";
+    const { errors, write } = prepareCreateRelation(
+      loaded,
+      relationTypeKey,
+      fromEntityId,
+      toEntityId,
+      userProps,
+      relationId,
+    );
+    Object.assign(errors, endFaults);
+    if (resolved.fromEntityId === null || resolved.toEntityId === null) {
+      throw new ValidationError("Instance validation failed", { fields: errors });
+    }
 
-  // Endpoint validation against the FULL schema's declared source/target.
-  const fullRtForValidation = loaded.full.relationTypes[relationTypeKey] ?? scopedRt;
-  const fromError = await endpointError(
-    store,
-    loaded.full,
-    fromEntityId,
-    fullRtForValidation.fromEntityTypeKey,
-    relationTypeKey,
-    "Source",
-  );
-  if (fromError !== null) {
-    errors.fromEntityId = fromError;
-  }
-  const toError = await endpointError(
-    store,
-    loaded.full,
-    toEntityId,
-    fullRtForValidation.toEntityTypeKey,
-    relationTypeKey,
-    "Target",
-  );
-  if (toError !== null) {
-    errors.toEntityId = toError;
-  }
+    // Endpoint validation against the FULL schema's declared source/target.
+    const fullRtForValidation = loaded.full.relationTypes[relationTypeKey] ?? scopedRt;
+    // The pair is locked before any row the checks below lock, in the order
+    // a changeset commit takes them; a taken pair is refused after them.
+    const pairTaken =
+      fullRtForValidation.onePerPair &&
+      (await tx.lockPairs(relationTypeKey, [{ fromId: fromEntityId, toId: toEntityId }])).length > 0;
+    const fromError = await endpointError(
+      tx,
+      loaded.full,
+      fromEntityId,
+      fullRtForValidation.fromEntityTypeKey,
+      relationTypeKey,
+      "Source",
+    );
+    if (fromError !== null) {
+      errors.fromEntityId = fromError;
+    }
+    const toError = await endpointError(
+      tx,
+      loaded.full,
+      toEntityId,
+      fullRtForValidation.toEntityTypeKey,
+      relationTypeKey,
+      "Target",
+    );
+    if (toError !== null) {
+      errors.toEntityId = toError;
+    }
 
-  await guard?.checkRelationCreate(fullRtForValidation, fromEntityId, toEntityId, errors);
+    await guard?.checkRelationCreate(fullRtForValidation, fromEntityId, toEntityId, errors);
 
-  if (fullRtForValidation.parent !== null) {
-    await checkParentRules(fullRtForValidation.parent, fromEntityId, toEntityId, loaded.full, errors, store);
-  }
+    if (fullRtForValidation.parent !== null) {
+      await checkParentRules(fullRtForValidation.parent, fromEntityId, toEntityId, loaded.full, errors, tx);
+    }
 
-  if (Object.keys(errors).length > 0) {
-    throw new ValidationError("Instance validation failed", { fields: errors });
-  }
+    if (Object.keys(errors).length > 0) {
+      throw new ValidationError("Instance validation failed", { fields: errors });
+    }
 
-  const relation = await store.createRelation(
-    write.relationTypeKey,
-    write.relationId,
-    write.fromEntityId,
-    write.toEntityId,
-    write.properties,
-    write.propertyDefs,
-    await searchPlan(store, write.change),
-  );
+    if (pairTaken) throw new PairTakenError(relationTypeKey);
 
-  return filterRelationProperties(relation, scopedRt);
+    const relation = await tx.createRelation(
+      write.relationTypeKey,
+      write.relationId,
+      write.fromEntityId,
+      write.toEntityId,
+      write.properties,
+      write.propertyDefs,
+      planSearchWrite(search.dependencies, write.change),
+    );
+
+    return filterRelationProperties(relation, scopedRt);
+  });
 }
 
+/**
+ * One page of a relation type's relations. Each end filter names the
+ * entity by id or by identity, exactly one; an identity no entity of the
+ * end's type has, through the lens, matches nothing, as an unknown id.
+ */
 export async function listRelations(
   lensKey: string,
   relationTypeKey: string,
@@ -973,8 +1302,7 @@ export async function listRelations(
   offset: number,
   sort: string,
   order: string,
-  fromEntityId: string | null,
-  toEntityId: string | null,
+  ends: RelationEnds,
   filters: Record<string, string>,
   store: RuntimeStore,
 ): Promise<PaginatedResult> {
@@ -984,8 +1312,24 @@ export async function listRelations(
     throw new NotFoundError(`Relation type '${relationTypeKey}' not found`);
   }
 
+  const pairFaults: FieldErrors = {};
+  for (const [idField, identityField] of [
+    ["fromEntityId", "fromEntityIdentity"],
+    ["toEntityId", "toEntityIdentity"],
+  ] as const) {
+    if (ends[idField] != null && ends[identityField] != null) exactlyOneFault(pairFaults, idField, identityField);
+  }
+  if (Object.keys(pairFaults).length > 0) {
+    throw new ValidationError("Give each end by id or by identity, not both", { fields: pairFaults });
+  }
   const sortField = validateSortField(sort, scopedRt.properties);
   const conditions = parseFilterConditions(filters, scopedRt.properties, relationTypeKey);
+  const endId = async (id: string | null | undefined, identity: string | null | undefined, type: string): Promise<string | null> =>
+    identity === null || identity === undefined
+      ? (id ?? null)
+      : ((await entityIdOfIdentity(loaded, type, identity, store)) ?? NO_ENTITY);
+  const fromEntityId = await endId(ends.fromEntityId, ends.fromEntityIdentity, scopedRt.fromEntityTypeKey);
+  const toEntityId = await endId(ends.toEntityId, ends.toEntityIdentity, scopedRt.toEntityTypeKey);
 
   const [rawItems, total] = await store.listRelations(
     relationTypeKey,
@@ -1038,36 +1382,36 @@ export async function updateRelation(
   store: RuntimeStore,
   rulesetKey: string | null = null,
 ): Promise<Row> {
-  const loaded = await loadSchema(lensKey, store);
-  const scopedRt = scopedRelationType(loaded, relationTypeKey);
-  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
+  return writeWithDesign(lensKey, store, async (tx, loaded, search) => {
+    const scopedRt = scopedRelationType(loaded, relationTypeKey);
+    const guard = await AnchorGuard.open(rulesetKey, loaded, tx);
 
-  const { errors, write } = prepareUpdateRelation(loaded, relationTypeKey, relationId, body);
-  const refused =
-    (await guard?.relationError(loaded.full.relationTypes[relationTypeKey] ?? scopedRt, relationId, "update")) ?? null;
-  if (refused !== null) {
-    errors.relationId = refused;
-  }
-  if (Object.keys(errors).length > 0) {
-    throw new ValidationError("Instance validation failed", { fields: errors });
-  }
+    const { errors, write } = prepareUpdateRelation(loaded, relationTypeKey, relationId, body);
+    const refused =
+      (await guard?.relationError(loaded.full.relationTypes[relationTypeKey] ?? scopedRt, relationId, "update")) ?? null;
+    if (refused !== null) {
+      errors.relationId = refused;
+    }
+    if (Object.keys(errors).length > 0) {
+      throw new ValidationError("Instance validation failed", { fields: errors });
+    }
 
-  if (write === null) {
-    return getRelation(lensKey, relationTypeKey, relationId, store);
-  }
-
-  const relation = await store.updateRelation(
-    write.relationTypeKey,
-    write.relationId,
-    write.setProperties,
-    write.removeProperties,
-    write.propertyDefs,
-    await searchPlan(store, write.change),
-  );
-  if (relation === null) {
-    throw new NotFoundError(`Relation '${relationId}' not found`);
-  }
-  return filterRelationProperties(relation, scopedRt);
+    const relation =
+      write === null
+        ? await tx.getRelation(relationTypeKey, relationId)
+        : await tx.updateRelation(
+            write.relationTypeKey,
+            write.relationId,
+            write.setProperties,
+            write.removeProperties,
+            write.propertyDefs,
+            planSearchWrite(search.dependencies, write.change),
+          );
+    if (relation === null) {
+      throw new NotFoundError(`Relation '${relationId}' not found`);
+    }
+    return filterRelationProperties(relation, scopedRt);
+  });
 }
 
 /** Delete a relation; neither endpoint is touched. Through a ruleset with
@@ -1079,20 +1423,21 @@ export async function deleteRelation(
   store: RuntimeStore,
   rulesetKey: string | null = null,
 ): Promise<void> {
-  const loaded = await loadSchema(lensKey, store);
-  const scopedRt = scopedRelationType(loaded, relationTypeKey);
-  const guard = await AnchorGuard.open(rulesetKey, loaded, store);
-  await guard?.checkRelationDelete(loaded.full.relationTypes[relationTypeKey] ?? scopedRt, relationId);
+  await writeWithDesign(lensKey, store, async (tx, loaded, search) => {
+    const scopedRt = scopedRelationType(loaded, relationTypeKey);
+    const guard = await AnchorGuard.open(rulesetKey, loaded, tx);
+    await guard?.checkRelationDelete(loaded.full.relationTypes[relationTypeKey] ?? scopedRt, relationId);
 
-  const write = prepareDeleteRelation(loaded, relationTypeKey, relationId);
-  const deleted = await store.deleteRelation(
-    write.relationTypeKey,
-    write.relationId,
-    await searchPlan(store, write.change),
-  );
-  if (!deleted) {
-    throw new NotFoundError(`Relation '${relationId}' not found`);
-  }
+    const write = prepareDeleteRelation(loaded, relationTypeKey, relationId);
+    const deleted = await tx.deleteRelation(
+      write.relationTypeKey,
+      write.relationId,
+      planSearchWrite(search.dependencies, write.change),
+    );
+    if (!deleted) {
+      throw new NotFoundError(`Relation '${relationId}' not found`);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1106,10 +1451,8 @@ export interface NeighborhoodResult {
 
 /**
  * One entity plus its immediate neighbourhood. Relations whose type the
- * lens does not expose are dropped together with their neighbour. A
- * neighbour is filtered to the lens only when its own entity type is in
- * scope — an out-of-scope neighbour escapes property stripping (the
- * documented leak), though its document values are still stubbed.
+ * lens does not expose are dropped together with their neighbour; every
+ * kept relation and neighbour is filtered to the lens.
  */
 export async function getNeighbors(
   lensKey: string,
@@ -1145,43 +1488,41 @@ export async function getNeighbors(
     Object.assign(defs, etDef.properties);
   }
 
+  // The relation types to read: the requested one, if the lens shows it,
+  // else every type the lens shows — filtered in storage, before the limit,
+  // so hidden relations take no room in the page. A lens that shows every
+  // relation type needs no filter.
+  const shownRelationTypeKeys = Object.keys(loaded.scoped.relationTypes);
+  const relationTypeKeys =
+    relationTypeKey !== null
+      ? shownRelationTypeKeys.filter((key) => key === relationTypeKey)
+      : shownRelationTypeKeys.length < Object.keys(loaded.full.relationTypes).length
+        ? shownRelationTypeKeys
+        : null;
+
   const neighbors = await store.getNeighbors(
     entityId,
     direction,
-    relationTypeKey,
+    relationTypeKeys,
     limit,
     propertyDefsByType,
   );
 
-  // Filter neighbors by scoped relation types.
+  // Keep only neighbours over a relation type the lens exposes, to an
+  // entity type it exposes — the lens never serves a relation type into a
+  // hidden one, so the second test only fails closed.
   const filteredNeighbors: Row[] = [];
   for (const n of neighbors) {
     const rel = n.relation as Row;
-    const rtKey = rel._relationTypeKey as string | undefined;
-    if (rtKey && rtKey in loaded.scoped.relationTypes) {
-      const scopedRt = loaded.scoped.relationTypes[rtKey]!;
-      n.relation = filterRelationProperties(rel, scopedRt);
-      // Filter neighbor entity properties only when its own type is in scope.
-      const neighborEntity = n.entity as Row;
-      const neighborEtKey = neighborEntity._entityTypeKey as string | undefined;
-      if (neighborEtKey && neighborEtKey in loaded.scoped.entityTypes) {
-        n.entity = filterEntityProperties(
-          neighborEntity,
-          loaded.scoped.entityTypes[neighborEtKey]!,
-          fields,
-        );
-      } else if (neighborEtKey && neighborEtKey in loaded.full.entityTypes) {
-        // Type not in scope — still stub document values (never inline).
-        n.entity = stubDocumentProperties(
-          neighborEntity,
-          loaded.full.entityTypes[neighborEtKey]!.properties,
-          fields,
-        );
-      }
-      filteredNeighbors.push(n);
-    } else if (!rtKey) {
-      filteredNeighbors.push(n);
+    const neighborEntity = n.entity as Row;
+    const scopedRt = loaded.scoped.relationTypes[rel._relationTypeKey as string];
+    const scopedNeighborEt = loaded.scoped.entityTypes[neighborEntity._entityTypeKey as string];
+    if (scopedRt === undefined || scopedNeighborEt === undefined) {
+      continue;
     }
+    n.relation = filterRelationProperties(rel, scopedRt);
+    n.entity = filterEntityProperties(neighborEntity, scopedNeighborEt, fields);
+    filteredNeighbors.push(n);
   }
 
   // Filter the centre entity.
@@ -1254,12 +1595,15 @@ function isPlainObject(value: unknown): value is Row {
 /**
  * Filter out-of-scope properties and stub document values (in place).
  *
- * Node/relationship maps are stripped to scoped properties with document
- * values stubbed — per column, exactly as a read result is
- * (`docs/capabilities/ontology-lenses.md#what-scoping-cuts`). Scalar
- * columns of the form `var.property` that reference a document property
- * are stubbed as well; an ALIASED projection of a document property is
- * not of that form and returns the full text — the documented exception.
+ * Every entity and relation in a row — a column of its own, or at any
+ * depth inside a list or map (`collect(p)`, `[p]`, `{x: p}`) — is stripped
+ * to its type's scoped properties with document values stubbed, exactly as
+ * a read result is (`docs/capabilities/ontology-lenses.md#what-scoping-cuts`).
+ * One of a type the lens does not show becomes null: the compiler never
+ * matches one, so this only fails closed. Scalar columns of the form
+ * `var.property` that reference a document property are stubbed as well;
+ * an ALIASED projection of a document property is not of that form and
+ * returns the full text — the documented exception.
  */
 function postprocessQueryRows(
   rows: Row[],
@@ -1268,13 +1612,7 @@ function postprocessQueryRows(
 ): void {
   for (const row of rows) {
     for (const [col, value] of Object.entries(row)) {
-      if (isPlainObject(value)) {
-        const typeKey = resolveTypeKeyForValue(col, value, varMap, scoped);
-        if (typeKey === null) {
-          continue;
-        }
-        row[col] = stripOutOfScopeProps(value, typeKey, scoped);
-      } else if (typeof value === "string" && col.includes(".")) {
+      if (typeof value === "string" && col.includes(".")) {
         // Scalar projection like `RETURN p.bio` — stub document values.
         const dot = col.indexOf(".");
         const variable = col.slice(0, dot).trim();
@@ -1291,32 +1629,37 @@ function postprocessQueryRows(
         if (propDef !== undefined && propDef.dataType === "document") {
           row[col] = { document: true, length: cpLength(value) };
         }
+      } else {
+        row[col] = projectQueryValue(value, scoped);
       }
     }
   }
 }
 
-/** Figure out the schema type key for a map returned by the store. */
-function resolveTypeKeyForValue(
-  column: string,
-  value: Row,
-  varMap: Map<string, string | null>,
-  schema: SchemaCacheValue,
-): string | null {
-  // If the column is a known variable, use the pre-built mapping.
-  if (varMap.has(column)) {
-    return varMap.get(column)!;
+/** One projected value through the lens: lists and maps walked, every
+ * entity or relation in them (it carries its type key) stripped, and one
+ * of a type the lens does not show replaced by null. */
+function projectQueryValue(value: unknown, scoped: SchemaCacheValue): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => projectQueryValue(item, scoped));
   }
-  // Fallback: inspect _entityTypeKey or _relationTypeKey in the value.
-  const etk = value._entityTypeKey;
-  if (typeof etk === "string" && etk in schema.entityTypes) {
-    return etk;
+  if (!isPlainObject(value)) {
+    return value;
   }
-  const rtk = value._relationTypeKey;
-  if (typeof rtk === "string" && rtk in schema.relationTypes) {
-    return rtk;
+  if ("_entityTypeKey" in value) {
+    const etDef = scoped.entityTypes[value._entityTypeKey as string];
+    return etDef === undefined
+      ? null
+      : stripOutOfScopeProps(value, etDef.properties, true, etDef.identityProperties !== null);
   }
-  return null;
+  if ("_relationTypeKey" in value) {
+    const rtDef = scoped.relationTypes[value._relationTypeKey as string];
+    return rtDef === undefined ? null : stripOutOfScopeProps(value, rtDef.properties, false);
+  }
+  for (const [key, item] of Object.entries(value)) {
+    value[key] = projectQueryValue(item, scoped);
+  }
+  return value;
 }
 
 // ---------------------------------------------------------------------------
@@ -1559,23 +1902,20 @@ export async function searchSavedQueries(
   return results;
 }
 
-/** Remove properties not in the scoped schema and stub documents. Unlike
- * entity reads, only the SYSTEM properties survive here — other
- * underscore-prefixed bookkeeping is stripped. */
-function stripOutOfScopeProps(value: Row, typeKey: string, schema: SchemaCacheValue): Row {
-  let allowed: Set<string>;
-  let result = value;
-  const etDef = schema.entityTypes[typeKey];
-  const rtDef = schema.relationTypes[typeKey];
-  if (etDef !== undefined) {
-    allowed = new Set([...Object.keys(etDef.properties), ...SYSTEM_PROPERTIES]);
-    // Stub document values before the helper `_doc_*_length` keys are stripped.
-    result = stubDocumentProperties(value, etDef.properties);
-  } else if (rtDef !== undefined) {
-    allowed = new Set([...Object.keys(rtDef.properties), ...SYSTEM_PROPERTIES]);
-  } else {
-    return value;
-  }
+/** Remove properties not in the scoped definitions and stub documents
+ * (of an entity), and an identity the lens does not show whole. Unlike entity reads, only the SYSTEM properties survive
+ * here — other underscore-prefixed bookkeeping is stripped. */
+function stripOutOfScopeProps(
+  value: Row,
+  properties: Record<string, PropertyDef>,
+  entity: boolean,
+  identityShown = false,
+): Row {
+  const allowed = new Set([...Object.keys(properties), ...SYSTEM_PROPERTIES]);
+  // The identity only where the lens shows the type's whole identity.
+  if (!identityShown) allowed.delete(IDENTITY_FIELD);
+  // Stub document values before the helper `_doc_*_length` keys are stripped.
+  const result = entity ? stubDocumentProperties(value, properties) : value;
   for (const key of Object.keys(result)) {
     if (!allowed.has(key)) {
       delete result[key];

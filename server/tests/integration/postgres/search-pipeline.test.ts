@@ -3,8 +3,9 @@
  * transaction, the dependency map's fan-out and deletes, generation
  * reconciliation, the worker building keyword and semantic generations
  * with a deterministic fake provider (hash skip, retries, failure), the
- * claim token, wake-ups, and relation entries that pair one relation with
- * its own target. Index rows are created through the store directly.
+ * claim token, the lease fencing a claim taken over or withdrawn, release
+ * on stop, wake-ups, and relation entries that pair one relation with its
+ * own target. Index rows are created through the store directly.
  * Requires the docker-compose PostgreSQL.
  */
 
@@ -12,12 +13,14 @@ import { randomUUID } from "node:crypto";
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runQuery } from "../../../src/adapters/postgres/errors.js";
+import { runQuery, withTransaction } from "../../../src/adapters/postgres/errors.js";
+import { PostgresSearchIndexStore } from "../../../src/adapters/postgres/searchIndexStore.js";
 import { settings } from "../../../src/config.js";
-import { setEmbeddingProvider } from "../../../src/core/embedding.js";
+import { setEmbeddingProvider, type EmbeddingProvider } from "../../../src/core/embedding.js";
 import type {
   ModelingStore,
   RuntimeStore,
+  SearchEntryWrite,
   SearchGenerationRecord,
   SearchIndexRecord,
   SearchIndexStore,
@@ -31,14 +34,17 @@ import {
   initStores,
   subscribeSearchWork,
 } from "../../../src/core/ports.js";
+import { entryTextHash } from "../../../src/core/searchEntry.js";
 import { SearchIndexDefinition } from "../../../src/core/searchIndex.js";
 import {
   rebuildSearchIndex,
   reconcileSearchGenerations,
   refreshSearchIndex,
 } from "../../../src/runtime/indexing/generations.js";
+import { refreshReaders } from "../../../src/runtime/indexing/managed.js";
 import { getSearchIndexStatus } from "../../../src/runtime/indexing/status.js";
 import {
+  drainOnce,
   drainSearchWork,
   searchEntryRates,
   startSearchWorker,
@@ -103,6 +109,47 @@ async function entries(generationId: string): Promise<Row[]> {
   return result.rows;
 }
 
+/** A keyword entry of an entity's own part. */
+function selfEntry(entityId: string, text: string): SearchEntryWrite {
+  return {
+    entityId,
+    partKind: "self",
+    groupNo: 0,
+    partId: "",
+    relationType: null,
+    targetType: null,
+    targetId: null,
+    startChar: null,
+    charLength: null,
+    text,
+    textHash: entryTextHash(text, "keyword", ""),
+    embedding: null,
+  };
+}
+
+/** The fake provider with its first `embedBatch` held until `release`, or
+ * until its signal aborts: a worker paused mid-batch. */
+function heldProvider(): { provider: EmbeddingProvider; held: () => boolean; release: () => void } {
+  const inner = fakeEmbeddingProvider();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let held = false;
+  const provider: EmbeddingProvider = {
+    ...inner,
+    async embedBatch(texts, signal) {
+      if (!held) {
+        held = true;
+        await new Promise<void>((resolve, reject) => {
+          void gate.then(resolve);
+          signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        });
+      }
+      return inner.embedBatch(texts, signal);
+    },
+  };
+  return { provider, held: () => held, release };
+}
+
 describe("PostgreSQL search pipeline", () => {
   let modeling: ModelingStore;
   let runtime: RuntimeStore;
@@ -121,7 +168,7 @@ describe("PostgreSQL search pipeline", () => {
   }
 
   async function worksFor(from: string, to: string, role: string): Promise<string> {
-    const created = await service.createRelation(LENS, "works_for", from, to, { role }, runtime);
+    const created = await service.createRelation(LENS, "works_for", { fromEntityId: from, toEntityId: to }, { role }, runtime);
     return created._id as string;
   }
 
@@ -173,7 +220,7 @@ describe("PostgreSQL search pipeline", () => {
     await modeling.createEntityType(companyType, "company", "Company", null, newProperty("name", "string"));
     await modeling.createProperty(companyType, "EntityType", randomUUID(), "founded", "Founded", null, "integer", false, null);
     const worksForType = randomUUID();
-    await modeling.createRelationType(worksForType, "works_for", "Works for", null, "person", "company", null);
+    await modeling.createRelationType(worksForType, "works_for", "Works for", null, "person", "company", { parent: null, onePerPair: false });
     for (const key of ["role", "since"]) {
       await modeling.createProperty(worksForType, "RelationType", randomUUID(), key, key[0]!.toUpperCase() + key.slice(1), null, "string", false, null);
     }
@@ -487,6 +534,28 @@ describe("PostgreSQL search pipeline", () => {
     expect((await active(index, "semantic")).state).toBe("ready");
   });
 
+  it("re-queues the readers of a renamed type in the design change: with its commit or not at all", async () => {
+    await addIndex();
+    const ada = await person("Ada");
+    await worksFor(ada, await company("ACME"), "CTO");
+    await drainSearchWork();
+    expect(await queued()).toEqual([]);
+
+    await expect(
+      modeling.changeDesign(async (change) => {
+        expect(await refreshReaders(change.searchIndices(), ["company"])).toEqual(["employment"]);
+        throw new Error("rolled back");
+      }),
+    ).rejects.toThrow("rolled back");
+    expect(await queued()).toEqual([]);
+
+    expect(await modeling.changeDesign((change) => refreshReaders(change.searchIndices(), ["company"]))).toEqual([
+      "employment",
+    ]);
+    expect((await queued()).length).toBeGreaterThan(0);
+    expect(await modeling.changeDesign((change) => refreshReaders(change.searchIndices(), ["age_group"]))).toEqual([]);
+  });
+
   it("retries with backoff, counts items failed for good, and a rebuild retries them", async () => {
     await person("Ada");
     await person("Bob");
@@ -523,6 +592,72 @@ describe("PostgreSQL search pipeline", () => {
     await drainSearchWork();
     expect((await getSearchIndexStatus(ONTOLOGY_KEY, "employment")).state).toBe("ready");
     expect(await queued()).toEqual([]);
+  });
+
+  it("a rebuild that a design change overtakes runs again instead of vanishing", async () => {
+    await person("Ada", { email: "ada@example.org", age: 36 });
+    const index = await addIndex();
+    await drainSearchWork();
+    const before = await active(index, "keyword");
+
+    // Another server's design change holds the design and commits while
+    // the rebuild waits for it with the revision it read before.
+    let committed!: () => void;
+    const release = new Promise<void>((resolve) => (committed = resolve));
+    let locked!: () => void;
+    const held = new Promise<void>((resolve) => (locked = resolve));
+    const change = withTransaction(
+      async (querier) => {
+        await querier.query(`SELECT pg_advisory_xact_lock(hashtextextended('ontoforge.design.' || current_schema(), 0))`);
+        await querier.query(`UPDATE design_revision SET revision = revision + 1`);
+        locked();
+        await release;
+      },
+      "READ COMMITTED",
+      NAMESPACE,
+    );
+    await held;
+    const rebuild = rebuildSearchIndex(ONTOLOGY_KEY, "employment");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    committed();
+    await change;
+
+    const changes = await rebuild;
+    expect(changes.filter((c) => c.representation === "keyword").map((c) => c.action)).toEqual(["created"]);
+    await drainSearchWork();
+    expect((await active(index, "keyword")).generationId).not.toBe(before.generationId);
+  });
+
+  it("a design change between the representations of a rebuild: the missing one is rebuilt too", async () => {
+    await person("Ada", { email: "ada@example.org", age: 36 });
+    const index = await addIndex();
+    await drainSearchWork();
+    const before = { keyword: await active(index, "keyword"), semantic: await active(index, "semantic") };
+
+    // A design change commits once the keyword generation is created,
+    // so the semantic creation of that round is refused.
+    const create = PostgresSearchIndexStore.prototype.createGeneration;
+    let moved = false;
+    const spy = vi.spyOn(PostgresSearchIndexStore.prototype, "createGeneration").mockImplementation(async function (
+      this: PostgresSearchIndexStore,
+      ...args: Parameters<typeof create>
+    ) {
+      if (args[0].representation === "semantic" && !moved) {
+        moved = true;
+        await runQuery(`UPDATE ${NAMESPACE}.design_revision SET revision = revision + 1`);
+      }
+      return create.apply(this, args);
+    });
+    try {
+      const changes = await rebuildSearchIndex(ONTOLOGY_KEY, "employment");
+      const created = changes.filter((c) => c.indexKey === "employment" && c.action === "created");
+      expect(created.map((c) => c.representation)).toEqual(["keyword", "semantic"]);
+    } finally {
+      spy.mockRestore();
+    }
+    await drainSearchWork();
+    expect((await active(index, "keyword")).generationId).not.toBe(before.keyword.generationId);
+    expect((await active(index, "semantic")).generationId).not.toBe(before.semantic.generationId);
   });
 
   // ---------------------------------------------------------------------
@@ -615,6 +750,130 @@ describe("PostgreSQL search pipeline", () => {
     await store.completeQueueItems([reclaimed!]);
     expect(await queued()).toEqual([]);
     expect((await active(index, "keyword")).state).toBe("ready");
+  });
+
+  it("fences a claim taken over: the stale owner's writes and settlements are dropped", async () => {
+    setEmbeddingProvider(null);
+    await addIndex();
+    await drainSearchWork();
+    const ada = await person("Ada");
+    const options = { limit: 10, leaseSeconds: 300, maxAttempts: 5, semanticModelId: null };
+    const [stale] = await store.claimQueueItems(options);
+    const generationId = stale!.generationId;
+
+    await runQuery(`UPDATE ${NAMESPACE}.search_queue SET lease_until = now() - interval '1 second'`);
+    const [current] = await store.claimQueueItems(options);
+    expect(current?.entityId).toBe(ada);
+    expect(new Date(current!.lease).getTime()).toBeGreaterThan(new Date(stale!.lease).getTime());
+    expect(await store.upsertEntries(generationId, [selfEntry(ada, "Ada current")], [current!])).toBe(1);
+
+    // The stale owner resumes: nothing it does lands, and it is told so.
+    expect(await store.upsertEntries(generationId, [selfEntry(ada, "Ada stale")], [stale!])).toBe(0);
+    const self = { entityId: ada, partKind: "self" as const, groupNo: 0, partId: "" };
+    expect(await store.deleteEntries(generationId, [self], [stale!])).toBe(0);
+    expect(await store.deleteEntityPartsExcept(generationId, ada, "self", 0, [], [stale!])).toBe(0);
+    expect(await store.completeQueueItems([stale!])).toEqual({ completed: 0, lost: 1 });
+    expect(await store.failQueueItems([{ item: stale!, delayMs: 0 }], "late")).toEqual({ attempts: [], lost: 1 });
+    expect(await store.releaseQueueItems([stale!])).toBe(0);
+    expect((await entries(generationId)).map((row) => row["text"])).toEqual(["Ada current"]);
+    const [row] = await queued();
+    expect(row).toMatchObject({ attempts: 0, last_error: null });
+    const lease = await runQuery(
+      `SELECT lease_until = $1::timestamptz AS current FROM ${NAMESPACE}.search_queue`,
+      [current!.lease],
+    );
+    expect(lease.rows[0]!["current"]).toBe(true);
+
+    expect(await store.completeQueueItems([current!])).toEqual({ completed: 1, lost: 0 });
+    expect(await queued()).toEqual([]);
+  });
+
+  it("drops the late batch of a worker taken over mid-embedding; progress counts once", async () => {
+    const { provider: held, held: isHeld, release } = heldProvider();
+    setEmbeddingProvider(held);
+    const ada = await person("Ada");
+    const index = await addIndex();
+    // The index was created behind the design revision: writes must see it.
+    invalidateLoadedSchemaCache();
+    const semantic = (await live(index)).find((g) => g.representation === "semantic")!;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // A claims both items, builds the keyword entry and waits in the embedding.
+      const first = drainOnce({ ontologyKey: ONTOLOGY_KEY });
+      await waitFor(isHeld);
+      await service.updateEntity(LENS, "person", ada, { name: "Ada Lovelace" }, runtime);
+      // A's lease expires; B takes over and builds the newer state.
+      await runQuery(`UPDATE ${NAMESPACE}.search_queue SET lease_until = now() - interval '1 second'
+                      WHERE lease_until IS NOT NULL`);
+      await drainSearchWork({ ontologyKey: ONTOLOGY_KEY });
+      release();
+      await first;
+
+      expect((await entries(semantic.generationId)).map((row) => row["text"])).toEqual(["Person: Ada Lovelace"]);
+      expect(await queued()).toEqual([]);
+      const generation = (await store.getGeneration(semantic.generationId))!;
+      expect(generation).toMatchObject({ state: "ready", done: 1, total: 1, failed: 0 });
+      expect(warn.mock.calls.map(([line]) => String(line))).toContainEqual(
+        `Search claim lost: 1 of 1 items of generation ${semantic.generationId} taken over or withdrawn, effects dropped`,
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("writes no entries back for an entity deleted while it was composed", async () => {
+    const { provider: held, held: isHeld, release } = heldProvider();
+    setEmbeddingProvider(held);
+    const ada = await person("Ada");
+    const index = await addIndex();
+    // The index was created behind the design revision: writes must see it.
+    invalidateLoadedSchemaCache();
+    const semantic = (await live(index)).find((g) => g.representation === "semantic")!;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const pass = drainOnce({ ontologyKey: ONTOLOGY_KEY });
+      await waitFor(isHeld);
+      await service.deleteEntity(LENS, "person", ada, runtime);
+      release();
+      await pass;
+      expect(await entries(semantic.generationId)).toEqual([]);
+      expect(await queued()).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("releases the batch a stop interrupts: no attempt charged, the next pass builds it", async () => {
+    const { provider: held, held: isHeld } = heldProvider();
+    setEmbeddingProvider(held);
+    await person("Ada");
+    const index = await addIndex();
+    const stop = new AbortController();
+    const pass = drainOnce({ ontologyKey: ONTOLOGY_KEY, signal: stop.signal });
+    await waitFor(isHeld);
+    stop.abort();
+    await pass;
+    expect(await queued()).toMatchObject([{ attempts: 0, lease_until: null, last_error: null }]);
+
+    await drainSearchWork();
+    expect(await queued()).toEqual([]);
+    expect((await live(index)).every((g) => g.state === "ready")).toBe(true);
+  });
+
+  it("builds a generation's search structure once at a time", async () => {
+    setEmbeddingProvider(null);
+    const index = await addIndex();
+    const [building] = await live(index);
+    expect(building!.state).toBe("building");
+    // Another process builds it: this one skips and leaves it building.
+    await withTransaction(async (querier) => {
+      await querier.query(`SELECT pg_advisory_xact_lock(hashtextextended('ontoforge.search-build.' || $1, 0))`, [
+        building!.generationId,
+      ]);
+      expect(await store.finishGeneration(building!.generationId)).toBe(false);
+    });
+    expect((await store.getGeneration(building!.generationId))!.state).toBe("building");
+    expect(await store.finishGeneration(building!.generationId)).toBe(true);
   });
 
   it("notifies listeners when work is queued, and the running worker builds", async () => {

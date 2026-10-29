@@ -248,10 +248,12 @@ describe("runtime index search through REST", () => {
     });
   });
 
-  it("answers 404 for an unknown index and 422 by field for invalid requests", async () => {
+  it("answers an unknown index as one the lens cannot search, and 422 by field for invalid requests", async () => {
     const unknown = await search({ query: "x", indices: ["ghost"] });
-    expect(unknown.statusCode).toBe(404);
-    expect(unknown.json().error.code).toBe("RESOURCE_NOT_FOUND");
+    expect(unknown.statusCode).toBe(422);
+    expect(unknown.json().error.details.fields).toEqual({
+      "indices.0": "Search index 'ghost' is not available in this lens",
+    });
 
     const invalid = await search({
       query: " ",

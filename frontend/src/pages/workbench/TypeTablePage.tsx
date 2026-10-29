@@ -24,6 +24,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useRuntimeSchema } from '@/api/hooks'
+import { useCanEdit } from '@/components/auth/useAccess'
 import { qk } from '@/api/queryKeys'
 import { listEntities, type ListEntitiesParams } from '@/api/runtime'
 import { GONE_CHANGESET_TEXT } from '@/api/staging'
@@ -67,6 +68,16 @@ import { isDocumentStub } from '@/lib/documents'
 import { pinnedChangeset, usePinnedChangeset } from '@/lib/pinnedChangeset'
 
 const PAGE_SIZE = 25
+
+/** The identity as a filter subject: the server filters `_identity` as a string. */
+const IDENTITY_SUBJECT: SchemaProperty = {
+  key: '_identity',
+  displayName: 'Identity',
+  description: null,
+  dataType: 'string',
+  required: false,
+  defaultValue: null,
+}
 
 /** Sortable column header: label + asc/desc indicator. */
 function SortableHeader({
@@ -124,6 +135,7 @@ export function TypeTablePage() {
   const queryClient = useQueryClient()
   const writes = useRuntimeWrites(ontologyKey ?? '', lensKey ?? '')
   const pinned = usePinnedChangeset(ontologyKey ?? '', lensKey ?? '')
+  const canEdit = useCanEdit(ontologyKey ?? '', lensKey ?? '')
   const schema = useRuntimeSchema(ontologyKey, lensKey)
   const type = schema.data?.entityTypes.find((t) => t.key === typeKey)
   const nameProperty = type?.nameProperty
@@ -134,15 +146,17 @@ export function TypeTablePage() {
     return [...type.properties].sort((a, b) => Number(b.required) - Number(a.required))
   }, [type])
 
+  // The identity, a system property: a string column, sortable and filterable.
+  const hasIdentity = (type?.identityProperties ?? null) !== null
   const filterSubjects = useMemo<FilterSubjects>(
     () => ({
-      properties,
+      properties: hasIdentity ? [IDENTITY_SUBJECT, ...properties] : properties,
       relations:
         typeKey === undefined || schema.data === undefined
           ? []
           : relationSubjects(typeKey, schema.data.relationTypes, schema.data.entityTypes),
     }),
-    [properties, typeKey, schema.data],
+    [properties, typeKey, schema.data, hasIdentity],
   )
 
   const [page, setPage] = useState(0)
@@ -194,7 +208,12 @@ export function TypeTablePage() {
   // and never pulls document content.
   const params = useMemo<ListEntitiesParams>(() => {
     const sort = sorting[0]
-    const allIds = [...properties.map((p) => p.key), '_updatedAt', '_createdAt']
+    const allIds = [
+      ...(hasIdentity ? ['_identity'] : []),
+      ...properties.map((p) => p.key),
+      '_updatedAt',
+      '_createdAt',
+    ]
     const visibleIds = allIds.filter((id) => columnVisibility[id] !== false)
     const anyHidden = visibleIds.length < allIds.length
     const documentKeys = new Set(
@@ -208,9 +227,9 @@ export function TypeTablePage() {
       order: sort === undefined || sort.desc ? 'desc' : 'asc',
       ...(debouncedQ !== '' ? { q: debouncedQ } : {}),
       ...(anyHidden && !anyDocumentVisible ? { fields: ['_id', ...visibleIds] } : {}),
-      filter: filtersToParam(filters, properties),
+      filter: filtersToParam(filters, filterSubjects.properties),
     }
-  }, [sorting, properties, columnVisibility, page, debouncedQ, filters])
+  }, [sorting, properties, columnVisibility, page, debouncedQ, filters, hasIdentity, filterSubjects])
 
   const entities = useQuery({
     queryKey: qk.entities(ontologyKey ?? '', lensKey ?? '', typeKey ?? '', params),
@@ -256,6 +275,21 @@ export function TypeTablePage() {
           />
         ),
       },
+      ...(hasIdentity
+        ? [
+            {
+              id: '_identity',
+              accessorFn: (row: EntityInstance) => row._identity,
+              header: 'Identity',
+              cell: ({ row }: { row: { original: EntityInstance } }) =>
+                row.original._identity === undefined ? (
+                  <span className="text-muted-foreground/50">—</span>
+                ) : (
+                  <span className="font-mono text-[12px]">{row.original._identity}</span>
+                ),
+            } satisfies ColumnDef<EntityInstance>,
+          ]
+        : []),
       ...properties.map<ColumnDef<EntityInstance>>((p) => ({
         id: p.key,
         accessorFn: (row) => row[p.key],
@@ -348,8 +382,9 @@ export function TypeTablePage() {
         ),
       },
     ]
-    return defs
-  }, [properties, navigate, ontologyKey, lensKey, typeKey, nameProperty])
+    // Selecting rows only leads to deleting them.
+    return canEdit ? defs : defs.filter((d) => d.id !== 'select')
+  }, [properties, navigate, ontologyKey, lensKey, typeKey, nameProperty, canEdit, hasIdentity])
 
   const table = useReactTable({
     data: entities.data?.items ?? [],
@@ -424,6 +459,9 @@ export function TypeTablePage() {
     const visibleProps = properties.filter((p) => columnVisibility[p.key] !== false)
     const cols: { header: string; get: (e: EntityInstance) => unknown }[] = [
       { header: '_id', get: (e) => e._id },
+      ...(hasIdentity && columnVisibility['_identity'] !== false
+        ? [{ header: '_identity', get: (e: EntityInstance) => e._identity }]
+        : []),
       ...visibleProps.map((p) => ({
         header: p.key,
         get: (e: EntityInstance) => e[p.key],
@@ -512,14 +550,20 @@ export function TypeTablePage() {
         <EmptyState
           icon={Table2}
           title={`Add your first ${type.displayName.toLowerCase()}`}
-          description={`No ${type.displayName.toLowerCase()} entities exist yet. Create one to get started — or press ⌘K to search and add from anywhere.`}
+          description={
+            canEdit
+              ? `No ${type.displayName.toLowerCase()} entities exist yet. Create one to get started — or press ⌘K to search and add from anywhere.`
+              : `No ${type.displayName.toLowerCase()} entities exist yet.`
+          }
           action={
-            <Button asChild size="sm">
-              <Link to={`/o/${ontologyKey}/w/${lensKey}/t/${typeKey}?new=1`}>
-                <Plus className="size-3.5" />
-                New {type.displayName}
-              </Link>
-            </Button>
+            canEdit ? (
+              <Button asChild size="sm">
+                <Link to={`/o/${ontologyKey}/w/${lensKey}/t/${typeKey}?new=1`}>
+                  <Plus className="size-3.5" />
+                  New {type.displayName}
+                </Link>
+              </Button>
+            ) : undefined
           }
         />
       ) : (
@@ -552,10 +596,12 @@ export function TypeTablePage() {
                 CSV
               </Button>
               <ColumnVisibilityMenu table={table} />
-              <Button size="sm" className="h-8 gap-1.5 text-[13px]" onClick={() => openQuickAdd(typeKey)}>
-                <Plus className="size-3.5" />
-                New {type.displayName}
-              </Button>
+              {canEdit && (
+                <Button size="sm" className="h-8 gap-1.5 text-[13px]" onClick={() => openQuickAdd(typeKey)}>
+                  <Plus className="size-3.5" />
+                  New {type.displayName}
+                </Button>
+              )}
             </div>
           </div>
 

@@ -55,8 +55,10 @@ local integration test. No decision-specific REST endpoint or UI is exposed.
 | `npm run test:integration:embedding` | Semantic search | PostgreSQL + Ollama |
 | `npm run test:integration:ai` | AI (slow, real model) | PostgreSQL + Ollama |
 | `npm run test:integration:decision` | Decision HTTP contract | Local decision API; no database |
+| `npm run test:integration:valkey` | Valkey shared state | Dev Valkey; no database |
 
 `npm run typecheck` runs the TypeScript compiler without emitting.
+See [Testing](../docs/workflows/testing.md) for setup, side effects and further checks.
 
 ## OQL parser
 

@@ -12,13 +12,13 @@ show every entity the answer may use before the answer arrives. Questions form a
 conversation held by the server as a [thread](threads.md). Every lens also has a
 [default navigator](#the-default-navigator), derived from the lens and never stored.
 
-Vocabulary: [../README.md](../README.md#glossary). The rules these follow:
-[../decisions.md](../decisions.md). Every route: [../interfaces.md](../interfaces.md).
+Vocabulary: [glossary](../glossary.md). System structure:
+[../architecture.md](../architecture.md). Every route: [../interfaces/](../interfaces/README.md).
 
 ## Ownership and persistence
 
 A navigator belongs to exactly one lens of one ontology. Its key is unique among the
-lens's navigators and follows the lens-resource [key](../README.md) rule, at most 64
+lens's navigators and follows the lens-resource [key](../glossary.md#schema-and-design) rule, at most 64
 characters. It carries a name (1 to 200 characters), an optional description (a save
 accepts up to 4,000 characters), a configuration version, the configuration and timestamps. This release
 writes and runs configuration version 1.
@@ -154,7 +154,7 @@ A turn streams its work before its answer:
   entities · reached Person at hop 2" — and, for the walk, which round. A step the turn
   does not need arrives once, as skipped, with a summary and no duration.
 - **The entities** — [as every assistant reports them](threads.md#the-entities-a-turn-met):
-  each with a ref unique in the turn, its type, label, up to six fields, its role — anchor, reached by the walk, or carried over from the previous answer — its
+  each with a ref unique in the turn, its type, label, identity when it has one, up to six fields, its role — anchor, reached by the walk, or carried over from the previous answer — its
   distance from the nearest anchor, why it is there ("Lena Fischer manages Kira Novak", or
   "Closest match for “Nordwind Robotics” — not the same name"), and whether it is evidence;
   and the relations between them, each naming the stored relation it stands for. They are
@@ -164,7 +164,7 @@ A turn streams its work before its answer:
   end of the turn.
 
 Only evidence can be cited. The event format is in
-[../interfaces.md](../interfaces.md#navigator-list-and-chat).
+[../interfaces/](../interfaces/assistants-rest.md#navigator-list-and-chat).
 
 ## The default navigator
 
@@ -187,7 +187,7 @@ Navigators are managed through modeling REST, addressed by lens key and navigato
 read one, create or replace, delete. At runtime a list names every navigator of the lens —
 runnable or not, without configuration or validation, the default first; a question runs by
 navigator key on a thread and streams its work and answer, and a thread reads back
-([../interfaces.md](../interfaces.md)). Management, the runtime list and reading a thread call
+([../interfaces/](../interfaces/README.md)). Management, the runtime list and reading a thread call
 no model. A question needs a language-model provider — without one it is refused as a
 disabled feature before anything is read or streamed; without an embedding provider,
 mentions are resolved by keyword. No MCP tool manages or runs a navigator.

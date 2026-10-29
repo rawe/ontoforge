@@ -8,11 +8,13 @@ is reachable, the property definitions decide what is valid. Nothing is written 
 
 One entity or one relation per call, with one exception: a
 [create with a parent relation](#the-create-with-a-parent-relation) writes one entity and
-one relation together, on every mount. There is no batch write and no transaction spanning
-calls: a [changeset](changesets.md) stages writes call by call, and its commit persists
-all of them or none.
+one relation together, on every mount. No transaction spans immediate calls: many writes
+go together through a [changeset](changesets.md), which stages them, many calls to a
+request, and whose commit persists all of them or none
+([bulk-inserts.md](bulk-inserts.md)).
 
-Reads come in four shapes: one instance by id, a filtered and paginated list of one type,
+Reads come in four shapes: one instance by id (or an entity by its
+[identity](entity-identity.md)), a filtered and paginated list of one type,
 the immediate neighbourhood of one entity, and [OQL](oql.md) for anything a fixed shape
 cannot express. Matching by meaning is [search](search.md); long-text values are
 [documents](documents.md). Reads never see staged data.
@@ -37,33 +39,50 @@ Updates are partial (see [Partial updates](#partial-updates)). Delete is by type
 id, and takes three things with it:
 
 1. the entity;
-2. **every relation attached to it, in either direction** — including relations whose type
-   the current lens cannot see;
+2. **every relation attached to it, in either direction**;
 3. its entries in every [search index](search-indices.md#lifecycle) — its
    [document passages](documents.md) among them — and those of the relations deleted with
    it.
 
 Wherever the schema flags a parent relation, an entity that still has children is not
 deleted at all, for any client and through any lens
-([Leaf-only deletes](#leaf-only-deletes)). Otherwise nothing warns first and nothing is
-refused: the runtime cascade is silent, unlike the schema cascade protocol in
-[schema-modeling.md](schema-modeling.md). A caller that needs to know what would be lost
-must traverse first.
+([Leaf-only deletes](#leaf-only-deletes)). Nor is an entity with a relation attached
+whose type the lens does not show: a lens never removes what it does not show. The
+refusal is a conflict, "This entity has relations this lens does not show; it can only be
+deleted through a lens that shows them", and nothing is deleted. Otherwise nothing warns
+first and nothing is refused: the runtime cascade is silent, unlike the schema cascade
+protocol in [schema-modeling.md](schema-modeling.md). A caller that needs to know what
+would be lost must traverse first.
+
+An entity of a type that declares an [identity](entity-identity.md) carries `_identity`,
+unique within the type. Every read, update, delete, path, neighbourhood and document route
+by id has a twin by identity, and a create or update that would give an entity a taken
+identity is refused with `IDENTITY_TAKEN`. There is no create-or-update outside a
+changeset's [put](changesets.md#put). How identities are
+built, renamed and resolved is in [entity-identity.md](entity-identity.md).
 
 Addressing an entity whose type the lens does not expose fails exactly as addressing a
 missing entity does: not found. A lens never reports that something exists but is hidden,
-with one bit of exception: refusing to delete an entity with children reveals that a
-child exists — never its type, id or count — even when the lens hides it.
+with one bit of exception: refusing to delete an entity reveals that a child, or a
+relation the lens hides, exists — never its type, id or count.
 
 ## Relations
 
-A relation is created against one relation type with two endpoint ids and, optionally,
-property values. Both endpoints must already exist, and each endpoint's entity type must
+A relation is created against one relation type with two endpoints, each named by its id
+or by its [identity](entity-identity.md#addressing-by-identity) (`fromEntityId` or
+`fromEntityIdentity`, `toEntityId` or `toEntityIdentity`), and, optionally, property
+values. A relation list filters by either form of each end too. Both endpoints must already exist, and each endpoint's entity type must
 equal the relation type's declared source and target — checked against the full schema, not
 the lens, so a narrow lens cannot create an edge that is invalid under a wider one.
 Endpoint errors are collected alongside property errors and reported together. A
 relation of a parent relation is also checked against the
 [parent rules](#the-parent-rules), for every client, in the service.
+
+A relation create of a [one-per-pair](schema-modeling.md#one-per-pair) relation type
+whose source and target the type already links, in that direction, is refused once
+everything else is valid, with `409 RESOURCE_CONFLICT`, `details.code` `PAIR_TAKEN` and
+`details.relationTypeKey`; it never names the other relation. Two concurrent creates of
+one pair give exactly one relation and this conflict.
 
 **Endpoints are immutable.** An update that carries endpoint ids ignores them silently
 rather than rejecting the request; properties in the same payload still apply. Repointing a
@@ -114,13 +133,14 @@ The checks lock nothing; the race this leaves is in
 ### The create with a parent relation
 
 An entity create may carry `parentRelation`: the key of a parent relation whose child end
-is the new entity's type, the parent's id, and optionally the relation's own properties.
+is the new entity's type, the parent's id (`parentId`) or identity (`parentIdentity`), and
+optionally the relation's own properties.
 The new entity and that relation are written in one transaction, or not at all; the
 relation runs from parent to child for a `source` parent end and from child to parent for
 a `target` one. The response is the created entity.
 
 It is validated exactly as a relation create, with every fault collected together with
-the entity's own under `parentRelation.type`, `parentRelation.parentId` and
+the entity's own under `parentRelation.type`, `parentRelation.parentId` (or `parentRelation.parentIdentity`) and
 `parentRelation.properties.<key>`: the relation type must be visible through the lens,
 must be a parent relation, and must have the entity's type at its child end; the parent
 must exist with the type of the parent end, checked against the full schema; the relation's
@@ -140,12 +160,12 @@ ontology without a parent relation nothing is checked.
 
 ### The path read
 
-The path of one entity is its [hierarchy path](../README.md#hierarchies): the
-entity's ancestors, root first, followed by the entity itself, each as its type key, id and
-name. A hierarchy root's path is the entity alone. Through a lens the path starts below
-the nearest ancestor whose type the lens hides, so it never names a hidden entity or one
-above it. `name` is the value of the type's name property, and null when unset or hidden by
-the lens. An entity of a type the lens hides, a missing entity, or an id of another type is
+The path of one entity is its [hierarchy path](../glossary.md#hierarchies): the
+entity's ancestors, root first, followed by the entity itself, each as its type key, id,
+identity and name. A hierarchy root's path is the entity alone. Through a lens the path starts below
+the nearest ancestor whose type the lens hides, or that is reached over a parent relation
+the lens hides, so it never names a hidden entity or one above it. `name` is the value of the type's name property, and null when unset or hidden by
+the lens; `identity` is null when the type has none, or none the lens shows. An entity of a type the lens hides, a missing entity, or an id of another type is
 not found, as on the entity read. On data that the accepted race left with two parents,
 the path lists every visible ancestor the walk reaches.
 
@@ -163,9 +183,13 @@ sequence of them.
 | Defaults *(creation)* | Every property with a default that the caller did not supply receives it. |
 | Coercion | Each supplied value is converted to the property's declared data type, or rejected. |
 
+An entity of a type with an identity is also checked for its identity: no identity property
+may hold an empty string, the identity may be at most 512 code points, and no other entity
+of the type may hold it (`IDENTITY_TAKEN`, a conflict rather than a field error).
+
 **All errors are collected.** One rejected write names every offending field at once,
-keyed by property. This is contractual, not incidental — see
-[decisions.md](../decisions.md#schema-and-data).
+keyed by property, so a caller can correct it in one round trip rather than discover
+faults one at a time.
 
 **Coercion is strict, and it is conversion, not guessing.** The write path applies the
 declared data type unchanged; the seven data types and exactly what each one accepts and
@@ -217,11 +241,12 @@ A list request names one entity type or one relation type and returns `items` pl
 
 **Pagination.** A page size and an offset, both bounded — the permitted range and the
 defaults are with the parameter in
-[interfaces.md](../interfaces.md#listing-sorting-filtering). An out-of-range page size is
+[interfaces](../interfaces/README.md#listing-sorting-filtering). An out-of-range page size is
 rejected, so there is no way to pull more than one capped page in a single call.
 
 **Sorting.** `sort` accepts any property key of the type as exposed by the lens, plus the
-creation and update timestamps, and defaults to the creation timestamp ascending. Anything
+creation and update timestamps and, on an entity type with an identity the lens shows,
+`_identity` (which also filters, as a `string` property), and defaults to the creation timestamp ascending. Anything
 else is a validation error naming the field. The timestamps are accepted both by their
 system names and by underscore-less aliases; the aliases exist only for sorting and name
 nothing in a response. Where instances lack the sort property, their relative position is
@@ -234,7 +259,7 @@ unfiltered list rather than nothing. Relation lists take no free-text term.
 
 **Property filters.** Any number of filters may be combined; they and the free-text term
 are ANDed. The operator suffixes themselves, and the parameter form that carries them, are
-in [interfaces.md](../interfaces.md#listing-sorting-filtering). What matters here is how a
+in [interfaces](../interfaces/README.md#listing-sorting-filtering). What matters here is how a
 filter is evaluated: values arrive as text and are coerced to the property's data type by
 the same rules as writes — except under the substring operator, which compares as text and
 therefore accepts anything. Every comparison, negation included, is evaluated against a
@@ -275,6 +300,13 @@ persons who hold a CTO employment; listing companies with
 `filter.works_for@since__lt=2025-01-01` returns the companies with an employment that
 began before 2025. No schema key may contain a dot, an at sign or a colon, so a path is
 never mistaken for a property key.
+
+A path needs no schema declaration beyond the relation it follows. This keeps a related
+property filter available as soon as its relation exists, without a second schema object
+to keep in sync, and avoids flattening relations into properties just to filter a list.
+For longer paths, [OQL](oql.md) supports multi-hop patterns. A retriever can also use
+its own configured exact filters of up to two hops
+([retrievers.md](retrievers.md#the-configuration)).
 
 - **Direction is derived, or marked.** When the listed type is only the relation type's
   source, the path is followed outgoing, to the target; when it is only the target,
@@ -366,7 +398,7 @@ already allows. Unknown names are not an error; they simply match nothing.
 
 Some system fields survive projection unconditionally, so that a result stays identifiable.
 Which ones, per read, is tabulated in
-[interfaces.md](../interfaces.md#field-projection) alongside the routes that accept a
+[interfaces](../interfaces/README.md#field-projection) alongside the routes that accept a
 projection at all.
 
 Projection is the one way to obtain a document property's real content inside an entity
@@ -407,7 +439,7 @@ values are stubbed even then.
 
 ## Through the interfaces
 
-The full index of routes and tools is [interfaces.md](../interfaces.md). All of the below
+The full index of routes and tools is [interfaces](../interfaces/README.md). All of the below
 is runtime, addressed through one ontology and one lens — the same type key in another
 ontology names disjoint data that no operation here can reach.
 
@@ -421,7 +453,9 @@ ontology names disjoint data that no operation here can reach.
 REST carries filters as `filter.<property>` query parameters and repeats `fields` per
 value; MCP takes a filters object and a list, with the same keys and the same operator
 suffixes. The parent relation of a create is `parentRelation` in the REST body and
-`parent_relation`, with `parent_id`, as the MCP argument; MCP names a fault by the REST
+`parent_relation`, with `parent_id` or `parent_identity`, as the MCP argument. The MCP
+tools that name an entity take `entity_identity` beside `entity_id`, and the relation tools
+`from_entity_identity` and `to_entity_identity` beside the ids; MCP names a fault by the REST
 key. Both reach the same service, so every rule above holds identically. MCP clamps
 `limit` and `offset` into range instead of rejecting them, where REST rejects out-of-range
 values.
@@ -429,4 +463,4 @@ values.
 In the web UI, the data workbench is the surface for all of this: a per-type table with
 sorting, filtering, text search and paging, an entity detail view with inline property
 editing and a neighbour list, and a graph explorer built on the same traversal operation.
-See [product-surface.md](../product-surface.md).
+See [product surface](../product-surface/README.md).

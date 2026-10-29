@@ -12,6 +12,8 @@ import { optional, record, text } from './checks.ts'
 export interface EntityCard {
   ref: string
   id: string
+  /** Its readable identity, when its type has one the lens shows. */
+  identity?: string
   /** The entity type's key. */
   type: string
   typeName: string
@@ -46,7 +48,7 @@ export interface EntitiesEvent {
 }
 
 const validCard = (c: unknown): c is EntityCard => record(c) &&
-  text(c.ref) && c.ref !== '' && text(c.id) && text(c.type) && text(c.typeName) && text(c.label) &&
+  text(c.ref) && c.ref !== '' && text(c.id) && optional(c.identity, text) && text(c.type) && text(c.typeName) && text(c.label) &&
   Array.isArray(c.fields) && c.fields.every((f) => record(f) && text(f.name) && text(f.value)) &&
   typeof c.evidence === 'boolean' && optional(c.reason, text) && optional(c.role, text) &&
   optional(c.hop, (v) => typeof v === 'number' && Number.isFinite(v))

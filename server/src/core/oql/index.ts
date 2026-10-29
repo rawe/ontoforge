@@ -4,7 +4,7 @@
  * OQL is OntoForge's read-only graph query language over lens type
  * keys. Its syntax is openCypher-shaped; its normative reference is the
  * ISO GQL standard (ISO/IEC 39075:2024) and the GPML pattern sublanguage
- * shared with SQL/PGQ — see `docs/decisions.md#query`.
+ * shared with SQL/PGQ — see `docs/capabilities/oql.md#what-it-is`.
  *
  * This module is database-independent: it parses user-submitted OQL with
  * the ANTLR parser generated from the vendored Cypher grammar
@@ -76,6 +76,7 @@ export const SYSTEM_PROPERTIES: ReadonlySet<string> = new Set([
   "_relationTypeKey",
   "_createdAt",
   "_updatedAt",
+  "_identity",
 ]);
 
 /** Internal labels that must not appear in user queries. */

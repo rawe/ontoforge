@@ -1,4 +1,4 @@
-import type { Matched, SearchCatalogEntry } from '@/api/types'
+import type { EntityMatch, Matched, SearchCatalogEntry } from '@/api/types'
 
 /** The parts of a lens schema the "matched via" line reads (a `RuntimeSchema` fits). */
 export interface MatchedViaSchema {
@@ -22,6 +22,34 @@ function passageProperty(
   return { entityType, property: suffix }
 }
 
+/** `via <group> → <target>`: the relation group's label, else the relation type's display name, else its key. */
+function relationLine(
+  relationType: string | null,
+  targetLabel: string | null,
+  entry: SearchCatalogEntry | undefined,
+  schema: MatchedViaSchema | undefined,
+): string | null {
+  const label =
+    entry?.relations.find((g) => g.relationType === relationType && g.label !== null)?.label ??
+    schema?.relationTypes.find((r) => r.key === relationType)?.displayName ??
+    relationType
+  if (label === null) return targetLabel === null ? null : `via ${targetLabel}`
+  return targetLabel === null ? `via ${label}` : `via ${label} → ${targetLabel}`
+}
+
+/** `via passage in <document>`: the property's display name, else its key. */
+function passageLine(
+  passage: { entityType: string; property: string } | null,
+  schema: MatchedViaSchema | undefined,
+): string {
+  if (passage === null) return 'via passage'
+  const displayName =
+    schema?.entityTypes
+      .find((t) => t.key === passage.entityType)
+      ?.properties.find((p) => p.key === passage.property)?.displayName ?? passage.property
+  return `via passage in ${displayName}`
+}
+
 /**
  * One short line telling which entry a search hit was found by — no
  * scores. `via Employment → ACME` for a relation part (the group label,
@@ -38,29 +66,37 @@ export function matchedViaText(
   const entry = catalog.find((c) => c.key === matched.index)
 
   if (matched.partKind === 'relation') {
-    const relationType = matched.relationType
-    const label =
-      entry?.relations.find((g) => g.relationType === relationType && g.label !== null)
-        ?.label ??
-      schema?.relationTypes.find((r) => r.key === relationType)?.displayName ??
-      relationType
     const target = matched.target
     const targetName = target === null ? null : (target.label ?? target.id.slice(0, 12))
     const targetLabel =
       targetName === null || target?.identity == null ? targetName : `${targetName} (${target.identity})`
-    if (label === null) return targetLabel === null ? null : `via ${targetLabel}`
-    return targetLabel === null ? `via ${label}` : `via ${label} → ${targetLabel}`
+    return relationLine(matched.relationType, targetLabel, entry, schema)
   }
 
-  if (matched.partKind === 'passage') {
-    const passage = passageProperty(matched.index, entry)
-    if (passage === null) return 'via passage'
-    const displayName =
-      schema?.entityTypes
-        .find((t) => t.key === passage.entityType)
-        ?.properties.find((p) => p.key === passage.property)?.displayName ?? passage.property
-    return `via passage in ${displayName}`
-  }
+  if (matched.partKind === 'passage') return passageLine(passageProperty(matched.index, entry), schema)
 
+  return null
+}
+
+/**
+ * The same line for an entity search item's `match`, on an entity of
+ * `entityType`: a relation's target by its name, else its truncated id; a
+ * passage's document as the match names it (`via passage` when the lens
+ * hides it).
+ */
+export function entityMatchText(
+  match: EntityMatch,
+  entityType: string,
+  schema: MatchedViaSchema | undefined,
+  catalog: readonly SearchCatalogEntry[] = [],
+): string | null {
+  if (match.part === 'relation') {
+    const target = match.target
+    const targetLabel = target === undefined ? null : (target.name ?? target._id.slice(0, 12))
+    return relationLine(match.relationType ?? null, targetLabel, catalog.find((c) => c.key === match.index), schema)
+  }
+  if (match.part === 'passage') {
+    return passageLine(match.property == null ? null : { entityType, property: match.property }, schema)
+  }
   return null
 }

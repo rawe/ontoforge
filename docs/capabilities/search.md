@@ -305,10 +305,12 @@ scope's types, and a type that does not declare every key — or that a query-pa
 not resolve from — drops out. A key that no type of the scope resolves is a validation
 error. With no type left, the result is empty and carries a limitation.
 
-**Items.** An item names the entity — `_id`, `_entityTypeKey`, `name` — and the best entry
-that found it: its index, its part (`self`, `relation` or `passage`) and a snippet. A
-passage adds the document and the passage's place in it; a relation adds the relation
-type and the entity at its other end. The snippet is withheld when the index reads a
+**Items.** An item names the entity — `_id`, `_entityTypeKey`, `name` and, when its type
+declares an identity the lens shows, `identity`: the identity properties and their values,
+in the identity's order — and the best entry that found it: its index, its part (`self`,
+`relation` or `passage`) and a snippet. A passage adds the document and the passage's
+place in it; a relation adds the relation type and the entity at its other end, named
+without an identity. The snippet is withheld when the index reads a
 property the lens hides; a passage's document is null when the lens hides it; relation
 entries the lens cannot see are skipped. An entity deleted after ranking is left out, so
 a page may be shorter than the limit.
@@ -348,7 +350,8 @@ many passages per entity, in rank order; without it, there is no cap per entity.
 
 **Filters** apply to the entity that owns the document.
 
-**Items.** An item names the entity — `_id`, `_entityTypeKey`, `name` — and the passage:
+**Items.** An item names the entity as the [entity search](#entity-search) does — `_id`,
+`_entityTypeKey`, `name` and, where it applies, `identity` — and the passage:
 its document, its chunk ordinal, its character offset and length, and its text. The text
 is read when the search answers, from the document as it is then, at that offset and
 length; it never includes the header the stored entry carries. `text: false` leaves it

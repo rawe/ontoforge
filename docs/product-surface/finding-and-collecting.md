@@ -59,21 +59,21 @@ the [working set](#working-set) and opens the Explorer.
 
 Search results never show a score: it would be read as relevance or confidence, which a
 relative score is not. Where the server names the entry that found a hit
-([capabilities/search.md](../capabilities/search.md#response)), a hit found through a
+([capabilities/search.md](../capabilities/search.md#entity-search)), a hit found through a
 relation or a passage carries one short line:
 
 - a relation entry — `via <label> → <target>`: the relation group's label from the lens's
   [search catalog](../capabilities/search.md#the-search-catalog), else the relation type's
-  display name, and the target's label, else its truncated identifier, followed by the
-  target's identity in parentheses where it has one;
-- a passage entry — `via passage in <property>`, the document property's display name;
+  display name, and the target's label, else its truncated identifier; in a retriever's
+  results followed by the target's identity in parentheses where it has one;
+- a passage entry — `via passage in <property>`, the document property's display name, or
+  `via passage` where the lens hides the document;
 - the entity's own fields — no line.
 
 The line never shows the entry's text. The palette and the relation target picker use the
-[default search](../capabilities/search.md#ranked-search), which reads only managed indices,
-so no relation line appears there; relation lines appear in
-a retriever's diagnostics and in the palette's question results, whose searches
-reach custom indices.
+[entity search](../capabilities/search.md#entity-search) over the lens's managed indices,
+so no relation line appears there; relation lines appear in a retriever's diagnostics and
+in the palette's question results, whose searches reach custom indices.
 
 ## Quick add
 

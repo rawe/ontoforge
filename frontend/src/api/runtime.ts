@@ -43,8 +43,6 @@ import type {
   SchemaEntityType,
   SchemaRelationType,
   SearchCatalogEntry,
-  SearchResponse,
-  SearchStrategy,
   StagedAnswer,
   StagedEntity,
   StagedObjectView,
@@ -234,19 +232,6 @@ export const deleteRelation = (
   })
 
 /* ---------------------------------- search ---------------------------------- */
-
-export interface SearchParams {
-  q: string
-  type?: string
-  in?: readonly ('properties' | 'document')[]
-  strategy?: SearchStrategy
-  'document.property'?: string
-  limit?: number
-  fields?: readonly string[]
-  filter?: FilterMap
-}
-export const search = (ontologyKey: string, lensKey: string, params: SearchParams) =>
-  request<SearchResponse>(`${base(ontologyKey, lensKey)}/search${buildQuery(params)}`)
 
 /** The search indices this lens can search. */
 export const listSearchCatalog = (ontologyKey: string, lensKey: string) =>

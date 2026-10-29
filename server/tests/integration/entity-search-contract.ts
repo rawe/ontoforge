@@ -8,7 +8,7 @@
  *
  * person (status, bio) —works_for (role)→ company (city); Ada is CTO at
  * ACME, Bob CTO at Foo; the custom index `person_employment` reads the
- * employments.
+ * employments. Neither type declares an identity, unless a test does.
  */
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -41,6 +41,7 @@ const EMPLOYMENT = {
 export function entitySearchContract(embedding: boolean, enabled = true) {
   let app: FastifyInstance;
   const ids: Record<string, string> = {};
+  let personTypeId: string;
 
   async function post(url: string, payload: object): Promise<Row> {
     const res = await app.inject({ method: "POST", url, payload });
@@ -96,6 +97,7 @@ export function entitySearchContract(embedding: boolean, enabled = true) {
       await post("/api/ontologies", { key: O });
       await post(`${MODEL}/lenses`, { key: "all", name: "All" });
       const person = await post(`${MODEL}/entity-types`, { key: "person", displayName: "Person" });
+      personTypeId = person.entityTypeId;
       for (const [key, dataType] of [["status", "string"], ["bio", "document"]] as const) {
         await post(`${MODEL}/entity-types/${person.entityTypeId}/properties`, { key, displayName: key, dataType });
       }
@@ -381,6 +383,55 @@ export function entitySearchContract(embedding: boolean, enabled = true) {
           },
         },
       ]);
+    });
+
+    it("an entity whose type declares an identity carries it, in its order; one whose lens hides part of it none", async () => {
+      await nameLens(["person~default"]);
+      // The cascade adds status to the lens that lists person's properties.
+      const declared = await app.inject({
+        method: "PUT",
+        url: `${MODEL}/entity-types/${personTypeId}?cascade=true`,
+        payload: { identityProperties: ["status", "name"] },
+      });
+      expect(declared.statusCode, declared.body).toBe(200);
+      invalidateLoadedSchemaCache();
+      const person = await found({ query: "retired", types: ["person"], keyword: {} });
+      expect(person.items[0].entity).toEqual({
+        _id: ids.bob,
+        _entityTypeKey: "person",
+        name: "Bob",
+        identity: { status: "retired", name: "Bob" },
+      });
+      expect(Object.keys(person.items[0].entity.identity)).toEqual(["status", "name"]);
+      // company declares none; a relation target is named without one.
+      const company = await found({ query: "ACME", types: ["company"], keyword: {} });
+      expect(company.items[0].entity).toEqual({ _id: ids.acme, _entityTypeKey: "company", name: "ACME" });
+      const relation = await found({ query: "CTO ACME", indices: [EMPLOYMENT.key], keyword: { match: "all" } });
+      expect(relation.items[0].entity.identity).toEqual({ status: "active", name: "Ada" });
+      expect(relation.items[0].match.target).toEqual({ _id: ids.acme, _entityTypeKey: "company", name: "ACME" });
+
+      // Only a design import writes a lens that hides an identity property.
+      const design = (await app.inject({ method: "GET", url: `${MODEL}/export` })).json();
+      const names = design.lenses.find((lens: Row) => lens.key === "names");
+      names.includes.entityTypes = [{ ...names.includes.entityTypes[0], properties: ["name"] }];
+      const copy = "entity_search_copy";
+      await post("/api/ontologies", { key: copy });
+      await post(`/api/ontologies/${copy}/model/import`, design);
+      await post(`/api/ontologies/${copy}/runtime/lenses/all/entities/person`, { name: "Cy", status: "active" });
+      invalidateLoadedSchemaCache();
+      await drainSearchWork({ ontologyKey: copy });
+      const cy = async (lens: string) => {
+        const res = await app.inject({
+          method: "POST",
+          url: `/api/ontologies/${copy}/runtime/lenses/${lens}/search/entities`,
+          payload: { query: "Cy", keyword: {} },
+        });
+        expect(res.statusCode, res.body).toBe(200);
+        return res.json().items.map((item: Row) => item.entity);
+      };
+      const whole = { _id: expect.any(String), _entityTypeKey: "person", name: "Cy" };
+      expect(await cy("all")).toEqual([{ ...whole, identity: { status: "active", name: "Cy" } }]);
+      expect(await cy("names")).toEqual([whole]);
     });
 
     it("withholds the snippet of an index that reads a property the lens hides", async () => {

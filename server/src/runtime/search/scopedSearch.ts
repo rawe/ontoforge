@@ -58,6 +58,9 @@ export interface EntityReference {
   _entityTypeKey: string;
   /** Its name property's value; null when it has none, or the lens hides it. */
   name: string | null;
+  /** Its identity properties and their values, in the identity's order;
+   * absent when its type declares none the lens shows. */
+  identity?: Row;
 }
 
 /** An index to rank, with the exact conditions on its root type. */
@@ -239,17 +242,29 @@ function described({ code, method, indices }: Limitation): SearchLimitation {
   return { code, message: messages[code], method, indices };
 }
 
-/** The entity of a hit, named through the lens. */
+/** The properties that name a hit's entity: its name property and its
+ * identity properties, as far as the lens shows them. */
+export function namingProperties(loaded: LoadedSchema, entityType: string): string[] {
+  const type = loaded.scoped.entityTypes[entityType];
+  if (type === undefined) return [];
+  return [...(type.nameProperty === null ? [] : [type.nameProperty]), ...(type.identityProperties ?? [])];
+}
+
+/** The entity of a hit, named through the lens: its name and — when its
+ * type declares an identity the lens shows — its identity properties. */
 export function entityReference(
   loaded: LoadedSchema,
   hit: { entityId: string; entityType: string },
   entity: Row,
 ): EntityReference {
-  const nameProperty = loaded.scoped.entityTypes[hit.entityType]?.nameProperty ?? null;
+  const type = loaded.scoped.entityTypes[hit.entityType];
+  const nameProperty = type?.nameProperty ?? null;
   const name = nameProperty === null ? null : entity[nameProperty];
+  const identity = type?.identityProperties ?? null;
   return {
     _id: hit.entityId,
     _entityTypeKey: hit.entityType,
     name: typeof name === "string" && name !== "" ? name : null,
+    ...(identity === null ? {} : { identity: Object.fromEntries(identity.map((key) => [key, entity[key]])) }),
   };
 }

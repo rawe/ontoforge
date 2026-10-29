@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { displayLabel, nameProperties } from '../src/lib/displayLabel.ts'
+import { displayLabel, identityText, nameProperties, referenceLabel } from '../src/lib/displayLabel.ts'
 import type { EntityInstance, RuntimeSchema, SchemaEntityType } from '../src/api/types.ts'
 
 const entity = (props: Record<string, EntityInstance[string]>): EntityInstance => ({
@@ -33,4 +33,15 @@ test('nameProperties maps entity type keys to their name property', () => {
   assert.equal(names.get('doc'), null)
   assert.equal(names.get('missing'), undefined)
   assert.equal(nameProperties(undefined).size, 0)
+})
+
+test('a search reference is labelled by its name, else its truncated _id', () => {
+  assert.equal(referenceLabel({ _id: '0123456789abcdef', _entityTypeKey: 'person', name: 'Ada' }), 'Ada')
+  assert.equal(referenceLabel({ _id: '0123456789abcdef', _entityTypeKey: 'person', name: null }), '0123456789ab')
+})
+
+test('an identity given as its properties reads as its text form, in order', () => {
+  assert.equal(identityText({ code: 'M', year: 7 }), 'M~7')
+  assert.equal(identityText({ year: 7, code: 'M' }), '7~M')
+  assert.equal(identityText({ code: '50%~off', start: '2024-01-31' }), '50%25%7Eoff~2024-01-31')
 })

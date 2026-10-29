@@ -11,7 +11,8 @@
  * person (status, bio, notes) —works_for (role)→ company (city, no
  * document). Ada's bio is three passages, each naming the engine; Bob's
  * one. The custom index `person_notes` reads the name, the status, the
- * notes and the employments.
+ * notes and the employments. Neither type declares an identity, unless a
+ * test does.
  */
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -57,6 +58,7 @@ const NOTES = {
 export function passageSearchContract(embedding: boolean, enabled = true) {
   let app: FastifyInstance;
   const ids: Record<string, string> = {};
+  let personTypeId: string;
 
   async function post(url: string, payload: object): Promise<Row> {
     const res = await app.inject({ method: "POST", url, payload });
@@ -119,6 +121,7 @@ export function passageSearchContract(embedding: boolean, enabled = true) {
       await post("/api/ontologies", { key: O });
       await post(`${MODEL}/lenses`, { key: "all", name: "All" });
       const person = await post(`${MODEL}/entity-types`, { key: "person", displayName: "Person" });
+      personTypeId = person.entityTypeId;
       for (const [key, dataType] of [["status", "string"], ["bio", "document"], ["notes", "document"]] as const) {
         await post(`${MODEL}/entity-types/${person.entityTypeId}/properties`, { key, displayName: key, dataType });
       }
@@ -435,6 +438,26 @@ export function passageSearchContract(embedding: boolean, enabled = true) {
         charLength: BOB_BIO.length,
         text: changed,
       });
+    });
+
+    it("the entity carries its identity when its type declares one, also without the passage text", async () => {
+      const declared = await app.inject({
+        method: "PUT",
+        url: `${MODEL}/entity-types/${personTypeId}?cascade=true`,
+        payload: { identityProperties: ["status", "name"] },
+      });
+      expect(declared.statusCode, declared.body).toBe(200);
+      invalidateLoadedSchemaCache();
+      for (const text of [true, false]) {
+        const bob = await found({ query: "tomatoes", documents: ["person.bio"], keyword: {}, text });
+        expect(bob.items[0].entity).toEqual({
+          _id: ids.bob,
+          _entityTypeKey: "person",
+          name: "Bob",
+          identity: { status: "retired", name: "Bob" },
+        });
+        expect(Object.keys(bob.items[0].entity.identity)).toEqual(["status", "name"]);
+      }
     });
 
     it("a method that cannot run on an index is a limitation: switched off, not built yet", async () => {

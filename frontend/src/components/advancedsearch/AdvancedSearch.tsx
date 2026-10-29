@@ -17,6 +17,7 @@ import {
   type DocumentViewerTarget,
 } from '@/components/DocumentViewerDialog'
 import { EmptyState } from '@/components/EmptyState'
+import { IdentityText } from '@/components/IdentityText'
 import { QueryErrorBlock } from '@/components/query/ResultsPanel'
 import { formatQueryError } from '@/components/query/resultUtils'
 import { FilterChips } from '@/components/table/FilterChips'
@@ -40,6 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { identityText } from '@/lib/displayLabel'
 import { getTypeColor } from '@/lib/typeColors'
 import { cn } from '@/lib/utils'
 import {
@@ -572,6 +574,9 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
                             >
                               {entityLabel(item.entity)}
                             </Link>
+                            {item.entity.identity !== undefined && (
+                              <IdentityText identity={identityText(item.entity.identity)} />
+                            )}
                             <span className="text-[11px] text-muted-foreground" title={match.index}>
                               {part}
                             </span>
@@ -609,6 +614,9 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
                             >
                               {entityLabel(entity)}
                             </Link>
+                            {entity.identity !== undefined && (
+                              <IdentityText identity={identityText(entity.identity)} />
+                            )}
                             {property !== undefined ? (
                               <button
                                 type="button"

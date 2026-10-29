@@ -36,6 +36,7 @@ import {
   methodsOf,
   namedIndices,
   namedTypes,
+  namingProperties,
   rootTypes,
   runScopedSearch,
   shownDocument,
@@ -124,8 +125,7 @@ export async function searchPassages(
   const withText = request.text ?? true;
   const fields = new Set<string>();
   for (const hit of hits) {
-    const nameProperty = loaded.scoped.entityTypes[hit.entityType]?.nameProperty ?? null;
-    if (nameProperty !== null) fields.add(nameProperty);
+    for (const property of namingProperties(loaded, hit.entityType)) fields.add(property);
     if (withText) fields.add(shownDocument(loaded, hit.matched.index)!);
   }
   const entities = await readHitEntities(loaded, store, hits, [...fields]);

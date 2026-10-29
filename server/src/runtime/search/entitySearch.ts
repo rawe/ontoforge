@@ -17,8 +17,9 @@
  *    (`resolveSearchFilters`). A type that does not declare every key, or
  *    that a query path does not resolve from, drops out; the rest are
  *    restricted by push-down, one filter per type.
- * 4. Each found entity is named, with the best entry that found it.
- *    An entity gone since the ranking is left out.
+ * 4. Each found entity is named — with its identity properties when its
+ *    type declares an identity the lens shows — with the best entry that
+ *    found it. An entity gone since the ranking is left out.
  *
  * What could not run — a method on some indices, a type without an index,
  * a filter no type declares — is reported as a limitation; every rule the

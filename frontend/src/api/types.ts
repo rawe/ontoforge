@@ -409,7 +409,6 @@ export interface StagedAnswer {
 /* ------------------------------ runtime — search ----------------------------- */
 
 export type SearchStrategy = 'semantic' | 'keyword' | 'keyword-any' | 'keyword-all' | 'hybrid'
-export type SearchKind = 'properties' | 'document'
 export interface SearchEvidence {
   /** Original (1 + cosine) / 2 measurement, not confidence; null is unmeasured. */
   semanticSimilarity: number | null
@@ -456,17 +455,6 @@ export interface Matched {
   charOffset: number | null
   charLength: number | null
 }
-export interface SearchResponse {
-  query: string
-  type: string | null
-  in: SearchKind[]
-  strategy: SearchStrategy
-  /** The applied similarity floor on the `semanticSimilarity` scale; null when none was set. */
-  minSimilarity: number | null
-  filter: Record<string, string>
-  hits: SearchHit[]
-}
-
 /** The body `POST /search/entities` takes; `POST /search/passages` adds to it. */
 export interface EntitySearchBody {
   query: string
@@ -503,25 +491,30 @@ export interface EntityReference {
   _id: string
   _entityTypeKey: string
   name: string | null
+  /** Its identity properties and their values, in the identity's order; absent when its
+   * type declares none the lens shows. Never on a relation target. */
+  identity?: Record<string, JsonValue>
+}
+
+/** The best entry that found an entity. */
+export interface EntityMatch {
+  index: string
+  part: 'self' | 'relation' | 'passage'
+  /** Null when the index reads a property the lens hides. */
+  snippet: string | null
+  /** Passages: the document, null when the lens hides it. */
+  property?: string | null
+  charOffset?: number
+  charLength?: number
+  /** Relations: the relation type and the entity at its other end. */
+  relationType?: string
+  target?: EntityReference
 }
 
 export interface EntitySearchItem {
   rank: number
   entity: EntityReference
-  /** The best entry that found the entity. */
-  match: {
-    index: string
-    part: 'self' | 'relation' | 'passage'
-    /** Null when the index reads a property the lens hides. */
-    snippet: string | null
-    /** Passages: the document, null when the lens hides it. */
-    property?: string | null
-    charOffset?: number
-    charLength?: number
-    /** Relations: the relation type and the entity at its other end. */
-    relationType?: string
-    target?: EntityReference
-  }
+  match: EntityMatch
 }
 
 export interface EntitySearchResponse {

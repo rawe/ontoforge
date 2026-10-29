@@ -203,9 +203,11 @@ at `relations.<i>` — are collected under `details.fields`; a mode that needs a
 methods; with neither, the best available runs. `filter` carries the `filter.*` keys of the
 entity list without the prefix; `limit` counts entities, 1–100, default 10. The response
 carries `ran`, `items` and `limitations`. Each item has `rank`, from 1, `entity`
-`{_id, _entityTypeKey, name}` and `match` `{index, part, snippet}`, plus `property` (null
-when the lens hides the document), `charOffset`, `charLength` for a passage and
-`relationType`, `target` for a relation. Each limitation has `code` and `message` and,
+`{_id, _entityTypeKey, name, identity}` — `identity`, the identity properties and their
+values in the identity's order, only for a type that declares an identity the lens shows —
+and `match` `{index, part, snippet}`, plus `property` (null when the lens hides the
+document), `charOffset`, `charLength` for a passage and `relationType`, `target`
+(`{_id, _entityTypeKey, name}`) for a relation. Each limitation has `code` and `message` and,
 where they apply, `method`, `indices`, `types`. A body of the wrong shape, or with a field
 not listed here, is rejected with `details.errors`. The request's rules are collected under
 `details.fields` at the request's own paths: `query`, `types.<i>`, `indices.<i>`,
@@ -217,7 +219,7 @@ without an embedding provider answers `FEATURE_DISABLED`. Rules:
 document properties as `type.property` — as a third scope field: `types`, `documents` or
 `indices`, one at a time. `limit` counts passages, 1–100, default 10; `perEntity`, 1 to
 the limit, caps the passages per entity; `text`, default true, false leaves the passage
-text out. Each item has `rank`, from 1, `entity` `{_id, _entityTypeKey, name}` and
+text out. Each item has `rank`, from 1, `entity` as in `POST /search/entities` and
 `passage` `{property, ordinal, charOffset, charLength, text}`. Limitations are those of
 `POST /search/entities`, with `documents` where it applies. Errors are reported as there,
 and also at `documents.<i>` and `perEntity`. Rules:

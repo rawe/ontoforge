@@ -5,7 +5,7 @@
  * modeling store bound to it — an unknown ontology key answers 404
  * before any route logic runs. Within the ontology the surface
  * addresses types and properties by INTERNAL IDENTIFIER, not key
- * (`docs/interfaces.md`, "What a path segment identifies"). Routers
+ * (`docs/interfaces/`, "What a path segment identifies"). Routers
  * parse and shape only — every domain rule lives in `service.ts`,
  * shared with the modeling MCP server.
  */
@@ -71,7 +71,7 @@ const RelationTypePropertyParams = OntologyParams.extend({
 });
 
 // Assistants and saved queries are the modeling exceptions addressed by
-// KEY, not internal identifier (`docs/interfaces.md`).
+// KEY, not internal identifier (`docs/interfaces/`).
 const LensKeyParams = OntologyParams.extend({ lensKey: z.string() });
 const AssistantKeyParams = OntologyParams.extend({ lensKey: z.string(), assistantKey: z.string() });
 const QueryKeyParams = OntologyParams.extend({ lensKey: z.string(), queryKey: z.string() });

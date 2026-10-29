@@ -2,7 +2,7 @@
  * Shared tool-name constants for the runtime MCP server and agent
  * allowlists. The grantable set is exactly twelve names — the document reads
  * included, `get_relation` still deliberately not grantable
- * (`docs/interfaces.md#runtime-tools`). `search_documents` is agent-only: it
+ * (`docs/interfaces/mcp.md#runtime-tools`). `search_documents` is agent-only: it
  * is the MCP `search` restricted to document passages, split off as
  * its own tool so a small model chooses it by name rather than by argument.
  */

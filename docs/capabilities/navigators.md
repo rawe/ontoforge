@@ -13,7 +13,7 @@ conversation held by the server as a [thread](threads.md). Every lens also has a
 [default navigator](#the-default-navigator), derived from the lens and never stored.
 
 Vocabulary: [glossary](../glossary.md). System structure:
-[../architecture.md](../architecture.md). Every route: [../interfaces.md](../interfaces.md).
+[../architecture.md](../architecture.md). Every route: [../interfaces/](../interfaces/README.md).
 
 ## Ownership and persistence
 
@@ -164,7 +164,7 @@ A turn streams its work before its answer:
   end of the turn.
 
 Only evidence can be cited. The event format is in
-[../interfaces.md](../interfaces.md#navigator-list-and-chat).
+[../interfaces/](../interfaces/assistants-rest.md#navigator-list-and-chat).
 
 ## The default navigator
 
@@ -187,7 +187,7 @@ Navigators are managed through modeling REST, addressed by lens key and navigato
 read one, create or replace, delete. At runtime a list names every navigator of the lens —
 runnable or not, without configuration or validation, the default first; a question runs by
 navigator key on a thread and streams its work and answer, and a thread reads back
-([../interfaces.md](../interfaces.md)). Management, the runtime list and reading a thread call
+([../interfaces/](../interfaces/README.md)). Management, the runtime list and reading a thread call
 no model. A question needs a language-model provider — without one it is refused as a
 disabled feature before anything is read or streamed; without an embedding provider,
 mentions are resolved by keyword. No MCP tool manages or runs a navigator.

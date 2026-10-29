@@ -70,7 +70,7 @@ defines the vocabulary.
 | Essential architectural constraints | [docs/architecture-constraints.md](docs/architecture-constraints.md) |
 | How it is put together | [docs/architecture.md](docs/architecture.md) |
 | What a capability does and its rules | [docs/capabilities/](docs/capabilities/) |
-| Every endpoint and MCP tool | [docs/interfaces.md](docs/interfaces.md) |
+| Every endpoint and MCP tool | [docs/interfaces/](docs/interfaces/README.md) |
 | Implementing a storage backend | [docs/storage-adapters.md](docs/storage-adapters.md) |
 | What the web client offers | [docs/product-surface.md](docs/product-surface.md) |
 

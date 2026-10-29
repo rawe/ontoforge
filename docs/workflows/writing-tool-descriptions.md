@@ -3,7 +3,7 @@
 Use this guide when adding or changing an MCP or agent tool. A description is part of
 the interface a model uses to choose and call that tool; it is not an implementation
 note. The operation's behavior belongs in its [capability](../capabilities/), and the
-available tools are indexed in [Interfaces](../interfaces.md#mcp).
+available tools are indexed in [Interfaces](../interfaces/mcp.md).
 
 ## Write for the tool the caller can see
 

@@ -255,7 +255,7 @@ popover says so before applying. Applied conditions appear as removable chips wi
 clear-all action.
 
 The table offers a subset of the entity list's filter vocabulary
-([interfaces.md](interfaces.md#listing-sorting-filtering)): strict greater-than and
+([interfaces/](interfaces/README.md#listing-sorting-filtering)): strict greater-than and
 less-than, and query paths in either form, are not offered. This lists every difference
 from the server's vocabulary: a change to the filter vocabulary decides whether the table
 offers it and updates this list.
@@ -637,11 +637,11 @@ the query with typed parameter inputs and shows the result as a table or as raw 
 
 **Connect** — a ready-to-paste AI-client configuration for the MCP servers, bound
 entirely by their URLs: the modeling server to this ontology, the runtime server to this
-lens within it ([interfaces.md](interfaces.md#how-a-mount-is-bound)). One card per server
+lens within it ([interfaces/](interfaces/mcp.md#how-a-mount-is-bound)). One card per server
 states what its connection is bound to, its job, what it covers and what it does not do;
 each card can be left out of the configuration, so a client gets only the server its task
 needs, or both. The configuration is offered in two formats, Claude Code and Codex, each with where to put it. The URLs start from the
-address the server reports for itself ([interfaces.md](interfaces.md#server)); when it
+address the server reports for itself ([interfaces/](interfaces/server.md#server)); when it
 reports none, a visible placeholder stands in its place with a note to replace it. A
 switch adds an `Authorization: Bearer` header holding a token placeholder for servers
 reached through an access-controlled entry point; with authentication on there is no
@@ -1498,7 +1498,7 @@ Everything else works unchanged. See [capabilities/search.md](capabilities/searc
 ## Client-side contracts the API does not imply
 
 None of the following is visible from the server's surface — the operations involved are
-indexed in [interfaces.md](interfaces.md). A reimplementation that honours the API and
+indexed in [interfaces/](interfaces/README.md). A reimplementation that honours the API and
 ignores these will look right and behave wrongly.
 
 **Instance counts are synthesized.** There is no count endpoint. A per-type count is one

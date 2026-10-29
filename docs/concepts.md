@@ -105,7 +105,7 @@ built on another — in particular, MCP does not call REST.
 With [authentication](capabilities/authentication.md) on, every interface serves only
 callers who signed in, within the roles OntoForge assigned them. It is off by default.
 
-See [interfaces.md](interfaces.md).
+See [interfaces/](interfaces/README.md).
 
 ## Optional capabilities
 

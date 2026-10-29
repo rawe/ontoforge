@@ -58,7 +58,7 @@ until the pods are ready.
 
 Ingress and TLS, the web client, PostgreSQL, NetworkPolicy, autoscaling, Valkey high
 availability or persistence. An Ingress you add routes only the public paths; the probes
-and `/metrics` stay internal ([interfaces.md](../../docs/interfaces.md#exposure)).
+and `/metrics` stay internal ([interfaces](../../docs/interfaces/server.md#exposure)).
 
 ## Checked
 

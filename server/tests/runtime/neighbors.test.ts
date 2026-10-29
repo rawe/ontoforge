@@ -1,7 +1,7 @@
 /**
  * Neighbourhood traversal with scope filtering over a mocked store.
  * Ported from `tests/runtime/test_neighbors.py`, plus the projection rows
- * of `docs/interfaces.md#field-projection` and the documented out-of-scope
+ * of `docs/interfaces/README.md#field-projection` and the documented out-of-scope
  * neighbour leak (`docs/capabilities/instance-data.md#traversal`).
  */
 

@@ -1,7 +1,7 @@
 /**
  * Metrics in Prometheus text format at `/metrics`, beside the probes on the
  * client port. Like the probes it is for the platform, not for clients: the
- * ingress keeps it internal (`docs/interfaces.md#exposure`).
+ * ingress keeps it internal (`docs/interfaces/server.md#exposure`).
  *
  * One registry per process holds every metric. Requests are labelled by
  * route template, never by raw path or ontology, so the number of series

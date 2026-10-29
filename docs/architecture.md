@@ -373,14 +373,14 @@ its modeling and runtime routes under `assistants/<kind>`, its own storage, its 
 of a configuration, its built-in default and its place in transfer under the lens's
 `assistants`. Every kind shares the
 [thread store](#thread-store), the chat request and stream frame, and the one `entities`
-event ([interfaces](interfaces.md#assistant-chat-and-threads)). Runtime's assistant kit holds the
+event ([interfaces](interfaces/assistants-rest.md#assistant-chat-and-threads)). Runtime's assistant kit holds the
 kind-neutral helpers: the live trace of a fixed pipeline's steps, and the model calls —
 structured output for a decision, a stream for the answer.
 
 The [navigator](capabilities/navigators.md)'s turn is a fixed pipeline. It
 announces its steps when the turn starts and traces each as it runs, in events prefixed
 with the navigator's name, and streams the entities its answer may use before the answer
-as the shared `entities` event ([interfaces.md](interfaces.md#assistant-chat-and-threads)).
+as the shared `entities` event ([interfaces/](interfaces/assistants-rest.md#assistant-chat-and-threads)).
 Its model calls are never retried.
 
 ## Authentication and authorization
@@ -547,7 +547,7 @@ new work. Ranked search reads the ready generations
 
 REST failures share an error envelope and a consistent taxonomy. MCP expresses the
 same failures as tool errors. The interface contract, including error codes and details,
-is in [Interfaces](interfaces.md#errors).
+is in [Interfaces](interfaces/README.md#errors).
 
 ## Startup
 
@@ -589,7 +589,7 @@ Rebuild is where repair happens, one
 ontology at a time.
 
 The port opens only once these steps are done; from then on the liveness and readiness
-probes answer ([interfaces.md](interfaces.md#probes)).
+probes answer ([interfaces/](interfaces/server.md#probes)).
 
 ## Shutdown
 
@@ -642,7 +642,7 @@ Stated plainly, because its absence is a design position and not an oversight:
   Introducing tenancy before a deployment needs it would guess at the tenant model.
 
 Absences in the API surface itself — no data wipe, no instance-data export — are listed
-with their consequences in [interfaces.md](interfaces.md#what-is-not-exposed).
+with their consequences in [interfaces/](interfaces/README.md#what-is-not-exposed).
 
 ## Further reading for implementers
 

@@ -161,7 +161,7 @@ the same carve-out the list operations state.
 
 ## Through the interfaces
 
-Complete operation and tool index: [../interfaces.md](../interfaces.md).
+Complete operation and tool index: [../interfaces/](../interfaces/README.md).
 
 | Reached by | How |
 |---|---|

@@ -53,7 +53,7 @@ A ruleset maps its key to one value per rule; why a fixed record and one ladder:
 ### Maintenance
 
 Rulesets are maintained without a lens, under the ontology's runtime prefix: list, read,
-put and delete ([../interfaces.md](../interfaces.md#rulesets)).
+put and delete ([../interfaces/](../interfaces/runtime-rest.md#rulesets)).
 
 - **Put** creates the ruleset or changes it, and answers the record with each rule's
   value. It sets each rule the body names and keeps the others; a new ruleset takes the
@@ -66,7 +66,7 @@ put and delete ([../interfaces.md](../interfaces.md#rulesets)).
 ## Ruleset mounts
 
 A ruleset mount adds `/rulesets/{rulesetKey}` to a runtime mount URL, on MCP and as a REST
-mirror of the runtime routes ([../interfaces.md](../interfaces.md#ruleset-mounts)). Every
+mirror of the runtime routes ([../interfaces/](../interfaces/runtime-rest.md#ruleset-mounts)). Every
 call on it checks the ontology, then the lens, then the ruleset, reading the ruleset
 afresh, so an unknown ruleset is not found on every call, reads included. Then its rules
 are checked: write access first, whose refusal wins, then the anchor.
@@ -138,7 +138,7 @@ changesets committable there.
   that stages but does not write lists the eight write tools with `changeset_id` required.
   A call of a tool the level does not list, for example after the level was lowered,
   answers the refusal above. The tool count per level is in
-  [../interfaces.md](../interfaces.md#mcp).
+  [MCP interfaces](../interfaces/mcp.md).
 - **Web UI:** the Write access section of the Rulesets page's dialog, the level's chip on
   its row, and a line on the Connect panel.
 
@@ -249,7 +249,7 @@ it checks, one step per level of the hierarchy.
 
 - **MCP:** on a ruleset mount, `create_entity`'s description states the rule for
   hierarchy types. MCP flattens the field key into the error text, as for every field
-  error ([../interfaces.md](../interfaces.md#errors)).
+  error ([../interfaces/](../interfaces/README.md#errors)).
 - **Web UI:** the Anchor section of the Rulesets page's dialog, with the entity picker, the
   anchor's path on its row, a line on the Connect panel, and a chip on the anchor's entity
   page.

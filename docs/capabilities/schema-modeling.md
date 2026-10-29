@@ -156,7 +156,7 @@ writes — relation creates, the create with a parent relation, leaf-only delete
 **Setting it, flipping it, or creating a relation type with it** checks the relations
 already stored under every parent relation, with the new reading in place of the old, as
 a [relation rule](#relation-rules) is checked: the violations are `two_parents` and
-`cycle` ([../interfaces.md](../interfaces.md#errors)). Clearing it, or deleting a
+`cycle` ([../interfaces/](../interfaces/README.md#errors)). Clearing it, or deleting a
 parent relation, is never refused; an update repeating the stored parent end is not a
 change and checks nothing.
 
@@ -378,7 +378,7 @@ invisible to both, and so are relations that break the relation rules; only a
 
 ## Through the interfaces
 
-Full index: [../interfaces.md](../interfaces.md). Every entrance below addresses
+Full index: [../interfaces/](../interfaces/README.md). Every entrance below addresses
 one ontology — REST in the path, MCP through the mount's binding.
 
 The same service enforces every rule above regardless of entrance, including the
@@ -401,7 +401,7 @@ Two differences between the entrances are contractual, not cosmetic:
 **Addressing differs.** The modeling MCP tools take keys throughout; the modeling
 REST routes take internal identifiers for types and properties. Exactly which
 path segment is which is tabulated in
-[../interfaces.md](../interfaces.md#what-a-path-segment-identifies), and it is the
+[../interfaces/](../interfaces/README.md#what-a-path-segment-identifies), and it is the
 commonest mistake made against this surface.
 
 **MCP folds the two property owners into one tool set.** Where REST has parallel

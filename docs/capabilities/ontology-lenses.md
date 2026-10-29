@@ -304,7 +304,7 @@ used only while the ontology's design is unchanged; the caching rules are in
 
 ## Through the interfaces
 
-Full index: [../interfaces.md](../interfaces.md).
+Full index: [../interfaces/](../interfaces/README.md).
 
 Defining a lens is a modeling operation; using one is a runtime operation. The two
 never mix — that separation is what makes it safe to hand an autonomous agent a
@@ -324,7 +324,7 @@ allowlist is how an allowlist is changed there, which works because adding is an
 upsert. REST offers the explicit update as well.
 
 **The runtime MCP server is bound to exactly one ontology and one lens by its
-mount URL** ([MCP binding](../interfaces.md#how-a-mount-is-bound)). A model never chooses
+mount URL** ([MCP binding](../interfaces/mcp.md#how-a-mount-is-bound)). A model never chooses
 a lens and can never reach across two — nor across two ontologies.
 
 What the web UI does with all of this is described in

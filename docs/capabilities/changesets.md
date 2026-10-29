@@ -352,7 +352,7 @@ database connection for its whole run, and every row it touches waits as long.
 | Start, list, read, unstage, cut, rebase, check, submit, unsubmit, commit, discard | routes under `changesets` of a runtime mount | eleven changeset tools | the Workbench's Changesets page: start, list, review with the staged text of a document, remove an object, cut a value, accept current, check, submit, unsubmit, commit, discard; an entity's page, as the pinned changeset leaves it |
 | Stage | `writes` of one changeset | the six write tools and the two document tools with `changeset_id` | the Workbench's writes while a changeset is pinned, except the Explorer canvas's |
 
-Routes and tools: [../interfaces.md](../interfaces.md#changesets). No MCP tool reads one
+Routes and tools: [../interfaces/](../interfaces/runtime-rest.md#changesets). No MCP tool reads one
 entity as the changeset leaves it. An MCP mount keeps no changeset of its own: every call
 names one by `changeset_id`, and a call that forgets it writes immediately, unless the
 ruleset's [write access](rulesets.md#write-access-through-the-interfaces) requires

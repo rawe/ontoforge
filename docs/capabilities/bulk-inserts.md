@@ -9,7 +9,7 @@ it follows stay in those two documents: [puts](changesets.md#put),
 [changeset limits](changesets.md#limits), along with the identity rules.
 
 Vocabulary: [glossary](../glossary.md#changesets). Routes:
-[../interfaces.md](../interfaces.md#changesets).
+[../interfaces/](../interfaces/runtime-rest.md#changesets).
 
 ## When to use it
 

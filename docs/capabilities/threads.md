@@ -86,4 +86,4 @@ wherever the assistant kind's list is.
 
 REST only, per assistant kind: the chat request's optional thread id, the stream's leading
 thread event, the read route, and the refusals for an unknown and a busy thread
-([../interfaces.md](../interfaces.md#assistant-chat-and-threads)). No MCP tool reaches a thread.
+([../interfaces/](../interfaces/assistants-rest.md#assistant-chat-and-threads)). No MCP tool reaches a thread.

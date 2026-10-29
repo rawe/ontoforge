@@ -166,7 +166,7 @@ their *descriptions* — nothing else is embedded, not the name and not the step
 requires an embedding provider and is rejected as unavailable without one. It returns key,
 name, description, parameters and a score, but **not** the steps. Its result count and
 score floor default conservatively — the exact values and their ranges are with the route
-in [../interfaces.md](../interfaces.md#saved-queries-1).
+in [../interfaces/](../interfaces/runtime-rest.md#saved-queries).
 
 A saved query's description is embedded when it is written and when it is imported, so
 editing a description re-embeds it. The bulk rebuild operation described in
@@ -176,7 +176,7 @@ with none, discovery has nothing to rebuild and the rebuild leaves the descripti
 ## Through the interfaces
 
 Definition is a modeling concern, execution a runtime one — the same split as everywhere
-else. Complete operation index: [../interfaces.md](../interfaces.md).
+else. Complete operation index: [../interfaces/](../interfaces/README.md).
 
 | | Modeling (define) | Runtime (use) |
 |---|---|---|

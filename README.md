@@ -99,7 +99,7 @@ Once connected to the runtime server, an AI assistant can work with your knowled
 
 Every write is validated against the ontology's schema — the assistant cannot invent entity types, add undefined properties, or write structurally invalid data.
 
-See [docs/interfaces.md](docs/interfaces.md) for the full tool catalog.
+See [docs/interfaces/](docs/interfaces/README.md) for the full tool catalog.
 
 ## Development Setup
 
@@ -201,7 +201,7 @@ Full documentation starts at **[docs/README.md](docs/README.md)**:
 | [architecture.md](docs/architecture.md) | System components, boundaries, invariants and flows |
 | [Architectural constraints](docs/architecture-constraints.md) | Essential boundaries to preserve when changing the system |
 | [capabilities/](docs/capabilities/) | One document per capability, end to end |
-| [interfaces.md](docs/interfaces.md) | REST surfaces and MCP tools; exact schemas are in OpenAPI |
+| [interfaces](docs/interfaces/README.md) | REST surfaces and MCP tools; exact schemas are in OpenAPI |
 | [storage-adapters.md](docs/storage-adapters.md) | Persistence contract and PostgreSQL adapter |
 | [product-surface.md](docs/product-surface.md) | Web UI screens and interactions |
 
@@ -243,7 +243,7 @@ ontoforge/
     ├── architecture-constraints.md # Essential architectural guardrails
     ├── implementation/             # Contributor details tied to the implementation
     ├── capabilities/               # One document per capability
-    ├── interfaces.md               # REST/MCP surfaces and shared error contract
+    ├── interfaces/                 # REST, MCP and the shared conventions
     ├── storage-adapters.md         # Persistence contract and PostgreSQL adapter
     ├── product-surface.md          # Web UI screens and interactions
     ├── adr/                        # Alternatives weighed behind decisions

@@ -18,7 +18,7 @@
  * of what arrived, because what arrived is a JSON value. Neither names a
  * type as this server's implementation language spells it: the text
  * surfaces verbatim in `details.fields` of validation errors, and a caller
- * is never told what the server is written in (`docs/interfaces.md#errors`).
+ * is never told what the server is written in (`docs/interfaces/README.md#errors`).
  */
 
 /** A value that cannot be coerced. Callers catch this and collect the

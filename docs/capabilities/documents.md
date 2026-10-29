@@ -185,7 +185,7 @@ document search, which matches passage by passage. Both are in [search.md](searc
 
 ## Through the interfaces
 
-The full index of routes and tools is [interfaces.md](../interfaces.md).
+The full index of routes and tools is [interfaces](../interfaces/README.md).
 
 | Operation | REST | Runtime MCP |
 |---|---|---|

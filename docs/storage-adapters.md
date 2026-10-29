@@ -107,7 +107,7 @@ condition surfaces as the single storage error, carrying a generated id and no s
 detail. The adapter logs the original — vendor name, driver code, message, stack —
 against that id. Expected conditions are not exceptions: a missing row is an empty result
 or an absent value, and a failed delete is a false return. See the shared error contract
-in [interfaces.md](interfaces.md#errors).
+in [interfaces/](interfaces/README.md#errors).
 
 **An adapter declares whether its search evaluates relation conditions** — path
 conditions and relation existence conditions alike. One plain
@@ -153,7 +153,7 @@ shape of the data and the rules the adapter must honour, not per-operation signa
 
 Internal identifiers appear in this section because they are the store's own currency.
 Runtime and MCP address schema and design objects by key; modeling REST may use internal
-identifiers ([interface addressing](interfaces.md#what-a-path-segment-identifies)).
+identifiers ([interface addressing](interfaces/README.md#what-a-path-segment-identifies)).
 
 ### Schema side
 
@@ -674,7 +674,7 @@ API does, never by its physical name.
 the adapter, dispatching on each condition's kind, must turn every condition into a
 predicate the database can evaluate. The
 operator vocabulary is fixed by the caller-facing surface, not by the adapter, and is
-enumerated once in [interfaces.md](interfaces.md#listing-sorting-filtering); an adapter
+enumerated once in [interfaces/](interfaces/README.md#listing-sorting-filtering); an adapter
 supports all of it and invents none of it. Validation happens above the port: every filter
 fault — an unknown property, an unknown operator, a value that will not coerce, a query
 path or relation subject that does not resolve — is collected there into one domain

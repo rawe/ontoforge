@@ -53,7 +53,7 @@ know it: it is not listed, read or written there.
   let that judgment change stored data.
 - The grantable set is *narrower* than the read tools available over MCP — being read-only
   is not sufficient to be grantable. The tools are named, and the read-only one left out
-  of the set is called out, in [../interfaces.md](../interfaces.md#runtime-tools).
+  of the set is called out, in [../interfaces/](../interfaces/mcp.md#runtime-tools).
 - **An agent reads documents by passage.** `search_documents` returns entities with
   document matches naming the property and character range. `get_document` reads those
   coordinates. MCP exposes the same document-search tool; neither surface takes a strategy
@@ -81,7 +81,7 @@ part of the product, not diagnostics. Repeated calls remain distinguishable, and
 parallel call does not hide another's result. Schema-invalid arguments and recoverable
 validation/not-found failures remain visible while the model corrects them. The assistant
 answer appears once, complete, after tool work finishes; a turn using no tools still
-produces an answer. The wire contract lives in [interfaces](../interfaces.md#ai).
+produces an answer. The wire contract lives in [interfaces](../interfaces/assistants-rest.md#ai).
 
 Beside a successful result of an entity tool — reading, listing, searching entities or
 document passages, or an entity's neighbours — the turn reports the entities it returned
@@ -111,7 +111,7 @@ adds to the rules there:
 ## Through the interfaces
 
 Configuring agents is modeling; running them is runtime. Complete operation index:
-[../interfaces.md](../interfaces.md).
+[../interfaces/](../interfaces/README.md).
 
 | | Where | Operations |
 |---|---|---|

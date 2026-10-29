@@ -14,7 +14,7 @@ For the practical steps to add, update or move documentation, use
    - **Essential architectural constraints:** [architecture-constraints.md](architecture-constraints.md).
    - **System structure, mechanisms and flows:** [architecture.md](architecture.md).
    - **Feature behavior, rules, limits and examples:** its document in [capabilities/](capabilities/).
-   - **Interface behavior and access:** [interfaces.md](interfaces.md); the web client in
+   - **Interface behavior and access:** [interfaces/](interfaces/README.md); the web client in
      [product-surface.md](product-surface.md).
    - **Storage contract and implementation:** [storage-adapters.md](storage-adapters.md).
    - **Contributor details tied to the implementation:** [implementation/](implementation/).

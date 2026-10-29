@@ -263,7 +263,7 @@ no language, and a new one starts with German and English. One whose storage was
 from an earlier layout starts with the single language it was created with
 ([../storage-adapters.md](../storage-adapters.md#how-ontologies-are-isolated)). The set
 is read and changed through the ontology's search settings in modeling
-([../interfaces.md](../interfaces.md#search-settings)); a change is validated whole
+([../interfaces/](../interfaces/modeling-rest.md#search-settings)); a change is validated whole
 before anything is written and accepts the languages in any order, kept in the order
 German, English. Changing it builds a new keyword generation of every index in the background —
 keyword entries need no embedding calls — and the previous generations keep answering
@@ -337,7 +337,7 @@ the server from starting: the server must remain available to finish the repair.
 
 ## Through the interfaces
 
-The full contract is in [../interfaces.md](../interfaces.md). REST `GET /search`, MCP,
+The full contract is in [../interfaces/](../interfaces/README.md). REST `GET /search`, MCP,
 agent tools and saved-query search steps use the default search and the same envelope.
 MCP and agents expose `search` (both kinds) and `search_documents` (documents only, every
 hit carrying a passage); neither tool takes a strategy or a floor — both apply the fixed

@@ -81,7 +81,7 @@ its root type — a passage index only where the lens shows its document propert
 ([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)).
 
 **A managed index can be switched off.** The ontology's search settings list the managed
-indices that are off ([../interfaces.md](../interfaces.md#search-settings)). A change
+indices that are off ([../interfaces/](../interfaces/modeling-rest.md#search-settings)). A change
 names exactly the indices off afterwards — every other managed index is on — and a key
 that names no managed index rejects the whole change before anything is written. A
 switched-off index keeps its definition and its lens inclusions but has no entries: its
@@ -391,7 +391,7 @@ search catalog, over REST and the runtime MCP server, lists them with their stat
 Indices are designed through the modeling surface — REST and the modeling MCP server —
 which lists every index with its status, manages custom indices, previews
 a draft and starts a rebuild
-([../interfaces.md](../interfaces.md#search-indices)), and includes indices in lenses
-([../interfaces.md](../interfaces.md#scope-inclusions)). The whole-schema read and the
+([../interfaces/](../interfaces/modeling-rest.md#search-indices)), and includes indices in lenses
+([../interfaces/](../interfaces/modeling-rest.md#scope-inclusions)). The whole-schema read and the
 [transfer format](transfer.md) carry the custom definitions, the switched-off
 managed indices and each lens's index inclusions.

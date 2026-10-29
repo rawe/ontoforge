@@ -1,6 +1,6 @@
 # One streaming response contract for REST chat
 
-Current behavior: [Assistant chat and threads](../interfaces.md#assistant-chat-and-threads)
+Current behavior: [Assistant chat and threads](../interfaces/assistants-rest.md#assistant-chat-and-threads)
 
 ## Context
 

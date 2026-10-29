@@ -34,7 +34,7 @@ For example:
   [entity identity](../capabilities/entity-identity.md), not a new decision rule.
 - A loading procedure belongs in [bulk inserts](../capabilities/bulk-inserts.md); the
   underlying staging and commit guarantees stay in [changesets](../capabilities/changesets.md).
-- A new REST route belongs in the [interface map](../interfaces.md) and the system's
+- A new REST route belongs in the [interface map](../interfaces/README.md) and the system's
   OpenAPI description; its feature semantics belong in the capability document.
 - A configuration variable and default belong in the root
   [configuration reference](../../README.md#configuration). A procedure for one script

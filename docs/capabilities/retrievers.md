@@ -14,7 +14,7 @@ Every lens also has a
 and never stored.
 
 Vocabulary: [glossary](../glossary.md). System structure:
-[../architecture.md](../architecture.md). Every route: [../interfaces.md](../interfaces.md).
+[../architecture.md](../architecture.md). Every route: [../interfaces/](../interfaces/README.md).
 
 ## Ownership and persistence
 
@@ -279,7 +279,7 @@ row per entity and sub-query with what matched and its answer fields, the limita
 the number of index searches, phase timings and bounded traces of every model call —
 the plan, a repeated plan, the answer. Diagnostics are for debugging: they are sent only
 when a question asks for them, and any question may. Progress — which phase runs — and
-the answer text are always streamed. The event format is in [../interfaces.md](../interfaces.md#retriever-list-chat-and-retrieve).
+the answer text are always streamed. The event format is in [../interfaces/](../interfaces/assistants-rest.md#retriever-list-chat-and-retrieve).
 
 ## Retrieve
 
@@ -385,7 +385,7 @@ one; copy, move, export and import are REST only. At
 runtime a list names every retriever of the lens — runnable or not, without configuration or
 validation, the default first; a question runs by retriever key on a thread and streams its
 progress and answer, a thread reads back, and a retrieve answers one query with one plain
-response ([../interfaces.md](../interfaces.md)). All address the default retriever by its key.
+response ([../interfaces/](../interfaces/README.md)). All address the default retriever by its key.
 Management, the runtime list, reading a thread, copy, move, export and import call no
 model. A question or a retrieve needs a
 language-model provider — without one it is refused as a disabled feature before anything

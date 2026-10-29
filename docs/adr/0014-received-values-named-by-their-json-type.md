@@ -1,6 +1,6 @@
 # A rejected value is named by its JSON type
 
-Current behavior: [Errors](../interfaces.md#errors)
+Current behavior: [Errors](../interfaces/README.md#errors)
 
 ## Context
 

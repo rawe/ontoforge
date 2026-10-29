@@ -11,7 +11,7 @@
  * schema belongs to no lens. Tools take KEYS (never internal
  * identifiers) plus a `type_kind` discriminator for properties, and
  * resolve keys to internal ids per call (never cached). Tool parameters
- * are snake_case on the wire (`docs/interfaces.md`, "JSON shape").
+ * are snake_case on the wire (`docs/interfaces/`, "JSON shape").
  *
  * Tools call the modeling services directly — never HTTP to the REST
  * routes; a second path would be a second contract. Failures are reported
@@ -260,7 +260,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
   const server = new McpServer({ name: "OntoForge Modeling", version: "0.1.0" });
   const authentication = actor !== null;
 
-  // The ONE registry-touching tool over MCP (`docs/interfaces.md#how-a-mount-is-bound`): with
+  // The ONE registry-touching tool over MCP (`docs/interfaces/mcp.md#how-a-mount-is-bound`): with
   // no arguments it can only ever act on the binding the client already
   // holds — it cannot list, reach, rename, or delete anything.
   server.registerTool(

@@ -46,6 +46,6 @@ prefix, and emits the summary last.
 
 The pipeline's behavior, including its model calls and retry policy, belongs to the
 [navigator capability](../capabilities/navigators.md#answering-a-question). Its wire events
-belong to the [interface reference](../interfaces.md#navigator-list-and-chat). A framework
+belong to the [interface reference](../interfaces/assistants-rest.md#navigator-list-and-chat). A framework
 change must preserve the thread's atomic-turn and single-owner guarantees as well as
 those observable contracts.

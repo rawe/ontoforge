@@ -2,7 +2,7 @@
  * MCP mounts on the Fastify app.
  *
  * Both servers are bound by URL, mirroring the REST tree — the URL is
- * the ONLY binding channel (`docs/interfaces.md#how-a-mount-is-bound`): no header,
+ * the ONLY binding channel (`docs/interfaces/mcp.md#how-a-mount-is-bound`): no header,
  * no environment fallback, no tool parameter. A URL that names no
  * ontology (or, for runtime, no lens; on a ruleset mount, no ruleset)
  * answers the app's standard 404 — as an unmatched route, or through the
@@ -25,7 +25,7 @@
  * Reader lists and calls only reads, below the ruleset's level too.
  *
  * Transport is Streamable HTTP, STATELESS, with plain JSON responses
- * (no SSE), per `docs/interfaces.md#mcp`: a fresh server +
+ * (no SSE), per `docs/interfaces/mcp.md#mcp`: a fresh server +
  * transport pair serves each request, so one mount serves many clients
  * and no connection carries state.
  */

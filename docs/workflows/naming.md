@@ -2,7 +2,7 @@
 
 Use this guide when adding a domain concept or keyed resource. The
 [glossary](../glossary.md) owns the vocabulary; the
-[interface conventions](../interfaces.md#what-a-path-segment-identifies) explain how
+[interface conventions](../interfaces/README.md#what-a-path-segment-identifies) explain how
 clients address resources.
 
 ## Follow one concept across the system
@@ -25,6 +25,6 @@ generated keys, such as managed search-index keys, follow their documented deriv
 in the owning capability; do not confuse them with caller-defined keys.
 
 When changing a key rule, check the server definition, client mirror, imports, tool
-descriptions and tests together. The [name compatibility policy](../interfaces.md#compatibility-of-names)
+descriptions and tests together. The [name compatibility policy](../interfaces/README.md#compatibility-of-names)
 covers renaming public API, MCP and configuration names; changing a stored or exported
 name also requires accounting for the corresponding upgrade.

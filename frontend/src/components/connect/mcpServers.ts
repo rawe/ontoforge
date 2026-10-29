@@ -3,7 +3,7 @@
  * knows about them: config entry name, the level its URL binds to, the URL
  * path, and the user-facing guidance.
  *
- * Mirrors docs/interfaces.md (MCP): when a server is added, re-addressed, or
+ * Mirrors docs/interfaces/mcp.md: when a server is added, re-addressed, or
  * its tool groups change, update this list — the cards and the snippets are
  * both built from it.
  *

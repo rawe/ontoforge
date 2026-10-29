@@ -55,7 +55,7 @@ REST exposes the operation under the lens's runtime prefix as
 `POST /decisions/compare-entities`. The body contains exactly `entityTypeKey`,
 `left` and `right`, with each snapshot a property-key-to-scalar-or-null map. The
 response contains `decision`, `probabilities` (keys `same`, `different`,
-`insufficient`), `confidence` and `truncatedFields`. See [interfaces](../interfaces.md).
+`insufficient`), `confidence` and `truncatedFields`. See [interfaces](../interfaces/README.md).
 There is no MCP tool.
 
 The server feature report exposes `decisions`. Without a configured

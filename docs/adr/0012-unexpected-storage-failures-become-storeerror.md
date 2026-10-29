@@ -1,6 +1,6 @@
 # Unexpected storage failures become one storage error with an error id
 
-Current behavior: [Errors](../interfaces.md#errors)
+Current behavior: [Errors](../interfaces/README.md#errors)
 
 ## Context
 

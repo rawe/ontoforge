@@ -22,6 +22,10 @@
  *    more, up to a fixed cap — never more.
  * 5. Project the entities through the lens and describe the match.
  *
+ * Steps 2–4 are a search tree (`core/searchTree.ts`): the request compiles
+ * into one (`core/searchCompile.ts`), and the executor (`executor.ts`)
+ * runs it.
+ *
  * `minScore` drops semantic entries below it — on the `(1 + cosine) / 2`
  * scale — before grouping, so it applies to an entity's best semantic
  * entry; keyword entries are never touched.
@@ -38,22 +42,20 @@ import type {
   RankedSearchEntry,
   Row,
   RuntimeStore,
-  SearchGenerationRecord,
   SearchIndexRecord,
   SearchIndexStore,
 } from "../../core/ports.js";
+import { compileEntitySearch } from "../../core/searchCompile.js";
 import { documentField } from "../../core/searchComposition.js";
 import { managedIndexDescription, type SearchRepresentation } from "../../core/searchIndex.js";
 import { disabledIndexKeys, type SearchIndexState } from "../../core/searchPipeline.js";
+import { availableIndices, readsHiddenProperties, snippet } from "../../core/searchQuery.js";
 import {
-  availableIndices,
-  fuseModes,
-  mergeByScore,
-  readsHiddenProperties,
-  snippet,
-  type FusedHit,
-  type ModeRanking,
-} from "../../core/searchQuery.js";
+  validateSearchTree,
+  type KeywordBlock,
+  type MethodBlocks,
+  type SemanticBlock,
+} from "../../core/searchTree.js";
 import {
   applyFieldProjection,
   ENTITY_NEIGHBOR_ALWAYS_FIELDS,
@@ -61,17 +63,12 @@ import {
 } from "../readHelpers.js";
 import { listSearchIndexStatuses } from "../indexing/status.js";
 import { loadSchema, type LoadedSchema } from "../schemaCache.js";
+import { executeSearchTree } from "./executor.js";
 import { relativeScore } from "./fusion.js";
 import { resolveSearchFilters } from "./request.js";
 
 export const SEARCH_MODES = ["semantic", "keyword", "hybrid"] as const;
 export type SearchMode = (typeof SEARCH_MODES)[number];
-
-/** Entries a ranking first fetches per requested entity. */
-const OVERFETCH_FACTOR = 4;
-
-/** The most entries one ranking fetches. */
-const ENTRY_FETCH_CAP = 1000;
 
 /** What matched an entity: its best entry. */
 export interface Matched {
@@ -263,169 +260,50 @@ export async function searchIndexCatalog(
 // The engine
 // ---------------------------------------------------------------------------
 
-interface LegSpec {
-  target: IndexTarget;
-  representation: SearchRepresentation;
-  generation: SearchGenerationRecord;
-}
-
-interface FetchedLeg {
-  entries: RankedSearchEntry[];
-  /** Fetching more would add nothing: the ranking ran out (or past the
-   * floor). */
-  exhausted: boolean;
-}
-
 /** Rank entities over the targets' active generations (module comment,
- * steps 2–4). */
+ * steps 2–4): the request compiles into a search tree, checked by its
+ * rules and run by the executor. */
 export async function rankThroughIndices(
   loaded: LoadedSchema,
   indexStore: SearchIndexStore,
   request: EngineRequest,
 ): Promise<EngineHit[]> {
-  const provider = getEmbeddingProvider();
-  const representations: SearchRepresentation[] =
-    request.mode === "hybrid" ? ["semantic", "keyword"] : [request.mode];
-  const ready = (await indexStore.listGenerations()).filter((g) => g.state === "ready");
-  const specs: LegSpec[] = [];
-  for (const target of request.targets) {
-    for (const representation of representations) {
-      if (!target.index.definition[representation].enabled) continue;
-      const generation = ready.find(
-        (g) =>
-          g.searchIndexId === target.index.searchIndexId &&
-          g.representation === representation &&
-          (representation === "keyword" || g.modelId === provider?.modelId),
-      );
-      if (generation !== undefined) specs.push({ target, representation, generation });
-    }
-  }
-  if (specs.length === 0) return [];
-
-  let vector: number[] | undefined;
-  if (specs.some((spec) => spec.representation === "semantic")) {
-    const embedded = await provider!.embed(request.query);
-    if (!embedded) throw new ValidationError("Failed to generate embedding for search query");
-    vector = embedded;
-  }
-
-  // The lens's hidden relation and target types, and the caller's choice.
-  const scoped = loaded.searchIndexScope.scoped;
-  const lensRelations = scoped ? Object.keys(loaded.scoped.relationTypes) : null;
-  const relationTypes =
-    request.relations === null
-      ? lensRelations
-      : request.relations.filter((key) => lensRelations === null || lensRelations.includes(key));
-  const targetTypes = scoped ? Object.keys(loaded.scoped.entityTypes) : null;
-
-  const fetchLeg = async (spec: LegSpec, limit: number): Promise<FetchedLeg> => {
-    const semantic = spec.representation === "semantic";
-    const own = spec.target.relations ?? null;
-    const raw = await indexStore.rankEntries({
-      generationId: spec.generation.generationId,
-      ...(semantic ? { vector } : { text: request.query, matching: request.matching }),
-      conditions: spec.target.conditions,
-      entityIds: spec.target.entityIds ?? null,
-      relationTypes:
-        own === null ? relationTypes : own.filter((key) => relationTypes === null || relationTypes.includes(key)),
-      targetTypes,
-      limit,
-    });
-    const floor = semantic ? request.minScore : null;
-    const entries = floor === null ? raw : raw.filter((entry) => entry.score >= floor);
-    const exhausted = raw.length < limit || (floor !== null && raw.at(-1)!.score < floor);
-    return { entries, exhausted };
-  };
-
-  const first = Math.min(request.limit * OVERFETCH_FACTOR, ENTRY_FETCH_CAP);
-  let fetched = await Promise.all(specs.map((spec) => fetchLeg(spec, first)));
-  let modes = fuse(specs, fetched);
-  if (modes.fused.length < request.limit && first < ENTRY_FETCH_CAP && fetched.some((f) => !f.exhausted)) {
-    fetched = await Promise.all(
-      specs.map((spec, i) => (fetched[i]!.exhausted ? fetched[i]! : fetchLeg(spec, ENTRY_FETCH_CAP))),
-    );
-    modes = fuse(specs, fetched);
-  }
-  return modes.fused.slice(0, request.limit).map((hit) => toEngineHit(hit, specs, modes));
-}
-
-/** An entry with the ranking (index × representation) it came from. */
-type SpecEntry = RankedSearchEntry & { spec: number };
-
-interface ModeRankings {
-  rankings: ModeRanking<SpecEntry>[];
-  fused: FusedHit<SpecEntry>[];
-}
-
-function fuse(specs: LegSpec[], fetched: FetchedLeg[]): ModeRankings {
-  const rankings: ModeRanking<SpecEntry>[] = [];
-  for (const representation of ["semantic", "keyword"] as const) {
-    const lists = specs.flatMap((spec, i) =>
-      spec.representation === representation
-        ? [fetched[i]!.entries.map((entry) => ({ ...entry, spec: i }))]
-        : [],
-    );
-    if (lists.length > 0) rankings.push({ representation, entries: mergeByScore(lists) });
-  }
-  return { rankings, fused: fuseModes(rankings) };
-}
-
-/** Same entry: same part of the same entity. */
-function sameEntry(a: RankedSearchEntry, b: RankedSearchEntry): boolean {
-  return a.partKind === b.partKind && a.groupNo === b.groupNo && a.partId === b.partId;
-}
-
-/** Without the ranking bookkeeping. */
-function plain({ spec: _spec, ...entry }: SpecEntry): RankedSearchEntry {
-  return entry;
-}
-
-function toEngineHit(
-  hit: FusedHit<SpecEntry>,
-  specs: LegSpec[],
-  { rankings }: ModeRankings,
-): EngineHit {
-  const matchedSpec = specs[hit.matched.entry.spec]!;
-  // The entity's entries per mode, the matched mode first; per index the
-  // first of them — the best of the mode it ranks best in — represents it,
-  // and is measured wherever a ranking fetched that very entry.
-  const ordered = [...rankings].sort(
-    (a, b) =>
-      Number(b.representation === hit.matched.representation) -
-      Number(a.representation === hit.matched.representation),
-  );
-  const own = ordered.map((ranking) => ({
-    representation: ranking.representation,
-    entries: ranking.entries.filter((entry) => entry.entityId === hit.entityId),
-  }));
-  const primaries = new Map<string, SpecEntry>();
-  for (const { entries } of own) {
-    for (const entry of entries) {
-      const key = specs[entry.spec]!.target.index.key;
-      if (!primaries.has(key)) primaries.set(key, entry);
-    }
-  }
-  const indices: IndexMatch[] = [...primaries].map(([key, primary]) => {
-    const measured = (representation: SearchRepresentation) =>
-      own
-        .find((mode) => mode.representation === representation)
-        ?.entries.find(
-          (entry) => specs[entry.spec]!.target.index.key === key && sameEntry(entry, primary),
-        )?.score ?? null;
-    return {
-      index: specs[primary.spec]!.target.index,
-      entry: plain(primary),
-      semanticSimilarity: measured("semantic"),
-      keywordScore: measured("keyword"),
-    };
+  if (request.targets.length === 0) return [];
+  const tree = compileEntitySearch({
+    text: request.query,
+    targets: request.targets.map((target) => ({
+      index: target.index.key,
+      entityType: target.index.definition.entityType,
+      conditions: target.conditions,
+      entityIds: target.entityIds ?? null,
+      relations: target.relations ?? null,
+    })),
+    methods: methodBlocks(request),
+    relations: request.relations,
+    limit: request.limit,
   });
-  return {
-    entityId: hit.entityId,
-    entityType: matchedSpec.target.index.definition.entityType,
-    score: hit.score,
-    matched: { index: matchedSpec.target.index, entry: plain(hit.matched.entry) },
-    indices,
-  };
+  // The targets are the indices the caller resolved through the lens.
+  const violations = validateSearchTree(tree, {
+    indices: new Set(request.targets.map((target) => target.index.key)),
+    entityTypes: new Set(Object.keys(loaded.scoped.entityTypes)),
+    model: getEmbeddingProvider()?.modelId ?? null,
+  });
+  if (violations.length > 0) {
+    throw new Error(
+      `Invalid search tree: ${violations.map((v) => `${v.rule} at '${v.path}': ${v.message}`).join("; ")}`,
+    );
+  }
+  const indices = new Map(request.targets.map((target) => [target.index.key, target.index] as const));
+  return executeSearchTree(loaded, indexStore, indices, tree);
+}
+
+/** The method blocks of a mode: keyword with the request's matching,
+ * semantic with its floor. */
+function methodBlocks(request: EngineRequest): MethodBlocks {
+  const keyword: KeywordBlock = { match: request.matching };
+  const semantic: SemanticBlock = request.minScore === null ? {} : { minSimilarity: request.minScore };
+  if (request.mode === "hybrid") return { semantic, keyword };
+  return request.mode === "semantic" ? { semantic } : { keyword };
 }
 
 // ---------------------------------------------------------------------------

@@ -3,9 +3,10 @@
  * may search, grouping ranked entries by entity and fusing the per-mode
  * rankings, and the snippet of a match.
  *
- * Pure — no storage, no I/O. The service (`runtime/search/indexSearch.ts`)
- * ranks the entries of each index's active generation, merges them per
- * representation and hands the mode rankings here.
+ * Pure — no storage, no I/O. The search tree's executor
+ * (`runtime/search/executor.ts`) ranks the entries of each index's active
+ * generation, merges them per representation and hands the mode rankings
+ * here.
  */
 
 import {

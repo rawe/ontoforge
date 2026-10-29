@@ -2,7 +2,7 @@
  * The two cookies of browser sign-in: the session cookie, and the login
  * cookie that carries a login in progress (`loginCookie.ts`). Browsers
  * scope cookies by host, not by port, so each name carries the port of
- * `PUBLIC_URL`: two deployments on one host never read each other's.
+ * `WEB_CLIENT_URL`: two deployments on one host never read each other's.
  *
  * Both are `HttpOnly; Secure; SameSite=Lax` without `Domain`. The session
  * cookie has no lifetime of its own — the server expires the session — and
@@ -20,8 +20,8 @@ export interface CookieNames {
 
 export const LOGIN_COOKIE_PATH = "/api/auth";
 
-export function cookieNames(publicUrl: string): CookieNames {
-  const url = new URL(publicUrl);
+export function cookieNames(webClientUrl: string): CookieNames {
+  const url = new URL(webClientUrl);
   const port = url.port !== "" ? url.port : url.protocol === "https:" ? "443" : "80";
   return { session: `ontoforge_session_${port}`, login: `ontoforge_login_${port}` };
 }

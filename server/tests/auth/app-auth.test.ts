@@ -7,7 +7,7 @@
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fakeRuntime, identified, ISSUER, PUBLIC_URL, type Fakes } from "./fakes.js";
+import { fakeRuntime, identified, ISSUER, PUBLIC_URL, SETTINGS, WEB_CLIENT_URL, type Fakes } from "./fakes.js";
 
 const ONTOLOGY_ID = "00000000-0000-4000-8000-000000000001";
 const LENS_ID = "00000000-0000-4000-8000-000000000002";
@@ -123,7 +123,7 @@ describe("with authentication on", () => {
     const crossSite = await app.inject({ method: "POST", url: "/api/ontologies", headers: { cookie, origin: "http://evil.example.com" }, payload: { key: "x" } });
     expect(crossSite.statusCode).toBe(403);
     expect(crossSite.json().error.message).toMatch(/own origin/);
-    const sameSite = await app.inject({ method: "POST", url: "/api/ontologies", headers: { cookie, origin: PUBLIC_URL }, payload: { key: "x" } });
+    const sameSite = await app.inject({ method: "POST", url: "/api/ontologies", headers: { cookie, origin: WEB_CLIENT_URL }, payload: { key: "x" } });
     expect(sameSite.statusCode).toBe(403);
     expect(sameSite.json().error.message).toMatch(/Ontology Creator/);
   });
@@ -179,7 +179,7 @@ describe("browser sign-in", () => {
     const res = await app.inject({ url: `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}` });
     expect(res.statusCode).toBe(302);
     const location = new URL(res.headers.location as string);
-    expect(location.searchParams.get("redirect_uri")).toBe(`${PUBLIC_URL}/api/auth/callback`);
+    expect(location.searchParams.get("redirect_uri")).toBe(`${WEB_CLIENT_URL}/api/auth/callback`);
     const login = setCookies(res).find((c) => c.startsWith(`${LOGIN_COOKIE}=`))!;
     expect(login).toMatch(/; Path=\/api\/auth; Max-Age=600; HttpOnly; Secure; SameSite=Lax$/);
     return { state: location.searchParams.get("state")!, cookie: `${LOGIN_COOKIE}=${cookieValue(res, LOGIN_COOKIE)}` };
@@ -192,7 +192,7 @@ describe("browser sign-in", () => {
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe("/workbench/books?lens=public");
     const finished = fakes.oidc.finished.at(-1)!;
-    expect(finished.callbackUrl.toString()).toBe(`${PUBLIC_URL}/api/auth/callback?code=c1&state=${state}`);
+    expect(finished.callbackUrl.toString()).toBe(`${WEB_CLIENT_URL}/api/auth/callback?code=c1&state=${state}`);
     expect(finished.checks.state).toBe(state);
     expect(fakes.access.calls).toContain("signIn newcomer false");
     expect(setCookies(res)).toContain(`${LOGIN_COOKIE}=; Path=/api/auth; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
@@ -202,9 +202,9 @@ describe("browser sign-in", () => {
     const me = await app.inject({ url: "/api/auth/me", headers: { cookie: `${SESSION_COOKIE}=${sessionId}` } });
     expect(me.json()).toMatchObject({ authentication: true, user: { username: "newcomer" }, assignments: [] });
 
-    const logout = await app.inject({ method: "POST", url: "/api/auth/logout", headers: { cookie: `${SESSION_COOKIE}=${sessionId}`, origin: PUBLIC_URL } });
+    const logout = await app.inject({ method: "POST", url: "/api/auth/logout", headers: { cookie: `${SESSION_COOKIE}=${sessionId}`, origin: WEB_CLIENT_URL } });
     expect(logout.statusCode).toBe(200);
-    expect(logout.json()).toEqual({ logoutUrl: fakes.oidc.logoutUrl(`${PUBLIC_URL}/`) });
+    expect(logout.json()).toEqual({ logoutUrl: fakes.oidc.logoutUrl(`${WEB_CLIENT_URL}/`) });
     expect(setCookies(logout)).toContain(`${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
     expect(await fakes.runtime.sessions.get(sessionId)).toBeNull();
   });
@@ -257,6 +257,42 @@ describe("browser sign-in", () => {
     const res = await app.inject({ method: "POST", url: "/api/auth/logout", headers: { cookie: `${SESSION_COOKIE}=${id}`, origin: "http://evil.example.com" } });
     expect(res.statusCode).toBe(403);
     expect(await fakes.runtime.sessions.get(id)).not.toBeNull();
+  });
+});
+
+describe("without a web client", () => {
+  let bare: FastifyInstance;
+  let bareFakes: Fakes;
+  beforeAll(async () => {
+    const { createApp } = await import("../../src/app.js");
+    bareFakes = fakeRuntime({ ...SETTINGS, webClientUrl: null });
+    bare = await createApp(undefined, bareFakes.runtime);
+    await bare.ready();
+  });
+  afterAll(async () => {
+    await bare.close();
+  });
+
+  it("mounts no browser sign-in and reads no session cookie", async () => {
+    for (const [method, url] of [["GET", "/api/auth/login"], ["GET", "/api/auth/callback"], ["POST", "/api/auth/logout"]] as const) {
+      expect((await bare.inject({ method, url })).statusCode, url).toBe(404);
+    }
+    const principal = bareFakes.access.add("reader");
+    await bareFakes.runtime.sessions.create("s1", { principalId: principal.id });
+    const cookie = `${SESSION_COOKIE}=s1`;
+    expect((await bare.inject({ url: "/api/auth/me", headers: { cookie } })).json()).toEqual({ authentication: true, user: null, assignments: [] });
+    const write = await bare.inject({ method: "POST", url: "/api/ontologies", headers: { cookie, origin: WEB_CLIENT_URL }, payload: { key: "x" } });
+    expect(write.statusCode).toBe(401);
+  });
+
+  it("still serves bearer callers and MCP sign-in under PUBLIC_URL", async () => {
+    bareFakes.oidc.tokens.set("t", identified("plain"));
+    const me = await bare.inject({ url: "/api/auth/me", headers: { authorization: "Bearer t" } });
+    expect(me.json()).toMatchObject({ authentication: true, user: { username: "plain" } });
+    const mount = "/mcp/ontologies/books/runtime/lenses/public";
+    expect((await bare.inject({ url: `/.well-known/oauth-protected-resource${mount}` })).json()).toMatchObject({
+      resource: `${PUBLIC_URL}${mount}`,
+    });
   });
 });
 

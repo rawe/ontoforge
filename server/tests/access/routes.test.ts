@@ -37,7 +37,8 @@ function routesOf(app: FastifyInstance): string[] {
 const FAKE_AUTH = {
   settings: {
     issuer: "http://issuer.test/realms/x",
-    publicUrl: "http://localhost:5173",
+    publicUrl: "http://localhost:8000",
+    webClientUrl: "http://localhost:5173",
     clientSecret: "test-secret-test-secret-test-secret",
   },
   oidc: {},

@@ -1,11 +1,11 @@
 /**
- * Browser sign-in, mounted at `/api/auth`. The server is the browser's
- * OpenID client: `login` sends the browser to the provider with the login
- * transaction sealed into the login cookie, `callback` finishes it,
- * provisions the principal and starts the session, `logout` ends it and
- * names the provider's end-session page. `me` — mounted with
- * authentication off too — tells the web client the mode and who is
- * signed in.
+ * Browser sign-in, mounted at `/api/auth` when `WEB_CLIENT_URL` is set.
+ * The server is the browser's OpenID client: `login` sends the browser to
+ * the provider with the login transaction sealed into the login cookie,
+ * `callback` finishes it, provisions the principal and starts the session,
+ * `logout` ends it and names the provider's end-session page. `me` —
+ * mounted with authentication off too — tells the web client the mode and
+ * who is signed in.
  *
  * Also the protected-resource metadata (RFC 9728) MCP clients discover the
  * provider through, mounted at the root with authentication on.
@@ -44,22 +44,22 @@ const LogoutResponse = z.object({ logoutUrl: z.string() });
 
 /**
  * Where the browser may be sent after signing in: a path with its query on
- * `PUBLIC_URL`'s origin. Anything else — another origin, a scheme, a
+ * `WEB_CLIENT_URL`'s origin. Anything else — another origin, a scheme, a
  * backslash or a control character browsers may read as one — becomes `/`.
  */
-export function normalizeReturnTo(value: string | undefined, publicUrl: string): string {
+export function normalizeReturnTo(value: string | undefined, webClientUrl: string): string {
   if (value === undefined || value === "" || /[\\\u0000-\u001f\u007f]/.test(value)) return "/";
   let url: URL;
   try {
-    url = new URL(value, publicUrl);
+    url = new URL(value, webClientUrl);
   } catch {
     return "/";
   }
-  if (url.origin !== new URL(publicUrl).origin) return "/";
+  if (url.origin !== new URL(webClientUrl).origin) return "/";
   return url.pathname + url.search;
 }
 
-/** Routes mounted at `/api/auth`: `me` always, the rest with authentication on. */
+/** Routes mounted at `/api/auth`: `me` always, the rest with authentication on and a web client. */
 export const authRouter: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/me",
@@ -82,17 +82,18 @@ export const authRouter: FastifyPluginAsyncZod = async (app) => {
 
   const auth = app.auth;
   if (auth === null) return;
-  const { publicUrl } = auth.settings;
-  const names = cookieNames(publicUrl);
+  const { webClientUrl } = auth.settings;
+  if (webClientUrl === null) return;
+  const names = cookieNames(webClientUrl);
   const key = loginCookieKey(auth.settings.clientSecret);
-  const callbackUrl = `${publicUrl}/api/auth/callback`;
+  const callbackUrl = `${webClientUrl}/api/auth/callback`;
   const clearLogin = clearedCookie(names.login, LOGIN_COOKIE_PATH);
 
   app.get(
     "/login",
     { schema: { tags: ["auth"], querystring: LoginQuery } },
     async (request, reply) => {
-      const returnTo = normalizeReturnTo(request.query.returnTo, publicUrl);
+      const returnTo = normalizeReturnTo(request.query.returnTo, webClientUrl);
       const { state, nonce, codeVerifier, url } = await auth.oidc.startLogin(callbackUrl);
       const sealed = sealLogin({ state, nonce, codeVerifier, returnTo, exp: Date.now() + LOGIN_LIFETIME_MS }, key);
       return reply
@@ -143,7 +144,7 @@ export const authRouter: FastifyPluginAsyncZod = async (app) => {
         await auth.sessions.delete(sessionId);
       }
       reply.header("set-cookie", clearedCookie(names.session, "/"));
-      return { logoutUrl: auth.oidc.logoutUrl(`${publicUrl}/`) };
+      return { logoutUrl: auth.oidc.logoutUrl(`${webClientUrl}/`) };
     },
   );
 };

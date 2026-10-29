@@ -4,9 +4,41 @@ These continue the two principles in the root [AGENTS.md](../AGENTS.md) — *con
 first* and *single source of truth* — which apply everywhere. The ones below apply to
 writing under `docs/`, and keep their original numbering.
 
-3. **Progressive disclosure.** Layer documents from overview to detail. High-level docs link to deeper docs, not duplicate their content.
-4. **When redundancy exists, maintain consistency.** Brief summaries referencing detail docs are acceptable. But if two places state the same fact, both must stay in sync. When they diverge, flag it.
-5. **Don't document what the code makes obvious.** Reference code by semantic anchors (module names, class names, section names) — never by file:line numbers. Feature docs should weave code references into prose, not be bare reference lists. Avoid code blocks in docs unless needed to illustrate a major pattern.
-6. **Respect document lifecycle.** Documents form a directed chain: concepts → architecture → capabilities → code. Later documents may reference earlier ones, never the reverse. Place information where it belongs in this lifecycle.
-7. **Status quo only.** `docs/` describes the system as it is. No history, no dates, no "planned", no migration notes — git holds history. Rejected alternatives belong only in an ADR ([workflows/recording-decisions.md](workflows/recording-decisions.md)). Unbuilt ideas are not documented at all.
-8. **Ontology-storage-neutral above the adapter.** Only `storage-adapters.md` describes how a backend stores ontologies. Every other document describes behaviour that holds for any ontology storage adapter. A rule or ADR that is about the ontology storage choice names it.
+For the practical steps to add, update or move documentation, use
+[Writing and updating documentation](workflows/documenting.md).
+
+3. **Progressive disclosure.** Layer documents from overview to detail. Overviews introduce
+   the essential ideas and link to the detailed home; give readers enough context to
+   understand a page without following every link.
+4. **One home per fact.** Each kind of information has its home:
+   - **Essential architectural constraints:** [architecture-constraints.md](architecture-constraints.md).
+   - **System structure, mechanisms and flows:** [architecture.md](architecture.md).
+   - **Feature behavior, rules, limits and examples:** its document in [capabilities/](capabilities/).
+   - **Interface behavior and access:** [interfaces/](interfaces/README.md); the web client in
+     [product-surface/](product-surface/README.md).
+   - **Storage contract and implementation:** [storage-adapters/](storage-adapters/README.md).
+   - **Contributor details tied to the implementation:** [implementation/](implementation/).
+   - **Configuration variables and defaults:** the configuration table in the root
+     [README.md](../README.md); procedures in [workflows/](workflows/).
+   - **Terms:** the [glossary](glossary.md).
+   - **The alternatives weighed for a decision:** its ADR in [adr/](adr/).
+
+   Elsewhere, name the concept and link to its home; do not restate its details.
+5. **Write at the right level.** Architecture explains system boundaries, responsibilities,
+   invariants and important flows, without depending on or linking to source code. Capability
+   documents describe what a feature does and its important rules, not a tour of its classes
+   or functions. Implementation-focused guides may reference code when it helps their
+   readers; prefer durable semantic anchors over line numbers. Source code may refer to
+   documentation that explains a rule or design. Use examples when they clarify behavior.
+6. **Link for a reader's purpose.** A documentation map may link to any destination. An
+   overview may link to a deeper page for further reading without making its own explanation
+   depend on that page. A capability may link to a related capability where their behavior
+   interacts, and to its interface or UI documentation. Interface and product documentation
+   link to the capability that owns the behavior. Link to the specific useful section, avoid
+   repeating the same link throughout a passage, and do not force a reader to follow a chain
+   of links to understand the basic point.
+7. **Status quo only.** `docs/` describes the system as it is. No plans, no unbuilt ideas, no
+   history, no dates, no migration notes — git holds history. A rule may carry a brief
+   reason; the alternatives weighed for a decision live only in its ADR, which the owning
+   document links ([recording decisions](workflows/recording-decisions.md)).
+8. **Ontology-storage-neutral above the adapter.** Only `storage-adapters/` describes how a backend stores ontologies. Every other document describes behavior that holds for any ontology storage adapter. A rule or ADR that is about the ontology storage choice names it.

@@ -5,7 +5,7 @@ OntoForge determines their permissions from roles assigned within OntoForge.
 Authentication is disabled by default; in that mode, requests are trusted and role
 checks are skipped.
 
-[Access terminology](../README.md#access).
+[Access terminology](../glossary.md#access).
 [Authentication and authorization architecture](../architecture.md#authentication-and-authorization).
 [Authentication configuration](../../README.md#authentication).
 
@@ -191,5 +191,5 @@ is enabled again. Threads have no principal owner.
 | Whether authentication is on | `authentication` in `/api/server/info` and `/api/auth/me` | — | — |
 | User management | `/api/users` and an ontology's `access` | — | the Users page and the Studio's Access page |
 
-[Authentication endpoints](../interfaces.md#sign-in).
-[Role-specific UI controls](../product-surface.md#signing-in).
+[Authentication endpoints](../interfaces/server.md#sign-in).
+[Role-specific UI controls](../product-surface/README.md#signing-in).

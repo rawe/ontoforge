@@ -1,68 +1,58 @@
-# Recording Decisions
+# Recording architectural decisions
 
-> What counts as a decision, where it is written and in which format. This is the only
-> place that says so; every other document links here.
+Every architectural decision needs the user's approval before it is made
+([AGENTS.md](../../AGENTS.md)). Once approved, it is written down in up to three places,
+each answering one question:
 
-Every architectural decision needs the user's approval before it is made. Once approved,
-it is recorded as below.
+| Question | Where |
+|---|---|
+| What does the system do now? | The owning document ([one home per fact](../AGENTS.md)) — always |
+| Which boundary must every change preserve? | [architecture-constraints.md](../architecture-constraints.md) — rarely |
+| Why this and not the obvious alternative? | An ADR in [adr/](../adr/) — only when alternatives were weighed |
 
-## Rule or ADR
+Most decisions need only the owning document.
 
-| | [decisions.md](../decisions.md) | [adr/](../adr/) |
-|---|---|---|
-| Answers | What must I not violate? | Why not the obvious alternative? |
-| Holds | Every rule in force, grouped by concern | The rejected alternatives behind one or more rules |
-| Written | For every decision | Only when alternatives were seriously weighed and would plausibly be proposed again |
-| Read | Before any work | When working on the rule that links to it |
+## Architectural constraint
 
-Most decisions need only the rule.
-
-## Rule
-
-A rule belongs in `decisions.md` when it constrains the design and an agent could break
-it without noticing. It goes under the section of its concern:
-
-```markdown
-**<The rule, in one sentence.>** <The reason, in one or two sentences.>
-→ [adr/NNNN](adr/NNNN-slug.md)
-```
-
-The link exists only when an ADR does. No examples, field lists, limits or procedures.
-Docs and code link a rule by its section anchor and never quote its wording.
+Add an entry only when it protects an important architectural boundary or guarantee that
+contributors need before designing any change. State the obligation in one bold sentence,
+a short reason and a link to its home. Feature defaults, limits, naming conventions and
+procedures stay with their owners.
 
 ## ADR
 
-One file per deliberation, `adr/NNNN-slug.md`, numbered with the next free four-digit
-number; numbers are never reused. Every rule it backs links to it.
+Write an ADR when alternatives were seriously weighed and would plausibly be proposed
+again. Rejected alternatives are written only in an ADR; the owning document links to it.
+
+One file per decision, `adr/NNNN-slug.md`, numbered above any number used before; numbers
+are never reused.
 
 ```markdown
 # <The decision, as a short title>
 
-Rule: [<Section>](../decisions.md#<section>)
+Current behavior: <links to the owning documents>
 
 ## Context
 
 <The situation that forced a choice, in two or three sentences.>
+
+## Decision
+
+<The choice and its scope, in one or two sentences.>
+
+## Consequences
+
+<Only when not obvious: the important costs and risks.>
 
 ## Rejected
 
 - **<Alternative>.** <Why not, in one or two sentences.>
 ```
 
-An ADR never restates the rule and carries no status or date.
+An ADR carries no status or date and does not repeat the owning document's rules.
 
 ## When a decision changes
 
-`decisions.md` and `adr/` hold only what is in force. Change or delete the rule, rewrite
-or delete its ADR, and write a new ADR only if the new decision was itself deliberated.
-Git keeps the history.
-
-## What belongs elsewhere
-
-- A capability's behaviour, fields and limits — its document in `capabilities/`
-- The web client — `product-surface.md`
-- Procedures — `workflows/`
-- Storage backend internals — `storage-adapters.md`
-- Configuration variables and their defaults — the configuration table in the root `README.md`
-- Terms — the [glossary](../README.md#glossary)
-- History, dates, migrations — git
+`adr/` holds only decisions in force; git keeps the history. Update the owning document,
+then rewrite or delete the ADR so it states the decision as it now stands. Write a new ADR
+only if the new decision was itself weighed against alternatives.

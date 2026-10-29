@@ -10,7 +10,7 @@ being handed the database.
 **Normative anchor.** OQL's reference is the ISO GQL standard and its GPML pattern
 sublanguage. It is not defined by, and does not track, any storage vendor's query
 language. Where an implementation's own dialect and the standard disagree, the standard
-wins. The rule and its reasoning are in [../decisions.md](../decisions.md#query).
+wins. The parser's grammar is openCypher-shaped; GQL decides what is correct.
 
 **Written in keys.** Node labels are entity type keys, relationship types are relation
 type keys, and property names are property keys — exactly as declared in the schema, in
@@ -23,7 +23,7 @@ active database speaks is the adapter's private business: invisible to callers, 
 error messages, and not part of this contract. Acceptance and validation therefore do not
 depend on the backend; where the execution of an accepted query is known to fall short of
 this contract, the shortfall is enumerated in
-[../storage-adapters.md](../storage-adapters.md#known-limitations).
+[../storage-adapters/](../storage-adapters/README.md#known-limitations).
 
 ## The read-only guarantee
 
@@ -42,8 +42,7 @@ transaction mode. Four categories:
 The language is a closed enumeration: what is named here is the whole surface. Any
 construct or function the grammar parses but this enumeration does not name is rejected
 at validation with a hint naming the supported alternative. Widening the surface is a
-deliberate addition; narrowing it is a breaking change. The rule this enforces is in
-[../decisions.md](../decisions.md#query).
+deliberate addition; narrowing it is a breaking change.
 
 - **Clauses.** MATCH, OPTIONAL MATCH, WHERE, WITH, RETURN, ORDER BY with ASC and DESC,
   SKIP, LIMIT, and AS aliases. A query carries at most one WITH, so a pipeline is at
@@ -145,7 +144,7 @@ connects.** Relation reads outside OQL do return them; query results do not.
 A client that needs to draw a graph from query results must therefore reconstruct endpoints
 itself, from the relation type's declared source and target and the entities in the same
 row. The reconstruction the web client performs, including how it resolves ambiguity, is in
-[../product-surface.md](../product-surface.md#client-side-contracts-the-api-does-not-imply).
+[../product-surface/](../product-surface/client-contracts.md#client-side-contracts-the-api-does-not-imply).
 
 ### Ordering and paging
 
@@ -162,7 +161,7 @@ the same carve-out the list operations state.
 
 ## Through the interfaces
 
-Complete operation and tool index: [../interfaces.md](../interfaces.md).
+Complete operation and tool index: [../interfaces/](../interfaces/README.md).
 
 | Reached by | How |
 |---|---|

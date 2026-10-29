@@ -4,10 +4,12 @@ How a client — an agent, a script, an import — writes many entities and rela
 go. A bulk insert is not a write path of its own: it fills [changesets](changesets.md)
 with staging requests that each list many calls, names entities by their
 [identity](entity-identity.md), and commits in chunks. This page is the recipe; the rules
-it follows stay in those two documents.
+it follows stay in those two documents: [puts](changesets.md#put),
+[staging many calls](changesets.md#many-calls-in-one-request), and
+[changeset limits](changesets.md#limits), along with the identity rules.
 
-Vocabulary: [../README.md](../README.md#changesets). Routes:
-[../interfaces.md](../interfaces.md#changesets).
+Vocabulary: [glossary](../glossary.md#changesets). Routes:
+[../interfaces/](../interfaces/runtime-rest.md#changesets).
 
 ## When to use it
 

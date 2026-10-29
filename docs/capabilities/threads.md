@@ -59,6 +59,13 @@ navigator's answer cites them by ref. An entity reported again replaces what was
 for its ref. They belong to the turn's stream only: a thread
 does not keep them.
 
+The shared card does not claim a common relevance or provenance judgment: each kind
+meets entities differently. What is shared is the entity's identity and label and whether
+it was handed to the answer model; kind-specific context keeps its own meaning.
+
+All kinds use the shared `entities` event for these cards; a kind's own events and tool
+events do not carry the cards ([ADR 0027](../adr/0027-one-shared-entities-event.md)).
+
 ## Lifetime
 
 A thread expires after a period without activity: a message accepted for it or a turn
@@ -79,4 +86,4 @@ wherever the assistant kind's list is.
 
 REST only, per assistant kind: the chat request's optional thread id, the stream's leading
 thread event, the read route, and the refusals for an unknown and a busy thread
-([../interfaces.md](../interfaces.md#assistant-chat-and-threads)). No MCP tool reaches a thread.
+([../interfaces/](../interfaces/assistants-rest.md#assistant-chat-and-threads)). No MCP tool reaches a thread.

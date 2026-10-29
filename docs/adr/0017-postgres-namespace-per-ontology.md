@@ -1,12 +1,24 @@
 # One PostgreSQL namespace per ontology
 
-Rule: [Storage](../decisions.md#storage)
+Current behavior: [Ontology isolation in PostgreSQL](../storage-adapters/postgresql.md#how-ontologies-are-isolated)
 
 ## Context
 
 Many isolated ontologies share one PostgreSQL database behind the persistence port.
 Isolation must never depend on a filter a query could forget. The physical options are a
 discriminator column, a namespace per ontology, or a database per ontology.
+
+## Decision
+
+Keep every ontology in its own PostgreSQL namespace inside the shared ontology
+database. Reserve the public namespace for server-wide data.
+
+## Consequences
+
+Isolation is structural rather than dependent on a discriminator predicate in every
+query. Ontologies share database provisioning instead of requiring separate databases,
+connection pools and cross-database registry operations. Changing this mapping would
+affect physical storage, references, uniqueness and index management.
 
 ## Rejected
 

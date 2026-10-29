@@ -70,7 +70,7 @@ in bindings and no entity type key. A final search step returns the plain search
 
 ### Identity and ownership
 
-- Query keys follow the lens-resource [key](../README.md) rule — hyphens are allowed,
+- Query keys follow the lens-resource [key](../glossary.md#schema-and-design) rule — hyphens are allowed,
   unlike in type and property keys — at up to 64 characters.
 - A key is unique within its lens. Two lenses may each hold a `people_by_skill`.
 - Writing a saved query is an upsert on that key: it creates or replaces wholesale.
@@ -114,8 +114,7 @@ It would be an unreferenced declaration, and the definition would be rejected.
 | Parameter values coerce to their declared types | — | yes |
 
 Structural and cross-check failures are collected and reported together rather than one at
-a time, as validation is expected to (see
-[../decisions.md](../decisions.md#schema-and-data)). The OQL check at definition time is
+a time, so a caller can correct the rejected definition in one round trip. The OQL check at definition time is
 skipped when the lens's schema cannot be loaded; the run-time check is not, so a query stored
 that way still fails safely on first use.
 
@@ -167,7 +166,7 @@ their *descriptions* — nothing else is embedded, not the name and not the step
 requires an embedding provider and is rejected as unavailable without one. It returns key,
 name, description, parameters and a score, but **not** the steps. Its result count and
 score floor default conservatively — the exact values and their ranges are with the route
-in [../interfaces.md](../interfaces.md#saved-queries-1).
+in [../interfaces/](../interfaces/runtime-rest.md#saved-queries).
 
 A saved query's description is embedded when it is written and when it is imported, so
 editing a description re-embeds it. The bulk rebuild operation described in
@@ -177,7 +176,7 @@ with none, discovery has nothing to rebuild and the rebuild leaves the descripti
 ## Through the interfaces
 
 Definition is a modeling concern, execution a runtime one — the same split as everywhere
-else. Complete operation index: [../interfaces.md](../interfaces.md).
+else. Complete operation index: [../interfaces/](../interfaces/README.md).
 
 | | Modeling (define) | Runtime (use) |
 |---|---|---|

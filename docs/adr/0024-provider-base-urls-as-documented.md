@@ -1,6 +1,6 @@
 # Provider base URLs as the provider documents them
 
-Rule: [Deployment](../decisions.md#deployment), [Naming](../decisions.md#naming)
+Current behavior: [Optional features](../../README.md#optional-features)
 
 ## Context
 
@@ -10,6 +10,11 @@ a path (`/api/v1`, `/v1beta/openai`). A server that appends its own version turn
 copied value into `/v1/v1`. That shows up only as a 404 behind a generic failure on the
 first model call. This concerns the OpenAI-compatible provider; the Ollama and Anthropic
 providers take a bare host, as those vendors document it.
+
+## Decision
+
+A base URL is written as the provider documents it, and one that breaks this rule stops
+the server at startup with the corrected value in the message.
 
 ## Rejected
 

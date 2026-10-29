@@ -1,11 +1,15 @@
 # Any-term keyword matching by default, all-term as a strategy
 
-Rule: [Search](../decisions.md#search)
+Current behavior: [Strategies and availability](../capabilities/search.md#strategies-and-availability)
 
 ## Context
 
 Keyword search needs one way to combine query terms by default, and a way to offer the
 other without splitting the caller's choice.
+
+## Decision
+
+Keyword matching is any-term by default; all-term matching is a strategy of its own.
 
 ## Rejected
 

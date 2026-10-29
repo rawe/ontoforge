@@ -1,10 +1,18 @@
 # Rulesets of fixed rules, write access on one ladder
 
+Current behavior: [Rulesets](../capabilities/rulesets.md)
+
 ## Context
 
 The clients of one URL need several limits that a person sets and may change at any time:
 where in a hierarchy they may write, how they may change data, and more to come. Each
 limit has to be clear to the person who picks it, and checked in one place.
+
+## Decision
+
+A ruleset is a fixed record with one value per rule. Write access is one ladder of fixed
+levels, checked against one operation table that also gives the tool list and the
+refusal text.
 
 ## Rejected
 

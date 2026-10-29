@@ -1,7 +1,11 @@
 # Architecture
 
-How OntoForge is put together. Concepts and vocabulary: [README.md](README.md). The rules
-this document obeys: [decisions.md](decisions.md).
+How OntoForge is put together. [Concepts](concepts.md) explain the mental model; the
+[glossary](glossary.md) defines its terms.
+
+This document explains the system's components, boundaries, invariants and major flows.
+Feature behavior and interface details are described in the linked capability and
+interface documents; physical ontology storage is described in the adapter documentation.
 
 ## Components
 
@@ -12,7 +16,8 @@ two more.
 runtime API, both MCP servers and the OpenAPI description. There is no mode switch and no
 partial deployment: every instance serves everything, and any number of instances share one
 database and one [shared state](#shared-state) — and, with authentication on, one access
-database and one identity provider.
+database and one identity provider. The schema and the data it governs must not diverge
+between servers, nor may one server expose what another protects.
 
 **Web client** — a separate static application talking to the server over REST only. It
 holds no privileged path; anything it does can be done over the API. With authentication
@@ -20,10 +25,12 @@ on, it is served from the deployment's public address, which proxies the API to 
 server, so the browser's session cookie reaches the server.
 
 **Database** — one instance, holding every ontology's schema and instance data together.
-Reached only through the persistence port.
+Reached only through the persistence port. Keeping them in different stores would make
+schema changes distributed transactions without adding useful isolation; their physical
+separation inside the database is the adapter's business.
 
 **Storage adapter** — the single active implementation of that port. See
-[storage-adapters.md](storage-adapters.md).
+[storage-adapters/](storage-adapters/README.md).
 
 **Access database** — with authentication on, a PostgreSQL database of its own beside the
 ontology database: principals, their identities, role assignments and the audit of every
@@ -141,7 +148,7 @@ agent ever spans two. The architecture makes that structural rather than checked
   same way.
 - **The physical isolation mechanism is the adapter's private business.** Nothing above
   the port knows how an ontology's data is kept apart from its neighbours'; the contract
-  and the adapter's mechanism are in [storage-adapters.md](storage-adapters.md).
+  and the adapter's mechanism are in [storage-adapters/](storage-adapters/README.md).
 
 The registry — not any storage catalog — is the authoritative list of ontologies. Zero
 ontologies is a valid server state: a fresh server starts empty, nothing is auto-created
@@ -205,8 +212,8 @@ identity properties' values, the one system property a lens can withhold
 ([entity identity](capabilities/entity-identity.md)). They are distinguished by a leading underscore, and since no user-defined key
 may begin with one, the namespaces cannot collide.
 
-That separation rests entirely on the key pattern being enforced, and one entry point does
-not enforce it — see the invariants below.
+The key pattern keeps user-defined properties separate from system properties;
+modeling writes and schema import both enforce it.
 
 Relation endpoint ids are the exception to the underscore convention: reads return them as
 `fromEntityId` and `toEntityId`, without a prefix, even though they are as
@@ -235,9 +242,9 @@ Enforced in the service layer on every write path, whichever interface it arrive
 is the summary; each one is stated with its consequences in
 [capabilities/schema-modeling.md](capabilities/schema-modeling.md).
 
-- Ontology keys follow the schema [key](README.md) rule and are at most 59 characters;
+- Ontology keys follow the schema [key](glossary.md#schema-and-design) rule and are at most 59 characters;
   ontology keys and display names are unique server-wide.
-- Type and property keys follow the schema [key](README.md) rule and are at most 64
+- Type and property keys follow the schema [key](glossary.md#schema-and-design) rule and are at most 64
   characters, on every path that sets them — the modeling interfaces and import alike.
 - Entity type keys, relation type keys, lens keys and lens names are unique within
   their ontology. Property keys are unique within their owning type.
@@ -258,8 +265,9 @@ Scoping cuts in three places: schema reads omit what is out of scope, writes rej
 and read results are filtered — including individual columns of a query result.
 
 One asymmetry is deliberate and easy to get wrong when reimplementing: writes validate
-against the scoped schema but apply defaults from the full schema. Relation endpoint types are checked against the full schema for the same reason. The rule
-and what it buys are in [decisions.md](decisions.md#schema-and-data); the three operations
+against the scoped schema but apply defaults from the full schema, so a narrow lens cannot
+create data invalid under a wider one. Relation endpoint types are checked against the
+full schema for the same reason. The three operations
 that consult the full schema instead of the lens, and what each one costs a caller, are in
 [capabilities/ontology-lenses.md](capabilities/ontology-lenses.md#the-lensfull-schema-asymmetry).
 
@@ -279,8 +287,8 @@ Each server process holds its own cache. Every entry is tagged with the
 current revision first and uses an entry only while it is still that revision, otherwise
 builds it again. A design change made on any server is therefore seen by the next request
 on every other, with no signal between them, and an ontology deleted and created again
-under its key never meets its predecessor's entries. The cache holds at most 512 lenses
-and 128 search contexts, dropping the least recently used first.
+under its key never meets its predecessor's entries. Each process bounds its cache;
+eviction changes what it must rebuild, not which design revision a request may use.
 
 ## Design revision
 
@@ -290,7 +298,7 @@ design change: one transaction that holds the ontology's design exclusively and 
 the revision, committing whole or not at all. Every data write, immediate or a changeset's
 commit, validates against the cached schema of the revision it read and then runs its
 checks, the write and its search work in one transaction that holds the design shared and
-first checks the revision is unchanged ([decisions.md](decisions.md#storage)). Shared holds
+first checks the revision is unchanged. Shared holds
 never wait for each other; a design change waits for running writes, and writes arriving
 meanwhile wait for it. When the revision moved, the write loads the schema again,
 validates again and retries; a design that keeps moving, or a wait of more than five
@@ -303,11 +311,12 @@ calls reads and writes against the design current at that call.
 
 Shared state is what every server must see alike but may lose: the assistants' threads
 ([thread store](#thread-store)) and, with authentication on, the browser sessions
-([authentication](#authentication-and-authorization)). It sits beside the persistence port rather than behind it
-([decisions.md](decisions.md#storage)), and one setting chooses where all of it lives:
+([authentication](#authentication-and-authorization)). It sits beside the persistence port rather than behind it,
+and one setting chooses where all of it lives:
 memory, which serves one server process, or Valkey, shared by every server that names it.
 A configured Valkey that does not answer, that would evict data rather than refuse it, or
-that cannot run the scripts fails the boot; nothing falls back to memory.
+that cannot run the scripts fails the boot; nothing falls back to memory. Falling back
+would split shared state between servers without an obvious failure.
 
 **What belongs there.** State another server must see, whose loss users recover from, and
 that expires on its own. Durable or authoritative state, and state that must commit with
@@ -338,8 +347,8 @@ cascades: a deleted ontology, lens or assistant leaves its threads to retention.
 completed turn. A thread keeps at most 25 turns; older ones are removed. The model sees at
 most the last 8. A thread's state takes at most 8 MiB; a turn that would exceed it fails.
 
-**One turn per thread, atomic turns.** A turn holds its thread under a lease of 30 seconds,
-renewed every 10 while it runs; a message to a thread whose lease is held, on any server,
+**One turn per thread, atomic turns.** A turn holds its thread under a renewable lease;
+a message to a thread whose lease is held, on any server,
 is refused, never queued. The turn runs on a copy of the thread's state in its own process
 and stores the result once, when it completes — only while it still holds the lease, and
 ending the lease in the same step. A cancelled or failed turn stores nothing and releases
@@ -364,20 +373,20 @@ its modeling and runtime routes under `assistants/<kind>`, its own storage, its 
 of a configuration, its built-in default and its place in transfer under the lens's
 `assistants`. Every kind shares the
 [thread store](#thread-store), the chat request and stream frame, and the one `entities`
-event ([decisions.md](decisions.md#interfaces)). Runtime's assistant kit holds the
+event ([interfaces](interfaces/assistants-rest.md#assistant-chat-and-threads)). Runtime's assistant kit holds the
 kind-neutral helpers: the live trace of a fixed pipeline's steps, and the model calls —
 structured output for a decision, a stream for the answer.
 
-The [navigator](capabilities/navigators.md)'s turn is a fixed LangGraph pipeline. It
+The [navigator](capabilities/navigators.md)'s turn is a fixed pipeline. It
 announces its steps when the turn starts and traces each as it runs, in events prefixed
 with the navigator's name, and streams the entities its answer may use before the answer
-as the shared `entities` event ([interfaces.md](interfaces.md#assistant-chat-and-threads)).
+as the shared `entities` event ([interfaces/](interfaces/assistants-rest.md#assistant-chat-and-threads)).
 Its model calls are never retried.
 
 ## Authentication and authorization
 
 One startup setting turns authentication on for a server; every server of a deployment
-shares it ([decisions.md](decisions.md#system-shape)). Off, every request is trusted and
+shares it. Off, every request is trusted and
 nothing below runs. What a caller experiences, and what each role allows:
 [capabilities/authentication.md](capabilities/authentication.md).
 
@@ -392,7 +401,9 @@ on the next request, on every server. A sign-in identity seen for the first time
 principal with no role, created once however many first requests race.
 
 **Browser sessions.** The server is the browser's OpenID client: authorization code with
-PKCE, as a confidential client ([decisions.md](decisions.md#access)). A login in progress
+PKCE, as a confidential client ([ADR 0031](adr/0031-server-as-browser-openid-client.md)).
+The browser holds an HttpOnly cookie, not a provider token a script could take; no further
+component is deployed, and losing a session requires only a new sign-in. A login in progress
 keeps nothing on the server; it travels in a short-lived, sealed cookie that any server of
 the deployment can open. The session lives in the shared state, keyed by a digest of the
 cookie's random id, and expires after its idle time or at the latest 24 hours after
@@ -403,7 +414,8 @@ address's origin, and cross-origin browser calls are allowed without credentials
 **What a route needs.** Every route declares its need — public, any signed-in caller, a
 platform role, the administrator or any member of the ontology in its path, a role on the
 lens in its path for an operation, or user administration — when it is registered; a
-route without one fails the boot. Runtime routes take their operation from the same table
+route without one fails the boot, so a forgotten declaration cannot leave a route open.
+Runtime routes take their operation from the same table
 that classifies a ruleset's writes, so one table says what writes. Public routes resolve no
 caller and keep working whatever the provider or the access database does.
 
@@ -412,6 +424,14 @@ and tells handlers which ontologies and lenses a caller may see listed. The MCP 
 through it as REST does, and a runtime mount builds its tool list from the caller's role as
 from a ruleset's level. An assistant's tool calls run inside its chat request, already
 judged for that lens.
+
+Authorization belongs to OntoForge. Roles are assigned there only, never inferred from
+provider groups, administrator flags or email addresses: those may change or be reused
+outside OntoForge's control. The verified issuer and subject identify the principal;
+current assignments determine its rights. Principals and assignments must be durable and
+independent of ontology design, transfer or deletion, which is why they use their own
+access database and port. Moving that database to a separate instance changes only its
+address ([ADR 0030](adr/0030-access-database-of-its-own.md)).
 
 ## Request lifecycle
 
@@ -440,7 +460,8 @@ A runtime write, which is the longest path:
 Two properties of the validation step are contractual rather than incidental, and both are
 rules rather than implementation choices:
 
-**All errors are collected, not the first one** — [decisions.md](decisions.md#schema-and-data).
+**Validation collects every error before answering.** A caller can correct the rejected
+request in one round trip rather than discovering faults one at a time.
 
 **Coercion is strict.** Values are converted, never guessed. What each data type converts
 and what it refuses is in
@@ -462,7 +483,7 @@ as the immediate path.
 database transaction: every operation of that store, and of the ruleset and changeset
 stores it hands out, uses the transaction's one connection, and taking a second connection
 inside it is a programming error
-([storage-adapters.md](storage-adapters.md#transactions)).
+([storage-adapters/](storage-adapters/contract.md#transactions)).
 
 **The commit lock.** Each ontology has one commit lock, held only by commits and checks
 and only for their transaction; a second commit on the ontology is refused at once rather
@@ -475,14 +496,15 @@ Every search index keeps entries composed from the
 current state of entities — their own fields, their relations together with the entities
 at the other end, and the passages of their documents. Entries are built in the
 background, never on the request path, so search over them is eventually consistent
-([decisions.md](decisions.md#search)).
+([index lifecycle](capabilities/search-indices.md#lifecycle)).
 
 **Every write queues its work in its own transaction.** Entity and relation writes —
 create, update, delete, document edits — hand the store, with the write, the search work
 they cause: which parts of which entities to compose again. The store queues it in the
 write's transaction, so the work exists exactly when the write commits; the queue lives in
-the same database, behind the persistence port. A deletion removes the affected entries
-with the write instead of queueing anything. A change no index reads queues nothing.
+the same database, behind the persistence port, without an external queue or broker. A
+deletion removes the affected entries with the write instead of queueing anything. A
+change no index reads queues nothing.
 
 **A worker in every server process drains the queue.** It claims a batch under a
 time-limited lease — items another process holds are skipped, so any number of processes
@@ -504,7 +526,8 @@ and, for semantic entries, the embedding model, for keyword entries the keyword 
 set. When no generation matches, a new one is built from a full backfill beside the
 active one, which keeps serving until the new one is complete and takes its place in one
 step; one process at a time builds its search structure. An entry's semantic text is labelled with the schema's display names, unless the
-index renders it from a template; its keyword text holds values only ([decisions.md](decisions.md#search)).
+index renders it from a template; its keyword text holds values only
+([composition](capabilities/search-indices.md#composition)).
 
 **Managed indices follow the schema.** After every schema change the modeling side derives
 the managed indices again from the full schema — creating, updating and deleting their
@@ -522,55 +545,9 @@ new work. Ranked search reads the ready generations
 
 ## Error model
 
-Every error response has the same envelope:
-
-```json
-{ "error": { "code": "...", "message": "...", "details": { } } }
-```
-
-There are exactly ten top-level codes:
-
-| Condition | Status | Code | `details` |
-|---|---|---|---|
-| No valid credential (authentication on) | 401 | `UNAUTHENTICATED` | — |
-| The caller's roles do not allow it (authentication on) | 403 | `FORBIDDEN` | — |
-| The identity provider's keys cannot be fetched to check a token (authentication on) | 503 | `PROVIDER_UNAVAILABLE` | — |
-| Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — or `code` |
-| Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | —, `code` or `violations` |
-| Input rejected | 422 | `VALIDATION_ERROR` | `fields` map, `errors` list, `violations` list with `total`, or `items` list |
-| Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses`, `affectedIndices` |
-| Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
-| Malformed request body | 400 | `INVALID_JSON` | — |
-| Request body over the configured limit | 413 | `PAYLOAD_TOO_LARGE` | — |
-
-Four refinements:
-
-**`details.code` narrows, it does not replace.** Where it appears, the top-level code
-stays one of the ten. A request for an unavailable search strategy, search with no available strategy,
-saved-query discovery with no embedding provider, an AI request with no
-language-model provider configured answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
-An assistant thread that is unknown, expired, bound to another assistant or started by
-another principal answers `404 RESOURCE_NOT_FOUND` with `details.code` of
-`THREAD_NOT_FOUND`, and a message to a thread still running `409 RESOURCE_CONFLICT` with
-`details.code` of `THREAD_BUSY` ([thread store](#thread-store)).
-
-**A refused relation rules write carries its violations.** A relation rules change — on
-create, update or import — that the stored relations break answers `409
-RESOURCE_CONFLICT` with `details.violations`: one entry per broken rule, `two_parents`,
-`cycle` or `duplicate_pair`, each with the `count` of offending entities, or of pairs
-for `duplicate_pair`, and up to five entities as `{type, id}`, a pair by its source
-([capabilities/schema-modeling.md](capabilities/schema-modeling.md#relation-rules)). The
-message carries the counts, so an MCP caller sees them too.
-
-**`STORAGE_ERROR` carries an id, not a cause.** A driver message names the vendor and its
-physical objects, which must not reach a client. The adapter logs the original against a
-generated `errorId` and returns only that id, so a reported failure can still be traced to
-its server-side record.
-
-**What a caller holds no role in is not found.** An ontology or lens outside the caller's
-assignments answers `RESOURCE_NOT_FOUND`, as an unknown key does; `FORBIDDEN` is for what
-the caller may know of ([capabilities/authentication.md](capabilities/authentication.md#what-a-caller-sees)).
-A `401` carries a `WWW-Authenticate` challenge ([interfaces.md](interfaces.md#sign-in)).
+REST failures share an error envelope and a consistent taxonomy. MCP expresses the
+same failures as tool errors. The interface contract, including error codes and details,
+is in [Interfaces](interfaces/README.md#errors).
 
 ## Startup
 
@@ -578,7 +555,7 @@ Ordered, and failure at any step prevents serving:
 
 1. Connect storage, verify reachability, ensure the server-wide constraints and indexes
    exist, and bring storage of an older storage version up to date
-   ([decisions.md](decisions.md#storage)). Per-ontology storage is provisioned when an
+   ([storage lifecycle](storage-adapters/contract.md#lifecycle)). Per-ontology storage is provisioned when an
    ontology is created; at boot only an upgrade reaches into it. Open the
    [shared state](#shared-state). With authentication on, open the access database:
    create it when it is missing and bring its schema up to date, once however many
@@ -600,15 +577,19 @@ Ordered, and failure at any step prevents serving:
 
 With authentication on, neither the access database nor the provider is optional: either
 failing fails the boot, and nothing falls back to running without authentication
-([decisions.md](decisions.md#access)). With it off, neither is touched.
+because a healthy-looking, unprotected server would expose every ontology. A failed
+authorization check refuses the protected request. With authentication off, neither
+dependency is touched.
 
 The registry walks in steps 4 and 5 do nothing when no ontology exists — a zero-ontology
-server boots clean. Note step 4 warns and does not repair — deliberately, for the reason
-given in [decisions.md](decisions.md#deployment). Rebuild is where repair happens, one
+server boots clean. Note step 4 warns and does not repair — deliberately, because repair
+drops the index and re-embeds its contents, a cost and outage the operator has not asked
+for ([vector index width drift](capabilities/search.md#vector-index-width-drift)).
+Rebuild is where repair happens, one
 ontology at a time.
 
 The port opens only once these steps are done; from then on the liveness and readiness
-probes answer ([interfaces.md](interfaces.md#probes)).
+probes answer ([interfaces/](interfaces/server.md#probes)).
 
 ## Shutdown
 
@@ -657,8 +638,15 @@ Provider setup and the wire contract are documented in
 
 Stated plainly, because its absence is a design position and not an oversight:
 
-- **No multi-tenancy.** An ontology isolates data but is not a tenant — the rule and
-  its reason are in [decisions.md](decisions.md#scope).
+- **No multi-tenancy.** Ontologies isolate data but are not tenants and carry no quota.
+  Introducing tenancy before a deployment needs it would guess at the tenant model.
 
 Absences in the API surface itself — no data wipe, no instance-data export — are listed
-with their consequences in [interfaces.md](interfaces.md#what-is-not-exposed).
+with their consequences in [interfaces/](interfaces/README.md#what-is-not-exposed).
+
+## Further reading for implementers
+
+[Runtime state implementation](implementation/runtime-state.md) describes cache capacities,
+turn-lease timing and the implementation of navigator turn execution. These details support
+the consistency and ownership guarantees above; they are not needed to understand the
+system's component boundaries.

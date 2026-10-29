@@ -25,7 +25,7 @@ docker compose stop
 
 Port 8000 is published as is, probes and `/metrics` included; for local use only. A public
 deployment puts an ingress in front that routes only the public paths
-([interfaces.md](../../docs/interfaces.md#exposure)).
+([interfaces](../../docs/interfaces/server.md#exposure)).
 
 ## Configuration
 

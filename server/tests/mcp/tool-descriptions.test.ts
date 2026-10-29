@@ -1,6 +1,6 @@
 /**
  * Every MCP and agent tool description is self-contained and fits
- * (`docs/decisions.md#interfaces`): at most 2000 characters, no rule
+ * (`docs/workflows/writing-tool-descriptions.md`): at most 2000 characters, no rule
  * deferred to another tool, and the tools taking `filters` state the filter
  * rules themselves — the one text `filterRules` builds.
  */

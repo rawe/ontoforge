@@ -1,5 +1,7 @@
 # Changesets stored as one record per staged object and per staged value, committed in fixed phases under a lock
 
+Current behavior: [Changesets](../capabilities/changesets.md) and [changeset storage](../storage-adapters/contract.md#the-changeset-store)
+
 ## Context
 
 A client plans many runtime writes, over hours or days, and hands the plan to a person who
@@ -8,6 +10,26 @@ object per call, and an MCP mount keeps nothing between calls. A plan touches th
 object many times — a rename and another, a document edited in small steps — and the
 reviewer must see, cut and fix each change on its own. A check runs the commit's own
 steps and rolls them back, holding the commit lock while it runs.
+
+## Decision
+
+Persist a changeset as a set of staged objects and individually addressable staged
+values, bound to one lens, rather than a journal of calls or one whole-plan document.
+Commit the plan atomically in fixed dependency phases under a lock, each phase applied
+through batch writes on the port that behave as the single writes in sequence, so the
+write semantics stay defined once; a check runs the same validation and commit steps and
+rolls them back. Keep the captured before-state
+until the caller explicitly rebases it. Do not hold a database transaction open while
+the plan is being built.
+
+## Consequences
+
+A plan survives process restarts, is shared between servers and can be handed to a
+reviewer. Repeated edits fold into the current staged value, which can be inspected or
+cut independently, including partial document edits. Fixed phases handle graph
+dependencies rather than relying on staging-call order. The representation requires
+its own persisted lifecycle and commit validation; a reviewer sees only the lens-bound
+plan, and ending a changeset does not add a retained-record or tombstone lifecycle.
 
 ## Rejected
 
@@ -40,8 +62,6 @@ steps and rolls them back, holding the commit lock while it runs.
 - **Applying the plan through the service's write functions.** Their per-call graph rules
   would have to be set aside for intermediate states the plan passes through, which
   changes seven signatures, and it is the slowest way to apply it.
-- **Set-based SQL for the commit.** It writes the write semantics a second time, beside
-  the immediate path's, for a speed the store writes have not been shown to lack.
 - **Submit running commit validation.** A plan with a fault its proposer cannot fix could
   never be handed over.
 - **A tombstone, or the kept row, of an ended changeset.** It adds a second lifecycle and

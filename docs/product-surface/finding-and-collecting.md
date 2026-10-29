@@ -1,7 +1,7 @@
 # Finding and collecting
 
 Interaction models for finding entities and gathering them: the command palette, quick add,
-the Explorer working set, the query console and the saved-query library. The screens that
+the Explorer working set, the query console, the saved-query library and advanced search. The screens that
 use them are in [workbench](workbench.md) and [studio](studio.md).
 
 ## Command palette
@@ -239,3 +239,25 @@ its description. Expanding a card reveals a run panel: one typed input per param
 required before the run is allowed), a run action, results in the shared results surface,
 and a "copy as cURL" action that reproduces the exact call. A query opened by deep link
 expands automatically, and runs immediately when it has no parameters.
+
+## Advanced search
+
+One form per field of the [entity search](../capabilities/search.md#entity-search) and the
+[passage search](../capabilities/search.md#passage-search); a field left empty is not sent,
+so the server's default applies, and the server judges what the form cannot.
+
+**Form.** A mode — Entities or Passages — and the text, run by Enter or Run once it is
+not blank. A scope over one field at a time: types, indices, or — for passages — document
+properties; none chosen searches the whole lens. Keyword with any or all words, and
+Semantic with an optional similarity floor, only on a server with semantic search; none
+checked lets the server run what can run. A filter with the
+[type table's](workbench.md#type-table) conditions, offered only when the scope names one
+type or one document property, without `contains`. A limit, and for passages a cap per
+entity.
+
+**Results.** The count, which methods ran, and each limitation as a sentence naming its
+types, indices or documents. An entity row has its rank, type chip, name linking to its
+detail, the part that matched and the snippet; a passage row has the entity, the document
+property — opening the [document viewer](schema-editing.md#document-viewer-and-editor) — and
+the passage text. No score is shown ([Matched via](#matched-via)). A rejected field shows its
+error under its control; others show verbatim below the form.

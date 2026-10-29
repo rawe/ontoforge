@@ -16,6 +16,9 @@ const ExplorePage = lazy(() =>
 const QueryPage = lazy(() =>
   import('@/pages/workbench/QueryPage').then((m) => ({ default: m.QueryPage })),
 )
+const AdvancedSearchPage = lazy(() =>
+  import('@/pages/workbench/AdvancedSearchPage').then((m) => ({ default: m.AdvancedSearchPage })),
+)
 const AiPage = lazy(() =>
   import('@/pages/workbench/AiPage').then((m) => ({ default: m.AiPage })),
 )
@@ -80,6 +83,7 @@ export const router = createBrowserRouter([
       { path: 'e/:typeKey/:id', element: <EntityDetailPage /> },
       { path: 'explore', element: suspended(<ExplorePage />) },
       { path: 'query', element: suspended(<QueryPage />) },
+      { path: 'search', element: suspended(<AdvancedSearchPage />) },
       { path: 'ai', element: suspended(<AiPage />) },
       { path: 'rulesets', element: suspended(<RulesetsPage />) },
       { path: 'changesets', element: suspended(<ChangesetsPage />) },

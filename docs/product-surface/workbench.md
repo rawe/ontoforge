@@ -1,15 +1,16 @@
 # Workbench screens
 
 Find the [home](#home), [type table](#type-table), [entity detail](#entity-detail),
-[Explorer](#explore), [query](#query), [rulesets](#rulesets), [changesets](#changesets),
-and [assistants](#assistants) screens below.
+[Explorer](#explore), [query](#query), [advanced search](#advanced-search),
+[rulesets](#rulesets), [changesets](#changesets), and [assistants](#assistants) screens
+below.
 
 ## Shell
 
 A collapsible sidebar (collapse state persists) carrying: the ontology switcher, the
 surface switch and the lens switcher beneath it, a search
-trigger, a create-entity trigger, fixed entries for Home, Explore, Query, Assistants when
-available, [Rulesets](#rulesets), which carries the number of rulesets whose anchor is
+trigger, a create-entity trigger, fixed entries for Home, Explore, Query,
+[Advanced search](#advanced-search), Assistants when available, [Rulesets](#rulesets), which carries the number of rulesets whose anchor is
 deleted as a red count (a red dot when collapsed), and [Changesets](#changesets), which
 carries the number of submitted changesets of the lens as a grey count (a grey dot when
 collapsed), then a data section listing every entity type the lens exposes, each with
@@ -181,6 +182,11 @@ See [Working set](finding-and-collecting.md#working-set) for both.
 
 Two tabs — Console and Library — which both stay live, so results survive a switch. See
 [Query console](finding-and-collecting.md#query-console) and [Saved-query library](finding-and-collecting.md#saved-query-library).
+
+## Advanced search
+
+The entity search and the passage search in one form, with scope, methods and filter, and
+their results. See [Advanced search](finding-and-collecting.md#advanced-search).
 
 ## Rulesets
 

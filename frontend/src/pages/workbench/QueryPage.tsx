@@ -3,17 +3,15 @@ import { useRuntimeSchema } from '@/api/hooks'
 import { PageHeader } from '@/components/PageHeader'
 import { ConsoleTab } from '@/components/query/ConsoleTab'
 import { LibraryTab } from '@/components/query/LibraryTab'
-import { SearchTab } from '@/components/query/SearchTab'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-type Tab = 'console' | 'search' | 'library'
+type Tab = 'console' | 'library'
 
 /**
- * `/o/:ontologyKey/w/:lensKey/query` — Query workbench. Three tabs: Console,
- * Search and saved-query Library. URL params: `?tab=search|library`,
- * `?run={queryKey}` (open a saved query's run panel) and `?query=...`
- * (prefill the console).
+ * `/o/:ontologyKey/w/:lensKey/query` — Query workbench. Two tabs: Console and
+ * saved-query Library. URL params: `?tab=library`, `?run={queryKey}` (open a
+ * saved query's run panel) and `?query=...` (prefill the console).
  */
 export function QueryPage() {
   const { ontologyKey, lensKey } = useParams<{ ontologyKey: string; lensKey: string }>()
@@ -29,12 +27,12 @@ export function QueryPage() {
       ? 'library'
       : queryParam !== null
         ? 'console'
-        : tabParam === 'library' || tabParam === 'search'
-          ? tabParam
+        : tabParam === 'library'
+          ? 'library'
           : 'console'
 
   const switchTab = (next: Tab) => {
-    setSearchParams(next === 'console' ? {} : { tab: next }, { replace: true })
+    setSearchParams(next === 'console' ? {} : { tab: 'library' }, { replace: true })
   }
 
   if (ontologyKey === undefined || lensKey === undefined) return null
@@ -43,12 +41,11 @@ export function QueryPage() {
     <div>
       <PageHeader
         title="Query"
-        description="Run read-only OQL queries against this lens, search it, and use the saved-query library."
+        description="Run read-only OQL queries against this lens and use the saved-query library."
         actions={
           <Tabs value={tab} onValueChange={(v) => switchTab(v as Tab)}>
             <TabsList>
               <TabsTrigger value="console">Console</TabsTrigger>
-              <TabsTrigger value="search">Search</TabsTrigger>
               <TabsTrigger value="library">Library</TabsTrigger>
             </TabsList>
           </Tabs>
@@ -66,7 +63,7 @@ export function QueryPage() {
 
         {schema.data !== undefined && (
           <>
-            {/* Every tab stays mounted so its results survive a switch. */}
+            {/* Both tabs stay mounted so console results survive a Library visit. */}
             <div className={tab === 'console' ? '' : 'hidden'}>
               <ConsoleTab
                 key={`${ontologyKey}/${lensKey}`}
@@ -74,14 +71,6 @@ export function QueryPage() {
                 lensKey={lensKey}
                 schema={schema.data}
                 initialQuery={queryParam ?? undefined}
-              />
-            </div>
-            <div className={tab === 'search' ? '' : 'hidden'}>
-              <SearchTab
-                key={`${ontologyKey}/${lensKey}`}
-                ontologyKey={ontologyKey}
-                lensKey={lensKey}
-                schema={schema.data}
               />
             </div>
             <div className={tab === 'library' ? '' : 'hidden'}>

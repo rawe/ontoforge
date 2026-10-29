@@ -17,6 +17,8 @@ import {
   type DocumentViewerTarget,
 } from '@/components/DocumentViewerDialog'
 import { EmptyState } from '@/components/EmptyState'
+import { QueryErrorBlock } from '@/components/query/ResultsPanel'
+import { formatQueryError } from '@/components/query/resultUtils'
 import { FilterChips } from '@/components/table/FilterChips'
 import { FilterPopover } from '@/components/table/FilterPopover'
 import {
@@ -40,8 +42,6 @@ import {
 } from '@/components/ui/select'
 import { getTypeColor } from '@/lib/typeColors'
 import { cn } from '@/lib/utils'
-import { QueryErrorBlock } from './ResultsPanel'
-import { formatQueryError } from './resultUtils'
 import {
   countText,
   fieldErrorsAt,
@@ -166,19 +166,19 @@ function OptionalNumber({
   )
 }
 
-interface SearchTabProps {
+interface AdvancedSearchProps {
   ontologyKey: string
   lensKey: string
   schema: RuntimeSchema
 }
 
 /**
- * Search tab: one control per field of `POST /search/entities` and
+ * Advanced search: one control per field of `POST /search/entities` and
  * `/search/passages` — mode, query text, one scope field, the method blocks,
  * a filter (when the scope names one type), limit and per entity — and the
  * ranked items with what ran and what could not.
  */
-export function SearchTab({ ontologyKey, lensKey, schema }: SearchTabProps) {
+export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchProps) {
   const { data: features } = useFeatures()
   const semanticAvailable = features?.semanticSearch === true
   const catalog = useSearchCatalog(ontologyKey, lensKey).data ?? []

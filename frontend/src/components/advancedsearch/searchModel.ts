@@ -1,5 +1,5 @@
 /**
- * Pure helpers for the Query page's Search tab: the body the form sends to
+ * Pure helpers for the Advanced search page: the body the form sends to
  * `POST /search/entities` or `/search/passages`, the field errors a control
  * shows, and `ran` and the limitations as readable sentences.
  *

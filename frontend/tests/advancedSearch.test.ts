@@ -9,7 +9,7 @@ import {
   unplacedFieldErrors,
   type LimitationNames,
   type SearchForm,
-} from '../src/components/query/searchModel.ts'
+} from '../src/components/advancedsearch/searchModel.ts'
 
 const form = (patch: Partial<SearchForm>): SearchForm => ({
   mode: 'entities',

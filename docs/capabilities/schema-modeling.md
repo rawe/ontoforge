@@ -4,7 +4,7 @@ Designing one ontology's schema: entity types, relation types and property
 definitions. Everything runtime permits is derived from it, so this is the only
 place where the shape of the graph is decided.
 
-Vocabulary: [../README.md](../README.md). Layering and invariants:
+Vocabulary: [glossary](../glossary.md). Layering and invariants:
 [../architecture.md](../architecture.md).
 
 ## What it does
@@ -54,9 +54,14 @@ something a reader would otherwise assume:
 
 ## Rules
 
+Schema edits change the design, not instance data. The only exception is rebuilding an
+entity's derived identity when its type's identity changes: identities come from values a
+caller wrote, not from a value callers can write directly. Otherwise cleaning instance
+data during a schema edit would turn that edit into a write over all of it.
+
 ### Keys and immutability
 
-Type keys and property keys follow the schema [key](../README.md) rule — lower snake
+Type keys and property keys follow the schema [key](../glossary.md#schema-and-design) rule — lower snake
 case, starting with a letter — and are at most 64 characters.
 The leading-letter requirement is load-bearing: system properties
 are distinguished by a leading underscore, so no user key can ever collide with
@@ -109,8 +114,7 @@ within the type. Setting it checks the type's stored entities and may need the
 [cascade protocol](#the-cascade-protocol); the identity properties are then required,
 without a default, and locked: they cannot become optional, take a default or be
 deleted while they belong to the identity. Setting, changing or clearing it rebuilds
-every entity's derived identity — the one schema edit that writes instance data
-([rule](../decisions.md#schema-and-data)). The whole model is in
+every entity's derived identity — the one schema edit that writes instance data. The whole model is in
 [entity-identity.md](entity-identity.md).
 
 ### Relation rules
@@ -152,7 +156,7 @@ writes — relation creates, the create with a parent relation, leaf-only delete
 **Setting it, flipping it, or creating a relation type with it** checks the relations
 already stored under every parent relation, with the new reading in place of the old, as
 a [relation rule](#relation-rules) is checked: the violations are `two_parents` and
-`cycle` ([../architecture.md](../architecture.md#error-model)). Clearing it, or deleting a
+`cycle` ([../interfaces/](../interfaces/README.md#errors)). Clearing it, or deleting a
 parent relation, is never refused; an update repeating the stored parent end is not a
 change and checks nothing.
 
@@ -162,7 +166,7 @@ cannot be turned off while the parent end is set — a field error on `onePerPai
 clearing the parent end leaves it on.
 
 These checks are the schema edits that read instance data. They read to refuse and never
-write ([../decisions.md](../decisions.md#schema-and-data)).
+write.
 
 ### One per pair
 
@@ -374,7 +378,7 @@ invisible to both, and so are relations that break the relation rules; only a
 
 ## Through the interfaces
 
-Full index: [../interfaces.md](../interfaces.md). Every entrance below addresses
+Full index: [../interfaces/](../interfaces/README.md). Every entrance below addresses
 one ontology — REST in the path, MCP through the mount's binding.
 
 The same service enforces every rule above regardless of entrance, including the
@@ -397,7 +401,7 @@ Two differences between the entrances are contractual, not cosmetic:
 **Addressing differs.** The modeling MCP tools take keys throughout; the modeling
 REST routes take internal identifiers for types and properties. Exactly which
 path segment is which is tabulated in
-[../interfaces.md](../interfaces.md#what-a-path-segment-identifies), and it is the
+[../interfaces/](../interfaces/README.md#what-a-path-segment-identifies), and it is the
 commonest mistake made against this surface.
 
 **MCP folds the two property owners into one tool set.** Where REST has parallel

@@ -1,11 +1,24 @@
 # MCP runs in the server process over stateless JSON HTTP
 
-Rule: [Interfaces](../decisions.md#interfaces)
+Current behavior: [MCP interfaces](../interfaces/mcp.md)
 
 ## Context
 
 OntoForge exposes its capabilities over MCP as well as REST. Where the MCP endpoints run,
 how they reach the domain logic, and which transport they speak had to be settled.
+
+## Decision
+
+MCP runs inside the server process and calls the same services as REST directly. Its
+transport is stateless HTTP with plain JSON responses, without a per-connection session
+or event stream.
+
+## Consequences
+
+MCP shares the service, storage, schema-cache and error-handling contracts rather than
+adding a separate deployed wrapper or a second database access path. A mount can serve
+many clients without keeping connection state; clients must support the chosen JSON
+HTTP transport.
 
 ## Rejected
 

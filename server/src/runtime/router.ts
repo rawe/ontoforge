@@ -8,7 +8,7 @@
  * Every request names its ontology and lens in the path and runs against
  * a runtime store bound to that ontology — an unknown ontology key
  * answers 404 before any route logic runs. Below the lens the surface is
- * addressed by KEYS everywhere (`docs/interfaces.md`). Routers parse and
+ * addressed by KEYS everywhere (`docs/interfaces/`). Routers parse and
  * shape only; every domain rule lives in `service.ts`, shared with the
  * runtime MCP server.
  *
@@ -49,7 +49,7 @@ const FieldsParam = z
 
 // Unknown keys (the `filter.*` family) pass through untyped and are picked
 // up by `parseFilters`; the declared parameters carry the bounds and
-// defaults documented in `docs/interfaces.md`.
+// defaults documented in `docs/interfaces/`.
 const ListQuery = z.looseObject({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
@@ -133,7 +133,7 @@ export const DocumentEditFields = {
 
 const DocumentEditPayload = z.looseObject(DocumentEditFields);
 
-/** OQL query request: the query text, nothing else (`docs/interfaces.md`). */
+/** OQL query request: the query text, nothing else (`docs/interfaces/`). */
 const QueryPayload = z.looseObject({ query: z.string().min(1) });
 
 const SavedQueryRunParams = LensParams.extend({ queryKey: z.string() });
@@ -144,7 +144,7 @@ const SavedQueryRunPayload = z.looseObject({
 });
 
 /** `GET /saved-queries/search` — bounds and defaults per
- * `docs/interfaces.md`, including the `min_score` snake_case irregularity. */
+ * `docs/interfaces/`, including the `min_score` snake_case irregularity. */
 const SavedQuerySearchQuery = z.looseObject({
   q: z.string().min(1),
   limit: z.coerce.number().int().min(1).max(20).default(3),

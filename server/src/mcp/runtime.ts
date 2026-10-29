@@ -6,7 +6,7 @@
  * (`/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey`, `mount.ts`)
  * and are fixed into the server factory, so a tool can never name an
  * ontology or a lens, and can never reach across two
- * (`docs/decisions.md#interfaces`). The ruleset mount (`…/rulesets/:rulesetKey`)
+ * (`docs/interfaces/mcp.md#how-a-mount-is-bound`). The ruleset mount (`…/rulesets/:rulesetKey`)
  * binds a ruleset the same way.
  *
  * Tools call the runtime services directly, take snake_case parameters,

@@ -7,18 +7,19 @@ runs a fixed pipeline — a planning model turns it into searches, the index sea
 them, an answer model writes the reply from what they found. Questions form a
 conversation held by the server as a [thread](threads.md). A question can also be
 [retrieved](#retrieve) instead: planned and searched, returning the found entities
-without an answer. Saving a retriever stores the configuration only: no vectors, no graph
-data, no conversation. Every lens also has a
+without an answer. Saving a retriever stores the configuration only: no per-retriever
+vectors, caches, graph data, snapshots or conversation that could drift from the indices.
+Every lens also has a
 [default retriever](#the-default-retriever), derived from its managed indices
 and never stored.
 
-Vocabulary: [../README.md](../README.md#glossary). The rules these follow:
-[../decisions.md](../decisions.md). Every route: [../interfaces.md](../interfaces.md).
+Vocabulary: [glossary](../glossary.md). System structure:
+[../architecture.md](../architecture.md). Every route: [../interfaces/](../interfaces/README.md).
 
 ## Ownership and persistence
 
 A retriever belongs to exactly one lens of one ontology. Its key is unique in that lens and
-follows the lens-resource [key](../README.md) rule, at most 64 characters. It carries a
+follows the lens-resource [key](../glossary.md#schema-and-design) rule, at most 64 characters. It carries a
 name (1 to 200 characters), an optional description, a configuration version, the
 configuration, the warnings of a conversion ([below](#converting-version-1-configurations))
 and timestamps. This release writes and runs configuration version 2.
@@ -87,7 +88,7 @@ and move, until its next save.
 
 Version 1 configured retrievers by result buckets with search fields and hard or soft
 conditions. A version-1 configuration is converted to version 2 wherever one arrives: in
-storage brought up to date ([../storage-adapters.md](../storage-adapters.md)), in a
+storage brought up to date ([../storage-adapters/](../storage-adapters/README.md)), in a
 single-retriever import, and in a `5.0` [transfer](transfer.md) payload.
 
 - Each bucket searches its type's default index when it searched a non-document field,
@@ -139,7 +140,7 @@ allows for them, a `query` with up to three `variants` — further ones and empt
 dropped and long ones cut to 200 characters, never failing the plan — a `mode` —
 `semantic`, `keyword` or `hybrid` — exact `filters` with values, and an optional
 reference to previous results. One entry never holds two relations
-([../decisions.md](../decisions.md#search)), so a condition the user states a value
+([search indices](search-indices.md#entries)), so a condition the user states a value
 for is attached as an allowed filter of the result type to the sub-query searching that
 type; the planner splits into a further sub-query, fused per entity, only when the
 condition needs another relation group and no filter covers it. A question no index can
@@ -241,7 +242,7 @@ filters, not its query. It lists every supplied record for a pure exact list, ex
 `unsupportedReason` as a data gap and respects every limitation. It states facts in plain
 words — never sub-queries, filter ids or paths, index keys or entity ids — and tells
 results with the same name apart by their fields. Search evidence does not prove that a
-result fits ([../decisions.md](../decisions.md#search)).
+result fits ([search evidence](search.md#response)).
 
 ### Follow-up questions
 
@@ -278,7 +279,7 @@ row per entity and sub-query with what matched and its answer fields, the limita
 the number of index searches, phase timings and bounded traces of every model call —
 the plan, a repeated plan, the answer. Diagnostics are for debugging: they are sent only
 when a question asks for them, and any question may. Progress — which phase runs — and
-the answer text are always streamed. The event format is in [../interfaces.md](../interfaces.md#retriever-list-chat-and-retrieve).
+the answer text are always streamed. The event format is in [../interfaces/](../interfaces/assistants-rest.md#retriever-list-chat-and-retrieve).
 
 ## Retrieve
 
@@ -384,7 +385,7 @@ one; copy, move, export and import are REST only. At
 runtime a list names every retriever of the lens — runnable or not, without configuration or
 validation, the default first; a question runs by retriever key on a thread and streams its
 progress and answer, a thread reads back, and a retrieve answers one query with one plain
-response ([../interfaces.md](../interfaces.md)). All address the default retriever by its key.
+response ([../interfaces/](../interfaces/README.md)). All address the default retriever by its key.
 Management, the runtime list, reading a thread, copy, move, export and import call no
 model. A question or a retrieve needs a
 language-model provider — without one it is refused as a disabled feature before anything

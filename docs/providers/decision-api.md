@@ -52,11 +52,8 @@ Context is sent to the provider only when a caller requests a decision.
 
 ## Configuration and use
 
-| Setting | Purpose |
-|---|---|
-| `DECISION_BASE_URL` | Provider base URL before `/v1/systemone`; unset leaves the client disabled |
-| `DECISION_MODEL` | Provider's model identifier |
-| `DECISION_API_KEY` | Bearer credential; falls back to `TYPESAFE_API_KEY` when unset |
+Deployment variables and defaults are in the root
+[configuration reference](../../README.md#entity-identity-comparison).
 
 Startup installs the configured client without contacting the provider. Internal
 callers can use the configured client, handling the disabled state, or construct an

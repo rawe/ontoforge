@@ -1,12 +1,23 @@
 # Product surface
 
 What the web client offers. It is a static application that reaches the server over REST
-only and holds no privileged path — see [architecture.md](architecture.md). Concepts and
-vocabulary: [README.md](README.md). Capability semantics are not repeated here; each
+only and holds no privileged path — see [architecture.md](architecture.md). [Concepts](concepts.md)
+explain the mental model; the [glossary](glossary.md) defines its terms. Capability semantics
+are not repeated here; each
 section links to the capability document that owns them.
 
 This document is the capability inventory. It is complete on *what the product does* and
 deliberately silent on how it is built.
+
+## Find a screen or interaction
+
+| Need | Start here |
+|---|---|
+| Start page, Studio and Workbench orientation, sign-in | [The three levels](#the-three-levels) |
+| Working with data, queries, rulesets, changesets and assistants | [Workbench screens](#workbench-screens) |
+| Modeling, lenses, search configuration and transfer | [Studio screens](#studio-screens) |
+| Shared controls, editors, chat and document interactions | [Interaction models](#interaction-models) |
+| Availability, client state, links and keyboard access | [Feature gating](#feature-gating), [Client-side contracts](#client-side-contracts-the-api-does-not-imply), [Deep links](#deep-links), [Keyboard surface](#keyboard-surface) |
 
 ## The three levels
 
@@ -162,6 +173,10 @@ them all the same.
 
 ## Workbench screens
 
+Find the [home](#home), [type table](#type-table), [entity detail](#entity-detail),
+[Explorer](#explore), [query](#query), [rulesets](#rulesets), [changesets](#changesets),
+and [assistants](#assistants) screens below.
+
 ### Shell
 
 A collapsible sidebar (collapse state persists) carrying: the ontology switcher, the
@@ -240,7 +255,7 @@ popover says so before applying. Applied conditions appear as removable chips wi
 clear-all action.
 
 The table offers a subset of the entity list's filter vocabulary
-([interfaces.md](interfaces.md#listing-sorting-filtering)): strict greater-than and
+([interfaces/](interfaces/README.md#listing-sorting-filtering)): strict greater-than and
 less-than, and query paths in either form, are not offered. This lists every difference
 from the server's vocabulary: a change to the filter vocabulary decides whether the table
 offers it and updates this list.
@@ -459,6 +474,10 @@ footer holds the theme control and the collapse control. Like the Workbench side
 collapses to an icon rail whose entries name themselves on hover; both sidebars share one
 collapse preference.
 
+Find [schema](#schema), [type pages](#type-page-classic-view), [lenses](#lenses),
+[lens detail](#lens-detail), [search](#search), the [index designer](#index-designer),
+and [transfer](#transfer) below.
+
 ### Schema
 
 One page for the ontology's schema, in two views of the same types: the
@@ -618,11 +637,11 @@ the query with typed parameter inputs and shows the result as a table or as raw 
 
 **Connect** — a ready-to-paste AI-client configuration for the MCP servers, bound
 entirely by their URLs: the modeling server to this ontology, the runtime server to this
-lens within it ([interfaces.md](interfaces.md#how-a-mount-is-bound)). One card per server
+lens within it ([interfaces/](interfaces/mcp.md#how-a-mount-is-bound)). One card per server
 states what its connection is bound to, its job, what it covers and what it does not do;
 each card can be left out of the configuration, so a client gets only the server its task
 needs, or both. The configuration is offered in two formats, Claude Code and Codex, each with where to put it. The URLs start from the
-address the server reports for itself ([interfaces.md](interfaces.md#server)); when it
+address the server reports for itself ([interfaces/](interfaces/server.md#server)); when it
 reports none, a visible placeholder stands in its place with a note to replace it. A
 switch adds an `Authorization: Bearer` header holding a token placeholder for servers
 reached through an access-controlled entry point; with authentication on there is no
@@ -752,6 +771,12 @@ Three operations, each with its own explanation. See
 ---
 
 ## Interaction models
+
+Find the [command palette](#command-palette), [quick add](#quick-add),
+[Explorer working set](#working-set), [query console](#query-console),
+[assistant panel](#assistants-panel), [assistant chat](#assistant-chat),
+[schema graph](#schema-graph), [scope editor](#scope-editor), and
+[document viewer and editor](#document-viewer-and-editor) below.
 
 ### Command palette
 
@@ -1473,7 +1498,7 @@ Everything else works unchanged. See [capabilities/search.md](capabilities/searc
 ## Client-side contracts the API does not imply
 
 None of the following is visible from the server's surface — the operations involved are
-indexed in [interfaces.md](interfaces.md). A reimplementation that honours the API and
+indexed in [interfaces/](interfaces/README.md). A reimplementation that honours the API and
 ignores these will look right and behave wrongly.
 
 **Instance counts are synthesized.** There is no count endpoint. A per-type count is one

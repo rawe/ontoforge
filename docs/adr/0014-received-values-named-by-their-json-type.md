@@ -1,12 +1,17 @@
 # A rejected value is named by its JSON type
 
-Rule: [Naming](../decisions.md#naming)
+Current behavior: [Errors](../interfaces/README.md#errors)
 
 ## Context
 
 A coercion failure reaches the caller verbatim. It has two halves: the type that was
 expected, which is a schema declaration, and a description of what arrived, which is a
 raw wire value. No single type system covers both halves.
+
+## Decision
+
+A field error names the expected schema type and describes the received value by its
+JSON type, as a string.
 
 ## Rejected
 

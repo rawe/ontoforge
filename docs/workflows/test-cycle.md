@@ -117,7 +117,7 @@ Sequential test groups — each group depends on data from previous groups. Regi
 routes live at `/api/ontologies`; every modeling route below is under
 `/api/ontologies/{ontologyKey}/model`, every runtime route under
 `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` (see
-[../interfaces.md](../interfaces.md)).
+[interfaces](../interfaces/runtime-rest.md)).
 
 1. **Registry CRUD** — create ontology (key + optional display name; no `textSearchLanguage` in the response), duplicate key (409), duplicate display name (409), invalid/over-long key (422), list, get, get-missing (404), rename display name, rename-missing (404)
 2. **Ontology scoping** — unknown ontology key on any modeling route (404); create a second ontology and give both the same entity type key (no conflict)

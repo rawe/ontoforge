@@ -1,6 +1,6 @@
 # One search entry per relation instance
 
-Rule: [Search](../decisions.md#search)
+Current behavior: [Search index entries](../capabilities/search-indices.md#entries)
 
 ## Context
 
@@ -8,6 +8,20 @@ A search index may enrich what an entity is found by with its relations and the 
 at their other end, for example a person found by their role at a company and that
 company's industry. Hits stay entities either way. The question is how relation
 instances become indexed content: together in one text per entity, or apart.
+
+## Decision
+
+Compose one relation search entry per relation instance of each configured group,
+keeping that relation's properties paired with the entity at its other end. Do not
+combine different relations or every combination of relations into a single entry.
+
+## Consequences
+
+Each employment, for example, keeps its role paired with the correct company, remains
+searchable beyond any arbitrary relation cap, and can be named as match evidence. A
+relation change does not require re-embedding one whole combined text. The trade-off is
+potentially multiple embeddings per entity when semantic search is enabled, and no single entry answering facts spread over two
+relations; exact filters or entity-level ranking fusion address those questions.
 
 ## Rejected
 

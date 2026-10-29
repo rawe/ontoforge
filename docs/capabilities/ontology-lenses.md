@@ -3,13 +3,13 @@
 A lens is a named aperture onto one ontology's schema. It decides what a
 runtime caller can see, name and write — and nothing else.
 
-Vocabulary: [../README.md](../README.md). The schema it looks at:
+Vocabulary: [glossary](../glossary.md). The schema it looks at:
 [schema-modeling.md](schema-modeling.md).
 
 ## What a lens is
 
 A lens belongs to exactly one ontology. It has a key, a name and an optional
-description. The key follows the schema [key](../README.md) rule at up to 64
+description. The key follows the schema [key](../glossary.md#schema-and-design) rule at up to 64
 characters, is chosen at creation, is never updatable, and is what every interface uses
 to address the lens — always together with its ontology, because lens keys are unique
 only within their ontology: every ontology can have its own `default`. The name is
@@ -178,8 +178,8 @@ broken under another:
 
 - **Defaults on create come from the full schema.** A property the lens hides
   cannot be written through it, yet if that property has a default the created
-  entity still receives it. Reason and rule:
-  [../decisions.md](../decisions.md#schema-and-data).
+  entity still receives it, so data created through a narrow lens remains valid under
+  a wider one ([write validation](instance-data.md#validation)).
 - **Relation endpoint checks use the full schema.** The source and target entity
   types a new relation is validated against are the type's real endpoints, not
   whatever the lens exposes.
@@ -252,7 +252,8 @@ The lens still governs what a search returns:
 - **Hidden properties stay inside entry text.** An index may read a property the lens
   hides; its entries still carry the value, so it can still drive the ranking. The
   match's snippet is then withheld, and the label of a relation's target is withheld
-  when the lens hides the target's name property.
+  when the lens hides the target's name property. Entries are shared across lenses;
+  composing separate entries for each lens would multiply storage and embedding cost.
 - **The search catalog is projected too.** It lists only the indices the lens can
   search, and of each only the fields, relation groups and document the lens shows; a
   managed index's description names only those fields
@@ -303,7 +304,7 @@ used only while the ontology's design is unchanged; the caching rules are in
 
 ## Through the interfaces
 
-Full index: [../interfaces.md](../interfaces.md).
+Full index: [../interfaces/](../interfaces/README.md).
 
 Defining a lens is a modeling operation; using one is a runtime operation. The two
 never mix — that separation is what makes it safe to hand an autonomous agent a
@@ -323,7 +324,7 @@ allowlist is how an allowlist is changed there, which works because adding is an
 upsert. REST offers the explicit update as well.
 
 **The runtime MCP server is bound to exactly one ontology and one lens by its
-mount URL** ([../decisions.md](../decisions.md#interfaces)). A model never chooses
+mount URL** ([MCP binding](../interfaces/mcp.md#how-a-mount-is-bound)). A model never chooses
 a lens and can never reach across two — nor across two ontologies.
 
 What the web UI does with all of this is described in

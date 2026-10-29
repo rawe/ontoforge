@@ -1,6 +1,8 @@
 # Search ranking without an index bonus, and evidence kept apart from rank
 
-Rule: [Search](../decisions.md#search)
+Current behavior: [Ranking](../capabilities/search.md#ranking),
+[similarity floor](../capabilities/search.md#similarity-floor),
+[response](../capabilities/search.md#response)
 
 ## Context
 
@@ -10,6 +12,12 @@ can hold it, so any combination that adds contributions favours types that have 
 them, for example a document property. Scores and match evidence also have to keep
 honest meanings: a normalized top score implies a perfect answer, and keyword text that
 carries schema labels lets keys count as content.
+
+## Decision
+
+Within one retrieval method an entity ranks by its best entry, with no bonus for
+occurring in several indices; the methods are fused by reciprocal rank. Ties are never
+broken by an invented measurement, and match evidence is reported apart from the rank.
 
 ## Rejected
 

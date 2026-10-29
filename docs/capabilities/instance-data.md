@@ -160,7 +160,7 @@ ontology without a parent relation nothing is checked.
 
 ### The path read
 
-The path of one entity is its [hierarchy path](../README.md#hierarchies): the
+The path of one entity is its [hierarchy path](../glossary.md#hierarchies): the
 entity's ancestors, root first, followed by the entity itself, each as its type key, id,
 identity and name. A hierarchy root's path is the entity alone. Through a lens the path starts below
 the nearest ancestor whose type the lens hides, or that is reached over a parent relation
@@ -188,8 +188,8 @@ may hold an empty string, the identity may be at most 512 code points, and no ot
 of the type may hold it (`IDENTITY_TAKEN`, a conflict rather than a field error).
 
 **All errors are collected.** One rejected write names every offending field at once,
-keyed by property. This is contractual, not incidental — see
-[decisions.md](../decisions.md#schema-and-data).
+keyed by property, so a caller can correct it in one round trip rather than discover
+faults one at a time.
 
 **Coercion is strict, and it is conversion, not guessing.** The write path applies the
 declared data type unchanged; the seven data types and exactly what each one accepts and
@@ -241,7 +241,7 @@ A list request names one entity type or one relation type and returns `items` pl
 
 **Pagination.** A page size and an offset, both bounded — the permitted range and the
 defaults are with the parameter in
-[interfaces.md](../interfaces.md#listing-sorting-filtering). An out-of-range page size is
+[interfaces](../interfaces/README.md#listing-sorting-filtering). An out-of-range page size is
 rejected, so there is no way to pull more than one capped page in a single call.
 
 **Sorting.** `sort` accepts any property key of the type as exposed by the lens, plus the
@@ -259,7 +259,7 @@ unfiltered list rather than nothing. Relation lists take no free-text term.
 
 **Property filters.** Any number of filters may be combined; they and the free-text term
 are ANDed. The operator suffixes themselves, and the parameter form that carries them, are
-in [interfaces.md](../interfaces.md#listing-sorting-filtering). What matters here is how a
+in [interfaces](../interfaces/README.md#listing-sorting-filtering). What matters here is how a
 filter is evaluated: values arrive as text and are coerced to the property's data type by
 the same rules as writes — except under the substring operator, which compares as text and
 therefore accepts anything. Every comparison, negation included, is evaluated against a
@@ -300,6 +300,13 @@ persons who hold a CTO employment; listing companies with
 `filter.works_for@since__lt=2025-01-01` returns the companies with an employment that
 began before 2025. No schema key may contain a dot, an at sign or a colon, so a path is
 never mistaken for a property key.
+
+A path needs no schema declaration beyond the relation it follows. This keeps a related
+property filter available as soon as its relation exists, without a second schema object
+to keep in sync, and avoids flattening relations into properties just to filter a list.
+For longer paths, [OQL](oql.md) supports multi-hop patterns. A retriever can also use
+its own configured exact filters of up to two hops
+([retrievers.md](retrievers.md#the-configuration)).
 
 - **Direction is derived, or marked.** When the listed type is only the relation type's
   source, the path is followed outgoing, to the target; when it is only the target,
@@ -391,7 +398,7 @@ already allows. Unknown names are not an error; they simply match nothing.
 
 Some system fields survive projection unconditionally, so that a result stays identifiable.
 Which ones, per read, is tabulated in
-[interfaces.md](../interfaces.md#field-projection) alongside the routes that accept a
+[interfaces](../interfaces/README.md#field-projection) alongside the routes that accept a
 projection at all.
 
 Projection is the one way to obtain a document property's real content inside an entity
@@ -432,7 +439,7 @@ values are stubbed even then.
 
 ## Through the interfaces
 
-The full index of routes and tools is [interfaces.md](../interfaces.md). All of the below
+The full index of routes and tools is [interfaces](../interfaces/README.md). All of the below
 is runtime, addressed through one ontology and one lens — the same type key in another
 ontology names disjoint data that no operation here can reach.
 

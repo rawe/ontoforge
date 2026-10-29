@@ -1,0 +1,383 @@
+# Glossary
+
+Terms are used in exactly this sense throughout the documentation and the API.
+
+### Schema and design
+
+**Ontology** — the independent, isolated unit: one domain's schema, its lenses, saved
+queries, assistants, and all instance data. A server holds many; nothing spans two.
+Addressed by an immutable key, unique server-wide, with a mutable display name.
+
+**Registry** — the server's flat, listable set of ontologies, addressed by key. The
+only place ontologies are created, renamed and deleted.
+
+**Schema** — the set of entity types, relation types and property definitions of one
+ontology.
+
+**Entity type** — a kind of thing that can exist (`person`, `invoice`). Identified by a
+**key** in `lower_snake_case`, unique within its ontology. The key is chosen at creation
+and never changes.
+
+**Relation type** — a kind of directed, typed connection between two entity types. Its
+source and target entity types are fixed at creation.
+
+**Relation rule** — an optional constraint a relation type declares on its relations: the
+[parent end](#hierarchies), or **one per pair** — at most one relation of the type from
+one source entity to one target entity. See
+[capabilities/schema-modeling.md](capabilities/schema-modeling.md#relation-rules).
+
+**Property definition** — a named, typed field on one entity type or one relation type.
+Carries a data type, whether it is required, and an optional default.
+
+**Name property** — the one `string` property of an entity type whose value names its
+entities. Every entity type has exactly one; it is created with the type and can be
+reassigned, never removed. See
+[capabilities/schema-modeling.md](capabilities/schema-modeling.md#the-name-property).
+
+**Data type** — one of `string`, `integer`, `float`, `boolean`, `date`, `datetime`,
+`document`.
+
+**Document property** — a `string`-like property for long text, allowed on entity types
+only. Reads return a size stub rather than the content, so that listing entities stays
+cheap. See [capabilities/documents.md](capabilities/documents.md).
+
+**Key** — the stable, human-readable identifier of an ontology, type, property, lens,
+search index, saved query, agent, retriever, navigator or ruleset. Keys are what every interface speaks.
+They are never database identifiers, and they are never exposed as UUIDs. Every key is
+unique within its owner; only ontology keys are unique server-wide. A key follows the rule
+of its level:
+
+- **Schema keys** — ontologies, types, properties, lenses, search indices — match
+  `^[a-z][a-z0-9_]*$`: lower snake case, starting with a letter. They appear as OQL
+  identifiers, where `-` would read as minus, and in storage names.
+- **Lens-resource keys** — saved queries, agents, retrievers and navigators — match
+  `^[a-z][a-z0-9_-]*$`: the schema rule plus `-`. They travel only in URLs, JSON and tool
+  arguments.
+- **Ruleset keys** match `^[a-z][a-z0-9_-]*$`.
+
+### Lenses
+
+**Lens** — a named view over one ontology's schema, addressed by its own key within
+that ontology. Belongs to exactly one ontology; holds no types and no data of its own.
+
+**Unscoped lens** — a lens that declares no selection and therefore exposes its
+ontology's whole schema. Adding a type to the schema widens it automatically.
+
+**Scoped lens** — a lens that names the types, and optionally the individual
+properties, it exposes. Everything else is invisible through it: absent from schema
+reads, rejected on write, and stripped from query results.
+
+**Inclusion** — one declaration that a lens exposes a given type, optionally narrowed to
+a subset of that type's properties. A scoped lens also includes the search indices it
+searches; those inclusions never make a lens scoped.
+
+### Data
+
+**Entity** — one instance of an entity type. Has a system-assigned identifier (its id) and
+the properties its type defines, and an identity when its type declares one.
+
+**Identity** — an entity's semantic name within its type: the values of its type's
+identity properties in order, joined into one string (`_identity`), unique within the type.
+Derived, never written; it changes when those values change. The id stays the reference.
+See [capabilities/entity-identity.md](capabilities/entity-identity.md).
+
+**Identity properties** — the ordered list of 1 to 5 `string`, `integer` or `date`
+properties an entity type declares as its identity; required, without a default, and
+locked while they belong to it.
+
+**Relation** — one instance of a relation type, connecting two entities. Its endpoints
+are fixed once created; its properties are not.
+
+**System property** — a server-managed field, distinguished by a leading underscore
+(`_id`, `_createdAt`, …). Always readable, never writable. Type and property keys cannot
+begin with an underscore, so the two namespaces cannot collide.
+
+**Chunk** — an internal fragment of a document property, so that search can match and
+return a passage rather than a whole document. Not addressable directly.
+
+### Hierarchies
+
+**Parent relation** — a relation type that names one of its ends, source or target, as
+the parent end. Its relations form a hierarchy: across all parent relations of an
+ontology, every entity has at most one parent, and there are no cycles. Otherwise an
+ordinary relation type. See
+[capabilities/schema-modeling.md](capabilities/schema-modeling.md#parent-relations).
+
+**Hierarchy root** — an entity without a parent. Qualified, because a search index's root
+is an entity type.
+
+**Hierarchy path** — the entities from a hierarchy root down to one entity, root first and
+ending with the entity, as one lens shows them. Qualified, because a query path is a
+filter key. See [capabilities/instance-data.md](capabilities/instance-data.md#the-path-read).
+
+### Rulesets
+
+**Ruleset** — a named record of an ontology holding the rules for the MCP clients of its
+URL: a runtime mount URL that names a lens and the ruleset. A ruleset that limits nothing
+writes as the plain lens does, but reaches only the changesets started through it. Not
+authentication. See [capabilities/rulesets.md](capabilities/rulesets.md).
+
+**Rule** — one limit a ruleset sets on its clients, on top of what the lens allows. The
+server defines every rule; a person sets only its value. Qualified as a ruleset's rule
+where the parent rules or a key rule could be meant.
+
+**Write access** — the rule saying how a ruleset's clients may change data, on one of
+three levels, each allowing what the one below allows and more.
+
+**`none`, `propose`, `full`** — the three levels of write access. `none` reads everything,
+changesets included, and writes nothing. `propose` stages writes into changesets and
+submits them, but writes nothing at once and commits nothing: the client proposes, a
+person commits. `full` allows everything the lens allows, and is the default.
+
+**Anchor** — the rule pointing a ruleset at one entity, or at none. Writes through the
+ruleset's URL to the anchor's hierarchy stay in its subtree; other types are not held. If
+the anchor's entity is deleted, the anchor's state is **deleted**, and every write is
+refused.
+
+**Subtree** — the anchor's entity and its descendants: the entities the anchor covers.
+
+**Anchor's hierarchy** — the entity types joined by parent relations to the type of the
+anchor's entity, with those parent relations. Writes to every other type are not held.
+
+### Changesets
+
+**Changeset** — runtime writes of one lens, staged over any length of time and committed
+together, all or nothing. Bound to the lens and the ruleset of the URL it was started
+through. See [capabilities/changesets.md](capabilities/changesets.md).
+
+**Staged object** — one entity or relation a changeset touches, with its action:
+create, update or delete. **Staged value** — the value a staged object sets for one of
+its properties, at most one per property. Nothing changes until the commit, and reads
+never see them. **Stage** merges one write into the changeset; **unstage** removes a
+staged object with its values, and **cut** removes one staged value.
+
+**Commit** — persisting a changeset's staged objects together, or none of them; a
+committed changeset is gone. **Commit validation** is the rules the commit applies to
+the end state before anything persists; a commit that breaks one **rejects** and persists
+nothing. Committing a submitted changeset is approving it; there is no approved state.
+
+**Discard** — deleting a draft changeset with its staged objects.
+
+**Draft, submitted** — a changeset's two states. A draft can be changed; a
+submitted one is frozen and handed over for review. **Submit** freezes it, optionally with
+a note; **unsubmit** makes it a draft again, with a required note, whoever calls it.
+
+**Before, current, after** — the three values of a staged value of an update:
+**before**, the stored value of its property when the changeset first touched it;
+**current**, that value now; **after**, the value it sets. **Drift** — current differing
+from before, which rejects the commit. **Rebase** — accepting current as the new before,
+keeping after.
+
+**MCP client** — an AI client outside the server, connected to one of its MCP mounts and
+acting on its own judgment. Not an agent, which is an assistant the server runs.
+
+### Using the graph
+
+**OQL** — the OntoForge Query Language: a read-only, pattern-matching graph language
+written in type keys and property keys. Anchored to the ISO GQL standard and its GPML
+pattern sublanguage. See [capabilities/oql.md](capabilities/oql.md).
+
+**Query path** — a filter key, on an entity list or on ranked search, that crosses
+exactly one relation type to a property reached through it: a property of the related entity, written
+`<relationTypeKey>.<propertyKey>`, or a property stored on the relation itself, written
+`<relationTypeKey>@<propertyKey>`; the relation segment may carry a direction marker,
+`:out` or `:in`. Resolved against the lens-scoped schema at query time; nothing is
+declared or stored for it. See
+[capabilities/instance-data.md](capabilities/instance-data.md#query-paths).
+
+**Relation existence** — a filter, on an entity list or on ranked search, whose key is
+a relation type alone under `__exists` or `__missing`, asking whether any relation of the
+type reaches the entity in the direction the schema implies; the relation segment
+follows the query path's rules. See
+[capabilities/instance-data.md](capabilities/instance-data.md#relation-existence).
+
+**Related entity** — the entity at the other end of a query path's relation: the
+relation type's target for an outgoing path, its source for an incoming one. A position
+in the schema, whereas a neighbour is an instance in a traversal result.
+
+**Query** — the plain text submitted to ranked search.
+
+**Default search** — ranked search over the managed indices of the searched types,
+selected by search kind and search strategy.
+
+**Index search** — ranked search through search indices named by key, or every index the
+lens can search, selected by a mode: `semantic`, `keyword` or `hybrid`. It alone ranks
+custom indices and relation entries.
+
+**Search catalog** — the list of search indices a lens can search, each projected
+through the lens, from which an index search chooses.
+
+**Literal term** — the entity list's case-insensitive substring filter over string values.
+
+**Single-type search** — ranking over one named entity type.
+
+**Cross-type search** — ranking across every type the lens exposes, narrowed by filters.
+
+**Searched types** — the one-or-many type set one search ranks.
+
+**Search kind** — the ranked unit and match: property search or document search.
+
+**Property search** — ranking entities by the entries of their types' default indices.
+
+**Document search** — ranking passages through passage indices and grouping them by
+parent entity.
+
+**Search strategy** — what a caller selects: it uses one retrieval method directly or
+fuses several by rank. The strategies are `semantic`, `keyword`, `keyword-any`,
+`keyword-all` and `hybrid`; requirements decide whether a strategy is available, and
+the applied strategy is named in the response.
+
+**Retrieval method** — how one source ranking is produced from storage: semantic ranking,
+any-term keyword matching or all-term keyword matching. Rank fusion combines source rankings
+at the strategy level and is not a retrieval method.
+
+**Any-term keyword matching** — a row matches when it carries any query term, each term also
+matching as a prefix; rank order carries the rest.
+
+**All-term keyword matching** — a row matches only when it carries every query term, each
+term also matching as a prefix.
+
+**Query term** — one word of the query after stop-word removal and stemming in a language
+of the ontology's keyword language set.
+
+**Source ranking** — the ordered list one retrieval method returns for one search index.
+
+**Hit** — one entity in a search result with its matches, relative score and the entry
+that matched it best.
+
+**Match** — a place the query met the entity: an entity match names the entity as a whole;
+a passage match names a document property and its best passage's coordinates.
+
+**Search index** — an ontology-level design object deciding what ranked search finds
+entities by: a root entity type, the text composed for each of its entities, and its
+representations — semantic, keyword or both. Hits are always entities of the root type.
+See [capabilities/search-indices.md](capabilities/search-indices.md).
+
+**Managed index** — a search index the server derives from the schema and keeps in step
+with it: a default index per entity type over its own `string` properties, and a passage
+index per document property.
+
+**Custom index** — a search index a modeler defines: its root type, fields, header,
+relation groups, templates and representations. Only custom indices have relation
+groups. See [capabilities/search-indices.md](capabilities/search-indices.md#custom-indices).
+
+**Entry** — one indexed text of a search index, owned by one entity: its own fields, one
+relation instance with the entity at its other end, or one passage of a document.
+
+**Relation group** — the part of an index definition that follows one relation type in one
+direction and names the relation's and the target entity's properties to include; it
+yields one entry per relation instance. Managed indices have none.
+
+**Header** — the short prefix of an entity's own fields that starts each of its relation
+and passage entries, by default its name property's value.
+
+**Cost preview** — the estimate of a search index definition's full build — entities,
+entries and seconds per representation at the measured throughput — returned with its
+validation, without saving it.
+
+**Entry outline** — the texts a search index definition composes per entry kind, from the
+schema alone, with tokens standing in for field values; returned with the cost preview.
+
+**Generation** — one build of one representation of one search index, identified by the
+definition and the embedding model (semantic) or the keyword language set (keyword).
+Search reads the ready one; a replacement is built beside it.
+
+**Keyword language set** — the languages, English, German or both, in which an
+ontology's keyword entries and queries are stemmed. A setting of the ontology's design,
+edited in modeling; a new ontology starts with both. See
+[capabilities/search.md](capabilities/search.md#keyword-language).
+
+**Relative score** — 1.0 for the best hit and each other hit's ordering number as a fraction
+of the best, comparable only within that response. See [search](capabilities/search.md#response)
+for the promise about its shape.
+
+**Search request / operation** — the common request object and service operation used by every
+search caller.
+
+**Search tool / document search tool** — `search` / `search_documents`, choosing both kinds
+or documents only, with the default strategy.
+
+**Search step** — a saved-query step running default search over one required type.
+
+**Saved query** — a stored, named, parameterized pipeline of one or more query steps.
+Discoverable by listing or by searching descriptions, so a client can find a suitable
+query without composing one.
+
+### Assistants
+
+**Assistant** — something on a lens you ask questions and hold a conversation with. Every
+assistant has a kind; the kinds differ in *how an answer is produced*, not in whether they
+converse. Each kind has its own configurations on a lens, keyed per kind, plus a built-in
+default keyed `_default` that is never stored.
+
+**Agent** — the assistant kind in which the model works step by step with tools it
+chooses: a named language-model configuration bound to one lens, a system prompt plus the
+set of read-only tools it may use. Its insight into a run is **tool activity** — which
+tools ran, with what, and what they returned — part of the product for every user. See
+[capabilities/agents.md](capabilities/agents.md).
+
+**Retriever** — the assistant kind in which a fixed pipeline searches the lens's search
+indices and answers from what it found: a planning model turns
+a question into searches of the retriever's indices, optionally narrowed to relation
+groups and exact filters, and an answer model replies from what they found — or, for a
+retrieve, the found entities are returned without an answer. Every lens also has an
+implicit **default retriever**, derived from its managed indices. Its insight into a run
+is **diagnostics** — plan, results per sub-query, timings, model traces — a debugging
+feature, given only on request. See
+[capabilities/retrievers.md](capabilities/retrievers.md).
+
+**Navigator** — the assistant kind that answers by walking the graph: a planning model
+reads the question as what it names, what it asks for and the relations between, a walk
+follows those relations through the lens, and an answer model replies from the entities it
+met, citing each. Its insight into a run is the **trace** — the pipeline's steps as they run
+and every entity met, before the answer — part of the product for every user. Every lens
+also has an implicit **default navigator**. See
+[capabilities/navigators.md](capabilities/navigators.md).
+
+**Thread** — one conversation with one assistant, held by the server: a client sends its
+new message and the thread's id, and the server continues from the turns the thread kept.
+See [capabilities/threads.md](capabilities/threads.md).
+
+### Access
+
+**Principal** — a person or a service as OntoForge knows it, bound to one verified
+sign-in identity at the OpenID provider: its issuer and subject. Active or disabled.
+
+**Role** — what a principal may do on one scope: **Platform Administrator** and **Ontology
+Creator** on the platform, **Ontology Administrator** on one ontology, **Reader**,
+**Proposer** and **Writer** on one lens. No role includes another.
+
+**Assignment** — one role held by one principal on its scope. No assignment, no access.
+See [capabilities/authentication.md](capabilities/authentication.md).
+
+### Internals
+
+**Persistence port** — the boundary every ontology storage operation crosses. Above it, only
+schema vocabulary, through stores bound to one ontology and a separate registry port;
+below it, one adapter that knows a specific database. See
+[storage-adapters/](storage-adapters/README.md).
+
+**Adapter** — an implementation of the port for one database. Owns physical naming, query
+compilation, index management, error translation, and the physical isolation between
+ontologies. Exactly one is active.
+
+**Design revision** — an ontology's never-reused identity and a number every change of its
+design advances. See [architecture.md](architecture.md#design-revision).
+
+**Shared state** — what every server must see alike but may lose, such as the assistants'
+threads and the browser sessions: in each server's own memory, or in one Valkey all
+servers share. See
+[architecture.md](architecture.md#shared-state).
+
+**Thread store** — where every server keeps the assistants' threads, part of the shared
+state. See [architecture.md](architecture.md#thread-store).
+
+**Access database** — where principals, their identities and assignments are kept: a
+database of its own beside the ontology database, used only with authentication on. See
+[architecture.md](architecture.md#components).
+
+**Transfer format** — the versioned JSON representation of one ontology's design, used
+for export and import. Carries schema, lenses, assistants, saved queries, the
+keyword language set, custom search indices and managed-index switches only — no
+instance data and no ontology identity. See
+[capabilities/transfer.md](capabilities/transfer.md).

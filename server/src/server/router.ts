@@ -2,7 +2,7 @@
  * Server routes, mounted at `/api/server` — the one phase-neutral
  * surface: read-only reads describing the deployment. Ontology-scoped
  * operations never live here, and server-wide data operations do not exist
- * (`docs/interfaces.md`).
+ * (`docs/interfaces/`).
  */
 
 import { supportsKeywordRanking } from "../core/ports.js";

@@ -199,7 +199,7 @@ export interface DesignRevision {
 /**
  * The modeling side of the persistence port: schema persistence.
  *
- * Capability grouping follows `docs/storage-adapters.md` ("The two store
+ * Capability grouping follows `docs/storage-adapters/stores.md` ("The two store
  * surfaces"); the section comments below mirror it.
  */
 export interface ModelingStore {
@@ -526,7 +526,7 @@ export interface ModelingStore {
 /**
  * The runtime side of the persistence port: instance-data persistence.
  *
- * Capability grouping follows `docs/storage-adapters.md` ("The two store
+ * Capability grouping follows `docs/storage-adapters/stores.md` ("The two store
  * surfaces"); the section comments below mirror it.
  *
  * Filter-taking methods (`listEntities`, `listRelations`, and the
@@ -553,7 +553,7 @@ export interface SearchedProperty {
 
 /** The keyword retrieval method: any admits a row carrying any query term, all
  * requires every query term; both match each term as a prefix. Contract:
- * `docs/storage-adapters.md`, "The search-index store" (ranking entries). */
+ * `docs/storage-adapters/search-index-store.md` (ranking entries). */
 export type KeywordMatching = "any" | "all";
 
 export interface RuntimeStore {
@@ -582,7 +582,7 @@ export interface RuntimeStore {
   designRevision(): Promise<DesignRevision>;
 
   /** Unfiltered: the adapter never applies the inclusions. Null when no
-   * lens has the key. Contract: `docs/storage-adapters.md`, "Schema reading".
+   * lens has the key. Contract: `docs/storage-adapters/stores.md`, "Schema reading".
    * Carries `searchIndexInclusions`, the keys of the indices the lens
    * includes, and `design`, the design revision of the same snapshot. */
   getFullSchemaWithLensInclusions(lensKey: string): Promise<Row | null>;

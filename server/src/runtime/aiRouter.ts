@@ -10,7 +10,7 @@
  *
  * There are deliberately NO MCP tools for chat — an MCP
  * client is itself a language model and gets the underlying tools
- * directly (`docs/interfaces.md`).
+ * directly (`docs/interfaces/`).
  */
 
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";

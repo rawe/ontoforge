@@ -3,7 +3,10 @@
 A read-only, optional judgment about whether two partial property snapshots describe
 the same real-world entity. It uses a Decision provider, independently of the
 language-model and embedding providers. It does not find candidates, read their
-instance data, merge entities or write anything.
+instance data, select or rank entities, merge entities or write anything.
+
+For the declared property values that uniquely identify and address an entity, see
+[entity identity](entity-identity.md). That identity is distinct from this judgment.
 
 ## Input and context
 
@@ -52,7 +55,7 @@ REST exposes the operation under the lens's runtime prefix as
 `POST /decisions/compare-entities`. The body contains exactly `entityTypeKey`,
 `left` and `right`, with each snapshot a property-key-to-scalar-or-null map. The
 response contains `decision`, `probabilities` (keys `same`, `different`,
-`insufficient`), `confidence` and `truncatedFields`. See [interfaces](../interfaces.md).
+`insufficient`), `confidence` and `truncatedFields`. See [interfaces](../interfaces/README.md).
 There is no MCP tool.
 
 The server feature report exposes `decisions`. Without a configured

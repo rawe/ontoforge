@@ -206,4 +206,4 @@ In the web UI, document properties appear as a compact size badge in tables and 
 collapsed section on an entity's detail view; expanding fetches the content and renders the
 Markdown, and editing opens a plain text editor with a preview and saves the whole value
 through the ordinary entity update — the partial-write operations exist for programmatic
-callers, not for the UI. See [product-surface.md](../product-surface.md).
+callers, not for the UI. See [product surface](../product-surface/README.md).

@@ -137,7 +137,7 @@ routes live at `/api/ontologies`; every modeling route below is under
 
 The start page at `/` manages the ontologies; schema flows live in the Studio surface
 (`/o/{ontologyKey}/studio/schema`, `.../studio/lenses`); data flows live in the Workbench
-(`/o/{ontologyKey}/w/{lensKey}`). See [../product-surface.md](../product-surface.md)
+(`/o/{ontologyKey}/w/{lensKey}`). See [../product-surface/](../product-surface/README.md)
 for the route map and the full capability inventory.
 
 Sequential UI flows — each step builds on the previous:

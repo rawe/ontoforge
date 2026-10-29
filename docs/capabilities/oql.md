@@ -144,7 +144,7 @@ connects.** Relation reads outside OQL do return them; query results do not.
 A client that needs to draw a graph from query results must therefore reconstruct endpoints
 itself, from the relation type's declared source and target and the entities in the same
 row. The reconstruction the web client performs, including how it resolves ambiguity, is in
-[../product-surface.md](../product-surface.md#client-side-contracts-the-api-does-not-imply).
+[../product-surface/](../product-surface/client-contracts.md#client-side-contracts-the-api-does-not-imply).
 
 ### Ordering and paging
 

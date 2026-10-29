@@ -266,4 +266,4 @@ it checks, one step per level of the hierarchy.
 to an [agent](agents.md).
 
 The Workbench itself writes through the plain lens. What its Rulesets page and the Connect
-panel offer is in [../product-surface.md](../product-surface.md#rulesets).
+panel offer is in [../product-surface/](../product-surface/workbench.md#rulesets).

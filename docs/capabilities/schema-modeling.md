@@ -410,4 +410,4 @@ tools discriminated by an argument. The rules applied are identical, including t
 rejection of `document` on a relation type.
 
 The web UI reaches all of this over REST and holds no privileged path; what it
-offers is described in [../product-surface.md](../product-surface.md).
+offers is described in [../product-surface/](../product-surface/README.md).

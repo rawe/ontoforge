@@ -192,4 +192,4 @@ is enabled again. Threads have no principal owner.
 | User management | `/api/users` and an ontology's `access` | — | the Users page and the Studio's Access page |
 
 [Authentication endpoints](../interfaces/server.md#sign-in).
-[Role-specific UI controls](../product-surface.md#signing-in).
+[Role-specific UI controls](../product-surface/README.md#signing-in).

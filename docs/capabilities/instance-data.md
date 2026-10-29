@@ -463,4 +463,4 @@ values.
 In the web UI, the data workbench is the surface for all of this: a per-type table with
 sorting, filtering, text search and paging, an entity detail view with inline property
 editing and a neighbour list, and a graph explorer built on the same traversal operation.
-See [product-surface.md](../product-surface.md).
+See [product surface](../product-surface/README.md).

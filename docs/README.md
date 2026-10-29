@@ -8,7 +8,7 @@ through generic APIs and a web application.
 | I want to… | Read |
 |---|---|
 | Understand OntoForge | [Concepts](concepts.md), the [glossary](glossary.md), then [architecture](architecture.md) for how it is built |
-| Use OntoForge | The [project README](../README.md) to get running, the [web UI guide](product-surface.md) or relevant capability below, and [interfaces](interfaces/README.md) for REST and MCP |
+| Use OntoForge | The [project README](../README.md) to get running, the [web UI guide](product-surface/README.md) or relevant capability below, and [interfaces](interfaces/README.md) for REST and MCP |
 | Change OntoForge | Read the [architectural constraints](architecture-constraints.md), then the documents owning the affected behavior; use [contributor workflows](workflows/) for the task |
 
 ## Documentation map
@@ -24,7 +24,7 @@ through generic APIs and a web application.
 | [Runtime state implementation](implementation/runtime-state.md) | Contributor details of cache capacity, turn leases and navigator execution |
 | [interfaces/](interfaces/README.md) | REST surfaces and MCP tools; exact schemas are in OpenAPI |
 | [storage-adapters/](storage-adapters/README.md) | Persistence contract and PostgreSQL adapter |
-| [product-surface.md](product-surface.md) | Web UI screens and interactions |
+| [product-surface/](product-surface/README.md) | Web UI screens and interactions |
 | [capabilities/](capabilities/) | One document per capability, end to end |
 | [workflows/](workflows/) | Procedures for working *on* OntoForge |
 | [adr/](adr/) | The alternatives weighed behind a decision |

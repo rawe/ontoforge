@@ -328,4 +328,4 @@ mount URL** ([MCP binding](../interfaces/mcp.md#how-a-mount-is-bound)). A model 
 a lens and can never reach across two — nor across two ontologies.
 
 What the web UI does with all of this is described in
-[../product-surface.md](../product-surface.md).
+[../product-surface/](../product-surface/README.md).

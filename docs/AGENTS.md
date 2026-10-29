@@ -15,7 +15,7 @@ For the practical steps to add, update or move documentation, use
    - **System structure, mechanisms and flows:** [architecture.md](architecture.md).
    - **Feature behavior, rules, limits and examples:** its document in [capabilities/](capabilities/).
    - **Interface behavior and access:** [interfaces/](interfaces/README.md); the web client in
-     [product-surface.md](product-surface.md).
+     [product-surface/](product-surface/README.md).
    - **Storage contract and implementation:** [storage-adapters/](storage-adapters/README.md).
    - **Contributor details tied to the implementation:** [implementation/](implementation/).
    - **Configuration variables and defaults:** the configuration table in the root

@@ -358,4 +358,4 @@ names one by `changeset_id`, and a call that forgets it writes immediately, unle
 ruleset's [write access](rulesets.md#write-access-through-the-interfaces) requires
 `changeset_id`. In the Workbench a person pins a
 draft, and the Workbench's writes stage into it until they leave it
-([../product-surface.md](../product-surface.md#changesets)).
+([../product-surface/](../product-surface/workbench.md#changesets)).

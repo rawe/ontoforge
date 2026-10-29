@@ -72,7 +72,7 @@ defines the vocabulary.
 | What a capability does and its rules | [docs/capabilities/](docs/capabilities/) |
 | Every endpoint and MCP tool | [docs/interfaces/](docs/interfaces/README.md) |
 | Implementing a storage backend | [docs/storage-adapters/](docs/storage-adapters/README.md) |
-| What the web client offers | [docs/product-surface.md](docs/product-surface.md) |
+| What the web client offers | [docs/product-surface/](docs/product-surface/README.md) |
 
 ## Agent skills
 

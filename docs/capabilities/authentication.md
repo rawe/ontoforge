@@ -30,7 +30,8 @@ Three authentication methods resolve callers to principals:
   24 hours after sign-in, whichever comes first. Each sign-in starts a new session.
   Signing out ends the session and redirects the browser to the provider's sign-out
   page, if available. State-changing requests authenticated by the session cookie must
-  originate from the deployment's own origin.
+  originate from the web client's address. Browser sign-in exists only when the deployment
+  names that address; without it, callers use bearer tokens.
 - **REST with a bearer token.** Send an access token issued by the provider for
   OntoForge's audience and required scope in the `Authorization` header using the
   `Bearer` scheme. OntoForge rejects ID tokens, tokens with an invalid issuer or
@@ -40,8 +41,8 @@ Three authentication methods resolve callers to principals:
 - **MCP over OAuth.** The MCP mounts take bearer tokens only. A client without one is told
   where to sign in, registers itself at the provider and signs its user in through the
   browser. Its token names OntoForge's audience only when the client asks for OntoForge's
-  scope, which the mount advertises. Clients must connect through the deployment's
-  public URL because that URL forms part of the OAuth resource identifier.
+  scope, which the mount advertises. Clients must connect through the server's public
+  address because that address forms part of the OAuth resource identifier.
 
 **First sign-in.** When a previously unknown sign-in identity first signs in, through the
 browser or with a bearer token, OntoForge creates a principal without any roles, except

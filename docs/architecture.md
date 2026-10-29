@@ -21,8 +21,9 @@ between servers, nor may one server expose what another protects.
 
 **Web client** — a separate static application talking to the server over REST only. It
 holds no privileged path; anything it does can be done over the API. With authentication
-on, it is served from the deployment's public address, which proxies the API to the
-server, so the browser's session cookie reaches the server.
+on, the browser signs in only through a web client served from the deployment's web client
+address, which proxies the API to the server, so the browser's session cookie reaches the
+server. A deployment without a web client accepts bearer tokens only.
 
 **Database** — one instance, holding every ontology's schema and instance data together.
 Reached only through the persistence port. Keeping them in different stores would make
@@ -621,7 +622,8 @@ per-ontology deployment configuration.
 | Shutdown | How long a stopping server drains | Default applies |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
 | Decision model | Endpoint, model, credential | Entity identity comparison unavailable |
-| Public URL | The address clients reach the deployment at, reported to clients; with authentication on, the browser's origin | No address is reported; required with authentication on |
+| Public URL | The address API and MCP clients reach the server at, reported to clients; MCP resources are named after it | No address is reported; required with authentication on |
+| Web client URL | With authentication on, the address the web client is served from, where browser sign-in runs | No browser sign-in; bearer tokens only |
 | Authentication | On or off; the identity provider, how this server reaches it, the client and its secret, the audience, the configured administrator, the session idle time, the access database | Off: every caller trusted |
 
 Exact variable names are in the repository README; they are deployment surface, not

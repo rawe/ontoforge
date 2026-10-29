@@ -1,6 +1,6 @@
 /**
- * The retriever pipeline with a fake model and a mocked search
- * engine: exactly planner + answer model, the stream's events and
+ * The retriever pipeline with a fake model and a fake search-index
+ * store: exactly planner + answer model, the stream's events and
  * diagnostics shapes (contract), the cards of the results the answer model
  * gets, planner failures before any answer,
  * cancellation, turns on a thread (what the models see, what the thread
@@ -12,7 +12,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fake = vi.hoisted(() => ({ invoke: vi.fn(), stream: vi.fn(), withConfig: vi.fn() }));
 const engine = vi.hoisted(() => ({
-  rankThroughIndices: vi.fn(),
   describeMatches: vi.fn(async () => new Map()),
   availableModes: vi.fn(() => ["keyword"]),
   indexStoreOf: vi.fn(),
@@ -23,11 +22,20 @@ vi.mock("../../../../src/config.js", () => ({
   settings: { AI_PROVIDER: "fake", AI_MODEL: "test", AI_BASE_URL: "http://unused" },
 }));
 vi.mock("../../../../src/core/ai.js", () => ({ createAiModel: vi.fn(() => fake) }));
-vi.mock("../../../../src/runtime/search/indexSearch.js", () => engine);
+vi.mock("../../../../src/runtime/search/indexSearch.js", async (importOriginal) => ({
+  runSearchTree: (await importOriginal<typeof import("../../../../src/runtime/search/indexSearch.js")>()).runSearchTree,
+  ...engine,
+}));
 
 import { settings } from "../../../../src/config.js";
 import { createAiModel } from "../../../../src/core/ai.js";
-import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../../../src/core/ports.js";
+import type {
+  RankedSearchEntry,
+  RuntimeStore,
+  SearchEntryQuery,
+  SearchIndexRecord,
+  SearchIndexStore,
+} from "../../../../src/core/ports.js";
 import type { LoadedSchema } from "../../../../src/runtime/schemaCache.js";
 import { DEFAULT_RETRIEVER_KEY, defaultRetrieverConfig } from "../../../../src/runtime/assistants/retrievers/defaultRetriever.js";
 import { PLANNER, PLANNER_RESPONSE_FORMAT, REPLAN } from "../../../../src/runtime/assistants/retrievers/plan.js";
@@ -48,16 +56,38 @@ const store = {
   distinctEntityValues: vi.fn(async (): Promise<string[]> => []),
 } as unknown as RuntimeStore;
 
+// One index, ready by keyword; what its search finds is set per test.
+const RECORD = {
+  key: "person~default",
+  searchIndexId: "person~default",
+  definition: {
+    key: "person~default",
+    entityType: "person",
+    fields: ["name"],
+    header: null,
+    relations: [],
+    keyword: { enabled: true },
+    semantic: { enabled: false },
+  },
+} as unknown as SearchIndexRecord;
+const rankEntries = vi.fn(async (_query: SearchEntryQuery): Promise<RankedSearchEntry[]> => []);
+const indexStore = {
+  listGenerations: async () => [
+    { generationId: "g", searchIndexId: "person~default", representation: "keyword", modelId: null, state: "ready" },
+  ],
+  rankEntries,
+} as unknown as SearchIndexStore;
+
 const agent: RunnableRetriever = {
   key: "people",
   config: CONFIG,
   scope: {
     config: CONFIG,
     lens: LENS,
-    loaded: { scoped: SCHEMA, full: SCHEMA } as unknown as LoadedSchema,
+    loaded: { scoped: SCHEMA, full: SCHEMA, searchIndexScope: { scoped: false, includedIndices: [] } } as unknown as LoadedSchema,
     store,
-    indexStore: {} as SearchIndexStore,
-    records: [{ key: "person~default", definition: { entityType: "person" } } as unknown as SearchIndexRecord],
+    indexStore,
+    records: [RECORD],
   },
 };
 
@@ -173,11 +203,20 @@ describe("retriever pipeline", () => {
   });
 
   describe("the entities event", () => {
-    const record = {
-      key: "person~default",
-      definition: { key: "person~default", entityType: "person", fields: ["name"], header: null, relations: [] },
-    } as unknown as SearchIndexRecord;
-    const found = (entityId: string) => ({ entityId, entityType: "person", score: 1, matched: { index: record, entry: { text: "Person" } }, indices: [] });
+    const record = RECORD;
+    const found = (entityId: string, score: number): RankedSearchEntry => ({
+      entityId,
+      partKind: "self",
+      groupNo: 0,
+      partId: "",
+      relationType: null,
+      targetType: null,
+      targetId: null,
+      startChar: null,
+      charLength: null,
+      text: "Person",
+      score,
+    });
     const PEOPLE: Record<string, Record<string, unknown>> = {
       ada: { _id: "ada", name: "Ada", email: "a@x" },
       // Alone over the answer context's budget: skipped.
@@ -190,7 +229,7 @@ describe("retriever pipeline", () => {
 
     beforeEach(() => {
       fake.invoke.mockResolvedValue(planned([sub({ query: "people", filters: [] })]));
-      engine.rankThroughIndices.mockResolvedValue([found("ada"), found("big"), found("eve")]);
+      rankEntries.mockResolvedValue([found("ada", 3), found("big", 2), found("eve", 1)]);
       (store.getEntitiesByIds as ReturnType<typeof vi.fn>).mockImplementationOnce(async (ids: string[]) =>
         Object.fromEntries(ids.map((id) => [id, PEOPLE[id]])),
       );
@@ -219,7 +258,7 @@ describe("retriever pipeline", () => {
       const person = SCHEMA.entityTypes.person!;
       const hiding = { ...SCHEMA, entityTypes: { ...SCHEMA.entityTypes, person: { ...person, properties: { name: person.properties.name! } } } };
       const lens = { ...LENS, scoped: hiding };
-      const loaded = { scoped: hiding, full: SCHEMA } as unknown as LoadedSchema;
+      const loaded = { ...agent.scope.loaded, scoped: hiding } as unknown as LoadedSchema;
       const hidden: RunnableRetriever = { ...wide, scope: { ...wide.scope, lens, loaded } };
       const { events } = await run("Who are the people?", false, undefined, undefined, hidden);
       const cards = events.find((e) => e.type === "entities")!.entities as { id: string; fields: unknown[] }[];
@@ -228,7 +267,7 @@ describe("retriever pipeline", () => {
     });
 
     it("is not sent when nothing reaches the answer model", async () => {
-      engine.rankThroughIndices.mockResolvedValue([]);
+      rankEntries.mockResolvedValue([]);
       const { events } = await run("Who are the people?", true, undefined, undefined, wide);
       expect(events.some((e) => e.type === "entities")).toBe(false);
       expect(fake.stream).toHaveBeenCalledTimes(1);
@@ -246,14 +285,14 @@ describe("retriever pipeline", () => {
   });
 
   it("runs the planner's own query words; a filter without a user quote is dropped with a limitation", async () => {
-    engine.rankThroughIndices.mockResolvedValue([]);
+    rankEntries.mockResolvedValue([]);
     fake.invoke.mockResolvedValue(planned([
       sub({ query: "events about artificial intelligence", filters: [{ id: "city", value: "Paris", quote: "Paris" }] }),
     ]));
     const { events } = await run("Which events are about artificial intelligence?");
-    expect(engine.rankThroughIndices.mock.calls[0]![2].query).toBe("events about artificial intelligence");
+    expect(rankEntries.mock.calls[0]![0].text).toBe("events about artificial intelligence");
     // No filter applied: no restriction.
-    expect(engine.rankThroughIndices.mock.calls[0]![2].targets[0].entityIds).toBeNull();
+    expect(rankEntries.mock.calls[0]![0].entityIds).toBeNull();
     const limitations = diagnosticsWith(events, "results").limitations as string[];
     expect(limitations).toContain(
       'The condition "lives in City Name: Paris" was not applied: the value is not stated verbatim in a user message.',
@@ -262,7 +301,7 @@ describe("retriever pipeline", () => {
   });
 
   it("a follow-up on searched results runs as a fresh search with the history, never failing the turn", async () => {
-    engine.rankThroughIndices.mockResolvedValue([]);
+    rankEntries.mockResolvedValue([]);
     fake.invoke.mockResolvedValue(planned([sub({ query: "CTO at ACME", filters: [] })]));
     const first = await run("Who is CTO at ACME?", false);
     // The planner points at the previous (searched) results.
@@ -274,9 +313,9 @@ describe("retriever pipeline", () => {
       { role: "assistant", content: "Ada." },
     ]);
     expect(plannerInput.previousVerifiedResults).toBeNull();
-    const second = engine.rankThroughIndices.mock.calls.at(-1)![2];
-    expect(second.query).toBe("CTO at ACME since");
-    expect(second.targets[0].entityIds).toBeNull();
+    const second = rankEntries.mock.calls.at(-1)![0];
+    expect(second.text).toBe("CTO at ACME since");
+    expect(second.entityIds).toBeNull();
     const limitations = diagnosticsWith(events, "results").limitations as string[];
     expect(limitations.some((text) => text.includes("reference to previous results was ignored"))).toBe(true);
   });
@@ -297,7 +336,7 @@ describe("retriever pipeline", () => {
     }
 
     it("is planned once more with the appended instruction, and the second plan is used", async () => {
-      engine.rankThroughIndices.mockResolvedValue([]);
+      rankEntries.mockResolvedValue([]);
       fake.invoke.mockResolvedValueOnce(unsupported).mockResolvedValueOnce(planned([sub({ query: "Bob role at ACME", filters: [] })]));
       const { summary, limitations } = await followUp();
       expect(fake.invoke).toHaveBeenCalledTimes(2);
@@ -305,7 +344,7 @@ describe("retriever pipeline", () => {
       expect(fake.invoke.mock.calls[1]![0][0].content).toBe(`${PLANNER}\n${REPLAN}`);
       // Same planner input both times.
       expect(fake.invoke.mock.calls[1]![0][1].content).toBe(fake.invoke.mock.calls[0]![0][1].content);
-      expect(engine.rankThroughIndices.mock.calls[0]![2].query).toBe("Bob role at ACME");
+      expect(rankEntries.mock.calls[0]![0].text).toBe("Bob role at ACME");
       expect(fake.stream).toHaveBeenCalledTimes(1);
       expect(summary.llmCalls).toBe(3);
       expect((summary.modelIO as { phase: string }[]).map((c) => c.phase)).toEqual(["plan", "replan", "answer"]);
@@ -316,7 +355,7 @@ describe("retriever pipeline", () => {
       fake.invoke.mockResolvedValue(unsupported);
       const { summary, limitations } = await followUp();
       expect(fake.invoke).toHaveBeenCalledTimes(2);
-      expect(engine.rankThroughIndices).not.toHaveBeenCalled();
+      expect(rankEntries).not.toHaveBeenCalled();
       const answerInput = JSON.parse(fake.stream.mock.calls[0]![0][1].content);
       expect(answerInput.unsupportedReason).toBe("already answered");
       expect(answerInput.searches).toEqual([]);
@@ -384,11 +423,11 @@ describe("retriever pipeline", () => {
 
   it("a follow-up refers to the previous exact results kept in its thread", async () => {
     const first = await run("Everyone in Berlin", false);
-    engine.rankThroughIndices.mockResolvedValue([]);
+    rankEntries.mockResolvedValue([]);
     fake.invoke.mockResolvedValue(planned([sub({ query: "CTO", filters: [], previous: { filterId: null, quote: "these people" } })]));
     await run("Which of these people is CTO?", false, first.thread);
     // The search is restricted to the previous result.
-    expect(engine.rankThroughIndices.mock.calls[0]![2].targets[0].entityIds).toEqual(["ada"]);
+    expect(rankEntries.mock.calls[0]![0].entityIds).toEqual(["ada"]);
     // Another thread has nothing to refer to.
     const { events } = await run("Which of these people is CTO?", true);
     expect(diagnosticsWith(events, "results").limitations).toContain(
@@ -400,11 +439,11 @@ describe("retriever pipeline", () => {
     const first = await run("Everyone in Berlin", false);
     const saved = { ...CONFIG, threshold: 0.5 };
     const changed: RunnableRetriever = { ...agent, config: saved, scope: { ...agent.scope, config: saved } };
-    engine.rankThroughIndices.mockResolvedValue([]);
+    rankEntries.mockResolvedValue([]);
     fake.invoke.mockResolvedValue(planned([sub({ query: "CTO", filters: [], previous: { filterId: null, quote: "these people" } })]));
     const { events } = await run("Which of these people is CTO?", true, first.thread, undefined, changed);
     expect(JSON.parse(fake.invoke.mock.calls.at(-1)![0][1].content).previousVerifiedResults).toBeNull();
-    expect(engine.rankThroughIndices.mock.calls[0]![2].targets[0].entityIds).toBeNull();
+    expect(rankEntries.mock.calls[0]![0].entityIds).toBeNull();
     expect(diagnosticsWith(events, "results").limitations).toContain(
       "The reference to previous results was ignored (there are no verified previous results); it ran as a fresh search.",
     );
@@ -442,7 +481,7 @@ describe("retrieve", () => {
   const signal = () => new AbortController().signal;
 
   it("makes exactly one planning call, no answer call, and returns chat's results in chat's order", async () => {
-    engine.rankThroughIndices.mockResolvedValue([]);
+    rankEntries.mockResolvedValue([]);
     const { events } = await run("Everyone in Berlin");
     const chatRows = diagnosticsWith(events, "results").results as { entityId: string }[];
     vi.clearAllMocks();

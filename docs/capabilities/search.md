@@ -87,8 +87,9 @@ entity rankings are fused by reciprocal rank: an entity's score is the sum of
 `1 / (60 + rank)` over the two, ranks starting at one, so only being found by both
 methods adds up — being found by several indices never does. Equal scores prefer the
 greater semantic similarity of each entity's best semantic entry, but only when every
-entity in that tied group has one; otherwise, and among equal similarities, they are
-ordered by entity id. What matched the entity is its best entry under the method in which
+entity in that tied group has one; otherwise, and among equal similarities, they keep the
+order in which the rankings first list them, the semantic ranking before the keyword
+ranking. What matched the entity is its best entry under the method in which
 it ranks best, semantic on equal ranks.
 
 An entry's **keyword score** is the number of distinct query words it contains — those

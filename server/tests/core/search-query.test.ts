@@ -294,21 +294,24 @@ describe("grouping and fusion", () => {
     expect(fused[0]!.matched).toMatchObject({ representation: "semantic", entry: { partId: "s" } });
   });
 
-  it("breaks equal fused scores by semantic similarity when every tied hit has one, else by entity id", () => {
+  it("breaks equal fused scores by semantic similarity when every tied hit has one, else by the earliest input", () => {
     const measured = fuseModes([
       mode("semantic", [[e("b", "x", "", 0.9), e("a", "x", "", 0.7)]]),
       mode("keyword", [[e("a", "x", "", 2), e("b", "x", "", 1)]]),
     ]);
     expect(measured.map((h) => h.entityId)).toEqual(["b", "a"]);
-    const unmeasured = fuseModes([
-      mode("semantic", [[e("z", "x", "", 0.9)]]),
-      mode("keyword", [[e("m", "x", "", 2)]]),
-    ]);
-    expect(unmeasured.map((h) => h.entityId)).toEqual(["m", "z"]);
+    // One equal score is no fusion: by entity id, as merged.
     expect(fuseModes([mode("keyword", [[e("z", "x", "", 1), e("m", "y", "", 1)]])]).map((h) => h.entityId)).toEqual([
       "m",
       "z",
     ]);
+  });
+
+  it("a tie of a hit with a semantic score and one without: the earliest input wins, whatever the ids", () => {
+    const semanticFirst = fuseModes([mode("semantic", [[e("z", "x", "", 0.9)]]), mode("keyword", [[e("m", "x", "", 2)]])]);
+    expect(semanticFirst.map((h) => h.entityId)).toEqual(["z", "m"]);
+    const keywordFirst = fuseModes([mode("keyword", [[e("z", "x", "", 2)]]), mode("semantic", [[e("m", "x", "", 0.9)]])]);
+    expect(keywordFirst.map((h) => h.entityId)).toEqual(["z", "m"]);
   });
 });
 

@@ -192,7 +192,9 @@ relation entries only those of the chosen relation types — the retriever's sub
 plan names none. In a sub-query without filters or a previous reference, semantic
 matches below the threshold do not count. The rankings of the query and its variants,
 and then of all sub-queries, are fused per entity by reciprocal rank
-(`1 / (60 + rank)`); an entity found by several sub-queries keeps what matched in each.
+(`1 / (60 + rank)`); equal sums are ordered as in [ranked search](search.md#ranking), the
+query before its variants and earlier sub-queries before later ones. An entity found by
+several sub-queries keeps what matched in each.
 
 **Filters restrict a sub-query to entities.** A filter finds the entities at the end of
 its path whose field equals the value — compared after Unicode normalisation, lower-casing
@@ -205,8 +207,9 @@ cut.
 **A restricted sub-query is an exact candidate set.** When filters or a previous
 reference restrict a sub-query, its query only orders the entities they allow: no
 threshold applies, and the allowed entities the search did not rank follow the ranked
-ones, without a match. A sub-query without a query lists them only. Either way at most
-100 entities are kept, and the answer is told when more match.
+ones, without a match, as long as the sub-query holds fewer than 100 entities; every
+ranked entity stays. A sub-query without a query lists them only. The answer is told when
+allowed entities were left out.
 
 An index whose build state is not `ready` still answers, and the answer is told that
 results may be incomplete ([search-indices.md](search-indices.md#status)).

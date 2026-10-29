@@ -4,12 +4,13 @@
  * Every search compiles into one (`searchCompile.ts`); the executor
  * (`runtime/search/executor.ts`) runs it.
  *
- * Leaves rank one index by one method for one text (`rank`) or name an
- * exact set of entities (`select`); inner nodes combine what flows up.
- * Each node yields a value: a ranking of entries, entities or passages on
- * a scale — where the numbers of its order came from — or a set. The
- * rules (`validateSearchTree`, R1–R8) refuse a tree whose values do not
- * fit, every violation at its path.
+ * Search nodes search one index by one method for one query text
+ * (`keywordSearch`, `semanticSearch`); a `filter` names the exact ids of
+ * the entities of one type that satisfy it; the other nodes combine what
+ * flows up. Each node yields a value: a ranking of entries, entities or
+ * passages with its score kind — what the numbers of its order mean — or
+ * entity ids. The rules (`validateSearchTree`, R1–R8) refuse a tree whose
+ * values do not fit, every violation at its path.
  *
  * Pure — no storage, no I/O.
  */
@@ -22,13 +23,14 @@ import type { SearchRepresentation } from "./searchIndex.js";
 // ---------------------------------------------------------------------------
 
 /** The keyword method's options: whether an entry needs any of the query's
- * words or all of them. */
+ * words or all of them. Configures every `keywordSearch` node. */
 export interface KeywordBlock {
   match: KeywordMatching;
 }
 
 /** The semantic method's options: the floor on an entry's similarity,
- * `(1 + cosine) / 2`, 0..1; absent: none. */
+ * `(1 + cosine) / 2`, 0..1; absent: none. Configures every
+ * `semanticSearch` node. */
 export interface SemanticBlock {
   minSimilarity?: number;
 }
@@ -44,39 +46,52 @@ export interface MethodBlocks {
 // Nodes
 // ---------------------------------------------------------------------------
 
-/** Rank one index's entries by one method for one text — the only node
- * that searches. Its one block names the method. */
-export interface RankNode {
-  kind: "rank";
+/** Search one index by keyword for one query text: its entries in keyword
+ * score order. */
+export interface KeywordSearchNode {
+  kind: "keywordSearch";
   /** The index key. */
   index: string;
   text: string;
-  keyword?: KeywordBlock;
-  semantic?: SemanticBlock;
+  match: KeywordMatching;
   /** Relation types whose relation entries count; null: every one the
    * lens shows. */
   relations: string[] | null;
+  /** The plan's sub-query the search belongs to — set by the planner
+   * compiler only, carried into provenance. */
+  subQuery?: number;
 }
 
-/** The entities of one type that meet exact conditions on stored values
- * and, unless `ids` is null, are among the ids — a set, no order. */
-export interface SelectNode {
-  kind: "select";
+/** Search one index by semantic similarity to one query text. */
+export interface SemanticSearchNode {
+  kind: "semanticSearch";
+  /** The index key. */
+  index: string;
+  text: string;
+  /** Entries below it do not count; absent: none. */
+  minSimilarity?: number;
+  /** As a keyword search's. */
+  relations: string[] | null;
+  subQuery?: number;
+}
+
+/** A search node: the only nodes that search. */
+export type SearchNode = KeywordSearchNode | SemanticSearchNode;
+
+/** The ids of the entities of one type that meet exact conditions on
+ * stored values and, unless `ids` is null, are among the ids — no order,
+ * no scores. */
+export interface FilterNode {
+  kind: "filter";
   entityType: string;
   conditions: FilterCondition[];
   ids: string[] | null;
 }
 
-/** The entities in every input set. */
-export interface IntersectNode {
-  kind: "intersect";
-  inputs: SearchNode[];
-}
-
-/** Rankings of one scale as one, by score. */
+/** Rankings of one score kind as one, by score. */
 export interface MergeNode {
   kind: "merge";
-  inputs: SearchNode[];
+  inputs: TreeNode[];
 }
 
 /** Entries to one item per result unit — an entity, or a passage — kept
@@ -84,41 +99,48 @@ export interface MergeNode {
 export interface GroupNode {
   kind: "group";
   key: "entity" | "passage";
-  input: SearchNode;
+  input: TreeNode;
 }
 
-/** Rankings of one unit as one by reciprocal rank — their order only. */
+/** Rankings of one result unit as one by reciprocal rank — their order
+ * only. */
 export interface FuseNode {
   kind: "fuse";
-  inputs: SearchNode[];
+  inputs: TreeNode[];
 }
 
-/** The ranking's items whose entity is in the set of its type — one set
- * per entity type; items of other types are kept. */
+/** The ranking's items whose entity is in the filter of its type — one
+ * filter per entity type; items of other types are kept. */
 export interface RestrictNode {
   kind: "restrict";
-  input: SearchNode;
-  sets: SearchNode[];
+  input: TreeNode;
+  filters: TreeNode[];
 }
 
-/** The ranking, then the set's entities it did not rank. */
+/** The ranking (none: an empty one), then the filters' entities it did
+ * not rank — filter by filter, each in id order — while it holds fewer
+ * than `until` items; a ranking that long already is kept whole. */
 export interface AppendNode {
   kind: "append";
-  input: SearchNode;
-  set: SearchNode;
+  input: TreeNode | null;
+  /** One per entity type. */
+  filters: TreeNode[];
+  until: number;
+  /** As a search node's. */
+  subQuery?: number;
 }
 
-/** The ranking's first `limit` items — the root. */
+/** The ranking's first `limit` items. */
 export interface CutNode {
   kind: "cut";
-  input: SearchNode;
+  input: TreeNode;
   limit: number;
 }
 
-export type SearchNode =
-  | RankNode
-  | SelectNode
-  | IntersectNode
+export type TreeNode =
+  | KeywordSearchNode
+  | SemanticSearchNode
+  | FilterNode
   | MergeNode
   | GroupNode
   | FuseNode
@@ -126,17 +148,20 @@ export type SearchNode =
   | AppendNode
   | CutNode;
 
-/** The method a rank ranks by: its one block's — null with none or both. */
-export function rankMethod(node: RankNode): SearchRepresentation | null {
-  if (node.keyword !== undefined && node.semantic === undefined) return "keyword";
-  if (node.semantic !== undefined && node.keyword === undefined) return "semantic";
-  return null;
+/** Whether a node searches. */
+export function isSearchNode(node: TreeNode): node is SearchNode {
+  return node.kind === "keywordSearch" || node.kind === "semanticSearch";
+}
+
+/** The method a search node searches by — its kind. */
+export function searchMethod(node: SearchNode): SearchRepresentation {
+  return node.kind === "keywordSearch" ? "keyword" : "semantic";
 }
 
 /** A node's inputs, each with its path segment. */
-function inputsOf(node: SearchNode): [string, SearchNode][] {
+function inputsOf(node: TreeNode): [string, TreeNode][] {
+  const filters = (of: TreeNode[]) => of.map((filter, i): [string, TreeNode] => [`filters.${i}`, filter]);
   switch (node.kind) {
-    case "intersect":
     case "merge":
     case "fuse":
       return node.inputs.map((input, i) => [`inputs.${i}`, input]);
@@ -144,12 +169,9 @@ function inputsOf(node: SearchNode): [string, SearchNode][] {
     case "cut":
       return [["input", node.input]];
     case "restrict":
-      return [["input", node.input], ...node.sets.map((set, i): [string, SearchNode] => [`sets.${i}`, set])];
+      return [["input", node.input], ...filters(node.filters)];
     case "append":
-      return [
-        ["input", node.input],
-        ["set", node.set],
-      ];
+      return [...(node.input === null ? [] : [["input", node.input] as [string, TreeNode]]), ...filters(node.filters)];
     default:
       return [];
   }
@@ -159,20 +181,20 @@ function inputsOf(node: SearchNode): [string, SearchNode][] {
 // Values
 // ---------------------------------------------------------------------------
 
-/** Where a ranking's order came from. Two rankings merge by score only on
- * one scale: similarities to one text's embedding by one model, keyword
- * scores of one text and matching — in the ontology's one language
- * setting. `ordinal`: the order only. */
-export type SearchScale =
-  | { kind: "semantic"; model: string | null; text: string }
-  | { kind: "keyword"; text: string; match: KeywordMatching }
-  | { kind: "ordinal" };
+/** What a ranking's scores mean. Two rankings merge by score only with one
+ * score kind: semantic similarities to one query text by one model,
+ * keyword scores of one query text and match — in the ontology's one
+ * language setting. `rankOnly`: the order only. */
+export type ScoreKind =
+  | { kind: "semanticSimilarity"; model: string | null; text: string }
+  | { kind: "keywordScore"; text: string; match: KeywordMatching }
+  | { kind: "rankOnly" };
 
-/** What a node yields: a ranking of entries, entities or passages on a
- * scale, or a set of entities of one type. */
-export type SearchValue =
-  | { unit: "entries" | "entities" | "passages"; scale: SearchScale }
-  | { unit: "set"; entityType: string };
+/** What a node yields: a ranking of entries, entities or passages with its
+ * score kind, or the entity ids of one type. */
+export type TreeValue =
+  | { unit: "entries" | "entities" | "passages"; scoreKind: ScoreKind }
+  | { unit: "entityIds"; entityType: string };
 
 /** What a tree is checked against: the lens and the ranking environment. */
 export interface SearchTreeContext {
@@ -180,13 +202,13 @@ export interface SearchTreeContext {
   indices: ReadonlySet<string>;
   /** The entity types the lens exposes. */
   entityTypes: ReadonlySet<string>;
-  /** The embedding model semantic leaves rank by; null without one. */
+  /** The embedding model semantic searches rank by; null without one. */
   model: string | null;
 }
 
 /** The value a node yields — null when the tree below does not fit the
  * rules (`validateSearchTree` says why). */
-export function searchValue(node: SearchNode, context: SearchTreeContext): SearchValue | null {
+export function treeValue(node: TreeNode, context: SearchTreeContext): TreeValue | null {
   return typeOf(node, "", context, []);
 }
 
@@ -199,8 +221,8 @@ export type SearchTreeRule = "R1" | "R2" | "R3" | "R4" | "R5" | "R6" | "R7" | "R
 
 export interface SearchTreeViolation {
   rule: SearchTreeRule;
-  /** Dotted path from the root (`""`) through `input`, `inputs.<i>`,
-   * `sets.<i>` and `set`. */
+  /** Dotted path from the root (`""`) through `input`, `inputs.<i>` and
+   * `filters.<i>`. */
   path: string;
   message: string;
 }
@@ -208,28 +230,38 @@ export interface SearchTreeViolation {
 /**
  * Check a tree against the rules, reporting every violation:
  *
- * - R1 a merge's rankings share one scale;
- * - R2 every rank reaches the root through exactly one group, below every
- *   fuse;
- * - R3 an ordinal ranking is only fused, restricted, appended to or cut;
- * - R4 a fuse or merge combines one unit; append ranks entities;
- * - R5 a floor lives in a semantic leaf;
- * - R6 a set enters a ranking only through restrict or append;
- * - R7 leaves name what the lens shows: a searchable index, an exposed type;
- * - R8 the root, and only the root, is a cut of entities or passages.
+ * - R1 a merge's rankings share one score kind;
+ * - R2 every search node reaches the root through exactly one group, below
+ *   every fuse;
+ * - R3 a rank-only ranking is only fused, restricted, appended to or cut;
+ * - R4 a fuse or merge combines one result unit; append ranks entities;
+ * - R5 a floor lives in a semantic search;
+ * - R6 entity ids enter a ranking only through restrict or append;
+ * - R7 nodes name what the lens shows: a searchable index, an exposed type;
+ * - R8 the root is a ranking of the result unit — entities or passages.
  */
-export function validateSearchTree(tree: SearchNode, context: SearchTreeContext): SearchTreeViolation[] {
+export function validateSearchTree(tree: TreeNode, context: SearchTreeContext): SearchTreeViolation[] {
   const violations: SearchTreeViolation[] = [];
-  typeOf(tree, "", context, violations);
-  if (tree.kind !== "cut") violations.push({ rule: "R8", path: "", message: "The root of a tree is a cut" });
+  const value = typeOf(tree, "", context, violations);
+  if (value?.unit === "entries") {
+    violations.push({
+      rule: "R2",
+      path: "",
+      message: "A search node reaches the root through exactly one group; these entries are not grouped",
+    });
+  } else if (value?.unit === "entityIds") {
+    violations.push({ rule: "R8", path: "", message: "The root is a ranking of entities or passages, not entity ids" });
+  }
   return violations;
 }
 
-type Ranking = Extract<SearchValue, { scale: SearchScale }>;
+type Ranking = Extract<TreeValue, { scoreKind: ScoreKind }>;
 
-function sameScale(a: SearchScale, b: SearchScale): boolean {
-  if (a.kind === "semantic" && b.kind === "semantic") return a.model === b.model && a.text === b.text;
-  if (a.kind === "keyword" && b.kind === "keyword") {
+function sameScoreKind(a: ScoreKind, b: ScoreKind): boolean {
+  if (a.kind === "semanticSimilarity" && b.kind === "semanticSimilarity") {
+    return a.model === b.model && a.text === b.text;
+  }
+  if (a.kind === "keywordScore" && b.kind === "keywordScore") {
     return a.text === b.text && a.match === b.match;
   }
   return a.kind === b.kind;
@@ -239,11 +271,11 @@ function sameScale(a: SearchScale, b: SearchScale): boolean {
  * input it depends on, breaks a rule — a node above does not report again
  * what follows from that. */
 function typeOf(
-  node: SearchNode,
+  node: TreeNode,
   path: string,
   context: SearchTreeContext,
   violations: SearchTreeViolation[],
-): SearchValue | null {
+): TreeValue | null {
   const refuse = (rule: SearchTreeRule, message: string, at = path): null => {
     violations.push({ rule, path: at, message });
     return null;
@@ -252,66 +284,74 @@ function typeOf(
     const at = path === "" ? segment : `${path}.${segment}`;
     return { path: at, value: typeOf(input, at, context, violations) };
   });
-  // The inputs that must be rankings: a set refused (R6), an ordinal one
-  // too where only a scored ranking fits (R3). Null when one does not fit.
+  // The inputs that must be rankings: entity ids refused (R6), a rank-only
+  // ranking too where only a scored one fits (R3). Null when one does not
+  // fit.
   const rankings = (of: typeof inputs, scored: boolean): Ranking[] | null => {
     if (of.some((input) => input.value === null)) return null;
     const misfits = of.filter((input) => {
-      if (input.value!.unit === "set") {
-        refuse("R6", "A set enters a ranking only through restrict or append", input.path);
+      if (input.value!.unit === "entityIds") {
+        refuse("R6", "Entity ids enter a ranking only through restrict or append", input.path);
         return true;
       }
-      if (scored && input.value!.scale.kind === "ordinal") {
-        refuse("R3", "An ordinal ranking is only fused, restricted, appended to or cut", input.path);
+      if (scored && input.value!.scoreKind.kind === "rankOnly") {
+        refuse("R3", "A rank-only ranking is only fused, restricted, appended to or cut", input.path);
         return true;
       }
       return false;
     });
     return misfits.length > 0 ? null : (of.map((input) => input.value) as Ranking[]);
   };
+  // A restrict's or append's filters: entity ids, one filter per entity
+  // type. Reports what does not fit.
+  const checkFilters = (filters: typeof inputs, what: string) => {
+    const types = new Set<string>();
+    for (const filter of filters) {
+      if (filter.value === null) continue;
+      if (filter.value.unit !== "entityIds") {
+        refuse("R6", `${what} takes the entity ids of a filter; this is a ranking`, filter.path);
+      } else if (types.has(filter.value.entityType)) {
+        refuse("shape", `${what} has one filter per entity type; '${filter.value.entityType}' has two`, filter.path);
+      } else {
+        types.add(filter.value.entityType);
+      }
+    }
+  };
 
   switch (node.kind) {
-    case "rank": {
+    case "keywordSearch":
+    case "semanticSearch": {
       if (!context.indices.has(node.index)) refuse("R7", `Search index '${node.index}' is not searchable in this lens`);
-      if (node.keyword !== undefined && "minSimilarity" in node.keyword) {
-        return refuse("R5", "A floor lives in a semantic leaf; keyword scores have none");
+      if (node.kind === "keywordSearch" && "minSimilarity" in node) {
+        return refuse("R5", "A floor lives in a semantic search; keyword scores have none");
       }
-      const method = rankMethod(node);
-      if (method === null) return refuse("shape", "A rank ranks by one method: one block, keyword or semantic");
-      if (node.text.trim() === "") return refuse("shape", "A rank needs a query text");
-      if (method === "keyword") {
-        return { unit: "entries", scale: { kind: "keyword", text: node.text, match: node.keyword!.match } };
+      if (node.text.trim() === "") return refuse("shape", "A search node needs a query text");
+      if (node.kind === "keywordSearch") {
+        return { unit: "entries", scoreKind: { kind: "keywordScore", text: node.text, match: node.match } };
       }
-      const floor = node.semantic!.minSimilarity;
+      const floor = node.minSimilarity;
       if (floor !== undefined && !(floor >= 0 && floor <= 1)) {
         return refuse("shape", "minSimilarity is a number from 0 to 1");
       }
-      return { unit: "entries", scale: { kind: "semantic", model: context.model, text: node.text } };
+      return { unit: "entries", scoreKind: { kind: "semanticSimilarity", model: context.model, text: node.text } };
     }
-    case "select":
+    case "filter":
       if (!context.entityTypes.has(node.entityType)) {
         refuse("R7", `Entity type '${node.entityType}' is not in this lens`);
       }
-      return { unit: "set", entityType: node.entityType };
-    case "intersect": {
-      if (inputs.length === 0) return refuse("shape", "An intersect needs at least one set");
-      if (inputs.some((input) => input.value === null)) return null;
-      const ranked = inputs.filter((input) => input.value!.unit !== "set");
-      for (const input of ranked) refuse("R6", "Only sets intersect", input.path);
-      if (ranked.length > 0) return null;
-      const types = new Set(inputs.map((input) => (input.value as { entityType: string }).entityType));
-      if (types.size > 1) return refuse("shape", "An intersect's sets are of one entity type");
-      return { unit: "set", entityType: [...types][0]! };
-    }
+      return { unit: "entityIds", entityType: node.entityType };
     case "merge": {
       if (inputs.length === 0) return refuse("shape", "A merge needs at least one ranking");
       const merged = rankings(inputs, true);
       if (merged === null) return null;
       if (merged.some((value) => value.unit !== merged[0]!.unit)) {
-        return refuse("R4", "A merge combines rankings of one unit");
+        return refuse("R4", "A merge combines rankings of one result unit");
       }
-      if (merged.some((value) => !sameScale(value.scale, merged[0]!.scale))) {
-        return refuse("R1", "A merge combines rankings of one scale: one method, text and model; else fuse them");
+      if (merged.some((value) => !sameScoreKind(value.scoreKind, merged[0]!.scoreKind))) {
+        return refuse(
+          "R1",
+          "A merge combines rankings of one score kind: one method, query text and model; else fuse them",
+        );
       }
       return merged[0]!;
     }
@@ -319,9 +359,9 @@ function typeOf(
       const [input] = rankings(inputs, true) ?? [];
       if (input === undefined) return null;
       if (input.unit !== "entries") {
-        return refuse("R2", "A rank reaches the root through exactly one group; this one groups grouped items");
+        return refuse("R2", "A search node reaches the root through exactly one group; this one groups grouped items");
       }
-      return { unit: node.key === "entity" ? "entities" : "passages", scale: input.scale };
+      return { unit: node.key === "entity" ? "entities" : "passages", scoreKind: input.scoreKind };
     }
     case "fuse": {
       if (inputs.length === 0) return refuse("shape", "A fuse needs at least one ranking");
@@ -331,48 +371,40 @@ function typeOf(
         return refuse("R2", "A fuse combines grouped rankings: a group below every fuse, so an item votes once");
       }
       if (fused.some((value) => value.unit !== fused[0]!.unit)) {
-        return refuse("R4", "A fuse combines rankings of one unit");
+        return refuse("R4", "A fuse combines rankings of one result unit");
       }
-      return { unit: fused[0]!.unit, scale: { kind: "ordinal" } };
+      return { unit: fused[0]!.unit, scoreKind: { kind: "rankOnly" } };
     }
     case "restrict": {
-      const [input, ...sets] = inputs;
-      if (sets.length === 0) refuse("shape", "A restrict needs at least one set");
-      const types = new Set<string>();
-      for (const set of sets) {
-        if (set.value === null) continue;
-        if (set.value.unit !== "set") {
-          refuse("R6", "A restrict keeps the items in a set; this is a ranking", set.path);
-        } else if (types.has(set.value.entityType)) {
-          refuse("shape", `A restrict has one set per entity type; '${set.value.entityType}' has two`, set.path);
-        } else {
-          types.add(set.value.entityType);
-        }
-      }
+      const [input, ...filters] = inputs;
+      if (filters.length === 0) refuse("shape", "A restrict needs at least one filter");
+      checkFilters(filters, "A restrict");
       return rankings([input!], false)?.[0] ?? null;
     }
     case "append": {
-      const [input, set] = inputs;
-      if (set!.value !== null && set!.value.unit !== "set") {
-        refuse("R6", "An append adds the entities of a set; this is a ranking", set!.path);
-      }
-      const [ranking] = rankings([input!], false) ?? [];
+      const ranked = node.input === null ? [] : inputs.slice(0, 1);
+      const filters = inputs.slice(ranked.length);
+      if (filters.length === 0) refuse("shape", "An append needs at least one filter");
+      if (!Number.isInteger(node.until) || node.until < 1) refuse("shape", "An append's until is a positive integer");
+      checkFilters(filters, "An append");
+      const appended: TreeValue = { unit: "entities", scoreKind: { kind: "rankOnly" } };
+      if (ranked.length === 0) return appended;
+      const [ranking] = rankings(ranked, false) ?? [];
       if (ranking === undefined) return null;
       if (ranking.unit === "entries") {
         return refuse("R2", "An append adds to grouped entities; group the entries first");
       }
       if (ranking.unit !== "entities") return refuse("R4", "An append adds to a ranking of entities");
-      return { unit: "entities", scale: { kind: "ordinal" } };
+      return appended;
     }
     case "cut": {
-      if (path !== "") refuse("R8", "A cut is the root of a tree");
       if (!Number.isInteger(node.limit) || node.limit < 1 || node.limit > 100) {
         refuse("shape", "A cut's limit is an integer from 1 to 100");
       }
       const [input] = rankings(inputs, false) ?? [];
       if (input === undefined) return null;
       if (input.unit === "entries") {
-        return refuse("R2", "A rank reaches the root through exactly one group; these entries are not grouped");
+        return refuse("R2", "A search node reaches the root through exactly one group; these entries are not grouped");
       }
       return input;
     }
@@ -388,11 +420,11 @@ function typeOf(
 /**
  * A tree as text, one node per line under its parent, inputs in order —
  * the same tree always prints the same: parameters in canonical JSON (keys
- * sorted), the ids and relation types of a leaf sorted.
+ * sorted), the ids and relation types of a node sorted.
  */
-export function printSearchTree(tree: SearchNode): string {
+export function printSearchTree(tree: TreeNode): string {
   const lines: string[] = [];
-  const print = (node: SearchNode, lead: string, indent: string) => {
+  const print = (node: TreeNode, lead: string, indent: string) => {
     lines.push(lead + label(node));
     const inputs = inputsOf(node);
     inputs.forEach(([, input], i) => {
@@ -404,25 +436,31 @@ export function printSearchTree(tree: SearchNode): string {
   return lines.join("\n");
 }
 
-function label(node: SearchNode): string {
+function label(node: TreeNode): string {
+  const subQuery = (of: { subQuery?: number }) => (of.subQuery === undefined ? [] : [`sub-query ${of.subQuery}`]);
   switch (node.kind) {
-    case "rank":
-      return `rank(${[
+    case "keywordSearch":
+    case "semanticSearch":
+      return `${node.kind}(${[
         node.index,
-        ...(["semantic", "keyword"] as const).flatMap((method) =>
-          node[method] === undefined ? [] : [`${method} ${canonical(node[method])}`],
-        ),
         JSON.stringify(node.text),
+        ...(node.kind === "keywordSearch" ? [`match ${node.match}`] : []),
+        ...(node.kind === "semanticSearch" && node.minSimilarity !== undefined
+          ? [`minSimilarity ${node.minSimilarity}`]
+          : []),
         ...(node.relations === null ? [] : [`relations ${canonical([...node.relations].sort())}`]),
+        ...subQuery(node),
       ].join(", ")})`;
-    case "select":
-      return `select(${[
+    case "filter":
+      return `filter(${[
         node.entityType,
         ...(node.conditions.length === 0 ? [] : [`where ${canonical(node.conditions)}`]),
         ...(node.ids === null ? [] : [`ids ${canonical([...node.ids].sort())}`]),
       ].join(", ")})`;
     case "group":
       return `group(${node.key})`;
+    case "append":
+      return `append(${[`until ${node.until}`, ...subQuery(node)].join(", ")})`;
     case "cut":
       return `cut(limit ${node.limit})`;
     default:

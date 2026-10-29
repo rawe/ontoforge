@@ -1,9 +1,10 @@
 /**
  * The search tree at run time: the trees today's searches compile into
  * (canonical printouts), and the executor against a fake search-index
- * store — single-method raw scores, fusion and its ties, `matched`, the
- * refetch, the similarity floor, restrictions pushed into the leaves, one
- * embedding per text.
+ * store — single-method raw scores, fusion and its one tie rule,
+ * `matched`, the refetch per cut, the similarity floor, restrictions
+ * pushed into the search nodes, append, provenance by sub-query and query
+ * text, one embedding per query text.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +19,12 @@ import type {
 } from "../../src/core/ports.js";
 import { SearchIndexDefinition, type SearchIndexSchema } from "../../src/core/searchIndex.js";
 import { RRF_K } from "../../src/core/searchQuery.js";
-import { printSearchTree, type RankNode, type SearchNode } from "../../src/core/searchTree.js";
+import {
+  printSearchTree,
+  type KeywordSearchNode,
+  type SemanticSearchNode,
+  type TreeNode,
+} from "../../src/core/searchTree.js";
 import { invalidateLoadedSchemaCache, type LoadedSchema } from "../../src/runtime/schemaCache.js";
 import { search } from "../../src/runtime/search/entry.js";
 import { executeSearchTree } from "../../src/runtime/search/executor.js";
@@ -85,40 +91,40 @@ describe("the trees today's searches compile", () => {
 
   it("the default search: hybrid over the default index of each type and the passage index", async () => {
     await search("full_lens", { query: "machine learning" }, store);
-    expect(printSearchTree(compiled.trees[0] as SearchNode)).toBe(
+    expect(printSearchTree(compiled.trees[0] as TreeNode)).toBe(
       [
         "cut(limit 10)",
         "└─ fuse",
         "   ├─ group(entity)",
         "   │  └─ merge",
-        '   │     ├─ rank(person~default, semantic {}, "machine learning")',
-        '   │     ├─ rank(company~default, semantic {}, "machine learning")',
-        '   │     └─ rank(person~body, semantic {}, "machine learning")',
+        '   │     ├─ semanticSearch(person~default, "machine learning")',
+        '   │     ├─ semanticSearch(company~default, "machine learning")',
+        '   │     └─ semanticSearch(person~body, "machine learning")',
         "   └─ group(entity)",
         "      └─ merge",
-        '         ├─ rank(person~default, keyword {"match":"any"}, "machine learning")',
-        '         ├─ rank(company~default, keyword {"match":"any"}, "machine learning")',
-        '         └─ rank(person~body, keyword {"match":"any"}, "machine learning")',
+        '         ├─ keywordSearch(person~default, "machine learning", match any)',
+        '         ├─ keywordSearch(company~default, "machine learning", match any)',
+        '         └─ keywordSearch(person~body, "machine learning", match any)',
       ].join("\n"),
     );
   });
 
-  it("an index search by keyword with a filter: the filter as a set per type", async () => {
+  it("an index search by keyword with a filter: the filter as a filter node per type", async () => {
     await searchByIndices(
       "full_lens",
       { query: "acme", indices: ["person~default", "company~default"], mode: "keyword", filters: { name: "ACME" } },
       store,
     );
-    expect(printSearchTree(compiled.trees[0] as SearchNode)).toBe(
+    expect(printSearchTree(compiled.trees[0] as TreeNode)).toBe(
       [
         "cut(limit 10)",
         "└─ restrict",
         "   ├─ group(entity)",
         "   │  └─ merge",
-        '   │     ├─ rank(person~default, keyword {"match":"any"}, "acme")',
-        '   │     └─ rank(company~default, keyword {"match":"any"}, "acme")',
-        '   ├─ select(person, where [{"dataType":"string","kind":"property","op":"eq","propertyKey":"name","value":"ACME"}])',
-        '   └─ select(company, where [{"dataType":"string","kind":"property","op":"eq","propertyKey":"name","value":"ACME"}])',
+        '   │     ├─ keywordSearch(person~default, "acme", match any)',
+        '   │     └─ keywordSearch(company~default, "acme", match any)',
+        '   ├─ filter(person, where [{"dataType":"string","kind":"property","op":"eq","propertyKey":"name","value":"ACME"}])',
+        '   └─ filter(company, where [{"dataType":"string","kind":"property","op":"eq","propertyKey":"name","value":"ACME"}])',
       ].join("\n"),
     );
   });
@@ -129,11 +135,11 @@ describe("the trees today's searches compile", () => {
       { query: "ada", type: "person", in: ["properties"], strategy: "semantic", minSimilarity: 0.75 },
       store,
     );
-    expect(printSearchTree(compiled.trees[0] as SearchNode)).toBe(
+    expect(printSearchTree(compiled.trees[0] as TreeNode)).toBe(
       [
         "cut(limit 10)",
         "└─ group(entity)",
-        '   └─ rank(person~default, semantic {"minSimilarity":0.75}, "ada")',
+        '   └─ semanticSearch(person~default, "ada", minSimilarity 0.75)',
       ].join("\n"),
     );
   });
@@ -211,27 +217,32 @@ describe("the executor", () => {
     indexStore = { listGenerations: async () => generations, rankEntries: rank } as unknown as SearchIndexStore;
   });
 
-  const sem = (index: string, text = "q", minSimilarity?: number): RankNode => ({
-    kind: "rank",
+  const sem = (index: string, text = "q", minSimilarity?: number, subQuery?: number): SemanticSearchNode => ({
+    kind: "semanticSearch",
     index,
     text,
-    semantic: minSimilarity === undefined ? {} : { minSimilarity },
+    ...(minSimilarity === undefined ? {} : { minSimilarity }),
     relations: null,
+    ...(subQuery === undefined ? {} : { subQuery }),
   });
-  const kw = (index: string, text = "q"): RankNode => ({
-    kind: "rank",
+  const kw = (index: string, text = "q", subQuery?: number): KeywordSearchNode => ({
+    kind: "keywordSearch",
     index,
     text,
-    keyword: { match: "any" },
+    match: "any",
     relations: null,
+    ...(subQuery === undefined ? {} : { subQuery }),
   });
-  const group = (input: SearchNode): SearchNode => ({ kind: "group", key: "entity", input });
-  const merge = (...inputs: SearchNode[]): SearchNode => ({ kind: "merge", inputs });
-  const fuse = (...inputs: SearchNode[]): SearchNode => ({ kind: "fuse", inputs });
-  const cut = (input: SearchNode, limit = 10): SearchNode => ({ kind: "cut", input, limit });
+  const group = (input: TreeNode): TreeNode => ({ kind: "group", key: "entity", input });
+  const merge = (...inputs: TreeNode[]): TreeNode => ({ kind: "merge", inputs });
+  const fuse = (...inputs: TreeNode[]): TreeNode => ({ kind: "fuse", inputs });
+  const cut = (input: TreeNode, limit = 10): TreeNode => ({ kind: "cut", input, limit });
   const hybrid = (...keys: string[]) =>
     fuse(group(merge(...keys.map((key) => sem(key)))), group(merge(...keys.map((key) => kw(key)))));
-  const run = (tree: SearchNode) => executeSearchTree(loaded, indexStore, indices, tree);
+  // The entity search's hits: one search per entity.
+  const run = async (tree: TreeNode) =>
+    (await executeSearchTree(loaded, indexStore, indices, tree)).map((hit) => hit.provenance[0]!.hit!);
+  const runTree = (tree: TreeNode) => executeSearchTree(loaded, indexStore, indices, tree);
   const rrf = (rank: number) => 1 / (RRF_K + rank);
 
   it("one method keeps the raw scores, merged across indices; equal scores by entity id", async () => {
@@ -287,7 +298,7 @@ describe("the executor", () => {
     expect(hits.map((hit) => [hit.entityId, hit.score])).toEqual([["a", rrf(1)]]);
   });
 
-  it("fetches limit × 4 first, then once more up to 1,000 the leaves not yet exhausted", async () => {
+  it("fetches limit × 4 first, then once more up to 1,000 the search nodes not yet exhausted", async () => {
     // Many entries of one entity fill the first page.
     lists["person~default/keyword"] = Array.from({ length: 50 }, (_, i) =>
       entry(i < 30 ? "a" : `e${i}`, 100 - i, String(i)),
@@ -309,7 +320,7 @@ describe("the executor", () => {
     expect(rank.mock.calls.map(([query]) => query.limit)).toEqual([8, 1000]);
   });
 
-  it("floors each semantic leaf after its fetch; a leaf past its floor is exhausted", async () => {
+  it("floors each semantic search after its fetch; one past its floor is exhausted", async () => {
     lists["person~default/semantic"] = [entry("a", 0.9), entry("b", 0.6), entry("c", 0.55), entry("d", 0.5)];
     const hits = await run(cut(group(sem("person~default", "q", 0.7)), 1));
     expect(hits.map((hit) => hit.entityId)).toEqual(["a"]);
@@ -319,7 +330,7 @@ describe("the executor", () => {
     expect(rank.mock.calls.map(([query]) => query.limit)).toEqual([4, 20]);
   });
 
-  it("pushes the restrictions into every leaf of their type; other types are not restricted", async () => {
+  it("pushes the restrictions into every search node of their type; other types are not restricted", async () => {
     const age = { kind: "property", propertyKey: "age", dataType: "integer", op: "gte", value: 20 } as const;
     const active = { kind: "property", propertyKey: "active", dataType: "boolean", op: "eq", value: true } as const;
     const ranked = group(merge(kw("person~default"), kw("person~notes"), kw("company~default")));
@@ -329,17 +340,9 @@ describe("the executor", () => {
         input: {
           kind: "restrict",
           input: ranked,
-          sets: [{ kind: "select", entityType: "person", conditions: [age], ids: ["a", "b"] }],
+          filters: [{ kind: "filter", entityType: "person", conditions: [age], ids: ["a", "b"] }],
         },
-        sets: [
-          {
-            kind: "intersect",
-            inputs: [
-              { kind: "select", entityType: "person", conditions: [active], ids: null },
-              { kind: "select", entityType: "person", conditions: [], ids: ["b", "c"] },
-            ],
-          },
-        ],
+        filters: [{ kind: "filter", entityType: "person", conditions: [active], ids: ["b", "c"] }],
       }),
     );
     expect(rank.mock.calls.map(([query]) => [query.generationId, query.conditions, query.entityIds])).toEqual([
@@ -349,7 +352,7 @@ describe("the executor", () => {
     ]);
   });
 
-  it("embeds each text once, whatever the number of leaves; no leaf to run embeds nothing", async () => {
+  it("embeds each query text once, whatever the number of search nodes; none to run embeds nothing", async () => {
     await run(cut(fuse(group(merge(sem("person~default"), sem("company~default"))), group(sem("person~notes", "v1")))));
     expect(embed.mock.calls.map(([text]) => text)).toEqual(["q", "v1"]);
     generations = [];
@@ -357,13 +360,73 @@ describe("the executor", () => {
     expect(embed).toHaveBeenCalledTimes(2);
   });
 
-  it("refuses what it cannot run yet", async () => {
-    lists["person~default/keyword"] = [entry("a", 1)];
-    const append: SearchNode = {
-      kind: "append",
-      input: group(kw("person~default")),
-      set: { kind: "select", entityType: "person", conditions: [], ids: ["b"] },
-    };
-    await expect(run(cut(append))).rejects.toThrow("cannot run yet");
+  it("fuses entity rankings by reciprocal rank: exact ties by the best semantic similarity, else the earliest input", async () => {
+    lists["person~default/semantic"] = [entry("a", 0.9), entry("b", 0.6)];
+    lists["company~default/keyword"] = [entry("c", 3), entry("d", 2)];
+    // v1 ranks c then d, q ranks a then b — each pair ties.
+    const hits = await runTree(
+      fuse(cut(group(kw("company~default", "v1")), 30), cut(group(sem("person~default", "q")), 30)),
+    );
+    // c and a tie at rank 1, d and b at rank 2: only a and b have a
+    // similarity, so the earliest input wins, not the entity id.
+    expect(hits.map((hit) => hit.entityId)).toEqual(["c", "a", "d", "b"]);
+    lists["company~default/semantic"] = [entry("c", 0.95), entry("d", 0.5)];
+    const both = await runTree(
+      fuse(cut(group(sem("person~default", "q")), 30), cut(group(sem("company~default", "v1")), 30)),
+    );
+    // Every tied entity has one now: the higher first.
+    expect(both.map((hit) => hit.entityId)).toEqual(["c", "a", "b", "d"]);
+  });
+
+  it("an entity keeps what each search found of it: sub-query, query text and hit, in tree order", async () => {
+    lists["person~default/keyword"] = [entry("a", 2), entry("b", 1)];
+    const hits = await runTree(
+      fuse(
+        fuse(cut(group(kw("person~default", "q", 0)), 30), cut(group(kw("person~default", "v1", 0)), 30)),
+        cut(group(kw("person~default", "other", 1)), 30),
+      ),
+    );
+    expect(hits.map((hit) => hit.entityId)).toEqual(["a", "b"]);
+    expect(hits[0]!.provenance.map((row) => [row.subQuery, row.text, row.hit!.matched.index.key])).toEqual([
+      [0, "q", "person~default"],
+      [0, "v1", "person~default"],
+      [1, "other", "person~default"],
+    ]);
+  });
+
+  it("an append lists the filters' ids the ranking missed, filter by filter in id order, while it holds fewer than until", async () => {
+    lists["person~default/keyword"] = [entry("p3", 2)];
+    const filters: TreeNode[] = [
+      { kind: "filter", entityType: "person", conditions: [], ids: ["p3", "p2", "p1"] },
+      { kind: "filter", entityType: "company", conditions: [], ids: ["c1"] },
+    ];
+    const ranked: TreeNode = { kind: "restrict", input: cut(group(kw("person~default")), 30), filters };
+    const hits = await runTree({ kind: "append", input: ranked, filters, until: 3, subQuery: 2 });
+    expect(hits.map((hit) => [hit.entityId, hit.entityType, hit.provenance[0]!.text])).toEqual([
+      ["p3", "person", "q"],
+      ["p1", "person", null],
+      ["p2", "person", null],
+    ]);
+    expect(hits[1]!.provenance).toEqual([{ subQuery: 2, text: null, hit: null }]);
+    // Pushed down, never filtered afterwards.
+    expect(rank.mock.calls[0]![0].entityIds).toEqual(["p3", "p2", "p1"]);
+    // A ranking that holds `until` already is kept whole; without one, only the ids.
+    lists["person~default/keyword"] = [entry("p3", 2), entry("p2", 1)];
+    const full = await runTree({ kind: "append", input: cut(group(kw("person~default")), 30), filters, until: 1 });
+    expect(full.map((hit) => hit.entityId)).toEqual(["p3", "p2"]);
+    const listed = await runTree({ kind: "append", input: null, filters, until: 100 });
+    expect(listed.map((hit) => hit.entityId)).toEqual(["p1", "p2", "p3", "c1"]);
+  });
+
+  it("each search node fetches by its nearest cut; a cut that comes out short refetches only its own", async () => {
+    lists["person~default/keyword"] = Array.from({ length: 20 }, (_, i) => entry("a", 100 - i, String(i)));
+    lists["company~default/keyword"] = Array.from({ length: 40 }, (_, i) => entry(`c${i}`, 100 - i));
+    const hits = await runTree(fuse(cut(group(kw("person~default", "q")), 2), cut(group(kw("company~default", "v1")), 3)));
+    expect(rank.mock.calls.map(([query]) => [query.generationId, query.limit])).toEqual([
+      ["person~default/keyword", 8],
+      ["company~default/keyword", 12],
+      ["person~default/keyword", 1000],
+    ]);
+    expect(hits.map((hit) => hit.entityId)).toEqual(["a", "c0", "c1", "c2"]);
   });
 });

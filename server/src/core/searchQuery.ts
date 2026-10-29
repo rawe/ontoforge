@@ -207,9 +207,9 @@ export function groupByEntity<E extends { entityId: string }>(entries: readonly 
  * Fuse the mode rankings at entity level: each grouped by entity (score =
  * its best entry, whichever index holds it), then reciprocal-rank fusion
  * across the modes — hybrid only; a single mode keeps its own scores. One
- * entity found by several indices of one mode counts once. Equal scores
- * prefer the greater semantic similarity when every tied entity has one,
- * then the entity id.
+ * entity found by several indices of one mode counts once. Equal sums:
+ * the one tie rule (`byScore`), by the best semantic entry; one mode's
+ * equal scores by entity id.
  */
 export function fuseModes<E extends { entityId: string; score: number }>(
   rankings: readonly ModeRanking<E>[],
@@ -234,22 +234,40 @@ export function fuseModes<E extends { entityId: string; score: number }>(
       }
     });
   }
-  const similarity = (hit: FusedHit<E>): number | null =>
-    hit.modes.find((m) => m.representation === "semantic")?.entry.score ?? null;
-  const byId = (a: FusedHit<E>, b: FusedHit<E>) =>
-    a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
-  const ranked = [...fused.values()].sort((a, b) => b.score - a.score);
-  const result: FusedHit<E>[] = [];
+  const hits = [...fused.values()];
+  // One mode is no fusion: equal scores by entity id, as merged.
+  if (rankings.length === 1) return hits.sort((a, b) => b.score - a.score || byId(a, b));
+  return byScore(hits, (hit) => hit.modes.find((m) => m.representation === "semantic")?.entry.score ?? null);
+}
+
+/**
+ * Fused items best score first, by the one tie rule of every fusion: equal
+ * scores prefer the greater semantic similarity when every tied item has
+ * one, then the earliest input that ranked the item — `items` come in
+ * that order, first appearance: input order, then position within it. A
+ * first appearance is unique, so the entity id never has to decide.
+ */
+export function byScore<T extends { entityId: string; score: number }>(
+  items: readonly T[],
+  similarity: (item: T) => number | null,
+): T[] {
+  // Stable sorts: equal scores, and then equal similarities, keep the
+  // order of first appearance.
+  const ranked = [...items].sort((a, b) => b.score - a.score);
+  const result: T[] = [];
   for (let start = 0; start < ranked.length; ) {
     let end = start + 1;
     while (end < ranked.length && ranked[end]!.score === ranked[start]!.score) end++;
     const group = ranked.slice(start, end);
-    const measured = group.every((hit) => similarity(hit) !== null);
-    group.sort((a, b) => (measured ? similarity(b)! - similarity(a)! : 0) || byId(a, b));
+    if (group.every((item) => similarity(item) !== null)) group.sort((a, b) => similarity(b)! - similarity(a)!);
     result.push(...group);
     start = end;
   }
   return result;
+}
+
+function byId(a: { entityId: string }, b: { entityId: string }): number {
+  return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
 }
 
 // ---------------------------------------------------------------------------

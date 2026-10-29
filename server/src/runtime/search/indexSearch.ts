@@ -55,6 +55,7 @@ import {
   type KeywordBlock,
   type MethodBlocks,
   type SemanticBlock,
+  type TreeNode,
 } from "../../core/searchTree.js";
 import {
   applyFieldProjection,
@@ -63,7 +64,7 @@ import {
 } from "../readHelpers.js";
 import { listSearchIndexStatuses } from "../indexing/status.js";
 import { loadSchema, type LoadedSchema } from "../schemaCache.js";
-import { executeSearchTree } from "./executor.js";
+import { executeSearchTree, type TreeHit } from "./executor.js";
 import { relativeScore } from "./fusion.js";
 import { resolveSearchFilters } from "./request.js";
 
@@ -261,8 +262,8 @@ export async function searchIndexCatalog(
 // ---------------------------------------------------------------------------
 
 /** Rank entities over the targets' active generations (module comment,
- * steps 2–4): the request compiles into a search tree, checked by its
- * rules and run by the executor. */
+ * steps 2–4): the request compiles into a search tree, run by
+ * `runSearchTree`. */
 export async function rankThroughIndices(
   loaded: LoadedSchema,
   indexStore: SearchIndexStore,
@@ -282,9 +283,21 @@ export async function rankThroughIndices(
     relations: request.relations,
     limit: request.limit,
   });
-  // The targets are the indices the caller resolved through the lens.
+  const hits = await runSearchTree(loaded, indexStore, request.targets.map((target) => target.index), tree);
+  // One search: its hit is the entity's.
+  return hits.map((hit) => hit.provenance[0]!.hit!);
+}
+
+/** Run a search tree over `indices` — the ones the caller resolved
+ * through the lens — once its rules hold. */
+export async function runSearchTree(
+  loaded: LoadedSchema,
+  indexStore: SearchIndexStore,
+  indices: readonly SearchIndexRecord[],
+  tree: TreeNode,
+): Promise<TreeHit[]> {
   const violations = validateSearchTree(tree, {
-    indices: new Set(request.targets.map((target) => target.index.key)),
+    indices: new Set(indices.map((index) => index.key)),
     entityTypes: new Set(Object.keys(loaded.scoped.entityTypes)),
     model: getEmbeddingProvider()?.modelId ?? null,
   });
@@ -293,8 +306,7 @@ export async function rankThroughIndices(
       `Invalid search tree: ${violations.map((v) => `${v.rule} at '${v.path}': ${v.message}`).join("; ")}`,
     );
   }
-  const indices = new Map(request.targets.map((target) => [target.index.key, target.index] as const));
-  return executeSearchTree(loaded, indexStore, indices, tree);
+  return executeSearchTree(loaded, indexStore, new Map(indices.map((index) => [index.key, index] as const)), tree);
 }
 
 /** The method blocks of a mode: keyword with the request's matching,

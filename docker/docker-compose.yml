@@ -70,7 +70,7 @@ services:
     ports:
       - "3000:80"
     environment:
-      # Internal URL of the server service — nginx proxies /api and /mcp here
+      # Internal URL of the server service — nginx proxies /api here
       BACKEND_URL: http://server:8000
     depends_on:
       - server

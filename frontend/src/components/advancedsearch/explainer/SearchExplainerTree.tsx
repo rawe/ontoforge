@@ -109,7 +109,7 @@ export function SearchExplainerTree({ lit, onSelect }: { lit: TreeNodeId[]; onSe
     {/* The filter applies inside every search. */}
     <path d={`M 204 ${LANES.keyword.top + 30} L 204 ${LANES.semantic.top + LANE_HEIGHT - 8}`} fill="none" strokeDasharray="3 3" strokeWidth={on('filter') ? 2 : 1}
       className={cn('transition-[stroke] duration-500', on('filter') ? 'stroke-primary' : 'stroke-muted-foreground/35')} />
-    {edge('filter', `M ${AT.filter.x + 65} ${AT.filter.y} L 202 ${AT.filter.y}`, on('filter'), true)}
+    {edge('filter-s', `M ${AT.filter.x + 65} ${AT.filter.y} L 202 ${AT.filter.y}`, on('filter'), true)}
 
     {(['keyword', 'semantic'] as const).flatMap((lane) => EXAMPLE_INDICES.map((_, i) => {
       const y = indexY(lane, i) + INDEX.height / 2

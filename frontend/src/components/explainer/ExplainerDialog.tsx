@@ -28,6 +28,7 @@ export interface ExplainerAt<Step extends ExplainerStep> {
 }
 
 interface ExplainerDialogProps<Step extends ExplainerStep> {
+  /** A different story — such as another assistant kind — starts at its first step, paused. */
   story: ExplainerStory<Step>
   /** Names the step bar and its diagram for assistive technology, such as "The step and the workflow". */
   label: string
@@ -64,11 +65,14 @@ function ExplainerPanel<Step extends ExplainerStep>({
 }: ExplainerDialogProps<Step>) {
   const { title, icon: Icon, summary, facts, steps } = story
   const [state, setState] = useState(FIRST_STEP)
-  const { index } = state
+  const [told, setTold] = useState(story)
+  if (told !== story) { setTold(story); setState(FIRST_STEP) }
+  const shown = told === story ? state : FIRST_STEP
+  const { index } = shown
   const last = steps.length - 1
   const step = steps[index]
 
-  const running = isRunning(state, last)
+  const running = isRunning(shown, last)
   useEffect(() => {
     if (!running) return
     const timer = window.setTimeout(() => setState((s) => advance(s, last)), playMs)

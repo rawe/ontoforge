@@ -215,7 +215,7 @@ export interface SearchTreeContext {
 /** The value a node yields — null when the tree below does not fit the
  * rules (`validateSearchTree` says why). */
 export function treeValue(node: TreeNode, context: SearchTreeContext): TreeValue | null {
-  return typeOf(node, "", context, []);
+  return typeOf(node, "", context, [], false);
 }
 
 // ---------------------------------------------------------------------------
@@ -234,11 +234,13 @@ export interface SearchTreeViolation {
 }
 
 /**
- * Check a tree against the rules, reporting every violation:
+ * Check a tree against the rules, reporting every violation — a tree with
+ * none runs in the executor:
  *
  * - R1 a merge's rankings share one score kind;
- * - R2 every search node reaches the root through exactly one group, below
- *   every fuse;
+ * - R2 every search node reaches the root through a cut, whose limit sets
+ *   how deep it reads, and through exactly one group, above every merge
+ *   and below every fuse; passages fuse straight from their groups;
  * - R3 a rank-only ranking is only fused, restricted, appended to or cut;
  * - R4 a fuse or merge combines one result unit; append ranks entities;
  * - R5 a floor lives in a semantic search;
@@ -248,7 +250,7 @@ export interface SearchTreeViolation {
  */
 export function validateSearchTree(tree: TreeNode, context: SearchTreeContext): SearchTreeViolation[] {
   const violations: SearchTreeViolation[] = [];
-  const value = typeOf(tree, "", context, violations);
+  const value = typeOf(tree, "", context, violations, false);
   if (value?.unit === "entries") {
     violations.push({
       rule: "R2",
@@ -273,14 +275,20 @@ function sameScoreKind(a: ScoreKind, b: ScoreKind): boolean {
   return a.kind === b.kind;
 }
 
+/** The ranking a node takes through its restricts. */
+function unrestricted(node: TreeNode): TreeNode {
+  return node.kind === "restrict" ? unrestricted(node.input) : node;
+}
+
 /** The value of a node, its inputs checked first; null when it, or an
  * input it depends on, breaks a rule — a node above does not report again
- * what follows from that. */
+ * what follows from that. `cut`: a cut lies above the node. */
 function typeOf(
   node: TreeNode,
   path: string,
   context: SearchTreeContext,
   violations: SearchTreeViolation[],
+  cut: boolean,
 ): TreeValue | null {
   const refuse = (rule: SearchTreeRule, message: string, at = path): null => {
     violations.push({ rule, path: at, message });
@@ -288,7 +296,7 @@ function typeOf(
   };
   const inputs = inputsOf(node).map(([segment, input]) => {
     const at = path === "" ? segment : `${path}.${segment}`;
-    return { path: at, value: typeOf(input, at, context, violations) };
+    return { path: at, value: typeOf(input, at, context, violations, cut || node.kind === "cut") };
   });
   // The inputs that must be rankings: entity ids refused (R6), a rank-only
   // ranking too where only a scored one fits (R3). Null when one does not
@@ -328,6 +336,7 @@ function typeOf(
     case "keywordSearch":
     case "semanticSearch": {
       if (!context.indices.has(node.index)) refuse("R7", `Search index '${node.index}' is not searchable in this lens`);
+      if (!cut) refuse("R2", "A search node needs a cut above it: its limit sets how deep it reads");
       if (node.kind === "keywordSearch" && "minSimilarity" in node) {
         return refuse("R5", "A floor lives in a semantic search; keyword scores have none");
       }
@@ -362,6 +371,9 @@ function typeOf(
           "A merge combines rankings of one score kind: one method, query text and model; else fuse them",
         );
       }
+      if (merged[0]!.unit !== "entries") {
+        return refuse("R2", "A merge combines the entries of search nodes; fuse grouped rankings instead");
+      }
       return merged[0]!;
     }
     case "group": {
@@ -381,6 +393,9 @@ function typeOf(
       }
       if (fused.some((value) => value.unit !== fused[0]!.unit)) {
         return refuse("R4", "A fuse combines rankings of one result unit");
+      }
+      if (fused[0]!.unit === "passages" && !node.inputs.every((input) => unrestricted(input).kind === "group")) {
+        return refuse("R2", "Passages fuse straight from their groups, not from a fuse or a cut");
       }
       return { unit: fused[0]!.unit, scoreKind: { kind: "rankOnly" } };
     }

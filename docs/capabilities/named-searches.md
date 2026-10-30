@@ -61,8 +61,6 @@ its path below `tree` (`tree.input.inputs.1.index`):
 - **Shape.** Each node has the fields of its kind and no other; a field it does not
   define, or a kind not in the table, is refused at its path. There is no `append`, no
   sub-query and no fixed list of ids.
-- **A cut above every search node.** A search reads as deep as the limit of the nearest
-  cut above it requires.
 - **`$query` in at least one search node's text**, or the query would go nowhere.
 - **The tree's rules, against the lens:**
   - a merge combines rankings of one score kind — one method, one text and, for semantic
@@ -70,6 +68,12 @@ its path below `tree` (`tree.input.inputs.1.index`):
     rankings of different kinds are fused instead;
   - every search node reaches the root through exactly one group, and every fuse lies
     above the groups, so an item votes once;
+  - a cut lies above every search node: a search reads as deep as the limit of the
+    nearest cut above it requires;
+  - a merge combines the entries of search nodes and merges, never grouped rankings —
+    those are fused;
+  - passages fuse straight from their groups: a fuse of passages takes no fuse and no
+    cut;
   - a fused ranking, which keeps only an order, is only fused again, restricted or cut;
   - a merge or fuse combines one result unit, entities or passages;
   - a floor belongs to a semantic search;
@@ -79,14 +83,9 @@ its path below `tree` (`tree.input.inputs.1.index`):
 - **Each filter's conditions** resolve against its entity type through the lens; a key
   the type does not have, or the lens hides, is refused at its path
   (`tree.input.filters.0.conditions.age__gte`).
-- **Shapes the search runs:**
-  - below a `passage` group only passage entries count: a search node there without
-    `parts` counts passages only, and one whose `parts` name another part is refused at
-    its `parts`;
-  - a merge combines the entries of search nodes and merges, never grouped rankings —
-    those are fused;
-  - passages fuse straight from their groups: a fuse of passages takes no fuse and no
-    cut.
+- **Below a `passage` group only passage entries count:** a search node there without
+  `parts` counts passages only, and one whose `parts` name another part is refused at its
+  `parts`.
 
 The lens checks are skipped when the lens's schema cannot be loaded, as for a
 [saved query](saved-queries.md#validation-at-definition-time-versus-run-time).
@@ -105,8 +104,8 @@ A run takes the **query** — required, not blank — and optional **filter**s, 
 1. The key is resolved within the lens; an unknown key is not found.
 2. The query goes in place of every `$query` in every search node's text, as written: no
    character of the query is special, and a text without `$query` stays as it is.
-3. The tree is checked against the lens again — the shape, lens and run-shape rules of
-   [Checks at save](#checks-at-save), stored filters included. A search the lens no longer
+3. The tree is checked against the lens again — the shape, the tree's rules and the passage rule
+   of [Checks at save](#checks-at-save), stored filters included. A search the lens no longer
    fits, because the lens was narrowed or an index switched off after it was saved, is a
    validation error naming the search and every path; it never runs. Nothing proactively
    invalidates a stored tree; re-saving it after such a change is the designer's job.

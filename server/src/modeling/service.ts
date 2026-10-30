@@ -2065,7 +2065,7 @@ export async function importSchema(
     }
   }
 
-  // Named searches: the rules that need no lens here; the lens check runs
+  // Named searches: the rule that needs no lens here; the lens check runs
   // once the lens and its indices are written, before the searches are.
   for (const lens of payload.lenses) {
     for (const ns of lens.namedSearches) {
@@ -2855,7 +2855,7 @@ export async function listNamedSearches(
 /**
  * Upsert by key (`docs/capabilities/named-searches.md`). Returns
  * `[response, created]`. Every rule the tree breaks is collected into one
- * validation error, each at its path: the rules that need no lens, then —
+ * validation error, each at its path: the rule that needs no lens, then —
  * unless the lens's schema cannot be loaded, as for a saved query — the
  * stored filters' conditions and R1–R8 against the lens.
  */

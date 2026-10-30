@@ -1761,7 +1761,7 @@ describe("named searches", () => {
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
   });
 
-  it("collects a bad key and the rules that need no lens with the other violations; writes nothing", async () => {
+  it("collects a bad key and the rule that needs no lens with the other violations; writes nothing", async () => {
     const res = await postImport(
       importPayload({
         lenses: [
@@ -1779,7 +1779,6 @@ describe("named searches", () => {
     expect(res.statusCode).toBe(422);
     expect(res.json().error.details.errors).toEqual([
       expect.stringMatching(/^Import error: invalid named search key 'Bad Key'/),
-      "Import error: named search 'no-query' of lens 'imported' tree.input: A search node needs a cut above it: its limit sets how deep it reads",
       "Import error: named search 'no-query' of lens 'imported' tree: At least one search node's text holds $query, where the runtime query goes",
     ]);
     expect(holder.store.createEntityType).not.toHaveBeenCalled();

@@ -7,7 +7,7 @@
  * fixed ids: a stored `filter` carries its conditions in the public
  * filter syntax, resolved against the lens when the tree is checked
  * (`runtime/search/namedSearch.ts`). Here: the shape — a field a node does
- * not define refused at its path — and the checks that need no lens.
+ * not define refused at its path — and the check that needs no lens.
  *
  * Pure — no storage, no I/O.
  */
@@ -115,29 +115,13 @@ export function treePath(path: string): string {
 }
 
 /**
- * The rules a stored tree breaks that need no lens, each as
- * `<path>: <message>`:
- *
- * - a cut above every search node: its limit sets how deep the search
- *   reads;
- * - `$query` in at least one search node's text — else the runtime query
- *   would go nowhere.
+ * The rule a stored tree breaks that needs no lens, as `<path>: <message>`:
+ * `$query` in at least one search node's text — else the runtime query
+ * would go nowhere.
  */
 export function storedTreeErrors(tree: StoredSearchNode): string[] {
-  const errors: string[] = [];
-  let marked = false;
-  const walk = (at: StoredSearchNode, path: string, cut: boolean) => {
-    if (at.kind === "keywordSearch" || at.kind === "semanticSearch") {
-      if (!cut) errors.push(`${treePath(path)}: A search node needs a cut above it: its limit sets how deep it reads`);
-      if (at.text.includes(QUERY_MARK)) marked = true;
-    }
-    for (const [segment, input] of storedInputs(at)) {
-      walk(input, path === "" ? segment : `${path}.${segment}`, cut || at.kind === "cut");
-    }
-  };
-  walk(tree, "", false);
-  if (!marked) errors.push(`tree: At least one search node's text holds ${QUERY_MARK}, where the runtime query goes`);
-  return errors;
+  const marked = storedSearchNodes(tree).some((at) => at.text.includes(QUERY_MARK));
+  return marked ? [] : [`tree: At least one search node's text holds ${QUERY_MARK}, where the runtime query goes`];
 }
 
 /** A named search as the runtime holds it, from the lens's schema cache. */

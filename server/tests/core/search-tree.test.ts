@@ -150,7 +150,7 @@ describe("rules", () => {
     });
 
     it("R4: entities and passages do not fuse", () => {
-      const passages = merge(group(semantic("person~notes"), "passage"), group(semantic("report~body"), "passage"));
+      const passages = group(semantic("person~notes"), "passage");
       expect(rules(cut(fuse(group(semantic("person~default")), passages)))).toEqual([{ rule: "R4", path: "input" }]);
     });
 
@@ -172,6 +172,45 @@ describe("rules", () => {
     expect(rules(cut(merge(keyword("person~default"), keyword("report~default"))))).toEqual([{ rule: "R2", path: "" }]);
   });
 
+  it("R2: a cut above every search node, at the search node", () => {
+    expect(rules(fuse(group(keyword("person~default")), cut(group(keyword("person~default", "v1")))))).toEqual([
+      { rule: "R2", path: "inputs.0.input" },
+    ]);
+    expect(check(group(keyword("person~default")))).toEqual([
+      {
+        rule: "R2",
+        path: "input",
+        message: "A search node needs a cut above it: its limit sets how deep it reads",
+      },
+    ]);
+    expect(rules(fuse(cut(group(keyword("person~default"))), cut(group(keyword("person~default", "v1")))))).toEqual([]);
+  });
+
+  it("R2: a merge combines search entries, restricted or not — never grouped rankings", () => {
+    expect(check(cut(merge(group(keyword("person~default")), group(keyword("report~default")))))).toEqual([
+      {
+        rule: "R2",
+        path: "input",
+        message: "A merge combines the entries of search nodes; fuse grouped rankings instead",
+      },
+    ]);
+    const restricted: TreeNode = { kind: "restrict", input: keyword("report~default"), filters: [filter("report")] };
+    expect(rules(cut(group(merge(merge(keyword("person~default"), restricted), keyword("person~notes")))))).toEqual(
+      [],
+    );
+  });
+
+  it("R2: passages fuse straight from their groups, restricted or not — not from a fuse or a cut", () => {
+    const passages = (text: string) => group({ ...keyword("report~body", text), parts: ["passage"] }, "passage");
+    const methods = () => fuse(passages("q"), { kind: "restrict", input: passages("q"), filters: [filter("report")] });
+    const refused = { rule: "R2", path: "input", message: "Passages fuse straight from their groups, not from a fuse or a cut" };
+    expect(check(cut(fuse(methods(), passages("v1"))))).toEqual([refused]);
+    expect(check(cut(fuse(cut(passages("q")), passages("v1"))))).toEqual([refused]);
+    expect(check(cut(methods()))).toEqual([]);
+    const entities = (text: string) => group(keyword("person~default", text));
+    expect(check(cut(fuse(fuse(entities("q"), entities("v1")), cut(entities("v2")))))).toEqual([]);
+  });
+
   it("R3: a rank-only ranking does not group", () => {
     expect(rules(cut(group(fuse(group(keyword("person~default"))))))).toEqual([{ rule: "R3", path: "input.input" }]);
   });
@@ -190,7 +229,7 @@ describe("rules", () => {
     expect(rules(cut({ kind: "restrict", input: ranked, filters: [ranked] }))).toEqual([
       { rule: "R6", path: "input.filters.0" },
     ]);
-    expect(rules(append(null, ranked))).toEqual([{ rule: "R6", path: "filters.0" }]);
+    expect(rules(append(null, cut(ranked)))).toEqual([{ rule: "R6", path: "filters.0" }]);
     expect(rules(cut(filter("person")))).toEqual([{ rule: "R6", path: "input" }]);
   });
 
@@ -202,8 +241,12 @@ describe("rules", () => {
 
   it("R8: the root is a ranking of entities or passages", () => {
     expect(rules(filter("person"))).toEqual([{ rule: "R8", path: "" }]);
-    expect(rules(merge(keyword("person~default"), keyword("report~default")))).toEqual([{ rule: "R2", path: "" }]);
-    expect(rules(group(keyword("person~default")))).toEqual([]);
+    expect(rules(merge(keyword("person~default"), keyword("report~default")))).toEqual([
+      { rule: "R2", path: "inputs.0" },
+      { rule: "R2", path: "inputs.1" },
+      { rule: "R2", path: "" },
+    ]);
+    expect(rules(cut(group(keyword("person~default"))))).toEqual([]);
   });
 
   it("checks a node's own parameters", () => {
@@ -213,7 +256,7 @@ describe("rules", () => {
     expect(rules({ kind: "append", input: null, filters: [filter("person")], until: 0 })).toEqual([
       { rule: "shape", path: "" },
     ]);
-    expect(rules(append(group(keyword("person~default")), filter("person"), filter("person", ["a"])))).toEqual([
+    expect(rules(append(cut(group(keyword("person~default"))), filter("person"), filter("person", ["a"])))).toEqual([
       { rule: "shape", path: "filters.1" },
     ]);
   });

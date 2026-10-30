@@ -80,7 +80,6 @@ export function compileNamedSearch(
   })) {
     errors.push(`${treePath(violationPath(violation, compiled))}: ${violation.message}`);
   }
-  errors.push(...unrunnable(compiled));
   return errors.length === 0 ? { tree: compiled, errors: [] } : { tree: null, errors };
 }
 
@@ -152,48 +151,6 @@ function compile(
       return { kind: "filter", entityType: at.entityType, conditions: resolved?.conditions ?? [], ids: null };
     }
   }
-}
-
-/**
- * The shapes the rules allow that the executor does not run, each at its
- * node:
- *
- * - a merge combines search entries — search nodes and merges, restricted
- *   or not — never grouped rankings;
- * - passages fuse straight from their groups (restricted or not): a fuse
- *   of passages takes no fuse and no cut.
- */
-function unrunnable(tree: TreeNode): string[] {
-  const errors: string[] = [];
-  const unrestricted = (node: TreeNode): TreeNode => (node.kind === "restrict" ? unrestricted(node.input) : node);
-  const walk = (node: TreeNode, path: string) => {
-    const at = (segment: string) => (path === "" ? segment : `${path}.${segment}`);
-    const entries = (input: TreeNode) => ["keywordSearch", "semanticSearch", "merge"].includes(unrestricted(input).kind);
-    if (node.kind === "merge" && !node.inputs.every(entries)) {
-      errors.push(`${treePath(path)}: A merge combines the entries of search nodes; fuse grouped rankings instead`);
-    }
-    const grouped = (input: TreeNode) => unrestricted(input).kind === "group";
-    if (node.kind === "fuse" && groupKey(node) === "passage" && !node.inputs.every(grouped)) {
-      errors.push(`${treePath(path)}: Passages fuse straight from their groups, not from a fuse or a cut`);
-    }
-    if (node.kind === "merge" || node.kind === "fuse") node.inputs.forEach((input, i) => walk(input, at(`inputs.${i}`)));
-    if (node.kind === "group" || node.kind === "cut" || node.kind === "restrict") walk(node.input, at("input"));
-  };
-  walk(tree, "");
-  return errors;
-}
-
-/** The key of the first group below a node; null when none. */
-function groupKey(node: TreeNode): "entity" | "passage" | null {
-  if (node.kind === "group") return node.key;
-  if (node.kind === "merge" || node.kind === "fuse") {
-    for (const input of node.inputs) {
-      const key = groupKey(input);
-      if (key !== null) return key;
-    }
-    return null;
-  }
-  return node.kind === "cut" || node.kind === "restrict" ? groupKey(node.input) : null;
 }
 
 /** Where a violation is reported: an unknown index or type, and a floor

@@ -1,10 +1,10 @@
 /**
  * Named-search modeling endpoints over mocked stores: list, upsert and
  * delete by key; the stored tree's shape, a field a node does not define
- * refused at its path; the rules that need no lens (a cut above every
- * search node, `$query` in a text); and the lens check — R1–R8 and the
- * stored filters' conditions, each at its path — run, or skipped when the
- * lens's schema cannot be loaded. Every violation is reported together.
+ * refused at its path; the rule that needs no lens (`$query` in a text);
+ * and the lens check — R1–R8 and the stored filters' conditions, each at
+ * its path — run, or skipped when the lens's schema cannot be loaded.
+ * Every violation is reported together.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -193,14 +193,13 @@ describe("upsert", () => {
     expect(errorsOf(res)).toEqual([expect.objectContaining({ path: "/tree/limit" })]);
   });
 
-  it("needs a cut above every search node and $query in a text, without the lens", async () => {
+  it("needs $query in a text, without the lens", async () => {
     const res = await put("no-cut", {
       kind: "fuse",
       inputs: [grouped("person~default", "people"), { kind: "cut", limit: 5, input: grouped("person~default", "staff") }],
     });
     expect(res.statusCode).toBe(422);
     expect(errorsOf(res)).toEqual([
-      "tree.inputs.0.input: A search node needs a cut above it: its limit sets how deep it reads",
       "tree: At least one search node's text holds $query, where the runtime query goes",
     ]);
     expect(holder.store.upsertNamedSearch).not.toHaveBeenCalled();
@@ -269,7 +268,7 @@ describe("the lens check", () => {
     expect(errors.some((error) => error.startsWith("tree.input.filters.0.conditions.age__gte: "))).toBe(true);
   });
 
-  it("reports the tree's rules at their nodes, with the rules that need no lens, together", async () => {
+  it("reports the tree's rules at their nodes together, a cut above every search node among them", async () => {
     withLens();
     const res = await put("rules", {
       kind: "fuse",
@@ -290,8 +289,8 @@ describe("the lens check", () => {
     });
     expect(res.statusCode).toBe(422);
     expect(errorsOf(res)).toEqual([
-      "tree.inputs.1: A search node needs a cut above it: its limit sets how deep it reads",
       expect.stringMatching(/^tree\.inputs\.0\.input: A merge combines rankings of one score kind/),
+      "tree.inputs.1: A search node needs a cut above it: its limit sets how deep it reads",
     ]);
   });
 

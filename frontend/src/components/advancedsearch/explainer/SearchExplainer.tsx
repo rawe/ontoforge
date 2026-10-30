@@ -1,8 +1,6 @@
-import { useEffect, useState, type CSSProperties, type KeyboardEvent } from 'react'
-import { ChevronLeft, ChevronRight, CircleQuestionMark, Pause, Play, TextSearch } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { TextSearch } from 'lucide-react'
+import { ExplainerButton } from '@/components/explainer/ExplainerButton'
+import { ExplainerDialog, type ExplainerStory } from '@/components/explainer/ExplainerDialog'
 import { getTypeColor } from '@/lib/typeColors'
 import { cn } from '@/lib/utils'
 import { SearchExplainerTree } from './SearchExplainerTree'
@@ -16,19 +14,25 @@ import {
   fusionPoints,
   type ExampleEntry,
   type ExampleView,
+  type StoryStep,
 } from './searchExplainerStory'
 
 const PLAY_MS = 6000
-const TITLE = 'How search works'
 
-const FACTS = [
-  { label: 'Keyword', value: 'finds your words' },
-  { label: 'Semantic', value: 'finds your meaning' },
-  { label: 'Fusion', value: 'combines both by rank' },
-]
-
-/** The step's body is this many lines high beside the controls, so the step bar keeps one height; a longer body scrolls. */
-const STEP_BODY_LINES = 3
+const EXPLAINER: ExplainerStory<StoryStep> = {
+  title: 'How search works',
+  icon: TextSearch,
+  summary: <>
+    A search ranks entities — or passages of their documents — for a text. By default it looks for your words and
+    for your meaning at the same time, and combines what both find into one list, best first.
+  </>,
+  facts: [
+    { label: 'Keyword', value: 'finds your words' },
+    { label: 'Semantic', value: 'finds your meaning' },
+    { label: 'Fusion', value: 'combines both by rank' },
+  ],
+  steps: STORY,
+}
 
 const microLabel = 'text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'
 
@@ -136,124 +140,35 @@ function Example({ view }: { view: ExampleView }) {
  * points to it.
  */
 export function SearchExplainerButton({ labeled = false, className }: { labeled?: boolean; className?: string }) {
-  if (labeled) return <Dialog>
-    <DialogTrigger asChild>
-      <Button type="button" variant="outline" size="sm" className={className}><CircleQuestionMark className="size-3.5" /> {TITLE}</Button>
-    </DialogTrigger>
-    <SearchExplainerDialog />
-  </Dialog>
-  return <Dialog>
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <DialogTrigger asChild>
-          <Button type="button" variant="ghost" size="icon-xs" aria-label={TITLE}
-            className={cn('text-muted-foreground hover:text-foreground', className)}>
-            <CircleQuestionMark />
-          </Button>
-        </DialogTrigger>
-      </TooltipTrigger>
-      <TooltipContent side="top">{TITLE}</TooltipContent>
-    </Tooltip>
-    <SearchExplainerDialog />
-  </Dialog>
-}
-
-function SearchExplainerDialog() {
-  return <DialogContent className="flex max-h-[94dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(78rem,calc(100%-2rem))]">
-    <SearchExplainerPanel />
-  </DialogContent>
-}
-
-/**
- * The explainer's content: the step over the simplified search tree, then the example at
- * that step beside the step's note. Only a step body longer than its lines scrolls.
- */
-function SearchExplainerPanel() {
-  const [index, setIndex] = useState(0)
-  const [playing, setPlaying] = useState(false)
-  const step = STORY[index]
-  const last = STORY.length - 1
-
-  const running = playing && index < last
-  useEffect(() => {
-    if (!running) return
-    const timer = window.setTimeout(() => setIndex((i) => Math.min(i + 1, last)), PLAY_MS)
-    return () => window.clearTimeout(timer)
-  }, [running, index, last])
-
-  const go = (next: number) => { setIndex(Math.max(0, Math.min(last, next))); setPlaying(false) }
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === 'ArrowRight') { event.preventDefault(); go(index + 1) }
-    if (event.key === 'ArrowLeft') { event.preventDefault(); go(index - 1) }
-  }
-
-  return <div className="flex min-h-0 flex-col" onKeyDown={onKeyDown}>
-    <header className="flex items-start gap-3 border-b px-5 pt-4 pb-3 pr-14">
-      <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><TextSearch className="size-5" /></span>
-      <div className="grid min-w-0 gap-1">
-        <DialogTitle className="text-lg font-semibold">{TITLE}</DialogTitle>
-        <DialogDescription className="text-[13px] leading-relaxed">
-          A search ranks entities — or passages of their documents — for a text. By default it looks for your words and
-          for your meaning at the same time, and combines what both find into one list, best first.
-        </DialogDescription>
-        <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
-          {FACTS.map((fact) => <div key={fact.label} className="flex gap-1.5">
-            <dt className="text-muted-foreground">{fact.label}</dt><dd className="font-medium">{fact.value}</dd>
-          </div>)}
-        </dl>
-      </div>
-    </header>
-
-    <div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 py-3">
-      <section className="shrink-0 rounded-xl border bg-card px-3 pt-2.5 pb-2" aria-label="The step and the search">
-        <div className="flex flex-col gap-2 md:flex-row md:items-start md:gap-6" aria-live="polite">
-          <div className="grid min-w-0 flex-1 gap-0.5">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <span className={microLabel}>Step {index + 1} of {STORY.length}</span>
-              <h4 className="text-base font-semibold">{step.title}</h4>
-            </div>
-            {/* Fixed beside the controls; on a narrow screen it grows instead. */}
-            <p className="text-[13px] leading-relaxed text-muted-foreground md:h-[var(--step-body)] md:overflow-y-auto" style={{ '--step-body': `${STEP_BODY_LINES}lh` } as CSSProperties}>{step.body}</p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2 pt-0.5 md:w-[22rem]">
-            <Button type="button" variant="outline" size="sm" onClick={() => go(index - 1)} disabled={index === 0}>
-              <ChevronLeft /> Back
-            </Button>
-            <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-1.5">
-              {STORY.map((s, i) => <button key={i} type="button" aria-label={`Step ${i + 1}: ${s.title}`} aria-current={i === index ? 'step' : undefined}
-                onClick={() => go(i)} className={cn('h-1.5 rounded-full transition-all', i === index ? 'w-5 bg-primary' : i < index ? 'w-1.5 bg-primary/40' : 'w-1.5 bg-muted-foreground/30')} />)}
-            </div>
-            <Button type="button" variant="ghost" size="icon-sm" aria-label={running ? 'Pause' : 'Play the example'}
-              onClick={() => { if (running) { setPlaying(false); return } if (index === last) setIndex(0); setPlaying(true) }}>
-              {running ? <Pause /> : <Play />}
-            </Button>
-            <Button type="button" size="sm" onClick={() => go(index + 1)} disabled={index === last}>
-              Next <ChevronRight />
-            </Button>
-          </div>
-        </div>
-        <div className="mt-1.5 overflow-x-auto border-t pt-1.5">
-          <h3 className={cn(microLabel, 'mb-1')}>What happens to your text</h3>
+  return <ExplainerButton title={EXPLAINER.title} label={labeled ? EXPLAINER.title : undefined} className={className}>
+    <ExplainerDialog story={EXPLAINER} label="The step and the search" playMs={PLAY_MS}
+      diagram={({ step, go }) => <>
+        <h3 className={cn(microLabel, 'mb-1')}>What happens to your text</h3>
+        <div className="overflow-x-auto">
           <div className="min-w-[40rem]">
             <SearchExplainerTree lit={step.lit} onSelect={go} />
           </div>
         </div>
-      </section>
+      </>}>
+      {({ step }) => <SearchExample step={step} />}
+    </ExplainerDialog>
+  </ExplainerButton>
+}
 
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <section className="flex flex-col gap-2 rounded-xl border bg-card p-3" aria-label="The example">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className={microLabel}>On an example: “{EXAMPLE_QUERY}”{step.view === 'indices' ? ' — four indices of its lens' : ''}</h3>
-            {step.view !== 'indices' && step.view !== 'results' && <span className="text-[11px] text-muted-foreground">numbers for illustration — results never show them</span>}
-          </div>
-          {/* As high as the tallest step's example, so the dialog keeps one height. */}
-          <div className="min-h-[15rem]"><Example view={step.view} /></div>
-        </section>
-        <section className="grid content-start gap-1 rounded-xl border border-primary/40 bg-primary/5 p-3 text-[13px]" aria-label="Note">
-          <span className={microLabel}>Good to know</span>
-          <p>{step.note}</p>
-        </section>
+/** The example query at a step beside the step's note. */
+function SearchExample({ step }: { step: StoryStep }) {
+  return <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+    <section className="flex flex-col gap-2 rounded-xl border bg-card p-3" aria-label="The example">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className={microLabel}>On an example: “{EXAMPLE_QUERY}”{step.view === 'indices' ? ' — four indices of its lens' : ''}</h3>
+        {step.view !== 'indices' && step.view !== 'results' && <span className="text-[11px] text-muted-foreground">numbers for illustration — results never show them</span>}
       </div>
-    </div>
+      {/* As high as the tallest step's example, so the dialog keeps one height. */}
+      <div className="min-h-[15rem]"><Example view={step.view} /></div>
+    </section>
+    <section className="grid content-start gap-1 rounded-xl border border-primary/40 bg-primary/5 p-3 text-[13px]" aria-label="Note">
+      <span className={microLabel}>Good to know</span>
+      <p>{step.note}</p>
+    </section>
   </div>
 }

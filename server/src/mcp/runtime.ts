@@ -1167,15 +1167,15 @@ export function createRuntimeMcpServer(
     "search_documents",
     {
       description:
-        "Rank passages of documents for a text, best first: a passage is one chunk of one entity's document. " +
+        "Rank document passages for a text, best first; a passage is a chunk of one entity's document. " +
         SEARCH_QUERY_RULE + " " +
         "Scope, at most one of: types (entity type keys: all their documents), documents ('type.property', " +
-        "e.g. \"person.bio\") or indices (keys from list_search_indices of indices that read a document); none " +
-        "searches every document of this lens. " +
+        "e.g. \"person.bio\") or indices (document indices' keys from list_search_indices); none: " +
+        "every document of the lens. " +
         filterRules({ contains: false, relations: true }) +
-        " They apply to the entity owning the document. " + SEARCH_FILTER_EFFECT + " " +
-        "limit: passages, an integer 1–100, default 10. per_entity: at most this many passages per entity, " +
-        "1 to limit; omit for no cap. text: false leaves each passage's text out (default true). " +
+        " They apply to the document's entity. " + SEARCH_FILTER_EFFECT + " " +
+        "limit: passages, an integer 1–100, default 10. per_entity: max passages per entity " +
+        "(1 to limit; omit: no cap). text: false omits the passage text. " +
         PASSAGE_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
       inputSchema: {
         query: z.string(),

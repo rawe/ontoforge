@@ -28,6 +28,10 @@ const runtimeOf = (lens: string) => `/api/ontologies/${O}/runtime/lenses/${lens}
 const RUNTIME = runtimeOf("all");
 const MANAGED = ["company~default", "person~bio", "person~default"];
 
+/** A keyword score: the query words the entry holds, plus a fraction below one. */
+const wordsMatched = (words: number) =>
+  expect.toSatisfy((score: number) => score >= words && score < words + 1, `${words} query word(s) matched`);
+
 const EMPLOYMENT = {
   key: "person_employment",
   name: "People by employment",
@@ -350,7 +354,12 @@ export function entitySearchContract(embedding: boolean, enabled = true) {
         {
           rank: 1,
           entity: { _id: ids.bob, _entityTypeKey: "person", name: "Bob" },
-          match: { index: "person~default", part: "self", snippet: expect.stringContaining("retired") },
+          match: {
+            index: "person~default",
+            part: "self",
+            snippet: expect.stringContaining("retired"),
+            scores: { keyword: wordsMatched(1) },
+          },
         },
       ]);
 
@@ -365,6 +374,7 @@ export function entitySearchContract(embedding: boolean, enabled = true) {
             snippet: expect.stringContaining("CTO"),
             relationType: "works_for",
             target: { _id: ids.acme, _entityTypeKey: "company", name: "ACME" },
+            scores: { keyword: wordsMatched(2) },
           },
         },
       ]);
@@ -381,6 +391,7 @@ export function entitySearchContract(embedding: boolean, enabled = true) {
             property: "bio",
             charOffset: 0,
             charLength: "Bob grows tomatoes in his garden.".length,
+            scores: { keyword: wordsMatched(1) },
           },
         },
       ]);
@@ -443,13 +454,18 @@ export function entitySearchContract(embedding: boolean, enabled = true) {
         {
           rank: 1,
           entity: { _id: ids.ada, _entityTypeKey: "person", name: "Ada" },
-          match: { index: "person~default", part: "self", snippet: null },
+          match: { index: "person~default", part: "self", snippet: null, scores: { keyword: wordsMatched(1) } },
         },
       ]);
       // company is hidden: the employments are skipped, the self entries still serve.
       expect((await found({ query: "CTO", indices: [EMPLOYMENT.key], keyword: {} }, "names")).items).toEqual([]);
       const own = await found({ query: "Ada", indices: [EMPLOYMENT.key], keyword: {} }, "names");
-      expect(own.items[0].match).toEqual({ index: EMPLOYMENT.key, part: "self", snippet: "Ada" });
+      expect(own.items[0].match).toEqual({
+        index: EMPLOYMENT.key,
+        part: "self",
+        snippet: "Ada",
+        scores: { keyword: wordsMatched(1) },
+      });
     });
 
     it("a method that cannot run on an index is a limitation: switched off, not built yet", async () => {

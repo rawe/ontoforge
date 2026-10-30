@@ -52,7 +52,7 @@ import {
 } from "../../core/searchTree.js";
 import type { LoadedSchema } from "../schemaCache.js";
 import { indexAvailability, type Unavailable } from "./availability.js";
-import type { EngineHit, IndexMatch } from "./indexSearch.js";
+import type { EngineHit, IndexMatch, MethodScores } from "./indexSearch.js";
 
 /** Entries a search node first fetches per entity its cut keeps. */
 const OVERFETCH_FACTOR = 4;
@@ -509,11 +509,22 @@ function toEngineHit(
       keywordScore: measured("keyword"),
     };
   });
+  // Every method that fetched the matched entry itself measures it.
+  const scores: MethodScores = {};
+  for (const representation of ["semantic", "keyword"] as const) {
+    const score = own
+      .find((method) => method.representation === representation)
+      ?.entries.find(
+        (entry) =>
+          searches[entry.search]!.index.key === matchedSearch.index.key && sameEntry(entry, hit.matched.entry),
+      )?.score;
+    if (score !== undefined) scores[representation] = score;
+  }
   return {
     entityId: hit.entityId,
     entityType: matchedSearch.index.definition.entityType,
     score: hit.score,
-    matched: { index: matchedSearch.index, entry: plain(hit.matched.entry) },
+    matched: { index: matchedSearch.index, entry: plain(hit.matched.entry), scores },
     indices,
   };
 }

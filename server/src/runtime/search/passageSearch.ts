@@ -18,9 +18,9 @@
  *    many per entity, in rank order.
  * 3. Filters apply to the entity that owns the document.
  * 4. Each passage is named with its entity, its document and its place in
- *    it, and — unless `text` is false — its text, read from the entity's
- *    current document at that place. An entity gone since the ranking is
- *    left out.
+ *    it, the scores of the methods that found it, and — unless `text` is
+ *    false — its text, read from the entity's current document at that
+ *    place. An entity gone since the ranking is left out.
  */
 
 import type { RuntimeStore, SearchIndexRecord } from "../../core/ports.js";
@@ -28,7 +28,7 @@ import { compilePassageSearch } from "../../core/searchCompile.js";
 import type { SearchRepresentation } from "../../core/searchIndex.js";
 import { loadSchema, type LoadedSchema } from "../schemaCache.js";
 import { documentSlice } from "../service.js";
-import { indexStoreOf, readHitEntities, searchableIndices } from "./indexSearch.js";
+import { indexStoreOf, readHitEntities, searchableIndices, type MethodScores } from "./indexSearch.js";
 import {
   checkRequest,
   entityReference,
@@ -40,6 +40,7 @@ import {
   rootTypes,
   runScopedSearch,
   shownDocument,
+  shownScores,
   type EntityReference,
   type ScopedSearchRequest,
   type SearchLimitation,
@@ -69,6 +70,9 @@ export interface PassageReference {
   /** The document's current text at that place; absent when the request
    * leaves it out. */
   text?: string;
+  /** Per method that found this passage in the index it ranks by, that
+   * method's own score. */
+  scores: MethodScores;
 }
 
 export interface PassageSearchItem {
@@ -140,6 +144,7 @@ export async function searchPassages(
         ordinal: Number(entry.partId),
         charOffset: entry.startChar!,
         charLength: entry.charLength!,
+        scores: shownScores(hit.matched.scores),
       };
       if (withText) {
         const value = entity[property];

@@ -437,7 +437,7 @@ describe("executeSavedQuery pipelines", () => {
         {
           rank: 1,
           entity: { _id: "p-1", _entityTypeKey: "person", name: "Alice" },
-          match: { index: "person~default", part: "self", snippet: expect.any(String) },
+          match: { index: "person~default", part: "self", snippet: expect.any(String), scores: { semantic: 0.9 } },
         },
       ],
       limitations: [],

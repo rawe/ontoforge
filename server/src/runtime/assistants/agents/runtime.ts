@@ -336,9 +336,9 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       SEARCH_QUERY_RULE + " " +
       "Scope, at most one of: types (entity type keys: all their documents) or documents ('type.property', " +
       'e.g. "person.bio"); neither searches every document. ' + filterRules({ contains: false, relations: true }) +
-      " They apply to the entity owning the document. " + SEARCH_FILTER_EFFECT + " " +
+      " They apply to the document's entity. " + SEARCH_FILTER_EFFECT + " " +
       "limit: passages, an integer up to 20, default 5. per_entity: at most this many passages per entity, " +
-      "1 to limit; omit for no cap. text: false leaves each passage's text out (default true). " +
+      "1 to limit; omit for no cap. text: false omits the passage text. " +
       PASSAGE_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
     schema: z.object({
       query: z.string(),

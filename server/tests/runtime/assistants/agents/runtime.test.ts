@@ -156,7 +156,8 @@ describe("toolset computation", () => {
     expect(payload).toEqual({ ran: [], items: [], limitations: [] });
     for (const tool of fake.boundTools[0]! as { name: string; description: string; schema: { shape: Record<string, unknown> } }[]) {
       if (!["search", "search_documents"].includes(tool.name)) continue;
-      expect(tool.description).toContain("Returns ran (the methods that ran: semantic, keyword), items and limitations");
+      expect(tool.description).toContain("Returns ran (the methods that ran), items and limitations");
+      expect(tool.description).toContain("scores (each method that found it: semantic, similarity 0.75 to 1");
       expect(tool.description).toContain("fixed similarity floor");
       expect(tool.description).not.toMatch(/relativeScore|strategy|evidence|adapter|list_search_indices/i);
       expect(tool.description.length).toBeLessThanOrEqual(2000);
@@ -417,7 +418,14 @@ describe("document reads", () => {
       {
         rank: 1,
         entity: { _id: "ent-1", _entityTypeKey: "person", name: "Alice" },
-        passage: { property: "bio", ordinal: 0, charOffset: 22, charLength: 21, text: "Alice joined in 2019." },
+        passage: {
+          property: "bio",
+          ordinal: 0,
+          charOffset: 22,
+          charLength: 21,
+          scores: { semantic: 0.91 },
+          text: "Alice joined in 2019.",
+        },
       },
     ]);
     // Only the passage index ranks — the entity's own index is not consulted.

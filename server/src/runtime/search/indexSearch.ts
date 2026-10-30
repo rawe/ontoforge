@@ -70,13 +70,19 @@ export interface IndexMatch {
   keywordScore: number | null;
 }
 
+/** Per method that found one entry — the same part in the same index —
+ * that method's own score of it, semantic first. Scores of different
+ * methods are not comparable. */
+export type MethodScores = Partial<Record<SearchRepresentation, number>>;
+
 /** One entity of an engine ranking. */
 export interface EngineHit {
   entityId: string;
   entityType: string;
   score: number;
-  /** The entity's best entry in the mode it ranks best in. */
-  matched: { index: SearchIndexRecord; entry: RankedSearchEntry };
+  /** The entity's best entry in the mode it ranks best in, with the score
+   * of every method that found this very entry. */
+  matched: { index: SearchIndexRecord; entry: RankedSearchEntry; scores: MethodScores };
   /** Per index that found the entity, the matched mode's order first. */
   indices: IndexMatch[];
 }

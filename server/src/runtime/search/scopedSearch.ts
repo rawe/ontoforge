@@ -27,7 +27,7 @@ import type { MethodBlocks, TreeNode } from "../../core/searchTree.js";
 import type { LoadedSchema } from "../schemaCache.js";
 import { deploymentMethods } from "./availability.js";
 import type { Limitation, TreeHit } from "./executor.js";
-import { indexStoreOf, runSearchTree } from "./indexSearch.js";
+import { indexStoreOf, runSearchTree, type MethodScores } from "./indexSearch.js";
 import { resolveSearchFilters } from "./filters.js";
 
 /** The request fields both searches share. */
@@ -265,4 +265,11 @@ export function entityReference(
     name: typeof name === "string" && name !== "" ? name : null,
     ...(identity === null ? {} : { identity: Object.fromEntries(identity.map((key) => [key, entity[key]])) }),
   };
+}
+
+/** An entry's scores per method, to four decimals. */
+export function shownScores(scores: MethodScores): MethodScores {
+  return Object.fromEntries(
+    Object.entries(scores).map(([method, score]) => [method, Math.round(score * 10_000) / 10_000]),
+  );
 }

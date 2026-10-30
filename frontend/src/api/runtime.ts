@@ -25,6 +25,7 @@ import type {
   EntitySearchResponse,
   JsonValue,
   ListResponse,
+  NamedSearchRunBody,
   NeighborDirection,
   NeighborsResponse,
   ParentRelationInput,
@@ -37,6 +38,7 @@ import type {
   RulesetPatch,
   RulesetView,
   RuntimeAssistant,
+  RuntimeNamedSearch,
   RuntimeSchema,
   SavedQuery,
   SavedQuerySearchHit,
@@ -250,6 +252,23 @@ export const searchPassages = (ontologyKey: string, lensKey: string, body: Passa
     method: 'POST',
     body,
   })
+
+/* ------------------------------- named searches ------------------------------ */
+
+export const listNamedSearches = (ontologyKey: string, lensKey: string) =>
+  request<RuntimeNamedSearch[]>(`${base(ontologyKey, lensKey)}/named-searches`)
+
+/** Run a named search for a query text: an entity or a passage search response, by its `result`. */
+export const runNamedSearch = (
+  ontologyKey: string,
+  lensKey: string,
+  searchKey: string,
+  body: NamedSearchRunBody,
+) =>
+  request<EntitySearchResponse | PassageSearchResponse>(
+    `${base(ontologyKey, lensKey)}/named-searches/${searchKey}/run`,
+    { method: 'POST', body },
+  )
 
 /* ----------------------------------- query ----------------------------------- */
 

@@ -85,6 +85,7 @@ const AGENT_COLS =
   "assistant_agent_id, key, name, description, system_prompt, tools, created_at, updated_at";
 const SAVED_QUERY_COLS =
   "saved_query_id, key, name, description, steps, parameters, created_at, updated_at";
+const NAMED_SEARCH_COLS = "named_search_id, key, name, description, tree, created_at, updated_at";
 
 /** The polymorphic-owner column the port's `typeKind` selects. */
 function ownerColumn(typeKind: TypeKind): "entity_type_id" | "relation_type_id" {
@@ -1179,6 +1180,53 @@ export class PostgresModelingStore implements ModelingStore {
       `DELETE FROM saved_query WHERE lens_id = $1 AND key = $2`,
       [lensId, queryKey],
     );
+    return result.rowCount > 0;
+  }
+
+  // ------------------------------------------------------------------
+  // Named searches
+  // ------------------------------------------------------------------
+
+  async listNamedSearches(lensId: string): Promise<Row[]> {
+    if (!isUuid(lensId)) {
+      return [];
+    }
+    const result = await this.query(
+      `SELECT ${NAMED_SEARCH_COLS} FROM named_search WHERE lens_id = $1 ORDER BY name, key`,
+      [lensId],
+    );
+    return camelizeRows(result.rows);
+  }
+
+  /** Upsert on the `(lens_id, key)` arbiter. */
+  async upsertNamedSearch(
+    lensId: string,
+    namedSearchId: string,
+    key: string,
+    name: string,
+    description: string,
+    treeJson: string,
+  ): Promise<[Row, boolean]> {
+    const result = await this.query(
+      `INSERT INTO named_search (named_search_id, lens_id, key, name, description, tree)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+       ON CONFLICT (lens_id, key) DO UPDATE SET
+         name = EXCLUDED.name,
+         description = EXCLUDED.description,
+         tree = EXCLUDED.tree,
+         updated_at = now()
+       RETURNING ${NAMED_SEARCH_COLS}, (named_search_id = $1) AS created`,
+      [namedSearchId, lensId, key, name, description, treeJson],
+    );
+    const { created, ...row } = camelizeRow(result.rows[0]!);
+    return [row, created as boolean];
+  }
+
+  async deleteNamedSearch(lensId: string, key: string): Promise<boolean> {
+    if (!isUuid(lensId)) {
+      return false;
+    }
+    const result = await this.query(`DELETE FROM named_search WHERE lens_id = $1 AND key = $2`, [lensId, key]);
     return result.rowCount > 0;
   }
 

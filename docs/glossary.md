@@ -42,7 +42,7 @@ only. Reads return a size stub rather than the content, so that listing entities
 cheap. See [capabilities/documents.md](capabilities/documents.md).
 
 **Key** — the stable, human-readable identifier of an ontology, type, property, lens,
-search index, saved query, agent, retriever, navigator or ruleset. Keys are what every interface speaks.
+search index, saved query, named search, agent, retriever, navigator or ruleset. Keys are what every interface speaks.
 They are never database identifiers, and they are never exposed as UUIDs. Every key is
 unique within its owner; only ontology keys are unique server-wide. A key follows the rule
 of its level:
@@ -50,7 +50,8 @@ of its level:
 - **Schema keys** — ontologies, types, properties, lenses, search indices — match
   `^[a-z][a-z0-9_]*$`: lower snake case, starting with a letter. They appear as OQL
   identifiers, where `-` would read as minus, and in storage names.
-- **Lens-resource keys** — saved queries, agents, retrievers and navigators — match
+- **Lens-resource keys** — saved queries, named searches, agents, retrievers and
+  navigators — match
   `^[a-z][a-z0-9_-]*$`: the schema rule plus `-`. They travel only in URLs, JSON and tool
   arguments.
 - **Ruleset keys** match `^[a-z][a-z0-9_-]*$`.
@@ -224,10 +225,10 @@ of the ontology's keyword language set.
 **Source ranking** — the ordered list one retrieval method returns for one search index.
 
 **Item** — one entity (entity search) or one passage (passage search) of a search result,
-with its rank; no score.
+with its rank; no score for the item as a whole.
 
 **Match** — the entry that found an entity in the entity search: its own fields, one
-relation with the entity at its other end, or one passage.
+relation with the entity at its other end, or one passage, with the score of each method that found it.
 
 **Search index** — an ontology-level design object deciding what ranked search finds
 entities by: a root entity type, the text composed for each of its entities, and its
@@ -279,6 +280,9 @@ and the passage search for MCP clients and agents, run under a fixed similarity 
 **Saved query** — a stored, named, parameterized pipeline of one or more query steps.
 Discoverable by listing or by searching descriptions, so a client can find a suitable
 query without composing one.
+
+**Named search** — a search tree stored under a key in a lens, `$query` marking where a
+caller's query text goes. See [capabilities/named-searches.md](capabilities/named-searches.md).
 
 ### Assistants
 
@@ -354,7 +358,7 @@ database of its own beside the ontology database, used only with authentication 
 [architecture.md](architecture.md#components).
 
 **Transfer format** — the versioned JSON representation of one ontology's design, used
-for export and import. Carries schema, lenses, assistants, saved queries, the
+for export and import. Carries schema, lenses, assistants, saved queries, named searches, the
 keyword language set, custom search indices and managed-index switches only — no
 instance data and no ontology identity. See
 [capabilities/transfer.md](capabilities/transfer.md).

@@ -95,11 +95,12 @@ A `401` means the token is missing or wrong. It carries no OntoForge error envel
 
 - Runtime only: schema introspection, entity CRUD, document reads and partial writes,
   relation CRUD, neighbors, search (entity search, passage search and the search
-  catalog), OQL query, saved query listing/search/run, entity identity comparison,
+  catalog), OQL query, saved query listing/search/run, named search listing/run, entity
+  identity comparison,
   the assistant endpoints (list, chat on server-held threads, thread read, retrieve), and
   the deployment reads `GET /api/server/info` and `GET /api/server/features`.
 - Not modeling: creating or changing entity types, relation types, properties or lenses;
-  defining saved queries; configuring assistants (agents, retrievers and navigators);
+  defining saved queries and named searches; configuring assistants (agents, retrievers and navigators);
   defining search indices; schema export and import; rebuilding search data. Listing
   lenses is the one modeling read this skill makes.
 - Not the registry: creating, renaming or deleting ontologies. Listing them is the one

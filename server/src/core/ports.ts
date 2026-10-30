@@ -484,6 +484,26 @@ export interface ModelingStore {
 
   deleteSavedQuery(lensId: string, queryKey: string): Promise<boolean>;
 
+  // ------------------------------------------------------------------
+  // Named searches
+  // ------------------------------------------------------------------
+
+  /** A lens's named searches, by name: key, name, description, the tree
+   * as stored, timestamps. */
+  listNamedSearches(lensId: string): Promise<Row[]>;
+
+  /** Upsert on the lens and key. The tree arrives as serialized JSON. */
+  upsertNamedSearch(
+    lensId: string,
+    namedSearchId: string,
+    key: string,
+    name: string,
+    description: string,
+    treeJson: string,
+  ): Promise<[Row, boolean]>;
+
+  deleteNamedSearch(lensId: string, key: string): Promise<boolean>;
+
   /** Ensure the saved-query description index at `dimensions`; a drifted
    * width is reported, never repaired. */
   ensureSavedQueryVectorIndex(dimensions: number): Promise<void>;
@@ -585,6 +605,10 @@ export interface RuntimeStore {
   getAgentConfigs(lensKey: string): Promise<Row[]>;
 
   getSavedQueries(lensKey: string): Promise<Row[]>;
+
+  /** A lens's named searches, by key: key, name, description and the tree
+   * as stored. */
+  getNamedSearches(lensKey: string): Promise<Row[]>;
 
   // ------------------------------------------------------------------
   // Search indices

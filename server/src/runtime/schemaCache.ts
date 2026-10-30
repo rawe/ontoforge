@@ -27,6 +27,7 @@
  */
 
 import type { AgentConfig, SavedQueryConfig, SavedQueryParameter, StepConfig } from "../core/ai.js";
+import type { NamedSearchConfig, StoredSearchNode } from "../core/namedSearch.js";
 import { NotFoundError } from "../core/exceptions.js";
 import { sameDesign } from "../core/designRevision.js";
 import type { DesignRevision, RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../core/ports.js";
@@ -79,6 +80,8 @@ export interface LoadedSchema {
   agentConfigs: Record<string, AgentConfig>;
   /** Saved-query pipelines keyed by query key. */
   savedQueries: Record<string, SavedQueryConfig>;
+  /** Named searches keyed by key, in key order. */
+  namedSearches: Record<string, NamedSearchConfig>;
   /** Whether the lens has type inclusions, and the search indices it
    * includes by key (`core/searchQuery.ts` decides availability). */
   searchIndexScope: { scoped: boolean; includedIndices: string[] };
@@ -288,6 +291,16 @@ export async function loadSchemaUncached(
     savedQueries[row.key as string] = toSavedQueryConfig(row);
   }
 
+  const namedSearches: Record<string, NamedSearchConfig> = {};
+  for (const row of await store.getNamedSearches(lensKey)) {
+    namedSearches[row.key as string] = {
+      key: row.key as string,
+      name: row.name as string,
+      description: row.description as string,
+      tree: row.tree as StoredSearchNode,
+    };
+  }
+
   const entityInclusions = schema.entityInclusions as InclusionRow[];
   const relationInclusions = schema.relationInclusions as InclusionRow[];
   const searchIndexScope = {
@@ -295,7 +308,15 @@ export async function loadSchemaUncached(
     includedIndices: (schema.searchIndexInclusions as string[] | undefined) ?? [],
   };
 
-  return { scoped, full, agentConfigs, savedQueries, searchIndexScope, design: schema.design as DesignRevision };
+  return {
+    scoped,
+    full,
+    agentConfigs,
+    savedQueries,
+    namedSearches,
+    searchIndexScope,
+    design: schema.design as DesignRevision,
+  };
 }
 
 /** Deserialize one stored saved-query row: `steps` and `parameters` are

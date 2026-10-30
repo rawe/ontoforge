@@ -28,6 +28,7 @@
 
 import {
   ENTITY_SEARCH_RESPONSE,
+  NAMED_SEARCH_RESPONSE,
   PASSAGE_SEARCH_RESPONSE,
   SEARCH_FILTER_EFFECT,
   SEARCH_QUERY_RULE,
@@ -1132,8 +1133,8 @@ export function createRuntimeMcpServer(
       description:
         "Rank entities for a text, best first. " + SEARCH_QUERY_RULE + " " +
         "Scope, at most one of: types (entity type keys: their own fields and their documents' passages) " +
-        "or indices (search index keys from list_search_indices; a custom index with relation groups also " +
-        "finds an entity through its relations); neither searches every type of this lens. " +
+        "or indices (index keys from list_search_indices; a custom index with relation groups also " +
+        "finds an entity through its relations); neither: every type of the lens. " +
         filterRules({ contains: false, relations: true }) + " " +
         SEARCH_FILTER_EFFECT + " limit: an integer 1–100, default 10. " +
         ENTITY_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
@@ -1167,15 +1168,15 @@ export function createRuntimeMcpServer(
     "search_documents",
     {
       description:
-        "Rank passages of documents for a text, best first: a passage is one chunk of one entity's document. " +
+        "Rank document passages for a text, best first; a passage is a chunk of one entity's document. " +
         SEARCH_QUERY_RULE + " " +
-        "Scope, at most one of: types (entity type keys: all their documents), documents ('type.property', " +
-        "e.g. \"person.bio\") or indices (keys from list_search_indices of indices that read a document); none " +
-        "searches every document of this lens. " +
+        "Scope, at most one of: types (entity type keys: all their documents), documents ('type.property') " +
+        "or indices (document indices' keys from list_search_indices); none: " +
+        "every document of the lens. " +
         filterRules({ contains: false, relations: true }) +
-        " They apply to the entity owning the document. " + SEARCH_FILTER_EFFECT + " " +
-        "limit: passages, an integer 1–100, default 10. per_entity: at most this many passages per entity, " +
-        "1 to limit; omit for no cap. text: false leaves each passage's text out (default true). " +
+        " They apply to the document's entity. " + SEARCH_FILTER_EFFECT + " " +
+        "limit: passages, an integer 1–100, default 10. per_entity: max passages per entity " +
+        "(1 to limit; omit: no cap). text: false omits the passage text. " +
         PASSAGE_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
       inputSchema: {
         query: z.string(),
@@ -1273,6 +1274,52 @@ export function createRuntimeMcpServer(
       );
       return jsonResult(result);
     }),
+  );
+
+  register(
+    "list_named_searches",
+    {
+      description:
+        "List the named searches of this lens: searches designed in advance, each run by its key with " +
+        "a query text. Each has key, name, description (what it finds — choose by it), result " +
+        "('entities' or 'passages': what a run returns) and types (the entity types it searches; " +
+        "filters apply to these). Read-only.",
+      inputSchema: {},
+    },
+    tool("list_named_searches", async (_args, open) =>
+      jsonResult(await service.listNamedSearches(lensKey, await open())),
+    ),
+  );
+
+  register(
+    "run_named_search",
+    {
+      description:
+        "Run a named search of this lens by its key, best first: its indices, methods and ranking are " +
+        "fixed; the query and filters are yours. key: a named search's key. " +
+        SEARCH_QUERY_RULE + " It fills the search's texts. " +
+        filterRules({ contains: false, relations: true }) + " They apply to the entity types the " +
+        "search searches (a passage's: its document's entity); a key none of them resolves is refused. " +
+        SEARCH_FILTER_EFFECT + " " + NAMED_SEARCH_RESPONSE + " Items are candidates, not verified answers. " +
+        "Read-only.",
+      inputSchema: {
+        key: z.string(),
+        query: z.string(),
+        filters: filtersArgument,
+      },
+    },
+    tool(
+      "run_named_search",
+      async (args: { key: string; query: string; filters?: Record<string, unknown> | undefined }, open) =>
+        jsonResult(
+          await service.runNamedSearch(
+            lensKey,
+            args.key,
+            { query: args.query, filter: filterText(args.filters) },
+            await open(),
+          ),
+        ),
+    ),
   );
 
   registerChangesetTools(register, lists, lensKey, { rulesetKey, writeAccess: offered }, tool);

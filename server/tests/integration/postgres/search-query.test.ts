@@ -40,6 +40,10 @@ const NS = `ont_${O}`;
 const MODEL = `/api/ontologies/${O}/model`;
 const runtimeOf = (lens: string) => `/api/ontologies/${O}/runtime/lenses/${lens}`;
 
+/** A keyword score: the query words the entry holds, plus a fraction below one. */
+const wordsMatched = (words: number) =>
+  expect.toSatisfy((score: number) => score >= words && score < words + 1, `${words} query word(s) matched`);
+
 const EMPLOYMENT = SearchIndexDefinition.parse({
   key: "employment",
   name: "People by employment",
@@ -290,6 +294,7 @@ describe("PostgreSQL search query", () => {
       snippet: "Ada CTO ACME",
       relationType: "works_for",
       target: { _id: acme._id, _entityTypeKey: "company", name: "ACME" },
+      scores: { keyword: wordsMatched(2) },
     });
   });
 
@@ -364,7 +369,12 @@ describe("PostgreSQL search query", () => {
     // The fake provider maps equal texts to equal vectors: similarity 1.
     const exact = await search("all", { query: text, indices: ["person~default"], semantic: { minSimilarity: 0.99 } });
     expect(idsOf(exact)).toEqual([ada._id]);
-    expect(exact.items[0]!.match).toEqual({ index: "person~default", part: "self", snippet: "Person: Ada" });
+    expect(exact.items[0]!.match).toEqual({
+      index: "person~default",
+      part: "self",
+      snippet: "Person: Ada",
+      scores: { semantic: 1 },
+    });
     const all = await search("all", { query: text, indices: ["person~default"], semantic: {} });
     expect(idsOf(all)[0]).toBe(ada._id);
     expect(all.items).toHaveLength(2);

@@ -35,7 +35,7 @@ runs each missing upgrade step inside every `ont_*` namespace — then the step'
 server-wide statements, if it has any, once in `public` — and records the new version
 last. The upgrade is logged, and the server never backs up storage itself. The steps and
 both version constants live in the storage-version module beside the DDL; the current
-storage version is 12. Before that
+storage version is 13. Before that
 transaction the adapter logs the pgvector version — the installed one, or the one the
 extension would install — and warns when it predates 0.7, which has no
 `halfvec`: the search entry table cannot then be created, so an upgrade of an existing
@@ -43,7 +43,7 @@ namespace and every ontology creation fail.
 
 **Registry create** is one transaction:
 the registry row first — so a concurrent same-key create dies on the named constraint as
-a conflict — then the fresh namespace, the twenty-one tables below with the search
+a conflict — then the fresh namespace, the twenty-two tables below with the search
 settings row and the design revision row and, when an embedding width is given, the fixed
 saved-query vector index inside it. **Registry delete** is one
 transaction: the registry row out, the namespace dropped in one cascade. A bound store applies its
@@ -57,20 +57,21 @@ per namespace:
 
 | Logical | Table | Joined by |
 |---|---|---|
-| Lens | `lens` | referenced by its inclusions, agents, saved queries, retrievers, navigators and changesets |
+| Lens | `lens` | referenced by its inclusions, agents, saved queries, named searches, retrievers, navigators and changesets |
 | Entity type | `entity_type` | referenced by its property definitions and inclusions; its name property's key in `name_property`, a reference to `property_def` by entity type and key, checked at commit; its identity property keys in order in the nullable array `identity_properties` |
 | Relation type | `relation_type` | endpoint entity type keys as deletion-restricted references to `entity_type`; referenced by its property definitions and inclusions; its parent end in the nullable `parent` column, `source` or `target`, with no check; one per pair in `one_per_pair`, read as on while `parent` is set |
 | Property definition | `property_def` | exactly one of two owner columns — entity type or relation type — enforced by a check constraint |
 | Scope inclusion | `lens_includes` | its lens plus exactly one of three columns — entity type, relation type or search index; the optional property allowlist is an array column, and an absent allowlist is stored as null, never as an empty array. Search-index rows reach the runtime schema read as index keys; the type-inclusion reads skip them |
 | Agent | `assistant_agent` | its lens |
 | Saved query | `saved_query` | its lens, with the denormalized lens key alongside |
+| Named search | `named_search` | its lens, with delete cascade; unique per lens and key; the tree as `jsonb` |
 | Retriever | `assistant_retriever` | its lens, with delete cascade; unique per lens and key; configuration and warnings as `jsonb` |
 | Navigator | `assistant_navigator` | its lens, with delete cascade; unique per lens and key; configuration as `jsonb` |
 
 Every schema row carries a `uuid` primary key.
 
 Deleting a schema object cascades through the foreign keys — property definitions,
-inclusions, agents, saved queries, retrievers, navigators and changesets die with their
+inclusions, agents, saved queries, named searches, retrievers, navigators and changesets die with their
 owner. The DDL enforces the structural constraints described at the start of this part;
 it does not add another layer of business-rule validation. The
 closed vocabularies the search-index tables check are index kind, representation and

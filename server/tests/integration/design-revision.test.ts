@@ -467,13 +467,16 @@ describe("a design change that fails part-way", () => {
     const revisionBefore = await (await getRuntimeStore("copy")).designRevision();
 
     // The types are written; the lenses fail.
-    await expect(modeling.importSchema(payload, failingOn(target, "createLens"))).rejects.toThrow("injected failure");
+    const runtime = await getRuntimeStore("copy");
+    await expect(modeling.importSchema(payload, failingOn(target, "createLens"), runtime)).rejects.toThrow(
+      "injected failure",
+    );
     expect(await target.listEntityTypes()).toEqual([]);
     expect(await target.listRelationTypes()).toEqual([]);
     expect(await target.listLenses()).toEqual([]);
     expect(await (await getRuntimeStore("copy")).designRevision()).toEqual(revisionBefore);
 
-    await modeling.importSchema(payload, target);
+    await modeling.importSchema(payload, target, runtime);
     expect((await target.listEntityTypes()).map((et) => et.key).sort()).toEqual(["company", "person"]);
     expect((await (await getRuntimeStore("copy")).designRevision()).revision).toBe(revisionBefore.revision + 1);
   });

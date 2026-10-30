@@ -85,9 +85,9 @@ beforeEach(async () => {
 });
 
 describe("tool surface", () => {
-  it("lists exactly the forty-five modeling tools — and NO update-inclusion tool", async () => {
+  it("lists exactly the forty-eight modeling tools — and NO update-inclusion tool", async () => {
     const tools = await client.listTools();
-    expect(tools.tools).toHaveLength(45);
+    expect(tools.tools).toHaveLength(48);
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       "add_entity_type_to_lens",
       "add_property",
@@ -100,6 +100,7 @@ describe("tool surface", () => {
       "delete_agent",
       "delete_entity_type",
       "delete_lens",
+      "delete_named_search",
       "delete_property",
       "delete_relation_type",
       "delete_retriever",
@@ -115,6 +116,7 @@ describe("tool surface", () => {
       "get_search_settings",
       "import_schema",
       "list_agents",
+      "list_named_searches",
       "list_retrievers",
       "list_saved_queries",
       "list_search_indices",
@@ -124,6 +126,7 @@ describe("tool surface", () => {
       "remove_relation_type_from_lens",
       "remove_search_index_from_lens",
       "set_agent",
+      "set_named_search",
       "set_retriever",
       "set_saved_query",
       "set_search_settings",

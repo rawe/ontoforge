@@ -50,17 +50,21 @@ Each searched index is ranked once per retrieval method the search runs — sema
 keyword, or both — over the entries of its ready generation. Within one
 method the rankings of every searched index — all types, own fields and passages alike —
 are merged into one ranking by their own scores, which share one scale there: semantic
-similarity under one embedding model, the keyword score of one query. That ranking
-is grouped by entity: an entity counts once, scored by its best entry, whichever index
-holds it. A single method keeps those scores. With both methods the semantic and keyword
-entity rankings are fused by reciprocal rank: an entity's score is the sum of
-`1 / (60 + rank)` over the two, ranks starting at one, so only being found by both
-methods adds up — being found by several indices never does. Equal scores prefer the
-greater semantic similarity of each entity's best semantic entry, but only when every
-entity in that tied group has one; otherwise, and among equal similarities, they keep the
-order in which the rankings first list them, the semantic ranking before the keyword
-ranking. What matched the entity is its best entry under the method in which
-it ranks best, semantic on equal ranks.
+similarity under one embedding model, the keyword score of one query. That ranking is
+grouped by entity: an entity counts once, scored by its best entry, whichever index holds
+it. A single method keeps those scores. With both methods the semantic and keyword entity
+rankings are fused by reciprocal rank: an entity's score is the sum of `1 / (60 + rank)`
+over the two, ranks starting at one, so only being found by both methods adds up — being
+found by several indices never does. Equal scores prefer the greater semantic similarity
+of each entity's best semantic entry, but only when every entity in that tied group has
+one; otherwise, and among equal similarities, they keep the order in which the rankings
+first list them, the semantic ranking before the keyword ranking. What matched the entity
+is its best entry under the method in which it ranks best, semantic on equal ranks. It
+carries the score of every method that fetched this very entry — the same part of the same
+index: the semantic similarity, the keyword score, or both. The two are never compared,
+and the item as a whole has no score; its place is its rank. A method without a score may
+still have found another entry of the entity, or this entry beyond the entries it fetched,
+so a missing score says nothing about that method.
 
 An entry's **keyword score** is the number of distinct query words it contains — those
 left after stop words are dropped ([below](#keyword-language)) — plus, as
@@ -200,12 +204,12 @@ error. With no type left, the result is empty and carries a limitation.
 **Items.** An item names the entity — `_id`, `_entityTypeKey`, `name` and, when its type
 declares an identity the lens shows, `identity`: the identity properties and their values,
 in the identity's order — and the best entry that found it: its index, its part (`self`,
-`relation` or `passage`) and a snippet. A passage adds the document and the passage's
-place in it; a relation adds the relation type and the entity at its other end, named
-without an identity. The snippet is withheld when the index reads a
-property the lens hides; a passage's document is null when the lens hides it; relation
-entries the lens cannot see are skipped. An entity deleted after ranking is left out, so
-a page may be shorter than the limit.
+`relation` or `passage`), a snippet and its scores ([ranking](#ranking)). A passage adds
+the document and the passage's place in it; a relation adds the relation type and the
+entity at its other end, named without an identity. The snippet is withheld when the index
+reads a property the lens hides; a passage's document is null when the lens hides it;
+relation entries the lens cannot see are skipped. An entity deleted after ranking is left
+out, so a page may be shorter than the limit.
 
 **Limitations.** `ran` lists the methods that ran on at least one index. Each limitation
 names its code:
@@ -219,10 +223,11 @@ names its code:
 
 ## Passage search
 
-The passage search ranks passages — chunks of [documents](documents.md#chunking) — for
-one query text, through a scope of search indices that read a document. Methods, filters
-and limitations are those of the [entity search](#entity-search); only the result unit
-differs. Only the order is returned, never a score.
+The passage search ranks passages — chunks of [documents](documents.md#chunking) — for one
+query text, through a scope of search indices that read a document. Methods, filters and
+limitations are those of the [entity search](#entity-search); only the result unit
+differs. A passage carries the scores of the methods that found it, as an entity search
+entry does; the order is the rank.
 
 **Scope.** Only an index over a document the lens shows can be searched: a passage
 returns its text. Without `types`, `documents` or `indices` it reads every type the lens
@@ -243,8 +248,9 @@ many passages per entity, in rank order; without it, there is no cap per entity.
 **Filters** apply to the entity that owns the document.
 
 **Items.** An item names the entity as the [entity search](#entity-search) does — `_id`,
-`_entityTypeKey`, `name` and, where it applies, `identity` — and the passage:
-its document, its chunk ordinal, its character offset and length, and its text. The text
+`_entityTypeKey`, `name` and, where it applies, `identity` — and the passage: its
+document, its chunk ordinal, its character offset and length, its scores and its text. The
+text
 is read when the search answers, from the document as it is then, at that offset and
 length; it never includes the header the stored entry carries. `text: false` leaves it
 out. An entity deleted after ranking is left out, so a page may be shorter than the limit.
@@ -318,7 +324,8 @@ the server from starting: the server must remain available to finish the repair.
 The full contract is in [../interfaces/](../interfaces/README.md). REST
 `POST /search/entities` is the [entity search](#entity-search), `POST /search/passages`
 the [passage search](#passage-search), and `GET /search-indices` the catalog. A
-saved-query search step runs the entity search ([saved-queries.md](saved-queries.md)).
+saved-query search step runs the entity search ([saved-queries.md](saved-queries.md)). A
+[named search](named-searches.md) stores a search tree of its own and runs it by key.
 
 The MCP and agent tool `search` runs the entity search, `search_documents` the passage
 search, each answering with that search's response. They take its scope, filters and

@@ -31,23 +31,42 @@ export const SEARCH_FILTER_EFFECT =
 
 /** The floor and the caution both tools state. */
 export const SEARCH_RESULT_NOTE =
-  "Semantic matches below a fixed similarity floor are left out. Items are candidates, not verified answers.";
+  `Semantic matches below a fixed similarity floor (${TOOL_MIN_SIMILARITY}) are left out. ` +
+  "Items are candidates, not verified answers.";
 
 /** An item's entity, in both responses. */
-const ENTITY =
-  "entity (_id, _entityTypeKey, name; identity, its identity properties' values, when its type has them)";
+const ENTITY = "entity (_id, _entityTypeKey, name; identity if its type has one)";
+
+/** What an entry's scores are, in both responses. */
+const SCORES =
+  `scores (each method that found it: semantic, similarity ${TOOL_MIN_SIMILARITY} to 1; keyword, query words ` +
+  "held plus a tie-breaking fraction below 1; not comparable; no score does not mean that method missed it; the rank " +
+  "fuses both, following neither)";
+
+/** A named search's response, as `run_named_search` answers it: the
+ * entity or the passage search's, its semantic scores under the search's
+ * own floors, and `queryText` where the search uses several texts. */
+export const NAMED_SEARCH_RESPONSE =
+  "Returns ran (methods that ran), items and limitations (what could not run: code, message, method, " +
+  `indices, types). Each item has rank (from 1), ${ENTITY} and, by the search's result: entities — ` +
+  "match, the entry that found it: index, part (self, relation or passage), snippet (null if this lens " +
+  "hides it), a relation's relationType and target, a passage's property, charOffset and charLength; " +
+  "passages — passage: property (the document), ordinal, charOffset, charLength and text. Both carry " +
+  "scores (each method that found the entry: semantic, similarity 0 to 1; keyword, query words held " +
+  "plus a fraction below 1; not comparable; no score does not mean that method missed it) and, when " +
+  "the search runs several query texts, queryText: the text that found it.";
 
 /** The entity search's response, as `search` answers it. */
 export const ENTITY_SEARCH_RESPONSE =
-  "Returns ran (the methods that ran: semantic, keyword), items and limitations (what could not run " +
-  "or serve: code, message, method, indices, types). Each item has rank (from 1; no scores are given), " +
+  "Returns ran (methods that ran), items and limitations (what could not run: code, message, method, " +
+  "indices, types). Each item has rank (from 1), " +
   `${ENTITY} and match, the entry that found it: index, part (self, relation or passage), snippet ` +
-  "(the start of its text, null when this lens hides it), a relation's relationType and target (_id, " +
-  "_entityTypeKey, name), a passage's property, charOffset and charLength.";
+  "(the start of its text; null if this lens hides it), a relation's relationType and target (_id, " +
+  `_entityTypeKey, name), a passage's property, charOffset and charLength, and ${SCORES}.`;
 
 /** The passage search's response, as `search_documents` answers it. */
 export const PASSAGE_SEARCH_RESPONSE =
-  "Returns ran (the methods that ran: semantic, keyword), items and limitations (what could not run " +
-  "or serve: code, message, method, indices, types, documents). Each item has rank (from 1; no scores " +
-  `are given), ${ENTITY} and passage: property (the document), ordinal, charOffset and charLength ` +
-  "(characters; read it, or around it, with get_document) and text unless text is false.";
+  "Returns ran (methods that ran), items and limitations (what could not run: code, message, method, " +
+  "indices, types, documents). Each item has rank (from 1), " +
+  `${ENTITY} and passage: property (the document), ordinal, charOffset and charLength ` +
+  `(characters; read it with get_document), ${SCORES}, and text unless text is false.`;

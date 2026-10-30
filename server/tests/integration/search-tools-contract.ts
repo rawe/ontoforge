@@ -33,11 +33,21 @@ function expectMatch(item: Record<string, any>) {
   const type = item.entity._entityTypeKey;
   expect(match.snippet.length).toBeGreaterThan(0);
   expect(Array.from(match.snippet as string).length).toBeLessThanOrEqual(200);
+  expect(Object.keys(match.scores).length).toBeGreaterThan(0);
+  for (const method of Object.keys(match.scores)) expect(["semantic", "keyword"]).toContain(method);
   if (match.part === "self") {
-    expect(Object.keys(match).sort()).toEqual(["index", "part", "snippet"]);
+    expect(Object.keys(match).sort()).toEqual(["index", "part", "scores", "snippet"]);
     expect(match.index).toBe(`${type}~default`);
   } else {
-    expect(Object.keys(match).sort()).toEqual(["charLength", "charOffset", "index", "part", "property", "snippet"]);
+    expect(Object.keys(match).sort()).toEqual([
+      "charLength",
+      "charOffset",
+      "index",
+      "part",
+      "property",
+      "scores",
+      "snippet",
+    ]);
     expect(match.part).toBe("passage");
     expect(match.index).toBe(`${type}~${match.property}`);
   }
@@ -192,7 +202,9 @@ export function searchToolsContract(embedding: boolean, enabled = true) {
       // text false: the places only.
       const places = await find({ query: "graph database", text: false }, "search_documents");
       expect(places.items.length).toBeGreaterThan(0);
-      for (const item of places.items) expect(Object.keys(item.passage).sort()).toEqual(["charLength", "charOffset", "ordinal", "property"]);
+      for (const item of places.items) {
+        expect(Object.keys(item.passage).sort()).toEqual(["charLength", "charOffset", "ordinal", "property", "scores"]);
+      }
     });
     it("filters narrow types and apply within both rankings", async () => {
       const found = await ids({ query: "graph database", filters: { year__gte: "2020" }, limit: 2 });

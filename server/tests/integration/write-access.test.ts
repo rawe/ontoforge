@@ -377,6 +377,8 @@ describe("through a 'none' ruleset's URL (REST)", () => {
       ["GET /saved-queries", "/saved-queries"],
       ["GET /saved-queries/search", "/saved-queries/search?q=task"],
       ["POST /saved-queries/:queryKey/run", "/saved-queries/q1/run", {}],
+      ["GET /named-searches", "/named-searches"],
+      ["POST /named-searches/:searchKey/run", "/named-searches/n1/run", { query: "x" }],
       ["POST /relations/:relationTypeKey", "/relations/assigned_to", { fromEntityId: e.T2, toEntityId: e.Kim }],
       ["GET /relations/:relationTypeKey", "/relations/has_task"],
       ["GET /relations/:relationTypeKey/:relationId", `/relations/has_task/${hasTask}`],
@@ -400,12 +402,13 @@ describe("through a 'none' ruleset's URL (REST)", () => {
     ];
   }
 
-  /** The reads this test server cannot serve: no saved query, no
+  /** The reads this test server cannot serve: no saved query or named search, no
    * embedding provider for the semantic saved-query search, no entity
    * type with an identity. */
   const UNSERVED: Record<string, number> = {
     "GET /saved-queries/search": 422,
     "POST /saved-queries/:queryKey/run": 404,
+    "POST /named-searches/:searchKey/run": 404,
     "GET /entities/:entityTypeKey/identity/:identity": 404,
     "GET /entities/:entityTypeKey/identity/:identity/path": 404,
     "GET /entities/:entityTypeKey/identity/:identity/documents/:propertyKey": 404,
@@ -414,7 +417,7 @@ describe("through a 'none' ruleset's URL (REST)", () => {
   };
   const VERBS = { write: "write directly", stage: "start or change a changeset", commit: "commit" } as const;
 
-  it("refuses the 10 writes, the 9 stage routes and the commit with 409; the 29 reads answer", async () => {
+  it("refuses the 10 writes, the 9 stage routes and the commit with 409; the 31 reads answer", async () => {
     const all = requests();
     expect(all.map(([route]) => route).sort()).toEqual(Object.keys(ROUTES).sort());
     const refused: string[] = [];
@@ -430,7 +433,7 @@ describe("through a 'none' ruleset's URL (REST)", () => {
       }
     }
     expect(refused).toHaveLength(20);
-    expect(all.length - refused.length).toBe(29);
+    expect(all.length - refused.length).toBe(31);
     // Nothing written, nothing staged, nothing started.
     expect((await rest("GET", `${ALL}/entities/task/${e.T1}`)).body.name).toBe("T1");
     expect((await rest("GET", `${ALL}/entities/task/${e.T1a1}`)).status).toBe(200);
@@ -552,7 +555,7 @@ describe("the MCP tool set at 'none'", () => {
     await putRuleset("agent-n", { writeAccess: "none" });
   });
 
-  it("tools/list: the reads, the changeset reads and get_ruleset, 20", async () => {
+  it("tools/list: the reads, the changeset reads and get_ruleset, 22", async () => {
     const names = (await (await connect("agent-n")).listTools()).tools.map((tool) => tool.name);
     expect(names.sort()).toEqual([
       "execute_query",
@@ -567,9 +570,11 @@ describe("the MCP tool set at 'none'", () => {
       "get_staged_document",
       "list_changesets",
       "list_entities",
+      "list_named_searches",
       "list_relations",
       "list_saved_queries",
       "list_search_indices",
+      "run_named_search",
       "run_saved_query",
       "search",
       "search_documents",

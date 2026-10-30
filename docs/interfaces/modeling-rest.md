@@ -8,7 +8,8 @@ schema; see [how an ontology is addressed](README.md#how-an-ontology-and-a-lens-
 Find routes for [lenses](#lenses), [entity types](#entity-types),
 [relation types](#relation-types), [properties](#property-definitions),
 [scope inclusions](#scope-inclusions), [assistants](#agent-configurations),
-[saved queries](#saved-queries), [search indices](#search-indices), or
+[saved queries](#saved-queries), [named searches](#named-searches),
+[search indices](#search-indices), or
 [schema-wide operations](#schema-wide-operations).
 
 ## Lenses
@@ -123,6 +124,21 @@ Per-lens, addressed by lens key. Semantics:
 | GET | `/lenses/{lensKey}/saved-queries` | List the lens's saved queries |
 | PUT | `/lenses/{lensKey}/saved-queries/{queryKey}` | Create or replace one; answers 201 on create, 200 on replace |
 | DELETE | `/lenses/{lensKey}/saved-queries/{queryKey}` | Delete a saved query |
+
+## Named searches
+
+Per-lens, addressed by lens key. Semantics:
+[capabilities/named-searches.md](../capabilities/named-searches.md).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/lenses/{lensKey}/named-searches` | List the lens's named searches, each with its tree |
+| PUT | `/lenses/{lensKey}/named-searches/{searchKey}` | Create or replace one; answers 201 on create, 200 on replace |
+| DELETE | `/lenses/{lensKey}/named-searches/{searchKey}` | Delete a named search |
+
+A tree of the wrong shape is refused as a request of the wrong shape, each path named; a
+tree breaking a rule is refused with one validation error listing each violation as
+`<path>: <message>`.
 
 ## Retrievers
 
@@ -249,8 +265,8 @@ provider: without one it skips the vector work and says so in its summary. It do
 touch search indices. After an embedding-provider switch it is run once per ontology. See
 [capabilities/search.md](../capabilities/search.md#rebuild).
 
-Transfer carries the design only — schema, lenses, agents, saved queries, retrievers,
-navigators, search indices; no instance
+Transfer carries the design only — schema, lenses, agents, saved queries, named searches,
+retrievers, navigators, search indices; no instance
 data and no ontology identity — see
 [capabilities/transfer.md](../capabilities/transfer.md) and
 [capabilities/search.md](../capabilities/search.md).

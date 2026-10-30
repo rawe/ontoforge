@@ -19,7 +19,8 @@
  *    restricted by push-down, one filter per type.
  * 4. Each found entity is named — with its identity properties when its
  *    type declares an identity the lens shows — with the best entry that
- *    found it. An entity gone since the ranking is left out.
+ *    found it and the scores of the methods that found that entry. An
+ *    entity gone since the ranking is left out.
  *
  * What could not run — a method on some indices, a type without an index,
  * a filter no type declares — is reported as a limitation; every rule the
@@ -30,7 +31,14 @@ import type { Row, RuntimeStore, SearchIndexRecord } from "../../core/ports.js";
 import { compileEntitySearch } from "../../core/searchCompile.js";
 import type { SearchRepresentation } from "../../core/searchIndex.js";
 import { loadSchema, type LoadedSchema } from "../schemaCache.js";
-import { describeMatches, indexStoreOf, readHitEntities, searchableIndices, type EngineHit } from "./indexSearch.js";
+import {
+  describeMatches,
+  indexStoreOf,
+  readHitEntities,
+  searchableIndices,
+  type EngineHit,
+  type MethodScores,
+} from "./indexSearch.js";
 import {
   checkRequest,
   entityReference,
@@ -41,6 +49,7 @@ import {
   rootTypes,
   runScopedSearch,
   shownDocument,
+  shownScores,
   type EntityReference,
   type FilteredTarget,
   type ScopedSearchRequest,
@@ -56,8 +65,9 @@ export interface EntitySearchRequest extends ScopedSearchRequest {
 }
 
 /** The best entry that found an entity. `snippet` is null when the index
- * reads a property the lens hides. */
-export type EntityMatch =
+ * reads a property the lens hides; `scores` holds every method that found
+ * this very entry. */
+export type EntityMatch = (
   | { index: string; part: "self"; snippet: string | null }
   | { index: string; part: "relation"; snippet: string | null; relationType: string; target: EntityReference }
   | {
@@ -68,7 +78,13 @@ export type EntityMatch =
       property: string | null;
       charOffset: number;
       charLength: number;
-    };
+    }
+) & {
+  scores: MethodScores;
+  /** The query text that found the entry — only on a named search's item,
+   * when its tree searches more than one text. */
+  queryText?: string;
+};
 
 export interface EntitySearchItem {
   /** From 1. */
@@ -126,7 +142,7 @@ export async function searchEntities(
 ): Promise<EntitySearchResponse> {
   const loaded = await loadSchema(lensKey, store);
   const { ran, hits, entities, limitations } = await rankEntities(loaded, request, store);
-  return { ran, items: await itemsOf(loaded, store, hits, entities), limitations };
+  return { ran, items: await entitySearchItems(loaded, store, hits, entities), limitations };
 }
 
 /** The entity search up to its ranking: for callers inside the server
@@ -186,8 +202,9 @@ function scopeOf(
   return { selected: managed, scopeTypes: Object.keys(loaded.scoped.entityTypes) };
 }
 
-/** The hits as items: each entity named, with its best entry. */
-async function itemsOf(
+/** The hits as items, ranked in their order: each entity named, with its
+ * best entry. Every hit's entity is in `entities`. */
+export async function entitySearchItems(
   loaded: LoadedSchema,
   store: RuntimeStore,
   hits: EngineHit[],
@@ -198,6 +215,7 @@ async function itemsOf(
     const { index, partKind, relationType, target, snippet, charOffset, charLength } = matched.get(hit.entityId)!;
     // `describeMatches` withholds a hidden property's text as "".
     const shown = snippet === "" ? null : snippet;
+    const scores = shownScores(hit.matched.scores);
     let match: EntityMatch;
     if (partKind === "relation") {
       match = {
@@ -206,6 +224,7 @@ async function itemsOf(
         snippet: shown,
         relationType: relationType!,
         target: { _id: target!.id, _entityTypeKey: target!.type, name: target!.label },
+        scores,
       };
     } else if (partKind === "passage") {
       match = {
@@ -215,9 +234,10 @@ async function itemsOf(
         property: shownDocument(loaded, hit.matched.index),
         charOffset: charOffset!,
         charLength: charLength!,
+        scores,
       };
     } else {
-      match = { index, part: "self", snippet: shown };
+      match = { index, part: "self", snippet: shown, scores };
     }
     return { rank: i + 1, entity: entityReference(loaded, hit, entities.get(hit.entityId)!), match };
   });

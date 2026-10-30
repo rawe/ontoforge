@@ -74,7 +74,7 @@ whether the embeddings were skipped. A stream that ends without a summary is an 
 not a success.
 
 **Entity search shows no number.** The palette and relation target picker use the
-server’s ranking order; the entity search returns no score. What found a hit is shown only as the
+server’s ranking order and show no score. What found a hit is shown only as the
 [matched-via](finding-and-collecting.md#matched-via) line, whose relation-group label the client resolves through
 the lens's search catalog; no passage text is shown. Saved-query discovery keeps its
 separate cosine score.

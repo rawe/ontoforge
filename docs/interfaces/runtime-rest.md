@@ -7,7 +7,8 @@ answers not found within the ontology.
 Find routes for [schema reads](#schema-introspection), [entities](#entities),
 [documents](#documents), [neighbours](#neighbours), [relations](#relations),
 [changesets](#changesets), [search](#search), [OQL](#query),
-[saved queries](#saved-queries), [identity comparison](#entity-identity-comparison),
+[saved queries](#saved-queries), [named searches](#named-searches),
+[identity comparison](#entity-identity-comparison),
 or [assistant chat and threads](assistants-rest.md#assistant-chat-and-threads).
 
 ## Schema introspection
@@ -175,7 +176,9 @@ carries `ran`, `items` and `limitations`. Each item has `rank`, from 1, `entity`
 values in the identity's order, only for a type that declares an identity the lens shows —
 and `match` `{index, part, snippet}`, plus `property` (null when the lens hides the
 document), `charOffset`, `charLength` for a passage and `relationType`, `target`
-(`{_id, _entityTypeKey, name}`) for a relation. Each limitation has `code` and `message` and,
+(`{_id, _entityTypeKey, name}`) for a relation, and `scores`: per method that found this entry, its own
+score, semantic first — `{semantic, keyword}`, each present only when that method found it, to four
+decimals. Each limitation has `code` and `message` and,
 where they apply, `method`, `indices`, `types`. A body of the wrong shape, or with a field
 not listed here, is rejected with `details.errors`. The request's rules are collected under
 `details.fields` at the request's own paths: `query`, `types.<i>`, `indices.<i>`,
@@ -188,7 +191,8 @@ document properties as `type.property` — as a third scope field: `types`, `doc
 `indices`, one at a time. `limit` counts passages, 1–100, default 10; `perEntity`, 1 to
 the limit, caps the passages per entity; `text`, default true, false leaves the passage
 text out. Each item has `rank`, from 1, `entity` as in `POST /search/entities` and
-`passage` `{property, ordinal, charOffset, charLength, text}`. Limitations are those of
+`passage` `{property, ordinal, charOffset, charLength, scores, text}`, `scores` as in
+`POST /search/entities`. Limitations are those of
 `POST /search/entities`, with `documents` where it applies. Errors are reported as there,
 and also at `documents.<i>` and `perEntity`. Rules:
 [capabilities/search.md](../capabilities/search.md#passage-search).
@@ -221,6 +225,23 @@ Search ranks saved-query descriptions semantically, so it needs an embedding pro
 `limit` is 1–20, default 3; `min_score` defaults to 0.7. The bare result array keeps
 `key`, `name`, `description`, `parameters` and absolute cosine `score` (0–1).
 
+## Named searches
+
+Runtime lists and runs them; modeling defines them. Semantics:
+[capabilities/named-searches.md](../capabilities/named-searches.md#running-one).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/named-searches` | List the lens's named searches, by key: `key`, `name`, `description`, `result` (`entities` or `passages`), `types` |
+| POST | `/named-searches/{searchKey}/run` | Run one with a query text |
+
+Run takes `{"query": "...", "filter": {"<key>": "<value>"}}`: `query` required, `filter`
+optional, in the entity search's `filter` form; any other field is rejected. The response
+is the [entity search's](#search) or the passage search's, as `result` says, the passage
+text always included. A blank query is a field error on `query`, a filter key no searched
+type resolves one on `filter.<key>`; a search the lens no longer fits is a
+`VALIDATION_ERROR` with `details.errors`, each `<path>: <message>` below `tree`.
+
 ## Entity identity comparison
 
 Semantics and request/response contract:
@@ -252,7 +273,7 @@ an unknown level one on `writeAccess`. An unknown ruleset is not found on read a
 ### Ruleset mounts
 
 `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/rulesets/{rulesetKey}` mirrors the
-[runtime REST](#runtime-rest) routes from schema introspection to saved queries, the path
+[runtime REST](#runtime-rest) routes from schema introspection to named searches, the path
 read included; the AI and entity identity comparison routes are not mirrored. Its root,
 `GET` on the prefix itself, answers what `get_ruleset` answers:
 `{key, writeAccess, anchor}`, `anchor` null or `{type, id, name, state, visible, path}`,

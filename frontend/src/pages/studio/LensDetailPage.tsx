@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, Layers, Plug, SquareTerminal, Trash2 } from 'lucide-react'
+import { ChevronLeft, Layers, ListTree, Plug, SquareTerminal, Trash2 } from 'lucide-react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
@@ -14,6 +14,7 @@ import { WORKBENCH_ICON } from '@/components/layout/surfaceTargets'
 import { AgentsTab } from '@/components/studio/AgentsTab'
 import { ConnectTab } from '@/components/studio/ConnectTab'
 import { NavigatorsTab } from '@/components/studio/NavigatorsTab'
+import { NamedSearchesTab } from '@/components/studio/NamedSearchesTab'
 import { RetrieversTab } from '@/components/studio/RetrieversTab'
 import { ScopeTab } from '@/components/studio/ScopeTab'
 import { SavedQueriesTab } from '@/components/studio/SavedQueriesTab'
@@ -36,10 +37,10 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-const TABS = ['scope', 'agents', 'retriever-agents', 'navigators', 'queries', 'connect'] as const
+const TABS = ['scope', 'agents', 'retriever-agents', 'navigators', 'queries', 'named-searches', 'connect'] as const
 type Tab = (typeof TABS)[number]
 
-/** `/o/:ontologyKey/studio/lenses/:id` — scope editor, agents, retrievers, navigators, saved queries, connect. */
+/** `/o/:ontologyKey/studio/lenses/:id` — scope editor, agents, retrievers, navigators, saved queries, named searches, connect. */
 export function LensDetailPage() {
   const { ontologyKey, id } = useParams<{ ontologyKey: string; id: string }>()
   const navigate = useNavigate()
@@ -139,8 +140,8 @@ export function LensDetailPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete "{lens.name}"?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This deletes the lens, its scope, agents, retrievers, navigators, saved queries
-                    and changesets, submitted ones included. The ontology's schema and instance data are not affected. This
+                    This deletes the lens, its scope, agents, retrievers, navigators, saved queries,
+                    named searches and changesets, submitted ones included. The ontology's schema and instance data are not affected. This
                     cannot be undone.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
@@ -175,7 +176,7 @@ export function LensDetailPage() {
             setSearchParams(v === 'scope' ? {} : { tab: v }, { replace: true })
           }}
         >
-          <TabsList className="mb-4">
+          <TabsList className="mb-4 max-w-full justify-start overflow-x-auto">
             <TabsTrigger value="scope">
               <Layers className="size-3.5" /> Scope
             </TabsTrigger>
@@ -190,6 +191,9 @@ export function LensDetailPage() {
             </TabsTrigger>
             <TabsTrigger value="queries">
               <SquareTerminal className="size-3.5" /> Saved queries
+            </TabsTrigger>
+            <TabsTrigger value="named-searches">
+              <ListTree className="size-3.5" /> Named searches
             </TabsTrigger>
             <TabsTrigger value="connect">
               <Plug className="size-3.5" /> Connect
@@ -209,6 +213,9 @@ export function LensDetailPage() {
           </TabsContent>
           <TabsContent value="queries">
             <SavedQueriesTab ontologyKey={ontologyKey} lens={lens} />
+          </TabsContent>
+          <TabsContent value="named-searches">
+            <NamedSearchesTab ontologyKey={ontologyKey} lens={lens} />
           </TabsContent>
           <TabsContent value="connect">
             <ConnectTab ontologyKey={ontologyKey} lens={lens} />

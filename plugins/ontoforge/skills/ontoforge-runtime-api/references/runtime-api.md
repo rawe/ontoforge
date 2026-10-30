@@ -390,6 +390,29 @@ Runtime runs them; the modeling surface defines them.
   { "params": { "city": "Berlin" } }
   ```
 
+## Named Searches
+
+A named search is a search designed on the modeling surface and stored under a key in the
+lens; runtime lists and runs it with a query text, never seeing its design.
+
+- `GET /named-searches`
+  Lists them in key order: `key`, `name`, `description`, `result` (`entities` or
+  `passages`) and `types` (the entity types it searches).
+
+- `POST /named-searches/{searchKey}/run`
+  Runs one. Request body — `query` (required) and optional `filter`, nothing else:
+  ```json
+  { "query": "engine", "filter": { "status": "active" } }
+  ```
+  `filter` takes the entity search's filter keys and applies to `types`; a type that does
+  not declare every key drops out. The response is the entity search's (`result`
+  `entities`) or the passage search's (`passages`, text always included). When the search
+  uses more than one query text, each `match` (or `passage`) also carries `queryText`, the
+  text that found it. Without an embedding provider its semantic parts run nothing and are
+  the limitation `no-provider`. An unknown key answers not found; a search the lens no
+  longer fits answers a validation error. MCP: `list_named_searches`, `run_named_search`
+  (`key`, `query`, `filters`).
+
 ## Entity Identity Comparison
 
 - `POST /decisions/compare-entities`

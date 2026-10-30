@@ -29,7 +29,7 @@ import {
 } from "../../src/core/searchTree.js";
 import { invalidateLoadedSchemaCache, type LoadedSchema } from "../../src/runtime/schemaCache.js";
 import { searchEntities } from "../../src/runtime/search/entitySearch.js";
-import { executeSearchTree } from "../../src/runtime/search/executor.js";
+import { executeSearchTree, type TreeHit } from "../../src/runtime/search/executor.js";
 import { createMockRuntimeStore, makeUnscopedSchema, withManagedIndices } from "./helpers.js";
 
 // Every tree the searches compile, as they compile it.
@@ -285,6 +285,22 @@ describe("the executor", () => {
     expect(hits[1]!.indices[0]).toMatchObject({ keywordScore: 2, semanticSimilarity: 0.7 });
   });
 
+  it("two groups of one method fused: an entity found only by the later one keeps that group's scores", async () => {
+    lists["person~default/keyword"] = [entry("a", 3)];
+    lists["company~default/keyword"] = [entry("c", 2), entry("a", 1, "1")];
+    const hits = await run(cut(fuse(group(kw("person~default")), group(kw("company~default")))));
+    const c = hits.find((hit) => hit.entityId === "c")!;
+    expect(c.matched).toMatchObject({ index: { key: "company~default" }, scores: { keyword: 2 } });
+    expect(c.indices.map((match) => [match.index.key, match.keywordScore])).toEqual([["company~default", 2]]);
+    // Found by both: each index's entry measured by the group that fetched it.
+    const a = hits.find((hit) => hit.entityId === "a")!;
+    expect(a.matched).toMatchObject({ index: { key: "person~default" }, scores: { keyword: 3 } });
+    expect(a.indices.map((match) => [match.index.key, match.keywordScore])).toEqual([
+      ["person~default", 3],
+      ["company~default", 1],
+    ]);
+  });
+
   it("without a ready generation of one method, a hybrid tree keeps the other method's raw scores", async () => {
     generations = generations.filter((g) => g.representation !== "semantic");
     lists["person~default/keyword"] = [entry("a", 2.5)];
@@ -444,6 +460,124 @@ describe("the executor", () => {
     ]);
   });
 
+  it("each provenance carries the item's rank in its own text's ranking; one fusion of several texts ranks each alone", async () => {
+    // Per query text: semantic lists the generation's entries, keyword the text's.
+    rank.mockImplementation(async (query) =>
+      (lists[`${query.generationId}${query.text === undefined ? "" : ` ${query.text}`}`] ?? []).slice(0, query.limit),
+    );
+    lists["person~default/keyword q"] = [entry("a", 3), entry("b", 2)];
+    lists["person~default/keyword v1"] = [entry("b", 5), entry("a", 1)];
+    lists["person~default/semantic"] = [entry("a", 0.9)];
+    // q by both methods, v1 by keyword: fused at once, above one cut.
+    const hits = await runTree(
+      cut(fuse(group(sem("person~default", "q")), group(kw("person~default", "q")), group(kw("person~default", "v1")))),
+    );
+    const rows = (entityId: string) =>
+      hits
+        .find((hit) => hit.entityId === entityId)!
+        .provenance.map((row) => [row.text, row.rank, row.hit!.matched.scores]);
+    // a: q's own fusion ranks it first (both methods), v1 second.
+    expect(rows("a")).toEqual([
+      ["q", 1, { semantic: 0.9, keyword: 3 }],
+      ["v1", 2, { keyword: 1 }],
+    ]);
+    expect(rows("b")).toEqual([
+      ["q", 2, { keyword: 2 }],
+      ["v1", 1, { keyword: 5 }],
+    ]);
+    // One text: one provenance, its rank in the whole ranking.
+    const single = await runTree(cut(group(kw("person~default", "q"))));
+    expect(single.map((hit) => hit.provenance.map((row) => [row.text, row.rank]))).toEqual([[["q", 1]], [["q", 2]]]);
+  });
+
+  it("a text fused from several cut rankings ranks as one: its rows' ranks fused, the best row with every score of its entry", async () => {
+    rank.mockImplementation(async (query) =>
+      (lists[`${query.generationId}${query.text === undefined ? "" : ` ${query.text}`}`] ?? []).slice(0, query.limit),
+    );
+    lists["person~default/semantic"] = [entry("e", 0.9), entry("a", 0.8), entry("b", 0.7)];
+    lists["person~default/keyword x"] = [entry("a", 3), entry("b", 2), entry("e", 1)];
+    lists["person~default/keyword x extra"] = [entry("e", 4)];
+    const hits = await runTree(
+      fuse(
+        cut(group(sem("person~default", "x"))),
+        cut(group(kw("person~default", "x"))),
+        cut(group(kw("person~default", "x extra"))),
+      ),
+    );
+    const rows = (entityId: string) =>
+      hits
+        .find((hit) => hit.entityId === entityId)!
+        .provenance.map((row) => [row.text, row.rank, row.hit!.matched.scores]);
+    // x alone fuses to a, e, b: e is second there, first in x extra.
+    expect(rows("e")).toEqual([
+      ["x", 2, { semantic: 0.9, keyword: 1 }],
+      ["x extra", 1, { keyword: 4 }],
+    ]);
+    expect(rows("a")).toEqual([["x", 1, { semantic: 0.8, keyword: 3 }]]);
+    expect(rows("b")).toEqual([["x", 3, { semantic: 0.7, keyword: 2 }]]);
+  });
+
+  it("a text cut in several branches ranks as one even where no entity repeats it, its ties as it alone breaks them", async () => {
+    rank.mockImplementation(async (query) =>
+      (lists[`${query.generationId}${query.text === undefined ? "" : ` ${query.text}`}`] ?? []).slice(0, query.limit),
+    );
+    const rankOf = (hits: TreeHit[], entityId: string) =>
+      hits.find((hit) => hit.entityId === entityId)!.provenance.map((row) => [row.text, row.rank]);
+    const tree = fuse(
+      cut(group(kw("person~default", "x"))),
+      cut(group(kw("company~default", "x"))),
+      cut(group(kw("person~default", "y"))),
+    );
+    // Disjoint: x alone ranks a, then b.
+    lists["person~default/keyword x"] = [entry("a", 3)];
+    lists["company~default/keyword x"] = [entry("b", 3)];
+    lists["person~default/keyword y"] = [entry("b", 1)];
+    expect(rankOf(await runTree(tree), "b")).toEqual([
+      ["x", 2],
+      ["y", 1],
+    ]);
+    // Tied in x alone, a first as there; whatever y adds to b.
+    lists["person~default/keyword x"] = [entry("a", 3), entry("b", 2)];
+    lists["company~default/keyword x"] = [entry("b", 3), entry("a", 2)];
+    expect(rankOf(await runTree(tree), "b")).toEqual([
+      ["x", 2],
+      ["y", 1],
+    ]);
+  });
+
+  it("an item's texts keep their order in the tree, by each one's first group, whichever branch found it", async () => {
+    rank.mockImplementation(async (query) =>
+      (lists[`${query.generationId}${query.text === undefined ? "" : ` ${query.text}`}`] ?? []).slice(0, query.limit),
+    );
+    // x's first group finds nothing; e is first in x and in y.
+    lists["company~default/keyword x"] = [];
+    lists["person~default/keyword y"] = [entry("e", 1)];
+    lists["person~default/keyword x"] = [entry("e", 2)];
+    const [hit] = await runTree(
+      fuse(
+        cut(group(kw("company~default", "x"))),
+        cut(group(kw("person~default", "y"))),
+        cut(group(kw("person~default", "x"))),
+      ),
+    );
+    expect(hit!.provenance.map((row) => [row.text, row.rank])).toEqual([
+      ["x", 1],
+      ["y", 1],
+    ]);
+  });
+
+  it("a text's matched entry takes the score of every method that fetched it, whatever entry the method matched", async () => {
+    lists["person~default/semantic"] = [entry("e", 0.9), entry("e", 0.8, "r")];
+    lists["person~default/keyword"] = [entry("e", 4, "r"), entry("e", 3)];
+    const [hit] = await runTree(
+      fuse(cut(group(sem("person~default", "x"))), cut(group(kw("person~default", "x"))), cut(group(kw("person~default", "y")))),
+    );
+    expect(hit!.provenance.map((row) => [row.text, row.hit!.matched.entry.partId, row.hit!.matched.scores])).toEqual([
+      ["x", "", { semantic: 0.9, keyword: 3 }],
+      ["y", "r", { keyword: 4 }],
+    ]);
+  });
+
   it("an append lists the filters' ids the ranking missed, filter by filter in id order, while it holds fewer than until", async () => {
     lists["person~default/keyword"] = [entry("p3", 2)];
     const filters: TreeNode[] = [
@@ -457,7 +591,7 @@ describe("the executor", () => {
       ["p1", "person", null],
       ["p2", "person", null],
     ]);
-    expect(hits[1]!.provenance).toEqual([{ subQuery: 2, text: null, hit: null }]);
+    expect(hits[1]!.provenance).toEqual([{ subQuery: 2, text: null, hit: null, rank: null }]);
     // Pushed down, never filtered afterwards.
     expect(rank.mock.calls[0]![0].entityIds).toEqual(["p3", "p2", "p1"]);
     // A ranking that holds `until` already is kept whole; without one, only the ids.

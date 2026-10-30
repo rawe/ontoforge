@@ -177,6 +177,11 @@ describe.skipIf(!ollamaUp)("MCP search (Ollama)", () => {
         ordinal: 0,
         charOffset: expect.any(Number),
         charLength: expect.any(Number),
+        scores: expect.toSatisfy(
+          (scores: Record<string, number>) =>
+            Object.keys(scores).length > 0 && Object.keys(scores).every((m) => ["semantic", "keyword"].includes(m)),
+          "a score per method that found it",
+        ),
         text: expect.stringContaining("distributed systems"),
       },
     });

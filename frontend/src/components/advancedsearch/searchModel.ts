@@ -1,6 +1,7 @@
 /**
  * Pure helpers for the Advanced search page: the body the form sends to
- * `POST /search/entities` or `/search/passages`, the field errors a control
+ * `POST /search/entities`, `/search/passages` or a named search's run, the
+ * field errors a control
  * shows, `ran` and the limitations as readable sentences, and how a found
  * entity links and reads.
  *
@@ -11,13 +12,37 @@
 import type {
   EntityReference,
   EntitySearchResponse,
+  NamedSearchRunBody,
   PassageSearchBody,
+  PassageSearchResponse,
   QueryResult,
+  MethodScores,
   Representation,
   SearchLimitation,
 } from '@/api/types'
 
 export type SearchMode = 'entities' | 'passages'
+
+/** The form's mode control: the two searches, and a named search of the lens. */
+export type FormMode = SearchMode | 'named'
+
+/** The modes offered: Named only when the lens has named searches. */
+export function formModes(hasNamed: boolean): FormMode[] {
+  return hasNamed ? ['entities', 'passages', 'named'] : ['entities', 'passages']
+}
+
+/** The mode in effect: a picked Named falls back to Entities while the lens has none. */
+export function modeInEffect(picked: FormMode, hasNamed: boolean): FormMode {
+  return picked === 'named' && !hasNamed ? 'entities' : picked
+}
+
+/** The named search the form runs: the chosen one, else the first. */
+export function chosenNamedSearch<T extends { key: string }>(
+  searches: readonly T[],
+  key: string,
+): T | undefined {
+  return searches.find((s) => s.key === key) ?? searches[0]
+}
 
 /** The request's scope fields; `documents` is the passage search's only. */
 export type ScopeField = 'types' | 'indices' | 'documents'
@@ -59,17 +84,26 @@ export function searchBody(form: SearchForm): PassageSearchBody {
     const minSimilarity = numberOf(form.semantic.minSimilarity)
     body.semantic = minSimilarity === undefined ? {} : { minSimilarity }
   }
-  if (form.filter !== undefined) {
-    body.filter = Object.fromEntries(
-      Object.entries(form.filter).map(([key, value]) => [key, String(value)]),
-    )
-  }
+  if (form.filter !== undefined) body.filter = filterStrings(form.filter)
   const limit = numberOf(form.limit)
   if (limit !== undefined) body.limit = limit
   if (form.mode === 'passages') {
     const perEntity = numberOf(form.perEntity)
     if (perEntity !== undefined) body.perEntity = perEntity
   }
+  return body
+}
+
+const filterStrings = (filter: Record<string, string | number | boolean>) =>
+  Object.fromEntries(Object.entries(filter).map(([key, value]) => [key, String(value)]))
+
+/** A named search's run body: the trimmed query, the filter values as strings. */
+export function namedRunBody(
+  query: string,
+  filter: Record<string, string | number | boolean> | undefined,
+): NamedSearchRunBody {
+  const body: NamedSearchRunBody = { query: query.trim() }
+  if (filter !== undefined) body.filter = filterStrings(filter)
   return body
 }
 
@@ -129,6 +163,16 @@ export function requestKey(mode: SearchMode, body: PassageSearchBody): string {
   })
 }
 
+/** A named search's run as a comparable text, apart from every search's:
+ * the same run reads the same whatever order its filter keys were chosen in. */
+export function namedRequestKey(searchKey: string, body: NamedSearchRunBody): string {
+  return JSON.stringify({
+    named: searchKey,
+    query: body.query,
+    filter: body.filter === undefined ? undefined : Object.entries(body.filter).sort(([a], [b]) => a.localeCompare(b)),
+  })
+}
+
 /** The request paths a form control answers for. */
 export const SEARCH_CONTROLS = [
   'query',
@@ -144,6 +188,9 @@ export const SEARCH_CONTROLS = [
 
 export type SearchControl = (typeof SEARCH_CONTROLS)[number]
 
+/** The controls a named search's run shows: the tree decides the rest. */
+export const NAMED_CONTROLS = ['query', 'filter'] as const satisfies readonly SearchControl[]
+
 const under = (path: string, control: string) =>
   path === control || path.startsWith(`${control}.`)
 
@@ -154,14 +201,30 @@ export function fieldErrorsAt(fields: Record<string, string>, control: SearchCon
     .map(([, message]) => message)
 }
 
-/** The messages no control answers for, each with its path. */
-export function unplacedFieldErrors(fields: Record<string, string>): string[] {
+/** The messages none of the shown controls answers for, each with its path. */
+export function unplacedFieldErrors(
+  fields: Record<string, string>,
+  controls: readonly SearchControl[] = SEARCH_CONTROLS,
+): string[] {
   return Object.entries(fields)
-    .filter(([path]) => !SEARCH_CONTROLS.some((control) => under(path, control)))
+    .filter(([path]) => !controls.some((control) => under(path, control)))
     .map(([path, message]) => `${path}: ${message}`)
 }
 
 const METHOD_NAMES: Record<Representation, string> = { semantic: 'Semantic', keyword: 'Keyword' }
+
+/** An entry's scores as a line, semantic first, e.g. `Semantic 0.81 · Keyword 2.25`. */
+export function scoresText(scores: MethodScores): string {
+  return (['semantic', 'keyword'] as const)
+    .filter((method) => scores[method] !== undefined)
+    .map((method) => `${METHOD_NAMES[method]} ${scores[method]!.toFixed(2)}`)
+    .join(' · ')
+}
+
+/** What the scores mean, for a hover. */
+export const SCORES_TITLE =
+  "Each method's own score of this entry: semantic similarity from 0 to 1, keyword query words " +
+  'matched plus a fraction. The two are not comparable; the rank orders the results.'
 
 /** The item count above the results, e.g. `1 entity`, `3 passages`. */
 export function countText(mode: SearchMode, count: number): string {
@@ -225,4 +288,16 @@ export function isEntitySearchResponse(
   result: QueryResult | EntitySearchResponse,
 ): result is EntitySearchResponse {
   return 'items' in result && 'ran' in result
+}
+
+/** Which unit a named search's run answered with, read from its items: the
+ * listed `result` may be older than the search the server ran. With no
+ * items either renderer fits, so the listed one stands. */
+export function namedRunResult(
+  response: EntitySearchResponse | PassageSearchResponse,
+  listed: SearchMode,
+): SearchMode {
+  const first = response.items[0]
+  if (first === undefined) return listed
+  return 'passage' in first ? 'passages' : 'entities'
 }

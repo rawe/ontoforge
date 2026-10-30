@@ -121,6 +121,64 @@ export interface SavedQuery {
   parameters: SavedQueryParameter[]
 }
 
+/** The parts of an index entry a search node counts. */
+export type SearchPartKind = 'self' | 'relation' | 'passage'
+
+/** A node of a named search's stored tree; `$query` in a search node's text
+ * is where the caller's query goes. */
+export type SearchTreeNode =
+  | {
+      kind: 'keywordSearch'
+      index: string
+      text: string
+      /** Absent: any. */
+      match?: 'any' | 'all'
+      /** Absent: every relation type the lens shows. */
+      relations?: string[]
+      /** Absent: every part. */
+      parts?: SearchPartKind[]
+    }
+  | {
+      kind: 'semanticSearch'
+      index: string
+      text: string
+      minSimilarity?: number
+      relations?: string[]
+      parts?: SearchPartKind[]
+    }
+  | { kind: 'merge'; inputs: SearchTreeNode[] }
+  | { kind: 'fuse'; inputs: SearchTreeNode[] }
+  | { kind: 'group'; key: 'entity' | 'passage'; input: SearchTreeNode }
+  | { kind: 'restrict'; input: SearchTreeNode; filters: SearchTreeNode[] }
+  /** `conditions` in the entity search's filter syntax. */
+  | { kind: 'filter'; entityType: string; conditions: Record<string, string> }
+  | { kind: 'cut'; input: SearchTreeNode; limit: number; perEntity?: number }
+
+export interface NamedSearch {
+  key: string
+  name: string
+  description: string
+  tree: SearchTreeNode
+}
+
+/** A named search as the runtime lists it: what a caller needs to run it, never its tree. */
+export interface RuntimeNamedSearch {
+  key: string
+  name: string
+  description: string
+  /** The unit its run answers with: an entity search or a passage search response. */
+  result: 'entities' | 'passages'
+  /** The entity types it searches, sorted; a run's `filter` applies to them. */
+  types: string[]
+}
+
+/** The body `POST /named-searches/{key}/run` takes. */
+export interface NamedSearchRunBody {
+  query: string
+  /** The entity search's `filter`. */
+  filter?: Record<string, string>
+}
+
 /**
  * A hit from semantic saved-query search. Discovery search deliberately
  * returns the query *without* its steps (only key, name, description,
@@ -472,6 +530,10 @@ export interface EntityReference {
   identity?: Record<string, JsonValue>
 }
 
+/** Per method that found an entry, its own score: semantic similarity 0–1, keyword
+ * query words matched plus a fraction. Never compared across methods. */
+export type MethodScores = Partial<Record<Representation, number>>
+
 /** The best entry that found an entity. */
 export interface EntityMatch {
   index: string
@@ -485,6 +547,10 @@ export interface EntityMatch {
   /** Relations: the relation type and the entity at its other end. */
   relationType?: string
   target?: EntityReference
+  /** Every method that found this very entry. */
+  scores: MethodScores
+  /** A named search with several query texts: the text this entry ranked best for. */
+  queryText?: string
 }
 
 export interface EntitySearchItem {
@@ -509,6 +575,10 @@ export interface PassageSearchItem {
     charLength: number
     /** Absent when the request sent `text: false`. */
     text?: string
+    /** Every method that found this passage. */
+    scores: MethodScores
+    /** A named search with several query texts: the text this passage ranked best for. */
+    queryText?: string
   }
 }
 
@@ -942,6 +1012,13 @@ export interface SavedQueryInput {
   description?: string | null
   steps: SavedQueryStep[]
   parameters?: SavedQueryParameter[]
+}
+
+export interface NamedSearchInput {
+  name: string
+  /** Required, may be empty. */
+  description: string
+  tree: SearchTreeNode
 }
 
 /** Runtime tool names an agent may be restricted to. */

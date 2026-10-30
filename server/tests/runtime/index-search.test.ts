@@ -320,9 +320,28 @@ describe("match", () => {
           snippet: "Ada CTO ACME",
           relationType: "works_for",
           target: { _id: "co-1", _entityTypeKey: "company", name: "N-co-1" },
+          scores: { keyword: 5 },
         },
       },
     ]);
+  });
+
+  it("scores the entry by every method that found this very entry, to four decimals", async () => {
+    runtime.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
+      Object.fromEntries(ids.map((id) => [id, { _id: id, _entityTypeKey: "person", name: `N-${id}` }])),
+    );
+    // Both methods find a's own fields; for b, keyword finds a relation
+    // entry instead of the own fields semantic ranks it by.
+    rank.mockImplementation(async (query) =>
+      query.generationId === "person~default/semantic"
+        ? [entry("a", 0.812345), entry("b", 0.8)]
+        : [entry("a", 2.25), entry("b", 1.5, { partKind: "relation", partId: "rel-9", relationType: "works_for" })],
+    );
+    const response = await search({ query: "ada", indices: ["person~default"] });
+    const byId = Object.fromEntries(response.items.map((item) => [item.entity._id, item.match]));
+    expect(byId["a"]).toMatchObject({ part: "self", scores: { semantic: 0.8123, keyword: 2.25 } });
+    expect(byId["b"]).toMatchObject({ part: "self", scores: { semantic: 0.8 } });
+    expect(Object.keys(byId["a"]!.scores)).toEqual(["semantic", "keyword"]);
   });
 
   it("withholds the snippet when the index reads a property the lens hides", async () => {

@@ -135,8 +135,8 @@ unscoped and therefore exposes everything.
 
 Inline-editable name and description, an immutable key, a scope marker, an entry into the
 Workbench for this lens (on the page matching the open tab, as the surface switch does), and deletion behind a confirmation stating that the lens, its
-scope, its agents, retrievers, navigators, saved queries and changesets, submitted ones
-included, go — while the schema and all instance data stay. Six tabs:
+scope, its agents, retrievers, navigators, saved queries, named searches and changesets,
+submitted ones included, go — while the schema and all instance data stay. Seven tabs:
 
 **Scope** — the [scope editor](schema-editing.md#scope-editor).
 
@@ -171,6 +171,24 @@ description and a scalar data type (document is not offered). An inline runner e
 the query with typed parameter inputs and shows a query result as a table, a search result
 as Advanced search's ranked items, or either as raw JSON. See
 [capabilities/saved-queries.md](../capabilities/saved-queries.md).
+
+**Named searches** — the authoring surface for the lens's
+[named searches](../capabilities/named-searches.md). The list shows each one's name, key,
+description and result unit (entities or passages), with edit and delete behind a
+confirmation. The editor (`?search=<key>`, a draft `?search=_new`) holds name,
+derived-and-then-immutable key and description, and the stored search tree as nested
+cards: the root on top, each node's inputs indented below it. A card names its node kind
+in plain words, says what it does, and holds its fields — a search's index (from the lens's
+search catalog), text, keyword match or semantic floor and parts; a group's unit; a
+limit's count and per-entity cap; a filter's entity type and its conditions as
+key = value rows. Its menu replaces the node with a fresh one of another kind, wraps it in
+a node that takes it as input, or removes it — from its parent's list, or by its single
+input taking its place. A merge or fuse adds inputs, a restrict filters. A new named search
+starts from a choice — result unit, indices, methods and limit — that writes the canonical
+tree, one search per index and method with the text `$query`, which is then edited;
+Start over returns to that choice. Saving shows the server's reasons in a summary and each
+on the card it names; leaving with unsaved changes asks first. A JSON switch shows the
+tree as it is saved, read-only, with a copy button.
 
 **Connect** — a ready-to-paste AI-client configuration for the MCP servers, bound
 entirely by their URLs: the modeling server to this ontology, the runtime server to this
@@ -290,8 +308,8 @@ Three operations, each with its own explanation. See
 [capabilities/transfer.md](../capabilities/transfer.md).
 
 - **Export** — downloads the ontology's whole design — entity types, relation types,
-  properties, search indices, keyword languages, lenses, agents, retrievers, navigators
-  and saved queries — as a JSON file named after the ontology key ("Download `<ontologyKey>`.json").
+  properties, search indices, keyword languages, lenses, agents, retrievers, navigators,
+  saved queries and named searches — as a JSON file named after the ontology key ("Download `<ontologyKey>`.json").
 - **Import** — takes a JSON file and writes it into the current ontology. It reports
   malformed JSON before sending anything, and on a
   key conflict explains that pre-existing objects with the same keys block the import and

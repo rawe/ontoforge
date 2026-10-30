@@ -32,6 +32,10 @@ const MODEL = `/api/ontologies/${O}/model`;
 const runtimeOf = (lens: string) => `/api/ontologies/${O}/runtime/lenses/${lens}`;
 const RUNTIME = runtimeOf("all");
 
+/** A keyword score: the query words the entry holds, plus a fraction below one. */
+const wordsMatched = (words: number) =>
+  expect.toSatisfy((score: number) => score >= words && score < words + 1, `${words} query word(s) matched`);
+
 /** About 1,000 characters led by `lead`: three make three passages at
  * the default chunk size, each holding one lead. */
 const paragraph = (lead: string) => `${lead} ${"Filler words pad the paragraph out. ".repeat(27)}`.trim();
@@ -397,7 +401,14 @@ export function passageSearchContract(embedding: boolean, enabled = true) {
         {
           rank: 1,
           entity: { _id: ids.bob, _entityTypeKey: "person", name: "Bob" },
-          passage: { property: "bio", ordinal: 0, charOffset: 0, charLength: BOB_BIO.length, text: BOB_BIO },
+          passage: {
+            property: "bio",
+            ordinal: 0,
+            charOffset: 0,
+            charLength: BOB_BIO.length,
+            scores: { keyword: wordsMatched(1) },
+            text: BOB_BIO,
+          },
         },
       ]);
       const bare = await found({ query: "tomatoes", documents: ["person.bio"], keyword: {}, text: false });
@@ -405,7 +416,13 @@ export function passageSearchContract(embedding: boolean, enabled = true) {
         {
           rank: 1,
           entity: { _id: ids.bob, _entityTypeKey: "person", name: "Bob" },
-          passage: { property: "bio", ordinal: 0, charOffset: 0, charLength: BOB_BIO.length },
+          passage: {
+            property: "bio",
+            ordinal: 0,
+            charOffset: 0,
+            charLength: BOB_BIO.length,
+            scores: { keyword: wordsMatched(1) },
+          },
         },
       ]);
       expect("text" in bare.items[0].passage).toBe(false);
@@ -422,6 +439,7 @@ export function passageSearchContract(embedding: boolean, enabled = true) {
           ordinal: passage.ordinal,
           charOffset: chunk.startChar,
           charLength: chunk.charLength,
+          scores: { keyword: wordsMatched(1) },
           text: chunk.text,
         });
       }
@@ -436,6 +454,7 @@ export function passageSearchContract(embedding: boolean, enabled = true) {
         ordinal: 0,
         charOffset: 0,
         charLength: BOB_BIO.length,
+        scores: { keyword: wordsMatched(1) },
         text: changed,
       });
     });
@@ -503,7 +522,16 @@ export function passageSearchContract(embedding: boolean, enabled = true) {
       expect(body.items.map((item: Row) => item.rank)).toEqual(body.items.map((_: Row, i: number) => i + 1));
       for (const item of body.items) {
         expect(Object.keys(item).sort()).toEqual(["entity", "passage", "rank"]);
-        expect(Object.keys(item.passage).sort()).toEqual(["charLength", "charOffset", "ordinal", "property", "text"]);
+        expect(Object.keys(item.passage).sort()).toEqual([
+          "charLength",
+          "charOffset",
+          "ordinal",
+          "property",
+          "scores",
+          "text",
+        ]);
+        expect(Object.keys(item.passage.scores).length).toBeGreaterThan(0);
+        for (const method of Object.keys(item.passage.scores)) expect(["semantic", "keyword"]).toContain(method);
         expect(["bio", "notes"]).toContain(item.passage.property);
       }
       for (const id of [ids.ada, ids.bob]) {

@@ -1718,3 +1718,70 @@ describe("import side effects with a provider", () => {
     expect(holder.store.createEntityType).not.toHaveBeenCalled();
   });
 });
+
+describe("named searches", () => {
+  const TREE = {
+    kind: "cut",
+    limit: 10,
+    input: { kind: "group", key: "entity", input: { kind: "keywordSearch", index: "person~default", text: "$query" } },
+  };
+
+  it("export nests each lens's named searches in it, trees as stored", async () => {
+    holder.store.getFullSchema.mockResolvedValue({
+      entityTypes: [],
+      relationTypes: [],
+      lenses: [{ lensId: "lens-1", key: "hr_view", name: "HR View", description: null, entityInclusions: [], relationInclusions: [] }],
+    });
+    holder.store.listNamedSearches.mockResolvedValue([
+      { namedSearchId: "ns-1", key: "people", name: "People", description: "Find people", tree: TREE, createdAt: NOW, updatedAt: NOW },
+    ]);
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().lenses[0].namedSearches).toEqual([
+      { key: "people", name: "People", description: "Find people", tree: TREE },
+    ]);
+  });
+
+  it("refuses a node field the stored tree does not define at its payload path; writes nothing", async () => {
+    const res = await postImport(
+      importPayload({
+        lenses: [
+          {
+            key: "imported",
+            name: "Imported",
+            namedSearches: [{ key: "people", name: "People", description: "d", tree: { ...TREE, subQuery: 1 } }],
+          },
+        ],
+      }),
+    );
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.errors).toEqual([
+      { path: "/lenses/0/namedSearches/0/tree/subQuery", message: "Unknown field of a cut node: 'subQuery'" },
+    ]);
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+  });
+
+  it("collects a bad key and the rule that needs no lens with the other violations; writes nothing", async () => {
+    const res = await postImport(
+      importPayload({
+        lenses: [
+          {
+            key: "imported",
+            name: "Imported",
+            namedSearches: [
+              { key: "Bad Key", name: "Bad", description: "d", tree: TREE },
+              { key: "no-query", name: "No query", description: "d", tree: { kind: "group", key: "entity", input: { kind: "keywordSearch", index: "x", text: "people" } } },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.errors).toEqual([
+      expect.stringMatching(/^Import error: invalid named search key 'Bad Key'/),
+      "Import error: named search 'no-query' of lens 'imported' tree: At least one search node's text holds $query, where the runtime query goes",
+    ]);
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
+    expect(holder.store.upsertNamedSearch).not.toHaveBeenCalled();
+  });
+});

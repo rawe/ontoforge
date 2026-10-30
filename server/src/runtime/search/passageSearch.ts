@@ -18,17 +18,23 @@
  *    many per entity, in rank order.
  * 3. Filters apply to the entity that owns the document.
  * 4. Each passage is named with its entity, its document and its place in
- *    it, and — unless `text` is false — its text, read from the entity's
- *    current document at that place. An entity gone since the ranking is
- *    left out.
+ *    it, the scores of the methods that found it, and — unless `text` is
+ *    false — its text, read from the entity's current document at that
+ *    place. An entity gone since the ranking is left out.
  */
 
-import type { RuntimeStore, SearchIndexRecord } from "../../core/ports.js";
+import type { Row, RuntimeStore, SearchIndexRecord } from "../../core/ports.js";
 import { compilePassageSearch } from "../../core/searchCompile.js";
 import type { SearchRepresentation } from "../../core/searchIndex.js";
 import { loadSchema, type LoadedSchema } from "../schemaCache.js";
 import { documentSlice } from "../service.js";
-import { indexStoreOf, readHitEntities, searchableIndices } from "./indexSearch.js";
+import {
+  indexStoreOf,
+  readHitEntities,
+  searchableIndices,
+  type EngineHit,
+  type MethodScores,
+} from "./indexSearch.js";
 import {
   checkRequest,
   entityReference,
@@ -40,6 +46,7 @@ import {
   rootTypes,
   runScopedSearch,
   shownDocument,
+  shownScores,
   type EntityReference,
   type ScopedSearchRequest,
   type SearchLimitation,
@@ -69,6 +76,12 @@ export interface PassageReference {
   /** The document's current text at that place; absent when the request
    * leaves it out. */
   text?: string;
+  /** Per method that found this passage in the index it ranks by, that
+   * method's own score. */
+  scores: MethodScores;
+  /** The query text that found the passage — only on a named search's
+   * item, when its tree searches more than one text. */
+  queryText?: string;
 }
 
 export interface PassageSearchItem {
@@ -123,13 +136,38 @@ export async function searchPassages(
   // One search: its hit is the passage's.
   const hits = result.hits.map((hit) => hit.provenance[0]!.hit!);
   const withText = request.text ?? true;
+  const entities = await readPassageEntities(loaded, store, hits, withText);
+  const items = passageSearchItems(loaded, hits, entities, withText);
+  return { ran: result.ran, items, limitations };
+}
+
+/** The entities of passage hits, read through the lens: the properties
+ * that name them, and with `withText` the documents the passages are
+ * read from. An entity gone since the ranking is missing. */
+export async function readPassageEntities(
+  loaded: LoadedSchema,
+  store: RuntimeStore,
+  hits: EngineHit[],
+  withText: boolean,
+): Promise<Map<string, Row>> {
   const fields = new Set<string>();
   for (const hit of hits) {
     for (const property of namingProperties(loaded, hit.entityType)) fields.add(property);
     if (withText) fields.add(shownDocument(loaded, hit.matched.index)!);
   }
-  const entities = await readHitEntities(loaded, store, hits, [...fields]);
-  const items = hits
+  return readHitEntities(loaded, store, hits, [...fields]);
+}
+
+/** The passage hits as items, ranked in their order — those whose entity
+ * is gone left out — each with its entity, its place and, with
+ * `withText`, its text. */
+export function passageSearchItems(
+  loaded: LoadedSchema,
+  hits: EngineHit[],
+  entities: Map<string, Row>,
+  withText: boolean,
+): PassageSearchItem[] {
+  return hits
     .filter((hit) => entities.has(hit.entityId))
     .map((hit, i): PassageSearchItem => {
       const entity = entities.get(hit.entityId)!;
@@ -140,6 +178,7 @@ export async function searchPassages(
         ordinal: Number(entry.partId),
         charOffset: entry.startChar!,
         charLength: entry.charLength!,
+        scores: shownScores(hit.matched.scores),
       };
       if (withText) {
         const value = entity[property];
@@ -152,7 +191,6 @@ export async function searchPassages(
       }
       return { rank: i + 1, entity: entityReference(loaded, hit, entity), passage };
     });
-  return { ran: result.ran, items, limitations };
 }
 
 /** The indices the request's scope selects, in key order, and the types

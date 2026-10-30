@@ -27,7 +27,7 @@ import type { MethodBlocks, TreeNode } from "../../core/searchTree.js";
 import type { LoadedSchema } from "../schemaCache.js";
 import { deploymentMethods } from "./availability.js";
 import type { Limitation, TreeHit } from "./executor.js";
-import { indexStoreOf, runSearchTree } from "./indexSearch.js";
+import { indexStoreOf, runSearchTree, type MethodScores } from "./indexSearch.js";
 import { resolveSearchFilters } from "./filters.js";
 
 /** The request fields both searches share. */
@@ -43,7 +43,7 @@ export interface ScopedSearchRequest {
 
 /** What could not run, or what a named scope could not serve. */
 export interface SearchLimitation {
-  code: Exclude<Limitation["code"], "no-provider"> | "not-searchable" | "filter-excludes-all-types";
+  code: Limitation["code"] | "not-searchable" | "filter-excludes-all-types";
   message: string;
   method?: SearchRepresentation;
   indices?: string[];
@@ -134,7 +134,7 @@ export function rootTypes(indices: SearchIndexRecord[]): string[] {
 }
 
 /** The document an index reads passages of, when the lens shows it. */
-export function shownDocument(loaded: LoadedSchema, index: SearchIndexRecord): string | null {
+export function shownDocument(loaded: Pick<LoadedSchema, "full" | "scoped">, index: SearchIndexRecord): string | null {
   const property = documentField(index.definition, loaded.full);
   const root = loaded.scoped.entityTypes[index.definition.entityType];
   return property !== null && root !== undefined && property in root.properties ? property : null;
@@ -230,12 +230,14 @@ export async function runScopedSearch(
 
 const METHOD_NAMES: Record<SearchRepresentation, string> = { semantic: "Semantic", keyword: "Keyword" };
 
-/** A search node limitation of the tree, as the response tells it. */
-function described({ code, method, indices }: Limitation): SearchLimitation {
-  if (code === "no-provider") throw new Error("Semantic search nodes are compiled only with an embedding provider");
+/** A search node limitation of the tree, as the response tells it. The
+ * entity and passage searches compile semantic search nodes only with an
+ * embedding provider; a named search's run may hold some without one. */
+export function described({ code, method, indices }: Limitation): SearchLimitation {
   const messages: Record<typeof code, string> = {
     "switched-off": `${METHOD_NAMES[method]} search is switched off on these indices`,
     "not-ready": `${METHOD_NAMES[method]} search entries of these indices are not built yet`,
+    "no-provider": `${METHOD_NAMES[method]} search needs an embedding provider; none is installed`,
   };
   return { code, message: messages[code], method, indices };
 }
@@ -265,4 +267,11 @@ export function entityReference(
     name: typeof name === "string" && name !== "" ? name : null,
     ...(identity === null ? {} : { identity: Object.fromEntries(identity.map((key) => [key, entity[key]])) }),
   };
+}
+
+/** An entry's scores per method, to four decimals. */
+export function shownScores(scores: MethodScores): MethodScores {
+  return Object.fromEntries(
+    Object.entries(scores).map(([method, score]) => [method, Math.round(score * 10_000) / 10_000]),
+  );
 }

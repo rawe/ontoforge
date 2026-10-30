@@ -25,6 +25,7 @@ const ALL_TABLES = [
   "lens_includes",
   "assistant_agent",
   "saved_query",
+  "named_search",
   "assistant_retriever",
   "assistant_navigator",
   "entity",

@@ -1,10 +1,16 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { ChevronDown, Info, Play, Search, SlidersHorizontal, X } from 'lucide-react'
-import { useFeatures, useSearchCatalog } from '@/api/hooks'
+import { useFeatures, useNamedSearches, useSearchCatalog } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import * as runtime from '@/api/runtime'
-import type { EntitySearchResponse, PassageSearchResponse, RuntimeSchema } from '@/api/types'
+import type {
+  EntitySearchResponse,
+  NamedSearchRunBody,
+  PassageSearchBody,
+  PassageSearchResponse,
+  RuntimeSchema,
+} from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import { QueryErrorBlock } from '@/components/query/ResultsPanel'
 import { formatQueryError } from '@/components/query/resultUtils'
@@ -19,16 +25,26 @@ import {
 } from '@/components/table/filters'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { SearchExplainerButton } from './explainer/SearchExplainer'
 import { ScopePicker, type ScopeChoice } from './ScopePicker'
 import {
+  chosenNamedSearch,
   fieldErrorsAt,
+  formModes,
+  modeInEffect,
+  NAMED_CONTROLS,
+  namedRequestKey,
+  namedRunBody,
+  namedRunResult,
   requestKey,
   scopeSummary,
+  SEARCH_CONTROLS,
   searchBody,
   sharedType,
   unplacedFieldErrors,
+  type FormMode,
   type MethodChoice,
   type ScopeField,
   type SearchControl,
@@ -39,6 +55,18 @@ import { EntitySearchResult, PassageSearchResult } from './SearchResults'
 type Outcome =
   | { mode: 'entities'; response: EntitySearchResponse }
   | { mode: 'passages'; response: PassageSearchResponse }
+
+/** What Run sends: one of the two searches, or a named search's run. */
+type SearchRequest =
+  | { kind: 'search'; mode: SearchMode; body: PassageSearchBody }
+  | { kind: 'named'; key: string; result: SearchMode; body: NamedSearchRunBody }
+
+const runKey = (request: SearchRequest) =>
+  request.kind === 'named'
+    ? namedRequestKey(request.key, request.body)
+    : requestKey(request.mode, request.body)
+
+const MODE_LABELS: Record<FormMode, string> = { entities: 'Entities', passages: 'Passages', named: 'Named' }
 
 /** The search route rejects substring operators. */
 const EXCLUDED_OPS = ['contains'] as const
@@ -174,6 +202,8 @@ interface AdvancedSearchProps {
  * `/search/passages` — mode and query text on top; scope, methods, a filter
  * and the limits in a settings panel beside the ranked items (above them on
  * a narrow screen, folded); the items with what ran and what could not.
+ * Named mode runs one of the lens's named searches: only the query and a
+ * filter are the caller's, its tree decides the rest.
  */
 export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchProps) {
   const { data: features } = useFeatures()
@@ -181,7 +211,18 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
   const catalogData = useSearchCatalog(ontologyKey, lensKey).data
   const catalog = useMemo(() => catalogData ?? [], [catalogData])
 
-  const [mode, setMode] = useState<SearchMode>('entities')
+  const namedData = useNamedSearches(ontologyKey, lensKey).data
+  const namedSearches = useMemo(() => namedData ?? [], [namedData])
+
+  const [modePick, setModePick] = useState<FormMode>('entities')
+  const [namedKey, setNamedKey] = useState('')
+  const formMode = modeInEffect(modePick, namedSearches.length > 0)
+  const named = useMemo(
+    () => (formMode === 'named' ? chosenNamedSearch(namedSearches, namedKey) : undefined),
+    [formMode, namedSearches, namedKey],
+  )
+  // The unit searched: a named search's result, else the mode.
+  const mode: SearchMode = named?.result ?? (formMode === 'named' ? 'entities' : formMode)
   const [query, setQuery] = useState('')
   // One scope field is sent; each keeps its own choice while another is shown.
   const [scopeField, setScopeField] = useState<ScopeField>('types')
@@ -256,14 +297,18 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
   const method: MethodChoice | null =
     features === undefined ? null : semanticAvailable ? (methodPick ?? 'both') : 'keyword'
 
-  // The filter editor works on one type: every chosen scope item must share it.
-  const filterTypeKey = sharedType(scopeKeys, (key) =>
-    scopeField === 'types'
-      ? key
-      : scopeField === 'documents'
-        ? key.split('.')[0]
-        : catalog.find((i) => i.key === key)?.entityType,
-  )
+  // The filter editor works on one type: every chosen scope item must share
+  // it, or the named search must search exactly one.
+  const filterTypeKey =
+    named !== undefined
+      ? sharedType(named.types, (key) => key)
+      : sharedType(scopeKeys, (key) =>
+          scopeField === 'types'
+            ? key
+            : scopeField === 'documents'
+              ? key.split('.')[0]
+              : catalog.find((i) => i.key === key)?.entityType,
+        )
   const filterType = filterTypeKey !== undefined ? typesByKey.get(filterTypeKey) : undefined
   const conditions = filter.typeKey === filterTypeKey ? filter.conditions : []
   const filterSubjects = useMemo<FilterSubjects>(
@@ -280,38 +325,52 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
     if (filterTypeKey !== undefined) setFilter({ typeKey: filterTypeKey, conditions: next(conditions) })
   }
 
-  const switchMode = (next: SearchMode) => {
-    setMode(next)
+  const switchMode = (next: FormMode) => {
+    setModePick(next)
     // Documents are the passage search's only.
     if (next === 'entities' && scopeField === 'documents') setScopeField('types')
   }
 
-  const request = {
-    mode,
-    body: searchBody({
-      mode,
-      query,
-      scope: { field: scopeField, keys: scopeKeys },
-      keyword: { on: method === 'keyword' || method === 'both', match },
-      semantic: { on: method === 'semantic' || method === 'both', minSimilarity },
-      filter: filtersToParam(conditions, filterSubjects),
-      limit,
-      perEntity,
-    }),
-  }
+  const filterParam = filtersToParam(conditions, filterSubjects)
+  const request: SearchRequest =
+    named !== undefined
+      ? { kind: 'named', key: named.key, result: named.result, body: namedRunBody(query, filterParam) }
+      : {
+          kind: 'search',
+          mode,
+          body: searchBody({
+            mode,
+            query,
+            scope: { field: scopeField, keys: scopeKeys },
+            keyword: { on: method === 'keyword' || method === 'both', match },
+            semantic: { on: method === 'semantic' || method === 'both', minSimilarity },
+            filter: filterParam,
+            limit,
+            perEntity,
+          }),
+        }
   // What the shown results were searched with: a change since then marks them stale.
   const [ranWith, setRanWith] = useState('')
-  const stale = outcome !== null && ranWith !== requestKey(request.mode, request.body)
+  const stale = outcome !== null && ranWith !== runKey(request)
 
   const execute = useMutation({
-    mutationFn: async ({ mode, body }: typeof request): Promise<Outcome> =>
-      mode === 'entities'
-        ? { mode, response: await runtime.searchEntities(ontologyKey, lensKey, body) }
-        : { mode, response: await runtime.searchPassages(ontologyKey, lensKey, body) },
+    mutationFn: async (sent: SearchRequest): Promise<Outcome> => {
+      if (sent.kind === 'search') {
+        return sent.mode === 'entities'
+          ? { mode: 'entities', response: await runtime.searchEntities(ontologyKey, lensKey, sent.body) }
+          : { mode: 'passages', response: await runtime.searchPassages(ontologyKey, lensKey, sent.body) }
+      }
+      const response = await runtime.runNamedSearch(ontologyKey, lensKey, sent.key, sent.body)
+      // The response's items say which unit came back: the listed result may
+      // be older than the search the server ran.
+      return namedRunResult(response, sent.result) === 'entities'
+        ? { mode: 'entities', response: response as EntitySearchResponse }
+        : { mode: 'passages', response: response as PassageSearchResponse }
+    },
     onSuccess: (data, sent) => {
       setOutcome(data)
       setError(null)
-      setRanWith(requestKey(sent.mode, sent.body))
+      setRanWith(runKey(sent))
     },
     onError: (err) => {
       setOutcome(null)
@@ -324,6 +383,8 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
     execute.mutate(request)
   }
 
+  // A named search's run shows only the query and the filter.
+  const controls = named !== undefined ? NAMED_CONTROLS : SEARCH_CONTROLS
   const fields = error instanceof ApiError ? (error.fieldErrors ?? {}) : {}
   const errorsAt = (control: SearchControl) => fieldErrorsAt(fields, control)
   const featureDisabled = error instanceof ApiError && error.details?.code === 'FEATURE_DISABLED'
@@ -331,10 +392,9 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
     error === null || featureDisabled
       ? null
       : error instanceof ApiError && error.fieldErrors !== undefined
-        ? unplacedFieldErrors(fields).join('\n') || null
+        ? unplacedFieldErrors(fields, controls).join('\n') || null
         : formatQueryError(error)
-  const settingErrors = (['types', 'indices', 'documents', 'keyword', 'semantic', 'filter', 'limit', 'perEntity'] as const)
-    .some((control) => errorsAt(control).length > 0)
+  const settingErrors = controls.some((control) => control !== 'query' && errorsAt(control).length > 0)
 
   const scopeOptions: { value: ScopeField; label: string }[] = [
     { value: 'types', label: 'Types' },
@@ -349,27 +409,48 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
       ]
     : [{ value: 'keyword', label: 'Keyword' }]
   const methodName = method === null ? 'Methods' : methodOptions.find((o) => o.value === method)?.label
-  const summary = [
-    scopeSummary(scopeField, scopeKeys.length, choices[scopeField].length),
-    methodName,
-    conditions.length > 0 ? `${conditions.length} filter${conditions.length === 1 ? '' : 's'}` : null,
-    `limit ${limit === '' ? 10 : limit}`,
-  ]
+  const filterCount = conditions.length > 0 ? `${conditions.length} filter${conditions.length === 1 ? '' : 's'}` : null
+  const summary = (
+    named !== undefined
+      ? [filterCount ?? 'No filter']
+      : [
+          scopeSummary(scopeField, scopeKeys.length, choices[scopeField].length),
+          methodName,
+          filterCount,
+          `limit ${limit === '' ? 10 : limit}`,
+        ]
+  )
     .filter((part) => part !== null)
     .join(' · ')
+  const unitName = mode === 'entities' ? 'entities' : 'passages of documents'
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
       <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3">
         <Segmented
           label="Search for"
-          value={mode}
-          options={[
-            { value: 'entities', label: 'Entities' },
-            { value: 'passages', label: 'Passages' },
-          ]}
+          value={formMode}
+          options={formModes(namedSearches.length > 0).map((value) => ({ value, label: MODE_LABELS[value] }))}
           onChange={switchMode}
         />
+        {named !== undefined && (
+          <Select value={named.key} onValueChange={setNamedKey}>
+            <SelectTrigger className="h-8 w-full min-w-0 text-[13px] sm:w-64" aria-label="Named search">
+              {/* The name only: the items' keys would crowd it out. */}
+              <SelectValue>
+                <span className="truncate">{named.name}</span>
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {namedSearches.map((s) => (
+                <SelectItem key={s.key} value={s.key}>
+                  <span className="truncate">{s.name}</span>
+                  <span className="font-mono text-[11px] text-muted-foreground">{s.key}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <div className="flex min-w-0 flex-[1_1_16rem] items-center gap-2">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -379,7 +460,13 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
               onKeyDown={(e) => {
                 if (e.key === 'Enter') run()
               }}
-              placeholder={mode === 'entities' ? 'Search entities…' : 'Search passages of documents…'}
+              placeholder={
+                named !== undefined
+                  ? `Search with ${named.name}…`
+                  : mode === 'entities'
+                    ? 'Search entities…'
+                    : 'Search passages of documents…'
+              }
               className="h-8 pl-8 text-[13px]"
               aria-label="Search text"
               aria-invalid={errorsAt('query').length > 0}
@@ -390,6 +477,12 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
             {execute.isPending ? 'Running…' : 'Run'}
           </Button>
         </div>
+        {named !== undefined && (
+          <p className="w-full text-[12px] leading-snug text-muted-foreground">
+            <span className="font-medium text-foreground">Finds {unitName}</span>
+            {named.description !== '' && ` · ${named.description}`}
+          </p>
+        )}
         {errorsAt('query').map((message) => (
           <p key={message} className="w-full text-xs text-destructive">
             {message}
@@ -421,85 +514,89 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
             <ChevronDown className={cn('size-4 text-muted-foreground transition-transform', settingsOpen && 'rotate-180')} />
           </button>
           <div className={cn('divide-y border-t lg:border-t-0', !settingsOpen && 'hidden lg:block')}>
-            <Section
-              title="Where to look"
-              errors={[...errorsAt('types'), ...errorsAt('indices'), ...errorsAt('documents')]}
-            >
-              <Segmented
-                label="Choose by"
-                value={scopeField}
-                options={scopeOptions}
-                onChange={setScopeField}
-                className="w-full"
-              />
-              <ScopePicker
-                key={`${scopeField}/${mode}`}
-                field={scopeField}
-                semanticAvailable={semanticAvailable}
-                mode={mode}
-                choices={choices[scopeField]}
-                chosen={scopeKeys}
-                onChange={(keys) =>
-                  setChosen((prev) => ({
-                    ...prev,
-                    // Keys this mode does not offer stay chosen for the other.
-                    [scopeField]: [...prev[scopeField].filter((k) => !offered.has(k)), ...keys],
-                  }))
-                }
-              />
-            </Section>
-
-            <Section title="How to match" errors={[...errorsAt('keyword'), ...errorsAt('semantic')]}>
-              {method === null ? (
-                <p className="text-[11px] text-muted-foreground">The server runs what can run.</p>
-              ) : (
-                <>
+            {named === undefined && (
+              <>
+                <Section
+                  title="Where to look"
+                  errors={[...errorsAt('types'), ...errorsAt('indices'), ...errorsAt('documents')]}
+                >
                   <Segmented
-                    label="Methods"
-                    value={method}
-                    options={methodOptions}
-                    onChange={setMethodPick}
+                    label="Choose by"
+                    value={scopeField}
+                    options={scopeOptions}
+                    onChange={setScopeField}
                     className="w-full"
                   />
-                  <p className="text-[11px] leading-snug text-muted-foreground">
-                    {METHOD_HINTS[method]}
-                    {!semanticAvailable && ' Semantic search is not set up on this server.'}
-                  </p>
-                  {method !== 'semantic' && (
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[12px]">Keyword match</span>
+                  <ScopePicker
+                    key={`${scopeField}/${mode}`}
+                    field={scopeField}
+                    semanticAvailable={semanticAvailable}
+                    mode={mode}
+                    choices={choices[scopeField]}
+                    chosen={scopeKeys}
+                    onChange={(keys) =>
+                      setChosen((prev) => ({
+                        ...prev,
+                        // Keys this mode does not offer stay chosen for the other.
+                        [scopeField]: [...prev[scopeField].filter((k) => !offered.has(k)), ...keys],
+                      }))
+                    }
+                  />
+                </Section>
+
+                <Section title="How to match" errors={[...errorsAt('keyword'), ...errorsAt('semantic')]}>
+                  {method === null ? (
+                    <p className="text-[11px] text-muted-foreground">The server runs what can run.</p>
+                  ) : (
+                    <>
                       <Segmented
-                        label="Keyword match"
-                        value={match}
-                        options={[
-                          { value: 'any', label: 'Any word' },
-                          { value: 'all', label: 'All words' },
-                        ]}
-                        onChange={setMatch}
+                        label="Methods"
+                        value={method}
+                        options={methodOptions}
+                        onChange={setMethodPick}
+                        className="w-full"
                       />
-                    </div>
+                      <p className="text-[11px] leading-snug text-muted-foreground">
+                        {METHOD_HINTS[method]}
+                        {!semanticAvailable && ' Semantic search is not set up on this server.'}
+                      </p>
+                      {method !== 'semantic' && (
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[12px]">Keyword match</span>
+                          <Segmented
+                            label="Keyword match"
+                            value={match}
+                            options={[
+                              { value: 'any', label: 'Any word' },
+                              { value: 'all', label: 'All words' },
+                            ]}
+                            onChange={setMatch}
+                          />
+                        </div>
+                      )}
+                      {method !== 'keyword' && (
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="grid text-[12px]">
+                            Minimum similarity
+                            <span className="text-[10.5px] text-muted-foreground">0–1; drops less similar matches</span>
+                          </span>
+                          <OptionalNumber
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={minSimilarity}
+                            onChange={setMinSimilarity}
+                            emptyLabel="none"
+                            label="Minimum similarity"
+                            className="h-7 w-24 text-[12.5px]"
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
-                  {method !== 'keyword' && (
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="grid text-[12px]">
-                        Minimum similarity
-                        <span className="text-[10.5px] text-muted-foreground">0–1; drops less similar matches</span>
-                      </span>
-                      <OptionalNumber
-                        min={0}
-                        max={1}
-                        step={0.05}
-                        value={minSimilarity}
-                        onChange={setMinSimilarity}
-                        emptyLabel="none"
-                        label="Minimum similarity"
-                        className="h-7 w-24 text-[12.5px]"
-                      />
-                    </div>
-                  )}
-                </>
-              )}
-            </Section>
+                </Section>
+              </>
+            )}
 
             <Section
               title="Filter"
@@ -516,7 +613,11 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
                 )
               }
             >
-              {filterType === undefined ? (
+              {filterType === undefined && named !== undefined ? (
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  Filters work on one type’s properties: this named search searches {named.types.length} types.
+                </p>
+              ) : filterType === undefined ? (
                 <p className="text-[11px] leading-snug text-muted-foreground">
                   Filters work on one type’s properties: choose one type — or indices or documents of one type —
                   under Where to look.
@@ -535,35 +636,37 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
               )}
             </Section>
 
-            <Section title="How many" errors={[...errorsAt('limit'), ...errorsAt('perEntity')]}>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[12px]">{mode === 'entities' ? 'Entities' : 'Passages'}</span>
-                <Input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={limit}
-                  onChange={(e) => setLimit(e.target.value)}
-                  placeholder="10"
-                  aria-label="Limit"
-                  className="h-7 w-24 text-[12.5px]"
-                />
-              </div>
-              {mode === 'passages' && (
+            {named === undefined && (
+              <Section title="How many" errors={[...errorsAt('limit'), ...errorsAt('perEntity')]}>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[12px]">Per entity, at most</span>
-                  <OptionalNumber
+                  <span className="text-[12px]">{mode === 'entities' ? 'Entities' : 'Passages'}</span>
+                  <Input
+                    type="number"
                     min={1}
                     max={100}
-                    value={perEntity}
-                    onChange={setPerEntity}
-                    emptyLabel="no cap"
-                    label="Passages per entity"
+                    value={limit}
+                    onChange={(e) => setLimit(e.target.value)}
+                    placeholder="10"
+                    aria-label="Limit"
                     className="h-7 w-24 text-[12.5px]"
                   />
                 </div>
-              )}
-            </Section>
+                {mode === 'passages' && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[12px]">Per entity, at most</span>
+                    <OptionalNumber
+                      min={1}
+                      max={100}
+                      value={perEntity}
+                      onChange={setPerEntity}
+                      emptyLabel="no cap"
+                      label="Passages per entity"
+                      className="h-7 w-24 text-[12.5px]"
+                    />
+                  </div>
+                )}
+              </Section>
+            )}
           </div>
         </aside>
 
@@ -608,8 +711,12 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
           {outcome === null && error === null && (
             <EmptyState
               icon={Search}
-              title="Search this lens"
-              description={`Rank ${mode === 'entities' ? 'entities' : 'passages of documents'} for a text — by keyword, by meaning, or both.`}
+              title={named !== undefined ? `Run ${named.name}` : 'Search this lens'}
+              description={
+                named !== undefined
+                  ? `Rank ${unitName} for a text, as this named search decides.`
+                  : `Rank ${unitName} for a text — by keyword, by meaning, or both.`
+              }
               action={<SearchExplainerButton labeled />}
               className="rounded-xl border border-dashed"
             />

@@ -7,7 +7,6 @@
 
 import { supportsKeywordRanking } from "../core/ports.js";
 import { deploymentMethods } from "../runtime/search/availability.js";
-import { availableStrategies } from "../runtime/search/strategies.js";
 
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -24,7 +23,7 @@ const InfoResponse = z.object({
 
 const FeaturesResponse = z.object({
   semanticSearch: z.boolean(),
-  searchStrategies: z.array(z.string()),
+  rankedSearch: z.boolean(),
   ai: z.boolean(),
   decisions: z.boolean(),
 });
@@ -56,10 +55,11 @@ export const serverRouter: FastifyPluginAsyncZod = async (app) => {
     },
     async () => {
       const keyword = await supportsKeywordRanking();
-      const capabilities = { supportsKeywordRanking: () => keyword };
+      const methods = deploymentMethods({ supportsKeywordRanking: () => keyword });
       return {
-        semanticSearch: deploymentMethods(capabilities).includes("semantic"),
-        searchStrategies: availableStrategies(capabilities),
+        semanticSearch: methods.includes("semantic"),
+        // Ranked search runs by keyword, or semantically with an embedding provider.
+        rankedSearch: methods.length > 0,
         ai: Boolean(settings.AI_PROVIDER),
         decisions: getDecisionModel() !== null,
       };

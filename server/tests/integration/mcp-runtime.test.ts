@@ -236,7 +236,6 @@ describe("tool surface", () => {
         "rebase",
         "run_saved_query",
         "search",
-        "search_by_index",
         "search_documents",
         "search_saved_queries",
         "start_changeset",
@@ -519,7 +518,7 @@ describe("entity tools", () => {
     }
   });
 
-  it("search applies no similarity floor without a provider (keyword default)", async () => {
+  it("search runs keyword alone without a provider", async () => {
     const client = await connectClient(`${baseUrl}/mcp/ontologies/test_ont/runtime/lenses/test_lens`);
     try {
       await call(client, "create_entity", {
@@ -529,9 +528,8 @@ describe("entity tools", () => {
       // Search entries are built in the background.
       await drainSearchWork();
       const found = json(await call(client, "search", { query: "Lovelace" }));
-      expect(found.strategy).toBe("keyword");
-      expect(found.minSimilarity).toBeNull();
-      expect((found.hits as Record<string, unknown>[]).length).toBe(1);
+      expect(found.ran).toEqual(["keyword"]);
+      expect((found.items as Record<string, unknown>[]).length).toBe(1);
     } finally {
       await client.close();
     }
@@ -848,7 +846,7 @@ describe("query paths", () => {
 
 describe("search indices", () => {
 
-  it("list_search_indices lists the lens's catalog; search_by_index pairs a relation with its target", async () => {
+  it("list_search_indices lists the lens's catalog; search with its indices pairs a relation with its target", async () => {
     const model = "/api/ontologies/test_ont/model";
     const created = await app.inject({
       method: "POST",
@@ -887,23 +885,18 @@ describe("search indices", () => {
         relations: [{ relationType: "works_for", direction: "outgoing", label: "Job" }],
       });
 
-      const found = json(await call(client, "search_by_index", { query: "CTO ACME", index: "employment", relations: ["works_for"] }));
-      // No provider in this suite: keyword, and no floor.
-      expect(found).toMatchObject({ query: "CTO ACME", mode: "keyword", minSimilarity: null });
-      const top = (found.hits as Record<string, any>[])[0]!;
+      const found = json(await call(client, "search", { query: "CTO ACME", indices: ["employment"] }));
+      // No provider in this suite: keyword alone.
+      expect(found).toMatchObject({ ran: ["keyword"], limitations: [] });
+      const top = (found.items as Record<string, any>[])[0]!;
       expect(top.entity._id).toBe(ada._id);
-      expect(top.matched).toMatchObject({ partKind: "relation", target: { id: acme._id, label: "ACME" } });
+      expect(top.match).toMatchObject({ part: "relation", target: { _id: acme._id, name: "ACME" } });
 
-      // Without index every index of the lens is searched, the custom one included.
-      const everywhere = json(await call(client, "search_by_index", { query: "CTO ACME" }));
-      expect((everywhere.hits as Record<string, any>[])[0]!.matched).toMatchObject({ index: "employment" });
+      // Without a scope only the managed indices are searched: no relation entry ranks.
+      const managed = json(await call(client, "search", { query: "CTO ACME" }));
+      for (const item of managed.items as Record<string, any>[]) expect(item.match.part).not.toBe("relation");
 
-      // The default search never ranks a relation entry, and keeps its own envelope.
-      const fallback = json(await call(client, "search", { query: "CTO ACME" }));
-      expect(fallback).toHaveProperty("strategy");
-      expect(fallback).not.toHaveProperty("mode");
-
-      const unknown = await call(client, "search_by_index", { query: "x", index: "nope" });
+      const unknown = await call(client, "search", { query: "x", indices: ["nope"] });
       expect(unknown.isError).toBe(true);
       expect(text(unknown)).toContain("nope");
     } finally {
@@ -1073,7 +1066,7 @@ describe("the ruleset mount", () => {
       const plainNames = (await plain.listTools()).tools.map((tool) => tool.name);
       const rulesetNames = (await viaRuleset.listTools()).tools.map((tool) => tool.name);
       expect(plainNames).not.toContain("get_ruleset");
-      expect(plainNames).toHaveLength(35);
+      expect(plainNames).toHaveLength(34);
       expect(rulesetNames.sort()).toEqual([...plainNames, "get_ruleset"].sort());
     } finally {
       await plain.close();

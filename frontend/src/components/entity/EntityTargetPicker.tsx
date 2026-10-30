@@ -57,7 +57,7 @@ export function EntityTargetPicker({
     lensKey,
     q: debouncedQuery,
     typeKey: targetType.key,
-    ranked: (features?.searchStrategies.length ?? 0) > 0,
+    ranked: features?.rankedSearch === true,
     allTypeKeys: [],
     enabled: true,
   })

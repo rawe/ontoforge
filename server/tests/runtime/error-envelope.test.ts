@@ -192,7 +192,7 @@ describe("features route", () => {
       semanticSearch: false,
       ai: false,
       decisions: false,
-      searchStrategies: ["keyword", "keyword-any", "keyword-all"],
+      rankedSearch: true,
     });
   });
 });

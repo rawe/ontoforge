@@ -1,6 +1,7 @@
 /**
- * Search indices with real embeddings (bge-m3): semantic and hybrid search
- * over the managed default and passage indices, and relation entries that
+ * Search indices with real embeddings (bge-m3), through the entity search:
+ * semantic and hybrid search over the managed default and passage indices,
+ * and relation entries that
  * pair one relation with its own target in the semantic representation —
  * "CTO ACME" finds the CTO of ACME through that very employment; "CTO Foo"
  * does not find her through it, semantic and hybrid alike — over a custom
@@ -14,9 +15,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../../../src/app.js";
 import { closeStores, getRuntimeStore, initStores } from "../../../src/core/ports.js";
 import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
-import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
-import { search, type SearchRequest } from "../../../src/runtime/search/entry.js";
-import { searchByIndices } from "../../../src/runtime/search/indexSearch.js";
+import { invalidateLoadedSchemaCache, loadSchema } from "../../../src/runtime/schemaCache.js";
+import { rankEntities, searchEntities, type EntitySearchRequest } from "../../../src/runtime/search/entitySearch.js";
 import { wipeDatabase } from "../reset.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
 
@@ -37,9 +37,9 @@ describe.skipIf(!ollamaUp)("search indices (Ollama)", () => {
     return res.json();
   }
 
-  /** The default search. */
-  async function find(request: SearchRequest): Promise<Row> {
-    return search("all", request, await getRuntimeStore(O));
+  /** The entity search. */
+  async function find(request: EntitySearchRequest) {
+    return searchEntities("all", request, await getRuntimeStore(O));
   }
 
   beforeAll(async () => {
@@ -120,53 +120,50 @@ describe.skipIf(!ollamaUp)("search indices (Ollama)", () => {
   });
 
   it("semantic search over passage indices returns the passage that matched", async () => {
-    const body = await find({ query: "beekeeping and vegetable gardening", strategy: "semantic", in: ["document"] });
-    const top = body.hits[0];
+    const body = await find({ query: "beekeeping and vegetable gardening", indices: ["person~bio"], semantic: {} });
+    const top = body.items[0]!;
     expect(top.entity._id).toBe(ids["Bob Miller"]);
-    expect(top.matched).toMatchObject({ index: "person~bio", partKind: "passage", charOffset: 0 });
-    expect(top.matched.snippet).toContain("honey bees");
-    expect(top.matches).toEqual([
-      expect.objectContaining({ kind: "document", propertyKey: "bio", charOffset: 0 }),
-    ]);
+    expect(top.match).toMatchObject({ index: "person~bio", part: "passage", property: "bio", charOffset: 0 });
+    expect(top.match.snippet).toContain("honey bees");
   });
 
   it("the semantic leg crosses languages: a German query finds the English passage", async () => {
-    const body = await find({ query: "Bienenzucht im Garten", strategy: "semantic", in: ["document"] });
-    expect(body.hits[0].entity._id).toBe(ids["Bob Miller"]);
+    const body = await find({ query: "Bienenzucht im Garten", indices: ["person~bio"], semantic: {} });
+    expect(body.items[0]!.entity._id).toBe(ids["Bob Miller"]);
   });
 
   it("hybrid search ranks across default and passage indices, one match per index", async () => {
-    const body = await find({ query: "Ada analytical engines", strategy: "hybrid" });
-    const top = body.hits[0];
-    expect(top.entity._id).toBe(ids["Ada Lovelace"]);
-    expect(new Set(top.matches.map((m: Row) => m.kind))).toEqual(new Set(["properties", "document"]));
-    for (const match of top.matches) {
-      expect(match.evidence.semanticSimilarity !== null || match.evidence.keywordMatch === true).toBe(true);
+    const runtime = await getRuntimeStore(O);
+    const { ran, hits } = await rankEntities(await loadSchema("all", runtime), { query: "Ada analytical engines" }, runtime);
+    expect(ran).toEqual(["semantic", "keyword"]);
+    const top = hits[0]!;
+    expect(top.entityId).toBe(ids["Ada Lovelace"]);
+    expect(new Set(top.indices.map((m) => m.index.key))).toEqual(new Set(["person~default", "person~bio"]));
+    for (const match of top.indices) {
+      expect(match.semanticSimilarity !== null || match.keywordScore !== null).toBe(true);
     }
   });
 
   it("a relation entry pairs one relation with its own target in the semantic representation", async () => {
-    const runtime = await getRuntimeStore(O);
-    const semantic = (query: string) =>
-      searchByIndices("all", { query, indices: ["employment"], mode: "semantic" }, runtime);
+    const semantic = (query: string) => find({ query, indices: ["employment"], semantic: {} });
 
     const acme = await semantic("CTO ACME");
-    expect(acme.hits[0]!.entity._id).toBe(ids["Ada Lovelace"]);
-    expect(acme.hits[0]!.matched).toMatchObject({
-      partKind: "relation",
-      relationId: ids["Ada Lovelace@ACME"],
-      target: { id: ids["ACME"], type: "company", label: "ACME" },
+    expect(acme.items[0]!.entity._id).toBe(ids["Ada Lovelace"]);
+    expect(acme.items[0]!.match).toMatchObject({
+      part: "relation",
+      relationType: "works_for",
+      target: { _id: ids["ACME"], _entityTypeKey: "company", name: "ACME" },
     });
 
     const foo = await semantic("CTO Foo");
-    expect(foo.hits[0]!.entity._id).toBe(ids["Bob Miller"]);
-    expect(foo.hits[0]!.matched).toMatchObject({ relationId: ids["Bob Miller@Foo"] });
+    expect(foo.items[0]!.entity._id).toBe(ids["Bob Miller"]);
+    expect(foo.items[0]!.match).toMatchObject({ target: { _id: ids["Foo"] } });
     // Ada is CTO of ACME and an advisor at Foo; no entry of hers says
     // "CTO at Foo", so she ranks below the one who is.
-    const ada = foo.hits.find((hit) => hit.entity._id === ids["Ada Lovelace"]);
+    const ada = foo.items.find((item) => item.entity._id === ids["Ada Lovelace"]);
     if (ada !== undefined) {
-      expect([ids["Ada Lovelace@ACME"], ids["Ada Lovelace@Foo"]]).toContain(ada.matched.relationId);
-      expect(foo.hits.indexOf(ada)).toBeGreaterThan(0);
+      expect([ids["ACME"], ids["Foo"]]).toContain(ada.match.target!._id);
+      expect(ada.rank).toBeGreaterThan(1);
     }
   });
 
@@ -180,15 +177,13 @@ describe.skipIf(!ollamaUp)("search indices (Ollama)", () => {
       ],
     });
 
-    const runtime = await getRuntimeStore(O);
-    const hybrid = (query: string) =>
-      searchByIndices("all", { query, indices: ["employment"], mode: "hybrid" }, runtime);
+    const hybrid = (query: string) => find({ query, indices: ["employment"], semantic: {}, keyword: {} });
     const acme = await hybrid("CTO ACME");
-    expect(acme.mode).toBe("hybrid");
-    expect(acme.hits[0]!.entity._id).toBe(ids["Ada Lovelace"]);
-    expect(acme.hits[0]!.matched).toMatchObject({ relationId: ids["Ada Lovelace@ACME"] });
+    expect(acme.ran).toEqual(["semantic", "keyword"]);
+    expect(acme.items[0]!.entity._id).toBe(ids["Ada Lovelace"]);
+    expect(acme.items[0]!.match).toMatchObject({ target: { _id: ids["ACME"] } });
     const foo = await hybrid("CTO Foo");
-    expect(foo.hits[0]!.entity._id).toBe(ids["Bob Miller"]);
-    expect(foo.hits[0]!.matched).toMatchObject({ relationId: ids["Bob Miller@Foo"] });
+    expect(foo.items[0]!.entity._id).toBe(ids["Bob Miller"]);
+    expect(foo.items[0]!.match).toMatchObject({ target: { _id: ids["Foo"] } });
   });
 });

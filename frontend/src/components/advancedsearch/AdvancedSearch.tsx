@@ -1,22 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
-import { FileText, Info, Play, Search, X } from 'lucide-react'
+import { Info, Play, Search, X } from 'lucide-react'
 import { useFeatures, useSearchCatalog } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import * as runtime from '@/api/runtime'
-import type {
-  EntitySearchResponse,
-  PassageSearchResponse,
-  RuntimeSchema,
-  SchemaProperty,
-} from '@/api/types'
-import {
-  DocumentViewerDialog,
-  type DocumentViewerTarget,
-} from '@/components/DocumentViewerDialog'
+import type { EntitySearchResponse, PassageSearchResponse, RuntimeSchema } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
-import { IdentityText } from '@/components/IdentityText'
 import { QueryErrorBlock } from '@/components/query/ResultsPanel'
 import { formatQueryError } from '@/components/query/resultUtils'
 import { FilterChips } from '@/components/table/FilterChips'
@@ -28,7 +17,6 @@ import {
   type FilterCondition,
   type FilterSubjects,
 } from '@/components/table/filters'
-import { TypeChip } from '@/components/TypeChip'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -40,12 +28,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { identityText } from '@/lib/displayLabel'
 import { getTypeColor } from '@/lib/typeColors'
 import { cn } from '@/lib/utils'
 import {
-  entityLabel,
-  entityLink,
   fieldErrorsAt,
   searchBody,
   unplacedFieldErrors,
@@ -53,7 +38,7 @@ import {
   type SearchControl,
   type SearchMode,
 } from './searchModel'
-import { EntitySearchResult, SearchSummary } from './SearchResults'
+import { EntitySearchResult, PassageSearchResult } from './SearchResults'
 
 type Outcome =
   | { mode: 'entities'; response: EntitySearchResponse }
@@ -203,7 +188,6 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
 
   const [outcome, setOutcome] = useState<Outcome | null>(null)
   const [error, setError] = useState<unknown>(null)
-  const [viewer, setViewer] = useState<DocumentViewerTarget | null>(null)
 
   const typesByKey = useMemo(
     () => new Map(schema.entityTypes.map((t) => [t.key, t])),
@@ -297,10 +281,6 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
       : error instanceof ApiError && error.fieldErrors !== undefined
         ? unplacedFieldErrors(fields).join('\n') || null
         : formatQueryError(error)
-
-  const typeName = (key: string) => typesByKey.get(key)?.displayName ?? key
-  const propertyOf = (typeKey: string, propertyKey: string): SchemaProperty | undefined =>
-    typesByKey.get(typeKey)?.properties.find((p) => p.key === propertyKey)
 
   const scopeOptions: { value: ScopeField; label: string }[] = [
     { value: 'types', label: 'Types' },
@@ -517,83 +497,12 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
       )}
 
       {outcome !== null && outcome.mode === 'passages' && (
-        <div className="space-y-2">
-          <SearchSummary
-            ontologyKey={ontologyKey}
-            lensKey={lensKey}
-            schema={schema}
-            mode="passages"
-            response={outcome.response}
-          />
-
-          {outcome.response.items.length === 0 ? (
-            <p className="rounded-xl border bg-card p-6 text-center text-[13px] text-muted-foreground">
-              Nothing found.
-            </p>
-          ) : (
-            <ol className="divide-y overflow-hidden rounded-xl border bg-card">
-              {outcome.response.items.map((item) => {
-                const { entity, passage } = item
-                const property = propertyOf(entity._entityTypeKey, passage.property)
-                return (
-                  <li
-                    key={`${entity._id}/${passage.property}/${passage.ordinal}`}
-                    className="flex gap-3 px-4 py-2.5"
-                  >
-                    <span className="w-6 shrink-0 pt-0.5 text-right font-mono text-[11px] text-muted-foreground tabular-nums">
-                      {item.rank}
-                    </span>
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <TypeChip
-                          typeKey={entity._entityTypeKey}
-                          displayName={typeName(entity._entityTypeKey)}
-                          size="sm"
-                        />
-                        <Link
-                          to={entityLink(ontologyKey, lensKey, entity)}
-                          className="truncate text-[13px] font-medium hover:underline"
-                        >
-                          {entityLabel(entity)}
-                        </Link>
-                        {entity.identity !== undefined && (
-                          <IdentityText identity={identityText(entity.identity)} />
-                        )}
-                        {property !== undefined ? (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setViewer({
-                                entityTypeKey: entity._entityTypeKey,
-                                entityId: entity._id,
-                                entityLabel: entityLabel(entity),
-                                property,
-                                length: passage.charOffset + passage.charLength,
-                              })
-                            }
-                            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
-                          >
-                            <FileText className="size-3" />
-                            {property.displayName}
-                          </button>
-                        ) : (
-                          <span className="font-mono text-[11px] text-muted-foreground">
-                            {passage.property}
-                          </span>
-                        )}
-                      </div>
-                      {passage.text !== undefined && (
-                        <p className="whitespace-pre-wrap text-[12px] leading-relaxed">
-                          {passage.text}
-                        </p>
-                      )}
-                    </div>
-                  </li>
-                )
-              })}
-            </ol>
-          )}
-        </div>
+        <PassageSearchResult
+          ontologyKey={ontologyKey}
+          lensKey={lensKey}
+          schema={schema}
+          response={outcome.response}
+        />
       )}
 
       {outcome === null && error === null && (
@@ -603,13 +512,6 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
           description="Rank entities, or passages of their documents, for a text — by keyword, by meaning, or both."
         />
       )}
-
-      <DocumentViewerDialog
-        ontologyKey={ontologyKey}
-        lensKey={lensKey}
-        target={viewer}
-        onClose={() => setViewer(null)}
-      />
     </div>
   )
 }

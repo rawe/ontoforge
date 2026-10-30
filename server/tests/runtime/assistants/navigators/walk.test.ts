@@ -199,7 +199,7 @@ describe("anchor", () => {
     const board = new Board(LENS);
     return { board, result: anchor(reader, board, LENS, intent(plan), previous, allowed, "the question") };
   };
-  const hit = (reader: FakeReader, id: string, relativeScore: number) => ({ entity: reader.byId.get(id)!, relativeScore });
+  const hit = (reader: FakeReader, id: string, score: number) => ({ entity: reader.byId.get(id)!, score });
 
   it("a mention matching a name anchors exactly those entities, up to three", async () => {
     const reader = orgReader();
@@ -227,7 +227,7 @@ describe("anchor", () => {
   it("a mention containing an entity's label matches it by name", async () => {
     const reader = orgReader();
     const found = await run(reader, { mentions: [{ text: "Apollo project", types: ["project"] }] }).result;
-    // The default search finds nothing for the whole phrase; listing neither.
+    // The search finds nothing for the whole phrase; listing neither.
     expect(found.nodes).toEqual([]);
     reader.searchWith = () => [hit(reader, "apollo", 1)];
     const again = await run(reader, { mentions: [{ text: "Apollo project", types: ["project"] }] }).result;

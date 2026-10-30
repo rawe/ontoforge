@@ -322,8 +322,7 @@ describe("the runtime surface itself", () => {
       semanticSearch: false,
       ai: false,
       decisions: false,
-      searchStrategies:
-        ["keyword", "keyword-any", "keyword-all"],
+      rankedSearch: true,
     });
   });
 });

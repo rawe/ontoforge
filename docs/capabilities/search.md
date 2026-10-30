@@ -1,13 +1,10 @@
 # Search
 
 The entity list filters by a literal term. Ranked search ranks entities or passages for a
-query, in four forms: the [**entity search**](#entity-search), which reads a scope of
-types or named indices with the methods the request chooses, the
+query, in two forms: the [**entity search**](#entity-search), which reads a scope of
+types or named indices with the methods the request chooses, and the
 [**passage search**](#passage-search), which ranks the passages of documents the same
-way, and two that only the MCP and agent tools run — the
-**default search** over the managed indices of the types it searches and the **index
-search** through [search indices](search-indices.md) named by key. No server operation
-falls back to another.
+way. No server operation falls back to another.
 
 ## Literal matching
 
@@ -19,58 +16,27 @@ See [instance-data.md](instance-data.md#query-paths) for property and query-path
 
 ## Ranked search
 
-This section describes the default search, which the MCP and agent search tools run; the [index search](#index-search) shares its ranking, floor
-and `matched`. Three independent dimensions select a default search's ranking: scope
-(one entity type or every type the lens exposes), search kind (properties, document, or
-both), and strategy, always the default one. The query is
-plain words, not an engine query language. The limit counts entities, from 1 to 100,
-default 10; search has no paging or offset.
+This section describes what both searches share: how they rank, the similarity floor,
+and how filters narrow them. The query is plain words, not an engine query language.
+Search has no paging or offset.
 
-Ranked search reads [search indices](search-indices.md). Each search kind searches the
-managed indices of the searched types:
-
-| Search kind | Indices searched | Match |
-|---|---|---|
-| Property search | the default index of each searched type | the entity's own-field entry |
-| Document search | the passage index of each searched document property | property key and the best passage's character coordinates |
-
-Both kinds run by default. A kind with nothing to search contributes nothing by default;
-requesting it explicitly is a validation error. A named document property restricts only
-document search: on one type it must be an exposed document property; across types it
-selects the types declaring that document property. No matching property is an error. An
-index the lens does not search, or one whose entries are not yet built, contributes
-nothing, and that is no error ([search-indices.md](search-indices.md#lifecycle)).
+Ranked search reads [search indices](search-indices.md). An index the lens does not
+search, or one whose entries are not yet built, contributes nothing, and that is no error
+([search-indices.md](search-indices.md#lifecycle)).
 
 Long text belongs in a `document` property, which is chunked, ranked passage by passage,
 and whose match names the property and the passage.
 
-### Strategies and availability
+### Methods and availability
 
-Each strategy is a composition of retrieval methods; the methods are defined in the
-[glossary](../glossary.md). Keyword ranking is stemmed full-text ranking in the
-ontology's [keyword languages](#keyword-language).
-
-| Strategy | Requirement | Retrieval methods |
-|---|---|---|
-| `semantic` | an embedding provider | semantic ranking |
-| `keyword` | the adapter supports keyword ranking | the default keyword matching |
-| `keyword-any` | as `keyword` | any-term keyword matching |
-| `keyword-all` | as `keyword` | all-term keyword matching |
-| `hybrid` | both requirements | semantic ranking and the default keyword matching, fused by reciprocal rank |
-
-The default keyword matching is any-term keyword matching; `keyword` and `hybrid` always
-use the same one. `keyword-any` and `keyword-all` each fix one retrieval method, whatever
-the default is. Matching is chosen by the strategy, not by a separate parameter.
-All-term means that every term must match; it still uses stemming and prefix matching
-([ADR 0026](../adr/0026-any-term-keyword-matching.md)).
-
-The default is the first available of `hybrid`, `keyword`, `semantic`. The feature report
-lists available strategies in the order `hybrid`, `keyword`, `keyword-any`,
-`keyword-all`, `semantic`, and every response names the applied strategy.
-An unknown strategy is a validation error; a built but unavailable strategy is rejected
-with the disabled-feature refinement and a message naming the available strategies. With
-no available strategy the operation is disabled. The semantic-search feature boolean is
-kept for saved-query discovery, which ranks by vector alone.
+Ranked search has two retrieval methods, defined in the [glossary](../glossary.md):
+semantic ranking, which needs an embedding provider, and keyword ranking — stemmed
+full-text ranking in the ontology's [keyword languages](#keyword-language) — which needs an
+adapter that ranks by keyword. Keyword matching is any-term by default and all-term on
+request; all-term means that every term must match, still with stemming and prefix
+matching ([ADR 0026](../adr/0026-any-term-keyword-matching.md)). The feature report says
+whether ranked search can run at all; its semantic-search boolean also gates saved-query
+discovery, which ranks by vector alone.
 
 Without a provider no semantic entries are built, and keyword search works on its own.
 Configuring a provider later builds the semantic entries in the background.
@@ -80,13 +46,13 @@ Configuring a provider later builds the semantic entries in the background.
 The alternatives weighed for ranking and evidence are in
 [ADR 0020](../adr/0020-search-ranking-and-evidence.md).
 
-Each searched index is ranked once per retrieval method the strategy uses — semantic,
-keyword, or both under `hybrid` — over the entries of its ready generation. Within one
+Each searched index is ranked once per retrieval method the search runs — semantic,
+keyword, or both — over the entries of its ready generation. Within one
 method the rankings of every searched index — all types, own fields and passages alike —
 are merged into one ranking by their own scores, which share one scale there: semantic
 similarity under one embedding model, the keyword score of one query. That ranking
 is grouped by entity: an entity counts once, scored by its best entry, whichever index
-holds it. A single method keeps those scores. Under `hybrid` the semantic and keyword
+holds it. A single method keeps those scores. With both methods the semantic and keyword
 entity rankings are fused by reciprocal rank: an entity's score is the sum of
 `1 / (60 + rank)` over the two, ranks starting at one, so only being found by both
 methods adds up — being found by several indices never does. Equal scores prefer the
@@ -106,58 +72,26 @@ holding fewer; among equal counts the native ranking decides.
 Each index's ranking first fetches four times the limit in entries. When the result holds
 fewer entities than the limit, every ranking not yet exhausted fetches once more, up to
 1,000 entries, and the merge runs again; nothing further is fetched, so a search over
-entities with many matching entries each can return fewer hits than the limit.
+entities with many matching entries each can return fewer items than the limit.
 
 ### Similarity floor
 
 A REST caller may supply a minimum similarity in the `semantic` block of the
 [entity](#entity-search) or [passage search](#passage-search), a number from 0 to 1 on
-the `semanticSimilarity` scale below; absent means no floor. The floor is model-specific —
-what counts as related depends on the embedding model — so REST never chooses one. The
-MCP and agent search tools take none from the caller and instead apply a fixed floor of
-0.75 whenever the default strategy ranks semantically, because a model client cannot judge
-the raw scores. A floor applies to semantic
-entries only: each semantic ranking drops every entry measured below the floor before it
-is grouped by entity, so the floor applies to an entity's best semantic entry.
-Under `semantic` the filtered ranking is the result, and zero hits is a valid outcome.
-Under `hybrid` only the semantic rankings are filtered; keyword-only hits are untouched
-and keep an unmeasured similarity, which is not a negative.
+the `(1 + cosine) / 2` scale; absent means no floor. The floor is model-specific — what
+counts as related depends on the embedding model — so REST never chooses one. The MCP and
+agent search tools take none from the caller and instead apply a fixed floor of 0.75
+whenever semantic search runs, because a model client cannot judge the raw scores. A
+floor applies to semantic entries only: each semantic ranking drops every entry measured
+below the floor before it is grouped, so the floor applies to an entity's best semantic
+entry. With semantic search alone the filtered ranking is the result, and an empty result
+is a valid outcome. With both methods only the semantic rankings are filtered; what
+keyword alone finds is untouched.
 
-### Response
+### What matched
 
-The envelope carries `query`, `type` (null across types), `in` (defaults filled), `strategy`,
-`minSimilarity` (null when absent), `filter` (empty when absent), and `hits`. Each hit
-carries `entity`, `relativeScore`, `matches` and `matched`. There is no aggregate
-confidence or total.
-
-The relative score is 1.0 for the best hit and each other hit's ordering number as a
-fraction of the best, comparable only within that response. Under one retrieval method it
-is a ratio of that method's scores; under `hybrid` a ratio of fusion scores, and fusion
-can produce multiple 1.0 hits whose tie order is resolved separately. Neither a 1.0 score nor
-a smooth tail says that the query has a relevant answer. Search returns candidates even
-for an unrelated query.
-
-**Matches.** Each index that found the entity contributes one match, its best entry
-there — under the method in which the entity ranks best, else under the other. The default index contributes an entity match, `kind: "properties"`. A passage
-index contributes a passage match, `kind: "document"`, with `propertyKey`, `charOffset`
-and `charLength`, directly usable with a [document read](documents.md). The entity match
-comes first, then passage matches in ranking order, one per document property.
-
-Every match also carries `evidence`, measured on the match's own entry wherever a ranking
-fetched that very entry:
-
-| Field | Meaning |
-|---|---|
-| `semanticSimilarity` | Original measured similarity, `(1 + cosine) / 2`, or null when unavailable or unmeasured. It is not a probability or calibrated confidence. |
-| `keywordMatch` | True when the query terms matched this entry; null when unavailable or unmeasured. False requires an explicit negative evaluation; rankings alone emit only true/null. |
-| `keywordScore` | The entry's [keyword score](#ranking) — query words contained plus native full-text ranking below one — or null when unavailable or unmeasured. A number exactly when `keywordMatch` is true. Higher is better within one ranking; it has no fixed upper bound and no meaning across responses, ontologies or languages, and is not comparable to `semanticSimilarity`. It exists for inspection and retrieval evaluation and never enters fusion or tie refinement. |
-
-A method whose ranking did not fetch the match's entry — it ranked other passages of the
-document, say — leaves that measurement null. Missing from a limited ranking does
-not prove a non-match. Keywords can span several properties; semantic matching over
-composed text does not identify an individual property. Null must not be read as false.
-
-**What matched.** `matched` names the entity's best entry:
+A retriever names, for each entity it found, the best entry that matched it as `matched`
+([retrievers.md](retrievers.md)):
 
 | Field | Meaning |
 |---|---|
@@ -170,15 +104,10 @@ composed text does not identify an individual property. Null must not be read as
 
 It names the entry, never which retrieval method found it.
 
-Callers should inspect entity values and read passages before making claims from them.
-Related content can provide a useful starting entity for graph traversal without
-containing the requested answer. The MCP and agent search tools apply the fixed floor
-described under [Similarity floor](#similarity-floor).
-
-Entities carry every lens-exposed property by default, with document values stubbed.
-Projection works as on the entity list, including raw document text when explicitly
-named. It never projects matches; the entity id and type key always survive. Vectors
-never appear in entities or design exports.
+Search returns candidates even for an unrelated query. Callers should inspect entity
+values and read passages before making claims from them. Related content can provide a
+useful starting entity for graph traversal without containing the requested answer.
+Vectors never appear in search results or design exports.
 
 ### Scope and filters
 
@@ -186,7 +115,7 @@ Cross-type search ranks the exact exposed set: one ranking per searched index, m
 score into one globally ordered page with no per-type quota. No shared cross-type index exists.
 Property filters narrow this set to types declaring every key. A key declared nowhere,
 or with conflicting data types across its declaring types, is a validation error. A query
-path similarly drops types its relation does not touch. This set feeds both kinds.
+path similarly drops types its relation does not touch.
 
 Filters run inside every ranking, on the entity owning each entry, so a ranking's page
 counts entries that pass them. They follow entity-list resolution, coercion and
@@ -197,47 +126,10 @@ are accepted only where the adapter declares support; rejection names the entity
 the alternative. Adapter limitations are recorded in
 [../storage-adapters/](../storage-adapters/README.md).
 
-## Index search
-
-The index search ranks entities through chosen search indices — managed or custom —
-named by key; naming none searches every index the lens can search
-([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). An index the lens
-cannot search, a switched-off managed one included, is a validation error naming it, and
-so is a key no index has: the lens does not tell which indices exist beyond it. Hits are entities of the indices' root types, ranked and
-grouped exactly as under [Ranking](#ranking): within one retrieval method the chosen
-indices merge by score, an entity counts once, scored by its best entry, and `hybrid`
-fuses the methods by reciprocal rank.
-
-**Relation entries count.** A custom index with relation groups holds one entry per
-relation instance ([search-indices.md](search-indices.md#relation-groups)), and an entity
-can rank by any of them; `matched` then names the relation and the entity at its other
-end. The request may name relation types: only their relation entries rank, own-field
-and passage entries always do, and an empty list ranks no relation entry. A relation type
-the lens does not expose is a validation error. Relation entries the lens cannot see are
-skipped whatever is named.
-
-**Mode, not strategy.** The index search runs the first available mode — `hybrid` with
-an embedding provider, `keyword` without one — the keyword legs using the default
-keyword matching.
-
-The other parameters follow the default search: exact [filters](#scope-and-filters),
-which narrow the chosen indices to those whose root type declares every key; the
-tools' fixed [similarity floor](#similarity-floor); a limit counting entities, 1 to 100,
-default 10; and a projection of each entity. Every validation failure is collected and
-reported by field.
-
-The response carries `query`, `mode` and `hits`; each hit carries `entity`,
-`relativeScore` and `matched` as defined under [Response](#response), and no `matches`.
-
-The default search is the index search's counterpart for callers who name types rather
-than indices: it searches only default and passage indices, so it never ranks a relation
-entry, and it offers search kinds, keyword strategies and per-index match evidence that
-the index search does not.
-
 ### The search catalog
 
 The catalog lists the indices a lens can search, in key order, so that a client or a
-model can choose among them. Each is projected through the lens:
+model can choose the `indices` of a search. Each is projected through the lens:
 
 | Field | Meaning |
 |---|---|
@@ -253,7 +145,7 @@ model can choose among them. Each is projected through the lens:
 
 Keyword entries are stemmed in every language of the ontology's **keyword language set**
 — English, German, or both — into one representation, and the query is stemmed in each of
-them. Within one language the query terms combine by the strategy's keyword matching,
+them. Within one language the query terms combine by the search's keyword matching,
 each also matching as a prefix; the languages are alternatives, so a query matches in
 whichever language stems it the way the entry was stemmed. A query word that any
 language of the set treats as a stop word is left out in every language — "für" is not
@@ -284,7 +176,9 @@ order is returned, never a score.
 managed indices of that type the lens can search
 ([ontology-lenses.md](ontology-lenses.md#search-through-a-lens)). `types` reads the
 managed indices of the named types. `indices` reads exactly the named indices, custom
-ones included; a custom index is read only when named. One scope field at a time. A type
+ones included; a custom index is read only when named, and one with relation groups also
+ranks an entity by its relation entries ([search-indices.md](search-indices.md#relation-groups)).
+One scope field at a time. A type
 the lens does not show, or an index the lens cannot search, is a validation error at its
 position. A named type with no managed index to search contributes nothing and is
 reported as a limitation.
@@ -423,26 +317,21 @@ the server from starting: the server must remain available to finish the repair.
 
 The full contract is in [../interfaces/](../interfaces/README.md). REST
 `POST /search/entities` is the [entity search](#entity-search), `POST /search/passages`
-the [passage search](#passage-search), and `GET /search-indices` the catalog; neither
-search has an MCP or agent tool yet. A saved-query search step runs the entity search
-([saved-queries.md](saved-queries.md)).
+the [passage search](#passage-search), and `GET /search-indices` the catalog. A
+saved-query search step runs the entity search ([saved-queries.md](saved-queries.md)).
 
-MCP and agent tools use the default search and its envelope.
-MCP and agents expose `search` (both kinds) and `search_documents` (documents only, every
-hit carrying a passage); neither tool takes a strategy or a floor — both apply the fixed
-floor whenever the default strategy ranks semantically and echo it as `minSimilarity`,
-null under a keyword default. Both allow an omitted entity type.
-MCP additionally accepts filters and fields. On MCP,
-`list_search_indices` answers the catalog, and `search_by_index` runs the index search
-over one index key, a list, or every index the lens can search, under the default mode,
-with the same fixed floor echoed as `minSimilarity`, optionally narrowed to named
-relation types. The agent tools have no index search. Agent limits are 10 by default for search,
-5 for document search, and 20 maximum.
+The MCP and agent tool `search` runs the entity search, `search_documents` the passage
+search, each answering with that search's response. They take its scope, filters and
+limit — `search_documents` also the cap per entity and whether passages carry their
+text — but no method block and no floor: they run what can run, semantic under the
+fixed [similarity floor](#similarity-floor). Only MCP takes `indices`, and there
+`list_search_indices` answers the catalog; agents see no index keys. Agent limits are
+10 by default for search, 5 for document search, and 20 maximum.
 
 Saved-query discovery is separate: it retains its absolute cosine score and minimum
 score, description-only embedding, and embedding-provider requirement.
 
-The palette and relation picker use ranked search whenever the strategy list is nonempty,
-falling back to literal entity lists otherwise. Neither displays a score or passage text;
-what they show of a hit is in
+The palette and relation picker use ranked search whenever it can run, falling back to
+literal entity lists otherwise. Neither displays a score or passage text; what they show
+of an item is in
 [../product-surface/](../product-surface/finding-and-collecting.md#matched-via).

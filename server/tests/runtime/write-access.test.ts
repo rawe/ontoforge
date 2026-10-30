@@ -145,12 +145,12 @@ describe("the levels and the check", () => {
     expect(() => routeOperation("PUT", "/schema")).toThrow("Route 'PUT /schema' has no row in the operation table");
   });
 
-  it("a level lists the tools whose operation it allows, and a stageable tool from staging up: 36, 35, 20", () => {
+  it("a level lists the tools whose operation it allows, and a stageable tool from staging up: 35, 34, 19", () => {
     const listed = (level: WriteAccess) => Object.keys(TOOLS).filter((name) => listsTool(level, name));
-    expect(listed("full")).toHaveLength(36);
+    expect(listed("full")).toHaveLength(35);
     expect(listed("propose").sort()).toEqual(Object.keys(TOOLS).filter((name) => name !== "commit_changeset").sort());
     expect(listed("none").sort()).toEqual(Object.keys(TOOLS).filter((name) => TOOLS[name]!.operation === "read").sort());
-    expect(listed("none")).toHaveLength(20);
+    expect(listed("none")).toHaveLength(19);
     expect(() => listsTool("full", "nope")).toThrow("Tool 'nope' has no row in the operation table");
   });
 });
@@ -175,12 +175,12 @@ describe("the tables cannot drift", () => {
     expect(registered.size).toBe(49);
   });
 
-  it("TOOLS are exactly the tools of a ruleset mount at full (36)", async () => {
+  it("TOOLS are exactly the tools of a ruleset mount at full (35)", async () => {
     const client = await connect("agent-a");
     const names = (await client.listTools()).tools.map((tool) => tool.name);
     await client.close();
     expect(names.sort()).toEqual(Object.keys(TOOLS).sort());
-    expect(names).toHaveLength(36);
+    expect(names).toHaveLength(35);
   });
 });
 

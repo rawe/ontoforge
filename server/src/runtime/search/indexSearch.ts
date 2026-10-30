@@ -1,63 +1,29 @@
 /**
- * Search over search indices (spec §8). One engine serves the index search (`searchByIndices`,
- * by index keys) and the default search (`searchThroughIndices`, its
- * request mapped onto default and passage indices):
+ * Search over search indices: what the entity search, the passage search
+ * and the retriever share around the search tree.
  *
- * 1. The indices: those requested, or all, among the ones the lens may
- *    search (`availableIndices`).
- * 2. Per index × representation of the mode, rank the entries of the
- *    active (ready) generation — semantic entries only of the embedding
- *    model in use. One that cannot run (`availability.ts`), such as a
- *    generation still building, contributes an empty ranking. The
- *    exact filters and the lens's hidden relation and target types (and
- *    a `relations` choice) restrict the ranking itself; a relation entry
- *    the lens cannot see is skipped, never rebuilt.
- * 3. Per representation, merge the indices' entries into one ranking by
- *    their raw scores, and group it by entity — the best entry scores it
- *    and is kept as what matched. Hybrid fuses the semantic and keyword
- *    entity rankings by reciprocal rank (k = 60); a single mode keeps its
- *    scores (`core/searchQuery.ts`). An entity found by several indices of
- *    one mode counts once, never more.
- * 4. Each index's ranking first fetches `limit × 4` entries; if fewer than
- *    `limit` entities come out, the rankings not yet exhausted fetch once
- *    more, up to a fixed cap — never more.
- * 5. Project the entities through the lens and describe the match.
- *
- * Steps 2–4 are a search tree (`core/searchTree.ts`): the request compiles
- * into one (`core/searchCompile.ts`), and the executor (`executor.ts`)
- * runs it.
- *
- * `minScore` drops semantic entries below it — on the `(1 + cosine) / 2`
- * scale — before grouping, so it applies to an entity's best semantic
- * entry; keyword entries are never touched.
- *
- * The lens's catalog (`searchIndexCatalog`) lists the indices it may
- * search, projected through it, for clients and agents to choose from.
+ * - The indices the lens may search (`searchableIndices`), and its catalog
+ *   of them (`searchIndexCatalog`), projected through it, for clients and
+ *   agents to choose from.
+ * - A search tree (`core/searchTree.ts`), checked against the lens and run
+ *   by the executor (`runSearchTree`, `executor.ts`).
+ * - The found entities, read through the lens (`readHitEntities`), and
+ *   what matched each (`describeMatches`).
  */
 
 import { getEmbeddingProvider } from "../../core/embedding.js";
-import { ValidationError } from "../../core/exceptions.js";
 import type {
-  FilterCondition,
-  KeywordMatching,
   RankedSearchEntry,
   Row,
   RuntimeStore,
   SearchIndexRecord,
   SearchIndexStore,
 } from "../../core/ports.js";
-import { compileEntitySearch } from "../../core/searchCompile.js";
 import { documentField } from "../../core/searchComposition.js";
 import { managedIndexDescription, type SearchRepresentation } from "../../core/searchIndex.js";
 import { disabledIndexKeys, type SearchIndexState } from "../../core/searchPipeline.js";
 import { availableIndices, readsHiddenProperties, snippet } from "../../core/searchQuery.js";
-import {
-  validateSearchTree,
-  type KeywordBlock,
-  type MethodBlocks,
-  type SemanticBlock,
-  type TreeNode,
-} from "../../core/searchTree.js";
+import { validateSearchTree, type TreeNode } from "../../core/searchTree.js";
 import {
   applyFieldProjection,
   ENTITY_NEIGHBOR_ALWAYS_FIELDS,
@@ -67,11 +33,9 @@ import { listSearchIndexStatuses } from "../indexing/status.js";
 import { loadSchema, type LoadedSchema } from "../schemaCache.js";
 import { deploymentMethods, offeredMethods, type SearchCapabilities } from "./availability.js";
 import { executeSearchTree, type TreeResult } from "./executor.js";
-import { relativeScore } from "./fusion.js";
-import { resolveSearchFilters } from "./request.js";
 
-export const SEARCH_MODES = ["semantic", "keyword", "hybrid"] as const;
-export type SearchMode = (typeof SEARCH_MODES)[number];
+/** The retriever's search modes. */
+export type SearchMode = "semantic" | "keyword" | "hybrid";
 
 /** What matched an entity: its best entry. */
 export interface Matched {
@@ -90,17 +54,6 @@ export interface Matched {
   /** A passage's place in its document. */
   charOffset: number | null;
   charLength: number | null;
-}
-
-/** One index to rank, with the exact filters on its root type. */
-export interface IndexTarget {
-  index: SearchIndexRecord;
-  conditions: FilterCondition[];
-  /** Relation types whose relation entries of this index count, on top of
-   * the request's `relations`; absent or null: no further restriction. */
-  relations?: readonly string[] | null;
-  /** Rank only these entities; absent or null: every entity. */
-  entityIds?: readonly string[] | null;
 }
 
 /** One index's part in an entity's hit: the entry that represents it and
@@ -126,17 +79,6 @@ export interface EngineHit {
   matched: { index: SearchIndexRecord; entry: RankedSearchEntry };
   /** Per index that found the entity, the matched mode's order first. */
   indices: IndexMatch[];
-}
-
-export interface EngineRequest {
-  targets: IndexTarget[];
-  query: string;
-  mode: SearchMode;
-  matching: KeywordMatching;
-  /** Relation types whose relation entries count; null: all the lens shows. */
-  relations: string[] | null;
-  minScore: number | null;
-  limit: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -263,33 +205,6 @@ export async function searchIndexCatalog(
 // The engine
 // ---------------------------------------------------------------------------
 
-/** Rank entities over the targets' active generations (module comment,
- * steps 2–4): the request compiles into a search tree, run by
- * `runSearchTree`. */
-export async function rankThroughIndices(
-  loaded: LoadedSchema,
-  indexStore: SearchIndexStore,
-  request: EngineRequest,
-): Promise<EngineHit[]> {
-  if (request.targets.length === 0) return [];
-  const tree = compileEntitySearch({
-    text: request.query,
-    targets: request.targets.map((target) => ({
-      index: target.index.key,
-      entityType: target.index.definition.entityType,
-      conditions: target.conditions,
-      entityIds: target.entityIds ?? null,
-      relations: target.relations ?? null,
-    })),
-    methods: methodBlocks(request),
-    relations: request.relations,
-    limit: request.limit,
-  });
-  const { hits } = await runSearchTree(loaded, indexStore, request.targets.map((target) => target.index), tree);
-  // One search: its hit is the entity's.
-  return hits.map((hit) => hit.provenance[0]!.hit!);
-}
-
 /** Run a search tree over `indices` — the ones the caller resolved
  * through the lens — once its rules hold. */
 export async function runSearchTree(
@@ -309,15 +224,6 @@ export async function runSearchTree(
     );
   }
   return executeSearchTree(loaded, indexStore, new Map(indices.map((index) => [index.key, index] as const)), tree);
-}
-
-/** The method blocks of a mode: keyword with the request's matching,
- * semantic with its floor. */
-function methodBlocks(request: EngineRequest): MethodBlocks {
-  const keyword: KeywordBlock = { match: request.matching };
-  const semantic: SemanticBlock = request.minScore === null ? {} : { minSimilarity: request.minScore };
-  if (request.mode === "hybrid") return { semantic, keyword };
-  return request.mode === "semantic" ? { semantic } : { keyword };
 }
 
 // ---------------------------------------------------------------------------
@@ -420,136 +326,7 @@ async function targetsOf(
   return targets;
 }
 
-// ---------------------------------------------------------------------------
-// Index search
-// ---------------------------------------------------------------------------
-
-export interface IndexSearchRequest {
-  /** Index keys; absent: every index the lens may search. */
-  indices?: string[] | null;
-  query: string;
-  /** Absent: the first available mode (hybrid with an embedding provider). */
-  mode?: SearchMode | null;
-  /** Relation types whose relation entries count; absent: all. */
-  relations?: string[] | null;
-  /** Exact filters, as the entity list's `filter.*` keys. */
-  filters?: Record<string, string>;
-  /** Floor on the best semantic entry, `(1 + cosine) / 2`, 0..1. */
-  minScore?: number | null;
-  /** Entities, 1..100; default 10. */
-  limit?: number;
-  /** Project each entity to these properties (`_id`, `_entityTypeKey`
-   * always kept); absent: every property the lens shows. */
-  fields?: string[] | null;
-}
-
-export interface IndexSearchHit {
-  entity: Row;
-  /** Ratio to the best hit's score in this response; never confidence. */
-  relativeScore: number;
-  matched: Matched;
-}
-
-export interface IndexSearchResponse {
-  query: string;
-  mode: SearchMode;
-  hits: IndexSearchHit[];
-}
-
 /** The search-index store behind a runtime store. */
 export function indexStoreOf(store: RuntimeStore): SearchIndexStore {
   return store.searchIndices();
-}
-
-/**
- * Search entities through chosen indices. An index the lens may not
- * search or that does not exist, an unknown relation type, an invalid
- * dimension -> validation error (collected, by field); a mode that needs
- * an embedding provider without one -> disabled feature.
- */
-export async function searchByIndices(
-  lensKey: string,
-  request: IndexSearchRequest,
-  store: RuntimeStore,
-): Promise<IndexSearchResponse> {
-  const indexStore = indexStoreOf(store);
-  const loaded = await loadSchema(lensKey, store);
-  const errors: Record<string, string> = {};
-
-  if (!request.query?.trim()) errors.query = "Required non-empty query";
-  const limit = request.limit ?? 10;
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
-    errors.limit = "Expected integer from 1 to 100";
-  }
-  const modes = availableModes(store);
-  const mode = request.mode ?? modes[0]!;
-  if (!(SEARCH_MODES as readonly string[]).includes(mode)) errors.mode = "Expected semantic, keyword or hybrid";
-  const minScore = request.minScore ?? null;
-  if (minScore !== null) {
-    if (!(typeof minScore === "number" && minScore >= 0 && minScore <= 1)) {
-      errors.minScore = "Expected number from 0 to 1";
-    } else if (mode === "keyword") {
-      errors.minScore = "minScore requires a mode that ranks semantically";
-    }
-  }
-
-  const searchable = await searchableIndices(loaded, indexStore);
-  let selected = searchable;
-  if (request.indices !== undefined && request.indices !== null) {
-    if (request.indices.length === 0) errors.indices = "Name at least one index, or omit indices";
-    // An unknown key answers as one the lens cannot search: the lens does
-    // not tell which indices exist beyond it.
-    request.indices.forEach((key, i) => {
-      if (!searchable.some((index) => index.key === key)) {
-        errors[`indices.${i}`] = `Search index '${key}' is not available in this lens`;
-      }
-    });
-    selected = searchable.filter((index) => request.indices!.includes(index.key));
-  }
-
-  const relations = request.relations ?? null;
-  relations?.forEach((key, i) => {
-    if (loaded.scoped.relationTypes[key] === undefined) {
-      errors[`relations.${i}`] = `Relation type '${key}' not found`;
-    }
-  });
-
-  const rootTypes = [...new Set(selected.map((index) => index.definition.entityType))]
-    .map((key) => [key, loaded.scoped.entityTypes[key]!] as [string, (typeof loaded.scoped.entityTypes)[string]])
-    .filter(([, def]) => def !== undefined);
-  const eligible = resolveSearchFilters(request.filters ?? {}, rootTypes, false, loaded, store, errors);
-  if (Object.keys(errors).length > 0) {
-    throw new ValidationError(Object.values(errors).join("; "), { fields: errors });
-  }
-  if (!modes.includes(mode)) {
-    throw new ValidationError(
-      `Search mode unavailable. Available modes: ${modes.join(", ")}`,
-      { code: "FEATURE_DISABLED" },
-    );
-  }
-
-  const conditions = new Map(eligible.map((type) => [type.entityTypeKey, type.conditions] as const));
-  const hits = await rankThroughIndices(loaded, indexStore, {
-    targets: selected
-      .filter((index) => conditions.has(index.definition.entityType))
-      .map((index) => ({ index, conditions: conditions.get(index.definition.entityType)! })),
-    query: request.query,
-    mode,
-    matching: "any",
-    relations,
-    minScore,
-    limit,
-  });
-  const entities = await readHitEntities(loaded, store, hits, request.fields);
-  const present = hits.filter((hit) => entities.has(hit.entityId));
-  const matched = await describeMatches(loaded, store, present);
-  return {
-    query: request.query,
-    mode,
-    hits: present.map((hit) => ({
-      entity: entities.get(hit.entityId)!,
-      relativeScore: relativeScore(hit.score, present[0]!.score),
-      matched: matched.get(hit.entityId)!,
-    })),
-  };
 }

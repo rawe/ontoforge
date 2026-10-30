@@ -212,16 +212,16 @@ that costs a caller is in
 
 **Search.** The runtime store declares whether search can rank by keyword — through its
 search-index store ([below](search-index-store.md#the-search-index-store)) — and declares path-condition
-support for all search strategies. The service ranks through the search-index store;
+support for every search method. The service ranks through the search-index store;
 fusion belongs above the port. Neither a bound store nor a query carries a language: a keyword generation stems in
 its own language set.
 Semantic scores are pinned to `(1 + cosine) / 2`, higher is better; arbitrary native
 scores must not be labeled semantic similarity. A keyword score is the number of distinct
 query words the entry contains plus, as a fraction below one, the adapter's native
 ranking measurement, higher is better
-([capabilities/search.md](../capabilities/search.md#ranking)); the runtime passes it through
-as evidence unchanged. A keyword-ranked entry establishes a positive match, while
-non-membership in a limited ranking establishes no negative evidence.
+([capabilities/search.md](../capabilities/search.md#ranking)). A keyword-ranked entry
+establishes a positive match, while non-membership in a limited ranking establishes no
+negative evidence.
 
 Saved-query discovery is a separate vector ranking over descriptions, scoped to one
 lens, with its own absolute score, limit and optional minimum score.

@@ -108,6 +108,16 @@ export async function checkEntitySearch(
   return { limit, targets, limitations };
 }
 
+/** The ranked entities of a request, before they are named: the engine's
+ * hits, best first, each with its score — comparable only within this
+ * ranking — and its entity as the lens shows it, every property. */
+export interface RankedEntities {
+  ran: SearchRepresentation[];
+  hits: EngineHit[];
+  entities: Map<string, Row>;
+  limitations: SearchLimitation[];
+}
+
 /** Rank entities for a query text (module comment). */
 export async function searchEntities(
   lensKey: string,
@@ -115,8 +125,20 @@ export async function searchEntities(
   store: RuntimeStore,
 ): Promise<EntitySearchResponse> {
   const loaded = await loadSchema(lensKey, store);
+  const { ran, hits, entities, limitations } = await rankEntities(loaded, request, store);
+  return { ran, items: await itemsOf(loaded, store, hits, entities), limitations };
+}
+
+/** The entity search up to its ranking: for callers inside the server
+ * that weigh the scores themselves (the navigator). An entity gone since
+ * the ranking is left out. */
+export async function rankEntities(
+  loaded: LoadedSchema,
+  request: EntitySearchRequest,
+  store: RuntimeStore,
+): Promise<RankedEntities> {
   const { limit, targets, limitations } = await checkEntitySearch(loaded, request, store);
-  if (targets.length === 0) return { ran: [], items: [], limitations };
+  if (targets.length === 0) return { ran: [], hits: [], entities: new Map(), limitations };
 
   const methods = methodsOf(request, store);
   const tree = compileEntitySearch({
@@ -136,8 +158,7 @@ export async function searchEntities(
   // One search: its hit is the entity's.
   const hits = result.hits.map((hit) => hit.provenance[0]!.hit!);
   const entities = await readHitEntities(loaded, store, hits, null);
-  const present = hits.filter((hit) => entities.has(hit.entityId));
-  return { ran: result.ran, items: await itemsOf(loaded, store, present, entities), limitations };
+  return { ran: result.ran, hits: hits.filter((hit) => entities.has(hit.entityId)), entities, limitations };
 }
 
 /** The indices the request's scope selects, in key order, and the types

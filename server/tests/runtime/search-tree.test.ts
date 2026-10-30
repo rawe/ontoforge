@@ -1,5 +1,5 @@
 /**
- * The search tree at run time: the trees today's searches compile into
+ * The search tree at run time: the trees the entity search compiles into
  * (canonical printouts), and the executor against a fake search-index
  * store — single-method raw scores, fusion and its one tie rule,
  * `matched`, the refetch per cut, the similarity floor, restrictions
@@ -28,9 +28,8 @@ import {
   type TreeNode,
 } from "../../src/core/searchTree.js";
 import { invalidateLoadedSchemaCache, type LoadedSchema } from "../../src/runtime/schemaCache.js";
-import { search } from "../../src/runtime/search/entry.js";
+import { searchEntities } from "../../src/runtime/search/entitySearch.js";
 import { executeSearchTree } from "../../src/runtime/search/executor.js";
-import { searchByIndices } from "../../src/runtime/search/indexSearch.js";
 import { createMockRuntimeStore, makeUnscopedSchema, withManagedIndices } from "./helpers.js";
 
 // Every tree the searches compile, as they compile it.
@@ -51,7 +50,7 @@ const MODEL = "fake:hash:2";
 
 afterEach(() => setEmbeddingProvider(null));
 
-describe("the trees today's searches compile", () => {
+describe("the trees the entity search compiles", () => {
   const INDEX_SCHEMA: SearchIndexSchema = {
     entityTypes: {
       person: {
@@ -91,8 +90,8 @@ describe("the trees today's searches compile", () => {
     withManagedIndices(store, INDEX_SCHEMA, MODEL, () => []);
   });
 
-  it("the default search: hybrid over the default index of each type and the passage index", async () => {
-    await search("full_lens", { query: "machine learning" }, store);
+  it("without scope or blocks: hybrid over the default index of each type and the passage index", async () => {
+    await searchEntities("full_lens", { query: "machine learning" }, store);
     expect(printSearchTree(compiled.trees[0] as TreeNode)).toBe(
       [
         "cut(limit 10)",
@@ -100,21 +99,21 @@ describe("the trees today's searches compile", () => {
         "   ├─ group(entity)",
         "   │  └─ merge",
         '   │     ├─ semanticSearch(person~default, "machine learning")',
-        '   │     ├─ semanticSearch(company~default, "machine learning")',
-        '   │     └─ semanticSearch(person~body, "machine learning")',
+        '   │     ├─ semanticSearch(person~body, "machine learning")',
+        '   │     └─ semanticSearch(company~default, "machine learning")',
         "   └─ group(entity)",
         "      └─ merge",
         '         ├─ keywordSearch(person~default, "machine learning", match any)',
-        '         ├─ keywordSearch(company~default, "machine learning", match any)',
-        '         └─ keywordSearch(person~body, "machine learning", match any)',
+        '         ├─ keywordSearch(person~body, "machine learning", match any)',
+        '         └─ keywordSearch(company~default, "machine learning", match any)',
       ].join("\n"),
     );
   });
 
-  it("an index search by keyword with a filter: the filter as a filter node per type", async () => {
-    await searchByIndices(
+  it("named indices by keyword with a filter: the filter as a filter node per type", async () => {
+    await searchEntities(
       "full_lens",
-      { query: "acme", indices: ["person~default", "company~default"], mode: "keyword", filters: { name: "ACME" } },
+      { query: "acme", indices: ["person~default", "company~default"], keyword: {}, filter: { name: "ACME" } },
       store,
     );
     expect(printSearchTree(compiled.trees[0] as TreeNode)).toBe(
@@ -131,10 +130,10 @@ describe("the trees today's searches compile", () => {
     );
   });
 
-  it("a semantic default search of one type's own fields with a floor", async () => {
-    await search(
+  it("a semantic search of one type's own fields with a floor", async () => {
+    await searchEntities(
       "full_lens",
-      { query: "ada", type: "person", in: ["properties"], strategy: "semantic", minSimilarity: 0.75 },
+      { query: "ada", indices: ["person~default"], semantic: { minSimilarity: 0.75 } },
       store,
     );
     expect(printSearchTree(compiled.trees[0] as TreeNode)).toBe(

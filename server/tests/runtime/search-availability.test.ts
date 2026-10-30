@@ -1,8 +1,7 @@
 /**
  * Availability (`runtime/search/availability.ts`): which methods the
  * deployment can run, and per index × method whether a search node runs —
- * on which generation — or why not; the old routes' vocabularies derived
- * from it.
+ * on which generation — or why not; the retriever's modes derived from it.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,7 +11,6 @@ import type { SearchGenerationRecord, SearchIndexRecord } from "../../src/core/p
 import { SearchIndexDefinition } from "../../src/core/searchIndex.js";
 import { deploymentMethods, indexAvailability, offeredMethods } from "../../src/runtime/search/availability.js";
 import { availableModes } from "../../src/runtime/search/indexSearch.js";
-import { availableStrategies } from "../../src/runtime/search/strategies.js";
 
 const MODEL = "fake:hash:2";
 const install = (modelId = MODEL) =>
@@ -68,13 +66,10 @@ describe("the deployment", () => {
     expect(deploymentMethods(store(false))).toEqual(["semantic"]);
   });
 
-  it("derives the old routes' strategies and modes, in their preference order", () => {
-    expect(availableStrategies(store(true))).toEqual(["keyword", "keyword-any", "keyword-all"]);
+  it("derives the retriever's modes, in their preference order", () => {
     expect(availableModes(store(true))).toEqual(["keyword"]);
     install();
-    expect(availableStrategies(store(true))).toEqual(["hybrid", "keyword", "keyword-any", "keyword-all", "semantic"]);
     expect(availableModes(store(true))).toEqual(["hybrid", "keyword", "semantic"]);
-    expect(availableStrategies(store(false))).toEqual(["semantic"]);
     expect(availableModes(store(false))).toEqual(["semantic"]);
   });
 });

@@ -86,7 +86,7 @@ export function createClient({ baseUrl, ontology, lens, token }) {
   };
 
   return {
-    /** Deployment: { baseUrl, version } and { semanticSearch, searchStrategies, ai, decisions }. */
+    /** Deployment: { baseUrl, version } and { semanticSearch, rankedSearch, ai, decisions }. */
     serverInfo: () => json('GET', '/api/server/info'),
     features: () => json('GET', '/api/server/features'),
 

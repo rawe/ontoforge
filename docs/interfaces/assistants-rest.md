@@ -114,7 +114,7 @@ events, which carry:
 | `modelIO` | Bounded system prompt, input and output traces of every model call, each with its `phase` — `plan`, `replan` for a follow-up's repeated planning, `answer` — and with usage and finish reason where the provider reports them |
 | `llmCalls` | The number of model calls: 2, or 3 when planning was repeated |
 
-`matched` has the form of a search hit's ([capabilities/search.md](../capabilities/search.md#response)).
+`matched` has the form [capabilities/search.md](../capabilities/search.md#what-matched) describes.
 
 **Read a thread.** As [shared](#assistant-chat-and-threads).
 

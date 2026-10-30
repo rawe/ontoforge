@@ -3,8 +3,8 @@
 A retriever answers questions over one lens's [search indices](search-indices.md).
 It is a stored configuration: which indices it searches, which exact filters a question
 may set, which fields the answer may cite and how strict semantic matching is. A question
-runs a fixed pipeline — a planning model turns it into searches, the index search runs
-them, an answer model writes the reply from what they found. Questions form a
+runs a fixed pipeline — a planning model turns it into searches, the server runs them over
+the retriever's indices, an answer model writes the reply from what they found. Questions form a
 conversation held by the server as a [thread](threads.md). A question can also be
 [retrieved](#retrieve) instead: planned and searched, returning the found entities
 without an answer. Saving a retriever stores the configuration only: no per-retriever
@@ -47,8 +47,8 @@ index ([search-indices.md](search-indices.md#relation-groups)). A filter is the 
 structural counterpart: it compares a stored value and reaches up to two hops, further
 than a relation group's one.
 
-The threshold is the cosine of the embedding model; the index search measures similarity
-as `(1 + cosine) / 2`, so the retriever searches with that floor
+The threshold is the cosine of the embedding model; search measures similarity as
+`(1 + cosine) / 2`, so the retriever searches with that floor
 ([search.md](search.md#similarity-floor)). It removes semantic matches below it, never a
 keyword match, and only in a search that no filter or previous reference restricts
 ([below](#retrieval)). It is a model-specific cut-off, not a confidence.
@@ -186,7 +186,7 @@ planned twice.
 
 ### Retrieval
 
-Each sub-query runs its query and each variant as one index search over its indices, in
+Each sub-query runs its query and each variant as one search over its indices, in
 the server, at most 30 entities each. Own-field and passage entries always count; of the
 relation entries only those of the chosen relation types — the retriever's subset when the
 plan names none. In a sub-query without filters or a previous reference, semantic
@@ -248,7 +248,7 @@ filters, not its query. It lists every supplied record for a pure exact list, ex
 `unsupportedReason` as a data gap and respects every limitation. It states facts in plain
 words — never sub-queries, filter ids or paths, index keys or entity ids — and tells
 results with the same name apart by their fields. Search evidence does not prove that a
-result fits ([search evidence](search.md#response)).
+result fits ([what matched](search.md#what-matched)).
 
 ### Follow-up questions
 
@@ -282,7 +282,7 @@ answers; how many: [../architecture.md](../architecture.md#thread-store).
 On request, the stream also reports what the retriever did: the validated plan — each
 planned filter with its definition, so the plan reads without the configuration — one result
 row per entity and sub-query with what matched and its answer fields, the limitations,
-the number of index searches, phase timings and bounded traces of every model call —
+the number of searches, phase timings and bounded traces of every model call —
 the plan, a repeated plan, the answer. Diagnostics are for debugging: they are sent only
 when a question asks for them, and any question may. Progress — which phase runs — and
 the answer text are always streamed. The event format is in [../interfaces/](../interfaces/assistants-rest.md#retriever-list-chat-and-retrieve).
@@ -310,7 +310,7 @@ property's value, or none — and two independent facts:
   words from the lens's display names, as the answer model receives it ("reported by
   Customer Name: Acme"). The server compared the stored value.
 - **Matched** — the text match of the first sub-query, in plan order, that ranked the
-  entity, in the form of a search hit's ([search.md](search.md#response)); none when every
+  entity, in the form [search.md](search.md#what-matched) describes; none when every
   sub-query only listed it. The entry text is withheld where the index reads properties
   the lens hides.
 

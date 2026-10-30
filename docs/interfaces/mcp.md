@@ -10,7 +10,7 @@ servers: no client reaches both through one MCP connection.
 |---|---|---|
 | Mount | `/mcp/ontologies/{ontologyKey}/model` | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` |
 | Bound to | One ontology | One ontology and one lens |
-| Tools | 45 | 35; 36 on a ruleset mount, 35 with write access `propose`, 20 with `none` or for a Reader; 34 for a Proposer, 35 on a ruleset mount |
+| Tools | 45 | 34; 35 on a ruleset mount, 34 with write access `propose`, 19 with `none` or for a Reader; 33 for a Proposer, 34 on a ruleset mount |
 | Sign-in, authentication on | Bearer token of an Ontology Administrator | Bearer token of a Reader, Proposer or Writer on the lens |
 
 ## How a mount is bound
@@ -126,10 +126,9 @@ Everything a client can do to instance data through one lens.
 | `delete_relation` | Delete a relation |
 | `get_neighbors` | An entity's local neighbourhood, with projection on both entities and relations |
 | `execute_query` | Run a read-only OQL query |
-| `list_search_indices` | The lens's search catalog, to choose indices for `search_by_index` |
-| `search` | Rank entities by properties and documents, using the default strategy and the fixed similarity floor |
-| `search_documents` | Rank entities by document passages under the same defaults; optionally restrict to one property |
-| `search_by_index` | Rank entities through the named search indices, or every index of the lens, under the default mode and the same fixed floor |
+| `list_search_indices` | The lens's search catalog, to choose indices for `search` and `search_documents` |
+| `search` | The entity search: rank entities for a text, under the fixed similarity floor |
+| `search_documents` | The passage search: rank passages of documents for a text, under the same floor |
 | `list_saved_queries` | Discover saved queries and their parameters |
 | `run_saved_query` | Execute a saved query with parameter values |
 | `search_saved_queries` | Find a saved query by describing what it should do |
@@ -165,18 +164,18 @@ An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
 `search_saved_queries`. Every write tool is outside that set, and so are the read-only
 `get_relation`, `get_path`, `get_ruleset`, `list_changesets`, `get_changeset` and
 `get_staged_document` — being
-read-only is not sufficient to be grantable. The two search tools
-return the default search's envelope and take no strategy and no similarity floor; they apply the
-fixed floor of [capabilities/search.md](../capabilities/search.md#similarity-floor) whenever
-the default strategy ranks semantically, echoed as `minSimilarity`. MCP also accepts
-filters and fields. See [capabilities/agents.md](../capabilities/agents.md).
+read-only is not sufficient to be grantable. `search` runs the
+[entity search](../capabilities/search.md#entity-search) and answers its response; it takes
+`query`, `types`, `filters` and `limit`, and on MCP `indices` instead of `types`.
+`search_documents` runs the [passage search](../capabilities/search.md#passage-search) and
+answers its response; it takes `query`, `types` or `documents`, `filters`, `limit`,
+`per_entity` and `text`, and on MCP `indices` instead of `types` or `documents`. Agents
+take no `indices`: they see no index keys. Neither tool takes a method block or a
+similarity floor: they run what can run, semantic under the fixed floor of
+[capabilities/search.md](../capabilities/search.md#similarity-floor). See
+[capabilities/agents.md](../capabilities/agents.md).
 
-`search_by_index` runs the index search, on MCP only. It takes `query`,
-`index` — one index key or a list, absent for every index the lens can search —
-`relations`, `limit`, `filters` and `fields`, but no mode and no `minScore`: it runs the
-default mode under the same fixed floor and answers `query`, `mode`, `minSimilarity` and
-`hits`. `list_search_indices` answers the catalog of `GET /search-indices`. Agents have
-neither.
+`list_search_indices` answers the catalog of `GET /search-indices`, on MCP only.
 
 `write_document` has no REST counterpart of its own: over REST both document edit forms
 share one route, selected by the operation in the body.

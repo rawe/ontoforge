@@ -1,12 +1,20 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { FileText } from 'lucide-react'
 import { useSearchCatalog } from '@/api/hooks'
 import type {
   EntitySearchItem,
   EntitySearchResponse,
+  PassageSearchItem,
+  PassageSearchResponse,
   Representation,
   RuntimeSchema,
   SearchLimitation,
 } from '@/api/types'
+import {
+  DocumentViewerDialog,
+  type DocumentViewerTarget,
+} from '@/components/DocumentViewerDialog'
 import { IdentityText } from '@/components/IdentityText'
 import { TypeChip } from '@/components/TypeChip'
 import { identityText } from '@/lib/displayLabel'
@@ -168,6 +176,123 @@ export function EntitySearchResult({
           ))}
         </ol>
       )}
+    </div>
+  )
+}
+
+/** One item of the passage search: rank, type, name with identity, the
+ * document — which opens the passage's document — and the passage's text. */
+export function PassageSearchItemRow({
+  ontologyKey,
+  lensKey,
+  schema,
+  item,
+  onOpen,
+}: {
+  ontologyKey: string
+  lensKey: string
+  schema: RuntimeSchema
+  item: PassageSearchItem
+  onOpen: (target: DocumentViewerTarget) => void
+}) {
+  const { entity, passage } = item
+  const type = schema.entityTypes.find((t) => t.key === entity._entityTypeKey)
+  const property = type?.properties.find((p) => p.key === passage.property)
+  return (
+    <li className="flex gap-3 px-4 py-2.5">
+      <span className="w-6 shrink-0 pt-0.5 text-right font-mono text-[11px] text-muted-foreground tabular-nums">
+        {item.rank}
+      </span>
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <TypeChip
+            typeKey={entity._entityTypeKey}
+            displayName={type?.displayName ?? entity._entityTypeKey}
+            size="sm"
+          />
+          <Link
+            to={entityLink(ontologyKey, lensKey, entity)}
+            className="truncate text-[13px] font-medium hover:underline"
+          >
+            {entityLabel(entity)}
+          </Link>
+          {entity.identity !== undefined && <IdentityText identity={identityText(entity.identity)} />}
+          {property !== undefined ? (
+            <button
+              type="button"
+              onClick={() =>
+                onOpen({
+                  entityTypeKey: entity._entityTypeKey,
+                  entityId: entity._id,
+                  entityLabel: entityLabel(entity),
+                  property,
+                  length: passage.charOffset + passage.charLength,
+                })
+              }
+              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+            >
+              <FileText className="size-3" />
+              {property.displayName}
+            </button>
+          ) : (
+            <span className="font-mono text-[11px] text-muted-foreground">{passage.property}</span>
+          )}
+        </div>
+        {passage.text !== undefined && (
+          <p className="whitespace-pre-wrap text-[12px] leading-relaxed">{passage.text}</p>
+        )}
+      </div>
+    </li>
+  )
+}
+
+/** A passage search response as Advanced search shows it: the summary, then
+ * the ranked passages; a passage's document opens in the document viewer. */
+export function PassageSearchResult({
+  ontologyKey,
+  lensKey,
+  schema,
+  response,
+}: {
+  ontologyKey: string
+  lensKey: string
+  schema: RuntimeSchema
+  response: PassageSearchResponse
+}) {
+  const [viewer, setViewer] = useState<DocumentViewerTarget | null>(null)
+  return (
+    <div className="space-y-2">
+      <SearchSummary
+        ontologyKey={ontologyKey}
+        lensKey={lensKey}
+        schema={schema}
+        mode="passages"
+        response={response}
+      />
+      {response.items.length === 0 ? (
+        <p className="rounded-xl border bg-card p-6 text-center text-[13px] text-muted-foreground">
+          Nothing found.
+        </p>
+      ) : (
+        <ol className="divide-y overflow-hidden rounded-xl border bg-card">
+          {response.items.map((item) => (
+            <PassageSearchItemRow
+              key={`${item.entity._id}/${item.passage.property}/${item.passage.ordinal}`}
+              ontologyKey={ontologyKey}
+              lensKey={lensKey}
+              schema={schema}
+              item={item}
+              onOpen={setViewer}
+            />
+          ))}
+        </ol>
+      )}
+      <DocumentViewerDialog
+        ontologyKey={ontologyKey}
+        lensKey={lensKey}
+        target={viewer}
+        onClose={() => setViewer(null)}
+      />
     </div>
   )
 }

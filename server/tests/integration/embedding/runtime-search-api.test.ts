@@ -1,9 +1,9 @@
 /**
- * The runtime index search with real embeddings (bge-m3): the MCP tool
- * `search_by_index` over a custom index with a relation group created
- * through the modeling API — "CTO ACME" finds the CTO of ACME through
- * that very employment, "CTO Foo" the CTO of Foo through his — hybrid as
- * the default mode under the tools' fixed floor, a German query finding an
+ * Search through named indices with real embeddings (bge-m3): the MCP
+ * tool `search` with `indices` over a custom index with a relation group
+ * created through the modeling API — "CTO ACME" finds the CTO of ACME
+ * through that very employment, "CTO Foo" the CTO of Foo through his —
+ * both methods under the tools' fixed floor, a German query finding an
  * English passage, and the catalog `GET search-indices` offering both
  * modes. PostgreSQL only; SKIPPED when Ollama or the model is unavailable.
  */
@@ -18,7 +18,6 @@ import { closeStores, initStores } from "../../../src/core/ports.js";
 import { createRuntimeMcpServer } from "../../../src/mcp/runtime.js";
 import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
-import { TOOL_MIN_SIMILARITY } from "../../../src/runtime/search/strategies.js";
 import { wipeDatabase } from "../reset.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
 
@@ -29,7 +28,7 @@ const O = "runtime_search_emb";
 const MODEL = `/api/ontologies/${O}/model`;
 const RUNTIME = `/api/ontologies/${O}/runtime/lenses/all`;
 
-describe.skipIf(!ollamaUp)("runtime index search (Ollama)", () => {
+describe.skipIf(!ollamaUp)("search through named indices (Ollama)", () => {
   let app: FastifyInstance;
   const ids: Record<string, string> = {};
 
@@ -39,14 +38,14 @@ describe.skipIf(!ollamaUp)("runtime index search (Ollama)", () => {
     return res.json();
   }
 
-  /** `search_by_index`'s answer; the call must succeed. */
+  /** `search`'s answer; the call must succeed. */
   async function search(args: object): Promise<Row> {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await createRuntimeMcpServer(O, "all").connect(serverTransport);
     const client = new Client({ name: "runtime-search-api-embedding", version: "0.0.1" });
     await client.connect(clientTransport);
     try {
-      const result = (await client.callTool({ name: "search_by_index", arguments: { ...args } })) as {
+      const result = (await client.callTool({ name: "search", arguments: { ...args } })) as {
         content: { text: string }[];
         isError?: boolean;
       };
@@ -134,29 +133,29 @@ describe.skipIf(!ollamaUp)("runtime index search (Ollama)", () => {
     await closeStores();
   });
 
-  it("hybrid, the default mode under the fixed floor: each employment pairs with its own company", async () => {
-    const acme = await search({ query: "CTO ACME", index: "person_employment" });
-    expect(acme).toMatchObject({ mode: "hybrid", minSimilarity: TOOL_MIN_SIMILARITY });
-    expect(acme.hits[0]).toMatchObject({
+  it("both methods under the fixed floor: each employment pairs with its own company", async () => {
+    const acme = await search({ query: "CTO ACME", indices: ["person_employment"] });
+    expect(acme.ran).toEqual(["semantic", "keyword"]);
+    expect(acme.items[0]).toMatchObject({
       entity: { _id: ids["Ada Lovelace"] },
-      matched: {
-        partKind: "relation",
-        relationId: ids["Ada Lovelace@ACME"],
-        target: { id: ids["ACME"], type: "company", label: "ACME" },
+      match: {
+        part: "relation",
+        relationType: "works_for",
+        target: { _id: ids["ACME"], _entityTypeKey: "company", name: "ACME" },
       },
     });
-    const foo = await search({ query: "CTO Foo", index: "person_employment" });
-    expect(foo.hits[0]).toMatchObject({
+    const foo = await search({ query: "CTO Foo", indices: ["person_employment"] });
+    expect(foo.items[0]).toMatchObject({
       entity: { _id: ids["Bob Miller"] },
-      matched: { relationId: ids["Bob Miller@Foo"] },
+      match: { target: { _id: ids["Foo"] } },
     });
   });
 
-  it("hybrid crosses languages: a German query finds the English passage", async () => {
-    const body = await search({ query: "Bienenzucht im Garten", index: "person~bio" });
-    expect(body.hits[0]).toMatchObject({
+  it("both methods cross languages: a German query finds the English passage", async () => {
+    const body = await search({ query: "Bienenzucht im Garten", indices: ["person~bio"] });
+    expect(body.items[0]).toMatchObject({
       entity: { _id: ids["Bob Miller"] },
-      matched: { index: "person~bio", partKind: "passage", charOffset: 0 },
+      match: { index: "person~bio", part: "passage", property: "bio", charOffset: 0 },
     });
   });
 

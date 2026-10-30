@@ -12,7 +12,7 @@ for questions, which is remembered.
 
 | Prefix | Mode | Behaviour |
 |---|---|---|
-| *(none)* | Entities | Cross-type entity search — ranked under the server's default strategy when any strategy is available, otherwise a parallel substring search over every exposed type. Starts at two characters; below that it shows recents or a hint. |
+| *(none)* | Entities | Cross-type entity search — ranked when the server can run ranked search, otherwise a parallel substring search over every exposed type. Starts at two characters; below that it shows recents or a hint. |
 | `#` | Types | Filter the exposed entity types; choosing one *scopes* the palette to that type rather than navigating. |
 | `?` | Saved queries | Semantic search over query descriptions when available, substring filtering over the full list otherwise. An empty query lists everything. |
 | `>` | Actions | Navigation to each Workbench area, the Studio, and a theme toggle. |
@@ -27,7 +27,7 @@ label, the entity's identity beside it where it has one, and, when the hit was f
 [matched via](#matched-via) line beneath. No number, score bar, percentage, numeric aria
 label or passage text is displayed. The relation target picker uses the same search hook
 and row; its empty input lists the first ten entities. Both use ranked search whenever
-the strategy list is nonempty, falling back to literal entity lists otherwise. Enter
+the server can run it, falling back to literal entity lists otherwise. Enter
 opens entity detail; Cmd/Ctrl+Enter focuses the Explorer.
 
 ### Question mode
@@ -57,8 +57,8 @@ the [working set](#working-set) and opens the Explorer.
 
 ## Matched via
 
-Search results never show a score: it would be read as relevance or confidence, which a
-relative score is not. Where the server names the entry that found a hit
+Search results never show a score: the server gives only the order, which is no measure
+of relevance or confidence. Where the server names the entry that found a hit
 ([capabilities/search.md](../capabilities/search.md#entity-search)), a hit found through a
 relation or a passage carries one short line:
 

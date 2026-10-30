@@ -333,9 +333,10 @@ lens can search, by key.
   `custom`), `name`, `description`, `entityType`, `fields`, `relations` (each
   `{relationType, direction, label}`), `documentProperty`, `modes` and `status`.
 
-MCP has search tools of its own — `search`, `search_documents`, `search_by_index` and
-`list_search_indices` — with their own arguments and response; they take no similarity
-floor from the caller and apply a fixed one of 0.75 whenever they rank semantically.
+MCP has search tools of its own — `search` runs the entity search, `search_documents` the
+passage search, `list_search_indices` lists the catalog — with snake_case arguments and the
+routes' responses; they take no method blocks: they run what can run, semantic under a
+fixed similarity floor of 0.75.
 
 ## Read-Only OQL Query
 
@@ -514,7 +515,7 @@ Both describe the deployment, not any ontology — they take no ontology and no 
   when none is configured), `version` (the server's release version)
 
 - `GET /api/server/features`
-  Response fields: `semanticSearch`, `searchStrategies`, `ai`, `decisions`
+  Response fields: `semanticSearch`, `rankedSearch`, `ai`, `decisions`
 
 Semantic search and the AI routes depend on external providers and are unavailable unless
 one is configured. Call this **before** offering either, rather than relying on the

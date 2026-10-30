@@ -19,7 +19,8 @@ export interface ServerInfo {
 }
 
 export interface Features {
-  searchStrategies: SearchStrategy[]
+  /** Ranked search runs: the store ranks by keyword, or an embedding provider is installed. */
+  rankedSearch: boolean
   semanticSearch: boolean
   ai: boolean
 }
@@ -414,38 +415,6 @@ export interface StagedAnswer {
 }
 
 /* ------------------------------ runtime — search ----------------------------- */
-
-export type SearchStrategy = 'semantic' | 'keyword' | 'keyword-any' | 'keyword-all' | 'hybrid'
-export interface SearchEvidence {
-  /** Original (1 + cosine) / 2 measurement, not confidence; null is unmeasured. */
-  semanticSimilarity: number | null
-  /** True for a native keyword match; null is unknown, including limited-list absence. */
-  keywordMatch: boolean | null
-  /** The entry's keyword score: distinct query words matched plus, as a fraction below
-   * one, the native full-text rank (docs/capabilities/search.md#ranking). A number exactly
-   * when keywordMatch is true; no fixed upper bound; not comparable to semanticSimilarity. */
-  keywordScore: number | null
-}
-export type SearchMatch = {
-  kind: 'properties'; evidence: SearchEvidence
-} | {
-  kind: 'document'; propertyKey: string; charOffset: number; charLength: number; evidence: SearchEvidence
-}
-export interface SearchHit {
-  entity: EntityInstance
-  /** 1.0 for the best hit; comparable only within this response.
-   * One unfused ranking uses source scores; hybrid sums reciprocal ranks.
-   * Cross-kind fusion uses the best rank contribution for multiple searched types,
-   * and sum for one searched type. Cross-type ties prefer best returned similarity
-   * only when all tied hits have a measurement; otherwise they stay stable.
-   * A tie does not prove equal relevance.
-   * Never indicates confidence or whether the best hit is good.
-   */
-  relativeScore: number
-  matches: SearchMatch[]
-  /** The entry the hit was found by. */
-  matched?: Matched
-}
 
 /** Which entry of which search index a hit was found by. */
 export interface Matched {

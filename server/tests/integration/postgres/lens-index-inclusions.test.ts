@@ -21,7 +21,7 @@ import { ValidationError } from "../../../src/core/exceptions.js";
 import { closeStores, getRuntimeStore, getSearchIndexStore, initStores } from "../../../src/core/ports.js";
 import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
-import { searchByIndices } from "../../../src/runtime/search/indexSearch.js";
+import { searchEntities } from "../../../src/runtime/search/entitySearch.js";
 import { fakeEmbeddingProvider } from "../../fakeEmbedding.js";
 import { wipeDatabase } from "../reset.js";
 
@@ -132,12 +132,12 @@ describe("lens index inclusions", () => {
    * error status when the index is not searchable there. */
   async function search(lensKey: string, query: string): Promise<string[] | number> {
     try {
-      const response = await searchByIndices(
+      const response = await searchEntities(
         lensKey,
-        { query, indices: [EMPLOYMENT.key], mode: "keyword" },
+        { query, indices: [EMPLOYMENT.key], keyword: {} },
         await getRuntimeStore(O),
       );
-      return response.hits.map((hit) => hit.entity._id as string);
+      return response.items.map((item) => item.entity._id);
     } catch (error) {
       if (error instanceof ValidationError) return 422;
       throw error;

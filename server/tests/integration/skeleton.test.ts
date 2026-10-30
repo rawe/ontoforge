@@ -62,8 +62,7 @@ describe("features route on a fully booted server", () => {
         semanticSearch: false,
         ai: false,
         decisions: false,
-        searchStrategies:
-          ["keyword", "keyword-any", "keyword-all"],
+        rankedSearch: true,
       });
     } finally {
       await shutdownServer(app);

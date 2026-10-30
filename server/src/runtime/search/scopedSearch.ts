@@ -28,7 +28,7 @@ import type { LoadedSchema } from "../schemaCache.js";
 import { deploymentMethods } from "./availability.js";
 import type { Limitation, TreeHit } from "./executor.js";
 import { indexStoreOf, runSearchTree } from "./indexSearch.js";
-import { resolveSearchFilters } from "./request.js";
+import { resolveSearchFilters } from "./filters.js";
 
 /** The request fields both searches share. */
 export interface ScopedSearchRequest {
@@ -160,11 +160,9 @@ export function filteredTargets(
   const eligible = resolveSearchFilters(
     request.filter ?? {},
     scopeTypes.map((key) => [key, loaded.scoped.entityTypes[key]!]),
-    false,
     loaded,
     store,
     filterErrors,
-    { pathsDropOut: true },
   );
   for (const [key, message] of Object.entries(filterErrors)) errors[`filter.${key}`] = message;
 

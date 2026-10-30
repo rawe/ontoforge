@@ -197,15 +197,8 @@ in the schema, whereas a neighbour is an instance in a traversal result.
 
 **Query** — the plain text submitted to ranked search.
 
-**Default search** — ranked search over the managed indices of the searched types,
-selected by search kind and search strategy.
-
-**Index search** — ranked search through search indices named by key, or every index the
-lens can search, selected by a mode: `semantic`, `keyword` or `hybrid`. It alone ranks
-custom indices and relation entries.
-
 **Search catalog** — the list of search indices a lens can search, each projected
-through the lens, from which an index search chooses.
+through the lens, from which a search's `indices` are chosen.
 
 **Literal term** — the entity list's case-insensitive substring filter over string values.
 
@@ -215,21 +208,9 @@ through the lens, from which an index search chooses.
 
 **Searched types** — the one-or-many type set one search ranks.
 
-**Search kind** — the ranked unit and match: property search or document search.
-
-**Property search** — ranking entities by the entries of their types' default indices.
-
-**Document search** — ranking passages through passage indices and grouping them by
-parent entity.
-
-**Search strategy** — what a caller selects: it uses one retrieval method directly or
-fuses several by rank. The strategies are `semantic`, `keyword`, `keyword-any`,
-`keyword-all` and `hybrid`; requirements decide whether a strategy is available, and
-the applied strategy is named in the response.
-
 **Retrieval method** — how one source ranking is produced from storage: semantic ranking,
 any-term keyword matching or all-term keyword matching. Rank fusion combines source rankings
-at the strategy level and is not a retrieval method.
+and is not a retrieval method.
 
 **Any-term keyword matching** — a row matches when it carries any query term, each term also
 matching as a prefix; rank order carries the rest.
@@ -242,11 +223,11 @@ of the ontology's keyword language set.
 
 **Source ranking** — the ordered list one retrieval method returns for one search index.
 
-**Hit** — one entity in a search result with its matches, relative score and the entry
-that matched it best.
+**Item** — one entity (entity search) or one passage (passage search) of a search result,
+with its rank; no score.
 
-**Match** — a place the query met the entity: an entity match names the entity as a whole;
-a passage match names a document property and its best passage's coordinates.
+**Match** — the entry that found an entity in the entity search: its own fields, one
+relation with the entity at its other end, or one passage.
 
 **Search index** — an ontology-level design object deciding what ranked search finds
 entities by: a root entity type, the text composed for each of its entities, and its
@@ -287,15 +268,11 @@ ontology's keyword entries and queries are stemmed. A setting of the ontology's 
 edited in modeling; a new ontology starts with both. See
 [capabilities/search.md](capabilities/search.md#keyword-language).
 
-**Relative score** — 1.0 for the best hit and each other hit's ordering number as a fraction
-of the best, comparable only within that response. See [search](capabilities/search.md#response)
-for the promise about its shape.
-
 **Search request / operation** — the common request object and service operation used by every
 search caller.
 
-**Search tool / document search tool** — `search` / `search_documents`, choosing both kinds
-or documents only, with the default strategy.
+**Search tool / document search tool** — `search` / `search_documents`, the entity search
+and the passage search for MCP clients and agents, run under a fixed similarity floor.
 
 **Search step** — a saved-query step running the entity search.
 

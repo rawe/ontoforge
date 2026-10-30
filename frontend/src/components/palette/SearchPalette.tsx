@@ -219,7 +219,7 @@ function PaletteContent({
     lensKey,
     q: mode === 'entities' ? debouncedQ : '',
     typeKey: scopedType ?? undefined,
-    ranked: (features?.searchStrategies.length ?? 0) > 0,
+    ranked: features?.rankedSearch === true,
     allTypeKeys: entityTypes.map((t) => t.key),
     enabled: entitySearchEnabled,
   })

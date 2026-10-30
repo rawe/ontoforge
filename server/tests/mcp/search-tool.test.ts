@@ -1,10 +1,10 @@
 /**
- * The runtime MCP search tools: `search_by_index` runs the index search —
- * `index` (one key or a list, absent for all), `relations`, the filters, the
- * clamped limit, the projection and the tools' fixed similarity floor —
- * while `search` and `search_documents` run only the default search.
- * `list_search_indices` returns the lens's catalog. The services are
- * stubbed; an in-memory client calls the tools.
+ * The runtime MCP search tools: `search` runs the entity search and
+ * `search_documents` the passage search — the scope, the filters as text,
+ * the clamped limit, the passage options and, with an embedding provider,
+ * both method blocks under the tools' fixed similarity floor — and answer
+ * with the search's response. `list_search_indices` returns the lens's
+ * catalog. The services are stubbed; an in-memory client calls the tools.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -14,8 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
 
 const stubs = vi.hoisted(() => ({
-  searchByIndices: vi.fn(),
-  search: vi.fn(),
+  searchEntities: vi.fn(),
+  searchPassages: vi.fn(),
   searchIndexCatalog: vi.fn(),
 }));
 vi.mock("../../src/runtime/service.js", () => stubs);
@@ -37,9 +37,11 @@ async function call(name: string, args: Record<string, unknown>): Promise<ToolCa
   return (await client.callTool({ name, arguments: args })) as unknown as ToolCallResult;
 }
 
+const RESPONSE = { ran: ["semantic", "keyword"], items: [], limitations: [] };
+
 beforeEach(async () => {
-  stubs.searchByIndices.mockReset().mockResolvedValue({ query: "q", mode: "hybrid", hits: [] });
-  stubs.search.mockReset().mockResolvedValue({ hits: [] });
+  stubs.searchEntities.mockReset().mockResolvedValue(RESPONSE);
+  stubs.searchPassages.mockReset().mockResolvedValue(RESPONSE);
   stubs.searchIndexCatalog.mockReset().mockResolvedValue([{ key: "person~default" }]);
   setEmbeddingProvider({
     dimensions: 2,
@@ -58,79 +60,88 @@ afterEach(async () => {
   setEmbeddingProvider(null);
 });
 
-describe("search_by_index", () => {
-  it("runs the index search with the mapped arguments and the fixed floor", async () => {
-    const result = await call("search_by_index", {
+const FLOOR = { semantic: { minSimilarity: 0.75 }, keyword: {} };
+
+describe("search", () => {
+  it("runs the entity search with the mapped arguments and the fixed floor, and answers its response", async () => {
+    const result = await call("search", {
       query: "CTO ACME",
-      index: "employment",
-      relations: ["works_for"],
+      types: ["person"],
       filters: { since__gte: 2020, active: true },
       limit: 500,
-      fields: ["name"],
     });
     expect(result.isError).toBeFalsy();
-    expect(stubs.searchByIndices).toHaveBeenCalledWith(
+    expect(stubs.searchEntities).toHaveBeenCalledWith(
       "all",
-      {
-        indices: ["employment"],
-        relations: ["works_for"],
-        query: "CTO ACME",
-        filters: { since__gte: "2020", active: "true" },
-        minScore: 0.75,
-        limit: 100,
-        fields: ["name"],
-      },
+      { query: "CTO ACME", types: ["person"], ...FLOOR, filter: { since__gte: "2020", active: "true" }, limit: 100 },
       expect.anything(),
     );
-    expect(stubs.search).not.toHaveBeenCalled();
-    expect(JSON.parse(result.content[0]!.text)).toEqual({
-      query: "q",
-      mode: "hybrid",
-      minSimilarity: 0.75,
-      hits: [],
-    });
+    expect(stubs.searchPassages).not.toHaveBeenCalled();
+    expect(JSON.parse(result.content[0]!.text)).toEqual(RESPONSE);
   });
 
-  it("takes a list of keys, and without index searches every index of the lens", async () => {
-    await call("search_by_index", { query: "x", index: ["a", "b"] });
-    await call("search_by_index", { query: "x" });
-    expect(stubs.searchByIndices.mock.calls[0]![1]).toMatchObject({ indices: ["a", "b"], relations: null, limit: 10 });
-    expect(stubs.searchByIndices.mock.calls[1]![1]).toMatchObject({ indices: null, relations: null });
+  it("takes indices instead of types; without either it searches the whole lens", async () => {
+    await call("search", { query: "x", indices: ["employment"] });
+    await call("search", { query: "x" });
+    expect(stubs.searchEntities.mock.calls[0]![1]).toEqual({ query: "x", indices: ["employment"], ...FLOOR, filter: {}, limit: 10 });
+    expect(stubs.searchEntities.mock.calls[1]![1]).toEqual({ query: "x", ...FLOOR, filter: {}, limit: 10 });
   });
 
-  it("applies no floor when the server ranks by keyword only", async () => {
+  it("sends no method block when the server ranks by keyword only", async () => {
     setEmbeddingProvider(null);
-    const result = await call("search_by_index", { query: "x", index: "a" });
-    expect(stubs.searchByIndices.mock.calls[0]![1]).toMatchObject({ minScore: null });
-    expect(JSON.parse(result.content[0]!.text)).toMatchObject({ minSimilarity: null });
+    await call("search", { query: "x" });
+    expect(stubs.searchEntities.mock.calls[0]![1]).toEqual({ query: "x", filter: {}, limit: 10 });
   });
 
   it("reports a refused request as a tool error", async () => {
-    stubs.searchByIndices.mockRejectedValueOnce(new Error("Search index 'nope' not found"));
-    const result = await call("search_by_index", { query: "x", index: "nope" });
+    stubs.searchEntities.mockRejectedValueOnce(new Error("Search index 'nope' is not available in this lens"));
+    const result = await call("search", { query: "x", indices: ["nope"] });
     expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain("Error executing tool search_by_index");
+    expect(result.content[0]!.text).toContain("Error executing tool search");
   });
 });
 
-describe("search", () => {
-  it("runs only the default search", async () => {
-    await call("search", { query: "x", entity_type_key: "person", filters: { age__gte: 30 } });
-    expect(stubs.search).toHaveBeenCalledWith(
+describe("search_documents", () => {
+  it("runs the passage search with its scope, per_entity and text, and answers its response", async () => {
+    const result = await call("search_documents", {
+      query: "kubernetes",
+      documents: ["person.bio"],
+      filters: { age__gte: 30 },
+      limit: 0,
+      per_entity: 2,
+      text: false,
+    });
+    expect(stubs.searchPassages).toHaveBeenCalledWith(
       "all",
-      expect.objectContaining({ query: "x", type: "person", filter: { age__gte: "30" }, minSimilarity: 0.75 }),
+      {
+        query: "kubernetes",
+        documents: ["person.bio"],
+        ...FLOOR,
+        filter: { age__gte: "30" },
+        limit: 1,
+        perEntity: 2,
+        text: false,
+      },
       expect.anything(),
     );
-    expect(stubs.searchByIndices).not.toHaveBeenCalled();
+    expect(stubs.searchEntities).not.toHaveBeenCalled();
+    expect(JSON.parse(result.content[0]!.text)).toEqual(RESPONSE);
   });
 
-  it("each search tool has its own arguments: no index on search, no entity type on search_by_index", async () => {
+  it("leaves per_entity and text to the search when not given", async () => {
+    await call("search_documents", { query: "x", types: ["person"] });
+    expect(stubs.searchPassages.mock.calls[0]![1]).toEqual({ query: "x", types: ["person"], ...FLOOR, filter: {}, limit: 10 });
+  });
+
+  it("each search tool has the arguments of its search; search_by_index is gone", async () => {
     const { tools } = await client.listTools();
     const argumentsOf = (name: string) =>
       Object.keys(tools.find((tool) => tool.name === name)!.inputSchema.properties ?? {}).sort();
-    expect(argumentsOf("search")).toEqual(["entity_type_key", "fields", "filters", "limit", "query"]);
-    expect(argumentsOf("search_documents")).toEqual(["entity_type_key", "fields", "filters", "limit", "property", "query"]);
-    expect(argumentsOf("search_by_index")).toEqual(["fields", "filters", "index", "limit", "query", "relations"]);
+    expect(argumentsOf("search")).toEqual(["filters", "indices", "limit", "query", "types"]);
+    expect(argumentsOf("search_documents")).toEqual([
+      "documents", "filters", "indices", "limit", "per_entity", "query", "text", "types",
+    ]);
+    expect(tools.some((tool) => tool.name === "search_by_index")).toBe(false);
   });
 });
 
@@ -148,35 +159,25 @@ describe("search tool descriptions", () => {
     return tools.find((tool) => tool.name === name)!.description!;
   }
 
-  it("define the keyword score for the caller, without the adapter, within 2000 characters", async () => {
-    for (const name of ["search", "search_documents"]) {
-      const description = await descriptionOf(name);
-      expect(description).toContain(
-        "keywordScore is then the distinct query words matched plus the full-text rank as a fraction below one",
-      );
-      expect(description).not.toMatch(/adapter/i);
+  it("describe each search's response and the fixed floor, without scores, within 2000 characters", async () => {
+    const search = await descriptionOf("search");
+    expect(search).toContain("Returns ran (the methods that ran: semantic, keyword), items and limitations");
+    expect(search).toContain("match, the entry that found it");
+    const documents = await descriptionOf("search_documents");
+    expect(documents).toContain("passage: property (the document), ordinal, charOffset and charLength");
+    for (const description of [search, documents]) {
+      expect(description).toContain("fixed similarity floor");
+      expect(description).not.toMatch(/relativeScore|strategy|evidence|adapter/i);
       expect(description.length).toBeLessThanOrEqual(2000);
     }
   });
 
-  it("describe search_by_index's own response — matched, no evidence — within 2000 characters", async () => {
-    const description = await descriptionOf("search_by_index");
-    expect(description).toContain("Returns query, mode (hybrid: semantic+keyword), minSimilarity and hits");
-    expect(description).toContain("matched");
-    expect(description).not.toMatch(/\bmatches\b|semanticSimilarity|keywordScore|entity_type_key|adapter/i);
-    expect(description.length).toBeLessThanOrEqual(2000);
-  });
-
-  it("name each envelope's fields, so the two shapes cannot be confused", async () => {
-    expect(await descriptionOf("search")).toContain("Returns query, type, in, strategy, minSimilarity, filter and hits");
-    expect(await descriptionOf("search_by_index")).toContain("for get_document use the index's documentProperty");
-    expect(await descriptionOf("get_document")).toContain("search_by_index passage's matched");
-  });
-
-  it("point each search tool at the other, and the catalog at search_by_index", async () => {
-    expect(await descriptionOf("search")).toContain("use search_by_index");
-    expect(await descriptionOf("search")).not.toMatch(/\bindex argument|\brelations\b/);
-    expect(await descriptionOf("search_by_index")).toContain("list_search_indices");
-    expect(await descriptionOf("list_search_indices")).toContain("search_by_index's index argument");
+  it("point from a passage to get_document, and the catalog at the indices argument", async () => {
+    expect(await descriptionOf("search_documents")).toContain("with get_document");
+    expect(await descriptionOf("get_document")).toContain(
+      "Pass a search_documents passage's property, charOffset and charLength",
+    );
+    for (const name of ["search", "search_documents"]) expect(await descriptionOf(name)).toContain("list_search_indices");
+    expect(await descriptionOf("list_search_indices")).toContain("indices argument of search and search_documents");
   });
 });

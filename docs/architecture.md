@@ -125,7 +125,7 @@ it calls, which is what makes the schema cache possible. Runtime uses core alone
 other three may use runtime as well as core: modeling where it needs runtime's own view —
 assembling a lens's schema, deriving the managed search indices of a changed schema, and
 validating agent configurations, retrievers and navigators against what runtime offers;
-server to report which search strategies the deployment offers.
+server to report whether the deployment can run ranked search.
 
 ## Ontology isolation
 

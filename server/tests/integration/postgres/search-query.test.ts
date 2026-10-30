@@ -4,7 +4,8 @@
  * their type), switched-off managed indices, relation entries that pair
  * one relation with its own target, query-time skipping of relation
  * entries a lens hides (no rebuild), exact filters inside the ranking,
- * and a semantic ranking with a deterministic fake provider. The worker
+ * raw keyword scores across types, and a semantic ranking with a
+ * deterministic fake provider — through the entity search. The worker
  * is drained explicitly. Requires the docker-compose PostgreSQL.
  */
 
@@ -28,8 +29,7 @@ import { reconcileSearchGenerations } from "../../../src/runtime/indexing/genera
 import { getSearchIndexStatus } from "../../../src/runtime/indexing/status.js";
 import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache, loadSchema } from "../../../src/runtime/schemaCache.js";
-import { search as defaultSearch } from "../../../src/runtime/search/entry.js";
-import { rankThroughIndices, searchByIndices } from "../../../src/runtime/search/indexSearch.js";
+import { rankEntities, searchEntities, type EntitySearchRequest } from "../../../src/runtime/search/entitySearch.js";
 import { fakeEmbeddingProvider } from "../../fakeEmbedding.js";
 import { wipeDatabase } from "../reset.js";
 
@@ -91,10 +91,11 @@ describe("PostgreSQL search query", () => {
     return result.rows.map((r) => r["key"] as string);
   }
 
-  async function search(lens: string, body: Parameters<typeof searchByIndices>[1]) {
+  async function search(lens: string, body: EntitySearchRequest) {
     await drainSearchWork({ ontologyKey: O });
-    return searchByIndices(lens, body, await getRuntimeStore(O));
+    return searchEntities(lens, body, await getRuntimeStore(O));
   }
+  const idsOf = (response: { items: { entity: { _id: string } }[] }) => response.items.map((item) => item.entity._id);
 
   beforeAll(async () => {
     await initStores();
@@ -221,8 +222,8 @@ describe("PostgreSQL search query", () => {
 
   it("a switched-off managed index keeps its row, builds nothing and is searched nowhere", async () => {
     const ada = await post(`${runtimeOf("all")}/entities/person`, { name: "Ada" });
-    const keyword = (q: string) => search("all", { query: q, mode: "keyword" });
-    expect((await keyword("Ada")).hits.map((h) => h.entity._id)).toEqual([ada._id]);
+    const keyword = (q: string) => search("all", { query: q, keyword: {} });
+    expect(idsOf(await keyword("Ada"))).toEqual([ada._id]);
     // Switched through the modeling route (search settings).
     const switchOff = (disabledIndices: string[]) =>
       app.inject({ method: "PUT", url: `${MODEL}/search-settings`, payload: { disabledIndices } });
@@ -238,13 +239,13 @@ describe("PostgreSQL search query", () => {
       representations: [],
     });
     expect(await liveGenerations("person~default")).toEqual([]);
-    expect((await keyword("Ada")).hits).toEqual([]);
+    expect((await keyword("Ada")).items).toEqual([]);
     await expect(search("all", { query: "Ada", indices: ["person~default"] })).rejects.toMatchObject({
       details: { fields: { "indices.0": expect.any(String) } },
     });
 
     expect((await switchOff([])).statusCode).toBe(200);
-    expect((await keyword("Ada")).hits.map((h) => h.entity._id)).toEqual([ada._id]);
+    expect(idsOf(await keyword("Ada"))).toEqual([ada._id]);
 
     const unknown = await switchOff(["employment"]);
     expect(unknown.statusCode).toBe(422);
@@ -274,38 +275,21 @@ describe("PostgreSQL search query", () => {
   }
 
   it("a relation entry pairs one relation with its own target, never another's", async () => {
-    const { ada, bob, acme, adaAcme } = await employmentFixture();
-    await drainSearchWork({ ontologyKey: O });
-    const runtime = await getRuntimeStore(O);
-    const loaded = await loadSchema("all", runtime);
-    const index = (await store.getIndex("employment"))!;
+    const { ada, bob, acme } = await employmentFixture();
     const allTerms = async (query: string) =>
-      (
-        await rankThroughIndices(loaded, store, {
-          targets: [{ index, conditions: [] }],
-          query,
-          mode: "keyword",
-          matching: "all",
-          relations: null,
-          minScore: null,
-          limit: 10,
-        })
-      ).map((hit) => hit.entityId);
+      idsOf(await search("all", { query, indices: ["employment"], keyword: { match: "all" } }));
     expect(await allTerms("CTO ACME")).toEqual([ada._id]);
     expect(await allTerms("CTO Foo")).toEqual([bob._id]);
     expect(await allTerms("Advisor ACME")).toEqual([]);
 
-    const response = await search("all", { query: "CTO ACME", indices: ["employment"], mode: "keyword" });
-    expect(response.hits[0]!.entity._id).toBe(ada._id);
-    expect(response.hits[0]!.matched).toEqual({
+    const response = await search("all", { query: "CTO ACME", indices: ["employment"], keyword: {} });
+    expect(response.items[0]!.entity._id).toBe(ada._id);
+    expect(response.items[0]!.match).toEqual({
       index: "employment",
-      partKind: "relation",
-      relationType: "works_for",
-      relationId: adaAcme._id,
-      target: { id: acme._id, type: "company", label: "ACME", identity: null },
+      part: "relation",
       snippet: "Ada CTO ACME",
-      charOffset: null,
-      charLength: null,
+      relationType: "works_for",
+      target: { _id: acme._id, _entityTypeKey: "company", name: "ACME" },
     });
   });
 
@@ -321,30 +305,24 @@ describe("PostgreSQL search query", () => {
     invalidateLoadedSchemaCache();
     const generations = (await liveGenerations("employment")).map((g) => g.generationId).sort();
 
-    const acme = (lens: string) => search(lens, { query: "ACME", indices: ["employment"], mode: "keyword" });
-    expect((await acme("all")).hits.map((h) => h.entity._id)).toEqual([ada._id]);
-    expect((await acme("people")).hits).toEqual([]);
+    const acme = (lens: string) => search(lens, { query: "ACME", indices: ["employment"], keyword: {} });
+    expect(idsOf(await acme("all"))).toEqual([ada._id]);
+    expect((await acme("people")).items).toEqual([]);
 
     // Showing companies infers works_for: the same entries rank again.
     await post(`${MODEL}/lenses/${people.lensId}/includes/entity-types`, { key: "company" });
-    expect((await acme("people")).hits.map((h) => h.entity._id)).toEqual([ada._id]);
+    expect(idsOf(await acme("people"))).toEqual([ada._id]);
     expect((await liveGenerations("employment")).map((g) => g.generationId).sort()).toEqual(generations);
-
-    // A relations choice narrows the same way.
-    const none = await search("all", { query: "ACME", indices: ["employment"], mode: "keyword", relations: [] });
-    expect(none.hits).toEqual([]);
   });
 
   it("exact filters restrict the candidates inside the ranking", async () => {
     const { ada, bob } = await employmentFixture();
-    const cto = (filters: Record<string, string>) =>
-      search("all", { query: "CTO", indices: ["employment"], mode: "keyword", filters });
-    expect((await cto({})).hits.map((h) => h.entity._id).sort()).toEqual([ada._id, bob._id].sort());
-    expect((await cto({ age__gte: "35" })).hits.map((h) => h.entity._id)).toEqual([ada._id]);
-    expect((await cto({ "works_for.name": "Foo" })).hits.map((h) => h.entity._id).sort()).toEqual(
-      [ada._id, bob._id].sort(),
-    );
-    expect((await cto({ "works_for.name": "ACME" })).hits.map((h) => h.entity._id)).toEqual([ada._id]);
+    const cto = async (filter: Record<string, string>) =>
+      idsOf(await search("all", { query: "CTO", indices: ["employment"], keyword: {}, filter }));
+    expect((await cto({})).sort()).toEqual([ada._id, bob._id].sort());
+    expect(await cto({ age__gte: "35" })).toEqual([ada._id]);
+    expect((await cto({ "works_for.name": "Foo" })).sort()).toEqual([ada._id, bob._id].sort());
+    expect(await cto({ "works_for.name": "ACME" })).toEqual([ada._id]);
   });
 
   it("one mode ranks across types by raw score, and an entity found by two indices counts once", async () => {
@@ -358,16 +336,17 @@ describe("PostgreSQL search query", () => {
     const acme = await post(`${rt}/entities/company`, { name: "Graph" });
     const bob = await post(`${rt}/entities/person`, { name: "Bob", bio: "Graph graph graph graph." });
     await drainSearchWork({ ontologyKey: O });
-    const hits = (await defaultSearch("all", { query: "graph", strategy: "keyword" }, await getRuntimeStore(O))).hits as Row[];
+    const runtime = await getRuntimeStore(O);
+    const { hits } = await rankEntities(await loadSchema("all", runtime), { query: "graph", keyword: {} }, runtime);
     // The tops of the three indices do not tie: their keyword scores order them.
-    expect(new Set(hits.map((h) => h.entity._id))).toEqual(new Set([ada._id, acme._id, bob._id]));
-    expect(hits.map((h) => h.relativeScore)).toEqual([...hits.map((h) => h.relativeScore)].sort((a, b) => b - a));
-    expect(hits.at(-1)!.relativeScore).toBeLessThan(1);
+    expect(hits.map((h) => h.entityId).sort()).toEqual([ada._id, acme._id, bob._id].sort());
+    const scores = hits.map((h) => h.score);
+    expect(scores).toEqual([...scores].sort((a, b) => b - a));
+    expect(scores.at(-1)!).toBeLessThan(scores[0]!);
     // Ada matches through her name and her biography; the score is her best entry's.
-    const adaHit = hits.find((h) => h.entity._id === ada._id)!;
-    expect(adaHit.matches.map((m: Row) => m.kind)).toEqual(["properties", "document"]);
-    const best = Math.max(...adaHit.matches.map((m: Row) => m.evidence.keywordScore as number));
-    expect(adaHit.relativeScore).toBeCloseTo(best / Math.max(...hits.flatMap((h) => h.matches.map((m: Row) => m.evidence.keywordScore as number))));
+    const adaHit = hits.find((h) => h.entityId === ada._id)!;
+    expect(adaHit.indices.map((m) => m.index.key).sort()).toEqual(["person~bio", "person~default"]);
+    expect(adaHit.score).toBe(Math.max(...adaHit.indices.map((m) => m.keywordScore!)));
   });
 
   it("ranks semantically over the active generation, floored on (1 + cosine) / 2", async () => {
@@ -383,13 +362,13 @@ describe("PostgreSQL search query", () => {
     ).rows[0]!["text"] as string;
 
     // The fake provider maps equal texts to equal vectors: similarity 1.
-    const exact = await search("all", { query: text, indices: ["person~default"], mode: "semantic", minScore: 0.99 });
-    expect(exact.hits.map((h) => h.entity._id)).toEqual([ada._id]);
-    expect(exact.hits[0]!.matched).toMatchObject({ index: "person~default", partKind: "self", snippet: "Person: Ada" });
-    const all = await search("all", { query: text, indices: ["person~default"], mode: "semantic" });
-    expect(all.hits.map((h) => h.entity._id)[0]).toBe(ada._id);
-    expect(all.hits).toHaveLength(2);
-    // Hybrid is the default with a provider.
-    expect((await search("all", { query: "Ada" })).mode).toBe("hybrid");
+    const exact = await search("all", { query: text, indices: ["person~default"], semantic: { minSimilarity: 0.99 } });
+    expect(idsOf(exact)).toEqual([ada._id]);
+    expect(exact.items[0]!.match).toEqual({ index: "person~default", part: "self", snippet: "Person: Ada" });
+    const all = await search("all", { query: text, indices: ["person~default"], semantic: {} });
+    expect(idsOf(all)[0]).toBe(ada._id);
+    expect(all.items).toHaveLength(2);
+    // Both methods run by default with a provider.
+    expect((await search("all", { query: "Ada" })).ran).toEqual(["semantic", "keyword"]);
   });
 });

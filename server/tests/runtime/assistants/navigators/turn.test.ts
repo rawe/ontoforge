@@ -204,7 +204,7 @@ describe("a navigator turn", () => {
   });
 
   it("a closest match is told to the answer", async () => {
-    reader.searchWith = () => [{ entity: reader.byId.get("lena")!, relativeScore: 1 }];
+    reader.searchWith = () => [{ entity: reader.byId.get("lena")!, score: 1 }];
     fake.invoke.mockResolvedValueOnce(plan({ mentions: [{ text: "Lina", types: ["person"] }], targets: ["person"] }));
     const { events } = await turn("Who does Lina manage?");
     expect(lastCards(events)[0]).toMatchObject({ label: "Lena Vogt", reason: "Closest match for “Lina” — not the same name" });

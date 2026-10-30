@@ -2,7 +2,14 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, Check, ChevronRight, CircleSlash, LoaderCircle } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useDisplayLabel, useRuntimeSchema } from '@/api/hooks'
-import type { EntityInstance, QueryResult, SearchHit, ToolCall } from '@/api/types'
+import type {
+  EntityInstance,
+  EntitySearchResponse,
+  PassageSearchResponse,
+  QueryResult,
+  ToolCall,
+} from '@/api/types'
+import { EntitySearchResult, PassageSearchResult } from '@/components/advancedsearch/SearchResults'
 import { TypeChip } from '@/components/TypeChip'
 import { ResultsTable } from '@/components/query/ResultsTable'
 import { isEntityObject } from '@/components/query/resultUtils'
@@ -228,7 +235,9 @@ function RawJson({ value }: { value: unknown }) {
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const isQueryResult = (v: unknown): v is QueryResult =>
   isRecord(v) && Array.isArray(v.columns) && Array.isArray(v.results)
-const isHits = (v: unknown): v is { hits: SearchHit[] } => isRecord(v) && Array.isArray(v.hits)
+/** The entity or the passage search's response, as the search tools and a search step answer. */
+const isSearchResponse = (v: unknown): v is EntitySearchResponse | PassageSearchResponse =>
+  isRecord(v) && Array.isArray(v.ran) && Array.isArray(v.items) && Array.isArray(v.limitations)
 const isItems = (v: unknown): v is { items: unknown[]; total?: number } => isRecord(v) && Array.isArray(v.items)
 
 /** A readable view of a result, per its shape; falls back to text or a note. */
@@ -246,28 +255,7 @@ function ToolResult({ ontologyKey, lensKey, call }: { ontologyKey: string; lensK
       </div>
     )
   }
-  if (isHits(result)) {
-    return (
-      <div className="space-y-1">
-        <p className="text-muted-foreground">{result.hits.length} {result.hits.length === 1 ? 'hit' : 'hits'}</p>
-        <ul className="space-y-1">
-          {result.hits.map((hit) => (
-            <li key={hit.entity._id} className="space-y-0.5">
-              <div className="flex items-center gap-2">
-                <EntityLink {...link} entity={hit.entity} />
-                <ScoreBar value={hit.relativeScore} />
-              </div>
-              {hit.matched?.snippet && (
-                <p className="line-clamp-2 pl-1 text-[11px] text-muted-foreground" title={hit.matched.snippet}>
-                  {hit.matched.snippet}
-                </p>
-              )}
-            </li>
-          ))}
-        </ul>
-      </div>
-    )
-  }
+  if (isSearchResponse(result)) return <SearchToolResult {...link} tool={call.tool} response={result} />
   if (isItems(result)) {
     const entities = result.items.filter(isEntityObject)
     return (
@@ -365,14 +353,24 @@ function EntityLink({ ontologyKey, lensKey, entity }: { ontologyKey: string; len
   )
 }
 
-/** The relative score (1.0 = best hit of this search) as a small bar. */
-function ScoreBar({ value }: { value: number }) {
-  return (
-    <span className="ml-auto flex shrink-0 items-center gap-1" title={`Relative score ${value.toFixed(2)} — 1.00 is the best hit of this search`}>
-      <span className="h-1.5 w-10 overflow-hidden rounded bg-muted">
-        <span className="block h-full bg-primary/60" style={{ width: `${Math.max(4, Math.min(100, value * 100))}%` }} />
-      </span>
-      <span className="w-7 text-right text-[10.5px] text-muted-foreground tabular-nums">{value.toFixed(2)}</span>
-    </span>
+/** A search's response with Advanced search's rows: passages for search_documents, else entities. */
+function SearchToolResult({
+  ontologyKey,
+  lensKey,
+  tool,
+  response,
+}: {
+  ontologyKey: string
+  lensKey: string
+  tool: string
+  response: EntitySearchResponse | PassageSearchResponse
+}) {
+  const schema = useRuntimeSchema(ontologyKey, lensKey).data
+  if (schema === undefined) return null
+  const props = { ontologyKey, lensKey, schema }
+  return tool === 'search_documents' ? (
+    <PassageSearchResult {...props} response={response as PassageSearchResponse} />
+  ) : (
+    <EntitySearchResult {...props} response={response as EntitySearchResponse} />
   )
 }

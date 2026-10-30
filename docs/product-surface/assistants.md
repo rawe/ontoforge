@@ -22,7 +22,7 @@ follows the running answer:
 each call in order, with a readable name, a one-line summary of what it asked for, its
 state, and its time inside the tool. Calls start collapsed and open by hand. An open call
 shows its arguments and its result in a form fitting the result — a table for query rows,
-hits with relative scores and matched snippets, entities, neighbours with their relation
+search items and passages with Advanced search's rows, entities, neighbours with their relation
 and direction, document text — linking entities to their pages, with the raw result one
 click away; a tool that answers with an error shows it highlighted. The panel heads with
 the question, the number of calls, the time spent inside tools — parallel calls once, said
@@ -134,7 +134,7 @@ the same key.
   included, passed to the answer model; answer fields for a type no chosen index finds
   are listed for removal.
 - **Answer** — the similarity threshold as a slider from −1 to 1, explained as a cosine
-  cut-off with its equivalent on the 0–1 similarity scale of index search, applied only
+  cut-off with its equivalent on the 0–1 similarity scale of search, applied only
   to sub-queries no filter or previous reference restricts, never to keyword matches, and dependent on the
   embedding model; and the maximum characters per answer field.
 

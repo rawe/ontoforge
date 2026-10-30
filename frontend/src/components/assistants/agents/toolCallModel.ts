@@ -101,8 +101,9 @@ export function toolCallSummary(call: ToolCall): string | undefined {
     case 'search_documents':
     case 'search_saved_queries': {
       const query = text(a.query)
-      const type = text(a.entity_type_key)
-      return query === undefined ? undefined : `“${query}”${type ? ` in ${type}` : ''}`
+      // The scope: types or documents, whichever was named.
+      const scope = [a.types, a.documents].find((keys) => Array.isArray(keys) && keys.length > 0)
+      return query === undefined ? undefined : `“${query}”${scope ? ` in ${(scope as unknown[]).join(', ')}` : ''}`
     }
     case 'execute_query':
       return text(a.query)?.replace(/\s+/g, ' ')

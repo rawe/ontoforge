@@ -572,7 +572,6 @@ describe("the MCP tool set at 'none'", () => {
       "list_search_indices",
       "run_saved_query",
       "search",
-      "search_by_index",
       "search_documents",
       "search_saved_queries",
     ]);

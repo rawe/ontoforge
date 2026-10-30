@@ -545,11 +545,6 @@ export interface SearchedType {
   propertyDefs: Record<string, PropertyDef>;
   conditions: FilterCondition[];
 }
-export interface SearchedProperty {
-  entityTypeKey: string;
-  propertyKey: string;
-  conditions: FilterCondition[];
-}
 
 /** The keyword retrieval method: any admits a row carrying any query term, all
  * requires every query term; both match each term as a prefix. Contract:

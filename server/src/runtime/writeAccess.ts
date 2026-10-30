@@ -60,7 +60,6 @@ export const TOOLS: Record<string, ToolRow> = {
   list_search_indices: { operation: "read" },
   search: { operation: "read" },
   search_documents: { operation: "read" },
-  search_by_index: { operation: "read" },
   list_saved_queries: { operation: "read" },
   run_saved_query: { operation: "read" },
   search_saved_queries: { operation: "read" },

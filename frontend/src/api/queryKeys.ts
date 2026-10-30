@@ -11,6 +11,7 @@
  *   ['lenses', ontologyKey]                          modeling lens list
  *   ['schema', ontologyKey, lensKey]                 runtime schema
  *   ['schema', ontologyKey, lensKey, 'search-indices']  runtime search catalog
+ *   ['schema', ontologyKey, lensKey, 'named-searches']  runtime named searches
  *   ['entities', ontologyKey, lensKey, typeKey, params]
  *   ['entity', ontologyKey, lensKey, typeKey, id]
  *   ['path', ontologyKey, lensKey, typeKey, id]      root → … → entity
@@ -54,6 +55,9 @@ export const qk = {
   schemaAll: ['schema'] as const,
   schema: (ontologyKey: string, lensKey: string) =>
     ['schema', ontologyKey, lensKey] as const,
+  /** Below the schema, like the search catalog: modeling saves and lens changes refresh it. */
+  namedSearches: (ontologyKey: string, lensKey: string) =>
+    ['schema', ontologyKey, lensKey, 'named-searches'] as const,
 
   entities: (ontologyKey: string, lensKey: string, typeKey: string, params?: unknown) =>
     params === undefined

@@ -161,6 +161,24 @@ export interface NamedSearch {
   tree: SearchTreeNode
 }
 
+/** A named search as the runtime lists it: what a caller needs to run it, never its tree. */
+export interface RuntimeNamedSearch {
+  key: string
+  name: string
+  description: string
+  /** The unit its run answers with: an entity search or a passage search response. */
+  result: 'entities' | 'passages'
+  /** The entity types it searches, sorted; a run's `filter` applies to them. */
+  types: string[]
+}
+
+/** The body `POST /named-searches/{key}/run` takes. */
+export interface NamedSearchRunBody {
+  query: string
+  /** The entity search's `filter`. */
+  filter?: Record<string, string>
+}
+
 /**
  * A hit from semantic saved-query search. Discovery search deliberately
  * returns the query *without* its steps (only key, name, description,
@@ -531,6 +549,8 @@ export interface EntityMatch {
   target?: EntityReference
   /** Every method that found this very entry. */
   scores: MethodScores
+  /** A named search with several query texts: the text this entry ranked best for. */
+  queryText?: string
 }
 
 export interface EntitySearchItem {
@@ -557,6 +577,8 @@ export interface PassageSearchItem {
     text?: string
     /** Every method that found this passage. */
     scores: MethodScores
+    /** A named search with several query texts: the text this passage ranked best for. */
+    queryText?: string
   }
 }
 

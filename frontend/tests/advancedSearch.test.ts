@@ -1,12 +1,18 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  chosenNamedSearch,
   countText,
   entityLabel,
   entityLink,
   fieldErrorsAt,
+  formModes,
   isEntitySearchResponse,
   limitationSentence,
+  modeInEffect,
+  NAMED_CONTROLS,
+  namedRequestKey,
+  namedRunBody,
   ranText,
   requestKey,
   scoresText,
@@ -189,4 +195,44 @@ test('a request key ignores the order scope and filter keys were chosen in', () 
   assert.equal(requestKey('entities', a), requestKey('entities', b))
   assert.notEqual(requestKey('entities', a), requestKey('passages', a))
   assert.notEqual(requestKey('entities', a), requestKey('entities', searchBody(form({}))))
+})
+
+test('Named is offered only while the lens has named searches', () => {
+  assert.deepEqual(formModes(false), ['entities', 'passages'])
+  assert.deepEqual(formModes(true), ['entities', 'passages', 'named'])
+  assert.equal(modeInEffect('named', true), 'named')
+  // The lens lost its last named search: back to Entities.
+  assert.equal(modeInEffect('named', false), 'entities')
+  assert.equal(modeInEffect('passages', false), 'passages')
+})
+
+test('the chosen named search is the one picked, else the first', () => {
+  const searches = [{ key: 'a' }, { key: 'b' }]
+  assert.equal(chosenNamedSearch(searches, 'b'), searches[1])
+  assert.equal(chosenNamedSearch(searches, ''), searches[0])
+  assert.equal(chosenNamedSearch(searches, 'gone'), searches[0])
+  assert.equal(chosenNamedSearch([], 'a'), undefined)
+})
+
+test('a named run sends the trimmed query and the filter values as strings', () => {
+  assert.deepEqual(namedRunBody(' Ada ', undefined), { query: 'Ada' })
+  assert.deepEqual(namedRunBody('Ada', { age: 36, active: true, name: 'x' }), {
+    query: 'Ada',
+    filter: { age: '36', active: 'true', name: 'x' },
+  })
+})
+
+test('a named run key names its search and ignores the order of filter keys', () => {
+  const a = namedRunBody('Ada', { a: 1, b: 2 })
+  const b = namedRunBody('Ada', { b: 2, a: 1 })
+  assert.equal(namedRequestKey('cv', a), namedRequestKey('cv', b))
+  assert.notEqual(namedRequestKey('cv', a), namedRequestKey('bio', a))
+  assert.notEqual(namedRequestKey('cv', a), namedRequestKey('cv', namedRunBody('Ada', undefined)))
+  // Never the same as a plain search with the same query.
+  assert.notEqual(namedRequestKey('cv', namedRunBody('Ada', undefined)), requestKey('entities', { query: 'Ada' }))
+})
+
+test('a named run places only query and filter errors; the rest, tree paths too, shows apart', () => {
+  const fields = { query: 'Required', 'filter.age': 'Unknown key', limit: 'Too big', 'tree.inputs.0': 'Not in the lens' }
+  assert.deepEqual(unplacedFieldErrors(fields, NAMED_CONTROLS), ['limit: Too big', 'tree.inputs.0: Not in the lens'])
 })

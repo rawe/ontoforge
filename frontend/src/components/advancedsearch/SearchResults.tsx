@@ -80,6 +80,12 @@ export function SearchSummary({
   )
 }
 
+/** The query text an item ranked best for, when a named search ran several. */
+function QueryText({ text }: { text: string | undefined }) {
+  if (text === undefined) return null
+  return <span className="min-w-0 text-[11px] break-words text-muted-foreground">for “{text}”</span>
+}
+
 /** The scores of the entry that found an item, quiet beside its place. */
 function Scores({ scores }: { scores: MethodScores }) {
   const text = scoresText(scores)
@@ -92,8 +98,9 @@ function Scores({ scores }: { scores: MethodScores }) {
 }
 
 /** One item of the entity search: rank, type, name with identity, the part
- * that matched — with the custom index that found it and its scores — and
- * its snippet. */
+ * that matched — with the custom index that found it, its scores and, from a
+ * named search with several texts, the text it ranked best for — and its
+ * snippet. */
 export function EntitySearchItemRow({
   ontologyKey,
   lensKey,
@@ -148,6 +155,7 @@ export function EntitySearchItemRow({
             {index?.kind === 'custom' && ` · via ${index.name}`}
           </span>
           <Scores scores={match.scores} />
+          <QueryText text={match.queryText} />
         </div>
         {match.snippet !== null && (
           <p className="line-clamp-2 text-[12px] text-muted-foreground">{match.snippet}</p>
@@ -281,6 +289,7 @@ export function PassageSearchItemRow({
             <span className="font-mono text-[11px] text-muted-foreground">{passage.property}</span>
           )}
           <Scores scores={passage.scores} />
+          <QueryText text={passage.queryText} />
         </div>
         {passage.text !== undefined && <PassageText text={passage.text} />}
       </div>

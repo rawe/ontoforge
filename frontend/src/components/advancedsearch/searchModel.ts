@@ -1,6 +1,7 @@
 /**
  * Pure helpers for the Advanced search page: the body the form sends to
- * `POST /search/entities` or `/search/passages`, the field errors a control
+ * `POST /search/entities`, `/search/passages` or a named search's run, the
+ * field errors a control
  * shows, `ran` and the limitations as readable sentences, and how a found
  * entity links and reads.
  *
@@ -11,6 +12,7 @@
 import type {
   EntityReference,
   EntitySearchResponse,
+  NamedSearchRunBody,
   PassageSearchBody,
   QueryResult,
   MethodScores,
@@ -19,6 +21,27 @@ import type {
 } from '@/api/types'
 
 export type SearchMode = 'entities' | 'passages'
+
+/** The form's mode control: the two searches, and a named search of the lens. */
+export type FormMode = SearchMode | 'named'
+
+/** The modes offered: Named only when the lens has named searches. */
+export function formModes(hasNamed: boolean): FormMode[] {
+  return hasNamed ? ['entities', 'passages', 'named'] : ['entities', 'passages']
+}
+
+/** The mode in effect: a picked Named falls back to Entities while the lens has none. */
+export function modeInEffect(picked: FormMode, hasNamed: boolean): FormMode {
+  return picked === 'named' && !hasNamed ? 'entities' : picked
+}
+
+/** The named search the form runs: the chosen one, else the first. */
+export function chosenNamedSearch<T extends { key: string }>(
+  searches: readonly T[],
+  key: string,
+): T | undefined {
+  return searches.find((s) => s.key === key) ?? searches[0]
+}
 
 /** The request's scope fields; `documents` is the passage search's only. */
 export type ScopeField = 'types' | 'indices' | 'documents'
@@ -60,17 +83,26 @@ export function searchBody(form: SearchForm): PassageSearchBody {
     const minSimilarity = numberOf(form.semantic.minSimilarity)
     body.semantic = minSimilarity === undefined ? {} : { minSimilarity }
   }
-  if (form.filter !== undefined) {
-    body.filter = Object.fromEntries(
-      Object.entries(form.filter).map(([key, value]) => [key, String(value)]),
-    )
-  }
+  if (form.filter !== undefined) body.filter = filterStrings(form.filter)
   const limit = numberOf(form.limit)
   if (limit !== undefined) body.limit = limit
   if (form.mode === 'passages') {
     const perEntity = numberOf(form.perEntity)
     if (perEntity !== undefined) body.perEntity = perEntity
   }
+  return body
+}
+
+const filterStrings = (filter: Record<string, string | number | boolean>) =>
+  Object.fromEntries(Object.entries(filter).map(([key, value]) => [key, String(value)]))
+
+/** A named search's run body: the trimmed query, the filter values as strings. */
+export function namedRunBody(
+  query: string,
+  filter: Record<string, string | number | boolean> | undefined,
+): NamedSearchRunBody {
+  const body: NamedSearchRunBody = { query: query.trim() }
+  if (filter !== undefined) body.filter = filterStrings(filter)
   return body
 }
 
@@ -130,6 +162,16 @@ export function requestKey(mode: SearchMode, body: PassageSearchBody): string {
   })
 }
 
+/** A named search's run as a comparable text, apart from every search's:
+ * the same run reads the same whatever order its filter keys were chosen in. */
+export function namedRequestKey(searchKey: string, body: NamedSearchRunBody): string {
+  return JSON.stringify({
+    named: searchKey,
+    query: body.query,
+    filter: body.filter === undefined ? undefined : Object.entries(body.filter).sort(([a], [b]) => a.localeCompare(b)),
+  })
+}
+
 /** The request paths a form control answers for. */
 export const SEARCH_CONTROLS = [
   'query',
@@ -145,6 +187,9 @@ export const SEARCH_CONTROLS = [
 
 export type SearchControl = (typeof SEARCH_CONTROLS)[number]
 
+/** The controls a named search's run shows: the tree decides the rest. */
+export const NAMED_CONTROLS = ['query', 'filter'] as const satisfies readonly SearchControl[]
+
 const under = (path: string, control: string) =>
   path === control || path.startsWith(`${control}.`)
 
@@ -155,10 +200,13 @@ export function fieldErrorsAt(fields: Record<string, string>, control: SearchCon
     .map(([, message]) => message)
 }
 
-/** The messages no control answers for, each with its path. */
-export function unplacedFieldErrors(fields: Record<string, string>): string[] {
+/** The messages none of the shown controls answers for, each with its path. */
+export function unplacedFieldErrors(
+  fields: Record<string, string>,
+  controls: readonly SearchControl[] = SEARCH_CONTROLS,
+): string[] {
   return Object.entries(fields)
-    .filter(([path]) => !SEARCH_CONTROLS.some((control) => under(path, control)))
+    .filter(([path]) => !controls.some((control) => under(path, control)))
     .map(([path, message]) => `${path}: ${message}`)
 }
 

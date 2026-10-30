@@ -142,6 +142,7 @@ describe("needOf", () => {
     ["GET", `${L}/entities/:entityTypeKey`, read],
     ["POST", `${L}/entities/:entityTypeKey`, { kind: "lens", operation: "write" }],
     ["POST", `${L}/search/entities`, read],
+    ["POST", `${L}/search/passages`, read],
     ["POST", `${L}/query`, read],
     ["POST", `${L}/changesets/`, { kind: "lens", operation: "stage" }],
     ["POST", `${L}/changesets/:changesetId/commit`, { kind: "lens", operation: "commit" }],

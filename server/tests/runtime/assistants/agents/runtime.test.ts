@@ -156,7 +156,7 @@ describe("toolset computation", () => {
     expect(payload).toEqual({ ran: [], items: [], limitations: [] });
     for (const tool of fake.boundTools[0]! as { name: string; description: string; schema: { shape: Record<string, unknown> } }[]) {
       if (!["search", "search_documents"].includes(tool.name)) continue;
-      expect(tool.description).toContain("Returns ran (the methods that ran), items and limitations");
+      expect(tool.description).toContain("Returns ran (methods that ran), items and limitations");
       expect(tool.description).toContain("scores (each method that found it: semantic, similarity 0.75 to 1");
       expect(tool.description).toContain("fixed similarity floor");
       expect(tool.description).not.toMatch(/relativeScore|strategy|evidence|adapter|list_search_indices/i);

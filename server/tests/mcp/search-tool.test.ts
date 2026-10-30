@@ -161,13 +161,13 @@ describe("search tool descriptions", () => {
 
   it("describe each search's response, its scores and the fixed floor, within 2000 characters", async () => {
     const search = await descriptionOf("search");
-    expect(search).toContain("Returns ran (the methods that ran), items and limitations");
+    expect(search).toContain("Returns ran (methods that ran), items and limitations");
     expect(search).toContain("match, the entry that found it");
-    expect(search).toContain("A method that found only another entry of the entity is absent.");
     const documents = await descriptionOf("search_documents");
     expect(documents).toContain("passage: property (the document), ordinal, charOffset and charLength");
     for (const description of [search, documents]) {
       expect(description).toContain("fixed similarity floor (0.75)");
+      expect(description).toContain("a missing score says nothing");
       expect(description).toContain("scores (each method that found it: semantic, similarity 0.75 to 1");
       expect(description).not.toMatch(/relativeScore|strategy|evidence|adapter/i);
       expect(description.length).toBeLessThanOrEqual(2000);

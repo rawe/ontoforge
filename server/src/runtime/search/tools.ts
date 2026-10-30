@@ -35,25 +35,25 @@ export const SEARCH_RESULT_NOTE =
   "Items are candidates, not verified answers.";
 
 /** An item's entity, in both responses. */
-const ENTITY = "entity (_id, _entityTypeKey, name, and identity when its type has one)";
+const ENTITY = "entity (_id, _entityTypeKey, name; identity if its type has one)";
 
 /** What an entry's scores are, in both responses. */
 const SCORES =
   `scores (each method that found it: semantic, similarity ${TOOL_MIN_SIMILARITY} to 1; keyword, query words ` +
-  "held plus a fraction below 1 to order equal counts; not comparable; the rank fuses both and follows neither)";
+  "held plus a tie-breaking fraction below 1; not comparable; a missing score says nothing; the rank " +
+  "fuses both, following neither)";
 
 /** The entity search's response, as `search` answers it. */
 export const ENTITY_SEARCH_RESPONSE =
-  "Returns ran (the methods that ran), items and limitations (what could not run: code, message, method, " +
+  "Returns ran (methods that ran), items and limitations (what could not run: code, message, method, " +
   "indices, types). Each item has rank (from 1), " +
   `${ENTITY} and match, the entry that found it: index, part (self, relation or passage), snippet ` +
   "(the start of its text; null if this lens hides it), a relation's relationType and target (_id, " +
-  `_entityTypeKey, name), a passage's property, charOffset and charLength, and ${SCORES}. A method that ` +
-  "found only another entry of the entity is absent.";
+  `_entityTypeKey, name), a passage's property, charOffset and charLength, and ${SCORES}.`;
 
 /** The passage search's response, as `search_documents` answers it. */
 export const PASSAGE_SEARCH_RESPONSE =
-  "Returns ran (the methods that ran), items and limitations (what could not run: code, message, method, " +
+  "Returns ran (methods that ran), items and limitations (what could not run: code, message, method, " +
   "indices, types, documents). Each item has rank (from 1), " +
   `${ENTITY} and passage: property (the document), ordinal, charOffset and charLength ` +
-  `(characters; read around it with get_document), ${SCORES}, and text unless text is false.`;
+  `(characters; read it with get_document), ${SCORES}, and text unless text is false.`;

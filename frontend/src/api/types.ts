@@ -472,6 +472,10 @@ export interface EntityReference {
   identity?: Record<string, JsonValue>
 }
 
+/** Per method that found an entry, its own score: semantic similarity 0–1, keyword
+ * query words matched plus a fraction. Never compared across methods. */
+export type MethodScores = Partial<Record<Representation, number>>
+
 /** The best entry that found an entity. */
 export interface EntityMatch {
   index: string
@@ -485,6 +489,8 @@ export interface EntityMatch {
   /** Relations: the relation type and the entity at its other end. */
   relationType?: string
   target?: EntityReference
+  /** Every method that found this very entry. */
+  scores: MethodScores
 }
 
 export interface EntitySearchItem {
@@ -509,6 +515,8 @@ export interface PassageSearchItem {
     charLength: number
     /** Absent when the request sent `text: false`. */
     text?: string
+    /** Every method that found this passage. */
+    scores: MethodScores
   }
 }
 

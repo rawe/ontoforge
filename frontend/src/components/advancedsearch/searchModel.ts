@@ -13,6 +13,7 @@ import type {
   EntitySearchResponse,
   PassageSearchBody,
   QueryResult,
+  MethodScores,
   Representation,
   SearchLimitation,
 } from '@/api/types'
@@ -162,6 +163,19 @@ export function unplacedFieldErrors(fields: Record<string, string>): string[] {
 }
 
 const METHOD_NAMES: Record<Representation, string> = { semantic: 'Semantic', keyword: 'Keyword' }
+
+/** An entry's scores as a line, semantic first, e.g. `Semantic 0.81 · Keyword 2.25`. */
+export function scoresText(scores: MethodScores): string {
+  return (['semantic', 'keyword'] as const)
+    .filter((method) => scores[method] !== undefined)
+    .map((method) => `${METHOD_NAMES[method]} ${scores[method]!.toFixed(2)}`)
+    .join(' · ')
+}
+
+/** What the scores mean, for a hover. */
+export const SCORES_TITLE =
+  "Each method's own score of this entry: semantic similarity from 0 to 1, keyword query words " +
+  'matched plus a fraction. The two are not comparable; the rank orders the results.'
 
 /** The item count above the results, e.g. `1 entity`, `3 passages`. */
 export function countText(mode: SearchMode, count: number): string {

@@ -9,6 +9,7 @@ import {
   limitationSentence,
   ranText,
   requestKey,
+  scoresText,
   scopeSummary,
   searchBody,
   sharedType,
@@ -139,6 +140,12 @@ test('each limitation code reads as a sentence naming its types, documents or in
     limitationSentence({ code: 'not-searchable', message: 'The server says so' }, 'entities', names),
     'The server says so',
   )
+})
+
+test('scores read semantic first, two decimals, only the methods present', () => {
+  assert.equal(scoresText({ keyword: 2.2308, semantic: 0.8154 }), 'Semantic 0.82 · Keyword 2.23')
+  assert.equal(scoresText({ keyword: 1.0909 }), 'Keyword 1.09')
+  assert.equal(scoresText({}), '')
 })
 
 test('ran and the count read as short lines', () => {

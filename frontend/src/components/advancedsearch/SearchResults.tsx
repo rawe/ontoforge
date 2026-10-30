@@ -5,6 +5,7 @@ import { useSearchCatalog } from '@/api/hooks'
 import type {
   EntitySearchItem,
   EntitySearchResponse,
+  MethodScores,
   PassageSearchItem,
   PassageSearchResponse,
   Representation,
@@ -25,6 +26,8 @@ import {
   entityLink,
   limitationSentence,
   ranText,
+  scoresText,
+  SCORES_TITLE,
   type LimitationNames,
   type SearchMode,
 } from './searchModel'
@@ -77,8 +80,20 @@ export function SearchSummary({
   )
 }
 
+/** The scores of the entry that found an item, quiet beside its place. */
+function Scores({ scores }: { scores: MethodScores }) {
+  const text = scoresText(scores)
+  if (text === '') return null
+  return (
+    <span className="font-mono text-[11px] text-muted-foreground tabular-nums" title={SCORES_TITLE}>
+      {text}
+    </span>
+  )
+}
+
 /** One item of the entity search: rank, type, name with identity, the part
- * that matched — with the custom index that found it — and its snippet. */
+ * that matched — with the custom index that found it and its scores — and
+ * its snippet. */
 export function EntitySearchItemRow({
   ontologyKey,
   lensKey,
@@ -132,6 +147,7 @@ export function EntitySearchItemRow({
             {part}
             {index?.kind === 'custom' && ` · via ${index.name}`}
           </span>
+          <Scores scores={match.scores} />
         </div>
         {match.snippet !== null && (
           <p className="line-clamp-2 text-[12px] text-muted-foreground">{match.snippet}</p>
@@ -264,6 +280,7 @@ export function PassageSearchItemRow({
           ) : (
             <span className="font-mono text-[11px] text-muted-foreground">{passage.property}</span>
           )}
+          <Scores scores={passage.scores} />
         </div>
         {passage.text !== undefined && <PassageText text={passage.text} />}
       </div>

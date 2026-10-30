@@ -77,7 +77,7 @@ export function SearchSummary({
 }
 
 /** One item of the entity search: rank, type, name with identity, the part
- * that matched and its snippet. */
+ * that matched — with the custom index that found it — and its snippet. */
 export function EntitySearchItemRow({
   ontologyKey,
   lensKey,
@@ -91,6 +91,8 @@ export function EntitySearchItemRow({
 }) {
   const { match } = item
   const type = schema.entityTypes.find((t) => t.key === item.entity._entityTypeKey)
+  // A custom index is named, so a row found through it says which one.
+  const index = useSearchCatalog(ontologyKey, lensKey).data?.find((i) => i.key === match.index)
   const part =
     match.part === 'relation'
       ? `Relation · ${
@@ -125,8 +127,9 @@ export function EntitySearchItemRow({
           {item.entity.identity !== undefined && (
             <IdentityText identity={identityText(item.entity.identity)} />
           )}
-          <span className="text-[11px] text-muted-foreground" title={match.index}>
+          <span className="text-[11px] text-muted-foreground" title={index?.name ?? match.index}>
             {part}
+            {index?.kind === 'custom' && ` · via ${index.name}`}
           </span>
         </div>
         {match.snippet !== null && (

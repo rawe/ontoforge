@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from 'react'
+import { useEffect, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { ChevronLeft, ChevronRight, CircleQuestionMark, Pause, Play, TextSearch } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -27,7 +27,7 @@ const FACTS = [
   { label: 'Fusion', value: 'combines both by rank' },
 ]
 
-/** The step's body is always this many lines high, so the step bar keeps one height; a longer body scrolls. */
+/** The step's body is this many lines high beside the controls, so the step bar keeps one height; a longer body scrolls. */
 const STEP_BODY_LINES = 3
 
 const microLabel = 'text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'
@@ -212,7 +212,8 @@ function SearchExplainerPanel() {
               <span className={microLabel}>Step {index + 1} of {STORY.length}</span>
               <h4 className="text-base font-semibold">{step.title}</h4>
             </div>
-            <p className="overflow-y-auto text-[13px] leading-relaxed text-muted-foreground" style={{ height: `${STEP_BODY_LINES}lh` }}>{step.body}</p>
+            {/* Fixed beside the controls; on a narrow screen it grows instead. */}
+            <p className="text-[13px] leading-relaxed text-muted-foreground md:h-[var(--step-body)] md:overflow-y-auto" style={{ '--step-body': `${STEP_BODY_LINES}lh` } as CSSProperties}>{step.body}</p>
           </div>
           <div className="flex shrink-0 items-center gap-2 pt-0.5 md:w-[22rem]">
             <Button type="button" variant="outline" size="sm" onClick={() => go(index - 1)} disabled={index === 0}>

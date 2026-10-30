@@ -285,25 +285,32 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
     if (next === 'entities' && scopeField === 'documents') setScopeField('types')
   }
 
+  const request = {
+    mode,
+    body: searchBody({
+      mode,
+      query,
+      scope: { field: scopeField, keys: scopeKeys },
+      keyword: { on: method === 'keyword' || method === 'both', match },
+      semantic: { on: method === 'semantic' || method === 'both', minSimilarity },
+      filter: filtersToParam(conditions, filterSubjects),
+      limit,
+      perEntity,
+    }),
+  }
+  // What the shown results were searched with: a change since then marks them stale.
+  const [ranWith, setRanWith] = useState('')
+  const stale = outcome !== null && ranWith !== JSON.stringify(request)
+
   const execute = useMutation({
-    mutationFn: async (): Promise<Outcome> => {
-      const body = searchBody({
-        mode,
-        query,
-        scope: { field: scopeField, keys: scopeKeys },
-        keyword: { on: method === 'keyword' || method === 'both', match },
-        semantic: { on: method === 'semantic' || method === 'both', minSimilarity },
-        filter: filtersToParam(conditions, filterSubjects),
-        limit,
-        perEntity,
-      })
-      return mode === 'entities'
+    mutationFn: async ({ mode, body }: typeof request): Promise<Outcome> =>
+      mode === 'entities'
         ? { mode, response: await runtime.searchEntities(ontologyKey, lensKey, body) }
-        : { mode, response: await runtime.searchPassages(ontologyKey, lensKey, body) }
-    },
-    onSuccess: (data) => {
+        : { mode, response: await runtime.searchPassages(ontologyKey, lensKey, body) },
+    onSuccess: (data, sent) => {
       setOutcome(data)
       setError(null)
+      setRanWith(JSON.stringify(sent))
     },
     onError: (err) => {
       setOutcome(null)
@@ -313,7 +320,7 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
 
   const run = () => {
     if (query.trim() === '' || execute.isPending) return
-    execute.mutate()
+    execute.mutate(request)
   }
 
   const fields = error instanceof ApiError ? (error.fieldErrors ?? {}) : {}
@@ -568,6 +575,16 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
           )}
 
           {otherError !== null && <QueryErrorBlock message={otherError} />}
+
+          {stale && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed px-3 py-1.5 text-[12px] text-muted-foreground">
+              <Info className="size-3.5 shrink-0" />
+              <span className="flex-1">The search changed since these results.</span>
+              <Button size="xs" variant="outline" onClick={run} disabled={query.trim() === '' || execute.isPending}>
+                <Play className="size-3" /> Run again
+              </Button>
+            </div>
+          )}
 
           {outcome !== null && outcome.mode === 'entities' && (
             <EntitySearchResult

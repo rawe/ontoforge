@@ -47,8 +47,9 @@ export const ENTITY_SEARCH_RESPONSE =
   "Returns ran (the methods that ran), items and limitations (what could not run: code, message, method, " +
   "indices, types). Each item has rank (from 1), " +
   `${ENTITY} and match, the entry that found it: index, part (self, relation or passage), snippet ` +
-  "(the start of its text, null when this lens hides it), a relation's relationType and target (_id, " +
-  `_entityTypeKey, name), a passage's property, charOffset and charLength, and ${SCORES}.`;
+  "(the start of its text; null if this lens hides it), a relation's relationType and target (_id, " +
+  `_entityTypeKey, name), a passage's property, charOffset and charLength, and ${SCORES}. A method that ` +
+  "found only another entry of the entity is absent.";
 
 /** The passage search's response, as `search_documents` answers it. */
 export const PASSAGE_SEARCH_RESPONSE =

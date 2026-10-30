@@ -1132,8 +1132,8 @@ export function createRuntimeMcpServer(
       description:
         "Rank entities for a text, best first. " + SEARCH_QUERY_RULE + " " +
         "Scope, at most one of: types (entity type keys: their own fields and their documents' passages) " +
-        "or indices (search index keys from list_search_indices; a custom index with relation groups also " +
-        "finds an entity through its relations); neither searches every type of this lens. " +
+        "or indices (index keys from list_search_indices; a custom index with relation groups also " +
+        "finds an entity through its relations); neither: every type of the lens. " +
         filterRules({ contains: false, relations: true }) + " " +
         SEARCH_FILTER_EFFECT + " limit: an integer 1–100, default 10. " +
         ENTITY_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,

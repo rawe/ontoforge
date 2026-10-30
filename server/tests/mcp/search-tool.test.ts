@@ -163,6 +163,7 @@ describe("search tool descriptions", () => {
     const search = await descriptionOf("search");
     expect(search).toContain("Returns ran (the methods that ran), items and limitations");
     expect(search).toContain("match, the entry that found it");
+    expect(search).toContain("A method that found only another entry of the entity is absent.");
     const documents = await descriptionOf("search_documents");
     expect(documents).toContain("passage: property (the document), ordinal, charOffset and charLength");
     for (const description of [search, documents]) {

@@ -14,6 +14,7 @@ import type {
   EntitySearchResponse,
   NamedSearchRunBody,
   PassageSearchBody,
+  PassageSearchResponse,
   QueryResult,
   MethodScores,
   Representation,
@@ -287,4 +288,16 @@ export function isEntitySearchResponse(
   result: QueryResult | EntitySearchResponse,
 ): result is EntitySearchResponse {
   return 'items' in result && 'ran' in result
+}
+
+/** Which unit a named search's run answered with, read from its items: the
+ * listed `result` may be older than the search the server ran. With no
+ * items either renderer fits, so the listed one stands. */
+export function namedRunResult(
+  response: EntitySearchResponse | PassageSearchResponse,
+  listed: SearchMode,
+): SearchMode {
+  const first = response.items[0]
+  if (first === undefined) return listed
+  return 'passage' in first ? 'passages' : 'entities'
 }

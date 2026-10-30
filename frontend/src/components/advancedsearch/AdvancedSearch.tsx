@@ -37,6 +37,7 @@ import {
   NAMED_CONTROLS,
   namedRequestKey,
   namedRunBody,
+  namedRunResult,
   requestKey,
   scopeSummary,
   SEARCH_CONTROLS,
@@ -360,8 +361,9 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
           : { mode: 'passages', response: await runtime.searchPassages(ontologyKey, lensKey, sent.body) }
       }
       const response = await runtime.runNamedSearch(ontologyKey, lensKey, sent.key, sent.body)
-      // The named search's result unit says which response came back.
-      return sent.result === 'entities'
+      // The response's items say which unit came back: the listed result may
+      // be older than the search the server ran.
+      return namedRunResult(response, sent.result) === 'entities'
         ? { mode: 'entities', response: response as EntitySearchResponse }
         : { mode: 'passages', response: response as PassageSearchResponse }
     },

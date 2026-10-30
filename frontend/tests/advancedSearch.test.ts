@@ -13,6 +13,7 @@ import {
   NAMED_CONTROLS,
   namedRequestKey,
   namedRunBody,
+  namedRunResult,
   ranText,
   requestKey,
   scoresText,
@@ -235,4 +236,19 @@ test('a named run key names its search and ignores the order of filter keys', ()
 test('a named run places only query and filter errors; the rest, tree paths too, shows apart', () => {
   const fields = { query: 'Required', 'filter.age': 'Unknown key', limit: 'Too big', 'tree.inputs.0': 'Not in the lens' }
   assert.deepEqual(unplacedFieldErrors(fields, NAMED_CONTROLS), ['limit: Too big', 'tree.inputs.0: Not in the lens'])
+})
+
+test('a named run renders by the unit its items show, not the listed result', () => {
+  const entity = { _id: 'e-1', _entityTypeKey: 'person', name: 'Ada' }
+  const scores = { keyword: 1 }
+  const match = { index: 'person', part: 'self' as const, snippet: null, scores }
+  const entities = { ran: ['keyword' as const], limitations: [], items: [{ rank: 1, entity, match }] }
+  const passages = {
+    ran: ['keyword' as const],
+    limitations: [],
+    items: [{ rank: 1, entity, passage: { property: 'bio', ordinal: 0, charOffset: 0, charLength: 3, scores } }],
+  }
+  assert.equal(namedRunResult(passages, 'entities'), 'passages')
+  assert.equal(namedRunResult(entities, 'passages'), 'entities')
+  assert.equal(namedRunResult({ ran: [], items: [], limitations: [] }, 'passages'), 'passages')
 })

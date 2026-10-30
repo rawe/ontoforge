@@ -249,17 +249,23 @@ One form per field of the [entity search](../capabilities/search.md#entity-searc
 so the server's default applies, and the server judges what the form cannot.
 
 **Form.** A mode — Entities or Passages — and the text, run by Enter or Run once it is
-not blank. A scope over one field at a time: types, indices, or — for passages — document
-properties; none chosen searches the whole lens. Keyword with any or all words, and
-Semantic with an optional similarity floor, only on a server with semantic search; none
-checked lets the server run what can run. A filter with the
-[type table's](workbench.md#type-table) conditions, offered only when the scope names one
-type or one document property, without `contains`. A limit, and for passages a cap per
-entity.
+not blank. On a wide screen the settings sit in a panel beside the results; on a narrow
+one they fold above them into a one-line summary. A scope over one field at a time:
+types, indices, or — for passages — document properties, each chosen from a list that can
+be searched, indices grouped by type with their kind, a missing method and a state that
+is not ready; each field keeps its choice while another is shown. None chosen searches
+every type through its managed indices. One choice of methods — Both, Keyword or
+Semantic, the last two only on a server with semantic search — with keyword matching by
+any or all words and an optional similarity floor. A filter with the
+[type table's](workbench.md#type-table) conditions, without `contains`, once every chosen
+scope item belongs to one type. A limit, and for passages a cap per entity. A "?" beside
+the title explains how search works, step by step over one example.
 
 **Results.** The count, which methods ran, and each limitation as a sentence naming its
 types, indices or documents. An entity row has its rank, type chip, name linking to its
-detail, the part that matched and the snippet; a passage row has the entity, the document
+detail, the part that matched and the snippet; a row found through a custom index names
+it; a passage row has the entity, the document
 property — opening the [document viewer](schema-editing.md#document-viewer-and-editor) — and
 the passage text. No score is shown ([Matched via](#matched-via)). A rejected field shows its
-error under its control; others show verbatim below the form.
+error under its control; others show verbatim below the form. Results searched with other
+settings than the form now shows say so, with a button to run again.

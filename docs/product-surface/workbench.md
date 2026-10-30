@@ -62,8 +62,10 @@ filters with the string operators, and is part of the CSV export. Document value
 [document viewer](schema-editing.md#document-viewer-and-editor) — never as inline content, and never as
 something the row click can swallow.
 
-A filter condition has a subject — a property of the type, or a relation type in one
-direction — and the operators on offer depend on it:
+A filter condition has a subject — a property of the type, a relation type in one
+direction, or a property reached through such a relation, of the entity at its other end
+or of the relation itself ([query paths](../capabilities/instance-data.md#query-paths)) —
+and the operators on offer depend on it:
 
 | Subject | Operators |
 |---|---|
@@ -72,11 +74,14 @@ direction — and the operators on offer depend on it:
 | boolean property | is, is set, is not set |
 | document property | is set, is not set |
 | relation type, per direction | has any, has none |
+| property through a relation | those of its data type, as above |
 
 A relation type is offered once for each direction in which it touches the type, so a
 self-referential type appears twice; each entry shows its direction and the entity type at
 its other end, and a relation type whose other end the lens does not expose is not
-offered. `between` is a client convenience: it is sent as a ≥ / ≤ pair on the same
+offered. Choosing a relation then asks for has any, has none, or a property through it. A
+text value lists values the property holds, from one page of matching entities, to pick
+from; a relation's own properties list none. `between` is a client convenience: it is sent as a ≥ / ≤ pair on the same
 property. Choosing "does not equal" notes that entities without a value are not included.
 A subject holds at most one condition: applying another to it replaces the first, and the
 popover says so before applying. Applied conditions appear as removable chips with a
@@ -84,12 +89,12 @@ clear-all action.
 
 The table offers a subset of the entity list's filter vocabulary
 ([interfaces/](../interfaces/README.md#listing-sorting-filtering)): strict greater-than and
-less-than, and query paths in either form, are not offered. This lists every difference
+less-than are not offered. This lists every difference
 from the server's vocabulary: a change to the filter vocabulary decides whether the table
 offers it and updates this list.
 
-Any change to search, filters or sort returns to the first page. Switching to another type
-resets search, filters, sort, column visibility, selection and page. If deleting the last
+Any change to search, filters or sort returns to the first page. Switching to another type or
+lens resets search, filters, sort, column visibility, selection and page. If deleting the last
 rows of a trailing page leaves the current page beyond the end, the table clamps back to
 the last populated page. Two distinct empty states are shown: "nothing exists yet" (with a
 create action) and "nothing matches" (with a clear-filters action).

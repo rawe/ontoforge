@@ -14,6 +14,8 @@ import type {
   JsonValue,
   Lens,
   LensInput,
+  NamedSearch,
+  NamedSearchInput,
   PropertyDefinition,
   PropertyInput,
   PropertyUpdate,
@@ -284,7 +286,7 @@ export const importSchema = (ontologyKey: string, data: Record<string, JsonValue
   })
 
 /* ---------------------------------- Agents ---------------------------------- */
-/* Unlike the routes above, assistant and saved-query routes address the lens
+/* Unlike the routes above, assistant, saved-query and named-search routes address the lens
    by its KEY, not its UUID. The built-in default agent is no modeling resource. */
 
 export const listAgents = (ontologyKey: string, lensKey: string) =>
@@ -331,6 +333,29 @@ export const deleteSavedQuery = (
 ) =>
   request<undefined>(
     `${base(ontologyKey)}/lenses/${lensKey}/saved-queries/${queryKey}`,
+    { method: 'DELETE' },
+  )
+
+/* ------------------------------- named searches ------------------------------ */
+
+export const listNamedSearches = (ontologyKey: string, lensKey: string) =>
+  request<NamedSearch[]>(`${base(ontologyKey)}/lenses/${lensKey}/named-searches`)
+
+/** Upsert — 201 created / 200 updated. */
+export const upsertNamedSearch = (
+  ontologyKey: string,
+  lensKey: string,
+  searchKey: string,
+  body: NamedSearchInput,
+) =>
+  request<NamedSearch>(
+    `${base(ontologyKey)}/lenses/${lensKey}/named-searches/${searchKey}`,
+    { method: 'PUT', body },
+  )
+
+export const deleteNamedSearch = (ontologyKey: string, lensKey: string, searchKey: string) =>
+  request<undefined>(
+    `${base(ontologyKey)}/lenses/${lensKey}/named-searches/${searchKey}`,
     { method: 'DELETE' },
   )
 

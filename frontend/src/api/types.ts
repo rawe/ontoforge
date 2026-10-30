@@ -121,6 +121,46 @@ export interface SavedQuery {
   parameters: SavedQueryParameter[]
 }
 
+/** The parts of an index entry a search node counts. */
+export type SearchPartKind = 'self' | 'relation' | 'passage'
+
+/** A node of a named search's stored tree; `$query` in a search node's text
+ * is where the caller's query goes. */
+export type SearchTreeNode =
+  | {
+      kind: 'keywordSearch'
+      index: string
+      text: string
+      /** Absent: any. */
+      match?: 'any' | 'all'
+      /** Absent: every relation type the lens shows. */
+      relations?: string[]
+      /** Absent: every part. */
+      parts?: SearchPartKind[]
+    }
+  | {
+      kind: 'semanticSearch'
+      index: string
+      text: string
+      minSimilarity?: number
+      relations?: string[]
+      parts?: SearchPartKind[]
+    }
+  | { kind: 'merge'; inputs: SearchTreeNode[] }
+  | { kind: 'fuse'; inputs: SearchTreeNode[] }
+  | { kind: 'group'; key: 'entity' | 'passage'; input: SearchTreeNode }
+  | { kind: 'restrict'; input: SearchTreeNode; filters: SearchTreeNode[] }
+  /** `conditions` in the entity search's filter syntax. */
+  | { kind: 'filter'; entityType: string; conditions: Record<string, string> }
+  | { kind: 'cut'; input: SearchTreeNode; limit: number; perEntity?: number }
+
+export interface NamedSearch {
+  key: string
+  name: string
+  description: string
+  tree: SearchTreeNode
+}
+
 /**
  * A hit from semantic saved-query search. Discovery search deliberately
  * returns the query *without* its steps (only key, name, description,
@@ -950,6 +990,13 @@ export interface SavedQueryInput {
   description?: string | null
   steps: SavedQueryStep[]
   parameters?: SavedQueryParameter[]
+}
+
+export interface NamedSearchInput {
+  name: string
+  /** Required, may be empty. */
+  description: string
+  tree: SearchTreeNode
 }
 
 /** Runtime tool names an agent may be restricted to. */

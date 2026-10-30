@@ -57,7 +57,7 @@ function Entries({ entries, semantic, grouped }: { entries: ExampleEntry[]; sema
         <span className="pt-px text-right font-mono text-[11px] text-muted-foreground tabular-nums">{counts && grouped ? rank : ''}</span>
         <span className="grid min-w-0 gap-0.5">
           <span className={cn(!counts && 'line-through')}><Who {...entry} /></span>
-          <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <span className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
             <span className="shrink-0">{entry.part}</span>
             {semantic && entry.similarity !== undefined
               ? <span className="flex min-w-0 flex-1 items-center gap-1.5">

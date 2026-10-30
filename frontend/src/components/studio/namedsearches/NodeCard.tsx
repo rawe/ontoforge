@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { MoreHorizontal, Plus, X } from 'lucide-react'
 import type { SearchCatalogEntry, SearchPartKind, SearchTreeNode } from '@/api/types'
 import { TypeDot } from '@/components/TypeChip'
@@ -25,6 +25,8 @@ import {
   WRAP_KINDS,
   addAt,
   childPath,
+  conditionProblem,
+  conditionsOf,
   inputsOf,
   newNode,
   nodeAt,
@@ -32,6 +34,7 @@ import {
   removeAt,
   replaceAt,
   wrapAt,
+  type ConditionRow,
   type NodeDefaults,
 } from './namedSearchModel'
 
@@ -391,8 +394,20 @@ function FilterFields({
   disabled: boolean
   onChange: (node: SearchTreeNode) => void
 }) {
-  const rows = Object.entries(node.conditions)
-  const setRows = (next: (readonly [string, string])[]) => onChange({ ...node, conditions: Object.fromEntries(next) })
+  // The rows as typed: a key that is empty or repeats another keeps its row,
+  // and the tree gets the first row of each key. Conditions set from outside re-seed them.
+  const [rows, setTypedRows] = useState<ConditionRow[]>(() => Object.entries(node.conditions))
+  const [seen, setSeen] = useState(node.conditions)
+  if (node.conditions !== seen) {
+    setSeen(node.conditions)
+    setTypedRows(Object.entries(node.conditions))
+  }
+  const setRows = (next: ConditionRow[]) => {
+    const conditions = conditionsOf(next)
+    setTypedRows(next)
+    setSeen(conditions)
+    onChange({ ...node, conditions })
+  }
   return (
     <div className="mt-2 grid gap-2">
       <Field label="Entity type" className="sm:max-w-60">
@@ -418,44 +433,51 @@ function FilterFields({
         </Select>
       </Field>
       <Field label="Conditions (all must hold)">
-        {rows.map(([k, v], i) => (
-          <div key={i} className="flex items-center gap-1.5">
-            <Input
-              value={k}
-              disabled={disabled}
-              onChange={(e) => setRows(rows.map((r, j) => (j === i ? [e.target.value, v] : r)))}
-              placeholder="key"
-              className="h-7 min-w-0 flex-1 font-mono text-xs"
-              aria-label="Condition key"
-            />
-            <span className="text-muted-foreground">=</span>
-            <Input
-              value={v}
-              disabled={disabled}
-              onChange={(e) => setRows(rows.map((r, j) => (j === i ? [k, e.target.value] : r)))}
-              placeholder="value"
-              className="h-7 min-w-0 flex-[2] font-mono text-xs"
-              aria-label="Condition value"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label="Remove condition"
-              disabled={disabled}
-              onClick={() => setRows(rows.filter((_, j) => j !== i))}
-            >
-              <X className="size-3" />
-            </Button>
-          </div>
-        ))}
+        {rows.map(([k, v], i) => {
+          const problem = conditionProblem(rows, i)
+          return (
+            <div key={i} className="grid gap-0.5">
+              <div className="flex items-center gap-1.5">
+                <Input
+                  value={k}
+                  disabled={disabled}
+                  onChange={(e) => setRows(rows.map((r, j) => (j === i ? [e.target.value, v] : r)))}
+                  placeholder="key"
+                  className="h-7 min-w-0 flex-1 font-mono text-xs"
+                  aria-label="Condition key"
+                  aria-invalid={problem !== null}
+                />
+                <span className="text-muted-foreground">=</span>
+                <Input
+                  value={v}
+                  disabled={disabled}
+                  onChange={(e) => setRows(rows.map((r, j) => (j === i ? [k, e.target.value] : r)))}
+                  placeholder="value"
+                  className="h-7 min-w-0 flex-[2] font-mono text-xs"
+                  aria-label="Condition value"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Remove condition"
+                  disabled={disabled}
+                  onClick={() => setRows(rows.filter((_, j) => j !== i))}
+                >
+                  <X className="size-3" />
+                </Button>
+              </div>
+              {problem !== null && <p className="text-[11px] text-destructive">{problem}</p>}
+            </div>
+          )
+        })}
         <div>
           <Button
             type="button"
             variant="outline"
             size="xs"
-            disabled={disabled || '' in node.conditions}
-            onClick={() => onChange({ ...node, conditions: { ...node.conditions, '': '' } })}
+            disabled={disabled || rows.some(([k]) => k === '')}
+            onClick={() => setRows([...rows, ['', '']])}
           >
             <Plus className="size-3" /> Add condition
           </Button>

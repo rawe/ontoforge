@@ -265,6 +265,25 @@ export function resultUnit(tree: SearchTreeNode): ResultUnit | null {
   }
 }
 
+/* -------------------------------- conditions -------------------------------- */
+
+/** One condition of a filter as the editor holds it: a key and its value, the key not yet checked. */
+export type ConditionRow = readonly [key: string, value: string]
+
+/** A filter's conditions from its rows: the first row of each key. */
+export function conditionsOf(rows: readonly ConditionRow[]): Record<string, string> {
+  const first = new Map<string, string>()
+  for (const [key, value] of rows) if (!first.has(key)) first.set(key, value)
+  return Object.fromEntries(first)
+}
+
+/** Why the row at `i` is not applied — no key but a value, or the key of an earlier row; null when it is. */
+export function conditionProblem(rows: readonly ConditionRow[], i: number): string | null {
+  const [key, value] = rows[i]!
+  if (key.trim() === '') return value === '' ? null : 'A row without a key is not applied.'
+  return rows.slice(0, i).some(([k]) => k === key) ? 'This key is already used above; this row is not applied.' : null
+}
+
 /** The tree as it is sent: filter condition rows without a key left out. */
 export function cleanTree(tree: SearchTreeNode): SearchTreeNode {
   switch (tree.kind) {

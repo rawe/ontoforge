@@ -6,6 +6,8 @@ import {
   addAt,
   canonicalTree,
   cleanTree,
+  conditionProblem,
+  conditionsOf,
   newNode,
   nodeAt,
   nodeOfPath,
@@ -186,6 +188,22 @@ test('cleanTree drops condition rows without a key', () => {
     limit: 5,
     input: { ...restrict, filters: [{ kind: 'filter', entityType: 'person', conditions: { year: '2020' } }] },
   })
+})
+
+test('typing a second key through an existing one keeps both conditions', () => {
+  const typed = (key: string) => [['age', '30'], [key, '']] as const
+  // On the way to `age__gte` the new row's key is briefly `age`: it is flagged, the existing condition stays.
+  assert.deepEqual(conditionsOf(typed('age')), { age: '30' })
+  assert.equal(conditionProblem(typed('age'), 0), null)
+  assert.match(conditionProblem(typed('age'), 1) ?? '', /already used/)
+  assert.deepEqual(conditionsOf(typed('age__gte')), { age: '30', age__gte: '' })
+  assert.equal(conditionProblem(typed('age__gte'), 1), null)
+})
+
+test('a condition row without a key is flagged only once it has a value', () => {
+  assert.equal(conditionProblem([['', '']], 0), null)
+  assert.match(conditionProblem([[' ', 'x']], 0) ?? '', /without a key/)
+  assert.deepEqual(conditionsOf([['year', '2020'], ['', ''], ['', 'x']]), { year: '2020', '': '' })
 })
 
 /* ---------------------------------- errors ---------------------------------- */

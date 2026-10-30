@@ -24,8 +24,9 @@ only; a node's inputs are nodes again.
 
 A search node's `relations` names the relation types whose relation entries count;
 without it, every relation type the lens shows counts. Its `parts` names the entry parts
-that count — `self`, `relation`, `passage`; without it, every part counts. Ranking,
-grouping, fusion and the scores are those of [ranked search](search.md#ranking).
+that count — `self`, `relation`, `passage`; without it, every part counts, and below a
+`passage` group passages only. Ranking, grouping, fusion and the scores are those of
+[ranked search](search.md#ranking).
 
 A filter's `conditions` take the keys and values of the
 [entity search's filters](search.md#scope-and-filters), checked against that one entity
@@ -74,6 +75,8 @@ its path below `tree` (`tree.input.inputs.1.index`):
     those are fused;
   - passages fuse straight from their groups: a fuse of passages takes no fuse and no
     cut;
+  - below a `passage` group only passage entries count: a search node there whose
+    `parts` name another part is refused at its `parts`;
   - a fused ranking, which keeps only an order, is only fused again, restricted or cut;
   - a merge or fuse combines one result unit, entities or passages;
   - a floor belongs to a semantic search;
@@ -83,9 +86,6 @@ its path below `tree` (`tree.input.inputs.1.index`):
 - **Each filter's conditions** resolve against its entity type through the lens; a key
   the type does not have, or the lens hides, is refused at its path
   (`tree.input.filters.0.conditions.age__gte`).
-- **Below a `passage` group only passage entries count:** a search node there without
-  `parts` counts passages only, and one whose `parts` name another part is refused at its
-  `parts`.
 
 The lens checks are skipped when the lens's schema cannot be loaded, as for a
 [saved query](saved-queries.md#validation-at-definition-time-versus-run-time).
@@ -104,8 +104,8 @@ A run takes the **query** — required, not blank — and optional **filter**s, 
 1. The key is resolved within the lens; an unknown key is not found.
 2. The query goes in place of every `$query` in every search node's text, as written: no
    character of the query is special, and a text without `$query` stays as it is.
-3. The tree is checked against the lens again — the shape, the tree's rules and the passage rule
-   of [Checks at save](#checks-at-save), stored filters included. A search the lens no longer
+3. The tree is checked against the lens again — the shape and the tree's rules of
+   [Checks at save](#checks-at-save), stored filters included. A search the lens no longer
    fits, because the lens was narrowed or an index switched off after it was saved, is a
    validation error naming the search and every path; it never runs. Nothing proactively
    invalidates a stored tree; re-saving it after such a change is the designer's job.

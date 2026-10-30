@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { FilterCondition } from "../../src/core/ports.js";
+import type { FilterCondition, SearchPartKind } from "../../src/core/ports.js";
 import {
   compileEntitySearch,
   compilePassageSearch,
@@ -150,7 +150,7 @@ describe("rules", () => {
     });
 
     it("R4: entities and passages do not fuse", () => {
-      const passages = group(semantic("person~notes"), "passage");
+      const passages = group({ ...semantic("person~notes"), parts: ["passage"] }, "passage");
       expect(rules(cut(fuse(group(semantic("person~default")), passages)))).toEqual([{ rule: "R4", path: "input" }]);
     });
 
@@ -211,12 +211,23 @@ describe("rules", () => {
     expect(check(cut(fuse(fuse(entities("q"), entities("v1")), cut(entities("v2")))))).toEqual([]);
   });
 
+  it("R2: below a passage group a search counts passage entries only", () => {
+    const refused = (path: string) => ({ rule: "R2", path, message: "A passage group counts passage entries only" });
+    const bodies = (parts?: SearchPartKind[]) => ({ ...keyword("report~body"), ...(parts && { parts }) });
+    expect(check(cut(group(bodies(["passage"]), "passage")))).toEqual([]);
+    expect(check(cut(group(bodies(), "passage")))).toEqual([refused("input.input.parts")]);
+    expect(check(cut(group(merge(bodies(["passage"]), bodies(["self", "passage"])), "passage")))).toEqual([
+      refused("input.input.inputs.1.parts"),
+    ]);
+    expect(check(cut(group(bodies())))).toEqual([]);
+  });
+
   it("R3: a rank-only ranking does not group", () => {
     expect(rules(cut(group(fuse(group(keyword("person~default"))))))).toEqual([{ rule: "R3", path: "input.input" }]);
   });
 
   it("R4: append adds to entities only", () => {
-    expect(rules(cut(append(group(semantic("person~notes"), "passage"), filter("person"))))).toEqual([
+    expect(rules(cut(append(group({ ...semantic("person~notes"), parts: ["passage"] }, "passage"), filter("person"))))).toEqual([
       { rule: "R4", path: "input" },
     ]);
   });

@@ -215,7 +215,7 @@ export interface SearchTreeContext {
 /** The value a node yields — null when the tree below does not fit the
  * rules (`validateSearchTree` says why). */
 export function treeValue(node: TreeNode, context: SearchTreeContext): TreeValue | null {
-  return typeOf(node, "", context, [], false);
+  return typeOf(node, "", context, [], ABOVE_ROOT);
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +240,8 @@ export interface SearchTreeViolation {
  * - R1 a merge's rankings share one score kind;
  * - R2 every search node reaches the root through a cut, whose limit sets
  *   how deep it reads, and through exactly one group, above every merge
- *   and below every fuse; passages fuse straight from their groups;
+ *   and below every fuse; passages fuse straight from their groups, and
+ *   below a passage group a search counts passage entries only;
  * - R3 a rank-only ranking is only fused, restricted, appended to or cut;
  * - R4 a fuse or merge combines one result unit; append ranks entities;
  * - R5 a floor lives in a semantic search;
@@ -250,7 +251,7 @@ export interface SearchTreeViolation {
  */
 export function validateSearchTree(tree: TreeNode, context: SearchTreeContext): SearchTreeViolation[] {
   const violations: SearchTreeViolation[] = [];
-  const value = typeOf(tree, "", context, violations, false);
+  const value = typeOf(tree, "", context, violations, ABOVE_ROOT);
   if (value?.unit === "entries") {
     violations.push({
       rule: "R2",
@@ -280,15 +281,23 @@ function unrestricted(node: TreeNode): TreeNode {
   return node.kind === "restrict" ? unrestricted(node.input) : node;
 }
 
+/** What lies above a node: a cut, a passage group. */
+interface Above {
+  cut: boolean;
+  passage: boolean;
+}
+
+const ABOVE_ROOT: Above = { cut: false, passage: false };
+
 /** The value of a node, its inputs checked first; null when it, or an
  * input it depends on, breaks a rule — a node above does not report again
- * what follows from that. `cut`: a cut lies above the node. */
+ * what follows from that. */
 function typeOf(
   node: TreeNode,
   path: string,
   context: SearchTreeContext,
   violations: SearchTreeViolation[],
-  cut: boolean,
+  above: Above,
 ): TreeValue | null {
   const refuse = (rule: SearchTreeRule, message: string, at = path): null => {
     violations.push({ rule, path: at, message });
@@ -296,7 +305,11 @@ function typeOf(
   };
   const inputs = inputsOf(node).map(([segment, input]) => {
     const at = path === "" ? segment : `${path}.${segment}`;
-    return { path: at, value: typeOf(input, at, context, violations, cut || node.kind === "cut") };
+    const below = {
+      cut: above.cut || node.kind === "cut",
+      passage: node.kind === "group" ? node.key === "passage" : above.passage,
+    };
+    return { path: at, value: typeOf(input, at, context, violations, below) };
   });
   // The inputs that must be rankings: entity ids refused (R6), a rank-only
   // ranking too where only a scored one fits (R3). Null when one does not
@@ -336,7 +349,10 @@ function typeOf(
     case "keywordSearch":
     case "semanticSearch": {
       if (!context.indices.has(node.index)) refuse("R7", `Search index '${node.index}' is not searchable in this lens`);
-      if (!cut) refuse("R2", "A search node needs a cut above it: its limit sets how deep it reads");
+      if (!above.cut) refuse("R2", "A search node needs a cut above it: its limit sets how deep it reads");
+      if (above.passage && !node.parts?.every((part) => part === "passage")) {
+        refuse("R2", "A passage group counts passage entries only", path === "" ? "parts" : `${path}.parts`);
+      }
       if (node.kind === "keywordSearch" && "minSimilarity" in node) {
         return refuse("R5", "A floor lives in a semantic search; keyword scores have none");
       }

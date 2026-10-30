@@ -84,8 +84,8 @@ export function compileNamedSearch(
 }
 
 /** `passage`: below a passage group, where only passage entries count —
- * a search node without `parts` counts those only; one whose `parts`
- * name another is an error. */
+ * a search node without `parts` counts those only (the tree's rules refuse
+ * other parts). */
 function compile(
   at: StoredSearchNode,
   path: string,
@@ -100,9 +100,6 @@ function compile(
   let parts: SearchPartKind[] | undefined;
   if (at.kind === "keywordSearch" || at.kind === "semanticSearch") {
     parts = at.parts ?? (passage ? ["passage"] : undefined);
-    if (passage && parts!.some((part) => part !== "passage")) {
-      errors.push(`${treePath(path)}.parts: A passage group counts passage entries only`);
-    }
   }
   switch (at.kind) {
     case "keywordSearch":

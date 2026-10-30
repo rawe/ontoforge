@@ -8,6 +8,7 @@ import {
   isEntitySearchResponse,
   limitationSentence,
   ranText,
+  requestKey,
   scopeSummary,
   searchBody,
   sharedType,
@@ -173,4 +174,12 @@ test('the scope summary counts what is chosen; nothing chosen reads as all', () 
   assert.equal(scopeSummary('indices', 0, 62), 'Every type’s managed indices')
   assert.equal(scopeSummary('indices', 1, 62), '1 of 62 indices')
   assert.equal(scopeSummary('documents', 0, 1), 'The one document')
+})
+
+test('a request key ignores the order scope and filter keys were chosen in', () => {
+  const a = searchBody(form({ scope: { field: 'types', keys: ['person', 'company'] }, filter: { a: 1, b: 2 } }))
+  const b = searchBody(form({ scope: { field: 'types', keys: ['company', 'person'] }, filter: { b: 2, a: 1 } }))
+  assert.equal(requestKey('entities', a), requestKey('entities', b))
+  assert.notEqual(requestKey('entities', a), requestKey('passages', a))
+  assert.notEqual(requestKey('entities', a), requestKey('entities', searchBody(form({}))))
 })

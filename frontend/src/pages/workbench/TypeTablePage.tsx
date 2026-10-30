@@ -186,11 +186,12 @@ export function TypeTablePage() {
     }
   }, [resetKey])
 
-  // Reset table-local state when navigating to another type.
-  const prevTypeKey = useRef(typeKey)
+  // Reset table-local state when navigating to another type — or lens, whose
+  // schema may hide what a filter names.
+  const prevTypeKey = useRef(`${lensKey}/${typeKey}`)
   useEffect(() => {
-    if (prevTypeKey.current !== typeKey) {
-      prevTypeKey.current = typeKey
+    if (prevTypeKey.current !== `${lensKey}/${typeKey}`) {
+      prevTypeKey.current = `${lensKey}/${typeKey}`
       setPage(0)
       setSorting([{ id: '_updatedAt', desc: true }])
       setColumnVisibility({ _createdAt: false })
@@ -199,7 +200,7 @@ export function TypeTablePage() {
       setDebouncedQ('')
       setFilters([])
     }
-  }, [typeKey])
+  }, [lensKey, typeKey])
 
   // Hidden columns are excluded from the request via `fields` (always keep
   // _id). Exception: `fields` returns document properties as their RAW full

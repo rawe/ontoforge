@@ -113,6 +113,22 @@ export function emptyScopeText(field: ScopeField, mode: SearchMode): string {
   }
 }
 
+/**
+ * A request as a comparable text: the same search reads the same whatever
+ * order its scope keys and filter keys were chosen in.
+ */
+export function requestKey(mode: SearchMode, body: PassageSearchBody): string {
+  const sorted = (keys: readonly string[] | undefined) => (keys === undefined ? undefined : [...keys].sort())
+  return JSON.stringify({
+    mode,
+    ...body,
+    types: sorted(body.types),
+    indices: sorted(body.indices),
+    documents: sorted(body.documents),
+    filter: body.filter === undefined ? undefined : Object.entries(body.filter).sort(([a], [b]) => a.localeCompare(b)),
+  })
+}
+
 /** The request paths a form control answers for. */
 export const SEARCH_CONTROLS = [
   'query',

@@ -24,6 +24,7 @@ import { SearchExplainerButton } from './explainer/SearchExplainer'
 import { ScopePicker, type ScopeChoice } from './ScopePicker'
 import {
   fieldErrorsAt,
+  requestKey,
   scopeSummary,
   searchBody,
   sharedType,
@@ -300,7 +301,7 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
   }
   // What the shown results were searched with: a change since then marks them stale.
   const [ranWith, setRanWith] = useState('')
-  const stale = outcome !== null && ranWith !== JSON.stringify(request)
+  const stale = outcome !== null && ranWith !== requestKey(request.mode, request.body)
 
   const execute = useMutation({
     mutationFn: async ({ mode, body }: typeof request): Promise<Outcome> =>
@@ -310,7 +311,7 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
     onSuccess: (data, sent) => {
       setOutcome(data)
       setError(null)
-      setRanWith(JSON.stringify(sent))
+      setRanWith(requestKey(sent.mode, sent.body))
     },
     onError: (err) => {
       setOutcome(null)

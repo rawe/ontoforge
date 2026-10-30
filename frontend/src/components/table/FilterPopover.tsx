@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { ListFilter } from 'lucide-react'
 import { useState } from 'react'
 import { listEntities } from '@/api/runtime'
@@ -56,9 +56,9 @@ export interface FilterValueSource {
 const SUGGESTIONS = 8
 
 /**
- * Values a string property holds on entities of a type, matching the typed
- * text: one page of the type's list, searched by the text, its distinct values
- * of the property. A hint to pick from, not every value there is.
+ * Values a string property holds on entities of a type, containing the typed
+ * text: one page of the type's list filtered on the property itself, its
+ * distinct values. A hint to pick from, not every value there is.
  */
 function useValueSuggestions(
   source: FilterValueSource | undefined,
@@ -76,17 +76,18 @@ function useValueSuggestions(
         sort: propertyKey,
         order: 'asc',
         fields: [propertyKey!],
-        ...(q !== '' ? { q } : {}),
+        ...(q !== '' ? { filter: { [propertyKey!]: { op: 'contains', value: q } } } : {}),
       })
-      const needle = q.toLowerCase()
       const values = page.items
         .map((e) => e[propertyKey!])
-        .filter((v): v is string => typeof v === 'string' && v !== '' && v.toLowerCase().includes(needle))
+        .filter((v): v is string => typeof v === 'string' && v !== '')
       return [...new Set(values)].slice(0, SUGGESTIONS)
     },
     enabled,
     staleTime: 30_000,
-    placeholderData: keepPreviousData,
+    // Keep the last values while the text changes, never across another property.
+    placeholderData: (previous, query) =>
+      query?.queryKey[3] === typeKey && query?.queryKey[4] === propertyKey ? previous : undefined,
   })
 }
 

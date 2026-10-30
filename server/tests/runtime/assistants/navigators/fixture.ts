@@ -130,7 +130,7 @@ export class FakeReader implements GraphReader {
     return [...this.byId.values()]
       .filter((e) => (type === null || e._entityTypeKey === type) && lower(e.name).includes(lower(query)))
       .slice(0, limit)
-      .map((entity) => ({ entity, relativeScore: 1 }));
+      .map((entity) => ({ entity, score: 1 }));
   }
 
   async list(type: string, term: string, limit: number): Promise<Row[]> {

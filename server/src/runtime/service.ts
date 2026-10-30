@@ -29,6 +29,7 @@
 import { randomUUID } from "node:crypto";
 
 import { CoercionError, assertNoNulCharacter, coerceValue, valueToText } from "../core/dataTypes.js";
+import { SEARCH_STEP_FIELDS, type StepConfig } from "../core/ai.js";
 import { getEmbeddingProvider } from "../core/embedding.js";
 import { ConflictError, IdentityTakenError, NotFoundError, PairTakenError, ValidationError } from "../core/exceptions.js";
 import { SYSTEM_PROPERTIES, getReturnVariables, parseAndValidate } from "../core/oql/index.js";
@@ -74,11 +75,12 @@ import {
   ENTITY_NEIGHBOR_ALWAYS_FIELDS,
   RELATION_ALWAYS_FIELDS,
 } from "./readHelpers.js";
-import { search } from "./search/entry.js";
+import { searchEntities, type EntitySearchRequest } from "./search/entitySearch.js";
 
 export { parseFilters, parseFilterConditions, docLengthKey } from "./readHelpers.js";
-export { search } from "./search/entry.js";
-export { searchByIndices, searchIndexCatalog } from "./search/indexSearch.js";
+export { searchIndexCatalog } from "./search/indexSearch.js";
+export { searchEntities } from "./search/entitySearch.js";
+export { searchPassages } from "./search/passageSearch.js";
 
 type Row = Record<string, unknown>;
 
@@ -1677,11 +1679,14 @@ function pyList(items: string[]): string {
 /**
  * Resolve binding expressions against earlier step outputs: `fieldName`
  * collected from every row IN ROW ORDER into a flat list. A row lacking
- * the field is skipped; an empty list is not an error and flows on.
+ * the field is skipped; an empty list is not an error and flows on. A
+ * field of a search step (`searchSteps`) other than its references is
+ * refused, naming the binding.
  */
 export function resolveBindings(
   bindings: Record<string, string>,
   stepResults: Record<string, Row[]>,
+  searchSteps: ReadonlySet<string> = new Set(),
 ): Record<string, unknown[]> {
   const resolved: Record<string, unknown[]> = {};
   for (const [paramName, expr] of Object.entries(bindings)) {
@@ -1691,6 +1696,12 @@ export function resolveBindings(
     }
     const stepName = match[1]!;
     const fieldName = match[2]!;
+    if (searchSteps.has(stepName) && !SEARCH_STEP_FIELDS.includes(fieldName)) {
+      throw new ValidationError(
+        `Binding '${paramName}' reads '${fieldName}' of search step '${stepName}', ` +
+          `which yields only ${SEARCH_STEP_FIELDS.join(", ")}`,
+      );
+    }
     const rows = stepResults[stepName] ?? [];
     resolved[paramName] = rows.filter((row) => fieldName in row).map((row) => row[fieldName]);
   }
@@ -1702,6 +1713,32 @@ export function resolveBindings(
 export function substituteParams(template: string, params: Row): string {
   return template.replace(PARAM_REF_RE, (whole, name: string) =>
     name in params ? valueToText(params[name]) : whole,
+  );
+}
+
+/** A search step as the entity search request it carries, with `query`
+ * as given; absent fields are left out. */
+export function searchStepRequest(step: StepConfig, query: string): EntitySearchRequest {
+  const { types, indices, keyword, semantic, filter, limit } = step;
+  return {
+    query,
+    ...(types != null ? { types } : {}),
+    ...(indices != null ? { indices } : {}),
+    ...(keyword != null ? { keyword } : {}),
+    ...(semantic != null ? { semantic } : {}),
+    ...(filter != null ? { filter } : {}),
+    ...(limit != null ? { limit } : {}),
+  };
+}
+
+/** The entity search's field errors of the search step at `index`, each
+ * placed under the step (`steps[0].types.0: …`). Any other failure is
+ * rethrown. */
+export function searchStepErrors(exc: unknown, index: number): string[] {
+  const fields = exc instanceof ValidationError ? exc.details?.fields : undefined;
+  if (fields === undefined) throw exc;
+  return Object.entries(fields as Record<string, string>).map(
+    ([path, message]) => `steps[${index}].${path}: ${message}`,
   );
 }
 
@@ -1766,14 +1803,15 @@ export async function executeSavedQuery(
   }
 
   const scoped = loaded.scoped;
+  const searchSteps = new Set(config.steps.filter((s) => s.type === "search").map((s) => s.name));
   const stepResults: Record<string, Row[]> = {};
   let lastOutput: Row = { columns: [], results: [] };
 
-  for (const step of config.steps) {
+  for (const [index, step] of config.steps.entries()) {
     // Resolve bindings from previous step outputs.
     let resolvedBindings: Record<string, unknown> = {};
     if (step.bindings) {
-      resolvedBindings = resolveBindings(step.bindings, stepResults);
+      resolvedBindings = resolveBindings(step.bindings, stepResults, searchSteps);
     }
 
     if (step.type === "oql") {
@@ -1795,14 +1833,22 @@ export async function executeSavedQuery(
     } else if (step.type === "search") {
       // Bindings are resolved but IGNORED here — only declared parameters
       // reach the search text, textually substituted.
-      const queryText = substituteParams(step.query!, coercedParams);
+      const request = searchStepRequest(step, substituteParams(step.query!, coercedParams));
+      let result;
+      try {
+        result = await searchEntities(lensKey, request, store);
+      } catch (exc) {
+        throw new ValidationError(`Saved query '${queryKey}' validation failed`, {
+          errors: searchStepErrors(exc, index),
+        });
+      }
 
-      const result = await search(lensKey, {
-        query: queryText, type: step.entityTypeKey!, limit: step.limit || 10,
-      }, store);
-      const rows = result.hits.map((hit) => hit.entity);
-
-      stepResults[step.name] = rows;
+      // Later steps bind the found entities' references only.
+      stepResults[step.name] = result.items.map(({ entity }) => ({
+        _id: entity._id,
+        _entityTypeKey: entity._entityTypeKey,
+        name: entity.name,
+      }));
       lastOutput = { ...result };
     }
   }
@@ -1820,15 +1866,7 @@ function savedQueryToWire(sq: {
   key: string;
   name: string;
   description: string;
-  steps: {
-    name: string;
-    type: string;
-    oql?: string | null;
-    entityTypeKey?: string | null;
-    query?: string | null;
-    limit?: number | null;
-    bindings?: Record<string, string> | null;
-  }[];
+  steps: StepConfig[];
   parameters: { name: string; description: string; dataType: string }[];
 }): Row {
   return {
@@ -1839,8 +1877,12 @@ function savedQueryToWire(sq: {
       name: s.name,
       type: s.type,
       ...(s.oql ? { oql: s.oql } : {}),
-      ...(s.entityTypeKey ? { entityTypeKey: s.entityTypeKey } : {}),
       ...(s.query ? { query: s.query } : {}),
+      ...(s.types != null ? { types: s.types } : {}),
+      ...(s.indices != null ? { indices: s.indices } : {}),
+      ...(s.keyword != null ? { keyword: s.keyword } : {}),
+      ...(s.semantic != null ? { semantic: s.semantic } : {}),
+      ...(s.filter && Object.keys(s.filter).length > 0 ? { filter: s.filter } : {}),
       ...(s.limit !== null && s.limit !== undefined ? { limit: s.limit } : {}),
       ...(s.bindings && Object.keys(s.bindings).length > 0 ? { bindings: s.bindings } : {}),
     })),

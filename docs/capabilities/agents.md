@@ -54,15 +54,15 @@ know it: it is not listed, read or written there.
 - The grantable set is *narrower* than the read tools available over MCP — being read-only
   is not sufficient to be grantable. The tools are named, and the read-only one left out
   of the set is called out, in [../interfaces/](../interfaces/mcp.md#runtime-tools).
-- **An agent reads documents by passage.** `search_documents` returns entities with
-  document matches naming the property and character range. `get_document` reads those
-  coordinates. MCP exposes the same document-search tool; neither surface takes a strategy
-  or a similarity floor, and both apply the fixed floor of [search.md](search.md#similarity-floor)
-  whenever the default strategy ranks semantically.
-- Entity and document search tools are available whenever a search strategy is available.
-  Only saved-query discovery requires an embedding provider specifically. This applies to
-  the default toolset and explicit allowlists. The search tools return the full envelope
-  and state the relative-score promise in their descriptions.
+- **An agent reads documents by passage.** `search_documents` returns passages, each
+  naming its document and its character offset and length. `get_document` reads those
+  coordinates. MCP exposes the same document-search tool; neither surface takes a method
+  block or a similarity floor, and both apply the fixed floor of
+  [search.md](search.md#similarity-floor).
+- Entity and document search tools are available whenever ranked search can run: the
+  store ranks by keyword, or an embedding provider is installed. Only saved-query
+  discovery requires an embedding provider specifically. This applies to the default
+  toolset and explicit allowlists. The search tools return the search's response.
 - An unknown tool name in an allowlist is rejected, and the error names the valid set.
 - When an agent defines a system prompt, that prompt is used and the schema description is
   appended to it. When it does not, a built-in prompt containing the schema is used. The

@@ -10,6 +10,8 @@ import { z } from "zod";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
+import { settings } from "../../src/config.js";
+import { setEmbeddingProvider } from "../../src/core/embedding.js";
 import {
   CascadeRequiredError,
   ConflictError,
@@ -190,12 +192,25 @@ describe("features route", () => {
       semanticSearch: false,
       ai: false,
       decisions: false,
-      searchStrategies: ["keyword", "keyword-any", "keyword-all"],
+      rankedSearch: true,
     });
   });
 });
 
 describe("OpenAPI surface", () => {
+  it("reports semantic search from the installed embedding provider, not from its setting", async () => {
+    const configured = settings.EMBEDDING_PROVIDER;
+    settings.EMBEDDING_PROVIDER = "ollama";
+    try {
+      expect((await app.inject({ url: "/api/server/features" })).json().semanticSearch).toBe(false);
+      setEmbeddingProvider({ dimensions: 1, modelId: "fake:1", embed: async () => [1], embedBatch: async () => [] });
+      expect((await app.inject({ url: "/api/server/features" })).json().semanticSearch).toBe(true);
+    } finally {
+      settings.EMBEDDING_PROVIDER = configured;
+      setEmbeddingProvider(null);
+    }
+  });
+
   it("serves /openapi.json with the features path", async () => {
     const res = await app.inject({ method: "GET", url: "/openapi.json" });
     expect(res.statusCode).toBe(200);

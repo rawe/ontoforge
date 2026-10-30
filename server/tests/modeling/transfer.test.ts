@@ -158,7 +158,7 @@ describe("export", () => {
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.formatVersion).toBe("7.0");
+    expect(body.formatVersion).toBe("8.0");
     expect(body.entityTypes).toHaveLength(2);
     expect(body.relationTypes).toHaveLength(1);
     expect(body.lenses).toHaveLength(1);
@@ -190,7 +190,7 @@ describe("export", () => {
     const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      formatVersion: "7.0",
+      formatVersion: "8.0",
       keywordLanguages: ["german", "english"],
       searchIndices: { custom: [], disabled: [] },
       entityTypes: [],
@@ -299,8 +299,12 @@ describe("export", () => {
             name: "main",
             type: "oql",
             oql: "MATCH (p:person) RETURN p",
-            entityTypeKey: null,
             query: null,
+            types: null,
+            indices: null,
+            keyword: null,
+            semantic: null,
+            filter: null,
             limit: 5,
             bindings: null,
           },
@@ -328,7 +332,7 @@ const LENS_DATA = {
 
 function importPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    formatVersion: "7.0",
+    formatVersion: "8.0",
     entityTypes: [
       {
         key: "person",
@@ -426,12 +430,12 @@ describe("import", () => {
     expect(holder.store.createEntityType.mock.calls[0]![4]).toMatchObject({ key: "full_name" });
   });
 
-  it("rejects a format version other than 7.0, 6.0 and 5.0, naming those; writes nothing", async () => {
+  it("rejects a format version other than 8.0, 7.0, 6.0 and 5.0, naming those; writes nothing", async () => {
     for (const version of ["2.0", "4.0", "unknown-version"]) {
       holder.store = createMockModelingStore();
       const res = await postImport(importPayload({ formatVersion: version }));
       expect(res.statusCode, `version ${version}`).toBe(422);
-      expect(res.json().error.details.fields.formatVersion).toBe("Expected one of 7.0, 6.0, 5.0");
+      expect(res.json().error.details.fields.formatVersion).toBe("Expected one of 8.0, 7.0, 6.0, 5.0");
       expect(holder.store.createEntityType).not.toHaveBeenCalled();
     }
   });
@@ -517,7 +521,7 @@ describe("import keyword languages", () => {
 
 describe("import search indices", () => {
   const person = entityType("person", "Person", [{ key: "bio", displayName: "Bio", dataType: "document", required: false }]);
-  const payload = (searchIndices: unknown, formatVersion = "7.0") => ({
+  const payload = (searchIndices: unknown, formatVersion = "8.0") => ({
     formatVersion,
     entityTypes: [person],
     relationTypes: [],
@@ -579,7 +583,7 @@ describe("lens index inclusions", () => {
     includes: { entityTypes: [{ key: "company" }], relationTypes: [] },
     ...(indexInclusions === undefined ? {} : { indexInclusions }),
   });
-  const payload = (lenses: unknown[], formatVersion = "7.0") => ({
+  const payload = (lenses: unknown[], formatVersion = "8.0") => ({
     formatVersion,
     entityTypes: [person, company],
     relationTypes: [],
@@ -666,7 +670,7 @@ describe("retrievers", () => {
       },
     ],
   };
-  const payload = (lens: Record<string, unknown>, formatVersion = "7.0") => ({
+  const payload = (lens: Record<string, unknown>, formatVersion = "8.0") => ({
     formatVersion,
     entityTypes: [person],
     relationTypes: [],
@@ -785,7 +789,7 @@ describe("navigators", () => {
   const navigator = (key: string, config: unknown = { hops: 3 }, configVersion = 1, name = "Walker") =>
     ({ key, name, description: null, configVersion, config });
   const payload = (navigators: unknown[]) => ({
-    formatVersion: "7.0",
+    formatVersion: "8.0",
     entityTypes: [person],
     relationTypes: [],
     lenses: [{ key: "all", name: "All", assistants: { navigators } }],
@@ -915,7 +919,7 @@ describe("version-specific fields", () => {
     expect(res.statusCode, res.body).toBe(201);
   });
 
-  it("7.0 ignores the older fields unchecked", async () => {
+  it("8.0 ignores the older fields unchecked", async () => {
     withSearchIndices();
     holder.store.createLens.mockResolvedValue(LENS_DATA);
     const res = await postImport({
@@ -1368,6 +1372,59 @@ describe("import validations", () => {
     expect(message).toContain("already used by");
     expect(message).toContain("Required for oql steps");
     expect(message).toContain("unused");
+  });
+
+  it("refuses a current payload's search step with a field it does not define, at its path", async () => {
+    const res = await postImport(
+      importPayload({
+        lenses: [
+          {
+            key: "imported",
+            name: "Imported",
+            savedQueries: [
+              { key: "stray", name: "Stray", description: "d", steps: [{ name: "found", type: "search", query: "x", entityTypeKey: "person" }] },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.errors).toEqual([
+      expect.objectContaining({ path: "/lenses/0/savedQueries/0/steps/0/entityTypeKey" }),
+    ]);
+    expect(holder.store.upsertSavedQuery).not.toHaveBeenCalled();
+  });
+
+  it("a 7.0 payload's search steps become entity searches; one binding a non-reference is left out and named", async () => {
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    const steps = (field: string) => [
+      { name: "found", type: "search", entityTypeKey: "person", query: "$q", limit: 3 },
+      { name: "more", type: "oql", oql: "MATCH (p:person) WHERE p._id IN $ids RETURN p", bindings: { ids: `{{found.${field}}}` } },
+    ];
+    const query = (key: string, field: string) => ({
+      key,
+      name: key,
+      description: "Find, then read",
+      steps: steps(field),
+      parameters: [{ name: "q", description: "Who", dataType: "string" }],
+    });
+    const res = await postImport(
+      importPayload({
+        formatVersion: "7.0",
+        lenses: [{ key: "imported", name: "Imported", savedQueries: [query("by-id", "_id"), query("by-email", "email")] }],
+      }),
+    );
+    expect(res.statusCode, res.body).toBe(201);
+    expect(res.json().leftOutSavedQueries).toEqual([{ lens: "imported", key: "by-email" }]);
+    expect(holder.store.upsertSavedQuery).toHaveBeenCalledTimes(1);
+    expect(holder.store.upsertSavedQuery.mock.calls[0]![2]).toBe("by-id");
+    expect(JSON.parse(holder.store.upsertSavedQuery.mock.calls[0]![5] as string)[0]).toEqual({
+      name: "found",
+      type: "search",
+      query: "$q",
+      types: ["person"],
+      limit: 3,
+    });
   });
 
   it("imports a structurally sound pipeline whose OQL names types no lens exposes", async () => {

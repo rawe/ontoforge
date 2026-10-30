@@ -15,13 +15,15 @@
  */
 
 import {
-  availableStrategies,
-  RELATIVE_SCORE_PROMISE,
-  SEARCH_EVIDENCE_GUIDANCE,
-  SEARCH_RESPONSE,
-  TOOL_MIN_SIMILARITY_GUIDANCE,
-  toolMinSimilarity,
-} from "../../search/strategies.js";
+  ENTITY_SEARCH_RESPONSE,
+  PASSAGE_SEARCH_RESPONSE,
+  SEARCH_FILTER_EFFECT,
+  SEARCH_QUERY_RULE,
+  SEARCH_RESULT_NOTE,
+  toolMethods,
+} from "../../search/tools.js";
+import { deploymentMethods } from "../../search/availability.js";
+import { filterRules } from "../../readHelpers.js";
 
 import { randomUUID } from "node:crypto";
 
@@ -41,7 +43,6 @@ import { createAgent, createMiddleware } from "langchain";
 import { z } from "zod";
 
 import { DEFAULT_AGENT_CONFIG, type AgentConfig } from "../../../core/ai.js";
-import { getEmbeddingProvider } from "../../../core/embedding.js";
 import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
 import type { RuntimeStore } from "../../../core/ports.js";
 import type { StreamEvent } from "../../chatStream.js";
@@ -156,6 +157,15 @@ interface AgentToolDef {
 const clampLimit = (limit: unknown, fallback: number, max: number): number =>
   Math.min(typeof limit === "number" ? limit : fallback, max);
 
+/** The scope arguments a search tool was given (null: left out), under the search's names. */
+function searchScope(args: Row): { types?: string[]; documents?: string[] } {
+  const scope: { types?: string[]; documents?: string[] } = {};
+  for (const field of ["types", "documents"] as const) {
+    if (Array.isArray(args[field])) scope[field] = args[field] as string[];
+  }
+  return scope;
+}
+
 const AGENT_TOOL_DEFS: AgentToolDef[] = [
   {
     name: TOOL_GET_SCHEMA,
@@ -226,8 +236,8 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       'the other tools — they appear as {"document": true, "length": N} ' +
       "stubs. 'offset' and 'limit' count characters; omit both to read the " +
       "whole document. Read a segment rather than the whole document when you " +
-      "know where to look: pass the charOffset and charLength of a " +
-      "search_documents hit to read exactly the passage it matched.",
+      "know where to look: pass a search_documents passage's property, charOffset " +
+      "and charLength as property_key, offset and limit to read exactly that passage.",
     schema: z.object({
       entity_type_key: z.string(),
       entity_id: z.string(),
@@ -291,38 +301,69 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         store,
       ),
   },
-  ...[false, true].map((document) => ({
-    name: document ? TOOL_SEARCH_DOCUMENTS : TOOL_SEARCH,
+  {
+    name: TOOL_SEARCH,
     description:
-      (document
-        ? "Find entities whose document text matches the query. Every hit has passage matches with propertyKey, charOffset and charLength for get_document. "
-        : "Find entities for a text across properties and documents. Omit entity_type_key to search across the lens. ") +
-      SEARCH_RESPONSE + " " + TOOL_MIN_SIMILARITY_GUIDANCE + " relativeScore: " +
-      RELATIVE_SCORE_PROMISE + " " + SEARCH_EVIDENCE_GUIDANCE,
+      "Rank entities for a text, best first. " + SEARCH_QUERY_RULE + " " +
+      "types: entity type keys to search, their own fields and their documents' passages; omit to " +
+      "search every type. " +
+      filterRules({ contains: false, relations: true }) + " " +
+      SEARCH_FILTER_EFFECT + " limit: an integer up to 20, default 10. " +
+      ENTITY_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
     schema: z.object({
       query: z.string(),
-      entity_type_key: z.string().nullish(),
+      types: z.array(z.string()).nullish(),
+      filters: z.record(z.string(), z.string()).nullish(),
       limit: z.number().int().nullish(),
-      ...(document ? { property: z.string().nullish() } : {}),
     }),
-    run: async (lensKey: string, store: RuntimeStore, args: Row) =>
-      service.search(
+    run: async (lensKey, store, args) =>
+      service.searchEntities(
         lensKey,
         {
           query: args.query as string,
-          type: (args.entity_type_key as string | null) ?? null,
-          limit: clampLimit(args.limit, document ? 5 : 10, 20),
-          minSimilarity: toolMinSimilarity(store),
-          ...(document
-            ? {
-                in: ["document" as const],
-                document: { property: (args.property as string | undefined) ?? undefined },
-              }
-            : {}),
+          ...searchScope(args),
+          ...toolMethods(store),
+          filter: (args.filters as Record<string, string> | null | undefined) ?? {},
+          limit: clampLimit(args.limit, 10, 20),
         },
         store,
       ),
-  })),
+  },
+  {
+    name: TOOL_SEARCH_DOCUMENTS,
+    description:
+      "Rank passages of documents for a text, best first: a passage is one chunk of one entity's document. " +
+      SEARCH_QUERY_RULE + " " +
+      "Scope, at most one of: types (entity type keys: all their documents) or documents ('type.property', " +
+      'e.g. "person.bio"); neither searches every document. ' + filterRules({ contains: false, relations: true }) +
+      " They apply to the entity owning the document. " + SEARCH_FILTER_EFFECT + " " +
+      "limit: passages, an integer up to 20, default 5. per_entity: at most this many passages per entity, " +
+      "1 to limit; omit for no cap. text: false leaves each passage's text out (default true). " +
+      PASSAGE_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
+    schema: z.object({
+      query: z.string(),
+      types: z.array(z.string()).nullish(),
+      documents: z.array(z.string()).nullish(),
+      filters: z.record(z.string(), z.string()).nullish(),
+      limit: z.number().int().nullish(),
+      per_entity: z.number().int().nullish(),
+      text: z.boolean().nullish(),
+    }),
+    run: async (lensKey, store, args) =>
+      service.searchPassages(
+        lensKey,
+        {
+          query: args.query as string,
+          ...searchScope(args),
+          ...toolMethods(store),
+          filter: (args.filters as Record<string, string> | null | undefined) ?? {},
+          limit: clampLimit(args.limit, 5, 20),
+          ...(typeof args.per_entity === "number" ? { perEntity: args.per_entity } : {}),
+          ...(typeof args.text === "boolean" ? { text: args.text } : {}),
+        },
+        store,
+      ),
+  },
   {
     name: TOOL_EXECUTE_QUERY,
     description:
@@ -367,7 +408,9 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
     description:
       "Execute a saved query by key with parameter values. " +
       "Use list_saved_queries first to discover available queries and " +
-      "their required parameters.",
+      "their required parameters. Answers with the last step's output: {columns, results} " +
+      "for an oql step; for a search step {ran, items, limitations}, each item a rank, the " +
+      "found entity (_id, _entityTypeKey, name) and the entry that matched.",
     schema: z.object({
       query_key: z.string(),
       params: z.record(z.string(), z.unknown()).nullish(),
@@ -597,18 +640,20 @@ STRATEGY — use the exact keys from the schema as tool arguments (e.g. entity_t
 5. For browsing entities of a type, use list_entities.
 6. A property shown as {"document": true, "length": N} is a large text held back
    from the result. To answer from its content, use search_documents to find the
-   matching passage, then get_document with that propertyKey and
-   charOffset/charLength to read it — read a segment, not the whole document.
+   matching passages, then get_document with a passage's property as property_key
+   and its charOffset/charLength as offset/limit to read it — read a segment, not
+   the whole document.
 
 Never make up answers — only use data from tool results. If the data doesn't contain the answer, say so. Be concise.
 `;
 
 /** Effective toolset: allowlist ∩ available. Embedding-dependent tools are
- * dropped without an embedding provider — for the default agent and
- * explicit allowlists alike. */
+ * dropped without an embedding provider, the search tools when no search
+ * method can run — for the default agent and explicit allowlists alike. */
 export function resolveChatToolNames(agentConfig: AgentConfig, store: RuntimeStore): string[] {
-  const hasEmbedding = getEmbeddingProvider() !== null;
-  const hasSearch = availableStrategies(store).length > 0;
+  const methods = deploymentMethods(store);
+  const hasEmbedding = methods.includes("semantic");
+  const hasSearch = methods.length > 0;
   return (agentConfig.tools ?? CHAT_TOOLS).filter(
     (t) =>
       ALL_TOOL_NAMES.has(t) &&

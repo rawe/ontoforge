@@ -396,7 +396,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 1 to 11 (2 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 1 to 12 (2 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     expect([await instances("ont_legacy"), await instances("ont_legacy_de")]).toEqual(before);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
@@ -518,7 +518,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 3 to 11 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 3 to 12 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
@@ -551,7 +551,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 4 to 11 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 4 to 12 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
@@ -587,7 +587,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 5 to 11 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 5 to 12 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     expect((await runQuery(`SELECT to_regclass('ont_older.assistant') AS t`)).rows).toEqual([{ t: null }]);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
@@ -654,7 +654,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 6 to 11 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 6 to 12 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
@@ -682,7 +682,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 8 to 11 (2 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 8 to 12 (2 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     expect((await runQuery(`SELECT ontology_id, revision FROM ont_older.design_revision`)).rows).toEqual([
       { ontology_id: ID_A, revision: 1 },
@@ -729,12 +729,53 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 10 to 11 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 10 to 12 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     const modeling = await getModelingStore("older");
     expect((await modeling.listRelationTypes()).map((rt) => [rt.key, rt.onePerPair])).toEqual([
       ["has_project", true],
       ["works_with", false],
+    ]);
+    await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
+    expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
+  });
+
+  it("upgrades version-11 storage by making search steps entity searches, deleting what binds more than references", async () => {
+    await getOntologyRegistry().createOntology(ID_A, "older", null, null);
+    const steps = (field: string) => [
+      { name: "skills", type: "search", entityTypeKey: "skill", query: "$q", limit: 5 },
+      { name: "people", type: "oql", oql: "MATCH (p:person) WHERE p._id IN $ids RETURN p", bindings: { ids: `{{skills.${field}}}` } },
+    ];
+    const oqlOnly = [{ name: "main", type: "oql", oql: "MATCH (p:person) RETURN p" }];
+    await withTransaction(async (querier) => {
+      const lensId = randomUUID();
+      await querier.query(`INSERT INTO ont_older.lens (lens_id, key, name) VALUES ($1, 'all', 'All')`, [lensId]);
+      for (const [key, pipeline] of [["by-id", steps("_id")], ["by-title", steps("title")], ["oql-only", oqlOnly]] as const) {
+        await querier.query(
+          `INSERT INTO ont_older.saved_query (saved_query_id, lens_id, lens_key, key, name, description, steps, parameters)
+           VALUES ($1, $2, 'all', $3, $3, 'd', $4, '[]')`,
+          [randomUUID(), lensId, key, JSON.stringify(pipeline)],
+        );
+      }
+    });
+    await recordVersion(11);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await initSchema();
+
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 11 to 12 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("Deleting saved query 'by-title' of lens 'all'"));
+    expect(await recordedVersion()).toBe(STORAGE_VERSION);
+    const stored = await runQuery(`SELECT key, steps FROM ont_older.saved_query ORDER BY key`);
+    expect(stored.rows.map((row) => [row["key"], JSON.parse(row["steps"] as string)])).toEqual([
+      [
+        "by-id",
+        [
+          { name: "skills", type: "search", types: ["skill"], query: "$q", limit: 5 },
+          { name: "people", type: "oql", oql: "MATCH (p:person) WHERE p._id IN $ids RETURN p", bindings: { ids: "{{skills._id}}" } },
+        ],
+      ],
+      ["oql-only", oqlOnly],
     ]);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));
@@ -764,7 +805,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 9 to 11 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 9 to 12 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     expect((await runQuery(`SELECT identity_properties FROM ont_older.entity_type`)).rows).toEqual([
       { identity_properties: null },
@@ -830,7 +871,7 @@ describe("PostgreSQL storage version", () => {
 
     await initSchema();
 
-    expect(log).toHaveBeenCalledWith("Upgrading storage from version 7 to 11 (1 ontologies).");
+    expect(log).toHaveBeenCalledWith("Upgrading storage from version 7 to 12 (1 ontologies).");
     expect(await recordedVersion()).toBe(STORAGE_VERSION);
     await getOntologyRegistry().createOntology(ID_B, "fresh", null, null);
     expect(await layout("ont_older")).toEqual(await layout("ont_fresh"));

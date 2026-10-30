@@ -156,44 +156,42 @@ Semantics: [capabilities/search.md](../capabilities/search.md).
 
 | Method | Path | Purpose | Parameters |
 |---|---|---|---|
-| GET | `/search` | Rank entities by properties, document passages, or both | `q`, `type`, repeatable `in`, `strategy`, `min_similarity`, `document.property`, `limit`, `fields`, `filter.*` |
 | GET | `/search-indices` | The lens's search catalog: the indices it can search, projected through it | — |
-| POST | `/search` | Rank entities through chosen search indices | body: `indices`, `query`, `mode`, `relations`, `filters`, `minScore`, `limit`, `fields` |
-
-`q` is required. Omit `type` for cross-type search; `in` accepts `properties` and
-`document`, defaulting to both. `strategy` accepts `semantic`, `keyword`, `keyword-any`,
-`keyword-all`, `hybrid`, defaulting to the best available; `keyword` and `hybrid` use the
-default keyword matching, while `keyword-any` and `keyword-all` each fix one. `document.property` restricts document search only and
-requires that kind. `min_similarity`, 0–1, drops semantic candidates measured below it
-and needs a strategy that ranks semantically. `limit` counts entities, 1–100, default 10.
-Filters also work across types, narrowing the searched set. The response carries `query`,
-`type`, `in`, `strategy`, `minSimilarity`, `filter`, `hits`; each hit has an entity, a
-within-response relative score, matches and `matched`. Matches — one per index that found
-the entity — carry nullable semantic/keyword evidence including the keyword score.
-`matched` names the entry that matched best: `index`, `partKind`, `relationType`,
-`relationId`, `target`, `snippet`, `charOffset`, `charLength`. Scores are not confidence.
-Evidence scope, `matched` and null semantics are defined in
-[the search response contract](../capabilities/search.md#response).
+| POST | `/search/entities` | Rank entities for a query text through a scope of search indices | body: `query`, `types`, `indices`, `keyword`, `semantic`, `filter`, `limit` |
+| POST | `/search/passages` | Rank passages of documents for a query text through a scope of search indices | body: `query`, `types`, `documents`, `indices`, `keyword`, `semantic`, `filter`, `limit`, `perEntity`, `text` |
 
 The catalog lists, in key order, each index as `key`, `kind` (`default`, `passage` or
 `custom`), `name`, `description`, `entityType`, `fields`, `relations` — each
 `{relationType, direction, label}` — `documentProperty` (null when none), `modes` and
 `status`. Rules: [capabilities/search.md](../capabilities/search.md#the-search-catalog).
 
-`POST /search` takes a JSON body. `query` is required; `indices` names index keys and
-defaults to every index the lens can search; `mode` accepts `semantic`, `keyword` or
-`hybrid` and defaults to the first available; `relations` lists relation types whose
-relation entries count; `filters` carries the `filter.*` keys of `GET /search` without
-the prefix, query paths included, each with a string value; `minScore`, 0–1, needs a
-mode that ranks semantically; `limit` counts entities, 1–100, default 10; `fields`
-projects each entity. The response carries `query`, `mode` and `hits`, each hit
-`entity`, `relativeScore` and `matched`. A body
-of the wrong shape, or with a field not listed here, is rejected with `details.errors`;
-the request's rules — an index the lens cannot search or that does not exist at
-`indices.<i>`, a relation type
-at `relations.<i>` — are collected under `details.fields`; a mode that needs a missing embedding provider answers
-`FEATURE_DISABLED`. Rules:
-[capabilities/search.md](../capabilities/search.md#index-search).
+`POST /search/entities` takes a JSON body. `query` is required and non-empty. `types`
+(entity type keys) or `indices` (index keys), not both, choose the scope. The blocks
+`keyword: {match}`, `any` or `all`, and `semantic: {minSimilarity}`, 0–1, choose the
+methods; with neither, the best available runs. `filter` carries the `filter.*` keys of the
+entity list without the prefix; `limit` counts entities, 1–100, default 10. The response
+carries `ran`, `items` and `limitations`. Each item has `rank`, from 1, `entity`
+`{_id, _entityTypeKey, name, identity}` — `identity`, the identity properties and their
+values in the identity's order, only for a type that declares an identity the lens shows —
+and `match` `{index, part, snippet}`, plus `property` (null when the lens hides the
+document), `charOffset`, `charLength` for a passage and `relationType`, `target`
+(`{_id, _entityTypeKey, name}`) for a relation. Each limitation has `code` and `message` and,
+where they apply, `method`, `indices`, `types`. A body of the wrong shape, or with a field
+not listed here, is rejected with `details.errors`. The request's rules are collected under
+`details.fields` at the request's own paths: `query`, `types.<i>`, `indices.<i>`,
+`keyword.match`, `semantic.minSimilarity`, `filter.<key>`, `limit`. A `semantic` block
+without an embedding provider answers `FEATURE_DISABLED`. Rules:
+[capabilities/search.md](../capabilities/search.md#entity-search).
+
+`POST /search/passages` takes the body of `POST /search/entities`, with `documents` —
+document properties as `type.property` — as a third scope field: `types`, `documents` or
+`indices`, one at a time. `limit` counts passages, 1–100, default 10; `perEntity`, 1 to
+the limit, caps the passages per entity; `text`, default true, false leaves the passage
+text out. Each item has `rank`, from 1, `entity` as in `POST /search/entities` and
+`passage` `{property, ordinal, charOffset, charLength, text}`. Limitations are those of
+`POST /search/entities`, with `documents` where it applies. Errors are reported as there,
+and also at `documents.<i>` and `perEntity`. Rules:
+[capabilities/search.md](../capabilities/search.md#passage-search).
 
 ## Query
 

@@ -83,8 +83,9 @@ rerun does not duplicate. A changeset holds 10,000 objects by default: commit an
 another when the server answers that it is full.
 
 **Reading after writing.** CRUD reads see a write at once. Search does not: index
-entries are built in the background, so a new or changed entity reaches `GET /search`
-and `POST /search` a moment later. Do not assert on search results right after a write.
+entries are built in the background, so a new or changed entity reaches
+`POST /search/entities` and `POST /search/passages` a moment later. Do not assert on
+search results right after a write.
 
 **Long text.** `document` properties come back as a stub on every entity read. Fetch the
 content with `GET .../documents/{propertyKey}`, by character range for large texts, and

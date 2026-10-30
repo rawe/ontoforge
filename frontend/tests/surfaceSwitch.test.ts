@@ -24,6 +24,7 @@ test('lens-level pages open the lens, on the matching tab', () => {
   assert.equal(studioTarget(OK, W, '', 'L1'), `${S}/lenses/L1`)
   assert.equal(studioTarget(OK, `${W}/explore`, '?focus=person:1', 'L1'), `${S}/lenses/L1`)
   assert.equal(studioTarget(OK, `${W}/query`, '?tab=library', 'L1'), `${S}/lenses/L1?tab=queries`)
+  assert.equal(studioTarget(OK, `${W}/search`, '', 'L1'), `${S}/lenses/L1`)
   assert.equal(studioTarget(OK, `${W}/ai`, '', 'L1'), `${S}/lenses/L1?tab=agents`)
   assert.equal(studioTarget(OK, `${W}/ai`, '?tab=retriever', 'L1'), `${S}/lenses/L1?tab=retriever-agents`)
   assert.equal(studioTarget(OK, `${W}/ai`, '?tab=navigator&assistant=x', 'L1'), `${S}/lenses/L1?tab=navigators`)

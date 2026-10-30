@@ -275,9 +275,10 @@ export const validateSchema = (ontologyKey: string) =>
 export const exportSchema = (ontologyKey: string) =>
   request<Record<string, JsonValue>>(`${base(ontologyKey)}/export`)
 
-/** 201 on success; RESOURCE_CONFLICT on clash. */
+/** 201 on success; RESOURCE_CONFLICT on clash. `leftOutSavedQueries`: the
+ * saved queries of an older payload the upgrade could not convert. */
 export const importSchema = (ontologyKey: string, data: Record<string, JsonValue>) =>
-  request<Record<string, JsonValue>>(`${base(ontologyKey)}/import`, {
+  request<{ lenses: Lens[]; leftOutSavedQueries: { lens: string; key: string }[] }>(`${base(ontologyKey)}/import`, {
     method: 'POST',
     body: data,
   })

@@ -2,8 +2,9 @@
  * Saved-query modeling endpoints over mocked stores, including:
  * collect-all reporting across mixed failures, BOTH parameter cross-check
  * directions including the binding-name-must-not-be-declared consequence,
- * self-reference rejection, the definition-time OQL lens check (run and
- * skipped variants), and description embedding on write.
+ * self-reference rejection, bindings to a search step's references only,
+ * the definition-time lens check of oql and search steps (run and skipped
+ * variants), and description embedding on write.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -310,7 +311,7 @@ describe("parameter cross-checks (both directions)", () => {
         {
           name: "second",
           type: "search",
-          entityTypeKey: "person",
+          types: ["person"],
           query: "$q",
           bindings: { q: "{{first.name}}" },
         },
@@ -452,7 +453,7 @@ describe("pipeline validation", () => {
     expect(res.statusCode).toBe(422);
   });
 
-  it("a search step missing its fields collects BOTH failures", async () => {
+  it("a search step needs its search text, and nothing else", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     const res = await put("test-query", {
       name: "Test",
@@ -462,9 +463,58 @@ describe("pipeline validation", () => {
     });
     expect(res.statusCode).toBe(422);
     const details = res.json().error.details as { errors: string[] };
-    expect(details.errors).toEqual([
-      "steps[0].entityTypeKey: Required for search steps",
-      "steps[0].query: Required for search steps",
+    expect(details.errors).toEqual(["steps[0].query: Required for search steps"]);
+  });
+
+  it("a search step refuses a field it does not define, at its path; an oql step's is stripped", async () => {
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
+    holder.store.upsertSavedQuery.mockResolvedValue([MOCK_QUERY, true]);
+    const res = await put("test-query", {
+      name: "Test",
+      description: "test",
+      steps: [{ name: "found", type: "search", query: "x", entityTypeKey: "person" }],
+      parameters: [],
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details.errors).toEqual([
+      { path: "/steps/0/entityTypeKey", message: "Unknown field of a search step: 'entityTypeKey'" },
+    ]);
+    const oql = await put("test-query", {
+      name: "Test",
+      description: "test",
+      steps: [{ name: "main", type: "oql", oql: "MATCH (p:person) RETURN p", minScore: 0.5 }],
+      parameters: [],
+    });
+    expect(oql.statusCode, oql.body).toBe(201);
+    expect(JSON.parse(holder.store.upsertSavedQuery.mock.calls[0]![5] as string)).toEqual([
+      { name: "main", type: "oql", oql: "MATCH (p:person) RETURN p" },
+    ]);
+  });
+
+  it("a binding to a search step reads its references only, naming the binding", async () => {
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
+    holder.store.upsertSavedQuery.mockResolvedValue([MOCK_QUERY, true]);
+    const pipeline = (field: string) => ({
+      name: "Test",
+      description: "test",
+      steps: [
+        { name: "found", type: "search", query: "engineers" },
+        {
+          name: "people",
+          type: "oql",
+          oql: "MATCH (p:person) WHERE p._id IN $ids RETURN p",
+          bindings: { ids: `{{found.${field}}}` },
+        },
+      ],
+      parameters: [],
+    });
+    for (const field of ["_id", "_entityTypeKey", "name"]) {
+      expect((await put("test-query", pipeline(field))).statusCode, field).toBe(201);
+    }
+    const res = await put("test-query", pipeline("email"));
+    expect(res.statusCode).toBe(422);
+    expect((res.json().error.details as { errors: string[] }).errors).toEqual([
+      "steps[1].bindings.ids: Reads 'email' of search step 'found', which yields only _id, _entityTypeKey, name",
     ]);
   });
 
@@ -499,7 +549,7 @@ describe("pipeline validation", () => {
         {
           name: "skills",
           type: "search",
-          entityTypeKey: "skill",
+          types: ["skill"],
           query: "$skill_query",
           limit: 5,
         },
@@ -518,7 +568,7 @@ describe("pipeline validation", () => {
   });
 });
 
-describe("definition-time OQL lens check", () => {
+describe("definition-time lens check", () => {
   it("an oql step naming a type the lens does not expose is rejected", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.runtimeStore.getFullSchemaWithLensInclusions.mockResolvedValue(
@@ -536,6 +586,86 @@ describe("definition-time OQL lens check", () => {
     });
     expect(res.statusCode).toBe(422);
     expect(holder.store.upsertSavedQuery).not.toHaveBeenCalled();
+  });
+
+  it("a search step is checked like the entity search checks its request, every failure under its step", async () => {
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
+    holder.runtimeStore.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/ontologies/onto/model/lenses/full_lens/saved-queries/bad-search",
+      payload: {
+        name: "Bad",
+        description: "breaks the entity search's rules",
+        steps: [
+          { name: "main", type: "oql", oql: "MATCH (p:person) RETURN p" },
+          { name: "found", type: "search", query: "$q", types: ["spaceship"], keyword: { match: "some" } },
+          { name: "both", type: "search", query: "x", types: ["person"], indices: ["person~default"] },
+          { name: "filtered", type: "search", query: "x", types: ["person"], filter: { colour: "red" } },
+        ],
+        parameters: [{ name: "q", description: "What", dataType: "string" }],
+      },
+    });
+    expect(res.statusCode).toBe(422);
+    const errors = (res.json().error.details as { errors: string[] }).errors;
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        "steps[1].types.0: Entity type 'spaceship' not found",
+        "steps[1].keyword.match: Expected any or all",
+        "steps[2].indices: Name types or indices, not both",
+        expect.stringMatching(/^steps\[3\]\.filter\.colour: /),
+      ]),
+    );
+    expect(errors.every((error) => error.startsWith("steps["))).toBe(true);
+    expect(holder.store.upsertSavedQuery).not.toHaveBeenCalled();
+  });
+
+  it("a search step the lens can run is stored with its fields, sparse", async () => {
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
+    holder.store.upsertSavedQuery.mockResolvedValue([MOCK_QUERY, true]);
+    holder.runtimeStore.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/ontologies/onto/model/lenses/full_lens/saved-queries/good-search",
+      payload: {
+        name: "Good",
+        description: "an entity search",
+        steps: [
+          {
+            name: "found",
+            type: "search",
+            query: "$q",
+            types: ["person"],
+            indices: null,
+            keyword: { match: "all" },
+            filter: { active: "true" },
+            limit: 3,
+          },
+        ],
+        parameters: [{ name: "q", description: "What", dataType: "string" }],
+      },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(JSON.parse(holder.store.upsertSavedQuery.mock.calls[0]![5] as string)).toEqual([
+      { name: "found", type: "search", query: "$q", types: ["person"], keyword: { match: "all" }, filter: { active: "true" }, limit: 3 },
+    ]);
+  });
+
+  it("a semantic block without an embedding provider is refused at save as a disabled feature", async () => {
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
+    holder.runtimeStore.getFullSchemaWithLensInclusions.mockResolvedValue(makeUnscopedSchema());
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/ontologies/onto/model/lenses/full_lens/saved-queries/semantic",
+      payload: {
+        name: "Semantic",
+        description: "needs a provider",
+        steps: [{ name: "found", type: "search", query: "x", semantic: {} }],
+        parameters: [],
+      },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.details).toEqual({ code: "FEATURE_DISABLED" });
   });
 
   it("the check is skipped when the lens's schema cannot be loaded", async () => {

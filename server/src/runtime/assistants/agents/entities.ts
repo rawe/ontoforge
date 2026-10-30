@@ -69,7 +69,13 @@ export function toolEntities(
       break;
     case TOOL_SEARCH:
     case TOOL_SEARCH_DOCUMENTS:
-      for (const hit of (value.hits ?? []) as { entity: Row }[]) card(hit.entity, hit.entity._entityTypeKey);
+      // A search names its entities: the name and identity properties make the card.
+      for (const { entity } of (value.items ?? []) as { entity: Row }[]) {
+        const type = lens.entityTypes[String(entity._entityTypeKey)];
+        const nameProperty = type?.nameProperty ?? null;
+        const named = nameProperty === null ? {} : { [nameProperty]: entity.name };
+        card({ _id: entity._id, ...(entity.identity as Row | undefined), ...named }, entity._entityTypeKey);
+      }
       break;
     case TOOL_GET_NEIGHBORS: {
       const centre = card(value.entity as Row | undefined, args.entity_type_key);

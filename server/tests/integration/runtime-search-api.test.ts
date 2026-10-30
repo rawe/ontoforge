@@ -1,22 +1,24 @@
 /**
- * The runtime index search through REST only, on PostgreSQL: an ontology,
- * its schema and data, a custom index created through the modeling API
- * and built by the worker, then `POST search` — a relation entry pairs one
- * employment with its own company, a scoped lens hiding companies skips
- * the relation entries, `relations` narrows them — and the lens's catalog
+ * Search through named indices on PostgreSQL: an ontology, its schema and
+ * data, a custom index created through the modeling API and built by the
+ * worker, then the MCP tool `search` with `indices` — a relation entry
+ * pairs one employment with its own company, a scoped lens hiding
+ * companies skips the relation entries — and the lens's catalog
  * `GET search-indices` with its relation group label, without switched-off
- * managed indices. Plus the error cases, the filters object and the field
- * projection. Keyword mode throughout (no provider); the semantic and
- * hybrid legs run in the embedding suite. Requires the docker-compose
- * database.
+ * managed indices. Plus the error cases and the filters object. Keyword
+ * only (no provider); the hybrid leg runs in the embedding suite. Requires
+ * the docker-compose database.
  */
 
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
+import { createRuntimeMcpServer } from "../../src/mcp/runtime.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { wipeDatabase } from "./reset.js";
@@ -79,16 +81,31 @@ async function get(url: string): Promise<any> {
   return res.json();
 }
 
-const search = (body: object, lens = "all") =>
-  app.inject({ method: "POST", url: `${runtimeOf(lens)}/search`, payload: body });
-
-async function hits(body: object, lens = "all"): Promise<Row[]> {
-  const res = await search(body, lens);
-  expect(res.statusCode, res.body).toBe(200);
-  return res.json().hits;
+/** `search` through the lens: its answer, or its refusal's text. */
+async function search(args: object, lens = "all"): Promise<{ isError: boolean; text: string; body?: Row }> {
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await createRuntimeMcpServer(O, lens).connect(serverTransport);
+  const client = new Client({ name: "runtime-search-api", version: "0.0.1" });
+  await client.connect(clientTransport);
+  try {
+    const result = (await client.callTool({ name: "search", arguments: { ...args } })) as {
+      content: { text: string }[];
+      isError?: boolean;
+    };
+    const text = result.content[0]!.text;
+    return result.isError ? { isError: true, text } : { isError: false, text, body: JSON.parse(text) };
+  } finally {
+    await client.close();
+  }
 }
 
-describe("runtime index search through REST", () => {
+async function items(args: object, lens = "all"): Promise<Row[]> {
+  const res = await search(args, lens);
+  expect(res.isError, res.text).toBe(false);
+  return res.body!.items;
+}
+
+describe("search through named indices", () => {
   const ids: Record<string, string> = {};
 
   /** person —works_for (role, since)→ company; Ada (CTO at ACME, Advisor
@@ -152,60 +169,50 @@ describe("runtime index search through REST", () => {
 
   it("pairs each relation with its own target: CTO ACME finds Ada through that employment", async () => {
     const res = await search({ query: "CTO ACME", indices: [EMPLOYMENT.key] });
-    expect(res.statusCode, res.body).toBe(200);
-    const body = res.json();
-    expect(body).toMatchObject({ query: "CTO ACME", mode: "keyword" });
-    expect(body.hits[0]).toMatchObject({
+    expect(res.isError, res.text).toBe(false);
+    const body = res.body!;
+    expect(body).toMatchObject({ ran: ["keyword"], limitations: [] });
+    expect(body.items[0]).toMatchObject({
+      rank: 1,
       entity: { _id: ids.ada, _entityTypeKey: "person", name: "Ada" },
-      relativeScore: 1,
-      matched: {
+      match: {
         index: EMPLOYMENT.key,
-        partKind: "relation",
+        part: "relation",
         relationType: "works_for",
-        relationId: ids["ada@acme"],
-        target: { id: ids.acme, type: "company", label: "ACME" },
-        charOffset: null,
-        charLength: null,
+        target: { _id: ids.acme, _entityTypeKey: "company", name: "ACME" },
       },
     });
-    expect(body.hits[0].matched.snippet).toContain("CTO");
+    expect(body.items[0].match.snippet).toContain("CTO");
 
     // Bob is CTO of Foo: his entry pairs both terms, Ada has no such entry.
-    const foo = await hits({ query: "CTO Foo", indices: [EMPLOYMENT.key] });
+    const foo = await items({ query: "CTO Foo", indices: [EMPLOYMENT.key] });
     expect(foo[0]).toMatchObject({
       entity: { _id: ids.bob },
-      matched: { relationId: ids["bob@foo"], target: { id: ids.foo, label: "Foo" } },
+      match: { target: { _id: ids.foo, name: "Foo" } },
     });
     // Keyword matching takes any term, so Ada still matches one term —
     // "CTO" of her ACME entry or "Foo" of her advisor entry — but never
     // both in one entry: she ranks below Bob, through a partial match.
-    const ada = foo.find((hit) => hit.entity._id === ids.ada)!;
-    expect(foo.indexOf(ada)).toBeGreaterThan(0);
-    expect(ada.relativeScore).toBeLessThan(1);
-    expect([ids["ada@acme"], ids["ada@foo"]]).toContain(ada.matched.relationId);
-    expect(/CTO/.test(ada.matched.snippet) && /Foo/.test(ada.matched.snippet)).toBe(false);
+    const ada = foo.find((item) => item.entity._id === ids.ada)!;
+    expect(ada.rank).toBeGreaterThan(1);
+    expect([ids.acme, ids.foo]).toContain(ada.match.target._id);
+    expect(/CTO/.test(ada.match.snippet) && /Foo/.test(ada.match.snippet)).toBe(false);
   });
 
-  it("all indices of the lens when none is named; the default index finds names", async () => {
-    const found = await hits({ query: "Bob" });
-    expect(found[0]).toMatchObject({ entity: { _id: ids.bob }, matched: { partKind: "self" } });
+  it("the managed indices of the lens when none is named; the default index finds names", async () => {
+    const found = await items({ query: "Bob" });
+    expect(found[0]).toMatchObject({ entity: { _id: ids.bob }, match: { part: "self" } });
   });
 
-  it("relations narrows the relation entries; a scoped lens hiding companies skips them", async () => {
-    expect((await hits({ query: "CTO ACME", indices: [EMPLOYMENT.key], relations: ["works_for"] }))[0]!.entity._id).toBe(
-      ids.ada,
-    );
-    // No relation type: only self entries count, and none says CTO.
-    expect(await hits({ query: "CTO ACME", indices: [EMPLOYMENT.key], relations: [] })).toEqual([]);
+  it("a scoped lens hiding companies skips the relation entries", async () => {
+    expect((await items({ query: "CTO ACME", indices: [EMPLOYMENT.key] }))[0]!.entity._id).toBe(ids.ada);
 
     await peopleLens();
-    expect(await hits({ query: "CTO ACME" }, "hr")).toEqual([]);
+    expect(await items({ query: "CTO ACME", indices: [EMPLOYMENT.key] }, "hr")).toEqual([]);
     // The self entries still serve.
-    expect((await hits({ query: "Ada" }, "hr")).map((hit) => hit.entity._id)).toEqual([ids.ada]);
-    // works_for is hidden in that lens: naming it is an unknown relation type.
-    const hidden = await search({ query: "CTO", relations: ["works_for"] }, "hr");
-    expect(hidden.statusCode).toBe(422);
-    expect(Object.keys(hidden.json().error.details.fields)).toEqual(["relations.0"]);
+    expect((await items({ query: "Ada", indices: [EMPLOYMENT.key] }, "hr")).map((item) => item.entity._id)).toEqual([
+      ids.ada,
+    ]);
   });
 
   it("the catalog lists the indices with their relation group label, projected through the lens", async () => {
@@ -242,50 +249,25 @@ describe("runtime index search through REST", () => {
     const catalog = (await get(`${RUNTIME}/search-indices`)) as Row[];
     expect(catalog.map((index) => index.key)).not.toContain("company~default");
     const refused = await search({ query: "ACME", indices: ["company~default"] });
-    expect(refused.statusCode).toBe(422);
-    expect(refused.json().error.details.fields).toEqual({
-      "indices.0": "Search index 'company~default' is not available in this lens",
-    });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain("indices.0: Search index 'company~default' is not available in this lens");
   });
 
-  it("answers an unknown index as one the lens cannot search, and 422 by field for invalid requests", async () => {
+  it("answers an unknown index as one the lens cannot search, and collects invalid requests by field", async () => {
     const unknown = await search({ query: "x", indices: ["ghost"] });
-    expect(unknown.statusCode).toBe(422);
-    expect(unknown.json().error.details.fields).toEqual({
-      "indices.0": "Search index 'ghost' is not available in this lens",
-    });
+    expect(unknown.isError).toBe(true);
+    expect(unknown.text).toContain("indices.0: Search index 'ghost' is not available in this lens");
 
-    const invalid = await search({
-      query: " ",
-      indices: [],
-      limit: 101,
-      minScore: 0.5,
-      mode: "keyword",
-      filters: { ghost: "1" },
-    });
-    expect(invalid.statusCode).toBe(422);
-    expect(Object.keys(invalid.json().error.details.fields).sort()).toEqual(
-      ["ghost", "indices", "limit", "minScore", "query"].sort(),
-    );
-    expect((await search({ query: "x", mode: "fuzzy" })).json().error.details.fields).toEqual({
-      mode: "Expected semantic, keyword or hybrid",
-    });
-    const semantic = await search({ query: "x", mode: "semantic" });
-    expect(semantic.statusCode).toBe(422);
-    expect(semantic.json().error.details.code).toBe("FEATURE_DISABLED");
-    // Shape errors come from the route.
-    expect((await search({ indices: [EMPLOYMENT.key] })).statusCode).toBe(422);
+    const invalid = await search({ query: " ", indices: [], filters: { ghost: "1" } });
+    expect(invalid.isError).toBe(true);
+    for (const field of ["query", "indices", "filter.ghost"]) expect(invalid.text).toContain(`${field}:`);
   });
 
-  it("the filters object takes property keys and query paths; fields projects", async () => {
-    const byStatus = await hits({ query: "CTO", indices: [EMPLOYMENT.key], filters: { status: "retired" } });
-    expect(byStatus.map((hit) => hit.entity._id)).toEqual([ids.bob]);
-    const byPath = await hits({ query: "CTO", indices: [EMPLOYMENT.key], filters: { "works_for:out.name": "ACME" } });
-    expect(byPath.map((hit) => hit.entity._id)).toEqual([ids.ada]);
-    const byRelation = await hits({ query: "CTO", indices: [EMPLOYMENT.key], filters: { "works_for@since__gte": "2021" } });
-    expect(byRelation.map((hit) => hit.entity._id)).toEqual([ids.bob]);
-
-    const projected = await hits({ query: "Ada", fields: ["status"] });
-    expect(projected[0]!.entity).toEqual({ _id: ids.ada, _entityTypeKey: "person", status: "active" });
+  it("the filters object takes property keys and query paths", async () => {
+    const idsOf = async (filters: Row) =>
+      (await items({ query: "CTO", indices: [EMPLOYMENT.key], filters })).map((item) => item.entity._id);
+    expect(await idsOf({ status: "retired" })).toEqual([ids.bob]);
+    expect(await idsOf({ "works_for:out.name": "ACME" })).toEqual([ids.ada]);
+    expect(await idsOf({ "works_for@since__gte": "2021" })).toEqual([ids.bob]);
   });
 });

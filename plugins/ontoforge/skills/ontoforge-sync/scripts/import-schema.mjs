@@ -25,14 +25,14 @@ try {
 }
 
 // Reject incomplete transfer payloads before sending them to the server.
-// Formats 7.0 and 6.0 carry "keywordLanguages"; the server still imports 5.0,
+// Formats 8.0, 7.0 and 6.0 carry "keywordLanguages"; the server still imports 5.0,
 // which carries one "textSearchLanguage" instead. The server validates the rest.
 const hasLanguage = Array.isArray(payload.keywordLanguages) ||
   ['english', 'german'].includes(payload.textSearchLanguage);
 if (!Array.isArray(payload.lenses) || !hasLanguage) {
   die(
     `${file} is not an OntoForge transfer payload: expected a "lenses" array and ` +
-      '"keywordLanguages" (format 7.0 or 6.0) or a supported "textSearchLanguage" (format 5.0).',
+      '"keywordLanguages" (format 8.0, 7.0 or 6.0) or a supported "textSearchLanguage" (format 5.0).',
   );
 }
 
@@ -51,6 +51,10 @@ try {
   );
   for (const lens of lenses) {
     console.error(`  ${lens.key}: ${lens.name}`);
+  }
+  // An older payload's saved queries the upgrade could not convert.
+  for (const query of result.leftOutSavedQueries || []) {
+    console.error(`  left out saved query ${query.lens}/${query.key}: it binds a field a search step no longer yields`);
   }
 } catch (err) {
   // Import never creates its target. A missing ontology is a registry

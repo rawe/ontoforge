@@ -60,7 +60,6 @@ export const TOOLS: Record<string, ToolRow> = {
   list_search_indices: { operation: "read" },
   search: { operation: "read" },
   search_documents: { operation: "read" },
-  search_by_index: { operation: "read" },
   list_saved_queries: { operation: "read" },
   run_saved_query: { operation: "read" },
   search_saved_queries: { operation: "read" },
@@ -78,7 +77,7 @@ export const TOOLS: Record<string, ToolRow> = {
 };
 
 /** Every route of the ruleset REST mirror, as "METHOD /path" below the
- * mount. Three POST routes only read. */
+ * mount. Five POST routes only read. */
 export const ROUTES: Record<string, Operation> = {
   "GET /": "read",
   "GET /schema": "read",
@@ -86,9 +85,9 @@ export const ROUTES: Record<string, Operation> = {
   "GET /schema/entity-types/:key": "read",
   "GET /schema/relation-types": "read",
   "GET /schema/relation-types/:key": "read",
-  "GET /search": "read",
   "GET /search-indices": "read",
-  "POST /search": "read",
+  "POST /search/entities": "read",
+  "POST /search/passages": "read",
   "POST /entities/:entityTypeKey": "write",
   "GET /entities/:entityTypeKey": "read",
   "GET /entities/:entityTypeKey/:entityId": "read",

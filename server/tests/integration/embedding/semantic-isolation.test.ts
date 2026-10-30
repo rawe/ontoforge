@@ -50,13 +50,14 @@ describe.skipIf(!ollamaUp)("semantic search isolation between ontologies (Ollama
     return res.json() as Row;
   }
 
-  async function search(prefix: string, query: string): Promise<Row[]> {
+  async function search(prefix: string, body: Row): Promise<Row[]> {
     const res = await app.inject({
-      method: "GET",
-      url: `${prefix}/search?strategy=semantic&q=${encodeURIComponent(query)}&in=properties`,
+      method: "POST",
+      url: `${prefix}/search/entities`,
+      payload: { ...body, semantic: {} },
     });
     expect(res.statusCode, res.body).toBe(200);
-    return (res.json() as { hits: Row[] }).hits;
+    return (res.json() as { items: Row[] }).items;
   }
 
   /** Both ontologies: entity type `person` (name/bio) and an unscoped
@@ -97,23 +98,16 @@ describe.skipIf(!ollamaUp)("semantic search isolation between ontologies (Ollama
   });
 
   it("cross-type search (cross-type ranking) sees only the addressed ontology", async () => {
-    const crmHits = await search(crm, "distributed systems expert");
+    const crmHits = await search(crm, { query: "distributed systems expert" });
     expect(crmHits.map((r) => (r.entity as Row).name)).not.toContain("Dana Fischer");
 
-    const hrHits = await search(hr, "distributed systems expert");
+    const hrHits = await search(hr, { query: "distributed systems expert" });
     expect(hrHits.map((r) => (r.entity as Row).name)).toEqual(["Dana Fischer"]);
   });
 
   it("per-type search sees only the addressed ontology", async () => {
-    const res = await app.inject({
-      method: "GET",
-      url: `${crm}/search?strategy=semantic&q=${encodeURIComponent("distributed systems expert")}&type=person&in=properties`,
-    });
-    expect(res.statusCode, res.body).toBe(200);
-    const names = ((res.json() as { hits: Row[] }).hits).map(
-      (r) => (r.entity as Row).name,
-    );
-    expect(names).not.toContain("Dana Fischer");
+    const hits = await search(crm, { query: "distributed systems expert", types: ["person"] });
+    expect(hits.map((r) => (r.entity as Row).name)).not.toContain("Dana Fischer");
   });
 
   it("saved-query discovery sees only the addressed ontology's lens", async () => {

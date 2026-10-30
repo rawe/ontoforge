@@ -10,7 +10,6 @@ import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { DEFAULT_AGENT_CONFIG, setAiModel, type AgentConfig } from "../../../../src/core/ai.js";
-import { RELATIVE_SCORE_PROMISE, TOOL_MIN_SIMILARITY } from "../../../../src/runtime/search/strategies.js";
 import { setEmbeddingProvider } from "../../../../src/core/embedding.js";
 import { NotFoundError, ValidationError } from "../../../../src/core/exceptions.js";
 import {
@@ -153,88 +152,75 @@ describe("toolset computation", () => {
     expect(boundToolNames(fake)).not.toContain("semantic_search");
     expect(boundToolNames(fake)).not.toContain("search_saved_queries");
     const payload = JSON.parse(String(fake.calls[1]!.find((m) => m instanceof ToolMessage)!.content));
-    expect(payload).toEqual({ query: "engineer", type: null, in: ["properties", "document"], strategy: "keyword", minSimilarity: null, filter: {}, hits: [] });
+    // The entity search's response: no index to search, nothing ran.
+    expect(payload).toEqual({ ran: [], items: [], limitations: [] });
     for (const tool of fake.boundTools[0]! as { name: string; description: string; schema: { shape: Record<string, unknown> } }[]) {
       if (!["search", "search_documents"].includes(tool.name)) continue;
-      expect(tool.description).toContain(RELATIVE_SCORE_PROMISE);
-      expect(tool.description).toContain("semanticSimilarity");
-      // Matches carry no property attribution any more.
-      expect(tool.description).not.toContain("keywordPropertyKeys");
-      expect(tool.description).toContain("unknown or unmeasured");
-      expect(tool.description).toContain("distinct query words matched plus the full-text rank");
-      expect(tool.description).not.toMatch(/adapter/i);
+      expect(tool.description).toContain("Returns ran (the methods that ran: semantic, keyword), items and limitations");
+      expect(tool.description).toContain("fixed similarity floor");
+      expect(tool.description).not.toMatch(/relativeScore|strategy|evidence|adapter|list_search_indices/i);
       expect(tool.description.length).toBeLessThanOrEqual(2000);
-      expect(Object.keys(tool.schema.shape).sort()).toEqual((tool.name === "search" ? ["query", "entity_type_key", "limit"] : ["query", "entity_type_key", "limit", "property"]).sort());
+      expect(Object.keys(tool.schema.shape).sort()).toEqual(
+        (tool.name === "search"
+          ? ["query", "types", "filters", "limit"]
+          : ["query", "types", "documents", "filters", "limit", "per_entity", "text"]
+        ).sort(),
+      );
     }
   });
 
-  it("run_saved_query preserves a final search envelope", async () => {
+  it("run_saved_query answers a final search step with the entity search's response", async () => {
     withEmptySearchIndices(store);
     store.getSavedQueries.mockResolvedValue([{
       key: "find_people", name: "Find people", description: "Find people",
-      steps: JSON.stringify([{ name: "people", type: "search", entityTypeKey: "person", query: "engineer" }]),
+      steps: JSON.stringify([{ name: "people", type: "search", types: ["person"], query: "engineer" }]),
       parameters: "[]",
     }]);
     const fake = installFake([toolCallMessage("run_saved_query", { query_key: "find_people" }), new AIMessage("Done")]);
     await aiChat("full_lens", "run the query", asRuntimeStore(store));
     const payload = JSON.parse(String(fake.calls[1]!.find((m) => m instanceof ToolMessage)!.content));
-    expect(payload).toEqual({ query: "engineer", type: "person", in: ["properties", "document"], strategy: "keyword", minSimilarity: null, filter: {}, hits: [] });
+    // No index to search: nothing ran, and the type is named as a limitation.
+    expect(payload).toEqual({
+      ran: [],
+      items: [],
+      limitations: [expect.objectContaining({ code: "not-searchable", types: ["person"] })],
+    });
   });
 
-  it("search tools apply the fixed floor under a hybrid default", async () => {
+  it("search tools run both methods with an embedding provider, semantic under the fixed floor", async () => {
     setEmbeddingProvider(fakeEmbedding);
-    withEmptySearchIndices(store);
-    const fake = installFake([
-      toolCallMessage("search", { query: "engineer", entity_type_key: "person" }),
-      new AIMessage("Found."),
-    ]);
-    await aiChat("full_lens", "find an engineer", asRuntimeStore(store));
-    const payload = JSON.parse(String(fake.calls[1]!.find((m) => m instanceof ToolMessage)!.content));
-    expect(payload.strategy).toBe("hybrid");
-    expect(payload.minSimilarity).toBe(TOOL_MIN_SIMILARITY);
-  });
-
-  it("search tools apply the fixed floor under a semantic default", async () => {
-    setEmbeddingProvider(fakeEmbedding);
-    withManagedIndices(store, PERSON_INDEX_SCHEMA, fakeEmbedding.modelId, () => [
-      rankedEntry("a", 0.8),
-      rankedEntry("b", 0.7),
-    ]);
+    store.supportsKeywordRanking.mockReturnValue(true);
+    withManagedIndices(store, PERSON_INDEX_SCHEMA, fakeEmbedding.modelId, (query) =>
+      query.generationId.endsWith("semantic") ? [rankedEntry("a", 0.8), rankedEntry("b", 0.7)] : [],
+    );
     store.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
       Object.fromEntries(ids.map((id) => [id, { _id: id, _entityTypeKey: "person", name: id }])),
     );
     const fake = installFake([
-      toolCallMessage("search", { query: "engineer", entity_type_key: "person" }),
+      toolCallMessage("search", { query: "engineer", types: ["person"], filters: { name: "a" } }),
       new AIMessage("Found."),
     ]);
     await aiChat("full_lens", "find an engineer", asRuntimeStore(store));
     const payload = JSON.parse(String(fake.calls[1]!.find((m) => m instanceof ToolMessage)!.content));
-    expect(payload.strategy).toBe("semantic");
-    expect(payload.minSimilarity).toBe(TOOL_MIN_SIMILARITY);
-    expect((payload.hits as Row[]).map((h) => (h.entity as Row)._id)).toEqual(["a"]);
-    for (const tool of fake.boundTools[0]! as { name: string; description: string }[]) {
-      if (!["search", "search_documents"].includes(tool.name)) continue;
-      expect(tool.description).toContain("fixed similarity floor");
-      expect(tool.description.length).toBeLessThanOrEqual(2000);
-    }
+    expect(payload.ran).toEqual(["semantic", "keyword"]);
+    // b is below the floor of 0.75.
+    expect((payload.items as Row[]).map((item) => (item.entity as Row)._id)).toEqual(["a"]);
+    const semantic = store.indices.rankEntries.mock.calls.find(([query]) => query.generationId === "person~default/semantic")!;
+    expect(semantic[0].conditions).toEqual([expect.objectContaining({ propertyKey: "name", value: "a" })]);
   });
 
-  it("search tools pass no floor under a keyword default", async () => {
-    withEmptySearchIndices(store);
-    const schema = makeUnscopedSchema();
-    (schema.entityTypes as Row[])[0]!.properties = [
-      ...((schema.entityTypes as Row[])[0]!.properties as Row[]),
-      { key: "bio", displayName: "Bio", dataType: "document" },
-    ];
-    store.getFullSchemaWithLensInclusions.mockResolvedValue(schema);
+  it("search tools run keyword alone without an embedding provider", async () => {
+    store.supportsKeywordRanking.mockReturnValue(true);
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithDocument());
+    withManagedIndices(store, PERSON_INDEX_SCHEMA, undefined, () => []);
     const fake = installFake([
       toolCallMessage("search_documents", { query: "engineer" }),
       new AIMessage("Found."),
     ]);
     await aiChat("full_lens", "find an engineer", asRuntimeStore(store));
     const payload = JSON.parse(String(fake.calls[1]!.find((m) => m instanceof ToolMessage)!.content));
-    expect(payload.strategy).toBe("keyword");
-    expect(payload.minSimilarity).toBeNull();
+    expect(payload).toEqual({ ran: ["keyword"], items: [], limitations: [] });
+    expect(store.indices.rankEntries.mock.calls.map(([query]) => query.generationId)).toEqual(["person~bio/keyword"]);
   });
 
   it("explicit allowlist is intersected with availability, keeping its order", async () => {
@@ -427,11 +413,16 @@ describe("document reads", () => {
     expect(result.reply).toBe("In 2019.");
     const toolMessages = fake.calls[1]!.filter((m) => m instanceof ToolMessage);
     const payload = JSON.parse(String(toolMessages[0]!.content)) as Row;
-    const hit = (payload.hits as Row[])[0]!;
-    expect(hit.matches).toEqual([{ kind: "document", propertyKey: "bio", charOffset: 22, charLength: 21, evidence: { semanticSimilarity: 0.91, keywordMatch: null, keywordScore: null } }]);
-    expect(hit.relativeScore).toBe(1);
+    expect(payload.items).toEqual([
+      {
+        rank: 1,
+        entity: { _id: "ent-1", _entityTypeKey: "person", name: "Alice" },
+        passage: { property: "bio", ordinal: 0, charOffset: 22, charLength: 21, text: "Alice joined in 2019." },
+      },
+    ]);
     // Only the passage index ranks — the entity's own index is not consulted.
-    expect(store.indices.rankEntries.mock.calls.map(([query]) => query.generationId)).toEqual([
+    expect(store.indices.rankEntries.mock.calls.map(([query]) => query.generationId).sort()).toEqual([
+      "person~bio/keyword",
       "person~bio/semantic",
     ]);
     expect(result.toolCalls).toEqual([
@@ -746,7 +737,7 @@ describe("entities event", () => {
     ]);
   });
 
-  it("search hits become cards", async () => {
+  it("search items become cards", async () => {
     store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithDocument());
     invalidateLoadedSchemaCache();
     setEmbeddingProvider(fakeEmbedding);

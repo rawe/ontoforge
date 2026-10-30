@@ -1,23 +1,23 @@
-# Search ranking without an index bonus, and evidence kept apart from rank
+# Search ranking without an index bonus, and no score in results
 
 Current behavior: [Ranking](../capabilities/search.md#ranking),
 [similarity floor](../capabilities/search.md#similarity-floor),
-[response](../capabilities/search.md#response)
+[entity search](../capabilities/search.md#entity-search)
 
 ## Context
 
 Search ranks entities across several indices (own fields, passages, relation entries,
 several types) and up to two retrieval methods. An entity's type decides which indices
 can hold it, so any combination that adds contributions favours types that have more of
-them, for example a document property. Scores and match evidence also have to keep
-honest meanings: a normalized top score implies a perfect answer, and keyword text that
-carries schema labels lets keys count as content.
+them, for example a document property. A score shown to a caller reads as relevance or
+confidence, which no ranking score is.
 
 ## Decision
 
 Within one retrieval method an entity ranks by its best entry, with no bonus for
 occurring in several indices; the methods are fused by reciprocal rank. Ties are never
-broken by an invented measurement, and match evidence is reported apart from the rank.
+broken by an invented measurement. A result carries its rank and the entry that matched,
+never a score.
 
 ## Rejected
 
@@ -35,12 +35,11 @@ broken by an invented measurement, and match evidence is reported apart from the
 - **Treating an unmeasured similarity as zero in ties, or comparing tied entities
   pairwise.** The first invents a negative preference. The second can order a group
   inconsistently.
-- **One minimum similarity for every caller, or dropping hits without keyword evidence.**
-  Useful paraphrases have no lexical match, related passages can score high without
-  answering, and the floors that were tested removed useful candidates. A similarity
-  floor is model-specific.
+- **A score or a normalized relative score in results.** A top score of 1.0 reads as a
+  perfect answer, and even an unrelated query has a best result.
+- **One minimum similarity for every caller.** Useful paraphrases have no lexical match,
+  related passages can score high without answering, and the floors that were tested
+  removed useful candidates. A similarity floor is model-specific.
 - **Labelled text for keyword matching, or stripping labels when reading it.** The first
   lets schema names match. The second cannot reliably reconstruct value boundaries when
   values contain separators or the text is stale.
-- **Attributing a semantic match to an individual property.** One vector describes the
-  composed text, so any property cause would be invented.

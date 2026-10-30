@@ -313,8 +313,12 @@ function toSavedQueryConfig(row: Row): SavedQueryConfig {
     name: s.name as string,
     type: s.type as string,
     oql: (s.oql as string | undefined) ?? null,
-    entityTypeKey: (s.entityTypeKey as string | undefined) ?? null,
     query: (s.query as string | undefined) ?? null,
+    types: (s.types as string[] | undefined) ?? null,
+    indices: (s.indices as string[] | undefined) ?? null,
+    keyword: (s.keyword as StepConfig["keyword"] | undefined) ?? null,
+    semantic: (s.semantic as StepConfig["semantic"] | undefined) ?? null,
+    filter: (s.filter as Record<string, string> | undefined) ?? null,
     limit: (s.limit as number | undefined) ?? null,
     bindings: (s.bindings as Record<string, string> | undefined) ?? null,
   }));

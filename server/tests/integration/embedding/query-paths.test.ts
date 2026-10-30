@@ -1,7 +1,8 @@
 /**
- * Query paths on semantic search, end-to-end against the docker-compose
- * database and a local Ollama. A path filter narrows both rankings —
- * entities and document passages — to entities that satisfy it, and the
+ * Query paths on the semantic entity search (`POST search/entities`),
+ * end-to-end against the docker-compose database and a local Ollama. A
+ * path filter narrows the ranking of a type's own entries and of its
+ * document passages to entities that satisfy it, and the
  * requested limit counts only matching hits. What to expect is decided by
  * the adapter's own declaration, read through the port, never by the
  * backend's name: an adapter declaring support runs the path cases; one
@@ -32,7 +33,7 @@ type Row = Record<string, unknown>;
 const ollamaUp = await checkOllamaModel();
 
 const LENS = "/api/ontologies/test_ont/runtime/lenses/path_search";
-const SEARCH = `${LENS}/search?strategy=semantic&q=punched%20cards%20and%20polynomial%20tables`;
+const QUERY = "punched cards and polynomial tables";
 
 /** Near the query: the passages that rank first. */
 const NEAR_BIO = "The analytical engine reads punched cards and computes polynomial tables.";
@@ -135,17 +136,22 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
     await drainSearchWork();
   }
 
-  /** The hits of one search, as the entity names in rank order. */
-  async function hits(query: string): Promise<{ names: string[]; results: Row[] }> {
-    const res = await app.inject({ method: "GET", url: `${SEARCH}&${query}` });
-    expect(res.statusCode, `GET ${query}: ${res.body}`).toBe(200);
-    const results = (res.json() as { hits: Row[] }).hits;
+  /** One semantic entity search for the query: a scope and a filter. */
+  function search(body: Row) {
+    return app.inject({ method: "POST", url: `${LENS}/search/entities`, payload: { query: QUERY, semantic: {}, ...body } });
+  }
+
+  /** The items of one search, as the entity names in rank order. */
+  async function hits(body: Row): Promise<{ names: string[]; results: Row[] }> {
+    const res = await search(body);
+    expect(res.statusCode, `${JSON.stringify(body)}: ${res.body}`).toBe(200);
+    const results = (res.json() as { items: Row[] }).items;
     return { names: results.map((r) => (r.entity as Row).name as string), results };
   }
 
-  async function rejected(query: string): Promise<{ message: string; fields: Record<string, string> }> {
-    const res = await app.inject({ method: "GET", url: `${SEARCH}&${query}` });
-    expect(res.statusCode, `GET ${query}: ${res.body}`).toBe(422);
+  async function rejected(body: Row): Promise<{ message: string; fields: Record<string, string> }> {
+    const res = await search(body);
+    expect(res.statusCode, `${JSON.stringify(body)}: ${res.body}`).toBe(422);
     const error = res.json().error as { message: string; details: { fields: Record<string, string> } };
     return { message: error.message, fields: error.details.fields };
   }
@@ -165,39 +171,39 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
   describe("on an adapter declaring support", () => {
     it("the entity ranking, outgoing, related-entity form: persons by their company's name", async (ctx) => {
       whenSupported(ctx);
-      const { names } = await hits("type=person&in=properties&filter.works_for.name=Acme");
+      const { names } = await hits({ indices: ["person~default"], filter: { "works_for.name": "Acme" } });
       expect(names.sort()).toEqual(["Alice", "Carol", "Erin"]);
     });
 
     it("the passage ranking, outgoing, relation-property form: passages on entities whose employment fails the filter are excluded", async (ctx) => {
       whenSupported(ctx);
-      const { names, results } = await hits("type=person&in=document&filter.works_for@role=CTO");
+      const { names, results } = await hits({ indices: ["person~bio"], filter: { "works_for@role": "CTO" } });
       expect(names).toEqual(["Alice"]);
-      expect((results[0]!.matches as Row[])[0]!.kind).toBe("document");
+      expect((results[0]!.match as Row).part).toBe("passage");
     });
 
     it("the passage ranking, incoming, related-entity form: companies by an employee's name", async (ctx) => {
       whenSupported(ctx);
-      const { names, results } = await hits("type=company&in=document&filter.works_for.name=Bob");
+      const { names, results } = await hits({ indices: ["company~profile"], filter: { "works_for.name": "Bob" } });
       expect(names).toEqual(["Globex"]);
-      expect((results[0]!.matches as Row[])[0]!.kind).toBe("document");
+      expect((results[0]!.match as Row).part).toBe("passage");
     });
 
     it("both rankings fused, incoming, relation-property form: companies with a CTO", async (ctx) => {
       whenSupported(ctx);
-      const { names } = await hits("type=company&filter.works_for@role=CTO");
+      const { names } = await hits({ types: ["company"], filter: { "works_for@role": "CTO" } });
       expect(names).toEqual(["Acme"]);
     });
 
     it("an explicit direction marker that agrees with the endpoints is accepted", async (ctx) => {
       whenSupported(ctx);
-      const { names } = await hits("type=person&in=properties&filter.works_for:out@role=Engineer");
+      const { names } = await hits({ indices: ["person~default"], filter: { "works_for:out@role": "Engineer" } });
       expect(names.sort()).toEqual(["Bob", "Carol", "Erin"]);
     });
 
     it("a path filter and a plain filter combine by AND", async (ctx) => {
       whenSupported(ctx);
-      const { names } = await hits("type=person&filter.works_for.name=Acme&filter.age__gt=40");
+      const { names } = await hits({ types: ["person"], filter: { "works_for.name": "Acme", age__gt: "40" } });
       expect(names).toEqual(["Carol"]);
     });
 
@@ -205,33 +211,32 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
       whenSupported(ctx);
       // The premise: unfiltered, the two best passages belong to Bob and
       // Dave, neither of whom works for Acme.
-      const unfiltered = await hits("type=person&in=document&limit=2");
+      const unfiltered = await hits({ indices: ["person~bio"], limit: 2 });
       expect(unfiltered.names.sort()).toEqual(["Bob", "Dave"]);
 
       // Filtered to Acme's employees, a page of two is still full — with
       // passages that ranked behind the excluded ones.
-      const two = await hits("type=person&in=document&limit=2&filter.works_for.name=Acme");
+      const two = await hits({ indices: ["person~bio"], limit: 2, filter: { "works_for.name": "Acme" } });
       expect(two.names).toHaveLength(2);
       for (const name of two.names) {
         expect(["Alice", "Carol", "Erin"]).toContain(name);
       }
-      const three = await hits("type=person&in=document&limit=3&filter.works_for.name=Acme");
+      const three = await hits({ indices: ["person~bio"], limit: 3, filter: { "works_for.name": "Acme" } });
       expect(three.names.sort()).toEqual(["Alice", "Carol", "Erin"]);
     });
 
     it("an unknown path, a substring on a path and an uncoercible value are rejected together", async (ctx) => {
       whenSupported(ctx);
-      const { message, fields } = await rejected(
-        "type=person&filter.ghost.name=x&filter.works_for.name__contains=Ac&filter.age=abc",
-      );
-      expect(fields).toEqual({
-        "ghost.name":
-          "Not defined in type 'person'. Property keys: age, bio, name. " +
-          "Relation types touching 'person': works_for",
-        "works_for.name__contains": "Not supported on search; use the entity list",
-        age: expect.stringContaining("Expected integer"),
+      const { message, fields } = await rejected({
+        types: ["person"],
+        filter: { "ghost.name": "x", "works_for.name__contains": "Ac", age: "abc" },
       });
-      expect(message).toContain("Not defined in type 'person'");
+      expect(fields).toEqual({
+        "filter.ghost.name": "Unknown filter property or relation type: 'ghost.name'",
+        "filter.works_for.name__contains": "Not supported on search; use the entity list",
+        "filter.age": expect.stringContaining("Expected integer"),
+      });
+      expect(message).toContain("Unknown filter property or relation type");
       expect(message).toContain("Not supported on search");
       expect(message).toContain("Expected integer");
     });
@@ -245,10 +250,10 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
       "a path filter is rejected above the port, naming the entity list, together with the other faults: %s",
       async (key, ctx) => {
         whenUnsupported(ctx);
-        const { message, fields } = await rejected(`type=person&filter.${key}=x&filter.age=abc`);
+        const { message, fields } = await rejected({ types: ["person"], filter: { [key]: "x", age: "abc" } });
         expect(fields).toEqual({
-          [key]: REJECTION,
-          age: expect.stringContaining("Expected integer"),
+          [`filter.${key}`]: REJECTION,
+          "filter.age": expect.stringContaining("Expected integer"),
         });
         expect(message).toContain(
           `Not supported on search by the active storage adapter`,
@@ -270,16 +275,16 @@ describe.skipIf(!ollamaUp)("query paths on semantic search (Ollama)", () => {
 
   describe("on every adapter", () => {
     it("a plain filter narrows the passage ranking", async () => {
-      const { names, results } = await hits("type=person&in=document&filter.age__gt=40");
+      const { names, results } = await hits({ indices: ["person~bio"], filter: { age__gt: "40" } });
       expect(names.sort()).toEqual(["Carol", "Dave"]);
       for (const hit of results) {
-        expect((hit.matches as Row[])[0]!.kind).toBe("document");
+        expect((hit.match as Row).part).toBe("passage");
       }
     });
 
     it("cross-type path filters narrow the searched types where supported", async (ctx) => {
       whenSupported(ctx);
-      const { names } = await hits("filter.works_for.name=Acme");
+      const { names } = await hits({ filter: { "works_for.name": "Acme" } });
       expect(names.sort()).toEqual(["Alice", "Carol", "Erin"]);
     });
   });

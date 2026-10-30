@@ -545,11 +545,6 @@ export interface SearchedType {
   propertyDefs: Record<string, PropertyDef>;
   conditions: FilterCondition[];
 }
-export interface SearchedProperty {
-  entityTypeKey: string;
-  propertyKey: string;
-  conditions: FilterCondition[];
-}
 
 /** The keyword retrieval method: any admits a row carrying any query term, all
  * requires every query term; both match each term as a prefix. Contract:
@@ -1048,6 +1043,8 @@ export interface SearchEntryQuery {
    * target type too; null lists every type. Other entries always rank. */
   relationTypes: string[] | null;
   targetTypes: string[] | null;
+  /** Rank only entries of these parts; absent or null: of every part. */
+  partKinds?: readonly SearchPartKind[] | null;
   limit: number;
 }
 

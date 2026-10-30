@@ -35,7 +35,7 @@ runs each missing upgrade step inside every `ont_*` namespace — then the step'
 server-wide statements, if it has any, once in `public` — and records the new version
 last. The upgrade is logged, and the server never backs up storage itself. The steps and
 both version constants live in the storage-version module beside the DDL; the current
-storage version is 10. Before that
+storage version is 12. Before that
 transaction the adapter logs the pgvector version — the installed one, or the one the
 extension would install — and warns when it predates 0.7, which has no
 `halfvec`: the search entry table cannot then be created, so an upgrade of an existing

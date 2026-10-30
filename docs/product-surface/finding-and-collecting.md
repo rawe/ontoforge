@@ -1,7 +1,7 @@
 # Finding and collecting
 
 Interaction models for finding entities and gathering them: the command palette, quick add,
-the Explorer working set, the query console and the saved-query library. The screens that
+the Explorer working set, the query console, the saved-query library and advanced search. The screens that
 use them are in [workbench](workbench.md) and [studio](studio.md).
 
 ## Command palette
@@ -12,7 +12,7 @@ for questions, which is remembered.
 
 | Prefix | Mode | Behaviour |
 |---|---|---|
-| *(none)* | Entities | Cross-type entity search — ranked under the server's default strategy when any strategy is available, otherwise a parallel substring search over every exposed type. Starts at two characters; below that it shows recents or a hint. |
+| *(none)* | Entities | Cross-type entity search — ranked when the server can run ranked search, otherwise a parallel substring search over every exposed type. Starts at two characters; below that it shows recents or a hint. |
 | `#` | Types | Filter the exposed entity types; choosing one *scopes* the palette to that type rather than navigating. |
 | `?` | Saved queries | Semantic search over query descriptions when available, substring filtering over the full list otherwise. An empty query lists everything. |
 | `>` | Actions | Navigation to each Workbench area, the Studio, and a theme toggle. |
@@ -27,7 +27,7 @@ label, the entity's identity beside it where it has one, and, when the hit was f
 [matched via](#matched-via) line beneath. No number, score bar, percentage, numeric aria
 label or passage text is displayed. The relation target picker uses the same search hook
 and row; its empty input lists the first ten entities. Both use ranked search whenever
-the strategy list is nonempty, falling back to literal entity lists otherwise. Enter
+the server can run it, falling back to literal entity lists otherwise. Enter
 opens entity detail; Cmd/Ctrl+Enter focuses the Explorer.
 
 ### Question mode
@@ -57,23 +57,23 @@ the [working set](#working-set) and opens the Explorer.
 
 ## Matched via
 
-Search results never show a score: it would be read as relevance or confidence, which a
-relative score is not. Where the server names the entry that found a hit
-([capabilities/search.md](../capabilities/search.md#response)), a hit found through a
+Search results never show a score: the server gives only the order, which is no measure
+of relevance or confidence. Where the server names the entry that found a hit
+([capabilities/search.md](../capabilities/search.md#entity-search)), a hit found through a
 relation or a passage carries one short line:
 
 - a relation entry — `via <label> → <target>`: the relation group's label from the lens's
   [search catalog](../capabilities/search.md#the-search-catalog), else the relation type's
-  display name, and the target's label, else its truncated identifier, followed by the
-  target's identity in parentheses where it has one;
-- a passage entry — `via passage in <property>`, the document property's display name;
+  display name, and the target's label, else its truncated identifier; in a retriever's
+  results followed by the target's identity in parentheses where it has one;
+- a passage entry — `via passage in <property>`, the document property's display name, or
+  `via passage` where the lens hides the document;
 - the entity's own fields — no line.
 
 The line never shows the entry's text. The palette and the relation target picker use the
-[default search](../capabilities/search.md#ranked-search), which reads only managed indices,
-so no relation line appears there; relation lines appear in
-a retriever's diagnostics and in the palette's question results, whose searches
-reach custom indices.
+[entity search](../capabilities/search.md#entity-search) over the lens's managed indices,
+so no relation line appears there; relation lines appear in a retriever's diagnostics and
+in the palette's question results, whose searches reach custom indices.
 
 ## Quick add
 
@@ -236,6 +236,36 @@ The run-focused half of the Query screen; authoring lives in the Studio, and eve
 links there. A search box over the library — semantic when available, substring otherwise.
 Each query is a card showing its name, key, a badge per step kind, a parameter count and
 its description. Expanding a card reveals a run panel: one typed input per parameter (all
-required before the run is allowed), a run action, results in the shared results surface,
-and a "copy as cURL" action that reproduces the exact call. A query opened by deep link
+required before the run is allowed), a run action, results in the shared results surface
+— or, when the last step is a search step, the ranked items as
+[Advanced search](#advanced-search) lists them, with what ran and what could not — and a
+"copy as cURL" action that reproduces the exact call. A query opened by deep link
 expands automatically, and runs immediately when it has no parameters.
+
+## Advanced search
+
+One form per field of the [entity search](../capabilities/search.md#entity-search) and the
+[passage search](../capabilities/search.md#passage-search); a field left empty is not sent,
+so the server's default applies, and the server judges what the form cannot.
+
+**Form.** A mode — Entities or Passages — and the text, run by Enter or Run once it is
+not blank. On a wide screen the settings sit in a panel beside the results; on a narrow
+one they fold above them into a one-line summary. A scope over one field at a time:
+types, indices, or — for passages — document properties, each chosen from a list that can
+be searched, indices grouped by type with their kind, a missing method and a state that
+is not ready; each field keeps its choice while another is shown. None chosen searches
+every type through its managed indices. One choice of methods — Both, Keyword or
+Semantic, the last two only on a server with semantic search — with keyword matching by
+any or all words and an optional similarity floor. A filter with the
+[type table's](workbench.md#type-table) conditions, without `contains`, once every chosen
+scope item belongs to one type. A limit, and for passages a cap per entity. A "?" beside
+the title explains how search works, step by step over one example.
+
+**Results.** The count, which methods ran, and each limitation as a sentence naming its
+types, indices or documents. An entity row has its rank, type chip, name linking to its
+detail, the part that matched and the snippet; a row found through a custom index names
+it; a passage row has the entity, the document
+property — opening the [document viewer](schema-editing.md#document-viewer-and-editor) — and
+the passage text. No score is shown ([Matched via](#matched-via)). A rejected field shows its
+error under its control; others show verbatim below the form. Results searched with other
+settings than the form now shows say so, with a button to run again.

@@ -149,10 +149,11 @@ Overlap must be smaller than the size.
 
 Each chunk records its ordinal, its exact character offset and length in the source
 document, and its text. **Chunks are internal.** Nothing addresses them: there is
-no chunk id, ordinal or listing anywhere in the API, they are absent from the schema, they
-are rejected by the query validator, and they are not exported. The only trace they leave is
-in a search hit, which reports the matched passage as a character offset and length — the
-coordinates the document read operation takes. See [search.md](search.md).
+no chunk id or listing anywhere in the API, they are absent from the schema, they are
+rejected by the query validator, and they are not exported. The only trace they leave is in
+search: a hit reports the matched passage as a character offset and length — the
+coordinates the document read operation takes — and the passage search adds its ordinal.
+See [search.md](search.md).
 
 ### Embedding behaviour
 
@@ -182,6 +183,8 @@ Literal text search on an entity list does **not** cover documents, so a term ap
 document but nowhere else returns nothing from it. Two things do reach the content: a
 property filter naming the document property with the substring operator, and ranked
 document search, which matches passage by passage. Both are in [search.md](search.md).
+The [passage search](search.md#passage-search) returns the matching passages themselves,
+each with its place in the document and its text.
 
 ## Through the interfaces
 

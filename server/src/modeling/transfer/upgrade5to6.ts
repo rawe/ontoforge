@@ -136,5 +136,6 @@ export const upgrade5to6: Upgrader = (raw) => {
       lenses,
     },
     retrieverWarnings,
+    leftOutSavedQueries: [],
   };
 };

@@ -25,7 +25,7 @@ import {
 } from "../../../src/core/ports.js";
 import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache, loadSchema } from "../../../src/runtime/schemaCache.js";
-import { rankThroughIndices, searchByIndices } from "../../../src/runtime/search/indexSearch.js";
+import { rankEntities, searchEntities } from "../../../src/runtime/search/entitySearch.js";
 import { fakeEmbeddingProvider } from "../../fakeEmbedding.js";
 import { wipeDatabase } from "../reset.js";
 
@@ -147,18 +147,8 @@ describe("custom search indices through the API", () => {
 
   async function keywordHits(query: string, matching: "any" | "all" = "all", key = EMPLOYMENT.key) {
     await drainSearchWork({ ontologyKey: O });
-    const runtime = await getRuntimeStore(O);
-    const index = (await (await getSearchIndexStore(O)).getIndex(key))!;
-    const hits = await rankThroughIndices(await loadSchema("all", runtime), runtime.searchIndices!(), {
-      targets: [{ index, conditions: [] }],
-      query,
-      mode: "keyword",
-      matching,
-      relations: null,
-      minScore: null,
-      limit: 10,
-    });
-    return hits.map((hit) => hit.entityId);
+    const response = await searchEntities("all", { query, indices: [key], keyword: { match: matching } }, await getRuntimeStore(O));
+    return response.items.map((item) => item.entity._id);
   }
 
   beforeAll(async () => {
@@ -341,17 +331,16 @@ describe("custom search indices through the API", () => {
     expect(await keywordHits("CTO Foo")).toEqual([bob._id]);
     expect(await keywordHits("Advisor ACME")).toEqual([]);
 
-    const response = await searchByIndices(
+    const response = await searchEntities(
       "all",
-      { query: "CTO ACME", indices: ["person_employment"], mode: "keyword" },
+      { query: "CTO ACME", indices: ["person_employment"], keyword: {} },
       await getRuntimeStore(O),
     );
-    expect(response.hits[0]!.entity._id).toBe(ada._id);
-    expect(response.hits[0]!.matched).toMatchObject({
+    expect(response.items[0]!.entity._id).toBe(ada._id);
+    expect(response.items[0]!.match).toMatchObject({
       index: "person_employment",
-      partKind: "relation",
-      relationId: adaAcme._id,
-      target: { id: acme._id, type: "company", label: "ACME" },
+      part: "relation",
+      target: { _id: acme._id, _entityTypeKey: "company", name: "ACME" },
     });
 
     // The target's field changes: every relation pointing to it recomposes.
@@ -376,14 +365,9 @@ describe("custom search indices through the API", () => {
     await post(INDICES, EMPLOYMENT);
     await drainSearchWork({ ontologyKey: O });
     const runtime = await getRuntimeStore(O);
-    const store = await getSearchIndexStore(O);
     const rank = async (query: string) => {
-      const targets = await Promise.all(
-        ["person~default", EMPLOYMENT.key].map(async (key) => ({ index: (await store.getIndex(key))!, conditions: [] })),
-      );
-      const hits = await rankThroughIndices(await loadSchema("all", runtime), runtime.searchIndices!(), {
-        targets, query, mode: "keyword", matching: "any", relations: null, minScore: null, limit: 10,
-      });
+      const request = { query, indices: ["person~default", EMPLOYMENT.key], keyword: {} };
+      const { hits } = await rankEntities(await loadSchema("all", runtime), request, runtime);
       return hits.map((hit) => [hit.entityId, hit.matched.entry.partKind, hit.score] as const);
     };
     const acme = await rank("CTO ACME");
@@ -519,12 +503,12 @@ describe("custom search indices through the API", () => {
     await post(`${copyRuntime}/relations/works_for`, { fromEntityId: grace._id, toEntityId: navy._id, role: "Admiral" });
     await drainSearchWork({ ontologyKey: COPY });
     expect((await ok("GET", `${modelOf(COPY)}/search-indices/person_employment/status`)).state).toBe("ready");
-    const found = await searchByIndices(
+    const found = await searchEntities(
       "all",
-      { query: "Admiral Navy", indices: ["person_employment"], mode: "keyword" },
+      { query: "Admiral Navy", indices: ["person_employment"], keyword: {} },
       await getRuntimeStore(COPY),
     );
-    expect(found.hits.map((h) => h.entity._id)).toEqual([grace._id]);
+    expect(found.items.map((item) => item.entity._id)).toEqual([grace._id]);
   });
 
   it("import validates every custom definition against the imported schema, all or nothing", async () => {

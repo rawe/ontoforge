@@ -81,8 +81,9 @@ describe("tool descriptions", () => {
 
   it("the entity filter tools state the full filter rules", () => {
     expect(runtime.get("list_entities")).toContain(filterRules({ contains: true, relations: true }));
-    for (const name of ["search", "search_documents", "search_by_index"]) {
+    for (const name of ["search", "search_documents"]) {
       expect(runtime.get(name)).toContain(filterRules({ contains: false, relations: true }));
+      expect(agent.get(name)).toContain(filterRules({ contains: false, relations: true }));
     }
     expect(runtime.get("list_relations")).toContain(filterRules({ contains: true, relations: false }));
   });
@@ -317,11 +318,11 @@ describe("tool descriptions", () => {
       .filter((name) => allows(level, TOOLS[name]!.operation) || (TOOLS[name]!.stageable === true && allows(level, "stage")))
       .sort();
 
-  it("the tool list follows the operation table: 35 on the plain lens; 36, 35 and 20 at full, propose and none", () => {
-    expect(runtime.size).toBe(35);
-    expect(full.size).toBe(36);
-    expect(propose.size).toBe(35);
-    expect(none.size).toBe(20);
+  it("the tool list follows the operation table: 34 on the plain lens; 35, 34 and 19 at full, propose and none", () => {
+    expect(runtime.size).toBe(34);
+    expect(full.size).toBe(35);
+    expect(propose.size).toBe(34);
+    expect(none.size).toBe(19);
     expect([...runtime.keys()].sort()).toEqual(allowed("full").filter((name) => name !== "get_ruleset"));
     for (const [level, map] of [["full", full], ["propose", propose], ["none", none]] as const) {
       expect([...map.keys()].sort(), level).toEqual(allowed(level));

@@ -700,7 +700,8 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         `Import a v${TRANSFER_FORMAT_VERSION} schema payload (also accepted, upgraded on the way in: ` +
         IMPORTABLE_FORMAT_VERSIONS.filter((v) => v !== TRANSFER_FORMAT_VERSION).map((v) => `v${v}`).join(", ") +
         "). Creates entity types, relation types, and lenses with scope configuration, " +
-        "assistants and saved queries.",
+        "assistants and saved queries. Answers with the created lenses and leftOutSavedQueries: " +
+        "the saved queries ({lens, key}) of an older payload the upgrade could not convert.",
       inputSchema: {
         payload: z.record(z.string(), z.unknown()),
       },
@@ -1414,13 +1415,19 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "Step types: " +
         "'oql' — needs 'oql' field with a read-only OQL query (OQL-style " +
         "pattern syntax over entity/relation type keys) using $param placeholders. " +
-        "'search' — needs 'entityTypeKey' and 'query' (use $param_name to reference a declared parameter). " +
-        "Optional: 'limit' (default 10). " +
+        "'search' — an entity search: needs 'query', the search text (use $param_name to reference a " +
+        "declared parameter; only here). Optional: 'types' (entity type keys) or 'indices' (search index " +
+        "keys), not both — neither searches every type of the lens; 'keyword' {match:'any'|'all'} and/or " +
+        "'semantic' {minSimilarity: 0..1} choose the methods — neither runs what the server can; 'filter' " +
+        "{key: value}, all must hold: key is a property or '<relation>.<property>', with an optional suffix " +
+        "__ne/__gt/__gte/__lt/__lte, or __exists/__missing (true/false), e.g. {year__gte:'2020'}; a type lacking a key is " +
+        "left out; 'limit' (1-100, default 10). Checked against the lens on save. A final search step returns {ran, items, " +
+        "limitations}; later steps can bind only '_id', '_entityTypeKey' and 'name' of its entities. " +
         "Data flow: steps can have 'bindings' dict mapping param names to '{{prevStepName.fieldName}}' " +
         "which collects that field from all rows of a previous step's output into a list. " +
         "Parameters define top-level $param placeholders. " +
         "Each parameter needs: name, description, dataType (string/integer/float/boolean/date/datetime). " +
-        "Example: steps=[{name:'skills', type:'search', entityTypeKey:'skill', query:'$q', limit:5}, " +
+        "Example: steps=[{name:'skills', type:'search', types:['skill'], query:'$q', limit:5}, " +
         "{name:'results', type:'oql', oql:'MATCH (p:person)-[:has_skill]->(s:skill) " +
         "WHERE s._id IN $ids RETURN p', bindings:{ids:'{{skills._id}}'}}], parameters=[{name:'q', ...}]",
       inputSchema: {

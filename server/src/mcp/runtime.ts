@@ -27,13 +27,13 @@
  */
 
 import {
-  INDEX_SEARCH_GUIDANCE,
-  RELATIVE_SCORE_PROMISE,
-  SEARCH_EVIDENCE_GUIDANCE,
-  SEARCH_RESPONSE,
-  TOOL_MIN_SIMILARITY_GUIDANCE,
-  toolMinSimilarity,
-} from "../runtime/search/strategies.js";
+  ENTITY_SEARCH_RESPONSE,
+  PASSAGE_SEARCH_RESPONSE,
+  SEARCH_FILTER_EFFECT,
+  SEARCH_QUERY_RULE,
+  SEARCH_RESULT_NOTE,
+  toolMethods,
+} from "../runtime/search/tools.js";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -92,20 +92,22 @@ function clamp(value: number, min: number, max: number): number {
 
 interface SearchToolArgs {
   query: string;
-  entity_type_key?: string;
-  limit?: number;
+  types?: string[];
+  documents?: string[];
+  indices?: string[];
   filters?: Record<string, unknown>;
-  fields?: string[];
-  property?: string;
+  limit?: number;
+  per_entity?: number;
+  text?: boolean;
 }
 
-interface IndexSearchToolArgs {
-  query: string;
-  index?: string | string[];
-  relations?: string[];
-  limit?: number;
-  filters?: Record<string, unknown>;
-  fields?: string[];
+/** The scope arguments a search tool was given, under the search's names. */
+function scopeOf({ types, documents, indices }: SearchToolArgs): { types?: string[]; documents?: string[]; indices?: string[] } {
+  return {
+    ...(types === undefined ? {} : { types }),
+    ...(documents === undefined ? {} : { documents }),
+    ...(indices === undefined ? {} : { indices }),
+  };
 }
 
 /** Tool filter values as the text the services coerce, like a query string. */
@@ -544,8 +546,8 @@ export function createRuntimeMcpServer(
         "hold large Markdown text and are stubbed by default in other tools " +
         '— they appear as {"document": true, "length": N} stubs. ' +
         "'offset' and 'limit' are character-based; omit both to read the full " +
-        "document. Use the charOffset/charLength from a search hit's " +
-        "matches, or from a search_by_index passage's matched, to read exactly the matching passage." + ENTITY_ADDRESS,
+        "document. Pass a search_documents passage's property, charOffset and charLength (or a " +
+        "search passage match's) as property_key, offset and limit to read exactly that passage." + ENTITY_ADDRESS,
       inputSchema: {
         entity_type_key: z.string(),
         entity_id: z.string().optional(),
@@ -1109,12 +1111,12 @@ export function createRuntimeMcpServer(
     "list_search_indices",
     {
       description:
-        "List the search indices this lens can search, to choose indices for search_by_index's index argument. " +
-        "Each has key, kind (default: an entity type's own text; passage: one document's passages; " +
+        "List the search indices this lens can search, to choose keys for the indices argument of search " +
+        "and search_documents. Each has key, kind (default: an entity type's own text; passage: one document's passages; " +
         "custom: designed fields and relation groups), name, description (what it finds — choose by it), " +
-        "entityType (hits are always entities of this type), fields, relations (the relation groups: " +
-        "relationType — the key search_by_index's relations argument takes — direction and label), " +
-        "documentProperty (the property_key for get_document after a passage match), modes and " +
+        "entityType (results are always entities of this type), fields, relations (the relation groups: " +
+        "relationType, direction and label), documentProperty (the document an index reads passages of, " +
+        "the property_key for get_document), modes and " +
         "status (ready, building, stale, failed, unavailable; an index not yet built finds nothing).",
       inputSchema: {},
     },
@@ -1123,96 +1125,86 @@ export function createRuntimeMcpServer(
     ),
   );
 
-  for (const document of [false, true]) {
-    const name = document ? "search_documents" : "search";
-    register(
-      name,
-      {
-        description:
-          (document
-            ? "Find entities whose document text matches; property restricts it to one document property key. Hits carry passage matches to read with get_document. "
-            : "Find entities for a text across properties and documents; to find them through what they are related to, or through chosen search indices, use search_by_index. ") +
-          "Omit entity_type_key to search all exposed types. " +
-          filterRules({ contains: false, relations: true }) +
-          " Filters narrow the hits, never list what the query misses; across types they keep only the types every key applies to. " +
-          "fields projects each entity; limit: an integer 1–100, default 10. " +
-          SEARCH_RESPONSE + " " + TOOL_MIN_SIMILARITY_GUIDANCE + " relativeScore: " +
-          RELATIVE_SCORE_PROMISE + " " + SEARCH_EVIDENCE_GUIDANCE,
-        inputSchema: {
-          query: z.string(),
-          entity_type_key: z.string().optional(),
-          limit: z.number().optional(),
-          filters: z.record(z.string(), z.unknown()).optional(),
-          fields: z.array(z.string()).optional(),
-          ...(document ? { property: z.string().optional() } : {}),
-        },
-      },
-      tool(name, async (args: SearchToolArgs, open) => {
-        const store = await open();
-        return jsonResult(
-          await service.search(
-            lensKey,
-            {
-              query: args.query,
-              type: args.entity_type_key ?? null,
-              limit: clamp(args.limit ?? 10, 1, 100),
-              minSimilarity: toolMinSimilarity(store),
-              filter: filterText(args.filters),
-              fields: args.fields ?? null,
-              ...(document
-                ? { in: ["document" as const], document: { property: args.property } }
-                : {}),
-            },
-            store,
-          ),
-        );
-      }),
-    );
-  }
-
+  const filtersArgument = z.record(z.string(), z.unknown()).optional();
   register(
-    "search_by_index",
+    "search",
     {
       description:
-        "Find entities for a text through search indices (keys from list_search_indices). " +
-        "A custom index with relation groups also finds an entity through its relations. " +
-        "index: one key or a non-empty list; omit it for every index of this lens. " +
-        "relations: relation types whose entries count ([] none); own fields and passages always do. " +
-        filterRules({ contains: false, relations: true }) +
-        " Filters narrow the hits, never list what the query misses, and keep only indices whose type every key applies to. " +
-        "fields projects each entity; limit: an integer 1–100, default 10. " +
-        "Returns query, mode (hybrid: semantic+keyword), minSimilarity and hits; each hit has entity, relativeScore and " +
-        "matched, its best entry: index, partKind (self/relation/passage), a relation's relationType, relationId and " +
-        "target (other end: id, type, label), snippet (the entry's start), a passage's charOffset and charLength " +
-        "— for get_document use the index's documentProperty as property_key. " +
-        TOOL_MIN_SIMILARITY_GUIDANCE + " relativeScore: " +
-        RELATIVE_SCORE_PROMISE + " " + INDEX_SEARCH_GUIDANCE,
+        "Rank entities for a text, best first. " + SEARCH_QUERY_RULE + " " +
+        "Scope, at most one of: types (entity type keys: their own fields and their documents' passages) " +
+        "or indices (search index keys from list_search_indices; a custom index with relation groups also " +
+        "finds an entity through its relations); neither searches every type of this lens. " +
+        filterRules({ contains: false, relations: true }) + " " +
+        SEARCH_FILTER_EFFECT + " limit: an integer 1–100, default 10. " +
+        ENTITY_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
       inputSchema: {
         query: z.string(),
-        index: z.union([z.string(), z.array(z.string())]).optional(),
-        relations: z.array(z.string()).optional(),
+        types: z.array(z.string()).optional(),
+        indices: z.array(z.string()).optional(),
+        filters: filtersArgument,
         limit: z.number().optional(),
-        filters: z.record(z.string(), z.unknown()).optional(),
-        fields: z.array(z.string()).optional(),
       },
     },
-    tool("search_by_index", async (args: IndexSearchToolArgs, open) => {
+    tool("search", async (args: SearchToolArgs, open) => {
       const store = await open();
-      const minSimilarity = toolMinSimilarity(store);
-      const response = await service.searchByIndices(
-        lensKey,
-        {
-          indices: args.index === undefined ? null : [args.index].flat(),
-          relations: args.relations ?? null,
-          query: args.query,
-          filters: filterText(args.filters),
-          minScore: minSimilarity,
-          limit: clamp(args.limit ?? 10, 1, 100),
-          fields: args.fields ?? null,
-        },
-        store,
+      return jsonResult(
+        await service.searchEntities(
+          lensKey,
+          {
+            query: args.query,
+            ...scopeOf(args),
+            ...toolMethods(store),
+            filter: filterText(args.filters),
+            limit: clamp(args.limit ?? 10, 1, 100),
+          },
+          store,
+        ),
       );
-      return jsonResult({ query: response.query, mode: response.mode, minSimilarity, hits: response.hits });
+    }),
+  );
+
+  register(
+    "search_documents",
+    {
+      description:
+        "Rank passages of documents for a text, best first: a passage is one chunk of one entity's document. " +
+        SEARCH_QUERY_RULE + " " +
+        "Scope, at most one of: types (entity type keys: all their documents), documents ('type.property', " +
+        "e.g. \"person.bio\") or indices (keys from list_search_indices of indices that read a document); none " +
+        "searches every document of this lens. " +
+        filterRules({ contains: false, relations: true }) +
+        " They apply to the entity owning the document. " + SEARCH_FILTER_EFFECT + " " +
+        "limit: passages, an integer 1–100, default 10. per_entity: at most this many passages per entity, " +
+        "1 to limit; omit for no cap. text: false leaves each passage's text out (default true). " +
+        PASSAGE_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
+      inputSchema: {
+        query: z.string(),
+        types: z.array(z.string()).optional(),
+        documents: z.array(z.string()).optional(),
+        indices: z.array(z.string()).optional(),
+        filters: filtersArgument,
+        limit: z.number().optional(),
+        per_entity: z.number().optional(),
+        text: z.boolean().optional(),
+      },
+    },
+    tool("search_documents", async (args: SearchToolArgs, open) => {
+      const store = await open();
+      return jsonResult(
+        await service.searchPassages(
+          lensKey,
+          {
+            query: args.query,
+            ...scopeOf(args),
+            ...toolMethods(store),
+            filter: filterText(args.filters),
+            limit: clamp(args.limit ?? 10, 1, 100),
+            ...(args.per_entity === undefined ? {} : { perEntity: args.per_entity }),
+            ...(args.text === undefined ? {} : { text: args.text }),
+          },
+          store,
+        ),
+      );
     }),
   );
 
@@ -1237,7 +1229,9 @@ export function createRuntimeMcpServer(
       description:
         "Execute a saved query by name with parameter values. " +
         "Use list_saved_queries to discover available queries and their required " +
-        "parameters first.",
+        "parameters first. Answers with the last step's output: {columns, results} for an " +
+        "oql step; for a search step {ran, items, limitations}, each item a rank, the " +
+        "found entity (_id, _entityTypeKey, name) and the entry that matched.",
       inputSchema: {
         query_key: z.string(),
         params: z.record(z.string(), z.unknown()).optional(),

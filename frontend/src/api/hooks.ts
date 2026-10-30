@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { queryOptions, useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { displayLabel, nameProperties } from '@/lib/displayLabel'
-import { matchedViaText } from '@/lib/matchedVia'
+import { entityMatchText } from '@/lib/matchedVia'
 import * as auth from './auth'
 import * as model from './model'
 import * as registry from './registry'
@@ -11,7 +11,7 @@ import * as runtime from './runtime'
 import { listNavigators } from './navigators'
 import { listRetrievers } from './retrievers'
 import { qk } from './queryKeys'
-import type { AssistantKind, EntityInstance, Matched } from './types'
+import type { AssistantKind, EntityInstance, EntityMatch } from './types'
 
 /** The authentication mode and the signed-in user; refetched when a request answers 401. */
 export function useAuthMe() {
@@ -232,11 +232,11 @@ export function useAssistants(ontologyKey: string, lensKey: string, kind: Assist
 }
 
 /**
- * "Matched via" text function for search hits in the current workbench
- * route's lens (see `matchedViaText`). The catalog supplies group labels
- * and document properties.
+ * "Matched via" text function for entity search items in the current
+ * workbench route's lens (see `entityMatchText`). The catalog supplies
+ * group labels.
  */
-export function useMatchedVia(): (matched: Matched | undefined) => string | null {
+export function useMatchedVia(): (match: EntityMatch, entityType: string) => string | null {
   const { ontologyKey = '', lensKey = '' } = useParams<{
     ontologyKey: string
     lensKey: string
@@ -244,7 +244,7 @@ export function useMatchedVia(): (matched: Matched | undefined) => string | null
   const schema = useRuntimeSchema(ontologyKey, lensKey).data
   const catalog = useSearchCatalog(ontologyKey, lensKey, ontologyKey !== '' && lensKey !== '').data
   return useMemo(
-    () => (matched: Matched | undefined) => matchedViaText(matched, schema, catalog),
+    () => (match: EntityMatch, entityType: string) => entityMatchText(match, entityType, schema, catalog),
     [schema, catalog],
   )
 }

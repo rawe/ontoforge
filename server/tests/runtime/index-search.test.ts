@@ -1,9 +1,9 @@
 /**
- * The search-index engine against a fake search-index store: index
- * resolution and validation, which generations rank, the lens's hidden
- * relation and target types as ranking restrictions, the similarity
- * floor, the bounded over-fetch, what `matched` describes, the field
- * projection, and the lens's catalog.
+ * The search-index engine, through the entity search, against a fake
+ * search-index store: index resolution and validation, which generations
+ * rank, the lens's hidden relation and target types as ranking
+ * restrictions, the similarity floor, the bounded over-fetch, what an
+ * item's match describes, and the lens's catalog.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +18,8 @@ import type {
 } from "../../src/core/ports.js";
 import { deriveManagedIndices, SearchIndexDefinition } from "../../src/core/searchIndex.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
-import { searchByIndices, searchIndexCatalog } from "../../src/runtime/search/indexSearch.js";
+import { searchEntities } from "../../src/runtime/search/entitySearch.js";
+import { searchIndexCatalog } from "../../src/runtime/search/indexSearch.js";
 import { createMockRuntimeStore, makeFullSchema } from "./helpers.js";
 
 // The catalog reads build states from the status module, which reads the
@@ -108,6 +109,8 @@ beforeEach(() => {
   });
   const schema = makeFullSchema({ lensKey: "all" });
   runtime = createMockRuntimeStore();
+  // As the PostgreSQL adapter: keyword ranking, so hybrid is the default.
+  runtime.supportsKeywordRanking.mockReturnValue(true);
   runtime.getFullSchemaWithLensInclusions.mockResolvedValue(schema);
   runtime.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
     Object.fromEntries(ids.map((id) => [id, { _id: id, _entityTypeKey: "person", name: `N-${id}`, age: 3 }])),
@@ -150,16 +153,18 @@ beforeEach(() => {
 
 afterEach(() => setEmbeddingProvider(null));
 
-const search = (request: Parameters<typeof searchByIndices>[1]) => searchByIndices("all", request, runtime);
+const search = (request: Parameters<typeof searchEntities>[1]) => searchEntities("all", request, runtime);
 
 describe("index resolution", () => {
-  it("searches every index the lens may search when none is named", async () => {
-    await search({ query: "x", mode: "keyword" });
+  it("searches every managed index the lens may search when none is named; a custom one only when named", async () => {
+    await search({ query: "x", keyword: {} });
     expect(rank.mock.calls.map(([q]) => q.generationId).sort()).toEqual([
       "company~default/keyword",
-      "employment/keyword",
       "person~default/keyword",
     ]);
+    rank.mockClear();
+    await search({ query: "x", indices: ["employment"], keyword: {} });
+    expect(rank.mock.calls.map(([q]) => q.generationId)).toEqual(["employment/keyword"]);
   });
 
   it("an unknown index answers exactly as one the lens may not search: a validation error", async () => {
@@ -177,32 +182,31 @@ describe("index resolution", () => {
       ...makeFullSchema({ lensKey: "all", entityInclusions: [{ key: "person", properties: null }] }),
       searchIndexInclusions: ["person~default"],
     });
-    await search({ query: "x", mode: "keyword" });
+    await search({ query: "x", keyword: {} });
     expect(rank.mock.calls.map(([q]) => q.generationId)).toEqual(["person~default/keyword"]);
     await expect(search({ query: "x", indices: ["employment"] })).rejects.toMatchObject({
       details: { fields: { "indices.0": expect.any(String) } },
     });
   });
 
-  it("collects invalid dimensions; a mode without its provider is a disabled feature", async () => {
+  it("collects invalid dimensions; a semantic block without its provider is a disabled feature", async () => {
     await expect(
-      search({ query: " ", limit: 0, mode: "keyword", minScore: 0.5, relations: ["ghost"], filters: { nope: "1" } }),
+      search({ query: " ", limit: 0, semantic: { minSimilarity: 1.5 }, filter: { nope: "1" } }),
     ).rejects.toMatchObject({
       details: {
         fields: {
           query: expect.any(String),
           limit: expect.any(String),
-          minScore: expect.stringContaining("semantically"),
-          "relations.0": expect.any(String),
-          nope: expect.any(String),
+          "semantic.minSimilarity": expect.any(String),
+          "filter.nope": expect.any(String),
         },
       },
     });
     setEmbeddingProvider(null);
-    await expect(search({ query: "x", mode: "semantic" })).rejects.toMatchObject({
+    await expect(search({ query: "x", semantic: {} })).rejects.toMatchObject({
       details: { code: "FEATURE_DISABLED" },
     });
-    expect((await search({ query: "x" })).mode).toBe("keyword");
+    expect((await search({ query: "x" })).ran).toEqual(["keyword"]);
   });
 });
 
@@ -215,8 +219,8 @@ describe("rankings", () => {
           ? { ...g, modelId: "other:model:2" }
           : g,
     );
-    const response = await search({ query: "x" });
-    expect(response.mode).toBe("hybrid");
+    const response = await search({ query: "x", indices: ["person~default", "company~default", "employment"] });
+    expect(response.ran).toEqual(["semantic", "keyword"]);
     expect(rank.mock.calls.map(([q]) => q.generationId).sort()).toEqual([
       "company~default/keyword",
       "employment/keyword",
@@ -230,8 +234,8 @@ describe("rankings", () => {
     expect(keyword).toMatchObject({ text: "x", matching: "any" });
   });
 
-  it("hides the lens's relation and target types and narrows to the chosen relations", async () => {
-    await search({ query: "x", indices: ["employment"], mode: "keyword" });
+  it("hides the lens's relation and target types", async () => {
+    await search({ query: "x", indices: ["employment"], keyword: {} });
     expect(rank.mock.calls[0]![0]).toMatchObject({ relationTypes: null, targetTypes: null });
 
     runtime.getFullSchemaWithLensInclusions.mockResolvedValue({
@@ -243,22 +247,16 @@ describe("rankings", () => {
     });
     invalidateLoadedSchemaCache();
     rank.mockClear();
-    await search({ query: "x", indices: ["employment"], mode: "keyword" });
+    await search({ query: "x", indices: ["employment"], keyword: {} });
     // Companies are hidden: works_for (person → company) is not inferred.
     expect(rank.mock.calls[0]![0]).toMatchObject({
       relationTypes: [],
       targetTypes: ["person", "department"],
     });
-
-    invalidateLoadedSchemaCache();
-    runtime.getFullSchemaWithLensInclusions.mockResolvedValue(makeFullSchema({ lensKey: "all" }));
-    rank.mockClear();
-    await search({ query: "x", indices: ["employment"], mode: "keyword", relations: ["belongs_to"] });
-    expect(rank.mock.calls[0]![0]).toMatchObject({ relationTypes: ["belongs_to"], targetTypes: null });
   });
 
   it("passes the exact filters of the root type into the ranking", async () => {
-    await search({ query: "x", indices: ["person~default"], mode: "keyword", filters: { age__gte: "20" } });
+    await search({ query: "x", indices: ["person~default"], keyword: {}, filter: { age__gte: "20" } });
     expect(rank.mock.calls[0]![0].conditions).toEqual([
       expect.objectContaining({ kind: "property", propertyKey: "age", op: "gte", value: 20 }),
     ]);
@@ -270,8 +268,8 @@ describe("rankings", () => {
         ? [entry("a", 0.9), entry("b", 0.6)]
         : [entry("c", 3)],
     );
-    const response = await search({ query: "x", indices: ["person~default"], minScore: 0.7 });
-    expect(response.hits.map((h) => h.entity._id)).toEqual(["a", "c"]);
+    const response = await search({ query: "x", indices: ["person~default"], semantic: { minSimilarity: 0.7 }, keyword: {} });
+    expect(response.items.map((item) => item.entity._id)).toEqual(["a", "c"]);
   });
 
   it("over-fetches limit × 4 entries and fetches once more, up to the cap, when entities run short", async () => {
@@ -279,20 +277,20 @@ describe("rankings", () => {
     rank.mockImplementation(async (query) =>
       Array.from({ length: query.limit }, (_, i) => entry(i < 8 ? "a" : `e${i}`, 1 - i / 2000, { partId: String(i) })),
     );
-    const response = await search({ query: "x", indices: ["person~default"], mode: "semantic", limit: 2 });
+    const response = await search({ query: "x", indices: ["person~default"], semantic: {}, limit: 2 });
     expect(rank.mock.calls.map(([q]) => q.limit)).toEqual([8, 1000]);
-    expect(response.hits.map((h) => h.entity._id)).toEqual(["a", "e8"]);
+    expect(response.items.map((item) => item.entity._id)).toEqual(["a", "e8"]);
   });
 
   it("does not fetch again when a ranking ran out", async () => {
     rank.mockImplementation(async () => [entry("a", 0.9)]);
-    await search({ query: "x", indices: ["person~default"], mode: "semantic", limit: 5 });
+    await search({ query: "x", indices: ["person~default"], semantic: {}, limit: 5 });
     expect(rank.mock.calls.map(([q]) => q.limit)).toEqual([20]);
   });
 });
 
-describe("matched", () => {
-  it("describes a relation entry with its relation, target and label, and a self entry plainly", async () => {
+describe("match", () => {
+  it("describes a relation entry with its relation type and target", async () => {
     runtime.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
       Object.fromEntries(ids.map((id) => [id, { _id: id, _entityTypeKey: "person", name: `N-${id}` }])),
     );
@@ -311,20 +309,17 @@ describe("matched", () => {
           ]
         : [],
     );
-    const response = await search({ query: "cto acme", indices: ["employment"], mode: "keyword" });
-    expect(response.hits).toEqual([
+    const response = await search({ query: "cto acme", indices: ["employment"], keyword: {} });
+    expect(response.items).toEqual([
       {
+        rank: 1,
         entity: { _id: "a", _entityTypeKey: "person", name: "N-a" },
-        relativeScore: 1,
-        matched: {
+        match: {
           index: "employment",
-          partKind: "relation",
-          relationType: "works_for",
-          relationId: "rel-1",
-          target: { id: "co-1", type: "company", label: "N-co-1", identity: null },
+          part: "relation",
           snippet: "Ada CTO ACME",
-          charOffset: null,
-          charLength: null,
+          relationType: "works_for",
+          target: { _id: "co-1", _entityTypeKey: "company", name: "N-co-1" },
         },
       },
     ]);
@@ -336,18 +331,9 @@ describe("matched", () => {
       searchIndexInclusions: ["person~default"],
     });
     rank.mockImplementation(async () => [entry("a", 3, { text: "Ada secret@example.com" })]);
-    const response = await search({ query: "ada", mode: "keyword" });
-    expect(response.hits[0]!.matched.snippet).toBe("");
-    // Projected through the lens.
-    expect(response.hits[0]!.entity).toEqual({ _id: "a", _entityTypeKey: "person", name: "N-a" });
-  });
-});
-
-describe("fields", () => {
-  it("projects each entity to the named fields, keeping id and type", async () => {
-    rank.mockImplementation(async () => [entry("a", 3)]);
-    const response = await search({ query: "x", indices: ["person~default"], mode: "keyword", fields: ["age"] });
-    expect(response.hits[0]!.entity).toEqual({ _id: "a", _entityTypeKey: "person", age: 3 });
+    const response = await search({ query: "ada", keyword: {} });
+    expect(response.items[0]!.match.snippet).toBeNull();
+    expect(response.items[0]!.entity).toEqual({ _id: "a", _entityTypeKey: "person", name: "N-a" });
   });
 });
 

@@ -3,9 +3,10 @@
  * may search, grouping ranked entries by entity and fusing the per-mode
  * rankings, and the snippet of a match.
  *
- * Pure — no storage, no I/O. The service (`runtime/search/indexSearch.ts`)
- * ranks the entries of each index's active generation, merges them per
- * representation and hands the mode rankings here.
+ * Pure — no storage, no I/O. The search tree's executor
+ * (`runtime/search/executor.ts`) ranks the entries of each index's active
+ * generation, merges them per representation and hands the mode rankings
+ * here.
  */
 
 import {
@@ -168,7 +169,7 @@ export interface ModeHit<E> {
   entry: E;
 }
 
-/** One entity of the fused ranking. */
+/** One item of the fused ranking: an entity, or a passage of one. */
 export interface FusedHit<E> {
   entityId: string;
   /** One mode: the best entry's own score (similarity or keyword score);
@@ -191,13 +192,18 @@ export function mergeByScore<E extends { score: number }>(lists: readonly (reado
   return lists.flat().sort((a, b) => b.score - a.score);
 }
 
-/** Each entity once, with its best entry, in ranking order. Entries come
- * best first, so the first of an entity is its best. */
-export function groupByEntity<E extends { entityId: string }>(entries: readonly E[]): E[] {
+/** Each entity once — or each item `keyOf` names — with its best entry,
+ * in ranking order. Entries come best first, so the first of an item is
+ * its best. */
+export function groupByEntity<E extends { entityId: string }>(
+  entries: readonly E[],
+  keyOf: (entry: E) => string = (entry) => entry.entityId,
+): E[] {
   const seen = new Set<string>();
   return entries.filter((entry) => {
-    if (seen.has(entry.entityId)) return false;
-    seen.add(entry.entityId);
+    const key = keyOf(entry);
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }
@@ -206,21 +212,23 @@ export function groupByEntity<E extends { entityId: string }>(entries: readonly 
  * Fuse the mode rankings at entity level: each grouped by entity (score =
  * its best entry, whichever index holds it), then reciprocal-rank fusion
  * across the modes — hybrid only; a single mode keeps its own scores. One
- * entity found by several indices of one mode counts once. Equal scores
- * prefer the greater semantic similarity when every tied entity has one,
- * then the entity id.
+ * entity found by several indices of one mode counts once. Equal sums:
+ * the one tie rule (`byScore`), by the best semantic entry; one mode's
+ * equal scores by entity id. With `keyOf` the items are what it names —
+ * passages — instead of entities.
  */
 export function fuseModes<E extends { entityId: string; score: number }>(
   rankings: readonly ModeRanking<E>[],
+  keyOf: (entry: E) => string = (entry) => entry.entityId,
 ): FusedHit<E>[] {
   const fused = new Map<string, FusedHit<E>>();
   for (const ranking of rankings) {
-    groupByEntity(ranking.entries).forEach((entry, i) => {
+    groupByEntity(ranking.entries, keyOf).forEach((entry, i) => {
       const hit: ModeHit<E> = { representation: ranking.representation, rank: i + 1, entry };
       const contribution = rankings.length === 1 ? entry.score : 1 / (RRF_K + hit.rank);
-      const prior = fused.get(entry.entityId);
+      const prior = fused.get(keyOf(entry));
       if (prior === undefined) {
-        fused.set(entry.entityId, { entityId: entry.entityId, score: contribution, matched: hit, modes: [hit] });
+        fused.set(keyOf(entry), { entityId: entry.entityId, score: contribution, matched: hit, modes: [hit] });
         return;
       }
       prior.score += contribution;
@@ -233,22 +241,40 @@ export function fuseModes<E extends { entityId: string; score: number }>(
       }
     });
   }
-  const similarity = (hit: FusedHit<E>): number | null =>
-    hit.modes.find((m) => m.representation === "semantic")?.entry.score ?? null;
-  const byId = (a: FusedHit<E>, b: FusedHit<E>) =>
-    a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
-  const ranked = [...fused.values()].sort((a, b) => b.score - a.score);
-  const result: FusedHit<E>[] = [];
+  const hits = [...fused.values()];
+  // One mode is no fusion: equal scores by entity id, as merged.
+  if (rankings.length === 1) return hits.sort((a, b) => b.score - a.score || byId(a, b));
+  return byScore(hits, (hit) => hit.modes.find((m) => m.representation === "semantic")?.entry.score ?? null);
+}
+
+/**
+ * Fused items best score first, by the one tie rule of every fusion: equal
+ * scores prefer the greater semantic similarity when every tied item has
+ * one, then the earliest input that ranked the item — `items` come in
+ * that order, first appearance: input order, then position within it. A
+ * first appearance is unique, so the entity id never has to decide.
+ */
+export function byScore<T extends { entityId: string; score: number }>(
+  items: readonly T[],
+  similarity: (item: T) => number | null,
+): T[] {
+  // Stable sorts: equal scores, and then equal similarities, keep the
+  // order of first appearance.
+  const ranked = [...items].sort((a, b) => b.score - a.score);
+  const result: T[] = [];
   for (let start = 0; start < ranked.length; ) {
     let end = start + 1;
     while (end < ranked.length && ranked[end]!.score === ranked[start]!.score) end++;
     const group = ranked.slice(start, end);
-    const measured = group.every((hit) => similarity(hit) !== null);
-    group.sort((a, b) => (measured ? similarity(b)! - similarity(a)! : 0) || byId(a, b));
+    if (group.every((item) => similarity(item) !== null)) group.sort((a, b) => similarity(b)! - similarity(a)!);
     result.push(...group);
     start = end;
   }
   return result;
+}
+
+function byId(a: { entityId: string }, b: { entityId: string }): number {
+  return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
 }
 
 // ---------------------------------------------------------------------------

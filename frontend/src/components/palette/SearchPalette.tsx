@@ -219,7 +219,7 @@ function PaletteContent({
     lensKey,
     q: mode === 'entities' ? debouncedQ : '',
     typeKey: scopedType ?? undefined,
-    ranked: (features?.searchStrategies.length ?? 0) > 0,
+    ranked: features?.rankedSearch === true,
     allTypeKeys: entityTypes.map((t) => t.key),
     enabled: entitySearchEnabled,
   })
@@ -338,12 +338,12 @@ function PaletteContent({
   /* ------------------------------ result renders ----------------------------- */
 
   const entityItem = (result: EntitySearchResult, valuePrefix: 'entity' | 'recent') => {
-    const { entity, matches, matched } = result
+    const { entity } = result
     return (
       <CommandItem key={`${valuePrefix}:${entity._id}`} value={`${valuePrefix}:${entity._entityTypeKey}:${entity._id}`}
         onSelect={() => go(`${base}/e/${entity._entityTypeKey}/${entity._id}`)}>
         {valuePrefix === 'recent' && <Clock className="size-3.5 shrink-0 text-muted-foreground" />}
-        <EntitySearchRow entity={entity} matches={matches} matched={matched} typeName={typeName(entity._entityTypeKey)} />
+        <EntitySearchRow result={result} typeName={typeName(entity._entityTypeKey)} />
       </CommandItem>
     )
   }

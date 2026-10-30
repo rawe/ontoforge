@@ -19,7 +19,8 @@ export interface ServerInfo {
 }
 
 export interface Features {
-  searchStrategies: SearchStrategy[]
+  /** Ranked search runs: the store ranks by keyword, or an embedding provider is installed. */
+  rankedSearch: boolean
   semanticSearch: boolean
   ai: boolean
 }
@@ -87,16 +88,23 @@ export interface SchemaRelationType {
   properties: SchemaProperty[]
 }
 
+/** A `search` step carries the entity search's request fields
+ * (`EntitySearchBody`) under their names; the modeling routes answer an
+ * absent field as null. */
 export interface SavedQueryStep {
   name: string
   type: 'oql' | 'search'
   /** OQL text — `oql` steps only. */
-  oql?: string
-  entityTypeKey?: string
-  /** Semantic-search text — `search` steps only. */
-  query?: string
-  limit?: number
-  bindings?: Record<string, string>
+  oql?: string | null
+  /** The search text, `$name` substituted — `search` steps only. */
+  query?: string | null
+  types?: string[] | null
+  indices?: string[] | null
+  keyword?: { match?: 'any' | 'all' } | null
+  semantic?: { minSimilarity?: number } | null
+  filter?: Record<string, string> | null
+  limit?: number | null
+  bindings?: Record<string, string> | null
 }
 
 export interface SavedQueryParameter {
@@ -408,39 +416,6 @@ export interface StagedAnswer {
 
 /* ------------------------------ runtime — search ----------------------------- */
 
-export type SearchStrategy = 'semantic' | 'keyword' | 'keyword-any' | 'keyword-all' | 'hybrid'
-export type SearchKind = 'properties' | 'document'
-export interface SearchEvidence {
-  /** Original (1 + cosine) / 2 measurement, not confidence; null is unmeasured. */
-  semanticSimilarity: number | null
-  /** True for a native keyword match; null is unknown, including limited-list absence. */
-  keywordMatch: boolean | null
-  /** The entry's keyword score: distinct query words matched plus, as a fraction below
-   * one, the native full-text rank (docs/capabilities/search.md#ranking). A number exactly
-   * when keywordMatch is true; no fixed upper bound; not comparable to semanticSimilarity. */
-  keywordScore: number | null
-}
-export type SearchMatch = {
-  kind: 'properties'; evidence: SearchEvidence
-} | {
-  kind: 'document'; propertyKey: string; charOffset: number; charLength: number; evidence: SearchEvidence
-}
-export interface SearchHit {
-  entity: EntityInstance
-  /** 1.0 for the best hit; comparable only within this response.
-   * One unfused ranking uses source scores; hybrid sums reciprocal ranks.
-   * Cross-kind fusion uses the best rank contribution for multiple searched types,
-   * and sum for one searched type. Cross-type ties prefer best returned similarity
-   * only when all tied hits have a measurement; otherwise they stay stable.
-   * A tie does not prove equal relevance.
-   * Never indicates confidence or whether the best hit is good.
-   */
-  relativeScore: number
-  matches: SearchMatch[]
-  /** The entry the hit was found by. */
-  matched?: Matched
-}
-
 /** Which entry of which search index a hit was found by. */
 export interface Matched {
   index: string
@@ -456,15 +431,91 @@ export interface Matched {
   charOffset: number | null
   charLength: number | null
 }
-export interface SearchResponse {
+/** The body `POST /search/entities` takes; `POST /search/passages` adds to it. */
+export interface EntitySearchBody {
   query: string
-  type: string | null
-  in: SearchKind[]
-  strategy: SearchStrategy
-  /** The applied similarity floor on the `semanticSimilarity` scale; null when none was set. */
-  minSimilarity: number | null
-  filter: Record<string, string>
-  hits: SearchHit[]
+  /** One scope field at a time; none searches every type the lens shows. */
+  types?: string[]
+  indices?: string[]
+  keyword?: { match?: 'any' | 'all' }
+  semantic?: { minSimilarity?: number }
+  /** The entity list's `filter.*` keys without the prefix. */
+  filter?: Record<string, string>
+  limit?: number
+}
+
+export interface PassageSearchBody extends EntitySearchBody {
+  /** Document properties as `type.property`. */
+  documents?: string[]
+  perEntity?: number
+  text?: boolean
+}
+
+/** What could not run, or what a named scope could not serve. */
+export interface SearchLimitation {
+  code: 'not-searchable' | 'switched-off' | 'not-ready' | 'filter-excludes-all-types'
+  message: string
+  method?: Representation
+  indices?: string[]
+  types?: string[]
+  /** Named document properties, as `type.property`. */
+  documents?: string[]
+}
+
+/** An entity as a search names it; `name` is null when it has none or the lens hides it. */
+export interface EntityReference {
+  _id: string
+  _entityTypeKey: string
+  name: string | null
+  /** Its identity properties and their values, in the identity's order; absent when its
+   * type declares none the lens shows. Never on a relation target. */
+  identity?: Record<string, JsonValue>
+}
+
+/** The best entry that found an entity. */
+export interface EntityMatch {
+  index: string
+  part: 'self' | 'relation' | 'passage'
+  /** Null when the index reads a property the lens hides. */
+  snippet: string | null
+  /** Passages: the document, null when the lens hides it. */
+  property?: string | null
+  charOffset?: number
+  charLength?: number
+  /** Relations: the relation type and the entity at its other end. */
+  relationType?: string
+  target?: EntityReference
+}
+
+export interface EntitySearchItem {
+  rank: number
+  entity: EntityReference
+  match: EntityMatch
+}
+
+export interface EntitySearchResponse {
+  ran: Representation[]
+  items: EntitySearchItem[]
+  limitations: SearchLimitation[]
+}
+
+export interface PassageSearchItem {
+  rank: number
+  entity: EntityReference
+  passage: {
+    property: string
+    ordinal: number
+    charOffset: number
+    charLength: number
+    /** Absent when the request sent `text: false`. */
+    text?: string
+  }
+}
+
+export interface PassageSearchResponse {
+  ran: Representation[]
+  items: PassageSearchItem[]
+  limitations: SearchLimitation[]
 }
 
 /* ----------------------------- runtime — documents ---------------------------- */

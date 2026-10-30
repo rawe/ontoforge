@@ -86,7 +86,7 @@ export function createClient({ baseUrl, ontology, lens, token }) {
   };
 
   return {
-    /** Deployment: { baseUrl, version } and { semanticSearch, searchStrategies, ai, decisions }. */
+    /** Deployment: { baseUrl, version } and { semanticSearch, rankedSearch, ai, decisions }. */
     serverInfo: () => json('GET', '/api/server/info'),
     features: () => json('GET', '/api/server/features'),
 
@@ -126,7 +126,12 @@ export function createClient({ baseUrl, ontology, lens, token }) {
 
     neighbors: (type, id, query) =>
       json('GET', `${runtime}/entities/${seg(type)}/${seg(id)}/neighbors`, { query }),
-    search: (query) => json('GET', `${runtime}/search`, { query }),
+    /** Ranked entities: { ran, items, limitations }. `request` takes types or indices, keyword, semantic, filter, limit. */
+    searchEntities: (query, request = {}) =>
+      json('POST', `${runtime}/search/entities`, { body: { ...request, query } }),
+    /** Ranked passages: { ran, items, limitations }. `request` also takes documents, perEntity, text. */
+    searchPassages: (query, request = {}) =>
+      json('POST', `${runtime}/search/passages`, { body: { ...request, query } }),
     oql: (text) => json('POST', `${runtime}/query`, { body: { query: text } }),
     runSavedQuery: (key, params = {}) =>
       json('POST', `${runtime}/saved-queries/${seg(key)}/run`, { body: { params } }),
@@ -161,7 +166,7 @@ export function createClient({ baseUrl, ontology, lens, token }) {
   };
 }
 
-// Repeated keys (fields, in) take an array; filters are passed as their full
+// Repeated keys (fields) take an array; filters are passed as their full
 // parameter names, e.g. { 'filter.status__ne': 'archived' }.
 function toQuery(query) {
   const params = new URLSearchParams();

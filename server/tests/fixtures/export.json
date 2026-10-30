@@ -1,5 +1,5 @@
 {
-    "formatVersion": "7.0",
+    "formatVersion": "8.0",
     "entityTypes": [
         {
             "key": "company",
@@ -175,8 +175,12 @@
                             "name": "main",
                             "type": "oql",
                             "oql": "MATCH (p:person) WHERE p.name IN $names RETURN p",
-                            "entityTypeKey": null,
                             "query": null,
+                            "types": null,
+                            "indices": null,
+                            "keyword": null,
+                            "semantic": null,
+                            "filter": null,
                             "limit": null,
                             "bindings": null
                         }
@@ -198,8 +202,14 @@
                             "name": "people",
                             "type": "search",
                             "oql": null,
-                            "entityTypeKey": "person",
                             "query": "$q",
+                            "types": [
+                                "person"
+                            ],
+                            "indices": null,
+                            "keyword": null,
+                            "semantic": null,
+                            "filter": null,
                             "limit": 5,
                             "bindings": null
                         },
@@ -207,8 +217,12 @@
                             "name": "results",
                             "type": "oql",
                             "oql": "MATCH (p:person) WHERE p._id IN $ids RETURN p.name",
-                            "entityTypeKey": null,
                             "query": null,
+                            "types": null,
+                            "indices": null,
+                            "keyword": null,
+                            "semantic": null,
+                            "filter": null,
                             "limit": null,
                             "bindings": {
                                 "ids": "{{people._id}}"

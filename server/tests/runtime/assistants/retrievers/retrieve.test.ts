@@ -1,17 +1,39 @@
 /**
- * Retrieval of a plan over a mocked search engine: what each search is
- * asked (indices, relations per index, the threshold as `(1 + t) / 2`,
- * entity restrictions from filters), how sub-queries fuse per entity,
+ * Retrieval of a plan over a fake search-index store: the tree the plan
+ * compiles into (indices, relations per index, the threshold as
+ * `(1 + t) / 2`, entity restrictions from filters and previous results),
+ * what its searches ask the store, how sub-queries fuse per entity,
  * listing without a query, the evidence and diagnostics shapes, and the
  * cards of the results handed to the answer model.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const engine = vi.hoisted(() => ({ rankThroughIndices: vi.fn(), describeMatches: vi.fn() }));
-vi.mock("../../../../src/runtime/search/indexSearch.js", () => engine);
+// The trees retrieval runs, as it runs them; what matched is described by a stub.
+const engine = vi.hoisted(() => ({ trees: [] as unknown[], describeMatches: vi.fn() }));
+vi.mock("../../../../src/runtime/search/indexSearch.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../../../src/runtime/search/indexSearch.js")>();
+  return {
+    ...original,
+    describeMatches: engine.describeMatches,
+    runSearchTree: (...args: Parameters<typeof original.runSearchTree>) => {
+      engine.trees.push(args[3]);
+      return original.runSearchTree(...args);
+    },
+  };
+});
 
-import type { RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../../../src/core/ports.js";
+import { setEmbeddingProvider } from "../../../../src/core/embedding.js";
+import type {
+  RankedSearchEntry,
+  RuntimeStore,
+  SearchEntryQuery,
+  SearchGenerationRecord,
+  SearchIndexRecord,
+  SearchIndexStore,
+} from "../../../../src/core/ports.js";
+import { printSearchTree, type TreeNode } from "../../../../src/core/searchTree.js";
+import type { EngineHit } from "../../../../src/runtime/search/indexSearch.js";
 import type { LoadedSchema } from "../../../../src/runtime/schemaCache.js";
 import type { Plan } from "../../../../src/runtime/assistants/retrievers/plan.js";
 import {
@@ -21,7 +43,6 @@ import {
   diagnosticResults,
   entityCards,
   filterValues,
-  fuseRankings,
   retrieve,
   retrievedResults,
   type RetrievalScope,
@@ -84,27 +105,59 @@ const store = {
   getEntitiesByIds: vi.fn(async (ids: string[]) => Object.fromEntries(ids.filter((id) => PEOPLE[id]).map((id) => [id, PEOPLE[id]]))),
 } as unknown as RuntimeStore;
 
+// Every index ready in both methods; each query text embeds as its
+// position among the texts embedded.
+const generation = (key: string, representation: "semantic" | "keyword"): SearchGenerationRecord => ({
+  generationId: `${key}/${representation}`,
+  searchIndexId: `id-${key}`,
+  representation,
+  definitionHash: "h",
+  modelId: representation === "semantic" ? "fake" : null,
+  dimensions: null,
+  languages: null,
+  state: "ready",
+  total: 0,
+  done: 0,
+  failed: 0,
+  createdAt: new Date(0),
+  readyAt: new Date(0),
+});
+const embedded: string[] = [];
+/** Per index and query text, the entries its searches find, best first. */
+let lists: Record<string, Record<string, RankedSearchEntry[]>>;
+const rankEntries = vi.fn(async (query: SearchEntryQuery) => {
+  const key = query.generationId.split("/")[0]!;
+  const text = query.text ?? embedded[query.vector![0]!]!;
+  // As the database: the restriction is part of the query.
+  return (lists[key]?.[text] ?? [])
+    .filter((entry) => query.entityIds == null || query.entityIds.includes(entry.entityId))
+    .slice(0, query.limit);
+});
+const indexStore = {
+  listGenerations: async () => CATALOG.flatMap((entry) => [generation(entry.key, "semantic"), generation(entry.key, "keyword")]),
+  rankEntries,
+} as unknown as SearchIndexStore;
+
 const scope = (): RetrievalScope => ({
   config: CONFIG,
   lens: LENS,
   loaded: { scoped: SCHEMA, full: SCHEMA, searchIndexScope: { scoped: false, includedIndices: [] } } as unknown as LoadedSchema,
   store,
-  indexStore: {} as SearchIndexStore,
+  indexStore,
   records: CATALOG.map((entry) => record(entry.key)),
   signal: new AbortController().signal,
 });
 
-/** An engine hit whose matched entry is a relation entry of `index`. */
-const hit = (entityId: string, index: string, text: string) => ({
-  entityId,
-  entityType: "person",
-  score: 1,
-  matched: {
-    index: record(index),
-    entry: { entityId, partKind: "relation", groupNo: 0, partId: "r", relationType: "works_for", targetType: "company", targetId: "c", startChar: null, charLength: null, text, score: 1 },
-  },
-  indices: [],
-});
+/** What the searches of `index` find for `query`: these entities, each by
+ * a relation entry with the text, best first. */
+const finds = (index: string, query: string, ...found: [entityId: string, text: string][]) => {
+  lists[index] = {
+    ...lists[index],
+    [query]: found.map(([entityId, text], i) => ({ entityId, partKind: "relation", groupNo: 0, partId: "r", relationType: "works_for", targetType: "company", targetId: "c", startChar: null, charLength: null, text, score: 0.9 - i / 10 })),
+  };
+};
+
+const tree = (i = 0) => printSearchTree(engine.trees[i] as TreeNode);
 
 const subQuery = (overrides: Partial<Plan["subQueries"][number]>): Plan["subQueries"][number] => ({
   indices: ["person_employment"],
@@ -119,26 +172,55 @@ const subQuery = (overrides: Partial<Plan["subQueries"][number]>): Plan["subQuer
 
 beforeEach(() => {
   vi.clearAllMocks();
-  engine.describeMatches.mockImplementation(async (_l: unknown, _s: unknown, hits: ReturnType<typeof hit>[]) =>
+  engine.trees = [];
+  lists = {};
+  embedded.length = 0;
+  setEmbeddingProvider({
+    dimensions: 1,
+    modelId: "fake",
+    embed: async (text) => [embedded.push(text) - 1],
+    embedBatch: async () => [],
+  });
+  engine.describeMatches.mockImplementation(async (_l: unknown, _s: unknown, hits: EngineHit[]) =>
     new Map(hits.map((h) => [h.entityId, { index: h.matched.index.key, partKind: "relation", relationType: "works_for", relationId: "r", target: { id: "c", type: "company", label: "ACME" }, snippet: h.matched.entry.text, charOffset: null, charLength: null }])),
   );
 });
 
+afterEach(() => setEmbeddingProvider(null));
+
 describe("sub-query search", () => {
-  it("asks the engine with the retriever's relations, the threshold floor and one call per query text", async () => {
-    engine.rankThroughIndices.mockResolvedValue([hit("ada", "person_employment", "Employment Role: CTO Company: ACME")]);
+  it("searches each query text with the retriever's relations and the threshold floor, 30 entities each", async () => {
+    finds("person_employment", "CTO at ACME", ["ada", "Employment Role: CTO Company: ACME"]);
+    finds("person_employment", "chief technology officer ACME", ["ada", "Employment Role: CTO Company: ACME"]);
     const plan: Plan = { subQueries: [subQuery({ indices: ["person_employment", "person_home"], variants: ["chief technology officer ACME"] })], unsupportedReason: null };
     const retrieval = await retrieve(scope(), plan);
     expect(retrieval.searchCalls).toBe(2);
-    const request = engine.rankThroughIndices.mock.calls[0]![2];
-    expect(request).toMatchObject({ query: "CTO at ACME", mode: "hybrid", matching: "any", relations: null, limit: 30 });
-    expect(request.minScore).toBeCloseTo(0.675);
-    // Per index: the retriever's relation subset (works_for), all groups (null) for person_home.
-    expect(request.targets.map((t: { index: { key: string }; relations: unknown; entityIds: unknown }) => [t.index.key, t.relations, t.entityIds])).toEqual([
-      ["person_employment", ["works_for"], null],
-      ["person_home", null, null],
-    ]);
-    expect(engine.rankThroughIndices.mock.calls[1]![2].query).toBe("chief technology officer ACME");
+    // Per index: the retriever's relation subset (works_for), all groups for person_home.
+    expect(tree()).toBe(
+      [
+        "fuse",
+        "├─ cut(limit 30)",
+        "│  └─ fuse",
+        "│     ├─ group(entity)",
+        "│     │  └─ merge",
+        '│     │     ├─ semanticSearch(person_employment, "CTO at ACME", minSimilarity 0.675, relations ["works_for"], sub-query 0)',
+        '│     │     └─ semanticSearch(person_home, "CTO at ACME", minSimilarity 0.675, sub-query 0)',
+        "│     └─ group(entity)",
+        "│        └─ merge",
+        '│           ├─ keywordSearch(person_employment, "CTO at ACME", match any, relations ["works_for"], sub-query 0)',
+        '│           └─ keywordSearch(person_home, "CTO at ACME", match any, sub-query 0)',
+        "└─ cut(limit 30)",
+        "   └─ fuse",
+        "      ├─ group(entity)",
+        "      │  └─ merge",
+        '      │     ├─ semanticSearch(person_employment, "chief technology officer ACME", minSimilarity 0.675, relations ["works_for"], sub-query 0)',
+        '      │     └─ semanticSearch(person_home, "chief technology officer ACME", minSimilarity 0.675, sub-query 0)',
+        "      └─ group(entity)",
+        "         └─ merge",
+        '            ├─ keywordSearch(person_employment, "chief technology officer ACME", match any, relations ["works_for"], sub-query 0)',
+        '            └─ keywordSearch(person_home, "chief technology officer ACME", match any, sub-query 0)',
+      ].join("\n"),
+    );
     expect(retrieval.items).toEqual([
       {
         entityId: "ada",
@@ -152,22 +234,20 @@ describe("sub-query search", () => {
   });
 
   it("keyword mode passes no floor; the planner's relations narrow within the retriever's", async () => {
-    engine.rankThroughIndices.mockResolvedValue([]);
     await retrieve(scope(), { subQueries: [subQuery({ mode: "keyword", indices: ["person_home"], relations: ["lives_in"] })], unsupportedReason: null });
-    const request = engine.rankThroughIndices.mock.calls[0]![2];
-    expect(request.minScore).toBeNull();
-    expect(request.targets[0].relations).toEqual(["lives_in"]);
+    expect(tree()).toBe(
+      ["cut(limit 30)", "└─ group(entity)", '   └─ keywordSearch(person_home, "CTO at ACME", match any, relations ["lives_in"], sub-query 0)'].join("\n"),
+    );
   });
 
   it("a filter restricts the search to the entities it reaches, by normalized exact value", async () => {
-    engine.rankThroughIndices.mockResolvedValue([]);
     await retrieve(scope(), {
       subQueries: [subQuery({ filters: [{ id: "city", value: "berlin", quote: "Berlin" }] })],
       unsupportedReason: null,
     });
-    // "Berlin-Mitte" contains the value but does not equal it.
-    expect(engine.rankThroughIndices.mock.calls[0]![2].targets[0].entityIds.sort()).toEqual(["ada", "eve"]);
-    engine.rankThroughIndices.mockResolvedValue([hit("ada", "person_employment", "CTO at ACME")]);
+    // "Berlin-Mitte" contains the value but does not equal it; every search is restricted.
+    expect(rankEntries.mock.calls.map(([query]) => [...query.entityIds!].sort())).toEqual([["ada", "eve"], ["ada", "eve"]]);
+    finds("person_employment", "CTO at ACME", ["ada", "CTO at ACME"]);
     const plan: Plan = {
       subQueries: [subQuery({ filters: [{ id: "city", value: "Berlin", quote: "Berlin" }] })],
       unsupportedReason: null,
@@ -185,14 +265,24 @@ describe("sub-query search", () => {
 
   it("a filtered sub-query is not cut by the threshold and keeps the filtered entities the search did not rank", async () => {
     // "Who works at ACME and lives in Berlin?": one sub-query plus the city filter.
-    engine.rankThroughIndices.mockResolvedValue([hit("eve", "person_employment", "Employment ACME")]);
+    finds("person_employment", "works at ACME", ["eve", "Employment ACME"]);
     const retrieval = await retrieve(scope(), {
       subQueries: [subQuery({ query: "works at ACME", mode: "semantic", filters: [{ id: "city", value: "Berlin", quote: "lives in Berlin" }] })],
       unsupportedReason: null,
     });
-    const request = engine.rankThroughIndices.mock.calls[0]![2];
-    expect(request.minScore).toBeNull();
-    expect(request.targets[0].entityIds.sort()).toEqual(["ada", "eve"]);
+    // No floor; the restriction pushed into the search, the restricted entities appended.
+    expect(tree()).toBe(
+      [
+        "append(until 100, sub-query 0)",
+        "├─ restrict",
+        "│  ├─ cut(limit 30)",
+        "│  │  └─ group(entity)",
+        '│  │     └─ semanticSearch(person_employment, "works at ACME", relations ["works_for"], sub-query 0)',
+        '│  └─ filter(person, ids ["ada","eve"])',
+        '└─ filter(person, ids ["ada","eve"])',
+      ].join("\n"),
+    );
+    expect([...rankEntries.mock.calls[0]![0].entityIds!].sort()).toEqual(["ada", "eve"]);
     // Eve ranked by the search, Ada kept after her.
     expect(retrieval.items.map((item) => [item.entityId, item.matches[0]!.matched === null])).toEqual([
       ["eve", false],
@@ -206,7 +296,7 @@ describe("sub-query search", () => {
       unsupportedReason: null,
     };
     const retrieval = await retrieve(scope(), plan);
-    expect(engine.rankThroughIndices).not.toHaveBeenCalled();
+    expect(rankEntries).not.toHaveBeenCalled();
     expect(retrieval.searchCalls).toBe(0);
     // Each result carries the filter it satisfies, for the answer model.
     const fact = "lives in City Name: Berlin";
@@ -219,13 +309,13 @@ describe("sub-query search", () => {
   });
 
   it("fuses two sub-queries per entity: found by both ranks first and keeps both matches", async () => {
-    engine.rankThroughIndices
-      .mockResolvedValueOnce([hit("bob", "person_employment", "CTO at ACME"), hit("ada", "person_employment", "CTO at ACME")])
-      .mockResolvedValueOnce([hit("eve", "person_home", "Home Berlin"), hit("ada", "person_home", "Home Berlin")]);
+    finds("person_employment", "CTO at ACME", ["bob", "CTO at ACME"], ["ada", "CTO at ACME"]);
+    finds("person_home", "lives in Berlin", ["eve", "Home Berlin"], ["ada", "Home Berlin"]);
     const retrieval = await retrieve(scope(), {
       subQueries: [subQuery({}), subQuery({ indices: ["person_home"], query: "lives in Berlin" })],
       unsupportedReason: null,
     });
+    // Bob and Eve tie exactly (each first in one sub-query) and are equally similar: the earlier sub-query wins.
     expect(retrieval.items.map((item) => item.entityId)).toEqual(["ada", "bob", "eve"]);
     expect(retrieval.items[0]!.matches.map((m) => [m.subQuery, m.text])).toEqual([
       [0, "CTO at ACME"],
@@ -250,14 +340,62 @@ describe("sub-query search", () => {
     });
   });
 
-  it("notes indices that are not fully built and the planner's unsupported reason", async () => {
-    engine.rankThroughIndices.mockResolvedValue([]);
-    const building = { ...scope(), lens: { ...LENS, catalog: CATALOG.map((e) => (e.key === "person_employment" ? { ...e, status: "building" as const } : e)) } };
+  it("compiles the whole plan into one tree: variants fused, a filter and a previous reference pushed down and appended", async () => {
+    const plan: Plan = {
+      subQueries: [
+        subQuery({ variants: ["chief technology officer"], filters: [{ id: "city", value: "Berlin", quote: "Berlin" }] }),
+        subQuery({ indices: ["person_home"], query: "near the river", mode: "keyword", previous: { filterId: null, quote: "these" } }),
+      ],
+      unsupportedReason: null,
+    };
+    const previous = { complete: true, plan, results: [{ entityType: "person", ids: ["bob", "ada"] }] };
+    await retrieve(scope(), plan, previous);
+    expect(engine.trees).toHaveLength(1);
+    expect(tree()).toBe(
+      [
+        "fuse",
+        "├─ append(until 100, sub-query 0)",
+        "│  ├─ restrict",
+        "│  │  ├─ fuse",
+        "│  │  │  ├─ cut(limit 30)",
+        "│  │  │  │  └─ fuse",
+        "│  │  │  │     ├─ group(entity)",
+        '│  │  │  │     │  └─ semanticSearch(person_employment, "CTO at ACME", relations ["works_for"], sub-query 0)',
+        "│  │  │  │     └─ group(entity)",
+        '│  │  │  │        └─ keywordSearch(person_employment, "CTO at ACME", match any, relations ["works_for"], sub-query 0)',
+        "│  │  │  └─ cut(limit 30)",
+        "│  │  │     └─ fuse",
+        "│  │  │        ├─ group(entity)",
+        '│  │  │        │  └─ semanticSearch(person_employment, "chief technology officer", relations ["works_for"], sub-query 0)',
+        "│  │  │        └─ group(entity)",
+        '│  │  │           └─ keywordSearch(person_employment, "chief technology officer", match any, relations ["works_for"], sub-query 0)',
+        '│  │  └─ filter(person, ids ["ada","eve"])',
+        '│  └─ filter(person, ids ["ada","eve"])',
+        "└─ append(until 100, sub-query 1)",
+        "   ├─ restrict",
+        "   │  ├─ cut(limit 30)",
+        "   │  │  └─ group(entity)",
+        '   │  │     └─ keywordSearch(person_home, "near the river", match any, sub-query 1)',
+        '   │  └─ filter(person, ids ["ada","bob"])',
+        '   └─ filter(person, ids ["ada","bob"])',
+      ].join("\n"),
+    );
+  });
+
+  it("notes the indices a search node could not run on for want of a ready generation, and the planner's unsupported reason", async () => {
+    // person_employment's semantic generation is still building.
+    const generations = CATALOG.flatMap((entry) => [generation(entry.key, "semantic"), generation(entry.key, "keyword")]).map((g) =>
+      g.generationId === "person_employment/semantic" ? { ...g, state: "building" as const } : g,
+    );
+    const building = { ...scope(), indexStore: { ...indexStore, listGenerations: async () => generations } as SearchIndexStore };
     const retrieval = await retrieve(building, { subQueries: [subQuery({})], unsupportedReason: "No salaries." });
     expect(retrieval.limitations).toEqual([
       "No salaries.",
       "Search indices not fully built (person_employment); results may be incomplete.",
     ]);
+    // A catalog status other than ready, with every search node run: no note.
+    const statusOnly = { ...scope(), lens: { ...LENS, catalog: CATALOG.map((e) => (e.key === "person_employment" ? { ...e, status: "building" as const } : e)) } };
+    expect((await retrieve(statusOnly, { subQueries: [subQuery({})], unsupportedReason: null })).limitations).toEqual([]);
   });
 });
 
@@ -290,9 +428,8 @@ describe("filter values", () => {
 
 describe("retrieved results", () => {
   it("carry each entity's proven conditions, unioned over sub-queries, and the first sub-query's text match", async () => {
-    engine.rankThroughIndices
-      .mockResolvedValueOnce([hit("bob", "person_employment", "CTO at ACME"), hit("eve", "person_employment", "CTO at ACME")])
-      .mockResolvedValueOnce([hit("eve", "person_home", "Home Berlin")]);
+    finds("person_employment", "CTO at ACME", ["bob", "CTO at ACME"], ["eve", "CTO at ACME"]);
+    finds("person_home", "lives in Berlin", ["eve", "Home Berlin"]);
     const retrieval = await retrieve(scope(), {
       subQueries: [
         // Unfiltered and ranked.
@@ -325,12 +462,6 @@ describe("retrieved results", () => {
 });
 
 describe("fusion and context", () => {
-  it("fuses rankings by reciprocal rank; one ranking keeps its order", () => {
-    const a = [{ entityId: "x" }, { entityId: "y" }];
-    expect(fuseRankings([a])).toEqual(a);
-    expect(fuseRankings([[{ entityId: "x" }, { entityId: "y" }], [{ entityId: "z" }, { entityId: "y" }]]).map((r) => r.entityId)).toEqual(["y", "x", "z"]);
-  });
-
   it("keeps the answer context within its budget and counts what did not fit", () => {
     const items = Array.from({ length: 40 }, (_, i) => ({
       entityId: `e${i}`,
@@ -375,7 +506,7 @@ describe("fusion and context", () => {
   });
 
   it("gives the answer model display names and plain conditions: no entity ids, keys, filter ids or paths", async () => {
-    engine.rankThroughIndices.mockResolvedValue([hit("eve", "person_employment", "Employment Role: CTO Company: ACME")]);
+    finds("person_employment", "works at ACME", ["eve", "Employment Role: CTO Company: ACME"]);
     const plan: Plan = {
       subQueries: [
         subQuery({ relations: ["works_for"], query: "works at ACME", filters: [{ id: "city", value: "Berlin", quote: "lives in Berlin" }] }),

@@ -10,6 +10,7 @@ import {
   Settings2,
   Sparkles,
   SquareTerminal,
+  TextSearch,
   Waypoints,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
@@ -251,6 +252,12 @@ export function Sidebar({
         <NavItem to={base} end label="Home" icon={LayoutDashboard} collapsed={collapsed} />
         <NavItem to={`${base}/explore`} label="Explore" icon={Waypoints} collapsed={collapsed} />
         <NavItem to={`${base}/query`} label="Query" icon={SquareTerminal} collapsed={collapsed} />
+        <NavItem
+          to={`${base}/search`}
+          label="Advanced search"
+          icon={TextSearch}
+          collapsed={collapsed}
+        />
         {features?.ai !== false && (
           <NavItem to={`${base}/ai`} label="Assistants" icon={Sparkles} collapsed={collapsed} />
         )}

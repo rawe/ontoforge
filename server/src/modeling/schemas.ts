@@ -213,17 +213,43 @@ export const AgentConfigResponse = z.object({
 
 export const STEP_NAME_PATTERN = /^[a-zA-Z_]\w*$/;
 
+/** The request fields of the entity search a `search` step carries
+ * besides `query` and `limit`; their rules are the entity search's. */
+const SearchStepFields = {
+  types: z.array(z.string()).nullable().optional(),
+  indices: z.array(z.string()).nullable().optional(),
+  keyword: z.strictObject({ match: z.string().optional() }).nullable().optional(),
+  semantic: z.strictObject({ minSimilarity: z.number().optional() }).nullable().optional(),
+  filter: z.record(z.string(), z.string()).nullable().optional(),
+};
+
+/** The fields a step may carry. */
+const STEP_FIELDS = new Set(["name", "type", "oql", "query", ...Object.keys(SearchStepFields), "limit", "bindings"]);
+
+/** A search step refuses a field it does not define, each at its path: a
+ * dropped scope field would widen the search to the whole lens. Other
+ * steps' unknown fields are stripped on write. */
+function refuseUnknownSearchFields(step: { type: string }, ctx: z.RefinementCtx): void {
+  if (step.type !== "search") return;
+  for (const key of Object.keys(step).filter((field) => !STEP_FIELDS.has(field))) {
+    ctx.addIssue({ code: "custom", path: [key], message: `Unknown field of a search step: '${key}'` });
+  }
+}
+
 /** One saved-query step. `oql` steps carry the query text in `oql`;
- * `search` steps carry their search text in `query`. */
-export const StepSchema = z.object({
-  name: z.string().regex(STEP_NAME_PATTERN),
-  type: z.enum(["oql", "search"]),
-  oql: z.string().nullable().optional(),
-  entityTypeKey: z.string().nullable().optional(),
-  query: z.string().nullable().optional(),
-  limit: z.number().int().min(1).max(100).nullable().optional(),
-  bindings: z.record(z.string(), z.string()).nullable().optional(),
-});
+ * `search` steps carry the entity search's request fields, the search
+ * text in `query`. */
+export const StepSchema = z
+  .looseObject({
+    name: z.string().regex(STEP_NAME_PATTERN),
+    type: z.enum(["oql", "search"]),
+    oql: z.string().nullable().optional(),
+    query: z.string().nullable().optional(),
+    ...SearchStepFields,
+    limit: z.number().int().min(1).max(100).nullable().optional(),
+    bindings: z.record(z.string(), z.string()).nullable().optional(),
+  })
+  .superRefine(refuseUnknownSearchFields);
 
 export const SavedQueryParameterSchema = z.object({
   name: z.string().regex(STEP_NAME_PATTERN),
@@ -243,8 +269,12 @@ export const StepResponse = z.object({
   name: z.string(),
   type: z.string(),
   oql: z.string().nullable(),
-  entityTypeKey: z.string().nullable(),
   query: z.string().nullable(),
+  types: z.array(z.string()).nullable(),
+  indices: z.array(z.string()).nullable(),
+  keyword: z.object({ match: z.string().optional() }).nullable(),
+  semantic: z.object({ minSimilarity: z.number().optional() }).nullable(),
+  filter: z.record(z.string(), z.string()).nullable(),
   limit: z.number().nullable(),
   bindings: z.record(z.string(), z.string()).nullable(),
 });
@@ -271,7 +301,7 @@ export const SavedQueryResponse = z.object({
 /** Current transfer format version — what export writes and the only one
  * import reads; older versions reach it through the upgrade chain
  * (`modeling/transfer/upgrades.ts`). */
-export const TRANSFER_FORMAT_VERSION = "7.0";
+export const TRANSFER_FORMAT_VERSION = "8.0";
 
 /** What import accepts as the request shape: an object with an optional
  * version string. The rest belongs to the version — its upgrader, then
@@ -344,15 +374,17 @@ export const ExportSavedQueryParameter = z.object({
 /** Saved-query step in the transfer format — laxer than the definition-time
  * `StepSchema` (any name, any type, any limit): import re-checks each step
  * against the definition-time rules itself, collecting the failures. */
-export const ExportSavedQueryStep = z.object({
-  name: z.string(),
-  type: StepSchema.shape.type,
-  oql: z.string().nullable().optional(),
-  entityTypeKey: z.string().nullable().optional(),
-  query: z.string().nullable().optional(),
-  limit: z.number().int().nullable().optional(),
-  bindings: z.record(z.string(), z.string()).nullable().optional(),
-});
+export const ExportSavedQueryStep = z
+  .looseObject({
+    name: z.string(),
+    type: z.enum(["oql", "search"]),
+    oql: z.string().nullable().optional(),
+    query: z.string().nullable().optional(),
+    ...SearchStepFields,
+    limit: z.number().int().nullable().optional(),
+    bindings: z.record(z.string(), z.string()).nullable().optional(),
+  })
+  .superRefine(refuseUnknownSearchFields);
 
 export const ExportSavedQuery = z.object({
   key: z.string(),

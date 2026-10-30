@@ -47,8 +47,8 @@ When authentication is enabled, every request — these two included — also ca
   tests `__exists` and `__missing`, which take `true`/`false` and also accept a bare
   relation type as the key
 - `fields` is repeated, not comma-separated: `fields=name&fields=email`
-- Two query parameters are `snake_case` against the surrounding convention:
-  `min_score` on saved-query search and `min_similarity` on search
+- One query parameter is `snake_case` against the surrounding convention: `min_score` on
+  saved-query search
 
 ## Listing, Sorting, Filtering
 
@@ -264,41 +264,57 @@ carry `_id` and `_entityTypeKey` (and `_identity` where they have one); relation
 
 ## Search
 
-`GET /search` ranks entities for plain query text `q` (required). Optional parameters:
-`type` (omit to search across the lens), repeatable `in=properties` / `in=document`
-(default both), `strategy=semantic|keyword|keyword-any|keyword-all|hybrid` (default best
-available), `min_similarity` (0–1 on the `semanticSimilarity` scale; drops semantic
-candidates below it, never keyword hits; rejected under any keyword strategy, explicit or
-default),
-`document.property` (one document property, only valid when documents are searched),
-`limit` (1–100, default 10), `fields`, and `filter.<key>`.
+Two routes rank for one plain query text through a scope of **search indices**:
+`POST /search/entities` ranks entities, `POST /search/passages` passages of documents.
+Both return the order only, never a score.
 
-Filters narrow cross-type search to declaring types; conflicting data types and unknown
-keys are collected validation faults. Substring operators are rejected. Query paths work
-where the adapter declares support; otherwise use the entity list.
+- `POST /search/entities`
+  Ranks entities. JSON body:
+  ```json
+  { "query": "CTO at ACME", "types": ["person"], "keyword": {"match": "any"},
+    "semantic": {"minSimilarity": 0.6}, "filter": {"works_for.name": "ACME"}, "limit": 10 }
+  ```
+  Only `query` is required. Scope: `types` (entity type keys) or `indices` (index keys,
+  custom ones included), not both; neither reads every type the lens shows through its
+  managed indices. Methods: one block per method — `keyword: {match}`, `any` (default; a
+  hit carries at least one query word) or `all` (every query word), and
+  `semantic: {minSimilarity}`, 0–1 on the `(1 + cosine) / 2` scale, which drops semantic
+  candidates below it. The blocks sent choose the methods, and two are fused; with
+  neither, both run, or keyword alone without an embedding provider. `filter` takes the
+  `filter.*` keys of the entity list without the prefix, query paths included, values as
+  strings; a type that does not declare every key, or that a query path does not resolve
+  from, drops out. Substring operators are rejected. `limit` counts entities, 1–100,
+  default 10.
 
-Keyword matching: `keyword` and `hybrid` use the default keyword matching, today any-term
-(a hit carries at least one query word). `keyword-any` always matches any-term;
-`keyword-all` requires every query word and returns no hits when no entity carries them
-all. Each query word also matches as a prefix under every keyword strategy.
+  The response is `{ran, items, limitations}`; `ran` lists the methods that ran. Each
+  item has `rank` (from 1), `entity` — `{_id, _entityTypeKey, name}`, plus `identity`
+  (the identity properties and their values) for a type with an identity the lens
+  shows — and `match`, the best entry that found it: `{index, part, snippet}`, `part`
+  being `self`, `relation` or `passage`. A passage adds `property` (null when the lens
+  hides the document), `charOffset` and `charLength`; a relation adds `relationType` and
+  `target` (`{_id, _entityTypeKey, name}`). `snippet` is null when the index reads a
+  property the lens hides. Items carry no other properties: read the entity for them.
 
-The envelope is `{query, type, in, strategy, minSimilarity, filter, hits}`; `minSimilarity`
-echoes the applied floor, null when none was set. Each hit carries `entity`,
-`relativeScore`, `matches` and `matched`. An entity match is `{kind: "properties"}`; each
-matching document property contributes `{kind: "document", propertyKey, charOffset,
-charLength}`. The entity match comes first. Every match carries `evidence`
-(`semanticSimilarity`, `keywordMatch`, `keywordScore`, each nullable — null is not false).
-Use document coordinates as `offset` and `limit` on a read. The best relative score is
-1.0; all scores are comparable only within this response, never confidence or absolute
-similarity.
+- `POST /search/passages`
+  Ranks passages. The body of `POST /search/entities`, with `documents` (`type.property`)
+  as a third scope field — `types`, `documents` or `indices`, one at a time — plus
+  `perEntity` (1 to the limit; at most that many passages per entity, no cap when
+  omitted) and `text` (default true; false leaves the passage text out). `limit` counts
+  passages. Each item has `rank`, `entity` as above and `passage`
+  `{property, ordinal, charOffset, charLength, text}`. Use the coordinates as `offset` and
+  `limit` on a document read.
 
-`matched` names the entity's best entry: `index` (the search index key), `partKind`
-(`self` for own fields, `relation`, `passage`), `relationType` and `relationId` (relation
-entries only), `target` (`{id, type, label}` of the entity at the relation's other end),
-`snippet` (the entry's first ≤ 200 characters; empty when the index reads a property the
-lens hides) and `charOffset`/`charLength` (passages only).
+What could not run is a limitation, not an error: each has `code` (`not-searchable`,
+`switched-off`, `not-ready`, `filter-excludes-all-types`), `message` and, where they
+apply, `method`, `indices`, `types` and, on passages, `documents`. Every broken rule is
+collected under `details.fields` at the request's own path — `query`, `types.<i>`,
+`indices.<i>`, `documents.<i>`, `keyword.match`, `semantic.minSimilarity`,
+`filter.<key>`, `limit`, `perEntity`; a body of the wrong shape, or with a field not
+listed here, is rejected with `details.errors`. A `semantic` block without an embedding
+provider answers `FEATURE_DISABLED`.
 
-The relative-score promise: under `semantic` or a keyword strategy alone the shape is real, a ratio of similarities or of engine scores; under `hybrid`, or with two kinds fused, it is rank-made: a hit found by both rankings sits clearly above one found by one, then the numbers trail smoothly whatever the closeness. It shows where the ranking degrades and how steeply, never whether the best hit is good.
+Under keyword ranking each query word also matches as a prefix; matches across languages
+come from semantic ranking.
 
 ### Search indices
 
@@ -308,42 +324,19 @@ Ranked search reads **search indices**: per entity type a managed default index
 entry per relation instance (e.g. a person's role at one company) so an entity can match
 through its relations. Entries are built in the background after each write: a new entity
 is searchable once its entries are built. Keyword search stems in the ontology's keyword
-languages (English, German or both); no request names a language. `GET /search` searches
-only the default and passage indices of the requested types; `POST /search` searches any
-indices by key.
+languages (English, German or both); no request names a language. Without `indices`, both
+search routes read the managed indices of the requested types; with it, any indices the
+lens can search, by key.
 
 - `GET /search-indices`
   The lens's search catalog, in key order: per index `key`, `kind` (`default`, `passage`,
   `custom`), `name`, `description`, `entityType`, `fields`, `relations` (each
   `{relationType, direction, label}`), `documentProperty`, `modes` and `status`.
 
-- `POST /search`
-  Ranks entities through chosen indices. JSON body:
-  ```json
-  { "query": "CTO at ACME", "indices": ["person_employment"], "mode": "hybrid",
-    "relations": ["works_for"], "filters": {"works_for.name": "ACME"},
-    "minScore": 0.6, "limit": 10, "fields": ["name"] }
-  ```
-  Only `query` is required. `indices` defaults to every index the lens can search;
-  `mode` is `semantic`, `keyword` or `hybrid` (default hybrid with an embedding provider,
-  else keyword); `relations` restricts relation entries to those types (`[]` = none;
-  own-field and passage entries always count); `filters` takes the `filter.*` keys of
-  `GET /search` without the prefix, values as strings; `minScore` (0–1, semantic only;
-  rejected under `keyword`); `limit` 1–100, default 10. The response is
-  `{query, mode, hits}`, each hit `entity`, `relativeScore` and `matched` — no `matches`.
-  An unknown index key answers 404; an index the lens cannot search is a 422 at
-  `indices.<i>`.
-
-MCP `search` runs both kinds, `search_documents` runs only documents and accepts optional
-`property`. Both accept `query`, optional `entity_type_key`, `limit`, `filters`, `fields`;
-neither takes a strategy or `min_similarity` — both apply a fixed floor of 0.75 whenever
-the default strategy ranks semantically (echoed as `minSimilarity`, null under a keyword
-default). They return the same envelope. MCP `search_by_index` runs the index search of
-`POST /search`: `query`, `index` (one key or a list; absent for every index of the lens),
-`relations`, `limit`, `filters`, `fields`, under the default mode and the same fixed floor;
-it answers `{query, mode, minSimilarity, hits}`. `list_search_indices` returns the catalog. The keyword strategies need
-adapter support; semantic needs embeddings; hybrid needs both. Defaults prefer hybrid,
-keyword, semantic.
+MCP has search tools of its own — `search` runs the entity search, `search_documents` the
+passage search, `list_search_indices` lists the catalog — with snake_case arguments and the
+routes' responses; they take no method blocks: they run what can run, semantic under a
+fixed similarity floor of 0.75.
 
 ## Read-Only OQL Query
 
@@ -522,7 +515,7 @@ Both describe the deployment, not any ontology — they take no ontology and no 
   when none is configured), `version` (the server's release version)
 
 - `GET /api/server/features`
-  Response fields: `semanticSearch`, `searchStrategies`, `ai`, `decisions`
+  Response fields: `semanticSearch`, `rankedSearch`, `ai`, `decisions`
 
 Semantic search and the AI routes depend on external providers and are unavailable unless
 one is configured. Call this **before** offering either, rather than relying on the
@@ -550,9 +543,9 @@ There are exactly six codes:
 `details.code` narrows, it does not replace: where it appears, the top-level code stays
 one of the six.
 
-The one narrowing that matters on this surface is `FEATURE_DISABLED`. A request for an
-unavailable search strategy, search without any available strategy, or saved-query
-discovery, AI or entity identity comparison without the required provider
+The one narrowing that matters on this surface is `FEATURE_DISABLED`. A search with a
+`semantic` block, saved-query discovery, AI or entity identity comparison without the
+required provider
 answers `422 VALIDATION_ERROR` with `details: {"code": "FEATURE_DISABLED"}`, which is what
 separates it from an ordinary rejected request on the same route:
 

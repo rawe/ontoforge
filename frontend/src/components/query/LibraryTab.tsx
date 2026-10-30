@@ -12,7 +12,9 @@ import {
 import { toast } from 'sonner'
 import { useFeatures, useLenses } from '@/api/hooks'
 import * as runtime from '@/api/runtime'
-import type { JsonValue, QueryResult, SchemaRelationType } from '@/api/types'
+import type { EntitySearchResponse, JsonValue, QueryResult, RuntimeSchema } from '@/api/types'
+import { isEntitySearchResponse } from '@/components/advancedsearch/searchModel'
+import { EntitySearchResult } from '@/components/advancedsearch/SearchResults'
 import { EmptyState } from '@/components/EmptyState'
 import {
   useDebouncedValue,
@@ -36,19 +38,21 @@ function RunPanel({
   ontologyKey,
   lensKey,
   query,
-  relationTypes,
+  schema,
   autoRun,
 }: {
   ontologyKey: string
   lensKey: string
   /** Full query or step-less search hit — running only needs key + parameters. */
   query: SavedQueryHit
-  relationTypes: readonly SchemaRelationType[]
+  schema: RuntimeSchema
   /** Fire the run immediately on mount (palette `?run=` hand-off). */
   autoRun: boolean
 }) {
   const [raw, setRaw] = useState<Record<string, string>>({})
-  const [run, setRun] = useState<{ result: QueryResult; ms: number } | null>(null)
+  const [run, setRun] = useState<{ result: QueryResult | EntitySearchResponse; ms: number } | null>(
+    null,
+  )
   const [error, setError] = useState<string | null>(null)
 
   const buildParams = () => {
@@ -139,13 +143,22 @@ function RunPanel({
 
       {error !== null && <QueryErrorBlock message={error} />}
 
-      {run !== null && (
+      {/* A pipeline ending in a search step answers with the entity search's items. */}
+      {run !== null && isEntitySearchResponse(run.result) && (
+        <EntitySearchResult
+          ontologyKey={ontologyKey}
+          lensKey={lensKey}
+          schema={schema}
+          response={run.result}
+        />
+      )}
+      {run !== null && !isEntitySearchResponse(run.result) && (
         <ResultsPanel
           ontologyKey={ontologyKey}
           lensKey={lensKey}
           result={run.result}
           elapsedMs={run.ms}
-          relationTypes={relationTypes}
+          relationTypes={schema.relationTypes}
           csvName={`${lensKey}-${query.key}`}
         />
       )}
@@ -170,7 +183,7 @@ function stepBadges(query: SavedQueryHit) {
 interface LibraryTabProps {
   ontologyKey: string
   lensKey: string
-  relationTypes: readonly SchemaRelationType[]
+  schema: RuntimeSchema
   /** `?run=` — open (and, when parameterless, immediately run) this query. */
   runKey: string | null
   /** Switch the page to the Console tab (zero-state CTA). */
@@ -185,7 +198,7 @@ interface LibraryTabProps {
 export function LibraryTab({
   ontologyKey,
   lensKey,
-  relationTypes,
+  schema,
   runKey,
   onOpenConsole,
 }: LibraryTabProps) {
@@ -326,7 +339,7 @@ export function LibraryTab({
                   ontologyKey={ontologyKey}
                   lensKey={lensKey}
                   query={q}
-                  relationTypes={relationTypes}
+                  schema={schema}
                   autoRun={runKey === q.key && q.parameters.length === 0}
                 />
               )}

@@ -445,11 +445,11 @@ describe("runtime run (no provider)", () => {
   });
 
   it("a pipeline containing a search step uses keyword without a provider", async () => {
-    await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/needs-embeddings", {
+    const defined = await inject("PUT", "/api/ontologies/test_ont/model/lenses/test_lens/saved-queries/needs-embeddings", {
       name: "Needs embeddings",
       description: "search feeding a query",
       steps: [
-        { name: "hits", type: "search", entityTypeKey: "person", query: "$who" },
+        { name: "hits", type: "search", types: ["person"], query: "$who" },
         {
           name: "detail",
           type: "oql",
@@ -459,6 +459,7 @@ describe("runtime run (no provider)", () => {
       ],
       parameters: [{ name: "who", description: "Who to look for", dataType: "string" }],
     });
+    expect(defined.statusCode, JSON.stringify(defined.body)).toBe(201);
 
     const run = await inject(
       "POST",
@@ -580,6 +581,17 @@ describe("modeling MCP tools", () => {
       expect(text(refused)).toContain("'a' already used by steps[0]");
       expect(text(refused)).toContain("not declared: ['age']");
       expect(text(refused)).toContain("not referenced in any step: ['unused']");
+
+      // A search step's unknown field is refused at its path, never dropped.
+      const stray = await call(client, "set_saved_query", {
+        lens_key: "test_lens",
+        key: "mcp-stray",
+        name: "Stray",
+        description: "an old field",
+        steps: [{ name: "found", type: "search", query: "x", entityTypeKey: "person" }],
+      });
+      expect(stray.isError).toBe(true);
+      expect(text(stray)).toContain("steps.0.entityTypeKey: Unknown field of a search step: 'entityTypeKey'");
 
       const deleted = await call(client, "delete_saved_query", {
         lens_key: "test_lens",

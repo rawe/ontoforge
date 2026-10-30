@@ -8,10 +8,10 @@ import { useEffect, useState } from 'react'
 import * as runtime from '@/api/runtime'
 import type {
   EntityInstance,
-  Matched,
+  EntityMatch,
+  EntityReference,
   SavedQuery,
   SavedQuerySearchHit,
-  SearchMatch,
 } from '@/api/types'
 
 export function useDebouncedValue<T>(value: T, delayMs: number): T {
@@ -23,12 +23,14 @@ export function useDebouncedValue<T>(value: T, delayMs: number): T {
   return debounced
 }
 
-export interface EntitySearchResult {
-  entity: EntityInstance
-  matches?: SearchMatch[]
-  /** Which index entry found the hit (ranked search). */
-  matched?: Matched
-}
+/**
+ * One entity search row: a whole entity (an empty query, a literal match),
+ * or a ranked hit — the entity as the search names it, with the best entry
+ * that found it. Narrow with `'match' in result`.
+ */
+export type EntitySearchResult =
+  | { entity: EntityInstance }
+  | { entity: EntityReference; match: EntityMatch }
 
 export interface EntitySearchOptions {
   ontologyKey: string
@@ -46,7 +48,7 @@ export interface EntitySearchOptions {
 }
 
 /**
- * Entity search. Ranked (cross-type or `type=`-scoped) when available and
+ * Entity search. Ranked (cross-type or scoped to one type) when available and
  * the query has ≥2 chars; substring `q` queries otherwise (parallel per-type
  * when unscoped). An empty query with a typeKey lists the first entities of
  * that type; an empty unscoped query returns nothing.
@@ -81,16 +83,13 @@ export function useEntitySearch({
         return res.items.map((entity) => ({ entity }))
       }
       if (ranked && q.length >= 2) {
-        const res = await runtime.search(ontologyKey, lensKey, {
-          q,
-          ...(typeKey !== undefined ? { type: typeKey } : {}),
+        // No method block: the server runs what can run.
+        const res = await runtime.searchEntities(ontologyKey, lensKey, {
+          query: q,
+          ...(typeKey !== undefined ? { types: [typeKey] } : {}),
           limit,
         })
-        return res.hits.map(({ entity, matches, matched }) => ({
-          entity: { ...entity, _entityTypeKey: entity._entityTypeKey ?? typeKey! },
-          matches,
-          matched,
-        }))
+        return res.items.map(({ entity, match }) => ({ entity, match }))
       }
       if (typeKey !== undefined) {
         const res = await runtime.listEntities(ontologyKey, lensKey, typeKey, { q, limit })

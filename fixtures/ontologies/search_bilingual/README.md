@@ -67,19 +67,22 @@ Fischer's bio and CV); "studies" (Globex Research, Grace Turner) and "study" (Ka
 
 ## Test queries
 
-`POST /api/ontologies/fx_search_bilingual/runtime/lenses/<lens>/search`, observed with
-bge-m3; ties and lower ranks may shift with another model.
+`POST /api/ontologies/fx_search_bilingual/runtime/lenses/<lens>/search/entities`, observed
+with bge-m3; ties and lower ranks may shift with another model. A body without `types` or
+`indices` reads only the managed indices, so the rows below that search every index name
+them all: *every index* stands for
+`"indices":["city~default","company~default","person_employment","person_residence","person~cv","person~default"]`.
 
 | Lens | Body | Expected top hit(s) |
 |---|---|---|
-| `all` | `{"query":"CTO ACME"}` | Ada Lovelace first, matched via `person_employment` → relation `works_for` → ACME ("Role: CTO … Company: ACME"); Ines Wagner (CFO at ACME) next; Bob Martin, CTO elsewhere, only lower through his Software Engineer entry at ACME |
-| `all` | `{"query":"CTO Foo"}` | Bob Martin first, via Employment → Foo Labs (the company Foo Labs ties); Ada Lovelace below him via her Advisor entry at Foo Labs, never via her CTO entry |
+| `all` | `{"query":"CTO ACME",` *every index*`}` | Ada Lovelace first, matched via `person_employment` → relation `works_for` → ACME ("Role: CTO … Company: ACME"); Ines Wagner (CFO at ACME) next; Bob Martin, CTO elsewhere, only lower through his Software Engineer entry at ACME |
+| `all` | `{"query":"CTO Foo",` *every index*`}` | Bob Martin first, via Employment → Foo Labs (the company Foo Labs ties); Ada Lovelace below him via her Advisor entry at Foo Labs, never via her CTO entry |
 | `all` | `{"query":"Advisor at Foo Labs","indices":["person_employment"]}` | Ada Lovelace, via Employment → Foo Labs |
-| `all` | `{"query":"Häuser","mode":"keyword"}` | Jonas Fischer (CV: "Haus", "Hauses"), Dieter Müller and Müller GmbH ("Häuser") — German stemming pairs the forms |
-| `all` | `{"query":"shopping studies","mode":"keyword"}` | Grace Turner ("studies"), Karen Lee ("study") |
-| `all` | `{"query":"who builds houses in Bavaria","mode":"semantic"}` | Müller GmbH and Dieter Müller — English query, German text |
-| `all` | `{"query":"offshore wind farm engineer","mode":"semantic"}` | Hans Becker's CV passage ("Offshore-Windparks", German) |
-| `no_company` | `{"query":"CTO ACME","indices":["person_employment"],"mode":"keyword"}` | no `works_for` entry ever matches; only own-field entries mentioning ACME in the bio (Ines Wagner, Bob Martin); Ada Lovelace does not appear (in `hybrid` she ranks low through her own-field entry, never through an employment) |
+| `all` | `{"query":"Häuser","keyword":{},` *every index*`}` | Jonas Fischer (CV: "Haus", "Hauses"), Dieter Müller and Müller GmbH ("Häuser") — German stemming pairs the forms |
+| `all` | `{"query":"shopping studies","keyword":{},` *every index*`}` | Grace Turner ("studies"), Karen Lee ("study") |
+| `all` | `{"query":"who builds houses in Bavaria","semantic":{},` *every index*`}` | Müller GmbH and Dieter Müller — English query, German text |
+| `all` | `{"query":"offshore wind farm engineer","semantic":{},` *every index*`}` | Hans Becker's CV passage ("Offshore-Windparks", German) |
+| `no_company` | `{"query":"CTO ACME","indices":["person_employment"],"keyword":{}}` | no `works_for` entry ever matches; only own-field entries mentioning ACME in the bio (Ines Wagner, Bob Martin); Ada Lovelace does not appear (with both methods she ranks low through her own-field entry, never through an employment) |
 | `no_company` | `{"query":"lives in Germany","indices":["person_residence"]}` | people living in Berlin, Hamburg or München, via Residence entries |
 | `no_company` | `{"query":"x","indices":["company~default"]}` | 422 at `indices.0`: not searchable in this lens |
 

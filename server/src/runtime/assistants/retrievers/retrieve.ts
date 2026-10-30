@@ -1,18 +1,20 @@
 /**
- * Retrieval of a retriever's plan: each sub-query searches its
- * indices through the search engine (`runtime/search/indexSearch.ts`) —
- * in process, never over HTTP — and the sub-queries' rankings are fused
- * per entity by reciprocal rank (k = 60). An entity found by several
- * sub-queries keeps what matched in each; that, with its answer fields,
- * is the evidence the answer model gets.
+ * Retrieval of a retriever's plan: the plan compiles into one search tree
+ * (`compilePlannedSearch`), run in process by the search engine
+ * (`runtime/search/indexSearch.ts`) — never over HTTP. Per sub-query each
+ * query text and variant searches its indices, the texts fused by
+ * reciprocal rank (k = 60); the sub-queries' rankings are fused again. An
+ * entity found by several sub-queries keeps what matched in each; that,
+ * with its answer fields, is the evidence the answer model gets.
  *
  * Filters and previous-result references restrict a sub-query to entity
  * ids, resolved here from the instance data: the entities on the far end
  * of the filter's path whose field equals the value (normalized compare,
- * as `sameValue`), walked back to the result type. A sub-query without a
- * query lists the restricted entities instead of searching. Semantic
- * matches below the retriever's threshold never count (A5: the cosine
- * threshold `t` is the search's `(1 + t) / 2` floor).
+ * as `sameValue`), walked back to the result type. The tree pushes them
+ * into its searches and lists the restricted entities the searches did not
+ * rank; a sub-query without a query only lists them. Semantic matches
+ * below the retriever's threshold never count (A5: the cosine threshold
+ * `t` is the search's `(1 + t) / 2` floor).
  */
 
 import type { Row, RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../../../core/ports.js";
@@ -22,18 +24,22 @@ import {
   type RetrieverFilter,
   type FilterHop,
 } from "../../../core/retriever.js";
-import { readsHiddenProperties, RRF_K } from "../../../core/searchQuery.js";
+import { compilePlannedSearch } from "../../../core/searchCompile.js";
+import { readsHiddenProperties } from "../../../core/searchQuery.js";
+import type { KeywordBlock, MethodBlocks, SemanticBlock, TreeNode } from "../../../core/searchTree.js";
 import { entityCard, EntityRefs, type EntityCard } from "../entities.js";
 import { filterEntityProperties } from "../../readHelpers.js";
 import type { LoadedSchema } from "../../schemaCache.js";
-import { describeMatches, rankThroughIndices, type EngineHit, type Matched } from "../../search/indexSearch.js";
+import type { Limitation, TreeHit } from "../../search/executor.js";
+import { describeMatches, runSearchTree, type Matched } from "../../search/indexSearch.js";
 import { filterCondition, relationName, type RetrieverLens } from "./config.js";
 import { MAX_LISTED_VALUES, sameValue, type FilterValues, type Plan, type Previous, type SubQuery } from "./plan.js";
 
-/** Entities one search of a sub-query ranks. */
+/** Entities each query text of a sub-query ranks. */
 export const SUB_QUERY_LIMIT = 30;
 
-/** Most entities a query-less sub-query lists. */
+/** Most entities a restricted sub-query lists: the restricted entities its
+ * search did not rank follow while it holds fewer. */
 export const LIST_LIMIT = 100;
 
 /** Most entities one filter (or reference) step keeps. */
@@ -98,13 +104,6 @@ export interface Retrieval {
   searchMs: number;
   /** Display names of answer fields cut to the configured characters. */
   cutFields: string[];
-}
-
-/** One sub-query's ranking before the entities are read. */
-interface Ranked {
-  entityId: string;
-  entityType: string;
-  hit: EngineHit | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -269,27 +268,8 @@ async function restrictionsOf(
 }
 
 // ---------------------------------------------------------------------------
-// Sub-queries and fusion
+// The plan as one search tree
 // ---------------------------------------------------------------------------
-
-/** Reciprocal-rank fusion of entity rankings (k = 60); one ranking keeps
- * its order. Each entity keeps its first appearance's payload. */
-export function fuseRankings<T extends { entityId: string }>(rankings: readonly (readonly T[])[]): T[] {
-  if (rankings.length === 1) return [...rankings[0]!];
-  const fused = new Map<string, { item: T; score: number; first: number }>();
-  let order = 0;
-  rankings.forEach((ranking) =>
-    ranking.forEach((item, i) => {
-      const contribution = 1 / (RRF_K + i + 1);
-      const prior = fused.get(item.entityId);
-      if (prior === undefined) fused.set(item.entityId, { item, score: contribution, first: order++ });
-      else prior.score += contribution;
-    }),
-  );
-  return [...fused.values()]
-    .sort((a, b) => b.score - a.score || a.first - b.first)
-    .map((entry) => entry.item);
-}
 
 /** The relation types whose entries of an index count for a sub-query:
  * the planner's choice within the retriever's, else the retriever's (null: all). */
@@ -299,65 +279,39 @@ function relationsFor(config: RetrieverConfig, index: string, sub: SubQuery): st
   return allowed === null ? sub.relations : sub.relations.filter((relation) => allowed.includes(relation));
 }
 
+/** The method blocks of a sub-query's mode. The retriever's threshold
+ * floors the semantic search only without restrictions: restricted
+ * candidates are exact, the search only orders them. */
+function methodsOf(config: RetrieverConfig, sub: SubQuery, restricted: boolean): MethodBlocks {
+  const keyword: KeywordBlock = { match: "any" };
+  const semantic: SemanticBlock = restricted ? {} : { minSimilarity: similarityFloor(config.threshold) };
+  if (sub.mode === "hybrid") return { semantic, keyword };
+  return sub.mode === "semantic" ? { semantic } : { keyword };
+}
+
 /**
- * One sub-query's ranking. Without restrictions: the search, cut by the
- * retriever's similarity threshold. With restrictions (filters, previous
- * results) the candidates are exact: the search only orders them — no
- * threshold — and the restricted entities it did not rank follow, so none
- * is lost to a query that does not describe it. Without a query the
- * restricted entities are listed.
+ * The plan's tree: per sub-query its query and variants over its indices,
+ * each ranking `SUB_QUERY_LIMIT` entities. With restrictions (filters,
+ * previous results) the candidates are exact: the search only orders them
+ * and the restricted entities it did not rank follow, up to `LIST_LIMIT`,
+ * so none is lost to a query that does not describe it. Null when no
+ * sub-query searches or lists anything.
  */
-async function runSubQuery(
-  scope: RetrievalScope,
-  sub: SubQuery,
-  previous: Previous | undefined,
-  retrieval: Retrieval,
-): Promise<Ranked[]> {
-  const records = sub.indices.map((key) => scope.records.find((record) => record.key === key)!);
-  const roots = [...new Set(records.map((record) => record.definition.entityType))];
-  const restrictions = await restrictionsOf(scope, sub, roots, previous, retrieval.limitations);
-  const rankings: Ranked[][] = [];
-  for (const text of sub.query === "" ? [] : [sub.query, ...sub.variants]) {
-    scope.signal.throwIfAborted();
-    const started = performance.now();
-    const hits = await rankThroughIndices(scope.loaded, scope.indexStore, {
-      targets: records.map((index) => ({
-        index,
-        conditions: [],
-        relations: relationsFor(scope.config, index.key, sub),
-        entityIds: (() => {
-          const ids = restrictions.get(index.definition.entityType);
-          return ids === undefined ? null : [...ids];
-        })(),
+function planTree(scope: RetrievalScope, plan: Plan, restrictions: Map<string, Set<string>>[]): TreeNode | null {
+  return compilePlannedSearch({
+    subQueries: plan.subQueries.map((sub, i) => ({
+      texts: sub.query === "" ? [] : [sub.query, ...sub.variants],
+      targets: sub.indices.map((key) => ({
+        index: key,
+        entityType: scope.records.find((record) => record.key === key)!.definition.entityType,
+        relations: relationsFor(scope.config, key, sub),
       })),
-      query: text,
-      mode: sub.mode,
-      matching: "any",
-      relations: null,
-      minScore:
-        sub.mode === "keyword" || restrictions.size > 0 ? null : similarityFloor(scope.config.threshold),
-      limit: SUB_QUERY_LIMIT,
-    });
-    retrieval.searchCalls += 1;
-    retrieval.searchMs += performance.now() - started;
-    rankings.push(hits.map((hit) => ({ entityId: hit.entityId, entityType: hit.entityType, hit })));
-  }
-  const ranked = rankings.length === 0 ? [] : fuseRankings(rankings);
-  const found = new Set(ranked.map((item) => item.entityId));
-  const rest: Ranked[] = [];
-  for (const [entityType, ids] of restrictions) {
-    for (const entityId of [...ids].sort()) {
-      if (!found.has(entityId)) rest.push({ entityId, entityType, hit: null });
-    }
-  }
-  const room = Math.max(0, LIST_LIMIT - ranked.length);
-  if (rest.length > room) {
-    retrieval.limitations.push(
-      `${ranked.length + rest.length} entities match the exact constraints; only ` +
-        `${ranked.length + room} were listed. The list is incomplete.`,
-    );
-  }
-  return [...ranked, ...rest.slice(0, room)];
+      methods: methodsOf(scope.config, sub, restrictions[i]!.size > 0),
+      restrictions: [...restrictions[i]!].map(([entityType, ids]) => ({ entityType, ids: [...ids] })),
+    })),
+    textLimit: SUB_QUERY_LIMIT,
+    listLimit: LIST_LIMIT,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -372,7 +326,7 @@ function cut(value: unknown, characters: number): { value: unknown; cut: boolean
 }
 
 /** The entities of the fused ranking, projected through the lens, by id. */
-async function readEntities(scope: RetrievalScope, ranked: readonly Ranked[]): Promise<Map<string, Row>> {
+async function readEntities(scope: RetrievalScope, ranked: readonly TreeHit[]): Promise<Map<string, Row>> {
   const byType = new Map<string, string[]>();
   for (const item of ranked) byType.set(item.entityType, [...(byType.get(item.entityType) ?? []), item.entityId]);
   const entities = new Map<string, Row>();
@@ -397,12 +351,54 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
     searchMs: 0,
     cutFields: [],
   };
-  const perSubQuery: Ranked[][] = [];
-  for (const sub of plan.subQueries) perSubQuery.push(await runSubQuery(scope, sub, previous, retrieval));
+  // Per sub-query, its restrictions and what resolving them noted.
+  const resolved: { restrictions: Map<string, Set<string>>; limitations: string[] }[] = [];
+  for (const sub of plan.subQueries) {
+    const records = sub.indices.map((key) => scope.records.find((record) => record.key === key)!);
+    const roots = [...new Set(records.map((record) => record.definition.entityType))];
+    const limitations: string[] = [];
+    resolved.push({ restrictions: await restrictionsOf(scope, sub, roots, previous, limitations), limitations });
+  }
+  const tree = planTree(scope, plan, resolved.map((sub) => sub.restrictions));
+  let hits: TreeHit[] = [];
+  let unrun: Limitation[] = [];
+  if (tree !== null) {
+    scope.signal.throwIfAborted();
+    const started = performance.now();
+    ({ hits, limitations: unrun } = await runSearchTree(scope.loaded, scope.indexStore, scope.records, tree));
+    retrieval.searchMs = performance.now() - started;
+  }
+  retrieval.searchCalls = plan.subQueries.reduce(
+    (calls, sub) => calls + (sub.query === "" ? 0 : 1 + sub.variants.length),
+    0,
+  );
+  // Per sub-query, what resolving its restrictions noted, then whether its
+  // list left restricted entities out — every entity it ranked is in the
+  // fused ranking, which is not cut.
+  for (const [subQuery, { restrictions, limitations }] of resolved.entries()) {
+    retrieval.limitations.push(...limitations);
+    const ranked = new Set(
+      hits
+        .filter((hit) => hit.provenance.some((row) => row.subQuery === subQuery && row.hit !== null))
+        .map((hit) => hit.entityId),
+    );
+    let missed = 0;
+    for (const ids of restrictions.values()) for (const id of ids) if (!ranked.has(id)) missed += 1;
+    const room = Math.max(0, LIST_LIMIT - ranked.size);
+    if (missed > room) {
+      retrieval.limitations.push(
+        `${ranked.size + missed} entities match the exact constraints; only ` +
+          `${ranked.size + room} were listed. The list is incomplete.`,
+      );
+    }
+  }
 
+  // The indices a search node could not run on for want of a ready
+  // generation.
+  const unbuilt = new Set(unrun.flatMap((limitation) => (limitation.code === "not-ready" ? limitation.indices : [])));
   const building = [...new Set(plan.subQueries.flatMap((sub) => sub.indices))].flatMap((key) => {
     const entry = scope.lens.catalog.find((candidate) => candidate.key === key);
-    return entry === undefined || entry.status === "ready" ? [] : [entry.name];
+    return entry === undefined || !unbuilt.has(key) ? [] : [entry.name];
   });
   if (building.length > 0) {
     retrieval.limitations.push(
@@ -421,10 +417,21 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
       if (filter === undefined || filter.entityType !== entityType) return [];
       return [{ filter: filter.id, value: applied.value, text: filterCondition(scope.lens.scoped, filter, applied.value) }];
     });
-  for (const [subQuery, ranked] of perSubQuery.entries()) {
-    const hits = ranked.flatMap((item) => (item.hit === null ? [] : [item.hit]));
-    const described = await describeMatches(scope.loaded, scope.store, hits);
-    for (const item of ranked) {
+  for (const subQuery of plan.subQueries.keys()) {
+    // What the sub-query found of each entity: the hit of its first query
+    // text that found it; null when listed.
+    const found = hits.flatMap((item) => {
+      const rows = item.provenance.filter((row) => row.subQuery === subQuery);
+      if (rows.length === 0) return [];
+      const hit = rows.find((row) => row.hit !== null)?.hit ?? null;
+      return [{ entityId: item.entityId, entityType: item.entityType, hit }];
+    });
+    const described = await describeMatches(
+      scope.loaded,
+      scope.store,
+      found.flatMap((item) => (item.hit === null ? [] : [item.hit])),
+    );
+    for (const item of found) {
       let text: string | null = null;
       if (item.hit !== null) {
         const { index, entry } = item.hit.matched;
@@ -443,10 +450,9 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
     }
   }
 
-  const fused = fuseRankings(perSubQuery);
-  const entities = await readEntities(scope, fused);
+  const entities = await readEntities(scope, hits);
   const truncated = new Set<string>();
-  for (const item of fused) {
+  for (const item of hits) {
     const entity = entities.get(item.entityId);
     if (entity === undefined) continue;
     const fields: Row = {};

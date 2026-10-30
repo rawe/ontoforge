@@ -35,5 +35,6 @@ export const upgrade6to7: Upgrader = (raw) => {
       })),
     },
     retrieverWarnings: new Map(),
+    leftOutSavedQueries: [],
   };
 };

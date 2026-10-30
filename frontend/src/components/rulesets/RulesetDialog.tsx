@@ -79,7 +79,7 @@ export function RulesetDialog({ target, onClose, ...rest }: RulesetDialogProps) 
 }
 
 /** One entity's path through the lens. */
-function usePath(ontologyKey: string, lensKey: string, entity: EntityInstance | null) {
+function usePath(ontologyKey: string, lensKey: string, entity: Pick<EntityInstance, '_id' | '_entityTypeKey'> | null) {
   return useQuery({
     queryKey: qk.path(ontologyKey, lensKey, entity?._entityTypeKey ?? '', entity?._id ?? ''),
     queryFn: () => runtime.getPath(ontologyKey, lensKey, entity!._entityTypeKey, entity!._id),
@@ -106,7 +106,7 @@ function PathLine({
 }: {
   ontologyKey: string
   lensKey: string
-  entity: EntityInstance
+  entity: Pick<EntityInstance, '_id' | '_entityTypeKey'>
   icon?: boolean
 }) {
   const path = usePath(ontologyKey, lensKey, entity)

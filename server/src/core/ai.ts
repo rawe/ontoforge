@@ -50,17 +50,26 @@ export interface SavedQueryParameter {
 }
 
 /** One pipeline step: `oql` carries its query in `oql`; `search`
- * carries its search text in `query`. */
+ * carries the entity search's request fields under their names, its
+ * search text in `query`. */
 export interface StepConfig {
   name: string;
   /** "oql" or "search". */
   type: string;
   oql?: string | null;
-  entityTypeKey?: string | null;
   query?: string | null;
+  types?: string[] | null;
+  indices?: string[] | null;
+  keyword?: { match?: string } | null;
+  semantic?: { minSimilarity?: number } | null;
+  filter?: Record<string, string> | null;
   limit?: number | null;
   bindings?: Record<string, string> | null;
 }
+
+/** The fields a later step may bind from a `search` step's rows: the
+ * found entities' references. */
+export const SEARCH_STEP_FIELDS: readonly string[] = ["_id", "_entityTypeKey", "name"];
 
 /** A stored, named, parameterized pipeline belonging to one lens. */
 export interface SavedQueryConfig {

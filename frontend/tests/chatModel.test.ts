@@ -105,7 +105,7 @@ test('agent: tool events are timed and matched out of order by callId; the runni
   turn = applyEvent(agentTurns, turn, { type: 'agent.tool_call', callId: 'a', tool: 'get_entity', args: { entity_id: 'x' } }, 100)
   turn = applyEvent(agentTurns, turn, { type: 'agent.tool_call', callId: 'b', tool: 'search', args: { query: 'q' } }, 110)
   assert.equal(agentTurns.progress(turn.insight), 'Get entity, Search')
-  turn = applyEvent(agentTurns, turn, { type: 'agent.tool_result', callId: 'b', result: { hits: [] } }, 150)
+  turn = applyEvent(agentTurns, turn, { type: 'agent.tool_result', callId: 'b', result: { ran: [], items: [], limitations: [] } }, 150)
   assert.equal(agentTurns.progress(turn.insight), 'Get entity')
   turn = applyEvent(agentTurns, turn, { type: 'agent.tool_result', callId: 'a', result: { _id: 'x' } }, 400)
   assert.equal(agentTurns.progress(turn.insight), undefined)
@@ -138,7 +138,8 @@ test('toolError reads an {error} result only', () => {
 
 test('toolCallSummary says what a call asked for', () => {
   const summary = (tool: string, args: Record<string, unknown>) => toolCallSummary({ callId: 'c', tool, args, status: 'pending' })
-  assert.equal(summary('search', { query: 'CTO', entity_type_key: 'person' }), '“CTO” in person')
+  assert.equal(summary('search', { query: 'CTO', types: ['person'] }), '“CTO” in person')
+  assert.equal(summary('search_documents', { query: 'CTO', types: null, documents: ['person.bio', 'company.about'] }), '“CTO” in person.bio, company.about')
   assert.equal(summary('execute_query', { query: 'MATCH (p:person)\n  RETURN p' }), 'MATCH (p:person) RETURN p')
   assert.equal(summary('list_entities', { entity_type_key: 'person', search: null, filters: { city: 'Berlin' } }), 'person · city = Berlin')
   assert.equal(summary('get_neighbors', { entity_type_key: 'person', entity_id: 'p1', direction: 'outgoing' }), 'person · p1 · outgoing')

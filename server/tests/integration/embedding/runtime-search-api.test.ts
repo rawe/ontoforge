@@ -1,19 +1,21 @@
 /**
- * The runtime index search through REST with real embeddings (bge-m3):
- * `POST search` in semantic and hybrid mode over a custom index with a
- * relation group created through the modeling API — "CTO ACME" finds the
- * CTO of ACME through that very employment, "CTO Foo" the CTO of Foo
- * through his — hybrid as the default mode, `minScore` on the semantic
- * leg, a German query finding an English passage through hybrid, and the
- * catalog offering both modes. PostgreSQL only; SKIPPED when Ollama or
- * the model is unavailable.
+ * Search through named indices with real embeddings (bge-m3): the MCP
+ * tool `search` with `indices` over a custom index with a relation group
+ * created through the modeling API — "CTO ACME" finds the CTO of ACME
+ * through that very employment, "CTO Foo" the CTO of Foo through his —
+ * both methods under the tools' fixed floor, a German query finding an
+ * English passage, and the catalog `GET search-indices` offering both
+ * modes. PostgreSQL only; SKIPPED when Ollama or the model is unavailable.
  */
 
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../../../src/app.js";
 import { closeStores, initStores } from "../../../src/core/ports.js";
+import { createRuntimeMcpServer } from "../../../src/mcp/runtime.js";
 import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../../src/runtime/schemaCache.js";
 import { wipeDatabase } from "../reset.js";
@@ -26,7 +28,7 @@ const O = "runtime_search_emb";
 const MODEL = `/api/ontologies/${O}/model`;
 const RUNTIME = `/api/ontologies/${O}/runtime/lenses/all`;
 
-describe.skipIf(!ollamaUp)("runtime index search through REST (Ollama)", () => {
+describe.skipIf(!ollamaUp)("search through named indices (Ollama)", () => {
   let app: FastifyInstance;
   const ids: Record<string, string> = {};
 
@@ -36,10 +38,22 @@ describe.skipIf(!ollamaUp)("runtime index search through REST (Ollama)", () => {
     return res.json();
   }
 
-  async function search(body: object): Promise<Row> {
-    const res = await app.inject({ method: "POST", url: `${RUNTIME}/search`, payload: body });
-    expect(res.statusCode, res.body).toBe(200);
-    return res.json();
+  /** `search`'s answer; the call must succeed. */
+  async function search(args: object): Promise<Row> {
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await createRuntimeMcpServer(O, "all").connect(serverTransport);
+    const client = new Client({ name: "runtime-search-api-embedding", version: "0.0.1" });
+    await client.connect(clientTransport);
+    try {
+      const result = (await client.callTool({ name: "search", arguments: { ...args } })) as {
+        content: { text: string }[];
+        isError?: boolean;
+      };
+      expect(result.isError, result.content[0]!.text).toBeFalsy();
+      return JSON.parse(result.content[0]!.text);
+    } finally {
+      await client.close();
+    }
   }
 
   beforeAll(async () => {
@@ -119,39 +133,29 @@ describe.skipIf(!ollamaUp)("runtime index search through REST (Ollama)", () => {
     await closeStores();
   });
 
-  for (const mode of ["semantic", "hybrid"] as const) {
-    it(`${mode}: each employment pairs with its own company`, async () => {
-      const acme = await search({ query: "CTO ACME", indices: ["person_employment"], mode });
-      expect(acme.mode).toBe(mode);
-      expect(acme.hits[0]).toMatchObject({
-        entity: { _id: ids["Ada Lovelace"] },
-        matched: {
-          partKind: "relation",
-          relationId: ids["Ada Lovelace@ACME"],
-          target: { id: ids["ACME"], type: "company", label: "ACME" },
-        },
-      });
-      const foo = await search({ query: "CTO Foo", indices: ["person_employment"], mode });
-      expect(foo.hits[0]).toMatchObject({
-        entity: { _id: ids["Bob Miller"] },
-        matched: { relationId: ids["Bob Miller@Foo"] },
-      });
+  it("both methods under the fixed floor: each employment pairs with its own company", async () => {
+    const acme = await search({ query: "CTO ACME", indices: ["person_employment"] });
+    expect(acme.ran).toEqual(["semantic", "keyword"]);
+    expect(acme.items[0]).toMatchObject({
+      entity: { _id: ids["Ada Lovelace"] },
+      match: {
+        part: "relation",
+        relationType: "works_for",
+        target: { _id: ids["ACME"], _entityTypeKey: "company", name: "ACME" },
+      },
     });
-  }
-
-  it("hybrid is the default mode; minScore floors the semantic leg", async () => {
-    const all = await search({ query: "CTO ACME", indices: ["person_employment"] });
-    expect(all.mode).toBe("hybrid");
-    // No entry is that similar: nothing remains.
-    const floored = await search({ query: "CTO ACME", indices: ["person_employment"], mode: "semantic", minScore: 0.99 });
-    expect(floored.hits).toEqual([]);
+    const foo = await search({ query: "CTO Foo", indices: ["person_employment"] });
+    expect(foo.items[0]).toMatchObject({
+      entity: { _id: ids["Bob Miller"] },
+      match: { target: { _id: ids["Foo"] } },
+    });
   });
 
-  it("hybrid crosses languages: a German query finds the English passage", async () => {
-    const body = await search({ query: "Bienenzucht im Garten", indices: ["person~bio"], mode: "hybrid" });
-    expect(body.hits[0]).toMatchObject({
+  it("both methods cross languages: a German query finds the English passage", async () => {
+    const body = await search({ query: "Bienenzucht im Garten", indices: ["person~bio"] });
+    expect(body.items[0]).toMatchObject({
       entity: { _id: ids["Bob Miller"] },
-      matched: { index: "person~bio", partKind: "passage", charOffset: 0 },
+      match: { index: "person~bio", part: "passage", property: "bio", charOffset: 0 },
     });
   });
 

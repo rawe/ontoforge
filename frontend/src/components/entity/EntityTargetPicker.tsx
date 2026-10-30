@@ -1,11 +1,19 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { toast } from 'sonner'
 import { useFeatures } from '@/api/hooks'
+import { qk } from '@/api/queryKeys'
+import * as runtime from '@/api/runtime'
 import type { EntityInstance, SchemaEntityType } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
 import { Command, CommandItem, CommandList } from '@/components/ui/command'
 import { EntitySearchRow } from '@/components/palette/EntitySearchRow'
-import { useDebouncedValue, useEntitySearch } from '@/components/palette/usePaletteSearch'
+import {
+  useDebouncedValue,
+  useEntitySearch,
+  type EntitySearchResult,
+} from '@/components/palette/usePaletteSearch'
 
 interface EntityTargetPickerProps {
   ontologyKey: string
@@ -21,13 +29,14 @@ interface EntityTargetPickerProps {
   autoFocus?: boolean
   /** Items before the results, such as "New connected …". */
   leading?: ReactNode
-  /** An extra line under each result, such as its path. */
-  detail?: (entity: EntityInstance) => ReactNode
+  /** An extra line under each result, such as its path, by the entity's id and type. */
+  detail?: (entity: Pick<EntityInstance, '_id' | '_entityTypeKey'>) => ReactNode
 }
 
 /**
  * Search one entity type through the lens and pick an entity: the add-relation
- * target picker, also used to choose where a ruleset's anchor points.
+ * target picker, also used to choose where a ruleset's anchor points. A ranked
+ * hit names the entity only, so picking one reads it whole first.
  */
 export function EntityTargetPicker({
   ontologyKey,
@@ -48,10 +57,22 @@ export function EntityTargetPicker({
     lensKey,
     q: debouncedQuery,
     typeKey: targetType.key,
-    ranked: (features?.searchStrategies.length ?? 0) > 0,
+    ranked: features?.rankedSearch === true,
     allTypeKeys: [],
     enabled: true,
   })
+  const queryClient = useQueryClient()
+
+  const pick = (result: EntitySearchResult) => {
+    if (!('match' in result)) return onPick(result.entity)
+    const { _entityTypeKey: typeKey, _id: id } = result.entity
+    queryClient
+      .fetchQuery({
+        queryKey: qk.entity(ontologyKey, lensKey, typeKey, id),
+        queryFn: () => runtime.getEntity(ontologyKey, lensKey, typeKey, id),
+      })
+      .then(onPick, (error: unknown) => toast.error(error instanceof Error ? error.message : String(error)))
+  }
 
   return (
     // h-auto: Command's size-full would take the whole height of a stretched
@@ -73,29 +94,19 @@ export function EntityTargetPicker({
       </div>
       <CommandList className="max-h-52">
         {leading}
-        {(search.data ?? []).map(({ entity: candidate, matches, matched }) => (
+        {(search.data ?? []).map((result) => (
           <CommandItem
-            key={candidate._id}
-            value={`target:${candidate._id}`}
+            key={result.entity._id}
+            value={`target:${result.entity._id}`}
             disabled={disabled}
-            onSelect={() => onPick(candidate)}
+            onSelect={() => pick(result)}
           >
             {detail === undefined ? (
-              <EntitySearchRow
-                entity={candidate}
-                matches={matches}
-                matched={matched}
-                typeName={targetType.displayName}
-              />
+              <EntitySearchRow result={result} typeName={targetType.displayName} />
             ) : (
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <EntitySearchRow
-                  entity={candidate}
-                  matches={matches}
-                  matched={matched}
-                  typeName={targetType.displayName}
-                />
-                {detail(candidate)}
+                <EntitySearchRow result={result} typeName={targetType.displayName} />
+                {detail(result.entity)}
               </span>
             )}
           </CommandItem>

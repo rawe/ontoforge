@@ -24,6 +24,7 @@ import type { GraphReader } from "./reader.js";
 const HITS_PER_MENTION = 3;
 /** Topic matches kept when the question names nothing. */
 const TOPIC_ANCHORS = 6;
+/** A topic match is kept while its score is at least this share of the best one's. */
 const TOPIC_SCORE_RATIO = 0.5;
 /** Neighbours read per entity and hop. */
 const NEIGHBORS_PER_ENTITY = 40;
@@ -94,7 +95,7 @@ async function resolveMention(
     // Search found nothing it may use: list by substring per candidate type.
     const listTypes = (candidateTypes.length > 0 ? candidateTypes : [...allowed]).slice(0, 12);
     const listed = (await Promise.all(listTypes.map((t) => reader.list(t, text, HITS_PER_MENTION)))).flat();
-    hits = listed.map((entity) => ({ entity, relativeScore: 1 }));
+    hits = listed.map((entity) => ({ entity, score: 1 }));
   }
   if (hits.length === 0) return { entities: [], exact: false };
   const wanted = normalized(text);
@@ -156,9 +157,9 @@ export async function anchor(
     const topic = intent.search.trim() || question;
     const hits = (await reader.search(topic, null, true, 20))
       .filter((hit) => allowed.has(String(hit.entity._entityTypeKey ?? "")));
-    const best = hits[0]?.relativeScore ?? 0;
+    const best = hits[0]?.score ?? 0;
     const kept = hits
-      .filter((hit) => hit.relativeScore >= TOPIC_SCORE_RATIO * best)
+      .filter((hit) => hit.score >= TOPIC_SCORE_RATIO * best)
       .slice(0, TOPIC_ANCHORS)
       .map((hit) => board.add(hit.entity, "anchor", 0, `Matches the topic ${quote(topic)}`, null))
       .filter((node): node is BoardNode => node !== null);

@@ -15,11 +15,13 @@ import { TRANSFER_FORMAT_VERSION, TransferEnvelope } from "../schemas.js";
 import { readFields, type Upgraded, type Upgrader } from "./upgrader.js";
 import { upgrade5to6 } from "./upgrade5to6.js";
 import { upgrade6to7 } from "./upgrade6to7.js";
+import { upgrade7to8 } from "./upgrade7to8.js";
 
 /** Every older version import accepts, oldest first, with its upgrader. */
 const UPGRADES: Record<string, Upgrader> = {
   "5.0": upgrade5to6,
   "6.0": upgrade6to7,
+  "7.0": upgrade7to8,
 };
 
 /** Every version import accepts, newest first; an absent version is the
@@ -44,12 +46,13 @@ export function upgradeToCurrent(body: unknown): Upgraded {
     });
   }
   const versions = Object.keys(UPGRADES);
-  let upgraded: Upgraded = { payload, retrieverWarnings: new Map() };
+  let upgraded: Upgraded = { payload, retrieverWarnings: new Map(), leftOutSavedQueries: [] };
   for (const from of versions.slice(version === TRANSFER_FORMAT_VERSION ? versions.length : versions.indexOf(version))) {
     const next = UPGRADES[from]!(upgraded.payload);
     upgraded = {
       payload: next.payload,
       retrieverWarnings: new Map([...upgraded.retrieverWarnings, ...next.retrieverWarnings]),
+      leftOutSavedQueries: [...upgraded.leftOutSavedQueries, ...next.leftOutSavedQueries],
     };
   }
   return upgraded;

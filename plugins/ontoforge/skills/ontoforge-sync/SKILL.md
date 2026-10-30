@@ -76,7 +76,7 @@ node scripts/export-schema.mjs [-o <output>] [--ontology <key>] [--base-url <url
 
 **API used**: `GET /api/ontologies/{ontologyKey}/model/export`
 
-The output file is the OntoForge transfer format (v7.0) and can be committed to version
+The output file is the OntoForge transfer format (v8.0) and can be committed to version
 control. It carries the design only — no entities, no relations, no document content,
 and not the ontology's own key or display name. It is not a backup.
 
@@ -280,13 +280,13 @@ node scripts/import-data.mjs /tmp/data.json --base-url http://localhost:8000
 
 ## File Formats
 
-### Schema file (transfer format v7.0)
+### Schema file (transfer format v8.0)
 
 Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
 
 ```json
 {
-  "formatVersion": "7.0",
+  "formatVersion": "8.0",
   "keywordLanguages": ["german", "english"],
   "searchIndices": {
     "custom": [
@@ -368,9 +368,12 @@ Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
   `navigators`, the navigators, each with `key`, `name`, `description`, `configVersion` (1)
   and `config`. Optional, and so is each list.
 
-The format version decides how import reads the file: `7.0` (or none) is the current
-format. Two older versions are upgraded on the way in: `6.0` — lens `aiAgents` and
-`retrieverAgents` instead of `assistants` — and `5.0` — additionally one
+The format version decides how import reads the file: `8.0` (or none) is the current
+format. Three older versions are upgraded on the way in: `7.0` — saved-query search steps
+naming one `entityTypeKey`, each converted into an entity search over that type (a saved
+query binding a search step's field other than `_id`, `_entityTypeKey` or `name` is left
+out and named in the import result's `leftOutSavedQueries`) — `6.0` — additionally lens
+`aiAgents` and `retrieverAgents` instead of `assistants` — and `5.0` — additionally one
 `textSearchLanguage` instead of `keywordLanguages`, no search indices, no name properties,
 and lens `retrievers` of configuration version 1 instead of `retrieverAgents`, each
 converted into a retriever that lists what the conversion dropped as warnings. Any

@@ -600,8 +600,8 @@ describe("a reconciliation that fails after its design change committed", () => 
     expect(after).toHaveLength(1);
     expect(after[0]!.generation_id).not.toBe(before[0]!.generation_id);
     expect(after[0]!.state).toBe("ready");
-    const found = await call("POST", `${ALL}/search`, { query: "Zephyrine" });
+    const found = await call("POST", `${ALL}/search/entities`, { query: "Zephyrine" });
     expect(found.status).toBe(200);
-    expect(found.body.hits.map((hit: Row) => hit.entity._id)).toContain(zed.body._id);
+    expect(found.body.items.map((item: Row) => item.entity._id)).toContain(zed.body._id);
   }, 20_000);
 });

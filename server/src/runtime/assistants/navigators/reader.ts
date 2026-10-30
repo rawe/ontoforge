@@ -5,14 +5,17 @@
  * already scoped to the lens; tests substitute their own.
  */
 
-import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
+import { NotFoundError } from "../../../core/exceptions.js";
 import type { Row, RuntimeStore } from "../../../core/ports.js";
-import { search, type SearchRequest } from "../../search/entry.js";
+import { loadSchema } from "../../schemaCache.js";
+import { rankEntities } from "../../search/entitySearch.js";
+import { indexStoreOf, searchableIndices } from "../../search/indexSearch.js";
 import { getEntity, getNeighbors, listEntities } from "../../service.js";
 
 export interface SearchHitRow {
   entity: Row;
-  relativeScore: number;
+  /** The engine's score; comparable only within one search. */
+  score: number;
 }
 
 export interface Neighbor {
@@ -21,7 +24,9 @@ export interface Neighbor {
 }
 
 export interface GraphReader {
-  /** Ranked search over the lens, best first; empty when no strategy is available. */
+  /** Ranked search over the lens — the entities' own fields, with
+   * `documents` their documents' passages too — best first; empty when
+   * nothing can run. */
   search(query: string, type: string | null, documents: boolean, limit: number): Promise<SearchHitRow[]>;
   /** Entities of one type whose string properties contain the term. */
   list(type: string, term: string, limit: number): Promise<Row[]>;
@@ -34,16 +39,18 @@ export interface GraphReader {
 export function lensReader(lensKey: string, store: RuntimeStore): GraphReader {
   return {
     async search(query, type, documents, limit) {
-      const request: SearchRequest = { query, type, in: documents ? ["properties", "document"] : ["properties"], limit };
-      try {
-        const response = await search(lensKey, request, store);
-        return response.hits.map((hit) => ({ entity: hit.entity, relativeScore: hit.relativeScore }));
-      } catch (error) {
-        // No search strategy, or a type without a searchable index: the
-        // caller falls back to listing.
-        if (error instanceof ValidationError) return [];
-        throw error;
-      }
+      const loaded = await loadSchema(lensKey, store);
+      // The managed indices of the type, or of every type: own fields, and
+      // with documents the passages.
+      const indices = (await searchableIndices(loaded, indexStoreOf(store)))
+        .filter((index) => index.kind === "default" || (documents && index.kind === "passage"))
+        .filter((index) => type === null || index.definition.entityType === type)
+        .map((index) => index.key);
+      if (indices.length === 0) return [];
+      // What cannot run is a limitation, not an error: then nothing is
+      // found, and the caller falls back to listing.
+      const { hits, entities } = await rankEntities(loaded, { query, indices, limit }, store);
+      return hits.map((hit) => ({ entity: entities.get(hit.entityId)!, score: hit.score }));
     },
     async list(type, term, limit) {
       const page = await listEntities(lensKey, type, limit, 0, "_createdAt", "asc", term, {}, store);

@@ -21,11 +21,15 @@ import type {
   CommitResult,
   DocumentContentResponse,
   EntityInstance,
+  EntitySearchBody,
+  EntitySearchResponse,
   JsonValue,
   ListResponse,
   NeighborDirection,
   NeighborsResponse,
   ParentRelationInput,
+  PassageSearchBody,
+  PassageSearchResponse,
   PathStep,
   QueryResult,
   RelationInstance,
@@ -39,8 +43,6 @@ import type {
   SchemaEntityType,
   SchemaRelationType,
   SearchCatalogEntry,
-  SearchResponse,
-  SearchStrategy,
   StagedAnswer,
   StagedEntity,
   StagedObjectView,
@@ -231,22 +233,23 @@ export const deleteRelation = (
 
 /* ---------------------------------- search ---------------------------------- */
 
-export interface SearchParams {
-  q: string
-  type?: string
-  in?: readonly ('properties' | 'document')[]
-  strategy?: SearchStrategy
-  'document.property'?: string
-  limit?: number
-  fields?: readonly string[]
-  filter?: FilterMap
-}
-export const search = (ontologyKey: string, lensKey: string, params: SearchParams) =>
-  request<SearchResponse>(`${base(ontologyKey, lensKey)}/search${buildQuery(params)}`)
-
 /** The search indices this lens can search. */
 export const listSearchCatalog = (ontologyKey: string, lensKey: string) =>
   request<SearchCatalogEntry[]>(`${base(ontologyKey, lensKey)}/search-indices`)
+
+/** Rank entities for a query text through a scope of search indices. */
+export const searchEntities = (ontologyKey: string, lensKey: string, body: EntitySearchBody) =>
+  request<EntitySearchResponse>(`${base(ontologyKey, lensKey)}/search/entities`, {
+    method: 'POST',
+    body,
+  })
+
+/** Rank passages of documents for a query text through a scope of search indices. */
+export const searchPassages = (ontologyKey: string, lensKey: string, body: PassageSearchBody) =>
+  request<PassageSearchResponse>(`${base(ontologyKey, lensKey)}/search/passages`, {
+    method: 'POST',
+    body,
+  })
 
 /* ----------------------------------- query ----------------------------------- */
 
@@ -281,7 +284,8 @@ export const runSavedQuery = (
   queryKey: string,
   params: Record<string, JsonValue>,
 ) =>
-  request<QueryResult>(`${base(ontologyKey, lensKey)}/saved-queries/${queryKey}/run`, {
+  // The last step's output: OQL rows, or an entity search response.
+  request<QueryResult | EntitySearchResponse>(`${base(ontologyKey, lensKey)}/saved-queries/${queryKey}/run`, {
     method: 'POST',
     body: { params },
   })

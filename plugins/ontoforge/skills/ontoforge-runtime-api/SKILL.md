@@ -94,7 +94,7 @@ A `401` means the token is missing or wrong. It carries no OntoForge error envel
 ## Boundaries
 
 - Runtime only: schema introspection, entity CRUD, document reads and partial writes,
-  relation CRUD, neighbors, search (default search, index search and the search
+  relation CRUD, neighbors, search (entity search, passage search and the search
   catalog), OQL query, saved query listing/search/run, entity identity comparison,
   the assistant endpoints (list, chat on server-held threads, thread read, retrieve), and
   the deployment reads `GET /api/server/info` and `GET /api/server/features`.

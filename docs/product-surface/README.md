@@ -179,8 +179,8 @@ Find the [command palette](finding-and-collecting.md#command-palette), [quick ad
 
 ## Feature gating
 
-The client asks the server once per session which optional capabilities exist — the
-available search strategies plus the semantic-search and AI flags — and
+The client asks the server once per session which optional capabilities exist — whether
+ranked search runs, plus the semantic-search and AI flags — and
 treats the answer as never going stale. None is inferred from a failed call — the client
 never probes.
 
@@ -192,7 +192,7 @@ flicker into existence while the report is loading.
 | Off | What changes |
 |---|---|
 | AI | The Assistants navigation entry, the Assistants palette action, the palette's question mode, the Ask an assistant quick action and the Explorer's Ask button and dock are gone. The Assistants screen itself renders an explanation. |
-| No search strategies | Entity search falls back to substring matching — per type in parallel when unscoped. |
+| Ranked search | Entity search falls back to substring matching — per type in parallel when unscoped. |
 | Semantic search | Saved-query search falls back to client-side substring filtering over the full list. The search-data rebuild is disabled and explains that there is nothing to rebuild. |
 
 Everything else works unchanged. See [capabilities/search.md](../capabilities/search.md).

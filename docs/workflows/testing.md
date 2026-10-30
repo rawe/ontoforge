@@ -26,7 +26,7 @@ persistence port: it runs against the adapter `DB_BACKEND` selects. The embeddin
 (`tests/integration/ai/`) are separate because they configure live providers, while the
 plain integration suite's feature-disabled assertions depend on running with *no*
 provider configured. Where the plain suite needs semantic entries — search-index storage,
-the indexing pipeline, index search — it installs the deterministic fake embedding provider
+the indexing pipeline, ranked search — it installs the deterministic fake embedding provider
 of `tests/fakeEmbedding.ts` for the test and removes it afterwards, so it still needs no
 Ollama. The AI suite's retriever tests run with no embedding provider: their indices
 search by keyword.

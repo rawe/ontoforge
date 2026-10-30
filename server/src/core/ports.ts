@@ -606,6 +606,10 @@ export interface RuntimeStore {
 
   getSavedQueries(lensKey: string): Promise<Row[]>;
 
+  /** A lens's named searches, by key: key, name, description and the tree
+   * as stored. */
+  getNamedSearches(lensKey: string): Promise<Row[]>;
+
   // ------------------------------------------------------------------
   // Search indices
   // ------------------------------------------------------------------

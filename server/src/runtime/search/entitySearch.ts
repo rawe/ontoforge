@@ -79,7 +79,12 @@ export type EntityMatch = (
       charOffset: number;
       charLength: number;
     }
-) & { scores: MethodScores };
+) & {
+  scores: MethodScores;
+  /** The query text that found the entry — only on a named search's item,
+   * when its tree searches more than one text. */
+  queryText?: string;
+};
 
 export interface EntitySearchItem {
   /** From 1. */
@@ -137,7 +142,7 @@ export async function searchEntities(
 ): Promise<EntitySearchResponse> {
   const loaded = await loadSchema(lensKey, store);
   const { ran, hits, entities, limitations } = await rankEntities(loaded, request, store);
-  return { ran, items: await itemsOf(loaded, store, hits, entities), limitations };
+  return { ran, items: await entitySearchItems(loaded, store, hits, entities), limitations };
 }
 
 /** The entity search up to its ranking: for callers inside the server
@@ -197,8 +202,9 @@ function scopeOf(
   return { selected: managed, scopeTypes: Object.keys(loaded.scoped.entityTypes) };
 }
 
-/** The hits as items: each entity named, with its best entry. */
-async function itemsOf(
+/** The hits as items, ranked in their order: each entity named, with its
+ * best entry. Every hit's entity is in `entities`. */
+export async function entitySearchItems(
   loaded: LoadedSchema,
   store: RuntimeStore,
   hits: EngineHit[],

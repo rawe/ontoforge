@@ -444,6 +444,36 @@ describe("the executor", () => {
     ]);
   });
 
+  it("each provenance carries the item's rank in its own text's ranking; one fusion of several texts ranks each alone", async () => {
+    // Per query text: semantic lists the generation's entries, keyword the text's.
+    rank.mockImplementation(async (query) =>
+      (lists[`${query.generationId}${query.text === undefined ? "" : ` ${query.text}`}`] ?? []).slice(0, query.limit),
+    );
+    lists["person~default/keyword q"] = [entry("a", 3), entry("b", 2)];
+    lists["person~default/keyword v1"] = [entry("b", 5), entry("a", 1)];
+    lists["person~default/semantic"] = [entry("a", 0.9)];
+    // q by both methods, v1 by keyword: fused at once, above one cut.
+    const hits = await runTree(
+      cut(fuse(group(sem("person~default", "q")), group(kw("person~default", "q")), group(kw("person~default", "v1")))),
+    );
+    const rows = (entityId: string) =>
+      hits
+        .find((hit) => hit.entityId === entityId)!
+        .provenance.map((row) => [row.text, row.rank, row.hit!.matched.scores]);
+    // a: q's own fusion ranks it first (both methods), v1 second.
+    expect(rows("a")).toEqual([
+      ["q", 1, { semantic: 0.9, keyword: 3 }],
+      ["v1", 2, { keyword: 1 }],
+    ]);
+    expect(rows("b")).toEqual([
+      ["q", 2, { keyword: 2 }],
+      ["v1", 1, { keyword: 5 }],
+    ]);
+    // One text: one provenance, its rank in the whole ranking.
+    const single = await runTree(cut(group(kw("person~default", "q"))));
+    expect(single.map((hit) => hit.provenance.map((row) => [row.text, row.rank]))).toEqual([[["q", 1]], [["q", 2]]]);
+  });
+
   it("an append lists the filters' ids the ranking missed, filter by filter in id order, while it holds fewer than until", async () => {
     lists["person~default/keyword"] = [entry("p3", 2)];
     const filters: TreeNode[] = [
@@ -457,7 +487,7 @@ describe("the executor", () => {
       ["p1", "person", null],
       ["p2", "person", null],
     ]);
-    expect(hits[1]!.provenance).toEqual([{ subQuery: 2, text: null, hit: null }]);
+    expect(hits[1]!.provenance).toEqual([{ subQuery: 2, text: null, hit: null, rank: null }]);
     // Pushed down, never filtered afterwards.
     expect(rank.mock.calls[0]![0].entityIds).toEqual(["p3", "p2", "p1"]);
     // A ranking that holds `until` already is kept whole; without one, only the ids.

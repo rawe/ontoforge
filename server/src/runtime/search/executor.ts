@@ -24,7 +24,9 @@
  * 4. A cut keeps its first `limit` items, at most `perEntity` passages per
  *    entity; an append adds its filters' ids the ranking missed. Each item
  *    of the root carries what found it: per search — sub-query and query
- *    text — the hit, per index.
+ *    text — the hit, per index, and the item's rank in that text's ranking.
+ *    Where one fusion ranks several query texts, each text's rankings are
+ *    fused alone for that: the item's hit and rank per text.
  *
  * It runs the trees the compilers build today: passages rank only as the
  * methods of one search, fused.
@@ -91,6 +93,9 @@ export interface Provenance {
   text: string | null;
   /** What the search found of the entity; null when listed. */
   hit: EngineHit | null;
+  /** The item's rank, from 1, in the ranking of this query text alone;
+   * null when listed. */
+  rank: number | null;
 }
 
 /** What restricts the entities of one type: exact conditions, and the
@@ -144,10 +149,21 @@ type Combined = (
       key: GroupNode["key"];
       keyOf: (entry: FoundEntry) => string;
       rankings: ModeRanking<FoundEntry>[];
+      /** The query text of each ranking, in the same order. */
+      texts: string[];
       hits: FusedHit<FoundEntry>[];
+      /** Per query text, in tree order, its rankings fused alone. */
+      byText: TextRanking[];
     }
   | { unit: "items"; key: GroupNode["key"]; items: Item[] }
 ) & { ran: boolean };
+
+/** One query text's rankings fused alone: each item's hit and rank in
+ * them, by the item's key. */
+interface TextRanking {
+  rankings: ModeRanking<FoundEntry>[];
+  ranked: Map<string, { hit: FusedHit<FoundEntry>; rank: number }>;
+}
 
 /** Run a valid tree; `indices` holds every index its search nodes name. */
 export async function executeSearchTree(
@@ -317,9 +333,26 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
     if (entry.partKind !== "passage") throw new Error("A passage group takes passage entries only");
     return `${entry.entityId}/${documentOf(entry.search)}/${entry.partId}`;
   };
-  const grouped = (key: GroupNode["key"], rankings: ModeRanking<FoundEntry>[], ran: boolean): Combined => {
+  const grouped = (
+    key: GroupNode["key"],
+    rankings: ModeRanking<FoundEntry>[],
+    texts: string[],
+    ran: boolean,
+  ): Combined => {
     const itemOf = keyOf(key);
-    return { unit: "grouped", key, keyOf: itemOf, rankings, hits: fuseModes(rankings, itemOf), ran };
+    const hits = fuseModes(rankings, itemOf);
+    const rankedBy = (fused: FusedHit<FoundEntry>[]) =>
+      new Map(fused.map((hit, i) => [itemOf(hit.matched.entry), { hit, rank: i + 1 }] as const));
+    const distinct = [...new Set(texts)];
+    // One text: the whole ranking is its own.
+    const byText =
+      distinct.length === 1
+        ? [{ rankings, ranked: rankedBy(hits) }]
+        : distinct.map((text) => {
+            const own = rankings.filter((_, i) => texts[i] === text);
+            return { rankings: own, ranked: rankedBy(fuseModes(own, itemOf)) };
+          });
+    return { unit: "grouped", key, keyOf: itemOf, rankings, texts, hits, byText, ran };
   };
 
   /** A node's ranking, bottom-up. */
@@ -341,7 +374,8 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
       }
       case "group": {
         const input = entriesOf(combine(node.input));
-        return grouped(node.key, [{ representation: input.method, entries: input.entries }], input.ran);
+        const ranking = { representation: input.method, entries: input.entries };
+        return grouped(node.key, [ranking], [textOf(node.input)], input.ran);
       }
       case "fuse": {
         const all = node.inputs.map(combine);
@@ -354,7 +388,12 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
           input.unit === "grouped" && input.rankings.length === 1 ? [input] : [],
         );
         if (methods.length === fused.length) {
-          return grouped(methods[0]!.key, methods.flatMap((input) => input.rankings), true);
+          return grouped(
+            methods[0]!.key,
+            methods.flatMap((input) => input.rankings),
+            methods.flatMap((input) => input.texts),
+            true,
+          );
         }
         if (fused.some((input) => input.unit !== "entries" && input.key === "passage")) {
           throw new Error("Passages fuse only as the methods of one search");
@@ -374,7 +413,7 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
             if (items.length >= node.until) break;
             if (listed.has(entityId)) continue;
             listed.add(entityId);
-            const provenance: Provenance = { subQuery: node.subQuery ?? null, text: null, hit: null };
+            const provenance: Provenance = { subQuery: node.subQuery ?? null, text: null, hit: null, rank: null };
             items.push({ entityId, entityType: filter.entityType, score: 0, similarity: null, provenance: [provenance] });
           }
         }
@@ -417,21 +456,43 @@ function entriesOf(input: Combined): Extract<Combined, { unit: "entries" }> {
   return input;
 }
 
+/** The query text of the entries a group takes: its search nodes share
+ * one (R1). */
+function textOf(node: TreeNode): string {
+  if (isSearchNode(node)) return node.text;
+  if (node.kind === "merge" && node.inputs[0] !== undefined) return textOf(node.inputs[0]);
+  if (node.kind === "restrict") return textOf(node.input);
+  throw new Error(`A group takes entries; '${node.kind}' yields none`);
+}
+
 /** A ranking's items with what found them: a fusion of methods hit by
  * hit, its search — the matched search node's sub-query and query text —
- * as their provenance. */
+ * as their provenance. A fusion of several query texts gives one
+ * provenance per text that found the item, in tree order: the hit of that
+ * text's rankings alone. */
 function itemsOf(input: Combined, searches: Planned[]): Item[] {
   if (input.unit === "items") return input.items;
   if (input.unit === "entries") throw new Error("Only grouped items rank above a group");
-  return input.hits.map((hit) => {
-    const hitOf = toEngineHit(hit, searches, input.rankings, input.keyOf);
+  const provenanceOf = (hit: FusedHit<FoundEntry>, rankings: ModeRanking<FoundEntry>[], rank: number): Provenance => {
     const { node } = searches[hit.matched.entry.search]!;
+    const hitOf = toEngineHit(hit, searches, rankings, input.keyOf);
+    return { subQuery: node.subQuery ?? null, text: node.text, hit: hitOf, rank };
+  };
+  return input.hits.map((hit) => {
+    const item = input.keyOf(hit.matched.entry);
+    const provenance =
+      input.byText.length === 1
+        ? [provenanceOf(hit, input.rankings, input.byText[0]!.ranked.get(item)!.rank)]
+        : input.byText.flatMap(({ rankings, ranked }) => {
+            const own = ranked.get(item);
+            return own === undefined ? [] : [provenanceOf(own.hit, rankings, own.rank)];
+          });
     return {
       entityId: hit.entityId,
-      entityType: hitOf.entityType,
+      entityType: provenance[0]!.hit!.entityType,
       score: hit.score,
       similarity: hit.modes.find((mode) => mode.representation === "semantic")?.entry.score ?? null,
-      provenance: [{ subQuery: node.subQuery ?? null, text: node.text, hit: hitOf }],
+      provenance,
     };
   });
 }

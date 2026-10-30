@@ -318,11 +318,11 @@ describe("tool descriptions", () => {
       .filter((name) => allows(level, TOOLS[name]!.operation) || (TOOLS[name]!.stageable === true && allows(level, "stage")))
       .sort();
 
-  it("the tool list follows the operation table: 34 on the plain lens; 35, 34 and 19 at full, propose and none", () => {
-    expect(runtime.size).toBe(34);
-    expect(full.size).toBe(35);
-    expect(propose.size).toBe(34);
-    expect(none.size).toBe(19);
+  it("the tool list follows the operation table: 36 on the plain lens; 37, 36 and 21 at full, propose and none", () => {
+    expect(runtime.size).toBe(36);
+    expect(full.size).toBe(37);
+    expect(propose.size).toBe(36);
+    expect(none.size).toBe(21);
     expect([...runtime.keys()].sort()).toEqual(allowed("full").filter((name) => name !== "get_ruleset"));
     for (const [level, map] of [["full", full], ["propose", propose], ["none", none]] as const) {
       expect([...map.keys()].sort(), level).toEqual(allowed(level));

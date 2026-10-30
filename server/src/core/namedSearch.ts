@@ -139,3 +139,53 @@ export function storedTreeErrors(tree: StoredSearchNode): string[] {
   if (!marked) errors.push(`tree: At least one search node's text holds ${QUERY_MARK}, where the runtime query goes`);
   return errors;
 }
+
+/** A named search as the runtime holds it, from the lens's schema cache. */
+export interface NamedSearchConfig {
+  key: string;
+  name: string;
+  description: string;
+  tree: StoredSearchNode;
+}
+
+/** The search nodes of a stored tree, in tree order. */
+export function storedSearchNodes(tree: StoredSearchNode): Extract<StoredSearchNode, { text: string }>[] {
+  if (tree.kind === "keywordSearch" || tree.kind === "semanticSearch") return [tree];
+  return storedInputs(tree).flatMap(([, input]) => storedSearchNodes(input));
+}
+
+/** What a stored tree ranks — the unit of its root (R8), set by the group
+ * its first ranking reaches. A tree checked at save always reaches one. */
+export function namedSearchResult(tree: StoredSearchNode): "entities" | "passages" {
+  switch (tree.kind) {
+    case "group":
+      return tree.key === "entity" ? "entities" : "passages";
+    case "cut":
+    case "restrict":
+      return namedSearchResult(tree.input);
+    case "merge":
+    case "fuse":
+      if (tree.inputs[0] !== undefined) return namedSearchResult(tree.inputs[0]);
+      break;
+  }
+  throw new Error(`A stored search tree with '${tree.kind}' here ranks nothing`);
+}
+
+/** The tree with `query` in place of every `$query` in its search nodes'
+ * texts, as written — no character of the query is special. */
+export function withQuery(tree: StoredSearchNode, query: string): StoredSearchNode {
+  switch (tree.kind) {
+    case "keywordSearch":
+    case "semanticSearch":
+      return { ...tree, text: tree.text.split(QUERY_MARK).join(query) };
+    case "merge":
+    case "fuse":
+      return { ...tree, inputs: tree.inputs.map((input) => withQuery(input, query)) };
+    case "group":
+    case "cut":
+    case "restrict":
+      return { ...tree, input: withQuery(tree.input, query) };
+    case "filter":
+      return tree;
+  }
+}

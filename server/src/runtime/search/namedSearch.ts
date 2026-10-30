@@ -4,14 +4,55 @@
  * entity type through the lens, then the tree's rules R1–R8
  * (`validateSearchTree`) — every failure at its path below `tree`. The
  * same check serves the save, the import and the run.
+ *
+ * The runtime listing and the run by key
+ * (`docs/capabilities/named-searches.md`):
+ *
+ * 1. The query goes in place of every `$query`; the tree is checked
+ *    against the lens again — one it no longer fits is refused, never run.
+ * 2. The run's `filter`, in the entity search's filter syntax, applies to
+ *    the root types of the indices the tree searches: per type that
+ *    resolves every key a filter, a type that does not none of its
+ *    entities, all in one restrict directly under the root cut (around
+ *    the root when that is no cut). A key no type resolves is an error;
+ *    no type left an empty result and a limitation.
+ * 3. The executor runs it; a search node that cannot run — a semantic one
+ *    without an embedding provider too — is a limitation.
+ * 4. The response is the entity or the passage search's, by the root's
+ *    unit. Each item's match comes from the query text the item ranked
+ *    best in — by its rank in that text's ranking, ties to the earlier
+ *    text in the tree — and names that text as `queryText` when the tree
+ *    searches more than one.
  */
 
 import { getEmbeddingProvider } from "../../core/embedding.js";
-import { storedInputs, treePath, type StoredSearchNode } from "../../core/namedSearch.js";
-import type { RuntimeStore } from "../../core/ports.js";
-import { validateSearchTree, type SearchTreeViolation, type TreeNode } from "../../core/searchTree.js";
-import type { LoadedSchema } from "../schemaCache.js";
+import { NotFoundError, ValidationError } from "../../core/exceptions.js";
+import {
+  namedSearchResult,
+  storedInputs,
+  storedSearchNodes,
+  treePath,
+  withQuery,
+  type StoredSearchNode,
+} from "../../core/namedSearch.js";
+import type { RuntimeStore, SearchPartKind } from "../../core/ports.js";
+import type { SearchRepresentation } from "../../core/searchIndex.js";
+import {
+  isSearchNode,
+  searchMethod,
+  validateSearchTree,
+  type FilterNode,
+  type SearchNode,
+  type SearchTreeViolation,
+  type TreeNode,
+} from "../../core/searchTree.js";
+import { loadSchema, type LoadedSchema } from "../schemaCache.js";
+import { entitySearchItems, type EntitySearchResponse } from "./entitySearch.js";
+import type { Provenance, TreeHit } from "./executor.js";
 import { resolveSearchFilters } from "./filters.js";
+import { indexStoreOf, readHitEntities, runSearchTree, searchableIndices } from "./indexSearch.js";
+import { passageSearchItems, readPassageEntities, type PassageSearchResponse } from "./passageSearch.js";
+import { described, rootTypes, type SearchLimitation } from "./scopedSearch.js";
 
 /** What a tree is checked against: the lens's schema, the indices it may
  * search, and whether the adapter's search evaluates relation
@@ -39,13 +80,31 @@ export function compileNamedSearch(
   })) {
     errors.push(`${treePath(violationPath(violation, compiled))}: ${violation.message}`);
   }
+  errors.push(...unrunnable(compiled));
   return errors.length === 0 ? { tree: compiled, errors: [] } : { tree: null, errors };
 }
 
-function compile(at: StoredSearchNode, path: string, lens: NamedSearchLens, errors: string[]): TreeNode {
+/** `passage`: below a passage group, where only passage entries count —
+ * a search node without `parts` counts those only; one whose `parts`
+ * name another is an error. */
+function compile(
+  at: StoredSearchNode,
+  path: string,
+  lens: NamedSearchLens,
+  errors: string[],
+  passage = false,
+): TreeNode {
+  const below = at.kind === "group" ? at.key === "passage" : passage;
   const input = (segment: string, of: StoredSearchNode) =>
-    compile(of, path === "" ? segment : `${path}.${segment}`, lens, errors);
+    compile(of, path === "" ? segment : `${path}.${segment}`, lens, errors, below);
   const inputs = () => storedInputs(at).map(([segment, of]) => input(segment, of));
+  let parts: SearchPartKind[] | undefined;
+  if (at.kind === "keywordSearch" || at.kind === "semanticSearch") {
+    parts = at.parts ?? (passage ? ["passage"] : undefined);
+    if (passage && parts!.some((part) => part !== "passage")) {
+      errors.push(`${treePath(path)}.parts: A passage group counts passage entries only`);
+    }
+  }
   switch (at.kind) {
     case "keywordSearch":
       return {
@@ -54,7 +113,7 @@ function compile(at: StoredSearchNode, path: string, lens: NamedSearchLens, erro
         text: at.text,
         match: at.match ?? "any",
         relations: at.relations ?? null,
-        ...(at.parts === undefined ? {} : { parts: at.parts }),
+        ...(parts === undefined ? {} : { parts }),
       };
     case "semanticSearch":
       return {
@@ -63,7 +122,7 @@ function compile(at: StoredSearchNode, path: string, lens: NamedSearchLens, erro
         text: at.text,
         ...(at.minSimilarity === undefined ? {} : { minSimilarity: at.minSimilarity }),
         relations: at.relations ?? null,
-        ...(at.parts === undefined ? {} : { parts: at.parts }),
+        ...(parts === undefined ? {} : { parts }),
       };
     case "merge":
     case "fuse":
@@ -95,6 +154,48 @@ function compile(at: StoredSearchNode, path: string, lens: NamedSearchLens, erro
   }
 }
 
+/**
+ * The shapes the rules allow that the executor does not run, each at its
+ * node:
+ *
+ * - a merge combines search entries — search nodes and merges, restricted
+ *   or not — never grouped rankings;
+ * - passages fuse straight from their groups (restricted or not): a fuse
+ *   of passages takes no fuse and no cut.
+ */
+function unrunnable(tree: TreeNode): string[] {
+  const errors: string[] = [];
+  const unrestricted = (node: TreeNode): TreeNode => (node.kind === "restrict" ? unrestricted(node.input) : node);
+  const walk = (node: TreeNode, path: string) => {
+    const at = (segment: string) => (path === "" ? segment : `${path}.${segment}`);
+    const entries = (input: TreeNode) => ["keywordSearch", "semanticSearch", "merge"].includes(unrestricted(input).kind);
+    if (node.kind === "merge" && !node.inputs.every(entries)) {
+      errors.push(`${treePath(path)}: A merge combines the entries of search nodes; fuse grouped rankings instead`);
+    }
+    const grouped = (input: TreeNode) => unrestricted(input).kind === "group";
+    if (node.kind === "fuse" && groupKey(node) === "passage" && !node.inputs.every(grouped)) {
+      errors.push(`${treePath(path)}: Passages fuse straight from their groups, not from a fuse or a cut`);
+    }
+    if (node.kind === "merge" || node.kind === "fuse") node.inputs.forEach((input, i) => walk(input, at(`inputs.${i}`)));
+    if (node.kind === "group" || node.kind === "cut" || node.kind === "restrict") walk(node.input, at("input"));
+  };
+  walk(tree, "");
+  return errors;
+}
+
+/** The key of the first group below a node; null when none. */
+function groupKey(node: TreeNode): "entity" | "passage" | null {
+  if (node.kind === "group") return node.key;
+  if (node.kind === "merge" || node.kind === "fuse") {
+    for (const input of node.inputs) {
+      const key = groupKey(input);
+      if (key !== null) return key;
+    }
+    return null;
+  }
+  return node.kind === "cut" || node.kind === "restrict" ? groupKey(node.input) : null;
+}
+
 /** Where a violation is reported: an unknown index or type, and a floor
  * where none belongs, at their field; every other rule at its node. */
 function violationPath({ rule, path }: SearchTreeViolation, tree: TreeNode): string {
@@ -113,4 +214,190 @@ function nodeAt(tree: TreeNode, path: string): TreeNode {
     at = (segment === "input" ? at.input : at[segment as "inputs" | "filters"]![Number(segments[++i])]) as typeof at;
   }
   return at;
+}
+
+// ---------------------------------------------------------------------------
+// Listing and running by key
+// ---------------------------------------------------------------------------
+
+/** A named search as the runtime lists it: no tree. */
+export interface NamedSearchListing {
+  key: string;
+  name: string;
+  description: string;
+  /** What it ranks: the unit of its tree's root. */
+  result: "entities" | "passages";
+  /** The root types of the indices it searches that the lens can search,
+   * sorted — what a run's `filter` applies to. */
+  types: string[];
+}
+
+/** A run's request: the query text, and exact conditions as the entity
+ * search's `filter`. */
+export interface NamedSearchRunRequest {
+  query: string;
+  filter?: Record<string, string> | undefined;
+}
+
+/** The lens's named searches, by key, from the schema cache. */
+export async function listNamedSearches(lensKey: string, store: RuntimeStore): Promise<NamedSearchListing[]> {
+  const loaded = await loadSchema(lensKey, store);
+  const searchable = await searchableIndices(loaded, indexStoreOf(store));
+  const byKey = Object.values(loaded.namedSearches).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return byKey.map((search) => {
+    const named = new Set(storedSearchNodes(search.tree).map((node) => node.index));
+    return {
+      key: search.key,
+      name: search.name,
+      description: search.description,
+      result: namedSearchResult(search.tree),
+      types: rootTypes(searchable.filter((index) => named.has(index.key))).sort(),
+    };
+  });
+}
+
+/** Run a named search by key with a query text (module comment). */
+export async function runNamedSearch(
+  lensKey: string,
+  key: string,
+  request: NamedSearchRunRequest,
+  store: RuntimeStore,
+): Promise<EntitySearchResponse | PassageSearchResponse> {
+  const loaded = await loadSchema(lensKey, store);
+  const search = loaded.namedSearches[key];
+  if (search === undefined) throw new NotFoundError(`Named search '${key}' not found`);
+  if (!request.query?.trim()) {
+    throw new ValidationError("Required non-empty query", { fields: { query: "Required non-empty query" } });
+  }
+
+  const searchable = await searchableIndices(loaded, indexStoreOf(store));
+  const compiled = compileNamedSearch(withQuery(search.tree, request.query), {
+    loaded,
+    indices: new Set(searchable.map((index) => index.key)),
+    store,
+  });
+  if (compiled.tree === null) {
+    throw new ValidationError(`Named search '${key}' validation failed`, { errors: compiled.errors });
+  }
+  const nodes = searchNodesOf(compiled.tree);
+  const indices = searchable.filter((index) => nodes.some((node) => node.index === index.key));
+  const types = rootTypes(indices).sort();
+  const limitations: SearchLimitation[] = [];
+
+  let tree = compiled.tree;
+  const filter = request.filter ?? {};
+  if (Object.keys(filter).length > 0) {
+    const filters = typeFilters(loaded, store, filter, types);
+    if (filters === null) {
+      limitations.push({
+        code: "filter-excludes-all-types",
+        message: "No searched entity type declares every filter key",
+        types,
+      });
+      return { ran: [], items: [], limitations };
+    }
+    tree = restrictedUnderCut(tree, filters);
+  }
+
+  const result = await runSearchTree(loaded, indexStoreOf(store), indices, tree);
+  for (const limitation of result.limitations) limitations.push(described(limitation));
+  const ran = ranMethods(nodes, result.limitations);
+  const multiText = new Set(nodes.map((node) => node.text)).size > 1;
+  const picked = result.hits.map(bestMatch);
+  const hits = picked.map((match) => match.hit!);
+
+  if (namedSearchResult(search.tree) === "passages") {
+    const entities = await readPassageEntities(loaded, store, hits, true);
+    const kept = picked.filter((match) => entities.has(match.hit!.entityId));
+    const items = passageSearchItems(loaded, hits, entities, true).map((item, i) =>
+      multiText ? { ...item, passage: { ...item.passage, queryText: kept[i]!.text! } } : item,
+    );
+    return { ran, items, limitations };
+  }
+  const entities = await readHitEntities(loaded, store, hits, null);
+  const kept = picked.filter((match) => entities.has(match.hit!.entityId));
+  const items = (await entitySearchItems(loaded, store, kept.map((match) => match.hit!), entities)).map((item, i) =>
+    multiText ? { ...item, match: { ...item.match, queryText: kept[i]!.text! } } : item,
+  );
+  return { ran, items, limitations };
+}
+
+/** The search nodes of a compiled tree, in tree order. */
+function searchNodesOf(tree: TreeNode): SearchNode[] {
+  if (isSearchNode(tree)) return [tree];
+  switch (tree.kind) {
+    case "merge":
+    case "fuse":
+      return tree.inputs.flatMap(searchNodesOf);
+    case "group":
+    case "cut":
+    case "restrict":
+      return searchNodesOf(tree.input);
+    default:
+      return [];
+  }
+}
+
+/**
+ * The run's `filter` as one filter per type: the conditions of a type
+ * that resolves every key, no entity of one that does not. A key no type
+ * resolves is an error at `filter.<key>`; null when no type is left.
+ */
+function typeFilters(
+  loaded: LoadedSchema,
+  store: RuntimeStore,
+  filter: Record<string, string>,
+  types: string[],
+): FilterNode[] | null {
+  const errors: Record<string, string> = {};
+  const eligible = resolveSearchFilters(
+    filter,
+    types.map((type) => [type, loaded.scoped.entityTypes[type]!]),
+    loaded,
+    store,
+    errors,
+  );
+  if (Object.keys(errors).length > 0) {
+    const fields = Object.fromEntries(Object.entries(errors).map(([key, message]) => [`filter.${key}`, message]));
+    throw new ValidationError(Object.values(fields).join("; "), { fields });
+  }
+  if (eligible.length === 0) return null;
+  return types.map((entityType): FilterNode => {
+    const resolved = eligible.find((type) => type.entityTypeKey === entityType);
+    return resolved === undefined
+      ? { kind: "filter", entityType, conditions: [], ids: [] }
+      : { kind: "filter", entityType, conditions: resolved.conditions, ids: null };
+  });
+}
+
+/** The tree with one restrict of `filters` directly under its root cut,
+ * or around the root when that is no cut — pushed down like every
+ * restrict, AND-ed with the tree's own. */
+function restrictedUnderCut(tree: TreeNode, filters: FilterNode[]): TreeNode {
+  if (tree.kind === "cut") return { ...tree, input: { kind: "restrict", input: tree.input, filters } };
+  return { kind: "restrict", input: tree, filters };
+}
+
+/** The methods that ran on at least one search node, semantic first. */
+function ranMethods(nodes: SearchNode[], limitations: { method: SearchRepresentation; indices: string[] }[]) {
+  return (["semantic", "keyword"] as const).filter((method) =>
+    nodes.some(
+      (node) =>
+        searchMethod(node) === method &&
+        !limitations.some((limitation) => limitation.method === method && limitation.indices.includes(node.index)),
+    ),
+  );
+}
+
+/** What found an item, as a named search answers it: the search with the
+ * best rank in its own text's ranking; equal ranks, the earlier in the
+ * tree. */
+function bestMatch(hit: TreeHit): Provenance {
+  let best: Provenance | undefined;
+  for (const row of hit.provenance) {
+    if (row.hit === null || row.rank === null) continue;
+    if (best === undefined || row.rank < best.rank!) best = row;
+  }
+  if (best === undefined) throw new Error("A named search's item is found by a search");
+  return best;
 }

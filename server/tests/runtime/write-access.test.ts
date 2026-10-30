@@ -145,18 +145,18 @@ describe("the levels and the check", () => {
     expect(() => routeOperation("PUT", "/schema")).toThrow("Route 'PUT /schema' has no row in the operation table");
   });
 
-  it("a level lists the tools whose operation it allows, and a stageable tool from staging up: 35, 34, 19", () => {
+  it("a level lists the tools whose operation it allows, and a stageable tool from staging up: 37, 36, 21", () => {
     const listed = (level: WriteAccess) => Object.keys(TOOLS).filter((name) => listsTool(level, name));
-    expect(listed("full")).toHaveLength(35);
+    expect(listed("full")).toHaveLength(37);
     expect(listed("propose").sort()).toEqual(Object.keys(TOOLS).filter((name) => name !== "commit_changeset").sort());
     expect(listed("none").sort()).toEqual(Object.keys(TOOLS).filter((name) => TOOLS[name]!.operation === "read").sort());
-    expect(listed("none")).toHaveLength(19);
+    expect(listed("none")).toHaveLength(21);
     expect(() => listsTool("full", "nope")).toThrow("Tool 'nope' has no row in the operation table");
   });
 });
 
 describe("the tables cannot drift", () => {
-  it("ROUTES are exactly the routes the ruleset mirror registers (49)", async () => {
+  it("ROUTES are exactly the routes the ruleset mirror registers (51)", async () => {
     const prefix = "/api/ontologies/:ontologyKey/runtime/lenses/:lensKey/rulesets/:rulesetKey";
     const app = Fastify();
     app.setValidatorCompiler(validatorCompiler);
@@ -172,15 +172,15 @@ describe("the tables cannot drift", () => {
     await app.ready();
     await app.close();
     expect([...registered].sort()).toEqual(Object.keys(ROUTES).sort());
-    expect(registered.size).toBe(49);
+    expect(registered.size).toBe(51);
   });
 
-  it("TOOLS are exactly the tools of a ruleset mount at full (35)", async () => {
+  it("TOOLS are exactly the tools of a ruleset mount at full (37)", async () => {
     const client = await connect("agent-a");
     const names = (await client.listTools()).tools.map((tool) => tool.name);
     await client.close();
     expect(names.sort()).toEqual(Object.keys(TOOLS).sort());
-    expect(names).toHaveLength(35);
+    expect(names).toHaveLength(37);
   });
 });
 
@@ -274,6 +274,8 @@ describe("the REST mirror", () => {
     "GET /saved-queries": ["/saved-queries"],
     "GET /saved-queries/search": ["/saved-queries/search?q=ann"],
     "POST /saved-queries/:queryKey/run": ["/saved-queries/q1/run", {}],
+    "GET /named-searches": ["/named-searches"],
+    "POST /named-searches/:searchKey/run": ["/named-searches/n1/run", { query: "ann" }],
     "POST /relations/:relationTypeKey": ["/relations/works_for", { fromEntityId: ID, toEntityId: OTHER }],
     "GET /relations/:relationTypeKey": ["/relations/works_for"],
     "GET /relations/:relationTypeKey/:relationId": [`/relations/works_for/${ID}`],
@@ -324,17 +326,17 @@ describe("the REST mirror", () => {
     return refused;
   }
 
-  it("full answers all 49", async () => {
+  it("full answers all 51", async () => {
     expect(await refusedAt("full")).toEqual([]);
   });
 
-  it("propose refuses the 10 immediate writes and the commit: 38 / 11", async () => {
+  it("propose refuses the 10 immediate writes and the commit: 40 / 11", async () => {
     const refused = await refusedAt("propose");
     expect(refused.map((route) => ROUTES[route])).toEqual([...Array(10).fill("write"), "commit"]);
-    expect(Object.keys(ROUTES).length - refused.length).toBe(38);
+    expect(Object.keys(ROUTES).length - refused.length).toBe(40);
   });
 
-  it("none refuses every write, stage and commit: 29 / 20; the changeset reads still answer", async () => {
+  it("none refuses every write, stage and commit: 31 / 20; the changeset reads still answer", async () => {
     const refused = await refusedAt("none");
     expect(refused).toEqual(Object.keys(ROUTES).filter((route) => ROUTES[route] !== "read"));
     expect(refused).toHaveLength(20);

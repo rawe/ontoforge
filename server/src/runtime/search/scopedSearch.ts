@@ -43,7 +43,7 @@ export interface ScopedSearchRequest {
 
 /** What could not run, or what a named scope could not serve. */
 export interface SearchLimitation {
-  code: Exclude<Limitation["code"], "no-provider"> | "not-searchable" | "filter-excludes-all-types";
+  code: Limitation["code"] | "not-searchable" | "filter-excludes-all-types";
   message: string;
   method?: SearchRepresentation;
   indices?: string[];
@@ -230,12 +230,14 @@ export async function runScopedSearch(
 
 const METHOD_NAMES: Record<SearchRepresentation, string> = { semantic: "Semantic", keyword: "Keyword" };
 
-/** A search node limitation of the tree, as the response tells it. */
-function described({ code, method, indices }: Limitation): SearchLimitation {
-  if (code === "no-provider") throw new Error("Semantic search nodes are compiled only with an embedding provider");
+/** A search node limitation of the tree, as the response tells it. The
+ * entity and passage searches compile semantic search nodes only with an
+ * embedding provider; a named search's run may hold some without one. */
+export function described({ code, method, indices }: Limitation): SearchLimitation {
   const messages: Record<typeof code, string> = {
     "switched-off": `${METHOD_NAMES[method]} search is switched off on these indices`,
     "not-ready": `${METHOD_NAMES[method]} search entries of these indices are not built yet`,
+    "no-provider": `${METHOD_NAMES[method]} search needs an embedding provider; none is installed`,
   };
   return { code, message: messages[code], method, indices };
 }

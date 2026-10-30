@@ -140,6 +140,15 @@ const SavedQueryRunPayload = z.looseObject({
   params: z.record(z.string(), z.unknown()).default({}),
 });
 
+const NamedSearchRunParams = LensParams.extend({ searchKey: z.string() });
+
+/** Named-search run request: the query text and, as the entity search's
+ * `filter`, exact conditions; nothing else. Rules in `runNamedSearch`. */
+const NamedSearchRunPayload = z.strictObject({
+  query: z.string(),
+  filter: z.record(z.string(), z.string()).optional(),
+});
+
 /** `GET /saved-queries/search` — bounds and defaults per
  * `docs/interfaces/`, including the `min_score` snake_case irregularity. */
 const SavedQuerySearchQuery = z.looseObject({
@@ -504,6 +513,30 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
         request.params.lensKey,
         request.params.queryKey,
         request.body.params,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
+  );
+
+  // --- Named searches (runtime: list from the cache, run by key) ---
+
+  app.get(
+    "/named-searches",
+    { schema: { tags: ["runtime"], params: LensParams } },
+    async (request) =>
+      service.listNamedSearches(
+        request.params.lensKey,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.post(
+    "/named-searches/:searchKey/run",
+    { schema: { tags: ["runtime"], params: NamedSearchRunParams, body: NamedSearchRunPayload } },
+    async (request) =>
+      service.runNamedSearch(
+        request.params.lensKey,
+        request.params.searchKey,
+        request.body,
         await getRuntimeStore(request.params.ontologyKey),
       ),
   );

@@ -43,6 +43,19 @@ const SCORES =
   "held plus a tie-breaking fraction below 1; not comparable; no score does not mean that method missed it; the rank " +
   "fuses both, following neither)";
 
+/** A named search's response, as `run_named_search` answers it: the
+ * entity or the passage search's, its semantic scores under the search's
+ * own floors, and `queryText` where the search uses several texts. */
+export const NAMED_SEARCH_RESPONSE =
+  "Returns ran (methods that ran), items and limitations (what could not run: code, message, method, " +
+  `indices, types). Each item has rank (from 1), ${ENTITY} and, by the search's result: entities — ` +
+  "match, the entry that found it: index, part (self, relation or passage), snippet (null if this lens " +
+  "hides it), a relation's relationType and target, a passage's property, charOffset and charLength; " +
+  "passages — passage: property (the document), ordinal, charOffset, charLength and text. Both carry " +
+  "scores (each method that found the entry: semantic, similarity 0 to 1; keyword, query words held " +
+  "plus a fraction below 1; not comparable; no score does not mean that method missed it) and, when " +
+  "the search runs several query texts, queryText: the text that found it.";
+
 /** The entity search's response, as `search` answers it. */
 export const ENTITY_SEARCH_RESPONSE =
   "Returns ran (methods that ran), items and limitations (what could not run: code, message, method, " +

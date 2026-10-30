@@ -324,7 +324,8 @@ the server from starting: the server must remain available to finish the repair.
 The full contract is in [../interfaces/](../interfaces/README.md). REST
 `POST /search/entities` is the [entity search](#entity-search), `POST /search/passages`
 the [passage search](#passage-search), and `GET /search-indices` the catalog. A
-saved-query search step runs the entity search ([saved-queries.md](saved-queries.md)).
+saved-query search step runs the entity search ([saved-queries.md](saved-queries.md)). A
+[named search](named-searches.md) stores a search tree of its own and runs it by key.
 
 The MCP and agent tool `search` runs the entity search, `search_documents` the passage
 search, each answering with that search's response. They take its scope, filters and

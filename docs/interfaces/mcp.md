@@ -48,7 +48,7 @@ otherwise, reads included.
 | Tool | Purpose |
 |---|---|
 | `ensure_ontology` | Create the ontology this mount is bound to if it does not exist yet; no-op if it does. Argument-less — it acts only on the mount's own ontology — and reports the key and whether it created. A created ontology starts bare and without a display name; naming is a REST/UI operation. With authentication on it creates nothing |
-| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries, retrievers and navigators. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
+| `get_schema` | The ontology's whole design — types, relation types, properties, the keyword language set, the custom search indices and the switched-off managed ones, and every lens with its type inclusions, its search-index inclusions (`indexInclusions`), agents, saved queries, named searches, retrievers and navigators. Identical to `export_schema`, and the only way to enumerate lenses: there is no `list_lenses` |
 | `create_entity_type` | Add an entity type together with its name property (`name_property`, default `name`), optionally with an identity (`identity_properties`) |
 | `update_entity_type` | Change display name, description, name property (`name_property`) or identity (`identity_properties`; null clears it); the key is immutable |
 | `delete_entity_type` | Remove an entity type and its properties |
@@ -92,6 +92,9 @@ otherwise, reads included.
 | `list_saved_queries` | List a lens's saved queries |
 | `set_saved_query` | Create or replace a saved query pipeline |
 | `delete_saved_query` | Delete a saved query |
+| `list_named_searches` | List a lens's named searches, each with its tree |
+| `set_named_search` | Create or replace a named search from a `tree` in the REST wire format; every violation is refused in one message |
+| `delete_named_search` | Delete a named search, by `search_key` |
 
 The per-lens tools take a `lens_key` naming a lens of the bound ontology.
 `create_entity_type`, `update_entity_type`, `add_property`, `delete_property`, `delete_entity_type`,
@@ -132,6 +135,8 @@ Everything a client can do to instance data through one lens.
 | `list_saved_queries` | Discover saved queries and their parameters |
 | `run_saved_query` | Execute a saved query with parameter values |
 | `search_saved_queries` | Find a saved query by describing what it should do |
+| `list_named_searches` | List the lens's named searches: key, name, description, result and types |
+| `run_named_search` | Run a named search by `key` with a `query` and optional `filters`; answers the entity or the passage search's response |
 | `start_changeset` | Start a changeset, with an optional `note` |
 | `list_changesets` | The changesets this mount reaches |
 | `get_changeset` | A changeset with its staged objects by first touch |

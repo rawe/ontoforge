@@ -71,7 +71,7 @@ Provide, in this order:
 4. **Constraints and indexes.** Everything under the uniqueness obligation — the
    server-wide part at initialization, the per-ontology part at registry create.
 5. **The schema side.** Lenses, types, properties, inclusions, full-schema retrieval,
-   agents, saved queries and the navigator store. Nothing on the data side is useful
+   agents, saved queries, named searches and the navigator store. Nothing on the data side is useful
    until the schema can be read back.
 6. **The data side.** Entities, relations, traversal, the hierarchy operations, the
    commit reads, the ruleset store, units of work and the changeset store.

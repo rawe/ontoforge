@@ -87,6 +87,10 @@ does not interpret them. A saved query also accepts an embedding of its descript
 the key of its owning lens alongside it, so that a search over descriptions can be
 narrowed to one lens without a join.
 
+**Named-search storage.** A named search belongs to a lens and is addressed by key within
+it: list for a lens, upsert — reporting whether it created or updated — and delete. It
+carries name, description and its tree as JSON the store does not interpret.
+
 **Design changes.** The modeling store runs a unit of work as one design change: one
 transaction that holds the ontology's design exclusively — data writes and other design
 changes wait for it — and advances the ontology's [design revision](contract.md#the-design-revision),
@@ -103,10 +107,11 @@ index operations under obligations, below.
 ## Data side
 
 **Schema reading.** The runtime side reads the schema for itself rather than calling the
-modeling side. The runtime store exposes three operations, each keyed by lens key within
+modeling side. The runtime store exposes four operations, each keyed by lens key within
 its binding. One returns the full schema together with the lens and its inclusion rows,
-one returns the lens's agent configurations, and one returns the lens's saved queries. The
-caller uses the inclusion rows to compute the scoped schema. The first also carries the
+one returns the lens's agent configurations, one returns the lens's saved queries, and one
+returns the lens's named searches — key, name, description and the tree as stored — in key
+order. The caller uses the inclusion rows to compute the scoped schema. The first also carries the
 keys of the search indices the lens includes, in key order, and the design revision of the
 same snapshot. The first returns nothing at all when no lens has that key, which is how an unknown lens
 is detected. The runtime store also exposes the ontology key it is bound to, because the

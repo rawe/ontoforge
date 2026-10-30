@@ -60,8 +60,8 @@ address keeps ontologies apart: [architecture.md](../architecture.md#ontology-is
 
 Modeling REST does **not** nest types under a lens. Entity types, relation types and
 their properties are resources of the ontology, at the top level of its modeling
-surface. Scope inclusions, agent configurations, saved queries, retrievers and
-navigators are addressed per lens.
+surface. Scope inclusions, agent configurations, saved queries, named searches, retrievers
+and navigators are addressed per lens.
 
 ### What a path segment identifies
 
@@ -72,7 +72,7 @@ This is the single most common source of mistakes against the modeling surface.
 | Registry | Ontology key |
 | Runtime REST, everywhere | Keys — ontology key, lens key, ruleset key, type key, property key; instance ids for entities and relations, or an entity's [identity](../capabilities/entity-identity.md) on the identity twin of an entity route |
 | Modeling REST — lenses, entity types, relation types, properties, inclusions | **Internal identifiers**, not keys |
-| Modeling REST — agent configs, saved queries, retrievers, navigators | Lens key and the resource key |
+| Modeling REST — agent configs, saved queries, named searches, retrievers, navigators | Lens key and the resource key |
 | Modeling REST — search indices | Index key — managed keys included, which carry `~` |
 | Both MCP servers | Keys only |
 

@@ -4,9 +4,9 @@ OntoForge is a graph-native ontology studio. You design a graph schema, then use
 through generic, schema-driven APIs — no per-schema code is written or generated.
 
 One server holds many **ontologies** — totally isolated units, each with its own schema,
-lenses, saved queries, assistants and instance data. Within an ontology the system has two
-halves. **Modeling** designs that ontology's schema. **Runtime** reads and writes its
-instance data through one lens. Both run in one server and are reachable over REST, over
+lenses, saved queries, named searches, assistants and instance data. Within an ontology
+the system has two halves. **Modeling** designs that ontology's schema. **Runtime** reads
+and writes its instance data through one lens. Both run in one server and are reachable over REST, over
 MCP, and through a web UI. Ontologies share an ontology database; with authentication on,
 a separate access database holds principals and their access assignments.
 

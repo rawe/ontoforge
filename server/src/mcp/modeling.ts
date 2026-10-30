@@ -297,7 +297,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "Get the current state of the ontology's schema. Returns all entity types, " +
         "relation types, and their properties, the keyword language set, the search " +
         "indices (custom definitions and switched-off managed indices) and the lenses with " +
-        "their type and search-index inclusions, assistants (agents, retrievers and navigators) and saved queries.",
+        "their type and search-index inclusions, assistants (agents, retrievers and navigators), saved queries and named searches.",
       inputSchema: {},
     },
     wrap("get_schema", async () => {
@@ -685,7 +685,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         `Export the full schema in the OntoForge v${TRANSFER_FORMAT_VERSION} transfer format ` +
         "(JSON), including the keyword language set, the search indices and each lens's " +
-        "assistants (agents, retrievers and navigators) and saved queries.",
+        "assistants (agents, retrievers and navigators), saved queries and named searches.",
       inputSchema: {},
     },
     wrap("export_schema", async () => {
@@ -977,7 +977,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "delete_lens",
     {
       description:
-        "Delete a lens, with its agents, saved queries and changesets (changes staged and not yet committed). " +
+        "Delete a lens, with its agents, saved queries, named searches and changesets (changes staged and not yet committed). " +
         "Does not affect the schema, the instance data or other lenses. The result states how many changesets were deleted.",
       inputSchema: {
         lens_key: z.string(),

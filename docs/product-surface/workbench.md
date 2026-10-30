@@ -190,8 +190,9 @@ Two tabs — Console and Library — which both stay live, so results survive a 
 
 ## Advanced search
 
-The entity search and the passage search in one form, with scope, methods and filter, and
-their results. See [Advanced search](finding-and-collecting.md#advanced-search).
+The entity search and the passage search in one form, with scope, methods and filter, the
+lens's named searches run by key, and their results. See
+[Advanced search](finding-and-collecting.md#advanced-search).
 
 ## Rulesets
 

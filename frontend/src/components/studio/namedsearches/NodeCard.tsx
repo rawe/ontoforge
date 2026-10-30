@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { MoreHorizontal, Plus, X } from 'lucide-react'
 import type { SearchCatalogEntry, SearchPartKind, SearchTreeNode } from '@/api/types'
 import { TypeDot } from '@/components/TypeChip'
+import { IndexExplainerButton } from '@/components/search/explainer/IndexExplainer'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -308,6 +309,10 @@ function NodeFields({
                 )
               })}
             </div>
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+              self: own fields · relation: one relation · passage: one chunk of a document — only the parts this index makes.
+              <IndexExplainerButton labeled parts className="h-6 px-2 text-[11px]" />
+            </p>
           </Field>
           {node.relations !== undefined && (
             <p className="text-[11px] text-muted-foreground sm:col-span-2">

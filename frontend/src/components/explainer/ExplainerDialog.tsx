@@ -44,6 +44,8 @@ interface ExplainerDialogProps<Step extends ExplainerStep> {
   playMs?: number
   /** The step's body is this many lines high beside the controls, so the step bar keeps one height; a longer body scrolls. */
   bodyLines?: number
+  /** The step it opens on, such as the one a page points to; the first by default. */
+  start?: number
 }
 
 const microLabel = 'text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'
@@ -61,15 +63,16 @@ export function ExplainerDialog<Step extends ExplainerStep>(props: ExplainerDial
 }
 
 function ExplainerPanel<Step extends ExplainerStep>({
-  story, label, diagram, children, tag, aside, playMs = 5000, bodyLines = 3,
+  story, label, diagram, children, tag, aside, playMs = 5000, bodyLines = 3, start = 0,
 }: ExplainerDialogProps<Step>) {
   const { title, icon: Icon, summary, facts, steps } = story
-  const [state, setState] = useState(FIRST_STEP)
-  const [told, setTold] = useState(story)
-  if (told !== story) { setTold(story); setState(FIRST_STEP) }
-  const shown = told === story ? state : FIRST_STEP
-  const { index } = shown
   const last = steps.length - 1
+  const first = start === 0 ? FIRST_STEP : goTo(start, last)
+  const [state, setState] = useState(first)
+  const [told, setTold] = useState(story)
+  if (told !== story) { setTold(story); setState(first) }
+  const shown = told === story ? state : first
+  const { index } = shown
   const step = steps[index]
 
   const running = isRunning(shown, last)

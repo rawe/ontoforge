@@ -13,6 +13,7 @@ import {
 } from '@/api/searchIndexHooks'
 import type { EntityType, KeywordLanguage, SearchIndexRecord } from '@/api/types'
 import { PageHeader } from '@/components/PageHeader'
+import { IndexExplainerButton } from '@/components/search/explainer/IndexExplainer'
 import { TypeChip } from '@/components/TypeChip'
 import {
   countFields,
@@ -154,6 +155,12 @@ function IndexTables({
 
   return (
     <div className="grid gap-6">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <IndexExplainerButton labeled />
+        <p className="text-[12px] text-muted-foreground">
+          What an index holds — its entries and their parts — and how a search uses them.
+        </p>
+      </div>
       <section className="space-y-2.5">
         <h2 className="flex items-center gap-2 text-[13px] font-semibold">
           Custom indices

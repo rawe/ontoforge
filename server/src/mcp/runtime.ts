@@ -1169,8 +1169,8 @@ export function createRuntimeMcpServer(
       description:
         "Rank document passages for a text, best first; a passage is a chunk of one entity's document. " +
         SEARCH_QUERY_RULE + " " +
-        "Scope, at most one of: types (entity type keys: all their documents), documents ('type.property', " +
-        "e.g. \"person.bio\") or indices (document indices' keys from list_search_indices); none: " +
+        "Scope, at most one of: types (entity type keys: all their documents), documents ('type.property') " +
+        "or indices (document indices' keys from list_search_indices); none: " +
         "every document of the lens. " +
         filterRules({ contains: false, relations: true }) +
         " They apply to the document's entity. " + SEARCH_FILTER_EFFECT + " " +

@@ -40,7 +40,7 @@ const ENTITY = "entity (_id, _entityTypeKey, name; identity if its type has one)
 /** What an entry's scores are, in both responses. */
 const SCORES =
   `scores (each method that found it: semantic, similarity ${TOOL_MIN_SIMILARITY} to 1; keyword, query words ` +
-  "held plus a tie-breaking fraction below 1; not comparable; a missing score says nothing; the rank " +
+  "held plus a tie-breaking fraction below 1; not comparable; no score does not mean that method missed it; the rank " +
   "fuses both, following neither)";
 
 /** The entity search's response, as `search` answers it. */

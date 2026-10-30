@@ -236,8 +236,7 @@ There are exactly ten top-level codes:
 Four refinements:
 
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
-stays one of the ten. A search with a `semantic` block and no embedding provider, a search tool with no
-available strategy, saved-query discovery with no embedding provider, an AI request with no
+stays one of the ten. A search with a `semantic` block and no embedding provider, saved-query discovery with no embedding provider, an AI request with no
 language-model provider configured answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
 An assistant thread that is unknown, expired, bound to another assistant or started by
 another principal answers `404 RESOURCE_NOT_FOUND` with `details.code` of

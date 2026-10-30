@@ -545,6 +545,27 @@ describe("the executor", () => {
     ]);
   });
 
+  it("an item's texts keep their order in the tree, by each one's first group, whichever branch found it", async () => {
+    rank.mockImplementation(async (query) =>
+      (lists[`${query.generationId}${query.text === undefined ? "" : ` ${query.text}`}`] ?? []).slice(0, query.limit),
+    );
+    // x's first group finds nothing; e is first in x and in y.
+    lists["company~default/keyword x"] = [];
+    lists["person~default/keyword y"] = [entry("e", 1)];
+    lists["person~default/keyword x"] = [entry("e", 2)];
+    const [hit] = await runTree(
+      fuse(
+        cut(group(kw("company~default", "x"))),
+        cut(group(kw("person~default", "y"))),
+        cut(group(kw("person~default", "x"))),
+      ),
+    );
+    expect(hit!.provenance.map((row) => [row.text, row.rank])).toEqual([
+      ["x", 1],
+      ["y", 1],
+    ]);
+  });
+
   it("a text's matched entry takes the score of every method that fetched it, whatever entry the method matched", async () => {
     lists["person~default/semantic"] = [entry("e", 0.9), entry("e", 0.8, "r")];
     lists["person~default/keyword"] = [entry("e", 4, "r"), entry("e", 3)];

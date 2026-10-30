@@ -325,6 +325,8 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
   const groups: { search: SearchNode; ranking: ModeRanking<FoundEntry> }[] = [];
   let fusedItems = false;
   const textRankings = new Map<string, TextRanking>();
+  // Each sub-query and query text in tree order, by its first group.
+  const textOrder: string[] = [];
   // The document each search node's index reads, once.
   const documents = new Map<number, string | null>();
   const documentOf = (search: number) => {
@@ -380,7 +382,11 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
       case "group": {
         const input = entriesOf(combine(node.input));
         const ranking = { representation: input.method, entries: input.entries };
-        if (input.ran) groups.push({ search: searchNodeOf(node.input), ranking });
+        const search = searchNodeOf(node.input);
+        if (!textOrder.includes(textKey(search.subQuery ?? null, search.text))) {
+          textOrder.push(textKey(search.subQuery ?? null, search.text));
+        }
+        if (input.ran) groups.push({ search, ranking });
         return grouped(node.key, [ranking], [textOf(node.input)], input.ran);
       }
       case "fuse": {
@@ -448,18 +454,18 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
   if (!fusedItems || root.unit !== "items") return { root, counts };
   return { root: { ...root, items: root.items.map((item) => ({ ...item, provenance: byOwnText(item) })) }, counts };
 
-  /** An item's provenance, one per sub-query and query text: the hit and
-   * rank of that text's ranking alone — every group's ranking of it in
-   * the tree, its methods fused — whatever branches they were cut in. */
+  /** An item's provenance, one per sub-query and query text in tree
+   * order: the hit and rank of that text's ranking alone — every group's
+   * ranking of it in the tree, its methods fused — whatever branches they
+   * were cut in. Listed rows follow. */
   function byOwnText(item: Item): Provenance[] {
     const provenance: Provenance[] = [];
     const done = new Set<string>();
-    for (const row of item.provenance) {
-      if (row.hit === null) {
-        provenance.push(row);
-        continue;
-      }
-      const text = `${row.subQuery}\u0000${row.text}`;
+    const place = (row: Provenance) => textOrder.indexOf(textKey(row.subQuery, row.text!));
+    const rows = item.provenance.filter((row) => row.hit !== null).sort((a, b) => place(a) - place(b));
+    const listed = item.provenance.filter((row) => row.hit === null);
+    for (const row of rows) {
+      const text = textKey(row.subQuery, row.text!);
       if (done.has(text)) continue;
       done.add(text);
       const { rankings, ranked } = textRanking(row.subQuery, row.text!);
@@ -471,11 +477,11 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
       const hit = toEngineHit(own.hit, searches, rankings, entityOf);
       provenance.push({ ...row, hit, rank: own.rank });
     }
-    return provenance;
+    return [...provenance, ...listed];
   }
 
   function textRanking(subQuery: number | null, text: string) {
-    const key = `${subQuery}\u0000${text}`;
+    const key = textKey(subQuery, text);
     let found = textRankings.get(key);
     if (found === undefined) {
       const rankings = groups
@@ -490,6 +496,8 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
 }
 
 const entityOf = (entry: FoundEntry) => entry.entityId;
+
+const textKey = (subQuery: number | null, text: string) => `${subQuery}\u0000${text}`;
 
 /** At most `cap` items per entity, in rank order; no cap: all. */
 function perEntity<T extends { entityId: string }>(items: readonly T[], cap: number | undefined): T[] {

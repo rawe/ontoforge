@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowDown,
@@ -12,11 +12,13 @@ import {
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useFeatures, useRuntimeSchema, useSearchCatalog } from '@/api/hooks'
 import * as model from '@/api/model'
 import * as runtime from '@/api/runtime'
 import { qk } from '@/api/queryKeys'
 import type {
   DataType,
+  EntitySearchResponse,
   JsonValue,
   Lens,
   QueryResult,
@@ -24,8 +26,9 @@ import type {
   SavedQueryParameter,
   SavedQueryStep,
 } from '@/api/types'
+import { isEntitySearchResponse } from '@/components/advancedsearch/searchModel'
+import { EntitySearchResult } from '@/components/advancedsearch/SearchResults'
 import { EmptyState } from '@/components/EmptyState'
-import { TypeDot } from '@/components/TypeChip'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,6 +41,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -65,47 +69,60 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
+import { getTypeColor } from '@/lib/typeColors'
+import { cn } from '@/lib/utils'
 import { TypedValueInput } from './TypedValueInput'
 import { PARAMETER_DATA_TYPES, coerceTypedValue, deriveKey, invalidateModeling, isValidLensResourceKey, toastError } from './lib'
 import { KeyField } from './shared'
 
-/* ------------------------------ bindings editor ------------------------------ */
+/* --------------------------------- map editor -------------------------------- */
 
-function BindingsEditor({
-  bindings,
+/** Rows of key = value — a step's bindings or a search step's filter. */
+function MapEditor({
+  label,
+  entries: map,
+  keyPlaceholder,
+  valuePlaceholder,
+  addLabel,
+  hint,
   onChange,
 }: {
-  bindings: Record<string, string>
-  onChange: (bindings: Record<string, string>) => void
+  label: string
+  entries: Record<string, string>
+  keyPlaceholder: string
+  valuePlaceholder: string
+  addLabel: string
+  hint: ReactNode
+  onChange: (entries: Record<string, string>) => void
 }) {
-  const entries = Object.entries(bindings)
+  const entries = Object.entries(map)
   const update = (index: number, k: string, v: string) => {
     const next = entries.map((e, i) => (i === index ? ([k, v] as const) : e))
     onChange(Object.fromEntries(next))
   }
   return (
     <div className="grid gap-1.5">
-      <span className="text-xs font-medium text-muted-foreground">Bindings</span>
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
       {entries.map(([k, v], i) => (
         <div key={i} className="flex items-center gap-1.5">
           <Input
             value={k}
             onChange={(e) => update(i, e.target.value, v)}
-            placeholder="param"
+            placeholder={keyPlaceholder}
             className="h-7 flex-1 font-mono text-xs"
           />
           <span className="text-muted-foreground">=</span>
           <Input
             value={v}
             onChange={(e) => update(i, k, e.target.value)}
-            placeholder="{{stepName.field}}"
+            placeholder={valuePlaceholder}
             className="h-7 flex-[2] font-mono text-xs"
           />
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
-            aria-label="Remove binding"
+            aria-label={`Remove ${label.toLowerCase()} row`}
             onClick={() => onChange(Object.fromEntries(entries.filter((_, j) => j !== i)))}
           >
             <X className="size-3" />
@@ -113,19 +130,190 @@ function BindingsEditor({
         </div>
       ))}
       <div>
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          onClick={() => onChange({ ...bindings, '': '' })}
-        >
-          <Plus className="size-3" /> Add binding
+        <Button type="button" variant="outline" size="xs" onClick={() => onChange({ ...map, '': '' })}>
+          <Plus className="size-3" /> {addLabel}
         </Button>
       </div>
-      <p className="text-[11px] text-muted-foreground">
-        Reference results of earlier steps with{' '}
-        <code className="font-mono">{'{{stepName.field}}'}</code>.
-      </p>
+      <p className="text-[11px] text-muted-foreground">{hint}</p>
+    </div>
+  )
+}
+
+/* ------------------------------ search step fields ----------------------------- */
+
+/** Chips that toggle keys in or out of a list. */
+function KeyChips({
+  label,
+  choices,
+  selected,
+  onToggle,
+}: {
+  label: string
+  choices: readonly { key: string; typeKey: string }[]
+  selected: readonly string[]
+  onToggle: (key: string) => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <span className="w-14 text-[11px] text-muted-foreground">{label}</span>
+      {choices.map((c) => {
+        const on = selected.includes(c.key)
+        const color = getTypeColor(c.typeKey)
+        return (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => onToggle(c.key)}
+            aria-pressed={on}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono text-[11px] transition-opacity',
+              color.chip,
+              !on && 'opacity-40 hover:opacity-70',
+            )}
+          >
+            <span className={cn('size-1.5 rounded-full', color.dot)} aria-hidden />
+            {c.key}
+          </button>
+        )
+      })}
+      {choices.length === 0 && <span className="text-[11px] text-muted-foreground">none in this lens</span>}
+    </div>
+  )
+}
+
+/** The entity search fields of a search step: text, scope, methods, filter, limit. */
+function SearchStepFields({
+  step,
+  entityTypeKeys,
+  indices,
+  semanticAvailable,
+  onChange,
+}: {
+  step: SavedQueryStep
+  entityTypeKeys: string[]
+  indices: readonly { key: string; typeKey: string }[]
+  semanticAvailable: boolean
+  onChange: (patch: Partial<SavedQueryStep>) => void
+}) {
+  const toggled = (list: string[] | null | undefined, key: string) => {
+    const current = list ?? []
+    const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key]
+    return next.length === 0 ? undefined : next
+  }
+  return (
+    <div className="grid gap-2">
+      <div className="grid gap-1">
+        <Label className="text-xs">Search text</Label>
+        <Input
+          value={step.query ?? ''}
+          onChange={(e) => onChange({ query: e.target.value })}
+          placeholder="what to search for ($params allowed)"
+          className="h-7 text-xs"
+        />
+      </div>
+      <div className="grid gap-1">
+        <Label className="text-xs">Scope</Label>
+        <KeyChips
+          label="Types"
+          choices={entityTypeKeys.map((key) => ({ key, typeKey: key }))}
+          selected={step.types ?? []}
+          onToggle={(key) => onChange({ types: toggled(step.types, key), indices: undefined })}
+        />
+        <KeyChips
+          label="Indices"
+          choices={indices}
+          selected={step.indices ?? []}
+          onToggle={(key) => onChange({ indices: toggled(step.indices, key), types: undefined })}
+        />
+        <p className="text-[11px] text-muted-foreground">
+          Types or indices, not both. None chosen: every type the lens shows is searched.
+        </p>
+      </div>
+      <div className="grid gap-1">
+        <Label className="text-xs">Methods</Label>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 text-xs">
+              <Checkbox
+                checked={step.keyword != null}
+                onCheckedChange={(checked) =>
+                  onChange({ keyword: checked === true ? { match: 'any' } : undefined })
+                }
+              />
+              Keyword
+            </label>
+            <Select
+              value={step.keyword?.match ?? 'any'}
+              onValueChange={(match) => onChange({ keyword: { match: match as 'any' | 'all' } })}
+              disabled={step.keyword == null}
+            >
+              <SelectTrigger className="h-7 w-36 text-xs" aria-label="Keyword match">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="any">match any word</SelectItem>
+                <SelectItem value="all">match all words</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {(semanticAvailable || step.semantic != null) && (
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-2 text-xs">
+                <Checkbox
+                  checked={step.semantic != null}
+                  onCheckedChange={(checked) => onChange({ semantic: checked === true ? {} : undefined })}
+                />
+                Semantic
+              </label>
+              <Input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={step.semantic?.minSimilarity ?? ''}
+                onChange={(e) =>
+                  onChange({
+                    semantic:
+                      e.target.value === '' ? {} : { minSimilarity: Number(e.target.value) },
+                  })
+                }
+                disabled={step.semantic == null}
+                placeholder="no floor"
+                aria-label="Minimum similarity"
+                className="h-7 w-28 text-xs"
+              />
+            </div>
+          )}
+        </div>
+        {step.keyword == null && step.semantic == null && (
+          <p className="text-[11px] text-muted-foreground">
+            None checked: the server runs what can run.
+          </p>
+        )}
+      </div>
+      <MapEditor
+        label="Filter"
+        entries={step.filter ?? {}}
+        keyPlaceholder="key, e.g. year__gte"
+        valuePlaceholder="value"
+        addLabel="Add condition"
+        hint="Exact conditions, all must hold; a type that lacks a key is left out."
+        onChange={(filter) => onChange({ filter: Object.keys(filter).length === 0 ? undefined : filter })}
+      />
+      <div className="grid w-32 gap-1">
+        <Label className="text-xs">Limit</Label>
+        <Input
+          type="number"
+          min={1}
+          max={100}
+          value={step.limit ?? ''}
+          onChange={(e) =>
+            onChange({ limit: e.target.value === '' ? undefined : Number(e.target.value) })
+          }
+          className="h-7 text-xs"
+          placeholder="10"
+        />
+      </div>
     </div>
   )
 }
@@ -137,6 +325,8 @@ function StepEditor({
   index,
   count,
   entityTypeKeys,
+  indices,
+  semanticAvailable,
   onChange,
   onMove,
   onRemove,
@@ -145,6 +335,8 @@ function StepEditor({
   index: number
   count: number
   entityTypeKeys: string[]
+  indices: readonly { key: string; typeKey: string }[]
+  semanticAvailable: boolean
   onChange: (patch: Partial<SavedQueryStep>) => void
   onMove: (dir: -1 | 1) => void
   onRemove: () => void
@@ -227,65 +419,32 @@ function StepEditor({
       )}
 
       {step.type === 'search' && (
-        <div className="grid gap-2">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="grid gap-1">
-              <Label className="text-xs">Entity type</Label>
-              <Select
-                value={step.entityTypeKey ?? ''}
-                onValueChange={(v) => onChange({ entityTypeKey: v })}
-              >
-                <SelectTrigger className="h-7 w-full text-xs">
-                  <SelectValue placeholder="Select type…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {entityTypeKeys.map((key) => (
-                    <SelectItem key={key} value={key}>
-                      <span className="flex items-center gap-1.5">
-                        <TypeDot typeKey={key} />
-                        <span className="font-mono text-xs">{key}</span>
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-1">
-              <Label className="text-xs">Query text</Label>
-              <Input
-                value={step.query ?? ''}
-                onChange={(e) => onChange({ query: e.target.value })}
-                placeholder="what to search for ($params allowed)"
-                className="h-7 text-xs"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="grid gap-1">
-              <Label className="text-xs">Limit</Label>
-              <Input
-                type="number"
-                min={1}
-                max={100}
-                value={step.limit ?? ''}
-                onChange={(e) =>
-                  onChange({
-                    limit: e.target.value === '' ? undefined : Number(e.target.value),
-                  })
-                }
-                className="h-7 text-xs"
-                placeholder="10"
-              />
-            </div>
-
-          </div>
-        </div>
+        <SearchStepFields
+          step={step}
+          entityTypeKeys={entityTypeKeys}
+          indices={indices}
+          semanticAvailable={semanticAvailable}
+          onChange={onChange}
+        />
       )}
 
       {index > 0 && (
         <div className="mt-2 border-t pt-2">
-          <BindingsEditor
-            bindings={step.bindings ?? {}}
+          <MapEditor
+            label="Bindings"
+            entries={step.bindings ?? {}}
+            keyPlaceholder="param"
+            valuePlaceholder="{{stepName.field}}"
+            addLabel="Add binding"
+            hint={
+              <>
+                Reference results of earlier steps with{' '}
+                <code className="font-mono">{'{{stepName.field}}'}</code>; a search step
+                yields <code className="font-mono">_id</code>,{' '}
+                <code className="font-mono">_entityTypeKey</code> and{' '}
+                <code className="font-mono">name</code>.
+              </>
+            }
             onChange={(bindings) =>
               onChange({
                 bindings: Object.keys(bindings).length === 0 ? undefined : bindings,
@@ -325,6 +484,11 @@ function SavedQueryDialog({
     queryFn: () => model.listEntityTypes(ontologyKey),
   })
   const entityTypeKeys = (entityTypesQuery.data ?? []).map((t) => t.key)
+  const indices = (useSearchCatalog(ontologyKey, lensKey, open).data ?? []).map((i) => ({
+    key: i.key,
+    typeKey: i.entityType,
+  }))
+  const semanticAvailable = useFeatures().data?.semanticSearch === true
 
   const [key, setKey] = useState('')
   const [keyTouched, setKeyTouched] = useState(false)
@@ -364,11 +528,18 @@ function SavedQueryDialog({
       if (s.type === 'oql') {
         base.oql = s.oql ?? ''
       } else {
-        base.entityTypeKey = s.entityTypeKey
         base.query = s.query ?? ''
-        if (s.limit !== undefined) base.limit = s.limit
+        if (s.types != null && s.types.length > 0) base.types = s.types
+        if (s.indices != null && s.indices.length > 0) base.indices = s.indices
+        if (s.keyword != null) base.keyword = s.keyword
+        if (s.semantic != null) base.semantic = s.semantic
+        const filter = Object.fromEntries(
+          Object.entries(s.filter ?? {}).filter(([k]) => k.trim() !== ''),
+        )
+        if (Object.keys(filter).length > 0) base.filter = filter
+        if (s.limit != null) base.limit = s.limit
       }
-      if (i > 0 && s.bindings !== undefined && Object.keys(s.bindings).length > 0) {
+      if (i > 0 && s.bindings != null && Object.keys(s.bindings).length > 0) {
         base.bindings = s.bindings
       }
       return base
@@ -397,7 +568,7 @@ function SavedQueryDialog({
       s.name.trim() !== '' &&
       (s.type === 'oql'
         ? (s.oql ?? '').trim() !== ''
-        : (s.entityTypeKey ?? '') !== '' && (s.query ?? '').trim() !== ''),
+        : (s.query ?? '').trim() !== ''),
   )
   const paramsValid = parameters.every((p) => p.name.trim() !== '')
   const valid =
@@ -480,13 +651,7 @@ function SavedQueryDialog({
                   onClick={() =>
                     setSteps((prev) => [
                       ...prev,
-                      {
-                        name: `step${prev.length + 1}`,
-                        type: 'search',
-                        entityTypeKey: entityTypeKeys[0] ?? '',
-                        query: '',
-                        limit: 10,
-                      },
+                      { name: `step${prev.length + 1}`, type: 'search', query: '', limit: 10 },
                     ])
                   }
                 >
@@ -501,6 +666,8 @@ function SavedQueryDialog({
                 index={i}
                 count={steps.length}
                 entityTypeKeys={entityTypeKeys}
+                indices={indices}
+                semanticAvailable={semanticAvailable}
                 onChange={(patch) => updateStep(i, patch)}
                 onMove={(dir) => moveStep(i, dir)}
                 onRemove={() => setSteps((prev) => prev.filter((_, j) => j !== i))}
@@ -633,9 +800,10 @@ function SavedQueryRunner({
   query: SavedQuery
 }) {
   const [raw, setRaw] = useState<Record<string, string>>({})
-  const [result, setResult] = useState<QueryResult | null>(null)
+  const [result, setResult] = useState<QueryResult | EntitySearchResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showRaw, setShowRaw] = useState(false)
+  const schema = useRuntimeSchema(ontologyKey, lensKey).data
 
   const run = useMutation({
     mutationFn: () => {
@@ -685,9 +853,11 @@ function SavedQueryRunner({
         </Button>
         {result !== null && (
           <>
-            <span className="text-xs text-muted-foreground">
-              {result.results.length} row{result.results.length === 1 ? '' : 's'}
-            </span>
+            {!isEntitySearchResponse(result) && (
+              <span className="text-xs text-muted-foreground">
+                {result.results.length} row{result.results.length === 1 ? '' : 's'}
+              </span>
+            )}
             <Button variant="ghost" size="xs" onClick={() => setShowRaw((s) => !s)}>
               <Braces className="size-3" /> {showRaw ? 'Table' : 'Raw JSON'}
             </Button>
@@ -704,7 +874,17 @@ function SavedQueryRunner({
           {JSON.stringify(result, null, 2)}
         </pre>
       )}
-      {result !== null && !showRaw && (
+      {result !== null && !showRaw && isEntitySearchResponse(result) && schema !== undefined && (
+        <div className="max-h-80 overflow-auto">
+          <EntitySearchResult
+            ontologyKey={ontologyKey}
+            lensKey={lensKey}
+            schema={schema}
+            response={result}
+          />
+        </div>
+      )}
+      {result !== null && !showRaw && !isEntitySearchResponse(result) && (
         <div className="max-h-80 overflow-auto rounded-lg border bg-card">
           {result.results.length === 0 ? (
             <p className="p-4 text-center text-xs text-muted-foreground">No rows.</p>

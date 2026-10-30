@@ -367,7 +367,9 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
     description:
       "Execute a saved query by key with parameter values. " +
       "Use list_saved_queries first to discover available queries and " +
-      "their required parameters.",
+      "their required parameters. Answers with the last step's output: {columns, results} " +
+      "for an oql step; for a search step {ran, items, limitations}, each item a rank, the " +
+      "found entity (_id, _entityTypeKey, name) and the entry that matched.",
     schema: z.object({
       query_key: z.string(),
       params: z.record(z.string(), z.unknown()).nullish(),

@@ -297,7 +297,7 @@ search caller.
 **Search tool / document search tool** — `search` / `search_documents`, choosing both kinds
 or documents only, with the default strategy.
 
-**Search step** — a saved-query step running default search over one required type.
+**Search step** — a saved-query step running the entity search.
 
 **Saved query** — a stored, named, parameterized pipeline of one or more query steps.
 Discoverable by listing or by searching descriptions, so a client can find a suitable

@@ -284,7 +284,8 @@ export const runSavedQuery = (
   queryKey: string,
   params: Record<string, JsonValue>,
 ) =>
-  request<QueryResult>(`${base(ontologyKey, lensKey)}/saved-queries/${queryKey}/run`, {
+  // The last step's output: OQL rows, or an entity search response.
+  request<QueryResult | EntitySearchResponse>(`${base(ontologyKey, lensKey)}/saved-queries/${queryKey}/run`, {
     method: 'POST',
     body: { params },
   })

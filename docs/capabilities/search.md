@@ -4,7 +4,7 @@ The entity list filters by a literal term. Ranked search ranks entities or passa
 query, in four forms: the [**entity search**](#entity-search), which reads a scope of
 types or named indices with the methods the request chooses, the
 [**passage search**](#passage-search), which ranks the passages of documents the same
-way, and two that only the MCP and agent tools and the saved-query search step run — the
+way, and two that only the MCP and agent tools run — the
 **default search** over the managed indices of the types it searches and the **index
 search** through [search indices](search-indices.md) named by key. No server operation
 falls back to another.
@@ -19,8 +19,7 @@ See [instance-data.md](instance-data.md#query-paths) for property and query-path
 
 ## Ranked search
 
-This section describes the default search, which the MCP and agent search tools and the
-saved-query search step run; the [index search](#index-search) shares its ranking, floor
+This section describes the default search, which the MCP and agent search tools run; the [index search](#index-search) shares its ranking, floor
 and `matched`. Three independent dimensions select a default search's ranking: scope
 (one entity type or every type the lens exposes), search kind (properties, document, or
 both), and strategy, always the default one. The query is
@@ -425,9 +424,10 @@ the server from starting: the server must remain available to finish the repair.
 The full contract is in [../interfaces/](../interfaces/README.md). REST
 `POST /search/entities` is the [entity search](#entity-search), `POST /search/passages`
 the [passage search](#passage-search), and `GET /search-indices` the catalog; neither
-search has an MCP or agent tool yet.
+search has an MCP or agent tool yet. A saved-query search step runs the entity search
+([saved-queries.md](saved-queries.md)).
 
-MCP, agent tools and saved-query search steps use the default search and its envelope.
+MCP and agent tools use the default search and its envelope.
 MCP and agents expose `search` (both kinds) and `search_documents` (documents only, every
 hit carrying a passage); neither tool takes a strategy or a floor — both apply the fixed
 floor whenever the default strategy ranks semantically and echo it as `minSimilarity`,
@@ -437,8 +437,7 @@ MCP additionally accepts filters and fields. On MCP,
 over one index key, a list, or every index the lens can search, under the default mode,
 with the same fixed floor echoed as `minSimilarity`, optionally narrowed to named
 relation types. The agent tools have no index search. Agent limits are 10 by default for search,
-5 for document search, and 20 maximum. A saved-query search step requires one type and
-uses the default kinds and strategy; see [saved-queries.md](saved-queries.md).
+5 for document search, and 20 maximum.
 
 Saved-query discovery is separate: it retains its absolute cosine score and minimum
 score, description-only embedding, and embedding-provider requirement.

@@ -3,8 +3,10 @@
  * over a mocked store, including: exact-match and coercion failures collected,
  * binding resolution rules (flat row-order list, skipped rows, empty list
  * flows on), binding-wins-collision, textual substitution with unmatched
- * `$name` left verbatim, `_score` as a binding field, and the
- * no-provider failure of a pipeline containing a search step.
+ * `$name` left verbatim, the search step as an entity search — its
+ * references bound, its response final, other fields refused, its
+ * failures under the step — and the no-provider failure of a semantic
+ * block.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -352,7 +354,7 @@ describe("executeSavedQuery pipelines", () => {
     expect(result.results).toEqual([]);
   });
 
-  it("search -> oql: textual substitution reaches the search, _score is absent from bindings", async () => {
+  it("search -> oql: the substituted text reaches the entity search, its references flow through the binding", async () => {
     setEmbeddingProvider({ dimensions: 3, modelId: "fake:3", embed: vi.fn(async () => [0.1, 0.2, 0.3]) });
     stubSavedQueries([
       {
@@ -363,15 +365,16 @@ describe("executeSavedQuery pipelines", () => {
           {
             name: "skills",
             type: "search",
-            entityTypeKey: "person",
+            types: ["person"],
+            semantic: {},
             query: "$skill_query",
             limit: 5,
           },
           {
             name: "persons",
             type: "oql",
-            oql: "MATCH (p:person) WHERE p._id IN $skill_ids OR p.name IN $scores RETURN p",
-            bindings: { skill_ids: "{{skills._id}}", scores: "{{skills._score}}" },
+            oql: "MATCH (p:person) WHERE p._id IN $skill_ids OR p.name IN $names RETURN p",
+            bindings: { skill_ids: "{{skills._id}}", names: "{{skills.name}}" },
           },
         ],
         parameters: [
@@ -384,7 +387,7 @@ describe("executeSavedQuery pipelines", () => {
       rankedEntry("skill-2", 0.85),
     ]);
     store.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
-      Object.fromEntries(ids.map((id) => [id, { _id: id, _entityTypeKey: "person", name: id }])),
+      Object.fromEntries(ids.map((id) => [id, { _id: id, _entityTypeKey: "person", name: `Name ${id}` }])),
     );
     store.executeOql.mockResolvedValue([["p"], [{ p: { _id: "person-1", name: "Alice" } }]]);
 
@@ -395,19 +398,76 @@ describe("executeSavedQuery pipelines", () => {
       asRuntimeStore(store),
     );
 
-    // The search ranked the named type's default index with the
+    // The entity search ranked the named type's default index with the
     // substituted text's embedding.
     expect(store.indices.rankEntries).toHaveBeenCalledTimes(1);
     expect(store.indices.rankEntries.mock.calls[0]![0].generationId).toBe("person~default/semantic");
 
-    // The oql step got the flat _id list plus the _score binding field.
+    // The oql step got the flat lists of the found entities' references.
     const params = store.executeOql.mock.calls[0]![1] as Row;
     expect(params.skill_ids).toEqual(["skill-1", "skill-2"]);
-    expect(params.scores).toEqual([]);
+    expect(params.names).toEqual(["Name skill-1", "Name skill-2"]);
     expect(params.skill_query).toBe("machine learning");
 
     // The last step's output is the response.
     expect(result.columns).toEqual(["p"]);
+  });
+
+  it("a final search step answers with the entity search's response", async () => {
+    setEmbeddingProvider({ dimensions: 3, modelId: "fake:3", embed: vi.fn(async () => [0.1, 0.2, 0.3]) });
+    stubSavedQueries([
+      {
+        key: "only-search",
+        name: "Only search",
+        description: "Find persons",
+        steps: [{ name: "people", type: "search", types: ["person"], semantic: {}, query: "engineers", limit: 1 }],
+        parameters: [],
+      },
+    ]);
+    withManagedIndices(store, PERSON_INDEX_SCHEMA, "fake:3", () => [rankedEntry("p-1", 0.9)]);
+    store.getEntitiesByIds.mockImplementation(async (ids: string[]) =>
+      Object.fromEntries(ids.map((id) => [id, { _id: id, _entityTypeKey: "person", name: "Alice" }])),
+    );
+
+    const result = await executeSavedQuery("full_lens", "only-search", {}, asRuntimeStore(store));
+
+    expect(result).toEqual({
+      ran: ["semantic"],
+      items: [
+        {
+          rank: 1,
+          entity: { _id: "p-1", _entityTypeKey: "person", name: "Alice" },
+          match: { index: "person~default", part: "self", snippet: expect.any(String) },
+        },
+      ],
+      limitations: [],
+    });
+  });
+
+  it("a binding to a non-reference of a search step is refused at run, naming the binding", async () => {
+    // Stored around the definition-time check, as an older pipeline was.
+    stubSavedQueries([
+      {
+        key: "by-score",
+        name: "By score",
+        description: "binds what a search step does not yield",
+        steps: [
+          { name: "skills", type: "search", types: ["person"], query: "x" },
+          {
+            name: "persons",
+            type: "oql",
+            oql: "MATCH (p:person) WHERE p.name IN $scores RETURN p",
+            bindings: { scores: "{{skills._score}}" },
+          },
+        ],
+        parameters: [],
+      },
+    ]);
+    withManagedIndices(store, PERSON_INDEX_SCHEMA, undefined, () => []);
+    await expect(executeSavedQuery("full_lens", "by-score", {}, asRuntimeStore(store))).rejects.toThrow(
+      "Binding 'scores' reads '_score' of search step 'skills', which yields only _id, _entityTypeKey, name",
+    );
+    expect(store.executeOql).not.toHaveBeenCalled();
   });
 
   it("bindings on a search step are ignored — only parameters reach the text", async () => {
@@ -423,7 +483,8 @@ describe("executeSavedQuery pipelines", () => {
           {
             name: "second",
             type: "search",
-            entityTypeKey: "person",
+            types: ["person"],
+            semantic: {},
             query: "people like $q and $name",
             bindings: { name: "{{first.name}}" },
           },
@@ -445,14 +506,14 @@ describe("executeSavedQuery pipelines", () => {
     expect(embed).toHaveBeenCalledWith("people like engineers and $name");
   });
 
-  it("a pipeline containing a search step fails without a provider", async () => {
+  it("a search step's semantic block fails without a provider", async () => {
     stubSavedQueries([
       {
         key: "needs-provider",
         name: "Needs Provider",
-        description: "search then oql",
+        description: "semantic search then oql",
         steps: [
-          { name: "skills", type: "search", entityTypeKey: "person", query: "x" },
+          { name: "skills", type: "search", types: ["person"], semantic: {}, query: "x" },
           {
             name: "persons",
             type: "oql",
@@ -471,6 +532,24 @@ describe("executeSavedQuery pipelines", () => {
     }
     expect(caught).toBeInstanceOf(ValidationError);
     expect(caught!.details).toEqual({ code: "FEATURE_DISABLED" });
+  });
+
+  it("a search step the lens no longer serves fails at run, every failure under its step", async () => {
+    stubSavedQueries([
+      {
+        key: "stale-search",
+        name: "Stale search",
+        description: "names a vanished type",
+        steps: [
+          { name: "main", type: "oql", oql: "MATCH (p:person) RETURN p" },
+          { name: "found", type: "search", types: ["vanished_type"], query: "x" },
+        ],
+        parameters: [],
+      },
+    ]);
+    await expect(executeSavedQuery("full_lens", "stale-search", {}, asRuntimeStore(store))).rejects.toMatchObject({
+      details: { errors: ["steps[1].types.0: Entity type 'vanished_type' not found"] },
+    });
   });
 
   it("a schema change surfaces at the next run — nothing invalidates stored pipelines", async () => {

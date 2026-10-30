@@ -236,8 +236,10 @@ The run-focused half of the Query screen; authoring lives in the Studio, and eve
 links there. A search box over the library — semantic when available, substring otherwise.
 Each query is a card showing its name, key, a badge per step kind, a parameter count and
 its description. Expanding a card reveals a run panel: one typed input per parameter (all
-required before the run is allowed), a run action, results in the shared results surface,
-and a "copy as cURL" action that reproduces the exact call. A query opened by deep link
+required before the run is allowed), a run action, results in the shared results surface
+— or, when the last step is a search step, the ranked items as
+[Advanced search](#advanced-search) lists them, with what ran and what could not — and a
+"copy as cURL" action that reproduces the exact call. A query opened by deep link
 expands automatically, and runs immediately when it has no parameters.
 
 ## Advanced search

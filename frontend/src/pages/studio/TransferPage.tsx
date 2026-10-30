@@ -131,12 +131,20 @@ export function TransferPage() {
       }
       return model.importSchema(ontologyKey!, data)
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       setImportError(null)
       setFile(null)
       if (fileInputRef.current !== null) fileInputRef.current.value = ''
       void queryClient.invalidateQueries()
       toast.success('Schema imported')
+      const leftOut = result.leftOutSavedQueries
+      if (leftOut.length > 0) {
+        toast.warning(
+          `Left out ${leftOut.length} saved ${leftOut.length === 1 ? 'query' : 'queries'} the upgrade could not convert: ${leftOut
+            .map((q) => `${q.lens}/${q.key}`)
+            .join(', ')}`,
+        )
+      }
     },
     onError: (error) => {
       if (error instanceof ApiError && error.code === 'RESOURCE_CONFLICT') {

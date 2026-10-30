@@ -61,7 +61,7 @@ it("the registry takes no language and answers none; export carries the keyword 
     "textSearchLanguage",
   );
   const exported = (await app.inject({ url: `${model}/export` })).json();
-  expect(exported).toMatchObject({ formatVersion: "7.0", keywordLanguages: ["german", "english"] });
+  expect(exported).toMatchObject({ formatVersion: "8.0", keywordLanguages: ["german", "english"] });
   expect(exported).not.toHaveProperty("textSearchLanguage");
 });
 
@@ -221,7 +221,7 @@ describe("search settings", () => {
   });
 });
 
-it("rejects the old tool and step names, and strips minScore from a search step", async () => {
+it("rejects the old tool and step names, and a search step's unknown fields at their paths", async () => {
   await post("/api/ontologies", { key: "language_test" });
   await post(`${model}/lenses`, { key: "all", name: "All" });
   await post(`${model}/entity-types`, { key: "paper", displayName: "Paper" });
@@ -233,16 +233,22 @@ it("rejects the old tool and step names, and strips minScore from a search step"
   const query = {
     name: "Find",
     description: "Find paper",
-    steps: [{ name: "find", type: "semantic_search", entityTypeKey: "paper", query: "graph" }],
+    steps: [{ name: "find", type: "semantic_search", types: ["paper"], query: "graph" }],
     parameters: [],
   };
   expect((await put("saved-queries/old", query)).statusCode).toBe(422);
-  const created = await put("saved-queries/current", {
+  const stray = await put("saved-queries/current", {
     ...query,
-    steps: [{ ...query.steps[0], type: "search", minScore: 0.9 }],
+    steps: [{ ...query.steps[0], type: "search", minScore: 0.9, entityTypeKey: "paper" }],
   });
+  expect(stray.statusCode).toBe(422);
+  expect(stray.json().error.details.errors.map((e: { path: string }) => e.path).sort()).toEqual([
+    "/steps/0/entityTypeKey",
+    "/steps/0/minScore",
+  ]);
+  const created = await put("saved-queries/current", { ...query, steps: [{ ...query.steps[0], type: "search" }] });
   expect(created.statusCode, created.body).toBe(201);
-  expect(created.json().steps[0]).not.toHaveProperty("minScore");
+  expect(created.json().steps[0].types).toEqual(["paper"]);
   const payload = {
     keywordLanguages: ["english"],
     entityTypes: [],

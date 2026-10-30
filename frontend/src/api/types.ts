@@ -87,16 +87,23 @@ export interface SchemaRelationType {
   properties: SchemaProperty[]
 }
 
+/** A `search` step carries the entity search's request fields
+ * (`EntitySearchBody`) under their names; the modeling routes answer an
+ * absent field as null. */
 export interface SavedQueryStep {
   name: string
   type: 'oql' | 'search'
   /** OQL text — `oql` steps only. */
-  oql?: string
-  entityTypeKey?: string
-  /** Semantic-search text — `search` steps only. */
-  query?: string
-  limit?: number
-  bindings?: Record<string, string>
+  oql?: string | null
+  /** The search text, `$name` substituted — `search` steps only. */
+  query?: string | null
+  types?: string[] | null
+  indices?: string[] | null
+  keyword?: { match?: 'any' | 'all' } | null
+  semantic?: { minSimilarity?: number } | null
+  filter?: Record<string, string> | null
+  limit?: number | null
+  bindings?: Record<string, string> | null
 }
 
 export interface SavedQueryParameter {

@@ -6,7 +6,6 @@ import { useFeatures, useSearchCatalog } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import * as runtime from '@/api/runtime'
 import type {
-  EntityReference,
   EntitySearchResponse,
   PassageSearchResponse,
   RuntimeSchema,
@@ -45,17 +44,16 @@ import { identityText } from '@/lib/displayLabel'
 import { getTypeColor } from '@/lib/typeColors'
 import { cn } from '@/lib/utils'
 import {
-  countText,
+  entityLabel,
+  entityLink,
   fieldErrorsAt,
-  limitationSentence,
-  ranText,
   searchBody,
   unplacedFieldErrors,
-  type LimitationNames,
   type ScopeField,
   type SearchControl,
   type SearchMode,
 } from './searchModel'
+import { EntitySearchResult, SearchSummary } from './SearchResults'
 
 type Outcome =
   | { mode: 'entities'; response: EntitySearchResponse }
@@ -303,17 +301,6 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
   const typeName = (key: string) => typesByKey.get(key)?.displayName ?? key
   const propertyOf = (typeKey: string, propertyKey: string): SchemaProperty | undefined =>
     typesByKey.get(typeKey)?.properties.find((p) => p.key === propertyKey)
-  const names: LimitationNames = {
-    type: typeName,
-    index: (key) => catalog.find((i) => i.key === key)?.name ?? key,
-    document: (key) => {
-      const [typeKey, propertyKey] = key.split('.')
-      return `${typeName(typeKey)} · ${propertyOf(typeKey, propertyKey)?.displayName ?? propertyKey}`
-    },
-  }
-  const entityLink = (entity: EntityReference) =>
-    `/o/${ontologyKey}/w/${lensKey}/e/${entity._entityTypeKey}/${entity._id}`
-  const entityLabel = (entity: EntityReference) => entity.name ?? entity._id
 
   const scopeOptions: { value: ScopeField; label: string }[] = [
     { value: 'types', label: 'Types' },
@@ -520,19 +507,24 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
 
       {otherError !== null && <QueryErrorBlock message={otherError} />}
 
-      {outcome !== null && (
+      {outcome !== null && outcome.mode === 'entities' && (
+        <EntitySearchResult
+          ontologyKey={ontologyKey}
+          lensKey={lensKey}
+          schema={schema}
+          response={outcome.response}
+        />
+      )}
+
+      {outcome !== null && outcome.mode === 'passages' && (
         <div className="space-y-2">
-          <div className="space-y-1 text-xs text-muted-foreground">
-            <p>
-              {countText(outcome.mode, outcome.response.items.length)} ·{' '}
-              {ranText(outcome.response.ran)}
-            </p>
-            {outcome.response.limitations.map((l, i) => (
-              <p key={i} className="text-amber-700 dark:text-amber-400">
-                {limitationSentence(l, outcome.mode, names)}
-              </p>
-            ))}
-          </div>
+          <SearchSummary
+            ontologyKey={ontologyKey}
+            lensKey={lensKey}
+            schema={schema}
+            mode="passages"
+            response={outcome.response}
+          />
 
           {outcome.response.items.length === 0 ? (
             <p className="rounded-xl border bg-card p-6 text-center text-[13px] text-muted-foreground">
@@ -540,115 +532,65 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
             </p>
           ) : (
             <ol className="divide-y overflow-hidden rounded-xl border bg-card">
-              {outcome.mode === 'entities'
-                ? outcome.response.items.map((item) => {
-                    const { match } = item
-                    const part =
-                      match.part === 'relation'
-                        ? `Relation · ${
-                            schema.relationTypes.find((r) => r.key === match.relationType)?.displayName ??
-                            match.relationType
-                          }${match.target !== undefined ? ` → ${entityLabel(match.target)}` : ''}`
-                        : match.part === 'passage'
-                          ? `Passage${
-                              match.property != null
-                                ? ` · ${propertyOf(item.entity._entityTypeKey, match.property)?.displayName ?? match.property}`
-                                : ''
-                            }`
-                          : 'Own fields'
-                    return (
-                      <li key={item.entity._id} className="flex gap-3 px-4 py-2.5">
-                        <span className="w-6 shrink-0 pt-0.5 text-right font-mono text-[11px] text-muted-foreground tabular-nums">
-                          {item.rank}
-                        </span>
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex min-w-0 flex-wrap items-center gap-2">
-                            <TypeChip
-                              typeKey={item.entity._entityTypeKey}
-                              displayName={typeName(item.entity._entityTypeKey)}
-                              size="sm"
-                            />
-                            <Link
-                              to={entityLink(item.entity)}
-                              className="truncate text-[13px] font-medium hover:underline"
-                            >
-                              {entityLabel(item.entity)}
-                            </Link>
-                            {item.entity.identity !== undefined && (
-                              <IdentityText identity={identityText(item.entity.identity)} />
-                            )}
-                            <span className="text-[11px] text-muted-foreground" title={match.index}>
-                              {part}
-                            </span>
-                          </div>
-                          {match.snippet !== null && (
-                            <p className="line-clamp-2 text-[12px] text-muted-foreground">
-                              {match.snippet}
-                            </p>
-                          )}
-                        </div>
-                      </li>
-                    )
-                  })
-                : outcome.response.items.map((item) => {
-                    const { entity, passage } = item
-                    const property = propertyOf(entity._entityTypeKey, passage.property)
-                    return (
-                      <li
-                        key={`${entity._id}/${passage.property}/${passage.ordinal}`}
-                        className="flex gap-3 px-4 py-2.5"
-                      >
-                        <span className="w-6 shrink-0 pt-0.5 text-right font-mono text-[11px] text-muted-foreground tabular-nums">
-                          {item.rank}
-                        </span>
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex min-w-0 flex-wrap items-center gap-2">
-                            <TypeChip
-                              typeKey={entity._entityTypeKey}
-                              displayName={typeName(entity._entityTypeKey)}
-                              size="sm"
-                            />
-                            <Link
-                              to={entityLink(entity)}
-                              className="truncate text-[13px] font-medium hover:underline"
-                            >
-                              {entityLabel(entity)}
-                            </Link>
-                            {entity.identity !== undefined && (
-                              <IdentityText identity={identityText(entity.identity)} />
-                            )}
-                            {property !== undefined ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setViewer({
-                                    entityTypeKey: entity._entityTypeKey,
-                                    entityId: entity._id,
-                                    entityLabel: entityLabel(entity),
-                                    property,
-                                    length: passage.charOffset + passage.charLength,
-                                  })
-                                }
-                                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
-                              >
-                                <FileText className="size-3" />
-                                {property.displayName}
-                              </button>
-                            ) : (
-                              <span className="font-mono text-[11px] text-muted-foreground">
-                                {passage.property}
-                              </span>
-                            )}
-                          </div>
-                          {passage.text !== undefined && (
-                            <p className="whitespace-pre-wrap text-[12px] leading-relaxed">
-                              {passage.text}
-                            </p>
-                          )}
-                        </div>
-                      </li>
-                    )
-                  })}
+              {outcome.response.items.map((item) => {
+                const { entity, passage } = item
+                const property = propertyOf(entity._entityTypeKey, passage.property)
+                return (
+                  <li
+                    key={`${entity._id}/${passage.property}/${passage.ordinal}`}
+                    className="flex gap-3 px-4 py-2.5"
+                  >
+                    <span className="w-6 shrink-0 pt-0.5 text-right font-mono text-[11px] text-muted-foreground tabular-nums">
+                      {item.rank}
+                    </span>
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <TypeChip
+                          typeKey={entity._entityTypeKey}
+                          displayName={typeName(entity._entityTypeKey)}
+                          size="sm"
+                        />
+                        <Link
+                          to={entityLink(ontologyKey, lensKey, entity)}
+                          className="truncate text-[13px] font-medium hover:underline"
+                        >
+                          {entityLabel(entity)}
+                        </Link>
+                        {entity.identity !== undefined && (
+                          <IdentityText identity={identityText(entity.identity)} />
+                        )}
+                        {property !== undefined ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setViewer({
+                                entityTypeKey: entity._entityTypeKey,
+                                entityId: entity._id,
+                                entityLabel: entityLabel(entity),
+                                property,
+                                length: passage.charOffset + passage.charLength,
+                              })
+                            }
+                            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                          >
+                            <FileText className="size-3" />
+                            {property.displayName}
+                          </button>
+                        ) : (
+                          <span className="font-mono text-[11px] text-muted-foreground">
+                            {passage.property}
+                          </span>
+                        )}
+                      </div>
+                      {passage.text !== undefined && (
+                        <p className="whitespace-pre-wrap text-[12px] leading-relaxed">
+                          {passage.text}
+                        </p>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
             </ol>
           )}
         </div>

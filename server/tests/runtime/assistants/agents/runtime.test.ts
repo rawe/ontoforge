@@ -168,17 +168,22 @@ describe("toolset computation", () => {
     }
   });
 
-  it("run_saved_query preserves a final search envelope", async () => {
+  it("run_saved_query answers a final search step with the entity search's response", async () => {
     withEmptySearchIndices(store);
     store.getSavedQueries.mockResolvedValue([{
       key: "find_people", name: "Find people", description: "Find people",
-      steps: JSON.stringify([{ name: "people", type: "search", entityTypeKey: "person", query: "engineer" }]),
+      steps: JSON.stringify([{ name: "people", type: "search", types: ["person"], query: "engineer" }]),
       parameters: "[]",
     }]);
     const fake = installFake([toolCallMessage("run_saved_query", { query_key: "find_people" }), new AIMessage("Done")]);
     await aiChat("full_lens", "run the query", asRuntimeStore(store));
     const payload = JSON.parse(String(fake.calls[1]!.find((m) => m instanceof ToolMessage)!.content));
-    expect(payload).toEqual({ query: "engineer", type: "person", in: ["properties", "document"], strategy: "keyword", minSimilarity: null, filter: {}, hits: [] });
+    // No index to search: nothing ran, and the type is named as a limitation.
+    expect(payload).toEqual({
+      ran: [],
+      items: [],
+      limitations: [expect.objectContaining({ code: "not-searchable", types: ["person"] })],
+    });
   });
 
   it("search tools apply the fixed floor under a hybrid default", async () => {

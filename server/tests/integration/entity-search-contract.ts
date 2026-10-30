@@ -2,7 +2,8 @@
  * The HTTP contract of the entity search (`POST search/entities`), run with
  * and without local embeddings: the method blocks, the scope rules and
  * their errors, filters as hard facts, `ran` and every limitation, and the
- * item for each part of an entry. Search answers from search indices,
+ * item for each part of an entry — and a saved query's search step, which
+ * runs it. Search answers from search indices,
  * whose entries the worker builds asynchronously: a search first drains
  * the queued work, unless it asks for what is not built yet.
  *
@@ -487,6 +488,38 @@ export function entitySearchContract(embedding: boolean, enabled = true) {
       });
       expect(body.limitations).toEqual(embedding ? [notReady("semantic"), notReady("keyword")] : [notReady("keyword")]);
       expect((await found({ query: "CTO", indices: ["employment_new"], keyword: {} })).limitations).toEqual([]);
+    });
+
+    it("a saved query's search step is this search: its response final, its ids bound, its rules at save", async () => {
+      const put = (key: string, steps: object[]) =>
+        app.inject({
+          method: "PUT",
+          url: `${MODEL}/lenses/all/saved-queries/${key}`,
+          payload: { name: key, description: "Find people", parameters: [{ name: "q", description: "Who", dataType: "string" }], steps },
+        });
+      const run = async (key: string) => {
+        await drainSearchWork({ ontologyKey: O });
+        const res = await app.inject({ method: "POST", url: `${RUNTIME}/saved-queries/${key}/run`, payload: { params: { q: "Bob" } } });
+        expect(res.statusCode, res.body).toBe(200);
+        return res.json();
+      };
+      const step = { name: "people", type: "search", query: "$q tomatoes", types: ["person"], filter: { status: "retired" }, limit: 2 };
+      expect((await put("final", [step])).statusCode).toBe(201);
+      expect(await run("final")).toEqual(
+        await found({ query: "Bob tomatoes", types: ["person"], filter: { status: "retired" }, limit: 2 }),
+      );
+
+      const bound = { name: "names", type: "oql", oql: "MATCH (p:person) WHERE p._id IN $ids RETURN p.name AS name", bindings: { ids: "{{people._id}}" } };
+      expect((await put("bound", [step, bound])).statusCode).toBe(201);
+      expect((await run("bound")).results).toEqual([{ name: "Bob" }]);
+
+      const refused = await put("refused", [{ ...step, types: ["ghost"], keyword: { match: "some" } }]);
+      expect(refused.statusCode).toBe(422);
+      expect(refused.json().error.details.errors.sort()).toEqual([
+        "steps[0].filter.status: Unknown filter property or relation type: 'status'",
+        "steps[0].keyword.match: Expected any or all",
+        "steps[0].types.0: Entity type 'ghost' not found",
+      ]);
     });
 
     it.skipIf(!embedding)("hybrid over two types fuses both methods into one ranking", async () => {

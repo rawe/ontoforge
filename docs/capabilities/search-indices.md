@@ -382,8 +382,8 @@ switched-off managed index cannot be rebuilt.
 Indices are reached through ranked search ([search.md](search.md)). The entity and
 passage search — `POST search/entities`, `POST search/passages` — read the managed
 indices of the requested types, or the indices named by key, custom ones included
-([search.md](search.md#entity-search)). The default search — the MCP and agent search
-tools and saved-query search steps — searches the managed indices of the requested
+([search.md](search.md#entity-search)), and so does a saved-query search step. The default
+search — the MCP and agent search tools — searches the managed indices of the requested
 types. The index search — the MCP `search_by_index` tool — searches any indices the lens
 can search, custom ones and their relation entries included
 ([search.md](search.md#index-search)); the lens's

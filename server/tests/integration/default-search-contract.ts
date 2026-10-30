@@ -2,23 +2,22 @@
  * The default search as the MCP tools run it — `search` over properties
  * and documents, `search_documents` over documents only — with and without
  * local embeddings: the default strategy, the tools' fixed similarity
- * floor, the envelope, filters, projection and the lens's scope. Plus the
- * saved-query search step, which runs the same search. Search answers from
- * search indices, whose entries the worker builds asynchronously: every
- * search first drains the queued work. An in-memory client calls the tools.
+ * floor, the envelope, filters, projection and the lens's scope. Search
+ * answers from search indices, whose entries the worker builds
+ * asynchronously: every search first drains the queued work. An in-memory
+ * client calls the tools.
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { FastifyInstance } from "fastify";
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
-import { initStores, closeStores, getRuntimeStore } from "../../src/core/ports.js";
+import { initStores, closeStores } from "../../src/core/ports.js";
 import { getEmbeddingProvider, setEmbeddingProvider } from "../../src/core/embedding.js";
 import { runQuery } from "../../src/adapters/postgres/errors.js";
 import { createRuntimeMcpServer } from "../../src/mcp/runtime.js";
 import { drainSearchWork } from "../../src/runtime/indexing/worker.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
-import { search } from "../../src/runtime/search/entry.js";
 import { TOOL_MIN_SIMILARITY } from "../../src/runtime/search/strategies.js";
 import { wipeDatabase } from "./reset.js";
 import { enableOllamaProvider, disableProvider } from "./embedding/support.js";
@@ -367,31 +366,6 @@ export function defaultSearchContract(embedding: boolean, enabled = true) {
         for (const match of hit.matches) expectEvidence(match, strategy);
       },
     );
-    it("a final saved-query search step returns the default search's envelope", async () => {
-      const definition = await app.inject({
-        method: "PUT",
-        url: `${model}/lenses/all/saved-queries/find_papers`,
-        payload: {
-          name: "Find papers",
-          description: "Search papers",
-          parameters: [],
-          steps: [{ name: "papers", type: "search", entityTypeKey: "paper", query: "graph database", limit: 2 }],
-        },
-      });
-      expect(definition.statusCode, definition.body).toBe(201);
-      await drainSearchWork();
-      const run = await app.inject({
-        method: "POST",
-        url: `${runtime}/saved-queries/find_papers/run`,
-        payload: { params: {} },
-      });
-      expect(run.statusCode, run.body).toBe(200);
-      const direct = await search("all", { query: "graph database", type: "paper", limit: 2 }, await getRuntimeStore("search_test"));
-      expect(run.json()).toEqual(JSON.parse(JSON.stringify(direct)));
-      expect(run.json().hits[0].entity).not.toHaveProperty("_score");
-      // Hits always name their entity type, a single searched type included.
-      expect(run.json().hits[0].entity._entityTypeKey).toBe("paper");
-    });
     it.skipIf(!embedding)("the fixed floor removes semantic candidates only", async () => {
       const result = await find({ query: "graph database" });
       expect(result.hits.length).toBeGreaterThan(0);

@@ -161,11 +161,15 @@ steer each step. A switch shows the other two kinds.
 **Saved queries** — the authoring surface for the lens's stored pipelines, and the only
 place multi-step pipelines can be built. Per query: name, derived-and-then-immutable key,
 description, an ordered list of steps, and a parameter list. A step is either a query step
-carrying query text, or a search step carrying an entity type, search text and a result
-limit — it has no minimum score. Steps can be reordered and removed; every step after the
-first can bind parameters to fields of an earlier step's results. Parameters carry a name,
-a description and a scalar data type (document is not offered). An inline runner executes
-the query with typed parameter inputs and shows the result as a table or as raw JSON. See
+carrying query text, or a search step carrying the entity search's fields: search text, a
+scope of types or of indices (choosing one clears the other; none searches the whole
+lens), the keyword and semantic methods — semantic only with an embedding provider —
+filter conditions as key = value rows, and a limit. Steps can be reordered and removed;
+every step after the first can bind parameters to fields of an earlier step's results — of
+a search step only `_id`, `_entityTypeKey` and `name`. Parameters carry a name, a
+description and a scalar data type (document is not offered). An inline runner executes
+the query with typed parameter inputs and shows a query result as a table, a search result
+as Advanced search's ranked items, or either as raw JSON. See
 [capabilities/saved-queries.md](../capabilities/saved-queries.md).
 
 **Connect** — a ready-to-paste AI-client configuration for the MCP servers, bound
@@ -292,7 +296,8 @@ Three operations, each with its own explanation. See
   malformed JSON before sending anything, and on a
   key conflict explains that pre-existing objects with the same keys block the import and
   that the clashes must be resolved (or a bare ontology used). A successful import
-  refreshes every cached view.
+  refreshes every cached view, and warns with the saved queries an older payload's upgrade
+  left out.
 - **Rebuild search data** — runs the [search-data rebuild](../capabilities/search.md#rebuild)
   for this ontology, behind a confirmation warning about duration and provider cost, then
   live progress per group while it runs and a summary when it finishes. It re-embeds the

@@ -1,7 +1,8 @@
 /**
  * The storage-version decision at boot, against a scripted querier: what
  * an empty, an unversioned (5.x), an unreleased version-2, a 6.x, a 7.0
- * (version 4, 5 or 6), a version-7, a version-8, a current, a newer and a too-old database each lead to. The real upgrade against PostgreSQL is covered by
+ * (version 4, 5 or 6), a version-7, a version-8, a version-11, a current, a newer and a too-old database
+ * each lead to. The real upgrade against PostgreSQL is covered by
  * `tests/integration/postgres/storage-version.test.ts`.
  */
 
@@ -18,19 +19,27 @@ const SERVER_DDL = ["CREATE TABLE IF NOT EXISTS public.storage_version (version 
 
 /** A database as the boot sees it: the version row (absent = unversioned),
  * whether the registry exists, its ontology namespaces, whether they
- * keep retrievers in `retriever_config` (the unreleased version 2), and
- * whether another server holds the storage lock. */
+ * keep retrievers in `retriever_config` (the unreleased version 2), the
+ * saved queries each namespace holds, and whether another server holds
+ * the storage lock. */
 function database(state: {
   version?: number;
   registry: boolean;
   namespaces?: string[];
   retrieverConfig?: boolean;
+  savedQueries?: Record<string, unknown>[];
   lockHeld?: boolean;
 }) {
   const queries: string[] = [];
+  const params: unknown[][] = [];
   const querier: Querier = {
-    async query(text: string): Promise<DbResult> {
+    async query(text: string, values?: unknown[]): Promise<DbResult> {
       queries.push(text);
+      params.push(values ?? []);
+      if (text.startsWith("SELECT saved_query_id")) {
+        const rows = state.savedQueries ?? [];
+        return { rows, rowCount: rows.length };
+      }
       if (text.includes("pg_try_advisory_xact_lock")) {
         return { rows: [{ locked: !(state.lockHeld ?? false) }], rowCount: 1 };
       }
@@ -48,7 +57,7 @@ function database(state: {
       return { rows: [], rowCount: 0 };
     },
   };
-  return { querier, queries };
+  return { querier, queries, params };
 }
 
 /** Step 8 in one namespace: the changeset tables with their indexes, then
@@ -86,6 +95,12 @@ const step11 = (namespace: string) => [
   `SET LOCAL search_path TO ${namespace}, public`,
   "ALTER TABLE relation_type ADD COLUMN one_per_pair boolean NOT NULL DEFAULT false",
   "CREATE INDEX changeset_value_match_idx ON changeset_value (changeset_id, property_key, md5(value::text))",
+];
+
+/** Step 12 in one namespace without a search step: the saved queries read. */
+const step12 = (namespace: string) => [
+  `SET LOCAL search_path TO ${namespace}, public`,
+  "SELECT saved_query_id, lens_key, key, steps FROM saved_query ORDER BY key",
 ];
 
 const writes = (queries: string[]) => queries.filter((q) => /^(INSERT|DELETE|CREATE|LOCK TABLE)/.test(q));
@@ -134,9 +149,9 @@ describe("storage version at boot", () => {
     const bound = queries.filter((q) => q.startsWith("SET LOCAL search_path"));
     // Step by step: the 6.0 step, the 7.0 step, the assistant step, the
     // navigator step, the parent-and-ruleset step, the changeset step, the
-    // design revision step, the identity step, then the one-per-pair step,
-    // each in every namespace.
-    expect(bound).toEqual(Array.from({ length: 9 }, () => [
+    // design revision step, the identity step, the one-per-pair step, then
+    // the search step conversion, each in every namespace.
+    expect(bound).toEqual(Array.from({ length: 10 }, () => [
       "SET LOCAL search_path TO ont_a, public",
       "SET LOCAL search_path TO ont_b, public",
       "SET LOCAL search_path TO public",
@@ -152,7 +167,7 @@ describe("storage version at boot", () => {
     expect(queries.filter((q) => q.startsWith("CREATE TABLE retriever_agent"))).toHaveLength(2);
     expect(queries.filter((q) => q.includes("RENAME TO retriever_agent"))).toEqual([]);
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 1 to 11"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 1 to 12"));
   });
 
   it("upgrades storage at the unreleased version 2 by the same step, taking its retrievers over", async () => {
@@ -167,7 +182,7 @@ describe("storage version at boot", () => {
     expect(queries).toContain("ALTER TABLE retriever_config RENAME TO retriever_agent");
     expect(queries.filter((q) => q.startsWith("CREATE TABLE retriever_agent"))).toEqual([]);
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 2 to 11"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 2 to 12"));
   });
 
   it("upgrades 6.x storage (version 3) by the 7.0 step and the assistant step, naming the assistant tables after their kind", async () => {
@@ -178,7 +193,7 @@ describe("storage version at boot", () => {
     expect(queries).toContain("ALTER TABLE retriever_agent RENAME TO assistant_retriever");
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
     expect(queries.filter((q) => q.startsWith("CREATE TABLE assistant ("))).toHaveLength(1);
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 3 to 11"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 3 to 12"));
   });
 
   it("upgrades version-4 storage by the assistant step and the navigator step: one assistant table per namespace", async () => {
@@ -193,13 +208,13 @@ describe("storage version at boot", () => {
     expect(created[0]).toContain("ON DELETE CASCADE");
     expect(created[0]).toContain("CONSTRAINT assistant_key_unique UNIQUE (lens_id, kind, key)");
     expect(queries.filter((q) => q === "ALTER TABLE assistant RENAME TO assistant_navigator")).toHaveLength(2);
-    expect(queries.filter((q) => q.startsWith("SET LOCAL search_path"))).toEqual(Array.from({ length: 7 }, () => [
+    expect(queries.filter((q) => q.startsWith("SET LOCAL search_path"))).toEqual(Array.from({ length: 8 }, () => [
       "SET LOCAL search_path TO ont_a, public",
       "SET LOCAL search_path TO ont_b, public",
       "SET LOCAL search_path TO public",
     ]).flat());
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 4 to 11"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 4 to 12"));
   });
 
   it("upgrades version-5 storage by the navigator step: the assistant table becomes the navigator table", async () => {
@@ -212,10 +227,10 @@ describe("storage version at boot", () => {
       "ALTER TABLE assistant_navigator ADD CONSTRAINT assistant_navigator_key_unique UNIQUE (lens_id, key)",
     );
     expect(queries.at(-1)).toBe("INSERT INTO public.storage_version (version) VALUES ($1)");
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 5 to 11"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("from version 5 to 12"));
   });
 
-  it("upgrades version-6 storage by steps 7 to 11, each in every namespace, the number last", async () => {
+  it("upgrades version-6 storage by steps 7 to 12, each in every namespace, the number last", async () => {
     const { querier, queries } = database({ version: 6, registry: true, namespaces: ["ont_a", "ont_b"] });
     await bringStorageUpToDate(querier, SERVER_DDL);
     const firstStep = queries.indexOf("SET LOCAL search_path TO ont_a, public");
@@ -241,6 +256,9 @@ describe("storage version at boot", () => {
       ...step11("ont_a"),
       ...step11("ont_b"),
       "SET LOCAL search_path TO public",
+      ...step12("ont_a"),
+      ...step12("ont_b"),
+      "SET LOCAL search_path TO public",
       "DELETE FROM public.storage_version",
       "INSERT INTO public.storage_version (version) VALUES ($1)",
     ]);
@@ -249,10 +267,10 @@ describe("storage version at boot", () => {
     expect(ruleset).toContain("anchor_id       uuid");
     // No FK to entity, no CHECK.
     expect(ruleset).not.toMatch(/REFERENCES|CHECK/);
-    expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 6 to 11 (2 ontologies).");
+    expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 6 to 12 (2 ontologies).");
   });
 
-  it("upgrades version-7 storage by steps 8 to 11, in every namespace, the number last", async () => {
+  it("upgrades version-7 storage by steps 8 to 12, in every namespace, the number last", async () => {
     const { querier, queries } = database({ version: 7, registry: true, namespaces: ["ont_a", "ont_b"] });
     await bringStorageUpToDate(querier, SERVER_DDL);
     const firstStep = queries.indexOf("SET LOCAL search_path TO ont_a, public");
@@ -269,6 +287,9 @@ describe("storage version at boot", () => {
       "SET LOCAL search_path TO public",
       ...step11("ont_a"),
       ...step11("ont_b"),
+      "SET LOCAL search_path TO public",
+      ...step12("ont_a"),
+      ...step12("ont_b"),
       "SET LOCAL search_path TO public",
       "DELETE FROM public.storage_version",
       "INSERT INTO public.storage_version (version) VALUES ($1)",
@@ -294,10 +315,10 @@ describe("storage version at boot", () => {
       expect(table.match(/REFERENCES/g)).toHaveLength(1);
       expect(table).not.toMatch(/CHECK|ruleset \(/);
     }
-    expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 7 to 11 (2 ontologies).");
+    expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 7 to 12 (2 ontologies).");
   });
 
-  it("upgrades version-8 storage — the 7.1 line — by steps 9 to 11, in every namespace, the number last", async () => {
+  it("upgrades version-8 storage — the 7.1 line — by steps 9 to 12, in every namespace, the number last", async () => {
     const { querier, queries } = database({ version: 8, registry: true, namespaces: ["ont_a", "ont_b"] });
     await bringStorageUpToDate(querier, SERVER_DDL);
     const firstStep = queries.indexOf("SET LOCAL search_path TO ont_a, public");
@@ -312,6 +333,9 @@ describe("storage version at boot", () => {
       ...step11("ont_a"),
       ...step11("ont_b"),
       "SET LOCAL search_path TO public",
+      ...step12("ont_a"),
+      ...step12("ont_b"),
+      "SET LOCAL search_path TO public",
       "DELETE FROM public.storage_version",
       "INSERT INTO public.storage_version (version) VALUES ($1)",
     ]);
@@ -319,10 +343,10 @@ describe("storage version at boot", () => {
     // One row, no FK: the registry lives in another namespace.
     expect(table).toContain("CONSTRAINT design_revision_singleton CHECK (singleton)");
     expect(table).not.toMatch(/REFERENCES/);
-    expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 8 to 11 (2 ontologies).");
+    expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 8 to 12 (2 ontologies).");
   });
 
-  it("upgrades version-9 storage by steps 10 and 11: the identity columns and constraint, then one per pair", async () => {
+  it("upgrades version-9 storage by steps 10 to 12: the identity columns and constraint, one per pair, search steps", async () => {
     const { querier, queries } = database({ version: 9, registry: true, namespaces: ["ont_a", "ont_b"] });
     await bringStorageUpToDate(querier, SERVER_DDL);
     const firstStep = queries.indexOf("SET LOCAL search_path TO ont_a, public");
@@ -334,14 +358,16 @@ describe("storage version at boot", () => {
       ...step11("ont_a"),
       ...step11("ont_b"),
       "SET LOCAL search_path TO public",
+      ...step12("ont_a"),
+      ...step12("ont_b"),
+      "SET LOCAL search_path TO public",
       "DELETE FROM public.storage_version",
       "INSERT INTO public.storage_version (version) VALUES ($1)",
     ]);
-    expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 9 to 11 (2 ontologies).");
+    expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 9 to 12 (2 ontologies).");
   });
 
-  it("upgrades version-10 storage by step 11 alone: one per pair in every namespace", async () => {
-    expect(STORAGE_VERSION).toBe(11);
+  it("upgrades version-10 storage by steps 11 and 12: one per pair, then search steps, in every namespace", async () => {
     const { querier, queries } = database({ version: 10, registry: true, namespaces: ["ont_a", "ont_b"] });
     await bringStorageUpToDate(querier, SERVER_DDL);
     const firstStep = queries.indexOf("SET LOCAL search_path TO ont_a, public");
@@ -350,10 +376,45 @@ describe("storage version at boot", () => {
       ...step11("ont_a"),
       ...step11("ont_b"),
       "SET LOCAL search_path TO public",
+      ...step12("ont_a"),
+      ...step12("ont_b"),
+      "SET LOCAL search_path TO public",
       "DELETE FROM public.storage_version",
       "INSERT INTO public.storage_version (version) VALUES ($1)",
     ]);
-    expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 10 to 11 (2 ontologies).");
+    expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 10 to 12 (2 ontologies).");
+  });
+
+  it("upgrades version-11 storage by step 12: search steps become entity searches, one binding more is deleted", async () => {
+    expect(STORAGE_VERSION).toBe(12);
+    const steps = (field: string) =>
+      JSON.stringify([
+        { name: "skills", type: "search", entityTypeKey: "skill", query: "$q", limit: 5 },
+        { name: "people", type: "oql", oql: "MATCH (p) WHERE p._id IN $ids RETURN p", bindings: { ids: `{{skills.${field}}}` } },
+      ]);
+    const { querier, queries, params } = database({
+      version: 11,
+      registry: true,
+      namespaces: ["ont_a"],
+      savedQueries: [
+        { saved_query_id: "sq-1", lens_key: "all", key: "by-id", steps: steps("_id") },
+        { saved_query_id: "sq-2", lens_key: "all", key: "by-title", steps: steps("title") },
+        { saved_query_id: "sq-3", lens_key: "all", key: "oql-only", steps: JSON.stringify([{ name: "main", type: "oql", oql: "MATCH (p) RETURN p" }]) },
+      ],
+    });
+    await bringStorageUpToDate(querier, SERVER_DDL);
+    const update = queries.indexOf("UPDATE saved_query SET steps = $2 WHERE saved_query_id = $1");
+    expect(params[update]![0]).toBe("sq-1");
+    expect(JSON.parse(params[update]![1] as string)).toEqual([
+      { name: "skills", type: "search", types: ["skill"], query: "$q", limit: 5 },
+      { name: "people", type: "oql", oql: "MATCH (p) WHERE p._id IN $ids RETURN p", bindings: { ids: "{{skills._id}}" } },
+    ]);
+    const deleted = queries.indexOf("DELETE FROM saved_query WHERE saved_query_id = $1");
+    expect(params[deleted]).toEqual(["sq-2"]);
+    // An oql-only pipeline stays as it is.
+    expect(queries.filter((q) => q.startsWith("UPDATE saved_query") || q.startsWith("DELETE FROM saved_query"))).toHaveLength(2);
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("Deleting saved query 'by-title' of lens 'all'"));
+    expect(console.log).toHaveBeenCalledWith("Upgrading storage from version 11 to 12 (1 ontologies).");
   });
 
   it("refuses storage newer than the code and writes nothing", async () => {

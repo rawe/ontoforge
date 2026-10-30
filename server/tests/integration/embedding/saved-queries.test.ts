@@ -1,8 +1,9 @@
 /**
  * Saved queries with a real embedding provider (Ollama): the description
  * is embedded on write and re-embedded on a description edit, semantic
- * discovery ranks by description similarity (never returning steps), and a
- * search -> oql pipeline flows search hits into a bound query parameter.
+ * discovery ranks by description similarity (never returning steps), a
+ * search -> oql pipeline flows the found entities' ids into a bound query
+ * parameter, and a final search step answers as the entity search.
  * SKIPPED when Ollama or the model is unavailable.
  */
 
@@ -18,7 +19,7 @@ import {
   initStores,
 } from "../../../src/core/ports.js";
 import { drainSearchWork } from "../../../src/runtime/indexing/worker.js";
-import { search } from "../../../src/runtime/search/entry.js";
+import { searchEntities } from "../../../src/runtime/search/entitySearch.js";
 import { wipeDatabase } from "../reset.js";
 import { checkOllamaModel, disableProvider, enableOllamaProvider } from "./support.js";
 import { defineEntityProperty } from "../fixture.js";
@@ -184,7 +185,8 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
           {
             name: "skills",
             type: "search",
-            entityTypeKey: "skill",
+            types: ["skill"],
+            semantic: {},
             query: "$topic",
             limit: 1,
           },
@@ -255,11 +257,11 @@ describe.skipIf(!ollamaUp)("saved queries (Ollama)", () => {
     try {
       await inject("PUT", "/api/ontologies/test_ont/model/lenses/sq_test/saved-queries/only-search", {
         name: "Only search", description: "Search skills", parameters: [],
-        steps: [{ name: "skills", type: "search", entityTypeKey: "skill", query: "Python", limit: 2 }],
+        steps: [{ name: "skills", type: "search", types: ["skill"], query: "Python", limit: 2 }],
       });
       const run = await client.callTool({ name: "run_saved_query", arguments: { query_key: "only-search" } }) as { content: { text: string }[]; isError?: boolean };
       expect(run.isError).toBeUndefined();
-      const direct = await search("sq_test", { query: "Python", type: "skill", limit: 2 }, await getRuntimeStore("test_ont"));
+      const direct = await searchEntities("sq_test", { query: "Python", types: ["skill"], limit: 2 }, await getRuntimeStore("test_ont"));
       expect(JSON.parse(run.content[0]!.text)).toEqual(JSON.parse(JSON.stringify(direct)));
       const result = (await client.callTool({
         name: "search_saved_queries",

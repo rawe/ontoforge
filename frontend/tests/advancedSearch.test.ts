@@ -2,7 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   countText,
+  entityLabel,
+  entityLink,
   fieldErrorsAt,
+  isEntitySearchResponse,
   limitationSentence,
   ranText,
   searchBody,
@@ -142,4 +145,13 @@ test('ran and the count read as short lines', () => {
   assert.equal(countText('entities', 1), '1 entity')
   assert.equal(countText('entities', 0), '0 entities')
   assert.equal(countText('passages', 3), '3 passages')
+})
+
+test('a saved query run is told apart by its shape; a found entity reads by name, else id', () => {
+  assert.equal(isEntitySearchResponse({ ran: ['keyword'], items: [], limitations: [] }), true)
+  assert.equal(isEntitySearchResponse({ columns: ['p'], results: [] }), false)
+  const entity = { _id: 'e-1', _entityTypeKey: 'person', name: null }
+  assert.equal(entityLabel(entity), 'e-1')
+  assert.equal(entityLabel({ ...entity, name: 'Ada' }), 'Ada')
+  assert.equal(entityLink('onto', 'all', entity), '/o/onto/w/all/e/person/e-1')
 })

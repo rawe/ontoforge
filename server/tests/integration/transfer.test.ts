@@ -6,9 +6,9 @@
  * untouched on conflict, and the modeling MCP pair (`get_schema` ≡
  * export).
  *
- * `tests/fixtures/export.json` is a stored export payload (format 7.0)
- * over the same design this suite imports, `export-6.0.json` the same
- * design in format 6.0; the document is identity-free — no ontology key
+ * `tests/fixtures/export.json` is a stored export payload (format 8.0)
+ * over the same design this suite imports, `export-7.0.json` and
+ * `export-6.0.json` the same design in formats 7.0 and 6.0; the document is identity-free — no ontology key
  * or name — so it is portable into any ontology. Two normalizations make
  * the comparison meaningful:
  *
@@ -36,6 +36,7 @@ type Row = Record<string, unknown>;
 const readFixture = (name: string): Row =>
   JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8")) as Row;
 const EXPORT_FIXTURE = readFixture("export.json");
+const EXPORT_FIXTURE_7 = readFixture("export-7.0.json");
 const EXPORT_FIXTURE_6 = readFixture("export-6.0.json");
 
 /** Order-normalize a payload and drop `includes: null` (the fixture's
@@ -161,6 +162,13 @@ describe("round-trip against a stored export document", () => {
 });
 
 describe("older format versions", () => {
+  it("a stored 7.0 payload imports as the same design, its search step an entity search", async () => {
+    const res = await importInto("test_ont", EXPORT_FIXTURE_7);
+    expect(res.statusCode, res.body).toBe(201);
+    expect(res.json().leftOutSavedQueries).toEqual([]);
+    expect(normalize(await exportFrom("test_ont"))).toEqual(normalize(EXPORT_FIXTURE));
+  });
+
   it("a stored 6.0 payload imports as the same design", async () => {
     const res = await importInto("test_ont", EXPORT_FIXTURE_6);
     expect(res.statusCode, res.body).toBe(201);
@@ -392,7 +400,7 @@ describe("the parent end", () => {
       properties: [{ key: "name", displayName: "Name", dataType: "string", required: true }],
     });
     const res = await importInto("test_ont", {
-      formatVersion: "7.0",
+      formatVersion: "8.0",
       keywordLanguages: ["english"],
       entityTypes: [entityType("task"), entityType("person")],
       relationTypes: [

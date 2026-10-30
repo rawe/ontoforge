@@ -64,24 +64,33 @@ document property too, as for any managed index that comes into existence
 
 ## The format version
 
-The payload declares a format version, and export always writes the current one: `7.0`.
+The payload declares a format version, and export always writes the current one: `8.0`.
 The version is the format's own line, bumped only when the payload shape changes
-incompatibly. A relation type's `parent` is optional in `7.0`: without it, or with null,
+incompatibly. A relation type's `parent` is optional in `8.0`: without it, or with null,
 the relation type is an ordinary one, and the older versions' relation types import as
 ordinary ones too. Its `onePerPair` is optional as well: without it, the relation type is
 one per pair only when it is a parent relation.
 
-**Import upgrades older versions step by step.** It accepts two older versions and brings
+**Import upgrades older versions step by step.** It accepts three older versions and brings
 each up to the current one first, one version at a time, so an older export needs no
-external conversion tool: a `5.0` payload becomes a
-`6.0` one, a `6.0` payload a `7.0` one. Every other version is refused with a field
-error on the version naming the three it accepts:
+external conversion tool: a `5.0` payload becomes a `6.0` one, a `6.0` payload a `7.0`
+one, a `7.0` payload an `8.0` one. Every other version is refused with a field error on
+the version naming the four it accepts:
 
 | Version | Import |
 |---|---|
-| `7.0`, or no version at all | The current format, validated as described below |
-| `6.0` | Upgraded to `7.0` |
-| `5.0` | Upgraded to `6.0`, then to `7.0` |
+| `8.0`, or no version at all | The current format, validated as described below |
+| `7.0` | Upgraded to `8.0` |
+| `6.0` | Upgraded to `7.0`, then to `8.0` |
+| `5.0` | Upgraded to `6.0`, then to `7.0` and `8.0` |
+
+A `7.0` payload differs from `8.0` in its saved queries' search steps: each names one
+entity type in `entityTypeKey`, and later steps may bind any field of its rows. The upgrade
+makes each an [entity search](saved-queries.md#the-pipeline) over `types: [<that type>]`,
+with no method block and every other field kept. A saved query in which a step binds a
+field of a search step other than `_id`, `_entityTypeKey` or `name` cannot be converted:
+it is left out, and the import result names it. The same conversion brings stored saved
+queries up to date ([../storage-adapters/](../storage-adapters/README.md)).
 
 A `6.0` payload differs from `7.0` in one way: its lenses carry their agents under
 `aiAgents` and their retrievers under `retrieverAgents`, in place of `assistants`.
@@ -109,8 +118,8 @@ date ([../storage-adapters/](../storage-adapters/README.md)).
 
 **Each version reads only its own fields.** An upgrade checks the fields it reads and
 reports a malformed one at its path in the payload's own version, every offending path
-named together, like a payload of the wrong shape: `6.0` checks each lens's `aiAgents`
-and `retrieverAgents`; `5.0` checks `textSearchLanguage` — its absence is a field error
+named together, like a payload of the wrong shape: `7.0` checks each lens's key and its
+saved queries' keys and steps; `6.0` checks each lens's `aiAgents` and `retrieverAgents`; `5.0` checks `textSearchLanguage` — its absence is a field error
 on it — and each lens's `retrievers`, a retriever without a readable configuration of
 version 1 among them. Fields of another version are ignored unchecked, however they
 look. The current version requires `keywordLanguages` — its absence is a field error on
@@ -215,12 +224,15 @@ Import is a write path, and the write-path rules apply to it:
   at definition time. An unknown tool name fails the import.
 - Every saved query's steps are checked structurally, exactly as at definition time:
   known step types, unique step names, required fields per type, well-formed bindings
-  referring only to earlier steps, and the parameter cross-checks in both directions.
+  referring only to earlier steps — to a search step's references only — and the
+  parameter cross-checks in both directions. A search step carrying a field the current
+  version does not define is refused at its path, like a payload of the wrong shape.
   Saved-query parameters may not have the `document` data type.
 
-One difference from definition time is worth knowing: an imported saved query's OQL text
-is **not** parsed and checked against the lens. A pipeline that is structurally sound but
-names a type the lens does not expose imports successfully and fails when it is first run.
+One difference from definition time is worth knowing: an imported saved query's steps are
+**not** checked against the lens — no OQL parsing, no search scope or filter check. A
+pipeline that is structurally sound but names a type the lens does not expose imports
+successfully and fails when it is first run.
 
 Retrievers are checked for shape only: a key following the key rules and unique in
 its lens — a `5.0` key once renamed — a name of 1 to 200 characters, and a configuration
@@ -258,7 +270,7 @@ artefacts and computes embeddings, all within the target ontology.
   `5.0` payload's converted agents keep their conversion warnings, key renames among them
   ([above](#the-format-version)).
 
-Import answers with the lenses it created.
+Import answers with the lenses it created and `leftOutSavedQueries`: the lens and key of each saved query an upgrade could not convert — empty for a current payload.
 
 ## Through the interfaces
 

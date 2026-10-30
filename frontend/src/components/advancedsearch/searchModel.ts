@@ -1,13 +1,21 @@
 /**
  * Pure helpers for the Advanced search page: the body the form sends to
  * `POST /search/entities` or `/search/passages`, the field errors a control
- * shows, and `ran` and the limitations as readable sentences.
+ * shows, `ran` and the limitations as readable sentences, and how a found
+ * entity links and reads.
  *
  * No React, no I/O — unit-tested with `node --test`. The server stays
  * authoritative: a value the form cannot judge is sent and its error shown.
  */
 
-import type { PassageSearchBody, Representation, SearchLimitation } from '@/api/types'
+import type {
+  EntityReference,
+  EntitySearchResponse,
+  PassageSearchBody,
+  QueryResult,
+  Representation,
+  SearchLimitation,
+} from '@/api/types'
 
 export type SearchMode = 'entities' | 'passages'
 
@@ -144,4 +152,17 @@ export function limitationSentence(
       return `None of ${types.join(', ')} declares every filter key, so nothing was searched.`
   }
   return limitation.message
+}
+
+export const entityLink = (ontologyKey: string, lensKey: string, entity: EntityReference) =>
+  `/o/${ontologyKey}/w/${lensKey}/e/${entity._entityTypeKey}/${entity._id}`
+
+export const entityLabel = (entity: EntityReference) => entity.name ?? entity._id
+
+/** Whether a saved query's run answered with an entity search (its last
+ * step is a search step) rather than OQL rows. */
+export function isEntitySearchResponse(
+  result: QueryResult | EntitySearchResponse,
+): result is EntitySearchResponse {
+  return 'items' in result && 'ran' in result
 }

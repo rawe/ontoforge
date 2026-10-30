@@ -20,6 +20,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import type { AccessActor } from "../access/store.js";
+import { SEARCH_STEP_FIELDS } from "../core/ai.js";
 import { getEmbeddingProvider } from "../core/embedding.js";
 import {
   CascadeRequiredError,
@@ -69,6 +70,8 @@ import { portableNavigator } from "./navigators.js";
 import { portable as portableRetriever } from "./retrievers.js";
 import { readSearchSettings, updateSearchSettings as changeSearchSettings } from "../runtime/indexing/settings.js";
 import { loadSchema, loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
+import { checkEntitySearch } from "../runtime/search/entitySearch.js";
+import { searchStepRequest, searchStepErrors } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
   ExportPayload,
@@ -1807,7 +1810,7 @@ export async function importSchema(
   body: unknown,
   store: ModelingStore,
 ): Promise<Row> {
-  const { payload: upgraded, retrieverWarnings } = upgradeToCurrent(body);
+  const { payload: upgraded, retrieverWarnings, leftOutSavedQueries } = upgradeToCurrent(body);
   if (upgraded.keywordLanguages === undefined) {
     throw new ValidationError("The payload carries no keywordLanguages", {
       fields: { keywordLanguages: "Required" },
@@ -2234,17 +2237,7 @@ export async function importSchema(
       }
 
       for (const sq of lens.savedQueries) {
-        const stepsJson = JSON.stringify(
-          sq.steps.map((s) => ({
-            name: s.name,
-            type: s.type,
-            ...(s.oql ? { oql: s.oql } : {}),
-            ...(s.entityTypeKey ? { entityTypeKey: s.entityTypeKey } : {}),
-            ...(s.query ? { query: s.query } : {}),
-            ...(s.limit !== null && s.limit !== undefined ? { limit: s.limit } : {}),
-            ...(s.bindings && Object.keys(s.bindings).length > 0 ? { bindings: s.bindings } : {}),
-          })),
-        );
+        const stepsJson = JSON.stringify(sq.steps.map(storedStep));
         const paramsJson = JSON.stringify(
           sq.parameters.map((p) => ({
             name: p.name,
@@ -2331,7 +2324,7 @@ export async function importSchema(
     );
   }
   await afterSchemaChange(store);
-  return { lenses: createdLenses };
+  return { lenses: createdLenses, leftOutSavedQueries };
 }
 
 // --- Search settings ---
@@ -2479,10 +2472,32 @@ function toStepResponse(s: Row): StepResponseBody {
     name: s.name as string,
     type: s.type as string,
     oql: (s.oql as string | undefined) ?? null,
-    entityTypeKey: (s.entityTypeKey as string | undefined) ?? null,
     query: (s.query as string | undefined) ?? null,
+    types: (s.types as string[] | undefined) ?? null,
+    indices: (s.indices as string[] | undefined) ?? null,
+    keyword: (s.keyword as StepResponseBody["keyword"] | undefined) ?? null,
+    semantic: (s.semantic as StepResponseBody["semantic"] | undefined) ?? null,
+    filter: (s.filter as Record<string, string> | undefined) ?? null,
     limit: (s.limit as number | undefined) ?? null,
     bindings: (s.bindings as Record<string, string> | undefined) ?? null,
+  };
+}
+
+/** A step as stored: sparse, an absent field left out — and an empty
+ * filter or binding map too. */
+function storedStep(s: StepInput): Row {
+  return {
+    name: s.name,
+    type: s.type,
+    ...(s.oql ? { oql: s.oql } : {}),
+    ...(s.query ? { query: s.query } : {}),
+    ...(s.types != null ? { types: s.types } : {}),
+    ...(s.indices != null ? { indices: s.indices } : {}),
+    ...(s.keyword != null ? { keyword: s.keyword } : {}),
+    ...(s.semantic != null ? { semantic: s.semantic } : {}),
+    ...(s.filter && Object.keys(s.filter).length > 0 ? { filter: s.filter } : {}),
+    ...(s.limit !== null && s.limit !== undefined ? { limit: s.limit } : {}),
+    ...(s.bindings && Object.keys(s.bindings).length > 0 ? { bindings: s.bindings } : {}),
   };
 }
 
@@ -2538,9 +2553,6 @@ function validatePipeline(steps: StepInput[], paramNames: string[], queryKey: st
         errors.push(`${prefix}.oql: Required for oql steps`);
       }
     } else if (step.type === "search") {
-      if (!step.entityTypeKey) {
-        errors.push(`${prefix}.entityTypeKey: Required for search steps`);
-      }
       if (!step.query) {
         errors.push(`${prefix}.query: Required for search steps`);
       }
@@ -2559,10 +2571,19 @@ function validatePipeline(steps: StepInput[], paramNames: string[], queryKey: st
           continue;
         }
         const refStep = match[1]!;
+        const field = match[2]!;
         if (!seenStepNames.has(refStep) || seenStepNames.get(refStep)! >= i) {
           errors.push(
             `${prefix}.bindings.${paramName}: References step '${refStep}' ` +
               "which does not exist before this step",
+          );
+        } else if (
+          steps[seenStepNames.get(refStep)!]!.type === "search" &&
+          !SEARCH_STEP_FIELDS.includes(field)
+        ) {
+          errors.push(
+            `${prefix}.bindings.${paramName}: Reads '${field}' of search step '${refStep}', ` +
+              `which yields only ${SEARCH_STEP_FIELDS.join(", ")}`,
           );
         }
       }
@@ -2661,16 +2682,28 @@ export async function upsertSavedQuery(
 
   await resolveLensByKey(store, lensKey);
 
-  // Validate each oql step against the lens's schema — skipped ONLY when
-  // that schema cannot be loaded (the run-time check still applies then).
-  // Cache-free on purpose: validate against the currently persisted schema.
-  // The runtime cache is scoped by ontology and lens.
+  // Validate each step against the lens's schema — skipped ONLY when that
+  // schema cannot be loaded (the run-time check still applies then). A
+  // search step is checked as the entity search checks its request, every
+  // failure under its step. Cache-free on purpose: validate against the
+  // currently persisted schema. The runtime cache is scoped by ontology and
+  // lens.
   try {
     const loaded = await loadSchemaUncached(lensKey, runtimeStore);
-    for (const step of body.steps) {
+    const searchErrors: string[] = [];
+    for (const [index, step] of body.steps.entries()) {
       if (step.type === "oql" && step.oql) {
         parseAndValidate(step.oql, loaded.scoped);
+      } else if (step.type === "search") {
+        try {
+          await checkEntitySearch(loaded, searchStepRequest(step, step.query!), runtimeStore);
+        } catch (exc) {
+          searchErrors.push(...searchStepErrors(exc, index));
+        }
       }
+    }
+    if (searchErrors.length > 0) {
+      throw new ValidationError(`Saved query '${queryKey}' validation failed`, { errors: searchErrors });
     }
   } catch (exc) {
     if (exc instanceof NotFoundError) {
@@ -2686,17 +2719,7 @@ export async function upsertSavedQuery(
     }
   }
 
-  const stepsJson = JSON.stringify(
-    body.steps.map((s) => ({
-      name: s.name,
-      type: s.type,
-      ...(s.oql ? { oql: s.oql } : {}),
-      ...(s.entityTypeKey ? { entityTypeKey: s.entityTypeKey } : {}),
-      ...(s.query ? { query: s.query } : {}),
-      ...(s.limit !== null && s.limit !== undefined ? { limit: s.limit } : {}),
-      ...(s.bindings && Object.keys(s.bindings).length > 0 ? { bindings: s.bindings } : {}),
-    })),
-  );
+  const stepsJson = JSON.stringify(body.steps.map(storedStep));
   const paramsJson = JSON.stringify(
     body.parameters.map((p) => ({
       name: p.name,

@@ -32,6 +32,7 @@
 import { randomUUID } from "node:crypto";
 
 import { legacyNameProperty } from "../../core/legacyNameProperty.js";
+import { convertLegacySearchSteps } from "../../core/legacySearchStep.js";
 import {
   convertLegacyRetrieverConfig,
   LEGACY_RETRIEVER_CONFIG_VERSION,
@@ -47,7 +48,7 @@ import { quoteIdent } from "./oql/bindings.js";
 import { camelizeRow } from "./rows.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 11;
+export const STORAGE_VERSION = 12;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 1;
@@ -323,6 +324,33 @@ async function convertRetrievers(querier: Querier): Promise<void> {
         JSON.stringify(warnings),
       ],
     );
+  }
+}
+
+/**
+ * Make every stored saved query's `search` steps entity searches
+ * (`core/legacySearchStep.ts`). A saved query that cannot be converted —
+ * a step binds a field of a search step other than a reference — is
+ * deleted, and named in the log.
+ */
+async function convertSearchSteps(querier: Querier): Promise<void> {
+  const rows = (await querier.query(`SELECT saved_query_id, lens_key, key, steps FROM saved_query ORDER BY key`)).rows;
+  for (const row of rows) {
+    const steps = JSON.parse(row["steps"] as string) as Row[];
+    if (!steps.some((step) => step.type === "search")) continue;
+    const converted = convertLegacySearchSteps(steps);
+    if (converted === null) {
+      console.log(
+        `Deleting saved query '${row["key"] as string}' of lens '${row["lens_key"] as string}': ` +
+          "it binds a field a search step no longer yields.",
+      );
+      await querier.query(`DELETE FROM saved_query WHERE saved_query_id = $1`, [row["saved_query_id"]]);
+    } else {
+      await querier.query(`UPDATE saved_query SET steps = $2 WHERE saved_query_id = $1`, [
+        row["saved_query_id"],
+        JSON.stringify(converted),
+      ]);
+    }
   }
 }
 
@@ -619,6 +647,12 @@ const STEPS: Step[] = [
       `ALTER TABLE relation_type ADD COLUMN one_per_pair boolean NOT NULL DEFAULT false`,
       `CREATE INDEX changeset_value_match_idx ON changeset_value (changeset_id, property_key, md5(value::text))`,
     ],
+  },
+  {
+    // 8.0, a data rewrite: a saved query's search step is an entity
+    // search; a saved query binding what it no longer yields goes.
+    to: 12,
+    actions: [convertSearchSteps],
   },
 ];
 

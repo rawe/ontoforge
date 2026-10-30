@@ -25,13 +25,13 @@ execution; the only control flow is the order they are written in. There are two
 | Step type | Carries | Does |
 |---|---|---|
 | `oql` | an OQL query | Runs the query against the lens, exactly as an ad-hoc query would |
-| `search` | an entity type key and a search text, optionally a result limit | Runs the default search strategy over both kinds for that entity type |
+| `search` | the request fields of the [entity search](search.md#entity-search) under their names: a search text in `query`, optionally `types` or `indices`, the `keyword` and `semantic` blocks, `filter` and `limit` | Runs the entity search through the lens |
 
 Only the **last step's** output is returned. Intermediate step outputs exist solely to
 feed later steps through bindings; they are never sent to the caller. The shape of the
 response is therefore the shape of whatever the final step produces — a column list plus
-rows for an `oql` step, a search response for a `search` step. See
-[oql.md](oql.md) and [search.md](search.md) for those shapes.
+rows for an `oql` step, the entity search's response (`ran`, `items`, `limitations`) for a
+`search` step. See [oql.md](oql.md) and [search.md](search.md#entity-search) for those shapes.
 
 ### Parameters and substitution
 
@@ -62,9 +62,10 @@ a flat list — there is no aggregation, reshaping or scalar extraction. The con
 query is expected to use it as a set, typically with a membership test.
 
 What counts as a "field" depends on the producing step. Rows of an `oql` step are its
-result rows, so a field is one of its returned column names. Rows of a `search`
-step are the matched entities in ranking order, with no `_score`, relative score or matches
-in bindings and no entity type key. A final search step returns the plain search envelope.
+result rows, so a field is one of its returned column names. Rows of a `search` step are
+the found entities' references in rank order: `_id`, `_entityTypeKey` and `name`. A binding
+to any other field of a search step is rejected, at definition and at run, naming the
+binding; a later `oql` step reads further properties by id.
 
 ## Rules
 
@@ -83,10 +84,13 @@ in bindings and no entity type key. A final search step returns the plain search
 - A pipeline has at least one step.
 - Step names match `^[a-zA-Z_]\w*$` and are unique within the pipeline. They are the
   handles bindings refer to.
-- An `oql` step must carry a query. A `search` step must carry both an entity
-  type key and a search text.
-- A `search` step's limit is 1–100 and defaults to 10. It has no minimum score;
-  unknown step fields are stripped on write and import.
+- An `oql` step must carry a query. A `search` step must carry a search text; without
+  `types` and `indices` it searches every type the lens shows.
+- A `search` step's other fields follow the entity search's rules — one scope field at a
+  time, the method blocks, filter keys, a limit of 1–100 defaulting to 10. A field a
+  `search` step does not define is rejected at its path, so a misspelt or retired scope
+  field never widens the search to the whole lens; an `oql` step's unknown fields are
+  stripped on write and import.
 - A binding must reference a step declared **strictly earlier**. Self-references and
   forward references are rejected, which makes a cycle unexpressible.
 - A binding expression must match the reference form exactly; anything else is rejected.
@@ -110,16 +114,17 @@ It would be an unreferenced declaration, and the definition would be rejected.
 | Step structure, names, binding form and ordering | yes | — |
 | Parameter cross-checks | yes | — |
 | Each `oql` step parses and names only types and properties the lens exposes | yes | yes |
+| Each `search` step follows the entity search's rules against the lens, each failure named under its step (`steps[1].types.0`) | yes | yes |
 | Supplied parameters match the declaration | — | yes |
 | Parameter values coerce to their declared types | — | yes |
 
 Structural and cross-check failures are collected and reported together rather than one at
-a time, so a caller can correct the rejected definition in one round trip. The OQL check at definition time is
+a time, so a caller can correct the rejected definition in one round trip. The lens check at definition time is
 skipped when the lens's schema cannot be loaded; the run-time check is not, so a query stored
 that way still fails safely on first use.
 
-Nothing proactively invalidates a stored pipeline. A schema change that removes a type an
-`oql` step names, or a lens narrowing that hides one, leaves the saved query in place; it
+Nothing proactively invalidates a stored pipeline. A schema change that removes a type a
+step names, or a lens narrowing that hides one, leaves the saved query in place; it
 fails with a validation error the next time it runs. Re-validating stored queries after a
 schema change is the designer's job.
 
@@ -141,7 +146,9 @@ schema change is the designer's job.
 6. Results of an `oql` step are post-processed exactly like an ad-hoc query: columns and
    properties the lens does not expose are stripped, and document properties are reduced
    to stubs ([documents.md](documents.md)).
-7. The last step's output is returned.
+7. A `search` step's `$name` placeholders in `query` are substituted, and the step runs
+   the entity search with its other fields as stored.
+8. The last step's output is returned.
 
 Two rules that are easy to miss:
 
@@ -152,7 +159,9 @@ Two rules that are easy to miss:
   declared parameters reach the search text. To consume collected values, feed them into
   an `oql` step.
 
-A pipeline containing a `search` step requires at least one available search strategy.
+A `search` step without a method block runs what the server can — keyword alone without
+an embedding provider; one with a `semantic` block is refused as a disabled feature without
+one, at definition and at run.
 
 ### Discovery
 

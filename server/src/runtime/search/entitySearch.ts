@@ -42,6 +42,7 @@ import {
   runScopedSearch,
   shownDocument,
   type EntityReference,
+  type FilteredTarget,
   type ScopedSearchRequest,
   type SearchLimitation,
 } from "./scopedSearch.js";
@@ -83,6 +84,30 @@ export interface EntitySearchResponse {
   limitations: SearchLimitation[];
 }
 
+/** A request checked against a lens: its limit, the indices to rank and
+ * what its scope could not serve. */
+export interface CheckedEntitySearch {
+  limit: number;
+  targets: FilteredTarget[];
+  limitations: SearchLimitation[];
+}
+
+/** Check a request against the lens without running it: every broken
+ * rule thrown together, by the request's own path (module comment). */
+export async function checkEntitySearch(
+  loaded: LoadedSchema,
+  request: EntitySearchRequest,
+  store: RuntimeStore,
+): Promise<CheckedEntitySearch> {
+  const errors: Record<string, string> = {};
+  const limit = checkRequest(request, errors);
+  const limitations: SearchLimitation[] = [];
+  const searchable = await searchableIndices(loaded, indexStoreOf(store));
+  const { selected, scopeTypes } = scopeOf(loaded, request, searchable, errors, limitations);
+  const targets = filteredTargets(loaded, store, request, selected, scopeTypes, errors, limitations);
+  return { limit, targets, limitations };
+}
+
 /** Rank entities for a query text (module comment). */
 export async function searchEntities(
   lensKey: string,
@@ -90,13 +115,7 @@ export async function searchEntities(
   store: RuntimeStore,
 ): Promise<EntitySearchResponse> {
   const loaded = await loadSchema(lensKey, store);
-  const errors: Record<string, string> = {};
-  const limit = checkRequest(request, errors);
-
-  const limitations: SearchLimitation[] = [];
-  const searchable = await searchableIndices(loaded, indexStoreOf(store));
-  const { selected, scopeTypes } = scopeOf(loaded, request, searchable, errors, limitations);
-  const targets = filteredTargets(loaded, store, request, selected, scopeTypes, errors, limitations);
+  const { limit, targets, limitations } = await checkEntitySearch(loaded, request, store);
   if (targets.length === 0) return { ran: [], items: [], limitations };
 
   const methods = methodsOf(request, store);

@@ -78,7 +78,7 @@ export function QueryPage() {
                 key={`${ontologyKey}/${lensKey}`}
                 ontologyKey={ontologyKey}
                 lensKey={lensKey}
-                relationTypes={schema.data.relationTypes}
+                schema={schema.data}
                 runKey={runParam}
                 onOpenConsole={() => switchTab('console')}
               />

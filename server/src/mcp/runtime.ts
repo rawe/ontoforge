@@ -1237,7 +1237,9 @@ export function createRuntimeMcpServer(
       description:
         "Execute a saved query by name with parameter values. " +
         "Use list_saved_queries to discover available queries and their required " +
-        "parameters first.",
+        "parameters first. Answers with the last step's output: {columns, results} for an " +
+        "oql step; for a search step {ran, items, limitations}, each item a rank, the " +
+        "found entity (_id, _entityTypeKey, name) and the entry that matched.",
       inputSchema: {
         query_key: z.string(),
         params: z.record(z.string(), z.unknown()).optional(),

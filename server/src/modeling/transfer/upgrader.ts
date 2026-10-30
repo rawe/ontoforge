@@ -1,8 +1,8 @@
 /**
  * What the upgraders of the transfer format's chain share
- * (`upgrades.ts`): their signature, the retriever warnings that travel
- * beside a payload, and reading fields the way the request shape reports
- * them.
+ * (`upgrades.ts`): their signature, the retriever warnings and the
+ * saved queries left out that travel beside a payload, and reading fields
+ * the way the request shape reports them.
  */
 
 import type { z } from "zod";
@@ -25,10 +25,19 @@ export function retrieverWarningKey(lensKey: string, retrieverKey: string): stri
   return `${lensKey}/${retrieverKey}`;
 }
 
-/** What an upgrader makes of a payload of its version: one of the next. */
+/** A saved query an upgrade could not convert, by its lens's key and its
+ * own. */
+export interface LeftOutSavedQuery {
+  lens: string;
+  key: string;
+}
+
+/** What an upgrader makes of a payload of its version: one of the next,
+ * and the saved queries it left out of it. */
 export interface Upgraded {
   payload: Payload;
   retrieverWarnings: RetrieverWarnings;
+  leftOutSavedQueries: LeftOutSavedQuery[];
 }
 
 /** An upgrader checks the fields it reads, reporting a malformed one in its

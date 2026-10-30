@@ -285,6 +285,22 @@ describe("the executor", () => {
     expect(hits[1]!.indices[0]).toMatchObject({ keywordScore: 2, semanticSimilarity: 0.7 });
   });
 
+  it("two groups of one method fused: an entity found only by the later one keeps that group's scores", async () => {
+    lists["person~default/keyword"] = [entry("a", 3)];
+    lists["company~default/keyword"] = [entry("c", 2), entry("a", 1, "1")];
+    const hits = await run(cut(fuse(group(kw("person~default")), group(kw("company~default")))));
+    const c = hits.find((hit) => hit.entityId === "c")!;
+    expect(c.matched).toMatchObject({ index: { key: "company~default" }, scores: { keyword: 2 } });
+    expect(c.indices.map((match) => [match.index.key, match.keywordScore])).toEqual([["company~default", 2]]);
+    // Found by both: each index's entry measured by the group that fetched it.
+    const a = hits.find((hit) => hit.entityId === "a")!;
+    expect(a.matched).toMatchObject({ index: { key: "person~default" }, scores: { keyword: 3 } });
+    expect(a.indices.map((match) => [match.index.key, match.keywordScore])).toEqual([
+      ["person~default", 3],
+      ["company~default", 1],
+    ]);
+  });
+
   it("without a ready generation of one method, a hybrid tree keeps the other method's raw scores", async () => {
     generations = generations.filter((g) => g.representation !== "semantic");
     lists["person~default/keyword"] = [entry("a", 2.5)];

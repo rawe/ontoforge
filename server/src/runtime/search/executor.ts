@@ -558,27 +558,27 @@ function toEngineHit(
       if (!primaries.has(key)) primaries.set(key, entry);
     }
   }
-  const indices: IndexMatch[] = [...primaries].map(([key, primary]) => {
-    const measured = (representation: SearchRepresentation) =>
-      own
-        .find((method) => method.representation === representation)
-        ?.entries.find((entry) => searches[entry.search]!.index.key === key && sameEntry(entry, primary))?.score ?? null;
-    return {
-      index: searches[primary.search]!.index,
-      entry: plain(primary),
-      semanticSimilarity: measured("semantic"),
-      keywordScore: measured("keyword"),
-    };
-  });
+  // A method's score of this very entry: its own in the method that
+  // fetched it, else from the first ranking of the method, in tree order,
+  // that fetched it too.
+  const measured = (representation: SearchRepresentation, target: FoundEntry) => {
+    if (searches[target.search]!.method === representation) return target.score;
+    const key = searches[target.search]!.index.key;
+    return own
+      .filter((method) => method.representation === representation)
+      .flatMap((method) => method.entries)
+      .find((entry) => searches[entry.search]!.index.key === key && sameEntry(entry, target))?.score;
+  };
+  const indices: IndexMatch[] = [...primaries.values()].map((primary) => ({
+    index: searches[primary.search]!.index,
+    entry: plain(primary),
+    semanticSimilarity: measured("semantic", primary) ?? null,
+    keywordScore: measured("keyword", primary) ?? null,
+  }));
   // Every method that fetched the matched entry itself measures it.
   const scores: MethodScores = {};
   for (const representation of ["semantic", "keyword"] as const) {
-    const score = own
-      .find((method) => method.representation === representation)
-      ?.entries.find(
-        (entry) =>
-          searches[entry.search]!.index.key === matchedSearch.index.key && sameEntry(entry, hit.matched.entry),
-      )?.score;
+    const score = measured(representation, hit.matched.entry);
     if (score !== undefined) scores[representation] = score;
   }
   return {

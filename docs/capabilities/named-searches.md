@@ -77,6 +77,8 @@ its path below `tree` (`tree.input.inputs.1.index`):
     cut;
   - below a `passage` group only passage entries count: a search node there whose
     `parts` name another part is refused at its `parts`;
+  - below a `passage` group, an index whose document the lens hides is refused at its
+    `index`;
   - a fused ranking, which keeps only an order, is only fused again, restricted or cut;
   - a merge or fuse combines one result unit, entities or passages;
   - a floor belongs to a semantic search;

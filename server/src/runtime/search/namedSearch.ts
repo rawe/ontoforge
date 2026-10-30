@@ -1,7 +1,8 @@
 /**
  * A named search's tree against its lens (`core/namedSearch.ts` holds the
  * stored form): each stored filter's conditions resolved against its
- * entity type through the lens, then the tree's rules R1–R8
+ * entity type through the lens, no search below a passage group over a
+ * document the lens hides, then the tree's rules R1–R8
  * (`validateSearchTree`) — every failure at its path below `tree`. The
  * same check serves the save, the import and the run.
  *
@@ -35,7 +36,8 @@ import {
   withQuery,
   type StoredSearchNode,
 } from "../../core/namedSearch.js";
-import type { RuntimeStore, SearchPartKind } from "../../core/ports.js";
+import type { RuntimeStore, SearchIndexRecord, SearchPartKind } from "../../core/ports.js";
+import { documentField } from "../../core/searchComposition.js";
 import type { SearchRepresentation } from "../../core/searchIndex.js";
 import {
   isSearchNode,
@@ -52,7 +54,7 @@ import type { Provenance, TreeHit } from "./executor.js";
 import { resolveSearchFilters } from "./filters.js";
 import { indexStoreOf, readHitEntities, runSearchTree, searchableIndices } from "./indexSearch.js";
 import { passageSearchItems, readPassageEntities, type PassageSearchResponse } from "./passageSearch.js";
-import { described, rootTypes, type SearchLimitation } from "./scopedSearch.js";
+import { described, rootTypes, shownDocument, type SearchLimitation } from "./scopedSearch.js";
 
 /** What a tree is checked against: the lens's schema, the indices it may
  * search, and whether the adapter's search evaluates relation
@@ -61,7 +63,28 @@ export interface NamedSearchLens {
   loaded: Pick<LoadedSchema, "scoped">;
   /** The keys of the indices the lens may search. */
   indices: ReadonlySet<string>;
+  /** Of those, the keys of the ones that read a document the lens hides:
+   * as in the passage search, a search below a passage group may not name
+   * one — its passages would carry no document and no text. */
+  hiddenDocuments: ReadonlySet<string>;
   store: Pick<RuntimeStore, "supportsSearchPathConditions">;
+}
+
+/** A lens to check a tree against, from its schema before and after its
+ * scope and the indices it may search. */
+export function namedSearchLens(
+  loaded: Pick<LoadedSchema, "full" | "scoped">,
+  searchable: readonly SearchIndexRecord[],
+  store: NamedSearchLens["store"],
+): NamedSearchLens {
+  const hidesDocument = (index: SearchIndexRecord) =>
+    documentField(index.definition, loaded.full) !== null && shownDocument(loaded, index) === null;
+  return {
+    loaded,
+    indices: new Set(searchable.map((index) => index.key)),
+    hiddenDocuments: new Set(searchable.filter(hidesDocument).map((index) => index.key)),
+    store,
+  };
 }
 
 /** The tree as the executor runs it, and every rule it breaks against
@@ -85,7 +108,7 @@ export function compileNamedSearch(
 
 /** `passage`: below a passage group, where only passage entries count —
  * a search node without `parts` counts those only (the tree's rules refuse
- * other parts). */
+ * other parts), and one over a document the lens hides is refused. */
 function compile(
   at: StoredSearchNode,
   path: string,
@@ -100,6 +123,9 @@ function compile(
   let parts: SearchPartKind[] | undefined;
   if (at.kind === "keywordSearch" || at.kind === "semanticSearch") {
     parts = at.parts ?? (passage ? ["passage"] : undefined);
+    if (passage && lens.hiddenDocuments.has(at.index)) {
+      errors.push(`${treePath(path === "" ? "index" : `${path}.index`)}: Search index '${at.index}' reads no document this lens shows`);
+    }
   }
   switch (at.kind) {
     case "keywordSearch":
@@ -225,11 +251,7 @@ export async function runNamedSearch(
   }
 
   const searchable = await searchableIndices(loaded, indexStoreOf(store));
-  const compiled = compileNamedSearch(withQuery(search.tree, request.query), {
-    loaded,
-    indices: new Set(searchable.map((index) => index.key)),
-    store,
-  });
+  const compiled = compileNamedSearch(withQuery(search.tree, request.query), namedSearchLens(loaded, searchable, store));
   if (compiled.tree === null) {
     throw new ValidationError(`Named search '${key}' validation failed`, { errors: compiled.errors });
   }

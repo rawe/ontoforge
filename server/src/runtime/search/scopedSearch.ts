@@ -134,7 +134,7 @@ export function rootTypes(indices: SearchIndexRecord[]): string[] {
 }
 
 /** The document an index reads passages of, when the lens shows it. */
-export function shownDocument(loaded: LoadedSchema, index: SearchIndexRecord): string | null {
+export function shownDocument(loaded: Pick<LoadedSchema, "full" | "scoped">, index: SearchIndexRecord): string | null {
   const property = documentField(index.definition, loaded.full);
   const root = loaded.scoped.entityTypes[index.definition.entityType];
   return property !== null && root !== undefined && property in root.properties ? property : null;

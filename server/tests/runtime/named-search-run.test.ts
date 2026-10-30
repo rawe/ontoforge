@@ -25,6 +25,7 @@ import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import {
   compileNamedSearch,
   listNamedSearches,
+  namedSearchLens,
   runNamedSearch,
   type NamedSearchLens,
 } from "../../src/runtime/search/namedSearch.js";
@@ -204,6 +205,43 @@ describe("refusals", () => {
     });
     expect(rank).not.toHaveBeenCalled();
   });
+
+  it("a passage group over a document the lens hides is refused at its index; nothing runs", async () => {
+    const notes: SearchIndexRecord = {
+      searchIndexId: "id-person~notes",
+      key: "person~notes",
+      kind: "passage",
+      definition: { ...INDICES.find((index) => index.key === "person~default")!.definition, key: "person~notes", fields: ["notes"], header: null },
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    };
+    const base = runtime.searchIndices();
+    (runtime as unknown as { searchIndices: () => SearchIndexStore }).searchIndices = () => ({
+      ...base,
+      listIndices: async () => [...INDICES, notes],
+    });
+    const schema = (properties: string[] | null) => {
+      const full = makeFullSchema({ lensKey: "all", entityInclusions: [{ key: "person", properties }] });
+      const person = (full.entityTypes as Row[])[0]!;
+      person.properties = [
+        ...(person.properties as Row[]),
+        { key: "notes", displayName: "Notes", dataType: "document", required: false, defaultValue: null },
+      ];
+      return { ...full, searchIndexInclusions: ["person~notes"] };
+    };
+    save("notes", cut({ kind: "group", key: "passage", input: kw("person~notes", "$query") }));
+
+    runtime.getFullSchemaWithLensInclusions.mockResolvedValue(schema(["name"]));
+    await expect(run("notes", { query: "x" })).rejects.toMatchObject({
+      message: "Named search 'notes' validation failed",
+      details: { errors: ["tree.input.input.index: Search index 'person~notes' reads no document this lens shows"] },
+    });
+    expect(rank).not.toHaveBeenCalled();
+
+    invalidateLoadedSchemaCache();
+    runtime.getFullSchemaWithLensInclusions.mockResolvedValue(schema(["name", "notes"]));
+    await expect(run("notes", { query: "x" })).resolves.toMatchObject({ items: [] });
+  });
 });
 
 describe("the run's filter", () => {
@@ -309,7 +347,8 @@ describe("the match", () => {
 describe("shapes the executor runs, checked at save and run", () => {
   const lens = {
     loaded: { scoped: { entityTypes: { person: { properties: {} } } } },
-    indices: new Set(["person~default", "person~notes"]),
+    indices: new Set(["person~default", "person~notes", "person~memo"]),
+    hiddenDocuments: new Set(["person~memo"]),
     store: { supportsSearchPathConditions: () => false },
   } as unknown as NamedSearchLens;
   const passage = (input: StoredSearchNode): StoredSearchNode => ({ kind: "group", key: "passage", input });
@@ -324,6 +363,30 @@ describe("shapes the executor runs, checked at save and run", () => {
       "tree.input.input.parts: A passage group counts passage entries only",
     ]);
     expect(errors(cut(passage({ kind: "keywordSearch", index: "person~notes", text: "q", parts: ["passage"] })))).toEqual([]);
+  });
+
+  it("a search below a passage group over a document the lens hides is refused at its index; above an entity group not", () => {
+    expect(errors(cut(fuse(passage(kw("person~notes", "q")), passage(sem("person~memo", "q")))))).toEqual([
+      "tree.input.inputs.1.input.index: Search index 'person~memo' reads no document this lens shows",
+    ]);
+    expect(errors(cut(group(kw("person~memo", "q"))))).toEqual([]);
+  });
+
+  it("the lens's hidden documents: indices whose document the lens hides, not those without one", () => {
+    const type = (properties: Record<string, string>) => ({
+      key: "person",
+      properties: Object.fromEntries(Object.entries(properties).map(([key, dataType]) => [key, { key, dataType }])),
+    });
+    const record = (key: string, fields: string[]) =>
+      ({ key, definition: { key, entityType: "person", fields } }) as unknown as SearchIndexRecord;
+    const loaded = {
+      full: { entityTypes: { person: type({ name: "string", notes: "document", memo: "document" }) }, relationTypes: {} },
+      scoped: { entityTypes: { person: type({ name: "string", notes: "document" }) }, relationTypes: {} },
+    } as unknown as Parameters<typeof namedSearchLens>[0];
+    const indices = [record("person~default", ["name"]), record("person~notes", ["notes"]), record("person~memo", ["memo"])];
+    const built = namedSearchLens(loaded, indices, lens.store);
+    expect([...built.indices]).toEqual(["person~default", "person~notes", "person~memo"]);
+    expect([...built.hiddenDocuments]).toEqual(["person~memo"]);
   });
 
   it("a merge combines search entries, never grouped rankings", () => {

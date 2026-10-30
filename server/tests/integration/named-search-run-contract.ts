@@ -90,6 +90,7 @@ export function namedSearchRunContract(embedding: boolean, enabled = true) {
       await post("/api/ontologies", { key: O });
       await post(`${MODEL}/lenses`, { key: "all", name: "All" });
       const person = await post(`${MODEL}/entity-types`, { key: "person", displayName: "Person" });
+      ids.person = person.entityTypeId;
       for (const [key, dataType] of [["status", "string"], ["bio", "document"]] as const) {
         await post(`${MODEL}/entity-types/${person.entityTypeId}/properties`, { key, displayName: key, dataType });
       }
@@ -254,6 +255,36 @@ export function namedSearchRunContract(embedding: boolean, enabled = true) {
       expect(listed).toEqual([
         { key: "both", name: "both", description: "About both", result: "entities", types: ["person"] },
       ]);
+    });
+
+    it("a lens that hides the document of a passage search's index, the index still included, refuses the run and the save", async () => {
+      const lens = await post(`${MODEL}/lenses`, { key: "nobio", name: "No bio" });
+      await post(`${MODEL}/lenses/${lens.lensId}/includes/entity-types`, { key: "person", properties: null });
+      await post(`${MODEL}/lenses/${lens.lensId}/includes/search-indices`, { key: "person~bio" });
+      const tree = cut(group(kw("person~bio", "$query"), "passage"));
+      await save("bios", tree, "nobio");
+      expect((await ran("bios", { query: "engine" }, "nobio")).items).toHaveLength(2);
+
+      // Hiding the document keeps the index inclusion: a lens warning, not an error.
+      const narrowed = await app.inject({
+        method: "PUT",
+        url: `${MODEL}/lenses/${lens.lensId}/includes/entity-types/${ids.person}`,
+        payload: { properties: ["name", "status"] },
+      });
+      expect(narrowed.statusCode, narrowed.body).toBe(200);
+      invalidateLoadedSchemaCache();
+      const error = "tree.input.input.index: Search index 'person~bio' reads no document this lens shows";
+      const res = await run("bios", { query: "engine" }, "nobio");
+      expect(res.status).toBe(422);
+      expect(res.body!.error.message).toBe("Named search 'bios' validation failed");
+      expect(res.body!.error.details.errors).toEqual([error]);
+      const saved = await inject("PUT", `${MODEL}/lenses/nobio/named-searches/bios`, {
+        name: "bios",
+        description: "About bios",
+        tree,
+      });
+      expect(saved.status).toBe(422);
+      expect(saved.body!.error.details.errors).toEqual([error]);
     });
 
     it("a tree of several texts names the text each match came from", async () => {

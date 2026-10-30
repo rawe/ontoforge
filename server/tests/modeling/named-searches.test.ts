@@ -13,7 +13,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
 import type { SearchIndexRecord } from "../../src/core/ports.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
-import { createMockRuntimeStore, makeUnscopedSchema, type MockRuntimeStore } from "../runtime/helpers.js";
+import {
+  createMockRuntimeStore,
+  makeFullSchema,
+  makeUnscopedSchema,
+  type MockRuntimeStore,
+} from "../runtime/helpers.js";
 import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.js";
 
 type Row = Record<string, unknown>;
@@ -51,10 +56,10 @@ const STORED = {
   updatedAt: NOW,
 };
 
-/** An index record the lens can search: its key and root type are what
- * the check reads. */
-const index = (key: string, entityType: string) =>
-  ({ key, kind: "default", definition: { key, entityType } }) as unknown as SearchIndexRecord;
+/** An index record the lens can search: its key, root type and fields
+ * are what the check reads. */
+const index = (key: string, entityType: string, fields: string[] = []) =>
+  ({ key, kind: "default", definition: { key, entityType, fields } }) as unknown as SearchIndexRecord;
 
 let app: FastifyInstance;
 
@@ -229,6 +234,25 @@ describe("the lens check", () => {
       },
     });
     expect(res.statusCode, res.body).toBe(201);
+  });
+
+  it("refuses a search below a passage group over a document the lens hides, at its index", async () => {
+    const schema = makeFullSchema({ lensKey: "full_lens", entityInclusions: [{ key: "person", properties: ["name"] }] });
+    const person = (schema.entityTypes as Row[])[0]!;
+    person.properties = [
+      ...(person.properties as Row[]),
+      { key: "bio", displayName: "Bio", dataType: "document", required: false, defaultValue: null },
+    ];
+    holder.runtimeStore.getFullSchemaWithLensInclusions.mockResolvedValue({ ...schema, searchIndexInclusions: ["person~bio"] });
+    holder.runtimeStore.indices.listIndices.mockResolvedValue([index("person~bio", "person", ["bio"])]);
+    const res = await put("bios", {
+      kind: "cut",
+      limit: 10,
+      input: { kind: "group", key: "passage", input: { kind: "keywordSearch", index: "person~bio", text: "$query" } },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(errorsOf(res)).toEqual(["tree.input.input.index: Search index 'person~bio' reads no document this lens shows"]);
+    expect(holder.store.upsertNamedSearch).not.toHaveBeenCalled();
   });
 
   it("names an index the lens cannot search and a type it does not show at their fields", async () => {

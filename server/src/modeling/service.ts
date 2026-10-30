@@ -81,7 +81,7 @@ import {
 } from "../runtime/schemaCache.js";
 import { checkEntitySearch } from "../runtime/search/entitySearch.js";
 import { indexStoreOf, searchableIndices } from "../runtime/search/indexSearch.js";
-import { compileNamedSearch, type NamedSearchLens } from "../runtime/search/namedSearch.js";
+import { compileNamedSearch, namedSearchLens, type NamedSearchLens } from "../runtime/search/namedSearch.js";
 import { searchStepRequest, searchStepErrors } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
@@ -2889,8 +2889,7 @@ export async function upsertNamedSearch(
   }
   if (loaded !== null) {
     const searchable = await searchableIndices(loaded, indexStoreOf(runtimeStore));
-    const lens = { loaded, indices: new Set(searchable.map((index) => index.key)), store: runtimeStore };
-    errors.push(...compileNamedSearch(body.tree, lens).errors);
+    errors.push(...compileNamedSearch(body.tree, namedSearchLens(loaded, searchable, runtimeStore)).errors);
   }
   if (errors.length > 0) {
     throw new ValidationError(`Named search '${key}' validation failed`, { errors });
@@ -2956,7 +2955,7 @@ async function importedLensSearch(
       },
       disabledIndexKeys(settings),
     );
-    lenses.set(lens.key, { loaded: { scoped }, indices: new Set(searchable.map((index) => index.key)), store: runtimeStore });
+    lenses.set(lens.key, namedSearchLens({ full, scoped }, searchable, runtimeStore));
   }
   return lenses;
 }

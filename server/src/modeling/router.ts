@@ -34,6 +34,8 @@ import {
   LensCreate,
   LensResponse,
   LensUpdate,
+  NamedSearchResponse,
+  NamedSearchUpsert,
   PropertyDefinitionCreate,
   PropertyDefinitionResponse,
   PropertyDefinitionUpdate,
@@ -70,11 +72,12 @@ const RelationTypePropertyParams = OntologyParams.extend({
   propertyId: z.string(),
 });
 
-// Assistants and saved queries are the modeling exceptions addressed by
-// KEY, not internal identifier (`docs/interfaces/`).
+// Assistants, saved queries and named searches are the modeling exceptions
+// addressed by KEY, not internal identifier (`docs/interfaces/`).
 const LensKeyParams = OntologyParams.extend({ lensKey: z.string() });
 const AssistantKeyParams = OntologyParams.extend({ lensKey: z.string(), assistantKey: z.string() });
 const QueryKeyParams = OntologyParams.extend({ lensKey: z.string(), queryKey: z.string() });
+const NamedSearchKeyParams = OntologyParams.extend({ lensKey: z.string(), searchKey: z.string() });
 // Search indices are addressed by key too: managed keys are derived from
 // the schema and carry no identifier of their own.
 const IndexKeyParams = OntologyParams.extend({ indexKey: z.string() });
@@ -467,6 +470,7 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       const result = await service.importSchema(
         request.body,
         await getModelingStore(request.params.ontologyKey),
+        await getRuntimeStore(request.params.ontologyKey),
       );
       return reply.status(201).send(result);
     },
@@ -1110,6 +1114,61 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
       await service.deleteSavedQuery(
         request.params.lensKey,
         request.params.queryKey,
+        await getModelingStore(request.params.ontologyKey),
+      );
+      return reply.status(204).send();
+    },
+  );
+
+  // --- Named Searches (addressed by lens key + key) ---
+
+  app.get(
+    "/lenses/:lensKey/named-searches",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: LensKeyParams,
+        response: { 200: z.array(NamedSearchResponse) },
+      },
+    },
+    async (request) =>
+      service.listNamedSearches(
+        request.params.lensKey,
+        await getModelingStore(request.params.ontologyKey),
+      ),
+  );
+
+  app.put(
+    "/lenses/:lensKey/named-searches/:searchKey",
+    {
+      schema: {
+        tags: ["modeling"],
+        params: NamedSearchKeyParams,
+        body: NamedSearchUpsert,
+        response: { 200: NamedSearchResponse, 201: NamedSearchResponse },
+      },
+    },
+    async (request, reply) => {
+      const [result, created] = await service.upsertNamedSearch(
+        request.params.lensKey,
+        request.params.searchKey,
+        request.body,
+        await getModelingStore(request.params.ontologyKey),
+        await getRuntimeStore(request.params.ontologyKey),
+      );
+      return reply.status(created ? 201 : 200).send(result);
+    },
+  );
+
+  app.delete(
+    "/lenses/:lensKey/named-searches/:searchKey",
+    {
+      schema: { tags: ["modeling"], params: NamedSearchKeyParams },
+    },
+    async (request, reply) => {
+      await service.deleteNamedSearch(
+        request.params.lensKey,
+        request.params.searchKey,
         await getModelingStore(request.params.ontologyKey),
       );
       return reply.status(204).send();

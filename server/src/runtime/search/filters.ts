@@ -19,8 +19,8 @@ import type { EntityTypeDef, LoadedSchema } from "../schemaCache.js";
 export function resolveSearchFilters(
   filter: Record<string, string>,
   types: [string, EntityTypeDef][],
-  loaded: LoadedSchema,
-  store: RuntimeStore,
+  loaded: Pick<LoadedSchema, "scoped">,
+  store: Pick<RuntimeStore, "supportsSearchPathConditions">,
   errors: Record<string, string>,
 ): SearchedType[] {
   const eligible = new Map(

@@ -55,6 +55,7 @@ import {
   PropertyDefinitionUpdate,
   RelationTypeCreate,
   RelationTypeUpdate,
+  NamedSearchUpsert,
   SavedQueryUpsert,
   SearchSettingsUpdate,
   TRANSFER_FORMAT_VERSION,
@@ -700,14 +701,18 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         `Import a v${TRANSFER_FORMAT_VERSION} schema payload (also accepted, upgraded on the way in: ` +
         IMPORTABLE_FORMAT_VERSIONS.filter((v) => v !== TRANSFER_FORMAT_VERSION).map((v) => `v${v}`).join(", ") +
         "). Creates entity types, relation types, and lenses with scope configuration, " +
-        "assistants and saved queries. Answers with the created lenses and leftOutSavedQueries: " +
+        "assistants, saved queries and named searches. Answers with the created lenses and leftOutSavedQueries: " +
         "the saved queries ({lens, key}) of an older payload the upgrade could not convert.",
       inputSchema: {
         payload: z.record(z.string(), z.unknown()),
       },
     },
     wrap("import_schema", async (args: { payload: Record<string, unknown> }) => {
-      const result = await service.importSchema(args.payload, await getModelingStore(ontologyKey));
+      const result = await service.importSchema(
+        args.payload,
+        await getModelingStore(ontologyKey),
+        await getRuntimeStore(ontologyKey),
+      );
       return jsonResult(result);
     }),
   );
@@ -1478,6 +1483,89 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       return textResult(
         `Saved query '${args.query_key}' deleted from lens '${args.lens_key}'.`,
       );
+    }),
+  );
+
+  // --- Named Search Tools ---
+
+  server.registerTool(
+    "list_named_searches",
+    {
+      description: "List the named searches of a lens: key, name, description and stored tree of each.",
+      inputSchema: {
+        lens_key: z.string(),
+      },
+    },
+    wrap("list_named_searches", async (args: { lens_key: string }) => {
+      const results = await service.listNamedSearches(args.lens_key, await getModelingStore(ontologyKey));
+      return jsonResult(results);
+    }),
+  );
+
+  server.registerTool(
+    "set_named_search",
+    {
+      description:
+        "Create or replace a named search of a lens: a search tree stored under a key, run by key with a " +
+        `query text. Key must match pattern ${LENS_RESOURCE_KEY_PATTERN.source} and be at most ${MAX_KEY_LENGTH} ` +
+        "characters. 'tree' is one node; each node has 'kind' and only its own fields. " +
+        "keywordSearch {index, text, match?: 'any'|'all' (default any), relations?, parts?}: the entries of one " +
+        "search index ranked by keyword. semanticSearch {index, text, minSimilarity?: 0..1, relations?, " +
+        "parts?}: ranked by semantic similarity. relations: the relation types whose relation entries count " +
+        "(absent: every one the lens shows); parts: 'self', 'relation', 'passage' (absent: every part). " +
+        "group {key: 'entity'|'passage', input}: one item per entity or passage, by its best entry; every " +
+        "search node reaches the root through exactly one group. merge {inputs}: rankings of one method, text " +
+        "and result unit, by score. fuse {inputs}: grouped rankings of one result unit, by reciprocal rank. " +
+        "restrict {input, filters}: keeps the items whose entity meets the filter of its type, one filter per " +
+        "type; items of other types are kept. filter {entityType, conditions}: only in restrict's filters; " +
+        "conditions {key: value}, all must hold: key is a property of that type or '<relation>.<property>', " +
+        "with an optional suffix __ne/__gt/__gte/__lt/__lte, or __exists/__missing (true/false). " +
+        "cut {input, limit: 1-100, perEntity?}: the first limit items, perEntity passages per entity at most. " +
+        "Every search node needs a cut above it; the root ranks entities or passages. '$query' in a search " +
+        "node's text marks where the query goes; at least one text holds it. Indices must be searchable and " +
+        "types shown in the lens. Checked on save, every violation at its path (tree.input.inputs.0.index). " +
+        "Example: {kind:'cut', limit:10, input:{kind:'fuse', inputs:[{kind:'group', key:'entity', " +
+        "input:{kind:'keywordSearch', index:'person~default', text:'$query'}}, {kind:'group', key:'entity', " +
+        "input:{kind:'semanticSearch', index:'person~default', text:'$query'}}]}}",
+      inputSchema: {
+        lens_key: z.string(),
+        key: z.string(),
+        name: z.string(),
+        description: z.string(),
+        tree: z.record(z.string(), z.unknown()),
+      },
+    },
+    wrap("set_named_search", async (args: {
+      lens_key: string;
+      key: string;
+      name: string;
+      description: string;
+      tree: Record<string, unknown>;
+    }) => {
+      const body = NamedSearchUpsert.parse({ name: args.name, description: args.description, tree: args.tree });
+      const [result, created] = await service.upsertNamedSearch(
+        args.lens_key,
+        args.key,
+        body,
+        await getModelingStore(ontologyKey),
+        await getRuntimeStore(ontologyKey),
+      );
+      return jsonResult({ ...result, created });
+    }),
+  );
+
+  server.registerTool(
+    "delete_named_search",
+    {
+      description: "Delete a named search from a lens.",
+      inputSchema: {
+        lens_key: z.string(),
+        search_key: z.string(),
+      },
+    },
+    wrap("delete_named_search", async (args: { lens_key: string; search_key: string }) => {
+      await service.deleteNamedSearch(args.lens_key, args.search_key, await getModelingStore(ontologyKey));
+      return textResult(`Named search '${args.search_key}' deleted from lens '${args.lens_key}'.`);
     }),
   );
 

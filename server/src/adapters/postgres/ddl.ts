@@ -205,6 +205,19 @@ export function ontologyDdlStatements(): string[] {
   CONSTRAINT saved_query_key_unique UNIQUE (lens_id, key)        -- upsert arbiter
 )`,
 
+  `CREATE TABLE IF NOT EXISTS named_search (
+  named_search_id uuid        CONSTRAINT named_search_pk PRIMARY KEY,
+  lens_id         uuid        NOT NULL CONSTRAINT named_search_lens_fk
+                              REFERENCES lens (lens_id) ON DELETE CASCADE,
+  key             text        NOT NULL,
+  name            text        NOT NULL,
+  description     text        NOT NULL,
+  tree            jsonb       NOT NULL,  -- the stored search tree; the store does not interpret it
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT named_search_key_unique UNIQUE (lens_id, key)       -- upsert arbiter
+)`,
+
   `CREATE TABLE IF NOT EXISTS assistant_retriever (
   assistant_retriever_id uuid        CONSTRAINT assistant_retriever_pk PRIMARY KEY,
   lens_id                uuid        NOT NULL CONSTRAINT assistant_retriever_lens_fk

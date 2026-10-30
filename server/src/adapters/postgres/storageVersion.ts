@@ -48,7 +48,7 @@ import { quoteIdent } from "./oql/bindings.js";
 import { camelizeRow } from "./rows.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 12;
+export const STORAGE_VERSION = 13;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 1;
@@ -653,6 +653,24 @@ const STEPS: Step[] = [
     // search; a saved query binding what it no longer yields goes.
     to: 12,
     actions: [convertSearchSteps],
+  },
+  {
+    // Named searches: the table of search trees stored per lens.
+    to: 13,
+    actions: [
+      `CREATE TABLE named_search (
+  named_search_id uuid        CONSTRAINT named_search_pk PRIMARY KEY,
+  lens_id         uuid        NOT NULL CONSTRAINT named_search_lens_fk
+                              REFERENCES lens (lens_id) ON DELETE CASCADE,
+  key             text        NOT NULL,
+  name            text        NOT NULL,
+  description     text        NOT NULL,
+  tree            jsonb       NOT NULL,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT named_search_key_unique UNIQUE (lens_id, key)
+)`,
+    ],
   },
 ];
 

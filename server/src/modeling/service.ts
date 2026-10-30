@@ -29,9 +29,12 @@ import {
   StoreError,
   ValidationError,
 } from "../core/exceptions.js";
+import { storedTreeErrors, type StoredSearchNode } from "../core/namedSearch.js";
 import { RETRIEVER_CONFIG_VERSION, RetrieverConfig } from "../core/retriever.js";
 import { parseAndValidate } from "../core/oql/index.js";
 import type { ModelingStore, RelationRules, RelationRuleViolation, RuntimeStore } from "../core/ports.js";
+import { disabledIndexKeys } from "../core/searchPipeline.js";
+import { availableIndices } from "../core/searchQuery.js";
 import {
   DATA_TYPES,
   LENS_RESOURCE_KEY_PATTERN,
@@ -69,8 +72,16 @@ import {
 import { portableNavigator } from "./navigators.js";
 import { portable as portableRetriever } from "./retrievers.js";
 import { readSearchSettings, updateSearchSettings as changeSearchSettings } from "../runtime/indexing/settings.js";
-import { loadSchema, loadSchemaUncached, buildSchemaCacheFromRaw, applyScopeFiltering } from "../runtime/schemaCache.js";
+import {
+  loadSchema,
+  loadSchemaUncached,
+  buildSchemaCacheFromRaw,
+  applyScopeFiltering,
+  type LoadedSchema,
+} from "../runtime/schemaCache.js";
 import { checkEntitySearch } from "../runtime/search/entitySearch.js";
+import { indexStoreOf, searchableIndices } from "../runtime/search/indexSearch.js";
+import { compileNamedSearch, type NamedSearchLens } from "../runtime/search/namedSearch.js";
 import { searchStepRequest, searchStepErrors } from "../runtime/service.js";
 import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
 import {
@@ -95,6 +106,8 @@ import type {
   LensCreateInput,
   LensResponseBody,
   LensUpdateInput,
+  NamedSearchResponseBody,
+  NamedSearchUpsertInput,
   PropertyDefinitionCreateInput,
   PropertyDefinitionResponseBody,
   PropertyDefinitionUpdateInput,
@@ -1723,6 +1736,12 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
         dataType: p.dataType,
       })),
     }));
+    exported.namedSearches = (await store.listNamedSearches(lens.lensId as string)).map((ns) => ({
+      key: ns.key,
+      name: ns.name,
+      description: ns.description,
+      tree: ns.tree,
+    }));
     lenses.push(exported);
   }
 
@@ -1742,7 +1761,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
 
 /**
  * Import a transfer payload: create the types, then the lenses
- * with their inclusions, assistants and saved queries.
+ * with their inclusions, assistants, saved queries and named searches.
  *
  * Validate-then-write: the ENTIRE payload is
  * validated before anything is written — every rule violation collected
@@ -1754,7 +1773,9 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * the violation list as a flag write is. The saved-query descriptions are
  * embedded before anything is written; the checks against the target and
  * every write are then one design change, so a failure at any point —
- * the provider's included — leaves the target as it was.
+ * the provider's included — leaves the target as it was. A named
+ * search's tree is checked against its lens as written, inside that
+ * design change, so its lens violations are refused after the conflicts.
  *
  * Every imported key is validated against the same patterns the
  * interactive paths enforce, closing the `_id`-property hole
@@ -1809,6 +1830,7 @@ function importedIdentityErrors(et: z.infer<typeof ExportPayload>["entityTypes"]
 export async function importSchema(
   body: unknown,
   store: ModelingStore,
+  runtimeStore: Pick<RuntimeStore, "supportsSearchPathConditions">,
 ): Promise<Row> {
   const { payload: upgraded, retrieverWarnings, leftOutSavedQueries } = upgradeToCurrent(body);
   if (upgraded.keywordLanguages === undefined) {
@@ -2039,6 +2061,22 @@ export async function importSchema(
             }
           }
         }
+      }
+    }
+  }
+
+  // Named searches: the rules that need no lens here; the lens check runs
+  // once the lens and its indices are written, before the searches are.
+  for (const lens of payload.lenses) {
+    for (const ns of lens.namedSearches) {
+      if (!LENS_RESOURCE_KEY_PATTERN.test(ns.key)) {
+        errors.push(badKey("named search", ns.key, resourceKeyPattern));
+      }
+      if (ns.key.length > MAX_KEY_LENGTH) {
+        errors.push(longKey("named search", ns.key));
+      }
+      for (const error of storedTreeErrors(ns.tree)) {
+        errors.push(`Import error: named search '${ns.key}' of lens '${lens.key}' ${error}`);
       }
     }
   }
@@ -2278,6 +2316,31 @@ export async function importSchema(
     for (const lens of payload.lenses) {
       if (lens.indexInclusions !== undefined) {
         await importLensIndexInclusions(target, lensIds.get(lens)!, lens.indexInclusions);
+      }
+    }
+    // Named searches once every index and inclusion exists: checked
+    // against the lens as written, every violation reported together.
+    const searchLenses = await importedLensSearch(target, runtimeStore, lensIds);
+    const searchErrors = payload.lenses.flatMap((lens) =>
+      lens.namedSearches.flatMap((ns) =>
+        compileNamedSearch(ns.tree, searchLenses.get(lens.key)!).errors.map(
+          (error) => `Import error: named search '${ns.key}' of lens '${lens.key}' ${error}`,
+        ),
+      ),
+    );
+    if (searchErrors.length > 0) {
+      throw new ValidationError(searchErrors.join("; "), { errors: searchErrors });
+    }
+    for (const lens of payload.lenses) {
+      for (const ns of lens.namedSearches) {
+        await target.upsertNamedSearch(
+          lensIds.get(lens)!,
+          randomUUID(),
+          ns.key,
+          ns.name,
+          ns.description,
+          JSON.stringify(ns.tree),
+        );
       }
     }
     // Retrievers last, once their indices exist; navigators beside them.
@@ -2765,4 +2828,135 @@ export async function deleteSavedQuery(
       throw new NotFoundError(`Saved query '${queryKey}' not found`);
     }
   });
+}
+
+// --- Named searches (addressed by lens key + key) ---
+
+function toNamedSearchResponse(data: Row): NamedSearchResponseBody {
+  return {
+    key: data.key as string,
+    name: data.name as string,
+    description: data.description as string,
+    tree: data.tree as StoredSearchNode,
+    createdAt: toIso(data.createdAt),
+    updatedAt: toIso(data.updatedAt),
+  };
+}
+
+export async function listNamedSearches(
+  lensKey: string,
+  store: ModelingStore,
+): Promise<NamedSearchResponseBody[]> {
+  const lens = await resolveLensByKey(store, lensKey);
+  const rows = await store.listNamedSearches(lens.lensId as string);
+  return rows.map(toNamedSearchResponse);
+}
+
+/**
+ * Upsert by key (`docs/capabilities/named-searches.md`). Returns
+ * `[response, created]`. Every rule the tree breaks is collected into one
+ * validation error, each at its path: the rules that need no lens, then —
+ * unless the lens's schema cannot be loaded, as for a saved query — the
+ * stored filters' conditions and R1–R8 against the lens.
+ */
+export async function upsertNamedSearch(
+  lensKey: string,
+  key: string,
+  body: NamedSearchUpsertInput,
+  store: ModelingStore,
+  runtimeStore: RuntimeStore,
+): Promise<[NamedSearchResponseBody, boolean]> {
+  if (!LENS_RESOURCE_KEY_PATTERN.test(key)) {
+    throw new ValidationError(
+      `Invalid named search key '${key}'. Must match pattern: ${LENS_RESOURCE_KEY_PATTERN.source}`,
+    );
+  }
+  if (key.length > MAX_KEY_LENGTH) {
+    throw new ValidationError(
+      `Invalid named search key '${key}'. Maximum length is ${MAX_KEY_LENGTH} characters`,
+    );
+  }
+  await resolveLensByKey(store, lensKey);
+
+  const errors = storedTreeErrors(body.tree);
+  // Cache-free on purpose: checked against the currently persisted schema.
+  let loaded: LoadedSchema | null = null;
+  try {
+    loaded = await loadSchemaUncached(lensKey, runtimeStore);
+  } catch (exc) {
+    // Lens has no runtime schema loaded yet: the run-time check still applies.
+    if (!(exc instanceof NotFoundError)) throw exc;
+  }
+  if (loaded !== null) {
+    const searchable = await searchableIndices(loaded, indexStoreOf(runtimeStore));
+    const lens = { loaded, indices: new Set(searchable.map((index) => index.key)), store: runtimeStore };
+    errors.push(...compileNamedSearch(body.tree, lens).errors);
+  }
+  if (errors.length > 0) {
+    throw new ValidationError(`Named search '${key}' validation failed`, { errors });
+  }
+
+  const [data, created] = await store.changeDesign(async (s) => {
+    const lens = await resolveLensByKey(s, lensKey);
+    return s.upsertNamedSearch(
+      lens.lensId as string,
+      randomUUID(),
+      key,
+      body.name,
+      body.description,
+      JSON.stringify(body.tree),
+    );
+  });
+  return [toNamedSearchResponse(data), created];
+}
+
+export async function deleteNamedSearch(
+  lensKey: string,
+  key: string,
+  store: ModelingStore,
+): Promise<void> {
+  await store.changeDesign(async (s) => {
+    const lens = await resolveLensByKey(s, lensKey);
+    const deleted = await s.deleteNamedSearch(lens.lensId as string, key);
+    if (!deleted) {
+      throw new NotFoundError(`Named search '${key}' not found`);
+    }
+  });
+}
+
+/**
+ * What the named searches of the lenses an import wrote are checked
+ * against, read inside its design change: each lens's schema and the
+ * indices it may search, by lens key.
+ */
+type Inclusions = { key: string; properties: string[] | null }[];
+
+async function importedLensSearch(
+  target: ModelingStore,
+  runtimeStore: Pick<RuntimeStore, "supportsSearchPathConditions">,
+  lensIds: ReadonlyMap<ExportLensInput, string>,
+): Promise<Map<string, NamedSearchLens>> {
+  const schema = await target.getFullSchema();
+  const indices = target.searchIndices();
+  const [records, settings] = await Promise.all([indices.listIndices(), indices.getSearchSettings()]);
+  const lenses = new Map<string, NamedSearchLens>();
+  for (const [lens, lensId] of lensIds) {
+    if (lens.namedSearches.length === 0) continue;
+    const lensData = (schema.lenses as Row[]).find((row) => row.lensId === lensId)!;
+    const entityInclusions = (lensData.entityInclusions as Inclusions | undefined) ?? [];
+    const relationInclusions = (lensData.relationInclusions as Inclusions | undefined) ?? [];
+    const full = buildSchemaCacheFromRaw(lensData, schema.entityTypes as Row[], schema.relationTypes as Row[]);
+    const scoped = applyScopeFiltering(full, entityInclusions, relationInclusions);
+    const searchable = availableIndices(
+      records,
+      {
+        scoped: entityInclusions.length > 0 || relationInclusions.length > 0,
+        exposedEntityTypes: new Set(Object.keys(scoped.entityTypes)),
+        includedIndices: new Set(await indices.listLensIndexInclusions(lensId)),
+      },
+      disabledIndexKeys(settings),
+    );
+    lenses.set(lens.key, { loaded: { scoped }, indices: new Set(searchable.map((index) => index.key)), store: runtimeStore });
+  }
+  return lenses;
 }

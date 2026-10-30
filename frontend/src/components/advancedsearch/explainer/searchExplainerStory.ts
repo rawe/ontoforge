@@ -122,7 +122,7 @@ export const STORY: StoryStep[] = [
   {
     title: 'Fusion: combine by rank',
     body:
-      'Keyword scores and closeness cannot be compared, so the two rankings are combined by position: ' +
+      'Keyword scores and similarities cannot be compared, so the two rankings are combined by position: ' +
       'a high place in either ranking earns points, and an entity found by both earns points from both places. This is reciprocal rank fusion.',
     note: 'With only one method chosen there is nothing to fuse: its ranking is the result.',
     lit: ['fuse'],

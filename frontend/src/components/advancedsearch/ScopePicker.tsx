@@ -167,6 +167,7 @@ export function ScopePicker({
                   <Checkbox
                     checked={chosenSet.has(c.key)}
                     onCheckedChange={() => toggle(c.key)}
+                    aria-label={c.group !== undefined ? `${c.group} · ${c.label}` : c.label}
                     className="mt-0.5"
                   />
                   {group === '' && <TypeDot typeKey={c.typeKey} className="mt-1.5" />}

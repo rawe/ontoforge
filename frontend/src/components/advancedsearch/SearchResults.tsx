@@ -18,6 +18,7 @@ import {
 import { IdentityText } from '@/components/IdentityText'
 import { TypeChip } from '@/components/TypeChip'
 import { identityText } from '@/lib/displayLabel'
+import { cn } from '@/lib/utils'
 import {
   countText,
   entityLabel,
@@ -183,6 +184,29 @@ export function EntitySearchResult({
   )
 }
 
+/** A passage's text, a few lines at first: a long one opens in full on request. */
+function PassageText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const long = text.length > 420 || text.split('\n').length > 5
+  return (
+    <div>
+      <p className={cn('whitespace-pre-wrap text-[12px] leading-relaxed', long && !open && 'line-clamp-5')}>
+        {text}
+      </p>
+      {long && (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+        >
+          {open ? 'Show less' : 'Show all'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 /** One item of the passage search: rank, type, name with identity, the
  * document — which opens the passage's document — and the passage's text. */
 export function PassageSearchItemRow({
@@ -241,9 +265,7 @@ export function PassageSearchItemRow({
             <span className="font-mono text-[11px] text-muted-foreground">{passage.property}</span>
           )}
         </div>
-        {passage.text !== undefined && (
-          <p className="whitespace-pre-wrap text-[12px] leading-relaxed">{passage.text}</p>
-        )}
+        {passage.text !== undefined && <PassageText text={passage.text} />}
       </div>
     </li>
   )

@@ -8,7 +8,9 @@ import {
   isEntitySearchResponse,
   limitationSentence,
   ranText,
+  scopeSummary,
   searchBody,
+  sharedType,
   unplacedFieldErrors,
   type LimitationNames,
   type SearchForm,
@@ -141,7 +143,7 @@ test('each limitation code reads as a sentence naming its types, documents or in
 test('ran and the count read as short lines', () => {
   assert.equal(ranText([]), 'No method ran')
   assert.equal(ranText(['keyword']), 'Ran keyword search')
-  assert.equal(ranText(['semantic', 'keyword']), 'Ran semantic and keyword search')
+  assert.equal(ranText(['semantic', 'keyword']), 'Ran semantic and keyword search, fused by rank')
   assert.equal(countText('entities', 1), '1 entity')
   assert.equal(countText('entities', 0), '0 entities')
   assert.equal(countText('passages', 3), '3 passages')
@@ -154,4 +156,21 @@ test('a saved query run is told apart by its shape; a found entity reads by name
   assert.equal(entityLabel(entity), 'e-1')
   assert.equal(entityLabel({ ...entity, name: 'Ada' }), 'Ada')
   assert.equal(entityLink('onto', 'all', entity), '/o/onto/w/all/e/person/e-1')
+})
+
+test('the filter type is the one type every chosen scope item belongs to', () => {
+  const typeOf = (key: string) => key.split('~')[0]
+  assert.equal(sharedType([], typeOf), undefined)
+  assert.equal(sharedType(['person~default', 'person~cv'], typeOf), 'person')
+  assert.equal(sharedType(['person~default', 'company~default'], typeOf), undefined)
+  // An unknown key has no type, so nothing is shared.
+  assert.equal(sharedType(['person~default', 'gone'], (key) => (key === 'gone' ? undefined : 'person')), undefined)
+})
+
+test('the scope summary counts what is chosen; nothing chosen reads as all', () => {
+  assert.equal(scopeSummary('types', 0, 5), 'All 5 types')
+  assert.equal(scopeSummary('types', 2, 5), '2 of 5 types')
+  assert.equal(scopeSummary('indices', 0, 62), 'Every type’s managed indices')
+  assert.equal(scopeSummary('indices', 1, 62), '1 of 62 indices')
+  assert.equal(scopeSummary('documents', 0, 1), 'All 1 document')
 })

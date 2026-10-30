@@ -1,13 +1,14 @@
 import { useParams } from 'react-router-dom'
 import { useRuntimeSchema } from '@/api/hooks'
 import { AdvancedSearch } from '@/components/advancedsearch/AdvancedSearch'
+import { SearchExplainerButton } from '@/components/advancedsearch/explainer/SearchExplainer'
 import { PageHeader } from '@/components/PageHeader'
 import { Skeleton } from '@/components/ui/skeleton'
 
 /**
  * `/o/:ontologyKey/w/:lensKey/search` — Advanced search: the entity search and
  * the passage search with every option, apart from the Cmd+K palette's quick
- * search.
+ * search. A "?" beside the title explains how search works.
  */
 export function AdvancedSearchPage() {
   const { ontologyKey, lensKey } = useParams<{ ontologyKey: string; lensKey: string }>()
@@ -19,7 +20,8 @@ export function AdvancedSearchPage() {
     <div>
       <PageHeader
         title="Advanced search"
-        description="Search entities or document passages in this lens, with scope, methods and filter."
+        meta={<SearchExplainerButton className="-ml-2" />}
+        description="Search entities or passages of their documents in this lens — by keyword, by meaning, or both."
       />
 
       <div className="p-6">

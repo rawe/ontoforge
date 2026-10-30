@@ -22,6 +22,9 @@ export type SearchMode = 'entities' | 'passages'
 /** The request's scope fields; `documents` is the passage search's only. */
 export type ScopeField = 'types' | 'indices' | 'documents'
 
+/** What ranks: the method blocks the form sends. */
+export type MethodChoice = 'keyword' | 'semantic' | 'both'
+
 export interface SearchForm {
   mode: SearchMode
   query: string
@@ -70,6 +73,45 @@ export function searchBody(form: SearchForm): PassageSearchBody {
   return body
 }
 
+/** The one entity type every chosen scope item belongs to, if they share one:
+ * the filter editor works on one type's properties. */
+export function sharedType(
+  keys: readonly string[],
+  typeOf: (key: string) => string | undefined,
+): string | undefined {
+  const types = new Set(keys.map(typeOf))
+  return keys.length > 0 && types.size === 1 ? [...types][0] : undefined
+}
+
+const SCOPE_NOUNS: Record<ScopeField, [string, string]> = {
+  types: ['type', 'types'],
+  indices: ['index', 'indices'],
+  documents: ['document', 'documents'],
+}
+
+/** What the scope searches, in a few words: `All 5 types`, `2 of 62 indices`. */
+export function scopeSummary(field: ScopeField, chosen: number, total: number): string {
+  const [one, many] = SCOPE_NOUNS[field]
+  if (chosen > 0) return `${chosen} of ${total} ${total === 1 ? one : many}`
+  return field === 'indices' ? 'Every type’s managed indices' : `All ${total} ${total === 1 ? one : many}`
+}
+
+/** What an empty scope field searches, as the line under its list. */
+export function emptyScopeText(field: ScopeField, mode: SearchMode): string {
+  switch (field) {
+    case 'types':
+      return mode === 'entities'
+        ? 'Nothing chosen: every type is searched, by its own fields and its documents.'
+        : 'Nothing chosen: the documents of every type are searched.'
+    case 'indices':
+      return mode === 'entities'
+        ? 'Nothing chosen: every type’s own fields and documents are searched. A custom index is searched only when chosen.'
+        : 'Nothing chosen: every type’s documents are searched. A custom index is searched only when chosen.'
+    case 'documents':
+      return 'Nothing chosen: every document is searched.'
+  }
+}
+
 /** The request paths a form control answers for. */
 export const SEARCH_CONTROLS = [
   'query',
@@ -113,7 +155,8 @@ export function countText(mode: SearchMode, count: number): string {
 /** `ran` as a line above the results. */
 export function ranText(ran: readonly Representation[]): string {
   if (ran.length === 0) return 'No method ran'
-  return `Ran ${ran.map((method) => METHOD_NAMES[method].toLowerCase()).join(' and ')} search`
+  const names = ran.map((method) => METHOD_NAMES[method].toLowerCase()).join(' and ')
+  return ran.length > 1 ? `Ran ${names} search, fused by rank` : `Ran ${names} search`
 }
 
 /** How a limitation names what it lists: display names for keys. */

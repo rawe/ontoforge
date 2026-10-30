@@ -1,4 +1,4 @@
-# Search ranking without an index bonus, and no score in results
+# Search ranking without an index bonus, and scores only on the matching entry
 
 Current behavior: [Ranking](../capabilities/search.md#ranking),
 [similarity floor](../capabilities/search.md#similarity-floor),
@@ -16,8 +16,8 @@ confidence, which no ranking score is.
 
 Within one retrieval method an entity ranks by its best entry, with no bonus for
 occurring in several indices; the methods are fused by reciprocal rank. Ties are never
-broken by an invented measurement. A result carries its rank and the entry that matched,
-never a score.
+broken by an invented measurement. A result carries its rank and the entry that matched, with
+each method's own score of that entry; the result as a whole never has a score.
 
 ## Rejected
 
@@ -35,8 +35,12 @@ never a score.
 - **Treating an unmeasured similarity as zero in ties, or comparing tied entities
   pairwise.** The first invents a negative preference. The second can order a group
   inconsistently.
-- **A score or a normalized relative score in results.** A top score of 1.0 reads as a
-  perfect answer, and even an unrelated query has a best result.
+- **A score or a normalized relative score for the result as a whole.** A top score of 1.0
+  reads as a perfect answer, and even an unrelated query has a best result.
+- **Every method's own best entry beside the match.** It repeated the match's place for most
+  results and took a third of a search tool's response.
+- **Only the score of the method the match ranks by.** The other method's score of the same
+  entry is a different, equally valid measurement; dropping it hides that both found it.
 - **One minimum similarity for every caller.** Useful paraphrases have no lexical match,
   related passages can score high without answering, and the floors that were tested
   removed useful candidates. A similarity floor is model-specific.

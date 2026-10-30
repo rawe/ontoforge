@@ -224,10 +224,10 @@ of the ontology's keyword language set.
 **Source ranking** — the ordered list one retrieval method returns for one search index.
 
 **Item** — one entity (entity search) or one passage (passage search) of a search result,
-with its rank; no score.
+with its rank; no score for the item as a whole.
 
 **Match** — the entry that found an entity in the entity search: its own fields, one
-relation with the entity at its other end, or one passage.
+relation with the entity at its other end, or one passage, with the score of each method that found it.
 
 **Search index** — an ontology-level design object deciding what ranked search finds
 entities by: a root entity type, the text composed for each of its entities, and its

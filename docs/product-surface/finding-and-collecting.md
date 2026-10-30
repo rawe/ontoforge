@@ -263,9 +263,10 @@ the title explains how search works, step by step over one example.
 
 **Results.** The count, which methods ran, and each limitation as a sentence naming its
 types, indices or documents. An entity row has its rank, type chip, name linking to its
-detail, the part that matched and the snippet; a row found through a custom index names
+detail, the part that matched, its scores and the snippet; a row found through a custom index names
 it; a passage row has the entity, the document
 property — opening the [document viewer](schema-editing.md#document-viewer-and-editor) — and
-the passage text. No score is shown ([Matched via](#matched-via)). A rejected field shows its
+the passage text. Beside the part that matched, each method's score — "Semantic 0.82 · Keyword 2.17", two
+decimals — with a hover saying the two are not comparable. A rejected field shows its
 error under its control; others show verbatim below the form. Results searched with other
 settings than the form now shows say so, with a button to run again.

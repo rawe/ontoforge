@@ -490,6 +490,33 @@ describe("the executor", () => {
     expect(single.map((hit) => hit.provenance.map((row) => [row.text, row.rank]))).toEqual([[["q", 1]], [["q", 2]]]);
   });
 
+  it("a text fused from several cut rankings ranks as one: its rows' ranks fused, the best row with every score of its entry", async () => {
+    rank.mockImplementation(async (query) =>
+      (lists[`${query.generationId}${query.text === undefined ? "" : ` ${query.text}`}`] ?? []).slice(0, query.limit),
+    );
+    lists["person~default/semantic"] = [entry("e", 0.9), entry("a", 0.8), entry("b", 0.7)];
+    lists["person~default/keyword x"] = [entry("a", 3), entry("b", 2), entry("e", 1)];
+    lists["person~default/keyword x extra"] = [entry("e", 4)];
+    const hits = await runTree(
+      fuse(
+        cut(group(sem("person~default", "x"))),
+        cut(group(kw("person~default", "x"))),
+        cut(group(kw("person~default", "x extra"))),
+      ),
+    );
+    const rows = (entityId: string) =>
+      hits
+        .find((hit) => hit.entityId === entityId)!
+        .provenance.map((row) => [row.text, row.rank, row.hit!.matched.scores]);
+    // x alone fuses to a, e, b: e is second there, first in x extra.
+    expect(rows("e")).toEqual([
+      ["x", 2, { semantic: 0.9, keyword: 1 }],
+      ["x extra", 1, { keyword: 4 }],
+    ]);
+    expect(rows("a")).toEqual([["x", 1, { semantic: 0.8, keyword: 3 }]]);
+    expect(rows("b")).toEqual([["x", 3, { semantic: 0.7, keyword: 2 }]]);
+  });
+
   it("an append lists the filters' ids the ranking missed, filter by filter in id order, while it holds fewer than until", async () => {
     lists["person~default/keyword"] = [entry("p3", 2)];
     const filters: TreeNode[] = [

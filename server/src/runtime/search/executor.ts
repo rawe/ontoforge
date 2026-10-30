@@ -499,7 +499,7 @@ function itemsOf(input: Combined, searches: Planned[]): Item[] {
 
 /** Rankings of entities as one by reciprocal rank (k = 60), ties by the
  * one rule; an entity keeps what found it in every ranking, in their
- * order. */
+ * order — one provenance per sub-query and query text (`asOne`). */
 function fuseItems(rankings: Item[][]): Item[] {
   const fused = new Map<string, Item>();
   for (const ranking of rankings) {
@@ -517,7 +517,84 @@ function fuseItems(rankings: Item[][]): Item[] {
       prior.provenance.push(...item.provenance);
     });
   }
-  return byScore([...fused.values()], (item) => item.similarity);
+  const items = byScore([...fused.values()], (item) => item.similarity);
+  return asOne(items);
+}
+
+/** A sub-query and query text found by several fused rankings counts as
+ * one ranking of that text: its rows' ranks fused by reciprocal rank, ties
+ * by the one rule, and per item the row of its best rank stands, with the
+ * scores the other rows measured of that same entry. */
+function asOne(items: Item[]): Item[] {
+  const textOf = (row: Provenance) => (row.hit === null ? null : `${row.subQuery}\u0000${row.text}`);
+  const repeated = new Set<string>();
+  for (const item of items) {
+    const seen = new Set<string>();
+    for (const row of item.provenance) {
+      const text = textOf(row);
+      if (text === null) continue;
+      if (seen.has(text)) repeated.add(text);
+      seen.add(text);
+    }
+  }
+  if (repeated.size === 0) return items;
+  const ranks = new Map<string, Map<string, number>>();
+  for (const text of repeated) {
+    const rows = items.flatMap((item) => {
+      const own = item.provenance.filter((row) => textOf(row) === text);
+      if (own.length === 0) return [];
+      const score = own.reduce((sum, row) => sum + 1 / (RRF_K + row.rank!), 0);
+      const semantic = own.map((row) => row.hit!.matched.scores.semantic ?? null).filter((s) => s !== null);
+      return [{ entityId: item.entityId, score, similarity: semantic.length === 0 ? null : Math.max(...semantic) }];
+    });
+    const ranked = byScore(rows, (row) => row.similarity);
+    ranks.set(text, new Map(ranked.map((row, i) => [row.entityId, i + 1] as const)));
+  }
+  return items.map((item) => {
+    const provenance: Provenance[] = [];
+    for (const row of item.provenance) {
+      const text = textOf(row);
+      if (text === null || !repeated.has(text)) {
+        provenance.push(row);
+        continue;
+      }
+      if (provenance.some((kept) => textOf(kept) === text)) continue;
+      const own = item.provenance.filter((other) => textOf(other) === text);
+      const best = own.reduce((a, b) => (b.rank! < a.rank! ? b : a));
+      provenance.push({ ...best, hit: measuredBy(best.hit!, own), rank: ranks.get(text)!.get(item.entityId)! });
+    }
+    return { ...item, provenance };
+  });
+}
+
+/** A hit with the scores the other rows of its text measured of the same
+ * entries. */
+function measuredBy(hit: EngineHit, rows: Provenance[]): EngineHit {
+  const same = (a: { index: SearchIndexRecord; entry: RankedSearchEntry }, b: typeof a) =>
+    a.index.key === b.index.key && sameEntry(a.entry, b.entry);
+  const scores: MethodScores = { ...hit.matched.scores };
+  const indices = hit.indices.map((match) => ({ ...match }));
+  for (const { hit: other } of rows) {
+    if (other === null || other === hit) continue;
+    if (same(other.matched, hit.matched)) {
+      for (const representation of ["semantic", "keyword"] as const) {
+        scores[representation] ??= other.matched.scores[representation];
+      }
+    }
+    for (const match of other.indices) {
+      const own = indices.find((kept) => kept.index.key === match.index.key);
+      if (own === undefined) indices.push({ ...match });
+      else if (same(own, match)) {
+        own.semanticSimilarity ??= match.semanticSimilarity;
+        own.keywordScore ??= match.keywordScore;
+      }
+    }
+  }
+  // Semantic first, as every method's scores are listed.
+  const ordered: MethodScores = {};
+  if (scores.semantic !== undefined) ordered.semantic = scores.semantic;
+  if (scores.keyword !== undefined) ordered.keyword = scores.keyword;
+  return { ...hit, matched: { ...hit.matched, scores: ordered }, indices };
 }
 
 /** Same entry: same part of the same entity. */

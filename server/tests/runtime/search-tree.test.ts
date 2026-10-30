@@ -29,7 +29,7 @@ import {
 } from "../../src/core/searchTree.js";
 import { invalidateLoadedSchemaCache, type LoadedSchema } from "../../src/runtime/schemaCache.js";
 import { searchEntities } from "../../src/runtime/search/entitySearch.js";
-import { executeSearchTree } from "../../src/runtime/search/executor.js";
+import { executeSearchTree, type TreeHit } from "../../src/runtime/search/executor.js";
 import { createMockRuntimeStore, makeUnscopedSchema, withManagedIndices } from "./helpers.js";
 
 // Every tree the searches compile, as they compile it.
@@ -515,6 +515,46 @@ describe("the executor", () => {
     ]);
     expect(rows("a")).toEqual([["x", 1, { semantic: 0.8, keyword: 3 }]]);
     expect(rows("b")).toEqual([["x", 3, { semantic: 0.7, keyword: 2 }]]);
+  });
+
+  it("a text cut in several branches ranks as one even where no entity repeats it, its ties as it alone breaks them", async () => {
+    rank.mockImplementation(async (query) =>
+      (lists[`${query.generationId}${query.text === undefined ? "" : ` ${query.text}`}`] ?? []).slice(0, query.limit),
+    );
+    const rankOf = (hits: TreeHit[], entityId: string) =>
+      hits.find((hit) => hit.entityId === entityId)!.provenance.map((row) => [row.text, row.rank]);
+    const tree = fuse(
+      cut(group(kw("person~default", "x"))),
+      cut(group(kw("company~default", "x"))),
+      cut(group(kw("person~default", "y"))),
+    );
+    // Disjoint: x alone ranks a, then b.
+    lists["person~default/keyword x"] = [entry("a", 3)];
+    lists["company~default/keyword x"] = [entry("b", 3)];
+    lists["person~default/keyword y"] = [entry("b", 1)];
+    expect(rankOf(await runTree(tree), "b")).toEqual([
+      ["x", 2],
+      ["y", 1],
+    ]);
+    // Tied in x alone, a first as there; whatever y adds to b.
+    lists["person~default/keyword x"] = [entry("a", 3), entry("b", 2)];
+    lists["company~default/keyword x"] = [entry("b", 3), entry("a", 2)];
+    expect(rankOf(await runTree(tree), "b")).toEqual([
+      ["x", 2],
+      ["y", 1],
+    ]);
+  });
+
+  it("a text's matched entry takes the score of every method that fetched it, whatever entry the method matched", async () => {
+    lists["person~default/semantic"] = [entry("e", 0.9), entry("e", 0.8, "r")];
+    lists["person~default/keyword"] = [entry("e", 4, "r"), entry("e", 3)];
+    const [hit] = await runTree(
+      fuse(cut(group(sem("person~default", "x"))), cut(group(kw("person~default", "x"))), cut(group(kw("person~default", "y")))),
+    );
+    expect(hit!.provenance.map((row) => [row.text, row.hit!.matched.entry.partId, row.hit!.matched.scores])).toEqual([
+      ["x", "", { semantic: 0.9, keyword: 3 }],
+      ["y", "r", { keyword: 4 }],
+    ]);
   });
 
   it("an append lists the filters' ids the ranking missed, filter by filter in id order, while it holds fewer than until", async () => {

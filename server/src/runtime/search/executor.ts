@@ -320,6 +320,11 @@ function both(a: Restriction | undefined, b: Restriction): Restriction {
 function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | null)[], loaded: LoadedSchema) {
   const searchOf = new Map(searches.map((search, i) => [search.node as TreeNode, i] as const));
   const counts = new Map<CutNode, number>();
+  // Each group's ranking with its search, and whether rankings of entities
+  // fused: then a query text's rankings may lie in several of them.
+  const groups: { search: SearchNode; ranking: ModeRanking<FoundEntry> }[] = [];
+  let fusedItems = false;
+  const textRankings = new Map<string, TextRanking>();
   // The document each search node's index reads, once.
   const documents = new Map<number, string | null>();
   const documentOf = (search: number) => {
@@ -375,6 +380,7 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
       case "group": {
         const input = entriesOf(combine(node.input));
         const ranking = { representation: input.method, entries: input.entries };
+        if (input.ran) groups.push({ search: searchNodeOf(node.input), ranking });
         return grouped(node.key, [ranking], [textOf(node.input)], input.ran);
       }
       case "fuse": {
@@ -399,6 +405,7 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
           throw new Error("Passages fuse only as the methods of one search");
         }
         const items = fuseItems(fused.map((input) => itemsOf(input, searches)));
+        fusedItems = true;
         return { unit: "items", key: "entity", items, ran: true };
       }
       case "restrict":
@@ -437,8 +444,52 @@ function combineTree(tree: TreeNode, searches: Planned[], fetched: (Fetched | nu
         throw new Error(`A search tree with '${node.kind}' here cannot run`);
     }
   };
-  return { root: combine(tree), counts };
+  const root = combine(tree);
+  if (!fusedItems || root.unit !== "items") return { root, counts };
+  return { root: { ...root, items: root.items.map((item) => ({ ...item, provenance: byOwnText(item) })) }, counts };
+
+  /** An item's provenance, one per sub-query and query text: the hit and
+   * rank of that text's ranking alone — every group's ranking of it in
+   * the tree, its methods fused — whatever branches they were cut in. */
+  function byOwnText(item: Item): Provenance[] {
+    const provenance: Provenance[] = [];
+    const done = new Set<string>();
+    for (const row of item.provenance) {
+      if (row.hit === null) {
+        provenance.push(row);
+        continue;
+      }
+      const text = `${row.subQuery}\u0000${row.text}`;
+      if (done.has(text)) continue;
+      done.add(text);
+      const { rankings, ranked } = textRanking(row.subQuery, row.text!);
+      const own = ranked.get(item.entityId);
+      if (own === undefined) {
+        provenance.push(row);
+        continue;
+      }
+      const hit = toEngineHit(own.hit, searches, rankings, entityOf);
+      provenance.push({ ...row, hit, rank: own.rank });
+    }
+    return provenance;
+  }
+
+  function textRanking(subQuery: number | null, text: string) {
+    const key = `${subQuery}\u0000${text}`;
+    let found = textRankings.get(key);
+    if (found === undefined) {
+      const rankings = groups
+        .filter(({ search }) => (search.subQuery ?? null) === subQuery && search.text === text)
+        .map(({ ranking }) => ranking);
+      const ranked = new Map(fuseModes(rankings, entityOf).map((hit, i) => [hit.entityId, { hit, rank: i + 1 }] as const));
+      found = { rankings, ranked };
+      textRankings.set(key, found);
+    }
+    return found;
+  }
 }
+
+const entityOf = (entry: FoundEntry) => entry.entityId;
 
 /** At most `cap` items per entity, in rank order; no cap: all. */
 function perEntity<T extends { entityId: string }>(items: readonly T[], cap: number | undefined): T[] {
@@ -459,9 +510,14 @@ function entriesOf(input: Combined): Extract<Combined, { unit: "entries" }> {
 /** The query text of the entries a group takes: its search nodes share
  * one (R1). */
 function textOf(node: TreeNode): string {
-  if (isSearchNode(node)) return node.text;
-  if (node.kind === "merge" && node.inputs[0] !== undefined) return textOf(node.inputs[0]);
-  if (node.kind === "restrict") return textOf(node.input);
+  return searchNodeOf(node).text;
+}
+
+/** The first search node of the entries a group takes. */
+function searchNodeOf(node: TreeNode): SearchNode {
+  if (isSearchNode(node)) return node;
+  if (node.kind === "merge" && node.inputs[0] !== undefined) return searchNodeOf(node.inputs[0]);
+  if (node.kind === "restrict") return searchNodeOf(node.input);
   throw new Error(`A group takes entries; '${node.kind}' yields none`);
 }
 
@@ -499,7 +555,7 @@ function itemsOf(input: Combined, searches: Planned[]): Item[] {
 
 /** Rankings of entities as one by reciprocal rank (k = 60), ties by the
  * one rule; an entity keeps what found it in every ranking, in their
- * order — one provenance per sub-query and query text (`asOne`). */
+ * order. */
 function fuseItems(rankings: Item[][]): Item[] {
   const fused = new Map<string, Item>();
   for (const ranking of rankings) {
@@ -517,84 +573,7 @@ function fuseItems(rankings: Item[][]): Item[] {
       prior.provenance.push(...item.provenance);
     });
   }
-  const items = byScore([...fused.values()], (item) => item.similarity);
-  return asOne(items);
-}
-
-/** A sub-query and query text found by several fused rankings counts as
- * one ranking of that text: its rows' ranks fused by reciprocal rank, ties
- * by the one rule, and per item the row of its best rank stands, with the
- * scores the other rows measured of that same entry. */
-function asOne(items: Item[]): Item[] {
-  const textOf = (row: Provenance) => (row.hit === null ? null : `${row.subQuery}\u0000${row.text}`);
-  const repeated = new Set<string>();
-  for (const item of items) {
-    const seen = new Set<string>();
-    for (const row of item.provenance) {
-      const text = textOf(row);
-      if (text === null) continue;
-      if (seen.has(text)) repeated.add(text);
-      seen.add(text);
-    }
-  }
-  if (repeated.size === 0) return items;
-  const ranks = new Map<string, Map<string, number>>();
-  for (const text of repeated) {
-    const rows = items.flatMap((item) => {
-      const own = item.provenance.filter((row) => textOf(row) === text);
-      if (own.length === 0) return [];
-      const score = own.reduce((sum, row) => sum + 1 / (RRF_K + row.rank!), 0);
-      const semantic = own.map((row) => row.hit!.matched.scores.semantic ?? null).filter((s) => s !== null);
-      return [{ entityId: item.entityId, score, similarity: semantic.length === 0 ? null : Math.max(...semantic) }];
-    });
-    const ranked = byScore(rows, (row) => row.similarity);
-    ranks.set(text, new Map(ranked.map((row, i) => [row.entityId, i + 1] as const)));
-  }
-  return items.map((item) => {
-    const provenance: Provenance[] = [];
-    for (const row of item.provenance) {
-      const text = textOf(row);
-      if (text === null || !repeated.has(text)) {
-        provenance.push(row);
-        continue;
-      }
-      if (provenance.some((kept) => textOf(kept) === text)) continue;
-      const own = item.provenance.filter((other) => textOf(other) === text);
-      const best = own.reduce((a, b) => (b.rank! < a.rank! ? b : a));
-      provenance.push({ ...best, hit: measuredBy(best.hit!, own), rank: ranks.get(text)!.get(item.entityId)! });
-    }
-    return { ...item, provenance };
-  });
-}
-
-/** A hit with the scores the other rows of its text measured of the same
- * entries. */
-function measuredBy(hit: EngineHit, rows: Provenance[]): EngineHit {
-  const same = (a: { index: SearchIndexRecord; entry: RankedSearchEntry }, b: typeof a) =>
-    a.index.key === b.index.key && sameEntry(a.entry, b.entry);
-  const scores: MethodScores = { ...hit.matched.scores };
-  const indices = hit.indices.map((match) => ({ ...match }));
-  for (const { hit: other } of rows) {
-    if (other === null || other === hit) continue;
-    if (same(other.matched, hit.matched)) {
-      for (const representation of ["semantic", "keyword"] as const) {
-        scores[representation] ??= other.matched.scores[representation];
-      }
-    }
-    for (const match of other.indices) {
-      const own = indices.find((kept) => kept.index.key === match.index.key);
-      if (own === undefined) indices.push({ ...match });
-      else if (same(own, match)) {
-        own.semanticSimilarity ??= match.semanticSimilarity;
-        own.keywordScore ??= match.keywordScore;
-      }
-    }
-  }
-  // Semantic first, as every method's scores are listed.
-  const ordered: MethodScores = {};
-  if (scores.semantic !== undefined) ordered.semantic = scores.semantic;
-  if (scores.keyword !== undefined) ordered.keyword = scores.keyword;
-  return { ...hit, matched: { ...hit.matched, scores: ordered }, indices };
+  return byScore([...fused.values()], (item) => item.similarity);
 }
 
 /** Same entry: same part of the same entity. */

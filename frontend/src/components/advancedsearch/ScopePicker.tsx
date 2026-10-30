@@ -22,9 +22,15 @@ export interface ScopeChoice {
 
 const KIND_LABEL: Record<IndexKind, string> = { default: 'fields', passage: 'passages', custom: 'custom' }
 
-/** What an index row says beside its name: its kind, a missing method, a state that is not ready. */
-function IndexTags({ index }: { index: NonNullable<ScopeChoice['index']> }) {
-  const oneMode = index.modes.length === 1 ? `${index.modes[0]} only` : index.modes.length === 0 ? 'no method' : null
+/** What an index row says beside its name: its kind, a missing method, a state that is not ready.
+ * Without semantic search every index ranks by keyword only, so that goes unsaid. */
+function IndexTags({ index, semanticAvailable }: { index: NonNullable<ScopeChoice['index']>; semanticAvailable: boolean }) {
+  const oneMode =
+    index.modes.length === 0
+      ? 'no method'
+      : index.modes.length === 1 && (semanticAvailable || index.modes[0] === 'semantic')
+        ? `${index.modes[0]} only`
+        : null
   return (
     <span className="ml-auto flex shrink-0 items-center gap-1 text-[10.5px] text-muted-foreground">
       {index.status !== 'ready' && (
@@ -48,9 +54,11 @@ export function ScopePicker({
   choices,
   chosen,
   onChange,
+  semanticAvailable,
 }: {
   field: ScopeField
   mode: SearchMode
+  semanticAvailable: boolean
   choices: readonly ScopeChoice[]
   chosen: readonly string[]
   onChange: (keys: string[]) => void
@@ -117,7 +125,7 @@ export function ScopePicker({
 
       <div className="overflow-hidden rounded-lg border">
         {choices.length > 6 && (
-          <div className="flex items-center gap-2 border-b px-2.5">
+          <div className="flex items-center gap-2 border-b px-2.5 focus-within:bg-muted/40 focus-within:ring-2 focus-within:ring-ring/50 focus-within:ring-inset">
             <Search className="size-3.5 shrink-0 text-muted-foreground" />
             <input
               value={text}
@@ -165,7 +173,7 @@ export function ScopePicker({
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
                       <span className="truncate">{c.label}</span>
-                      {c.index !== undefined && <IndexTags index={c.index} />}
+                      {c.index !== undefined && <IndexTags index={c.index} semanticAvailable={semanticAvailable} />}
                     </span>
                     {c.index?.kind === 'custom' && c.description !== undefined && (
                       <span className="line-clamp-1 text-[11px] text-muted-foreground">{c.description}</span>

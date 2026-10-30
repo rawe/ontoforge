@@ -55,12 +55,12 @@ function Entries({ entries, semantic, grouped }: { entries: ExampleEntry[]; sema
           <span className={cn(!counts && 'line-through')}><Who {...entry} /></span>
           <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
             <span className="shrink-0">{entry.part}</span>
-            {semantic && entry.closeness !== undefined
+            {semantic && entry.similarity !== undefined
               ? <span className="flex min-w-0 flex-1 items-center gap-1.5">
                   <span className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted">
-                    <span className="block h-full rounded-full bg-primary/70" style={{ width: `${entry.closeness * 100}%` }} />
+                    <span className="block h-full rounded-full bg-primary/70" style={{ width: `${entry.similarity * 100}%` }} />
                   </span>
-                  <span className="tabular-nums">{entry.closeness.toFixed(2)}</span>
+                  <span className="tabular-nums">{entry.similarity.toFixed(2)}</span>
                   <span className="truncate">{entry.found}</span>
                 </span>
               : <span className="truncate">found: <span className="text-foreground">{entry.found}</span></span>}
@@ -193,8 +193,8 @@ function SearchExplainerPanel() {
       <div className="grid min-w-0 gap-1">
         <DialogTitle className="text-lg font-semibold">{TITLE}</DialogTitle>
         <DialogDescription className="text-[13px] leading-relaxed">
-          A search ranks entities — or passages of their documents — for a text. It looks for your words and for your
-          meaning at the same time, and combines what both find into one list, best first.
+          A search ranks entities — or passages of their documents — for a text. By default it looks for your words and
+          for your meaning at the same time, and combines what both find into one list, best first.
         </DialogDescription>
         <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
           {FACTS.map((fact) => <div key={fact.label} className="flex gap-1.5">
@@ -242,7 +242,7 @@ function SearchExplainerPanel() {
       <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <section className="flex flex-col gap-2 rounded-xl border bg-card p-3" aria-label="The example">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className={microLabel}>On an example: “{EXAMPLE_QUERY}”</h3>
+            <h3 className={microLabel}>On an example: “{EXAMPLE_QUERY}”{step.view === 'indices' ? ' — four indices of its lens' : ''}</h3>
             {step.view !== 'indices' && step.view !== 'results' && <span className="text-[11px] text-muted-foreground">numbers for illustration — results never show them</span>}
           </div>
           {/* As high as the tallest step's example, so the dialog keeps one height. */}

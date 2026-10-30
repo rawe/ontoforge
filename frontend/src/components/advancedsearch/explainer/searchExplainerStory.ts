@@ -1,7 +1,8 @@
 /**
  * What the search explainer shows: the search tree in plain words — the text searched in
- * every index of the scope by keyword and by meaning, each method's findings ranked with one
- * item per entity, the two rankings fused by rank, filtered and cut to the limit — told over
+ * every index of the scope by keyword and by meaning, a filter applied inside every search,
+ * each method's findings ranked with one item per entity, the two rankings fused by rank and
+ * cut to the limit — told over
  * one example query, step by step. A newcomer's view: no request fields, no formulas.
  *
  * The example follows the real rules: an entity counts once per method by its best entry,
@@ -36,9 +37,10 @@ export interface ExampleEntry {
   type: string
   /** Which part of the entity matched: its own fields or one passage. */
   part: string
-  /** The words found (keyword), or how close in meaning, 0–1 (semantic). */
+  /** The words found (keyword), or what was similar in meaning (semantic). */
   found: string
-  closeness?: number
+  /** How similar in meaning, 0–1 (semantic only). */
+  similarity?: number
   /** A second, weaker entry of an entity already listed: it does not count again. */
   repeat?: boolean
 }
@@ -51,11 +53,11 @@ export const KEYWORD_ENTRIES: ExampleEntry[] = [
 ]
 
 export const SEMANTIC_ENTRIES: ExampleEntry[] = [
-  { entity: 'Marktplatz Incident 4', typeKey: 'incident', type: 'Incident', part: 'Report, passage 1', found: 'about handling floods', closeness: 0.86 },
-  { entity: 'Eastgate Request 2', typeKey: 'citizen_request', type: 'Citizen Request', part: 'Report, passage 1', found: '“water in the cellar after heavy rain, nobody came”', closeness: 0.81 },
-  { entity: 'Riverside Incident 1', typeKey: 'incident', type: 'Incident', part: 'own fields', found: 'flooding and response time', closeness: 0.79 },
-  { entity: 'Riverside Incident 1', typeKey: 'incident', type: 'Incident', part: 'Report, passage 2', found: 'about the clean-up', closeness: 0.74, repeat: true },
-  { entity: 'Harbour District', typeKey: 'district', type: 'District', part: 'own fields', found: 'flood protection on the quay', closeness: 0.66 },
+  { entity: 'Marktplatz Incident 4', typeKey: 'incident', type: 'Incident', part: 'Report, passage 1', found: 'about handling floods', similarity: 0.86 },
+  { entity: 'Eastgate Request 2', typeKey: 'citizen_request', type: 'Citizen Request', part: 'Report, passage 1', found: '“water in the cellar after heavy rain, nobody came”', similarity: 0.81 },
+  { entity: 'Riverside Incident 1', typeKey: 'incident', type: 'Incident', part: 'own fields', found: 'flooding and response time', similarity: 0.79 },
+  { entity: 'Riverside Incident 1', typeKey: 'incident', type: 'Incident', part: 'Report, passage 2', found: 'about the clean-up', similarity: 0.74, repeat: true },
+  { entity: 'Harbour District', typeKey: 'district', type: 'District', part: 'own fields', found: 'flood protection on the quay', similarity: 0.66 },
 ]
 
 export interface FusedRow {
@@ -85,8 +87,8 @@ export const STORY: StoryStep[] = [
     body:
       'You type a text. The scope decides where it is looked for: in search indices — prepared copies of the texts of a type, ' +
       'kept up to date by OntoForge. A type has one for its own fields and one per document, cut into passages. ' +
-      'Nothing chosen searches the whole lens.',
-    note: 'An index holds entries: one per entity for its own fields, one per passage of a document.',
+      'Nothing chosen searches every type through these.',
+    note: 'An index holds entries: one per entity for its own fields, one per passage of a document. A modeler can add custom indices; they are searched only when you choose them.',
     lit: ['query', 'keyword', 'semantic'],
     view: 'indices',
   },
@@ -95,7 +97,7 @@ export const STORY: StoryStep[] = [
     body:
       'Keyword search looks for the words you typed, in any of their forms — “flood” finds “flooding”. ' +
       'An entry with more of your words ranks above one with fewer. “All words” keeps only entries that hold every word.',
-    note: 'Keyword search is exact and predictable, but it misses a text that says the same thing in other words.',
+    note: 'Keyword search is predictable, but it misses a text that says the same thing in other words.',
     lit: ['keyword'],
     view: 'keyword',
   },
@@ -103,8 +105,8 @@ export const STORY: StoryStep[] = [
     title: 'Semantic search: the meaning',
     body:
       'Semantic search compares meaning, not words: it finds “water in the cellar after heavy rain” for “flooding”. ' +
-      'Every entry gets a closeness to your text between 0 and 1. A minimum similarity drops what is less close.',
-    note: 'Semantic search finds what keyword search misses — and always returns something, even for an unrelated text.',
+      'Every entry gets a similarity to your text between 0 and 1. A minimum similarity drops what is less similar.',
+    note: 'Semantic search finds what keyword search misses. Without a minimum similarity it returns something even for an unrelated text.',
     lit: ['semantic'],
     view: 'semantic',
   },
@@ -121,7 +123,7 @@ export const STORY: StoryStep[] = [
     title: 'Fusion: combine by rank',
     body:
       'Keyword scores and closeness cannot be compared, so the two rankings are combined by position: ' +
-      'a high place in either ranking earns points, and an entity found by both earns twice. This is reciprocal rank fusion.',
+      'a high place in either ranking earns points, and an entity found by both earns points from both places. This is reciprocal rank fusion.',
     note: 'With only one method chosen there is nothing to fuse: its ranking is the result.',
     lit: ['fuse'],
     view: 'fused',
@@ -129,7 +131,7 @@ export const STORY: StoryStep[] = [
   {
     title: 'Filter and limit: the results',
     body:
-      'A filter keeps only entities that match it — and it applies inside every search, so it never empties the list afterwards. ' +
+      'A filter keeps only entities that match it. It applies inside every search, so the limit counts only entities that match. ' +
       'The best ones up to the limit are shown, each with the part that matched. Only the order is shown, never a score.',
     note: 'In Passages mode the same happens, but a passage — not an entity — is what is ranked and shown.',
     lit: ['filter', 'results'],

@@ -227,7 +227,7 @@ export function TypeTablePage() {
       order: sort === undefined || sort.desc ? 'desc' : 'asc',
       ...(debouncedQ !== '' ? { q: debouncedQ } : {}),
       ...(anyHidden && !anyDocumentVisible ? { fields: ['_id', ...visibleIds] } : {}),
-      filter: filtersToParam(filters, filterSubjects.properties),
+      filter: filtersToParam(filters, filterSubjects),
     }
   }, [sorting, properties, columnVisibility, page, debouncedQ, filters, hasIdentity, filterSubjects])
 
@@ -583,6 +583,7 @@ export function TypeTablePage() {
               subjects={filterSubjects}
               active={filters}
               onAdd={(f) => setFilters((prev) => withCondition(prev, f))}
+              values={{ ontologyKey: ontologyKey!, lensKey: lensKey!, typeKey: typeKey! }}
             />
             <div className="ml-auto flex items-center gap-2">
               <Button

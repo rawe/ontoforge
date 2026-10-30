@@ -159,7 +159,7 @@ function OptionalNumber({
 const METHOD_HINTS: Record<MethodChoice, string> = {
   keyword: 'Finds the words you typed, in any of their forms.',
   semantic: 'Finds texts close in meaning, even without the same words.',
-  both: 'Runs both and fuses their rankings: found by both ranks highest.',
+  both: 'Runs both and fuses their rankings: being found by both moves an entity up.',
 }
 
 interface AdvancedSearchProps {
@@ -293,7 +293,7 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
         scope: { field: scopeField, keys: scopeKeys },
         keyword: { on: method === 'keyword' || method === 'both', match },
         semantic: { on: method === 'semantic' || method === 'both', minSimilarity },
-        filter: filtersToParam(conditions, filterSubjects.properties),
+        filter: filtersToParam(conditions, filterSubjects),
         limit,
         perEntity,
       })
@@ -405,7 +405,11 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
               <span className="font-medium">Settings</span>
               <span className="text-muted-foreground"> · {summary}</span>
             </span>
-            {settingErrors && <span className="size-1.5 rounded-full bg-destructive" aria-label="Has errors" />}
+            {settingErrors && (
+              <span className="size-1.5 rounded-full bg-destructive">
+                <span className="sr-only">Has errors</span>
+              </span>
+            )}
             <ChevronDown className={cn('size-4 text-muted-foreground transition-transform', settingsOpen && 'rotate-180')} />
           </button>
           <div className={cn('divide-y border-t lg:border-t-0', !settingsOpen && 'hidden lg:block')}>
@@ -423,10 +427,17 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
               <ScopePicker
                 key={`${scopeField}/${mode}`}
                 field={scopeField}
+                semanticAvailable={semanticAvailable}
                 mode={mode}
                 choices={choices[scopeField]}
                 chosen={scopeKeys}
-                onChange={(keys) => setChosen((prev) => ({ ...prev, [scopeField]: keys }))}
+                onChange={(keys) =>
+                  setChosen((prev) => ({
+                    ...prev,
+                    // Keys this mode does not offer stay chosen for the other.
+                    [scopeField]: [...prev[scopeField].filter((k) => !offered.has(k)), ...keys],
+                  }))
+                }
               />
             </Section>
 
@@ -462,8 +473,9 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
                   )}
                   {method !== 'keyword' && (
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[12px]" title="Drops semantic matches less similar than this, from 0 to 1">
+                      <span className="grid text-[12px]">
                         Minimum similarity
+                        <span className="text-[10.5px] text-muted-foreground">0–1; drops less similar matches</span>
                       </span>
                       <OptionalNumber
                         min={0}
@@ -491,6 +503,7 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
                     active={conditions}
                     onAdd={(f) => setConditions((prev) => withCondition(prev, f))}
                     excludedOps={EXCLUDED_OPS}
+                    values={{ ontologyKey, lensKey, typeKey: filterType.key }}
                   />
                 )
               }

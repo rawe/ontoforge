@@ -31,7 +31,7 @@ export interface SearchForm {
   /** No keys: the field is left out, so the whole lens is searched. */
   scope: { field: ScopeField; keys: readonly string[] }
   keyword: { on: boolean; match: 'any' | 'all' }
-  /** `minSimilarity` as typed; empty leaves the server's floor. */
+  /** `minSimilarity` as typed; empty sends none, so there is no floor. */
   semantic: { on: boolean; minSimilarity: string }
   /** The applied filter conditions, as the entity list's filter keys. */
   filter: Record<string, string | number | boolean> | undefined
@@ -44,7 +44,7 @@ const numberOf = (text: string): number | undefined =>
   text.trim() === '' ? undefined : Number(text)
 
 /**
- * The request body: one scope field when it names keys, a block per checked
+ * The request body: one scope field when it names keys, a block per chosen
  * method (none: the server runs what can run), the filter values as strings.
  * The passage text is always wanted, which is the server's default.
  */
@@ -93,7 +93,8 @@ const SCOPE_NOUNS: Record<ScopeField, [string, string]> = {
 export function scopeSummary(field: ScopeField, chosen: number, total: number): string {
   const [one, many] = SCOPE_NOUNS[field]
   if (chosen > 0) return `${chosen} of ${total} ${total === 1 ? one : many}`
-  return field === 'indices' ? 'Every type’s managed indices' : `All ${total} ${total === 1 ? one : many}`
+  if (field === 'indices') return 'Every type’s managed indices'
+  return total === 1 ? `The one ${one}` : `All ${total} ${many}`
 }
 
 /** What an empty scope field searches, as the line under its list. */

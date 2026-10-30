@@ -1,7 +1,8 @@
 /**
  * Filter model for the type tables. A `FilterCondition` is one applied chip
- * on one subject: a property of the listed type, or a relation type in one
- * direction. Operators are constrained per subject; conditions serialize to
+ * on one subject: a property of the listed type, a relation type in one
+ * direction, or a query path — a property of the entity at the relation's
+ * other end, or of the relation itself. Operators are constrained per subject; conditions serialize to
  * the runtime entity list's `filter.{key}` / `filter.{key}__{op}` params —
  * "between" expands into a `__gte` + `__lte` pair on the same property.
  *
@@ -40,6 +41,14 @@ export type RelationDirection = Exclude<NeighborDirection, 'both'>
 export type FilterSubject =
   | { kind: 'property'; propertyKey: string }
   | { kind: 'relation'; relationTypeKey: string; direction: RelationDirection }
+  | {
+      kind: 'path'
+      relationTypeKey: string
+      direction: RelationDirection
+      /** Whose property: the entity at the other end (`.`) or the relation (`@`). */
+      on: 'entity' | 'relation'
+      propertyKey: string
+    }
 
 export interface FilterCondition {
   /** Local unique id for chip removal. */
@@ -66,15 +75,41 @@ export interface FilterSubjects {
 }
 
 /**
- * The subject's filter key: a property key, or `relationTypeKey:out|in`. The
- * direction marker is always sent — a self-relation requires it, and it keeps
- * a relation type apart from a property sharing its key. No schema key holds
- * a colon, so the two forms never collide.
+ * The subject's filter key: a property key, `relationTypeKey:out|in`, or a
+ * query path `relationTypeKey:out|in.propertyKey` (the related entity's) or
+ * `relationTypeKey:out|in@propertyKey` (the relation's). The direction marker
+ * is always sent — a self-relation requires it, and it keeps a relation type
+ * apart from a property sharing its key. No schema key holds a colon, a dot or
+ * an at sign, so the forms never collide.
  */
 export function subjectKey(subject: FilterSubject): string {
-  return subject.kind === 'property'
-    ? subject.propertyKey
-    : `${subject.relationTypeKey}:${subject.direction === 'outgoing' ? 'out' : 'in'}`
+  if (subject.kind === 'property') return subject.propertyKey
+  const relation = `${subject.relationTypeKey}:${subject.direction === 'outgoing' ? 'out' : 'in'}`
+  if (subject.kind === 'relation') return relation
+  return `${relation}${subject.on === 'entity' ? '.' : '@'}${subject.propertyKey}`
+}
+
+/** The relation subject a relation or path subject crosses. */
+export function relationOf(
+  subject: FilterSubject,
+  subjects: FilterSubjects,
+): RelationSubject | undefined {
+  if (subject.kind === 'property') return undefined
+  return subjects.relations.find(
+    (r) => r.relationType.key === subject.relationTypeKey && r.direction === subject.direction,
+  )
+}
+
+/** The property a subject compares: the listed type's own, or a path's final one. */
+export function subjectProperty(
+  subject: FilterSubject,
+  subjects: FilterSubjects,
+): SchemaProperty | undefined {
+  if (subject.kind === 'property') return subjects.properties.find((p) => p.key === subject.propertyKey)
+  if (subject.kind === 'relation') return undefined
+  const relation = relationOf(subject, subjects)
+  const owner = subject.on === 'entity' ? relation?.otherType : relation?.relationType
+  return owner?.properties.find((p) => p.key === subject.propertyKey)
 }
 
 export function relationSubject(relation: RelationSubject): FilterSubject {
@@ -211,17 +246,13 @@ const SERIALIZE: Record<
  */
 export function filtersToParam(
   filters: readonly FilterCondition[],
-  properties: readonly SchemaProperty[],
+  subjects: FilterSubjects,
 ): Record<string, FilterValue> | undefined {
   if (filters.length === 0) return undefined
-  const byKey = new Map(properties.map((p) => [p.key, p]))
   const out: Record<string, FilterValue> = {}
   for (const f of filters) {
     // A relation subject takes existence operators only, which read no data type.
-    const dataType =
-      f.subject.kind === 'property'
-        ? (byKey.get(f.subject.propertyKey)?.dataType ?? 'string')
-        : 'string'
+    const dataType = subjectProperty(f.subject, subjects)?.dataType ?? 'string'
     for (const [key, value] of SERIALIZE[f.op](subjectKey(f.subject), f, dataType)) {
       out[key] = value
     }
@@ -250,19 +281,26 @@ export function relationLabel(relation: RelationSubject): string {
 
 /**
  * Chip text, e.g. `Name contains "ada"`, `Age between 30 and 40`,
- * `Email is not set` or `Supersedes ← Version has none`.
+ * `Email is not set`, `Supersedes ← Version has none` or
+ * `Works For → Company · Name equals "Acme"`.
  */
 export function filterLabel(f: FilterCondition, subjects: FilterSubjects): string {
   const subject = f.subject
   const op = opLabel(subject, f.op)
-  if (subject.kind === 'relation') {
-    const key = subjectKey(subject)
-    const relation = subjects.relations.find((r) => subjectKey(relationSubject(r)) === key)
-    return `${relation !== undefined ? relationLabel(relation) : key} ${op}`
-  }
+  const relation = relationOf(subject, subjects)
+  const via =
+    relation !== undefined
+      ? relationLabel(relation)
+      : subject.kind === 'property'
+        ? ''
+        : `${subject.relationTypeKey}:${subject.direction === 'outgoing' ? 'out' : 'in'}`
+  if (subject.kind === 'relation') return `${via} ${op}`
   const propertyKey = subject.propertyKey
-  const prop = subjects.properties.find((p) => p.key === propertyKey)
-  const name = prop?.displayName ?? propertyKey
+  const prop = subjectProperty(subject, subjects)
+  const name =
+    subject.kind === 'path'
+      ? `${via} · ${subject.on === 'relation' ? 'relation ' : ''}${prop?.displayName ?? propertyKey}`
+      : (prop?.displayName ?? propertyKey)
   const fmt = (v: string) => {
     if (prop?.dataType === 'date') return humanDate(v)
     if (prop?.dataType === 'datetime') return humanDateTime(v)

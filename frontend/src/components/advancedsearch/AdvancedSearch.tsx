@@ -493,7 +493,7 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
                         onChange={setMinSimilarity}
                         emptyLabel="none"
                         label="Minimum similarity"
-                        className="h-7 w-20 text-[12.5px]"
+                        className="h-7 w-24 text-[12.5px]"
                       />
                     </div>
                   )}
@@ -546,7 +546,7 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
                   onChange={(e) => setLimit(e.target.value)}
                   placeholder="10"
                   aria-label="Limit"
-                  className="h-7 w-20 text-[12.5px]"
+                  className="h-7 w-24 text-[12.5px]"
                 />
               </div>
               {mode === 'passages' && (
@@ -559,7 +559,7 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
                     onChange={setPerEntity}
                     emptyLabel="no cap"
                     label="Passages per entity"
-                    className="h-7 w-20 text-[12.5px]"
+                    className="h-7 w-24 text-[12.5px]"
                   />
                 </div>
               )}

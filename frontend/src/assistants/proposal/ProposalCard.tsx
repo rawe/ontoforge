@@ -39,6 +39,15 @@ export function ProposalCard({ checked, restored, at }: { checked: CheckedPropos
   const card = useRef<HTMLDivElement>(null)
   // A request is out: a second click before the buttons disable sends nothing.
   const sending = useRef(false)
+  // Where the person is, read after an Apply's await: going elsewhere since
+  // wins over showing the new type, and so does a card no longer shown.
+  const here = useRef(`${location.pathname}${location.search}`)
+  const shown = useRef(true)
+  useEffect(() => { here.current = `${location.pathname}${location.search}` }, [location.pathname, location.search])
+  useEffect(() => {
+    shown.current = true
+    return () => { shown.current = false }
+  }, [])
 
   useEffect(() => {
     if (!reviewing) return
@@ -69,11 +78,12 @@ export function ProposalCard({ checked, restored, at }: { checked: CheckedPropos
     navigate(buildSchemaUrl(ontologyKey, view, type))
   }
   // Once its list is read again: the schema page drops a selection its (stale) list does not know.
-  const selectFirstNew = async () => {
+  // Only where Apply was clicked: `from` is that page.
+  const selectFirstNew = async (from: string) => {
     const first = createdTypes(proposal)[0]
     if (first === undefined) return
     await queryClient.refetchQueries({ queryKey: qk.model(ontologyKey, first.kind), exact: true }).catch(() => {})
-    select(first)
+    if (shown.current && here.current === from) select(first)
   }
 
   const readDesign = () => queryClient.fetchQuery({
@@ -99,6 +109,7 @@ export function ProposalCard({ checked, restored, at }: { checked: CheckedPropos
     if (!applicable(state) || sending.current) return
     sending.current = true
     dispatch({ type: 'apply' })
+    const from = `${location.pathname}${location.search}`
     let receipt: Receipt
     try {
       receipt = await apply.mutateAsync({ proposal, expected: state.check.baseRevision })
@@ -110,18 +121,18 @@ export function ProposalCard({ checked, restored, at }: { checked: CheckedPropos
       if (details?.code === 'DESIGN_CHANGED' && current !== null) dispatch({ type: 'designChanged', current })
       else if (details?.code === 'PROPOSAL_REFUSED' && refusal !== null) dispatch({ type: 'refused', check: refusal })
       else if (error instanceof ApiError && error.status < 500) dispatch({ type: 'failed', error: error.message })
-      else await reconcile()
+      else await reconcile(from)
       return
     }
     sending.current = false
     dispatch({ type: 'applied', receipt })
     invalidateModeling(queryClient)
     setReviewing(false)
-    await selectFirstNew()
+    await selectFirstNew(from)
   }
 
   // The answer to Apply was lost: it may have been applied. Never sent again; the reloaded schema decides.
-  const reconcile = async () => {
+  const reconcile = async (from: string) => {
     dispatch({ type: 'lost' })
     invalidateModeling(queryClient)
     try {
@@ -130,7 +141,7 @@ export function ProposalCard({ checked, restored, at }: { checked: CheckedPropos
       dispatch({ type: 'reconciled', applied })
       if (applied === true) {
         setReviewing(false)
-        await selectFirstNew()
+        await selectFirstNew(from)
       }
     } catch {
       dispatch({ type: 'reconciled', applied: null })

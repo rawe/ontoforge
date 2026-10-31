@@ -13,6 +13,7 @@ import {
   type ToolEvent,
 } from '../assistants/stream/chatStream'
 import type { DraftTarget } from '../assistants/draft/draftFillModel'
+import type { DesignRevision, Proposal, ProposalCheck, Receipt } from '../assistants/proposal/proposalModel'
 import type { Focus } from '../assistants/types'
 import { buildQuery, request } from './http'
 import type {
@@ -432,3 +433,15 @@ export const studioChat = (
   onEvent: (event: SharedEvent | ToolEvent<'studio'>) => void,
   signal: AbortSignal,
 ) => postChat(assistantPath({ ontologyKey, lensKey: null }, 'studio'), body, toolCallReader('studio'), onEvent, signal)
+
+/** Check a schema proposal against the current design; writes nothing. */
+export const checkProposal = (ontologyKey: string, proposal: Proposal) =>
+  request<ProposalCheck>(`${base(ontologyKey)}/proposals/check`, { method: 'POST', body: { proposal } })
+
+/**
+ * Apply a checked proposal to the design revision its check ran on: every
+ * step or none. 409 RESOURCE_CONFLICT with `details.code` DESIGN_CHANGED
+ * (`details.current`) or PROPOSAL_REFUSED (`details.check`).
+ */
+export const applyProposal = (ontologyKey: string, proposal: Proposal, expected: DesignRevision) =>
+  request<Receipt>(`${base(ontologyKey)}/proposals/apply`, { method: 'POST', body: { proposal, expected } })

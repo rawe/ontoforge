@@ -154,11 +154,25 @@ export function restoredCalls(artifacts: readonly unknown[]): ToolCall[] {
 
 /* ---------------------------------- design --------------------------------- */
 
-/** What the review reads of the current design: each type by key, its description and its properties'. */
+/** A property as the review reads it from the design. */
+export interface DesignProperty {
+  key: string
+  description: string | null
+  displayName?: string
+  dataType?: string
+  required?: boolean
+  defaultValue?: string | null
+}
+
+/** What the review reads of the current design: each type by key, what a
+ * proposal step sets on it (a relation type's ends included) and its properties. */
 export interface DesignType {
   key: string
   description: string | null
-  properties: { key: string; description: string | null; required?: boolean }[]
+  displayName?: string
+  source?: string
+  target?: string
+  properties: DesignProperty[]
 }
 
 export interface Design {
@@ -166,16 +180,24 @@ export interface Design {
   relationTypes: DesignType[]
 }
 
+const optionalString = (value: unknown) => (isString(value) ? value : null)
+
 /** The design of a schema export (`GET …/model/export`); null when it is none. */
 export function designOf(exported: unknown): Design | null {
   if (!isRecord(exported) || !Array.isArray(exported.entityTypes) || !Array.isArray(exported.relationTypes)) return null
   const types = (rows: unknown[]): DesignType[] => rows.filter(isRecord).map((row) => ({
     key: String(row.key),
-    description: isString(row.description) ? row.description : null,
+    description: optionalString(row.description),
+    ...(isString(row.displayName) ? { displayName: row.displayName } : {}),
+    ...(isString(row.fromEntityTypeKey) ? { source: row.fromEntityTypeKey } : {}),
+    ...(isString(row.toEntityTypeKey) ? { target: row.toEntityTypeKey } : {}),
     properties: (Array.isArray(row.properties) ? row.properties : []).filter(isRecord).map((p) => ({
       key: String(p.key),
-      description: isString(p.description) ? p.description : null,
+      description: optionalString(p.description),
+      ...(isString(p.displayName) ? { displayName: p.displayName } : {}),
+      ...(isString(p.dataType) ? { dataType: p.dataType } : {}),
       required: p.required === true,
+      defaultValue: optionalString(p.defaultValue),
     })),
   }))
   return { entityTypes: types(exported.entityTypes), relationTypes: types(exported.relationTypes) }
@@ -364,32 +386,40 @@ export function typeExists(design: Design | null, type: { kind: TypeKind; key: s
 }
 
 /**
- * Whether the design shows the proposal applied: every step's final effect
- * is there — of several description steps on one target, the last. A
- * proposal applies whole or not at all, so after a lost apply response
- * this tells which.
+ * Whether the design shows the proposal applied: every step's whole effect
+ * is there — what it creates as the step sets it, and of several
+ * description steps on one target the last. A proposal applies whole or
+ * not at all, so after a lost apply response this tells which; a same-key
+ * item someone else made differently does not count.
  */
 export function appliedIn(proposal: Proposal, design: Design): boolean {
   const find = (kind: TypeKind, key: string) => (kind === 'entity-types' ? design.entityTypes : design.relationTypes).find((t) => t.key === key)
   const overwritten = (i: number, key: string) =>
     proposal.steps.slice(i + 1).some((later) => later.op === 'set_description' && describedKey(later) === key)
+  /** Whether an item has the description the proposal leaves it: a later description step decides it instead. */
+  const describedAs = (i: number, key: string, item: { description: string | null }, description: string | undefined) =>
+    overwritten(i, key) || item.description === (description ?? null)
   return proposal.steps.every((step, i) => {
     switch (step.op) {
       case 'create_entity_type': {
-        // The type, and its name property as the step set it (a later
-        // description step on it decides its description instead).
         const type = find('entity-types', step.key)
         const name = type?.properties.find((p) => p.key === 'name')
-        if (type === undefined) return false
-        if (step.nameRequired !== undefined && (name?.required === true) !== step.nameRequired) return false
-        return step.nameDescription === undefined || overwritten(i, `entity-types:${step.key}:name`)
-          || name?.description === step.nameDescription
+        return type !== undefined && type.displayName === step.name
+          && describedAs(i, `entity-types:${step.key}:`, type, step.description)
+          && name !== undefined && name.required === (step.nameRequired ?? false)
+          && describedAs(i, `entity-types:${step.key}:name`, name, step.nameDescription)
       }
-      case 'create_relation_type':
-        return find('relation-types', step.key) !== undefined
+      case 'create_relation_type': {
+        const type = find('relation-types', step.key)
+        return type !== undefined && type.displayName === step.name && type.source === step.source && type.target === step.target
+          && describedAs(i, `relation-types:${step.key}:`, type, step.description)
+      }
       case 'add_property': {
         const owner = ownerOf(step)
-        return find(owner.kind, owner.key)?.properties.some((p) => p.key === step.key) ?? false
+        const property = find(owner.kind, owner.key)?.properties.find((p) => p.key === step.key)
+        return property !== undefined && property.displayName === step.name && property.dataType === step.dataType
+          && property.required === (step.required ?? false) && property.defaultValue === (step.defaultValue ?? null)
+          && describedAs(i, `${owner.kind}:${owner.key}:${step.key}`, property, step.description)
       }
       case 'set_description': {
         if (overwritten(i, describedKey(step))) return true

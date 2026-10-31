@@ -69,15 +69,21 @@ test('a restored answer gets its proposal back as one completed call', () => {
 
 test('reads the design of a schema export', () => {
   const read = designOf({
-    entityTypes: [{ key: 'person', description: 'P', properties: [{ key: 'name', description: null, required: true }, { key: 'age' }] }],
-    relationTypes: [{ key: 'knows' }],
+    entityTypes: [{
+      key: 'person', displayName: 'Person', description: 'P',
+      properties: [{ key: 'name', displayName: 'Name', dataType: 'string', required: true, defaultValue: null, description: null }, { key: 'age' }],
+    }],
+    relationTypes: [{ key: 'knows', fromEntityTypeKey: 'person', toEntityTypeKey: 'person' }],
   })
   assert.deepEqual(read, {
     entityTypes: [{
-      key: 'person', description: 'P',
-      properties: [{ key: 'name', description: null, required: true }, { key: 'age', description: null, required: false }],
+      key: 'person', description: 'P', displayName: 'Person',
+      properties: [
+        { key: 'name', description: null, displayName: 'Name', dataType: 'string', required: true, defaultValue: null },
+        { key: 'age', description: null, required: false, defaultValue: null },
+      ],
     }],
-    relationTypes: [{ key: 'knows', description: null, properties: [] }],
+    relationTypes: [{ key: 'knows', description: null, source: 'person', target: 'person', properties: [] }],
   })
   assert.equal(designOf({ error: 'x' }), null)
 })
@@ -157,18 +163,44 @@ test('the first new type, in step order', () => {
 
 test('a reloaded design shows the proposal applied only when every step took effect', () => {
   assert.equal(appliedIn(proposal, design), false)
-  const after: Design = {
+  const name = { key: 'name', description: null, required: false }
+  const start = { key: 'start', displayName: 'Start', dataType: 'date', required: true, defaultValue: null, description: null }
+  const signedBy = { key: 'signed_by', displayName: 'Signed by', source: 'contract', target: 'person', description: null, properties: [] }
+  const after = (changes: { start?: object; signedBy?: object } = {}): Design => ({
     entityTypes: [
-      { key: 'person', description: 'A natural person', properties: [{ key: 'name', description: null }] },
-      { key: 'contract', description: null, properties: [{ key: 'name', description: null }, { key: 'start', description: null }] },
+      { key: 'person', description: 'A natural person', properties: [name] },
+      { key: 'contract', displayName: 'Contract', description: null, properties: [name, { ...start, ...changes.start }] },
     ],
     relationTypes: [
       { key: 'knows', description: 'Knows', properties: [{ key: 'since', description: 'Since when' }] },
-      { key: 'signed_by', description: null, properties: [] },
+      { ...signedBy, ...changes.signedBy },
     ],
+  })
+  assert.equal(appliedIn(proposal, after()), true)
+  assert.equal(appliedIn(proposal, { ...after(), relationTypes: after().relationTypes.slice(0, 1) }), false)
+})
+
+test('a lost apply: a same-key item someone else made differently does not show it applied', () => {
+  const name = { key: 'name', description: null, required: false }
+  const design = (start: object, signedBy: object = {}): Design => ({
+    entityTypes: [
+      { key: 'person', description: 'A natural person', properties: [name] },
+      { key: 'contract', displayName: 'Contract', description: null, properties: [name, {
+        key: 'start', displayName: 'Start', dataType: 'date', required: true, defaultValue: null, description: null, ...start,
+      }] },
+    ],
+    relationTypes: [
+      { key: 'knows', description: 'Knows', properties: [{ key: 'since', description: 'Since when' }] },
+      { key: 'signed_by', displayName: 'Signed by', source: 'contract', target: 'person', description: null, properties: [], ...signedBy },
+    ],
+  })
+  assert.equal(appliedIn(proposal, design({})), true)
+  for (const start of [{ dataType: 'string' }, { required: false }, { defaultValue: '2024-01-01' }, { displayName: 'Begin' }, { description: 'x' }]) {
+    assert.equal(appliedIn(proposal, design(start)), false, JSON.stringify(start))
   }
-  assert.equal(appliedIn(proposal, after), true)
-  assert.equal(appliedIn(proposal, { ...after, relationTypes: after.relationTypes.slice(0, 1) }), false)
+  for (const signedBy of [{ target: 'contract' }, { source: 'person' }, { displayName: 'Signer' }]) {
+    assert.equal(appliedIn(proposal, design({}, signedBy)), false, JSON.stringify(signedBy))
+  }
 })
 
 test('a lost apply of repeated description steps on one target: only the last one decides', () => {
@@ -192,7 +224,7 @@ test("a lost apply of a new type with its name property set: the type alone does
     { id: 's1', op: 'create_entity_type', key: 'team', name: 'Team', nameRequired: true, nameDescription: 'What it is called' },
   ]
   const team = (required: boolean, description: string | null): Design => ({
-    ...design, entityTypes: [...design.entityTypes, { key: 'team', description: null, properties: [{ key: 'name', description, required }] }],
+    ...design, entityTypes: [...design.entityTypes, { key: 'team', displayName: 'Team', description: null, properties: [{ key: 'name', description, required }] }],
   })
   assert.equal(appliedIn({ steps }, team(true, 'What it is called')), true)
   assert.equal(appliedIn({ steps }, team(false, 'What it is called')), false)
@@ -202,7 +234,7 @@ test("a lost apply of a new type with its name property set: the type alone does
   assert.equal(appliedIn({ steps: described }, team(true, 'Label')), true)
   assert.equal(appliedIn({ steps: described }, team(true, 'What it is called')), false)
   // The export's required flag is read.
-  const exported = designOf({ entityTypes: [{ key: 'team', properties: [{ key: 'name', required: true, description: 'What it is called' }] }], relationTypes: [] })
+  const exported = designOf({ entityTypes: [{ key: 'team', displayName: 'Team', properties: [{ key: 'name', required: true, description: 'What it is called' }] }], relationTypes: [] })
   assert.equal(appliedIn({ steps }, exported!), true)
 })
 

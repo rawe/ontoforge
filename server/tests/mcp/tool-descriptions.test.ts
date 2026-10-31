@@ -76,7 +76,7 @@ const all = [
   [
     "studio fill_agent_draft",
     fillAgentDraftTool(
-      { target: { lensKey: "all", agentKey: null }, version: 0, fields: { name: "", description: "", systemPrompt: "", tools: null } },
+      { target: { kind: "agent", lens: "all", agent: null }, version: 0, fields: { name: "", description: "", systemPrompt: "", tools: null } },
       {} as ModelingStore,
       [...VALID_AGENT_TOOLS],
     ).description,

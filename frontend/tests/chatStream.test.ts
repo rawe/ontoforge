@@ -5,6 +5,7 @@ import {
   toolCallReader,
 } from '../src/assistants/stream/chatStream.ts'
 import { ApiError } from '../src/api/http.ts'
+import type { Focus } from '../src/assistants/types.ts'
 
 function response(chunks: Uint8Array[]) {
   return new Response(new ReadableStream({ start(controller) {
@@ -199,7 +200,7 @@ test('the Studio helper is bound to the whole ontology: its chat and thread read
   try {
     const path = assistantPath({ ontologyKey: 'o 1', lensKey: null }, 'studio', '_default')
     assert.equal(path, '/api/ontologies/o%201/model/ai')
-    const focus = { kind: 'property', key: 'email', typeKey: 'person' }
+    const focus: Focus = { kind: 'entityTypeProperty', entityType: 'person', property: 'email' }
     await postChat(path, { message: 'Hello', focus } as never, toolCallReader('studio'), () => {}, new AbortController().signal)
     assert.equal(calls[0]!.url, '/api/ontologies/o%201/model/ai/chat')
     assert.deepEqual(JSON.parse(String(calls[0]!.init!.body)), { message: 'Hello', focus })

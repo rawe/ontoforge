@@ -33,8 +33,8 @@ const DESIGN = {
 };
 const DESCRIPTIONS = ["D-person", "D-name", "D-works-for", "D-role", "D-all"];
 
-const run = (focus?: Parameters<typeof studioRun>[2]) =>
-  studioRun("fair", DESIGN, focus, {} as ModelingStore, {} as BaseChatModel);
+const run = (turn: Parameters<typeof studioRun>[2] = {}) =>
+  studioRun("fair", DESIGN, turn, {} as ModelingStore, {} as BaseChatModel);
 
 describe("the Studio helper's prepared run", () => {
   it("keeps the instructions fixed and every description in a labelled context block", () => {
@@ -58,7 +58,7 @@ describe("the Studio helper's prepared run", () => {
   });
 
   it("adds the focus as a block of its own, as structured fields", () => {
-    const focus = run({ kind: "agent", key: "support", lensKey: "hr" }).context.at(-1)!;
+    const focus = run({ focus: { kind: "agent", key: "support", lensKey: "hr" } }).context.at(-1)!;
     expect(focus).toEqual({ label: "Focus", source: "the Studio page the person has open", text: "kind: agent\nkey: support\nlensKey: hr" });
   });
 

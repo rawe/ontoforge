@@ -20,7 +20,7 @@ import {
   SEARCH_RESULT_NOTE,
   toolMethods,
 } from "../../search/tools.js";
-import { deploymentMethods } from "../../search/availability.js";
+import { deploymentMethods, type SearchCapabilities } from "../../search/availability.js";
 import { filterRules } from "../../readHelpers.js";
 
 import { z } from "zod";
@@ -477,19 +477,26 @@ STRATEGY — use the exact keys from the schema as tool arguments (e.g. entity_t
 Never make up answers — only use data from tool results. If the data doesn't contain the answer, say so. Be concise.
 `;
 
-/** Effective toolset: allowlist ∩ available. Embedding-dependent tools are
- * dropped without an embedding provider, the search tools when no search
- * method can run — for the default agent and explicit allowlists alike. */
-export function resolveChatToolNames(agentConfig: AgentConfig, store: RuntimeStore): string[] {
+/** The tools of `tools` this deployment cannot run: the embedding-dependent
+ * ones without an embedding provider, the search tools when no search
+ * method can run. */
+export function unavailableTools(tools: readonly string[], store: SearchCapabilities): string[] {
   const methods = deploymentMethods(store);
   const hasEmbedding = methods.includes("semantic");
   const hasSearch = methods.length > 0;
-  return (agentConfig.tools ?? CHAT_TOOLS).filter(
+  return tools.filter(
     (t) =>
-      ALL_TOOL_NAMES.has(t) &&
-      (!EMBEDDING_TOOLS.has(t) || hasEmbedding) &&
-      (![TOOL_SEARCH, TOOL_SEARCH_DOCUMENTS].includes(t) || hasSearch),
+      (EMBEDDING_TOOLS.has(t) && !hasEmbedding) ||
+      ([TOOL_SEARCH, TOOL_SEARCH_DOCUMENTS].includes(t) && !hasSearch),
   );
+}
+
+/** Effective toolset: allowlist ∩ available — the unavailable tools are
+ * dropped for the default agent and explicit allowlists alike. */
+export function resolveChatToolNames(agentConfig: AgentConfig, store: RuntimeStore): string[] {
+  const tools = agentConfig.tools ?? CHAT_TOOLS;
+  const unavailable = new Set(unavailableTools(tools, store));
+  return tools.filter((t) => ALL_TOOL_NAMES.has(t) && !unavailable.has(t));
 }
 
 /** One turn of agent chat on a thread. */

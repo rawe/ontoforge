@@ -2,8 +2,10 @@
  * The Studio helper: one built-in, never-stored design helper per ontology
  * — the modeling host of the tool loop (`assistants/loop.ts`). It reads
  * the ontology's design only and writes nothing. Each turn prepares a run:
- * fixed instructions, a design briefing and the page's focus as labelled
- * context blocks, and the design tools (`tools.ts`). Schema and lens
+ * fixed instructions, a design briefing, the page's focus and the open
+ * agent editor's draft as labelled context blocks, and the design tools
+ * (`tools.ts`) — with the draft, also the tool that proposes values for it
+ * (`draft.ts`). Schema and lens
  * descriptions are untrusted text: they reach the model only inside
  * context blocks and tool results, never in the instructions.
  */
@@ -18,8 +20,11 @@ import {
   type PreparedRun,
   type StreamExecution,
 } from "../../assistants/index.js";
-import type { ModelingStore } from "../../core/ports.js";
+import { supportsKeywordRanking, type ModelingStore } from "../../core/ports.js";
 import { MAX_KEY_LENGTH } from "../../core/schemas.js";
+import { unavailableTools } from "../../runtime/assistants/agents/runtime.js";
+import { VALID_AGENT_TOOLS } from "../../runtime/toolNames.js";
+import { draftBlock, fillAgentDraftTool, type AgentDraft } from "./draft.js";
 import { designTools, lensScope, readDesign } from "./tools.js";
 
 type Row = Record<string, unknown>;
@@ -47,6 +52,8 @@ export type Focus = z.infer<typeof Focus>;
 export const INSTRUCTIONS = `You are the design helper in the OntoForge Studio. You help the person who administers this ontology understand and review its design: entity types, relation types and their properties, lenses and their scope, and search indices.
 
 You read the design only. You never see instance data (entities, relations, documents, counts), and you cannot change anything: when a change would help, describe it as steps the person takes in the Studio.
+
+One exception: while the person has an agent editor open, the context has an Agent draft block and you have the fill_agent_draft tool. Only when they ask you to draft, write or change that agent, call fill_agent_draft with the fields to change; first read what the agent's lens shows, so its instructions and tools fit. The person fills the editor from your proposal, reviews it and saves it themselves; say so briefly.
 
 The context blocks give an outline of the schema and the lenses as of this message, and what the person has open, if anything. Use the tools for details and for validation results, and use exact keys as tool arguments. Answer from the design you read; say so when the design does not tell. Be concise.`;
 
@@ -100,34 +107,42 @@ function focusText(focus: Focus): string {
   return Object.entries(focus).map(([field, value]) => `${field}: ${value}`).join("\n");
 }
 
-/** The design briefing and the focus, each a labelled block. */
-export function briefing(ontologyKey: string, design: Row, focus?: Focus): ContextBlock[] {
+/** What a turn brings beside its message: the page's focus and the open agent editor's draft. */
+export interface StudioTurnContext {
+  focus?: Focus;
+  draft?: AgentDraft;
+}
+
+/** The design briefing, the focus and the draft, each a labelled block. */
+export function briefing(ontologyKey: string, design: Row, { focus, draft }: StudioTurnContext = {}): ContextBlock[] {
   const blocks: ContextBlock[] = [
     { label: "Schema outline", source: "the ontology's schema", text: schemaOutline(ontologyKey, design) },
     { label: "Lenses", source: "the ontology's lenses", text: lensOutline(design) },
   ];
   if (focus !== undefined) blocks.push({ label: "Focus", source: "the Studio page the person has open", text: focusText(focus) });
+  if (draft !== undefined) blocks.push(draftBlock(draft));
   return blocks;
 }
 
-/** One turn's run over `design`, the store's design as `readDesign` reads it. */
+/** One turn's run over `design`, the store's design as `readDesign` reads it;
+ * `lacking` are the grantable agent tools this server cannot run. */
 export function studioRun(
   ontologyKey: string,
   design: Row,
-  focus: Focus | undefined,
+  turn: StudioTurnContext,
   store: ModelingStore,
   model: BaseChatModel,
+  lacking: readonly string[] = [],
 ): PreparedRun<null> {
-  return {
-    kind: STUDIO_KIND, instructions: INSTRUCTIONS, context: briefing(ontologyKey, design, focus),
-    tools: designTools(store), ctx: null, model,
-  };
+  const tools = designTools(store);
+  if (turn.draft !== undefined) tools.push(fillAgentDraftTool(turn.draft, store, lacking));
+  return { kind: STUDIO_KIND, instructions: INSTRUCTIONS, context: briefing(ontologyKey, design, turn), tools, ctx: null, model };
 }
 
 /** One turn of the Studio helper on a thread. */
 export async function runStudioChat(
   ontologyKey: string,
-  turn: { message: string; focus?: Focus },
+  turn: { message: string } & StudioTurnContext,
   store: ModelingStore,
   model: BaseChatModel,
   thread: GraphThread,
@@ -135,7 +150,9 @@ export async function runStudioChat(
 ): Promise<Row> {
   const design = await readDesign(store);
   execution.signal?.throwIfAborted();
-  const run = studioRun(ontologyKey, design, turn.focus, store, model);
+  const keyword = await supportsKeywordRanking();
+  const lacking = unavailableTools([...VALID_AGENT_TOOLS], { supportsKeywordRanking: () => keyword });
+  const run = studioRun(ontologyKey, design, turn, store, model, lacking);
   const { reply } = await runToolLoop(run, turn.message, thread, execution);
   execution.signal?.throwIfAborted();
   return { reply };

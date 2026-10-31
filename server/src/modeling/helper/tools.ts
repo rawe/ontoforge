@@ -18,7 +18,7 @@ import * as service from "../service.js";
 type Row = Record<string, unknown>;
 
 /** An expected modeling error as the model reads it; undefined for any other. */
-function expectedError(error: unknown): { error: Row } | undefined {
+export function expectedError(error: unknown): { error: Row } | undefined {
   const code = error instanceof NotFoundError ? "RESOURCE_NOT_FOUND"
     : error instanceof ValidationError ? "VALIDATION_ERROR"
       : error instanceof ConflictError ? "RESOURCE_CONFLICT"

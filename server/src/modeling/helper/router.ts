@@ -18,13 +18,14 @@ import { accessOf } from "../../auth/plugin.js";
 import { getModelingStore } from "../../core/ports.js";
 import { requireLanguageModel } from "../../runtime/assistants/kit/model.js";
 import { ChatPayload, sendChatStream } from "../../runtime/chatStream.js";
+import { AgentDraft } from "./draft.js";
 import { Focus, runStudioChat, STUDIO_HELPER, STUDIO_KIND } from "./helper.js";
 
 const OntologyParams = z.object({ ontologyKey: z.string() });
 const ThreadParams = OntologyParams.extend({ threadId: z.string() });
 
-/** The chat body: the shared one, plus what the page has open. */
-export const StudioChatPayload = ChatPayload.extend({ focus: Focus.optional() }).strict();
+/** The chat body: the shared one, plus what the page has open and the open agent editor's draft. */
+export const StudioChatPayload = ChatPayload.extend({ focus: Focus.optional(), draft: AgentDraft.optional() }).strict();
 
 async function studioBinding(request: FastifyRequest<{ Params: { ontologyKey: string } }>): Promise<ThreadBinding> {
   return {
@@ -43,10 +44,12 @@ export const studioHelperRouter: FastifyPluginAsyncZod<{ threads: ThreadStore }>
       const { ontologyKey } = request.params;
       const store = await getModelingStore(ontologyKey);
       const model = requireLanguageModel();
-      const { message, threadId, focus } = request.body;
+      const { message, threadId, focus, draft } = request.body;
       const turn = await openThread(threads, await studioBinding(request), threadId);
       return sendChatStream(reply, { threads, turn }, (execution, thread) => runStudioChat(
-        ontologyKey, { message, ...(focus === undefined ? {} : { focus }) }, store, model, thread, execution,
+        ontologyKey,
+        { message, ...(focus === undefined ? {} : { focus }), ...(draft === undefined ? {} : { draft }) },
+        store, model, thread, execution,
       ));
     },
   );

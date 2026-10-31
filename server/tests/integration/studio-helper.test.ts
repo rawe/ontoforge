@@ -203,6 +203,28 @@ describe("the Studio helper", () => {
     expect((await app.inject({ method: "GET", url: lensRead })).statusCode).toBe(404);
   });
 
+  it("takes the agent editor's draft and fills it through its tool, storing nothing", async () => {
+    const draft = {
+      target: { lensKey: "visitor", agentKey: null }, version: 3,
+      fields: { name: "", description: "", systemPrompt: "", tools: null },
+    };
+    expect((await chat({ message: "Hi", draft: { ...draft, version: -1 } })).status).toBe(422);
+    expect((await chat({ message: "Hi", draft: { ...draft, fields: { ...draft.fields, key: "x" } } })).status).toBe(422);
+
+    const model = new FakeToolCallingModel([
+      toolCallMessage("fill_agent_draft", { name: "Visitor guide", tools: ["get_schema", "search"] }),
+      new AIMessage("Filled."),
+    ]);
+    setAiModel(model);
+    const res = await chat({ message: "Draft an agent for this lens", draft });
+    expect(res.events.find((e) => e.type === "studio.tool_result")!.result).toEqual({
+      target: { lensKey: "visitor", agentKey: null }, sourceVersion: 3,
+      fields: { name: "Visitor guide", tools: ["get_schema", "search"] },
+    });
+    expect(systemPromptOf(model)).toContain('<context label="Agent draft"');
+    expect(await ok("GET", `${MODEL}/lenses/visitor/assistants/agents`)).toEqual([]);
+  });
+
   it("reads a thread without a language model", async () => {
     setAiModel(new FakeToolCallingModel([new AIMessage("Kept.")]));
     const threadId = (await chat({ message: "Keep" })).events[0]!.threadId as string;

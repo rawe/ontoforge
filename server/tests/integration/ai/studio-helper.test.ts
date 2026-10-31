@@ -1,7 +1,8 @@
 /**
  * The Studio helper against the real database and the configured language
  * model: it answers a question about a small schema through the Studio
- * route, from the design alone, and validates a lens with its tool.
+ * route, from the design alone, validates a lens with its tool, and drafts
+ * an agent for a lens into the open editor's draft.
  * Configuration and skips as in `ai.test.ts` (`support.ts`).
  */
 
@@ -28,8 +29,8 @@ async function post(url: string, payload: object): Promise<Row> {
 }
 
 /** One Studio turn: its events, exactly one terminal `final`. */
-async function ask(message: string): Promise<Row[]> {
-  const res = await app!.inject({ method: "POST", url: `${MODEL}/ai/chat`, payload: { message } });
+async function ask(message: string, extra: object = {}): Promise<Row[]> {
+  const res = await app!.inject({ method: "POST", url: `${MODEL}/ai/chat`, payload: { message, ...extra } });
   expect(res.statusCode, res.body).toBe(200);
   const events = res.body.trim().split("\n").map((line) => JSON.parse(line) as Row);
   expect(events.at(-1)?.type, res.body).toBe("final");
@@ -91,5 +92,31 @@ describe("the Studio helper on a real model", () => {
     const calls = checked.filter((event) => event.type === "studio.tool_call");
     expect(calls.map((call) => call.tool)).toContain("validate_lens");
     expect(String(checked.at(-1)!.reply).toLowerCase()).toContain("valid");
+  });
+
+  it("drafts an agent for a lens into the open editor with fill_agent_draft", async (ctx) => {
+    if (app === null) {
+      ctx.skip(skipReason?.split("\n")[0] ?? "AI suite unavailable");
+      return;
+    }
+    const draft = {
+      target: { lensKey: "public", agentKey: null }, version: 5,
+      fields: { name: "", description: "", systemPrompt: "", tools: null },
+    };
+    const events = await ask(
+      "Draft this agent for me: a guide that answers questions about the books this lens shows. " +
+      "Give it a name, a short description, instructions, and only the tools it needs.",
+      { draft, focus: { kind: "lens", key: "public" } },
+    );
+    const fill = events.filter((event) => event.type === "studio.tool_call" && event.tool === "fill_agent_draft");
+    expect(fill.length, JSON.stringify(events)).toBeGreaterThan(0);
+    const results = events.filter((event) => event.type === "studio.tool_result" && fill.some((call) => call.callId === event.callId));
+    const filled = results.map((event) => event.result).find((result) => result.error === undefined);
+    expect(filled, JSON.stringify(results)).toBeDefined();
+    expect(filled.target).toEqual({ lensKey: "public", agentKey: null });
+    expect(filled.sourceVersion).toBe(5);
+    expect(String(filled.fields.name ?? "")).not.toBe("");
+    const agents = await app!.inject({ method: "GET", url: `${MODEL}/lenses/public/assistants/agents` });
+    expect(agents.json()).toEqual([]);
   });
 });

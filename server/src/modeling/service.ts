@@ -2461,6 +2461,19 @@ export async function getAgent(
   return toAgentResponse(row);
 }
 
+/** The allowlist is validated against the fixed grantable set: an unknown
+ * name is rejected and the error names the valid set. Null grants every tool. */
+export function checkAgentTools(tools: string[] | null): void {
+  if (tools === null) return;
+  const unknown = tools.filter((t) => !VALID_AGENT_TOOLS.has(t));
+  if (unknown.length > 0) {
+    const available = [...VALID_AGENT_TOOLS].sort();
+    throw new ValidationError(
+      `Unknown tool(s): ${pyList(unknown)}. Available tools: ${pyList(available)}`,
+    );
+  }
+}
+
 /** Upsert by key. Returns `[response, created]`. */
 export async function upsertAgent(
   lensKey: string,
@@ -2482,18 +2495,8 @@ export async function upsertAgent(
     throw new ValidationError("Agent key '_default' is reserved");
   }
 
-  // The allowlist is validated against the fixed grantable set: an unknown
-  // name is rejected and the error names the valid set.
   const tools = body.tools ?? null;
-  if (tools !== null) {
-    const unknown = tools.filter((t) => !VALID_AGENT_TOOLS.has(t));
-    if (unknown.length > 0) {
-      const available = [...VALID_AGENT_TOOLS].sort();
-      throw new ValidationError(
-        `Unknown tool(s): ${pyList(unknown)}. Available tools: ${pyList(available)}`,
-      );
-    }
-  }
+  checkAgentTools(tools);
 
   const [data, created] = await store.changeDesign(async (s) => {
     const lens = await resolveLensByKey(s, lensKey);

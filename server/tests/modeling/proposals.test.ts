@@ -2,8 +2,8 @@
  * Schema proposals without a database: the shape (the v1 steps only, no
  * cascade or consent field, the step cap), the cheap checks against a
  * design as read, and the Studio tool: a later call replaces the turn's
- * proposal, an expected modeling error is the model's result, a storage
- * error is not.
+ * proposal, a failed one leaves none, an expected modeling error is the
+ * model's result, a storage error is not.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -114,6 +114,20 @@ describe("the propose_schema_change tool", () => {
     expect(await tool.run(first, turn)).toBe(CHECK);
     expect(await tool.run(second, turn)).toBe(CHECK);
     expect(turnArtifacts(turn)).toEqual([{ type: "proposal", version: 1, value: { proposal: second, check: CHECK } }]);
+  });
+
+  it("leaves the turn no proposal when the replacing call fails", async () => {
+    const failing = store();
+    vi.mocked(failing.changeDesign)
+      .mockResolvedValueOnce(CHECK)
+      .mockRejectedValueOnce(new ConflictError("Another operation holds this data; try again"));
+    const tool = proposeSchemaChangeTool(failing);
+    const turn: StudioTurn = { proposal: null };
+    const proposal = { steps: [{ id: "s1", op: "create_entity_type", key: "team", name: "Team" }] };
+    expect(await tool.run(proposal, turn)).toBe(CHECK);
+    const error = await tool.run(proposal, turn).catch((e: unknown) => e);
+    expect(tool.expected(error)).toEqual({ error: expect.objectContaining({ code: "RESOURCE_CONFLICT" }) });
+    expect(turnArtifacts(turn)).toEqual([]);
   });
 
   it("hands an expected modeling error to the model, never a storage error", () => {

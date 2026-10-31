@@ -3,7 +3,8 @@
  * proposal (`proposals/proposal.ts`), the server checks it without writing
  * (`proposals/check.ts`) and returns the check. A later call in the same
  * turn replaces the turn's proposal, so a refused step never blocks its
- * fix; the turn's last proposal and its check are the turn's artifact.
+ * fix; the turn's last proposal and its check are the turn's artifact —
+ * none when the last call failed.
  * Calls run one at a time. Only a person applies a proposal, from the
  * Studio: the model has no apply tool and no field to consent with.
  */
@@ -52,6 +53,8 @@ export function proposeSchemaChangeTool(store: ModelingStore): Tool<StudioTurn> 
     input: Proposal,
     serial: true,
     run: async (args, turn) => {
+      // Replaced from the start: a call that fails leaves no earlier proposal as the turn's.
+      turn.proposal = null;
       const proposal = Proposal.parse(args);
       const check = await checkProposal(store, proposal);
       turn.proposal = { proposal, check };

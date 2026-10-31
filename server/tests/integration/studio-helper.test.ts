@@ -2,8 +2,9 @@
  * The Studio helper over REST on PostgreSQL, with a scripted model: the
  * FEATURE_DISABLED refusal, the body it accepts, every design tool's result
  * free of instance data and of anything derived from it, expected errors
- * handed back to the model, descriptions only in context blocks, and its
- * ontology-scoped threads — continued and read through the Studio route
+ * handed back to the model, a turn's last proposal as its artifact (none
+ * when the call replacing it fails), descriptions only in context blocks,
+ * and its ontology-scoped threads — continued and read through the Studio route
  * only, never through a lens route, and a lens thread never through it.
  * Authorization is in `access-authorization.test.ts`.
  */
@@ -14,6 +15,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 import { createApp } from "../../src/app.js";
 import { setAiModel } from "../../src/core/ai.js";
+import { PostgresModelingStore } from "../../src/adapters/postgres/modelingStore.js";
+import { ConflictError } from "../../src/core/exceptions.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
 import { FakeToolCallingModel, toolCallMessage } from "../runtime/aiHelpers.js";
 import { wipeDatabase } from "./reset.js";
@@ -264,6 +267,27 @@ describe("the Studio helper", () => {
     expect((await ok("GET", `${THREADS}/${threadId}`)).messages).toEqual([
       ...turnOne, { role: "user", content: "Thanks" }, { role: "assistant", content: "Plain." },
     ]);
+  });
+
+  it("leaves a turn no proposal when the call replacing it fails", async () => {
+    const teams = { steps: [{ id: "s1", op: "create_entity_type", key: "team", name: "Team" }] };
+    const changeDesign = PostgresModelingStore.prototype.changeDesign;
+    let calls = 0;
+    vi.spyOn(PostgresModelingStore.prototype, "changeDesign").mockImplementation(function (this: PostgresModelingStore, ...args) {
+      calls += 1;
+      if (calls === 2) return Promise.reject(new ConflictError("Another operation holds this data; try again"));
+      return changeDesign.apply(this, args) as never;
+    });
+    setAiModel(new FakeToolCallingModel([
+      toolCallMessage("propose_schema_change", teams, "c1"),
+      toolCallMessage("propose_schema_change", teams, "c2"),
+      new AIMessage("Done."),
+    ]));
+    const res = await chat({ message: "Add teams" });
+    const results = res.events.filter((e) => e.type === "studio.tool_result").map((e) => e.result);
+    expect(results[0]).toMatchObject({ ok: true });
+    expect(results[1]).toMatchObject({ error: { code: "RESOURCE_CONFLICT" } });
+    expect(res.events.at(-1)).toEqual({ type: "final", reply: "Done." });
   });
 
   it("reads a thread without a language model", async () => {

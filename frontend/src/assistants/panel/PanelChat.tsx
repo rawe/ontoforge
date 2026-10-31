@@ -19,19 +19,23 @@ import { focusLabel } from './panelModel'
  * The panel's conversation with the Studio helper: header, the focus chip,
  * the messages with each answer's steps and cards, and the input. The chip's
  * focus goes with each message as structured `focus`, the open draft
- * editor's draft as `draft`; the input starts empty. Remount it (React `key`) for another ontology or principal.
+ * editor's draft as `draft`; the input starts empty. The thread is
+ * remembered per principal; while that is unknown none is. Remount it
+ * (React `key`) for another ontology or principal.
  */
-export function PanelChat({ binding, focus, onRemoveFocus, onClose }: {
+export function PanelChat({ binding, principal, focus, onRemoveFocus, onClose }: {
   binding: Binding
+  /** The user's id, null without authentication; undefined while unknown. */
+  principal: string | null | undefined
   focus: Focus | null
   onRemoveFocus: () => void
   onClose: () => void
 }) {
   const { ontologyKey, lensKey } = binding
-  // Fixed for a mount: another ontology remounts.
-  const owner = useMemo<ThreadOwner>(
-    () => ({ ontologyKey, lensKey, kind: studio.kind, assistantKey: DEFAULT_ASSISTANT }),
-    [ontologyKey, lensKey],
+  // Fixed for a mount: another ontology or principal remounts.
+  const owner = useMemo<ThreadOwner | null>(
+    () => (principal === undefined ? null : { ontologyKey, lensKey, kind: studio.kind, assistantKey: DEFAULT_ASSISTANT, principal }),
+    [ontologyKey, lensKey, principal],
   )
   const [confirmNew, setConfirmNew] = useState(false)
   const { draftEditor } = useAssistantPanel()

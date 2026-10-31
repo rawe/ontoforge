@@ -28,8 +28,9 @@ export function AssistantPanelHost({ binding, children }: {
   const { data: features } = useFeatures()
   const { data: me } = useAuthMe()
   const available = features?.ai === true
-  const principal = me === undefined ? 'unknown' : me.authentication ? me.user?.id ?? 'signed-out' : 'anonymous'
-  const scope = `${binding.ontologyKey}/${principal}`
+  // Whose conversation: the user's id, null without authentication; undefined while unknown or signed out.
+  const principal = me === undefined ? undefined : me.authentication ? me.user?.id : null
+  const scope = `${binding.ontologyKey}/${principal === undefined ? '?' : principal === null ? '@anonymous' : `user:${principal}`}`
 
   const [settings, setSettings] = useState(() => panelSettings(readJson(storageKeys.assistantPanel)))
   const [mounted, setMounted] = useState(settings.open)
@@ -92,6 +93,7 @@ export function AssistantPanelHost({ binding, children }: {
             <PanelChat
               key={scope}
               binding={binding}
+              principal={principal}
               focus={focus}
               onRemoveFocus={() => setFocus(null)}
               onClose={() => setOpen(false)}

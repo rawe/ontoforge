@@ -1,12 +1,12 @@
 /**
  * Remembered conversations: the server holds each thread; the browser
- * remembers per ontology + lens (none for the Studio helper) + kind +
- * assistant only the current thread id (`of.thread.…`, storage failures
+ * remembers per ontology + lens (for the Studio helper: + principal instead)
+ * + kind + assistant only the current thread id (`of.thread.…`, storage failures
  * ignored) and restores the messages from the server's thread read on open.
  */
 
 import type { ChatMessage } from '@/api/types'
-import { readString, remove, storageKeys, writeString } from '@/lib/storage'
+import { readString, remove, storageKeys, writeString } from '../../lib/storage.ts'
 import { assistantPath, readThread, threadError } from '../stream/chatStream.ts'
 import type { Binding } from '../types.ts'
 
@@ -14,9 +14,15 @@ import type { Binding } from '../types.ts'
 export interface ThreadOwner extends Binding {
   kind: string
   assistantKey: string
+  /**
+   * Bound to the whole ontology: whose thread it is — the user's id, null
+   * without authentication — so one person's thread is never restored or
+   * forgotten for another in the same browser. Unused for a lens's.
+   */
+  principal?: string | null
 }
 
-const key = (o: ThreadOwner) => storageKeys.thread(o.ontologyKey, o.lensKey, o.kind, o.assistantKey)
+const key = (o: ThreadOwner) => storageKeys.thread(o.ontologyKey, o.lensKey, o.kind, o.assistantKey, o.principal ?? null)
 
 export const rememberedThread = (owner: ThreadOwner): string | null => readString(key(owner))
 export const rememberThread = (owner: ThreadOwner, threadId: string) => writeString(key(owner), threadId)

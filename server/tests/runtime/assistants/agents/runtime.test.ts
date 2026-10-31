@@ -6,6 +6,8 @@
  * FEATURE_DISABLED rejection without a provider.
  */
 
+import { readFileSync } from "node:fs";
+
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -18,6 +20,7 @@ import {
   runAgentChat,
 } from "../../../../src/runtime/assistants/agents/runtime.js";
 import { TURNS_PER_THREAD, TURNS_THE_MODEL_SEES, type GraphThread } from "../../../../src/assistants/index.js";
+import { TurnSaver } from "../../../../src/assistants/threads/turnSaver.js";
 import { graphValues, newGraphThread } from "../../../assistants/threads/graphThread.js";
 import { invalidateLoadedSchemaCache, loadSchema } from "../../../../src/runtime/schemaCache.js";
 import { FakeToolCallingModel, toolCallMessage } from "../../aiHelpers.js";
@@ -35,6 +38,8 @@ import {
 } from "../../helpers.js";
 
 type Row = Record<string, unknown>;
+
+const fixture = (name: string) => readFileSync(new URL(`../../../fixtures/${name}`, import.meta.url), "utf8");
 
 /** A new thread of the default agent, as a chat without a thread id starts one. */
 async function newThread(): Promise<GraphThread> {
@@ -291,6 +296,14 @@ describe("prompt assembly", () => {
     expect(content).toMatch(/^You are a knowledge graph assistant\./);
     expect(content).toContain("SCHEMA:\n" + describeSchema(loaded.scoped));
     expect(content).toContain("Never make up answers");
+  });
+
+  it("the built-in prompt is byte for byte the one the agents have always had", async () => {
+    const fake = installFake([new AIMessage("hi")]);
+
+    await aiChat("full_lens", "hello", asRuntimeStore(store));
+
+    expect(fake.calls[0]![0]!.content).toBe(fixture("agent-system-prompt.txt"));
   });
 
   it("custom prompt: used verbatim with the schema description appended", async () => {
@@ -580,6 +593,55 @@ describe("chat trace and turns on a thread", () => {
     expect(String(messages[5]!.content)).toBe("And how old is she?");
     // Only the turn's model calls ran; earlier tool work was not repeated.
     expect(store.listEntities).toHaveBeenCalledTimes(1);
+  });
+
+  /** "Who is there?" answered after one list_entities call, as a turn stored it. */
+  const STORED_TURN = fixture("agent-thread-v1.json");
+
+  /** A dumped thread's last checkpoint without what each run makes anew: ids and time. */
+  function storedCheckpoint(state: string): Row {
+    const envelope = JSON.parse(state) as { checkpoints: Record<string, { checkpoint: [string, string] }> };
+    expect(Object.keys(envelope.checkpoints)).toEqual([""]);
+    const checkpoint = JSON.parse(Buffer.from(envelope.checkpoints[""]!.checkpoint[1], "base64").toString()) as Row;
+    delete checkpoint.id;
+    delete checkpoint.ts;
+    for (const message of (checkpoint.channel_values as { messages: { kwargs: Row }[] }).messages) delete message.kwargs.id;
+    return checkpoint;
+  }
+
+  function scriptStoredTurn() {
+    store.listEntities.mockResolvedValue([[makeEntity({ name: "Alice", age: 30 }, "person", "p1")], 1]);
+    return installFake([
+      toolCallMessage("list_entities", { entity_type_key: "person" }),
+      new AIMessage("There is one person: Alice."),
+      new AIMessage("She is 30."),
+    ]);
+  }
+
+  it("a turn leaves the thread state a turn has always left", async () => {
+    scriptStoredTurn();
+    const thread = await newThread();
+
+    await aiChat("full_lens", "Who is there?", asRuntimeStore(store), thread);
+
+    const state = Buffer.from((thread.checkpointer as TurnSaver).dump()).toString();
+    expect(storedCheckpoint(state)).toEqual(storedCheckpoint(STORED_TURN));
+  });
+
+  it("a stored thread continues: the model sees its turn with the tool call and result", async () => {
+    const fake = scriptStoredTurn();
+    fake.responses = [new AIMessage("She is 30.")];
+    const threadId = "stored";
+    const thread = { checkpointer: TurnSaver.load(threadId, new Uint8Array(Buffer.from(STORED_TURN))), threadId };
+
+    const result = await aiChat("full_lens", "And how old is she?", asRuntimeStore(store), thread);
+
+    expect(result.reply).toBe("She is 30.");
+    const messages = fake.calls[0]!;
+    expect(messages.map((m) => m.getType())).toEqual(["system", "human", "ai", "tool", "ai", "human"]);
+    expect(messages[3]).toBeInstanceOf(ToolMessage);
+    expect(String(messages[3]!.content)).toContain('"name":"Alice"');
+    expect((await graphValues(thread)).messages).toHaveLength(6);
   });
 
   it(`the model sees the last ${TURNS_THE_MODEL_SEES} turns`, async () => {

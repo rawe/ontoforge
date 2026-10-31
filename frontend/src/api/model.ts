@@ -12,6 +12,7 @@ import {
   type SharedEvent,
   type ToolEvent,
 } from '../assistants/stream/chatStream'
+import type { DraftTarget } from '../assistants/draft/draftFillModel'
 import type { Focus } from '../assistants/types'
 import { buildQuery, request } from './http'
 import type {
@@ -420,6 +421,8 @@ export const rebuildSearchIndex = (ontologyKey: string, key: string) =>
 /** A Studio helper message: the shared body, plus what the page has in view. */
 export interface StudioChatRequest extends ChatRequest {
   focus?: Focus
+  /** The open agent editor's unsaved values, with its draft version. */
+  draft?: { target: DraftTarget; version: number; fields: Record<string, unknown> }
 }
 
 /** One message to the Studio helper; without `threadId` it starts a new thread. */

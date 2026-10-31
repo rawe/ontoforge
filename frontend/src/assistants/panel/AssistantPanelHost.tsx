@@ -1,6 +1,7 @@
-import { lazy, Suspense, useCallback, useMemo, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useAuthMe, useFeatures } from '@/api/hooks'
 import { readJson, storageKeys, writeJson } from '@/lib/storage'
+import type { DraftEditor } from '../draft/draftFillModel'
 import type { Focus } from '../types'
 import { AssistantPanelContext, type AssistantPanel } from './panelContext'
 import { clampWidth, focusId, panelSettings, type PanelSettings } from './panelModel'
@@ -51,6 +52,16 @@ export function AssistantPanelHost({ binding, children }: {
     save((current) => ({ ...current, open }))
   }, [save])
 
+  // The one open draft editor; read when a message goes out or a card fills it, so it re-renders nothing.
+  const draftEditorRef = useRef<DraftEditor | null>(null)
+  const publishDraft = useCallback((editor: DraftEditor) => {
+    draftEditorRef.current = editor
+    return () => {
+      if (draftEditorRef.current === editor) draftEditorRef.current = null
+    }
+  }, [])
+  const draftEditor = useCallback(() => draftEditorRef.current, [])
+
   // Stable, so a page's published focus is not published again when the panel opens or closes.
   const unpublish = useCallback((gone: Focus) => setFocus((current) => (focusId(current) === focusId(gone) ? null : current)), [])
   const panel = useMemo<AssistantPanel>(() => ({
@@ -64,7 +75,9 @@ export function AssistantPanelHost({ binding, children }: {
     toggle: () => setOpen(!settings.open),
     publish: setFocus,
     unpublish,
-  }), [available, settings.open, setOpen, unpublish])
+    publishDraft,
+    draftEditor,
+  }), [available, settings.open, setOpen, unpublish, publishDraft, draftEditor])
 
   return (
     <AssistantPanelContext.Provider value={panel}>

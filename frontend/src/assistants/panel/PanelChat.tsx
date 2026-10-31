@@ -12,13 +12,14 @@ import type { ThreadOwner } from '../conversation/threadStore'
 import { useAssistantConversation } from '../conversation/useAssistantConversation'
 import { Composer, Intro, NewConversationDialog, TurnView } from '../shell/AssistantChat'
 import type { Binding, Focus } from '../types'
+import { useAssistantPanel } from './panelContext'
 import { focusLabel } from './panelModel'
 
 /**
  * The panel's conversation with the Studio helper: header, the focus chip,
  * the messages with each answer's steps and cards, and the input. The chip's
- * focus goes with each message as structured `focus`; the input starts
- * empty. Remount it (React `key`) for another ontology or principal.
+ * focus goes with each message as structured `focus`, the open draft
+ * editor's draft as `draft`; the input starts empty. Remount it (React `key`) for another ontology or principal.
  */
 export function PanelChat({ binding, focus, onRemoveFocus, onClose }: {
   binding: Binding
@@ -33,11 +34,18 @@ export function PanelChat({ binding, focus, onRemoveFocus, onClose }: {
     [ontologyKey, lensKey],
   )
   const [confirmNew, setConfirmNew] = useState(false)
+  const { draftEditor } = useAssistantPanel()
   const conversation = useAssistantConversation({
     owner,
     model: studio.model,
     send: (body, onEvent, signal) => {
-      const request: StudioChatRequest = focus === null ? body : { ...body, focus }
+      const open = draftEditor()?.state()
+      const draft = open === undefined || open.ontologyKey !== ontologyKey
+        ? undefined
+        : { target: open.target, version: open.version, fields: open.fields }
+      const request: StudioChatRequest = {
+        ...body, ...(focus === null ? {} : { focus }), ...(draft === undefined ? {} : { draft }),
+      }
       return studio.send(binding, DEFAULT_ASSISTANT, request, onEvent, signal)
     },
     blocked: false,

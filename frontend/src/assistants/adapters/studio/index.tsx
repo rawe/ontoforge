@@ -2,6 +2,7 @@ import { Sparkles } from 'lucide-react'
 import { Fragment } from 'react'
 import { studioChat } from '@/api/model'
 import type { ToolCall } from '@/api/types'
+import { AgentDraftCard } from '../../draft/DraftFillCard'
 import type { ToolEvent } from '../../stream/chatStream'
 import { ToolCallPanel, ToolCallsSummary } from '../../steps/ToolCallPanel'
 import { toolCallTurns, toolError } from '../../steps/toolCallModel'
@@ -9,7 +10,9 @@ import type { PresentationAdapter, ToolCard } from '../../types'
 import { studioResult } from './studioResult'
 
 /** The cards a completed call of a tool puts under its answer, by tool name. */
-const TOOL_CARDS: Record<string, ToolCard> = {}
+const TOOL_CARDS: Record<string, ToolCard> = {
+  fill_agent_draft: (call, _turn, at) => <AgentDraftCard call={call} at={at} />,
+}
 
 const STEPS = { one: 'step', many: 'steps' }
 

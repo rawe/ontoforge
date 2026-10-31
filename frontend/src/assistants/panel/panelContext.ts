@@ -1,6 +1,7 @@
 /** The context of `AssistantPanelHost`: what pages publish into the panel, and the calls that open it. */
 
 import { createContext, useContext, useEffect } from 'react'
+import type { DraftEditor } from '../draft/draftFillModel'
 import type { Focus } from '../types'
 import { focusFromId, focusId } from './panelModel'
 
@@ -16,12 +17,17 @@ export interface AssistantPanel {
   publish: (focus: Focus | null) => void
   /** The page no longer shows this focus. */
   unpublish: (focus: Focus) => void
+  /** An editor with a draft the helper may fill opened; the call returned withdraws it. */
+  publishDraft: (editor: DraftEditor) => () => void
+  /** The open draft editor, if any: its draft goes with each message, its cards fill it. */
+  draftEditor: () => DraftEditor | null
 }
 
 export const AssistantPanelContext = createContext<AssistantPanel | null>(null)
 
 const NONE: AssistantPanel = {
   available: false, isOpen: false, open: () => {}, close: () => {}, toggle: () => {}, publish: () => {}, unpublish: () => {},
+  publishDraft: () => () => {}, draftEditor: () => null,
 }
 
 /** The panel of the layout; outside one (no host), an unavailable panel whose calls do nothing. */

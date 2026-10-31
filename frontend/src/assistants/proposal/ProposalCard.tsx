@@ -27,6 +27,9 @@ import { ProposalReview } from './ProposalReview'
  * too. An Apply whose answer is lost is never sent again by itself: the
  * reloaded schema tells whether it was applied.
  */
+/** The page the browser shows now. */
+const whereNow = () => `${window.location.pathname}${window.location.search}`
+
 export function ProposalCard({ checked, restored, at }: { checked: CheckedProposal; restored: boolean; at: Binding }) {
   const { proposal } = checked
   const { ontologyKey } = at
@@ -39,11 +42,10 @@ export function ProposalCard({ checked, restored, at }: { checked: CheckedPropos
   const card = useRef<HTMLDivElement>(null)
   // A request is out: a second click before the buttons disable sends nothing.
   const sending = useRef(false)
-  // Where the person is, read after an Apply's await: going elsewhere since
-  // wins over showing the new type, and so does a card no longer shown.
-  const here = useRef(`${location.pathname}${location.search}`)
+  // After an Apply's await, going elsewhere since wins over showing the new
+  // type, and so does a card no longer shown. The browser's URL is read, not
+  // the rendered location: a navigation is there before React renders it.
   const shown = useRef(true)
-  useEffect(() => { here.current = `${location.pathname}${location.search}` }, [location.pathname, location.search])
   useEffect(() => {
     shown.current = true
     return () => { shown.current = false }
@@ -83,7 +85,7 @@ export function ProposalCard({ checked, restored, at }: { checked: CheckedPropos
     const first = createdTypes(proposal)[0]
     if (first === undefined) return
     await queryClient.refetchQueries({ queryKey: qk.model(ontologyKey, first.kind), exact: true }).catch(() => {})
-    if (shown.current && here.current === from) select(first)
+    if (shown.current && whereNow() === from) select(first)
   }
 
   const readDesign = () => queryClient.fetchQuery({
@@ -109,7 +111,7 @@ export function ProposalCard({ checked, restored, at }: { checked: CheckedPropos
     if (!applicable(state) || sending.current) return
     sending.current = true
     dispatch({ type: 'apply' })
-    const from = `${location.pathname}${location.search}`
+    const from = whereNow()
     let receipt: Receipt
     try {
       receipt = await apply.mutateAsync({ proposal, expected: state.check.baseRevision })

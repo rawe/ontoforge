@@ -15,6 +15,7 @@ import type { ModelingStore, RuntimeStore, WriteAccess } from "../../src/core/po
 import { RelationGroup, SearchIndexDefinition } from "../../src/core/searchIndex.js";
 import { createModelingMcpServer } from "../../src/mcp/modeling.js";
 import { fillAgentDraftTool } from "../../src/modeling/helper/draft.js";
+import { proposeSchemaChangeTool } from "../../src/modeling/helper/propose.js";
 import { designTools } from "../../src/modeling/helper/tools.js";
 import { createRuntimeMcpServer } from "../../src/mcp/runtime.js";
 import { ALL_TOOL_NAMES, buildTools } from "../../src/runtime/assistants/agents/runtime.js";
@@ -71,6 +72,7 @@ const all = [
   ...[...modeling].map(([name, text]) => [`modeling ${name}`, text] as const),
   ...[...agent].map(([name, text]) => [`agent ${name}`, text] as const),
   ...designTools({} as ModelingStore).map((tool) => [`studio ${tool.name}`, tool.description] as const),
+  ["studio propose_schema_change", proposeSchemaChangeTool({} as ModelingStore).description] as const,
   [
     "studio fill_agent_draft",
     fillAgentDraftTool(

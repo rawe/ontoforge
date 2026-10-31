@@ -10,7 +10,7 @@
 
 import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import type { FastifyInstance } from "fastify";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createApp } from "../../src/app.js";
 import { setAiModel } from "../../src/core/ai.js";
@@ -83,6 +83,7 @@ afterAll(async () => {
 
 afterEach(() => {
   setAiModel(null);
+  vi.restoreAllMocks();
 });
 
 describe("the Studio helper", () => {
@@ -223,6 +224,46 @@ describe("the Studio helper", () => {
     });
     expect(systemPromptOf(model)).toContain('<context label="Agent draft"');
     expect(await ok("GET", `${MODEL}/lenses/visitor/assistants/agents`)).toEqual([]);
+  });
+
+  it("checks each proposal it is handed, keeps the turn's last with its check as the artifact, and writes nothing", async () => {
+    const needsCascade = { steps: [{ id: "s1", op: "add_property", entityType: "person", key: "badge", name: "Badge", dataType: "string", required: true }] };
+    const teams = {
+      summary: "Add teams",
+      steps: [
+        { id: "s1", op: "create_entity_type", key: "team", name: "Team" },
+        { id: "s2", op: "create_relation_type", key: "member_of", name: "Member of", source: "person", target: "team" },
+      ],
+    };
+    setAiModel(new FakeToolCallingModel([
+      toolCallMessage("propose_schema_change", needsCascade, "c1"),
+      toolCallMessage("propose_schema_change", teams, "c2"),
+      new AIMessage("Proposed: apply it in the Studio."),
+    ]));
+    const res = await chat({ message: "Add teams" });
+    const results = res.events.filter((e) => e.type === "studio.tool_result").map((e) => e.result);
+    expect(results[0]).toMatchObject({ ok: false, refusals: [{ stepId: "s1", code: "CASCADE_REQUIRED" }] });
+    expect(results[1]).toMatchObject({ ok: true, refusals: [] });
+    const artifacts = [{ type: "proposal", version: 1, value: { proposal: teams, check: results[1] } }];
+    expect(res.events.at(-1)).toEqual({ type: "final", reply: "Proposed: apply it in the Studio.", artifacts });
+    const threadId = res.events[0]!.threadId as string;
+    const turnOne = [{ role: "user", content: "Add teams" }, { role: "assistant", content: "Proposed: apply it in the Studio.", artifacts }];
+    expect((await ok("GET", `${THREADS}/${threadId}`)).messages).toEqual(turnOne);
+    expect((await ok("GET", `${MODEL}/entity-types`)).map((t: Row) => t.key).sort()).toEqual(["company", "person"]);
+
+    // A failed turn leaves no artifact, nor anything else.
+    setAiModel(new FakeToolCallingModel([toolCallMessage("propose_schema_change", teams, "c3"), toolCallMessage("no_such_tool", {}, "c4")]));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const failed = await chat({ message: "Again", threadId });
+    expect(failed.events.at(-1)!.type).toBe("error");
+    expect((await ok("GET", `${THREADS}/${threadId}`)).messages).toEqual(turnOne);
+
+    // A turn without a proposal leaves none; the earlier one stays with its reply.
+    setAiModel(new FakeToolCallingModel([new AIMessage("Plain.")]));
+    expect((await chat({ message: "Thanks", threadId })).events.at(-1)).toEqual({ type: "final", reply: "Plain." });
+    expect((await ok("GET", `${THREADS}/${threadId}`)).messages).toEqual([
+      ...turnOne, { role: "user", content: "Thanks" }, { role: "assistant", content: "Plain." },
+    ]);
   });
 
   it("reads a thread without a language model", async () => {

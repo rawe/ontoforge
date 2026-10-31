@@ -65,7 +65,7 @@ export function draftBlock(draft: AgentDraft): ContextBlock {
 const list = (names: string[]) => names.join(", ");
 
 /** The draft tool for the open editor; `lacking` are the grantable tools this deployment cannot run. */
-export function fillAgentDraftTool(draft: AgentDraft, store: ModelingStore, lacking: readonly string[]): Tool<null> {
+export function fillAgentDraftTool(draft: AgentDraft, store: ModelingStore, lacking: readonly string[]): Tool<unknown> {
   return {
     name: FILL_AGENT_DRAFT,
     description:

@@ -1,8 +1,9 @@
 /**
  * The Studio helper against the real database and the configured language
  * model: it answers a question about a small schema through the Studio
- * route, from the design alone, validates a lens with its tool, and drafts
- * an agent for a lens into the open editor's draft.
+ * route, from the design alone, validates a lens with its tool, drafts
+ * an agent for a lens into the open editor's draft, and proposes a schema
+ * change whose check passes and which the person then applies.
  * Configuration and skips as in `ai.test.ts` (`support.ts`).
  */
 
@@ -92,6 +93,37 @@ describe("the Studio helper on a real model", () => {
     const calls = checked.filter((event) => event.type === "studio.tool_call");
     expect(calls.map((call) => call.tool)).toContain("validate_lens");
     expect(String(checked.at(-1)!.reply).toLowerCase()).toContain("valid");
+  });
+
+  it("proposes an entity type and a relation type; the check passes and applying it succeeds", async (ctx) => {
+    if (app === null) {
+      ctx.skip(skipReason?.split("\n")[0] ?? "AI suite unavailable");
+      return;
+    }
+    const events = await ask(
+      "Extend the schema: add an entity type 'publisher' (Publisher) and a relation type 'published_by' " +
+      "(Published by) from book to publisher.",
+    );
+    const final = events.at(-1)!;
+    expect(final.artifacts, JSON.stringify(events)).toHaveLength(1);
+    const { proposal, check } = final.artifacts[0].value;
+    expect(final.artifacts[0]).toMatchObject({ type: "proposal", version: 1 });
+    expect(check.ok, JSON.stringify(check)).toBe(true);
+    const ops = proposal.steps.map((step: Row) => `${step.op}:${step.key}`);
+    expect(ops).toEqual(expect.arrayContaining(["create_entity_type:publisher", "create_relation_type:published_by"]));
+    const types = async () => (await app!.inject({ method: "GET", url: `${MODEL}/entity-types` })).json().map((t: Row) => t.key);
+    expect(await types()).not.toContain("publisher");
+
+    const applied = await app!.inject({
+      method: "POST", url: `${MODEL}/proposals/apply`, payload: { proposal, expected: check.baseRevision },
+    });
+    expect(applied.statusCode, applied.body).toBe(200);
+    expect(applied.json().created["entityTypes.publisher"]).toBeDefined();
+    expect(await types()).toContain("publisher");
+    const relations = (await app!.inject({ method: "GET", url: `${MODEL}/relation-types` })).json();
+    expect(relations.find((r: Row) => r.key === "published_by")).toMatchObject({
+      sourceEntityTypeKey: "book", targetEntityTypeKey: "publisher",
+    });
   });
 
   it("drafts an agent for a lens into the open editor with fill_agent_draft", async (ctx) => {

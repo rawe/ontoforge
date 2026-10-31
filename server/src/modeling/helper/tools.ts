@@ -116,7 +116,7 @@ const DESIGN_TOOLS: DesignTool[] = [
 ];
 
 /** The design tools, bound to one ontology's store. */
-export function designTools(store: ModelingStore): Tool<null>[] {
+export function designTools(store: ModelingStore): Tool<unknown>[] {
   return DESIGN_TOOLS.map((def) => ({
     name: def.name,
     description: def.description,

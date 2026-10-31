@@ -76,12 +76,18 @@ export function ProposalCard({ checked, restored, at }: { checked: CheckedPropos
     select(first)
   }
 
+  const readDesign = () => queryClient.fetchQuery({
+    queryKey: qk.model(ontologyKey, 'export'), queryFn: () => model.exportSchema(ontologyKey), staleTime: 0,
+  })
+
+  // The rows' "before" values are read again with it: Apply waits for both.
   const recheck = async () => {
     if (!recheckable(state) || sending.current) return
     sending.current = true
     dispatch({ type: 'check' })
     try {
-      dispatch({ type: 'checked', check: await model.checkProposal(ontologyKey, proposal) })
+      const [check] = await Promise.all([model.checkProposal(ontologyKey, proposal), readDesign()])
+      dispatch({ type: 'checked', check })
     } catch (error) {
       dispatch({ type: 'failed', error: chatErrorText(error, 'The check failed.') })
     } finally {
@@ -119,10 +125,7 @@ export function ProposalCard({ checked, restored, at }: { checked: CheckedPropos
     dispatch({ type: 'lost' })
     invalidateModeling(queryClient)
     try {
-      const exported = await queryClient.fetchQuery({
-        queryKey: qk.model(ontologyKey, 'export'), queryFn: () => model.exportSchema(ontologyKey), staleTime: 0,
-      })
-      const read = designOf(exported)
+      const read = designOf(await readDesign())
       const applied = read === null ? null : appliedIn(proposal, read)
       dispatch({ type: 'reconciled', applied })
       if (applied === true) {

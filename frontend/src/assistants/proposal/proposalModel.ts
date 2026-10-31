@@ -131,6 +131,16 @@ export function proposalArtifact(artifacts: readonly unknown[]): CheckedProposal
 }
 
 /**
+ * The live proposal call of an answer: its last `propose_schema_change`
+ * call, which replaces the earlier ones, when it completed with a proposal
+ * and its check; null otherwise — an earlier call never stands in for it.
+ */
+export function liveProposalCall(calls: readonly ToolCall[]): ToolCall | null {
+  const last = calls.filter((call) => call.tool === PROPOSE_TOOL).at(-1)
+  return last !== undefined && last.status === 'completed' && checkedCall(last.args, last.result) !== null ? last : null
+}
+
+/**
  * A restored answer's tool calls: its proposal artifact as the one
  * completed proposal call, so its card shows again; none without one.
  */
@@ -190,12 +200,14 @@ const GROUP_ORDER: GroupKey[] = ['entityTypes', 'properties', 'relationTypes', '
 /** One row of the review: one step. */
 export interface ProposalRow {
   stepId: string
-  /** `+` adds, `~` changes. */
-  mark: '+' | '~'
+  /** `+` adds, `~` changes, `=` leaves as it is (a description set to the text it has). */
+  mark: '+' | '~' | '='
   /** What it names: a type key, or `type.property`. */
   target: string
   /** What it adds: a name, a data type, the ends of a relation type. */
   detail: string
+  /** The description an added item gets. */
+  description?: string
   /** A description step's text before and after; `before` is undefined while the design is unknown. */
   change?: { before: string | undefined; after: string }
   /** The model's reason, its own words. */
@@ -220,6 +232,12 @@ function ownerOf(step: OwnedStep): { kind: TypeKind; key: string } {
   return step.entityType !== undefined
     ? { kind: 'entity-types', key: step.entityType }
     : { kind: 'relation-types', key: step.relationType ?? '' }
+}
+
+/** What a description step describes: its type and, for a property, the property's key. */
+const describedKey = (step: Extract<ProposalStep, { op: 'set_description' }>) => {
+  const owner = ownerOf(step)
+  return `${owner.kind}:${owner.key}:${step.property ?? ''}`
 }
 
 /** The description a step's target has in `design`: '' for none or a type the proposal creates; undefined while unknown. */
@@ -256,30 +274,31 @@ export function proposalRows(proposal: Proposal, check: ProposalCheck | null, de
         byGroup.get('entityTypes')!.push({
           ...common, mark: '+', target: step.key, detail: `“${step.name}”, with a name property`,
           type: { kind: 'entity-types', key: step.key },
-          ...(step.description === undefined ? {} : { change: { before: '', after: step.description } }),
+          ...(step.description === undefined ? {} : { description: step.description }),
         })
         break
       case 'create_relation_type':
         byGroup.get('relationTypes')!.push({
           ...common, mark: '+', target: step.key, detail: `“${step.name}”, ${step.source} → ${step.target}`,
           type: { kind: 'relation-types', key: step.key },
-          ...(step.description === undefined ? {} : { change: { before: '', after: step.description } }),
+          ...(step.description === undefined ? {} : { description: step.description }),
         })
         break
       case 'add_property': {
         const owner = ownerOf(step)
         byGroup.get('properties')!.push({
           ...common, mark: '+', target: `${owner.key}.${step.key}`, detail: propertyDetail(step), type: owner,
-          ...(step.description === undefined ? {} : { change: { before: '', after: step.description } }),
+          ...(step.description === undefined ? {} : { description: step.description }),
         })
         break
       }
       case 'set_description': {
         const owner = ownerOf(step)
+        const before = descriptionBefore(step, design)
         byGroup.get('descriptions')!.push({
-          ...common, mark: '~', target: step.property === undefined ? owner.key : `${owner.key}.${step.property}`,
+          ...common, mark: before === step.description ? '=' : '~', target: step.property === undefined ? owner.key : `${owner.key}.${step.property}`,
           detail: step.property === undefined ? (owner.kind === 'entity-types' ? 'entity type' : 'relation type') : 'property',
-          change: { before: descriptionBefore(step, design), after: step.description },
+          change: { before, after: step.description },
           type: owner,
         })
         break
@@ -338,13 +357,16 @@ export function typeExists(design: Design | null, type: { kind: TypeKind; key: s
 }
 
 /**
- * Whether the design shows the proposal applied: every step's effect is
- * there. A proposal applies whole or not at all, so after a lost apply
- * response this tells which.
+ * Whether the design shows the proposal applied: every step's final effect
+ * is there — of several description steps on one target, the last. A
+ * proposal applies whole or not at all, so after a lost apply response
+ * this tells which.
  */
 export function appliedIn(proposal: Proposal, design: Design): boolean {
   const find = (kind: TypeKind, key: string) => (kind === 'entity-types' ? design.entityTypes : design.relationTypes).find((t) => t.key === key)
-  return proposal.steps.every((step) => {
+  const overwritten = (i: number, key: string) =>
+    proposal.steps.slice(i + 1).some((later) => later.op === 'set_description' && describedKey(later) === key)
+  return proposal.steps.every((step, i) => {
     switch (step.op) {
       case 'create_entity_type':
         return find('entity-types', step.key) !== undefined
@@ -355,6 +377,7 @@ export function appliedIn(proposal: Proposal, design: Design): boolean {
         return find(owner.kind, owner.key)?.properties.some((p) => p.key === step.key) ?? false
       }
       case 'set_description': {
+        if (overwritten(i, describedKey(step))) return true
         const owner = ownerOf(step)
         const type = find(owner.kind, owner.key)
         const described = step.property === undefined ? type : type?.properties.find((p) => p.key === step.property)
@@ -382,6 +405,10 @@ export interface ReviewState {
   stale: { checked: DesignRevision; current: DesignRevision } | null
   /** The design was edited here since the check: advisory, the server decides on Apply. */
   edited: boolean
+  /** Design writes seen here, counted. */
+  edits: number
+  /** `edits` when the running check started: a write after it still asks for a re-check. */
+  checkFrom: number
   /** The last Apply was refused; nothing was written. The check is the refusing one. */
   refused: boolean
   /** The applied proposal's receipt; null when it was applied but its response was lost. */
@@ -407,17 +434,22 @@ export type ReviewAction =
 
 /** A card's first state: its check, fresh for a live answer, not for a restored one. */
 export function initialReview(check: ProposalCheck, fresh: boolean): ReviewState {
-  return { check, fresh, phase: 'ready', stale: null, edited: false, refused: false, receipt: null, lost: null, error: null }
+  return {
+    check, fresh, phase: 'ready', stale: null, edited: false, edits: 0, checkFrom: 0, refused: false, receipt: null, lost: null, error: null,
+  }
 }
 
 export function reviewReducer(state: ReviewState, action: ReviewAction): ReviewState {
   const busy = state.phase !== 'ready'
   switch (action.type) {
     case 'check':
-      return state.phase === 'ready' ? { ...state, phase: 'checking', error: null } : state
+      return state.phase === 'ready' ? { ...state, phase: 'checking', error: null, checkFrom: state.edits } : state
     case 'checked':
       return state.phase === 'checking'
-        ? { ...state, phase: 'ready', check: action.check, fresh: true, stale: null, edited: false, refused: false, lost: null }
+        ? {
+          ...state, phase: 'ready', check: action.check, fresh: true, stale: null,
+          edited: state.edits !== state.checkFrom, refused: false, lost: null,
+        }
         : state
     case 'apply':
       return applicable(state) ? { ...state, phase: 'applying', error: null } : state
@@ -439,7 +471,8 @@ export function reviewReducer(state: ReviewState, action: ReviewAction): ReviewS
     case 'failed':
       return state.phase === 'checking' || state.phase === 'applying' ? { ...state, phase: 'ready', error: action.error } : state
     case 'edited':
-      return busy ? state : { ...state, edited: true }
+      // While a check runs too: it may have read the design before this write.
+      return busy && state.phase !== 'checking' ? state : { ...state, edited: true, edits: state.edits + 1 }
     case 'reject':
       return busy ? state : { ...state, phase: 'rejected' }
   }

@@ -4,7 +4,7 @@ import { studioChat } from '@/api/model'
 import type { ToolCall } from '@/api/types'
 import { AgentDraftCard } from '../../draft/DraftFillCard'
 import { ProposalCard } from '../../proposal/ProposalCard'
-import { checkedCall, PROPOSE_TOOL, restoredCalls } from '../../proposal/proposalModel'
+import { checkedCall, liveProposalCall, PROPOSE_TOOL, restoredCalls } from '../../proposal/proposalModel'
 import type { ToolEvent } from '../../stream/chatStream'
 import { ToolCallPanel, ToolCallsSummary } from '../../steps/ToolCallPanel'
 import { toolCallTurns, toolError } from '../../steps/toolCallModel'
@@ -22,10 +22,6 @@ const TOOL_CARDS: Record<string, ToolCard> = {
       : <ProposalCard checked={checked} restored={turn.restored === true} at={at} />
   },
 }
-
-/** Each later proposal of an answer replaces the earlier ones: only its last one is live. */
-const isLive = (call: ToolCall, calls: readonly ToolCall[]) =>
-  call.tool !== PROPOSE_TOOL || call === calls.filter((c) => c.tool === PROPOSE_TOOL && checkedCall(c.args, c.result) !== null).at(-1)
 
 const STEPS = { one: 'step', many: 'steps' }
 
@@ -50,8 +46,9 @@ export const studio: PresentationAdapter<ToolEvent<'studio'>, ToolCall[]> = {
       </div>
     ),
   },
+  // Each later proposal of an answer replaces the earlier ones: only its last call is live, and only when it succeeded.
   cards: (turn, at) => turn.insight
     .filter((call) => call.status === 'completed' && toolError(call) === null && Object.hasOwn(TOOL_CARDS, call.tool))
-    .filter((call, _i, calls) => isLive(call, calls))
+    .filter((call) => call.tool !== PROPOSE_TOOL || call === liveProposalCall(turn.insight))
     .map((call) => <Fragment key={call.callId}>{TOOL_CARDS[call.tool]!(call, turn, at)}</Fragment>),
 }

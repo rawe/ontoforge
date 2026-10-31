@@ -7,8 +7,9 @@ import {
 } from './proposalModel'
 
 /**
- * The whole proposal as one plain list diff: its rows by group, `+` added,
- * `~` changed (a description before → after), each refused row with the
+ * The whole proposal as one plain list diff: its rows by group, `+` added
+ * (with the description it gets), `~` changed (a description before →
+ * after), `=` a description left as it is, each refused row with the
  * server's reason; then the server's check line, what it does not prove,
  * and Reject, Re-check, Apply all. A row of a type that exists already
  * selects it in the schema.
@@ -93,14 +94,18 @@ export function ProposalReview({ proposal, groups, design, state, onSelect, onRe
 }
 
 function ReviewRow({ row, selectable, onSelect }: { row: ProposalRow; selectable: boolean; onSelect: () => void }) {
-  const added = row.mark === '+'
+  const tone = row.mark === '+' ? 'text-(--tc-emerald)' : row.mark === '~' ? 'text-(--tc-amber)' : 'text-muted-foreground'
   const body = (
     <>
-      <span className={cn('w-3 shrink-0 font-mono', added ? 'text-(--tc-emerald)' : 'text-(--tc-amber)')}>{row.mark}</span>
+      <span className={cn('w-3 shrink-0 font-mono', tone)}>{row.mark}</span>
       <span className="min-w-0 flex-1">
         <span className="font-mono text-[11px] break-all">{row.target}</span>
         <span className="text-muted-foreground"> {row.detail}</span>
-        {row.change !== undefined && (
+        {row.description !== undefined && <span className="block break-words">“{row.description}”</span>}
+        {row.mark === '=' && row.change !== undefined && (
+          <span className="block break-words text-muted-foreground">“{row.change.after}” · unchanged</span>
+        )}
+        {row.mark === '~' && row.change !== undefined && (
           <span className="block break-words text-muted-foreground">
             {row.change.before !== undefined && <>“{row.change.before}” → </>}
             <span className="text-foreground">“{row.change.after}”</span>

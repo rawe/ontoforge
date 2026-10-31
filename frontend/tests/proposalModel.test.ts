@@ -1,10 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  appliedIn, applicable, applyBlocker, checkedCall, checkLine, countsLine, createdTypes, designOf, initialReview, proposalArtifact,
+  appliedIn, applicable, applyBlocker, checkedCall, checkLine, countsLine, createdTypes, designOf, initialReview, liveProposalCall, proposalArtifact,
   proposalRows, restoredCalls, reviewReducer, strayRefusals, type Design, type Proposal, type ProposalCheck, type ReviewAction,
   type ReviewState,
 } from '../src/assistants/proposal/proposalModel.ts'
+import type { ToolCall } from '../src/api/types.ts'
 
 const proposal: Proposal = {
   summary: 'Adds contracts signed by people.',
@@ -43,6 +44,19 @@ test('reads a proposal call and a restored artifact; a failed call or another ar
   const artifact = (check: ProposalCheck) => ({ type: 'proposal', version: 1, value: { proposal, check } })
   assert.deepEqual(proposalArtifact([artifact(refused), artifact(ok)]), { proposal, check: ok })
   assert.equal(proposalArtifact([{ type: 'proposal', version: 2, value: { proposal, check: ok } }, { type: 'draft' }]), null)
+})
+
+test("an answer's live proposal is its last call, only when that call succeeded", () => {
+  const call = (callId: string, result: unknown, status: ToolCall['status'] = 'completed'): ToolCall =>
+    ({ callId, tool: 'propose_schema_change', args: proposal as unknown as Record<string, unknown>, result, status })
+  const read: ToolCall = { callId: 'r', tool: 'get_schema', args: {}, result: {}, status: 'completed' }
+  const first = call('c1', ok)
+  const second = call('c2', refused)
+  assert.equal(liveProposalCall([first, read, second, read]), second)
+  // A failed replacement never revives the earlier proposal.
+  assert.equal(liveProposalCall([first, call('c2', { error: { code: 'RESOURCE_CONFLICT', message: 'busy' } })]), null)
+  assert.equal(liveProposalCall([first, call('c2', undefined, 'interrupted')]), null)
+  assert.equal(liveProposalCall([read]), null)
 })
 
 test('a restored answer gets its proposal back as one completed call', () => {
@@ -85,6 +99,24 @@ test('rows group by what they touch, with descriptions before and after', () => 
   assert.equal(proposalRows(proposal, ok, null).at(-1)!.rows[0]!.change!.before, undefined)
 })
 
+test("an added item's description is plain; a description set to its current text is unchanged", () => {
+  const steps: Proposal['steps'] = [
+    { id: 'a', op: 'create_entity_type', key: 'team', name: 'Team', description: 'A team' },
+    { id: 'b', op: 'create_relation_type', key: 'in', name: 'In', source: 'person', target: 'team', description: 'Member of' },
+    { id: 'c', op: 'add_property', entityType: 'team', key: 'size', name: 'Size', dataType: 'integer', description: 'Head count' },
+    { id: 'd', op: 'set_description', relationType: 'knows', description: 'Knows' },
+  ]
+  const rows = proposalRows({ steps }, ok, design).flatMap((g) => g.rows)
+  assert.deepEqual(rows.map((r) => [r.stepId, r.mark, r.description, r.change]), [
+    ['a', '+', 'A team', undefined],
+    ['c', '+', 'Head count', undefined],
+    ['b', '+', 'Member of', undefined],
+    ['d', '=', undefined, { before: 'Knows', after: 'Knows' }],
+  ])
+  // While the design is unknown it reads as a change.
+  assert.equal(proposalRows({ steps }, ok, null).at(-1)!.rows[0]!.mark, '~')
+})
+
 test('a row carries only its own refusal and warnings from the check', () => {
   const rows = proposalRows(proposal, refused, design).flatMap((g) => g.rows)
   assert.deepEqual(rows.filter((r) => r.refusal !== undefined).map((r) => r.stepId), ['s3'])
@@ -124,6 +156,22 @@ test('a reloaded design shows the proposal applied only when every step took eff
   assert.equal(appliedIn(proposal, { ...after, relationTypes: after.relationTypes.slice(0, 1) }), false)
 })
 
+test('a lost apply of repeated description steps on one target: only the last one decides', () => {
+  const twice: Proposal = {
+    steps: [
+      { id: 's1', op: 'set_description', entityType: 'person', description: 'A' },
+      { id: 's2', op: 'set_description', entityType: 'person', property: 'name', description: 'Name' },
+      { id: 's3', op: 'set_description', entityType: 'person', description: 'B' },
+    ],
+  }
+  const described = (type: string, name: string): Design => ({
+    ...design, entityTypes: [{ key: 'person', description: type, properties: [{ key: 'name', description: name }] }],
+  })
+  assert.equal(appliedIn(twice, described('B', 'Name')), true)
+  assert.equal(appliedIn(twice, described('A', 'Name')), false)
+  assert.equal(appliedIn(twice, described('B', 'Old')), false)
+})
+
 const run = (state: ReviewState, ...actions: ReviewAction[]) => actions.reduce(reviewReducer, state)
 
 test('Apply is offered only for a fresh, unrefused, ok check', () => {
@@ -138,6 +186,17 @@ test('Apply is offered only for a fresh, unrefused, ok check', () => {
   const edited = run(initialReview(ok, true), { type: 'edited' })
   assert.match(applyBlocker(edited)!, /edited/)
   assert.equal(applicable(run(edited, { type: 'check' }, { type: 'checked', check: { ...ok, baseRevision: rev(42) } })), true)
+})
+
+test('a local edit while a check runs still asks for a re-check', () => {
+  const during = run(initialReview(ok, true), { type: 'check' }, { type: 'edited' }, { type: 'checked', check: { ...ok, baseRevision: rev(42) } })
+  assert.equal(during.phase, 'ready')
+  assert.match(applyBlocker(during)!, /edited/)
+  // A failed check keeps it, and so does the edit before a check that then fails.
+  assert.equal(run(initialReview(ok, true), { type: 'check' }, { type: 'edited' }, { type: 'failed', error: 'x' }).edited, true)
+  assert.equal(run(initialReview(ok, true), { type: 'edited' }, { type: 'check' }, { type: 'failed', error: 'x' }).edited, true)
+  // The next check, with no write during it, clears it.
+  assert.equal(applicable(run(during, { type: 'check' }, { type: 'checked', check: ok })), true)
 })
 
 test('apply: the receipt, a stale design, a refusal', () => {

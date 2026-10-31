@@ -52,10 +52,12 @@ export function LensDetailPage() {
 
   const { data: lenses, isPending } = useLenses(ontologyKey)
   const lens = lenses?.find((o) => o.lensId === id)
-  // An open saved agent's editor is the focus; any other view of the lens, the lens.
+  // An open agent editor is the focus — a new agent's with no key yet; any other view of the lens, the lens.
   const agentKey = tab === 'agents' ? searchParams.get('agent') : null
-  const editsAgent = agentKey !== null && agentKey !== ASSISTANT_NEW && agentKey !== ASSISTANT_DEFAULT
-  usePublishFocus(lens === undefined ? null : editsAgent ? { kind: 'agent', key: agentKey, lensKey: lens.key } : { kind: 'lens', key: lens.key })
+  const editsAgent = agentKey !== null && agentKey !== ASSISTANT_DEFAULT
+  usePublishFocus(lens === undefined ? null : editsAgent
+    ? { kind: 'agent', lens: lens.key, agent: agentKey === ASSISTANT_NEW ? null : agentKey }
+    : { kind: 'lens', lens: lens.key })
 
   const update = useMutation({
     mutationFn: (patch: { name: string; description: string | null }) =>
@@ -130,7 +132,7 @@ export function LensDetailPage() {
           </Badge>
           <ScopeBadge ontologyKey={ontologyKey} lensId={lens.lensId} />
           <div className="ml-auto flex items-center gap-2">
-            <AskAboutButton focus={{ kind: 'lens', key: lens.key }} />
+            <AskAboutButton focus={{ kind: 'lens', lens: lens.key }} />
             <Button variant="outline" size="sm" asChild>
               <Link to={workbenchLensPage(ontologyKey, lens.key, tab)}>
                 <WORKBENCH_ICON className="size-3.5" /> Open in Workbench

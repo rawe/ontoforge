@@ -12,21 +12,19 @@ import { z } from "zod";
 import type { ContextBlock, Tool } from "../../assistants/index.js";
 import { NotFoundError, ValidationError } from "../../core/exceptions.js";
 import type { ModelingStore } from "../../core/ports.js";
-import { MAX_KEY_LENGTH } from "../../core/schemas.js";
+import { addressLines, AgentAddress } from "./address.js";
 import { VALID_AGENT_TOOLS_CSV } from "../../runtime/toolNames.js";
 import * as service from "../service.js";
 import { expectedError } from "./tools.js";
 
 type Row = Record<string, unknown>;
 
-const Key = z.string().min(1).max(MAX_KEY_LENGTH);
-
-/** The open agent editor: which agent (`agentKey` null for a new one), its
- * draft version — bumped by the editor on every edit — and its values;
+/** The open agent editor: which agent (its address; `agent` null for a new
+ * one), its draft version — bumped by the editor on every edit — and its values;
  * `tools` null grants every tool. */
 export const AgentDraft = z
   .object({
-    target: z.object({ lensKey: Key, agentKey: Key.nullable() }).strict(),
+    target: AgentAddress,
     version: z.number().int().nonnegative(),
     fields: z
       .object({
@@ -51,8 +49,7 @@ export function draftBlock(draft: AgentDraft): ContextBlock {
     label: "Agent draft",
     source: "the agent editor the person has open, unsaved",
     text: [
-      `lens: ${target.lensKey}`,
-      `agent: ${target.agentKey ?? "(a new agent, not saved yet)"}`,
+      ...addressLines(target),
       `name: ${shown(fields.name)}`,
       `description: ${shown(fields.description)}`,
       `tools: ${fields.tools === null ? "all tools" : shown(fields.tools.join(", "))}`,
@@ -113,8 +110,8 @@ export function fillAgentDraftTool(draft: AgentDraft | undefined, store: Modelin
       if (Object.keys(fields).length === 0) {
         throw new ValidationError("Propose at least one of name, description, system_prompt, all_tools or tools.");
       }
-      if (!(await store.getLensByKey(draft.target.lensKey))) {
-        throw new NotFoundError(`Lens '${draft.target.lensKey}' not found`);
+      if (!(await store.getLensByKey(draft.target.lens))) {
+        throw new NotFoundError(`Lens '${draft.target.lens}' not found`);
       }
       return { target: draft.target, sourceVersion: draft.version, fields };
     },

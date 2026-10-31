@@ -7,13 +7,13 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { studio } from '../adapters/studio'
+import { addressLabel } from '../address'
 import { DEFAULT_ASSISTANT, type Turn } from '../conversation/chatModel'
 import type { ThreadOwner } from '../conversation/threadStore'
 import { useAssistantConversation } from '../conversation/useAssistantConversation'
 import { Composer, Intro, NewConversationDialog, TurnView } from '../shell/AssistantChat'
 import type { Binding, Focus } from '../types'
 import { useAssistantPanel } from './panelContext'
-import { focusLabel } from './panelModel'
 
 /**
  * The panel's conversation with the Studio helper: header, the focus chip,
@@ -136,7 +136,7 @@ export function PanelChat({ binding, principal, focus, onRemoveFocus, onClose }:
 
 /** The page's focus: sent with the next message until removed. */
 function FocusChip({ focus, onRemove }: { focus: Focus; onRemove: () => void }) {
-  const { name, what } = focusLabel(focus)
+  const { name, what } = addressLabel(focus)
   return (
     <span
       data-testid="assistant-focus-chip"

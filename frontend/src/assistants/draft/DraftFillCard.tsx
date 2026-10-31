@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ToolCall } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { itemKey } from '../address'
 import { useAssistantPanel } from '../panel/panelContext'
 import type { Binding } from '../types'
 import { proposalOf, type FillOutcome } from './draftFillModel'
@@ -29,7 +30,7 @@ export function AgentDraftCard({ call, at }: { call: ToolCall; at: Binding }) {
   return (
     <div data-testid="draft-fill-card" className="grid gap-1.5 rounded-lg border bg-card px-3 py-2.5 text-xs">
       <p className="font-medium">
-        Agent draft · <span className="font-mono">{proposal.target.agentKey ?? 'new agent'}</span>
+        Agent draft · <span className="font-mono">{itemKey(proposal.target) ?? 'new agent'}</span>
       </p>
       <p className="text-muted-foreground">
         {fields.length} {fields.length === 1 ? 'field' : 'fields'}: {fields.map((field) => AGENT_FIELDS[field]).join(', ')}

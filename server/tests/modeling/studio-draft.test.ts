@@ -20,7 +20,7 @@ const DESIGN = { entityTypes: [], relationTypes: [], lenses: [] };
 const LENS = { lensId: "lens-1", key: "hr", name: "HR", description: null, createdAt: NOW, updatedAt: NOW };
 
 const DRAFT: AgentDraft = {
-  target: { lensKey: "hr", agentKey: "support" },
+  target: { kind: "agent", lens: "hr", agent: "support" },
   version: 7,
   fields: { name: "Support", description: "", systemPrompt: "Be brief.", tools: ["get_schema"] },
 };
@@ -63,10 +63,10 @@ describe("the draft in a Studio turn", () => {
   });
 
   it("sends the draft as a labelled block of its own", () => {
-    const block = run({ ...DRAFT, target: { lensKey: "hr", agentKey: null } }).context.at(-1)!;
+    const block = run({ ...DRAFT, target: { kind: "agent", lens: "hr", agent: null } }).context.at(-1)!;
     expect(block.label).toBe("Agent draft");
     expect(block.text).toBe(
-      "lens: hr\nagent: (a new agent, not saved yet)\nname: Support\ndescription: (empty)\ntools: get_schema\nsystem prompt:\nBe brief.",
+      "kind: agent\nlens: hr\nagent: (new, not saved yet)\nname: Support\ndescription: (empty)\ntools: get_schema\nsystem prompt:\nBe brief.",
     );
   });
 });
@@ -75,7 +75,7 @@ describe("fill_agent_draft", () => {
   it("returns the proposed fields with the draft's target and version", async () => {
     const result = await call({ name: "Helpdesk", system_prompt: "Answer from the schema.", tools: ["search", "get_entity", "search"] });
     expect(result).toEqual({
-      target: { lensKey: "hr", agentKey: "support" },
+      target: { kind: "agent", lens: "hr", agent: "support" },
       sourceVersion: 7,
       fields: { name: "Helpdesk", systemPrompt: "Answer from the schema.", tools: ["search", "get_entity"] },
     });

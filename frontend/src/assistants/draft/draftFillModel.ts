@@ -1,7 +1,7 @@
 /**
  * Draft fill's pure parts: reading the draft tool's proposal, whether it
- * still fits the open editor (same ontology, same agent or new-agent
- * session, same draft version), which of its fields change the draft,
+ * still fits the open editor (same ontology, same target address, same
+ * draft version), which of its fields change the draft,
  * filling it with a record of the AI's edit, the AI marks, retiring the
  * record of a field the person edits, and undoing the AI's edit for the
  * fields the person has not edited since.
@@ -9,14 +9,13 @@
  * No React, no I/O — unit-tested with `node --test`.
  */
 
+import { addressOf, sameAddress, type DesignAddress } from '../address.ts'
+
 /** An editor's fillable values by field. A list counts as a set: its order changes nothing. */
 export type Fields = Record<string, unknown>
 
-/** Which draft: one lens's agent, `agentKey` null for a new one. */
-export interface DraftTarget {
-  lensKey: string
-  agentKey: string | null
-}
+/** Which draft: the address of the item the editor edits, its own key null for a new one. */
+export type DraftTarget = DesignAddress
 
 /** The open editor's draft as the panel sends it: its target, version and values. */
 export interface DraftState {
@@ -58,11 +57,10 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 
 /** The proposal a draft tool's result holds; null for any other result. */
 export function proposalOf(result: unknown): DraftProposal | null {
-  if (!isRecord(result) || !isRecord(result.target) || !isRecord(result.fields)) return null
-  const { lensKey, agentKey } = result.target
-  if (typeof lensKey !== 'string' || (agentKey !== null && typeof agentKey !== 'string')) return null
-  if (typeof result.sourceVersion !== 'number') return null
-  return { target: { lensKey, agentKey }, sourceVersion: result.sourceVersion, fields: result.fields }
+  if (!isRecord(result) || !isRecord(result.fields)) return null
+  const target = addressOf(result.target)
+  if (target === null || typeof result.sourceVersion !== 'number') return null
+  return { target, sourceVersion: result.sourceVersion, fields: result.fields }
 }
 
 /** Whether two field values are the same; lists as sets. */
@@ -77,8 +75,7 @@ export function sameValue(a: unknown, b: unknown): boolean {
 export function isStale(open: DraftState | null, ontologyKey: string, proposal: DraftProposal): boolean {
   return open === null
     || open.ontologyKey !== ontologyKey
-    || open.target.lensKey !== proposal.target.lensKey
-    || open.target.agentKey !== proposal.target.agentKey
+    || !sameAddress(open.target, proposal.target)
     || open.version !== proposal.sourceVersion
 }
 

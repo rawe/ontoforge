@@ -37,7 +37,9 @@ export function Inspector() {
           {isEntity ? 'Entity type' : 'Relation type'}
         </span>
         <span className="flex-1" />
-        <AskAboutButton focus={{ kind: isEntity ? 'entityType' : 'relationType', key: selection.key }} />
+        <AskAboutButton
+          focus={isEntity ? { kind: 'entityType', entityType: selection.key } : { kind: 'relationType', relationType: selection.key }}
+        />
         <Button
           variant="ghost"
           size="xs"

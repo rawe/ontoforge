@@ -3,7 +3,8 @@
 import { createContext, useContext, useEffect } from 'react'
 import type { DraftEditor } from '../draft/draftFillModel'
 import type { Focus } from '../types'
-import { focusFromId, focusId } from './panelModel'
+import { addressFromId } from '../address'
+import { focusId } from './panelModel'
 
 export interface AssistantPanel {
   /** The server has a language model: the panel and its entry points show. */
@@ -46,7 +47,7 @@ export function usePublishFocus(focus: Focus | null): void {
   // The id stands for the focus, so a new object with the same content publishes nothing new.
   const id = focusId(focus)
   useEffect(() => {
-    const published = id === null ? null : focusFromId(id)
+    const published = id === null ? null : addressFromId(id)
     publish(published)
     return () => {
       if (published !== null) unpublish(published)

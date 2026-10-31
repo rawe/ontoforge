@@ -9,16 +9,17 @@ import {
 } from '../src/components/studio/assistants/agentDraft.ts'
 
 const fields = { name: 'Support', description: '', systemPrompt: 'Be brief.', tools: ['get_schema'] as string[] | null }
-const open: DraftState = { ontologyKey: 'fair', target: { lensKey: 'hr', agentKey: 'support' }, version: 7, fields }
+const open: DraftState = { ontologyKey: 'fair', target: { kind: 'agent', lens: 'hr', agent: 'support' }, version: 7, fields }
 const proposal: DraftProposal = {
-  target: { lensKey: 'hr', agentKey: 'support' }, sourceVersion: 7, fields: { name: 'Helpdesk', tools: ['search', 'get_entity'] },
+  target: { kind: 'agent', lens: 'hr', agent: 'support' }, sourceVersion: 7, fields: { name: 'Helpdesk', tools: ['search', 'get_entity'] },
 }
 
 test('reads a draft proposal from the tool result, and nothing else', () => {
   assert.deepEqual(proposalOf(proposal), proposal)
-  assert.deepEqual(proposalOf({ ...proposal, target: { lensKey: 'hr', agentKey: null } })?.target, { lensKey: 'hr', agentKey: null })
+  assert.deepEqual(proposalOf({ ...proposal, target: { kind: 'agent', lens: 'hr', agent: null } })?.target, { kind: 'agent', lens: 'hr', agent: null })
   assert.equal(proposalOf({ error: { message: 'no' } }), null)
   assert.equal(proposalOf({ ...proposal, sourceVersion: '7' }), null)
+  assert.equal(proposalOf({ ...proposal, target: { lensKey: 'hr', agentKey: 'support' } }), null)
   assert.equal(proposalOf(null), null)
 })
 
@@ -27,12 +28,13 @@ test('a proposal fits only the same editor at the same version', () => {
   assert.equal(isStale(null, 'fair', proposal), true)
   assert.equal(isStale({ ...open, version: 8 }, 'fair', proposal), true)
   assert.equal(isStale(open, 'other', proposal), true)
-  assert.equal(isStale({ ...open, target: { lensKey: 'hr', agentKey: 'other' } }, 'fair', proposal), true)
-  assert.equal(isStale({ ...open, target: { lensKey: 'sales', agentKey: 'support' } }, 'fair', proposal), true)
+  assert.equal(isStale({ ...open, target: { kind: 'agent', lens: 'hr', agent: 'other' } }, 'fair', proposal), true)
+  assert.equal(isStale({ ...open, target: { kind: 'agent', lens: 'sales', agent: 'support' } }, 'fair', proposal), true)
+  assert.equal(isStale({ ...open, target: { kind: 'lens', lens: 'hr' } }, 'fair', proposal), true)
   // A new agent's session is only its own: the version never repeats across sessions.
-  const draftOfNew = { ...open, target: { lensKey: 'hr', agentKey: null } }
+  const draftOfNew = { ...open, target: { kind: 'agent', lens: 'hr', agent: null } }
   assert.equal(isStale(draftOfNew, 'fair', proposal), true)
-  assert.equal(isStale(draftOfNew, 'fair', { ...proposal, target: { lensKey: 'hr', agentKey: null } }), false)
+  assert.equal(isStale(draftOfNew, 'fair', { ...proposal, target: { kind: 'agent', lens: 'hr', agent: null } }), false)
 })
 
 test('the diff lists the fields the proposal changes; a list is a set', () => {

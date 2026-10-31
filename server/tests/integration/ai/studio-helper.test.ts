@@ -145,13 +145,13 @@ describe("the Studio helper on a real model", () => {
       ctx.skip(skipReason?.split("\n")[0] ?? "AI suite unavailable");
       return;
     }
-    const focus = { kind: "entityType", key: "book" };
+    const focus = { kind: "entityType", entityType: "book" };
     const first = await ask("Propose an entity type 'series' (Series) with a string property 'title'.", { focus });
     const threadId = first.find((event) => event.type === "thread")!.threadId as string;
     expect((await apply(first)).created["entityTypes.series"]).toBeDefined();
 
     const second = await ask("Now propose a relation type 'part_of' (Part of) from book to series.", {
-      threadId, focus: { kind: "entityType", key: "series" },
+      threadId, focus: { kind: "entityType", entityType: "series" },
     });
     expect((await apply(second)).created["relationTypes.part_of"]).toBeDefined();
 
@@ -169,20 +169,20 @@ describe("the Studio helper on a real model", () => {
       return;
     }
     const draft = {
-      target: { lensKey: "public", agentKey: null }, version: 5,
+      target: { kind: "agent", lens: "public", agent: null }, version: 5,
       fields: { name: "", description: "", systemPrompt: "", tools: null },
     };
     const events = await ask(
       "Draft this agent for me: a guide that answers questions about the books this lens shows. " +
       "Give it a name, a short description, instructions, and only the tools it needs.",
-      { draft, focus: { kind: "lens", key: "public" } },
+      { draft, focus: { kind: "agent", lens: "public", agent: null } },
     );
     const fill = events.filter((event) => event.type === "studio.tool_call" && event.tool === "fill_agent_draft");
     expect(fill.length, JSON.stringify(events)).toBeGreaterThan(0);
     const results = events.filter((event) => event.type === "studio.tool_result" && fill.some((call) => call.callId === event.callId));
     const filled = results.map((event) => event.result).find((result) => result.error === undefined);
     expect(filled, JSON.stringify(results)).toBeDefined();
-    expect(filled.target).toEqual({ lensKey: "public", agentKey: null });
+    expect(filled.target).toEqual({ kind: "agent", lens: "public", agent: null });
     expect(filled.sourceVersion).toBe(5);
     expect(String(filled.fields.name ?? "")).not.toBe("");
     const agents = await app!.inject({ method: "GET", url: `${MODEL}/lenses/public/assistants/agents` });

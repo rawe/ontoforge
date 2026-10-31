@@ -9,6 +9,7 @@ import type { ReactNode } from 'react'
 import type { ToolCall } from '@/api/types'
 import type { Turn, TurnModel } from './conversation/chatModel.ts'
 import type { ChatRequest, SharedEvent } from './stream/chatStream.ts'
+import type { DesignAddress } from './address.ts'
 
 /** Where an assistant answers: one lens, or (`lensKey: null`) the whole ontology — the Studio helper. */
 export interface Binding {
@@ -16,17 +17,8 @@ export interface Binding {
   lensKey: string | null
 }
 
-/**
- * What a Studio page has in view, sent with a message as structured data,
- * never as text. A property names its type in `typeKey`, an agent its lens
- * in `lensKey`.
- */
-export interface Focus {
-  kind: 'entityType' | 'relationType' | 'property' | 'lens' | 'agent'
-  key: string
-  typeKey?: string
-  lensKey?: string
-}
+/** What a Studio page has in view: a design item's address, sent with a message as structured data, never as text. */
+export type Focus = DesignAddress
 
 /** How the module shows one assistant kind, the same on every surface. */
 export interface PresentationAdapter<E extends { type: string }, I> {

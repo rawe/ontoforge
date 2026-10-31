@@ -13,8 +13,6 @@
  */
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { z } from "zod";
-
 import {
   runToolLoop,
   type ContextBlock,
@@ -24,9 +22,9 @@ import {
   type Tool,
 } from "../../assistants/index.js";
 import { supportsKeywordRanking, type ModelingStore } from "../../core/ports.js";
-import { MAX_KEY_LENGTH } from "../../core/schemas.js";
 import { unavailableTools } from "../../runtime/assistants/agents/runtime.js";
 import { VALID_AGENT_TOOLS } from "../../runtime/toolNames.js";
+import { addressLines, DesignAddress } from "./address.js";
 import { draftBlock, fillAgentDraftTool, type AgentDraft } from "./draft.js";
 import { proposeSchemaChangeTool, turnArtifacts, type StudioTurn } from "./propose.js";
 import { designTools, lensScope, readDesign } from "./tools.js";
@@ -39,19 +37,9 @@ export const STUDIO_KIND = "studio";
 /** The one built-in helper; its name is a working name. */
 export const STUDIO_HELPER = { key: "_default", name: "Studio helper" } as const;
 
-const Key = z.string().min(1).max(MAX_KEY_LENGTH);
-
-/** What the Studio page shows the person: structured, never prose. A
- * property names its type in `typeKey`, an agent its lens in `lensKey`. */
-export const Focus = z
-  .object({
-    kind: z.enum(["entityType", "relationType", "property", "lens", "agent"]),
-    key: Key,
-    typeKey: Key.optional(),
-    lensKey: Key.optional(),
-  })
-  .strict();
-export type Focus = z.infer<typeof Focus>;
+/** What the Studio page shows the person: a design item's address, never prose. */
+export const Focus = DesignAddress;
+export type Focus = DesignAddress;
 
 export const INSTRUCTIONS = `You are the design helper in the OntoForge Studio. You help the person who administers this ontology understand and review its design: entity types, relation types and their properties, lenses and their scope, and search indices.
 
@@ -109,10 +97,6 @@ function lensOutline(design: Row): string {
   }).join("\n");
 }
 
-function focusText(focus: Focus): string {
-  return Object.entries(focus).map(([field, value]) => `${field}: ${value}`).join("\n");
-}
-
 /** What a turn brings beside its message: the page's focus and the open agent editor's draft. */
 export interface StudioTurnContext {
   focus?: Focus;
@@ -131,7 +115,7 @@ export function briefing(ontologyKey: string, design: Row): ContextBlock[] {
 /** What goes with one message: the page's focus and the open draft, each a labelled block. */
 export function turnContext({ focus, draft }: StudioTurnContext): ContextBlock[] {
   const blocks: ContextBlock[] = [];
-  if (focus !== undefined) blocks.push({ label: "Focus", source: "the Studio page the person has open", text: focusText(focus) });
+  if (focus !== undefined) blocks.push({ label: "Focus", source: "the Studio page the person has open", text: addressLines(focus).join("\n") });
   if (draft !== undefined) blocks.push(draftBlock(draft));
   return blocks;
 }

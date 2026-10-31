@@ -7,7 +7,7 @@ import { useFeatures } from '@/api/hooks'
 import * as model from '@/api/model'
 import { qk } from '@/api/queryKeys'
 import { AGENT_TOOL_NAMES, type Agent, type Lens } from '@/api/types'
-import { AiChangedMark, useAssistantPanel, useDraftFill, type DraftTarget, type Focus } from '@/assistants'
+import { AiChangedMark, useAssistantPanel, useDraftFill, type DraftTarget } from '@/assistants'
 import { AgentChat } from '@/components/assistants/agents/AgentChat'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -165,7 +165,8 @@ interface AgentPageProps {
 function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSaved, onDeleted, onClose }: AgentPageProps) {
   const isNew = agent === null
   const baseline = useMemo(() => draftOf(agent), [agent])
-  const target = useMemo<DraftTarget>(() => ({ lensKey, agentKey: agent?.key ?? null }), [lensKey, agent])
+  // The draft's target, and the focus "Ask AI" opens the panel on.
+  const target = useMemo<DraftTarget>(() => ({ kind: 'agent', lens: lensKey, agent: agent?.key ?? null }), [lensKey, agent])
   const [busy, setBusy] = useState(false)
   const { draft, change, reset, undo, marks, canUndo } = useDraftFill({
     initial: baseline,
@@ -178,7 +179,6 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
   })
   const key = draft.key
   const panel = useAssistantPanel()
-  const focus: Focus = agent === null ? { kind: 'lens', key: lensKey } : { kind: 'agent', key: agent.key, lensKey }
   const [saveErrors, setSaveErrors] = useState<string[]>([])
   const [failed, setFailed] = useState<'save' | 'delete'>('save')
 
@@ -273,7 +273,7 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
                 </Button>
               )}
               {panel.available && (
-                <Button type="button" size="sm" variant="ghost" data-testid="agent-ask-ai" onClick={() => panel.open({ focus })}>
+                <Button type="button" size="sm" variant="ghost" data-testid="agent-ask-ai" onClick={() => panel.open({ focus: target })}>
                   <Sparkles className="size-3.5" /> Ask AI
                 </Button>
               )}

@@ -4,6 +4,15 @@
  * by UUID (`lensId`, `entityTypeId`, `relationTypeId`, `propertyId`).
  */
 
+import {
+  assistantPath,
+  postChat,
+  toolCallReader,
+  type ChatRequest,
+  type SharedEvent,
+  type ToolEvent,
+} from '../assistants/stream/chatStream'
+import type { Focus } from '../assistants/types'
 import { buildQuery, request } from './http'
 import type {
   Agent,
@@ -405,3 +414,18 @@ export const getSearchIndexStatus = (ontologyKey: string, key: string) =>
 /** Starts new generations for the enabled representations (202). */
 export const rebuildSearchIndex = (ontologyKey: string, key: string) =>
   request<IndexStatus>(`${indexPath(ontologyKey, key)}/rebuild`, { method: 'POST' })
+
+/* ------------------------------- Studio helper ------------------------------ */
+
+/** A Studio helper message: the shared body, plus what the page has in view. */
+export interface StudioChatRequest extends ChatRequest {
+  focus?: Focus
+}
+
+/** One message to the Studio helper; without `threadId` it starts a new thread. */
+export const studioChat = (
+  ontologyKey: string,
+  body: StudioChatRequest,
+  onEvent: (event: SharedEvent | ToolEvent<'studio'>) => void,
+  signal: AbortSignal,
+) => postChat(assistantPath({ ontologyKey, lensKey: null }, 'studio'), body, toolCallReader('studio'), onEvent, signal)

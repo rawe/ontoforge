@@ -2,7 +2,7 @@ import { ChevronLeft, Plus } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { AssistantKind } from '@/api/types'
 import { AssistantExplainerButton } from '@/components/assistants/explainers/AssistantExplainer'
-import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
+import { adapters } from '@/assistants'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ASSISTANT_DEFAULT, ASSISTANT_DEFAULT_TEXT, ASSISTANT_STATUS_TEXT, type AssistantStatus } from './assistantModel'
@@ -29,7 +29,7 @@ export function AssistantEditorPage({ kind, title, assistantKey, status, onBack,
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="ghost" size="sm" className="-ml-2 h-7 gap-1 text-xs text-muted-foreground" onClick={onBack}>
-          <ChevronLeft className="size-3.5" /> All {ASSISTANT_KINDS[kind].many}
+          <ChevronLeft className="size-3.5" /> All {adapters[kind].nouns.many}
         </Button>
         <h2 className="text-[14px] font-semibold">{title}</h2>
         <AssistantExplainerButton kind={kind} className="-ml-1.5" />
@@ -56,7 +56,7 @@ export function AssistantDefaultPage({ kind, onBack, onNew, test }: {
     <AssistantEditorPage kind={kind} title="Default" assistantKey={ASSISTANT_DEFAULT} status="builtIn" onBack={onBack} test={test}>
       <section className="rounded-xl border bg-card p-4">
         <p className="text-xs text-muted-foreground">{ASSISTANT_DEFAULT_TEXT[kind]}</p>
-        <Button size="sm" className="mt-3" onClick={onNew}><Plus className="size-3.5" /> New {ASSISTANT_KINDS[kind].one.toLowerCase()}</Button>
+        <Button size="sm" className="mt-3" onClick={onNew}><Plus className="size-3.5" /> New {adapters[kind].nouns.one.toLowerCase()}</Button>
       </section>
     </AssistantEditorPage>
   )

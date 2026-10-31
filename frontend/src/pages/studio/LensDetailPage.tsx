@@ -3,10 +3,10 @@ import { ChevronLeft, Layers, ListTree, Plug, SquareTerminal, Trash2 } from 'luc
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
+import { adapters } from '@/assistants'
 import { useLenses } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
 import type { Lens } from '@/api/types'
-import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { lensDeletedText } from '@/components/changesets/changesets'
 import { EmptyState } from '@/components/EmptyState'
 import { workbenchLensPage } from '@/components/layout/surfaceSwitch'
@@ -181,13 +181,13 @@ export function LensDetailPage() {
               <Layers className="size-3.5" /> Scope
             </TabsTrigger>
             <TabsTrigger value="agents">
-              <ASSISTANT_KINDS.agents.icon className="size-3.5" /> Agents
+              <adapters.agents.icon className="size-3.5" /> Agents
             </TabsTrigger>
             <TabsTrigger value="retriever-agents">
-              <ASSISTANT_KINDS.retrievers.icon className="size-3.5" /> Retrievers
+              <adapters.retrievers.icon className="size-3.5" /> Retrievers
             </TabsTrigger>
             <TabsTrigger value="navigators">
-              <ASSISTANT_KINDS.navigators.icon className="size-3.5" /> Navigators
+              <adapters.navigators.icon className="size-3.5" /> Navigators
             </TabsTrigger>
             <TabsTrigger value="queries">
               <SquareTerminal className="size-3.5" /> Saved queries

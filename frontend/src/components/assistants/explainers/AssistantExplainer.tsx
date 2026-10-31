@@ -3,7 +3,7 @@ import {
   Funnel, Layers, ListOrdered, MessageCircleQuestionMark, MessageSquareText, Search, Sparkles, Waypoints, Wrench, type LucideIcon,
 } from 'lucide-react'
 import type { AssistantKind } from '@/api/types'
-import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
+import { adapters } from '@/assistants'
 import { ExplainerButton } from '@/components/explainer/ExplainerButton'
 import { ExplainerDialog, type ExplainerStory } from '@/components/explainer/ExplainerDialog'
 import { cn } from '@/lib/utils'
@@ -15,7 +15,7 @@ const KINDS: AssistantKind[] = ['agents', 'retrievers', 'navigators']
 
 const storyOf = (kind: AssistantKind): ExplainerStory<StoryStep> => {
   const { title, summary, facts, story } = EXPLAINERS[kind]
-  return { title, icon: ASSISTANT_KINDS[kind].icon, summary, facts, steps: story }
+  return { title, icon: adapters[kind].icon, summary, facts, steps: story }
 }
 
 /** One story per kind, made once: a tab switches to another story, which starts at its first step. */
@@ -35,7 +35,7 @@ const microLabel = 'text-[10px] font-semibold tracking-wider text-muted-foregrou
  * assistant's name, or `labeled` — "? How retrievers work" — among a list's actions.
  */
 export function AssistantExplainerButton({ kind, labeled = false, className }: { kind: AssistantKind; labeled?: boolean; className?: string }) {
-  const { one, many } = ASSISTANT_KINDS[kind]
+  const { one, many } = adapters[kind].nouns
   return <ExplainerButton title={`How ${article(one)} ${one.toLowerCase()} works`} label={labeled ? `How ${many} work` : undefined} className={className}>
     <AssistantExplainerDialog openedFor={kind} />
   </ExplainerButton>
@@ -77,7 +77,7 @@ function KindTabs({ kind, onSelect, onClose }: { kind: AssistantKind; onSelect: 
   const keepArrows = (event: KeyboardEvent) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') event.stopPropagation() }
   return <div role="tablist" aria-label="Assistant kind" onKeyDown={keepArrows} className="flex shrink-0 rounded-lg border bg-muted/50 p-0.5">
     {KINDS.map((option) => {
-      const { one, icon: KindIcon } = ASSISTANT_KINDS[option]
+      const { nouns: { one }, icon: KindIcon } = adapters[option]
       return <button key={option} type="button" role="tab" aria-selected={option === kind} onClick={() => onSelect(option)}
         className={cn('flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
           option === kind ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>

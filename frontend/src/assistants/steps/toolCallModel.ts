@@ -1,38 +1,48 @@
 /**
- * Pure helpers of the agent chat: how the agent's tool events build an
- * answer's tool calls (with client-side timing — the stream carries none),
- * what the running answer is doing, and a short description of each call.
+ * Pure helpers of the steps of every kind that runs on the tool loop
+ * (agents, the Studio helper): how its tool events build an answer's tool
+ * calls (with client-side timing — the stream carries none), what the
+ * running answer is doing, and a short description of each call.
  *
  * No React, no I/O — unit-tested with `node --test`.
  */
 
-import type { ChatEvent, SharedEvent } from '../stream/chatStream.ts'
 import type { ToolCall } from '@/api/types'
+import type { ToolEvent } from '../stream/chatStream.ts'
 import type { TurnModel } from '../conversation/chatModel.ts'
 
-/** The agent's own stream events. */
-export type AgentEvent = Exclude<ChatEvent, SharedEvent>
-
-/** An agent answer's insight is its tool calls, in the order they were made. */
-export const agentTurns: TurnModel<AgentEvent, ToolCall[]> = {
-  empty: () => [],
-  apply(calls, event, now) {
-    switch (event.type) {
-      case 'agent.tool_call':
+/**
+ * A tool loop's answer: its insight is its tool calls, in the order they
+ * were made, from the events with the kind's prefix (`agent`, `studio`).
+ */
+export function toolCallTurns<P extends string>(prefix: P): TurnModel<ToolEvent<P>, ToolCall[]> {
+  return {
+    empty: () => [],
+    apply(calls, event, now) {
+      if ('tool' in event && event.type === `${prefix}.tool_call`) {
         return [...calls, { callId: event.callId, tool: event.tool, args: event.args, status: 'pending', startedAt: now }]
-      case 'agent.tool_result':
+      }
+      if ('result' in event && event.type === `${prefix}.tool_result`) {
         return calls.map((call) =>
           call.callId === event.callId ? { ...call, result: event.result, status: 'completed', finishedAt: now } : call)
-    }
-  },
-  // Calls still running when the turn ends count as interrupted.
-  end: (calls) => calls.map((call) => (call.status === 'pending' ? { ...call, status: 'interrupted' } : call)),
-  hasInsight: (calls) => calls.length > 0,
-  progress(calls) {
-    const running = [...new Set(calls.filter((c) => c.status === 'pending').map((c) => toolLabel(c.tool)))]
-    return running.length > 0 ? running.join(', ') : undefined
-  },
+      }
+      return calls
+    },
+    // Calls still running when the turn ends count as interrupted.
+    end: (calls) => calls.map((call) => (call.status === 'pending' ? { ...call, status: 'interrupted' } : call)),
+    hasInsight: (calls) => calls.length > 0,
+    progress(calls) {
+      const running = [...new Set(calls.filter((c) => c.status === 'pending').map((c) => toolLabel(c.tool)))]
+      return running.length > 0 ? running.join(', ') : undefined
+    },
+  }
 }
+
+/** The agent's own stream events. */
+export type AgentEvent = ToolEvent<'agent'>
+
+/** An agent answer's insight is its tool calls. */
+export const agentTurns = toolCallTurns('agent')
 
 /** How long a call ran, in ms; undefined while running or when not timed. */
 export function callDuration(call: ToolCall): number | undefined {
@@ -61,13 +71,20 @@ export function toolTime(calls: readonly ToolCall[]): number | undefined {
   return total + end - start
 }
 
-/** The error a tool answered with (`{error}`), if any. */
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/** The error a tool answered with (`{error}`, its text or `{code, message}`), if any. */
 export function toolError(call: ToolCall): string | null {
   const result = call.result
-  if (call.status !== 'completed' || typeof result !== 'object' || result === null || Array.isArray(result)) return null
-  const keys = Object.keys(result)
-  const error = (result as Record<string, unknown>).error
-  return keys.length === 1 && typeof error === 'string' ? error : null
+  if (call.status !== 'completed' || !isRecord(result) || Object.keys(result).length !== 1) return null
+  const error = result.error
+  if (typeof error === 'string') return error
+  return isRecord(error) && typeof error.message === 'string' ? error.message : null
+}
+
+/** How many calls an answer made, and how many of them answered with an error. */
+export function toolCallCounts(calls: readonly ToolCall[]): { calls: number; errors: number } {
+  return { calls: calls.length, errors: calls.filter((call) => toolError(call) !== null).length }
 }
 
 const TOOL_LABELS: Record<string, string> = {
@@ -83,6 +100,10 @@ const TOOL_LABELS: Record<string, string> = {
   list_saved_queries: 'List saved queries',
   run_saved_query: 'Run saved query',
   search_saved_queries: 'Search saved queries',
+  list_lenses: 'List lenses',
+  list_search_indices: 'List search indices',
+  validate_schema: 'Validate the schema',
+  validate_lens: 'Validate a lens',
 }
 
 /** A readable name of a tool; unknown tools keep their key. */
@@ -127,6 +148,8 @@ export function toolCallSummary(call: ToolCall): string | undefined {
       return [text(a.entity_type_key), text(a.entity_id), text(a.property_key)].filter(Boolean).join(' · ') || undefined
     case 'list_relations':
       return text(a.relation_type_key)
+    case 'validate_lens':
+      return text(a.lens_key)
     default:
       return undefined
   }

@@ -18,7 +18,9 @@ import {
 import {
   agentTurns,
   callDuration,
+  toolCallCounts,
   toolCallSummary,
+  toolCallTurns,
   toolError,
   toolTime,
 } from '../src/assistants/steps/toolCallModel.ts'
@@ -128,12 +130,33 @@ test('agent: a failed or stopped turn interrupts running calls', () => {
   }
 })
 
-test('toolError reads an {error} result only', () => {
+test('toolError reads an {error} result only: its text, or the message of a {code, message} error', () => {
   const call = (result: unknown, status: ToolCall['status'] = 'completed'): ToolCall => ({ callId: 'c', tool: 't', args: {}, result, status })
   assert.equal(toolError(call({ error: 'not found' })), 'not found')
+  assert.equal(toolError(call({ error: { code: 'RESOURCE_NOT_FOUND', message: "Lens 'x' not found" } })), "Lens 'x' not found")
+  assert.equal(toolError(call({ error: { code: 'X' } })), null)
   assert.equal(toolError(call({ error: 'x', items: [] })), null)
   assert.equal(toolError(call('text')), null)
   assert.equal(toolError(call({ error: 'x' }, 'pending')), null)
+})
+
+test('toolCallCounts counts the calls and those that answered with an error', () => {
+  const call = (callId: string, result: unknown): ToolCall => ({ callId, tool: 't', args: {}, result, status: 'completed' })
+  assert.deepEqual(toolCallCounts([]), { calls: 0, errors: 0 })
+  assert.deepEqual(toolCallCounts([call('a', { valid: true }), call('b', { error: 'x' }), call('c', { error: { code: 'C', message: 'm' } })]), { calls: 3, errors: 2 })
+})
+
+test('studio: the tool events with its own prefix build the calls; another kind\'s are ignored', () => {
+  const studioTurns = toolCallTurns('studio')
+  let turn = pendingTurn('t', 'q', studioTurns.empty(), 0)
+  turn = applyEvent(studioTurns, turn, { type: 'studio.tool_call', callId: 'a', tool: 'validate_lens', args: { lens_key: 'main' } }, 10)
+  assert.equal(studioTurns.progress(turn.insight), 'Validate a lens')
+  turn = applyEvent(studioTurns, turn, { type: 'agent.tool_call', callId: 'b', tool: 'search', args: {} } as never, 11)
+  turn = applyEvent(studioTurns, turn, { type: 'studio.tool_result', callId: 'a', result: { valid: true, errors: [] } }, 30)
+  assert.deepEqual(turn.insight.map((c) => [c.callId, c.status, callDuration(c)]), [['a', 'completed', 20]])
+  assert.equal(toolCallSummary(turn.insight[0]!), 'main')
+  const ended = stopTurn(studioTurns, applyEvent(studioTurns, turn, { type: 'studio.tool_call', callId: 'c', tool: 'get_schema', args: {} }, 40), 50)
+  assert.deepEqual(ended.insight.map((c) => c.status), ['completed', 'interrupted'])
 })
 
 test('toolCallSummary says what a call asked for', () => {

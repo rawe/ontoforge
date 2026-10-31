@@ -1,7 +1,7 @@
 import { Plus } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { AssistantKind } from '@/api/types'
-import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
+import { adapters } from '@/assistants'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ASSISTANT_DEFAULT, ASSISTANT_DEFAULT_TEXT } from './assistantModel'
@@ -67,7 +67,7 @@ export function AssistantDefaultCard({ kind, onOpen }: { kind: AssistantKind; on
 
 /** The card after the default when a kind has none of its own yet. */
 export function AssistantEmptyCard({ kind, text, onNew }: { kind: AssistantKind; text: string; onNew: () => void }) {
-  const { one, many } = ASSISTANT_KINDS[kind]
+  const { one, many } = adapters[kind].nouns
   return (
     <div className="rounded-xl border bg-card p-4">
       <p className="text-[13px] font-semibold">No {many} yet</p>

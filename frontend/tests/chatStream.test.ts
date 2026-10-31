@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  agentReader, assistantPath, chatErrorText, postChat, readChatStream, readNdjsonStream, readThread, threadError,
+  agentReader, assistantPath, chatErrorText, postChat, readAssistantStream, readChatStream, readNdjsonStream, readThread, threadError,
+  toolCallReader,
 } from '../src/assistants/stream/chatStream.ts'
 import { ApiError } from '../src/api/http.ts'
 
@@ -157,15 +158,53 @@ test('a chat posts {message, threadId} to the assistant route; a thread reads ba
       : new Response(JSON.stringify({ threadId: 't1', messages: [{ role: 'user', content: 'Hello' }] }), { headers: { 'content-type': 'application/json' } })
   }) as typeof fetch
   try {
-    const path = assistantPath('o 1', 'main', 'agents', '_default')
+    const path = assistantPath({ ontologyKey: 'o 1', lensKey: 'main' }, 'agents', '_default')
     assert.equal(path, '/api/ontologies/o%201/runtime/lenses/main/ai/assistants/agents/_default')
-    assert.equal(assistantPath('o', 'main', 'retrievers'), '/api/ontologies/o/runtime/lenses/main/ai/assistants/retrievers')
+    assert.equal(assistantPath({ ontologyKey: 'o', lensKey: 'main' }, 'retrievers'), '/api/ontologies/o/runtime/lenses/main/ai/assistants/retrievers')
     await postChat(path, { message: 'Hello', threadId: 't1' }, agentReader(), () => {}, new AbortController().signal)
     assert.equal(calls[0]!.url, `${path}/chat`)
     assert.deepEqual(JSON.parse(String(calls[0]!.init!.body)), { message: 'Hello', threadId: 't1' })
     const thread = await readThread(path, 't1')
     assert.equal(calls[1]!.url, `${path}/threads/t1`)
     assert.deepEqual(thread.messages, [{ role: 'user', content: 'Hello' }])
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('the Studio helper reads its own tool events; another kind\'s are ignored, and its calls must close before final', async () => {
+  const body = THREAD +
+    '{"type":"studio.tool_call","callId":"1","tool":"get_schema","args":{}}\n' +
+    '{"type":"agent.tool_call","callId":"2","tool":"search","args":{}}\n' +
+    '{"type":"studio.tool_result","callId":"1","result":{"error":{"code":"RESOURCE_NOT_FOUND","message":"gone"}}}\n' +
+    '{"type":"final","reply":"Hi"}\n'
+  const received: { type: string }[] = []
+  await readAssistantStream(response([new TextEncoder().encode(body)]), toolCallReader('studio'), (e) => received.push(e))
+  assert.deepEqual(received.map((e) => e.type), ['thread', 'studio.tool_call', 'studio.tool_result', 'final'])
+  const open = THREAD + '{"type":"studio.tool_call","callId":"1","tool":"get_schema","args":{}}\n{"type":"final","reply":"x"}\n'
+  await assert.rejects(readAssistantStream(response([new TextEncoder().encode(open)]), toolCallReader('studio'), () => {}), /Invalid final/)
+  const orphan = THREAD + '{"type":"studio.tool_result","callId":"9","result":null}\n'
+  await assert.rejects(readAssistantStream(response([new TextEncoder().encode(orphan)]), toolCallReader('studio'), () => {}), /Invalid tool result/)
+})
+
+test('the Studio helper is bound to the whole ontology: its chat and thread read live under the modeling API', async () => {
+  const original = globalThis.fetch
+  const calls: { url: string; init?: RequestInit }[] = []
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    calls.push({ url, init })
+    return url.endsWith('/chat')
+      ? response([new TextEncoder().encode(THREAD + '{"type":"final","reply":"Hi"}\n')])
+      : new Response(JSON.stringify({ threadId: 't1', messages: [] }), { headers: { 'content-type': 'application/json' } })
+  }) as typeof fetch
+  try {
+    const path = assistantPath({ ontologyKey: 'o 1', lensKey: null }, 'studio', '_default')
+    assert.equal(path, '/api/ontologies/o%201/model/ai')
+    const focus = { kind: 'property', key: 'email', typeKey: 'person' }
+    await postChat(path, { message: 'Hello', focus } as never, toolCallReader('studio'), () => {}, new AbortController().signal)
+    assert.equal(calls[0]!.url, '/api/ontologies/o%201/model/ai/chat')
+    assert.deepEqual(JSON.parse(String(calls[0]!.init!.body)), { message: 'Hello', focus })
+    await readThread(path, 't1')
+    assert.equal(calls[1]!.url, '/api/ontologies/o%201/model/ai/threads/t1')
   } finally {
     globalThis.fetch = original
   }

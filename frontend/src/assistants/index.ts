@@ -34,5 +34,8 @@ export {
   TurnView,
   type InsightView,
 } from './shell/AssistantChat'
-export { ToolCallPanel } from './steps/ToolCallPanel'
-export { agentTurns, toolError, type AgentEvent } from './steps/toolCallModel'
+export { ToolCallPanel, ToolCallsSummary } from './steps/ToolCallPanel'
+export { agentTurns, type AgentEvent } from './steps/toolCallModel'
+export { adapterOf, adapters, type AdapterKind } from './adapters'
+export { StepList } from './adapters/navigators/StepList'
+export type { AnyAdapter, Binding, Focus, PresentationAdapter, ToolCard } from './types'

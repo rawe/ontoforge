@@ -1,12 +1,11 @@
 import { useCallback, useEffect, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { chatErrorText, DEFAULT_ASSISTANT } from '@/assistants'
+import { adapters, chatErrorText, DEFAULT_ASSISTANT } from '@/assistants'
 import { useAssistants } from '@/api/hooks'
 import type { AssistantKind, RuntimeAssistant } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ASSISTANT_KINDS } from './kinds'
 
 const PARAM = 'assistant'
 
@@ -55,16 +54,16 @@ export function AssistantTab({
   if (assistants.error || list === undefined) {
     return (
       <div className="p-6 text-sm">
-        <p role="alert">Could not load {ASSISTANT_KINDS[kind].many}: {chatErrorText(assistants.error, 'request failed')}</p>
+        <p role="alert">Could not load {adapters[kind].nouns.many}: {chatErrorText(assistants.error, 'request failed')}</p>
         <Button variant="outline" size="sm" className="mt-3" onClick={() => void assistants.refetch()}>Reload</Button>
       </div>
     )
   }
   if (assistant === undefined) {
-    return <p className="p-6 text-sm text-muted-foreground">This lens has no {ASSISTANT_KINDS[kind].many}.</p>
+    return <p className="p-6 text-sm text-muted-foreground">This lens has no {adapters[kind].nouns.many}.</p>
   }
 
-  const { one, icon: Icon } = ASSISTANT_KINDS[kind]
+  const { nouns: { one }, icon: Icon } = adapters[kind]
   const picker = (
     <div className="flex min-w-0 items-center gap-2">
       <Icon className="size-4 shrink-0 text-muted-foreground" />

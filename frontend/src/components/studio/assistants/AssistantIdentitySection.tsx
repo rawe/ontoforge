@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { AssistantKind } from '@/api/types'
-import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
+import { adapters } from '@/assistants'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -35,7 +35,7 @@ export function AssistantIdentitySection({
   onDescription: (description: string) => void
 }) {
   const [keyTouched, setKeyTouched] = useState(false)
-  const one = ASSISTANT_KINDS[kind].one
+  const one = adapters[kind].nouns.one
   const id = one.toLowerCase()
   return (
     <section className="grid gap-3 rounded-xl border bg-card p-4">

@@ -15,29 +15,47 @@ import { ResultsTable } from '@/components/query/ResultsTable'
 import { isEntityObject } from '@/components/query/resultUtils'
 import { cn } from '@/lib/utils'
 import { formatDuration, turnDuration, type Turn } from '../conversation/chatModel'
+import type { Binding } from '../types'
 import {
   callDuration,
+  toolCallCounts,
   toolCallSummary,
   toolError,
   toolLabel,
   toolTime,
 } from './toolCallModel'
 
+/** A kind's own view of a completed call's result; undefined leaves it to the shared views. */
+export type ResultView = (call: ToolCall) => ReactNode | undefined
+
 interface ToolCallPanelProps {
-  ontologyKey: string
-  lensKey: string
+  at: Binding
   /** The assistant turn shown; undefined when no turn of this session made tool calls. */
   turn: Turn<ToolCall[]> | undefined
   /** The conversation has answers restored from an earlier session, which keep no tool calls. */
   hasRestoredTurns: boolean
+  result?: ResultView
+}
+
+/** "N tool calls · M with error" — or the kind's own noun for its calls. */
+export function ToolCallsSummary({ calls, nouns = { one: 'tool call', many: 'tool calls' } }: {
+  calls: readonly ToolCall[]
+  nouns?: { one: string; many: string }
+}) {
+  const { errors } = toolCallCounts(calls)
+  return <>
+    {calls.length} {calls.length === 1 ? nouns.one : nouns.many}
+    {errors > 0 && <span className="text-(--tc-amber)">· {errors} with error</span>}
+  </>
 }
 
 /**
- * The tool calls of one assistant turn, in the order the agent made them:
- * what each asked for, how long it took and what it answered — readable
- * per tool, raw JSON one click away. Follows a running turn as calls arrive.
+ * The tool calls of one assistant turn, in the order the assistant made
+ * them: what each asked for, how long it took and what it answered —
+ * readable per tool, raw JSON one click away. Follows a running turn as
+ * calls arrive.
  */
-export function ToolCallPanel({ ontologyKey, lensKey, turn, hasRestoredTurns }: ToolCallPanelProps) {
+export function ToolCallPanel({ at, turn, hasRestoredTurns, result }: ToolCallPanelProps) {
   const calls = turn?.insight ?? []
   const scroll = useRef<HTMLDivElement>(null)
   const running = turn?.status === 'pending'
@@ -62,7 +80,7 @@ export function ToolCallPanel({ ontologyKey, lensKey, turn, hasRestoredTurns }: 
   // Calls that overlapped: the tool time is less than their sum.
   const parallel =
     time !== undefined && calls.reduce((sum, c) => sum + (callDuration(c) ?? 0), 0) > time + 1
-  const failed = calls.filter((c) => toolError(c) !== null).length
+  const failed = toolCallCounts(calls).errors
   return (
     <div className="flex min-h-0 flex-1 flex-col text-xs">
       <div className="space-y-0.5 border-b px-4 py-2.5">
@@ -87,8 +105,8 @@ export function ToolCallPanel({ ontologyKey, lensKey, turn, hasRestoredTurns }: 
           {calls.map((call, i) => (
             <ToolCallCard
               key={call.callId}
-              ontologyKey={ontologyKey}
-              lensKey={lensKey}
+              at={at}
+              result={result}
               call={call}
               step={i + 1}
               open={opened[call.callId] ?? false}
@@ -102,15 +120,15 @@ export function ToolCallPanel({ ontologyKey, lensKey, turn, hasRestoredTurns }: 
 }
 
 function ToolCallCard({
-  ontologyKey,
-  lensKey,
+  at,
+  result,
   call,
   step,
   open,
   onToggle,
 }: {
-  ontologyKey: string
-  lensKey: string
+  at: Binding
+  result: ResultView | undefined
   call: ToolCall
   step: number
   open: boolean
@@ -120,7 +138,7 @@ function ToolCallCard({
   const error = toolError(call)
   const duration = callDuration(call)
   return (
-    <li className={cn('rounded-lg border bg-card', error !== null && 'border-(--tc-amber-border)')}>
+    <li data-testid="tool-call" data-tool={call.tool} className={cn('rounded-lg border bg-card', error !== null && 'border-(--tc-amber-border)')}>
       <button
         type="button"
         aria-expanded={open}
@@ -166,7 +184,7 @@ function ToolCallCard({
               </p>
             ) : (
               <Section title="Result">
-                <ToolResult ontologyKey={ontologyKey} lensKey={lensKey} call={call} />
+                {result?.(call) ?? <ToolResult at={at} call={call} />}
               </Section>
             ))}
           {call.status === 'completed' && <RawJson value={call.result} />}
@@ -240,13 +258,39 @@ const isSearchResponse = (v: unknown): v is EntitySearchResponse | PassageSearch
   isRecord(v) && Array.isArray(v.ran) && Array.isArray(v.items) && Array.isArray(v.limitations)
 const isItems = (v: unknown): v is { items: unknown[]; total?: number } => isRecord(v) && Array.isArray(v.items)
 
-/** A readable view of a result, per its shape; falls back to text or a note. */
-function ToolResult({ ontologyKey, lensKey, call }: { ontologyKey: string; lensKey: string; call: ToolCall }) {
+/**
+ * A readable view of a result, per its shape; falls back to text or a note.
+ * Entities, rows and search results need a lens to show in.
+ */
+function ToolResult({ at, call }: { at: Binding; call: ToolCall }) {
   const result = call.result
-  const link = { ontologyKey, lensKey }
   if (typeof result === 'string') {
     return <pre className="max-h-72 overflow-auto rounded border bg-muted/30 p-2 font-mono text-[11px] whitespace-pre-wrap">{result}</pre>
   }
+  if (at.lensKey !== null) {
+    const view = runtimeResult({ ontologyKey: at.ontologyKey, lensKey: at.lensKey }, call)
+    if (view !== undefined) return view
+  }
+  if (Array.isArray(result) && result.every((r) => isRecord(r) && typeof r.key === 'string')) {
+    const rows = result as { key: string; name?: string; description?: string | null }[]
+    return (
+      <ul className="space-y-1">
+        {rows.map((r) => (
+          <li key={r.key}>
+            <span className="font-medium">{r.name ?? r.key}</span> <code className="text-[10.5px] text-muted-foreground">{r.key}</code>
+            {r.description && <p className="line-clamp-2 text-[11px] text-muted-foreground">{r.description}</p>}
+          </li>
+        ))}
+      </ul>
+    )
+  }
+  return <p className="text-muted-foreground">See the raw result.</p>
+}
+
+/** The views of a lens's runtime results; undefined for any other shape. */
+function runtimeResult(link: { ontologyKey: string; lensKey: string }, call: ToolCall): ReactNode | undefined {
+  const { ontologyKey, lensKey } = link
+  const result = call.result
   if (isQueryResult(result)) {
     return (
       <div className="space-y-1">
@@ -323,20 +367,7 @@ function ToolResult({ ontologyKey, lensKey, call }: { ontologyKey: string; lensK
       </div>
     )
   }
-  if (Array.isArray(result) && result.every((r) => isRecord(r) && typeof r.key === 'string')) {
-    const rows = result as { key: string; name?: string; description?: string | null }[]
-    return (
-      <ul className="space-y-1">
-        {rows.map((r) => (
-          <li key={r.key}>
-            <span className="font-medium">{r.name ?? r.key}</span> <code className="text-[10.5px] text-muted-foreground">{r.key}</code>
-            {r.description && <p className="line-clamp-2 text-[11px] text-muted-foreground">{r.description}</p>}
-          </li>
-        ))}
-      </ul>
-    )
-  }
-  return <p className="text-muted-foreground">See the raw result.</p>
+  return undefined
 }
 
 function EntityLink({ ontologyKey, lensKey, entity }: { ontologyKey: string; lensKey: string; entity: EntityInstance }) {

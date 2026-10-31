@@ -80,5 +80,5 @@ export async function chatNavigator(
   body: ChatRequest,
   onEvent: (event: SharedEvent | GraphEvent) => void, signal: AbortSignal,
 ) {
-  await postChat(assistantPath(ontologyKey, lensKey, 'navigators', key), body, reader(), onEvent, signal)
+  await postChat(assistantPath({ ontologyKey, lensKey }, 'navigators', key), body, reader(), onEvent, signal)
 }

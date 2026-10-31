@@ -1,6 +1,8 @@
 /**
  * Chat with an assistant of any kind, under
- * `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/ai/assistants/<kind>`:
+ * `/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/ai/assistants/<kind>`
+ * — or the Studio helper, bound to the whole ontology, under
+ * `/api/ontologies/{ontologyKey}/model/ai`:
  * one message per request (`{message, threadId?}`), its NDJSON stream read
  * by one reader for the shared events — `thread` first, `delta`,
  * `entities`, one terminal `final` or `error` — with the kind's own events
@@ -9,7 +11,8 @@
 import { record } from '../../api/checks.ts'
 import { checkEntities, type EntitiesEvent } from '../../api/entities.ts'
 import { ApiError, parseError, request } from '../../api/http.ts'
-import type { AssistantKind, AssistantThread } from '../../api/types.ts'
+import type { AssistantThread } from '../../api/types.ts'
+import type { Binding } from '../types.ts'
 
 export interface StreamError { code: string; message: string; details?: Record<string, unknown> }
 
@@ -21,11 +24,13 @@ export type SharedEvent =
   | { type: 'final'; reply: string }
   | { type: 'error'; error: StreamError }
 
+/** The tool activity of a kind that runs on the tool loop, its events prefixed with the kind (`agent`, `studio`). */
+export type ToolEvent<P extends string = string> =
+  | { type: `${P}.tool_call`; callId: string; tool: string; args: Record<string, unknown> }
+  | { type: `${P}.tool_result`; callId: string; result: unknown }
+
 /** An agent's turn: the shared events plus its tool activity. */
-export type ChatEvent =
-  | SharedEvent
-  | { type: 'agent.tool_call'; callId: string; tool: string; args: Record<string, unknown> }
-  | { type: 'agent.tool_result'; callId: string; result: unknown }
+export type ChatEvent = SharedEvent | ToolEvent<'agent'>
 
 /** How a kind reads its own events. */
 export interface KindReader<K> {
@@ -131,26 +136,26 @@ export async function readAssistantStream<K>(
   })
 }
 
-/** The agent's tool events: each call announced once, its one result after it, none open at `final`. */
-export function agentReader(): KindReader<Exclude<ChatEvent, SharedEvent>> {
+/** A tool loop's events (`<prefix>.tool_call`, `<prefix>.tool_result`): each call announced once, its one result after it, none open at `final`. */
+export function toolCallReader<P extends string>(prefix: P): KindReader<ToolEvent<P>> {
   const calls = new Map<string, boolean>()
   return {
     parse(e) {
       switch (e.type) {
-        case 'agent.tool_call':
+        case `${prefix}.tool_call`:
           if (typeof e.callId !== 'string' || !e.callId || calls.has(e.callId) ||
             typeof e.tool !== 'string' || !record(e.args)) {
             throw new Error('Invalid tool call')
           }
           calls.set(e.callId, false)
-          return e as Exclude<ChatEvent, SharedEvent>
-        case 'agent.tool_result':
+          return e as ToolEvent<P>
+        case `${prefix}.tool_result`:
           if (typeof e.callId !== 'string' || !calls.has(e.callId) || calls.get(e.callId) ||
             !Object.hasOwn(e, 'result')) {
             throw new Error('Invalid tool result')
           }
           calls.set(e.callId, true)
-          return e as Exclude<ChatEvent, SharedEvent>
+          return e as ToolEvent<P>
         default:
           if (typeof e.type === 'string' && e.type.includes('.')) return null
           throw new Error('Unknown chat event')
@@ -162,15 +167,24 @@ export function agentReader(): KindReader<Exclude<ChatEvent, SharedEvent>> {
   }
 }
 
+/** The agent's tool events. */
+export const agentReader = () => toolCallReader('agent')
+
 /** Consume one agent turn; EOF without a terminal event is an interrupted turn. */
 export const readChatStream = (response: Response, onEvent: (event: ChatEvent) => void, signal?: AbortSignal) =>
   readAssistantStream(response, agentReader(), onEvent, signal)
 
 /* ---------------------------------- routes --------------------------------- */
 
-/** `/ai/assistants/<kind>`, or one assistant of it. */
-export function assistantPath(ontologyKey: string, lensKey: string, kind: AssistantKind, assistantKey?: string) {
-  const base = `/api/ontologies/${encodeURIComponent(ontologyKey)}/runtime/lenses/${encodeURIComponent(lensKey)}/ai/assistants/${kind}`
+/**
+ * A lens's `/ai/assistants/<kind>`, or one assistant of it. Bound to the
+ * whole ontology there is one assistant, the Studio helper, with a route of
+ * its own: `/model/ai`.
+ */
+export function assistantPath(at: Binding, kind: string, assistantKey?: string) {
+  const ontology = `/api/ontologies/${encodeURIComponent(at.ontologyKey)}`
+  if (at.lensKey === null) return `${ontology}/model/ai`
+  const base = `${ontology}/runtime/lenses/${encodeURIComponent(at.lensKey)}/ai/assistants/${kind}`
   return assistantKey === undefined ? base : `${base}/${encodeURIComponent(assistantKey)}`
 }
 

@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
+import { adapters } from '../adapters'
 import {
   MAX_MESSAGE,
   elapsedSeconds,
@@ -104,7 +104,7 @@ export function AssistantChat<E extends { type: string }, I>({
   const { turns, restoring, notice, running } = conversation
   const scroll = useRef<HTMLDivElement>(null)
   const panel = insight.panel
-  const icon = ASSISTANT_KINDS[kind].icon
+  const icon = adapters[kind].icon
   const shown = inspectedTurn(turns, selected, model.hasInsight)
 
   useEffect(() => {
@@ -253,6 +253,7 @@ export function Composer({ name, placeholder, conversation, disabled }: {
       <form className="flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); void submit() }}>
         <Textarea
           aria-label={`Message to ${name}`}
+          data-testid="chat-input"
           placeholder={placeholder}
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -263,11 +264,11 @@ export function Composer({ name, placeholder, conversation, disabled }: {
           className="max-h-36 min-h-9 resize-none py-[7px] text-[13px] leading-5 md:text-[13px]"
         />
         {running ? (
-          <Button key="stop" type="button" variant="outline" size="lg" className="w-[4.75rem]" onClick={stop}>
+          <Button key="stop" type="button" data-testid="chat-stop" variant="outline" size="lg" className="w-[4.75rem]" onClick={stop}>
             <Square className="size-3 fill-current" /> Stop
           </Button>
         ) : (
-          <Button key="send" type="submit" size="lg" className="w-[4.75rem]" disabled={!canAsk || input.trim() === ''}>
+          <Button key="send" type="submit" data-testid="chat-send" size="lg" className="w-[4.75rem]" disabled={!canAsk || input.trim() === ''}>
             <SendHorizonal className="size-3.5" /> Send
           </Button>
         )}
@@ -303,20 +304,21 @@ function AssistantIcon({ icon: Icon, className }: { icon: LucideIcon; className?
 export function TurnView<I>({ turn, icon, answer, progress, insight }: { turn: Turn<I>; icon: LucideIcon; answer: ReactNode; progress: string | undefined; insight: ReactNode }) {
   const ended = endText(turn)
   return (
-    <article className="space-y-3">
+    <article className="space-y-3" data-testid="chat-turn" data-status={turn.status}>
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg bg-primary/10 px-3 py-2 text-[13px] break-words whitespace-pre-wrap">
+        <div data-testid="chat-question" className="max-w-[85%] rounded-lg bg-primary/10 px-3 py-2 text-[13px] break-words whitespace-pre-wrap">
           {turn.question}
         </div>
       </div>
       <div className="flex gap-2.5">
         <AssistantIcon icon={icon} className="mt-0.5" />
         <div className="min-w-0 flex-1 space-y-2 pt-0.5">
-          {answer}
+          {answer && <div data-testid="chat-answer">{answer}</div>}
           {turn.status === 'pending' && turn.startedAt !== undefined && <Working since={turn.startedAt} detail={progress} />}
           {ended !== null && (
             <p
               role={turn.stopped ? 'status' : 'alert'}
+              data-testid="chat-turn-end"
               className={cn('flex items-start gap-1.5 text-[13px]', turn.stopped ? 'text-muted-foreground' : 'text-destructive')}
             >
               {turn.stopped ? <Square className="mt-[3px] size-3 shrink-0" /> : <AlertCircle className="mt-0.5 size-3.5 shrink-0" />}

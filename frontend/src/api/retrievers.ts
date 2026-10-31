@@ -172,14 +172,14 @@ export async function chatRetriever(
   body: ChatRequest & { diagnostics: boolean },
   onEvent: (event: RetrieverEvent) => void, signal: AbortSignal,
 ) {
-  await postChat(assistantPath(ontologyKey, lensKey, 'retrievers', key), body, retrieverReader, onEvent, signal)
+  await postChat(assistantPath({ ontologyKey, lensKey }, 'retrievers', key), body, retrieverReader, onEvent, signal)
 }
 
 /** One query to the saved (or default) retriever: its planning and retrieval, no answer. */
 export const retrieveQuestion = (
   ontologyKey: string, lensKey: string, key: string,
   body: { query: string }, signal?: AbortSignal,
-) => request<RetrieveResponse>(`${assistantPath(ontologyKey, lensKey, 'retrievers', key)}/retrieve`, { method: 'POST', body, signal })
+) => request<RetrieveResponse>(`${assistantPath({ ontologyKey, lensKey }, 'retrievers', key)}/retrieve`, { method: 'POST', body, signal })
 
 /* ------------------------------- stream reader ------------------------------ */
 

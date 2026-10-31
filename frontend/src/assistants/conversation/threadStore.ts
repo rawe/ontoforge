@@ -1,20 +1,18 @@
 /**
- * Workbench conversations: the server holds each thread; the browser
- * remembers per ontology + lens + kind + assistant only the current thread
- * id (`of.thread.…`, storage failures ignored) and restores the messages
- * from the server's thread read on open.
+ * Remembered conversations: the server holds each thread; the browser
+ * remembers per ontology + lens (none for the Studio helper) + kind +
+ * assistant only the current thread id (`of.thread.…`, storage failures
+ * ignored) and restores the messages from the server's thread read on open.
  */
 
-import { readAssistantThread } from '@/api/runtime'
-import { threadError } from '../stream/chatStream.ts'
-import type { AssistantKind, ChatMessage } from '@/api/types'
+import type { ChatMessage } from '@/api/types'
 import { readString, remove, storageKeys, writeString } from '@/lib/storage'
+import { assistantPath, readThread, threadError } from '../stream/chatStream.ts'
+import type { Binding } from '../types.ts'
 
 /** Which assistant a remembered thread belongs to. */
-export interface ThreadOwner {
-  ontologyKey: string
-  lensKey: string
-  kind: AssistantKind
+export interface ThreadOwner extends Binding {
+  kind: string
   assistantKey: string
 }
 
@@ -33,7 +31,7 @@ export async function restoreThread(owner: ThreadOwner, signal: AbortSignal): Pr
   const threadId = rememberedThread(owner)
   if (threadId === null) return { threadId: null, messages: [], expired: false }
   try {
-    const thread = await readAssistantThread(owner.ontologyKey, owner.lensKey, owner.kind, owner.assistantKey, threadId, signal)
+    const thread = await readThread(assistantPath(owner, owner.kind, owner.assistantKey), threadId, signal)
     return { threadId, messages: thread.messages, expired: false }
   } catch (error) {
     if (threadError(error) !== 'THREAD_NOT_FOUND') throw error

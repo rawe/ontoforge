@@ -1,6 +1,6 @@
 import { Wrench } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { agentTurns, AssistantChat, type ChatRequest, InsightToggle, ToolCallPanel, toolError } from '@/assistants'
+import { agentTurns, AssistantChat, type ChatRequest, InsightToggle, ToolCallPanel, ToolCallsSummary } from '@/assistants'
 import { agentChat } from '@/api/runtime'
 import { EntitiesTabs, type EntitiesTab } from '@/components/assistants/entities/EntitiesTabs'
 import { readString, storageKeys, writeString } from '@/lib/storage'
@@ -67,7 +67,7 @@ export function AgentChat({ ontologyKey, lensKey, agentKey, name, description, b
               icon: Wrench,
               subtitle: 'The entities the agent met and what it looked up for the selected answer. Pick another answer with its button.',
               content: (turn, turns) => {
-                const toolCalls = <ToolCallPanel ontologyKey={ontologyKey} lensKey={lensKey} turn={turn} hasRestoredTurns={turns.some((t) => t.restored)} />
+                const toolCalls = <ToolCallPanel at={{ ontologyKey, lensKey }} turn={turn} hasRestoredTurns={turns.some((t) => t.restored)} />
                 return turn === undefined ? toolCalls : (
                   <EntitiesTabs
                     ontologyKey={ontologyKey}
@@ -85,12 +85,10 @@ export function AgentChat({ ontologyKey, lensKey, agentKey, name, description, b
           const calls = turn.insight
           const { entities } = turn
           if (calls.length === 0 && entities.length === 0) return null
-          const errors = calls.filter((c) => toolError(c) !== null).length
           return {
             icon: Wrench,
             label: <>
-              {calls.length} tool {calls.length === 1 ? 'call' : 'calls'}
-              {errors > 0 && <span className="text-(--tc-amber)">· {errors} with error</span>}
+              <ToolCallsSummary calls={calls} />
               {entities.length > 0 && <span className="text-muted-foreground/70">· {entities.length} {entities.length === 1 ? 'entity' : 'entities'}</span>}
             </>,
           }

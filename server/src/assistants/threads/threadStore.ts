@@ -81,6 +81,15 @@ export interface Turn {
   state: Uint8Array | null;
 }
 
+/** A versioned value a turn leaves in its thread beside its reply — a
+ * Studio proposal with its check — published with the turn and read back
+ * with it. `type` and `version` tell a reader what `value` is. */
+export interface Artifact {
+  type: string;
+  version: number;
+  value: unknown;
+}
+
 /** What a graph run needs of its thread: the id and the saver to run on. */
 export interface GraphThread {
   checkpointer: BaseCheckpointSaver;

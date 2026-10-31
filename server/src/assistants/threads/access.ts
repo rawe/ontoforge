@@ -9,13 +9,14 @@
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 
 import { ConflictError, NotFoundError } from "../../core/exceptions.js";
-import type { ThreadBinding, ThreadStore, Turn } from "./threadStore.js";
-import { threadValues } from "./turnSaver.js";
+import type { Artifact, ThreadBinding, ThreadStore, Turn } from "./threadStore.js";
+import { threadArtifacts, threadValues } from "./turnSaver.js";
 
-/** One message of a thread read back. */
+/** One message of a thread read back; a reply carries the artifacts its turn left, if any. */
 export interface ThreadMessage {
   role: "user" | "assistant";
   content: string;
+  artifacts?: Artifact[];
 }
 
 export function threadNotFound(): NotFoundError {
@@ -50,7 +51,8 @@ export async function openThread(
 /**
  * A thread's user and assistant texts in order, as of its last completed
  * turn — the user's messages and the assistant's replies, never tool calls
- * or their results. Reading does not count as use.
+ * or their results — each reply with its turn's artifacts, if it left any.
+ * Reading does not count as use.
  */
 export async function readThread(
   threads: ThreadStore,
@@ -60,11 +62,13 @@ export async function readThread(
   const read = await threads.read(threadId, binding);
   if (read === null) throw threadNotFound();
   const values = await threadValues(read.state);
+  const artifacts = threadArtifacts(read.state);
   const messages = ((values.messages as BaseMessage[] | undefined) ?? []).flatMap((message): ThreadMessage[] => {
     if (message.getType() === "human") return [{ role: "user", content: message.text }];
     // An assistant message that calls tools is tool work, not a reply.
     if (AIMessage.isInstance(message) && !message.tool_calls?.length) {
-      return [{ role: "assistant", content: message.text }];
+      const left = message.id === undefined ? undefined : artifacts[message.id];
+      return [{ role: "assistant", content: message.text, ...(left === undefined ? {} : { artifacts: left }) }];
     }
     return [];
   });

@@ -10,7 +10,12 @@
  * pending writes are kept. `dump` wraps them in a versioned JSON envelope:
  *
  *   { v: 1, checkpoints: { <ns>: { id, parentId, checkpoint: [type, b64], metadata: [type, b64] } },
- *     writes: { <ns>: { <checkpointId>: [[taskId, slot, channel, [type, b64]], …] } } }
+ *     writes: { <ns>: { <checkpointId>: [[taskId, slot, channel, [type, b64]], …] } },
+ *     artifacts?: { <messageId>: [{ type, version, value }, …] } }
+ *
+ * `artifacts` holds the turns' artifacts by the id of the reply that ended
+ * each turn (`keepArtifacts`); a thread whose turns left none has no such
+ * field.
  */
 
 import {
@@ -29,6 +34,7 @@ import {
 import type { RunnableConfig } from "@langchain/core/runnables";
 
 import { StoreError } from "../../core/exceptions.js";
+import type { Artifact } from "./threadStore.js";
 
 /** The envelope version `dump` writes and `load` accepts. */
 const ENVELOPE_VERSION = 1;
@@ -55,6 +61,7 @@ interface Envelope {
   v: number;
   checkpoints: Record<string, { id: string; parentId?: string; checkpoint: EncodedSerialised; metadata: EncodedSerialised }>;
   writes: Record<string, Record<string, [string, number, string, EncodedSerialised][]>>;
+  artifacts?: Record<string, Artifact[]>;
 }
 
 const encode = ([type, bytes]: Serialised): EncodedSerialised => [type, Buffer.from(bytes).toString("base64")];
@@ -87,6 +94,8 @@ export class TurnSaver extends BaseCheckpointSaver {
   private checkpoints = new Map<string, StoredCheckpoint>();
   /** Pending writes per namespace, keyed by checkpoint id, then `taskId,slot`. */
   private writes = new Map<string, Map<string, Map<string, StoredWrite>>>();
+  /** The turns' artifacts, by the id of each turn's reply. */
+  private artifacts: Record<string, Artifact[]> = {};
 
   private constructor(readonly threadId: string) {
     super();
@@ -113,6 +122,7 @@ export class TurnSaver extends BaseCheckpointSaver {
       }
       saver.writes.set(ns, loaded);
     }
+    saver.artifacts = { ...(envelope.artifacts ?? {}) };
     return saver;
   }
 
@@ -135,7 +145,27 @@ export class TurnSaver extends BaseCheckpointSaver {
         );
       }
     }
+    if (Object.keys(this.artifacts).length > 0) envelope.artifacts = this.artifacts;
     return new Uint8Array(Buffer.from(JSON.stringify(envelope), "utf8"));
+  }
+
+  /**
+   * After a turn ran: keep its `artifacts` under the id of its reply, the
+   * last message of the root checkpoint, and drop those of turns no longer
+   * in the thread. A turn without artifacts on a thread without any
+   * changes nothing.
+   */
+  async keepArtifacts(artifacts: Artifact[]): Promise<void> {
+    if (artifacts.length === 0 && Object.keys(this.artifacts).length === 0) return;
+    const root = this.checkpoints.get("");
+    const checkpoint = root && ((await this.serde.loadsTyped(...root.checkpoint)) as Checkpoint);
+    const messages = (checkpoint?.channel_values.messages as { id?: string }[] | undefined) ?? [];
+    const ids = new Set(messages.map((message) => message.id));
+    for (const id of Object.keys(this.artifacts)) {
+      if (!ids.has(id)) delete this.artifacts[id];
+    }
+    const reply = messages.at(-1)?.id;
+    if (artifacts.length > 0 && reply !== undefined) this.artifacts[reply] = artifacts;
   }
 
   async getTuple(config: RunnableConfig): Promise<CheckpointTuple | undefined> {
@@ -251,6 +281,12 @@ export class TurnSaver extends BaseCheckpointSaver {
     }
     return tuple;
   }
+}
+
+/** A published state's artifacts by the id of each turn's reply; `{}` for none. */
+export function threadArtifacts(state: Uint8Array | null): Record<string, Artifact[]> {
+  if (state === null) return {};
+  return parseEnvelope(state).artifacts ?? {};
 }
 
 /**

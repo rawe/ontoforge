@@ -20,6 +20,7 @@ export {
   TURNS_PER_THREAD,
   TURNS_THE_MODEL_SEES,
   type GraphThread,
+  type Artifact,
   type StoreLifetimes,
   type Thread,
   type ThreadBinding,

@@ -2,7 +2,8 @@
  * The saver a turn runs its graph on: a graph continues across dump and
  * load into a fresh saver, as a follow-up on another server does; only the
  * latest checkpoint is kept; the turn cap holds; unreadable bytes fail as a
- * storage error, never as an empty thread.
+ * storage error, never as an empty thread; a turn's artifacts stay with its
+ * reply until the turn leaves the thread.
  */
 
 import { AIMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
@@ -11,7 +12,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { StoreError } from "../../../src/core/exceptions.js";
 import { TURNS_PER_THREAD } from "../../../src/assistants/threads/threadStore.js";
-import { threadValues, TurnSaver } from "../../../src/assistants/threads/turnSaver.js";
+import { threadArtifacts, threadValues, TurnSaver } from "../../../src/assistants/threads/turnSaver.js";
+import type { Artifact } from "../../../src/assistants/threads/threadStore.js";
 import { trimTurns } from "../../../src/assistants/threads/turns.js";
 
 /** A two-step chat graph: `reply` answers and trims the thread to
@@ -30,12 +32,22 @@ function chatGraph(checkpointer: TurnSaver) {
     .compile({ checkpointer });
 }
 
-/** One turn as the chat stream runs it: load, run, dump. */
-async function turn(state: Uint8Array | null, message: string): Promise<Uint8Array> {
+/** One turn as the chat stream runs it: load, run, keep its artifacts, dump. */
+async function turn(state: Uint8Array | null, message: string, artifacts: Artifact[] = []): Promise<Uint8Array> {
   const saver = TurnSaver.load("t1", state);
   await chatGraph(saver).invoke({ messages: [new HumanMessage(message)] }, { configurable: { thread_id: "t1" } });
+  await saver.keepArtifacts(artifacts);
   return saver.dump();
 }
+
+/** Each kept artifact's value, by the text of the reply it belongs to. */
+async function artifactsByReply(state: Uint8Array): Promise<Record<string, unknown[]>> {
+  const messages = (await threadValues(state)).messages as BaseMessage[];
+  return Object.fromEntries(Object.entries(threadArtifacts(state)).map(([id, artifacts]) =>
+    [String(messages.find((m) => m.id === id)!.content), artifacts.map((a) => a.value)]));
+}
+
+const artifact = (value: unknown): Artifact => ({ type: "proposal", version: 1, value });
 
 const contents = (values: Record<string, unknown>) => (values.messages as BaseMessage[]).map((m) => m.content);
 
@@ -66,6 +78,22 @@ describe("turn saver", () => {
     expect(await saver.getTuple({ configurable: { thread_id: "t2" } })).toBeUndefined();
     await expect(chatGraph(saver).invoke({ messages: [new HumanMessage("x")] }, { configurable: { thread_id: "t2" } }))
       .rejects.toThrow("another thread");
+  });
+
+  it("keeps a turn's artifacts with its reply, and only while the turn is in the thread", async () => {
+    let state = await turn(null, "one", [artifact("a1")]);
+    state = await turn(state, "two");
+    state = await turn(state, "three", [artifact("a3"), artifact("a3b")]);
+    expect(await artifactsByReply(state)).toEqual({ "echo one": ["a1"], "echo three": ["a3", "a3b"] });
+    for (let i = 4; i <= TURNS_PER_THREAD + 1; i++) state = await turn(state, `turn ${i}`);
+    expect(await artifactsByReply(state)).toEqual({ "echo three": ["a3", "a3b"] });
+  });
+
+  it("writes no artifacts field for a thread whose turns left none", async () => {
+    const state = await turn(await turn(null, "one"), "two");
+    expect(Object.keys(JSON.parse(Buffer.from(state).toString("utf8")))).toEqual(["v", "checkpoints", "writes"]);
+    expect(threadArtifacts(state)).toEqual({});
+    expect(threadArtifacts(null)).toEqual({});
   });
 
   it("reads no state as an empty thread", async () => {

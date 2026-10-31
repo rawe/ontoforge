@@ -13,7 +13,7 @@ import type { Writable } from "node:stream";
 
 import { ConflictError, NotFoundError, StoreError, ValidationError } from "../core/exceptions.js";
 import { threadBusy, threadNotFound } from "./threads/access.js";
-import { TURN_HEARTBEAT_MS, type GraphThread, type ThreadStore, type Turn } from "./threads/threadStore.js";
+import { TURN_HEARTBEAT_MS, type Artifact, type GraphThread, type ThreadStore, type Turn } from "./threads/threadStore.js";
 import { TurnSaver } from "./threads/turnSaver.js";
 
 /** NDJSON event envelope; callers define their event payloads. */
@@ -61,6 +61,8 @@ function publicError(error: unknown) {
  * Runs `run` as the turn and streams its events to `out`. A turn whose
  * state cannot be loaded throws before the stream opens, its lease
  * released; a response already gone ends the turn without opening it.
+ * `run` returns the turn's `reply` and, if it left any, its `artifacts`
+ * (`Artifact[]`): they are published with the turn and sent with `final`.
  */
 export async function streamTurn(
   out: TurnStream,
@@ -130,12 +132,14 @@ export async function streamTurn(
   try {
     await write({ type: "thread", threadId });
     const result = await run({ signal, onToolEvent: write }, { checkpointer: saver, threadId });
+    const artifacts = (result.artifacts as Artifact[] | undefined) ?? [];
+    await saver.keepArtifacts(artifacts);
     const published = await threads.publish(owned, saver.dump());
     open = false;
     clearInterval(heartbeat);
     if (published === "taken") throw threadBusy();
     if (published === "gone") throw threadNotFound();
-    await write({ type: "final", reply: result.reply });
+    await write({ type: "final", reply: result.reply, ...(artifacts.length > 0 ? { artifacts } : {}) });
   } catch (error) {
     // A cancelled or failed turn leaves nothing in its thread.
     await endTurn();

@@ -139,6 +139,23 @@ export function threadStoreSuite(name: string, factory: ThreadStoreFactory): voi
         expect(asTurn(await store.begin(threadId, BINDING)).state).toEqual(bytes("one"));
       });
 
+      it("keeps an ontology-scoped thread apart from every lens's", async () => {
+        const ontology: ThreadBinding = { ...BINDING, lensKey: null, kind: "studio", assistantKey: "_default" };
+        const { threadId, binding } = await store.create(ontology);
+        expect(binding).toEqual(ontology);
+        expect(await store.publish(asTurn(await store.begin(threadId, ontology)), bytes("design"))).toBe("published");
+        expect(text((await store.read(threadId, ontology))?.state)).toBe("design");
+        // The same assistant through a lens, the empty lens key included, finds neither thread.
+        const lensThread = await threadWith("lens");
+        for (const lensKey of ["visitor", ""]) {
+          expect(await store.read(threadId, { ...ontology, lensKey })).toBeNull();
+          expect(await store.begin(threadId, { ...ontology, lensKey })).toBeNull();
+        }
+        expect(await store.read(lensThread, { ...BINDING, lensKey: null })).toBeNull();
+        expect(await store.begin(lensThread, { ...BINDING, lensKey: null })).toBeNull();
+        expect(text(asTurn(await store.begin(threadId, ontology)).state)).toBe("design");
+      });
+
       it("finds a thread only as its owner", async () => {
         const owned = { ...BINDING, owner: "principal-a" };
         const { threadId } = await store.create(owned);

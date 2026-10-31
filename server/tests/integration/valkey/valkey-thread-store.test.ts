@@ -98,6 +98,25 @@ describe("valkey thread store", () => {
     await expectAllExpiring(1);
   });
 
+  it("a lens thread written before scopes reads and continues as a lens's; an unknown scope is no thread", async () => {
+    const threadId = "written-before-scopes";
+    const key = `ontoforge:thread:{${threadId}}`;
+    // The hash as the store wrote it before ontology-scoped threads: no `scope`.
+    await admin.hset(key, { ontologyKey: "fair", lensKey: "visitor", kind: "agents", assistantKey: "guide", owner: "", state: "one" });
+    await admin.pexpire(key, SUITE_LIFETIMES.idleMs);
+    expect(await store.read(threadId, BINDING)).toEqual({ state: bytes("one") });
+    expect(await store.read(threadId, { ...BINDING, lensKey: null })).toBeNull();
+    expect(await store.begin(threadId, { ...BINDING, lensKey: null })).toBeNull();
+    const turn = (await store.begin(threadId, BINDING)) as Turn;
+    expect(turn.state).toEqual(bytes("one"));
+    expect(await store.publish(turn, bytes("two"))).toBe("published");
+    expect(await store.read(threadId, BINDING)).toEqual({ state: bytes("two") });
+
+    await admin.hset(key, "scope", "elsewhere");
+    expect(await store.read(threadId, BINDING)).toBeNull();
+    expect(await store.begin(threadId, BINDING)).toBeNull();
+  });
+
   it("a flush under a running turn: publish is gone, renew and release refused, nothing reappears", async () => {
     const { threadId } = await store.create(BINDING);
     const turn = (await store.begin(threadId, BINDING)) as Turn;

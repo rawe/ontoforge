@@ -57,7 +57,9 @@ export const TURNS_THE_MODEL_SEES = 8;
  * as another principal, is refused. */
 export interface ThreadBinding {
   ontologyKey: string;
-  lensKey: string;
+  /** The lens the thread reads through; null for a thread of the whole
+   * ontology (the Studio's), which no lens route continues. */
+  lensKey: string | null;
   /** The assistant kind as the routes name it. */
   kind: string;
   assistantKey: string;
@@ -135,6 +137,15 @@ export function checkStateSize(state: Uint8Array): void {
     throw new ValidationError("Conversation too large; start a new one.");
   }
 }
+
+/**
+ * A binding's scope as both stores keep it: `lens` with its lens key,
+ * `ontology` with none. A stored binding without a scope is a lens's — the
+ * threads written before ontology-scoped ones existed.
+ */
+export type ThreadScope = "lens" | "ontology";
+
+export const scopeOf = (binding: ThreadBinding): ThreadScope => (binding.lensKey === null ? "ontology" : "lens");
 
 export function sameBinding(a: ThreadBinding, b: ThreadBinding): boolean {
   return (

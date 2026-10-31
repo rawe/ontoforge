@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { useFeatures } from '@/api/hooks'
 import * as model from '@/api/model'
 import { qk } from '@/api/queryKeys'
-import { AGENT_TOOL_NAMES, type Agent, type AgentInput, type Lens } from '@/api/types'
+import { AGENT_TOOL_NAMES, type Agent, type Lens } from '@/api/types'
 import { AiChangedMark, useAssistantPanel, useDraftFill, type DraftTarget, type Focus } from '@/assistants'
 import { AgentChat } from '@/components/assistants/agents/AgentChat'
 import { Badge } from '@/components/ui/badge'
@@ -15,6 +15,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { agentFields, draftOf, sameDraft, toInput, withAgentFields, withKey, withName, type AgentDraft } from './assistants/agentDraft'
 import { AssistantActionBar } from './assistants/AssistantActionBar'
 import { AssistantCard } from './assistants/AssistantCard'
 import { AssistantDefaultPage, AssistantEditorPage } from './assistants/AssistantEditorPage'
@@ -25,7 +26,7 @@ import {
   ASSISTANT_DEFAULT, ASSISTANT_NEW, assistantErrorLines, assistantKeyError, assistantStatus,
 } from './assistants/assistantModel'
 import { useAssistantLeaveGuard } from './assistants/useAssistantLeaveGuard'
-import { deriveKey, invalidateModeling, isValidLensResourceKey } from './lib'
+import { invalidateModeling, isValidLensResourceKey } from './lib'
 
 const TAB = 'agents'
 const PARAM = 'agent'
@@ -139,54 +140,8 @@ export function AgentsTab({ ontologyKey, lens }: { ontologyKey: string; lens: Le
   )
 }
 
-/** What the editor changes of an agent; `tools` is kept while "All tools" is on. */
-interface AgentDraft {
-  name: string
-  description: string
-  systemPrompt: string
-  allTools: boolean
-  tools: string[]
-}
-
-function draftOf(agent: Agent | null): AgentDraft {
-  return {
-    name: agent?.name ?? '',
-    description: agent?.description ?? '',
-    systemPrompt: agent?.systemPrompt ?? '',
-    allTools: agent?.tools == null,
-    tools: agent?.tools ?? [],
-  }
-}
-
-/** What the Studio helper may fill: the agent's values, `tools` null for every tool. */
-type AgentFields = { name: string; description: string; systemPrompt: string; tools: string[] | null }
-
-const agentFields = (draft: AgentDraft): AgentFields => ({
-  name: draft.name, description: draft.description, systemPrompt: draft.systemPrompt, tools: draft.allTools ? null : draft.tools,
-})
-
-/** The draft with filled values; "All tools" keeps the chosen tools, as its switch does. */
-const withAgentFields = (draft: AgentDraft, fields: AgentFields): AgentDraft => ({
-  name: fields.name, description: fields.description, systemPrompt: fields.systemPrompt,
-  allTools: fields.tools === null, tools: fields.tools ?? draft.tools,
-})
-
 const showTools = (tools: unknown) =>
   tools === null ? 'All tools' : Array.isArray(tools) ? tools.join(', ') || '(none)' : String(tools)
-
-function sameDraft(a: AgentDraft, b: AgentDraft): boolean {
-  return a.name === b.name && a.description === b.description && a.systemPrompt === b.systemPrompt
-    && a.allTools === b.allTools && (a.allTools || (a.tools.length === b.tools.length && a.tools.every((t) => b.tools.includes(t))))
-}
-
-function toInput(draft: AgentDraft): AgentInput {
-  return {
-    name: draft.name.trim(),
-    description: draft.description.trim() === '' ? null : draft.description.trim(),
-    systemPrompt: draft.systemPrompt.trim() === '' ? null : draft.systemPrompt,
-    tools: draft.allTools ? null : draft.tools,
-  }
-}
 
 interface AgentPageProps {
   ontologyKey: string
@@ -210,27 +165,24 @@ interface AgentPageProps {
 function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSaved, onDeleted, onClose }: AgentPageProps) {
   const isNew = agent === null
   const baseline = useMemo(() => draftOf(agent), [agent])
-  const [key, setKey] = useState(agent?.key ?? '')
   const target = useMemo<DraftTarget>(() => ({ lensKey, agentKey: agent?.key ?? null }), [lensKey, agent])
+  const [busy, setBusy] = useState(false)
   const { draft, change, reset, undo, marks, canUndo } = useDraftFill({
     initial: baseline,
     ontologyKey,
     target,
+    busy,
     fieldsOf: agentFields,
     withFields: withAgentFields,
-    onFill: (before, after) => {
-      // A new agent's key follows a filled name as it follows a typed one, until edited.
-      if (isNew && key === deriveKey(before.name)) setKey(deriveKey(after.name))
-      setSaveErrors([])
-    },
+    onFill: () => setSaveErrors([]),
   })
+  const key = draft.key
   const panel = useAssistantPanel()
   const focus: Focus = agent === null ? { kind: 'lens', key: lensKey } : { kind: 'agent', key: agent.key, lensKey }
-  const [busy, setBusy] = useState(false)
   const [saveErrors, setSaveErrors] = useState<string[]>([])
   const [failed, setFailed] = useState<'save' | 'delete'>('save')
 
-  const dirty = !sameDraft(draft, baseline) || (isNew && key !== '')
+  const dirty = !sameDraft(draft, baseline)
   const keyValid = !isNew || (isValidLensResourceKey(key) && assistantKeyError(key, existingKeys, 'Agent') === undefined)
   const valid = draft.name.trim() !== '' && (draft.allTools || draft.tools.length > 0) && keyValid
   const canSave = (dirty || isNew) && valid && !busy
@@ -340,8 +292,9 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
           descriptionHint="What this agent is for; shown in the Workbench."
           nameMark={<AiChangedMark field="name" change={marks.name} />}
           descriptionMark={<AiChangedMark field="description" change={marks.description} />}
-          onName={(name) => edit(() => ({ name }))}
-          onKey={setKey}
+          followName={false}
+          onName={(name) => edit((d) => withName(d, name))}
+          onKey={(value) => edit((d) => withKey(d, value))}
           onDescription={(description) => edit(() => ({ description }))}
         />
         <section className="grid gap-4 rounded-xl border bg-card p-4">

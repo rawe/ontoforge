@@ -2,8 +2,9 @@
  * Draft fill's pure parts: reading the draft tool's proposal, whether it
  * still fits the open editor (same ontology, same agent or new-agent
  * session, same draft version), which of its fields change the draft,
- * filling it with a record of the AI's edit, the AI marks, and undoing
- * the AI's edit for the fields the person has not edited since.
+ * filling it with a record of the AI's edit, the AI marks, retiring the
+ * record of a field the person edits, and undoing the AI's edit for the
+ * fields the person has not edited since.
  *
  * No React, no I/O — unit-tested with `node --test`.
  */
@@ -37,9 +38,12 @@ export interface DraftProposal {
 export interface DraftEditor {
   /** The draft right now. */
   state(): DraftState
-  /** Fill the proposal into the draft if it still fits; false, changing nothing, if not. */
-  fill(ontologyKey: string, proposal: DraftProposal): boolean
+  /** Fill the proposal into the draft if it still fits and the editor takes fills now; else why not, changing nothing. */
+  fill(ontologyKey: string, proposal: DraftProposal): FillOutcome
 }
+
+/** A fill's outcome: done; refused for another draft or version; refused while the editor saves or deletes. */
+export type FillOutcome = 'filled' | 'stale' | 'busy'
 
 /** One field the AI changed: its value before the fill and the AI's. */
 export interface FieldChange {
@@ -78,6 +82,12 @@ export function isStale(open: DraftState | null, ontologyKey: string, proposal: 
     || open.version !== proposal.sourceVersion
 }
 
+/** Why the open editor refuses the proposal now, null if it takes it: stale, or busy while it saves or deletes. */
+export function fillRefusal(open: DraftState | null, busy: boolean, ontologyKey: string, proposal: DraftProposal): 'stale' | 'busy' | null {
+  if (isStale(open, ontologyKey, proposal)) return 'stale'
+  return busy ? 'busy' : null
+}
+
 /** The fields of the draft the proposal changes; fields the draft does not have are left out. */
 export function changedFields(current: Fields, proposed: Fields): string[] {
   return Object.keys(proposed).filter((field) => Object.hasOwn(current, field) && !sameValue(current[field], proposed[field]))
@@ -99,6 +109,15 @@ export function applyFill<F extends Fields>(current: F, proposed: Fields, previo
     else edit[field] = { before, after: proposed[field] }
   }
   return { fields: fields as F, edit }
+}
+
+/**
+ * The AI's edit after a person's change of the draft from `before` to
+ * `after`: a field the change touches is the person's for good, even if
+ * they later type the AI's value again; the other fields keep their record.
+ */
+export function withoutEdited(edit: AiEdit, before: Fields, after: Fields): AiEdit {
+  return Object.fromEntries(Object.entries(edit).filter(([field]) => sameValue(before[field], after[field])))
 }
 
 /** The AI changes the draft still shows: the fields that hold the AI's value. */

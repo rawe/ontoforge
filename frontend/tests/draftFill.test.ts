@@ -1,8 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  aiMarks, applyFill, changedFields, isStale, proposalOf, undoFill, type DraftProposal, type DraftState,
+  aiMarks, applyFill, changedFields, fillRefusal, isStale, proposalOf, undoFill, withoutEdited,
+  type AiEdit, type DraftProposal, type DraftState,
 } from '../src/assistants/draft/draftFillModel.ts'
+import {
+  agentFields, draftOf, sameDraft, withAgentFields, withKey, withName, type AgentDraft,
+} from '../src/components/studio/assistants/agentDraft.ts'
 
 const fields = { name: 'Support', description: '', systemPrompt: 'Be brief.', tools: ['get_schema'] as string[] | null }
 const open: DraftState = { ontologyKey: 'fair', target: { lensKey: 'hr', agentKey: 'support' }, version: 7, fields }
@@ -65,4 +69,54 @@ test('undo restores the AI-changed fields and keeps those the person edited sinc
   assert.deepEqual(Object.keys(aiMarks(edited, edit)), ['name', 'tools'])
   assert.deepEqual(undoFill(edited, edit), { ...fields, systemPrompt: 'My own prompt.' })
   assert.deepEqual(undoFill(fields, {}), fields)
+})
+
+test('the editor refuses a fill while it saves or deletes, and a stale one as stale', () => {
+  assert.equal(fillRefusal(open, false, 'fair', proposal), null)
+  assert.equal(fillRefusal(open, true, 'fair', proposal), 'busy')
+  assert.equal(fillRefusal({ ...open, version: 8 }, true, 'fair', proposal), 'stale')
+  assert.equal(fillRefusal(null, false, 'fair', proposal), 'stale')
+})
+
+// The agent editor's draft as `useDraftFill` keeps it: a fill, the person's change, undo.
+interface Editor { draft: AgentDraft; edit: AiEdit }
+const fillAgent = (s: Editor, proposed: Record<string, unknown>): Editor => {
+  const filled = applyFill(agentFields(s.draft), proposed, s.edit)
+  return { draft: withAgentFields(s.draft, filled.fields), edit: filled.edit }
+}
+const personChange = (s: Editor, next: (d: AgentDraft) => AgentDraft): Editor => {
+  const draft = next(s.draft)
+  return { draft, edit: withoutEdited(s.edit, agentFields(s.draft), agentFields(draft)) }
+}
+const undoAgent = (s: Editor): Editor => ({ draft: withAgentFields(s.draft, undoFill(agentFields(s.draft), s.edit)), edit: {} })
+
+test('a field the person edits is theirs for good, even back at the AI value; others stay undoable', () => {
+  const saved = draftOf({ key: 'support', name: 'Support', description: null, systemPrompt: 'Be brief.', tools: ['get_schema'] })
+  let s = fillAgent({ draft: saved, edit: {} }, { name: 'Helpdesk', systemPrompt: 'Answer.', tools: ['search'] })
+  s = personChange(s, (d) => withName(d, 'Help desk'))
+  s = personChange(s, (d) => withName(d, 'Helpdesk'))
+  s = personChange(s, (d) => ({ ...d, allTools: true }))
+  s = personChange(s, (d) => ({ ...d, allTools: false }))
+  assert.deepEqual(Object.keys(aiMarks(agentFields(s.draft), s.edit)), ['systemPrompt'])
+  const undone = undoAgent(s).draft
+  assert.equal(undone.name, 'Helpdesk')
+  assert.deepEqual(undone.tools, ['search'])
+  assert.equal(undone.systemPrompt, 'Be brief.')
+})
+
+test("a new agent's key follows a typed or filled name until the person edits the key; undo follows only then", () => {
+  const typed = { draft: withName(draftOf(null), 'Support'), edit: {} }
+  assert.equal(typed.draft.key, 'support')
+  const filled = fillAgent(typed, { name: 'Helpdesk' })
+  assert.equal(filled.draft.key, 'helpdesk')
+  assert.deepEqual(undoAgent(filled).draft, typed.draft)
+  // The key edited after the fill: undo restores the name, the person's key stays.
+  const ownKey = personChange(filled, (d) => withKey(d, 'desk'))
+  assert.deepEqual(ownKey.edit, filled.edit)
+  assert.equal(sameDraft(ownKey.draft, filled.draft), false)
+  assert.deepEqual(undoAgent(ownKey).draft, { ...typed.draft, key: 'desk', keyTouched: true })
+  // A key the person set back to the derived value still does not follow.
+  const chosen = { draft: withKey(withName(draftOf(null), 'Support'), 'support'), edit: {} }
+  assert.equal(fillAgent(chosen, { name: 'Helpdesk' }).draft.key, 'support')
+  assert.equal(withName(chosen.draft, 'Other').key, 'support')
 })

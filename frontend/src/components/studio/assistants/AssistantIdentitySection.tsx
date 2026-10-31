@@ -11,11 +11,12 @@ import { assistantKeyError } from './assistantModel'
 /**
  * The Name, Key and Description card of an editor. A new assistant's key
  * follows the name until edited and is refused when taken in the lens or too
- * long (`assistantKeyError`); a saved one's key is fixed.
+ * long (`assistantKeyError`); a saved one's key is fixed. With `followName`
+ * false the owner makes the key follow the name instead, in `onName`.
  */
 export function AssistantIdentitySection({
   kind, isNew, name, assistantKey, description, existingKeys, disabled, namePlaceholder, nameError, descriptionError, descriptionHint,
-  nameMark, descriptionMark, onName, onKey, onDescription,
+  followName = true, nameMark, descriptionMark, onName, onKey, onDescription,
 }: {
   kind: AssistantKind
   isNew: boolean
@@ -30,6 +31,8 @@ export function AssistantIdentitySection({
   descriptionError?: string
   /** The muted sentence under the description, when it has no error. */
   descriptionHint: string
+  /** Whether the section makes a new assistant's key follow the name until edited; false when the owner does. */
+  followName?: boolean
   /** Beside the Name and Description labels: the AI mark. */
   nameMark?: ReactNode
   descriptionMark?: ReactNode
@@ -52,7 +55,7 @@ export function AssistantIdentitySection({
           placeholder={namePlaceholder}
           onChange={(e) => {
             onName(e.target.value)
-            if (isNew && !keyTouched) onKey(deriveKey(e.target.value))
+            if (followName && isNew && !keyTouched) onKey(deriveKey(e.target.value))
           }}
         />
         {nameError !== undefined && <p className="text-xs text-destructive">{nameError}</p>}

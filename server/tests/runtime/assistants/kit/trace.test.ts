@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { StreamEvent } from "../../../../src/runtime/chatStream.js";
+import type { StreamEvent } from "../../../../src/assistants/index.js";
 import { Trace } from "../../../../src/runtime/assistants/kit/trace.js";
 
 function trace(signal = new AbortController().signal) {

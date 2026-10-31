@@ -14,8 +14,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { DEFAULT_AGENT_CONFIG, setAiModel } from "../../src/core/ai.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import { NotFoundError, StoreError } from "../../src/core/exceptions.js";
-import { MemoryThreadStore } from "../../src/runtime/threads/memoryThreadStore.js";
-import type { Turn } from "../../src/runtime/threads/threadStore.js";
+import { MemoryThreadStore, type Turn } from "../../src/assistants/index.js";
 import { FakeToolCallingModel, toolCallMessage } from "./aiHelpers.js";
 import {
   createMockRuntimeStore,

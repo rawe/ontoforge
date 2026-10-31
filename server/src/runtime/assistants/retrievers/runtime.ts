@@ -42,11 +42,14 @@ import {
   UntrackedValueChannel,
 } from "@langchain/langgraph";
 
+import {
+  type GraphThread,
+  type StreamExecution,
+} from "../../../assistants/index.js";
 import { settings } from "../../../config.js";
 import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
 import type { RuntimeStore } from "../../../core/ports.js";
 import type { RetrieverConfig } from "../../../core/retriever.js";
-import type { StreamExecution } from "../../chatStream.js";
 import { loadSchema } from "../../schemaCache.js";
 import {
   availableModes,
@@ -65,8 +68,6 @@ import {
   DEFAULT_RETRIEVER_NAME,
   defaultRetrieverConfig,
 } from "./defaultRetriever.js";
-import { TURNS_THE_MODEL_SEES, type GraphThread } from "../../threads/threadStore.js";
-import { lastTurns, trimTurns } from "../../threads/turns.js";
 import { modelInputTrace } from "./modelTrace.js";
 import {
   diagnosticPlan,
@@ -157,11 +158,10 @@ export async function requireRetrievers(lensKey: string, store: RuntimeStore): P
   await loadSchema(lensKey, store);
 }
 
-/** The conversation before the question that the models see: the
- * thread's last turns, the question's own counted, each message at most
- * 2,000 characters. */
+/** The conversation before the question that the models see: the whole
+ * thread, each message at most 2,000 characters. */
 export function historyOf(messages: BaseMessage[]): History[] {
-  return lastTurns(messages, TURNS_THE_MODEL_SEES)
+  return messages
     .slice(0, -1)
     .map((message) => ({
       role: message.getType() === "human" ? "user" : "assistant",
@@ -263,7 +263,7 @@ interface Planning {
  * Plan a question: one planning model call and the plan's checks. A
  * follow-up (a question with history) whose plan searches nothing is
  * planned once more; a question without history never is. Throws for a
- * planner input over the cap, a failed call and a malformed plan.
+ * planning context over the cap, a failed call and a malformed plan.
  */
 export async function planQuestion(planning: Planning): Promise<{ plan: Plan; notes: string[] }> {
   const { retriever, scope, modes, message, history, previous, plannerModel, timings, io, report } = planning;
@@ -271,7 +271,10 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
   const values = await filterValues(scope);
   signal.throwIfAborted();
   const input = plannerInput(retriever.config, scope.lens, scope.records, modes, message, history, previous, values);
-  if (input.length > PLANNER_INPUT_CHARACTERS) {
+  // The cap bounds what the lens and the retriever bring; the conversation
+  // is bounded on its own (`historyOf`, at most `TURNS_PER_THREAD` turns).
+  const context = plannerInput(retriever.config, scope.lens, scope.records, modes, message, [], previous, values);
+  if (context.length > PLANNER_INPUT_CHARACTERS) {
     throw new ValidationError(
       retriever.key === DEFAULT_RETRIEVER_KEY
         ? "This lens is too large for the default retriever: its planning context exceeds the limit. " +
@@ -508,10 +511,10 @@ export async function chat(
       });
       return { reply };
     })
-    // The turn joins the thread, which keeps its last turns, and its
-    // results become what the next question may refer to.
+    // The turn joins the thread, and its results become what the next
+    // question may refer to.
     .addNode("remember", async (state) => ({
-      messages: [...trimTurns(state.messages), new AIMessage(state.reply)],
+      messages: [new AIMessage(state.reply)],
       verified: {
         configHash: hash,
         previous: {

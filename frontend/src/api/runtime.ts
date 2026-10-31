@@ -7,10 +7,9 @@ import {
   agentReader,
   assistantPath,
   postChat,
-  readThread,
   type ChatEvent,
   type ChatRequest,
-} from './chatStream'
+} from '../assistants/stream/chatStream'
 import { buildQuery, request, type FilterMap } from './http'
 import type {
   AssistantKind,
@@ -331,7 +330,7 @@ export const getRulesetView = (ontologyKey: string, lensKey: string, rulesetKey:
 
 /** A kind's runtime list: every assistant of the lens, the built-in default (`_default`) first. */
 export const listAssistants = (ontologyKey: string, lensKey: string, kind: AssistantKind) =>
-  request<RuntimeAssistant[]>(assistantPath(ontologyKey, lensKey, kind))
+  request<RuntimeAssistant[]>(assistantPath({ ontologyKey, lensKey }, kind))
 
 /** One message to an agent (`_default` included); without `threadId` it starts a new thread. */
 export const agentChat = (
@@ -342,17 +341,7 @@ export const agentChat = (
   onEvent: (event: ChatEvent) => void,
   signal: AbortSignal,
 ) =>
-  postChat(assistantPath(ontologyKey, lensKey, 'agents', agentKey), body, agentReader(), onEvent, signal)
-
-/** A thread of one assistant read back. */
-export const readAssistantThread = (
-  ontologyKey: string,
-  lensKey: string,
-  kind: AssistantKind,
-  assistantKey: string,
-  threadId: string,
-  signal?: AbortSignal,
-) => readThread(assistantPath(ontologyKey, lensKey, kind, assistantKey), threadId, signal)
+  postChat(assistantPath({ ontologyKey, lensKey }, 'agents', agentKey), body, agentReader(), onEvent, signal)
 
 /* -------------------------------- changesets -------------------------------- */
 

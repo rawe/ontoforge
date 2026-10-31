@@ -1,17 +1,21 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Sparkles, Undo2 } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useFeatures } from '@/api/hooks'
 import * as model from '@/api/model'
 import { qk } from '@/api/queryKeys'
-import { AGENT_TOOL_NAMES, type Agent, type AgentInput, type Lens } from '@/api/types'
+import { AGENT_TOOL_NAMES, type Agent, type Lens } from '@/api/types'
+import { AiChangedMark, useAssistantPanel, useDraftFill, type DraftTarget, type Focus } from '@/assistants'
 import { AgentChat } from '@/components/assistants/agents/AgentChat'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { agentFields, draftOf, sameDraft, toInput, withAgentFields, withKey, withName, type AgentDraft } from './assistants/agentDraft'
 import { AssistantActionBar } from './assistants/AssistantActionBar'
 import { AssistantCard } from './assistants/AssistantCard'
 import { AssistantDefaultPage, AssistantEditorPage } from './assistants/AssistantEditorPage'
@@ -136,38 +140,8 @@ export function AgentsTab({ ontologyKey, lens }: { ontologyKey: string; lens: Le
   )
 }
 
-/** What the editor changes of an agent; `tools` is kept while "All tools" is on. */
-interface AgentDraft {
-  name: string
-  description: string
-  systemPrompt: string
-  allTools: boolean
-  tools: string[]
-}
-
-function draftOf(agent: Agent | null): AgentDraft {
-  return {
-    name: agent?.name ?? '',
-    description: agent?.description ?? '',
-    systemPrompt: agent?.systemPrompt ?? '',
-    allTools: agent?.tools == null,
-    tools: agent?.tools ?? [],
-  }
-}
-
-function sameDraft(a: AgentDraft, b: AgentDraft): boolean {
-  return a.name === b.name && a.description === b.description && a.systemPrompt === b.systemPrompt
-    && a.allTools === b.allTools && (a.allTools || (a.tools.length === b.tools.length && a.tools.every((t) => b.tools.includes(t))))
-}
-
-function toInput(draft: AgentDraft): AgentInput {
-  return {
-    name: draft.name.trim(),
-    description: draft.description.trim() === '' ? null : draft.description.trim(),
-    systemPrompt: draft.systemPrompt.trim() === '' ? null : draft.systemPrompt,
-    tools: draft.allTools ? null : draft.tools,
-  }
-}
+const showTools = (tools: unknown) =>
+  tools === null ? 'All tools' : Array.isArray(tools) ? tools.join(', ') || '(none)' : String(tools)
 
 interface AgentPageProps {
   ontologyKey: string
@@ -183,18 +157,32 @@ interface AgentPageProps {
 
 /**
  * Draft + Save editor of one agent with its test chat. Remount it (React
- * `key`) to re-seed the draft from a newer saved version.
+ * `key`) to re-seed the draft from a newer saved version. "Ask AI" opens
+ * the assistant panel on it; the Studio helper's draft cards fill the
+ * draft (`useDraftFill`), marked until the person edits a field, and
+ * "Undo AI edit" takes back what is still marked. Only Save stores.
  */
 function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSaved, onDeleted, onClose }: AgentPageProps) {
   const isNew = agent === null
   const baseline = useMemo(() => draftOf(agent), [agent])
-  const [draft, setDraft] = useState<AgentDraft>(baseline)
-  const [key, setKey] = useState(agent?.key ?? '')
+  const target = useMemo<DraftTarget>(() => ({ lensKey, agentKey: agent?.key ?? null }), [lensKey, agent])
   const [busy, setBusy] = useState(false)
+  const { draft, change, reset, undo, marks, canUndo } = useDraftFill({
+    initial: baseline,
+    ontologyKey,
+    target,
+    busy,
+    fieldsOf: agentFields,
+    withFields: withAgentFields,
+    onFill: () => setSaveErrors([]),
+  })
+  const key = draft.key
+  const panel = useAssistantPanel()
+  const focus: Focus = agent === null ? { kind: 'lens', key: lensKey } : { kind: 'agent', key: agent.key, lensKey }
   const [saveErrors, setSaveErrors] = useState<string[]>([])
   const [failed, setFailed] = useState<'save' | 'delete'>('save')
 
-  const dirty = !sameDraft(draft, baseline) || (isNew && key !== '')
+  const dirty = !sameDraft(draft, baseline)
   const keyValid = !isNew || (isValidLensResourceKey(key) && assistantKeyError(key, existingKeys, 'Agent') === undefined)
   const valid = draft.name.trim() !== '' && (draft.allTools || draft.tools.length > 0) && keyValid
   const canSave = (dirty || isNew) && valid && !busy
@@ -204,12 +192,12 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
   const title = draft.name.trim() || agent?.name || 'New agent'
   const { leave, dialog } = useAssistantLeaveGuard(dirty, title)
 
-  const edit = (patch: Partial<AgentDraft>) => {
-    setDraft((d) => ({ ...d, ...patch }))
+  const edit = (next: (draft: AgentDraft) => Partial<AgentDraft>) => {
+    change((d) => ({ ...d, ...next(d) }))
     setSaveErrors([])
   }
   const toggleTool = (tool: string, on: boolean) =>
-    edit({ tools: on ? [...draft.tools, tool] : draft.tools.filter((t) => t !== tool) })
+    edit((d) => ({ tools: on ? [...d.tools, tool] : d.tools.filter((t) => t !== tool) }))
 
   async function save() {
     setBusy(true)
@@ -275,8 +263,22 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
           name={agent?.name ?? ''}
           errors={saveErrors}
           failed={failed}
-          onDiscard={() => { setDraft(baseline); setSaveErrors([]) }}
+          onDiscard={() => { reset(baseline); setSaveErrors([]) }}
           onDelete={() => void remove()}
+          extras={
+            <>
+              {canUndo && (
+                <Button type="button" size="sm" variant="ghost" data-testid="agent-undo-ai-edit" disabled={busy} onClick={() => { undo(); setSaveErrors([]) }}>
+                  <Undo2 className="size-3.5" /> Undo AI edit
+                </Button>
+              )}
+              {panel.available && (
+                <Button type="button" size="sm" variant="ghost" data-testid="agent-ask-ai" onClick={() => panel.open({ focus })}>
+                  <Sparkles className="size-3.5" /> Ask AI
+                </Button>
+              )}
+            </>
+          }
         />
         <AssistantIdentitySection
           kind="agents"
@@ -288,34 +290,44 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
           disabled={busy}
           namePlaceholder="Research Assistant"
           descriptionHint="What this agent is for; shown in the Workbench."
-          onName={(name) => edit({ name })}
-          onKey={setKey}
-          onDescription={(description) => edit({ description })}
+          nameMark={<AiChangedMark field="name" change={marks.name} />}
+          descriptionMark={<AiChangedMark field="description" change={marks.description} />}
+          followName={false}
+          onName={(name) => edit((d) => withName(d, name))}
+          onKey={(value) => edit((d) => withKey(d, value))}
+          onDescription={(description) => edit(() => ({ description }))}
         />
         <section className="grid gap-4 rounded-xl border bg-card p-4">
           <h3 className="text-[13px] font-semibold">Behaviour</h3>
           <div className="grid gap-1.5">
-            <Label htmlFor="agent-prompt">System prompt</Label>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="agent-prompt">System prompt</Label>
+              <AiChangedMark field="systemPrompt" change={marks.systemPrompt} />
+            </div>
             <Textarea
               id="agent-prompt"
+              data-testid="agent-prompt"
               value={draft.systemPrompt}
               disabled={busy}
-              onChange={(e) => edit({ systemPrompt: e.target.value })}
+              onChange={(e) => { const systemPrompt = e.target.value; edit(() => ({ systemPrompt })) }}
               rows={6}
               className="font-mono text-xs"
               placeholder="You are a helpful assistant for…"
             />
           </div>
           <div className="grid gap-2">
-            <label className="flex items-center gap-2 text-[13px] font-medium">
-              <Switch checked={draft.allTools} disabled={busy} onCheckedChange={(allTools) => edit({ allTools })} />
-              All tools
-            </label>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-2 text-[13px] font-medium">
+                <Switch checked={draft.allTools} disabled={busy} data-testid="agent-all-tools" onCheckedChange={(allTools) => edit(() => ({ allTools }))} />
+                All tools
+              </label>
+              <AiChangedMark field="tools" change={marks.tools} show={showTools} />
+            </div>
             {!draft.allTools && (
               <div className="grid grid-cols-2 gap-1.5 rounded-lg border p-3">
                 {AGENT_TOOL_NAMES.map((tool) => (
                   <label key={tool} className="flex items-center gap-2 text-[13px]">
-                    <Checkbox checked={draft.tools.includes(tool)} disabled={busy} onCheckedChange={(checked) => toggleTool(tool, checked === true)} />
+                    <Checkbox checked={draft.tools.includes(tool)} disabled={busy} data-testid={`agent-tool-${tool}`} onCheckedChange={(checked) => toggleTool(tool, checked === true)} />
                     <span className="font-mono text-xs">{tool}</span>
                   </label>
                 ))}

@@ -3,15 +3,16 @@ import { ChevronLeft, Layers, ListTree, Plug, SquareTerminal, Trash2 } from 'luc
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
+import { AskAboutButton, adapters, usePublishFocus } from '@/assistants'
 import { useLenses } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
 import type { Lens } from '@/api/types'
-import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { lensDeletedText } from '@/components/changesets/changesets'
 import { EmptyState } from '@/components/EmptyState'
 import { workbenchLensPage } from '@/components/layout/surfaceSwitch'
 import { WORKBENCH_ICON } from '@/components/layout/surfaceTargets'
 import { AgentsTab } from '@/components/studio/AgentsTab'
+import { ASSISTANT_DEFAULT, ASSISTANT_NEW } from '@/components/studio/assistants/assistantModel'
 import { ConnectTab } from '@/components/studio/ConnectTab'
 import { NavigatorsTab } from '@/components/studio/NavigatorsTab'
 import { NamedSearchesTab } from '@/components/studio/NamedSearchesTab'
@@ -51,6 +52,10 @@ export function LensDetailPage() {
 
   const { data: lenses, isPending } = useLenses(ontologyKey)
   const lens = lenses?.find((o) => o.lensId === id)
+  // An open saved agent's editor is the focus; any other view of the lens, the lens.
+  const agentKey = tab === 'agents' ? searchParams.get('agent') : null
+  const editsAgent = agentKey !== null && agentKey !== ASSISTANT_NEW && agentKey !== ASSISTANT_DEFAULT
+  usePublishFocus(lens === undefined ? null : editsAgent ? { kind: 'agent', key: agentKey, lensKey: lens.key } : { kind: 'lens', key: lens.key })
 
   const update = useMutation({
     mutationFn: (patch: { name: string; description: string | null }) =>
@@ -125,6 +130,7 @@ export function LensDetailPage() {
           </Badge>
           <ScopeBadge ontologyKey={ontologyKey} lensId={lens.lensId} />
           <div className="ml-auto flex items-center gap-2">
+            <AskAboutButton focus={{ kind: 'lens', key: lens.key }} />
             <Button variant="outline" size="sm" asChild>
               <Link to={workbenchLensPage(ontologyKey, lens.key, tab)}>
                 <WORKBENCH_ICON className="size-3.5" /> Open in Workbench
@@ -181,13 +187,13 @@ export function LensDetailPage() {
               <Layers className="size-3.5" /> Scope
             </TabsTrigger>
             <TabsTrigger value="agents">
-              <ASSISTANT_KINDS.agents.icon className="size-3.5" /> Agents
+              <adapters.agents.icon className="size-3.5" /> Agents
             </TabsTrigger>
             <TabsTrigger value="retriever-agents">
-              <ASSISTANT_KINDS.retrievers.icon className="size-3.5" /> Retrievers
+              <adapters.retrievers.icon className="size-3.5" /> Retrievers
             </TabsTrigger>
             <TabsTrigger value="navigators">
-              <ASSISTANT_KINDS.navigators.icon className="size-3.5" /> Navigators
+              <adapters.navigators.icon className="size-3.5" /> Navigators
             </TabsTrigger>
             <TabsTrigger value="queries">
               <SquareTerminal className="size-3.5" /> Saved queries

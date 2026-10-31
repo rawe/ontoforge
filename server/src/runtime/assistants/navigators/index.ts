@@ -24,10 +24,9 @@ import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import { HumanMessage } from "@langchain/core/messages";
 import { Annotation, END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
 
+import type { GraphThread } from "../../../assistants/index.js";
 import type { RuntimeStore } from "../../../core/ports.js";
 import type { LoadedSchema } from "../../schemaCache.js";
-import { TURNS_THE_MODEL_SEES, type GraphThread } from "../../threads/threadStore.js";
-import { lastTurns, trimTurns } from "../../threads/turns.js";
 import { decide, streamAnswer, turnModel } from "../kit/model.js";
 import type { Topology, Trace } from "../kit/trace.js";
 import { ANSWER, answerInput, citedRefs } from "./answer.js";
@@ -84,9 +83,6 @@ export interface NavigatorTurn {
   trace: Trace;
 }
 
-/** Turns of the conversation the model calls see — fewer than the thread
- * keeps; a follow-up rarely needs more. */
-const TURNS_IN_PROMPT = Math.min(4, TURNS_THE_MODEL_SEES);
 /** Entities a follow-up may start from. */
 const FOCUS_CARRIED = 20;
 
@@ -100,8 +96,9 @@ const State = Annotation.Root({
 
 type Message = { role: "user" | "assistant"; content: string };
 
+/** The conversation the model calls see: the whole thread. */
 function historyOf(messages: BaseMessage[]): Message[] {
-  return lastTurns(messages, TURNS_IN_PROMPT).map((m) => ({
+  return messages.map((m) => ({
     role: m.getType() === "human" ? "user" : "assistant",
     content: m.text,
   }));
@@ -247,7 +244,7 @@ export async function run(turn: NavigatorTurn): Promise<string> {
       const carried = (cited.length > 0 ? cited : evidence.filter((n) => n.card.role !== "anchor"))
         .slice(0, FOCUS_CARRIED)
         .map((n) => ({ id: n.card.id, type: n.card.type, label: n.card.label }));
-      return { messages: [...trimTurns(state.messages), new AIMessage(reply)], carried };
+      return { messages: [new AIMessage(reply)], carried };
     })
     .addEdge(START, "understand")
     .addEdge("understand", "anchor")

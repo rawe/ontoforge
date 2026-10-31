@@ -33,7 +33,7 @@ import type {
   RuntimeSchema,
 } from '@/api/types'
 import { useAccess } from '@/components/auth/useAccess'
-import type { Turn } from '@/components/assistants/chat/chatModel'
+import type { Turn } from '@/assistants'
 import { EmptyState } from '@/components/EmptyState'
 import { EXPLORER_LIVE_ONLY_TEXT } from '@/components/changesets/changesets'
 import { TypeDot } from '@/components/TypeChip'

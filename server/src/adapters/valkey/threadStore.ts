@@ -7,7 +7,7 @@
  *
  * Per thread two keys, hash-tagged into one slot:
  *
- *   ontoforge:thread:{<id>}        hash ontologyKey lensKey kind assistantKey owner [state], PEXPIRE idle
+ *   ontoforge:thread:{<id>}        hash ontologyKey scope lensKey kind assistantKey owner [state], PEXPIRE idle
  *   ontoforge:thread:{<id>}:turn   the running turn's owner token, PX lease
  *
  * Every deadline is relative, so Valkey's clock alone decides expiry. Each
@@ -15,7 +15,9 @@
  * writes a new thread key; every write after `begin` compares the owner
  * token. Scripts without `allow-oom` are refused whole when Valkey is out of
  * memory; `renew` and `release` carry it, so a full store can still end turns.
- * `owner` is the principal id, empty when authentication is off.
+ * `owner` is the principal id, empty when authentication is off. `scope`
+ * is `lens` or `ontology` (`scopeOf`), whose `lensKey` is empty; a thread
+ * written without a scope, before ontology-scoped threads, is a lens's.
  */
 
 import { randomUUID } from "node:crypto";
@@ -26,26 +28,27 @@ import {
   checkStateSize,
   DEFAULT_LIFETIMES,
   sameBinding,
+  scopeOf,
   type StoreLifetimes,
   type Thread,
   type ThreadBinding,
   type ThreadStore,
   type Turn,
-} from "../../runtime/threads/threadStore.js";
+} from "../../assistants/index.js";
 import { toStoreError, type ValkeyScripts } from "./connection.js";
 
 // KEYS[1] = thread, KEYS[2] = turn.
 const LUA = {
-  // ARGV: ontologyKey, lensKey, kind, assistantKey, owner, idleMs
+  // ARGV: ontologyKey, lensKey, kind, assistantKey, owner, idleMs, scope
   threadCreate: `#!lua
 if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
-redis.call('HSET', KEYS[1], 'ontologyKey', ARGV[1], 'lensKey', ARGV[2], 'kind', ARGV[3], 'assistantKey', ARGV[4], 'owner', ARGV[5])
+redis.call('HSET', KEYS[1], 'ontologyKey', ARGV[1], 'scope', ARGV[7], 'lensKey', ARGV[2], 'kind', ARGV[3], 'assistantKey', ARGV[4], 'owner', ARGV[5])
 redis.call('PEXPIRE', KEYS[1], ARGV[6])
 return 1`,
-  // ARGV: ontologyKey, lensKey, kind, assistantKey, owner, token, idleMs, leaseMs
+  // ARGV: ontologyKey, lensKey, kind, assistantKey, owner, token, idleMs, leaseMs, scope
   threadBegin: `#!lua
-local b = redis.call('HMGET', KEYS[1], 'ontologyKey', 'lensKey', 'kind', 'assistantKey', 'owner')
-if b[1] ~= ARGV[1] or b[2] ~= ARGV[2] or b[3] ~= ARGV[3] or b[4] ~= ARGV[4] or (b[5] or '') ~= ARGV[5] then return {0} end
+local b = redis.call('HMGET', KEYS[1], 'ontologyKey', 'lensKey', 'kind', 'assistantKey', 'owner', 'scope')
+if b[1] ~= ARGV[1] or (b[6] or 'lens') ~= ARGV[9] or (b[2] or '') ~= ARGV[2] or b[3] ~= ARGV[3] or b[4] ~= ARGV[4] or (b[5] or '') ~= ARGV[5] then return {0} end
 if not redis.call('SET', KEYS[2], ARGV[6], 'NX', 'PX', ARGV[8]) then return {1} end
 redis.call('PEXPIRE', KEYS[1], ARGV[7])
 return {2, redis.call('HGET', KEYS[1], 'state')}`,
@@ -84,6 +87,28 @@ interface ThreadScripts {
   threadRelease(thread: string, turn: string, ...args: Arg[]): Promise<number>;
 }
 
+/** A thread hash's binding fields, in `storedBinding`'s order. */
+const BINDING_FIELDS = ["ontologyKey", "scope", "lensKey", "kind", "assistantKey", "owner"] as const;
+
+/**
+ * The binding a thread hash stores, its fields in `BINDING_FIELDS` order
+ * (null: absent); null when incomplete. No scope is a lens's.
+ */
+export function storedBinding(fields: (string | null)[]): ThreadBinding | null {
+  const [ontologyKey, scope, lensKey, kind, assistantKey, owner] = fields;
+  if (!ontologyKey || !kind || !assistantKey) return null;
+  let lens: string | null;
+  if ((scope ?? "lens") === "lens") {
+    if (!lensKey) return null;
+    lens = lensKey;
+  } else if (scope === "ontology" && !lensKey) {
+    lens = null;
+  } else {
+    return null;
+  }
+  return { ontologyKey, lensKey: lens, kind, assistantKey, owner: owner ? owner : null };
+}
+
 const threadKey = (threadId: string) => `ontoforge:thread:{${threadId}}`;
 const keys = (threadId: string): [string, string] => [threadKey(threadId), `${threadKey(threadId)}:turn`];
 
@@ -101,7 +126,9 @@ export class ValkeyThreadStore implements ThreadStore {
     const threadId = randomUUID();
     const { ontologyKey, lensKey, kind, assistantKey, owner } = binding;
     const created = await this.call(() =>
-      this.scripts.threadCreate(...keys(threadId), ontologyKey, lensKey, kind, assistantKey, owner ?? "", this.lifetimes.idleMs),
+      this.scripts.threadCreate(
+        ...keys(threadId), ontologyKey, lensKey ?? "", kind, assistantKey, owner ?? "", this.lifetimes.idleMs, scopeOf(binding),
+      ),
     );
     if (created !== 1) throw toStoreError("thread store", new Error("A new thread id was already taken"));
     return { threadId, binding: { ontologyKey, lensKey, kind, assistantKey, owner } };
@@ -109,18 +136,11 @@ export class ValkeyThreadStore implements ThreadStore {
 
   async read(threadId: string, binding: ThreadBinding): Promise<{ state: Uint8Array | null } | null> {
     const fields = await this.call(() =>
-      this.client.hmgetBuffer(threadKey(threadId), "ontologyKey", "lensKey", "kind", "assistantKey", "owner", "state"),
+      this.client.hmgetBuffer(threadKey(threadId), ...BINDING_FIELDS, "state"),
     );
-    const [ontologyKey, lensKey, kind, assistantKey, owner, state] = fields.map((field) => field ?? null);
-    if (!ontologyKey || !lensKey || !kind || !assistantKey) return null;
-    const stored = {
-      ontologyKey: ontologyKey.toString(),
-      lensKey: lensKey.toString(),
-      kind: kind.toString(),
-      assistantKey: assistantKey.toString(),
-      owner: owner && owner.length > 0 ? owner.toString() : null,
-    };
-    if (!sameBinding(stored, binding)) return null;
+    const stored = storedBinding(fields.slice(0, BINDING_FIELDS.length).map((field) => field?.toString() ?? null));
+    if (stored === null || !sameBinding(stored, binding)) return null;
+    const state = fields[BINDING_FIELDS.length];
     return { state: state ? new Uint8Array(state) : null };
   }
 
@@ -129,7 +149,8 @@ export class ValkeyThreadStore implements ThreadStore {
     const { ontologyKey, lensKey, kind, assistantKey, owner } = binding;
     const [outcome, state] = await this.call(() =>
       this.scripts.threadBeginBuffer(
-        ...keys(threadId), ontologyKey, lensKey, kind, assistantKey, owner ?? "", token, this.lifetimes.idleMs, this.lifetimes.leaseMs,
+        ...keys(threadId), ontologyKey, lensKey ?? "", kind, assistantKey, owner ?? "", token,
+        this.lifetimes.idleMs, this.lifetimes.leaseMs, scopeOf(binding),
       ),
     );
     if (outcome === 0) return null;

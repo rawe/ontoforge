@@ -1,23 +1,17 @@
 import { Check, ChevronRight, LoaderCircle, MessageSquarePlus, MessagesSquare, Plus, X } from 'lucide-react'
 import { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { chatErrorText } from '@/api/chatStream'
+import { adapters, chatErrorText, Composer, DEFAULT_ASSISTANT, InsightToggle, Intro, NewConversationDialog, type ThreadOwner, type Turn, TurnView, useAssistantConversation } from '@/assistants'
 import type { EntityCard } from '@/api/entities'
 import { useAssistants } from '@/api/hooks'
 import type { AssistantKind, RuntimeAssistant } from '@/api/types'
-import { Composer, InsightToggle, Intro, NewConversationDialog, TurnView } from '@/components/assistants/chat/AssistantChat'
-import { DEFAULT_ASSISTANT, type Turn } from '@/components/assistants/chat/chatModel'
-import type { ThreadOwner } from '@/components/assistants/chat/threadStore'
-import { useAssistantConversation } from '@/components/assistants/chat/useAssistantConversation'
 import { CitedAnswer } from '@/components/assistants/entities/CitedAnswer'
 import { EntityCardList } from '@/components/assistants/entities/EntityCardList'
-import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { ASK_KIND_ORDER, MAX_WIDTH, MIN_WIDTH, chooseAssistant, choiceValue, parseChoice } from './askDockModel'
-import { ASK_KINDS } from './askKinds'
 import type { useAskDock } from './useAskDock'
 
 /* ----------------------------------- dock ---------------------------------- */
@@ -99,7 +93,7 @@ export const AskDock = memo(function AskDock({ dock, ...props }: AskDockProps) {
       <SelectContent position="popper" align="start">
         {ASK_KIND_ORDER.map((kind) => {
           const list = lists[kind]
-          const { many, icon: Icon } = ASSISTANT_KINDS[kind]
+          const { nouns: { many }, icon: Icon } = adapters[kind]
           if (list?.length === 0) return null
           return (
             <SelectGroup key={kind}>
@@ -201,7 +195,7 @@ function AskConversation({
   onCanvas, pointed, onEntity, onHover, onAnswer,
 }: AskConversationProps) {
   // Fixed for a mount: another assistant remounts.
-  const spec = ASK_KINDS[kind]
+  const spec = adapters[kind]
   const owner = useMemo<ThreadOwner | null>(
     () => (assistantKey === null ? null : { ontologyKey, lensKey, kind, assistantKey }),
     [ontologyKey, lensKey, kind, assistantKey],
@@ -213,7 +207,7 @@ function AskConversation({
     owner,
     model: spec.model,
     send: (body, onEvent, signal) =>
-      (assistantKey === null ? Promise.resolve() : spec.send(ontologyKey, lensKey, assistantKey, body, onEvent, signal)),
+      (assistantKey === null ? Promise.resolve() : spec.send({ ontologyKey, lensKey }, assistantKey, body, onEvent, signal)),
     blocked: assistantKey === null,
     onComplete: (turn) => {
       if (!autoAdd || !spec.cites) return
@@ -223,7 +217,7 @@ function AskConversation({
     },
   })
   const { turns, running, restoring, notice } = conversation
-  const { icon, one } = ASSISTANT_KINDS[kind]
+  const { icon, nouns: { one } } = adapters[kind]
   const name = assistant?.name ?? one
   const scroll = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -314,7 +308,7 @@ function AskConversation({
 }
 
 function KindIcon({ kind }: { kind: AssistantKind }) {
-  const Icon = ASSISTANT_KINDS[kind].icon
+  const Icon = adapters[kind].icon
   return <Icon className="mx-1 size-4 shrink-0 text-muted-foreground" />
 }
 
@@ -332,7 +326,7 @@ function AnswerDetails({ ontologyKey, lensKey, kind, turn, refused, onCanvas, po
 }) {
   const [open, setOpen] = useState<'found' | 'details' | null>(null)
   const { entities } = turn
-  const { details } = ASK_KINDS[kind]
+  const { details } = adapters[kind]
   const label = details?.label(turn) ?? null
   if (entities.length === 0 && label === null && !refused) return null
   const placed = entities.filter((card) => onCanvas.has(card.id)).length

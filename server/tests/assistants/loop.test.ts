@@ -112,6 +112,31 @@ describe("tool loop", () => {
     expect(serial.events).toEqual(["helper.tool_call a", "helper.tool_result", "helper.tool_call b", "helper.tool_result"]);
   });
 
+  it("never starts a queued serial call once an earlier one failed unexpectedly", async () => {
+    const started: string[] = [];
+    const run = async (args: Record<string, unknown>) => {
+      started.push(String(args.x));
+      if (args.x === "a") throw new Error("boom");
+      return { echoed: args.x };
+    };
+    const model = new FakeToolCallingModel([calls("a", "b"), new AIMessage("never")]);
+
+    await expect(turn(prepared(model, [echo({ run, serial: true })]))).rejects.toThrow("boom");
+    expect(started).toEqual(["a"]);
+  });
+
+  it("still runs a queued serial call after an expected failure", async () => {
+    const run = async (args: Record<string, unknown>) => {
+      if (args.x === "a") throw new Expected("no such x");
+      return { echoed: args.x };
+    };
+    const model = new FakeToolCallingModel([calls("a", "b"), new AIMessage("done")]);
+
+    const { reply } = await turn(prepared(model, [echo({ run, serial: true })]));
+    expect(reply).toBe("done");
+    expect(toolResults(model)).toEqual([{ error: { code: "EXPECTED", message: "no such x" } }, { echoed: "b" }]);
+  });
+
   it("sends the instructions as they are without context, the labelled blocks after them with it", async () => {
     const bare = new FakeToolCallingModel([new AIMessage("hi")]);
     await turn(prepared(bare, [echo()]));

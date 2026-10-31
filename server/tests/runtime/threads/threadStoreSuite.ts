@@ -9,6 +9,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 import { Annotation, END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
@@ -40,6 +41,9 @@ const { idleMs: IDLE, leaseMs: LEASE } = SUITE_LIFETIMES;
 const MARGIN = 50;
 
 const BINDING: ThreadBinding = { ontologyKey: "fair", lensKey: "visitor", kind: "agents", assistantKey: "guide", owner: null };
+
+/** One completed `kindsGraph` turn ("Who is Ada?") as a stored state, in envelope version 1. */
+const STORED_STATE = readFileSync(new URL("../../fixtures/thread-state-v1.json", import.meta.url), "utf8");
 
 const bytes = (text: string) => new Uint8Array(Buffer.from(text));
 const text = (state: Uint8Array | null | undefined) => (state ? Buffer.from(state).toString() : state);
@@ -372,6 +376,23 @@ export function threadStoreSuite(name: string, factory: ThreadStoreFactory): voi
         expect((messages[2] as ToolMessage).tool_call_id).toBe("call-0");
         expect(messages.at(-1)!.text).toBe("answer to And her team?");
         expect(values.verified).toEqual({ configHash: "h1", previous: { complete: true, results: [{ entityType: "person", ids: ["ada"] }] } });
+        expect(values.carried).toEqual([{ id: "ada", type: "person", label: "Ada" }]);
+        expect(values.round).toBe(2);
+      });
+
+      it("continues a stored state as a later turn", async () => {
+        const threadId = await threadWith(STORED_STATE);
+        const turn = asTurn(await store.begin(threadId, BINDING));
+        const saver = TurnSaver.load(threadId, turn.state);
+        await kindsGraph(saver).invoke({ messages: [new HumanMessage("And her team?")] }, { configurable: { thread_id: threadId } });
+        expect(await store.publish(turn, saver.dump())).toBe("published");
+
+        const values = await threadValues((await store.read(threadId, BINDING))!.state);
+        const messages = values.messages as BaseMessage[];
+        expect(messages.map((m) => m.getType())).toEqual(["human", "ai", "tool", "ai", "human", "ai", "tool", "ai"]);
+        expect(messages.map((m) => m.text).filter((t, i) => i % 4 !== 1 && i % 4 !== 2)).toEqual([
+          "Who is Ada?", "answer to Who is Ada?", "And her team?", "answer to And her team?",
+        ]);
         expect(values.carried).toEqual([{ id: "ada", type: "person", label: "Ada" }]);
         expect(values.round).toBe(2);
       });

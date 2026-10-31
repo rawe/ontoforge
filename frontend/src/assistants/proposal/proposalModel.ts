@@ -170,8 +170,13 @@ export interface DesignType {
   key: string
   description: string | null
   displayName?: string
+  /** An entity type's name property. */
+  nameProperty?: string
+  /** A relation type's ends, its parent end (null for none) and whether it holds one relation per pair. */
   source?: string
   target?: string
+  parent?: string | null
+  onePerPair?: boolean
   properties: DesignProperty[]
 }
 
@@ -189,8 +194,11 @@ export function designOf(exported: unknown): Design | null {
     key: String(row.key),
     description: optionalString(row.description),
     ...(isString(row.displayName) ? { displayName: row.displayName } : {}),
+    ...(isString(row.nameProperty) ? { nameProperty: row.nameProperty } : {}),
     ...(isString(row.fromEntityTypeKey) ? { source: row.fromEntityTypeKey } : {}),
     ...(isString(row.toEntityTypeKey) ? { target: row.toEntityTypeKey } : {}),
+    // The export leaves `onePerPair` out when it is off.
+    ...(isString(row.fromEntityTypeKey) ? { parent: optionalString(row.parent), onePerPair: row.onePerPair === true } : {}),
     properties: (Array.isArray(row.properties) ? row.properties : []).filter(isRecord).map((p) => ({
       key: String(p.key),
       description: optionalString(p.description),
@@ -404,14 +412,18 @@ export function appliedIn(proposal: Proposal, design: Design): boolean {
       case 'create_entity_type': {
         const type = find('entity-types', step.key)
         const name = type?.properties.find((p) => p.key === 'name')
-        return type !== undefined && type.displayName === step.name
+        // The name property the server creates with the type (`newNameProperty`), as the step sets it.
+        return type !== undefined && type.displayName === step.name && type.nameProperty === 'name'
           && describedAs(i, `entity-types:${step.key}:`, type, step.description)
-          && name !== undefined && name.required === (step.nameRequired ?? false)
+          && name !== undefined && name.displayName === 'Name' && name.dataType === 'string' && name.defaultValue === null
+          && name.required === (step.nameRequired ?? false)
           && describedAs(i, `entity-types:${step.key}:name`, name, step.nameDescription)
       }
       case 'create_relation_type': {
         const type = find('relation-types', step.key)
+        // A proposal creates a plain relation type: no parent end, any number per pair.
         return type !== undefined && type.displayName === step.name && type.source === step.source && type.target === step.target
+          && type.parent === null && type.onePerPair === false
           && describedAs(i, `relation-types:${step.key}:`, type, step.description)
       }
       case 'add_property': {

@@ -70,20 +70,26 @@ test('a restored answer gets its proposal back as one completed call', () => {
 test('reads the design of a schema export', () => {
   const read = designOf({
     entityTypes: [{
-      key: 'person', displayName: 'Person', description: 'P',
+      key: 'person', displayName: 'Person', description: 'P', nameProperty: 'name',
       properties: [{ key: 'name', displayName: 'Name', dataType: 'string', required: true, defaultValue: null, description: null }, { key: 'age' }],
     }],
-    relationTypes: [{ key: 'knows', fromEntityTypeKey: 'person', toEntityTypeKey: 'person' }],
+    relationTypes: [
+      { key: 'knows', fromEntityTypeKey: 'person', toEntityTypeKey: 'person', parent: 'source', onePerPair: true },
+      { key: 'met', fromEntityTypeKey: 'person', toEntityTypeKey: 'person', parent: null },
+    ],
   })
   assert.deepEqual(read, {
     entityTypes: [{
-      key: 'person', description: 'P', displayName: 'Person',
+      key: 'person', description: 'P', displayName: 'Person', nameProperty: 'name',
       properties: [
         { key: 'name', description: null, displayName: 'Name', dataType: 'string', required: true, defaultValue: null },
         { key: 'age', description: null, required: false, defaultValue: null },
       ],
     }],
-    relationTypes: [{ key: 'knows', description: null, source: 'person', target: 'person', properties: [] }],
+    relationTypes: [
+      { key: 'knows', description: null, source: 'person', target: 'person', parent: 'source', onePerPair: true, properties: [] },
+      { key: 'met', description: null, source: 'person', target: 'person', parent: null, onePerPair: false, properties: [] },
+    ],
   })
   assert.equal(designOf({ error: 'x' }), null)
 })
@@ -163,38 +169,51 @@ test('the first new type, in step order', () => {
 
 test('a reloaded design shows the proposal applied only when every step took effect', () => {
   assert.equal(appliedIn(proposal, design), false)
-  const name = { key: 'name', description: null, required: false }
+  const name = { key: 'name', displayName: 'Name', dataType: 'string', defaultValue: null, description: null, required: false }
   const start = { key: 'start', displayName: 'Start', dataType: 'date', required: true, defaultValue: null, description: null }
-  const signedBy = { key: 'signed_by', displayName: 'Signed by', source: 'contract', target: 'person', description: null, properties: [] }
-  const after = (changes: { start?: object; signedBy?: object } = {}): Design => ({
+  const signedBy = {
+    key: 'signed_by', displayName: 'Signed by', source: 'contract', target: 'person', parent: null, onePerPair: false, description: null, properties: [],
+  }
+  const after: Design = {
     entityTypes: [
       { key: 'person', description: 'A natural person', properties: [name] },
-      { key: 'contract', displayName: 'Contract', description: null, properties: [name, { ...start, ...changes.start }] },
+      { key: 'contract', displayName: 'Contract', nameProperty: 'name', description: null, properties: [name, start] },
     ],
     relationTypes: [
       { key: 'knows', description: 'Knows', properties: [{ key: 'since', description: 'Since when' }] },
-      { ...signedBy, ...changes.signedBy },
+      signedBy,
     ],
-  })
-  assert.equal(appliedIn(proposal, after()), true)
-  assert.equal(appliedIn(proposal, { ...after(), relationTypes: after().relationTypes.slice(0, 1) }), false)
+  }
+  assert.equal(appliedIn(proposal, after), true)
+  assert.equal(appliedIn(proposal, { ...after, relationTypes: after.relationTypes.slice(0, 1) }), false)
 })
 
 test('a lost apply: a same-key item someone else made differently does not show it applied', () => {
-  const name = { key: 'name', description: null, required: false }
-  const design = (start: object, signedBy: object = {}): Design => ({
+  const name = { key: 'name', displayName: 'Name', dataType: 'string', defaultValue: null, description: null, required: false }
+  const design = (start: object, signedBy: object = {}, contract: { name?: object; nameProperty?: string } = {}): Design => ({
     entityTypes: [
       { key: 'person', description: 'A natural person', properties: [name] },
-      { key: 'contract', displayName: 'Contract', description: null, properties: [name, {
+      { key: 'contract', displayName: 'Contract', nameProperty: contract.nameProperty ?? 'name', description: null, properties: [{ ...name, ...contract.name }, {
         key: 'start', displayName: 'Start', dataType: 'date', required: true, defaultValue: null, description: null, ...start,
       }] },
     ],
     relationTypes: [
       { key: 'knows', description: 'Knows', properties: [{ key: 'since', description: 'Since when' }] },
-      { key: 'signed_by', displayName: 'Signed by', source: 'contract', target: 'person', description: null, properties: [], ...signedBy },
+      {
+        key: 'signed_by', displayName: 'Signed by', source: 'contract', target: 'person', parent: null, onePerPair: false,
+        description: null, properties: [], ...signedBy,
+      },
     ],
   })
   assert.equal(appliedIn(proposal, design({})), true)
+  // The name property a new type comes with, and which property names the type.
+  for (const contract of [{ name: { defaultValue: 'UNEXPECTED' } }, { name: { displayName: 'Alias' } }, { name: { dataType: 'document' } }, { nameProperty: 'label' }]) {
+    assert.equal(appliedIn(proposal, design({}, {}, contract)), false, JSON.stringify(contract))
+  }
+  // A relation type with a parent end, or one relation per pair, is not the plain one proposed.
+  for (const signedBy of [{ parent: 'source' }, { onePerPair: true }]) {
+    assert.equal(appliedIn(proposal, design({}, signedBy)), false, JSON.stringify(signedBy))
+  }
   for (const start of [{ dataType: 'string' }, { required: false }, { defaultValue: '2024-01-01' }, { displayName: 'Begin' }, { description: 'x' }]) {
     assert.equal(appliedIn(proposal, design(start)), false, JSON.stringify(start))
   }
@@ -224,7 +243,10 @@ test("a lost apply of a new type with its name property set: the type alone does
     { id: 's1', op: 'create_entity_type', key: 'team', name: 'Team', nameRequired: true, nameDescription: 'What it is called' },
   ]
   const team = (required: boolean, description: string | null): Design => ({
-    ...design, entityTypes: [...design.entityTypes, { key: 'team', displayName: 'Team', description: null, properties: [{ key: 'name', description, required }] }],
+    ...design, entityTypes: [...design.entityTypes, {
+      key: 'team', displayName: 'Team', nameProperty: 'name', description: null,
+      properties: [{ key: 'name', displayName: 'Name', dataType: 'string', defaultValue: null, description, required }],
+    }],
   })
   assert.equal(appliedIn({ steps }, team(true, 'What it is called')), true)
   assert.equal(appliedIn({ steps }, team(false, 'What it is called')), false)
@@ -234,7 +256,13 @@ test("a lost apply of a new type with its name property set: the type alone does
   assert.equal(appliedIn({ steps: described }, team(true, 'Label')), true)
   assert.equal(appliedIn({ steps: described }, team(true, 'What it is called')), false)
   // The export's required flag is read.
-  const exported = designOf({ entityTypes: [{ key: 'team', displayName: 'Team', properties: [{ key: 'name', required: true, description: 'What it is called' }] }], relationTypes: [] })
+  const exported = designOf({
+    entityTypes: [{
+      key: 'team', displayName: 'Team', nameProperty: 'name',
+      properties: [{ key: 'name', displayName: 'Name', dataType: 'string', defaultValue: null, required: true, description: 'What it is called' }],
+    }],
+    relationTypes: [],
+  })
   assert.equal(appliedIn({ steps }, exported!), true)
 })
 

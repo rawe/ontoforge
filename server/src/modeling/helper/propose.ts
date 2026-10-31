@@ -37,7 +37,8 @@ export function proposeSchemaChangeTool(store: ModelingStore): Tool<StudioTurn> 
       "person can apply it, in the Studio. Each call replaces your earlier proposal of this message, so " +
       "always send the complete proposal. summary: one sentence on what it does. steps: in order, 1 to " +
       `${MAX_PROPOSAL_STEPS}; each has a unique id (s1, s2, …), an op, an optional reason and the op's fields:\n` +
-      "- create_entity_type: key, name, description (optional). The type gets a string property 'name'.\n" +
+      "- create_entity_type: key, name, description (optional). The type gets a string property 'name'; " +
+      "nameDescription and nameRequired (optional) set that property's description and whether it is required.\n" +
       "- create_relation_type: key, name, source and target (entity type keys), description (optional).\n" +
       "- add_property: entityType or relationType (the type's key, exactly one), key, name, dataType " +
       `(${DATA_TYPES.join(", ")}; document only on entity types), required (default false), defaultValue ` +

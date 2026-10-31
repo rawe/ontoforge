@@ -24,7 +24,7 @@ interface StepFields {
 
 /** One additive design step, by key (the server's `proposals/proposal.ts`). */
 export type ProposalStep = StepFields & (
-  | { op: 'create_entity_type'; key: string; name: string; description?: string }
+  | { op: 'create_entity_type'; key: string; name: string; description?: string; nameDescription?: string; nameRequired?: boolean }
   | { op: 'create_relation_type'; key: string; name: string; source: string; target: string; description?: string }
   | {
     op: 'add_property'; entityType?: string; relationType?: string; key: string; name: string; dataType: string
@@ -249,6 +249,12 @@ function descriptionBefore(step: Extract<ProposalStep, { op: 'set_description' }
   return described?.description ?? ''
 }
 
+/** A new entity type's row detail: its name, and its name property as the step sets it. */
+function entityTypeDetail(step: Extract<ProposalStep, { op: 'create_entity_type' }>): string {
+  const name = `${step.nameRequired === true ? 'a required' : 'a'} name property`
+  return `“${step.name}”, with ${name}${step.nameDescription === undefined ? '' : `: “${step.nameDescription}”`}`
+}
+
 function propertyDetail(step: Extract<ProposalStep, { op: 'add_property' }>): string {
   return [
     step.dataType,
@@ -272,7 +278,7 @@ export function proposalRows(proposal: Proposal, check: ProposalCheck | null, de
     switch (step.op) {
       case 'create_entity_type':
         byGroup.get('entityTypes')!.push({
-          ...common, mark: '+', target: step.key, detail: `“${step.name}”, with a name property`,
+          ...common, mark: '+', target: step.key, detail: entityTypeDetail(step),
           type: { kind: 'entity-types', key: step.key },
           ...(step.description === undefined ? {} : { description: step.description }),
         })

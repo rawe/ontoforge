@@ -117,6 +117,18 @@ test("an added item's description is plain; a description set to its current tex
   assert.equal(proposalRows({ steps }, ok, null).at(-1)!.rows[0]!.mark, '~')
 })
 
+test("a new entity type's row shows its name property as the step sets it", () => {
+  const steps: Proposal['steps'] = [
+    { id: 'a', op: 'create_entity_type', key: 'team', name: 'Team' },
+    { id: 'b', op: 'create_entity_type', key: 'squad', name: 'Squad', nameRequired: true, nameDescription: 'Short label' },
+  ]
+  const rows = proposalRows({ steps }, ok, design).flatMap((g) => g.rows)
+  assert.deepEqual(rows.map((r) => r.detail), [
+    '“Team”, with a name property',
+    '“Squad”, with a required name property: “Short label”',
+  ])
+})
+
 test('a row carries only its own refusal and warnings from the check', () => {
   const rows = proposalRows(proposal, refused, design).flatMap((g) => g.rows)
   assert.deepEqual(rows.filter((r) => r.refusal !== undefined).map((r) => r.stepId), ['s3'])

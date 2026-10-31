@@ -258,7 +258,17 @@ async function runStep(
       const path = `entityTypes.${step.key}`;
       created[path] = row.entityTypeId as string;
       const name = await s.getPropertyByKey(row.entityTypeId as string, "EntityType", row.nameProperty as string);
-      if (name) created[`${path}.properties.${name.key as string}`] = name.propertyId as string;
+      if (name) {
+        created[`${path}.properties.${name.key as string}`] = name.propertyId as string;
+        // The name property as the step asks for it; the new type holds no data yet.
+        const update = {
+          ...(step.nameDescription === undefined ? {} : { description: step.nameDescription }),
+          ...(step.nameRequired === undefined ? {} : { required: step.nameRequired }),
+        };
+        if (Object.keys(update).length > 0) {
+          await service.updatePropertyIn(s, effects, row.entityTypeId as string, "EntityType", name.propertyId as string, update);
+        }
+      }
       return { kind: "EntityType", key: step.key };
     }
     case "create_relation_type": {

@@ -23,8 +23,13 @@ const Name = z.string().min(1);
 const Description = z.string().regex(/\S/, "A description is not empty");
 const StepFields = { id: z.string().min(1), reason: z.string().optional() };
 
+/** The type gets a string property `name`; `nameDescription` and
+ * `nameRequired` set that property's description and required flag. */
 export const CreateEntityTypeStep = z
-  .object({ ...StepFields, op: z.literal("create_entity_type"), key: Key, name: Name, description: Description.optional() })
+  .object({
+    ...StepFields, op: z.literal("create_entity_type"), key: Key, name: Name, description: Description.optional(),
+    nameDescription: Description.optional(), nameRequired: z.boolean().optional(),
+  })
   .strict();
 
 export const CreateRelationTypeStep = z

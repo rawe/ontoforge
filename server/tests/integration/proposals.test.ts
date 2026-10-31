@@ -253,4 +253,23 @@ describe("applying a proposal", () => {
     const again = await inject(APPLY, { proposal: ADD_PROJECTS, expected: receipt.revision });
     expect(again.json().error.details.check.refusals.map((r: Row) => r.code)).toContain("ALREADY_EXISTS");
   });
+
+  it("creates a new entity type's name property described and required as its step asks", async () => {
+    const proposal = {
+      steps: [
+        { id: "s1", op: "create_entity_type", key: "team", name: "Team", nameDescription: "What the team is called", nameRequired: true },
+        { id: "s2", op: "create_entity_type", key: "squad", name: "Squad" },
+      ],
+    };
+    const checked = (await inject(CHECK, { proposal })).json();
+    expect(checked.ok, JSON.stringify(checked)).toBe(true);
+    expect((await inject(APPLY, { proposal, expected: checked.baseRevision })).statusCode).toBe(200);
+
+    const types = await ok("GET", `${MODEL}/entity-types`);
+    const nameOf = async (key: string) => (await ok("GET", `${MODEL}/entity-types/${types.find((t: Row) => t.key === key).entityTypeId}/properties`))
+      .find((p: Row) => p.key === "name");
+    expect(await nameOf("team")).toMatchObject({ description: "What the team is called", required: true, dataType: "string" });
+    expect(await nameOf("squad")).toMatchObject({ description: null, required: false });
+    expect((await inject(CHECK, { proposal: { steps: [{ ...proposal.steps[1], key: "crew", nameDescription: " " }] } })).statusCode).toBe(422);
+  });
 });

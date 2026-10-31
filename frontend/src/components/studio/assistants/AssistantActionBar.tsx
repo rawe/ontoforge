@@ -35,8 +35,8 @@ export function AssistantActionBar({ kind, isNew, dirty, canSave, busy, name, er
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" size="sm" disabled={!canSave}>{isNew ? `Create ${one}` : 'Save'}</Button>
-        {!isNew && <Button type="button" size="sm" variant="ghost" disabled={!dirty || busy} onClick={onDiscard}>Discard changes</Button>}
+        <Button type="submit" size="sm" data-testid="assistant-save" disabled={!canSave}>{isNew ? `Create ${one}` : 'Save'}</Button>
+        {!isNew && <Button type="button" size="sm" variant="ghost" data-testid="assistant-discard" disabled={!dirty || busy} onClick={onDiscard}>Discard changes</Button>}
         {extras}
         {!isNew && (
           <Button type="button" size="sm" variant="ghost" className="ml-auto text-destructive" disabled={busy} onClick={() => setConfirmDelete(true)}>

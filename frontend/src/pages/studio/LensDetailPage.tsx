@@ -12,6 +12,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { workbenchLensPage } from '@/components/layout/surfaceSwitch'
 import { WORKBENCH_ICON } from '@/components/layout/surfaceTargets'
 import { AgentsTab } from '@/components/studio/AgentsTab'
+import { ASSISTANT_DEFAULT, ASSISTANT_NEW } from '@/components/studio/assistants/assistantModel'
 import { ConnectTab } from '@/components/studio/ConnectTab'
 import { NavigatorsTab } from '@/components/studio/NavigatorsTab'
 import { NamedSearchesTab } from '@/components/studio/NamedSearchesTab'
@@ -51,7 +52,10 @@ export function LensDetailPage() {
 
   const { data: lenses, isPending } = useLenses(ontologyKey)
   const lens = lenses?.find((o) => o.lensId === id)
-  usePublishFocus(lens === undefined ? null : { kind: 'lens', key: lens.key })
+  // An open saved agent's editor is the focus; any other view of the lens, the lens.
+  const agentKey = tab === 'agents' ? searchParams.get('agent') : null
+  const editsAgent = agentKey !== null && agentKey !== ASSISTANT_NEW && agentKey !== ASSISTANT_DEFAULT
+  usePublishFocus(lens === undefined ? null : editsAgent ? { kind: 'agent', key: agentKey, lensKey: lens.key } : { kind: 'lens', key: lens.key })
 
   const update = useMutation({
     mutationFn: (patch: { name: string; description: string | null }) =>

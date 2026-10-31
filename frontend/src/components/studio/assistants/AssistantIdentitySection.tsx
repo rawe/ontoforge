@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { AssistantKind } from '@/api/types'
 import { adapters } from '@/assistants'
 import { Input } from '@/components/ui/input'
@@ -15,7 +15,7 @@ import { assistantKeyError } from './assistantModel'
  */
 export function AssistantIdentitySection({
   kind, isNew, name, assistantKey, description, existingKeys, disabled, namePlaceholder, nameError, descriptionError, descriptionHint,
-  onName, onKey, onDescription,
+  nameMark, descriptionMark, onName, onKey, onDescription,
 }: {
   kind: AssistantKind
   isNew: boolean
@@ -30,6 +30,9 @@ export function AssistantIdentitySection({
   descriptionError?: string
   /** The muted sentence under the description, when it has no error. */
   descriptionHint: string
+  /** Beside the Name and Description labels: the AI mark. */
+  nameMark?: ReactNode
+  descriptionMark?: ReactNode
   onName: (name: string) => void
   onKey: (key: string) => void
   onDescription: (description: string) => void
@@ -40,7 +43,7 @@ export function AssistantIdentitySection({
   return (
     <section className="grid gap-3 rounded-xl border bg-card p-4">
       <div className="grid gap-1.5">
-        <Label htmlFor={`${id}-name`}>Name</Label>
+        <div className="flex items-center gap-2"><Label htmlFor={`${id}-name`}>Name</Label>{nameMark}</div>
         <Input
           id={`${id}-name`}
           value={name}
@@ -63,7 +66,7 @@ export function AssistantIdentitySection({
         onChange={(value) => { setKeyTouched(true); onKey(value) }}
       />
       <div className="grid gap-1.5">
-        <Label htmlFor={`${id}-description`}>Description</Label>
+        <div className="flex items-center gap-2"><Label htmlFor={`${id}-description`}>Description</Label>{descriptionMark}</div>
         <Textarea id={`${id}-description`} rows={2} value={description} disabled={disabled} onChange={(e) => onDescription(e.target.value)} />
         {descriptionError !== undefined
           ? <p className="text-xs text-destructive">{descriptionError}</p>

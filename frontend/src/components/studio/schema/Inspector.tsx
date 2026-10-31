@@ -6,6 +6,7 @@
  */
 
 import { Box, PanelTop, Workflow, X } from 'lucide-react'
+import { AskAboutButton } from '@/assistants'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { DeleteTypeButton } from '../modeling/DeleteDialog'
@@ -35,10 +36,12 @@ export function Inspector() {
         <span className="text-[12px] font-medium text-muted-foreground">
           {isEntity ? 'Entity type' : 'Relation type'}
         </span>
+        <span className="flex-1" />
+        <AskAboutButton focus={{ kind: isEntity ? 'entityType' : 'relationType', key: selection.key }} />
         <Button
           variant="ghost"
           size="xs"
-          className="ml-auto text-muted-foreground"
+          className="text-muted-foreground"
           onClick={() => switchView('classic')}
           title="Same components as a full page · switch with V"
         >

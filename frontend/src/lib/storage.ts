@@ -18,6 +18,7 @@
  *                               server)
  *   of.thread.{ontologyKey}.{kind}.{assistantKey} — the same for an assistant
  *                               bound to the whole ontology (the Studio helper)
+ *   of.assistantPanel         — the Studio's assistant panel: `{ open, width }`
  *   of.recents.{ontologyKey}.{lensKey} — last 10 opened entities (`lib/recents.ts`)
  *   of.queryHistory.{ontologyKey}.{lensKey} — last 10 run OQL queries
  *   of.changeset.{ontologyKey}.{lensKey} — id of the pinned changeset: the
@@ -54,6 +55,7 @@ export const storageKeys = {
     lensKey === null
       ? `of.thread.${ontologyKey}.${kind}.${assistantKey}`
       : `of.thread.${ontologyKey}.${lensKey}.${kind}.${assistantKey}`,
+  assistantPanel: 'of.assistantPanel',
   recents: (ontologyKey: string, lensKey: string) =>
     `of.recents.${ontologyKey}.${lensKey}`,
   queryHistory: (ontologyKey: string, lensKey: string) =>

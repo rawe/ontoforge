@@ -3,7 +3,7 @@ import { ChevronLeft, Layers, ListTree, Plug, SquareTerminal, Trash2 } from 'luc
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import * as model from '@/api/model'
-import { adapters } from '@/assistants'
+import { AskAboutButton, adapters, usePublishFocus } from '@/assistants'
 import { useLenses } from '@/api/hooks'
 import { qk } from '@/api/queryKeys'
 import type { Lens } from '@/api/types'
@@ -51,6 +51,7 @@ export function LensDetailPage() {
 
   const { data: lenses, isPending } = useLenses(ontologyKey)
   const lens = lenses?.find((o) => o.lensId === id)
+  usePublishFocus(lens === undefined ? null : { kind: 'lens', key: lens.key })
 
   const update = useMutation({
     mutationFn: (patch: { name: string; description: string | null }) =>
@@ -125,6 +126,7 @@ export function LensDetailPage() {
           </Badge>
           <ScopeBadge ontologyKey={ontologyKey} lensId={lens.lensId} />
           <div className="ml-auto flex items-center gap-2">
+            <AskAboutButton focus={{ kind: 'lens', key: lens.key }} />
             <Button variant="outline" size="sm" asChild>
               <Link to={workbenchLensPage(ontologyKey, lens.key, tab)}>
                 <WORKBENCH_ICON className="size-3.5" /> Open in Workbench

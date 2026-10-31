@@ -211,6 +211,23 @@ describe("tool loop", () => {
     expect([first!, second!].map(personText)).toEqual(["one", "two"]);
   });
 
+  it("names a context block the previous message carried and this one does not as gone, once", async () => {
+    const model = new FakeToolCallingModel([new AIMessage("ok")]);
+    const thread = newGraphThread();
+    await turn(prepared(model, [], { context: [block("Focus", "person"), block("Agent draft", "d")] }), thread, "one");
+    await turn(prepared(model, [], { context: [block("Agent draft", "d2")] }), thread, "two");
+    await turn(prepared(model, [], {}), thread, "three");
+    await turn(prepared(model, [], {}), thread, "four");
+
+    const gone = (label: string) =>
+      `<context label="${label}" source="test">\nNone now: what earlier messages showed under this label no longer applies.\n</context>`;
+    const humans = model.calls.at(-1)!.filter((m) => m.getType() === "human").map((m) => m.content);
+    expect(humans[1]).toBe(`${DATA}\n\n${gone("Focus")}\n\n<context label="Agent draft" source="test">\nd2\n</context>\n\ntwo`);
+    expect(humans[2]).toBe(`${DATA}\n\n${gone("Agent draft")}\n\nthree`);
+    expect(humans[3]).toBe("four");
+    expect(model.calls.slice(1).map((call) => personText(call.at(-1)!))).toEqual(["two", "three", "four"]);
+  });
+
   it("never sends a model's reasoning back, in any provider's form; text and tool calls stay", async () => {
     const thinking = { type: "thinking", thinking: "hm", signature: "sig" };
     const model = new FakeToolCallingModel([

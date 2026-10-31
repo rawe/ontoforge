@@ -55,6 +55,7 @@ import {
   MAX_IDENTITY_PROPERTIES,
 } from "../runtime/identity.js";
 import { afterCommit, reconcileSearchGenerations } from "../runtime/indexing/generations.js";
+import { EffectQueue } from "./effects.js";
 import { afterDesignChange, refreshReaders, syncManagedDefinitions } from "../runtime/indexing/managed.js";
 import {
   applyIndexCascade,
@@ -198,6 +199,9 @@ async function afterSchemaChange(store: ModelingStore): Promise<void> {
   await afterCommit(indices.ontologyKey, () => afterDesignChange(indices));
 }
 
+/** Queue `afterSchemaChange` for after the commit. */
+const reconcileAfter = (effects: EffectQueue) => effects.add("search", afterSchemaChange);
+
 // --- Lens ---
 
 export async function createLens(
@@ -290,28 +294,39 @@ export async function createEntityType(
   store: ModelingStore,
   cascade = false,
 ): Promise<EntityTypeResponseBody> {
-  const data = await store.changeDesign(async (s) => {
-    const existing = await s.getEntityTypeByKey(body.key);
-    if (existing) {
-      throw new ConflictError(`Entity type with key '${body.key}' already exists`);
-    }
-    const entityTypeId = randomUUID();
-    let data = await s.createEntityType(
-      entityTypeId,
-      body.key,
-      body.displayName,
-      body.description ?? null,
-      newNameProperty(body.nameProperty),
-    );
-    const identityProperties = body.identityProperties ?? null;
-    if (identityProperties !== null) {
-      data = await setIdentity(s, data, identityProperties, cascade);
-    }
-    await syncManagedDefinitions(s.searchIndices());
-    return data;
-  });
-  await afterSchemaChange(store);
+  const effects = new EffectQueue();
+  const data = await store.changeDesign((s) => createEntityTypeIn(s, effects, body, cascade));
+  await effects.run(store);
   return toEntityTypeResponse(data);
+}
+
+/** `createEntityType` on a store inside a design change: the type row as
+ * written; its after-commit work goes to `effects`. */
+export async function createEntityTypeIn(
+  s: ModelingStore,
+  effects: EffectQueue,
+  body: EntityTypeCreateInput,
+  cascade = false,
+): Promise<Row> {
+  const existing = await s.getEntityTypeByKey(body.key);
+  if (existing) {
+    throw new ConflictError(`Entity type with key '${body.key}' already exists`);
+  }
+  const entityTypeId = randomUUID();
+  let data = await s.createEntityType(
+    entityTypeId,
+    body.key,
+    body.displayName,
+    body.description ?? null,
+    newNameProperty(body.nameProperty),
+  );
+  const identityProperties = body.identityProperties ?? null;
+  if (identityProperties !== null) {
+    data = await setIdentity(s, data, identityProperties, cascade);
+  }
+  await syncManagedDefinitions(s.searchIndices());
+  reconcileAfter(effects);
+  return data;
 }
 
 /** The name property an entity type is created with when nothing else
@@ -358,41 +373,53 @@ export async function updateEntityType(
   store: ModelingStore,
   cascade = false,
 ): Promise<EntityTypeResponseBody> {
+  const effects = new EffectQueue();
+  const data = await store.changeDesign((s) => updateEntityTypeIn(s, effects, entityTypeId, body, cascade));
+  await effects.run(store);
+  return toEntityTypeResponse(data);
+}
+
+/** `updateEntityType` on a store inside a design change: the type row as
+ * written; its after-commit work goes to `effects`. */
+export async function updateEntityTypeIn(
+  s: ModelingStore,
+  effects: EffectQueue,
+  entityTypeId: string,
+  body: EntityTypeUpdateInput,
+  cascade = false,
+): Promise<Row> {
   const nameProperty = body.nameProperty ?? null;
-  const { data } = await store.changeDesign(async (s) => {
-    const before = await s.getEntityType(entityTypeId);
-    if (nameProperty !== null) {
-      const et = before;
-      if (!et) {
-        throw new NotFoundError(`Entity type '${entityTypeId}' not found`);
-      }
-      const prop = await s.getPropertyByKey(entityTypeId, "EntityType", nameProperty);
-      if (!prop || prop.dataType !== NAME_PROPERTY_DATA_TYPE) {
-        throw notANameProperty(nameProperty, et.key as string);
-      }
-    }
-    let data = await s.updateEntityType(
-      entityTypeId,
-      body.displayName ?? null,
-      body.description ?? null,
-      nameProperty,
-    );
-    if (!data) {
+  const before = await s.getEntityType(entityTypeId);
+  if (nameProperty !== null) {
+    const et = before;
+    if (!et) {
       throw new NotFoundError(`Entity type '${entityTypeId}' not found`);
     }
-    // Omitted leaves the identity unchanged; an explicit null clears it.
-    if (body.identityProperties !== undefined) {
-      data = await setIdentity(s, data, body.identityProperties, cascade);
+    const prop = await s.getPropertyByKey(entityTypeId, "EntityType", nameProperty);
+    if (!prop || prop.dataType !== NAME_PROPERTY_DATA_TYPE) {
+      throw notANameProperty(nameProperty, et.key as string);
     }
-    await syncManagedDefinitions(s.searchIndices());
-    const rendered =
-      before !== null &&
-      (before.displayName !== data.displayName || before.nameProperty !== data.nameProperty);
-    if (rendered) await refreshReaders(s.searchIndices(), [data.key as string]);
-    return { before, data };
-  });
-  await afterSchemaChange(store);
-  return toEntityTypeResponse(data);
+  }
+  let data = await s.updateEntityType(
+    entityTypeId,
+    body.displayName ?? null,
+    body.description ?? null,
+    nameProperty,
+  );
+  if (!data) {
+    throw new NotFoundError(`Entity type '${entityTypeId}' not found`);
+  }
+  // Omitted leaves the identity unchanged; an explicit null clears it.
+  if (body.identityProperties !== undefined) {
+    data = await setIdentity(s, data, body.identityProperties, cascade);
+  }
+  await syncManagedDefinitions(s.searchIndices());
+  const rendered =
+    before !== null &&
+    (before.displayName !== data.displayName || before.nameProperty !== data.nameProperty);
+  if (rendered) await refreshReaders(s.searchIndices(), [data.key as string]);
+  reconcileAfter(effects);
+  return data;
 }
 
 // --- Entity identity ---
@@ -655,37 +682,41 @@ export async function createRelationType(
   body: RelationTypeCreateInput,
   store: ModelingStore,
 ): Promise<RelationTypeResponseBody> {
-  const row = await store.changeDesign(async (s) => {
-    const existing = await s.getRelationTypeByKey(body.key);
-    if (existing) {
-      throw new ConflictError(`Relation type with key '${body.key}' already exists`);
-    }
-    // Endpoints must exist at creation, and are immutable forever after.
-    const source = await s.getEntityTypeByKey(body.sourceEntityTypeKey);
-    if (!source) {
-      throw new ValidationError(`Source entity type '${body.sourceEntityTypeKey}' not found`);
-    }
-    const target = await s.getEntityTypeByKey(body.targetEntityTypeKey);
-    if (!target) {
-      throw new ValidationError(`Target entity type '${body.targetEntityTypeKey}' not found`);
-    }
-    const relationTypeId = randomUUID();
-    const rules = nextRules({ parent: null, onePerPair: false }, body.parent ?? null, body.onePerPair);
-    const written = await s.createRelationType(
-      relationTypeId,
-      body.key,
-      body.displayName,
-      body.description ?? null,
-      body.sourceEntityTypeKey,
-      body.targetEntityTypeKey,
-      rules,
-    );
-    if ("violations" in written) {
-      throw relationRulesBroken(rulesSubject("", body.key, rules), written.violations);
-    }
-    return written.row;
-  });
+  const row = await store.changeDesign((s) => createRelationTypeIn(s, body));
   return toRelationTypeResponse(row);
+}
+
+/** `createRelationType` on a store inside a design change: the relation
+ * type row as written. It leaves no after-commit work. */
+export async function createRelationTypeIn(s: ModelingStore, body: RelationTypeCreateInput): Promise<Row> {
+  const existing = await s.getRelationTypeByKey(body.key);
+  if (existing) {
+    throw new ConflictError(`Relation type with key '${body.key}' already exists`);
+  }
+  // Endpoints must exist at creation, and are immutable forever after.
+  const source = await s.getEntityTypeByKey(body.sourceEntityTypeKey);
+  if (!source) {
+    throw new ValidationError(`Source entity type '${body.sourceEntityTypeKey}' not found`);
+  }
+  const target = await s.getEntityTypeByKey(body.targetEntityTypeKey);
+  if (!target) {
+    throw new ValidationError(`Target entity type '${body.targetEntityTypeKey}' not found`);
+  }
+  const relationTypeId = randomUUID();
+  const rules = nextRules({ parent: null, onePerPair: false }, body.parent ?? null, body.onePerPair);
+  const written = await s.createRelationType(
+    relationTypeId,
+    body.key,
+    body.displayName,
+    body.description ?? null,
+    body.sourceEntityTypeKey,
+    body.targetEntityTypeKey,
+    rules,
+  );
+  if ("violations" in written) {
+    throw relationRulesBroken(rulesSubject("", body.key, rules), written.violations);
+  }
+  return written.row;
 }
 
 export async function listRelationTypes(
@@ -711,39 +742,47 @@ export async function updateRelationType(
   body: RelationTypeUpdateInput,
   store: ModelingStore,
 ): Promise<RelationTypeResponseBody> {
-  const data = await store.changeDesign(async (s) => {
-    const before = await s.getRelationType(relationTypeId);
-    if (!before) {
-      throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
-    }
-    // An explicitly null parent clears it, as a property's default; omitted
-    // (`undefined`) means unchanged, and so does an omitted one per pair.
-    // A refused rule leaves the whole update unwritten.
-    const stored = rulesOfRow(before);
-    const rules = nextRules(stored, body.parent, body.onePerPair);
-    if (rules.parent !== stored.parent || rules.onePerPair !== stored.onePerPair) {
-      const written = await s.setRelationTypeRules(relationTypeId, rules);
-      if (written === null) {
-        throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
-      }
-      if ("violations" in written) {
-        throw relationRulesBroken(rulesSubject("", before.key as string, rules), written.violations);
-      }
-    }
-    const data = await s.updateRelationType(
-      relationTypeId,
-      body.displayName ?? null,
-      body.description ?? null,
-    );
-    if (!data) {
-      throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
-    }
-    if (before.displayName !== data.displayName) {
-      await refreshReaders(s.searchIndices(), [data.key as string]);
-    }
-    return data;
-  });
+  const data = await store.changeDesign((s) => updateRelationTypeIn(s, relationTypeId, body));
   return toRelationTypeResponse(data);
+}
+
+/** `updateRelationType` on a store inside a design change: the relation
+ * type row as written. It leaves no after-commit work. */
+export async function updateRelationTypeIn(
+  s: ModelingStore,
+  relationTypeId: string,
+  body: RelationTypeUpdateInput,
+): Promise<Row> {
+  const before = await s.getRelationType(relationTypeId);
+  if (!before) {
+    throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
+  }
+  // An explicitly null parent clears it, as a property's default; omitted
+  // (`undefined`) means unchanged, and so does an omitted one per pair.
+  // A refused rule leaves the whole update unwritten.
+  const stored = rulesOfRow(before);
+  const rules = nextRules(stored, body.parent, body.onePerPair);
+  if (rules.parent !== stored.parent || rules.onePerPair !== stored.onePerPair) {
+    const written = await s.setRelationTypeRules(relationTypeId, rules);
+    if (written === null) {
+      throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
+    }
+    if ("violations" in written) {
+      throw relationRulesBroken(rulesSubject("", before.key as string, rules), written.violations);
+    }
+  }
+  const data = await s.updateRelationType(
+    relationTypeId,
+    body.displayName ?? null,
+    body.description ?? null,
+  );
+  if (!data) {
+    throw new NotFoundError(`Relation type '${relationTypeId}' not found`);
+  }
+  if (before.displayName !== data.displayName) {
+    await refreshReaders(s.searchIndices(), [data.key as string]);
+  }
+  return data;
 }
 
 export async function deleteRelationType(
@@ -818,53 +857,67 @@ export async function createProperty(
   if (typeKind === "RelationType" && body.dataType === "document") {
     throw new ValidationError("Document properties are only supported on entity types");
   }
-  const data = await store.changeDesign(async (s) => {
-    await ensureOwnerExists(s, ownerId, typeKind);
-    const existing = await s.getPropertyByKey(ownerId, typeKind, body.key);
-    if (existing) {
-      throw new ConflictError(`Property with key '${body.key}' already exists on this type`);
-    }
-    // Cascade check: adding a required property without a default breaks
-    // every lens whose explicit allowlist for this type omits the new key.
-    if (body.required && (body.defaultValue === null || body.defaultValue === undefined)) {
-      const affected = await s.findLensesWithExplicitProperty(
-        typeKind,
-        ownerId,
-        body.key,
-      );
-      if (affected.length > 0 && !cascade) {
-        throw new CascadeRequiredError(
-          `Adding required property '${body.key}' without default would break ` +
-            `${affected.length} lens(es). ` +
-            "Use ?cascade=true to auto-add to explicit property lists.",
-          affected,
-        );
-      }
-      if (affected.length > 0) {
-        await s.addPropertyToIncludesLists(typeKind, ownerId, body.key);
-      }
-    }
-    const propertyId = randomUUID();
-    const data = await s.createProperty(
-      ownerId,
-      typeKind,
-      propertyId,
-      body.key,
-      body.displayName,
-      body.description ?? null,
-      body.dataType,
-      body.required,
-      body.defaultValue ?? null,
-    );
-    if (typeKind === "EntityType") {
-      await syncManagedDefinitions(s.searchIndices());
-    }
-    return data;
-  });
-  if (typeKind === "EntityType") {
-    await afterSchemaChange(store);
-  }
+  const effects = new EffectQueue();
+  const data = await store.changeDesign((s) => createPropertyIn(s, effects, ownerId, typeKind, body, cascade));
+  await effects.run(store);
   return toPropertyResponse(data);
+}
+
+/** `createProperty` on a store inside a design change: the property row
+ * as written; its after-commit work goes to `effects`. */
+export async function createPropertyIn(
+  s: ModelingStore,
+  effects: EffectQueue,
+  ownerId: string,
+  typeKind: TypeKind,
+  body: PropertyDefinitionCreateInput,
+  cascade: boolean,
+): Promise<Row> {
+  if (typeKind === "RelationType" && body.dataType === "document") {
+    throw new ValidationError("Document properties are only supported on entity types");
+  }
+  await ensureOwnerExists(s, ownerId, typeKind);
+  const existing = await s.getPropertyByKey(ownerId, typeKind, body.key);
+  if (existing) {
+    throw new ConflictError(`Property with key '${body.key}' already exists on this type`);
+  }
+  // Cascade check: adding a required property without a default breaks
+  // every lens whose explicit allowlist for this type omits the new key.
+  if (body.required && (body.defaultValue === null || body.defaultValue === undefined)) {
+    const affected = await s.findLensesWithExplicitProperty(
+      typeKind,
+      ownerId,
+      body.key,
+    );
+    if (affected.length > 0 && !cascade) {
+      throw new CascadeRequiredError(
+        `Adding required property '${body.key}' without default would break ` +
+          `${affected.length} lens(es). ` +
+          "Use ?cascade=true to auto-add to explicit property lists.",
+        affected,
+      );
+    }
+    if (affected.length > 0) {
+      await s.addPropertyToIncludesLists(typeKind, ownerId, body.key);
+    }
+  }
+  const propertyId = randomUUID();
+  const data = await s.createProperty(
+    ownerId,
+    typeKind,
+    propertyId,
+    body.key,
+    body.displayName,
+    body.description ?? null,
+    body.dataType,
+    body.required,
+    body.defaultValue ?? null,
+  );
+  if (typeKind === "EntityType") {
+    await syncManagedDefinitions(s.searchIndices());
+    reconcileAfter(effects);
+  }
+  return data;
 }
 
 export async function listProperties(
@@ -884,45 +937,56 @@ export async function updateProperty(
   body: PropertyDefinitionUpdateInput,
   store: ModelingStore,
 ): Promise<PropertyDefinitionResponseBody> {
-  const { renamed, data } = await store.changeDesign(async (s) => {
-    const owner = await ensureOwnerExists(s, ownerId, typeKind);
-    const before = await s.getProperty(ownerId, typeKind, propertyId);
-    // An identity property stays required without a default.
-    if (typeKind === "EntityType" && before !== null && identityOf(owner)?.includes(before.key as string)) {
-      if (body.required === false) {
-        throw identityLocked(before.key as string, owner.key as string, "become optional");
-      }
-      if (body.defaultValue !== null && body.defaultValue !== undefined) {
-        throw identityLocked(before.key as string, owner.key as string, "take a default");
-      }
-    }
-    // An explicitly null defaultValue clears the default — the one exception
-    // to sparse-update semantics. Omitted (`undefined`) means unchanged.
-    const clearDefault = body.defaultValue === null;
-    const data = await s.updateProperty(
-      ownerId,
-      typeKind,
-      propertyId,
-      body.displayName ?? null,
-      body.description ?? null,
-      body.required ?? null,
-      body.defaultValue ?? null,
-      clearDefault,
-    );
-    if (!data) {
-      throw new NotFoundError(`Property '${propertyId}' not found on this type`);
-    }
-    const renamed = before !== null && before.displayName !== data.displayName;
-    if (typeKind === "EntityType" || renamed) {
-      await syncManagedDefinitions(s.searchIndices());
-    }
-    if (renamed) await refreshReaders(s.searchIndices(), [owner.key as string]);
-    return { renamed, data };
-  });
-  if (typeKind === "EntityType" || renamed) {
-    await afterSchemaChange(store);
-  }
+  const effects = new EffectQueue();
+  const data = await store.changeDesign((s) => updatePropertyIn(s, effects, ownerId, typeKind, propertyId, body));
+  await effects.run(store);
   return toPropertyResponse(data);
+}
+
+/** `updateProperty` on a store inside a design change: the property row
+ * as written; its after-commit work goes to `effects`. */
+export async function updatePropertyIn(
+  s: ModelingStore,
+  effects: EffectQueue,
+  ownerId: string,
+  typeKind: TypeKind,
+  propertyId: string,
+  body: PropertyDefinitionUpdateInput,
+): Promise<Row> {
+  const owner = await ensureOwnerExists(s, ownerId, typeKind);
+  const before = await s.getProperty(ownerId, typeKind, propertyId);
+  // An identity property stays required without a default.
+  if (typeKind === "EntityType" && before !== null && identityOf(owner)?.includes(before.key as string)) {
+    if (body.required === false) {
+      throw identityLocked(before.key as string, owner.key as string, "become optional");
+    }
+    if (body.defaultValue !== null && body.defaultValue !== undefined) {
+      throw identityLocked(before.key as string, owner.key as string, "take a default");
+    }
+  }
+  // An explicitly null defaultValue clears the default — the one exception
+  // to sparse-update semantics. Omitted (`undefined`) means unchanged.
+  const clearDefault = body.defaultValue === null;
+  const data = await s.updateProperty(
+    ownerId,
+    typeKind,
+    propertyId,
+    body.displayName ?? null,
+    body.description ?? null,
+    body.required ?? null,
+    body.defaultValue ?? null,
+    clearDefault,
+  );
+  if (!data) {
+    throw new NotFoundError(`Property '${propertyId}' not found on this type`);
+  }
+  const renamed = before !== null && before.displayName !== data.displayName;
+  if (typeKind === "EntityType" || renamed) {
+    await syncManagedDefinitions(s.searchIndices());
+    reconcileAfter(effects);
+  }
+  if (renamed) await refreshReaders(s.searchIndices(), [owner.key as string]);
+  return data;
 }
 
 export async function deleteProperty(

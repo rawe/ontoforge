@@ -13,6 +13,8 @@ export interface Conversation<I> {
   /** The remembered thread is being read back; nothing can be sent. */
   restoring: boolean
   notice: string | null
+  /** Why the last message was refused before its stream opened; its text is back in the input. */
+  refused: string | null
 }
 
 export type ConversationAction<I> =
@@ -26,24 +28,45 @@ export type ConversationAction<I> =
   | { type: 'updated'; turn: Turn<I> }
   /** A message was refused for an expired thread: the conversation starts over. */
   | { type: 'expired' }
+  /** A message was refused before its stream opened: its turn is taken back. */
+  | { type: 'refused'; turnId: string; error: string }
   /** "New conversation". */
   | { type: 'cleared' }
 
-export const startConversation = <I>(restoring: boolean): Conversation<I> => ({ turns: [], restoring, notice: null })
+export const startConversation = <I>(restoring: boolean): Conversation<I> => ({ turns: [], restoring, notice: null, refused: null })
+
+/**
+ * How a message whose request threw ended: the user stopped it, its thread
+ * expired, it was refused before its stream opened (no event yet: the
+ * thread was busy, or the server was not reached) — only where the surface
+ * takes such a message back — or it failed.
+ */
+export function sendFailure({ aborted, code, opened, takeBack }: {
+  aborted: boolean
+  code: 'THREAD_NOT_FOUND' | 'THREAD_BUSY' | null
+  opened: boolean
+  takeBack: boolean
+}): 'stopped' | 'expired' | 'refused' | 'failed' {
+  if (aborted) return 'stopped'
+  if (code === 'THREAD_NOT_FOUND') return 'expired'
+  return takeBack && !opened ? 'refused' : 'failed'
+}
 
 export function conversationReducer<I>(state: Conversation<I>, action: ConversationAction<I>): Conversation<I> {
   switch (action.type) {
     case 'restored':
-      return { turns: action.turns, restoring: false, notice: action.expired ? EXPIRED_TEXT : state.notice }
+      return { ...state, turns: action.turns, restoring: false, notice: action.expired ? EXPIRED_TEXT : state.notice }
     case 'restoreFailed':
       return { ...state, restoring: false, notice: `Could not restore the conversation: ${action.error}` }
     case 'sent':
-      return { ...state, turns: [...state.turns, action.turn], notice: null }
+      return { ...state, turns: [...state.turns, action.turn], notice: null, refused: null }
     case 'updated':
       return { ...state, turns: state.turns.map((turn) => (turn.id === action.turn.id ? action.turn : turn)) }
     case 'expired':
-      return { ...state, turns: [], notice: EXPIRED_TEXT }
+      return { ...state, turns: [], notice: EXPIRED_TEXT, refused: null }
+    case 'refused':
+      return { ...state, turns: state.turns.filter((turn) => turn.id !== action.turnId), refused: action.error }
     case 'cleared':
-      return { ...state, turns: [], notice: null }
+      return { ...state, turns: [], notice: null, refused: null }
   }
 }

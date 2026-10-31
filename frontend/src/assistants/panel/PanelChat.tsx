@@ -1,4 +1,4 @@
-import { ChevronRight, LoaderCircle, MessageSquarePlus, X } from 'lucide-react'
+import { ChevronRight, LoaderCircle, MessageSquarePlus, RotateCcw, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { StudioChatRequest } from '@/api/model'
 import type { ToolCall } from '@/api/types'
@@ -53,8 +53,9 @@ export function PanelChat({ binding, principal, focus, onRemoveFocus, onClose }:
       return studio.send(binding, DEFAULT_ASSISTANT, request, onEvent, signal)
     },
     blocked: false,
+    takeBackRefused: true,
   })
-  const { turns, running, restoring, notice } = conversation
+  const { turns, running, restoring, notice, refused, input, canAsk } = conversation
   const { icon: Icon, nouns: { one: name } } = studio
   const scroll = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -111,6 +112,21 @@ export function PanelChat({ binding, principal, focus, onRemoveFocus, onClose }:
       </div>
 
       <div className="border-t px-3 pt-3 pb-2.5">
+        {refused !== null && (
+          <div role="alert" data-testid="assistant-refused" className="mb-2 flex items-start gap-2 rounded border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs">
+            <p className="min-w-0 flex-1 py-0.5 break-words text-destructive">{refused}</p>
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid="assistant-retry"
+              className="h-6 shrink-0 gap-1 px-2 text-xs"
+              disabled={running || !canAsk || input.trim() === ''}
+              onClick={() => void conversation.submit()}
+            >
+              <RotateCcw className="size-3" /> Retry
+            </Button>
+          </div>
+        )}
         <Composer name={name} placeholder="Message" conversation={conversation} disabled={false} />
       </div>
       <NewConversationDialog open={confirmNew} onOpenChange={setConfirmNew} onConfirm={conversation.startOver} />

@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { chatErrorText, threadError, type ChatRequest, type SharedEvent } from '../stream/chatStream'
 import { applyEvent, failTurn, pendingTurn, restoredTurns, stopTurn, type Turn, type TurnModel } from './chatModel'
-import { conversationReducer, startConversation, type Conversation, type ConversationAction } from './conversation'
+import { conversationReducer, sendFailure, startConversation, type Conversation, type ConversationAction } from './conversation'
 import { forgetThread, rememberThread, rememberedThread, restoreThread, type ThreadOwner } from './threadStore'
 
 interface ConversationOptions<E extends { type: string }, I> {
@@ -12,6 +12,12 @@ interface ConversationOptions<E extends { type: string }, I> {
   send: (body: ChatRequest, onEvent: (event: SharedEvent | E) => void, signal: AbortSignal) => Promise<void>
   /** Nothing can be asked (no assistant yet, or questions are blocked). */
   blocked: boolean
+  /**
+   * A message refused before its stream opened (a busy thread, no
+   * connection) is taken back: its text returns to the input with the
+   * reason (`refused`), to send again by hand. Otherwise its turn fails.
+   */
+  takeBackRefused?: boolean
   /** A question was sent. */
   onSent?: () => void
   /** An answer completed. */
@@ -26,7 +32,7 @@ interface ConversationOptions<E extends { type: string }, I> {
  * `key`) for another assistant.
  */
 export function useAssistantConversation<E extends { type: string }, I>({
-  owner, model, send, blocked, onSent, onComplete,
+  owner, model, send, blocked, takeBackRefused = false, onSent, onComplete,
 }: ConversationOptions<E, I>) {
   const [state, dispatch] = useReducer(
     conversationReducer as (state: Conversation<I>, action: ConversationAction<I>) => Conversation<I>,
@@ -78,8 +84,10 @@ export function useAssistantConversation<E extends { type: string }, I>({
     setInput('')
     callbacks.current.onSent?.()
     dispatch({ type: 'sent', turn })
+    let opened = false
     const onEvent = (event: SharedEvent | E) => {
       if (active.current !== controller || controller.signal.aborted) return
+      opened = true
       if (event.type === 'thread') {
         threadId.current = (event as SharedEvent & { type: 'thread' }).threadId
         if (owner !== null) rememberThread(owner, threadId.current)
@@ -92,9 +100,8 @@ export function useAssistantConversation<E extends { type: string }, I>({
       if (active.current === controller && turn.status === 'complete') callbacks.current.onComplete?.(turn)
     } catch (error) {
       if (active.current !== controller) return
-      if (controller.signal.aborted) {
-        turn = stopTurn(model, turn, Date.now())
-      } else if (threadError(error) === 'THREAD_NOT_FOUND') {
+      const failure = sendFailure({ aborted: controller.signal.aborted, code: threadError(error), opened, takeBack: takeBackRefused })
+      if (failure === 'expired') {
         // The thread expired: start over, the question back in the input.
         active.current = null
         threadId.current = null
@@ -102,9 +109,15 @@ export function useAssistantConversation<E extends { type: string }, I>({
         dispatch({ type: 'expired' })
         setInput(question)
         return
-      } else {
-        turn = failTurn(model, turn, chatErrorText(error), Date.now())
       }
+      if (failure === 'refused') {
+        // Nothing was answered: the question goes back to the input, never resent by itself.
+        active.current = null
+        dispatch({ type: 'refused', turnId: turn.id, error: chatErrorText(error) })
+        setInput(question)
+        return
+      }
+      turn = failure === 'stopped' ? stopTurn(model, turn, Date.now()) : failTurn(model, turn, chatErrorText(error), Date.now())
       save()
     } finally {
       if (active.current === controller) active.current = null

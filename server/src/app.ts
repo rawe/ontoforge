@@ -42,6 +42,7 @@ import {
 } from "./core/exceptions.js";
 import { mountMcp } from "./mcp/mount.js";
 import { serveMetrics } from "./metrics.js";
+import { studioHelperRouter } from "./modeling/helper/router.js";
 import { modelingRouter } from "./modeling/router.js";
 import { registryRouter } from "./registry/router.js";
 import { aiRouter } from "./runtime/aiRouter.js";
@@ -345,6 +346,7 @@ export async function createApp(shared?: SharedState, auth: AuthRuntime | null =
   await app.register(changesetRouter, { prefix: `${runtimePrefix}/changesets` });
   // One thread store per server: every assistant conversation lives in it.
   await app.register(aiRouter, { prefix: runtimePrefix, threads: state.threads });
+  await app.register(studioHelperRouter, { prefix: "/api/ontologies/:ontologyKey/model", threads: state.threads });
   await app.register(decisionRouter, { prefix: runtimePrefix });
   // Ruleset maintenance names no lens: the first lensless runtime routes.
   await app.register(rulesetRouter, { prefix: "/api/ontologies/:ontologyKey/runtime/rulesets" });

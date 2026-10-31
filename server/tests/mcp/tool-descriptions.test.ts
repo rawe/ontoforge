@@ -11,9 +11,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import type { RuntimeStore, WriteAccess } from "../../src/core/ports.js";
+import type { ModelingStore, RuntimeStore, WriteAccess } from "../../src/core/ports.js";
 import { RelationGroup, SearchIndexDefinition } from "../../src/core/searchIndex.js";
 import { createModelingMcpServer } from "../../src/mcp/modeling.js";
+import { designTools } from "../../src/modeling/helper/tools.js";
 import { createRuntimeMcpServer } from "../../src/mcp/runtime.js";
 import { ALL_TOOL_NAMES, buildTools } from "../../src/runtime/assistants/agents/runtime.js";
 import { filterRules } from "../../src/runtime/readHelpers.js";
@@ -68,6 +69,7 @@ const all = [
     .map(([name, text]) => [`none ${name}`, text] as const),
   ...[...modeling].map(([name, text]) => [`modeling ${name}`, text] as const),
   ...[...agent].map(([name, text]) => [`agent ${name}`, text] as const),
+  ...designTools({} as ModelingStore).map((tool) => [`studio ${tool.name}`, tool.description] as const),
 ];
 
 describe("tool descriptions", () => {

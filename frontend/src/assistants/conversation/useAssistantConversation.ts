@@ -62,7 +62,7 @@ export function useAssistantConversation<E extends { type: string }, I>({
       (restored) => {
         if (controller.signal.aborted) return
         threadId.current = restored.threadId
-        dispatch({ type: 'restored', turns: restoredTurns(restored.messages, model.empty, () => crypto.randomUUID()), expired: restored.expired })
+        dispatch({ type: 'restored', turns: restoredTurns(restored.messages, model.empty, () => crypto.randomUUID(), model.restore), expired: restored.expired })
       },
       (error: unknown) => {
         if (controller.signal.aborted) return

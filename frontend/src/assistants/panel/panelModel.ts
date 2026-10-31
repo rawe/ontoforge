@@ -49,6 +49,8 @@ export function focusLabel(focus: Focus): { name: string; what: string } {
 export const MIN_WIDTH = 320
 export const MAX_WIDTH = 720
 export const DEFAULT_WIDTH = 400
+/** The panel's width at least while a proposal review is open, so the review can be read. */
+export const REVIEW_WIDTH = 640
 
 /** What the browser remembers of the panel. */
 export interface PanelSettings {

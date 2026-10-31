@@ -4,7 +4,7 @@ import { readJson, storageKeys, writeJson } from '@/lib/storage'
 import type { DraftEditor } from '../draft/draftFillModel'
 import type { Focus } from '../types'
 import { AssistantPanelContext, type AssistantPanel } from './panelContext'
-import { clampWidth, focusId, panelSettings, type PanelSettings } from './panelModel'
+import { clampWidth, focusId, panelSettings, REVIEW_WIDTH, type PanelSettings } from './panelModel'
 
 // The conversation (markdown, steps, every kind's views) loads on the panel's first open.
 const PanelChat = lazy(() => import('./PanelChat').then((m) => ({ default: m.PanelChat })))
@@ -63,6 +63,17 @@ export function AssistantPanelHost({ binding, children }: {
   }, [])
   const draftEditor = useCallback(() => draftEditorRef.current, [])
 
+  // How many reviews hold the panel wide; the saved width is left as it is.
+  const [wide, setWide] = useState(0)
+  const widen = useCallback(() => {
+    setWide((n) => n + 1)
+    let held = true
+    return () => {
+      if (held) setWide((n) => n - 1)
+      held = false
+    }
+  }, [])
+
   // Stable, so a page's published focus is not published again when the panel opens or closes.
   const unpublish = useCallback((gone: Focus) => setFocus((current) => (focusId(current) === focusId(gone) ? null : current)), [])
   const panel = useMemo<AssistantPanel>(() => ({
@@ -78,7 +89,8 @@ export function AssistantPanelHost({ binding, children }: {
     unpublish,
     publishDraft,
     draftEditor,
-  }), [available, settings.open, setOpen, unpublish, publishDraft, draftEditor])
+    widen,
+  }), [available, settings.open, setOpen, unpublish, publishDraft, draftEditor, widen])
 
   return (
     <AssistantPanelContext.Provider value={panel}>
@@ -86,7 +98,7 @@ export function AssistantPanelHost({ binding, children }: {
       {available && mounted && (
         <DockedPanel
           open={settings.open}
-          width={settings.width}
+          width={wide > 0 ? Math.max(settings.width, REVIEW_WIDTH) : settings.width}
           onWidth={(width) => save((current) => ({ ...current, width }))}
         >
           <Suspense fallback={null}>

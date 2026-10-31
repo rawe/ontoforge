@@ -83,6 +83,17 @@ test('restoredTurns pairs each question with the answer after it', () => {
   ])
 })
 
+test('restoredTurns gives an answer with artifacts its insight from them', () => {
+  const restore = (artifacts: readonly unknown[]): ToolCall[] => artifacts.map((_, i) => ({ callId: `a${i}`, tool: 't', args: {}, status: 'completed' }))
+  const turns = restoredTurns([
+    { role: 'user', content: 'one' },
+    { role: 'assistant', content: 'A', artifacts: [{ type: 'proposal' }] },
+    { role: 'user', content: 'two' },
+    { role: 'assistant', content: 'B' },
+  ], agentTurns.empty, () => 'r', restore)
+  assert.deepEqual(turns.map((t) => t.insight.map((c) => c.callId)), [['a0'], []])
+})
+
 test('inspectedTurn picks the chosen turn, else the latest with insight', () => {
   const call: ToolCall = { callId: 'c', tool: 'search', args: {}, status: 'completed' }
   const turn = (id: string, insight: ToolCall[]): Turn<ToolCall[]> => ({ id, question: id, reply: '', status: 'complete', entities: [], links: [], insight })

@@ -21,13 +21,15 @@ export interface AssistantPanel {
   publishDraft: (editor: DraftEditor) => () => void
   /** The open draft editor, if any: its draft goes with each message, its cards fill it. */
   draftEditor: () => DraftEditor | null
+  /** A review opened: the panel is at least `REVIEW_WIDTH` wide until the call returned is made. */
+  widen: () => () => void
 }
 
 export const AssistantPanelContext = createContext<AssistantPanel | null>(null)
 
 const NONE: AssistantPanel = {
   available: false, isOpen: false, open: () => {}, close: () => {}, toggle: () => {}, publish: () => {}, unpublish: () => {},
-  publishDraft: () => () => {}, draftEditor: () => null,
+  publishDraft: () => () => {}, draftEditor: () => null, widen: () => () => {},
 }
 
 /** The panel of the layout; outside one (no host), an unavailable panel whose calls do nothing. */

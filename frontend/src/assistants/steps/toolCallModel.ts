@@ -104,6 +104,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_search_indices: 'List search indices',
   validate_schema: 'Validate the schema',
   validate_lens: 'Validate a lens',
+  propose_schema_change: 'Check a proposal',
 }
 
 /** A readable name of a tool; unknown tools keep their key. */

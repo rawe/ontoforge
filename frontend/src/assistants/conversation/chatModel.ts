@@ -32,7 +32,7 @@ export interface Turn<I> {
   entities: EntityCard[]
   /** Stored relations between them, unique by id. */
   links: EntityLink[]
-  /** What the kind reported about this answer — empty for a restored one. */
+  /** What the kind reported about this answer — for a restored one, what its artifacts give (`restore`), else empty. */
   insight: I
   /** Read back from the server's thread, not asked in this view. */
   restored?: boolean
@@ -53,6 +53,8 @@ export interface TurnModel<E, I> {
   hasInsight: (insight: I) => boolean
   /** The live detail of a running turn: what it is doing right now. */
   progress: (insight: I) => string | undefined
+  /** The insight of a restored answer from the artifacts it left; empty without. */
+  restore?: (artifacts: readonly unknown[]) => I
 }
 
 /** The conversation was unknown or expired: the next message starts a new one. */
@@ -131,13 +133,23 @@ export function endText(turn: Pick<Turn<unknown>, 'status' | 'error' | 'stopped'
 /**
  * A thread read back as turns: each question with the answer after it; an
  * answer without a question is dropped, a last question without one keeps
- * an empty answer.
+ * an empty answer. An answer's artifacts become its insight through
+ * `restore`.
  */
-export function restoredTurns<I>(messages: readonly ChatMessage[], empty: () => I, newId: () => string): Turn<I>[] {
+export function restoredTurns<I>(
+  messages: readonly ChatMessage[],
+  empty: () => I,
+  newId: () => string,
+  restore?: (artifacts: readonly unknown[]) => I,
+): Turn<I>[] {
   const turns: Turn<I>[] = []
   for (const message of messages) {
     if (message.role === 'user') turns.push({ id: newId(), question: message.content, reply: '', status: 'complete', entities: [], links: [], insight: empty(), restored: true })
-    else if (turns.length > 0) turns[turns.length - 1]!.reply = message.content
+    else if (turns.length > 0) {
+      const turn = turns[turns.length - 1]!
+      turn.reply = message.content
+      if (restore !== undefined && message.artifacts !== undefined && message.artifacts.length > 0) turn.insight = restore(message.artifacts)
+    }
   }
   return turns
 }

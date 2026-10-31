@@ -623,6 +623,8 @@ export interface RuntimeAssistant {
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  /** What an answer left besides its text (a Studio proposal), versioned by type. */
+  artifacts?: unknown[]
 }
 
 export interface AssistantThread {

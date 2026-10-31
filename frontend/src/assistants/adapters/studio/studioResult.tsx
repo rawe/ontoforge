@@ -1,5 +1,6 @@
 import type { ToolCall, ValidationError } from '@/api/types'
 import { cn } from '@/lib/utils'
+import { checkLine, checkOf } from '../../proposal/proposalModel'
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const isIssues = (v: unknown): v is ValidationError[] =>
@@ -9,6 +10,11 @@ const isIssues = (v: unknown): v is ValidationError[] =>
 export function studioResult(call: ToolCall) {
   const result = call.result
   if (!isRecord(result)) return undefined
+  const check = checkOf(result)
+  if (check !== null) {
+    const line = checkLine(check)
+    return <p className={line.verdict === 'ok' ? 'text-(--tc-emerald)' : 'text-destructive'}>{line.text}</p>
+  }
   if (typeof result.valid === 'boolean' && isIssues(result.errors)) {
     const warnings = isIssues(result.warnings) ? result.warnings : []
     return (

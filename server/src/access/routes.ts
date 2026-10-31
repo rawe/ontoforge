@@ -9,7 +9,8 @@
  * take their operation from the ruleset table (`runtime/writeAccess.ts`
  * `ROUTES`): one classification of what writes. The assistant and
  * decision routes below a lens add their own rows (`LENS_ROUTES`); none
- * of them writes.
+ * of them writes. The runtime reads of a lens's design (`DESIGN_READS`)
+ * also let the ontology's administrators in.
  *
  * A route without a need is `undefined`: when authentication is on, it
  * fails the boot.
@@ -22,7 +23,7 @@ const PUBLIC: Need = { kind: "public" };
 const ONTOLOGY_ADMIN: Need = { kind: "ontology-admin" };
 const ONTOLOGY_MEMBER: Need = { kind: "ontology-member" };
 const USER_ADMIN: Need = { kind: "user-admin" };
-/** A modeling read of one lens: its role holders and the ontology's administrators. */
+/** A read of one lens's design: its role holders and the ontology's administrators. */
 const LENS_DESIGN_READ: Need = { kind: "lens", operation: "read", orAdmin: true };
 
 const ONTOLOGY = "/api/ontologies/:ontologyKey";
@@ -48,6 +49,16 @@ export const LENS_ROUTES: Record<string, Operation> = {
   "POST /decisions/compare-entities": "read",
 };
 
+/** The runtime routes below a lens that read its design, not data: its schema and search catalog. */
+const DESIGN_READS = new Set([
+  "GET /schema",
+  "GET /schema/entity-types",
+  "GET /schema/entity-types/:key",
+  "GET /schema/relation-types",
+  "GET /schema/relation-types/:key",
+  "GET /search-indices",
+]);
+
 /** Outside `/api` and `/mcp`: probes, metrics, the API documentation, resource metadata. */
 const PUBLIC_PATHS = ["/livez", "/readyz", "/metrics", "/openapi.json", "/docs", "/.well-known"];
 
@@ -56,8 +67,10 @@ function within(path: string, prefix: string): boolean {
   return path === prefix || path.startsWith(`${prefix}/`);
 }
 
-function lensNeed(operation: Operation | undefined): Need | undefined {
-  return operation === undefined ? undefined : { kind: "lens", operation };
+/** The need of the route `route` (`METHOD path` below a lens) of `operation`. */
+function lensNeed(route: string, operation: Operation | undefined): Need | undefined {
+  if (operation === undefined) return undefined;
+  return DESIGN_READS.has(route) ? LENS_DESIGN_READ : { kind: "lens", operation };
 }
 
 /**
@@ -97,13 +110,15 @@ export function needOf(method: string, url: string): Need | undefined {
     return verb === "GET" ? LENS_DESIGN_READ : ONTOLOGY_ADMIN;
   }
   if (within(path, MIRROR)) {
-    return lensNeed(ROUTES[`${verb} ${path.slice(MIRROR.length) || "/"}`]);
+    const route = `${verb} ${path.slice(MIRROR.length) || "/"}`;
+    return lensNeed(route, ROUTES[route]);
   }
   if (path.startsWith(`${LENS}/`)) {
     const below = path.slice(LENS.length);
     // The mirror's root `GET /` has no plain counterpart.
     if (below === "/") return undefined;
-    return lensNeed(ROUTES[`${verb} ${below}`] ?? LENS_ROUTES[`${verb} ${below}`]);
+    const route = `${verb} ${below}`;
+    return lensNeed(route, ROUTES[route] ?? LENS_ROUTES[route]);
   }
 
   if (path === MCP_MODEL) return ONTOLOGY_ADMIN;

@@ -2,8 +2,9 @@
  * The Studio helper against the real database and the configured language
  * model: it answers a question about a small schema through the Studio
  * route, from the design alone, validates a lens with its tool, drafts
- * an agent for a lens into the open editor's draft, and proposes a schema
- * change whose check passes and which the person then applies.
+ * an agent for a lens into the open editor's draft, proposes a schema
+ * change whose check passes and which the person then applies, and keeps
+ * one conversation going across applied changes.
  * Configuration and skips as in `ai.test.ts` (`support.ts`).
  */
 
@@ -27,6 +28,19 @@ async function post(url: string, payload: object): Promise<Row> {
   const res = await app!.inject({ method: "POST", url, payload });
   expect(res.statusCode, `POST ${url}: ${res.body}`).toBeLessThan(300);
   return res.json();
+}
+
+/** Applies a turn's proposal as the person does: against the revision its check ran on. */
+async function apply(events: Row[]): Promise<Row> {
+  const final = events.at(-1)!;
+  expect(final.artifacts, JSON.stringify(events)).toHaveLength(1);
+  const { proposal, check } = final.artifacts[0].value;
+  expect(check.ok, JSON.stringify(check)).toBe(true);
+  const applied = await app!.inject({
+    method: "POST", url: `${MODEL}/proposals/apply`, payload: { proposal, expected: check.baseRevision },
+  });
+  expect(applied.statusCode, applied.body).toBe(200);
+  return applied.json();
 }
 
 /** One Studio turn: its events, exactly one terminal `final`. */
@@ -124,6 +138,29 @@ describe("the Studio helper on a real model", () => {
     expect(relations.find((r: Row) => r.key === "published_by")).toMatchObject({
       sourceEntityTypeKey: "book", targetEntityTypeKey: "publisher",
     });
+  });
+
+  it("keeps one conversation going across applied proposals: each next turn sees the changed schema", async (ctx) => {
+    if (app === null) {
+      ctx.skip(skipReason?.split("\n")[0] ?? "AI suite unavailable");
+      return;
+    }
+    const focus = { kind: "entityType", key: "book" };
+    const first = await ask("Propose an entity type 'series' (Series) with a string property 'title'.", { focus });
+    const threadId = first.find((event) => event.type === "thread")!.threadId as string;
+    expect((await apply(first)).created["entityTypes.series"]).toBeDefined();
+
+    const second = await ask("Now propose a relation type 'part_of' (Part of) from book to series.", {
+      threadId, focus: { kind: "entityType", key: "series" },
+    });
+    expect((await apply(second)).created["relationTypes.part_of"]).toBeDefined();
+
+    const third = await ask("Which entity type and which relation type did we add in this conversation? Answer with their keys.", {
+      threadId,
+    });
+    const reply = String(third.at(-1)!.reply);
+    expect(reply).toContain("series");
+    expect(reply).toContain("part_of");
   });
 
   it("drafts an agent for a lens into the open editor with fill_agent_draft", async (ctx) => {

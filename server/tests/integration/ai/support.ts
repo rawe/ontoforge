@@ -56,8 +56,10 @@ async function probeModel(): Promise<string | null> {
     const payload = (await res.json()) as { data?: { id: string }[] };
     const ids = (payload.data ?? []).map((m) => m.id);
     // Ollama lists tagged names (`qwen3:8b`), so a bare model name matches
-    // its tagged form too.
-    if (!ids.some((id) => id === model || id.startsWith(`${model}:`))) {
+    // its tagged form too; OpenRouter lists no routing variant
+    // (`openai/gpt-6-luna:floor`), so a variant matches its listed model.
+    const variantOf = model.includes(":") ? model.slice(0, model.lastIndexOf(":")) : null;
+    if (!ids.some((id) => id === model || id.startsWith(`${model}:`) || id === variantOf)) {
       return (
         `AI integration suite SKIPPED: AI_MODEL is not offered by the endpoint.\n` +
         `  Probed GET ${url} — the listing does not contain '${model}'.\n` +

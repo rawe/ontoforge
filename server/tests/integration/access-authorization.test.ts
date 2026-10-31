@@ -215,9 +215,15 @@ describe("authorization with authentication on", () => {
     expect(await keys("creator", "search-indices")).toEqual(["b~default"]);
   });
 
-  it("an Ontology Administrator gets no runtime data without a lens role; a Writer writes", async () => {
-    expect((await as("creator", "GET", `${visitor}/schema`)).status).toBe(403);
+  it("an Ontology Administrator reads a lens's design but no runtime data without a lens role; a Writer writes", async () => {
+    expect((await as("creator", "GET", `${visitor}/schema`)).status).toBe(200);
+    expect((await as("creator", "GET", `${visitor}/schema/entity-types`)).status).toBe(200);
+    expect((await as("creator", "GET", `${visitor}/search-indices`)).status).toBe(200);
+    expect((await as("creator", "GET", `${visitor}/entities/a`)).status).toBe(403);
+    expect((await as("creator", "GET", `${visitor}/saved-queries`)).status).toBe(403);
+    // A Platform Administrator administers no ontology by that role.
     expect((await as("admin", "GET", `${visitor}/schema`)).status).toBe(403);
+    expect((await as("admin", "GET", `${visitor}/search-indices`)).status).toBe(403);
     await grant("creator", "bob", { role: "writer", ontologyKey: "fair", lensKey: "visitor" });
     expect((await as("bob", "POST", `${visitor}/changesets`, {})).status).toBe(201);
   });

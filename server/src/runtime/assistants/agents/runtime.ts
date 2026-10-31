@@ -1,17 +1,15 @@
 /**
- * Agents at runtime (`docs/capabilities/agents.md`): agent
- * chat and the agent list. The engine is
- * LangChain.js / LangGraph.js (approved stack).
+ * Agents at runtime (`docs/capabilities/agents.md`): agent chat and the
+ * agent list — the runtime host of the tool loop (`assistants/loop.ts`).
  *
- * Each turn builds a fresh agent with the agent's current configuration
- * and a scoped tool subset, and runs it on its thread
- * (`docs/capabilities/threads.md`): the thread's state holds the
- * conversation with every tool call and result. Tools invoke the same
- * runtime service functions the MCP tools use — no HTTP hop. A tool
- * failure that is a not-found or validation error is returned to the
- * model as the tool's result so it can correct itself and retry
- * (`docs/capabilities/oql.md#self-correction-hints`); any other error
- * aborts the run.
+ * Each turn prepares a run with the agent's current configuration: its
+ * prompt with the lens schema, and a scoped tool subset bound to the lens.
+ * Tools invoke the same runtime service functions the MCP tools use — no
+ * HTTP hop. A tool failure that is a not-found or validation error is
+ * returned to the model as the tool's result so it can correct itself and
+ * retry (`docs/capabilities/oql.md#self-correction-hints`); any other
+ * error aborts the run. An entity tool's result is followed by the shared
+ * `entities` event (`./entities.ts`).
  */
 
 import {
@@ -25,24 +23,9 @@ import {
 import { deploymentMethods } from "../../search/availability.js";
 import { filterRules } from "../../readHelpers.js";
 
-import { randomUUID } from "node:crypto";
-
-import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import {
-  HumanMessage,
-  SystemMessage,
-  ToolMessage,
-  type BaseMessage,
-} from "@langchain/core/messages";
-import {
-  tool,
-  ToolInputParsingException,
-  type StructuredToolInterface,
-} from "@langchain/core/tools";
-import { createAgent, createMiddleware } from "langchain";
 import { z } from "zod";
 
-import { lastTurns, trimTurns, TURNS_THE_MODEL_SEES, type GraphThread, type StreamEvent } from "../../../assistants/index.js";
+import { runToolLoop, type GraphThread, type StreamExecution, type Tool } from "../../../assistants/index.js";
 import { DEFAULT_AGENT_CONFIG, type AgentConfig } from "../../../core/ai.js";
 import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
 import type { RuntimeStore } from "../../../core/ports.js";
@@ -148,7 +131,7 @@ export function describeSchema(schema: SchemaCacheValue): string {
 interface AgentToolDef {
   name: string;
   description: string;
-  schema: z.ZodType;
+  input: z.ZodType;
   run: (lensKey: string, store: RuntimeStore, args: Row) => Promise<unknown>;
 }
 
@@ -171,7 +154,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "Get the full lens schema including entity types, relation types, " +
       "and their property definitions with data types and required flags. " +
       "Call this if you need to verify available types or properties.",
-    schema: z.object({}),
+    input: z.object({}),
     run: async (lensKey, store) => {
       const loaded = await loadSchema(lensKey, store);
       return describeSchema(loaded.scoped);
@@ -197,7 +180,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "endpoints, so it needs no marker. A relation type that joins one type to " +
       "itself is the exception: there the direction cannot be derived, and the " +
       "error tells you which marker to add.",
-    schema: z.object({
+    input: z.object({
       entity_type_key: z.string(),
       search: z.string().nullish(),
       filters: z.record(z.string(), z.string()).nullish(),
@@ -219,7 +202,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
   {
     name: TOOL_GET_ENTITY,
     description: "Retrieve a specific entity by its _id. Returns all properties.",
-    schema: z.object({
+    input: z.object({
       entity_type_key: z.string(),
       entity_id: z.string(),
     }),
@@ -236,7 +219,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "whole document. Read a segment rather than the whole document when you " +
       "know where to look: pass a search_documents passage's property, charOffset " +
       "and charLength as property_key, offset and limit to read exactly that passage.",
-    schema: z.object({
+    input: z.object({
       entity_type_key: z.string(),
       entity_id: z.string(),
       property_key: z.string(),
@@ -259,7 +242,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
     description:
       "List relations of a type. Each result includes _id, source and target " +
       "entity IDs, and relation properties.",
-    schema: z.object({
+    input: z.object({
       relation_type_key: z.string(),
       limit: z.number().int().nullish(),
     }),
@@ -282,7 +265,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "Explore an entity's connections. Returns the entity plus all connected " +
       "entities with their connecting relations. Use this to answer 'what is X " +
       "connected to?' questions. Direction: 'outgoing', 'incoming', or 'both'.",
-    schema: z.object({
+    input: z.object({
       entity_type_key: z.string(),
       entity_id: z.string(),
       direction: z.string().nullish(),
@@ -308,7 +291,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       filterRules({ contains: false, relations: true }) + " " +
       SEARCH_FILTER_EFFECT + " limit: an integer up to 20, default 10. " +
       ENTITY_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
-    schema: z.object({
+    input: z.object({
       query: z.string(),
       types: z.array(z.string()).nullish(),
       filters: z.record(z.string(), z.string()).nullish(),
@@ -338,7 +321,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "limit: passages, an integer up to 20, default 5. per_entity: at most this many passages per entity, " +
       "1 to limit; omit for no cap. text: false omits the passage text. " +
       PASSAGE_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
-    schema: z.object({
+    input: z.object({
       query: z.string(),
       types: z.array(z.string()).nullish(),
       documents: z.array(z.string()).nullish(),
@@ -376,7 +359,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "MATCH (p:person {name: 'Alice'}) RETURN p | " +
       "MATCH (p:person)-[r:works_for]->(c:company) RETURN p.name, c.name | " +
       "MATCH (p:person) WHERE p.age > 30 RETURN p.name, p.age LIMIT 10",
-    schema: z.object({
+    input: z.object({
       query: z.string(),
     }),
     run: async (lensKey, store, args) => service.executeQuery(lensKey, args.query as string, store),
@@ -386,7 +369,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
     description:
       "List available saved queries with their parameters. " +
       "Each query has a key, name, description, and parameter definitions.",
-    schema: z.object({}),
+    input: z.object({}),
     run: async (lensKey, store) => {
       const loaded = await loadSchema(lensKey, store);
       return Object.values(loaded.savedQueries).map((sq) => ({
@@ -409,7 +392,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "their required parameters. Answers with the last step's output: {columns, results} " +
       "for an oql step; for a search step {ran, items, limitations}, each item a rank, the " +
       "found entity (_id, _entityTypeKey, name) and the entry that matched.",
-    schema: z.object({
+    input: z.object({
       query_key: z.string(),
       params: z.record(z.string(), z.unknown()).nullish(),
     }),
@@ -428,7 +411,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "Returns the most relevant saved queries ranked by how well their " +
       "description matches your query. Use this to find the right saved query " +
       "for a user's intent instead of listing all queries.",
-    schema: z.object({
+    input: z.object({
       query: z.string(),
     }),
     run: async (lensKey, store, args) =>
@@ -443,180 +426,29 @@ const AGENT_TOOL_DEFS_BY_NAME: ReadonlyMap<string, AgentToolDef> = new Map(
 /** Every instantiable tool name. */
 export const ALL_TOOL_NAMES: ReadonlySet<string> = new Set(AGENT_TOOL_DEFS_BY_NAME.keys());
 
-export type ToolEvent =
-  | { type: "agent.tool_call"; callId: string; tool: string; args: Row }
-  | { type: "agent.tool_result"; callId: string; result: unknown };
-
-export interface ChatExecution {
-  signal?: AbortSignal;
-  /** The tool events, and the shared `entities` event after an entity tool's result. */
-  onToolEvent?: (event: StreamEvent) => Promise<void>;
+/** Not-found and validation errors go back to the model, which corrects itself. */
+function selfCorrectable(error: unknown): { error: string } | undefined {
+  return error instanceof NotFoundError || error instanceof ValidationError ? { error: error.message } : undefined;
 }
 
-/**
- * Instantiate the named tools bound to one lens. A tool
- * failure that is a not-found or validation error becomes the tool's
- * result (`{"error": message}`) so the model self-corrects; model-supplied
- * arguments that fail the tool's schema are fed back the same way.
- * Anything else is rethrown and aborts the run. With the turn's `entities`,
- * a result that shows entities not sent yet is followed by the shared
- * `entities` event (`./entities.ts`); an `{error}` result shows none.
- */
-export function buildTools(
-  lensKey: string,
-  store: RuntimeStore,
-  toolNames: string[],
-  execution: ChatExecution = {},
-  entities?: TurnEntities,
-): StructuredToolInterface[] {
+/** A result's entities the turn has not sent yet, as the shared `entities` event. */
+const unsentEntities = (name: string) => (args: Row, result: unknown, entities: TurnEntities) => {
+  const found = entities.unsent(name, args, result);
+  return found.entities.length > 0 || found.links.length > 0 ? [entitiesEvent(found.entities, found.links)] : [];
+};
+
+/** The named tools, bound to one lens; the turn's entities present their results. */
+export function buildTools(lensKey: string, store: RuntimeStore, toolNames: string[]): Tool<TurnEntities>[] {
   return toolNames.flatMap((name) => {
     const def = AGENT_TOOL_DEFS_BY_NAME.get(name);
     if (!def) return [];
-    const structured = tool(
-      async (args: unknown) => {
-        execution.signal?.throwIfAborted();
-        let result: unknown;
-        try {
-          result = await def.run(lensKey, store, (args ?? {}) as Row);
-        } catch (error) {
-          if (!(error instanceof NotFoundError || error instanceof ValidationError)) throw error;
-          result = { error: error.message };
-        }
-        execution.signal?.throwIfAborted();
-        return [typeof result === "string" ? result : JSON.stringify(result), result];
-      },
-      { name: def.name, description: def.description, schema: def.schema,
-        responseFormat: "content_and_artifact" },
-    ) as StructuredToolInterface;
-    // Observe before schema parsing, so invalid arguments remain visible too.
-    const baseInvoke = structured.invoke.bind(structured);
-    structured.invoke = async (...invokeArgs: Parameters<typeof baseInvoke>) => {
-      execution.signal?.throwIfAborted();
-      const [input, config] = invokeArgs;
-      const isToolCall = input !== null && typeof input === "object" && "args" in input;
-      const args = ((isToolCall ? input.args : input) ?? {}) as Row;
-      const callId = randomUUID();
-      // The value handed back; a domain error becomes an `{error}` result.
-      let result: unknown;
-      await execution.onToolEvent?.({ type: "agent.tool_call", callId, tool: name, args });
-      execution.signal?.throwIfAborted();
-      let output: ToolMessage;
-      try {
-        output = await baseInvoke(isToolCall ? input : {
-          type: "tool_call", name, args, id: callId,
-        }, config) as ToolMessage;
-        result = output.artifact;
-      } catch (error) {
-        if (!(error instanceof ToolInputParsingException)) throw error;
-        result = { error: `Invalid arguments for ${name}: ${error.message}` };
-        output = new ToolMessage({
-          content: JSON.stringify(result), name,
-          tool_call_id: isToolCall ? String(input.id ?? "") : callId,
-        });
-      }
-      execution.signal?.throwIfAborted();
-      await execution.onToolEvent?.({ type: "agent.tool_result", callId, result });
-      if (entities !== undefined) {
-        const found = entities.unsent(name, args, result);
-        if (found.entities.length > 0 || found.links.length > 0) {
-          execution.signal?.throwIfAborted();
-          await execution.onToolEvent?.(entitiesEvent(found.entities, found.links));
-        }
-      }
-      return isToolCall ? output : output.content;
-    };
-    return [structured];
+    return [{
+      name, description: def.description, input: def.input,
+      run: (args: Row) => def.run(lensKey, store, args),
+      expected: selfCorrectable,
+      present: unsentEntities(name),
+    }];
   });
-}
-
-// ---------------------------------------------------------------------------
-// Agent runner
-// ---------------------------------------------------------------------------
-
-/** Flatten a message's content to plain text. */
-function messageText(message: BaseMessage | undefined): string {
-  if (message === undefined) {
-    return "";
-  }
-  const content = message.content as unknown;
-  if (typeof content === "string") {
-    return content;
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === "string") {
-          return part;
-        }
-        if (part !== null && typeof part === "object" && (part as Row).type === "text") {
-          return String((part as Row).text ?? "");
-        }
-        return "";
-      })
-      .join("");
-  }
-  return "";
-}
-
-// A budget of roughly 50 model calls: one LangGraph step per model call
-// plus one per tool batch.
-const RECURSION_LIMIT = 100;
-
-/**
- * Tool errors abort the run. `createAgent` hands every tool error back to
- * the model unless a `wrapToolCall` middleware is present, whose errors it
- * rethrows; this pass-through is that middleware. A tool name the model
- * made up fails the same way.
- */
-const ABORT_ON_TOOL_ERROR = createMiddleware({
-  name: "AbortOnToolError",
-  wrapToolCall: async (request, handler) => {
-    if (request.tool === undefined) throw new Error(`Tool "${request.toolCall.name}" not found.`);
-    return handler(request);
-  },
-});
-
-/**
- * One ReAct-style turn on a thread: system prompt, the thread's
- * conversation plus the new message, the given tools. The thread keeps at
- * most `TURNS_PER_THREAD` turns; the model sees the last
- * `TURNS_THE_MODEL_SEES`, tool calls and results included. Tool errors
- * outside the self-correction paths abort (the wrappers in `buildTools`
- * already feed domain and argument errors back). Returns the final reply
- * text.
- */
-async function runReactAgent(
-  model: BaseChatModel,
-  systemPrompt: string,
-  tools: StructuredToolInterface[],
-  message: string,
-  thread: GraphThread,
-  signal?: AbortSignal,
-): Promise<string> {
-  signal?.throwIfAborted();
-  const turns = createMiddleware({
-    name: "ThreadTurns",
-    beforeAgent: (state) => ({ messages: trimTurns(state.messages) }),
-    wrapModelCall: async (request, handler) => {
-      const messages = lastTurns(request.messages, TURNS_THE_MODEL_SEES);
-      // No tools: a plain model call is the same conversation without the
-      // tool loop (binding an empty toolset is rejected by providers).
-      if (tools.length === 0) return model.invoke([request.systemMessage, ...messages], { signal });
-      return handler({ ...request, messages });
-    },
-  });
-  // A SystemMessage keeps the prompt as plain string content; a string
-  // would be turned into a content-block array.
-  const agent = createAgent({
-    model, tools, systemPrompt: new SystemMessage(systemPrompt),
-    middleware: [turns, ABORT_ON_TOOL_ERROR], checkpointer: thread.checkpointer,
-  });
-  const state = await agent.invoke(
-    { messages: [new HumanMessage(message)] },
-    { recursionLimit: RECURSION_LIMIT, signal, configurable: { thread_id: thread.threadId } },
-  );
-  const finalMessages = state.messages as BaseMessage[];
-  return messageText(finalMessages[finalMessages.length - 1]);
 }
 
 // ---------------------------------------------------------------------------
@@ -667,7 +499,7 @@ export async function runAgentChat(
   message: string,
   store: RuntimeStore,
   thread: GraphThread,
-  execution: ChatExecution = {},
+  execution: Partial<StreamExecution> = {},
 ): Promise<Row> {
   execution.signal?.throwIfAborted();
   const loaded = await loadSchema(lensKey, store);
@@ -682,9 +514,10 @@ export async function runAgentChat(
 
   const toolNames = resolveChatToolNames(agentConfig, store);
   const model = requireLanguageModel();
-  const tools = buildTools(lensKey, store, toolNames, execution, new TurnEntities(loaded.scoped));
-
-  const reply = await runReactAgent(model, systemPrompt, tools, message, thread, execution.signal);
+  const { reply } = await runToolLoop({
+    kind: "agent", instructions: systemPrompt, context: [],
+    tools: buildTools(lensKey, store, toolNames), ctx: new TurnEntities(loaded.scoped), model,
+  }, message, thread, execution);
   execution.signal?.throwIfAborted();
 
   return { reply };

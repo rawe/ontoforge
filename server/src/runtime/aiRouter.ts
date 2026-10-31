@@ -6,7 +6,7 @@
  * (`assistants/navigators/router.ts`), each under `/ai/assistants/<kind>`.
  * Every request binds a runtime store to the ontology its path names.
  * Routers parse and shape only; the rules live in `assistants/agents/runtime.ts` and
- * `assistants/` (the session layer).
+ * `assistants/` (the session layer and the tool loop).
  *
  * There are deliberately NO MCP tools for chat — an MCP
  * client is itself a language model and gets the underlying tools

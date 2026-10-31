@@ -467,6 +467,16 @@ describe("retriever pipeline", () => {
     expect(history[0]!.content).toBe("Everyone in Berlin 1");
     expect(JSON.parse(fake.stream.mock.calls.at(-1)![0][1].content).history).toEqual(history);
   });
+
+  it("keeps planning a long conversation: the planner's cap leaves the history out", async () => {
+    const long = "A".repeat(2_500);
+    fake.stream.mockImplementation(async () => (async function* () { yield { content: long }; })());
+    const thread = await newThread();
+    for (let i = 1; i <= 13; i++) await run(`Everyone in Berlin ${i}`, false, thread);
+    const planned = JSON.parse(fake.invoke.mock.calls.at(-1)![0][1].content);
+    expect(planned.history).toHaveLength(2 * 12);
+    expect(fake.invoke.mock.calls.at(-1)![0][1].content.length).toBeGreaterThan(24_000);
+  });
 });
 
 describe("retrieve", () => {

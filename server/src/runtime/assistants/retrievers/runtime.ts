@@ -263,7 +263,7 @@ interface Planning {
  * Plan a question: one planning model call and the plan's checks. A
  * follow-up (a question with history) whose plan searches nothing is
  * planned once more; a question without history never is. Throws for a
- * planner input over the cap, a failed call and a malformed plan.
+ * planning context over the cap, a failed call and a malformed plan.
  */
 export async function planQuestion(planning: Planning): Promise<{ plan: Plan; notes: string[] }> {
   const { retriever, scope, modes, message, history, previous, plannerModel, timings, io, report } = planning;
@@ -271,7 +271,10 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
   const values = await filterValues(scope);
   signal.throwIfAborted();
   const input = plannerInput(retriever.config, scope.lens, scope.records, modes, message, history, previous, values);
-  if (input.length > PLANNER_INPUT_CHARACTERS) {
+  // The cap bounds what the lens and the retriever bring; the conversation
+  // is bounded on its own (`historyOf`, at most `TURNS_PER_THREAD` turns).
+  const context = plannerInput(retriever.config, scope.lens, scope.records, modes, message, [], previous, values);
+  if (context.length > PLANNER_INPUT_CHARACTERS) {
     throw new ValidationError(
       retriever.key === DEFAULT_RETRIEVER_KEY
         ? "This lens is too large for the default retriever: its planning context exceeds the limit. " +

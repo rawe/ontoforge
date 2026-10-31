@@ -6,10 +6,10 @@
  * `entities`, one terminal `final` or `error` — with the kind's own events
  * (`<kind>.<event>`) checked by the kind, and a thread read back.
  */
-import { record } from './checks.ts'
-import { checkEntities, type EntitiesEvent } from './entities.ts'
-import { ApiError, parseError, request } from './http.ts'
-import type { AssistantKind, AssistantThread } from './types.ts'
+import { record } from '../../api/checks.ts'
+import { checkEntities, type EntitiesEvent } from '../../api/entities.ts'
+import { ApiError, parseError, request } from '../../api/http.ts'
+import type { AssistantKind, AssistantThread } from '../../api/types.ts'
 
 export interface StreamError { code: string; message: string; details?: Record<string, unknown> }
 

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { EXPIRED_TEXT, pendingTurn, type Turn } from '../src/components/assistants/chat/chatModel.ts'
-import { conversationReducer, startConversation, type Conversation } from '../src/components/assistants/chat/conversation.ts'
+import { EXPIRED_TEXT, pendingTurn, type Turn } from '../src/assistants/conversation/chatModel.ts'
+import { conversationReducer, startConversation, type Conversation } from '../src/assistants/conversation/conversation.ts'
 
 const turn = (id: string, patch: Partial<Turn<null>> = {}): Turn<null> => ({ ...pendingTurn(id, `q ${id}`, null, 0), ...patch })
 const reduce = conversationReducer<null>

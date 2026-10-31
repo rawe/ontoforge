@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   agentReader, assistantPath, chatErrorText, postChat, readChatStream, readNdjsonStream, readThread, threadError,
-} from '../src/api/chatStream.ts'
+} from '../src/assistants/stream/chatStream.ts'
 import { ApiError } from '../src/api/http.ts'
 
 function response(chunks: Uint8Array[]) {

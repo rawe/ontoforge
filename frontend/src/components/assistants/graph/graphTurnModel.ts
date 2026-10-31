@@ -12,7 +12,7 @@ import {
   type GraphTopology,
   type StepStatus,
 } from '../../../api/graphEvents.ts'
-import type { TurnModel } from '../chat/chatModel.ts'
+import type { TurnModel } from '../../../assistants/conversation/chatModel.ts'
 
 /** A run that was still going when the turn failed or was stopped. */
 export type RunStatus = StepStatus | 'interrupted'

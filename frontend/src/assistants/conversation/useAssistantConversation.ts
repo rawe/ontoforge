@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { chatErrorText, threadError, type ChatRequest, type SharedEvent } from '@/api/chatStream'
+import { chatErrorText, threadError, type ChatRequest, type SharedEvent } from '../stream/chatStream'
 import { applyEvent, failTurn, pendingTurn, restoredTurns, stopTurn, type Turn, type TurnModel } from './chatModel'
 import { conversationReducer, startConversation, type Conversation, type ConversationAction } from './conversation'
 import { forgetThread, rememberThread, rememberedThread, restoreThread, type ThreadOwner } from './threadStore'

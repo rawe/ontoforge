@@ -1,12 +1,9 @@
 import { Wrench } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import type { ChatRequest } from '@/api/chatStream'
+import { agentTurns, AssistantChat, type ChatRequest, InsightToggle, ToolCallPanel, toolError } from '@/assistants'
 import { agentChat } from '@/api/runtime'
-import { AssistantChat, InsightToggle } from '@/components/assistants/chat/AssistantChat'
 import { EntitiesTabs, type EntitiesTab } from '@/components/assistants/entities/EntitiesTabs'
 import { readString, storageKeys, writeString } from '@/lib/storage'
-import { ToolCallPanel } from './ToolCallPanel'
-import { agentTurns, toolError } from './toolCallModel'
 
 interface AgentChatProps {
   ontologyKey: string

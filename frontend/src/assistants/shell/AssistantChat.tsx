@@ -1,7 +1,7 @@
 import { AlertCircle, LoaderCircle, MessageSquarePlus, SendHorizonal, Square, type LucideIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import type { ChatRequest, SharedEvent } from '@/api/chatStream'
+import type { ChatRequest, SharedEvent } from '../stream/chatStream'
 import type { AssistantKind } from '@/api/types'
 import { Markdown } from '@/components/ai/Markdown'
 import {
@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { ASSISTANT_KINDS } from '../kinds'
+import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
 import {
   MAX_MESSAGE,
   elapsedSeconds,
@@ -26,9 +26,9 @@ import {
   inspectedTurn,
   type Turn,
   type TurnModel,
-} from './chatModel'
-import type { ThreadOwner } from './threadStore'
-import { useAssistantConversation } from './useAssistantConversation'
+} from '../conversation/chatModel'
+import type { ThreadOwner } from '../conversation/threadStore'
+import { useAssistantConversation } from '../conversation/useAssistantConversation'
 
 /** How a kind shows what it reported about each answer. */
 export interface InsightView<I> {

@@ -10,7 +10,7 @@ import {
   readThread,
   type ChatEvent,
   type ChatRequest,
-} from './chatStream'
+} from '../assistants/stream/chatStream'
 import { buildQuery, request, type FilterMap } from './http'
 import type {
   AssistantKind,

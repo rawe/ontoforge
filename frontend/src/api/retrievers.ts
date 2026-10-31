@@ -10,7 +10,7 @@
  * reads the runtime index catalog and lens schema (`runtime.ts`), not a
  * catalog of its own.
  */
-import { assistantPath, postChat, readAssistantStream, type ChatRequest, type KindReader, type SharedEvent } from './chatStream.ts'
+import { assistantPath, postChat, readAssistantStream, type ChatRequest, type KindReader, type SharedEvent } from '../assistants/stream/chatStream.ts'
 import { request } from './http.ts'
 import type { Matched, RelationDirection } from './types'
 

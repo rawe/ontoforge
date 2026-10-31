@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { Turn } from '@/components/assistants/chat/chatModel'
+import type { Turn } from '@/assistants'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EntityCardList } from './EntityCardList'
 

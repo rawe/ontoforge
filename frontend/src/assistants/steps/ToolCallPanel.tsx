@@ -14,7 +14,7 @@ import { TypeChip } from '@/components/TypeChip'
 import { ResultsTable } from '@/components/query/ResultsTable'
 import { isEntityObject } from '@/components/query/resultUtils'
 import { cn } from '@/lib/utils'
-import { formatDuration, turnDuration, type Turn } from '../chat/chatModel'
+import { formatDuration, turnDuration, type Turn } from '../conversation/chatModel'
 import {
   callDuration,
   toolCallSummary,

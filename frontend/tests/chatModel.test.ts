@@ -14,14 +14,14 @@ import {
   turnDuration,
   type Turn,
   type TurnModel,
-} from '../src/components/assistants/chat/chatModel.ts'
+} from '../src/assistants/conversation/chatModel.ts'
 import {
   agentTurns,
   callDuration,
   toolCallSummary,
   toolError,
   toolTime,
-} from '../src/components/assistants/agents/toolCallModel.ts'
+} from '../src/assistants/steps/toolCallModel.ts'
 import { retrieverTurns, type RetrieverInsight } from '../src/components/assistants/retrievers/retrieverModel.ts'
 import type { ToolCall } from '../src/api/types.ts'
 

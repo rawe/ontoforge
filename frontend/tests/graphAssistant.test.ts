@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readAssistantStream } from '../src/api/chatStream.ts'
-import { applyEvent, failTurn, pendingTurn, stopTurn } from '../src/components/assistants/chat/chatModel.ts'
+import { readAssistantStream } from '../src/assistants/stream/chatStream.ts'
+import { applyEvent, failTurn, pendingTurn, stopTurn } from '../src/assistants/conversation/chatModel.ts'
 import { graphKindReader, type GraphEvent } from '../src/api/graphEvents.ts'
 import { graphTurns, stepState } from '../src/components/assistants/graph/graphTurnModel.ts'
 

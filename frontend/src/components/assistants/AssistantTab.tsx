@@ -1,13 +1,12 @@
 import { useCallback, useEffect, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { chatErrorText } from '@/api/chatStream'
+import { chatErrorText, DEFAULT_ASSISTANT } from '@/assistants'
 import { useAssistants } from '@/api/hooks'
 import type { AssistantKind, RuntimeAssistant } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ASSISTANT_KINDS } from '../kinds'
-import { DEFAULT_ASSISTANT } from './chatModel'
+import { ASSISTANT_KINDS } from './kinds'
 
 const PARAM = 'assistant'
 

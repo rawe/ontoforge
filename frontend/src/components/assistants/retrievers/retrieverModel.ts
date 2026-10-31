@@ -17,7 +17,7 @@ import type {
   SearchMode,
 } from '@/api/retrievers'
 import type { SearchCatalogEntry, ValidationError } from '@/api/types'
-import type { TurnModel, TurnStatus } from '../chat/chatModel.ts'
+import type { TurnModel, TurnStatus } from '../../../assistants/conversation/chatModel.ts'
 
 /** Client defaults (the server has no catalog endpoint for them). */
 export const DEFAULT_THRESHOLD = 0.35

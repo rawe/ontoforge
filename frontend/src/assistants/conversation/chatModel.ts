@@ -8,7 +8,7 @@
  * No React, no I/O — unit-tested with `node --test`.
  */
 
-import type { SharedEvent } from '@/api/chatStream'
+import type { SharedEvent } from '../stream/chatStream.ts'
 import type { EntityCard, EntityLink } from '@/api/entities'
 import type { ChatMessage } from '@/api/types'
 

@@ -2,7 +2,7 @@ import {
   Circle, CircleCheck, CircleDashed, CircleMinus, CircleSlash, CircleX, LoaderCircle, Repeat, Sparkles,
 } from 'lucide-react'
 import type { GraphStep } from '@/api/graphEvents'
-import { formatDuration, type Turn } from '@/components/assistants/chat/chatModel'
+import { formatDuration, type Turn } from '@/assistants'
 import { EntityCardList } from '@/components/assistants/entities/EntityCardList'
 import { roleInfo } from '@/components/assistants/entities/entityModel'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'

@@ -6,7 +6,7 @@
  */
 
 import { readAssistantThread } from '@/api/runtime'
-import { threadError } from '@/api/chatStream'
+import { threadError } from '../stream/chatStream.ts'
 import type { AssistantKind, ChatMessage } from '@/api/types'
 import { readString, remove, storageKeys, writeString } from '@/lib/storage'
 

@@ -1,5 +1,5 @@
 import { useRuntimeSchema, useSearchCatalog } from '@/api/hooks'
-import { AssistantTab } from '@/components/assistants/chat/AssistantTab'
+import { AssistantTab } from '@/components/assistants/AssistantTab'
 import { RetrieverChat } from './RetrieverChat'
 
 /**

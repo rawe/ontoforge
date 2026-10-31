@@ -6,9 +6,9 @@
  * No React, no I/O — unit-tested with `node --test`.
  */
 
-import type { ChatEvent, SharedEvent } from '@/api/chatStream'
+import type { ChatEvent, SharedEvent } from '../stream/chatStream.ts'
 import type { ToolCall } from '@/api/types'
-import type { TurnModel } from '../chat/chatModel.ts'
+import type { TurnModel } from '../conversation/chatModel.ts'
 
 /** The agent's own stream events. */
 export type AgentEvent = Exclude<ChatEvent, SharedEvent>

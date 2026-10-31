@@ -42,11 +42,17 @@ import {
   UntrackedValueChannel,
 } from "@langchain/langgraph";
 
+import {
+  lastTurns,
+  trimTurns,
+  TURNS_THE_MODEL_SEES,
+  type GraphThread,
+  type StreamExecution,
+} from "../../../assistants/index.js";
 import { settings } from "../../../config.js";
 import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
 import type { RuntimeStore } from "../../../core/ports.js";
 import type { RetrieverConfig } from "../../../core/retriever.js";
-import type { StreamExecution } from "../../chatStream.js";
 import { loadSchema } from "../../schemaCache.js";
 import {
   availableModes,
@@ -65,8 +71,6 @@ import {
   DEFAULT_RETRIEVER_NAME,
   defaultRetrieverConfig,
 } from "./defaultRetriever.js";
-import { TURNS_THE_MODEL_SEES, type GraphThread } from "../../threads/threadStore.js";
-import { lastTurns, trimTurns } from "../../threads/turns.js";
 import { modelInputTrace } from "./modelTrace.js";
 import {
   diagnosticPlan,

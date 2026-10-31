@@ -17,8 +17,8 @@ import {
   describeSchema,
   runAgentChat,
 } from "../../../../src/runtime/assistants/agents/runtime.js";
-import { TURNS_PER_THREAD, TURNS_THE_MODEL_SEES, type GraphThread } from "../../../../src/runtime/threads/threadStore.js";
-import { graphValues, newGraphThread } from "../../threads/graphThread.js";
+import { TURNS_PER_THREAD, TURNS_THE_MODEL_SEES, type GraphThread } from "../../../../src/assistants/index.js";
+import { graphValues, newGraphThread } from "../../../assistants/threads/graphThread.js";
 import { invalidateLoadedSchemaCache, loadSchema } from "../../../../src/runtime/schemaCache.js";
 import { FakeToolCallingModel, toolCallMessage } from "../../aiHelpers.js";
 import {

@@ -9,12 +9,11 @@
  * the question instead of running a guess.
  */
 
+import type { GraphThread, StreamExecution } from "../../../assistants/index.js";
 import { configIssues } from "../../../core/configIssues.js";
 import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
 import type { RuntimeStore } from "../../../core/ports.js";
-import type { StreamExecution } from "../../chatStream.js";
 import { loadSchema, type LoadedSchema, type SchemaCacheValue } from "../../schemaCache.js";
-import type { GraphThread } from "../../threads/threadStore.js";
 import type { RuntimeAssistant } from "../assistant.js";
 import { Trace } from "../kit/trace.js";
 import { checkNavigator, deriveNavigator, NAVIGATOR_CONFIG_VERSION, NavigatorConfig } from "./config.js";

@@ -44,8 +44,8 @@ import {
   retrieveQuestion,
   type RunnableRetriever,
 } from "../../../../src/runtime/assistants/retrievers/runtime.js";
-import { TURNS_PER_THREAD, TURNS_THE_MODEL_SEES, type GraphThread } from "../../../../src/runtime/threads/threadStore.js";
-import { graphValues, newGraphThread } from "../../threads/graphThread.js";
+import { TURNS_PER_THREAD, TURNS_THE_MODEL_SEES, type GraphThread } from "../../../../src/assistants/index.js";
+import { graphValues, newGraphThread } from "../../../assistants/threads/graphThread.js";
 import { CONFIG, LENS, SCHEMA } from "./fixture.js";
 
 const store = {

@@ -6,7 +6,7 @@
  * (`assistants/navigators/router.ts`), each under `/ai/assistants/<kind>`.
  * Every request binds a runtime store to the ontology its path names.
  * Routers parse and shape only; the rules live in `assistants/agents/runtime.ts` and
- * `threads/access.ts`.
+ * `assistants/` (the session layer).
  *
  * There are deliberately NO MCP tools for chat — an MCP
  * client is itself a language model and gets the underlying tools
@@ -16,14 +16,13 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
+import { openThread, readThread, type ThreadStore } from "../assistants/index.js";
 import { getRuntimeStore } from "../core/ports.js";
 import * as agents from "./assistants/agents/runtime.js";
 import { ChatPayload, sendChatStream, threadBinding } from "./chatStream.js";
 import { navigatorRuntimeRouter } from "./assistants/navigators/router.js";
 import { retrieverRuntimeRouter } from "./assistants/retrievers/router.js";
 import { loadSchema } from "./schemaCache.js";
-import { openThread, readThread } from "./threads/access.js";
-import type { ThreadStore } from "./threads/threadStore.js";
 
 const LensParams = z.object({ ontologyKey: z.string(), lensKey: z.string() });
 const AssistantParams = LensParams.extend({ assistantKey: z.string() });

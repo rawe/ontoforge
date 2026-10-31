@@ -16,8 +16,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { closeValkey, connectValkey } from "../../../src/adapters/valkey/connection.js";
 import { THREAD_SCRIPTS, ValkeyThreadStore } from "../../../src/adapters/valkey/threadStore.js";
 import { StoreError } from "../../../src/core/exceptions.js";
-import type { StoreLifetimes, ThreadBinding, Turn } from "../../../src/runtime/threads/threadStore.js";
-import { SUITE_LIFETIMES, threadStoreSuite } from "../../runtime/threads/threadStoreSuite.js";
+import type { StoreLifetimes, ThreadBinding, Turn } from "../../../src/assistants/index.js";
+import { SUITE_LIFETIMES, threadStoreSuite } from "../../assistants/threads/threadStoreSuite.js";
 import { CONTAINER, expectEveryKeyExpiring, openAdmin, url } from "./support.js";
 
 const BINDING: ThreadBinding = { ontologyKey: "fair", lensKey: "visitor", kind: "agents", assistantKey: "guide", owner: null };

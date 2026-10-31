@@ -42,14 +42,12 @@ import {
 import { createAgent, createMiddleware } from "langchain";
 import { z } from "zod";
 
+import { lastTurns, trimTurns, TURNS_THE_MODEL_SEES, type GraphThread, type StreamEvent } from "../../../assistants/index.js";
 import { DEFAULT_AGENT_CONFIG, type AgentConfig } from "../../../core/ai.js";
 import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
 import type { RuntimeStore } from "../../../core/ports.js";
-import type { StreamEvent } from "../../chatStream.js";
 import { loadSchema, type SchemaCacheValue } from "../../schemaCache.js";
 import * as service from "../../service.js";
-import { TURNS_THE_MODEL_SEES, type GraphThread } from "../../threads/threadStore.js";
-import { lastTurns, trimTurns } from "../../threads/turns.js";
 import {
   TOOL_EXECUTE_QUERY,
   TOOL_GET_DOCUMENT,

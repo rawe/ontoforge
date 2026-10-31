@@ -23,8 +23,8 @@ import {
   type ThreadBinding,
   type ThreadStore,
   type Turn,
-} from "../../../src/runtime/threads/threadStore.js";
-import { threadValues, TurnSaver } from "../../../src/runtime/threads/turnSaver.js";
+} from "../../../src/assistants/threads/threadStore.js";
+import { threadValues, TurnSaver } from "../../../src/assistants/threads/turnSaver.js";
 
 /** A store under test and how time passes for it. */
 export interface StoreUnderTest {

@@ -31,7 +31,7 @@ import {
   type ThreadBinding,
   type ThreadStore,
   type Turn,
-} from "../../runtime/threads/threadStore.js";
+} from "../../assistants/index.js";
 import { toStoreError, type ValkeyScripts } from "./connection.js";
 
 // KEYS[1] = thread, KEYS[2] = turn.

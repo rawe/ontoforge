@@ -10,9 +10,9 @@ import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph
 import { describe, expect, it, vi } from "vitest";
 
 import { StoreError } from "../../../src/core/exceptions.js";
-import { TURNS_PER_THREAD } from "../../../src/runtime/threads/threadStore.js";
-import { threadValues, TurnSaver } from "../../../src/runtime/threads/turnSaver.js";
-import { trimTurns } from "../../../src/runtime/threads/turns.js";
+import { TURNS_PER_THREAD } from "../../../src/assistants/threads/threadStore.js";
+import { threadValues, TurnSaver } from "../../../src/assistants/threads/turnSaver.js";
+import { trimTurns } from "../../../src/assistants/threads/turns.js";
 
 /** A two-step chat graph: `reply` answers and trims the thread to
  * `TURNS_PER_THREAD` turns, `tidy` is a second step so every turn writes

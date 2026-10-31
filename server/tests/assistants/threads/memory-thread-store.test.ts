@@ -7,8 +7,8 @@
 import { describe, expect, it } from "vitest";
 
 import { StoreError } from "../../../src/core/exceptions.js";
-import { MemoryThreadStore } from "../../../src/runtime/threads/memoryThreadStore.js";
-import { THREAD_IDLE_LIFETIME_MS, TURN_LEASE_MS, type ThreadBinding, type Turn } from "../../../src/runtime/threads/threadStore.js";
+import { MemoryThreadStore } from "../../../src/assistants/threads/memoryThreadStore.js";
+import { THREAD_IDLE_LIFETIME_MS, TURN_LEASE_MS, type ThreadBinding, type Turn } from "../../../src/assistants/threads/threadStore.js";
 import { threadStoreSuite } from "./threadStoreSuite.js";
 
 threadStoreSuite("in memory", async (lifetimes) => {

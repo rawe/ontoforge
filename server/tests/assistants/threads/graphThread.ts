@@ -5,8 +5,8 @@
 
 import { randomUUID } from "node:crypto";
 
-import type { GraphThread } from "../../../src/runtime/threads/threadStore.js";
-import { threadValues, TurnSaver } from "../../../src/runtime/threads/turnSaver.js";
+import type { GraphThread } from "../../../src/assistants/threads/threadStore.js";
+import { threadValues, TurnSaver } from "../../../src/assistants/threads/turnSaver.js";
 
 export function newGraphThread(): GraphThread {
   const threadId = randomUUID();

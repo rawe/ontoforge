@@ -24,10 +24,9 @@ import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import { HumanMessage } from "@langchain/core/messages";
 import { Annotation, END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
 
+import { lastTurns, trimTurns, TURNS_THE_MODEL_SEES, type GraphThread } from "../../../assistants/index.js";
 import type { RuntimeStore } from "../../../core/ports.js";
 import type { LoadedSchema } from "../../schemaCache.js";
-import { TURNS_THE_MODEL_SEES, type GraphThread } from "../../threads/threadStore.js";
-import { lastTurns, trimTurns } from "../../threads/turns.js";
 import { decide, streamAnswer, turnModel } from "../kit/model.js";
 import type { Topology, Trace } from "../kit/trace.js";
 import { ANSWER, answerInput, citedRefs } from "./answer.js";

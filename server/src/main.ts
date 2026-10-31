@@ -99,7 +99,7 @@ export interface ShutdownOptions {
  *    go on. The search worker stops alongside.
  * 3. Wait until no work runs, at most `drainMs`. Then cut every connection:
  *    a cut chat stream aborts its turn, which is rolled back and released
- *    (`chatStream.ts`); wait for that at most `UNWIND_MS`.
+ *    (`assistants/session.ts`); wait for that at most `UNWIND_MS`.
  * 4. Close the app — its shared state with it — the worker, the providers
  *    and the stores, in that order: none closes while work could use it.
  */

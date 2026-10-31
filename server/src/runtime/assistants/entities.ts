@@ -13,8 +13,8 @@
  * not fields).
  */
 
+import type { StreamEvent } from "../../assistants/index.js";
 import type { Row } from "../../core/ports.js";
-import type { StreamEvent } from "../chatStream.js";
 import type { EntityTypeDef, SchemaCacheValue } from "../schemaCache.js";
 
 /** One entity as the client shows it. */

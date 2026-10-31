@@ -6,8 +6,8 @@
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 import { describe, expect, it } from "vitest";
 
-import { TURNS_THE_MODEL_SEES } from "../../../src/runtime/threads/threadStore.js";
-import { lastTurns, trimTurns } from "../../../src/runtime/threads/turns.js";
+import { TURNS_THE_MODEL_SEES } from "../../../src/assistants/threads/threadStore.js";
+import { lastTurns, trimTurns } from "../../../src/assistants/threads/turns.js";
 
 /** `count` turns, each a question, a tool call, its result and a reply. */
 function conversation(count: number): BaseMessage[] {

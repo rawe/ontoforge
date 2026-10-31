@@ -2,11 +2,12 @@
  * The Studio helper: one built-in, never-stored design helper per ontology
  * — the modeling host of the tool loop (`assistants/loop.ts`). It reads
  * the ontology's design only and writes nothing. Each turn prepares a run:
- * fixed instructions, a design briefing, the page's focus and the open
- * agent editor's draft as labelled context blocks, the design tools
- * (`tools.ts`) and the schema proposal tool (`propose.ts`) — with the
- * draft, also the tool that proposes values for it (`draft.ts`). A turn's
- * last proposal and its check are its artifact. Schema and lens
+ * fixed instructions, the design briefing as its state, the page's focus
+ * and the open agent editor's draft as the message's context, the design
+ * tools (`tools.ts`), the schema proposal tool (`propose.ts`) and the tool
+ * that proposes values for an open draft (`draft.ts`) — always the same
+ * tools, so what the thread sends stays cacheable. A turn's last proposal
+ * and its check are its artifact. Schema and lens
  * descriptions are untrusted text: they reach the model only inside
  * context blocks and tool results, never in the instructions.
  */
@@ -58,9 +59,9 @@ You read the design only. You never see instance data (entities, relations, docu
 
 When the person asks you to create or extend the schema — entity types, relation types, properties, descriptions — call propose_schema_change with the complete proposal. It writes nothing: the server checks it, and the person reviews and applies it in the Studio. If the check refuses a step, fix the proposal and call it again. Never say a change was made or applied: say what you propose and that the person applies it. Describe any other change (deletes, renames, lenses, search indices) as steps the person takes in the Studio.
 
-While the person has an agent editor open, the context has an Agent draft block and you have the fill_agent_draft tool. Only when they ask you to draft, write or change that agent, call fill_agent_draft with the fields to change; first read what the agent's lens shows, so its instructions and tools fit. The person fills the editor from your proposal, reviews it and saves it themselves; say so briefly.
+While the person has an agent editor open, their message comes with an Agent draft block, and only then does fill_agent_draft work. Only when they ask you to draft, write or change that agent, call fill_agent_draft with the fields to change; first read what the agent's lens shows, so its instructions and tools fit. The person fills the editor from your proposal, reviews it and saves it themselves; say so briefly.
 
-The context blocks give an outline of the schema and the lenses as of this message, and what the person has open, if anything. Use the tools for details and for validation results, and use exact keys as tool arguments. Answer from the design you read; say so when the design does not tell. Be concise.`;
+Context blocks give an outline of the schema and the lenses — a newer one replaces an older one — and, with a message, what the person has open, if anything. Use the tools for details and for validation results, and use exact keys as tool arguments. Answer from the design you read; say so when the design does not tell. Be concise.`;
 
 const withDescription = (text: unknown) => (typeof text === "string" && text !== "" ? ` — ${text}` : "");
 
@@ -118,12 +119,18 @@ export interface StudioTurnContext {
   draft?: AgentDraft;
 }
 
-/** The design briefing, the focus and the draft, each a labelled block. */
-export function briefing(ontologyKey: string, design: Row, { focus, draft }: StudioTurnContext = {}): ContextBlock[] {
-  const blocks: ContextBlock[] = [
+/** The design briefing: the schema and the lenses, each a labelled block —
+ * the state the helper works on. */
+export function briefing(ontologyKey: string, design: Row): ContextBlock[] {
+  return [
     { label: "Schema outline", source: "the ontology's schema", text: schemaOutline(ontologyKey, design) },
     { label: "Lenses", source: "the ontology's lenses", text: lensOutline(design) },
   ];
+}
+
+/** What goes with one message: the page's focus and the open draft, each a labelled block. */
+export function turnContext({ focus, draft }: StudioTurnContext): ContextBlock[] {
+  const blocks: ContextBlock[] = [];
   if (focus !== undefined) blocks.push({ label: "Focus", source: "the Studio page the person has open", text: focusText(focus) });
   if (draft !== undefined) blocks.push(draftBlock(draft));
   return blocks;
@@ -139,11 +146,12 @@ export function studioRun(
   model: BaseChatModel,
   lacking: readonly string[] = [],
 ): PreparedRun<StudioTurn> {
-  const tools: Tool<StudioTurn>[] = [...designTools(store), proposeSchemaChangeTool(store)];
-  if (turn.draft !== undefined) tools.push(fillAgentDraftTool(turn.draft, store, lacking));
+  const tools: Tool<StudioTurn>[] = [
+    ...designTools(store), proposeSchemaChangeTool(store), fillAgentDraftTool(turn.draft, store, lacking),
+  ];
   return {
-    kind: STUDIO_KIND, instructions: INSTRUCTIONS, context: briefing(ontologyKey, design, turn), tools,
-    ctx: { proposal: null }, model,
+    kind: STUDIO_KIND, instructions: INSTRUCTIONS, state: briefing(ontologyKey, design), context: turnContext(turn),
+    tools, ctx: { proposal: null }, model,
   };
 }
 

@@ -43,9 +43,6 @@ import {
 } from "@langchain/langgraph";
 
 import {
-  lastTurns,
-  trimTurns,
-  TURNS_THE_MODEL_SEES,
   type GraphThread,
   type StreamExecution,
 } from "../../../assistants/index.js";
@@ -161,11 +158,10 @@ export async function requireRetrievers(lensKey: string, store: RuntimeStore): P
   await loadSchema(lensKey, store);
 }
 
-/** The conversation before the question that the models see: the
- * thread's last turns, the question's own counted, each message at most
- * 2,000 characters. */
+/** The conversation before the question that the models see: the whole
+ * thread, each message at most 2,000 characters. */
 export function historyOf(messages: BaseMessage[]): History[] {
-  return lastTurns(messages, TURNS_THE_MODEL_SEES)
+  return messages
     .slice(0, -1)
     .map((message) => ({
       role: message.getType() === "human" ? "user" : "assistant",
@@ -512,10 +508,10 @@ export async function chat(
       });
       return { reply };
     })
-    // The turn joins the thread, which keeps its last turns, and its
-    // results become what the next question may refer to.
+    // The turn joins the thread, and its results become what the next
+    // question may refer to.
     .addNode("remember", async (state) => ({
-      messages: [...trimTurns(state.messages), new AIMessage(state.reply)],
+      messages: [new AIMessage(state.reply)],
       verified: {
         configHash: hash,
         previous: {

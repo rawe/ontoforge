@@ -6,24 +6,25 @@
  * reply until the turn leaves the thread.
  */
 
-import { AIMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, RemoveMessage, type BaseMessage } from "@langchain/core/messages";
 import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
 import { describe, expect, it, vi } from "vitest";
 
 import { StoreError } from "../../../src/core/exceptions.js";
-import { TURNS_PER_THREAD } from "../../../src/assistants/threads/threadStore.js";
 import { threadArtifacts, threadValues, TurnSaver } from "../../../src/assistants/threads/turnSaver.js";
 import type { Artifact } from "../../../src/assistants/threads/threadStore.js";
-import { trimTurns } from "../../../src/assistants/threads/turns.js";
+/** Turns the test graph keeps: it removes older ones, so the saver's removals are exercised. */
+const KEPT = 3;
 
-/** A two-step chat graph: `reply` answers and trims the thread to
- * `TURNS_PER_THREAD` turns, `tidy` is a second step so every turn writes
- * several checkpoints. */
+/** A two-step chat graph: `reply` answers and removes the turns beyond
+ * `KEPT`, `tidy` is a second step so every turn writes several checkpoints. */
 function chatGraph(checkpointer: TurnSaver) {
   return new StateGraph(MessagesAnnotation)
     .addNode("reply", (state) => {
       const reply = new AIMessage(`echo ${String(state.messages.at(-1)!.content)}`);
-      return { messages: [reply, ...trimTurns([...state.messages, reply])] };
+      const beyond = state.messages.length + 1 - KEPT * 2;
+      const removed = state.messages.slice(0, Math.max(0, beyond)).map((m) => new RemoveMessage({ id: m.id! }));
+      return { messages: [reply, ...removed] };
     })
     .addNode("tidy", () => ({}))
     .addEdge(START, "reply")
@@ -65,11 +66,11 @@ describe("turn saver", () => {
     expect(await saver.getTuple(tuples[0]!.config)).toBeDefined();
   });
 
-  it(`keeps the last ${TURNS_PER_THREAD} turns`, async () => {
+  it("keeps what the graph removes out of the thread", async () => {
     let state: Uint8Array | null = null;
-    for (let i = 1; i <= TURNS_PER_THREAD + 2; i++) state = await turn(state, `turn ${i}`);
+    for (let i = 1; i <= KEPT + 2; i++) state = await turn(state, `turn ${i}`);
     const messages = contents(await threadValues(state));
-    expect(messages).toHaveLength(TURNS_PER_THREAD * 2);
+    expect(messages).toHaveLength(KEPT * 2);
     expect(messages[0]).toBe("turn 3");
   });
 
@@ -85,7 +86,7 @@ describe("turn saver", () => {
     state = await turn(state, "two");
     state = await turn(state, "three", [artifact("a3"), artifact("a3b")]);
     expect(await artifactsByReply(state)).toEqual({ "echo one": ["a1"], "echo three": ["a3", "a3b"] });
-    for (let i = 4; i <= TURNS_PER_THREAD + 1; i++) state = await turn(state, `turn ${i}`);
+    for (let i = 4; i <= KEPT + 1; i++) state = await turn(state, `turn ${i}`);
     expect(await artifactsByReply(state)).toEqual({ "echo three": ["a3", "a3b"] });
   });
 

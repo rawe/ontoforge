@@ -40,18 +40,12 @@ export const TURN_HEARTBEAT_MS = 10_000;
 export const THREAD_STATE_MAX_BYTES = 8 * 1024 * 1024;
 
 /**
- * At most this many turns stay in a thread's state; older ones are removed.
- * Bounds what one thread stores, and is what a thread read back shows — about
+ * A thread holds at most this many turns; a message beyond them is refused
+ * and the client starts a new conversation. Bounds what one thread stores
+ * and what the model sees — every turn, for every assistant kind — about
  * the 50 messages a chat view keeps.
  */
 export const TURNS_PER_THREAD = 25;
-
-/**
- * The model sees the last this many turns, for every assistant kind. Enough
- * to resolve references to recent questions and results ("these", "the
- * second one") while keeping model input small.
- */
-export const TURNS_THE_MODEL_SEES = 8;
 
 /** What a thread belongs to. Continuing it through another assistant, or
  * as another principal, is refused. */

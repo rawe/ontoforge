@@ -44,7 +44,7 @@ import {
   retrieveQuestion,
   type RunnableRetriever,
 } from "../../../../src/runtime/assistants/retrievers/runtime.js";
-import { TURNS_PER_THREAD, TURNS_THE_MODEL_SEES, type GraphThread } from "../../../../src/assistants/index.js";
+import type { GraphThread } from "../../../../src/assistants/index.js";
 import { graphValues, newGraphThread } from "../../../assistants/threads/graphThread.js";
 import { CONFIG, LENS, SCHEMA } from "./fixture.js";
 
@@ -459,21 +459,13 @@ describe("retriever pipeline", () => {
     expect(values.verified).toMatchObject({ previous: { complete: true, results: [{ entityType: "person", ids: ["ada"] }] } });
   });
 
-  it(`the models see the last ${TURNS_THE_MODEL_SEES} turns`, async () => {
+  it("the models see the whole thread", async () => {
     const thread = await newThread();
-    for (let i = 1; i <= TURNS_THE_MODEL_SEES + 2; i++) await run(`Everyone in Berlin ${i}`, false, thread);
+    for (let i = 1; i <= 10; i++) await run(`Everyone in Berlin ${i}`, false, thread);
     const history = JSON.parse(fake.invoke.mock.calls.at(-1)![0][1].content).history as { content: string }[];
-    expect(history).toHaveLength(2 * (TURNS_THE_MODEL_SEES - 1));
-    expect(history[0]!.content).toBe("Everyone in Berlin 3");
+    expect(history).toHaveLength(2 * 9);
+    expect(history[0]!.content).toBe("Everyone in Berlin 1");
     expect(JSON.parse(fake.stream.mock.calls.at(-1)![0][1].content).history).toEqual(history);
-  });
-
-  it(`a thread keeps at most ${TURNS_PER_THREAD} turns`, async () => {
-    const thread = await newThread();
-    for (let i = 1; i <= TURNS_PER_THREAD + 2; i++) await run(`Everyone in Berlin ${i}`, false, thread);
-    const messages = (await graphValues(thread)).messages as { text: string }[];
-    expect(messages).toHaveLength(2 * TURNS_PER_THREAD);
-    expect(messages[0]!.text).toBe("Everyone in Berlin 3");
   });
 });
 

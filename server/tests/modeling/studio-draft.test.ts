@@ -1,9 +1,9 @@
 /**
  * The Studio helper's agent draft over a mocked store: the draft as a
- * context block, the draft tool offered only with a draft, and the tool
- * itself — a valid proposal echoes target and draft version, an unknown or
- * gated tool name and an empty name are refused with the reason, and
- * nothing is written.
+ * block of the message's context, and the draft tool — refused without a
+ * draft; with one, a valid proposal echoes target and draft version, an
+ * unknown or gated tool name and an empty name are refused with the
+ * reason, and nothing is written.
  */
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -51,9 +51,15 @@ describe("the draft in a Studio turn", () => {
   const run = (draft?: AgentDraft) =>
     studioRun("fair", DESIGN, draft === undefined ? {} : { draft }, store, {} as BaseChatModel);
 
-  it("offers the draft tool only with a draft", () => {
-    expect(run().tools.map((t) => t.name)).not.toContain("fill_agent_draft");
-    expect(run(DRAFT).tools.map((t) => t.name).at(-1)).toBe("fill_agent_draft");
+  it("offers the draft tool on every turn, so the toolset never changes", () => {
+    expect(run().tools.map((t) => t.name)).toEqual(run(DRAFT).tools.map((t) => t.name));
+    expect(run().tools.map((t) => t.name).at(-1)).toBe("fill_agent_draft");
+  });
+
+  it("refuses the draft tool without a draft, telling the model why", async () => {
+    const without = fillAgentDraftTool(undefined, store, []) as Tool<null>;
+    const refused = await without.run({ name: "Helpdesk" }, null).catch((error) => without.expected(error));
+    expect(refused).toMatchObject({ error: { code: "VALIDATION_ERROR", message: expect.stringContaining("No agent editor is open") } });
   });
 
   it("sends the draft as a labelled block of its own", () => {

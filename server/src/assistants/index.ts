@@ -18,7 +18,6 @@ export {
   sameBinding,
   scopeOf,
   TURNS_PER_THREAD,
-  TURNS_THE_MODEL_SEES,
   type GraphThread,
   type Artifact,
   type StoreLifetimes,
@@ -30,4 +29,4 @@ export {
 } from "./threads/threadStore.js";
 export type { Tool } from "./tool.js";
 export { MemoryThreadStore } from "./threads/memoryThreadStore.js";
-export { lastTurns, trimTurns } from "./threads/turns.js";
+export { turnCount } from "./threads/turns.js";

@@ -64,12 +64,15 @@ export function draftBlock(draft: AgentDraft): ContextBlock {
 
 const list = (names: string[]) => names.join(", ");
 
-/** The draft tool for the open editor; `lacking` are the grantable tools this deployment cannot run. */
-export function fillAgentDraftTool(draft: AgentDraft, store: ModelingStore, lacking: readonly string[]): Tool<unknown> {
+/** The draft tool: proposes values for the open editor's draft, refused when
+ * the message brought none; `lacking` are the grantable tools this
+ * deployment cannot run. */
+export function fillAgentDraftTool(draft: AgentDraft | undefined, store: ModelingStore, lacking: readonly string[]): Tool<unknown> {
   return {
     name: FILL_AGENT_DRAFT,
     description:
-      "Propose new values for the agent in the editor the person has open (the Agent draft block). Pass " +
+      "Propose new values for the agent in the editor the person has open (the Agent draft block with their " +
+      "message; without one, the call is refused). Pass " +
       "only the fields you change. name: the agent's name, not empty. description: what the agent is for, " +
       "shown to the people who chat with it. system_prompt: the agent's instructions; when it runs, the " +
       "schema its lens shows is appended. Grant tools with either all_tools: true (every tool) or tools: a " +
@@ -85,6 +88,9 @@ export function fillAgentDraftTool(draft: AgentDraft, store: ModelingStore, lack
       tools: z.array(z.string()).nullish(),
     }),
     run: async (args) => {
+      if (draft === undefined) {
+        throw new ValidationError("No agent editor is open, so there is no draft to fill: describe the agent in your answer instead.");
+      }
       const fields: Row = {};
       const name = args.name as string | null | undefined;
       if (name != null) {

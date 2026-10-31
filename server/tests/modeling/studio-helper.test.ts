@@ -38,18 +38,19 @@ const run = (turn: Parameters<typeof studioRun>[2] = {}) =>
   studioRun("fair", DESIGN, turn, {} as ModelingStore, {} as BaseChatModel);
 
 describe("the Studio helper's prepared run", () => {
-  it("keeps the instructions fixed and every description in a labelled context block", () => {
+  it("keeps the instructions fixed and every description in a labelled block of its state", () => {
     const prepared = run();
     expect(prepared.kind).toBe("studio");
     expect(prepared.instructions).toBe(INSTRUCTIONS);
     for (const text of DESCRIPTIONS) expect(prepared.instructions).not.toContain(text);
-    expect(prepared.context.map((block) => block.label)).toEqual(["Schema outline", "Lenses"]);
-    const context = prepared.context.map((block) => block.text).join("\n");
-    for (const text of DESCRIPTIONS) expect(context).toContain(text);
+    expect(prepared.state.map((block) => block.label)).toEqual(["Schema outline", "Lenses"]);
+    const state = prepared.state.map((block) => block.text).join("\n");
+    for (const text of DESCRIPTIONS) expect(state).toContain(text);
+    expect(prepared.context).toEqual([]);
   });
 
   it("outlines the schema and each lens's scope", () => {
-    const [schema, lenses] = run().context;
+    const [schema, lenses] = run().state;
     expect(schema!.text).toContain("- works_for (Works for): person -> company — D-works-for");
     expect(schema!.text).toContain("  - name (name): string — D-name");
     expect(lenses!.text).toBe(
@@ -58,16 +59,17 @@ describe("the Studio helper's prepared run", () => {
     );
   });
 
-  it("adds the focus as a block of its own, as structured fields", () => {
+  it("sends the focus with the message as a block of its own, as structured fields", () => {
     const focus = run({ focus: { kind: "agent", key: "support", lensKey: "hr" } }).context.at(-1)!;
     expect(focus).toEqual({ label: "Focus", source: "the Studio page the person has open", text: "kind: agent\nkey: support\nlensKey: hr" });
   });
 
-  it("offers the design tools and the serial proposal tool only", () => {
+  it("offers the same tools on every turn: the design tools, the serial proposal tool and the draft tool", () => {
     const { tools } = run();
-    expect(tools.map((tool) => tool.name)).toEqual(
-      ["get_schema", "list_lenses", "list_search_indices", "validate_schema", "validate_lens", "propose_schema_change"],
-    );
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "get_schema", "list_lenses", "list_search_indices", "validate_schema", "validate_lens", "propose_schema_change",
+      "fill_agent_draft",
+    ]);
     expect(tools.filter((tool) => tool.serial).map((tool) => tool.name)).toEqual(["propose_schema_change"]);
   });
 });

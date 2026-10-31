@@ -455,10 +455,7 @@ export function buildTools(lensKey: string, store: RuntimeStore, toolNames: stri
 // Feature: Schema-Aware Chat
 // ---------------------------------------------------------------------------
 
-const CHAT_SYSTEM_PROMPT = `You are a knowledge graph assistant. You answer questions by querying data with the available tools. You can only read data, not create or modify it.
-
-SCHEMA:
-{schema}
+const CHAT_SYSTEM_PROMPT = `You are a knowledge graph assistant. You answer questions by querying data with the available tools. You can only read data, not create or modify it. The Schema context block names what the lens shows; a newer one replaces an older one.
 
 STRATEGY — use the exact keys from the schema as tool arguments (e.g. entity_type_key="person"):
 1. For questions about connections or relationships, use execute_query with a
@@ -474,8 +471,7 @@ STRATEGY — use the exact keys from the schema as tool arguments (e.g. entity_t
    and its charOffset/charLength as offset/limit to read it — read a segment, not
    the whole document.
 
-Never make up answers — only use data from tool results. If the data doesn't contain the answer, say so. Be concise.
-`;
+Never make up answers — only use data from tool results. If the data doesn't contain the answer, say so. Be concise.`;
 
 /** The tools of `tools` this deployment cannot run: the embedding-dependent
  * ones without an embedding provider, the search tools when no search
@@ -510,19 +506,16 @@ export async function runAgentChat(
 ): Promise<Row> {
   execution.signal?.throwIfAborted();
   const loaded = await loadSchema(lensKey, store);
-  const schemaDesc = describeSchema(loaded.scoped);
 
-  // Resolve system prompt: a custom prompt gets the schema appended; no
-  // prompt gets the built-in one. The schema is in the prompt either way.
-  let systemPrompt = agentConfig.systemPrompt ?? CHAT_SYSTEM_PROMPT.replace("{schema}", schemaDesc);
-  if (agentConfig.systemPrompt) {
-    systemPrompt += "\n\nSCHEMA:\n" + schemaDesc;
-  }
+  // The agent's own prompt, else the built-in one; the schema the lens shows
+  // is the state the tool loop keeps the thread on.
+  const instructions = agentConfig.systemPrompt ?? CHAT_SYSTEM_PROMPT;
+  const schema = { label: "Schema", source: "the schema the lens shows", text: describeSchema(loaded.scoped) };
 
   const toolNames = resolveChatToolNames(agentConfig, store);
   const model = requireLanguageModel();
   const { reply } = await runToolLoop({
-    kind: "agent", instructions: systemPrompt, context: [],
+    kind: "agent", instructions, state: [schema], context: [],
     tools: buildTools(lensKey, store, toolNames), ctx: new TurnEntities(loaded.scoped), model,
   }, message, thread, execution);
   execution.signal?.throwIfAborted();

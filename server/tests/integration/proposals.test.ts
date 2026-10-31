@@ -3,7 +3,8 @@
  * runs no after-commit work; it is refused on a store already inside a
  * design change; apply commits every step or none, against the revision
  * it expects, and runs the after-commit work once on a fresh store; two
- * applies of one checked revision commit once; a step that needs cascade
+ * applies of one checked revision commit once, the other answering the
+ * current revision however they interleave; a step that needs cascade
  * is a refusal; validation splits introduced from pre-existing issues.
  * Authorization is in `access-authorization.test.ts`.
  */
@@ -13,7 +14,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 import { createApp } from "../../src/app.js";
 import { closeStores, getModelingStore, initStores } from "../../src/core/ports.js";
-import { checkProposal } from "../../src/modeling/proposals/check.js";
+import { applyProposal, checkProposal } from "../../src/modeling/proposals/check.js";
 import { afterDesignChange } from "../../src/runtime/indexing/managed.js";
 import { wipeDatabase } from "./reset.js";
 
@@ -197,6 +198,26 @@ describe("applying a proposal", () => {
     expect(refused.error.details).toEqual({ code: "DESIGN_CHANGED", current: { ...expected, revision: expected.revision + 1 } });
     expect(await revision()).toEqual({ ...expected, revision: expected.revision + 1 });
     expect(await entityTypeKeys()).toEqual(["person", "skill"]);
+  });
+
+  it("refuses with the current revision when another apply commits between its first read and its hold", async () => {
+    const proposal = { steps: [{ id: "s1", op: "create_entity_type", key: "tool", name: "Tool" }] };
+    const expected = await revision();
+    const store = await getModelingStore(O);
+    // The loser's revision read, before the hold: the winner commits right after it.
+    const indices = store.searchIndices();
+    const read = indices.designRevision.bind(indices);
+    indices.designRevision = async () => {
+      const current = await read();
+      await applyProposal(O, await getModelingStore(O), proposal as never, current);
+      return current;
+    };
+    vi.spyOn(store, "searchIndices").mockReturnValueOnce(indices);
+    await expect(applyProposal(O, store, proposal as never, expected)).rejects.toMatchObject({
+      details: { code: "DESIGN_CHANGED", current: { ...expected, revision: expected.revision + 1 } },
+    });
+    expect(await revision()).toEqual({ ...expected, revision: expected.revision + 1 });
+    expect(await entityTypeKeys()).toEqual(["person", "skill", "tool"]);
   });
 
   it("commits every step at once, runs the after-commit work once on a fresh store, and answers a receipt", async () => {

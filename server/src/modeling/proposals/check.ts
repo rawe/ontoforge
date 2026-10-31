@@ -409,11 +409,11 @@ export async function applyProposal(
   proposal: Proposal,
   expected: DesignRevision,
 ): Promise<Receipt> {
-  // Without the lock first, so a stale or refused proposal never waits for it.
+  // Without the lock first, so a stale proposal never waits for it. Every
+  // check of the design runs under the hold, after `expected` is compared:
+  // a change committed in between is a stale revision, never a refusal.
   const current = await store.searchIndices().designRevision();
   if (!sameDesign(current, expected)) throw new StaleDesignError(current);
-  const refusals = cheapRefusals(proposal, await store.getFullSchema());
-  if (refusals.length > 0) throw new ProposalRefusedError(refusedEarly(current, refusals));
 
   const effects = new EffectQueue();
   const receipt = await store.changeDesign(async (s, base) => {

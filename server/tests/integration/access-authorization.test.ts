@@ -328,6 +328,20 @@ describe("authorization with authentication on", () => {
     }
   });
 
+  it("schema proposals: an Ontology Administrator checks and applies one; a lens role is refused", async () => {
+    const proposal = { steps: [{ id: "s1", op: "create_entity_type", key: "stall", name: "Stall" }] };
+    const check = await as("creator", "POST", `${fair}/model/proposals/check`, { proposal });
+    expect(check.status).toBe(200);
+    const expected = check.body.baseRevision;
+    for (const subject of ["alice", "bob"]) {
+      expect((await as(subject, "POST", `${fair}/model/proposals/check`, { proposal })).status).toBe(403);
+      expect((await as(subject, "POST", `${fair}/model/proposals/apply`, { proposal, expected })).status).toBe(403);
+    }
+    const applied = await as("creator", "POST", `${fair}/model/proposals/apply`, { proposal, expected });
+    expect(applied.status).toBe(200);
+    expect(Object.keys(applied.body.created)).toContain("entityTypes.stall");
+  });
+
   it("a Reader's runtime MCP mount lists only reads and refuses a write call", async () => {
     const connect = async (subject: string) => {
       const client = new Client({ name: "access-tests", version: "0.0.1" });

@@ -158,7 +158,7 @@ export function restoredCalls(artifacts: readonly unknown[]): ToolCall[] {
 export interface DesignType {
   key: string
   description: string | null
-  properties: { key: string; description: string | null }[]
+  properties: { key: string; description: string | null; required?: boolean }[]
 }
 
 export interface Design {
@@ -175,6 +175,7 @@ export function designOf(exported: unknown): Design | null {
     properties: (Array.isArray(row.properties) ? row.properties : []).filter(isRecord).map((p) => ({
       key: String(p.key),
       description: isString(p.description) ? p.description : null,
+      required: p.required === true,
     })),
   }))
   return { entityTypes: types(exported.entityTypes), relationTypes: types(exported.relationTypes) }
@@ -374,8 +375,16 @@ export function appliedIn(proposal: Proposal, design: Design): boolean {
     proposal.steps.slice(i + 1).some((later) => later.op === 'set_description' && describedKey(later) === key)
   return proposal.steps.every((step, i) => {
     switch (step.op) {
-      case 'create_entity_type':
-        return find('entity-types', step.key) !== undefined
+      case 'create_entity_type': {
+        // The type, and its name property as the step set it (a later
+        // description step on it decides its description instead).
+        const type = find('entity-types', step.key)
+        const name = type?.properties.find((p) => p.key === 'name')
+        if (type === undefined) return false
+        if (step.nameRequired !== undefined && (name?.required === true) !== step.nameRequired) return false
+        return step.nameDescription === undefined || overwritten(i, `entity-types:${step.key}:name`)
+          || name?.description === step.nameDescription
+      }
       case 'create_relation_type':
         return find('relation-types', step.key) !== undefined
       case 'add_property': {

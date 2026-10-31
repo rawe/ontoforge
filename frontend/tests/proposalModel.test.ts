@@ -69,11 +69,14 @@ test('a restored answer gets its proposal back as one completed call', () => {
 
 test('reads the design of a schema export', () => {
   const read = designOf({
-    entityTypes: [{ key: 'person', description: 'P', properties: [{ key: 'name', description: null }] }],
+    entityTypes: [{ key: 'person', description: 'P', properties: [{ key: 'name', description: null, required: true }, { key: 'age' }] }],
     relationTypes: [{ key: 'knows' }],
   })
   assert.deepEqual(read, {
-    entityTypes: [{ key: 'person', description: 'P', properties: [{ key: 'name', description: null }] }],
+    entityTypes: [{
+      key: 'person', description: 'P',
+      properties: [{ key: 'name', description: null, required: true }, { key: 'age', description: null, required: false }],
+    }],
     relationTypes: [{ key: 'knows', description: null, properties: [] }],
   })
   assert.equal(designOf({ error: 'x' }), null)
@@ -182,6 +185,25 @@ test('a lost apply of repeated description steps on one target: only the last on
   assert.equal(appliedIn(twice, described('B', 'Name')), true)
   assert.equal(appliedIn(twice, described('A', 'Name')), false)
   assert.equal(appliedIn(twice, described('B', 'Old')), false)
+})
+
+test("a lost apply of a new type with its name property set: the type alone does not show it applied", () => {
+  const steps: Proposal['steps'] = [
+    { id: 's1', op: 'create_entity_type', key: 'team', name: 'Team', nameRequired: true, nameDescription: 'What it is called' },
+  ]
+  const team = (required: boolean, description: string | null): Design => ({
+    ...design, entityTypes: [...design.entityTypes, { key: 'team', description: null, properties: [{ key: 'name', description, required }] }],
+  })
+  assert.equal(appliedIn({ steps }, team(true, 'What it is called')), true)
+  assert.equal(appliedIn({ steps }, team(false, 'What it is called')), false)
+  assert.equal(appliedIn({ steps }, team(true, null)), false)
+  // A later description step on the name property decides its description.
+  const described: Proposal['steps'] = [...steps, { id: 's2', op: 'set_description', entityType: 'team', property: 'name', description: 'Label' }]
+  assert.equal(appliedIn({ steps: described }, team(true, 'Label')), true)
+  assert.equal(appliedIn({ steps: described }, team(true, 'What it is called')), false)
+  // The export's required flag is read.
+  const exported = designOf({ entityTypes: [{ key: 'team', properties: [{ key: 'name', required: true, description: 'What it is called' }] }], relationTypes: [] })
+  assert.equal(appliedIn({ steps }, exported!), true)
 })
 
 const run = (state: ReviewState, ...actions: ReviewAction[]) => actions.reduce(reviewReducer, state)

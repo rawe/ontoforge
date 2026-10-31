@@ -294,6 +294,22 @@ describe("the Studio helper", () => {
     expect(res.events.at(-1)).toEqual({ type: "final", reply: "Done." });
   });
 
+  it("leaves a turn no proposal when the replacing call's arguments fail the schema", async () => {
+    const teams = { steps: [{ id: "s1", op: "create_entity_type", key: "team", name: "Team" }] };
+    setAiModel(new FakeToolCallingModel([
+      toolCallMessage("propose_schema_change", teams, "c1"),
+      toolCallMessage("propose_schema_change", { steps: [] }, "c2"),
+      new AIMessage("Done."),
+    ]));
+    const res = await chat({ message: "Add teams" });
+    const results = res.events.filter((e) => e.type === "studio.tool_result").map((e) => e.result);
+    expect(results[0]).toMatchObject({ ok: true });
+    expect(results[1].error).toMatch(/^Invalid arguments for propose_schema_change/);
+    expect(res.events.at(-1)).toEqual({ type: "final", reply: "Done." });
+    const threadId = res.events[0]!.threadId as string;
+    expect((await ok("GET", `${THREADS}/${threadId}`)).messages.at(-1)).toEqual({ role: "assistant", content: "Done." });
+  });
+
   it("reads a thread without a language model", async () => {
     setAiModel(new FakeToolCallingModel([new AIMessage("Kept.")]));
     const threadId = (await chat({ message: "Keep" })).events[0]!.threadId as string;

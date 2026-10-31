@@ -4,7 +4,7 @@
  * (`proposals/check.ts`) and returns the check. A later call in the same
  * turn replaces the turn's proposal, so a refused step never blocks its
  * fix; the turn's last proposal and its check are the turn's artifact —
- * none when the last call failed.
+ * none when the last call failed, its arguments included.
  * Calls run one at a time. Only a person applies a proposal, from the
  * Studio: the model has no apply tool and no field to consent with.
  */
@@ -62,5 +62,11 @@ export function proposeSchemaChangeTool(store: ModelingStore): Tool<StudioTurn> 
       return check;
     },
     expected: expectedError,
+    // Every call's result comes here, also one whose arguments failed the
+    // schema and so never ran: a failed replacement drops the proposal too.
+    present: (_args, result, turn) => {
+      if (result !== null && typeof result === "object" && "error" in result) turn.proposal = null;
+      return [];
+    },
   };
 }

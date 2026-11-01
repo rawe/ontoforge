@@ -23,10 +23,10 @@ export function ValueDiff({ before, after, className }: { before: DiffValue; aft
       {change.kind === 'text' && <TextDiff parts={change.parts} />}
       {change.kind === 'short' && (
         <span className="flex flex-wrap items-baseline gap-1.5">
-          {change.before === '' ? <Empty /> : <del className={cn(REMOVED, 'px-0.5')}><Said what="removed">{change.before}</Said></del>}
+          {change.before === '' ? <Empty /> : <del className={cn(REMOVED, 'whitespace-pre-wrap break-words px-0.5')}><Said what="removed">{change.before}</Said></del>}
           <ArrowRight aria-hidden className="size-3 shrink-0 self-center text-muted-foreground" />
           <span className="sr-only">changed to</span>
-          {change.after === '' ? <Empty /> : <ins className={cn(ADDED, 'px-0.5')}><Said what="added">{change.after}</Said></ins>}
+          {change.after === '' ? <Empty /> : <ins className={cn(ADDED, 'whitespace-pre-wrap break-words px-0.5')}><Said what="added">{change.after}</Said></ins>}
         </span>
       )}
       {change.kind === 'list' && <Items items={change.items} />}

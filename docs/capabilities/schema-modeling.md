@@ -392,13 +392,15 @@ No step deletes, renames or clears anything, and no step can consent to a
 [cascade](#the-cascade-protocol): a step that would need consent is refused. A proposal
 has at most 50 steps, because its check holds the design exclusively.
 
-**Check** runs every step through the rules above in one design change that it rolls back,
-then validates the resulting design. It reports the design revision it ran on; each refused
-step with its reason, stopping at the first step a rule refuses; the validation errors the
-proposal introduces, apart from those the design already had; warnings; the lenses that
-show what it adds or describes and the search indices it changes; and what the check does
-not prove, such as constraints the storage checks only at commit. A proposal with no
-refused step and no introduced error can be applied.
+**Check** first looks at each step's id, the keys it creates and what it refers to, and
+reports every step refused there. Only when none is, it runs every step through the rules
+above in one design change that it rolls back, stopping at the first step a rule refuses,
+and validates the resulting design. It reports the design revision it ran on; each refused
+step with its reason; the validation errors the proposal introduces, apart from those the
+design already had; warnings; the lenses that show what it adds or describes and the search
+indices it changes; and what the check does not prove, such as constraints the storage
+checks only at commit. A proposal with no refused step and no introduced error can be
+applied.
 
 **Apply** names the revision its check ran on. It checks everything again and writes every
 step or none. Under another revision it is refused with nothing written, and the proposal is

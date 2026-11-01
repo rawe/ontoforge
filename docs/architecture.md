@@ -106,8 +106,8 @@ documents, search, search indexing, query execution, saved-query pipelines and t
 
 **Assistants** is a technical module beneath the contexts, not a context of its own: the
 session layer every assistant kind runs on — a chat turn streamed on its thread, and the
-[thread store](#thread-store) — and the tool loop. It imports only core and the
-language-model engine libraries, never the web framework, auth, access, modeling, runtime
+[thread store](#thread-store) — and the tool loop. It imports only core, Node's
+built-ins and the language-model engine libraries, never the web framework, auth, access, modeling, runtime
 or MCP, and the others reach it only through its one entrance. A dependency test enforces
 this, and that runtime never imports modeling.
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import type { SearchIndexDefinition } from '../src/api/types.ts'
 import { aiMarks, applyFill, changedFields, sameNested, undoFill, withoutEdited } from '../src/assistants/draft/draftFillModel.ts'
 import { DRAFT_VIEWS, draftViewOf, proposedLabels } from '../src/assistants/draft/drafters.ts'
+import { valueChange } from '../src/lib/valueDiff.ts'
 import { groupLine, indexDiffValue, indexFields, withIndexFields } from '../src/components/search/indexDraft.ts'
 
 const draft: SearchIndexDefinition = {
@@ -34,8 +35,9 @@ test('a copy of a filled value still counts as the AI value; an edited group dro
 test('the diff shows each part in words', () => {
   assert.equal(indexDiffValue('header')(null), 'Name property')
   assert.equal(indexDiffValue('header')([]), 'None')
-  assert.deepEqual(indexDiffValue('header')(['name', 'email']), ['name', 'email'])
-  assert.deepEqual(indexDiffValue('relations')([works]), ['works_for (outgoing) · fields: role · company: name · label: Employment'])
+  assert.equal(indexDiffValue('header')(['name', 'email']), 'name\nemail')
+  assert.equal(indexDiffValue('relations')([works, { ...works, relationType: 'knows' }]),
+    'works_for (outgoing) · fields: role · company: name · label: Employment\nknows (outgoing) · fields: role · company: name · label: Employment')
   assert.equal(indexDiffValue('semantic')({ enabled: true, template: '{name}, {bio}' }), 'On\nTemplate: {name}, {bio}')
   assert.equal(indexDiffValue('semantic')({ enabled: false, template: null }), 'Off')
   assert.equal(indexDiffValue('keyword')({ enabled: true }), 'On')
@@ -48,4 +50,11 @@ test('the search index card lists the parts a proposal fills', () => {
   assert.equal(view.title, 'Search index draft')
   assert.deepEqual(proposedLabels(view, { relations: [], description: 'x' }), ['Description', 'Relation groups'])
   assert.equal(DRAFT_VIEWS.length, 2)
+})
+
+test('a change of order alone shows in the diff', () => {
+  const show = indexDiffValue('fields')
+  const change = valueChange(show(['name', 'bio']), show(['bio', 'name']))
+  const kinds = change.kind === 'text' ? change.parts.map((part) => part.kind) : [change.kind]
+  assert.ok(kinds.includes('added') && kinds.includes('removed'), JSON.stringify(change))
 })

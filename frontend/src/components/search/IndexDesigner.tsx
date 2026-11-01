@@ -160,8 +160,9 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
   const target = useMemo<DraftTarget>(() => ({ kind: 'searchIndex', searchIndex: saved?.key ?? null }), [saved])
   usePublishFocus(target)
   const panel = useAssistantPanel()
-  // While it saves or deletes, the editor takes no fill.
-  const [busy, setBusy] = useState(false)
+  // While a save or a delete runs, the editor takes no fill and starts no other; counted, as either may settle first.
+  const [running, setRunning] = useState(0)
+  const busy = running > 0
   const {
     draft, change, reset, undo, marks, canUndo,
   } = useDraftFill({
@@ -174,8 +175,11 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
     same: sameNested,
     onFill: (before, after) => {
       setSaveIssues([])
-      // A key the AI chose no longer follows the name.
-      if (after.key !== before.key) setKeyTouched(true)
+      // A key the AI chose no longer follows the name, and a refused key is no longer the draft's.
+      if (after.key !== before.key) {
+        setKeyTouched(true)
+        setKeyConflict(undefined)
+      }
     },
   })
   // Only an empty list of header fields needs the choice: chosen fields, none picked yet, or none.
@@ -241,7 +245,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
     isNew && !dirty
       ? []
       : mergeIssues([...keyProblem, ...problems], [...saveIssues, ...previewIssues])
-  const canSave = keyOk && problems.length === 0 && schema !== undefined
+  const canSave = keyOk && problems.length === 0 && schema !== undefined && !busy
 
   /* ----------------------------- leave protection --------------------------- */
   const leaving = useRef(false)
@@ -262,8 +266,8 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
         ? model.createSearchIndex(ontologyKey, definition)
         : model.updateSearchIndex(ontologyKey, definition)
     },
-    onMutate: () => setBusy(true),
-    onSettled: () => setBusy(false),
+    onMutate: () => setRunning((n) => n + 1),
+    onSettled: () => setRunning((n) => n - 1),
     onSuccess: (record) => {
       queryClient.setQueryData(searchKeys.index(ontologyKey, record.key), record)
       invalidateModeling(queryClient)
@@ -285,8 +289,8 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
   const remove = useMutation({
     mutationFn: (cascadeFlag: boolean) =>
       model.deleteSearchIndex(ontologyKey, saved!.key, cascadeFlag),
-    onMutate: () => setBusy(true),
-    onSettled: () => setBusy(false),
+    onMutate: () => setRunning((n) => n + 1),
+    onSettled: () => setRunning((n) => n - 1),
     onSuccess: () => {
       leaving.current = true
       toast.success('Index deleted')
@@ -358,7 +362,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
               </Button>
             )}
             {!isNew && (
-              <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>
+              <Button variant="destructive" size="sm" disabled={busy} onClick={() => setDeleteOpen(true)}>
                 <Trash2 className="size-3.5" /> Delete
               </Button>
             )}
@@ -678,7 +682,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
             isNew={isNew}
             dirty={dirty}
             canSave={canSave}
-            busy={save.isPending}
+            busy={busy}
             previewRequested={previewInput !== null}
             blocked={problems.length > 0}
             preview={previewCurrent ? preview.data : undefined}

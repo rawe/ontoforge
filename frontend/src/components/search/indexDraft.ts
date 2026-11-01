@@ -30,13 +30,18 @@ export function groupLine(group: SearchIndexRelationGroup): string {
 
 const onOff = (enabled: boolean) => (enabled ? 'On' : 'Off')
 
-/** How the diff shows a value of `field`. */
+/** A list as one line per item: the diff then compares lines, so a change of order shows. */
+const lines = (items: readonly string[]) => items.join('\n')
+
+/** How the diff shows a value of `field`. Lists are ordered here — their order decides the text — so they show as lines, not as a set. */
 export function indexDiffValue(field: keyof SearchIndexDefinition): (value: unknown) => DiffValue {
   switch (field) {
+    case 'fields':
+      return (value) => (Array.isArray(value) ? lines(value.map(String)) : toDiffValue(value))
     case 'header':
-      return (value) => (value === null ? 'Name property' : Array.isArray(value) && value.length === 0 ? 'None' : toDiffValue(value))
+      return (value) => (value === null ? 'Name property' : Array.isArray(value) && value.length === 0 ? 'None' : Array.isArray(value) ? lines(value.map(String)) : toDiffValue(value))
     case 'relations':
-      return (value) => (Array.isArray(value) ? (value as SearchIndexRelationGroup[]).map(groupLine) : toDiffValue(value))
+      return (value) => (Array.isArray(value) ? lines((value as SearchIndexRelationGroup[]).map(groupLine)) : toDiffValue(value))
     case 'semantic':
       return (value) => {
         const semantic = value as SearchIndexDefinition['semantic'] | undefined

@@ -1,8 +1,8 @@
 /**
- * The Studio helper's agent draft over a mocked store: the draft as a
- * block of the message's context, and the draft tool — refused without a
- * draft; with one, a valid proposal echoes target and draft version, an
- * unknown or gated tool name and an empty name are refused with the
+ * The Studio helper's agent drafter over a mocked store: the draft as a
+ * block of the message's context, its tool offered only with the draft,
+ * and the draft tool — a valid proposal echoes target and draft version,
+ * an unknown or gated tool name and an empty name are refused with the
  * reason, and nothing is written.
  */
 
@@ -10,7 +10,9 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { Tool } from "../../src/assistants/index.js";
-import { fillAgentDraftTool, type AgentDraft } from "../../src/modeling/helper/draft.js";
+import type { Draft } from "../../src/modeling/helper/drafter.js";
+import { fillAgentDraftTool, type AgentFields } from "../../src/modeling/helper/drafters/agent.js";
+import { draftPart, DraftPayload } from "../../src/modeling/helper/drafters/index.js";
 import { studioRun } from "../../src/modeling/helper/helper.js";
 import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.js";
 
@@ -19,7 +21,7 @@ type Row = Record<string, unknown>;
 const DESIGN = { entityTypes: [], relationTypes: [], lenses: [] };
 const LENS = { lensId: "lens-1", key: "hr", name: "HR", description: null, createdAt: NOW, updatedAt: NOW };
 
-const DRAFT: AgentDraft = {
+const DRAFT: Draft<AgentFields> = {
   target: { kind: "agent", lens: "hr", agent: "support" },
   version: 7,
   fields: { name: "Support", description: "", systemPrompt: "Be brief.", tools: ["get_schema"] },
@@ -48,22 +50,23 @@ beforeEach(() => {
 });
 
 describe("the draft in a Studio turn", () => {
-  const run = (draft?: AgentDraft) =>
-    studioRun("fair", DESIGN, draft === undefined ? {} : { draft }, store, {} as BaseChatModel);
+  const run = async (draft?: Draft<AgentFields>) =>
+    studioRun("fair", DESIGN, draft === undefined ? {} : { draft: await draftPart(draft, store) }, store, {} as BaseChatModel);
 
-  it("offers the draft tool on every turn, so the toolset never changes", () => {
-    expect(run().tools.map((t) => t.name)).toEqual(run(DRAFT).tools.map((t) => t.name));
-    expect(run().tools.map((t) => t.name).at(-1)).toBe("fill_agent_draft");
+  it("offers the draft tool only on a turn whose message brings the agent draft", async () => {
+    expect((await run()).tools.map((t) => t.name)).not.toContain("fill_agent_draft");
+    expect((await run(DRAFT)).tools.map((t) => t.name).at(-1)).toBe("fill_agent_draft");
   });
 
-  it("refuses the draft tool without a draft, telling the model why", async () => {
-    const without = fillAgentDraftTool(undefined, store, []) as Tool<null>;
-    const refused = await without.run({ name: "Helpdesk" }, null).catch((error) => without.expected(error));
-    expect(refused).toMatchObject({ error: { code: "VALIDATION_ERROR", message: expect.stringContaining("No agent editor is open") } });
+  it("takes a draft only of a kind some drafter fills, with values that fit it", () => {
+    expect(DraftPayload.safeParse(DRAFT).success).toBe(true);
+    expect(DraftPayload.safeParse({ ...DRAFT, target: { kind: "lens", lens: "hr" } }).success).toBe(false);
+    const extra = DraftPayload.safeParse({ ...DRAFT, fields: { ...DRAFT.fields, key: "x" } });
+    expect(extra.error?.issues[0]?.path).toEqual(["fields"]);
   });
 
-  it("sends the draft as a labelled block of its own", () => {
-    const block = run({ ...DRAFT, target: { kind: "agent", lens: "hr", agent: null } }).context.at(-1)!;
+  it("sends the draft as a labelled block of its own", async () => {
+    const block = (await run({ ...DRAFT, target: { kind: "agent", lens: "hr", agent: null } })).context.at(-1)!;
     expect(block.label).toBe("Agent draft");
     expect(block.text).toBe(
       "kind: agent\nlens: hr\nagent: (new, not saved yet)\nname: Support\ndescription: (empty)\ntools: get_schema\nsystem prompt:\nBe brief.",

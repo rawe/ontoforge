@@ -14,7 +14,7 @@ import { z } from "zod";
 import type { ModelingStore, RuntimeStore, WriteAccess } from "../../src/core/ports.js";
 import { RelationGroup, SearchIndexDefinition } from "../../src/core/searchIndex.js";
 import { createModelingMcpServer } from "../../src/mcp/modeling.js";
-import { fillAgentDraftTool } from "../../src/modeling/helper/draft.js";
+import { fillAgentDraftTool } from "../../src/modeling/helper/drafters/agent.js";
 import { proposeSchemaChangeTool } from "../../src/modeling/helper/propose.js";
 import { designTools } from "../../src/modeling/helper/tools.js";
 import { createRuntimeMcpServer } from "../../src/mcp/runtime.js";

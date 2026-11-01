@@ -142,8 +142,8 @@ function FocusChip({ focus, onRemove }: { focus: Focus; onRemove: () => void }) 
       data-testid="assistant-focus-chip"
       className="inline-flex min-w-0 items-center gap-1 rounded-md border bg-muted/40 py-0.5 pr-0.5 pl-2"
     >
-      <span className="truncate font-mono text-[11px]" title={name}>{name}</span>
-      <span className="shrink-0 text-muted-foreground">· {what}</span>
+      {name !== '' && <span className="truncate font-mono text-[11px]" title={name}>{name}</span>}
+      <span className="shrink-0 text-muted-foreground">{name === '' ? what : `· ${what}`}</span>
       <Button
         variant="ghost"
         size="icon-xs"

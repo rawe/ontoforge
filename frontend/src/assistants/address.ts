@@ -15,6 +15,7 @@ export type DesignAddress =
   | { kind: 'relationTypeProperty'; relationType: string; property: string | null }
   | { kind: 'lens'; lens: string | null }
   | { kind: 'agent'; lens: string; agent: string | null }
+  | { kind: 'searchIndex'; searchIndex: string | null }
 
 export type AddressKind = DesignAddress['kind']
 
@@ -26,6 +27,7 @@ const FIELDS: Record<AddressKind, readonly string[]> = {
   relationTypeProperty: ['relationType', 'property'],
   lens: ['lens'],
   agent: ['lens', 'agent'],
+  searchIndex: ['searchIndex'],
 }
 
 const WHAT: Record<AddressKind, string> = {
@@ -35,6 +37,7 @@ const WHAT: Record<AddressKind, string> = {
   relationTypeProperty: 'relation type property',
   lens: 'lens',
   agent: 'agent',
+  searchIndex: 'search index',
 }
 
 const valuesOf = (address: DesignAddress) =>

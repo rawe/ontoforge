@@ -2,7 +2,8 @@ import { Sparkles } from 'lucide-react'
 import { Fragment } from 'react'
 import { studioChat } from '@/api/model'
 import type { ToolCall } from '@/api/types'
-import { AgentDraftCard } from '../../draft/DraftFillCard'
+import { DraftFillCard } from '../../draft/DraftFillCard'
+import { FILL_DRAFT } from '../../draft/drafters'
 import { ProposalCard } from '../../proposal/ProposalCard'
 import { checkedCall, liveProposalCall, PROPOSE_TOOL, restoredCalls } from '../../proposal/proposalModel'
 import type { ToolEvent } from '../../stream/chatStream'
@@ -13,7 +14,7 @@ import { studioResult } from './studioResult'
 
 /** The cards a completed call of a tool puts under its answer, by tool name. */
 const TOOL_CARDS: Record<string, ToolCard> = {
-  fill_agent_draft: (call, _turn, at) => <AgentDraftCard call={call} at={at} />,
+  [FILL_DRAFT]: (call, _turn, at) => <DraftFillCard call={call} at={at} />,
   [PROPOSE_TOOL]: (call, turn, at) => {
     const checked = checkedCall(call.args, call.result)
     // A failed answer's proposal is never offered.

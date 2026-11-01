@@ -14,6 +14,10 @@
  * - the turn's context (what the page shows, an open draft) goes with its
  *   message, never into the system prompt; a context block the previous
  *   message carried and this one does not is named as gone;
+ * - a guide the host's own text gives for this turn (how to fill an open
+ *   draft) goes with the first message of the thread that needs it, ahead
+ *   of the data, and is never sent again: the history holds it — so the
+ *   tools and the system prompt stay the same on every turn;
  * - no reasoning a model returned is ever sent back to it, in any
  *   provider's form: replies keep their text and tool calls.
  *
@@ -46,6 +50,13 @@ export interface ContextBlock {
   text: string;
 }
 
+/** The host's own instructions for a part of its work, needed only on
+ * some turns: trusted text, never data. `label` names it. */
+export interface Guide {
+  label: string;
+  text: string;
+}
+
 /** What one turn runs, prepared by the host. */
 export interface PreparedRun<C> {
   /** Names the tool events: `<kind>.tool_call`, `<kind>.tool_result`. */
@@ -60,6 +71,9 @@ export interface PreparedRun<C> {
   /** What goes with this message only — the page's focus, an open draft:
    * labelled blocks before it. */
   context: ContextBlock[];
+  /** The guides this turn needs; each goes with the message of the first
+   * turn of the thread that needs it, then the history holds it. */
+  guides?: Guide[];
   tools: Tool<C>[];
   /** The turn's state the tools share. */
   ctx: C;
@@ -89,11 +103,18 @@ function systemPrompt(instructions: string, state: ContextBlock[]): string {
 /** What the thread remembers of the state it last sent: a digest of its blocks. */
 const stateDigest = (state: ContextBlock[]) => createHash("sha256").update(rendered(state).join("\n")).digest("hex");
 
-/** The turn's message: the changed state and the context first, if any,
- * then the person's words — kept apart too, for reading the thread back. */
-function turnMessage(message: string, changed: ContextBlock[], context: ContextBlock[]): HumanMessage {
-  if (changed.length === 0 && context.length === 0) return new HumanMessage(message);
-  const parts = [DATA_NOT_INSTRUCTIONS];
+const renderedGuide = (guide: Guide) => `Guide: ${guide.label}\n${guide.text}`;
+
+/** What the thread remembers of a guide it sent: a digest of its label and text. */
+const guideDigest = (guide: Guide) => createHash("sha256").update(renderedGuide(guide)).digest("hex");
+
+/** The turn's message: guides new to the thread, then the changed state and
+ * the context, if any, then the person's words — kept apart too, for
+ * reading the thread back. */
+function turnMessage(message: string, guides: Guide[], changed: ContextBlock[], context: ContextBlock[]): HumanMessage {
+  if (guides.length === 0 && changed.length === 0 && context.length === 0) return new HumanMessage(message);
+  const parts = guides.map(renderedGuide);
+  if (changed.length > 0 || context.length > 0) parts.push(DATA_NOT_INSTRUCTIONS);
   if (changed.length > 0) parts.push(STATE_CHANGED, ...rendered(changed));
   parts.push(...rendered(context), message);
   return new HumanMessage({ content: parts.join("\n\n"), additional_kwargs: { [PERSON_TEXT]: message } });
@@ -224,13 +245,15 @@ function messageText(message: BaseMessage | undefined): string {
 }
 
 /** What the thread keeps beside its messages: the system prompt its first
- * turn built, the digest of the state it last sent, and the context blocks
- * its last message carried. */
+ * turn built, the digest of the state it last sent, the context blocks
+ * its last message carried and the guides it sent. */
 const ThreadContext = z.object({
   systemPrompt: z.string().optional(),
   stateSeen: z.string().optional(),
   /** The context blocks the last message carried, by label and source. */
   contextSeen: z.array(z.object({ label: z.string(), source: z.string() })).optional(),
+  /** The digests of every guide the thread has sent. */
+  guidesSent: z.array(z.string()).optional(),
 });
 
 // A budget of roughly 50 model calls: one LangGraph step per model call
@@ -271,6 +294,9 @@ export async function runToolLoop<C>(
   const system = kept.systemPrompt ?? systemPrompt(run.instructions, run.state);
   const changed = kept.systemPrompt !== undefined && kept.stateSeen !== stateSeen ? run.state : [];
   const contextSeen = run.context.map(({ label, source }) => ({ label, source }));
+  const sent = kept.guidesSent ?? [];
+  const guides = (run.guides ?? []).filter((guide) => !sent.includes(guideDigest(guide)));
+  const guidesSent = [...sent, ...guides.map(guideDigest)];
   // A block gone since the last message would otherwise still read as current.
   const gone = (kept.contextSeen ?? [])
     .filter((seen) => !run.context.some((block) => block.label === seen.label))
@@ -293,7 +319,10 @@ export async function runToolLoop<C>(
     middleware: [turns, ABORT_ON_TOOL_ERROR], checkpointer: thread.checkpointer,
   });
   const state = await agent.invoke(
-    { messages: [turnMessage(message, changed, [...gone, ...run.context])], systemPrompt: system, stateSeen, contextSeen },
+    {
+      messages: [turnMessage(message, guides, changed, [...gone, ...run.context])],
+      systemPrompt: system, stateSeen, contextSeen, guidesSent,
+    },
     { recursionLimit: RECURSION_LIMIT, signal, ...config },
   );
   const finalMessages = state.messages as BaseMessage[];

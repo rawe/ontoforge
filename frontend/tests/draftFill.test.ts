@@ -4,6 +4,7 @@ import {
   aiMarks, applyFill, changedFields, fillRefusal, isStale, proposalOf, undoFill, withoutEdited,
   type AiEdit, type DraftProposal, type DraftState,
 } from '../src/assistants/draft/draftFillModel.ts'
+import { DRAFT_VIEWS, draftViewOf, proposedLabels } from '../src/assistants/draft/drafters.ts'
 import {
   agentFields, draftOf, sameDraft, withAgentFields, withKey, withName, type AgentDraft,
 } from '../src/components/studio/assistants/agentDraft.ts'
@@ -121,4 +122,18 @@ test("a new agent's key follows a typed or filled name until the person edits th
   const chosen = { draft: withKey(withName(draftOf(null), 'Support'), 'support'), edit: {} }
   assert.equal(fillAgent(chosen, { name: 'Helpdesk' }).draft.key, 'support')
   assert.equal(withName(chosen.draft, 'Other').key, 'support')
+})
+
+test('finds a drafter view by the kind of its item, none for a kind no drafter fills', () => {
+  assert.equal(draftViewOf('agent')?.title, 'Agent draft')
+  assert.equal(draftViewOf('lens'), undefined)
+})
+
+test('lists the labels of the proposed fields in the view order, unknown fields left out', () => {
+  const view = draftViewOf('agent')!
+  assert.deepEqual(proposedLabels(view, { tools: null, name: 'A', key: 'a' }), ['Name', 'Tools'])
+})
+
+test('gives every drafter view its own kind', () => {
+  assert.equal(new Set(DRAFT_VIEWS.map((v) => v.kind)).size, DRAFT_VIEWS.length)
 })

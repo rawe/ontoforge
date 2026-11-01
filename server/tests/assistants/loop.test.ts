@@ -11,7 +11,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import {
-  runToolLoop, type ContextBlock, type GraphThread, type PreparedRun, type StreamEvent, type Tool,
+  runToolLoop, type ContextBlock,
+  type Guide, type GraphThread, type PreparedRun, type StreamEvent, type Tool,
 } from "../../src/assistants/index.js";
 import { personText } from "../../src/assistants/threads/access.js";
 import { FakeToolCallingModel, toolCallMessage } from "../runtime/aiHelpers.js";
@@ -34,9 +35,11 @@ function echo(overrides: Partial<Tool<string[]>> = {}): Tool<string[]> {
 function prepared(
   model: FakeToolCallingModel,
   tools: Tool<string[]>[],
-  { state = [], context = [], instructions = "Help." }: { state?: ContextBlock[]; context?: ContextBlock[]; instructions?: string } = {},
+  { state = [], context = [], instructions = "Help.", guides }: {
+    state?: ContextBlock[]; context?: ContextBlock[]; instructions?: string; guides?: Guide[];
+  } = {},
 ): PreparedRun<string[]> {
-  return { kind: "helper", instructions, state, context, tools, ctx: [], model };
+  return { kind: "helper", instructions, state, context, tools, ctx: [], model, ...(guides === undefined ? {} : { guides }) };
 }
 
 /** One turn, on a new thread unless given one, with every event it streamed. */
@@ -226,6 +229,27 @@ describe("tool loop", () => {
     expect(humans[2]).toBe(`${DATA}\n\n${gone("Agent draft")}\n\nthree`);
     expect(humans[3]).toBe("four");
     expect(model.calls.slice(1).map((call) => personText(call.at(-1)!))).toEqual(["two", "three", "four"]);
+  });
+
+  it("sends a guide ahead of the data with the first message that needs it, never again, and a changed one anew", async () => {
+    const model = new FakeToolCallingModel([new AIMessage("ok")]);
+    const thread = newGraphThread();
+    const draft = { label: "Search index draft", text: "Send the whole definition." };
+    await turn(prepared(model, [], { guides: [draft], context: [block("Focus", "x")] }), thread, "one");
+    await turn(prepared(model, [], { guides: [draft] }), thread, "two");
+    await turn(prepared(model, [], {}), thread, "three");
+    await turn(prepared(model, [], { guides: [draft, { label: "Agent draft", text: "Pass what changes." }] }), thread, "four");
+    await turn(prepared(model, [], { guides: [{ ...draft, text: "Send it all." }] }), thread, "five");
+
+    const [system, ...rest] = model.calls.at(-1)!;
+    expect(system!.content).toBe("Help.");
+    const humans = rest.filter((m) => m.getType() === "human").map((m) => m.content);
+    expect(humans[0]).toBe(`Guide: Search index draft\nSend the whole definition.\n\n${DATA}\n\n<context label="Focus" source="test">\nx\n</context>\n\none`);
+    expect(humans[1]).toBe(`${DATA}\n\n<context label="Focus" source="test">\nNone now: what earlier messages showed under this label no longer applies.\n</context>\n\ntwo`);
+    expect(humans[2]).toBe("three");
+    expect(humans[3]).toBe("Guide: Agent draft\nPass what changes.\n\nfour");
+    expect(humans[4]).toBe("Guide: Search index draft\nSend it all.\n\nfive");
+    expect(model.calls.map((call) => personText(call.at(-1)!))).toEqual(["one", "two", "three", "four", "five"]);
   });
 
   it("never sends a model's reasoning back, in any provider's form; text and tool calls stay", async () => {

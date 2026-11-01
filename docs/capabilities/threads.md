@@ -1,16 +1,17 @@
 # Threads
 
-Every assistant — an [agent](agents.md), a [retriever](retrievers.md) or a
-[navigator](navigators.md) —
+Every assistant — an [agent](agents.md), a [retriever](retrievers.md), a
+[navigator](navigators.md) or the [Studio helper](studio-helper.md) —
 converses in **threads** the server holds. A client sends only its new message and, to
 continue, the thread's id; the server continues from what the thread kept. How the server
-stores threads, and the numbers below (turns kept, turns the model sees, lifetime, how
-much a thread and the store hold): [../architecture.md](../architecture.md#thread-store).
+stores threads, and the numbers below (turns a thread holds, lifetime, how much a thread
+and the store hold): [../architecture.md](../architecture.md#thread-store).
 
 ## Starting and continuing
 
 A message without a thread id starts a new thread, bound to the assistant it was sent to —
-its ontology, lens, kind and key. The answer names the thread's id first. A message with
+its ontology, its lens (none for the Studio helper, which works on the whole ontology),
+kind and key. The answer names the thread's id first. A message with
 that id continues the thread. The id is random and unguessable; knowing it is what lets a
 client continue or read a thread.
 
@@ -19,9 +20,10 @@ on, to the principal that started it. Sent to any other assistant, or by any oth
 principal, its id is unknown, exactly as an id that never existed or has expired: the
 message is refused as not found before anything runs, and the client starts a new thread.
 
-Each turn runs the assistant's **current** configuration. Saving an assistant does not end
-its threads; a client that wants a conversation under the new configuration only starts a
-new thread. There is no delete: a client done with a thread drops its id, and
+Saving an assistant does not end its threads. A retriever's and a navigator's next turn
+runs the saved configuration; an agent's thread keeps the prompt its first turn ran with,
+so a client that wants a conversation under a new prompt starts a new thread. There is no
+delete: a client done with a thread drops its id, and
 [retention](#lifetime) removes the thread.
 
 ## Turns
@@ -37,11 +39,12 @@ work is its tool calls and their results; they stay in the thread with the turn.
   left without its result. A thread only ever holds complete turns, and while a turn runs
   it reads back as of its last completed one. An interrupted turn is asked again, never
   resumed. A thread grown too large to keep refuses its turn; the client starts a new one.
-- **The model sees the whole thread** — for an agent including its tool calls and
-  results — but never a model's reasoning. What a thread sent is never changed: it keeps
-  the instructions its first turn ran with, and what changes later (the schema, what the
-  person has open) goes with a message. A thread holds a bounded number of turns; a
-  message beyond them is refused and the client starts a new thread.
+- **The model sees the whole thread** — for an agent and the Studio helper including
+  their tool calls and results — but never a model's reasoning. For those two, nothing a
+  thread sent is ever changed: its instructions stay as its first turn set them, and what
+  changes later (the schema, what the person has open) goes with a message.
+- **A thread holds a bounded number of turns.** A message beyond them is refused before
+  anything runs; the client starts a new thread. Nothing is removed.
 
 A retriever's and a navigator's thread also keep what a follow-up question may refer to
 ([retrievers.md](retrievers.md#follow-up-questions),
@@ -80,7 +83,8 @@ Continuing or reading a thread that is gone answers not found, as above.
 ## Reading a thread back
 
 A thread reads back as its user messages and the assistant's answers, in order — the
-turns it keeps, without tool calls or their results. A client restores a conversation from
+turns it keeps, without tool calls or their results. An answer carries the artifacts its
+turn left: for the Studio helper, the turn's last schema proposal with its check. A client restores a conversation from
 it. Reading runs no model, so it needs no language-model provider; it is available
 wherever the assistant kind's list is.
 

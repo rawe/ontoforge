@@ -5,13 +5,12 @@ switcher and the surface switch beneath it, its navigation covers Schema, Lenses
 and Transfer, with authentication on also [Access](README.md#signing-in), and everything it reads and writes belongs to the current ontology. Its
 footer holds the theme control and the collapse control. Like the Workbench sidebar, it
 collapses to an icon rail whose entries name themselves on hover; both sidebars share one
-collapse preference. With a language model configured, an AI panel beside every Studio page
-holds the [Studio helper](../capabilities/studio-helper.md); Ask AI opens it on what the page
-shows, and the agent and search index editors take its draft fills.
+collapse preference. With a language model configured, an [AI panel](#ai-panel) beside every
+Studio page holds the [Studio helper](../capabilities/studio-helper.md).
 
 Find [schema](#schema), [type pages](#type-page-classic-view), [lenses](#lenses),
 [lens detail](#lens-detail), [search](#search), the [index designer](#index-designer),
-and [transfer](#transfer) below.
+[transfer](#transfer) and the [AI panel](#ai-panel) below.
 
 ## Schema
 
@@ -325,3 +324,19 @@ Three operations, each with its own explanation. See
   current and are rebuilt one at a time from the [index designer](#index-designer). With
   no embedding provider configured there is nothing to rebuild: the action is disabled,
   with a note saying why.
+
+## AI panel
+
+The sidebar's AI entry opens the panel on the right of the page; its left edge resizes it.
+The schema page, the lens page and the index designer show what is in view as the panel's
+focus: a removable chip that goes with each message. Ask AI — in the schema inspector, on
+the lens page, in the agent editor and in the index designer — opens the panel on what it
+names. The agent and search index editors take the helper's draft fills.
+
+A schema proposal from the helper shows as a card under its answer. Review widens the panel
+and lists the whole proposal: what it adds (+) and changes (~), each refused step with its
+reason, the server's check — its issues and the lenses it touches — and what the check does
+not prove, with Reject, Re-check and Apply all. Apply all
+[applies it](../capabilities/schema-modeling.md#schema-proposals) against the revision of the
+latest check. After a schema change, and for a proposal restored from an earlier session,
+Apply waits for a re-check.

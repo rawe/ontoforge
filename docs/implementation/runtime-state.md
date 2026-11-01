@@ -20,7 +20,7 @@ created under the same key must not reuse the earlier ontology's entries.
 
 A running assistant turn holds a **30-second lease** and renews it every **10 seconds**.
 The cadence is defined by `TURN_LEASE_MS` and `TURN_HEARTBEAT_MS` in
-[threadStore.ts](../../server/src/runtime/threads/threadStore.ts).
+[threadStore.ts](../../server/src/assistants/threads/threadStore.ts).
 
 The lease bounds how long a server that dies can leave its thread busy. Renewal keeps a
 live turn's ownership; every publish, renewal or release is checked against its owner
@@ -29,9 +29,9 @@ complete state and ends the lease atomically. Cancellation or failure releases t
 without publishing a partial turn. The memory and Valkey stores implement the same
 contract.
 
-The lease cadence is separate from caller-visible conversation limits: turns retained,
-turns supplied to the model, maximum state size and idle expiry. Those limits and the
-store-capacity behavior remain described in the architectural
+The lease cadence is separate from caller-visible conversation limits: turns a thread
+holds, maximum state size and idle expiry. Those limits and the store-capacity behavior
+remain described in the architectural
 [thread-store contract](../architecture.md#thread-store). Changes to lease timing must
 still account for the recovery delay a client observes after a server fails.
 

@@ -9,7 +9,7 @@ Find routes for [lenses](#lenses), [entity types](#entity-types),
 [relation types](#relation-types), [properties](#property-definitions),
 [scope inclusions](#scope-inclusions), [assistants](#agent-configurations),
 [saved queries](#saved-queries), [named searches](#named-searches),
-[search indices](#search-indices), or
+[search indices](#search-indices), [schema proposals](#schema-proposals), or
 [schema-wide operations](#schema-wide-operations).
 
 ## Lenses
@@ -240,6 +240,24 @@ than the path. A taken key is a
 conflict. Replacing or deleting a managed index is a conflict — managed indices are only
 switched, in the search settings — and so is rebuilding a switched-off one. Deleting an
 index a lens includes without `cascade` answers `CASCADE_REQUIRED`.
+
+## Schema proposals
+
+Semantics: [capabilities/schema-modeling.md](../capabilities/schema-modeling.md#schema-proposals).
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/proposals/check` | Check a proposal without writing |
+| POST | `/proposals/apply` | Apply a proposal against the revision its check ran on |
+
+Check takes `proposal` and answers the check: `ok`, `baseRevision`, `refusals` — each
+`stepId`, `code`, `message` —, `validation` with `introduced` and `preExisting`, `warnings`,
+`impact` with `lenses` and `indices`, and `limits`. Apply takes `proposal` and `expected`,
+the check's `baseRevision`, and answers the committed `revision` and `created`, the id of
+each created type and property by its design path. Under another revision Apply answers
+`RESOURCE_CONFLICT` with `details.code` `DESIGN_CHANGED` and `details.current`; a refused
+step or an introduced validation error answers `RESOURCE_CONFLICT` with `details.code`
+`PROPOSAL_REFUSED` and `details.check`. Neither writes anything.
 
 ## Schema-wide operations
 

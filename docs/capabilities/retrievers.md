@@ -123,7 +123,7 @@ Cancelling the request stops further work.
 
 ### Planning
 
-The planning model receives the question, the recent conversation, the search modes the
+The planning model receives the question, the conversation so far, the search modes the
 server can run and, from the lens's catalog, each of the retriever's indices: its name,
 description and root type, what its own entry holds, the relation groups the retriever may
 use with what one relation entry holds, the document it reads passages of, and its
@@ -274,8 +274,8 @@ message named, or, when that message named none, the one the answer to it named 
 from an earlier exchange; the query names that entity. A follow-up the planner still
 answers as unsupported is planned once more ([above](#planning)).
 
-The planning and answer models see the thread's recent turns, as its user messages and
-answers; how many: [../architecture.md](../architecture.md#thread-store).
+The planning and answer models see the whole thread, as its user messages and answers,
+each cut to 2,000 characters.
 
 ### Diagnostics
 

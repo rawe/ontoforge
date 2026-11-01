@@ -1,12 +1,13 @@
 # Assistants REST
 
 The assistant routes of a lens, under the [runtime REST](runtime-rest.md) prefix
-`/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`. Shared conventions — addressing,
+`/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`, and the
+[Studio helper](#studio-helper)'s, under the [modeling REST](modeling-rest.md) prefix. Shared conventions — addressing,
 errors, who may call — are in the [interfaces index](README.md).
 
 ## Assistant chat and threads
 
-Every assistant kind — `agents`, `retrievers`, `navigators` — converses through the same request, the
+Every assistant kind — `agents`, `retrievers`, `navigators`, and the Studio helper — converses through the same request, the
 same stream frame and the same threads. Semantics:
 [capabilities/threads.md](../capabilities/threads.md). The kind's own section below lists its
 routes, its extra request fields and its own events.
@@ -22,7 +23,8 @@ thread bound to the addressed assistant; with it, the message continues that thr
 thread that is unknown, expired, bound to another assistant or started by another
 principal answers `RESOURCE_NOT_FOUND` with `details.code` `THREAD_NOT_FOUND`; a thread
 whose previous message is still being answered answers `RESOURCE_CONFLICT` with
-`details.code` `THREAD_BUSY`. Both are plain error responses before the stream opens, like every other
+`details.code` `THREAD_BUSY`, and one that holds its most turns `RESOURCE_CONFLICT` with
+`details.code` `THREAD_FULL`. All are plain error responses before the stream opens, like every other
 refusal the kind lists; a busy message is never queued.
 
 **Stream.** Every successful REST assistant chat uses `application/x-ndjson`; there is no
@@ -64,7 +66,8 @@ Delivery bounds buffering and terminates stalled or oversized streams.
 There is no background continuation after a disconnect.
 
 **Read a thread.** `200` with `threadId` and `messages` — the user messages and the
-assistant's answers in order, each `role` (`user` or `assistant`) and `content`, at most
+assistant's answers in order, each `role` (`user` or `assistant`), `content` and, on an
+answer whose turn left any, `artifacts` — each `type`, `version` and `value` —, at most
 the turns a thread keeps, without tool payloads. Unknown, expired, another assistant's or
 another principal's thread: `THREAD_NOT_FOUND`. Reading needs no language-model provider
 and does not count as use; it is gated like the kind's list.
@@ -205,3 +208,19 @@ as each completes. An unknown agent, an unavailable provider and an unknown or b
 are rejected before streaming, using the ordinary HTTP error response. Disconnect cancels
 further agent work, with best-effort cancellation of running operations. Reading a thread
 needs no provider, as the list does.
+
+## Studio helper
+
+Under the modeling prefix `/api/ontologies/{ontologyKey}/model`, for the ontology's
+administrators. Semantics: [capabilities/studio-helper.md](../capabilities/studio-helper.md).
+Chat requires a language-model provider; reading a thread does not.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/ai/chat` | Converse with the Studio helper |
+| GET | `/ai/threads/{threadId}` | Read a thread back |
+
+Chat takes the [shared request](#assistant-chat-and-threads) plus optional `focus`, what the
+page shows, and `draft`, the open editor's unsaved values. It streams `thread`, then the
+tool events `studio.tool_call` and `studio.tool_result`, shaped as the
+[agent's](#ai), then one terminal `final` or `error`; the answer arrives whole in `final`.

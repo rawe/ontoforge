@@ -23,7 +23,7 @@ response bodies are reproduced here except the shared error envelope.
 | Sign-in, users and deployment health | [Sign-in](server.md#sign-in), [User management](server.md#user-management), [Exposure](server.md#exposure), [Probes](server.md#probes), [Metrics](server.md#metrics) |
 | Design an ontology | [Modeling REST](modeling-rest.md) |
 | Work with instance data through a lens | [Runtime REST](runtime-rest.md), [Rulesets](runtime-rest.md#rulesets) |
-| Chat with an assistant of a lens | [Assistants REST](assistants-rest.md) |
+| Chat with an assistant of a lens or the Studio helper | [Assistants REST](assistants-rest.md) |
 | Connect an MCP client | [MCP](mcp.md) |
 
 ## Conventions
@@ -240,8 +240,10 @@ stays one of the ten. A search with a `semantic` block and no embedding provider
 language-model provider configured answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
 An assistant thread that is unknown, expired, bound to another assistant or started by
 another principal answers `404 RESOURCE_NOT_FOUND` with `details.code` of
-`THREAD_NOT_FOUND`, and a message to a thread still running `409 RESOURCE_CONFLICT` with
-`details.code` of `THREAD_BUSY` ([thread store](../architecture.md#thread-store)).
+`THREAD_NOT_FOUND`, a message to a thread still running `409 RESOURCE_CONFLICT` with
+`details.code` of `THREAD_BUSY`, and a message to a thread that holds its most turns
+`409 RESOURCE_CONFLICT` with `details.code` of `THREAD_FULL`
+([thread store](../architecture.md#thread-store)).
 
 **A refused relation rules write carries its violations.** A relation rules change — on
 create, update or import — that the stored relations break answers `409

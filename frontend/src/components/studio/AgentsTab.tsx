@@ -15,6 +15,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { toDiffValue } from '@/lib/valueDiff'
 import { agentFields, draftOf, sameDraft, toInput, withAgentFields, withKey, withName, type AgentDraft } from './assistants/agentDraft'
 import { AssistantActionBar } from './assistants/AssistantActionBar'
 import { AssistantCard } from './assistants/AssistantCard'
@@ -140,8 +141,8 @@ export function AgentsTab({ ontologyKey, lens }: { ontologyKey: string; lens: Le
   )
 }
 
-const showTools = (tools: unknown) =>
-  tools === null ? 'All tools' : Array.isArray(tools) ? tools.join(', ') || '(none)' : String(tools)
+/** An agent's tools as its AI mark shows them: null is every tool. */
+const toolsValue = (tools: unknown) => (tools === null ? 'All tools' : toDiffValue(tools))
 
 interface AgentPageProps {
   ontologyKey: string
@@ -290,8 +291,8 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
           disabled={busy}
           namePlaceholder="Research Assistant"
           descriptionHint="What this agent is for; shown in the Workbench."
-          nameMark={<AiChangedMark field="name" change={marks.name} />}
-          descriptionMark={<AiChangedMark field="description" change={marks.description} />}
+          nameMark={<AiChangedMark field="name" label="Name" change={marks.name} />}
+          descriptionMark={<AiChangedMark field="description" label="Description" change={marks.description} />}
           followName={false}
           onName={(name) => edit((d) => withName(d, name))}
           onKey={(value) => edit((d) => withKey(d, value))}
@@ -302,7 +303,7 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
           <div className="grid gap-1.5">
             <div className="flex items-center gap-2">
               <Label htmlFor="agent-prompt">System prompt</Label>
-              <AiChangedMark field="systemPrompt" change={marks.systemPrompt} />
+              <AiChangedMark field="systemPrompt" label="System prompt" change={marks.systemPrompt} />
             </div>
             <Textarea
               id="agent-prompt"
@@ -321,7 +322,7 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
                 <Switch checked={draft.allTools} disabled={busy} data-testid="agent-all-tools" onCheckedChange={(allTools) => edit(() => ({ allTools }))} />
                 All tools
               </label>
-              <AiChangedMark field="tools" change={marks.tools} show={showTools} />
+              <AiChangedMark field="tools" label="Tools" change={marks.tools} value={toolsValue} />
             </div>
             {!draft.allTools && (
               <div className="grid grid-cols-2 gap-1.5 rounded-lg border p-3">

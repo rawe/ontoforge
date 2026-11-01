@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { ValueDiff } from '@/components/ValueDiff'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -8,8 +9,8 @@ import {
 
 /**
  * The whole proposal as one plain list diff: its rows by group, `+` added
- * (with the description it gets), `~` changed (a description before →
- * after), `=` a description left as it is, each refused row with the
+ * (with the description it gets), `~` changed (its description's diff),
+ * `=` a description left as it is, each refused row with the
  * server's reason; then the server's check line, what it does not prove,
  * and Reject, Re-check, Apply all. A row of a type that exists already
  * selects it in the schema.
@@ -106,10 +107,9 @@ function ReviewRow({ row, selectable, onSelect }: { row: ProposalRow; selectable
           <span className="block break-words text-muted-foreground">“{row.change.after}” · unchanged</span>
         )}
         {row.mark === '~' && row.change !== undefined && (
-          <span className="block break-words text-muted-foreground">
-            {row.change.before !== undefined && <>“{row.change.before}” → </>}
-            <span className="text-foreground">“{row.change.after}”</span>
-          </span>
+          row.change.before === undefined
+            ? <span className="block break-words">“{row.change.after}”</span>
+            : <ValueDiff before={row.change.before} after={row.change.after} />
         )}
         {row.refusal !== undefined && (
           <span data-testid="proposal-row-refusal" className="block break-words text-destructive">

@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useEffectEvent, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Box, Command, PanelTop, Plus, SearchX, ShieldCheck, Waypoints } from 'lucide-react'
 import { useParams } from 'react-router-dom'
+import { schemaFocus, usePublishFocus } from '@/assistants'
 import * as model from '@/api/model'
 import type { ValidationResult } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
@@ -53,8 +54,10 @@ export function SchemaPage() {
 }
 
 function SchemaShell({ ontologyKey }: { ontologyKey: string }) {
-  const { view, selection, select, switchView, setPaletteOpen } = useSchemaWorkspace()
+  const { view, selection, propertyRequest, select, switchView, setPaletteOpen } = useSchemaWorkspace()
   const schema = useModelSchema(ontologyKey)
+  // The assistant panel's focus: the opened property, else the selected type.
+  usePublishFocus(schemaFocus(selection, propertyRequest?.propertyKey ?? null))
   const [validation, setValidation] = useState<ValidationResult | null>(null)
   const [createEntityOpen, setCreateEntityOpen] = useState(false)
   const [createRelationOpen, setCreateRelationOpen] = useState(false)

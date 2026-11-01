@@ -14,7 +14,7 @@
  * Summaries are written for people: display names, never ids or keys.
  */
 
-import type { StreamEvent } from "../../chatStream.js";
+import type { StreamEvent } from "../../../assistants/index.js";
 import { entitiesEvent, type EntityCard, type EntityLink } from "../entities.js";
 
 /** One step of a pipeline, as the client draws it. */

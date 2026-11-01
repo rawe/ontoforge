@@ -20,7 +20,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { runQuery, withTransaction, type Querier } from "../../src/adapters/postgres/errors.js";
 import { createApp } from "../../src/app.js";
-import { DesignChangedError } from "../../src/core/exceptions.js";
+import { DesignChangedError, StaleDesignError } from "../../src/core/exceptions.js";
 import {
   closeStores,
   getModelingStore,
@@ -537,6 +537,55 @@ describe("the design lock", () => {
     }
     expect(await sql(`SELECT id FROM entity`)).toEqual([]);
   }, 15_000);
+});
+
+describe("a design change with options", () => {
+  it("an expected revision: compared in full under the hold, advanced exactly once", async () => {
+    const store = await getModelingStore(O);
+    const base = await revision();
+    const created = await store.changeDesign(async (s, started) => {
+      expect(started).toEqual(base);
+      await s.createLens(randomUUID(), "one", "One", null);
+      await s.createLens(randomUUID(), "two", "Two", null);
+      return s.searchIndices().designRevision();
+    }, { expected: base });
+    expect(created).toEqual({ ...base, revision: base.revision + 1 });
+    expect(await revision()).toEqual(created);
+
+    for (const expected of [base, { ...created, ontologyId: randomUUID() }]) {
+      const stale = store.changeDesign(async (s) => s.createLens(randomUUID(), "three", "Three", null), { expected });
+      await expect(stale).rejects.toBeInstanceOf(StaleDesignError);
+      await expect(stale).rejects.toMatchObject({ details: { code: "DESIGN_CHANGED", current: created } });
+    }
+    expect(await revision()).toEqual(created);
+    expect(await sql(`SELECT key FROM lens WHERE key = 'three'`)).toEqual([]);
+  });
+
+  it("rollback: returns what the work returned and leaves no write and no revision change", async () => {
+    const store = await getModelingStore(O);
+    const base = await revision();
+    const answer = await store.changeDesign(async (s) => {
+      await s.createLens(randomUUID(), "tried", "Tried", null);
+      return (await s.getLensByKey("tried"))!.key;
+    }, { rollback: true });
+    expect(answer).toBe("tried");
+    expect(await revision()).toEqual(base);
+    expect(await sql(`SELECT key FROM lens WHERE key = 'tried'`)).toEqual([]);
+  });
+
+  it("is refused inside another design change, which then writes nothing", async () => {
+    const store = await getModelingStore(O);
+    const base = await revision();
+    for (const options of [{ rollback: true }, { expected: base }]) {
+      const nested = store.changeDesign(async (s) => {
+        await s.createLens(randomUUID(), "outer", "Outer", null);
+        return s.changeDesign(async () => "inner", options);
+      });
+      await expect(nested).rejects.toThrow(/inside another/);
+    }
+    expect(await revision()).toEqual(base);
+    expect(await sql(`SELECT key FROM lens WHERE key = 'outer'`)).toEqual([]);
+  });
 });
 
 describe("a reconciliation that fails after its design change committed", () => {

@@ -36,7 +36,7 @@ export const MAX_SUB_QUERIES = 4;
 /** Most variants of one sub-query's query. */
 export const MAX_VARIANTS = 3;
 
-/** Most characters of the planner's input. */
+/** Most characters of the planner's input without the conversation before the question. */
 export const PLANNER_INPUT_CHARACTERS = 24_000;
 
 /** Most distinct stored values of a filter's field listed to the planner;

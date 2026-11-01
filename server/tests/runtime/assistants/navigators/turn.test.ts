@@ -17,6 +17,7 @@ vi.mock("../../../../src/core/ai.js", () => ({ createAiModel: vi.fn(() => fake),
 vi.mock("../../../../src/runtime/assistants/navigators/reader.js", () => ({ lensReader: () => graph.reader }));
 
 import { settings } from "../../../../src/config.js";
+import type { GraphThread, StreamEvent } from "../../../../src/assistants/index.js";
 import { createAiModel } from "../../../../src/core/ai.js";
 import type { RuntimeStore } from "../../../../src/core/ports.js";
 import { ANSWER } from "../../../../src/runtime/assistants/navigators/answer.js";
@@ -24,10 +25,8 @@ import { deriveNavigator, type NavigatorConfig } from "../../../../src/runtime/a
 import { NAVIGATOR_TOPOLOGY } from "../../../../src/runtime/assistants/navigators/index.js";
 import type { Intent } from "../../../../src/runtime/assistants/navigators/understand.js";
 import { runNavigatorTurn } from "../../../../src/runtime/assistants/navigators/runtime.js";
-import type { StreamEvent } from "../../../../src/runtime/chatStream.js";
 import type { LoadedSchema } from "../../../../src/runtime/schemaCache.js";
-import type { GraphThread } from "../../../../src/runtime/threads/threadStore.js";
-import { graphValues, newGraphThread } from "../../threads/graphThread.js";
+import { graphValues, newGraphThread } from "../../../assistants/threads/graphThread.js";
 import { LENS, orgReader, type FakeReader } from "./fixture.js";
 
 let reader: FakeReader;

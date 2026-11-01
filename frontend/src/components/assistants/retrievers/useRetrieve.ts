@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { chatErrorText } from '@/api/chatStream'
+import { chatErrorText } from '@/assistants'
 import { retrieveQuestion, type RetrieveResponse } from '@/api/retrievers'
 import { isStale, questionToSend, type Asked } from './retrieveModel'
 

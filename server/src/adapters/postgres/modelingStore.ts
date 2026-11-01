@@ -25,7 +25,8 @@
  *   method's not-found shape.
  *
  * - `changeDesign` opens one transaction that holds the design
- *   exclusively and advances its revision (`design.ts`), and hands its
+ *   exclusively, compares the expected revision, if any, and advances
+ *   it (`design.ts`), and hands its
  *   work a store bound to that connection: every method above, and the
  *   search-index and navigator stores it hands out, run on it. Bound,
  *   `getFullSchema` reads at READ COMMITTED: the exclusive hold keeps the
@@ -40,7 +41,11 @@
 
 import { toSql } from "pgvector";
 
+import { sameDesign } from "../../core/designRevision.js";
+import { StaleDesignError } from "../../core/exceptions.js";
 import type {
+  DesignChangeOptions,
+  DesignRevision,
   ModelingStore,
   NavigatorStore,
   RelationRule,
@@ -279,6 +284,11 @@ function rulesOf(row: Row): RelationRules {
   return { parent: (row.parent as ParentEnd | null) ?? null, onePerPair: row.onePerPair === true };
 }
 
+/** Carries a rolled-back change's result out of its transaction. */
+class RolledBack {
+  constructor(readonly result: unknown) {}
+}
+
 export class PostgresModelingStore implements ModelingStore {
   /** Bound to one ontology's namespace; unbound (tests only) runs against
    * the connection's default namespace. `bound`: the connection of the
@@ -287,6 +297,8 @@ export class PostgresModelingStore implements ModelingStore {
     private readonly namespace?: string,
     private readonly ontologyKey: string = "",
     private readonly bound?: Querier,
+    /** The revision the bound design change started from. */
+    private readonly base?: DesignRevision,
   ) {}
 
   /** The search-index store of the same ontology. */
@@ -304,13 +316,30 @@ export class PostgresModelingStore implements ModelingStore {
     return new PostgresNavigatorStore(this.namespace, this.bound);
   }
 
-  changeDesign<T>(work: (store: ModelingStore) => Promise<T>): Promise<T> {
-    if (this.bound !== undefined) return work(this);
-    return withBoundTransaction(async (querier) => {
-      await holdDesignExclusive(querier);
-      await advanceDesign(querier);
-      return work(new PostgresModelingStore(this.namespace, this.ontologyKey, querier));
-    }, this.namespace);
+  async changeDesign<T>(
+    work: (store: ModelingStore, base: DesignRevision) => Promise<T>,
+    options: DesignChangeOptions = {},
+  ): Promise<T> {
+    const { expected, rollback = false } = options;
+    if (this.bound !== undefined) {
+      if (expected !== undefined || rollback) {
+        throw new Error("A design change with an expected revision or its own rollback cannot run inside another one");
+      }
+      return work(this, this.base!);
+    }
+    try {
+      return await withBoundTransaction(async (querier) => {
+        const base = await holdDesignExclusive(querier);
+        if (expected !== undefined && !sameDesign(base, expected)) throw new StaleDesignError(base);
+        await advanceDesign(querier);
+        const result = await work(new PostgresModelingStore(this.namespace, this.ontologyKey, querier, base), base);
+        if (rollback) throw new RolledBack(result);
+        return result;
+      }, this.namespace);
+    } catch (error) {
+      if (error instanceof RolledBack) return error.result as T;
+      throw error;
+    }
   }
 
   /** Door one, carrying this store's binding. */

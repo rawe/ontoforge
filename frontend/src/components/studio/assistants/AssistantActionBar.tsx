@@ -1,7 +1,7 @@
 import { Trash2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import type { AssistantKind } from '@/api/types'
-import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
+import { adapters } from '@/assistants'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
@@ -31,12 +31,12 @@ export function AssistantActionBar({ kind, isNew, dirty, canSave, busy, name, er
   onDelete: () => void
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const one = ASSISTANT_KINDS[kind].one.toLowerCase()
+  const one = adapters[kind].nouns.one.toLowerCase()
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" size="sm" disabled={!canSave}>{isNew ? `Create ${one}` : 'Save'}</Button>
-        {!isNew && <Button type="button" size="sm" variant="ghost" disabled={!dirty || busy} onClick={onDiscard}>Discard changes</Button>}
+        <Button type="submit" size="sm" data-testid="assistant-save" disabled={!canSave}>{isNew ? `Create ${one}` : 'Save'}</Button>
+        {!isNew && <Button type="button" size="sm" variant="ghost" data-testid="assistant-discard" disabled={!dirty || busy} onClick={onDiscard}>Discard changes</Button>}
         {extras}
         {!isNew && (
           <Button type="button" size="sm" variant="ghost" className="ml-auto text-destructive" disabled={busy} onClick={() => setConfirmDelete(true)}>

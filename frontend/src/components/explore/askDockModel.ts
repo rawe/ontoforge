@@ -6,7 +6,7 @@
  * No React, no I/O — unit-tested with `node --test`.
  */
 import type { AssistantKind } from '@/api/types'
-import { DEFAULT_ASSISTANT } from '../assistants/chat/chatModel.ts'
+import { DEFAULT_ASSISTANT } from '../../assistants/conversation/chatModel.ts'
 
 /** The kinds in the picker, in its order. */
 export const ASK_KIND_ORDER: readonly AssistantKind[] = ['navigators', 'retrievers', 'agents']

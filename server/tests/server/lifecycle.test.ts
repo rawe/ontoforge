@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../../src/app.js";
 import { shutdownServer } from "../../src/main.js";
-import { MemoryThreadStore } from "../../src/runtime/threads/memoryThreadStore.js";
+import { MemoryThreadStore } from "../../src/assistants/index.js";
 import type { SharedState } from "../../src/sharedState.js";
 
 /** Shared state in memory that records when it closes. */
@@ -98,7 +98,7 @@ describe("shutdown", () => {
     const events: string[] = [];
     const app = await build(events);
     // Shaped like a chat stream: hijacked, and the turn is released after
-    // the socket closed (`chatStream.ts`).
+    // the socket closed (`assistants/session.ts`).
     app.get("/stream", async (_request, reply) => {
       reply.hijack();
       reply.raw.writeHead(200, { "content-type": "application/x-ndjson" });

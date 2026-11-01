@@ -42,6 +42,8 @@ import {
 } from "./core/exceptions.js";
 import { mountMcp } from "./mcp/mount.js";
 import { serveMetrics } from "./metrics.js";
+import { studioHelperRouter } from "./modeling/helper/router.js";
+import { proposalRouter } from "./modeling/proposals/router.js";
 import { modelingRouter } from "./modeling/router.js";
 import { registryRouter } from "./registry/router.js";
 import { aiRouter } from "./runtime/aiRouter.js";
@@ -340,11 +342,13 @@ export async function createApp(shared?: SharedState, auth: AuthRuntime | null =
   // names its ontology in the path and runs against a store bound to it;
   // runtime requests additionally name the lens they read through.
   await app.register(modelingRouter, { prefix: "/api/ontologies/:ontologyKey/model" });
+  await app.register(proposalRouter, { prefix: "/api/ontologies/:ontologyKey/model" });
   const runtimePrefix = "/api/ontologies/:ontologyKey/runtime/lenses/:lensKey";
   await app.register(runtimeRouter, { prefix: runtimePrefix });
   await app.register(changesetRouter, { prefix: `${runtimePrefix}/changesets` });
   // One thread store per server: every assistant conversation lives in it.
   await app.register(aiRouter, { prefix: runtimePrefix, threads: state.threads });
+  await app.register(studioHelperRouter, { prefix: "/api/ontologies/:ontologyKey/model", threads: state.threads });
   await app.register(decisionRouter, { prefix: runtimePrefix });
   // Ruleset maintenance names no lens: the first lensless runtime routes.
   await app.register(rulesetRouter, { prefix: "/api/ontologies/:ontologyKey/runtime/rulesets" });

@@ -2,8 +2,8 @@ import { Sparkles } from 'lucide-react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useFeatures, useRuntimeSchema } from '@/api/hooks'
 import { AgentChat } from '@/components/assistants/agents/AgentChat'
-import { AssistantTab } from '@/components/assistants/chat/AssistantTab'
-import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
+import { AssistantTab } from '@/components/assistants/AssistantTab'
+import { adapters } from '@/assistants'
 import { NavigatorChat } from '@/components/assistants/navigators/NavigatorChat'
 import { RetrieverTab } from '@/components/assistants/retrievers/RetrieverTab'
 import { EmptyState } from '@/components/EmptyState'
@@ -65,15 +65,15 @@ export function AiPage() {
         </h1>
         <TabsList className="h-8">
           <TabsTrigger value="chat" className="gap-1.5 px-2.5 text-[13px]">
-            <ASSISTANT_KINDS.agents.icon className="size-3.5" />
+            <adapters.agents.icon className="size-3.5" />
             Agents
           </TabsTrigger>
           <TabsTrigger value="retriever" className="gap-1.5 px-2.5 text-[13px]">
-            <ASSISTANT_KINDS.retrievers.icon className="size-3.5" />
+            <adapters.retrievers.icon className="size-3.5" />
             Retrievers
           </TabsTrigger>
           <TabsTrigger value="navigator" className="gap-1.5 px-2.5 text-[13px]">
-            <ASSISTANT_KINDS.navigators.icon className="size-3.5" />
+            <adapters.navigators.icon className="size-3.5" />
             Navigators
           </TabsTrigger>
         </TabsList>

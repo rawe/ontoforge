@@ -6,11 +6,12 @@
  * filtered lists, the creator becoming administrator, user management's
  * scope, deletes forgetting assignments, the runtime MCP mount at a
  * Reader's level, a Proposer's changesets a Writer commits and owned
- * assistant threads.
+ * assistant threads, the Studio helper's among them.
  */
 
 import { randomUUID } from "node:crypto";
 
+import { AIMessage } from "@langchain/core/messages";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { FastifyInstance } from "fastify";
@@ -22,8 +23,10 @@ import { openAccessStore } from "../../src/adapters/postgres/accessStore.js";
 import { createApp } from "../../src/app.js";
 import type { AuthRuntime } from "../../src/auth/runtime.js";
 import { settings } from "../../src/config.js";
+import { setAiModel } from "../../src/core/ai.js";
 import { StoreError } from "../../src/core/exceptions.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
+import { FakeToolCallingModel } from "../runtime/aiHelpers.js";
 import { wipeDatabase } from "./reset.js";
 
 const DATABASE = "ontoforge_access_test";
@@ -295,6 +298,48 @@ describe("authorization with authentication on", () => {
     const role = (await access.assignmentsOf(adminId)).find((a) => a.role === "platform_admin")!;
     expect((await as("bob", "DELETE", `/api/users/${adminId}/assignments/${role.id}`)).status).toBe(409);
     expect((await as("admin", "DELETE", `/api/users/${await idOf("bob")}/assignments/${bobRole.id}`)).status).toBe(204);
+  });
+
+  it("the Studio helper: an Ontology Administrator chats on a thread of its own; a lens role is refused", async () => {
+    const chat = `${fair}/model/ai/chat`;
+    const thread = (id: string) => `${fair}/model/ai/threads/${id}`;
+    setAiModel(new FakeToolCallingModel([new AIMessage("A design answer.")]));
+    try {
+      const res = await app.inject({ method: "POST", url: chat, headers: { authorization: "Bearer creator" }, payload: { message: "Explain" } });
+      expect(res.statusCode, res.body).toBe(200);
+      const events = res.body.trim().split("\n").map((line) => JSON.parse(line) as Json);
+      expect(events.at(-1)).toEqual({ type: "final", reply: "A design answer." });
+      const threadId = events[0]!.threadId as string;
+      expect((await as("creator", "GET", thread(threadId))).body.messages).toHaveLength(2);
+      // A Reader and a Writer of a lens are no administrators.
+      for (const subject of ["alice", "bob"]) {
+        expect((await as(subject, "POST", chat, { message: "Explain" })).status).toBe(403);
+        expect((await as(subject, "GET", thread(threadId))).status).toBe(403);
+      }
+      // Another administrator of the ontology knows no thread of the creator's.
+      expect((await as("carol", "GET", "/api/ontologies")).status).toBe(200);
+      await grant("admin", "carol", { role: "ontology_admin", ontologyKey: "fair" });
+      const foreign = await as("carol", "POST", chat, { message: "Continue", threadId });
+      expect(foreign.status).toBe(404);
+      expect(foreign.body.error.details).toEqual({ code: "THREAD_NOT_FOUND" });
+      expect((await as("carol", "GET", thread(threadId))).status).toBe(404);
+    } finally {
+      setAiModel(null);
+    }
+  });
+
+  it("schema proposals: an Ontology Administrator checks and applies one; a lens role is refused", async () => {
+    const proposal = { steps: [{ id: "s1", op: "create_entity_type", key: "stall", name: "Stall" }] };
+    const check = await as("creator", "POST", `${fair}/model/proposals/check`, { proposal });
+    expect(check.status).toBe(200);
+    const expected = check.body.baseRevision;
+    for (const subject of ["alice", "bob"]) {
+      expect((await as(subject, "POST", `${fair}/model/proposals/check`, { proposal })).status).toBe(403);
+      expect((await as(subject, "POST", `${fair}/model/proposals/apply`, { proposal, expected })).status).toBe(403);
+    }
+    const applied = await as("creator", "POST", `${fair}/model/proposals/apply`, { proposal, expected });
+    expect(applied.status).toBe(200);
+    expect(Object.keys(applied.body.created)).toContain("entityTypes.stall");
   });
 
   it("a Reader's runtime MCP mount lists only reads and refuses a write call", async () => {

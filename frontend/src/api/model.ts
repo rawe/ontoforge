@@ -4,6 +4,17 @@
  * by UUID (`lensId`, `entityTypeId`, `relationTypeId`, `propertyId`).
  */
 
+import {
+  assistantPath,
+  postChat,
+  toolCallReader,
+  type ChatRequest,
+  type SharedEvent,
+  type ToolEvent,
+} from '../assistants/stream/chatStream'
+import type { DraftTarget } from '../assistants/draft/draftFillModel'
+import type { DesignRevision, Proposal, ProposalCheck, Receipt } from '../assistants/proposal/proposalModel'
+import type { Focus } from '../assistants/types'
 import { buildQuery, request } from './http'
 import type {
   Agent,
@@ -405,3 +416,32 @@ export const getSearchIndexStatus = (ontologyKey: string, key: string) =>
 /** Starts new generations for the enabled representations (202). */
 export const rebuildSearchIndex = (ontologyKey: string, key: string) =>
   request<IndexStatus>(`${indexPath(ontologyKey, key)}/rebuild`, { method: 'POST' })
+
+/* ------------------------------- Studio helper ------------------------------ */
+
+/** A Studio helper message: the shared body, plus what the page has in view. */
+export interface StudioChatRequest extends ChatRequest {
+  focus?: Focus
+  /** The open agent editor's unsaved values, with its draft version. */
+  draft?: { target: DraftTarget; version: number; fields: Record<string, unknown> }
+}
+
+/** One message to the Studio helper; without `threadId` it starts a new thread. */
+export const studioChat = (
+  ontologyKey: string,
+  body: StudioChatRequest,
+  onEvent: (event: SharedEvent | ToolEvent<'studio'>) => void,
+  signal: AbortSignal,
+) => postChat(assistantPath({ ontologyKey, lensKey: null }, 'studio'), body, toolCallReader('studio'), onEvent, signal)
+
+/** Check a schema proposal against the current design; writes nothing. */
+export const checkProposal = (ontologyKey: string, proposal: Proposal) =>
+  request<ProposalCheck>(`${base(ontologyKey)}/proposals/check`, { method: 'POST', body: { proposal } })
+
+/**
+ * Apply a checked proposal to the design revision its check ran on: every
+ * step or none. 409 RESOURCE_CONFLICT with `details.code` DESIGN_CHANGED
+ * (`details.current`) or PROPOSAL_REFUSED (`details.check`).
+ */
+export const applyProposal = (ontologyKey: string, proposal: Proposal, expected: DesignRevision) =>
+  request<Receipt>(`${base(ontologyKey)}/proposals/apply`, { method: 'POST', body: { proposal, expected } })

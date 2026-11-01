@@ -196,6 +196,19 @@ export interface DesignRevision {
   revision: number;
 }
 
+/** How a design change (`ModelingStore.changeDesign`) runs. */
+export interface DesignChangeOptions {
+  /** The revision the change must start from, compared in full under the
+   * exclusive hold before the change advances it — another one refuses
+   * with `StaleDesignError`, writing nothing. The revision then advances
+   * exactly once, however many writes `work` makes. */
+  expected?: DesignRevision;
+  /** Roll the change back even when `work` returns, the revision
+   * included, and return what it returned: a check that writes nothing.
+   * Constraints the storage checks only at commit never run in it. */
+  rollback?: boolean;
+}
+
 /**
  * The modeling side of the persistence port: schema persistence.
  *
@@ -215,9 +228,14 @@ export interface ModelingStore {
    * wait — and advances its revision; COMMIT when `work` returns,
    * ROLLBACK (the revision included) when it throws. The store handed to
    * `work`, and the search-index and navigator stores it hands out, run
-   * on that transaction (contract rule 2). On a store already inside a
-   * design change, `work` runs on it. */
-  changeDesign<T>(work: (store: ModelingStore) => Promise<T>): Promise<T>;
+   * on that transaction (contract rule 2); `base` is the revision the
+   * change started from, read under the hold. On a store already inside a
+   * design change, `work` runs on it, with that change's base, and
+   * `options` are refused: a nested change has no rollback of its own. */
+  changeDesign<T>(
+    work: (store: ModelingStore, base: DesignRevision) => Promise<T>,
+    options?: DesignChangeOptions,
+  ): Promise<T>;
 
   // ------------------------------------------------------------------
   // Lenses

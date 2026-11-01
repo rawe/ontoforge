@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import type { AssistantKind } from '@/api/types'
-import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
+import { adapters } from '@/assistants'
 
 /**
  * The editor's sticky Test panel: a header with the chat's "New conversation"
@@ -31,7 +31,7 @@ export function AssistantTestPanel({ kind, aiEnabled, hint, extras, children }: 
         <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
       </div>
       {aiEnabled ? children(actions)
-        : <p className="p-4 text-xs text-muted-foreground">This server has no AI provider configured; {ASSISTANT_KINDS[kind].many} cannot answer here.</p>}
+        : <p className="p-4 text-xs text-muted-foreground">This server has no AI provider configured; {adapters[kind].nouns.many} cannot answer here.</p>}
     </section>
   )
 }

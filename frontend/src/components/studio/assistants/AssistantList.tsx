@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import type { AssistantKind } from '@/api/types'
 import { EmptyState } from '@/components/EmptyState'
 import { AssistantExplainerButton } from '@/components/assistants/explainers/AssistantExplainer'
-import { ASSISTANT_KINDS } from '@/components/assistants/kinds'
+import { adapters } from '@/assistants'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AssistantDefaultCard, AssistantEmptyCard } from './AssistantCard'
@@ -26,7 +26,7 @@ export function AssistantList({ kind, count, extras, emptyText, onNew, onOpenDef
   /** The kind's `AssistantCard`s. */
   children: ReactNode
 }) {
-  const { one, many } = ASSISTANT_KINDS[kind]
+  const { one, many } = adapters[kind].nouns
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -55,7 +55,7 @@ export function AssistantLoading() {
 export function AssistantLoadError({ kind, error, onReload }: { kind: AssistantKind; error: unknown; onReload: () => void }) {
   return (
     <div className="text-sm">
-      <p role="alert" className="text-destructive">Could not load {ASSISTANT_KINDS[kind].many}: {assistantErrorLines(error).join(' ')}</p>
+      <p role="alert" className="text-destructive">Could not load {adapters[kind].nouns.many}: {assistantErrorLines(error).join(' ')}</p>
       <Button variant="outline" size="sm" className="mt-3" onClick={onReload}>Reload</Button>
     </div>
   )
@@ -63,7 +63,7 @@ export function AssistantLoadError({ kind, error, onReload }: { kind: AssistantK
 
 /** What the editor URL shows when the lens has no assistant under its key. */
 export function AssistantNotFound({ kind, assistantKey, onBack }: { kind: AssistantKind; assistantKey: string; onBack: () => void }) {
-  const { one, many, icon } = ASSISTANT_KINDS[kind]
+  const { nouns: { one, many }, icon } = adapters[kind]
   return (
     <EmptyState
       icon={icon}

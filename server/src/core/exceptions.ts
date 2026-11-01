@@ -82,6 +82,19 @@ export class DesignChangedError extends ConflictError {
   }
 }
 
+/** A design change expected another design revision than the one in
+ * force (`DesignChangeOptions.expected`); nothing was written. -> 409
+ * RESOURCE_CONFLICT, `details.code` `DESIGN_CHANGED` with the `current`
+ * revision. */
+export class StaleDesignError extends ConflictError {
+  constructor(current: { ontologyId: string; revision: number }) {
+    super("The ontology's design changed since it was checked; check again against the current design", {
+      code: "DESIGN_CHANGED",
+      current,
+    });
+  }
+}
+
 /** No valid credential for a protected operation. -> 401 UNAUTHENTICATED;
  * `invalidToken` when a bearer token was sent and rejected. */
 export class UnauthenticatedError extends OntoForgeError {

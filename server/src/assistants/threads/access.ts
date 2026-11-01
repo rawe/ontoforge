@@ -1,0 +1,101 @@
+/**
+ * How a chat reaches its thread (`docs/capabilities/threads.md`): a
+ * message starts or continues one before the stream opens, and a thread
+ * is read back as its user and assistant texts. Both refuse a thread that
+ * is unknown, expired, bound to another assistant or owned by another
+ * principal alike, so a client learns nothing about threads it cannot use.
+ * A thread holding `TURNS_PER_THREAD` turns takes no more messages.
+ */
+
+import { AIMessage, type BaseMessage } from "@langchain/core/messages";
+
+import { ConflictError, NotFoundError } from "../../core/exceptions.js";
+import { TURNS_PER_THREAD, type Artifact, type ThreadBinding, type ThreadStore, type Turn } from "./threadStore.js";
+import { threadArtifacts, threadValues } from "./turnSaver.js";
+import { turnCount } from "./turns.js";
+
+/** One message of a thread read back; a reply carries the artifacts its turn left, if any. */
+export interface ThreadMessage {
+  role: "user" | "assistant";
+  content: string;
+  artifacts?: Artifact[];
+}
+
+export function threadNotFound(): NotFoundError {
+  return new NotFoundError("Thread not found or expired; start a new conversation.", { code: "THREAD_NOT_FOUND" });
+}
+
+export function threadBusy(): ConflictError {
+  return new ConflictError("A message to this thread is still being answered; wait for it to finish.", {
+    code: "THREAD_BUSY",
+  });
+}
+
+export function threadFull(): ConflictError {
+  return new ConflictError(
+    `This conversation has reached its ${TURNS_PER_THREAD} messages; start a new conversation.`,
+    { code: "THREAD_FULL" },
+  );
+}
+
+/** Where a turn's message keeps the person's own words when context went with them. */
+export const PERSON_TEXT = "personText";
+
+/** The person's own words in a turn's message, without the context the
+ * tool loop sent with them (`loop.ts`). */
+export function personText(message: BaseMessage): string {
+  const own = message.additional_kwargs?.[PERSON_TEXT];
+  return typeof own === "string" ? own : message.text;
+}
+
+/**
+ * The turn a chat message runs: on a new thread bound to the assistant
+ * without an id, else on the given one. Refused for an unknown, expired or
+ * foreign thread (THREAD_NOT_FOUND), for one a turn still runs on
+ * (THREAD_BUSY) — never queued — and for a full one (THREAD_FULL). The
+ * caller publishes or releases the turn.
+ */
+export async function openThread(
+  threads: ThreadStore,
+  binding: ThreadBinding,
+  threadId: string | undefined,
+): Promise<Turn> {
+  const id = threadId ?? (await threads.create(binding)).threadId;
+  const turn = await threads.begin(id, binding);
+  // A thread just created can only be gone if it expired in between.
+  if (turn === null) throw threadNotFound();
+  if (turn === "busy") throw threadBusy();
+  const { messages } = await threadValues(turn.state);
+  if (turnCount((messages as BaseMessage[] | undefined) ?? []) >= TURNS_PER_THREAD) {
+    await threads.release(turn);
+    throw threadFull();
+  }
+  return turn;
+}
+
+/**
+ * A thread's user and assistant texts in order, as of its last completed
+ * turn — the user's messages and the assistant's replies, never tool calls
+ * or their results — each reply with its turn's artifacts, if it left any.
+ * Reading does not count as use.
+ */
+export async function readThread(
+  threads: ThreadStore,
+  binding: ThreadBinding,
+  threadId: string,
+): Promise<{ threadId: string; messages: ThreadMessage[] }> {
+  const read = await threads.read(threadId, binding);
+  if (read === null) throw threadNotFound();
+  const values = await threadValues(read.state);
+  const artifacts = threadArtifacts(read.state);
+  const messages = ((values.messages as BaseMessage[] | undefined) ?? []).flatMap((message): ThreadMessage[] => {
+    if (message.getType() === "human") return [{ role: "user", content: personText(message) }];
+    // An assistant message that calls tools is tool work, not a reply.
+    if (AIMessage.isInstance(message) && !message.tool_calls?.length) {
+      const left = message.id === undefined ? undefined : artifacts[message.id];
+      return [{ role: "assistant", content: message.text, ...(left === undefined ? {} : { artifacts: left }) }];
+    }
+    return [];
+  });
+  return { threadId, messages };
+}

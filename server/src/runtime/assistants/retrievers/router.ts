@@ -5,10 +5,9 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
+import { openThread, readThread, type ThreadStore } from "../../../assistants/index.js";
 import { getRuntimeStore } from "../../../core/ports.js";
 import { ChatPayload, sendChatStream, threadBinding } from "../../chatStream.js";
-import { openThread, readThread } from "../../threads/access.js";
-import type { ThreadStore } from "../../threads/threadStore.js";
 import { requireLanguageModel } from "../kit/model.js";
 import {
   chat,

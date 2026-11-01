@@ -8,7 +8,7 @@
  * No React, no I/O — unit-tested with `node --test`.
  */
 import { optional, record, text } from './checks.ts'
-import type { KindReader } from './chatStream.ts'
+import type { KindReader } from '../assistants/stream/chatStream.ts'
 
 /** One step of a kind's pipeline, as drawn. */
 export interface GraphStep {

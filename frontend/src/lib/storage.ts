@@ -16,6 +16,11 @@
  *                               assistant, shared by the Workbench and the
  *                               Explorer's ask dock (the messages stay on the
  *                               server)
+ *   of.thread.{ontologyKey}.{kind}.{assistantKey}.{principal} — the same for
+ *                               an assistant bound to the whole ontology (the
+ *                               Studio helper), per principal: the user's id
+ *                               URI-encoded, `@anonymous` without authentication
+ *   of.assistantPanel         — the Studio's assistant panel: `{ open, width }`
  *   of.recents.{ontologyKey}.{lensKey} — last 10 opened entities (`lib/recents.ts`)
  *   of.queryHistory.{ontologyKey}.{lensKey} — last 10 run OQL queries
  *   of.changeset.{ontologyKey}.{lensKey} — id of the pinned changeset: the
@@ -48,8 +53,11 @@ export const storageKeys = {
     `of.explore.${ontologyKey}.${lensKey}`,
   exploreAsk: (ontologyKey: string, lensKey: string) =>
     `of.exploreAsk.${ontologyKey}.${lensKey}`,
-  thread: (ontologyKey: string, lensKey: string, kind: string, assistantKey: string) =>
-    `of.thread.${ontologyKey}.${lensKey}.${kind}.${assistantKey}`,
+  thread: (ontologyKey: string, lensKey: string | null, kind: string, assistantKey: string, principal: string | null = null) =>
+    lensKey === null
+      ? `of.thread.${ontologyKey}.${kind}.${assistantKey}.${principal === null ? '@anonymous' : encodeURIComponent(principal)}`
+      : `of.thread.${ontologyKey}.${lensKey}.${kind}.${assistantKey}`,
+  assistantPanel: 'of.assistantPanel',
   recents: (ontologyKey: string, lensKey: string) =>
     `of.recents.${ontologyKey}.${lensKey}`,
   queryHistory: (ontologyKey: string, lensKey: string) =>

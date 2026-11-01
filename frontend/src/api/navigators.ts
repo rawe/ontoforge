@@ -8,7 +8,7 @@
  * also has the built-in `_default`, derived from the lens: first in the runtime list
  * (`runtime.ts` → `listAssistants`), never a modeling resource.
  */
-import { assistantPath, postChat, type ChatRequest, type SharedEvent } from './chatStream.ts'
+import { assistantPath, postChat, type ChatRequest, type SharedEvent } from '../assistants/stream/chatStream.ts'
 import { graphKindReader, type GraphEvent } from './graphEvents.ts'
 import { request } from './http.ts'
 
@@ -80,5 +80,5 @@ export async function chatNavigator(
   body: ChatRequest,
   onEvent: (event: SharedEvent | GraphEvent) => void, signal: AbortSignal,
 ) {
-  await postChat(assistantPath(ontologyKey, lensKey, 'navigators', key), body, reader(), onEvent, signal)
+  await postChat(assistantPath({ ontologyKey, lensKey }, 'navigators', key), body, reader(), onEvent, signal)
 }

@@ -10,14 +10,13 @@
 import { closeValkey, connectValkey } from "./adapters/valkey/connection.js";
 import { SESSION_SCRIPTS, ValkeySessionStore } from "./adapters/valkey/sessionStore.js";
 import { THREAD_SCRIPTS, ValkeyThreadStore } from "./adapters/valkey/threadStore.js";
+import { MemoryThreadStore, type ThreadStore } from "./assistants/index.js";
 import {
   MemorySessionStore,
   SESSION_ABSOLUTE_LIFETIME_MS,
   type SessionLifetimes,
   type SessionStore,
 } from "./auth/sessionStore.js";
-import { MemoryThreadStore } from "./runtime/threads/memoryThreadStore.js";
-import type { ThreadStore } from "./runtime/threads/threadStore.js";
 
 export interface SharedState {
   readonly threads: ThreadStore;

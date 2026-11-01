@@ -30,6 +30,7 @@ locally — milestone or working markers — must stay local. Only release tags 
 the remote.
 
 The tag push triggers the GitHub Actions workflow (`.github/workflows/release-images.yml`), which runs `make release` to build and push container images to GHCR.
+A tag with a suffix (e.g. `v8.0.0-beta.1`) is a pre-release: its images get only the version tag, never `latest`.
 
 ## Deploying a release
 

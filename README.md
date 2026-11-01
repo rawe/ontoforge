@@ -393,7 +393,7 @@ git tag v1.0.0 && git push origin v1.0.0
 | `ghcr.io/rawe/ontoforge-server:1.0.0` | Backend server (Node.js) |
 | `ghcr.io/rawe/ontoforge-ui:1.0.0` | React frontend (nginx) |
 
-Each image is also tagged `:latest`. See `Makefile` for manual builds and [`examples/docker-compose/`](examples/docker-compose/) for a ready-to-use setup.
+Each final release is also tagged `:latest`; a pre-release (e.g. `8.0.0-beta.1`) is not. See `Makefile` for manual builds and [`examples/docker-compose/`](examples/docker-compose/) for a ready-to-use setup.
 
 For a multi-server Kubernetes example, including its assumptions and limitations, see
 [deploy/kubernetes/README.md](deploy/kubernetes/README.md). The release and storage-upgrade

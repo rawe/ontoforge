@@ -14,6 +14,7 @@
 #
 # The VERSION parameter is required and should match the git tag (without 'v' prefix).
 # Example: git tag v1.0.0 → make release VERSION=1.0.0
+# A pre-release version (one with a "-", e.g. 1.0.0-beta.1) does not get the latest tag.
 
 .PHONY: help release release-server release-ui _check-version
 
@@ -26,6 +27,10 @@ REGISTRY ?= ghcr.io/rawe
 # Image names
 IMAGE_SERVER := $(REGISTRY)/ontoforge-server
 IMAGE_UI := $(REGISTRY)/ontoforge-ui
+
+# The latest tag goes to final versions only, never to a pre-release (x.y.z-suffix)
+LATEST_SERVER := $(if $(findstring -,$(VERSION)),,-t $(IMAGE_SERVER):latest)
+LATEST_UI := $(if $(findstring -,$(VERSION)),,-t $(IMAGE_UI):latest)
 
 # Build metadata
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -96,7 +101,7 @@ ifdef PUSH
 		--cache-from type=registry,ref=$(IMAGE_SERVER):buildcache \
 		--cache-to type=registry,ref=$(IMAGE_SERVER):buildcache,mode=max \
 		-t $(IMAGE_SERVER):$(VERSION) \
-		-t $(IMAGE_SERVER):latest \
+		$(LATEST_SERVER) \
 		-f server/Dockerfile \
 		--push \
 		server
@@ -107,7 +112,7 @@ else
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
 		--build-arg BUILD_DATE=$(BUILD_DATE) \
 		-t $(IMAGE_SERVER):$(VERSION) \
-		-t $(IMAGE_SERVER):latest \
+		$(LATEST_SERVER) \
 		-f server/Dockerfile \
 		--load \
 		server
@@ -129,7 +134,7 @@ ifdef PUSH
 		--cache-from type=registry,ref=$(IMAGE_UI):buildcache \
 		--cache-to type=registry,ref=$(IMAGE_UI):buildcache,mode=max \
 		-t $(IMAGE_UI):$(VERSION) \
-		-t $(IMAGE_UI):latest \
+		$(LATEST_UI) \
 		-f frontend/Dockerfile \
 		--push \
 		frontend
@@ -140,7 +145,7 @@ else
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
 		--build-arg BUILD_DATE=$(BUILD_DATE) \
 		-t $(IMAGE_UI):$(VERSION) \
-		-t $(IMAGE_UI):latest \
+		$(LATEST_UI) \
 		-f frontend/Dockerfile \
 		--load \
 		frontend

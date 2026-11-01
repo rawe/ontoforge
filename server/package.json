@@ -1,6 +1,6 @@
 {
   "name": "ontoforge-server",
-  "version": "7.1.1",
+  "version": "8.0.0-beta.1",
   "private": true,
   "type": "module",
   "description": "OntoForge server (TypeScript)",

@@ -62,9 +62,10 @@ export const SEARCH_INDEX_GUIDE =
   "[its property keys]}. Each relation becomes one entry with its fields and its target's. label (null: " +
   "the relation type's name) heads the entries; template (null: labelled lines) writes them as prose.\n" +
   "- semantic: {enabled (default true), template (null: labelled lines)}; keyword: {enabled (default true)}.\n" +
-  "A template replaces the semantic text: {x} is a field of the root (or of the relation, in a group), " +
-  "{target.x} a target field; a clause whose placeholder has no value is dropped up to the next , ; . or line " +
-  "break.\n" +
+  "A template replaces the semantic text, and only these placeholders have a value: {x} with x a field key of " +
+  "the relation (in a group's template) or of the root, and, in a group's template, {target.x} with x a field " +
+  "key of the entity at the other end — e.g. {target.name}, never its type key. Any other placeholder never has " +
+  "a value: its clause, up to the next , ; . or line break, is dropped.\n" +
   `Limits: at most ${MAX_INDEX_FIELDS} fields — own, relation and target together; the header does not ` +
   `count — at most ${MAX_RELATION_GROUPS} groups, at least one field or group, every group at least one ` +
   "field, at least one of semantic and keyword on. The check is the one a save runs and reports every issue " +

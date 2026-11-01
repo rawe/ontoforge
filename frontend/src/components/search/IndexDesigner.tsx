@@ -387,7 +387,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
             </div>
             <KeyField
               id="index-key"
-              label={<span className="flex items-center gap-2">Key<IndexMark field="key" marks={marks} /></span>}
+              mark={<IndexMark field="key" marks={marks} />}
               value={draft.key}
               disabled={!isNew}
               error={keyMessage ?? issuesAt(issues, 'key')[0]?.message}

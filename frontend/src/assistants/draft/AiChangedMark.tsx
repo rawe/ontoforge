@@ -34,7 +34,7 @@ export function AiChangedMark({ field, label, change, value = toDiffValue }: {
         align="start"
         aria-label={`${label}: changed by AI`}
         data-testid={`ai-diff-${field}`}
-        className="max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[min(36rem,calc(100vw-2rem))] overflow-y-auto"
+        className="max-h-[min(28rem,var(--radix-popover-content-available-height))] w-auto max-w-[min(36rem,calc(100vw-2rem))] min-w-72 overflow-y-auto"
       >
         <PopoverHeader>
           <PopoverTitle>{label} · changed by AI</PopoverTitle>

@@ -61,8 +61,7 @@ two model calls, and neither is retried. Cancelling the request stops further wo
 
 The first model call reads the question against the lens's schema — each entity type
 with its display name and description, each relation type the navigator may follow with its
-endpoints — the last four turns of the conversation, each message shortened to 600
-characters, and the entities the previous answer cited. It
+endpoints — the whole conversation, each message shortened to 600 characters, and the entities the previous answer cited. It
 returns, as structured output:
 
 - **mentions** — the concrete things the question names (names, titles, codes, values),
@@ -128,8 +127,8 @@ fit are counted, and the answer is told how many more were found.
 
 The second model call answers from the evidence alone: each entity as its type's display
 name, its label and up to six visible fields, the relations between evidence entities as
-sentences in display names, and the notes the turn collected; the same four turns of
-conversation come along as context, not evidence. It never sees ids, keys or scores. It
+sentences in display names, and the notes the turn collected; the same conversation comes
+along as context, not evidence. It never sees ids, keys or scores. It
 cites every entity it names by the entity's ref — `[E2]` — names an entity only when its
 relations and fields support what is asked, says plainly when the evidence does
 not answer the question, and answers in the language of the question. The navigator's

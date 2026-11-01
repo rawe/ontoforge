@@ -5,7 +5,7 @@ import { Link, useBlocker, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError } from '@/api/http'
 import * as model from '@/api/model'
-import { AiChangedMark, sameNested, useAssistantPanel, useDraftFill, usePublishFocus, type AiEdit, type DraftTarget } from '@/assistants'
+import { AiChangedMark, useAssistantPanel, useDraftFill, usePublishFocus, type AiEdit, type DraftTarget } from '@/assistants'
 import {
   searchKeys,
   useIndexSchema,
@@ -59,7 +59,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { EntryPreview, type LeftOut } from './EntryPreview'
-import { indexDiffValue, indexFields, withIndexFields } from './indexDraft'
+import { indexDiffValue, indexFields, sameIndexValue, withIndexFields } from './indexDraft'
 import {
   groupPlaceholders,
   insertAt,
@@ -172,7 +172,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
     busy,
     fieldsOf: indexFields,
     withFields: withIndexFields,
-    same: sameNested,
+    same: sameIndexValue,
     onFill: (before, after) => {
       setSaveIssues([])
       // A key the AI chose no longer follows the name, and a refused key is no longer the draft's.

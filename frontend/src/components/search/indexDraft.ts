@@ -3,7 +3,7 @@
  * by field, and each field's value as the "changed by AI" diff shows it.
  * The helper proposes whole parts of the definition — the relation groups
  * at once, the semantic settings at once — so equality is nested and
- * order-aware (`sameNested`): the order of fields decides the text.
+ * order-aware (`sameIndexValue`): the order of fields decides the text.
  *
  * No React, no I/O — unit-tested with `node --test`.
  */
@@ -17,6 +17,18 @@ export type IndexFields = { [K in keyof SearchIndexDefinition]: SearchIndexDefin
 export const indexFields = (draft: SearchIndexDefinition): IndexFields => ({ ...draft })
 
 export const withIndexFields = (draft: SearchIndexDefinition, fields: IndexFields): SearchIndexDefinition => ({ ...draft, ...fields })
+
+/** A blank label or template as null: Save stores it so (`toDefinition`). */
+const unblank = (key: string, value: unknown) =>
+  (key === 'label' || key === 'template') && typeof value === 'string' && value.trim() === '' ? null : value
+
+/**
+ * Whether two values of a part are the same as Save stores them: nested,
+ * list order included, a blank label or template the same as none.
+ */
+export function sameIndexValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a, unblank) === JSON.stringify(b, unblank)
+}
 
 /** One relation group as one line: the relation and direction, then what it reads. */
 export function groupLine(group: SearchIndexRelationGroup): string {

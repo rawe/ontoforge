@@ -74,11 +74,6 @@ export function sameValue(a: unknown, b: unknown): boolean {
   return a === b
 }
 
-/** Whether two values are the same, nested values and list order included: the `Same` of an editor with nested values. */
-export function sameNested(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
-}
-
 /** Whether the proposal no longer fits the open draft: another (or no) editor, or a newer version. */
 export function isStale(open: DraftState | null, ontologyKey: string, proposal: DraftProposal): boolean {
   return open === null

@@ -39,8 +39,12 @@ export const SearchIndexFields = z
   .strict();
 export type SearchIndexFields = z.infer<typeof SearchIndexFields>;
 
-/** Whether two values are the same, nested values and list order included. */
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+/** A blank label or template as null: the index editor saves it so. */
+const unblank = (key: string, value: unknown) =>
+  (key === "label" || key === "template") && typeof value === "string" && value.trim() === "" ? null : value;
+
+/** Whether two values are the same as the editor saves them, nested values and list order included. */
+const same = (a: unknown, b: unknown) => JSON.stringify(a, unblank) === JSON.stringify(b, unblank);
 
 export const SEARCH_INDEX_GUIDE =
   "Fill the open search index editor's draft (the Search index draft block shows its unsaved definition) " +

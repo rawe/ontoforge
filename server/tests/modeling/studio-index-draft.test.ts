@@ -116,6 +116,14 @@ describe("the search index drafter", () => {
     expect((reordered as Row).fields).toEqual({ fields: ["bio", "name"] });
   });
 
+  it("counts a blank label or template as none, as the editor saves it", async () => {
+    const group = { relationType: "works_for", direction: "outgoing", fields: ["role"], target: {}, label: "", template: " " };
+    const draft = { ...SAVED, fields: { ...PEOPLE, relations: [group] } };
+    check.mockImplementationOnce(async () => ({ ...PEOPLE, relations: [{ ...group, label: null, template: null }], description: "New" }) as never);
+    const result = await call(fillSearchIndexDraftTool(draft, store) as Tool<null>, { name: "People" });
+    expect((result as Row).fields).toEqual({ description: "New" });
+  });
+
   it("refuses a definition the same as the draft", async () => {
     const { key: _key, ...rest } = PEOPLE;
     const error = refusal(await call(fillSearchIndexDraftTool(SAVED, store) as Tool<null>, rest));

@@ -23,7 +23,7 @@ response bodies are reproduced here except the shared error envelope.
 | Sign-in, users and deployment health | [Sign-in](server.md#sign-in), [User management](server.md#user-management), [Exposure](server.md#exposure), [Probes](server.md#probes), [Metrics](server.md#metrics) |
 | Design an ontology | [Modeling REST](modeling-rest.md) |
 | Work with instance data through a lens | [Runtime REST](runtime-rest.md), [Rulesets](runtime-rest.md#rulesets) |
-| Chat with an assistant of a lens | [Assistants REST](assistants-rest.md) |
+| Chat with an assistant of a lens or the Studio helper | [Assistants REST](assistants-rest.md) |
 | Connect an MCP client | [MCP](mcp.md) |
 
 ## Conventions

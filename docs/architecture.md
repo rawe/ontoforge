@@ -349,7 +349,7 @@ one thread store — one for every server, not per ontology — behind an interf
 own, part of the [shared state](#shared-state).
 
 **Registry.** Each thread has a random, unguessable id — knowing it is what lets a client
-continue the thread — and a binding to exactly one assistant: ontology, lens, kind and key,
+continue the thread — and a binding to exactly one assistant: ontology, lens (none for the Studio helper's), kind and key,
 and with authentication on to the principal that started it. A thread is found only
 through its own assistant, and only by its own principal; otherwise it is unknown. Nothing
 cascades: a deleted ontology, lens or assistant leaves its threads to retention.

@@ -1,7 +1,7 @@
 # Threads
 
-Every assistant — an [agent](agents.md), a [retriever](retrievers.md) or a
-[navigator](navigators.md) —
+Every assistant — an [agent](agents.md), a [retriever](retrievers.md), a
+[navigator](navigators.md) or the [Studio helper](studio-helper.md) —
 converses in **threads** the server holds. A client sends only its new message and, to
 continue, the thread's id; the server continues from what the thread kept. How the server
 stores threads, and the numbers below (turns kept, turns the model sees, lifetime, how
@@ -10,7 +10,8 @@ much a thread and the store hold): [../architecture.md](../architecture.md#threa
 ## Starting and continuing
 
 A message without a thread id starts a new thread, bound to the assistant it was sent to —
-its ontology, lens, kind and key. The answer names the thread's id first. A message with
+its ontology, its lens (none for the Studio helper, which works on the whole ontology),
+kind and key. The answer names the thread's id first. A message with
 that id continues the thread. The id is random and unguessable; knowing it is what lets a
 client continue or read a thread.
 

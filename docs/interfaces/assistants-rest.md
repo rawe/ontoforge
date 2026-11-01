@@ -1,12 +1,13 @@
 # Assistants REST
 
 The assistant routes of a lens, under the [runtime REST](runtime-rest.md) prefix
-`/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`. Shared conventions — addressing,
+`/api/ontologies/{ontologyKey}/runtime/lenses/{lensKey}`, and the
+[Studio helper](#studio-helper)'s, under the [modeling REST](modeling-rest.md) prefix. Shared conventions — addressing,
 errors, who may call — are in the [interfaces index](README.md).
 
 ## Assistant chat and threads
 
-Every assistant kind — `agents`, `retrievers`, `navigators` — converses through the same request, the
+Every assistant kind — `agents`, `retrievers`, `navigators`, and the Studio helper — converses through the same request, the
 same stream frame and the same threads. Semantics:
 [capabilities/threads.md](../capabilities/threads.md). The kind's own section below lists its
 routes, its extra request fields and its own events.
@@ -205,3 +206,19 @@ as each completes. An unknown agent, an unavailable provider and an unknown or b
 are rejected before streaming, using the ordinary HTTP error response. Disconnect cancels
 further agent work, with best-effort cancellation of running operations. Reading a thread
 needs no provider, as the list does.
+
+## Studio helper
+
+Under the modeling prefix `/api/ontologies/{ontologyKey}/model`, for the ontology's
+administrators. Semantics: [capabilities/studio-helper.md](../capabilities/studio-helper.md).
+Chat requires a language-model provider; reading a thread does not.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/ai/chat` | Converse with the Studio helper |
+| GET | `/ai/threads/{threadId}` | Read a thread back |
+
+Chat takes the [shared request](#assistant-chat-and-threads) plus optional `focus`, what the
+page shows, and `draft`, the open editor's unsaved values. It streams `thread`, then the
+tool events `studio.tool_call` and `studio.tool_result`, shaped as the
+[agent's](#ai), then one terminal `final` or `error`; the answer arrives whole in `final`.

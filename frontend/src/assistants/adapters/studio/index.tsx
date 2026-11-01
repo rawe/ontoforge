@@ -3,7 +3,7 @@ import { Fragment } from 'react'
 import { studioChat } from '@/api/model'
 import type { ToolCall } from '@/api/types'
 import { DraftFillCard } from '../../draft/DraftFillCard'
-import { DRAFT_VIEWS } from '../../draft/drafters'
+import { FILL_DRAFT } from '../../draft/drafters'
 import { ProposalCard } from '../../proposal/ProposalCard'
 import { checkedCall, liveProposalCall, PROPOSE_TOOL, restoredCalls } from '../../proposal/proposalModel'
 import type { ToolEvent } from '../../stream/chatStream'
@@ -12,10 +12,9 @@ import { toolCallTurns, toolError } from '../../steps/toolCallModel'
 import type { PresentationAdapter, ToolCard } from '../../types'
 import { studioResult } from './studioResult'
 
-/** The cards a completed call of a tool puts under its answer, by tool name: each drafter's, the proposal's. */
+/** The cards a completed call of a tool puts under its answer, by tool name. */
 const TOOL_CARDS: Record<string, ToolCard> = {
-  ...Object.fromEntries(DRAFT_VIEWS.map((view): [string, ToolCard] =>
-    [view.tool, (call, _turn, at) => <DraftFillCard call={call} at={at} view={view} />])),
+  [FILL_DRAFT]: (call, _turn, at) => <DraftFillCard call={call} at={at} />,
   [PROPOSE_TOOL]: (call, turn, at) => {
     const checked = checkedCall(call.args, call.result)
     // A failed answer's proposal is never offered.

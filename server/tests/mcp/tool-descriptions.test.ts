@@ -14,8 +14,7 @@ import { z } from "zod";
 import type { ModelingStore, RuntimeStore, WriteAccess } from "../../src/core/ports.js";
 import { RelationGroup, SearchIndexDefinition } from "../../src/core/searchIndex.js";
 import { createModelingMcpServer } from "../../src/mcp/modeling.js";
-import { fillAgentDraftTool } from "../../src/modeling/helper/drafters/agent.js";
-import { fillSearchIndexDraftTool } from "../../src/modeling/helper/drafters/searchIndex.js";
+import { fillDraftTool } from "../../src/modeling/helper/drafter.js";
 import { proposeSchemaChangeTool } from "../../src/modeling/helper/propose.js";
 import { designTools } from "../../src/modeling/helper/tools.js";
 import { createRuntimeMcpServer } from "../../src/mcp/runtime.js";
@@ -74,27 +73,7 @@ const all = [
   ...[...agent].map(([name, text]) => [`agent ${name}`, text] as const),
   ...designTools({} as ModelingStore).map((tool) => [`studio ${tool.name}`, tool.description] as const),
   ["studio propose_schema_change", proposeSchemaChangeTool({} as ModelingStore).description] as const,
-  [
-    "studio fill_agent_draft",
-    fillAgentDraftTool(
-      { target: { kind: "agent", lens: "all", agent: null }, version: 0, fields: { name: "", description: "", systemPrompt: "", tools: null } },
-      {} as ModelingStore,
-      [...VALID_AGENT_TOOLS],
-    ).description,
-  ] as const,
-  [
-    "studio fill_search_index_draft",
-    fillSearchIndexDraftTool(
-      {
-        target: { kind: "searchIndex", searchIndex: null }, version: 0,
-        fields: {
-          key: "", name: "", description: "", entityType: "", fields: [], header: null, relations: [],
-          semantic: { enabled: true, template: null }, keyword: { enabled: true },
-        },
-      },
-      {} as ModelingStore,
-    ).description,
-  ] as const,
+  ["studio fill_draft", fillDraftTool(undefined, {} as ModelingStore).description] as const,
 ];
 
 describe("tool descriptions", () => {

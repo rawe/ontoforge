@@ -6,10 +6,9 @@
 
 import { z } from "zod";
 
-import type { ContextBlock, Tool } from "../../../assistants/index.js";
-import type { ModelingStore } from "../../../core/ports.js";
+import type { ContextBlock, Guide } from "../../../assistants/index.js";
 import { DesignAddress } from "../address.js";
-import { draftBlock, type Draft, type Drafter } from "../drafter.js";
+import { draftBlock, draftGuide, type Drafter, type OpenDraft } from "../drafter.js";
 import { agentDrafter } from "./agent.js";
 import { searchIndexDrafter } from "./searchIndex.js";
 
@@ -38,15 +37,17 @@ export const DraftPayload = z
   });
 export type DraftPayload = z.infer<typeof DraftPayload>;
 
-/** What an open draft brings to a turn: its block for the message and its drafter's tools. */
+/** What an open draft brings to a turn: its block for the message, its
+ * drafter's guide and the draft the one draft tool fills. */
 export interface DraftPart {
   block: ContextBlock;
-  tools: Tool<unknown>[];
+  guide: Guide;
+  open: OpenDraft;
 }
 
 /** The part of a turn `payload` brings, from its drafter. */
-export async function draftPart(payload: DraftPayload, store: ModelingStore): Promise<DraftPart> {
+export async function draftPart(payload: DraftPayload): Promise<DraftPart> {
   const drafter = drafterFor(payload.target.kind)!;
-  const draft: Draft = { ...payload, fields: drafter.fields.parse(payload.fields) };
-  return { block: draftBlock(drafter, draft), tools: await drafter.tools(draft, store) };
+  const open: OpenDraft = { drafter, draft: { ...payload, fields: drafter.fields.parse(payload.fields) } };
+  return { block: draftBlock(open), guide: await draftGuide(open), open };
 }

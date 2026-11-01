@@ -44,8 +44,8 @@ test('the diff shows each part in words', () => {
 })
 
 test('the search index card lists the parts a proposal fills', () => {
-  const view = draftViewOf('fill_search_index_draft')!
-  assert.equal(view.kind, 'searchIndex')
+  const view = draftViewOf('searchIndex')!
+  assert.equal(view.title, 'Search index draft')
   assert.deepEqual(proposedLabels(view, { relations: [], description: 'x' }), ['Description', 'Relation groups'])
   assert.equal(DRAFT_VIEWS.length, 2)
 })

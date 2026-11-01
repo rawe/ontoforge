@@ -2,7 +2,7 @@
  * The Studio helper's prepared run, without a store or a model: fixed
  * instructions, every description only in a labelled context block, the
  * focus as a block of its own, and exactly the design tools and the
- * proposal tool when no draft is open.
+ * proposal tool and the draft tool.
  */
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -65,10 +65,11 @@ describe("the Studio helper's prepared run", () => {
     expect(focus).toEqual({ label: "Focus", source: "the Studio page the person has open", text: "kind: agent\nlens: hr\nagent: support" });
   });
 
-  it("offers the design tools and the serial proposal tool, and no draft tool without an open draft", () => {
+  it("offers the same tools on every turn: the design tools, the serial proposal tool and the draft tool", () => {
     const { tools } = run();
     expect(tools.map((tool) => tool.name)).toEqual([
       "get_schema", "list_lenses", "list_search_indices", "validate_schema", "validate_lens", "propose_schema_change",
+      "fill_draft",
     ]);
     expect(tools.filter((tool) => tool.serial).map((tool) => tool.name)).toEqual(["propose_schema_change"]);
   });

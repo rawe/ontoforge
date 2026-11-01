@@ -221,7 +221,7 @@ describe("the Studio helper", () => {
     expect((await chat({ message: "Hi", draft: { ...draft, fields: { ...draft.fields, key: "x" } } })).status).toBe(422);
 
     const model = new FakeToolCallingModel([
-      toolCallMessage("fill_agent_draft", { name: "Visitor guide", tools: ["get_schema", "search"] }),
+      toolCallMessage("fill_draft", { fields: { name: "Visitor guide", tools: ["get_schema", "search"] } }),
       new AIMessage("Filled."),
     ]);
     setAiModel(model);
@@ -249,8 +249,8 @@ describe("the Studio helper", () => {
       keyword: { enabled: false },
     };
     const model = new FakeToolCallingModel([
-      toolCallMessage("fill_search_index_draft", { ...employment, key: "people", fields: ["name", "phone"] }, "c1"),
-      toolCallMessage("fill_search_index_draft", employment, "c2"),
+      toolCallMessage("fill_draft", { fields: { ...employment, key: "people", fields: ["name", "phone"] } }, "c1"),
+      toolCallMessage("fill_draft", { fields: employment }, "c2"),
       new AIMessage("Filled."),
     ]);
     setAiModel(model);
@@ -268,20 +268,21 @@ describe("the Studio helper", () => {
       },
     });
     expect(String(model.calls[0]!.at(-1)!.content)).toContain('<context label="Search index draft"');
+    expect(String(model.calls[0]!.at(-1)!.content)).toMatch(/^Guide: Search index draft\n/);
     expect((await ok("GET", `${MODEL}/search-indices`)).map((index: Row) => index.key)).not.toContain("people_work");
 
     // A saved index keeps its key; a taken key is refused for a new one.
     const saved = { target: { kind: "searchIndex", searchIndex: "people" }, version: 6, fields: { ...blank, key: "people", name: "People", description: "People by name", entityType: "person", fields: ["name", "email"] } };
     setAiModel(new FakeToolCallingModel([
-      toolCallMessage("fill_search_index_draft", { ...employment, key: "other" }, "c1"),
-      toolCallMessage("fill_search_index_draft", { name: "People", description: "People by name and email", entityType: "person", fields: ["name", "email"] }, "c2"),
+      toolCallMessage("fill_draft", { fields: { ...employment, key: "other" } }, "c1"),
+      toolCallMessage("fill_draft", { fields: { name: "People", description: "People by name and email", entityType: "person", fields: ["name", "email"] } }, "c2"),
       new AIMessage("Filled."),
     ]));
     const [changedKey, described] = (await chat({ message: "Describe it better", draft: saved })).events
       .filter((e) => e.type === "studio.tool_result").map((e) => e.result);
     expect(changedKey.error).toMatchObject({ code: "VALIDATION_ERROR", details: { fields: { key: "Must be the index's key 'people'" } } });
     expect(described.fields).toEqual({ description: "People by name and email" });
-    setAiModel(new FakeToolCallingModel([toolCallMessage("fill_search_index_draft", { ...employment, key: "people" }), new AIMessage("No.")]));
+    setAiModel(new FakeToolCallingModel([toolCallMessage("fill_draft", { fields: { ...employment, key: "people" } }), new AIMessage("No.")]));
     const taken = (await chat({ message: "Again", draft })).events.find((e) => e.type === "studio.tool_result")!.result;
     expect(taken.error).toMatchObject({ code: "RESOURCE_CONFLICT" });
   });

@@ -1,17 +1,19 @@
 /**
- * The Studio helper's agent drafter over a mocked store: the draft as a
- * block of the message's context, its tool offered only with the draft,
- * and the draft tool — a valid proposal echoes target and draft version,
- * an unknown or gated tool name and an empty name are refused with the
- * reason, and nothing is written.
+ * The Studio helper's draft foundation and its agent drafter, over a
+ * mocked store: the one draft tool on every turn, refused without an open
+ * draft; the draft as a block and the drafter's guide with the message;
+ * a draft only of a kind some drafter fills; and the agent drafter's
+ * check — a valid proposal echoes target and draft version, an unknown or
+ * gated tool name and an empty name are refused with the reason, and
+ * nothing is written.
  */
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { Tool } from "../../src/assistants/index.js";
-import type { Draft } from "../../src/modeling/helper/drafter.js";
-import { fillAgentDraftTool, type AgentFields } from "../../src/modeling/helper/drafters/agent.js";
+import { fillDraftTool, type Draft, type OpenDraft } from "../../src/modeling/helper/drafter.js";
+import { agentDrafter, agentGuide, type AgentFields } from "../../src/modeling/helper/drafters/agent.js";
 import { draftPart, DraftPayload } from "../../src/modeling/helper/drafters/index.js";
 import { studioRun } from "../../src/modeling/helper/helper.js";
 import { createMockModelingStore, NOW, type MockModelingStore } from "./helpers.js";
@@ -31,31 +33,39 @@ let store: MockModelingStore;
 let tool: Tool<null>;
 
 /** A call as the loop makes it: the result, or what an expected failure hands the model. */
-async function call(args: Row): Promise<unknown> {
+async function call(fields: Row, on: Tool<null> = tool): Promise<unknown> {
   try {
-    return await tool.run(args, null);
+    return await on.run({ fields }, null);
   } catch (error) {
-    const expected = tool.expected(error);
+    const expected = on.expected(error);
     if (expected === undefined) throw error;
     return expected;
   }
 }
 
-const refusal = (result: unknown) => (result as { error: { code: string; message: string } }).error;
+const refusal = (result: unknown) => (result as { error: { code: string; message: string; details?: Row } }).error;
 
 beforeEach(() => {
   store = createMockModelingStore();
   store.getLensByKey.mockResolvedValue(LENS);
-  tool = fillAgentDraftTool(DRAFT, store, ["search_saved_queries"]);
+  tool = fillDraftTool({ drafter: agentDrafter, draft: DRAFT } as OpenDraft, store) as Tool<null>;
 });
 
 describe("the draft in a Studio turn", () => {
   const run = async (draft?: Draft<AgentFields>) =>
-    studioRun("fair", DESIGN, draft === undefined ? {} : { draft: await draftPart(draft, store) }, store, {} as BaseChatModel);
+    studioRun("fair", DESIGN, draft === undefined ? {} : { draft: await draftPart(draft) }, store, {} as BaseChatModel);
 
-  it("offers the draft tool only on a turn whose message brings the agent draft", async () => {
-    expect((await run()).tools.map((t) => t.name)).not.toContain("fill_agent_draft");
-    expect((await run(DRAFT)).tools.map((t) => t.name).at(-1)).toBe("fill_agent_draft");
+  it("offers the same tools with or without a draft, so the toolset never changes", async () => {
+    const names = async (draft?: Draft<AgentFields>) => (await run(draft)).tools.map((t) => t.name);
+    expect(await names()).toEqual(await names(DRAFT));
+    expect((await names()).at(-1)).toBe("fill_draft");
+  });
+
+  it("refuses the draft tool without an open draft, telling the model why", async () => {
+    const without = fillDraftTool(undefined, store) as Tool<null>;
+    expect(refusal(await call({ name: "Helpdesk" }, without))).toMatchObject({
+      code: "VALIDATION_ERROR", message: expect.stringContaining("No editor with a draft is open"),
+    });
   });
 
   it("takes a draft only of a kind some drafter fills, with values that fit it", () => {
@@ -65,18 +75,22 @@ describe("the draft in a Studio turn", () => {
     expect(extra.error?.issues[0]?.path).toEqual(["fields"]);
   });
 
-  it("sends the draft as a labelled block of its own", async () => {
-    const block = (await run({ ...DRAFT, target: { kind: "agent", lens: "hr", agent: null } })).context.at(-1)!;
+  it("sends the draft as a labelled block of its own and the drafter's guide, never in the system prompt", async () => {
+    const prepared = await run({ ...DRAFT, target: { kind: "agent", lens: "hr", agent: null } });
+    const block = prepared.context.at(-1)!;
     expect(block.label).toBe("Agent draft");
     expect(block.text).toBe(
       "kind: agent\nlens: hr\nagent: (new, not saved yet)\nname: Support\ndescription: (empty)\ntools: get_schema\nsystem prompt:\nBe brief.",
     );
+    expect(prepared.guides).toEqual([{ label: "Agent draft", text: expect.stringContaining("systemPrompt") }]);
+    expect(prepared.instructions).not.toContain("systemPrompt");
+    expect((await run()).guides).toEqual([]);
   });
 });
 
-describe("fill_agent_draft", () => {
+describe("the agent drafter", () => {
   it("returns the proposed fields with the draft's target and version", async () => {
-    const result = await call({ name: "Helpdesk", system_prompt: "Answer from the schema.", tools: ["search", "get_entity", "search"] });
+    const result = await call({ name: "Helpdesk", systemPrompt: "Answer from the schema.", tools: ["search", "get_entity", "search"] });
     expect(result).toEqual({
       target: { kind: "agent", lens: "hr", agent: "support" },
       sourceVersion: 7,
@@ -84,27 +98,30 @@ describe("fill_agent_draft", () => {
     });
   });
 
-  it("takes all_tools as every tool and null arguments as left out", async () => {
-    const result = await call({ name: null, description: "For HR questions", all_tools: true, tools: null });
+  it("takes tools null as every tool", async () => {
+    const result = await call({ description: "For HR questions", tools: null });
     expect((result as Row).fields).toEqual({ description: "For HR questions", tools: null });
+  });
+
+  it("refuses a field the editor does not have, by its path", async () => {
+    expect(refusal(await call({ name: "A", system_prompt: "x" }))).toMatchObject({ code: "VALIDATION_ERROR", details: { fields: { fields: expect.any(String) } } });
+    expect(refusal(await call({ tools: "search" }))).toMatchObject({ details: { fields: { tools: expect.any(String) } } });
   });
 
   it("refuses a tool name outside the grantable twelve and names them", async () => {
     const error = refusal(await call({ tools: ["get_schema", "delete_everything"] }));
     expect(error.code).toBe("VALIDATION_ERROR");
     expect(error.message).toContain("Unknown tool(s): ['delete_everything']");
-    expect(error.message).toContain("search_saved_queries");
   });
 
-  it("refuses a tool this server cannot run", async () => {
-    const error = refusal(await call({ tools: ["get_schema", "search_saved_queries"] }));
-    expect(error).toEqual({ code: "VALIDATION_ERROR", message: "This server cannot run search_saved_queries; grant other tools." });
-    expect(tool.description).toContain("This server cannot run search_saved_queries: never grant them.");
+  it("names the tools this server cannot run in the guide", () => {
+    expect(agentGuide(["search_saved_queries"])).toContain("This server cannot run search_saved_queries: never grant them.");
+    expect(agentGuide([])).not.toContain("cannot run");
   });
 
-  it("refuses an empty name, an empty tool list, both tool forms and an empty proposal", async () => {
-    for (const args of [{ name: " " }, { tools: [] }, { all_tools: true, tools: ["search"] }, {}]) {
-      expect(refusal(await call(args)).code).toBe("VALIDATION_ERROR");
+  it("refuses an empty name, an empty tool list and an empty proposal", async () => {
+    for (const fields of [{ name: " " }, { tools: [] }, {}]) {
+      expect(refusal(await call(fields)).code).toBe("VALIDATION_ERROR");
     }
   });
 

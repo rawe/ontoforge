@@ -1,6 +1,6 @@
 /**
  * The Studio helper's search index drafter over a mocked store: the draft
- * as a block, its tool offered only with the draft, and the tool — the
+ * as a block and its guide with the message, and its check — the
  * save check decides (mocked here; the real one runs in the integration
  * suite), a new index needs a key, a saved one keeps its own, only the
  * parts that differ from the draft are proposed, an unchanged definition
@@ -13,8 +13,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tool } from "../../src/assistants/index.js";
 import { ConflictError } from "../../src/core/exceptions.js";
 import type { Draft } from "../../src/modeling/helper/drafter.js";
+import { fillDraftTool, type OpenDraft } from "../../src/modeling/helper/drafter.js";
 import { draftPart, DraftPayload } from "../../src/modeling/helper/drafters/index.js";
-import { fillSearchIndexDraftTool, type SearchIndexFields } from "../../src/modeling/helper/drafters/searchIndex.js";
+import { searchIndexDrafter, type SearchIndexFields } from "../../src/modeling/helper/drafters/searchIndex.js";
 import { studioRun } from "../../src/modeling/helper/helper.js";
 import * as searchIndices from "../../src/modeling/searchIndices.js";
 import { createMockModelingStore, type MockModelingStore } from "./helpers.js";
@@ -39,9 +40,13 @@ const SAVED: Draft<SearchIndexFields> = { target: { kind: "searchIndex", searchI
 
 let store: MockModelingStore;
 
-async function call(tool: Tool<null>, args: Row): Promise<unknown> {
+/** The draft tool on `draft`, through the index drafter. */
+const fillSearchIndexDraftTool = (draft: Draft<SearchIndexFields>, on: MockModelingStore) =>
+  fillDraftTool({ drafter: searchIndexDrafter, draft } as OpenDraft, on);
+
+async function call(tool: Tool<null>, fields: Row): Promise<unknown> {
   try {
-    return await tool.run(args, null);
+    return await tool.run({ fields }, null);
   } catch (error) {
     const expected = tool.expected(error);
     if (expected === undefined) throw error;
@@ -66,19 +71,18 @@ describe("the search index draft in a Studio turn", () => {
     expect(DraftPayload.safeParse({ ...NEW, target: { kind: "searchIndex", searchIndex: "" } }).success).toBe(false);
   });
 
-  it("sends the definition as a labelled block and offers only its own draft tool", async () => {
-    const run = studioRun("fair", { entityTypes: [], relationTypes: [], lenses: [] }, { draft: await draftPart(SAVED, store) }, store, {} as BaseChatModel);
+  it("sends the definition as a labelled block and its guide with the message", async () => {
+    const run = studioRun("fair", { entityTypes: [], relationTypes: [], lenses: [] }, { draft: await draftPart(SAVED) }, store, {} as BaseChatModel);
     const block = run.context.at(-1)!;
     expect(block.label).toBe("Search index draft");
     expect(block.text.startsWith("kind: searchIndex\nsearchIndex: people\ndefinition:\n{")).toBe(true);
     expect(JSON.parse(block.text.slice(block.text.indexOf("{")))).toEqual(PEOPLE);
-    const names = run.tools.map((t) => t.name);
-    expect(names.at(-1)).toBe("fill_search_index_draft");
-    expect(names).not.toContain("fill_agent_draft");
+    expect(run.guides).toEqual([{ label: "Search index draft", text: expect.stringContaining("relationType, direction") }]);
+    expect(run.tools.map((t) => t.name).at(-1)).toBe("fill_draft");
   });
 });
 
-describe("fill_search_index_draft", () => {
+describe("the search index drafter", () => {
   it("proposes a new index's whole definition, checked as a create", async () => {
     const tool = fillSearchIndexDraftTool(NEW, store) as Tool<null>;
     const definition = { key: "people_work", name: "People at work", description: "Who works where", entityType: "person", fields: ["name"] };

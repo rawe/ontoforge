@@ -2,7 +2,7 @@
  * The Studio helper against the real database and the configured language
  * model: it answers a question about a small schema through the Studio
  * route, from the design alone, validates a lens with its tool, drafts
- * an agent for a lens into the open editor's draft, proposes a schema
+ * an agent for a lens and a search index into the open editor's draft, proposes a schema
  * change whose check passes and which the person then applies, and keeps
  * one conversation going across applied changes.
  * Configuration and skips as in `ai.test.ts` (`support.ts`).
@@ -163,7 +163,7 @@ describe("the Studio helper on a real model", () => {
     expect(reply).toContain("part_of");
   });
 
-  it("drafts an agent for a lens into the open editor with fill_agent_draft", async (ctx) => {
+  it("drafts an agent for a lens into the open editor with fill_draft", async (ctx) => {
     if (app === null) {
       ctx.skip(skipReason?.split("\n")[0] ?? "AI suite unavailable");
       return;
@@ -177,7 +177,7 @@ describe("the Studio helper on a real model", () => {
       "Give it a name, a short description, instructions, and only the tools it needs.",
       { draft, focus: { kind: "agent", lens: "public", agent: null } },
     );
-    const fill = events.filter((event) => event.type === "studio.tool_call" && event.tool === "fill_agent_draft");
+    const fill = events.filter((event) => event.type === "studio.tool_call" && event.tool === "fill_draft");
     expect(fill.length, JSON.stringify(events)).toBeGreaterThan(0);
     const results = events.filter((event) => event.type === "studio.tool_result" && fill.some((call) => call.callId === event.callId));
     const filled = results.map((event) => event.result).find((result) => result.error === undefined);
@@ -187,5 +187,35 @@ describe("the Studio helper on a real model", () => {
     expect(String(filled.fields.name ?? "")).not.toBe("");
     const agents = await app!.inject({ method: "GET", url: `${MODEL}/lenses/public/assistants/agents` });
     expect(agents.json()).toEqual([]);
+  });
+
+  it("drafts a search index over a relation into the open index editor with fill_draft", async (ctx) => {
+    if (app === null) {
+      ctx.skip(skipReason?.split("\n")[0] ?? "AI suite unavailable");
+      return;
+    }
+    const draft = {
+      target: { kind: "searchIndex", searchIndex: null }, version: 8,
+      fields: {
+        key: "", name: "", description: "", entityType: "", fields: [], header: null, relations: [],
+        semantic: { enabled: true, template: null }, keyword: { enabled: true },
+      },
+    };
+    const events = await ask(
+      "Draft this index: find books by their own text and by the authors who wrote them, with each author's name.",
+      { draft, focus: draft.target },
+    );
+    const fill = events.filter((event) => event.type === "studio.tool_call" && event.tool === "fill_draft");
+    expect(fill.length, JSON.stringify(events)).toBeGreaterThan(0);
+    const results = events.filter((event) => event.type === "studio.tool_result" && fill.some((call) => call.callId === event.callId));
+    const filled = results.map((event) => event.result).find((result) => result.error === undefined);
+    expect(filled, JSON.stringify(results)).toBeDefined();
+    expect(filled.target).toEqual({ kind: "searchIndex", searchIndex: null });
+    expect(filled.fields.entityType).toBe("book");
+    expect(filled.fields.relations, JSON.stringify(filled)).toEqual([
+      expect.objectContaining({ relationType: "wrote", direction: "incoming", target: { author: expect.arrayContaining(["name"]) } }),
+    ]);
+    const indices = await app!.inject({ method: "GET", url: `${MODEL}/search-indices` });
+    expect(indices.json().map((index: Row) => index.key)).not.toContain(filled.fields.key);
   });
 });

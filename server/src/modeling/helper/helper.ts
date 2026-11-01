@@ -3,10 +3,11 @@
  * — the modeling host of the tool loop (`assistants/loop.ts`). It reads
  * the ontology's design only and writes nothing. Each turn prepares a run:
  * fixed instructions, the design briefing as its state, the page's focus
- * and the open editor's draft as the message's context, the design tools
- * (`tools.ts`) and the schema proposal tool (`propose.ts`) on every turn,
- * and — only while an editor with a draft is open — the tools of that
- * editor's drafter (`drafter.ts`, `drafters/`). A turn's last proposal
+ * and the open editor's draft as the message's context, the guide of that
+ * editor's drafter the first time the thread meets it, and always the same
+ * tools: the design tools (`tools.ts`), the schema proposal tool
+ * (`propose.ts`) and the draft tool, which hands its calls to the open
+ * draft's drafter (`drafter.ts`, `drafters/`). A turn's last proposal
  * and its check are its artifact. Schema and lens
  * descriptions are untrusted text: they reach the model only inside
  * context blocks and tool results, never in the instructions.
@@ -23,6 +24,7 @@ import {
 } from "../../assistants/index.js";
 import type { ModelingStore } from "../../core/ports.js";
 import { addressLines, DesignAddress } from "./address.js";
+import { fillDraftTool } from "./drafter.js";
 import { draftPart, type DraftPart, type DraftPayload } from "./drafters/index.js";
 import { proposeSchemaChangeTool, turnArtifacts, type StudioTurn } from "./propose.js";
 import { designTools, lensScope, readDesign } from "./tools.js";
@@ -45,7 +47,7 @@ You read the design only. You never see instance data (entities, relations, docu
 
 When the person asks you to create or extend the schema — entity types, relation types, properties, descriptions — call propose_schema_change with the complete proposal. It writes nothing: the server checks it, and the person reviews and applies it in the Studio. If the check refuses a step, fix the proposal and call it again. Never say a change was made or applied: say what you propose and that the person applies it. Describe any other change (deletes, renames, lenses) as steps the person takes in the Studio; a custom search index you can draft into its editor (Search, then a new index or an existing one) once the person has it open.
 
-While the person has an editor open that you can fill, their message comes with a draft block of its unsaved values, and only then do you have the tool that fills that draft; its description says how. Only when they ask you to draft, write or change what that editor holds, call it. The person fills the editor from your proposal, reviews it and saves it themselves; say so briefly. Without such an editor open, describe the item in your answer instead.
+While the person has an editor open that you can fill, their message comes with a draft block of its unsaved values, and only then does fill_draft work; a guide for that kind of editor comes with the first such message and says how. Only when they ask you to draft, write or change what that editor holds, call it. The person fills the editor from your proposal, reviews it and saves it themselves; say so briefly. Without such an editor open, describe the item in your answer instead.
 
 Context blocks give an outline of the schema and the lenses — a newer one replaces an older one — and, with a message, what the person has open, if anything. Use the tools for details and for validation results, and use exact keys as tool arguments. Answer from the design you read; say so when the design does not tell. Be concise.`;
 
@@ -132,10 +134,10 @@ export function studioRun(
   store: ModelingStore,
   model: BaseChatModel,
 ): PreparedRun<StudioTurn> {
-  const tools: Tool<StudioTurn>[] = [...designTools(store), proposeSchemaChangeTool(store), ...(turn.draft?.tools ?? [])];
+  const tools: Tool<StudioTurn>[] = [...designTools(store), proposeSchemaChangeTool(store), fillDraftTool(turn.draft?.open, store)];
   return {
     kind: STUDIO_KIND, instructions: INSTRUCTIONS, state: briefing(ontologyKey, design), context: turnContext(turn),
-    tools, ctx: { proposal: null }, model,
+    guides: turn.draft === undefined ? [] : [turn.draft.guide], tools, ctx: { proposal: null }, model,
   };
 }
 
@@ -150,7 +152,7 @@ export async function runStudioChat(
 ): Promise<Row> {
   const design = await readDesign(store);
   execution.signal?.throwIfAborted();
-  const draft = turn.draft === undefined ? undefined : await draftPart(turn.draft, store);
+  const draft = turn.draft === undefined ? undefined : await draftPart(turn.draft);
   const parts: StudioTurnParts = { ...(turn.focus === undefined ? {} : { focus: turn.focus }), ...(draft === undefined ? {} : { draft }) };
   const run = studioRun(ontologyKey, design, parts, store, model);
   const { reply } = await runToolLoop(run, turn.message, thread, execution);

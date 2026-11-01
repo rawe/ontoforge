@@ -11,8 +11,11 @@
 
 import { addressOf, sameAddress, type DesignAddress } from '../address.ts'
 
-/** An editor's fillable values by field. A list counts as a set: its order changes nothing. */
+/** An editor's fillable values by field. */
 export type Fields = Record<string, unknown>
+
+/** Whether two values of a field are the same, as an editor counts them. */
+export type Same = (a: unknown, b: unknown) => boolean
 
 /** Which draft: the address of the item the editor edits, its own key null for a new one. */
 export type DraftTarget = DesignAddress
@@ -63,12 +66,17 @@ export function proposalOf(result: unknown): DraftProposal | null {
   return { target, sourceVersion: result.sourceVersion, fields: result.fields }
 }
 
-/** Whether two field values are the same; lists as sets. */
+/** Whether two field values are the same; lists as sets. The default `Same`, for flat values. */
 export function sameValue(a: unknown, b: unknown): boolean {
   if (Array.isArray(a) && Array.isArray(b)) {
     return a.length === b.length && a.every((item) => b.includes(item)) && b.every((item) => a.includes(item))
   }
   return a === b
+}
+
+/** Whether two values are the same, nested values and list order included: the `Same` of an editor with nested values. */
+export function sameNested(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
 }
 
 /** Whether the proposal no longer fits the open draft: another (or no) editor, or a newer version. */
@@ -86,8 +94,8 @@ export function fillRefusal(open: DraftState | null, busy: boolean, ontologyKey:
 }
 
 /** The fields of the draft the proposal changes; fields the draft does not have are left out. */
-export function changedFields(current: Fields, proposed: Fields): string[] {
-  return Object.keys(proposed).filter((field) => Object.hasOwn(current, field) && !sameValue(current[field], proposed[field]))
+export function changedFields(current: Fields, proposed: Fields, same: Same = sameValue): string[] {
+  return Object.keys(proposed).filter((field) => Object.hasOwn(current, field) && !same(current[field], proposed[field]))
 }
 
 /**
@@ -95,14 +103,16 @@ export function changedFields(current: Fields, proposed: Fields): string[] {
  * the AI changed before and the person left alone keeps its value from
  * before the first fill; a field back at that value is no AI change.
  */
-export function applyFill<F extends Fields>(current: F, proposed: Fields, previous: AiEdit): { fields: F; edit: AiEdit } {
+export function applyFill<F extends Fields>(
+  current: F, proposed: Fields, previous: AiEdit, same: Same = sameValue,
+): { fields: F; edit: AiEdit } {
   const fields: Fields = { ...current }
   const edit: AiEdit = { ...previous }
-  for (const field of changedFields(current, proposed)) {
+  for (const field of changedFields(current, proposed, same)) {
     const earlier = previous[field]
-    const before = earlier !== undefined && sameValue(current[field], earlier.after) ? earlier.before : current[field]
+    const before = earlier !== undefined && same(current[field], earlier.after) ? earlier.before : current[field]
     fields[field] = proposed[field]
-    if (sameValue(before, proposed[field])) delete edit[field]
+    if (same(before, proposed[field])) delete edit[field]
     else edit[field] = { before, after: proposed[field] }
   }
   return { fields: fields as F, edit }
@@ -113,18 +123,18 @@ export function applyFill<F extends Fields>(current: F, proposed: Fields, previo
  * `after`: a field the change touches is the person's for good, even if
  * they later type the AI's value again; the other fields keep their record.
  */
-export function withoutEdited(edit: AiEdit, before: Fields, after: Fields): AiEdit {
-  return Object.fromEntries(Object.entries(edit).filter(([field]) => sameValue(before[field], after[field])))
+export function withoutEdited(edit: AiEdit, before: Fields, after: Fields, same: Same = sameValue): AiEdit {
+  return Object.fromEntries(Object.entries(edit).filter(([field]) => same(before[field], after[field])))
 }
 
 /** The AI changes the draft still shows: the fields that hold the AI's value. */
-export function aiMarks(current: Fields, edit: AiEdit): AiEdit {
-  return Object.fromEntries(Object.entries(edit).filter(([field, change]) => sameValue(current[field], change.after)))
+export function aiMarks(current: Fields, edit: AiEdit, same: Same = sameValue): AiEdit {
+  return Object.fromEntries(Object.entries(edit).filter(([field, change]) => same(current[field], change.after)))
 }
 
 /** The draft with the AI's edit undone: each field still at the AI's value is back to its value before; the rest stay. */
-export function undoFill<F extends Fields>(current: F, edit: AiEdit): F {
+export function undoFill<F extends Fields>(current: F, edit: AiEdit, same: Same = sameValue): F {
   const fields: Fields = { ...current }
-  for (const [field, change] of Object.entries(aiMarks(current, edit))) fields[field] = change.before
+  for (const [field, change] of Object.entries(aiMarks(current, edit, same))) fields[field] = change.before
   return fields as F
 }

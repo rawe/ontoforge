@@ -3,7 +3,7 @@
  * helpers (key validation, invalidation, errors) live in `./lib`.
  */
 
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -13,7 +13,7 @@ import { isValidLensResourceKey, isValidSchemaKey } from './lib'
 interface KeyFieldProps {
   id: string
   /** Field label; defaults to "Key". */
-  label?: string
+  label?: ReactNode
   value: string
   onChange: (value: string) => void
   /** Edit mode — the key is immutable, render it disabled. */

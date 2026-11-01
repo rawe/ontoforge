@@ -30,6 +30,16 @@ export const DRAFT_VIEWS: readonly DraftView[] = [
     newItem: 'new agent',
     fields: { name: 'Name', description: 'Description', systemPrompt: 'System prompt', tools: 'Tools' },
   },
+  {
+    kind: 'searchIndex',
+    tool: 'fill_search_index_draft',
+    title: 'Search index draft',
+    newItem: 'new index',
+    fields: {
+      name: 'Name', key: 'Key', description: 'Description', entityType: 'Entity type', fields: 'Own fields',
+      header: 'Owner line', relations: 'Relation groups', semantic: 'Semantic', keyword: 'Keyword',
+    },
+  },
 ]
 
 /** The view of the drafter whose tool is `tool`; undefined for any other tool. */

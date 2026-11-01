@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, Plus, Trash2, X } from 'lucide-react'
+import { ChevronLeft, Plus, Sparkles, Trash2, Undo2, X } from 'lucide-react'
 import { Link, useBlocker, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError } from '@/api/http'
 import * as model from '@/api/model'
+import { AiChangedMark, sameNested, useAssistantPanel, useDraftFill, usePublishFocus, type AiEdit, type DraftTarget } from '@/assistants'
 import {
   searchKeys,
   useIndexSchema,
@@ -58,6 +59,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { EntryPreview, type LeftOut } from './EntryPreview'
+import { indexDiffValue, indexFields, withIndexFields } from './indexDraft'
 import {
   groupPlaceholders,
   insertAt,
@@ -138,6 +140,9 @@ interface IndexDesignerProps {
  * Designer of one custom search index: draft + Save with the cost preview
  * in the save bar, validation next to the fields, status and rebuild.
  * Remount it (React `key`) to re-seed the draft from a newer saved version.
+ * "Ask AI" opens the assistant panel on it; the Studio helper's draft cards
+ * fill the draft (`useDraftFill`), marked until the person edits a part,
+ * and "Undo AI edit" takes back what is still marked. Only Save stores.
  */
 export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDesignerProps) {
   const isNew = saved === null
@@ -151,8 +156,33 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
     () => saved?.definition ?? emptyDraft(initialEntityType ?? ''),
     [saved, initialEntityType],
   )
-  const [draft, setDraft] = useState<SearchIndexDefinition>(baseline)
+  // The draft's target, the page's focus and what "Ask AI" opens the panel on.
+  const target = useMemo<DraftTarget>(() => ({ kind: 'searchIndex', searchIndex: saved?.key ?? null }), [saved])
+  usePublishFocus(target)
+  const panel = useAssistantPanel()
+  // While it saves or deletes, the editor takes no fill.
+  const [busy, setBusy] = useState(false)
+  const {
+    draft, change, reset, undo, marks, canUndo,
+  } = useDraftFill({
+    initial: baseline,
+    ontologyKey,
+    target,
+    busy,
+    fieldsOf: indexFields,
+    withFields: withIndexFields,
+    same: sameNested,
+    onFill: (before, after) => {
+      setSaveIssues([])
+      // A key the AI chose no longer follows the name.
+      if (after.key !== before.key) setKeyTouched(true)
+    },
+  })
+  // Only an empty list of header fields needs the choice: chosen fields, none picked yet, or none.
   const [headerChoice, setHeaderChoice] = useState<HeaderMode>(headerMode(baseline.header))
+  const headerShown: HeaderMode = draft.header !== null && draft.header.length === 0 && headerChoice === 'fields'
+    ? 'fields'
+    : headerMode(draft.header)
   const [keyTouched, setKeyTouched] = useState(false)
   const [saveIssues, setSaveIssues] = useState<ValidationError[]>([])
   const [keyConflict, setKeyConflict] = useState<string | undefined>()
@@ -160,11 +190,11 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
   const { cascade, guard, clear } = useCascade()
 
   const edit = (patch: Partial<SearchIndexDefinition>) => {
-    setDraft((d) => ({ ...d, ...patch }))
+    change((d) => ({ ...d, ...patch }))
     setSaveIssues([])
   }
   const discard = () => {
-    setDraft(baseline)
+    reset(baseline)
     setHeaderChoice(headerMode(baseline.header))
     setKeyTouched(false)
     setSaveIssues([])
@@ -232,6 +262,8 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
         ? model.createSearchIndex(ontologyKey, definition)
         : model.updateSearchIndex(ontologyKey, definition)
     },
+    onMutate: () => setBusy(true),
+    onSettled: () => setBusy(false),
     onSuccess: (record) => {
       queryClient.setQueryData(searchKeys.index(ontologyKey, record.key), record)
       invalidateModeling(queryClient)
@@ -253,6 +285,8 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
   const remove = useMutation({
     mutationFn: (cascadeFlag: boolean) =>
       model.deleteSearchIndex(ontologyKey, saved!.key, cascadeFlag),
+    onMutate: () => setBusy(true),
+    onSettled: () => setBusy(false),
     onSuccess: () => {
       leaving.current = true
       toast.success('Index deleted')
@@ -312,13 +346,23 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
               {saved.key}
             </Badge>
           )}
-          {!isNew && (
-            <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            {canUndo && (
+              <Button type="button" size="sm" variant="ghost" data-testid="index-undo-ai-edit" disabled={busy} onClick={() => { undo(); setSaveIssues([]) }}>
+                <Undo2 className="size-3.5" /> Undo AI edit
+              </Button>
+            )}
+            {panel.available && (
+              <Button type="button" size="sm" variant="ghost" data-testid="index-ask-ai" onClick={() => panel.open({ focus: target })}>
+                <Sparkles className="size-3.5" /> Ask AI
+              </Button>
+            )}
+            {!isNew && (
               <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>
                 <Trash2 className="size-3.5" /> Delete
               </Button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </header>
 
@@ -326,7 +370,10 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
         <div className="grid min-w-0 gap-4">
           <Section title="Name and description">
             <div className="grid gap-1.5">
-              <Label htmlFor="index-name">Name</Label>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="index-name">Name</Label>
+                <IndexMark field="name" marks={marks} />
+              </div>
               <Input
                 id="index-name"
                 value={draft.name}
@@ -340,6 +387,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
             </div>
             <KeyField
               id="index-key"
+              label={<span className="flex items-center gap-2">Key<IndexMark field="key" marks={marks} /></span>}
               value={draft.key}
               disabled={!isNew}
               error={keyMessage ?? issuesAt(issues, 'key')[0]?.message}
@@ -350,7 +398,10 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
               }}
             />
             <div className="grid gap-1.5">
-              <Label htmlFor="index-description">Description</Label>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="index-description">Description</Label>
+                <IndexMark field="description" marks={marks} />
+              </div>
               <Textarea
                 id="index-description"
                 rows={3}
@@ -368,6 +419,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
 
           <Section
             title="Entity type"
+            mark={<IndexMark field="entityType" marks={marks} />}
             description="Every hit is an entity of this type. Changing it clears fields, header and relation groups."
           >
             {schema === undefined ? (
@@ -376,7 +428,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
               <Select
                 value={draft.entityType === '' ? undefined : draft.entityType}
                 onValueChange={(v) => {
-                  setDraft((d) => withEntityType(d, v))
+                  change((d) => withEntityType(d, v))
                   setHeaderChoice('name')
                   setSaveIssues([])
                 }}
@@ -407,6 +459,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
             <>
               <Section
                 title="Own fields"
+                mark={<IndexMark field="fields" marks={marks} />}
                 meta={
                   <span className={cn('text-[12px] text-muted-foreground', fieldCount > MAX_INDEX_FIELDS && 'text-destructive')}>
                     {fieldCount}/{MAX_INDEX_FIELDS} fields in this index
@@ -471,6 +524,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
 
               <Section
                 title="Owner line (header)"
+                mark={<IndexMark field="header" marks={marks} />}
                 marker
                 dimmed={!headerApplies}
                 description="Says whose an entry is: it starts every entry that is not the entity's own — each relation entry and each passage. Its fields do not count toward the limit."
@@ -497,7 +551,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                   </Badge>
                 </div>
                 <RadioGroup
-                  value={headerChoice}
+                  value={headerShown}
                   onValueChange={(v) => {
                     const mode = v as HeaderMode
                     setHeaderChoice(mode)
@@ -522,7 +576,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                     None
                   </label>
                 </RadioGroup>
-                {headerChoice === 'fields' && (
+                {headerShown === 'fields' && (
                   <div className="ml-6">
                     <FieldChecklist
                       idPrefix="header"
@@ -543,6 +597,7 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
 
               <Section
                 title="Relation groups"
+                mark={<IndexMark field="relations" marks={marks} />}
                 meta={
                   <span className="text-[12px] text-muted-foreground">
                     {draft.relations.length}/{MAX_RELATION_GROUPS}
@@ -592,20 +647,26 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
                 title="Search modes"
                 description="Semantic search finds by meaning (needs an embedding provider); keyword search finds by words, stemmed in the ontology's keyword languages. How an entry's semantic text is written is chosen beside its preview."
               >
-                <label className="flex items-center gap-3 text-[13px]">
-                  <Switch
-                    checked={draft.semantic.enabled}
-                    onCheckedChange={(on) => edit({ semantic: { ...draft.semantic, enabled: on } })}
-                  />
-                  Semantic
-                </label>
-                <label className="flex items-center gap-3 text-[13px]">
-                  <Switch
-                    checked={draft.keyword.enabled}
-                    onCheckedChange={(on) => edit({ keyword: { enabled: on } })}
-                  />
-                  Keyword
-                </label>
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-3 text-[13px]">
+                    <Switch
+                      checked={draft.semantic.enabled}
+                      onCheckedChange={(on) => edit({ semantic: { ...draft.semantic, enabled: on } })}
+                    />
+                    Semantic
+                  </label>
+                  <IndexMark field="semantic" marks={marks} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-3 text-[13px]">
+                    <Switch
+                      checked={draft.keyword.enabled}
+                      onCheckedChange={(on) => edit({ keyword: { enabled: on } })}
+                    />
+                    Keyword
+                  </label>
+                  <IndexMark field="keyword" marks={marks} />
+                </div>
                 <IssueList issues={[...issuesAt(issues, 'semantic'), ...issuesAt(issues, 'keyword')]} />
               </Section>
             </>
@@ -676,6 +737,16 @@ export function IndexDesigner({ ontologyKey, saved, initialEntityType }: IndexDe
 
 /* ------------------------------- building blocks ------------------------------ */
 
+const MARK_LABELS: Record<keyof SearchIndexDefinition, string> = {
+  key: 'Key', name: 'Name', description: 'Description', entityType: 'Entity type', fields: 'Own fields',
+  header: 'Owner line', relations: 'Relation groups', semantic: 'Semantic', keyword: 'Keyword',
+}
+
+/** "Changed by AI" beside a part of the definition the helper filled, with its diff. */
+function IndexMark({ field, marks }: { field: keyof SearchIndexDefinition; marks: AiEdit }) {
+  return <AiChangedMark field={field} label={MARK_LABELS[field]} change={marks[field]} value={indexDiffValue(field)} />
+}
+
 /** Why a draft has no own entry, and what still finds the entity. */
 function ownEntryAbsence(typeName: string, groups: boolean, passages: boolean): string {
   const kinds = [groups && 'relation', passages && 'passage'].filter(Boolean).join(' and ')
@@ -688,6 +759,7 @@ function Section({
   title,
   description,
   meta,
+  mark,
   marker = false,
   dimmed = false,
   children,
@@ -695,6 +767,8 @@ function Section({
   title: string
   description?: string
   meta?: ReactNode
+  /** Beside the title: what the AI changed in this section, if anything. */
+  mark?: ReactNode
   /** The owner line's mark — the rule that marks its lines in the previews. */
   marker?: boolean
   /** Shown faded: the section applies to nothing yet. */
@@ -707,6 +781,7 @@ function Section({
         <div className="flex items-center gap-2">
           {marker && <span className="h-3.5 w-0.5 rounded-full bg-primary/35" aria-hidden />}
           <h2 className="text-[13px] font-semibold">{title}</h2>
+          {mark}
           {meta !== undefined && <span className="ml-auto">{meta}</span>}
         </div>
         {description !== undefined && (

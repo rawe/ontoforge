@@ -6,6 +6,8 @@
  * the previous answer cited.
  */
 
+import { readFileSync } from "node:fs";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fake = vi.hoisted(() => ({ invoke: vi.fn(), stream: vi.fn(), withConfig: vi.fn() }));
@@ -18,6 +20,7 @@ vi.mock("../../../../src/runtime/assistants/navigators/reader.js", () => ({ lens
 
 import { settings } from "../../../../src/config.js";
 import type { GraphThread, StreamEvent } from "../../../../src/assistants/index.js";
+import { TurnSaver } from "../../../../src/assistants/threads/turnSaver.js";
 import { createAiModel } from "../../../../src/core/ai.js";
 import type { RuntimeStore } from "../../../../src/core/ports.js";
 import { ANSWER } from "../../../../src/runtime/assistants/navigators/answer.js";
@@ -405,5 +408,31 @@ describe("follow-ups on a thread", () => {
     const { events } = await turn("What do they require?", { thread: first.thread });
     expect(stepDone(events, "anchor").summary).toBe("Continuing from the previous answer: 1 entity");
     expect(lastCards(events).map((c) => c.label)).toEqual(["Apollo", "Kubernetes"]);
+  });
+});
+
+describe("a thread stored before", () => {
+  /** "Which projects do Lena's reports work on?" answered citing Kira, Apollo, Omar and Zeus, as a turn stored it. */
+  const STORED_TURN = readFileSync(new URL("../../../fixtures/navigator-thread-v1.json", import.meta.url), "utf8");
+
+  it("continues from the focus it carries", async () => {
+    const thread = { checkpointer: TurnSaver.load("stored", new Uint8Array(Buffer.from(STORED_TURN))), threadId: "stored" };
+    fake.invoke.mockResolvedValueOnce(plan({ targets: ["team"], path: [{ relation: "member_of", direction: "outgoing" }], useFocus: true }));
+    answer("Kira Novak [E1] is in Platform [E5].");
+    const { events, reply } = await turn("And which teams are they in?", { thread });
+
+    expect(understandInput()).toContain("CONVERSATION (oldest first):\n\nuser: Which projects do Lena's reports work on?\n\nassistant: Kira Novak [E2]");
+    expect(understandInput()).toContain("ENTITIES OF THE PREVIOUS ANSWER: Kira Novak (person); Apollo (project); Omar Haddad (person); Zeus (project)");
+    const anchored = events.find((e) => e.type === "entities")!.entities as Card[];
+    expect(anchored.map((c) => [c.label, c.role])).toEqual([
+      ["Kira Novak", "focus"], ["Apollo", "focus"], ["Omar Haddad", "focus"], ["Zeus", "focus"],
+    ]);
+    expect(reply).toBe("Kira Novak [E1] is in Platform [E5].");
+    const values = await graphValues(thread);
+    expect(values.messages as unknown[]).toHaveLength(4);
+    expect(values.carried).toEqual([
+      { id: "kira", type: "person", label: "Kira Novak" },
+      { id: "platform", type: "team", label: "Platform" },
+    ]);
   });
 });

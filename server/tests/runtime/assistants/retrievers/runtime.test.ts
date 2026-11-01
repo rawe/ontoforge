@@ -8,6 +8,8 @@
  * whose first plan searched nothing.
  */
 
+import { readFileSync } from "node:fs";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fake = vi.hoisted(() => ({ invoke: vi.fn(), stream: vi.fn(), withConfig: vi.fn() }));
@@ -45,6 +47,7 @@ import {
   type RunnableRetriever,
 } from "../../../../src/runtime/assistants/retrievers/runtime.js";
 import type { GraphThread } from "../../../../src/assistants/index.js";
+import { TurnSaver } from "../../../../src/assistants/threads/turnSaver.js";
 import { graphValues, newGraphThread } from "../../../assistants/threads/graphThread.js";
 import { CONFIG, LENS, SCHEMA } from "./fixture.js";
 
@@ -171,7 +174,15 @@ describe("retriever pipeline", () => {
     expect(calls.map((c) => c.phase)).toEqual(["plan", "answer"]);
     expect(calls[0]!.input).toBe(fake.invoke.mock.calls[0]![0][1].content);
     expect(calls[1]!.systemPrompt).toBe(fake.stream.mock.calls[0]![0][0].content);
+    // The answer's usage is the last the provider reported.
+    expect((calls[1] as { usage?: unknown }).usage).toEqual({ input_tokens: 1, output_tokens: 1 });
     expect(events.at(-1)).toBe(summary);
+  });
+
+  it("a failed answer call fails the turn after the answer phase started; no retry", async () => {
+    fake.stream.mockRejectedValueOnce(new Error("boom"));
+    await expect(run("Everyone in Berlin", false)).rejects.toThrow("Response model failed; no automatic retry.");
+    expect(fake.stream).toHaveBeenCalledTimes(1);
   });
 
   it("the default retriever's diagnostics plan carries its derived filter definitions", async () => {
@@ -564,5 +575,38 @@ describe("retrieve", () => {
     controller.abort();
     await expect(retrieveQuestion(agent, "Who?", controller.signal)).rejects.toBeDefined();
     expect(fake.invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("a thread stored before", () => {
+  /** "Everyone in Berlin" answered "Ada." with the fixture's configuration, as a turn stored it. */
+  const STORED_TURN = readFileSync(new URL("../../../fixtures/retriever-thread-v1.json", import.meta.url), "utf8");
+  const storedThread = (): GraphThread =>
+    ({ checkpointer: TurnSaver.load("stored", new Uint8Array(Buffer.from(STORED_TURN))), threadId: "stored" });
+  const followUp = () => {
+    rankEntries.mockResolvedValue([]);
+    fake.invoke.mockResolvedValue(planned([sub({ query: "CTO", filters: [], previous: { filterId: null, quote: "these people" } })]));
+  };
+
+  it("continues: the models see its turn, and a follow-up refers to its results", async () => {
+    followUp();
+    const { thread } = await run("Which of these people is CTO?", false, storedThread());
+    const input = JSON.parse(fake.invoke.mock.calls.at(-1)![0][1].content);
+    expect(input.history).toEqual([{ role: "user", content: "Everyone in Berlin" }, { role: "assistant", content: "Ada." }]);
+    expect(input.previousVerifiedResults).not.toBeNull();
+    expect(rankEntries.mock.calls[0]![0].entityIds).toEqual(["ada"]);
+    expect(((await graphValues(thread)).messages as unknown[])).toHaveLength(4);
+  });
+
+  it("whose retriever's configuration changed offers none of its results", async () => {
+    const saved = { ...CONFIG, threshold: 0.5 };
+    const changed: RunnableRetriever = { ...agent, config: saved, scope: { ...agent.scope, config: saved } };
+    followUp();
+    const { events } = await run("Which of these people is CTO?", true, storedThread(), undefined, changed);
+    expect(JSON.parse(fake.invoke.mock.calls.at(-1)![0][1].content).previousVerifiedResults).toBeNull();
+    expect(rankEntries.mock.calls[0]![0].entityIds).toBeNull();
+    expect(diagnosticsWith(events, "results").limitations).toContain(
+      "The reference to previous results was ignored (there are no verified previous results); it ran as a fresh search.",
+    );
   });
 });

@@ -223,8 +223,9 @@ export async function run(turn: NavigatorTurn): Promise<string> {
     }, ["walk", "focus"])
     .addNode("answer", async () => {
       reply = await trace.step("answer", async (report) => {
-        const text = await streamAnswer(
-          model, trace,
+        trace.modelCalls++;
+        const { text } = await streamAnswer(
+          model,
           config.instructions ? `${ANSWER}\n\nADDITIONAL INSTRUCTIONS:\n${config.instructions}` : ANSWER,
           answerInput(board, evidence, message, history, notes),
           signal,

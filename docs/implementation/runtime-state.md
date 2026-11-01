@@ -20,7 +20,7 @@ created under the same key must not reuse the earlier ontology's entries.
 
 A running assistant turn holds a **30-second lease** and renews it every **10 seconds**.
 The cadence is defined by `TURN_LEASE_MS` and `TURN_HEARTBEAT_MS` in
-[threadStore.ts](../../server/src/runtime/threads/threadStore.ts).
+[threadStore.ts](../../server/src/assistants/threads/threadStore.ts).
 
 The lease bounds how long a server that dies can leave its thread busy. Renewal keeps a
 live turn's ownership; every publish, renewal or release is checked against its owner

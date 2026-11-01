@@ -97,12 +97,19 @@ Five modules, with a deliberately acyclic dependency graph:
 never looks inside one.
 
 **Modeling** owns one ontology's schema: types, properties, lens definitions, search-index
-definitions and settings, cascade rules, schema validation, transfer, search-data rebuild.
+definitions and settings, cascade rules, schema validation, transfer, search-data rebuild,
+schema proposals and the [Studio helper](capabilities/studio-helper.md).
 
 **Runtime** owns one ontology's instance data: entity and relation lifecycle, traversal,
-documents, search, search indexing, query execution, saved-query pipelines, the
-[assistants](#assistant-kinds) — agents, retrievers and navigators — and the
-[thread store](#thread-store) holding their conversations.
+documents, search, search indexing, query execution, saved-query pipelines and the
+[assistants](#assistant-kinds) — agents, retrievers and navigators.
+
+**Assistants** is a technical module beneath the contexts, not a context of its own: the
+session layer every assistant kind runs on — a chat turn streamed on its thread, and the
+[thread store](#thread-store) — and the tool loop. It imports only core and the
+language-model engine libraries, never the web framework, auth, access, modeling, runtime
+or MCP, and the others reach it only through its one entrance. A dependency test enforces
+this, and that runtime never imports modeling.
 
 **Server** carries the deployment's capability report — which optional providers this
 deployment has. It belongs to neither modeling nor runtime and is the only surface that
@@ -380,6 +387,11 @@ of a configuration, its built-in default and its place in transfer under the len
 event ([interfaces](interfaces/assistants-rest.md#assistant-chat-and-threads)). Runtime's assistant kit holds the
 kind-neutral helpers: the live trace of a fixed pipeline's steps, and the model calls —
 structured output for a decision, a stream for the answer.
+
+An agent's turn runs on the tool loop of the assistants module: the runtime hands it the
+agent's prompt, the lens's schema, the agent's tools and the model; the loop streams each
+call's events and feeds a failure the tool expects back to the model. The
+[Studio helper](capabilities/studio-helper.md) runs on the same loop, hosted by modeling.
 
 The [navigator](capabilities/navigators.md)'s turn is a fixed pipeline. It
 announces its steps when the turn starts and traces each as it runs, in events prefixed

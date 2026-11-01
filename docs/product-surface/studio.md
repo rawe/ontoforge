@@ -5,7 +5,9 @@ switcher and the surface switch beneath it, its navigation covers Schema, Lenses
 and Transfer, with authentication on also [Access](README.md#signing-in), and everything it reads and writes belongs to the current ontology. Its
 footer holds the theme control and the collapse control. Like the Workbench sidebar, it
 collapses to an icon rail whose entries name themselves on hover; both sidebars share one
-collapse preference.
+collapse preference. With a language model configured, an AI panel beside every Studio page
+holds the [Studio helper](../capabilities/studio-helper.md); Ask AI opens it on what the page
+shows, and the agent and search index editors take its draft fills.
 
 Find [schema](#schema), [type pages](#type-page-classic-view), [lenses](#lenses),
 [lens detail](#lens-detail), [search](#search), the [index designer](#index-designer),

@@ -37,9 +37,11 @@ work is its tool calls and their results; they stay in the thread with the turn.
   left without its result. A thread only ever holds complete turns, and while a turn runs
   it reads back as of its last completed one. An interrupted turn is asked again, never
   resumed. A thread grown too large to keep refuses its turn; the client starts a new one.
-- **The model sees the recent turns,** not the whole thread — for an agent including those
-  turns' tool calls and results. A thread keeps a bounded number of turns; older ones are
-  removed.
+- **The model sees the whole thread** — for an agent including its tool calls and
+  results — but never a model's reasoning. What a thread sent is never changed: it keeps
+  the instructions its first turn ran with, and what changes later (the schema, what the
+  person has open) goes with a message. A thread holds a bounded number of turns; a
+  message beyond them is refused and the client starts a new thread.
 
 A retriever's and a navigator's thread also keep what a follow-up question may refer to
 ([retrievers.md](retrievers.md#follow-up-questions),

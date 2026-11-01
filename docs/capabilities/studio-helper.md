@@ -6,7 +6,7 @@ indices — never instance data, and changes nothing itself. Its work reaches th
 only through a person:
 
 - **Answers** from the design.
-- **Schema proposals** — additive steps (new types, properties, descriptions) the server
+- **[Schema proposals](schema-modeling.md#schema-proposals)** — additive steps (new types, properties, descriptions) the server
   checks without writing. The person reviews a proposal and applies it in the Studio,
   against the design revision it was checked on.
 - **Draft fills** — with an agent editor or a custom search index editor open, it proposes

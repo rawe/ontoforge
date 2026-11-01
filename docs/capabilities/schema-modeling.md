@@ -376,6 +376,35 @@ Neither operation inspects instance data. Entities stranded by a deleted type ar
 invisible to both, and so are relations that break the relation rules; only a
 [rules change](#relation-rules) reports those.
 
+## Schema proposals
+
+A schema proposal is an ordered list of additive steps that the server checks without
+writing and applies whole. The [Studio helper](studio-helper.md) writes them; a person
+applies them. Its steps:
+
+- create an entity type; it gets its string name property `name`, which the step may
+  describe and make required;
+- create a relation type;
+- add a property to a type that exists or that an earlier step creates;
+- set the description of a type or a property.
+
+No step deletes, renames or clears anything, and no step can consent to a
+[cascade](#the-cascade-protocol): a step that would need consent is refused. A proposal
+has at most 50 steps, because its check holds the design exclusively.
+
+**Check** runs every step through the rules above in one design change that it rolls back,
+then validates the resulting design. It reports the design revision it ran on; each refused
+step with its reason, stopping at the first step a rule refuses; the validation errors the
+proposal introduces, apart from those the design already had; warnings; the lenses that
+show what it adds or describes and the search indices it changes; and what the check does
+not prove, such as constraints the storage checks only at commit. A proposal with no
+refused step and no introduced error can be applied.
+
+**Apply** names the revision its check ran on. It checks everything again and writes every
+step or none. Under another revision it is refused with nothing written, and the proposal is
+checked again. After the commit, the search indices catch up in the background, as after any
+schema change.
+
 ## Through the interfaces
 
 Full index: [../interfaces/](../interfaces/README.md). Every entrance below addresses
@@ -395,6 +424,7 @@ reaches MCP as its message, with the count per rule but without the listed entit
 | Whole-schema read | assembled from the type operations, or the export payload | one `get_schema` tool | schema studio |
 | Validation | per-lens and whole-schema | per-lens and whole-schema | schema studio |
 | Cascade consent | a query flag on the cascading operations | a boolean argument on the same operations | prompted on the affected action |
+| [Schema proposals](#schema-proposals) | check, apply | — | the Studio's AI panel |
 
 Two differences between the entrances are contractual, not cosmetic:
 

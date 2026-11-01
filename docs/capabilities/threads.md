@@ -83,7 +83,8 @@ Continuing or reading a thread that is gone answers not found, as above.
 ## Reading a thread back
 
 A thread reads back as its user messages and the assistant's answers, in order — the
-turns it keeps, without tool calls or their results. A client restores a conversation from
+turns it keeps, without tool calls or their results. An answer carries the artifacts its
+turn left: for the Studio helper, the turn's last schema proposal with its check. A client restores a conversation from
 it. Reading runs no model, so it needs no language-model provider; it is available
 wherever the assistant kind's list is.
 

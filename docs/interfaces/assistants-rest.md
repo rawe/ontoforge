@@ -66,7 +66,8 @@ Delivery bounds buffering and terminates stalled or oversized streams.
 There is no background continuation after a disconnect.
 
 **Read a thread.** `200` with `threadId` and `messages` — the user messages and the
-assistant's answers in order, each `role` (`user` or `assistant`) and `content`, at most
+assistant's answers in order, each `role` (`user` or `assistant`), `content` and, on an
+answer whose turn left any, `artifacts` — each `type`, `version` and `value` —, at most
 the turns a thread keeps, without tool payloads. Unknown, expired, another assistant's or
 another principal's thread: `THREAD_NOT_FOUND`. Reading needs no language-model provider
 and does not count as use; it is gated like the kind's list.

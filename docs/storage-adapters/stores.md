@@ -100,6 +100,13 @@ stores it hands out, runs on that transaction; the generation lifecycle, which n
 connections of its own, fails there as a programming error. Work started on a store
 already inside a design change runs within it.
 
+A design change may name the revision it expects: compared in full under the exclusive
+hold, another one refuses the change with nothing written. However many writes the work
+makes, the revision advances exactly once. A change may also roll itself back when its
+work returns, the revision included, and return the work's result: a check that writes
+nothing, in which constraints the storage checks only at commit never run. Both options are
+refused on a store already inside a design change.
+
 **Search-data maintenance.** Backing the rebuild operation: list every saved query with
 enough identity to re-embed it; set the embedding on one saved query. Plus the vector
 index operations under obligations, below.

@@ -1,6 +1,7 @@
 /**
  * One value's change from before to after, worked out for display: a long
- * or multi-line text as a word diff inside its changed lines, a list as the
+ * or multi-line text as a word diff inside its changed lines, with long
+ * unchanged stretches folded away, a list as the
  * items kept, removed and added, a short text as before → after, and two
  * values of different kinds side by side.
  *
@@ -22,12 +23,21 @@ export interface DiffItem {
   value: string
 }
 
+/** Unchanged lines left out of a text diff, by count. */
+export interface DiffFold {
+  kind: 'fold'
+  lines: number
+}
+
 /** How a change shows. */
 export type ValueChange =
-  | { kind: 'text'; parts: DiffPart[] }
+  | { kind: 'text'; parts: Array<DiffPart | DiffFold> }
   | { kind: 'short'; before: string; after: string }
   | { kind: 'list'; items: DiffItem[] }
   | { kind: 'mixed'; before: DiffValue; after: DiffValue }
+
+/** Unchanged lines a text diff keeps around each change; longer unchanged stretches fold. */
+const CONTEXT_LINES = 2
 
 /** A text up to this long without a line break shows as before → after; a longer one as a word diff. */
 const SHORT_TEXT = 60
@@ -155,6 +165,31 @@ export function diffText(before: string, after: string): DiffPart[] {
 }
 
 /**
+ * A text diff with each unchanged stretch cut to the lines around its
+ * changes, `context` before and after; the lines between fold. A stretch at
+ * the start or end keeps only the lines next to a change; a text without any
+ * change stays whole.
+ */
+export function foldUnchanged(parts: DiffPart[], context = CONTEXT_LINES): Array<DiffPart | DiffFold> {
+  if (parts.every((part) => part.kind === 'same')) return parts
+  return parts.flatMap((part, index): Array<DiffPart | DiffFold> => {
+    if (part.kind !== 'same') return [part]
+    // A stretch's first piece ends the line of the change before it, its last starts the line of the change after it.
+    const pieces = part.text.split(/(?<=\n)/)
+    const head = index > 0 ? context + 1 : 0
+    const tail = index < parts.length - 1 ? context + 1 : 0
+    const hidden = pieces.length - head - tail
+    if (hidden < 2) return [part]
+    const kept = (text: string): DiffPart[] => (text === '' ? [] : [{ kind: 'same', text }])
+    return [
+      ...kept(pieces.slice(0, head).join('')),
+      { kind: 'fold', lines: hidden },
+      ...kept(pieces.slice(pieces.length - tail).join('')),
+    ]
+  })
+}
+
+/**
  * The diff of two lists as sets: the items of `before` in their order, kept
  * or removed, then the items only `after` has, in its order.
  */
@@ -189,7 +224,7 @@ export function valueChange(before: DiffValue, after: DiffValue): ValueChange {
   const a = after ?? ''
   const short = (text: string) => text.length <= SHORT_TEXT && !text.includes('\n')
   if (short(b) && short(a)) return { kind: 'short', before: b, after: a }
-  return { kind: 'text', parts: diffText(b, a) }
+  return { kind: 'text', parts: foldUnchanged(diffText(b, a)) }
 }
 
 /** Any value as a `DiffValue`: texts and lists of texts as they are, anything else as its text. */

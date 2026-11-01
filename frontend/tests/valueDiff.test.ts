@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { diffList, diffText, toDiffValue, valueChange, type DiffPart } from '../src/lib/valueDiff.ts'
+import { diffList, diffText, foldUnchanged, toDiffValue, valueChange, type DiffFold, type DiffPart } from '../src/lib/valueDiff.ts'
 
 const side = (parts: DiffPart[], kind: 'removed' | 'added') => parts.filter((p) => p.kind === 'same' || p.kind === kind).map((p) => p.text).join('')
 
@@ -58,6 +58,41 @@ test('diffText: two long, wholly different texts still diff, as removed then add
   const after = Array.from({ length: 1500 }, (_, i) => `b${i}`).join(' ')
   const parts = diffText(before, after)
   assert.deepEqual(parts, [{ kind: 'removed', text: before }, { kind: 'added', text: after }])
+})
+
+const numbered = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => `line ${from + i}\n`).join('')
+
+const showFolded = (parts: Array<DiffPart | DiffFold>) =>
+  parts.map((p) => (p.kind === 'fold' ? `<${p.lines} folded>\n` : show([p]))).join('')
+
+test('foldUnchanged: long unchanged stretches fold to the lines around each change', () => {
+  const before = numbered(1, 20)
+  const after = before.replace('line 10\n', 'line ten\n')
+  assert.equal(
+    showFolded(foldUnchanged(diffText(before, after), 2)),
+    '<7 folded>\nline 8\nline 9\nline [-10-]{+ten+}\nline 11\nline 12\n<8 folded>\n',
+  )
+})
+
+test('foldUnchanged: a change mid-line keeps the rest of its line plus the context', () => {
+  const before = `${numbered(1, 6)}one long line with a typo here and more\n${numbered(7, 12)}`
+  const after = before.replace('typo', 'fix')
+  const parts = foldUnchanged(diffText(before, after), 1)
+  assert.equal(showFolded(parts), '<5 folded>\nline 6\none long line with a [-typo-]{+fix+} here and more\nline 7\n<5 folded>\n')
+})
+
+test('foldUnchanged: short gaps between changes and texts without changes stay whole', () => {
+  const before = numbered(1, 5)
+  const after = before.replace('line 1\n', 'line one\n').replace('line 5\n', 'line five\n')
+  assert.ok(foldUnchanged(diffText(before, after), 2).every((p) => p.kind !== 'fold'))
+  assert.deepEqual(foldUnchanged(diffText(before, before), 0), [{ kind: 'same', text: before }])
+})
+
+test('valueChange: a long text diff comes folded', () => {
+  const before = numbered(1, 40)
+  const change = valueChange(before, before.replace('line 20\n', 'line twenty\n'))
+  assert.equal(change.kind, 'text')
+  assert.ok(change.kind === 'text' && change.parts.some((p) => p.kind === 'fold'))
 })
 
 test('diffList: kept and removed in the order before, then the added in the order after', () => {

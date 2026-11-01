@@ -2,7 +2,7 @@
  * The Studio helper's prepared run, without a store or a model: fixed
  * instructions, every description only in a labelled context block, the
  * focus as a block of its own, and exactly the design tools and the
- * proposal tool.
+ * proposal tool and the draft tool.
  */
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -69,7 +69,7 @@ describe("the Studio helper's prepared run", () => {
     const { tools } = run();
     expect(tools.map((tool) => tool.name)).toEqual([
       "get_schema", "list_lenses", "list_search_indices", "validate_schema", "validate_lens", "propose_schema_change",
-      "fill_agent_draft",
+      "fill_draft",
     ]);
     expect(tools.filter((tool) => tool.serial).map((tool) => tool.name)).toEqual(["propose_schema_change"]);
   });
@@ -88,6 +88,7 @@ describe("a design address", () => {
       .toBe("kind: relationTypeProperty\nrelationType: works_at\nproperty: since");
     expect(lines({ kind: "lens", lens: "main" })).toBe("kind: lens\nlens: main");
     expect(lines({ agent: "support", lens: "main", kind: "agent" })).toBe("kind: agent\nlens: main\nagent: support");
+    expect(lines({ kind: "searchIndex", searchIndex: "people" })).toBe("kind: searchIndex\nsearchIndex: people");
   });
 
   it("names a new item, not saved yet, by a null key of its own", () => {

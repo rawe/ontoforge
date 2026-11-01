@@ -58,6 +58,7 @@ capability remains the home for what the feature means.
 | [navigators](capabilities/navigators.md) | Navigators — assistants that answer by walking the lens's graph: configuration, the pipeline of a turn, what the client sees, the default navigator |
 | [retrievers](capabilities/retrievers.md) | Retrievers — assistants that answer from a lens's search indices: configuration, validation, planning, retrieval, retrieve, diagnostics, the default retriever, portable JSON |
 | [threads](capabilities/threads.md) | Server-held assistant conversations: starting, continuing and reading a thread, atomic turns, lifetime |
+| [studio-helper](capabilities/studio-helper.md) | The Studio's AI helper: answers from the design, schema proposals, draft fills |
 | [entity-identity](capabilities/entity-identity.md) | Ids and identities: declaring an identity, its text form, uniqueness, addressing by identity, renames, lenses, changesets |
 | [entity-identity-comparison](capabilities/entity-identity-comparison.md) | Optional judgments about two partial entity snapshots |
 | [transfer](capabilities/transfer.md) | Schema export and import |

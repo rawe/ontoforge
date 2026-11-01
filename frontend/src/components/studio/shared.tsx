@@ -3,7 +3,7 @@
  * helpers (key validation, invalidation, errors) live in `./lib`.
  */
 
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -14,6 +14,8 @@ interface KeyFieldProps {
   id: string
   /** Field label; defaults to "Key". */
   label?: string
+  /** Beside the label, outside it: a mark such as "changed by AI". */
+  mark?: ReactNode
   value: string
   onChange: (value: string) => void
   /** Edit mode — the key is immutable, render it disabled. */
@@ -38,12 +40,18 @@ export function KeyField({
   error,
   autoFocus,
   lensResource = false,
+  mark,
 }: KeyFieldProps) {
   const isValid = lensResource ? isValidLensResourceKey : isValidSchemaKey
   const invalid = !disabled && value !== '' && !isValid(value)
   return (
     <div className="grid gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
+      {mark === undefined ? <Label htmlFor={id}>{label}</Label> : (
+        <div className="flex items-center gap-2">
+          <Label htmlFor={id}>{label}</Label>
+          {mark}
+        </div>
+      )}
       <Input
         id={id}
         value={value}

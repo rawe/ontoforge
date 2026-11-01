@@ -18,14 +18,14 @@ import { accessOf } from "../../auth/plugin.js";
 import { getModelingStore } from "../../core/ports.js";
 import { requireLanguageModel } from "../../runtime/assistants/kit/model.js";
 import { ChatPayload, sendChatStream } from "../../runtime/chatStream.js";
-import { AgentDraft } from "./draft.js";
+import { DraftPayload } from "./drafters/index.js";
 import { Focus, runStudioChat, STUDIO_HELPER, STUDIO_KIND } from "./helper.js";
 
 const OntologyParams = z.object({ ontologyKey: z.string() });
 const ThreadParams = OntologyParams.extend({ threadId: z.string() });
 
-/** The chat body: the shared one, plus what the page has open and the open agent editor's draft. */
-export const StudioChatPayload = ChatPayload.extend({ focus: Focus.optional(), draft: AgentDraft.optional() }).strict();
+/** The chat body: the shared one, plus what the page has open and the open editor's draft. */
+export const StudioChatPayload = ChatPayload.extend({ focus: Focus.optional(), draft: DraftPayload.optional() }).strict();
 
 async function studioBinding(request: FastifyRequest<{ Params: { ontologyKey: string } }>): Promise<ThreadBinding> {
   return {

@@ -12,6 +12,8 @@ const EVERY_KIND: DesignAddress[] = [
   { kind: 'lens', lens: 'main' },
   { kind: 'agent', lens: 'main', agent: 'support' },
   { kind: 'agent', lens: 'main', agent: null },
+  { kind: 'searchIndex', searchIndex: 'people' },
+  { kind: 'searchIndex', searchIndex: null },
 ]
 
 test('an address id stands for its kind and keys and reads back to the same address', () => {
@@ -59,4 +61,9 @@ test('the chip names the item by its keys and what it is, a new one as new', () 
   assert.deepEqual(addressLabel({ kind: 'agent', lens: 'main', agent: null }), { name: 'main', what: 'new agent' })
   assert.equal(itemKey({ kind: 'agent', lens: 'main', agent: null }), null)
   assert.equal(itemKey({ kind: 'entityTypeProperty', entityType: 'person', property: 'email' }), 'email')
+})
+
+test('a search index is addressed by its key, a new one by null', () => {
+  assert.deepEqual(addressLabel({ kind: 'searchIndex', searchIndex: 'people' }), { name: 'people', what: 'search index' })
+  assert.deepEqual(addressLabel({ kind: 'searchIndex', searchIndex: null }), { name: '', what: 'new search index' })
 })

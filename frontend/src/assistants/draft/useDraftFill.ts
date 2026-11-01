@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAssistantPanel } from '../panel/panelContext'
 import {
-  aiMarks, applyFill, fillRefusal, undoFill, withoutEdited, type AiEdit, type DraftEditor, type DraftTarget, type Fields,
+  aiMarks, applyFill, fillRefusal, sameValue, undoFill, withoutEdited,
+  type AiEdit, type DraftEditor, type DraftTarget, type Fields, type Same,
 } from './draftFillModel'
 
 // One counter for every editor of the page, started at the clock: a version never repeats, so it names one editor session's one state.
@@ -21,9 +22,10 @@ interface DraftFillState<D> {
  * AI marks; and the editor published to the assistant panel while mounted.
  * `D` is the editor's own draft, `F` its fillable fields (`fieldsOf`,
  * `withFields`). A fill happens only on a card's "Fill draft", and only if
- * the same editor is open at the same version and not `busy`.
+ * the same editor is open at the same version and not `busy`. `same`
+ * says when two values of a field are equal: lists as sets by default.
  */
-export function useDraftFill<D, F extends Fields>({ initial, ontologyKey, target, busy, fieldsOf, withFields, onFill }: {
+export function useDraftFill<D, F extends Fields>({ initial, ontologyKey, target, busy, fieldsOf, withFields, onFill, same = sameValue }: {
   initial: D
   ontologyKey: string
   target: DraftTarget
@@ -33,25 +35,27 @@ export function useDraftFill<D, F extends Fields>({ initial, ontologyKey, target
   withFields: (draft: D, fields: F) => D
   /** After a fill, with the draft before and after it. */
   onFill?: (before: D, after: D) => void
+  /** Whether two values of a field are the same. */
+  same?: Same
 }) {
   const [state, setState] = useState<DraftFillState<D>>(() => ({ draft: initial, version: nextVersion(), edit: {} }))
 
   const change = useCallback((next: (draft: D) => D) => {
     setState((s) => {
       const draft = next(s.draft)
-      return { draft, version: nextVersion(), edit: withoutEdited(s.edit, fieldsOf(s.draft), fieldsOf(draft)) }
+      return { draft, version: nextVersion(), edit: withoutEdited(s.edit, fieldsOf(s.draft), fieldsOf(draft), same) }
     })
-  }, [fieldsOf])
+  }, [fieldsOf, same])
   /** Back to `draft` with no AI edit: Discard changes. */
   const reset = useCallback((draft: D) => setState({ draft, version: nextVersion(), edit: {} }), [])
   const undo = () => setState((s) => ({
-    draft: withFields(s.draft, undoFill(fieldsOf(s.draft), s.edit)), version: nextVersion(), edit: {},
+    draft: withFields(s.draft, undoFill(fieldsOf(s.draft), s.edit, same)), version: nextVersion(), edit: {},
   }))
 
   // What the published editor reads: the rendered state and options.
-  const latest = useRef({ state, ontologyKey, target, busy, fieldsOf, withFields, onFill })
+  const latest = useRef({ state, ontologyKey, target, busy, fieldsOf, withFields, onFill, same })
   useEffect(() => {
-    latest.current = { state, ontologyKey, target, busy, fieldsOf, withFields, onFill }
+    latest.current = { state, ontologyKey, target, busy, fieldsOf, withFields, onFill, same }
   })
 
   const { publishDraft } = useAssistantPanel()
@@ -65,8 +69,8 @@ export function useDraftFill<D, F extends Fields>({ initial, ontologyKey, target
       fill: (ontologyKey, proposal) => {
         const refused = fillRefusal(draftState(), latest.current.busy, ontologyKey, proposal)
         if (refused !== null) return refused
-        const { state: s, fieldsOf: of, withFields: wf, onFill: after } = latest.current
-        const filled = applyFill(of(s.draft), proposal.fields, s.edit)
+        const { state: s, fieldsOf: of, withFields: wf, onFill: after, same: equal } = latest.current
+        const filled = applyFill(of(s.draft), proposal.fields, s.edit, equal)
         const draft = wf(s.draft, filled.fields)
         const next = { draft, version: nextVersion(), edit: filled.edit }
         latest.current = { ...latest.current, state: next }
@@ -78,6 +82,6 @@ export function useDraftFill<D, F extends Fields>({ initial, ontologyKey, target
     return publishDraft(editor)
   }, [publishDraft])
 
-  const marks = aiMarks(fieldsOf(state.draft), state.edit)
+  const marks = aiMarks(fieldsOf(state.draft), state.edit, same)
   return { draft: state.draft, version: state.version, change, reset, undo, marks, canUndo: Object.keys(marks).length > 0 }
 }

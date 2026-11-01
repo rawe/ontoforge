@@ -5,24 +5,22 @@ import { itemKey } from '../address'
 import { useAssistantPanel } from '../panel/panelContext'
 import type { Binding } from '../types'
 import { proposalOf, type FillOutcome } from './draftFillModel'
-
-const AGENT_FIELDS: Record<string, string> = {
-  name: 'Name', description: 'Description', systemPrompt: 'System prompt', tools: 'Tools',
-}
+import { draftViewOf, proposedLabels } from './drafters'
 
 /**
- * The card of a `fill_agent_draft` result: the agent and the fields it
- * proposes, and "Fill draft". A click fills the open agent editor only if
- * it is the same editor at the same draft version as when asked (D10)
- * and it is not saving or deleting; otherwise the card says so and
- * nothing changes. While it saves, "Fill draft" stays for a later try.
+ * The card of a `fill_draft` result, in the view of its target's drafter: the item and the fields it
+ * proposes, and "Fill draft". A click fills the open editor only if it is
+ * the same editor at the same draft version as when asked (D10) and it is
+ * not saving or deleting; otherwise the card says so and nothing changes.
+ * While it saves, "Fill draft" stays for a later try.
  */
-export function AgentDraftCard({ call, at }: { call: ToolCall; at: Binding }) {
+export function DraftFillCard({ call, at }: { call: ToolCall; at: Binding }) {
   const { draftEditor } = useAssistantPanel()
   const [outcome, setOutcome] = useState<FillOutcome | null>(null)
   const proposal = proposalOf(call.result)
-  if (proposal === null) return null
-  const fields = Object.keys(proposal.fields).filter((field) => Object.hasOwn(AGENT_FIELDS, field))
+  const view = proposal === null ? undefined : draftViewOf(proposal.target.kind)
+  if (proposal === null || view === undefined) return null
+  const fields = proposedLabels(view, proposal.fields)
   const fill = () => {
     const editor = draftEditor()
     setOutcome(editor === null ? 'stale' : editor.fill(at.ontologyKey, proposal))
@@ -30,10 +28,10 @@ export function AgentDraftCard({ call, at }: { call: ToolCall; at: Binding }) {
   return (
     <div data-testid="draft-fill-card" className="grid gap-1.5 rounded-lg border bg-card px-3 py-2.5 text-xs">
       <p className="font-medium">
-        Agent draft · <span className="font-mono">{itemKey(proposal.target) ?? 'new agent'}</span>
+        {view.title} · <span className="font-mono">{itemKey(proposal.target) ?? view.newItem}</span>
       </p>
       <p className="text-muted-foreground">
-        {fields.length} {fields.length === 1 ? 'field' : 'fields'}: {fields.map((field) => AGENT_FIELDS[field]).join(', ')}
+        {fields.length} {fields.length === 1 ? 'field' : 'fields'}: {fields.join(', ')}
       </p>
       {outcome === 'busy' && (
         <p role="status" data-testid="draft-fill-outcome" className="text-(--tc-amber)">

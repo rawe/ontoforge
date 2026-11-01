@@ -3,10 +3,11 @@
  * — the modeling host of the tool loop (`assistants/loop.ts`). It reads
  * the ontology's design only and writes nothing. Each turn prepares a run:
  * fixed instructions, the design briefing as its state, the page's focus
- * and the open agent editor's draft as the message's context, the design
- * tools (`tools.ts`), the schema proposal tool (`propose.ts`) and the tool
- * that proposes values for an open draft (`draft.ts`) — always the same
- * tools, so what the thread sends stays cacheable. A turn's last proposal
+ * and the open editor's draft as the message's context, the guide of that
+ * editor's drafter the first time the thread meets it, and always the same
+ * tools: the design tools (`tools.ts`), the schema proposal tool
+ * (`propose.ts`) and the draft tool, which hands its calls to the open
+ * draft's drafter (`drafter.ts`, `drafters/`). A turn's last proposal
  * and its check are its artifact. Schema and lens
  * descriptions are untrusted text: they reach the model only inside
  * context blocks and tool results, never in the instructions.
@@ -21,11 +22,10 @@ import {
   type StreamExecution,
   type Tool,
 } from "../../assistants/index.js";
-import { supportsKeywordRanking, type ModelingStore } from "../../core/ports.js";
-import { unavailableTools } from "../../runtime/assistants/agents/runtime.js";
-import { VALID_AGENT_TOOLS } from "../../runtime/toolNames.js";
+import type { ModelingStore } from "../../core/ports.js";
 import { addressLines, DesignAddress } from "./address.js";
-import { draftBlock, fillAgentDraftTool, type AgentDraft } from "./draft.js";
+import { fillDraftTool } from "./drafter.js";
+import { draftPart, type DraftPart, type DraftPayload } from "./drafters/index.js";
 import { proposeSchemaChangeTool, turnArtifacts, type StudioTurn } from "./propose.js";
 import { designTools, lensScope, readDesign } from "./tools.js";
 
@@ -45,9 +45,9 @@ export const INSTRUCTIONS = `You are the design helper in the OntoForge Studio. 
 
 You read the design only. You never see instance data (entities, relations, documents, counts), and you cannot change anything yourself.
 
-When the person asks you to create or extend the schema — entity types, relation types, properties, descriptions — call propose_schema_change with the complete proposal. It writes nothing: the server checks it, and the person reviews and applies it in the Studio. If the check refuses a step, fix the proposal and call it again. Never say a change was made or applied: say what you propose and that the person applies it. Describe any other change (deletes, renames, lenses, search indices) as steps the person takes in the Studio.
+When the person asks you to create or extend the schema — entity types, relation types, properties, descriptions — call propose_schema_change with the complete proposal. It writes nothing: the server checks it, and the person reviews and applies it in the Studio. If the check refuses a step, fix the proposal and call it again. Never say a change was made or applied: say what you propose and that the person applies it. Describe any other change (deletes, renames, lenses) as steps the person takes in the Studio; a custom search index you can draft into its editor (Search, then a new index or an existing one) once the person has it open.
 
-While the person has an agent editor open, their message comes with an Agent draft block, and only then does fill_agent_draft work. Only when they ask you to draft, write or change that agent, call fill_agent_draft with the fields to change; first read what the agent's lens shows, so its instructions and tools fit. The person fills the editor from your proposal, reviews it and saves it themselves; say so briefly.
+While the person has an editor open that you can fill, their message comes with a draft block of its unsaved values, and only then does fill_draft work; a guide for that kind of editor comes with the first such message and says how. Only when they ask you to draft, write or change what that editor holds, call it. The person fills the editor from your proposal, reviews it and saves it themselves; say so briefly. Without such an editor open, describe the item in your answer instead.
 
 Context blocks give an outline of the schema and the lenses — a newer one replaces an older one — and, with a message, what the person has open, if anything. Use the tools for details and for validation results, and use exact keys as tool arguments. Answer from the design you read; say so when the design does not tell. Be concise.`;
 
@@ -97,10 +97,16 @@ function lensOutline(design: Row): string {
   }).join("\n");
 }
 
-/** What a turn brings beside its message: the page's focus and the open agent editor's draft. */
+/** What a turn brings beside its message: the page's focus and the open editor's draft. */
 export interface StudioTurnContext {
   focus?: Focus;
-  draft?: AgentDraft;
+  draft?: DraftPayload;
+}
+
+/** What a prepared turn takes beside its message: the page's focus and the open draft's part. */
+export interface StudioTurnParts {
+  focus?: Focus;
+  draft?: DraftPart;
 }
 
 /** The design briefing: the schema and the lenses, each a labelled block —
@@ -113,29 +119,25 @@ export function briefing(ontologyKey: string, design: Row): ContextBlock[] {
 }
 
 /** What goes with one message: the page's focus and the open draft, each a labelled block. */
-export function turnContext({ focus, draft }: StudioTurnContext): ContextBlock[] {
+export function turnContext({ focus, draft }: StudioTurnParts): ContextBlock[] {
   const blocks: ContextBlock[] = [];
   if (focus !== undefined) blocks.push({ label: "Focus", source: "the Studio page the person has open", text: addressLines(focus).join("\n") });
-  if (draft !== undefined) blocks.push(draftBlock(draft));
+  if (draft !== undefined) blocks.push(draft.block);
   return blocks;
 }
 
-/** One turn's run over `design`, the store's design as `readDesign` reads it;
- * `lacking` are the grantable agent tools this server cannot run. */
+/** One turn's run over `design`, the store's design as `readDesign` reads it. */
 export function studioRun(
   ontologyKey: string,
   design: Row,
-  turn: StudioTurnContext,
+  turn: StudioTurnParts,
   store: ModelingStore,
   model: BaseChatModel,
-  lacking: readonly string[] = [],
 ): PreparedRun<StudioTurn> {
-  const tools: Tool<StudioTurn>[] = [
-    ...designTools(store), proposeSchemaChangeTool(store), fillAgentDraftTool(turn.draft, store, lacking),
-  ];
+  const tools: Tool<StudioTurn>[] = [...designTools(store), proposeSchemaChangeTool(store), fillDraftTool(turn.draft?.open, store)];
   return {
     kind: STUDIO_KIND, instructions: INSTRUCTIONS, state: briefing(ontologyKey, design), context: turnContext(turn),
-    tools, ctx: { proposal: null }, model,
+    guides: turn.draft === undefined ? [] : [turn.draft.guide], tools, ctx: { proposal: null }, model,
   };
 }
 
@@ -150,9 +152,9 @@ export async function runStudioChat(
 ): Promise<Row> {
   const design = await readDesign(store);
   execution.signal?.throwIfAborted();
-  const keyword = await supportsKeywordRanking();
-  const lacking = unavailableTools([...VALID_AGENT_TOOLS], { supportsKeywordRanking: () => keyword });
-  const run = studioRun(ontologyKey, design, turn, store, model, lacking);
+  const draft = turn.draft === undefined ? undefined : await draftPart(turn.draft);
+  const parts: StudioTurnParts = { ...(turn.focus === undefined ? {} : { focus: turn.focus }), ...(draft === undefined ? {} : { draft }) };
+  const run = studioRun(ontologyKey, design, parts, store, model);
   const { reply } = await runToolLoop(run, turn.message, thread, execution);
   execution.signal?.throwIfAborted();
   return { reply, artifacts: turnArtifacts(run.ctx) };

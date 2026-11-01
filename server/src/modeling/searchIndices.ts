@@ -318,10 +318,7 @@ export async function createSearchIndex(
 ): Promise<SearchIndexResponseBody> {
   const definition = await store.changeDesign(async (s) => {
     const indices = requireSearchIndices(s);
-    const { definition } = await validDefinition(indices, body);
-    if ((await indices.getIndex(definition.key)) !== null) {
-      throw new ConflictError(`Search index with key '${definition.key}' already exists`);
-    }
+    const definition = await savableDefinition(indices, null, body);
     await indices.createIndex(randomUUID(), "custom", definition);
     return definition;
   });
@@ -345,6 +342,45 @@ async function customIndex(indices: SearchIndexStore, key: string): Promise<Sear
 }
 
 /**
+ * The definition `body` stands for, checked as a save checks it: as a new
+ * index when `saved` is null — a taken key is a conflict — else as the
+ * replacement of the custom index `saved`, whose key the body may leave
+ * out but not change. Throws what the save would; writes nothing.
+ */
+async function savableDefinition(
+  indices: SearchIndexStore,
+  saved: string | null,
+  body: Record<string, unknown>,
+): Promise<SearchIndexDefinition> {
+  if (saved === null) {
+    const { definition } = await validDefinition(indices, body);
+    if ((await indices.getIndex(definition.key)) !== null) {
+      throw new ConflictError(`Search index with key '${definition.key}' already exists`);
+    }
+    return definition;
+  }
+  await customIndex(indices, saved);
+  if (body.key !== undefined && body.key !== saved) {
+    throw invalid([{ path: "key", message: `Must be the index's key '${saved}'` }]);
+  }
+  return (await validDefinition(indices, { ...body, key: saved })).definition;
+}
+
+/**
+ * Check a definition as saving it would — a new index when `saved` is
+ * null, else the replacement of the custom index `saved` — without
+ * writing; the definition with its defaults. The Studio helper's index
+ * drafter checks its proposals with it.
+ */
+export async function checkSearchIndexDefinition(
+  saved: string | null,
+  body: Record<string, unknown>,
+  store: ModelingStore,
+): Promise<SearchIndexDefinition> {
+  return savableDefinition(requireSearchIndices(store), saved, body);
+}
+
+/**
  * Replace a custom index's definition. The body's key must be the path's
  * (absent: taken from the path). A changed definition gets new
  * generations; the current ones serve until those are built.
@@ -356,12 +392,7 @@ export async function updateSearchIndex(
 ): Promise<SearchIndexResponseBody> {
   await store.changeDesign(async (s) => {
     const indices = requireSearchIndices(s);
-    await customIndex(indices, key);
-    if (body.key !== undefined && body.key !== key) {
-      throw invalid([{ path: "key", message: `Must be the index's key '${key}'` }]);
-    }
-    const { definition } = await validDefinition(indices, { ...body, key });
-    await indices.updateIndexDefinition(key, definition);
+    await indices.updateIndexDefinition(key, await savableDefinition(indices, key, body));
   });
   await afterIndexChange(requireSearchIndices(store));
   return getSearchIndex(key, store);

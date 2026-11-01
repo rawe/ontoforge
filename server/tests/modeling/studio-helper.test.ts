@@ -87,6 +87,7 @@ describe("a design address", () => {
       .toBe("kind: relationTypeProperty\nrelationType: works_at\nproperty: since");
     expect(lines({ kind: "lens", lens: "main" })).toBe("kind: lens\nlens: main");
     expect(lines({ agent: "support", lens: "main", kind: "agent" })).toBe("kind: agent\nlens: main\nagent: support");
+    expect(lines({ kind: "searchIndex", searchIndex: "people" })).toBe("kind: searchIndex\nsearchIndex: people");
   });
 
   it("names a new item, not saved yet, by a null key of its own", () => {

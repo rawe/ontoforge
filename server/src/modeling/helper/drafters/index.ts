@@ -11,8 +11,9 @@ import type { ModelingStore } from "../../../core/ports.js";
 import { DesignAddress } from "../address.js";
 import { draftBlock, type Draft, type Drafter } from "../drafter.js";
 import { agentDrafter } from "./agent.js";
+import { searchIndexDrafter } from "./searchIndex.js";
 
-export const DRAFTERS: readonly Drafter[] = [agentDrafter];
+export const DRAFTERS: readonly Drafter[] = [agentDrafter, searchIndexDrafter];
 
 /** The drafter of an editor of `kind`; undefined when that editor takes no draft. */
 export const drafterFor = (kind: string): Drafter | undefined => DRAFTERS.find((drafter) => drafter.kind === kind);

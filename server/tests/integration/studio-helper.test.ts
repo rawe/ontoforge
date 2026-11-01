@@ -235,6 +235,57 @@ describe("the Studio helper", () => {
     expect(await ok("GET", `${MODEL}/lenses/visitor/assistants/agents`)).toEqual([]);
   });
 
+  it("drafts a search index into the open index editor, checked as a save, storing nothing", async () => {
+    const blank = {
+      key: "", name: "", description: "", entityType: "", fields: [], header: null, relations: [],
+      semantic: { enabled: true, template: null }, keyword: { enabled: true },
+    };
+    const draft = { target: { kind: "searchIndex", searchIndex: null }, version: 5, fields: blank };
+    expect((await chat({ message: "Hi", draft: { ...draft, fields: { ...blank, estimate: 1 } } })).status).toBe(422);
+    const employment = {
+      key: "people_work", name: "People at work", description: "People with the companies they work for.",
+      entityType: "person", fields: ["name"], header: ["name", "email"],
+      relations: [{ relationType: "works_for", direction: "outgoing", target: { company: ["name"] }, label: "Employment" }],
+      keyword: { enabled: false },
+    };
+    const model = new FakeToolCallingModel([
+      toolCallMessage("fill_search_index_draft", { ...employment, key: "people", fields: ["name", "phone"] }, "c1"),
+      toolCallMessage("fill_search_index_draft", employment, "c2"),
+      new AIMessage("Filled."),
+    ]);
+    setAiModel(model);
+    const res = await chat({ message: "An index of who works where", draft, focus: draft.target });
+    const [refused, proposed] = res.events.filter((e) => e.type === "studio.tool_result").map((e) => e.result);
+    // Every rule issue at once, as a save reports it; the taken key only once the definition is valid.
+    expect(refused.error).toMatchObject({ code: "VALIDATION_ERROR", details: { fields: { "fields.1": expect.any(String) } } });
+    expect(proposed).toEqual({
+      target: { kind: "searchIndex", searchIndex: null }, sourceVersion: 5,
+      fields: {
+        key: "people_work", name: "People at work", description: "People with the companies they work for.",
+        entityType: "person", fields: ["name"], header: ["name", "email"],
+        relations: [{ relationType: "works_for", direction: "outgoing", fields: [], target: { company: ["name"] }, label: "Employment", template: null }],
+        keyword: { enabled: false },
+      },
+    });
+    expect(String(model.calls[0]!.at(-1)!.content)).toContain('<context label="Search index draft"');
+    expect((await ok("GET", `${MODEL}/search-indices`)).map((index: Row) => index.key)).not.toContain("people_work");
+
+    // A saved index keeps its key; a taken key is refused for a new one.
+    const saved = { target: { kind: "searchIndex", searchIndex: "people" }, version: 6, fields: { ...blank, key: "people", name: "People", description: "People by name", entityType: "person", fields: ["name", "email"] } };
+    setAiModel(new FakeToolCallingModel([
+      toolCallMessage("fill_search_index_draft", { ...employment, key: "other" }, "c1"),
+      toolCallMessage("fill_search_index_draft", { name: "People", description: "People by name and email", entityType: "person", fields: ["name", "email"] }, "c2"),
+      new AIMessage("Filled."),
+    ]));
+    const [changedKey, described] = (await chat({ message: "Describe it better", draft: saved })).events
+      .filter((e) => e.type === "studio.tool_result").map((e) => e.result);
+    expect(changedKey.error).toMatchObject({ code: "VALIDATION_ERROR", details: { fields: { key: "Must be the index's key 'people'" } } });
+    expect(described.fields).toEqual({ description: "People by name and email" });
+    setAiModel(new FakeToolCallingModel([toolCallMessage("fill_search_index_draft", { ...employment, key: "people" }), new AIMessage("No.")]));
+    const taken = (await chat({ message: "Again", draft })).events.find((e) => e.type === "studio.tool_result")!.result;
+    expect(taken.error).toMatchObject({ code: "RESOURCE_CONFLICT" });
+  });
+
   it("checks each proposal it is handed, keeps the turn's last with its check as the artifact, and writes nothing", async () => {
     const needsCascade = { steps: [{ id: "s1", op: "add_property", entityType: "person", key: "badge", name: "Badge", dataType: "string", required: true }] };
     const teams = {

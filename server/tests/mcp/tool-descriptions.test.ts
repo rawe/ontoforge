@@ -15,6 +15,7 @@ import type { ModelingStore, RuntimeStore, WriteAccess } from "../../src/core/po
 import { RelationGroup, SearchIndexDefinition } from "../../src/core/searchIndex.js";
 import { createModelingMcpServer } from "../../src/mcp/modeling.js";
 import { fillAgentDraftTool } from "../../src/modeling/helper/drafters/agent.js";
+import { fillSearchIndexDraftTool } from "../../src/modeling/helper/drafters/searchIndex.js";
 import { proposeSchemaChangeTool } from "../../src/modeling/helper/propose.js";
 import { designTools } from "../../src/modeling/helper/tools.js";
 import { createRuntimeMcpServer } from "../../src/mcp/runtime.js";
@@ -79,6 +80,19 @@ const all = [
       { target: { kind: "agent", lens: "all", agent: null }, version: 0, fields: { name: "", description: "", systemPrompt: "", tools: null } },
       {} as ModelingStore,
       [...VALID_AGENT_TOOLS],
+    ).description,
+  ] as const,
+  [
+    "studio fill_search_index_draft",
+    fillSearchIndexDraftTool(
+      {
+        target: { kind: "searchIndex", searchIndex: null }, version: 0,
+        fields: {
+          key: "", name: "", description: "", entityType: "", fields: [], header: null, relations: [],
+          semantic: { enabled: true, template: null }, keyword: { enabled: true },
+        },
+      },
+      {} as ModelingStore,
     ).description,
   ] as const,
 ];

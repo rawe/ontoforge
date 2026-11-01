@@ -89,22 +89,31 @@ export async function decide(
   }
 }
 
-/** One streamed call; every text delta goes to `onDelta`. Returns the whole text. */
+/** What a streamed call ended with: the whole text, and the usage the
+ * provider reported, if it did. */
+export interface StreamedAnswer {
+  text: string;
+  usage?: unknown;
+}
+
+/** One streamed call; every text delta goes to `onDelta`. A failed call
+ * fails with `failure`; there is no automatic retry. */
 export async function streamAnswer(
   model: BaseChatModel,
-  trace: Trace,
   system: string,
   input: string,
   signal: AbortSignal,
   onDelta: (text: string) => Promise<void>,
-): Promise<string> {
-  trace.modelCalls++;
+  failure = "The language model failed while answering; no automatic retry.",
+): Promise<StreamedAnswer> {
   let output = "";
+  let usage: unknown;
   try {
     const stream = await model.stream([new SystemMessage(system), new HumanMessage(input)], { signal });
     for await (const chunk of stream) {
       signal.throwIfAborted();
       const delta = contentText(chunk.content);
+      if (chunk.usage_metadata) usage = chunk.usage_metadata;
       if (delta) {
         output += delta;
         await onDelta(delta);
@@ -113,7 +122,7 @@ export async function streamAnswer(
   } catch (error) {
     signal.throwIfAborted();
     console.warn(`Answer model failed: ${error instanceof Error ? error.message : String(error)}`);
-    throw new ValidationError("The language model failed while answering; no automatic retry.");
+    throw new ValidationError(failure);
   }
-  return output;
+  return { text: output, usage };
 }

@@ -174,7 +174,15 @@ describe("retriever pipeline", () => {
     expect(calls.map((c) => c.phase)).toEqual(["plan", "answer"]);
     expect(calls[0]!.input).toBe(fake.invoke.mock.calls[0]![0][1].content);
     expect(calls[1]!.systemPrompt).toBe(fake.stream.mock.calls[0]![0][0].content);
+    // The answer's usage is the last the provider reported.
+    expect((calls[1] as { usage?: unknown }).usage).toEqual({ input_tokens: 1, output_tokens: 1 });
     expect(events.at(-1)).toBe(summary);
+  });
+
+  it("a failed answer call fails the turn after the answer phase started; no retry", async () => {
+    fake.stream.mockRejectedValueOnce(new Error("boom"));
+    await expect(run("Everyone in Berlin", false)).rejects.toThrow("Response model failed; no automatic retry.");
+    expect(fake.stream).toHaveBeenCalledTimes(1);
   });
 
   it("the default retriever's diagnostics plan carries its derived filter definitions", async () => {

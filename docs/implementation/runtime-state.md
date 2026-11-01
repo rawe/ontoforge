@@ -29,9 +29,9 @@ complete state and ends the lease atomically. Cancellation or failure releases t
 without publishing a partial turn. The memory and Valkey stores implement the same
 contract.
 
-The lease cadence is separate from caller-visible conversation limits: turns retained,
-turns supplied to the model, maximum state size and idle expiry. Those limits and the
-store-capacity behavior remain described in the architectural
+The lease cadence is separate from caller-visible conversation limits: turns a thread
+holds, maximum state size and idle expiry. Those limits and the store-capacity behavior
+remain described in the architectural
 [thread-store contract](../architecture.md#thread-store). Changes to lease timing must
 still account for the recovery delay a client observes after a server fails.
 

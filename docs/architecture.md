@@ -355,8 +355,8 @@ through its own assistant, and only by its own principal; otherwise it is unknow
 cascades: a deleted ontology, lens or assistant leaves its threads to retention.
 
 **State.** The store keeps one value per thread: its conversation state after its last
-completed turn. A thread keeps at most 25 turns; older ones are removed. The model sees at
-most the last 8. A thread's state takes at most 8 MiB; a turn that would exceed it fails.
+completed turn. A thread holds at most 25 turns; a message beyond them is refused. A
+thread's state takes at most 8 MiB; a turn that would exceed it fails.
 
 **One turn per thread, atomic turns.** A turn holds its thread under a renewable lease;
 a message to a thread whose lease is held, on any server,

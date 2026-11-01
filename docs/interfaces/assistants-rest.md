@@ -23,7 +23,8 @@ thread bound to the addressed assistant; with it, the message continues that thr
 thread that is unknown, expired, bound to another assistant or started by another
 principal answers `RESOURCE_NOT_FOUND` with `details.code` `THREAD_NOT_FOUND`; a thread
 whose previous message is still being answered answers `RESOURCE_CONFLICT` with
-`details.code` `THREAD_BUSY`. Both are plain error responses before the stream opens, like every other
+`details.code` `THREAD_BUSY`, and one that holds its most turns `RESOURCE_CONFLICT` with
+`details.code` `THREAD_FULL`. All are plain error responses before the stream opens, like every other
 refusal the kind lists; a busy message is never queued.
 
 **Stream.** Every successful REST assistant chat uses `application/x-ndjson`; there is no

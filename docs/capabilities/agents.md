@@ -101,10 +101,10 @@ thread's id, and the server continues from what the thread kept. What an agent's
 adds to the rules there:
 
 - **The model sees what it found, not only what it said.** A thread keeps each turn's tool
-  calls and their results, and the model sees them for the recent turns — a follow-up can
-  build on an earlier result without querying again.
-- **Each turn runs the agent's current configuration** — its prompt, its tools — against
-  the conversation so far, so a saved change applies from the next turn on.
+  calls and their results, and the model sees them — a follow-up can build on an earlier
+  result without querying again.
+- **A thread keeps the prompt its first turn ran with;** each turn uses the agent's
+  current tools. A saved prompt applies to new threads.
 - **Threads are per conversation, not per agent.** Two clients chatting with the same
   agent share nothing unless they share a thread id.
 

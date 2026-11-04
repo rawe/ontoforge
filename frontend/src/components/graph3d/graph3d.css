@@ -53,3 +53,12 @@
 .graph3d-detail-panel p{font-size:12px;line-height:1.6;color:#a9bed2;margin-bottom:12px}
 .graph3d-detail-panel button{display:flex;align-items:center;gap:6px;border:1px solid #6c9eb544;background:#1d394e;color:#c0edf5;border-radius:6px;padding:6px 8px;font-size:11px;cursor:pointer}
 .graph3d-detail-panel dl{margin:16px 0 0}.graph3d-detail-panel dl>div{padding:9px 0;border-top:1px solid #7093b021}.graph3d-detail-panel dt{font-size:10px;color:#809eb7}.graph3d-detail-panel dd{font-size:12px;color:#c9dce9;margin:3px 0 0;overflow-wrap:anywhere}
+.graph3d-follow-tour{display:flex;align-items:center;gap:7px;margin-bottom:12px;font-size:12px;color:#d4e7f4;cursor:pointer}
+.graph3d-follow-tour input{accent-color:#7ddce4;cursor:pointer}
+.graph3d-detail-source{display:block;margin-bottom:12px;color:#8ca9bf;font-size:10px}
+.graph3d-detail-panel h4{margin:20px 0 0;font-size:12px;font-weight:550;color:#d9eaf5}
+.graph3d-detail-panel h4+dl{margin-top:7px}
+.graph3d-detail-panel p{white-space:pre-wrap;overflow-wrap:anywhere}
+.graph3d-detail-panel .graph3d-detail-identity{margin:0 0 14px}
+.graph3d-detail-panel button:focus-visible,.graph3d-follow-tour input:focus-visible{outline:2px solid #7cddeb;outline-offset:3px}
+@media(max-width:650px){.graph3d-detail-panel{right:10px;top:10px;width:min(280px,calc(100% - 20px));max-height:calc(100% - 190px);padding:14px}}

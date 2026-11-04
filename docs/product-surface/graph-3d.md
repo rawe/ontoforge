@@ -21,16 +21,29 @@ neighbours into the working set.
 change height, and Shift to move faster. Escape returns to Orbit. Movement keys
 apply only while the canvas has keyboard focus. **Fit** recovers an overview.
 
-**Focus on neighbours** dims nodes and relations outside the selected node's
-immediate neighbourhood. Studio also retains its outline search and focus selection.
+**Focus on neighbours** dims nodes and relations outside the manually selected node's
+immediate neighbourhood. Tour previews do not move that boundary. Studio also retains
+its outline search and focus selection.
 Relations curve apart when several join the same endpoints; self-relations form
 loops. Arrowheads and moving pulses show direction. Parent relations retain their
 violet treatment.
 
-**Tour** visits the scene's nodes and slowly orbits each stop. Dragging takes
-control; the Tour button stops it. **Full screen** expands the scene and shows a
-compact selected-item panel. Leave full screen to use the host's editing and
-neighbour-expansion actions.
+**Tour** visits the visible, undimmed nodes and slowly orbits each stop. In full
+screen, **Follow tour** is on by default: the detail panel and scene highlight follow
+the current stop without changing the host's manual selection or address. Turn it
+off to pin the currently displayed details while the camera continues. Turning it
+back on resumes the current tour stop. Stopping the tour or dragging to take control
+keeps the last stop's details; manually selecting or searching for an item takes over
+the panel. Reduced-motion preferences make tour travel immediate and disable its
+automatic orbit.
+
+**Full screen** expands the scene and shows its detail panel. In Studio this includes
+the type's full description and property definitions. In Workbench it shows the
+instance's exposed identity and property values, with document sizes, plus incoming
+and outgoing relation counts under **Connections in this view**. These counts cover
+only the visible working set, not the full stored neighbourhood. Instance and relation
+panels show their values rather than repeating their schema type's description.
+Leave full screen to use the host's editing and neighbour-expansion actions.
 
 ## Display and recovery
 

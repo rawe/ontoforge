@@ -7,6 +7,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
 import type { Graph3DNode, Graph3DEdge } from './types'
 import { edgeLanes, hashKey, layoutGraph } from './layout'
 import { getTypeColor } from '@/lib/typeColors'
+import { focusNeighborhood } from './focus'
 
 export interface SceneOptions {
   nodes: readonly Graph3DNode[]
@@ -19,6 +20,8 @@ export interface SceneOptions {
   onSelectEdge: (id: string, at: { x: number; y: number }) => void
   onHoverNode: (id: string | null) => void
   onError: () => void
+  /** Camera tour preview only; never a host selection. */
+  onTourNode: (id: string) => void
   onNavigation: () => void
 }
 export interface SceneView { position: [number, number, number]; target: [number, number, number]; nodePositions?: Record<string, { x: number; y: number; z: number }> }
@@ -34,9 +37,10 @@ export interface SceneController {
   focusEdge: (id: string) => void
   select: (nodeId: string | null, edgeId: string | null) => void
   setFly: (value: boolean) => void
-  setFocus: (value: boolean) => void
+  setFocus: (value: boolean, anchor: string | null) => void
   setAnimated: (value: boolean) => void
   setTour: (value: boolean) => void
+  setReducedMotion: (value: boolean) => void
 }
 
 export function createGraphScene(options: SceneOptions): SceneController {
@@ -72,8 +76,10 @@ export function createGraphScene(options: SceneOptions): SceneController {
   // Frames are drawn while something moves; a still, paused scene stops drawing.
   let renderUntil = 0
   const wake = () => { renderUntil = performance.now() + 250 }
+  let reducedMotion = options.reducedMotion
   let fly = false, focused = false, animated = !options.reducedMotion, touring = false
   let selectedNode: string | null = null, selectedEdge: string | null = null
+  let focusAnchor: string | null = null
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75))
   renderer.setClearColor('#0b1426', 1)
@@ -282,7 +288,7 @@ export function createGraphScene(options: SceneOptions): SceneController {
 
   let cameraFlight: { start: number; from: THREE.Vector3; to: THREE.Vector3; targetFrom: THREE.Vector3; targetTo: THREE.Vector3 } | null = null
   const moveTo = (position: THREE.Vector3, target: THREE.Vector3) => {
-    if (options.reducedMotion || !animated) {
+    if (reducedMotion || !animated) {
       camera.position.copy(position); controls.target.copy(target); camera.lookAt(target); controls.update()
       cameraFlight = null; wake()
     } else cameraFlight = { start: performance.now(), from: camera.position.clone(), to: position, targetFrom: controls.target.clone(), targetTo: target }
@@ -324,18 +330,14 @@ export function createGraphScene(options: SceneOptions): SceneController {
   fit()
   const observer = new ResizeObserver(resize)
   observer.observe(mount)
-  const neighbours = new Set<string>()
+  let neighbours: ReadonlySet<string> = new Set()
   const paletteObserver = new MutationObserver(() => { stylesDirty = true; wake() })
   paletteObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] })
   const updateStyles = () => {
-    neighbours.clear()
-    if (selectedNode) {
-      neighbours.add(selectedNode)
-      edges.forEach(e => { if (e.source === selectedNode || e.target === selectedNode) { neighbours.add(e.source); neighbours.add(e.target) } })
-    }
+    neighbours = focusNeighborhood(focusAnchor, edges)
     for (const node of nodes) {
       const mesh = nodeMeshes.get(node.id)!
-      const dim = node.dimmed || (focused && selectedNode && !neighbours.has(node.id))
+      const dim = node.dimmed || (focused && focusAnchor && !neighbours.has(node.id))
       const color = typeColor(node.typeKey)
       mesh.material.color.set(color)
       mesh.material.emissive.set(color)
@@ -348,7 +350,7 @@ export function createGraphScene(options: SceneOptions): SceneController {
     for (const edge of edges) {
       const object = edgeObjects.get(edge.id)!
       const connected = edge.source === selectedNode || edge.target === selectedNode
-      const dim = edge.dimmed || (focused && selectedNode && !connected)
+      const dim = edge.dimmed || (focused && focusAnchor && edge.source !== focusAnchor && edge.target !== focusAnchor)
       object.material.opacity = dim ? 0.045 : edge.id === selectedEdge ? 0.95 : connected ? 0.85 : 0.6
       object.material.color.set(edge.id === selectedEdge ? '#efd08b' : connected ? '#72cddd' : edge.parent ? '#b794ed' : '#58b5cc')
       object.arrow.scale.setScalar(edge.id === selectedEdge ? 1.6 : 1)
@@ -377,7 +379,7 @@ export function createGraphScene(options: SceneOptions): SceneController {
     const detail = document.createElement('span'); detail.className = 'graph3d-label-detail'
     button.append(name, meta, detail); labels.appendChild(button)
     button.addEventListener('click', e => { e.stopPropagation(); const id = button.dataset.id; if (id) options.onSelectNode(id) })
-    button.addEventListener('dblclick', e => { e.stopPropagation(); const id = button.dataset.id; if (id) focus(id) })
+    button.addEventListener('dblclick', e => { e.stopPropagation(); const id = button.dataset.id; if (id) { options.onSelectNode(id); focus(id) } })
     return { button, name, meta, detail }
   })
   const projected = new THREE.Vector3()
@@ -397,7 +399,7 @@ export function createGraphScene(options: SceneOptions): SceneController {
       }
     }
     const candidates = nodes.flatMap(node => {
-      if ((node.dimmed || focused && selectedNode && !neighbours.has(node.id)) && node.id !== selectedNode) return []
+      if ((node.dimmed || focused && focusAnchor && !neighbours.has(node.id)) && node.id !== selectedNode) return []
       const position = vectorPositions.get(node.id)!
       labelPosition.copy(position).add(new THREE.Vector3(0, 5, 0))
       projected.copy(labelPosition).project(camera)
@@ -446,7 +448,7 @@ export function createGraphScene(options: SceneOptions): SceneController {
     raycaster.setFromCamera(pointer, camera)
     return raycaster.intersectObjects(pickObjects, false).find(hit => {
       const data = hit.object.userData
-      return !(focused && selectedNode && (data.kind === 'node' ? !neighbours.has(data.id) : !edges.some(e => e.id === data.id && (e.source === selectedNode || e.target === selectedNode))))
+      return !(focused && focusAnchor && (data.kind === 'node' ? !neighbours.has(data.id) : !edges.some(e => e.id === data.id && (e.source === focusAnchor || e.target === focusAnchor))))
     })
   }
   const onMove = (event: PointerEvent) => {
@@ -477,9 +479,10 @@ export function createGraphScene(options: SceneOptions): SceneController {
   }
   const onDouble = (event: MouseEvent) => {
     const hit = hitAt(event.clientX, event.clientY)
-    if (hit?.object.userData.kind === 'node') focus(String(hit.object.userData.id))
+    if (hit?.object.userData.kind === 'node') { const id = String(hit.object.userData.id); options.onSelectNode(id); focus(id) }
   }
   const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape' && touring) { event.preventDefault(); event.stopPropagation(); touring = false; cameraFlight = null; options.onNavigation(); return }
     if (event.key === 'Escape' && fly) { event.preventDefault(); event.stopPropagation(); keys.clear(); fly = false; controls.enabled = true; options.onNavigation(); return }
     if (!fly || !['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) return
     event.preventDefault(); event.stopPropagation(); keys.add(event.code); cameraFlight = null; wake()
@@ -508,6 +511,7 @@ export function createGraphScene(options: SceneOptions): SceneController {
   let elapsed = 0
   let frameId = 0
   let tourIndex = 0, lastTour = -1e6
+  let tourNodeId: string | null = null
   const localMove = new THREE.Vector3()
   const sample = new THREE.Vector3()
   const frame = (now: number) => {
@@ -516,7 +520,7 @@ export function createGraphScene(options: SceneOptions): SceneController {
     const delta = Math.min(clock.getDelta(), 0.05)
     if (document.hidden || !visible) return
     if (!fly) controls.update()
-    if (!animated && !cameraFlight && !stylesDirty && !(fly && keys.size) && now > renderUntil) return
+    if (!animated && !touring && !cameraFlight && !stylesDirty && !(fly && keys.size) && now > renderUntil) return
     if (animated) elapsed += delta
     if (stylesDirty) updateStyles()
     if (cameraFlight) {
@@ -534,11 +538,14 @@ export function createGraphScene(options: SceneOptions): SceneController {
         camera.position.add(localMove); controls.target.add(localMove)
       }
     }
-    if (touring && animated && nodes.length) {
-      if (now - lastTour > 6000) {
-        const node = nodes[tourIndex++ % nodes.length]
-        focus(node.id); lastTour = now
-      } else if (!cameraFlight) {
+    if (touring && nodes.length) {
+      const stops = nodes.filter(node => !node.dimmed && (!focused || !focusAnchor || neighbours.has(node.id)))
+      if (!stops.length) { touring = false; cameraFlight = null; options.onNavigation() }
+      else if (now - lastTour > 6000) {
+        const node = stops[tourIndex++ % stops.length]
+        focus(node.id); lastTour = now; tourNodeId = node.id
+        options.onTourNode(node.id)
+      } else if (animated && !reducedMotion && !cameraFlight) {
         const offset = camera.position.clone().sub(controls.target)
         offset.applyAxisAngle(up, delta * 0.06)
         camera.position.copy(controls.target).add(offset)
@@ -577,13 +584,23 @@ export function createGraphScene(options: SceneOptions): SceneController {
     fit, focus, focusEdge,
     getView() { return { position: camera.position.toArray(), target: controls.target.toArray(), nodePositions: Object.fromEntries([...vectorPositions].map(([id, p]) => [id, { x: p.x, y: p.y, z: p.z }])) } },
     restoreView(view) { cameraFlight = null; camera.position.fromArray(view.position); controls.target.fromArray(view.target); camera.lookAt(controls.target); controls.update(); wake() },
-    setGraph(nextNodes, nextEdges) { buildGraph(nextNodes, nextEdges, Object.fromEntries([...vectorPositions].map(([id, p]) => [id, { x: p.x, y: p.y, z: p.z }]))) },
+    setGraph(nextNodes, nextEdges) {
+      buildGraph(nextNodes, nextEdges, Object.fromEntries([...vectorPositions].map(([id, p]) => [id, { x: p.x, y: p.y, z: p.z }])))
+      if (tourNodeId && !nodeIds.has(tourNodeId)) { cameraFlight = null; tourNodeId = null; lastTour = -1e6 }
+      if (!nodes.length && touring) { touring = false; options.onNavigation() }
+    },
     updateData(nextNodes, nextEdges) { nodes = nextNodes; edges = nextEdges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target)); stylesDirty = true; lastLabels = 0; wake() },
     select(nodeId, edgeId) { selectedNode = nodeId; selectedEdge = edgeId; stylesDirty = true; lastLabels = 0; wake() },
-    setFly(value) { fly = value; controls.enabled = !value; keys.clear(); if (value) { touring = false; canvas.focus({ preventScroll: true }) } },
-    setFocus(value) { focused = value; stylesDirty = true; lastLabels = 0; wake() },
+    setFly(value) { fly = value; controls.enabled = !value; keys.clear(); if (value) { touring = false; cameraFlight = null; canvas.focus({ preventScroll: true }) } },
+    setFocus(value, anchor) { focused = value; focusAnchor = anchor && nodeIds.has(anchor) ? anchor : null; stylesDirty = true; lastLabels = 0; wake() },
     setAnimated(value) { animated = value; wake(); if (!value) { touring = false; if (cameraFlight) { camera.position.copy(cameraFlight.to); controls.target.copy(cameraFlight.targetTo); camera.lookAt(controls.target); cameraFlight = null } } },
-    setTour(value) { touring = value; if (value) { fly = false; controls.enabled = true; animated = true; lastTour = -1e6 } },
+    setTour(value) {
+      if (value === touring) return
+      touring = value
+      if (value) { fly = false; controls.enabled = true; tourIndex = 0; lastTour = -1e6; wake() }
+      else cameraFlight = null
+    },
+    setReducedMotion(value) { reducedMotion = value },
     dispose() {
       disposed = true
       cancelAnimationFrame(frameId)

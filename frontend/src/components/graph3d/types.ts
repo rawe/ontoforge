@@ -5,6 +5,10 @@ export interface Graph3DNode {
   typeKey: string
   subtitle?: string
   description?: string
+  /** A lens-exposed instance identity; absent for schema types or a hidden identity. */
+  identity?: string
+  /** Directional relation counts restricted to the visible graph. */
+  connections?: readonly { label: string; value: string }[]
   properties?: readonly { label: string; value: string }[]
   dimmed?: boolean
   highlighted?: boolean

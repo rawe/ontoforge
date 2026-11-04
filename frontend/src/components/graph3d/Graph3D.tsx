@@ -12,6 +12,8 @@ export function Graph3D(props: Graph3DProps) {
   const labelsRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<SceneController | null>(null)
   const viewRef = useRef<SceneView | null>(null)
+  /** The topology the live scene shows, so a change rebuilds the graph and not the renderer. */
+  const sceneTopologyRef = useRef<string | null>(null)
   const topology = JSON.stringify([
     nodes.map(node => [node.id, node.typeKey]).sort((a, b) => a[0].localeCompare(b[0])),
     edges.map(edge => [edge.id, edge.source, edge.target, edge.parent ?? false]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
@@ -36,6 +38,8 @@ export function Graph3D(props: Graph3DProps) {
     onSelectNode: id => selectNode(id), onSelectEdge: (id, at) => selectEdge(id, at), onHoverNode: id => hoverNode(id),
     onNavigation: () => navigation(), onError: () => sceneError(),
   }))
+  const currentTopology = useEffectEvent(() => topology)
+  const applyGraph = useEffectEvent(() => sceneRef.current?.setGraph(nodes, edges))
   const revealSelected = useEffectEvent(() => {
     if (selectedNodeId) sceneRef.current?.focus(selectedNodeId)
     else if (selectedEdgeId) sceneRef.current?.focusEdge(selectedEdgeId)
@@ -47,11 +51,18 @@ export function Graph3D(props: Graph3DProps) {
       const scene = initializeScene(mountRef.current, labelsRef.current)
       if (viewRef.current) scene.restoreView(viewRef.current)
       sceneRef.current = scene
-      return () => { current = false; viewRef.current = scene.getView(); scene.dispose(); sceneRef.current = null; hoverNode(null) }
+      sceneTopologyRef.current = currentTopology()
+      return () => { current = false; viewRef.current = scene.getView(); scene.dispose(); sceneRef.current = null; sceneTopologyRef.current = null; hoverNode(null) }
     } catch {
       queueMicrotask(() => { if (current) setFailed(true) })
     }
     return () => { current = false }
+    // Mounted once per WebGL attempt; topology changes reuse this renderer below.
+  }, [failed])
+  useEffect(() => {
+    if (!sceneRef.current || sceneTopologyRef.current === topology) return
+    applyGraph()
+    sceneTopologyRef.current = topology
   }, [topology, failed])
   useEffect(() => { sceneRef.current?.updateData(nodes, edges) }, [nodes, edges, topology, failed])
   useEffect(() => { sceneRef.current?.select(selectedNodeId, selectedEdgeId) }, [topology, selectedNodeId, selectedEdgeId, failed])

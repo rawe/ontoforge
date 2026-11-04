@@ -37,3 +37,25 @@ export async function sampleEntities(
   }
   return found
 }
+
+export interface RelationRead {
+  type: string
+  /** Outgoing reads filter by `fromEntityId`, incoming reads by `toEntityId`. */
+  direction: 'outgoing' | 'incoming'
+  entityId: string
+}
+
+/**
+ * The relation reads that connect newly added entities to the canvas: outgoing from each new
+ * entity, and incoming to it. Relations among already loaded entities are already drawn, so
+ * those entities are never read again.
+ */
+export function planRelationReads(
+  relationTypes: readonly { key: string; fromEntityTypeKey: string; toEntityTypeKey: string }[],
+  added: readonly EntityInstance[],
+): RelationRead[] {
+  return relationTypes.flatMap(type => added.flatMap(entity => [
+    ...(entity._entityTypeKey === type.fromEntityTypeKey ? [{ type: type.key, direction: 'outgoing' as const, entityId: entity._id }] : []),
+    ...(entity._entityTypeKey === type.toEntityTypeKey ? [{ type: type.key, direction: 'incoming' as const, entityId: entity._id }] : []),
+  ]))
+}

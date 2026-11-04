@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { EntityInstance } from '../src/api/types.ts'
-import { sampleEntities } from '../src/components/explore/quickLoad.ts'
+import { planRelationReads, sampleEntities } from '../src/components/explore/quickLoad.ts'
 
 const entity = (type: string, index: number): EntityInstance => ({
   _id: `${type}-${index}`, _entityTypeKey: type, _createdAt: '', _updatedAt: '',
@@ -36,4 +36,19 @@ test('quick load pages beyond existing nodes and never adds duplicates or exceed
 test('quick load stops on empty pages and reports failed reads', async () => {
   assert.deepEqual(await sampleEntities(['empty'], new Set(), 20, async (_key, page) => ({ ...page, items: [], total: 0 })), [])
   await assert.rejects(sampleEntities(['denied'], new Set(), 20, async () => { throw new Error('Lens access denied') }), /Lens access denied/)
+})
+
+test('quick load reads relations only for the entities it adds, in both directions', () => {
+  const types = [
+    { key: 'member_of', fromEntityTypeKey: 'person', toEntityTypeKey: 'team' },
+    { key: 'reports_to', fromEntityTypeKey: 'person', toEntityTypeKey: 'person' },
+  ]
+  const reads = planRelationReads(types, [entity('person', 1), entity('team', 2)])
+  assert.deepEqual(reads, [
+    { type: 'member_of', direction: 'outgoing', entityId: 'person-1' },
+    { type: 'member_of', direction: 'incoming', entityId: 'team-2' },
+    { type: 'reports_to', direction: 'outgoing', entityId: 'person-1' },
+    { type: 'reports_to', direction: 'incoming', entityId: 'person-1' },
+  ])
+  assert.deepEqual(planRelationReads(types, []), [])
 })

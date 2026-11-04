@@ -52,7 +52,7 @@ import { ExploreGraph3D } from './ExploreGraph3D'
 import { NodePanel } from './NodePanel'
 import { RelationEdge } from './RelationEdge'
 import { QuickLoadDialog } from './QuickLoadDialog'
-import { sampleEntities } from './quickLoad'
+import { planRelationReads, sampleEntities } from './quickLoad'
 import { useAskDock } from './useAskDock'
 import {
   MAX_NODES,
@@ -357,22 +357,20 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
     if (limit <= 0) throw new Error(capMessage)
     const entities = await sampleEntities(typeKeys, new Set(current.map(node => node.id)), limit,
       (key, page) => runtime.listEntities(ontologyKey, lensKey, key, page))
-    const all = [...current.map(node => node.data.entity), ...entities]
-    const ids = new Set(all.map(entity => entity._id))
-    const reads = schemaRef.current.relationTypes.flatMap(type => all
-      .filter(entity => entity._entityTypeKey === type.fromEntityTypeKey)
-      .map(entity => ({ type: type.key, source: entity._id })))
-    const results = await mapBounded(reads, PARALLEL_READS, ({ type, source }) =>
-      runtime.listRelations(ontologyKey, lensKey, type, { fromEntityId: source, limit: 200 }))
+    const ids = new Set([...current.map(node => node.id), ...entities.map(entity => entity._id)])
+    const reads = planRelationReads(schemaRef.current.relationTypes, entities)
+    const results = await mapBounded(reads, PARALLEL_READS, ({ type, direction, entityId }) =>
+      runtime.listRelations(ontologyKey, lensKey, type,
+        direction === 'outgoing' ? { fromEntityId: entityId, limit: 200 } : { toEntityId: entityId, limit: 200 }))
     const failed = results.find(result => result.status === 'rejected')
     if (failed?.status === 'rejected') throw failed.reason
     const pages = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
-    const relations = pages.flatMap(page => page.items.filter(relation => ids.has(relation.toEntityId)))
+    const relations = pages.flatMap(page => page.items.filter(relation => ids.has(relation.fromEntityId) && ids.has(relation.toEntityId)))
     if (!addEntities(entities)) throw new Error(capMessage)
     dispatch({ type: 'addEdges', relations })
     setFitRequest(request => request + 1)
     window.setTimeout(() => { void reactFlow.fitView({ ...fitOptions(), duration: 300 }) }, 60)
-    toast.success(entities.length === 0 ? 'No new entities to add. Connections refreshed.' : `Added ${entities.length} entities and their connections.`)
+    toast.success(entities.length === 0 ? 'No new entities to add.' : `Added ${entities.length} entities and their connections.`)
     if (pages.some(page => page.total > page.items.length)) {
       toast.info('Some connections were omitted. Expand a node’s relations to explore more.')
     }
@@ -955,7 +953,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
         )}
 
         {quickLoadOpen && <QuickLoadDialog
-          types={schema.entityTypes}
+          types={schema.entityTypes.filter((type) => !hiddenTypes.has(type.key))}
           remaining={MAX_NODES - ws.nodes.length}
           onClose={() => setQuickLoadOpen(false)}
           onLoad={quickLoad}

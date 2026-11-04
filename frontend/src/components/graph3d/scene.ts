@@ -26,6 +26,8 @@ export interface SceneController {
   getView: () => SceneView
   restoreView: (view: SceneView) => void
   updateData: (nodes: readonly Graph3DNode[], edges: readonly Graph3DEdge[]) => void
+  /** Replaces the graph's nodes and edges in the same renderer, keeping known positions and the camera. */
+  setGraph: (nodes: readonly Graph3DNode[], edges: readonly Graph3DEdge[]) => void
   dispose: () => void
   fit: () => void
   focus: (id: string) => void
@@ -61,10 +63,15 @@ export function createGraphScene(options: SceneOptions): SceneController {
     paletteCache.set(css, resolved)
     return resolved
   }
-  let nodes = options.nodes
-  const nodeIds = new Set(nodes.map(n => n.id))
-  let edges = options.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
+  let nodes: readonly Graph3DNode[] = []
+  let nodeIds = new Set<string>()
+  let edges: readonly Graph3DEdge[] = []
   let disposed = false
+  let stylesDirty = true
+  let lastLabels = 0
+  // Frames are drawn while something moves; a still, paused scene stops drawing.
+  let renderUntil = 0
+  const wake = () => { renderUntil = performance.now() + 250 }
   let fly = false, focused = false, animated = !options.reducedMotion, touring = false
   let selectedNode: string | null = null, selectedEdge: string | null = null
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' })
@@ -101,8 +108,64 @@ export function createGraphScene(options: SceneOptions): SceneController {
   const rimLight = new THREE.DirectionalLight('#9678ff', 1.1)
   rimLight.position.set(-80, 10, -50)
   scene.add(rimLight)
+  // Resources shared by every graph the renderer shows; disposed only with the scene.
+  const geometries = new Set<THREE.BufferGeometry>()
+  const materials = new Set<THREE.Material>()
+  const textures = new Set<THREE.Texture>()
+  const ownGeometry = <T extends THREE.BufferGeometry>(g: T): T => { geometries.add(g); return g }
+  const ownMaterial = <T extends THREE.Material>(m: T): T => { materials.add(m); return m }
+  const nodeGeometry = ownGeometry(new THREE.IcosahedronGeometry(1, 1))
+  const ringGeometry = ownGeometry(new THREE.TorusGeometry(4.4, 0.035, 5, 64))
+  const coneGeometry = ownGeometry(new THREE.ConeGeometry(0.68, 1.9, 6))
+  const up = new THREE.Vector3(0, 1, 0)
+  const selectionMaterial = ownMaterial(new THREE.MeshBasicMaterial({ color: new THREE.Color('#66cadd'), transparent: true, opacity: 0.65, depthWrite: false }))
+  const selectionRing = new THREE.Mesh(ringGeometry, selectionMaterial)
+  const selectionRing2 = new THREE.Mesh(ringGeometry, selectionMaterial)
+  selectionRing.visible = false; selectionRing2.visible = false
+  selectionRing2.scale.setScalar(1.2)
+  scene.add(selectionRing, selectionRing2)
+  // Soft halos supplement bloom without an expensive full-screen blur for each node.
+  const haloCanvas = document.createElement('canvas')
+  haloCanvas.width = 64; haloCanvas.height = 64
+  const haloContext = haloCanvas.getContext('2d')!
+  const gradient = haloContext.createRadialGradient(32, 32, 0, 32, 32, 32)
+  gradient.addColorStop(0, 'rgba(255,255,255,.6)')
+  gradient.addColorStop(0.2, 'rgba(255,255,255,.15)')
+  gradient.addColorStop(1, 'rgba(255,255,255,0)')
+  haloContext.fillStyle = gradient; haloContext.fillRect(0, 0, 64, 64)
+  const haloTexture = new THREE.CanvasTexture(haloCanvas)
+  textures.add(haloTexture)
+
+  // Everything below depends on the graph and is rebuilt by buildGraph in the same renderer.
+  let vectorPositions = new Map<string, THREE.Vector3>()
+  let radius = 22
+  const nodeMeshes = new Map<string, THREE.Mesh<THREE.IcosahedronGeometry, THREE.MeshStandardMaterial>>()
+  const halos = new Map<string, THREE.Sprite>()
+  const pickObjects: THREE.Object3D[] = []
+  const edgeObjects = new Map<string, { curve: THREE.Curve<THREE.Vector3>; material: THREE.MeshBasicMaterial; arrow: THREE.Mesh; pick: THREE.Line }>()
+  let particleEdges: readonly Graph3DEdge[] = []
+  let particlePositions = new Float32Array(0)
+  let particleGeometry = new THREE.BufferGeometry()
+  let particles = new THREE.Points()
+  let content = new THREE.Group()
+  const contentGeometries = new Set<THREE.BufferGeometry>()
+  const contentMaterials = new Set<THREE.Material>()
+  const ownContentGeometry = <T extends THREE.BufferGeometry>(g: T): T => { contentGeometries.add(g); return g }
+  const ownContentMaterial = <T extends THREE.Material>(m: T): T => { contentMaterials.add(m); return m }
+  const disposeContent = () => {
+    content.removeFromParent()
+    contentGeometries.forEach(g => g.dispose()); contentMaterials.forEach(m => m.dispose())
+    contentGeometries.clear(); contentMaterials.clear()
+    nodeMeshes.clear(); halos.clear(); edgeObjects.clear(); pickObjects.length = 0
+  }
+  const buildGraph = (nextNodes: readonly Graph3DNode[], nextEdges: readonly Graph3DEdge[], remembered?: Record<string, { x: number; y: number; z: number }>) => {
+  disposeContent()
+  content = new THREE.Group()
+  scene.add(content)
+  nodes = nextNodes
+  nodeIds = new Set(nodes.map(n => n.id))
+  edges = nextEdges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
   const positions = layoutGraph(nodes, edges)
-  const remembered = options.previousPositions
   if (remembered && nodes.some(node => remembered[node.id] !== undefined)) {
     const placed: THREE.Vector3[] = []
     const anchors = new Map<string, THREE.Vector3>()
@@ -131,55 +194,25 @@ export function createGraphScene(options: SceneOptions): SceneController {
       anchors.set(node.id, candidate); placed.push(candidate)
     }
   }
-  const vectorPositions = new Map([...positions].map(([id, p]) => [id, new THREE.Vector3(p.x, p.y, p.z)]))
-  const radius = Math.max(22, ...[...vectorPositions.values()].map(p => p.length() + 8))
-  const geometries = new Set<THREE.BufferGeometry>()
-  const materials = new Set<THREE.Material>()
-  const textures = new Set<THREE.Texture>()
-  const ownGeometry = <T extends THREE.BufferGeometry>(g: T): T => { geometries.add(g); return g }
-  const ownMaterial = <T extends THREE.Material>(m: T): T => { materials.add(m); return m }
-  const nodeGeometry = ownGeometry(new THREE.IcosahedronGeometry(1, 1))
-  const ringGeometry = ownGeometry(new THREE.TorusGeometry(4.4, 0.035, 5, 64))
-  const selectionMaterial = ownMaterial(new THREE.MeshBasicMaterial({ color: new THREE.Color('#66cadd'), transparent: true, opacity: 0.65, depthWrite: false }))
-  const selectionRing = new THREE.Mesh(ringGeometry, selectionMaterial)
-  const selectionRing2 = new THREE.Mesh(ringGeometry, selectionMaterial)
-  selectionRing.visible = false; selectionRing2.visible = false
-  selectionRing2.scale.setScalar(1.2)
-  scene.add(selectionRing, selectionRing2)
-  // Soft halos supplement bloom without an expensive full-screen blur for each node.
-  const haloCanvas = document.createElement('canvas')
-  haloCanvas.width = 64; haloCanvas.height = 64
-  const haloContext = haloCanvas.getContext('2d')!
-  const gradient = haloContext.createRadialGradient(32, 32, 0, 32, 32, 32)
-  gradient.addColorStop(0, 'rgba(255,255,255,.6)')
-  gradient.addColorStop(0.2, 'rgba(255,255,255,.15)')
-  gradient.addColorStop(1, 'rgba(255,255,255,0)')
-  haloContext.fillStyle = gradient; haloContext.fillRect(0, 0, 64, 64)
-  const haloTexture = new THREE.CanvasTexture(haloCanvas)
-  textures.add(haloTexture)
-  const nodeMeshes = new Map<string, THREE.Mesh<THREE.IcosahedronGeometry, THREE.MeshStandardMaterial>>()
-  const halos = new Map<string, THREE.Sprite>()
-  const pickObjects: THREE.Object3D[] = []
+  vectorPositions = new Map([...positions].map(([id, p]) => [id, new THREE.Vector3(p.x, p.y, p.z)]))
+  radius = Math.max(22, ...[...vectorPositions.values()].map(p => p.length() + 8))
   const degrees = new Map<string, number>()
   edges.forEach(e => { degrees.set(e.source, (degrees.get(e.source) ?? 0) + 1); degrees.set(e.target, (degrees.get(e.target) ?? 0) + 1) })
   for (const node of nodes) {
     const color = typeColor(node.typeKey)
-    const material = ownMaterial(new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.14, metalness: 0.28, roughness: 0.58, flatShading: true, transparent: true }))
+    const material = ownContentMaterial(new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.14, metalness: 0.28, roughness: 0.58, flatShading: true, transparent: true }))
     const mesh = new THREE.Mesh(nodeGeometry, material)
     mesh.position.copy(vectorPositions.get(node.id)!)
     const size = 2.3 + Math.min(1.8, Math.log2(1 + (degrees.get(node.id) ?? 0)) * 0.42)
     mesh.scale.setScalar(size)
     mesh.rotation.set(hashKey(node.id) / 1000, hashKey(node.typeKey) / 700, 0.3)
     mesh.userData = { kind: 'node', id: node.id }
-    scene.add(mesh); nodeMeshes.set(node.id, mesh); pickObjects.push(mesh)
-    const halo = new THREE.Sprite(ownMaterial(new THREE.SpriteMaterial({ map: haloTexture, color, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })))
+    content.add(mesh); nodeMeshes.set(node.id, mesh); pickObjects.push(mesh)
+    const halo = new THREE.Sprite(ownContentMaterial(new THREE.SpriteMaterial({ map: haloTexture, color, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })))
     halo.position.copy(mesh.position); halo.scale.setScalar(size * 6.5)
-    scene.add(halo); halos.set(node.id, halo)
+    content.add(halo); halos.set(node.id, halo)
   }
   const lanes = edgeLanes(edges)
-  const edgeObjects = new Map<string, { curve: THREE.Curve<THREE.Vector3>; material: THREE.MeshBasicMaterial; arrow: THREE.Mesh; pick: THREE.Line }>()
-  const coneGeometry = ownGeometry(new THREE.ConeGeometry(0.68, 1.9, 6))
-  const up = new THREE.Vector3(0, 1, 0)
   for (const edge of edges) {
     const source = vectorPositions.get(edge.source)!, target = vectorPositions.get(edge.target)!
     const lane = lanes.get(edge.id) ?? 0
@@ -201,25 +234,25 @@ export function createGraphScene(options: SceneOptions): SceneController {
       curve = new THREE.QuadraticBezierCurve3(source, midpoint, target)
     }
     const color = edge.parent ? '#c5a4ff' : '#58b5cc'
-    const material = ownMaterial(new THREE.MeshBasicMaterial({ color: new THREE.Color(color), transparent: true, opacity: 0.6, depthWrite: false }))
-    const tube = new THREE.Mesh(ownGeometry(new THREE.TubeGeometry(curve, edges.length > 800 ? 12 : 28, edge.parent ? 0.13 : 0.1, 4, false)), material)
-    scene.add(tube)
+    const material = ownContentMaterial(new THREE.MeshBasicMaterial({ color: new THREE.Color(color), transparent: true, opacity: 0.6, depthWrite: false }))
+    const tube = new THREE.Mesh(ownContentGeometry(new THREE.TubeGeometry(curve, edges.length > 800 ? 12 : 28, edge.parent ? 0.13 : 0.1, 4, false)), material)
+    content.add(tube)
     const arrow = new THREE.Mesh(coneGeometry, material)
     arrow.position.copy(curve.getPoint(0.78))
     arrow.quaternion.setFromUnitVectors(up, curve.getTangent(0.78).normalize())
-    scene.add(arrow)
-    const pick = new THREE.Line(ownGeometry(new THREE.BufferGeometry().setFromPoints(curve.getPoints(28))), ownMaterial(new THREE.LineBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })))
+    content.add(arrow)
+    const pick = new THREE.Line(ownContentGeometry(new THREE.BufferGeometry().setFromPoints(curve.getPoints(28))), ownContentMaterial(new THREE.LineBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })))
     pick.userData = { kind: 'edge', id: edge.id }
-    scene.add(pick); pickObjects.push(pick)
+    content.add(pick); pickObjects.push(pick)
     edgeObjects.set(edge.id, { curve, material, arrow, pick })
   }
-  const particleEdges = edges.slice(0, 1500)
-  const particlePositions = new Float32Array(particleEdges.length * 3)
-  const particleGeometry = ownGeometry(new THREE.BufferGeometry())
+  particleEdges = edges.slice(0, 1500)
+  particlePositions = new Float32Array(particleEdges.length * 3)
+  particleGeometry = ownContentGeometry(new THREE.BufferGeometry())
   particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3))
-  const particles = new THREE.Points(particleGeometry, ownMaterial(new THREE.PointsMaterial({ color: '#9ce3ed', size: 0.7, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, map: haloTexture })))
+  particles = new THREE.Points(particleGeometry, ownContentMaterial(new THREE.PointsMaterial({ color: '#9ce3ed', size: 0.7, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, map: haloTexture })))
   particles.frustumCulled = false
-  scene.add(particles)
+  content.add(particles)
   // A quiet spatial frame and distant stars make depth legible while preserving the graph.
   const starPositions = new Float32Array(900 * 3)
   for (let i = 0; i < 900; i++) {
@@ -232,22 +265,26 @@ export function createGraphScene(options: SceneOptions): SceneController {
     starPositions[i * 3 + 1] = y * distance
     starPositions[i * 3 + 2] = Math.sin(angle) * r * distance
   }
-  const starGeometry = ownGeometry(new THREE.BufferGeometry())
+  const starGeometry = ownContentGeometry(new THREE.BufferGeometry())
   starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3))
-  const stars = new THREE.Points(starGeometry, ownMaterial(new THREE.PointsMaterial({ color: '#809cc4', size: 0.65, transparent: true, opacity: 0.45, sizeAttenuation: true, depthWrite: false })))
-  scene.add(stars)
+  const stars = new THREE.Points(starGeometry, ownContentMaterial(new THREE.PointsMaterial({ color: '#809cc4', size: 0.65, transparent: true, opacity: 0.45, sizeAttenuation: true, depthWrite: false })))
+  content.add(stars)
   const grid = new THREE.GridHelper(Math.max(250, radius * 3), 30, '#34516c', '#182b42')
   grid.position.y = -radius * 0.8 - 16
   const gridMaterial = grid.material as THREE.LineBasicMaterial
   gridMaterial.transparent = true; gridMaterial.opacity = 0.16; gridMaterial.depthWrite = false
-  geometries.add(grid.geometry); materials.add(gridMaterial)
-  scene.add(grid)
+  contentGeometries.add(grid.geometry); contentMaterials.add(gridMaterial)
+  content.add(grid)
+  stylesDirty = true
+  lastLabels = 0
+  wake()
+  }
 
   let cameraFlight: { start: number; from: THREE.Vector3; to: THREE.Vector3; targetFrom: THREE.Vector3; targetTo: THREE.Vector3 } | null = null
   const moveTo = (position: THREE.Vector3, target: THREE.Vector3) => {
     if (options.reducedMotion || !animated) {
       camera.position.copy(position); controls.target.copy(target); camera.lookAt(target); controls.update()
-      cameraFlight = null
+      cameraFlight = null; wake()
     } else cameraFlight = { start: performance.now(), from: camera.position.clone(), to: position, targetFrom: controls.target.clone(), targetTo: target }
   }
   const fit = () => {
@@ -273,6 +310,7 @@ export function createGraphScene(options: SceneOptions): SceneController {
     if (direction.lengthSq() < 0.1) direction.set(0.4, 0.25, 1).normalize()
     moveTo(centre.clone().addScaledVector(direction, distance), centre)
   }
+  buildGraph(options.nodes, options.edges, options.previousPositions)
   camera.position.set(radius * 1.8, radius * 1.3, radius * 2.8)
   controls.target.set(0, 0, 0); camera.lookAt(controls.target)
   const resize = () => {
@@ -280,14 +318,14 @@ export function createGraphScene(options: SceneOptions): SceneController {
     if (!width || !height) return
     camera.aspect = width / height; camera.updateProjectionMatrix()
     renderer.setSize(width, height, false); composer.setSize(width, height)
+    wake()
   }
   resize()
   fit()
   const observer = new ResizeObserver(resize)
   observer.observe(mount)
   const neighbours = new Set<string>()
-  let stylesDirty = true
-  const paletteObserver = new MutationObserver(() => { stylesDirty = true })
+  const paletteObserver = new MutationObserver(() => { stylesDirty = true; wake() })
   paletteObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] })
   const updateStyles = () => {
     neighbours.clear()
@@ -344,7 +382,6 @@ export function createGraphScene(options: SceneOptions): SceneController {
   })
   const projected = new THREE.Vector3()
   const labelPosition = new THREE.Vector3()
-  let lastLabels = 0
   const updateLabels = (now: number) => {
     if (now - lastLabels < 80) return
     lastLabels = now
@@ -413,6 +450,7 @@ export function createGraphScene(options: SceneOptions): SceneController {
     })
   }
   const onMove = (event: PointerEvent) => {
+    wake()
     if (pointerDown && Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) > 4) dragged = true
     if (fly && pointerDown && event.buttons === 1) {
       const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ')
@@ -444,14 +482,15 @@ export function createGraphScene(options: SceneOptions): SceneController {
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === 'Escape' && fly) { event.preventDefault(); event.stopPropagation(); keys.clear(); fly = false; controls.enabled = true; options.onNavigation(); return }
     if (!fly || !['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) return
-    event.preventDefault(); event.stopPropagation(); keys.add(event.code); cameraFlight = null
+    event.preventDefault(); event.stopPropagation(); keys.add(event.code); cameraFlight = null; wake()
   }
   const onKeyUp = (event: KeyboardEvent) => { keys.delete(event.code) }
   const onBlur = () => { keys.clear(); pointerDown = null }
-  const onLeave = () => { if (hovered) options.onHoverNode(null); hovered = null; hoveredEdge = null }
+  const onLeave = () => { wake(); if (hovered) options.onHoverNode(null); hovered = null; hoveredEdge = null }
   const onContextLost = (event: Event) => { event.preventDefault(); options.onError() }
   const onControlStart = () => { cameraFlight = null; if (touring) { touring = false; options.onNavigation() } }
   controls.addEventListener('start', onControlStart)
+  controls.addEventListener('change', wake)
   canvas.addEventListener('pointerdown', onDown)
   canvas.addEventListener('pointermove', onMove)
   canvas.addEventListener('pointerup', onUp)
@@ -476,6 +515,8 @@ export function createGraphScene(options: SceneOptions): SceneController {
     frameId = requestAnimationFrame(frame)
     const delta = Math.min(clock.getDelta(), 0.05)
     if (document.hidden || !visible) return
+    if (!fly) controls.update()
+    if (!animated && !cameraFlight && !stylesDirty && !(fly && keys.size) && now > renderUntil) return
     if (animated) elapsed += delta
     if (stylesDirty) updateStyles()
     if (cameraFlight) {
@@ -493,7 +534,6 @@ export function createGraphScene(options: SceneOptions): SceneController {
         camera.position.add(localMove); controls.target.add(localMove)
       }
     }
-    if (!fly) controls.update()
     if (touring && animated && nodes.length) {
       if (now - lastTour > 6000) {
         const node = nodes[tourIndex++ % nodes.length]
@@ -536,12 +576,13 @@ export function createGraphScene(options: SceneOptions): SceneController {
   return {
     fit, focus, focusEdge,
     getView() { return { position: camera.position.toArray(), target: controls.target.toArray(), nodePositions: Object.fromEntries([...vectorPositions].map(([id, p]) => [id, { x: p.x, y: p.y, z: p.z }])) } },
-    restoreView(view) { cameraFlight = null; camera.position.fromArray(view.position); controls.target.fromArray(view.target); camera.lookAt(controls.target); controls.update() },
-    updateData(nextNodes, nextEdges) { nodes = nextNodes; edges = nextEdges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target)); stylesDirty = true; lastLabels = 0 },
-    select(nodeId, edgeId) { selectedNode = nodeId; selectedEdge = edgeId; stylesDirty = true; lastLabels = 0 },
+    restoreView(view) { cameraFlight = null; camera.position.fromArray(view.position); controls.target.fromArray(view.target); camera.lookAt(controls.target); controls.update(); wake() },
+    setGraph(nextNodes, nextEdges) { buildGraph(nextNodes, nextEdges, Object.fromEntries([...vectorPositions].map(([id, p]) => [id, { x: p.x, y: p.y, z: p.z }]))) },
+    updateData(nextNodes, nextEdges) { nodes = nextNodes; edges = nextEdges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target)); stylesDirty = true; lastLabels = 0; wake() },
+    select(nodeId, edgeId) { selectedNode = nodeId; selectedEdge = edgeId; stylesDirty = true; lastLabels = 0; wake() },
     setFly(value) { fly = value; controls.enabled = !value; keys.clear(); if (value) { touring = false; canvas.focus({ preventScroll: true }) } },
-    setFocus(value) { focused = value; stylesDirty = true; lastLabels = 0 },
-    setAnimated(value) { animated = value; if (!value) { touring = false; if (cameraFlight) { camera.position.copy(cameraFlight.to); controls.target.copy(cameraFlight.targetTo); camera.lookAt(controls.target); cameraFlight = null } } },
+    setFocus(value) { focused = value; stylesDirty = true; lastLabels = 0; wake() },
+    setAnimated(value) { animated = value; wake(); if (!value) { touring = false; if (cameraFlight) { camera.position.copy(cameraFlight.to); controls.target.copy(cameraFlight.targetTo); camera.lookAt(controls.target); cameraFlight = null } } },
     setTour(value) { touring = value; if (value) { fly = false; controls.enabled = true; animated = true; lastTour = -1e6 } },
     dispose() {
       disposed = true
@@ -550,9 +591,10 @@ export function createGraphScene(options: SceneOptions): SceneController {
       canvas.removeEventListener('pointerdown', onDown); canvas.removeEventListener('pointermove', onMove); canvas.removeEventListener('pointerup', onUp)
       canvas.removeEventListener('pointerleave', onLeave); canvas.removeEventListener('pointercancel', onBlur); canvas.removeEventListener('dblclick', onDouble)
       canvas.removeEventListener('keydown', onKeyDown); canvas.removeEventListener('keyup', onKeyUp); canvas.removeEventListener('blur', onBlur); canvas.removeEventListener('webglcontextlost', onContextLost)
-      controls.removeEventListener('start', onControlStart)
+      controls.removeEventListener('start', onControlStart); controls.removeEventListener('change', wake)
+      disposeContent()
       geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); textures.forEach(t => t.dispose())
-      bloom.dispose(); output.dispose(); composer.dispose(); renderer.dispose()
+      bloom.dispose(); output.dispose(); composer.dispose(); renderer.dispose(); renderer.forceContextLoss()
       canvas.remove(); relationLabel.remove(); slots.forEach(slot => slot.button.remove())
     },
   }

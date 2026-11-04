@@ -104,7 +104,8 @@ export function Graph3D(props: Graph3DProps) {
     <div ref={labelsRef} className="graph3d-labels" />
     {nodes.length === 0 && <div className="graph3d-empty"><Sparkles size={30} /><strong>Your graph starts here</strong><span>Add entity types or entities to explore their connections in 3D.</span></div>}
     <div className="graph3d-vignette" />
-    {fullscreen && (selected || selectedRelation) && <aside className="graph3d-detail-panel" aria-label="Selected graph item">
+    {/* The panel is this view's inspector: its presses must not reach a host's click-away handlers. */}
+    {fullscreen && (selected || selectedRelation) && <aside className="graph3d-detail-panel" aria-label="Selected graph item" onPointerDown={event => event.stopPropagation()}>
       <span className="graph3d-detail-kind">{selected ? selected.subtitle || selected.typeKey : 'Relationship'}</span>
       <h3>{selected?.label || selectedRelation?.label}</h3>
       {selected?.description && <p>{selected.description}</p>}

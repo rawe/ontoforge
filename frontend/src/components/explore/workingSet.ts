@@ -166,13 +166,13 @@ export function workingSetReducer(
     case 'addEdges': {
       const nodeIds = new Set(state.nodes.map((n) => n.id))
       const edgeIds = new Set(state.edges.map((e) => e.id))
+      // Skips relations already drawn and repeats within the batch, so each id is one edge.
       const fresh = action.relations
-        .filter(
-          (r) =>
-            !edgeIds.has(r._id) &&
-            nodeIds.has(r.fromEntityId) &&
-            nodeIds.has(r.toEntityId),
-        )
+        .filter((r) => {
+          if (edgeIds.has(r._id) || !nodeIds.has(r.fromEntityId) || !nodeIds.has(r.toEntityId)) return false
+          edgeIds.add(r._id)
+          return true
+        })
         .map(makeEdge)
       if (fresh.length === 0) return state
       return { nodes: state.nodes, edges: [...state.edges, ...fresh] }

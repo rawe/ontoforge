@@ -52,7 +52,7 @@ import { ExploreGraph3D } from './ExploreGraph3D'
 import { NodePanel } from './NodePanel'
 import { RelationEdge } from './RelationEdge'
 import { QuickLoadDialog } from './QuickLoadDialog'
-import { planRelationReads, sampleEntities } from './quickLoad'
+import { connectingRelations, planRelationReads, sampleEntities } from './quickLoad'
 import { useAskDock } from './useAskDock'
 import {
   MAX_NODES,
@@ -365,7 +365,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
     const failed = results.find(result => result.status === 'rejected')
     if (failed?.status === 'rejected') throw failed.reason
     const pages = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
-    const relations = pages.flatMap(page => page.items.filter(relation => ids.has(relation.fromEntityId) && ids.has(relation.toEntityId)))
+    const relations = connectingRelations(pages, ids)
     if (!addEntities(entities)) throw new Error(capMessage)
     dispatch({ type: 'addEdges', relations })
     setFitRequest(request => request + 1)

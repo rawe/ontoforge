@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type { EntityInstance } from '../src/api/types.ts'
-import { planRelationReads, sampleEntities } from '../src/components/explore/quickLoad.ts'
+import type { EntityInstance, RelationInstance } from '../src/api/types.ts'
+import { connectingRelations, planRelationReads, sampleEntities } from '../src/components/explore/quickLoad.ts'
 
 const entity = (type: string, index: number): EntityInstance => ({
   _id: `${type}-${index}`, _entityTypeKey: type, _createdAt: '', _updatedAt: '',
@@ -51,4 +51,17 @@ test('quick load reads relations only for the entities it adds, in both directio
     { type: 'reports_to', direction: 'incoming', entityId: 'person-1' },
   ])
   assert.deepEqual(planRelationReads(types, []), [])
+})
+
+test('quick load keeps one copy of a relation returned by both directions and drops off-canvas ends', () => {
+  const relation = (id: string, from: string, to: string) =>
+    ({ _id: id, _relationTypeKey: 'reports_to', fromEntityId: from, toEntityId: to }) as RelationInstance
+  const page = (items: RelationInstance[]) => ({ items, total: items.length, limit: 200, offset: 0 })
+  const between = relation('r1', 'a', 'b')
+  const self = relation('r2', 'a', 'a')
+  const result = connectingRelations(
+    [page([between, self, relation('r3', 'a', 'elsewhere')]), page([between, self])],
+    new Set(['a', 'b']),
+  )
+  assert.deepEqual(result.map(r => r._id), ['r1', 'r2'])
 })

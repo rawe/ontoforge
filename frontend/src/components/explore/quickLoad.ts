@@ -1,4 +1,4 @@
-import type { EntityInstance, ListResponse } from '../../api/types.ts'
+import type { EntityInstance, ListResponse, RelationInstance } from '../../api/types.ts'
 import { mapBounded } from './answerCanvas.ts'
 
 /** Read a balanced sample, paging past existing nodes without exceeding the requested addition. */
@@ -58,4 +58,21 @@ export function planRelationReads(
     ...(entity._entityTypeKey === type.fromEntityTypeKey ? [{ type: type.key, direction: 'outgoing' as const, entityId: entity._id }] : []),
     ...(entity._entityTypeKey === type.toEntityTypeKey ? [{ type: type.key, direction: 'incoming' as const, entityId: entity._id }] : []),
   ]))
+}
+
+/**
+ * The relations from the planned reads whose ends are both on the canvas, each once: a
+ * relation between two added entities, or a self-relation, comes back from both directions.
+ */
+export function connectingRelations(
+  pages: readonly ListResponse<RelationInstance>[],
+  onCanvas: ReadonlySet<string>,
+): RelationInstance[] {
+  const byId = new Map<string, RelationInstance>()
+  for (const page of pages) {
+    for (const relation of page.items) {
+      if (onCanvas.has(relation.fromEntityId) && onCanvas.has(relation.toEntityId)) byId.set(relation._id, relation)
+    }
+  }
+  return [...byId.values()]
 }

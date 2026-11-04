@@ -48,6 +48,7 @@ import { CanvasToolbar, SelectionBar, type TypeFilterEntry } from './CanvasToolb
 import { ConnectDialog, type ConnectPair } from './ConnectDialog'
 import { EdgePopover } from './EdgePopover'
 import { EntityNode } from './EntityNode'
+import { ExploreGraph3D } from './ExploreGraph3D'
 import { NodePanel } from './NodePanel'
 import { RelationEdge } from './RelationEdge'
 import { useAskDock } from './useAskDock'
@@ -134,6 +135,15 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
   const containerRef = useRef<HTMLDivElement>(null)
   const [hydrated, setHydrated] = useState(false)
   const [hiddenTypes, setHiddenTypes] = useState<ReadonlySet<string>>(new Set())
+  const graphView = searchParams.get('view') === '3d' ? '3d' : '2d'
+  const setGraphView = useCallback((view: '2d' | '3d') => {
+    const next = new URLSearchParams(searchParams)
+    if (view === '3d') next.set('view', '3d')
+    else next.delete('view')
+    setSearchParams(next)
+  }, [searchParams, setSearchParams])
+  const [fitRequest, setFitRequest] = useState(0)
+  const [revealRequest, setRevealRequest] = useState(0)
   /** The Hierarchy edges filter: only parent relations' edges show; no node moves. */
   const [hierarchyOnly, setHierarchyOnly] = useState(false)
   const [connectPair, setConnectPair] = useState<ConnectPair | null>(null)
@@ -263,6 +273,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
 
   const centerOn = useCallback(
     (position: XYPosition) => {
+      setRevealRequest((request) => request + 1)
       void reactFlow.setCenter(
         position.x + NODE_WIDTH / 2,
         position.y + NODE_HEIGHT / 2,
@@ -428,6 +439,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
       const onCanvas = new Set([...wsRef.current.nodes.map((n) => n.id), ...fetched.map((e) => e._id)])
       await addAnswerEdges(answer, onCanvas)
       if (fetched.length > 0) {
+        setFitRequest((request) => request + 1)
         window.setTimeout(() => {
           void reactFlow.fitView({ ...fitOptions(), duration: 300 })
         }, 60)
@@ -478,6 +490,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
       )
       const entities = results.flatMap((res) => (res.status === 'fulfilled' ? [res.value] : []))
       if (entities.length > 0 && addEntities(entities)) {
+        setFitRequest((request) => request + 1)
         window.setTimeout(() => {
           void reactFlow.fitView({ ...fitOptions(), duration: 300 })
         }, 60)
@@ -546,6 +559,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
   )
 
   const relayout = useCallback(() => {
+    setFitRequest((request) => request + 1)
     const positions = relayoutPositions(wsRef.current.nodes, wsRef.current.edges)
     setRelayouting(true)
     dispatch({ type: 'setPositions', positions })
@@ -556,6 +570,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
   }, [reactFlow, fitOptions])
 
   const fit = useCallback(() => {
+    setFitRequest((request) => request + 1)
     void reactFlow.fitView({ ...fitOptions(), duration: 300 })
   }, [reactFlow, fitOptions])
 
@@ -569,6 +584,8 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
   // F = fit view, P = pin toggle, A = ask dock (Delete/Backspace handled by React Flow).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // The 3D canvas owns its movement keys while exploring in space.
+      if (graphView === '3d') return
       if (e.metaKey || e.ctrlKey || e.altKey) return
       const target = e.target as HTMLElement | null
       if (
@@ -591,7 +608,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [fit, togglePinSelection, askOff, dock])
+  }, [fit, togglePinSelection, askOff, dock, graphView])
 
   /* ------------------------------ derived state ------------------------------ */
 
@@ -707,7 +724,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
         />
       )}
       <div ref={containerRef} className="relative h-full min-w-0 flex-1">
-        <div className={relayouting ? 'of-relayout h-full w-full' : 'h-full w-full'}>
+        <div className={`${relayouting ? 'of-relayout ' : ''}h-full w-full${graphView === '3d' ? ' invisible pointer-events-none' : ''}`} aria-hidden={graphView === '3d' || undefined} inert={graphView === '3d' || undefined}>
           <ReactFlow<EntityFlowNode, RelationFlowEdge>
             nodes={rfNodes}
             edges={rfEdges}
@@ -720,7 +737,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
             colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
             minZoom={0.1}
             maxZoom={2.5}
-            deleteKeyCode={['Backspace', 'Delete']}
+            deleteKeyCode={graphView === '2d' ? ['Backspace', 'Delete'] : null}
             multiSelectionKeyCode={['Meta', 'Shift']}
             onEdgeClick={(event, edge) =>
               setEdgePopover({ id: edge.id, x: event.clientX, y: event.clientY })
@@ -740,6 +757,32 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
           </ReactFlow>
         </div>
 
+        {graphView === '3d' && (
+          <div className="absolute inset-0">
+            <ExploreGraph3D
+              nodes={rfNodes}
+              edges={rfEdges}
+              schema={schema}
+              title={`${schema.lens.name} · Working set`}
+              selectedNodeId={panelNode?.id ?? null}
+              selectedEdgeId={edgePopover?.id ?? null}
+              fitRequest={fitRequest}
+              revealRequest={revealRequest}
+              onSelectNode={(id) => {
+                selectOnly(id)
+                setEdgePopover(null)
+                if (id === null) setShownEntity(null)
+              }}
+              onSelectEdge={(id, at) => {
+                selectOnly(null)
+                setEdgePopover({ id, ...at })
+              }}
+              onHoverNode={setHoveredNode}
+              onExit3D={() => setGraphView('2d')}
+            />
+          </div>
+        )}
+
         <CanvasToolbar
           nodeCount={ws.nodes.length}
           pinnedCount={pinnedCount}
@@ -747,6 +790,11 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
           onSearch={openPalette}
           onFit={fit}
           onRelayout={relayout}
+          view={{ mode: graphView, onChange: (mode) => {
+            setGraphView(mode)
+            setEdgePopover(null)
+            setHoveredNode(null)
+          } }}
           onClear={(mode) => dispatch({ type: 'clear', mode })}
           onToggleType={(typeKey) =>
             setHiddenTypes((prev) => {

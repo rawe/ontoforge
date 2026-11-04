@@ -1,0 +1,55 @@
+.graph3d-root{position:relative;isolation:isolate;width:100%;height:100%;min-height:280px;overflow:hidden;background:#070d1b;color:#e2edf9;font-family:inherit}
+.graph3d-root:fullscreen{width:100vw;height:100vh}
+.graph3d-mount,.graph3d-labels,.graph3d-vignette{position:absolute;inset:0}
+.graph3d-canvas{display:block;width:100%;height:100%;outline:none;touch-action:none;cursor:grab}
+.graph3d-canvas:focus-visible{outline:2px solid #7cddeb;outline-offset:-3px}
+.graph3d-root[data-fly] .graph3d-canvas{cursor:crosshair}
+.graph3d-vignette{pointer-events:none;background:radial-gradient(ellipse at 50% 40%,transparent 35%,#02071166 100%);z-index:1}
+.graph3d-labels{pointer-events:none;z-index:2;overflow:hidden}
+.graph3d-label{position:absolute;top:0;left:0;display:flex;flex-direction:column;align-items:center;max-width:220px;min-width:68px;padding:5px 9px 6px;border:1px solid transparent;border-radius:7px;color:#eef6ff;background:linear-gradient(180deg,#091221b8,#09122155);text-align:center;cursor:pointer;pointer-events:auto;line-height:1.35;transition:border-color .15s,background .15s;box-shadow:0 3px 16px #0002;text-shadow:0 1px 4px #0009}
+.graph3d-label[hidden]{display:none}
+.graph3d-label:hover,.graph3d-label:focus-visible{border-color:var(--node-color);background:#0c1a2eeb;outline:none}
+.graph3d-label.is-selected{border-color:var(--node-color);background:#0d1d32e8;box-shadow:0 0 22px color-mix(in srgb,var(--node-color) 17%,transparent)}
+.graph3d-label-name{max-width:195px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600;letter-spacing:.01em}
+.graph3d-label-meta{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px;color:var(--node-color);letter-spacing:.035em}
+.graph3d-label-detail{max-width:200px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:4px;font-size:10px;color:#a9bbd0;text-align:left}
+.graph3d-label-detail[hidden]{display:none}
+.graph3d-relation-label{position:absolute;left:0;top:0;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 11px;border:1px solid #71d2e866;border-radius:20px;background:#0a192def;color:#c8f4ff;font-size:11px;box-shadow:0 4px 24px #0005;pointer-events:none}
+.graph3d-relation-label[hidden]{display:none}
+.graph3d-hud{position:absolute;z-index:4;bottom:18px;left:20px;right:20px;width:fit-content;max-width:calc(100% - 40px);pointer-events:none;filter:drop-shadow(0 3px 12px #02071199)}
+.graph3d-caption{display:flex;align-items:center;gap:8px;margin-bottom:9px;font-size:11px;font-weight:500;color:#c7d7e8;letter-spacing:.025em}
+.graph3d-live-dot{width:5px;height:5px;flex-shrink:0;border-radius:100%;background:#6de5d6;box-shadow:0 0 9px #6de5d666}
+.graph3d-count{margin-left:5px;font-size:10px;color:#839bb5;font-weight:400}
+.graph3d-controls{display:flex;align-items:center;flex-wrap:wrap;gap:3px;padding:5px;border:1px solid #7190b52e;border-radius:11px;background:#0c1729e6;backdrop-filter:blur(16px);box-shadow:inset 0 1px #bbd8f40a,0 8px 32px #0003;pointer-events:auto;width:fit-content}
+.graph3d-controls button,.graph3d-search button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:31px;height:31px;border:0;border-radius:6px;padding:0 8px;background:transparent;color:#a8bdd3;font:inherit;font-size:11px;cursor:pointer;transition:background .15s,color .15s}
+.graph3d-controls button:hover,.graph3d-search button:hover{background:#283d58;color:#f0f7ff}
+.graph3d-controls button[aria-pressed=true]{color:#9bedf3;background:#234254b8}
+.graph3d-controls button:disabled{opacity:.3;cursor:default}
+.graph3d-controls button:focus-visible,.graph3d-search button:focus-visible{outline:2px solid #7cddeb;outline-offset:1px}
+.graph3d-divider{height:17px;width:1px;margin:0 3px;background:#8baac526}
+.graph3d-flight-icon{font-size:20px;line-height:1;font-weight:300;transform:rotate(-9deg)}
+.graph3d-hint{margin:8px 0 0 2px;color:#849ab3;font-size:10px;line-height:1.5;max-width:600px}
+.graph3d-search{width:300px;max-width:100%;margin-bottom:12px;border:1px solid #6e8daa55;border-radius:11px;background:#0b1729f7;box-shadow:0 14px 40px #0005;overflow:hidden;pointer-events:auto}
+.graph3d-search-field{display:flex;align-items:center;gap:8px;padding:8px 9px;color:#91bbd3;border-bottom:1px solid #7190b52e}
+.graph3d-search input{width:100%;min-width:0;padding:5px 0;border:0;outline:none;background:none;color:#e6f4ff;font:inherit;font-size:12px}
+.graph3d-search input::placeholder{color:#7d93ab}
+.graph3d-search-results{max-height:250px;overflow:auto;padding:4px}
+.graph3d-search-results button{display:flex;justify-content:space-between;width:100%;gap:12px;text-align:left}
+.graph3d-search-results button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.graph3d-search-results small{color:#7d9bb7;font-size:10px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.graph3d-search-results p{padding:14px;color:#8da5bc;font-size:12px}
+.graph3d-empty{position:absolute;z-index:3;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none;text-align:center;padding:30px;color:#9bb8d3}
+.graph3d-empty strong{font-size:18px;font-weight:500;color:#dfedf9}
+.graph3d-empty span{max-width:320px;font-size:12px;line-height:1.6}
+.graph3d-fallback{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:280px;height:100%;padding:30px;background:#0b1424;color:#b8cce1;text-align:center}
+.graph3d-fallback h3{font-size:17px;font-weight:500;color:#e2edf8;margin:0}
+.graph3d-fallback p{max-width:350px;font-size:13px;line-height:1.6;margin:0}
+.graph3d-fallback button{display:flex;align-items:center;gap:8px;padding:9px 13px;margin-top:5px;border:1px solid #61819966;border-radius:7px;background:#18374a;color:#d7f4ff;font:inherit;font-size:12px;cursor:pointer}
+@media(max-width:650px){.graph3d-hud{left:10px;bottom:10px;max-width:calc(100% - 20px)}.graph3d-caption{font-size:10px}.graph3d-count{font-size:9px}.graph3d-controls{gap:1px}.graph3d-controls button{padding:0 6px;min-width:28px;height:29px}.graph3d-hint{font-size:9px;max-width:320px}.graph3d-label-name{font-size:11px}.graph3d-label{max-width:160px}.graph3d-label-detail{max-width:145px}}
+@media(prefers-reduced-motion:reduce){.graph3d-root *{transition:none!important}}
+.graph3d-detail-panel{position:absolute;z-index:5;right:20px;top:20px;width:280px;max-height:calc(100% - 170px);overflow:auto;padding:18px;border:1px solid #799cb338;border-radius:12px;background:#0b1729eb;backdrop-filter:blur(14px);box-shadow:0 12px 40px #0004}
+.graph3d-detail-kind{font-size:10px;letter-spacing:.04em;color:#7ddce4}
+.graph3d-detail-panel h3{font-size:18px;font-weight:550;margin:5px 0 12px;color:#ecf6ff}
+.graph3d-detail-panel p{font-size:12px;line-height:1.6;color:#a9bed2;margin-bottom:12px}
+.graph3d-detail-panel button{display:flex;align-items:center;gap:6px;border:1px solid #6c9eb544;background:#1d394e;color:#c0edf5;border-radius:6px;padding:6px 8px;font-size:11px;cursor:pointer}
+.graph3d-detail-panel dl{margin:16px 0 0}.graph3d-detail-panel dl>div{padding:9px 0;border-top:1px solid #7093b021}.graph3d-detail-panel dt{font-size:10px;color:#809eb7}.graph3d-detail-panel dd{font-size:12px;color:#c9dce9;margin:3px 0 0;overflow-wrap:anywhere}

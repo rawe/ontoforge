@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
-import { ArrowLeft, Crosshair, Focus, Maximize2, Minimize2, Orbit, Pause, Play, Search, Sparkles, X } from 'lucide-react'
+import { ArrowLeft, Crosshair, Focus, Maximize2, Minimize2, Orbit, Pause, Play, Search, Sparkles, Square, Waves, X } from 'lucide-react'
 import type { Graph3DProps } from './types'
 import { createGraphScene, type SceneController, type SceneView } from './scene'
 import { followTourDetails, manualDetail, manualDetails, reconcileDetails, shownDetail, type DetailItem, type DetailState } from './details'
@@ -24,6 +24,8 @@ export function Graph3D(props: Graph3DProps) {
   const [focus, setFocus] = useState(false)
   const [animated, setAnimated] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
   const [tour, setTour] = useState(false)
+  const [tourPaused, setTourPaused] = useState(false)
+  if (!tour && tourPaused) setTourPaused(false)
   const [details, setDetails] = useState<DetailState>({ manualNodeId: selectedNodeId, manualEdgeId: selectedEdgeId, tourNodeId: null, followTour: true, pinned: null })
   const reconciledDetails = reconcileDetails(details, selectedNodeId, selectedEdgeId, nodes, edges)
   if (reconciledDetails !== details) {
@@ -93,6 +95,7 @@ export function Graph3D(props: Graph3DProps) {
   useEffect(() => { sceneRef.current?.setFocus(focus, selectedNodeId) }, [topology, focus, selectedNodeId, failed])
   useEffect(() => { sceneRef.current?.setAnimated(animated) }, [topology, animated, failed])
   useEffect(() => { sceneRef.current?.setTour(tour) }, [topology, tour, failed])
+  useEffect(() => { sceneRef.current?.setTourPaused(tourPaused) }, [topology, tour, tourPaused, failed])
   useEffect(() => { if (fitRequest !== undefined) sceneRef.current?.fit() }, [fitRequest])
   useEffect(() => { if (revealRequest !== undefined) revealSelected() }, [revealRequest])
   useEffect(() => {
@@ -131,7 +134,7 @@ export function Graph3D(props: Graph3DProps) {
     {/* The panel is this view's inspector: its presses must not reach a host's click-away handlers. */}
     {fullscreen && (selected || selectedRelation || tour) && <aside className="graph3d-detail-panel" aria-label="Graph details" onPointerDown={event => event.stopPropagation()}>
       <label className="graph3d-follow-tour"><input type="checkbox" checked={details.followTour} onChange={event => { const followTour = event.target.checked; setDetails(state => followTourDetails(state, followTour)) }} /> Follow tour</label>
-      <span className="graph3d-detail-source">{previewingTour ? tour ? 'Tour stop' : 'Last tour stop' : !details.followTour && details.pinned ? 'Pinned details' : 'Selected item'}</span>
+      <span className="graph3d-detail-source">{previewingTour ? tour ? tourPaused ? 'Paused tour stop' : 'Tour stop' : 'Last tour stop' : !details.followTour && details.pinned ? 'Pinned details' : 'Selected item'}</span>
       {!selected && !selectedRelation && <p>{details.followTour ? 'The next tour stop will appear here.' : 'Select a node to pin its details, or enable Follow tour.'}</p>}
       {(selected || selectedRelation) && <><span className="graph3d-detail-kind">{selected ? selected.subtitle || selected.typeKey : 'Relationship'}</span><h3>{selected?.label || selectedRelation?.label}</h3></>}
       {selected?.description && <p>{selected.description}</p>}
@@ -168,11 +171,12 @@ export function Graph3D(props: Graph3DProps) {
         <button type="button" aria-label="Fly" title="Fly: drag to look, WASD to move, Q/E for height, Shift to accelerate, Escape to stop" aria-pressed={fly} onClick={() => { setFly(v => !v); setTour(false) }}><span className="graph3d-flight-icon">↗</span><span>Fly</span></button>
         <span className="graph3d-divider" />
         <button type="button" title={selectedNodeId ? 'Focus on the selected node and its neighbours' : 'Select a node to focus on its neighbours'} aria-label="Focus on neighbours" aria-pressed={focus} disabled={!selectedNodeId} onClick={() => { takeControl(); setFocus(v => !v) }}><Focus size={16} /></button>
-        <button type="button" title={tour ? 'Stop guided tour' : 'Take a guided tour'} aria-pressed={tour} disabled={!nodes.some(node => !node.dimmed)} onClick={() => { setTour(v => !v); setFly(false); if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) setAnimated(true) }}><Sparkles size={16} /><span>Tour</span></button>
-        <button type="button" title={animated ? 'Pause scene animation' : 'Resume scene animation'} aria-label={animated ? 'Pause scene animation' : 'Resume scene animation'} aria-pressed={!animated} onClick={() => { setAnimated(v => !v); setTour(false) }}>{animated ? <Pause size={15} /> : <Play size={15} />}</button>
+        <button type="button" title={tour ? 'Stop guided tour' : 'Take a guided tour'} aria-pressed={tour} disabled={!nodes.some(node => !node.dimmed)} onClick={() => { setTour(v => !v); setTourPaused(false); setFly(false) }}>{tour ? <Square size={15} /> : <Sparkles size={16} />}<span>{tour ? 'Stop tour' : 'Tour'}</span></button>
+        {tour && <button type="button" title={tourPaused ? 'Resume tour' : 'Pause tour'} aria-label={tourPaused ? 'Resume tour' : 'Pause tour'} onClick={() => setTourPaused(value => !value)}>{tourPaused ? <Play size={15} /> : <Pause size={15} />}<span>{tourPaused ? 'Resume' : 'Pause'}</span></button>}
+        <button type="button" title="Animate particles, highlights and the slow tour orbit" aria-label="Motion" aria-pressed={animated} onClick={() => setAnimated(value => !value)}><Waves size={15} /><span>Motion</span></button>
         <button type="button" title={fullscreen ? 'Exit full screen' : 'Full screen'} aria-label={fullscreen ? 'Exit full screen' : 'Full screen'} onClick={() => void toggleFullscreen()}>{fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
       </div>
-      <div className="graph3d-hint" aria-live="polite">{fullscreenError ? 'Full screen is unavailable in this browser.' : fly ? 'Drag to look · W A S D move · Q / E height · Shift boost · Esc orbit' : tour ? 'Guided tour · drag the scene to take control' : selectedRelation ? `Relationship: ${selectedRelation.label}` : selected ? `${selected.label} · double-click to approach` : 'Drag to orbit · scroll to approach · click to inspect · double-click to fly to a node'}</div>
+      <div className="graph3d-hint" aria-live="polite">{fullscreenError ? 'Full screen is unavailable in this browser.' : fly ? 'Drag to look · W A S D move · Q / E height · Shift boost · Esc orbit' : tour ? tourPaused ? 'Tour paused · resume to continue from here' : 'Guided tour · drag the scene to take control' : selectedRelation ? `Relationship: ${selectedRelation.label}` : selected ? `${selected.label} · double-click to approach` : 'Drag to orbit · scroll to approach · click to inspect · double-click to fly to a node'}</div>
     </div>
   </div>
 }

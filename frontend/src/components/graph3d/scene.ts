@@ -8,6 +8,7 @@ import type { Graph3DNode, Graph3DEdge } from './types'
 import { edgeLanes, hashKey, layoutGraph } from './layout'
 import { getTypeColor } from '@/lib/typeColors'
 import { focusNeighborhood } from './focus'
+import { PlaybackClock } from './playback'
 
 export interface SceneOptions {
   nodes: readonly Graph3DNode[]
@@ -40,6 +41,7 @@ export interface SceneController {
   setFocus: (value: boolean, anchor: string | null) => void
   setAnimated: (value: boolean) => void
   setTour: (value: boolean) => void
+  setTourPaused: (value: boolean) => void
   setReducedMotion: (value: boolean) => void
 }
 
@@ -286,12 +288,13 @@ export function createGraphScene(options: SceneOptions): SceneController {
   wake()
   }
 
+  const playbackClock = new PlaybackClock()
   let cameraFlight: { start: number; from: THREE.Vector3; to: THREE.Vector3; targetFrom: THREE.Vector3; targetTo: THREE.Vector3 } | null = null
   const moveTo = (position: THREE.Vector3, target: THREE.Vector3) => {
-    if (reducedMotion || !animated) {
+    if (reducedMotion) {
       camera.position.copy(position); controls.target.copy(target); camera.lookAt(target); controls.update()
       cameraFlight = null; wake()
-    } else cameraFlight = { start: performance.now(), from: camera.position.clone(), to: position, targetFrom: controls.target.clone(), targetTo: target }
+    } else cameraFlight = { start: playbackClock.time(performance.now()), from: camera.position.clone(), to: position, targetFrom: controls.target.clone(), targetTo: target }
   }
   const fit = () => {
     const aspect = Math.max(0.4, camera.aspect)
@@ -519,12 +522,14 @@ export function createGraphScene(options: SceneOptions): SceneController {
     frameId = requestAnimationFrame(frame)
     const delta = Math.min(clock.getDelta(), 0.05)
     if (document.hidden || !visible) return
-    if (!fly) controls.update()
-    if (!animated && !touring && !cameraFlight && !stylesDirty && !(fly && keys.size) && now > renderUntil) return
+    const paused = touring && playbackClock.paused
+    const playbackNow = playbackClock.time(now)
+    if (!fly && !paused) controls.update()
+    if (!animated && (!touring || paused) && (!cameraFlight || paused) && !stylesDirty && !(fly && keys.size) && now > renderUntil) return
     if (animated) elapsed += delta
     if (stylesDirty) updateStyles()
-    if (cameraFlight) {
-      const t = Math.min(1, (now - cameraFlight.start) / 1250)
+    if (cameraFlight && !paused) {
+      const t = Math.min(1, (playbackNow - cameraFlight.start) / 1250)
       const ease = t * t * (3 - 2 * t)
       camera.position.lerpVectors(cameraFlight.from, cameraFlight.to, ease)
       controls.target.lerpVectors(cameraFlight.targetFrom, cameraFlight.targetTo, ease)
@@ -538,12 +543,12 @@ export function createGraphScene(options: SceneOptions): SceneController {
         camera.position.add(localMove); controls.target.add(localMove)
       }
     }
-    if (touring && nodes.length) {
+    if (touring && !paused && nodes.length) {
       const stops = nodes.filter(node => !node.dimmed && (!focused || !focusAnchor || neighbours.has(node.id)))
       if (!stops.length) { touring = false; cameraFlight = null; options.onNavigation() }
-      else if (now - lastTour > 6000) {
+      else if (playbackNow - lastTour > 6000) {
         const node = stops[tourIndex++ % stops.length]
-        focus(node.id); lastTour = now; tourNodeId = node.id
+        focus(node.id); lastTour = playbackNow; tourNodeId = node.id
         options.onTourNode(node.id)
       } else if (animated && !reducedMotion && !cameraFlight) {
         const offset = camera.position.clone().sub(controls.target)
@@ -593,12 +598,19 @@ export function createGraphScene(options: SceneOptions): SceneController {
     select(nodeId, edgeId) { selectedNode = nodeId; selectedEdge = edgeId; stylesDirty = true; lastLabels = 0; wake() },
     setFly(value) { fly = value; controls.enabled = !value; keys.clear(); if (value) { touring = false; cameraFlight = null; canvas.focus({ preventScroll: true }) } },
     setFocus(value, anchor) { focused = value; focusAnchor = anchor && nodeIds.has(anchor) ? anchor : null; stylesDirty = true; lastLabels = 0; wake() },
-    setAnimated(value) { animated = value; wake(); if (!value) { touring = false; if (cameraFlight) { camera.position.copy(cameraFlight.to); controls.target.copy(cameraFlight.targetTo); camera.lookAt(controls.target); cameraFlight = null } } },
+    setAnimated(value) { animated = value; wake() },
     setTour(value) {
+      if (!value) playbackClock.resume(performance.now())
       if (value === touring) return
       touring = value
-      if (value) { fly = false; controls.enabled = true; tourIndex = 0; lastTour = -1e6; wake() }
+      if (value) { playbackClock.resume(performance.now()); fly = false; controls.enabled = true; tourIndex = 0; lastTour = -1e6; wake() }
       else cameraFlight = null
+    },
+    setTourPaused(value) {
+      if (!touring) return
+      if (value) playbackClock.pause(performance.now())
+      else playbackClock.resume(performance.now())
+      wake()
     },
     setReducedMotion(value) { reducedMotion = value },
     dispose() {

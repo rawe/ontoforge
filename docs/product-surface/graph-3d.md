@@ -35,7 +35,9 @@ off to pin the currently displayed details while the camera continues. Turning i
 back on resumes the current tour stop. Stopping the tour or dragging to take control
 keeps the last stop's details; manually selecting or searching for an item takes over
 the panel. Reduced-motion preferences make tour travel immediate and disable its
-automatic orbit.
+automatic orbit. **Pause** holds the current camera position and detail stop without
+ending the tour; **Resume** continues the remaining camera travel and stop time.
+**Stop tour** ends it. Manual navigation or selection takes control even while paused.
 
 **Full screen** expands the scene and shows its detail panel. In Studio this includes
 the type's full description and property definitions. In Workbench it shows the
@@ -51,7 +53,8 @@ The 3D scene has its own spatial layout; it does not write the 2D layout. Existi
 node positions are retained while adding neighbours to a mounted scene. Returning
 to 2D restores its canvas. The 3D scene loads only when opened.
 
-The animation control pauses pulses and camera transitions. Reduced-motion
-preferences disable automatic animation and make camera travel immediate. Rendering
+**Motion** independently toggles particles, rotating highlights and the slow orbit
+around a tour stop; it does not stop the tour or disable navigation transitions.
+Reduced-motion preferences disable automatic animation and make camera travel immediate. Rendering
 is suspended while the scene is offscreen or the browser tab is hidden. When WebGL
 is unavailable or its context is lost, the scene offers **Return to 2D**.

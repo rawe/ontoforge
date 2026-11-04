@@ -85,3 +85,27 @@ test('an ontology key that reads like a path segment does not confuse parsing', 
     prop: null,
   })
 })
+
+test('3D addresses preserve entity, relation and property selections', () => {
+  const states: SchemaUrlState[] = [
+    { view: '3d', sel: null, prop: null },
+    { view: '3d', sel: { kind: 'entity-types', key: 'person' }, prop: 'email' },
+    { view: '3d', sel: { kind: 'relation-types', key: 'works_on' }, prop: 'since' },
+  ]
+  for (const state of states) assert.deepEqual(roundTrip(state), state)
+  assert.equal(buildSchemaUrl(OK, '3d', null, 'email'), '/o/org_graph/studio/schema/3d')
+  assert.deepEqual(parseSchemaUrl('/o/org_graph/studio/schema/3d', '?prop=email'), states[0])
+})
+
+test('switching among all views retains the selection and property in each address', () => {
+  const selection = { kind: 'relation-types', key: 'works_on' } as const
+  // Each pushed address is self-contained, so browser history restores the selected property.
+  const history = ['graph', '3d', 'classic', '3d'] as const
+  const addresses = history.map((view) => buildSchemaUrl(OK, view, selection, 'since'))
+  for (const index of [3, 2, 1, 0, 1, 2]) {
+    const url = new URL(addresses[index]!, 'http://x')
+    assert.deepEqual(parseSchemaUrl(url.pathname, url.search), {
+      view: history[index], sel: selection, prop: 'since',
+    })
+  }
+})

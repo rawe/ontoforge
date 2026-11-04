@@ -140,6 +140,7 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/w/{lensKey}/t/{typeKey}?new=1` | The table, with quick add open and pre-scoped to the type |
 | `/o/{ontologyKey}/w/{lensKey}/e/{typeKey}/{id}` | One entity's detail page |
 | `/o/{ontologyKey}/w/{lensKey}/explore` | The canvas, restored from the saved working set |
+| `/o/{ontologyKey}/w/{lensKey}/explore?view=3d` | The same working set in the [3D explorer](graph-3d.md); combines with `focus` |
 | `/o/{ontologyKey}/w/{lensKey}/explore?focus={typeKey}:{id}` | The canvas with that entity added, selected and centred |
 | `/o/{ontologyKey}/w/{lensKey}/query` | The query console |
 | `/o/{ontologyKey}/w/{lensKey}/query?query={text}` | The console with the query prefilled |
@@ -153,6 +154,7 @@ Workbench addresses live under `/o/{ontologyKey}/w/{lensKey}`, Studio addresses 
 | `/o/{ontologyKey}/w/{lensKey}/changesets/{changesetId}` | One changeset's review |
 | `/o/{ontologyKey}/studio` · `/o/{ontologyKey}/studio/schema` | Redirects to the schema graph |
 | `/o/{ontologyKey}/studio/schema/graph` | The [schema graph](schema-editing.md#schema-graph), nothing selected |
+| `/o/{ontologyKey}/studio/schema/3d[?sel=entity:{typeKey}\|relation:{typeKey}][&prop={propertyKey}]` | The [3D schema](schema-editing.md#3d-schema), with the same selection and property parameters as Graph |
 | `/o/{ontologyKey}/studio/schema/graph?sel=entity:{typeKey}` · `?sel=relation:{typeKey}` | The graph with that type selected and revealed, its inspector open |
 | `/o/{ontologyKey}/studio/schema/graph?sel=…&prop={propertyKey}` | The same, with that property opened and highlighted |
 | `/o/{ontologyKey}/studio/schema/types` | The classic list |
@@ -200,9 +202,9 @@ Any unrecognised address returns to the root.
 | Inline property edit (multi-line) | Shift+Enter | Newline |
 | Studio inline text | Enter (Cmd/Ctrl+Enter when multi-line) | Save |
 | Studio inline text | Escape | Cancel without saving |
-| Schema screen, both views | Cmd/Ctrl+K | Toggle the [schema command palette](schema-editing.md#schema-command-palette), also while typing |
-| Schema screen, both views | `V` | Switch Graph ⇄ Classic, keeping the selection and the opened property |
-| Schema screen, both views | `/` | Expand the outline and focus its search |
+| Schema screen, all views | Cmd/Ctrl+K | Toggle the [schema command palette](schema-editing.md#schema-command-palette), also while typing |
+| Schema screen, all views | `V` | Switch Graph ⇄ Classic, or leave 3D for Graph, keeping selection and opened property |
+| Schema screen, all views | `/` | Expand the outline and focus its search |
 | Schema graph | `N` | New entity type at the centre of the view |
 | Schema graph | `F` | Toggle focus mode on the selection |
 | Schema graph | `H` | Hide or show the properties on every node |

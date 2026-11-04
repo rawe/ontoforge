@@ -51,6 +51,8 @@ import { EntityNode } from './EntityNode'
 import { ExploreGraph3D } from './ExploreGraph3D'
 import { NodePanel } from './NodePanel'
 import { RelationEdge } from './RelationEdge'
+import { QuickLoadDialog } from './QuickLoadDialog'
+import { sampleEntities } from './quickLoad'
 import { useAskDock } from './useAskDock'
 import {
   MAX_NODES,
@@ -134,6 +136,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
   const rootRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [hydrated, setHydrated] = useState(false)
+  const [quickLoadOpen, setQuickLoadOpen] = useState(false)
   const [hiddenTypes, setHiddenTypes] = useState<ReadonlySet<string>>(new Set())
   const graphView = searchParams.get('view') === '3d' ? '3d' : '2d'
   const setGraphView = useCallback((view: '2d' | '3d') => {
@@ -347,6 +350,33 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
     },
     [centerOn, typeNameOf],
   )
+
+  const quickLoad = useCallback(async (typeKeys: string[], requested: number) => {
+    const current = wsRef.current.nodes
+    const limit = Math.min(requested, MAX_NODES - current.length)
+    if (limit <= 0) throw new Error(capMessage)
+    const entities = await sampleEntities(typeKeys, new Set(current.map(node => node.id)), limit,
+      (key, page) => runtime.listEntities(ontologyKey, lensKey, key, page))
+    const all = [...current.map(node => node.data.entity), ...entities]
+    const ids = new Set(all.map(entity => entity._id))
+    const reads = schemaRef.current.relationTypes.flatMap(type => all
+      .filter(entity => entity._entityTypeKey === type.fromEntityTypeKey)
+      .map(entity => ({ type: type.key, source: entity._id })))
+    const results = await mapBounded(reads, PARALLEL_READS, ({ type, source }) =>
+      runtime.listRelations(ontologyKey, lensKey, type, { fromEntityId: source, limit: 200 }))
+    const failed = results.find(result => result.status === 'rejected')
+    if (failed?.status === 'rejected') throw failed.reason
+    const pages = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
+    const relations = pages.flatMap(page => page.items.filter(relation => ids.has(relation.toEntityId)))
+    if (!addEntities(entities)) throw new Error(capMessage)
+    dispatch({ type: 'addEdges', relations })
+    setFitRequest(request => request + 1)
+    window.setTimeout(() => { void reactFlow.fitView({ ...fitOptions(), duration: 300 }) }, 60)
+    toast.success(entities.length === 0 ? 'No new entities to add. Connections refreshed.' : `Added ${entities.length} entities and their connections.`)
+    if (pages.some(page => page.total > page.items.length)) {
+      toast.info('Some connections were omitted. Expand a node’s relations to explore more.')
+    }
+  }, [ontologyKey, lensKey, addEntities, reactFlow, fitOptions])
 
   const selectOnly = useCallback((id: string | null) => {
     dispatch({
@@ -788,6 +818,7 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
           pinnedCount={pinnedCount}
           types={typeFilters}
           onSearch={openPalette}
+          onQuickLoad={() => setQuickLoadOpen(true)}
           onFit={fit}
           onRelayout={relayout}
           view={{ mode: graphView, onChange: (mode) => {
@@ -825,15 +856,18 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
             <div className="pointer-events-auto flex max-w-md flex-col items-center">
               <EmptyState
                 icon={Waypoints}
-                title="Search to start exploring"
-                description="Find entities and pull them onto the canvas, then expand along their relations."
+                title="Build your working graph"
+                description="Quick load existing entities and their connections, or search for a starting point."
                 action={
-                  <Button size="sm" onClick={openPalette}>
-                    <Search className="size-3.5" /> Search entities
-                    <kbd className="ml-1 rounded border border-primary-foreground/30 px-1 font-mono text-[10px]">
-                      ⌘K
-                    </kbd>
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => setQuickLoadOpen(true)}><Waypoints className="size-3.5" /> Quick load</Button>
+                    <Button size="sm" variant="outline" onClick={openPalette}>
+                      <Search className="size-3.5" /> Search entities
+                      <kbd className="ml-1 rounded border border-primary-foreground/30 px-1 font-mono text-[10px]">
+                        ⌘K
+                      </kbd>
+                    </Button>
+                  </div>
                 }
               />
               {recents.length > 0 && (
@@ -919,6 +953,13 @@ function ExplorerCanvasInner({ ontologyKey, lensKey, schema }: ExplorerCanvasPro
             }}
           />
         )}
+
+        {quickLoadOpen && <QuickLoadDialog
+          types={schema.entityTypes}
+          remaining={MAX_NODES - ws.nodes.length}
+          onClose={() => setQuickLoadOpen(false)}
+          onLoad={quickLoad}
+        />}
 
         <ConnectDialog
           ontologyKey={ontologyKey}

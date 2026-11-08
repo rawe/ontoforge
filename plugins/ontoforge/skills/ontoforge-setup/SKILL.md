@@ -153,7 +153,7 @@ These are the **only** environment variables recognized by the `ontoforge-server
 | `EMBEDDING_API_KEY` | no | *(none)* | API key — **required** when `EMBEDDING_PROVIDER=openai` |
 | `EMBEDDING_DIMENSIONS` | no | `1024` | Vector dimensions — must match what the model returns |
 | `EMBEDDING_BATCH_SIZE` | no | `1` | Texts per embedding request when many texts are embedded together (positive integer) |
-| `EMBEDDING_CONCURRENCY` | no | `1` | Embedding requests in flight at once when many texts are embedded together (positive integer) |
+| `EMBEDDING_CONCURRENCY` | no | `1` | Embedding requests in flight at once when many texts are embedded together (positive integer); this is the upper limit — a request answered with HTTP 429 is retried after the provider's `Retry-After` and lowers the concurrency for the rest of that batch |
 | `SEARCH_MAX_ATTEMPTS` | no | `5` | Failed attempts before a queued search-indexing item counts as failed (positive integer) |
 | `SEARCH_WORKER_BATCH` | no | `64` | Queued search-indexing items the background worker claims per batch (positive integer) |
 | `SEARCH_POLL_MS` | no | `5000` | Milliseconds the background search worker waits between queue checks when no wake-up arrives (positive integer) |

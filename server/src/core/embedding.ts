@@ -14,7 +14,9 @@
  * - `embedBatch(texts)` — many texts, sent `EMBEDDING_BATCH_SIZE` per request
  *   with up to `EMBEDDING_CONCURRENCY` requests in flight; vectors come back
  *   in input order. A failed request THROWS, so a caller that retries can
- *   tell a failure from "no provider".
+ *   tell a failure from "no provider". A request answered with HTTP 429 is
+ *   retried after the provider's `Retry-After`, and each 429 halves the
+ *   concurrency for the rest of that call.
  *
  * With no `EMBEDDING_PROVIDER` configured, no provider is ever installed
  * and every consumer that gates on `getEmbeddingProvider()` — entity
@@ -51,6 +53,25 @@ export interface Batching {
 }
 
 const REQUEST_TIMEOUT_MS = 30_000;
+
+/** Attempts per request when the provider answers HTTP 429. */
+const RATE_LIMIT_ATTEMPTS = 5;
+/** Wait before a 429 retry when `Retry-After` is missing or unparsable. */
+const RATE_LIMIT_DEFAULT_WAIT_MS = 2_000;
+/** Longest wait before a 429 retry, whatever `Retry-After` says. */
+const RATE_LIMIT_MAX_WAIT_MS = 60_000;
+
+/** A non-2xx answer from the provider. */
+class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    /** The raw `Retry-After` header, if any. */
+    readonly retryAfter: string | null,
+    detail: string,
+  ) {
+    super(`HTTP ${status}${detail ? `: ${detail}` : ""}`);
+  }
+}
 
 const NO_BATCHING: Batching = { batchSize: 1, concurrency: 1 };
 
@@ -95,27 +116,67 @@ abstract class HttpEmbeddingProvider implements EmbeddingProvider {
       chunks.push(texts.slice(i, i + this.batching.batchSize));
     }
     const results: number[][][] = new Array(chunks.length);
+    const attempts: number[] = new Array(chunks.length).fill(0);
+    const queue = chunks.map((_, index) => index);
     // The first failure stops the remaining requests.
     const stop = new AbortController();
     const shared = signal ? AbortSignal.any([signal, stop.signal]) : stop.signal;
     const failures: unknown[] = [];
-    let next = 0;
-    const worker = async (): Promise<void> => {
-      while (failures.length === 0 && next < chunks.length) {
-        const index = next++;
-        const chunk = chunks[index]!;
-        try {
-          const vectors = await this.request(chunk, withTimeout(shared));
-          this.check(vectors, chunk.length);
-          results[index] = vectors;
-        } catch (exc) {
-          failures.push(exc);
-          stop.abort();
+    // The configured concurrency is the upper limit; each HTTP 429 halves it
+    // for the rest of this call.
+    let limit = this.batching.concurrency;
+    let running = 0;
+    let throttled = false;
+
+    // One attempt for one chunk. A 429 with attempts left waits in its slot,
+    // then queues the chunk again — first, and within the lowered limit.
+    const send = async (index: number): Promise<void> => {
+      const chunk = chunks[index]!;
+      attempts[index]! += 1;
+      try {
+        const vectors = await this.request(chunk, withTimeout(shared));
+        this.check(vectors, chunk.length);
+        results[index] = vectors;
+      } catch (exc) {
+        const rateLimited = exc instanceof HttpError && exc.status === 429;
+        if (!rateLimited || attempts[index]! >= RATE_LIMIT_ATTEMPTS) {
+          throw exc;
         }
+        const waitMs = retryAfterMs(exc.retryAfter);
+        const reduced = Math.max(1, Math.floor(limit / 2));
+        if (!throttled) {
+          throttled = true;
+          console.warn(
+            `Embedding rate-limited (HTTP 429): concurrency ${limit} → ${reduced} ` +
+              `for this batch, waiting ${Math.ceil(waitMs / 1000)} s`,
+          );
+        }
+        limit = reduced;
+        await sleep(waitMs, shared);
+        queue.unshift(index);
       }
     };
-    const workers = Math.min(this.batching.concurrency, chunks.length);
-    await Promise.all(Array.from({ length: workers }, worker));
+
+    await new Promise<void>((resolve) => {
+      const pump = (): void => {
+        while (failures.length === 0 && running < limit && queue.length > 0) {
+          running += 1;
+          send(queue.shift()!)
+            .catch((exc: unknown) => {
+              failures.push(exc);
+              stop.abort();
+            })
+            .finally(() => {
+              running -= 1;
+              pump();
+            });
+        }
+        if (running === 0) {
+          resolve();
+        }
+      };
+      pump();
+    });
     if (failures.length > 0) {
       signal?.throwIfAborted();
       throw new Error(`Embedding failed (${this.modelId}): ${errorMessage(failures[0])}`);
@@ -151,7 +212,7 @@ abstract class HttpEmbeddingProvider implements EmbeddingProvider {
       });
       if (!response.ok) {
         const detail = await responseText(response);
-        throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+        throw new HttpError(response.status, response.headers.get("retry-after"), detail);
       }
       return response.json();
     });
@@ -229,6 +290,40 @@ function withTimeout(signal: AbortSignal | undefined): AbortSignal {
   return signal
     ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
     : AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+}
+
+/** The wait a `Retry-After` header asks for — delta-seconds or an HTTP-date —
+ * or the default when it is missing or unparsable; capped. */
+function retryAfterMs(header: string | null, now = Date.now()): number {
+  const value = header?.trim() ?? "";
+  let waitMs = RATE_LIMIT_DEFAULT_WAIT_MS;
+  if (/^\d+$/.test(value)) {
+    waitMs = Number(value) * 1000;
+  } else if (/[a-z]/i.test(value)) {
+    // An HTTP-date names its day and month; `Date.parse` alone would also
+    // accept values such as "-1".
+    const date = Date.parse(value);
+    if (!Number.isNaN(date)) {
+      waitMs = Math.max(0, date - now);
+    }
+  }
+  return Math.min(waitMs, RATE_LIMIT_MAX_WAIT_MS);
+}
+
+/** Resolve after `ms`; reject with the signal's reason once it aborts. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function errorMessage(exc: unknown): string {

@@ -334,7 +334,7 @@ it was built with ([search index lifecycle](docs/capabilities/search-indices.md#
 | `EMBEDDING_API_KEY` | *(unset)* | API key (required for `openai` provider) |
 | `EMBEDDING_DIMENSIONS` | `1024` | Vector dimensions — must match what the model returns |
 | `EMBEDDING_BATCH_SIZE` | `1` | Texts per embedding request when many texts are embedded together (positive integer; cloud endpoints typically take 16 or more) |
-| `EMBEDDING_CONCURRENCY` | `1` | Embedding requests in flight at once when many texts are embedded together (positive integer) |
+| `EMBEDDING_CONCURRENCY` | `1` | Embedding requests in flight at once when many texts are embedded together (positive integer); this is the upper limit — a request answered with HTTP 429 is retried after the provider's `Retry-After` and lowers the concurrency for the rest of that batch |
 
 Changing `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS` on an existing database — including a reused Docker volume — needs no action for entity search: the search indices notice the new model and build new semantic entries in the background; until those are ready, semantic ranking finds nothing and hybrid search answers from keyword entries alone. Saved-query discovery is the exception: its description index is built for the vector width of the model that created it, and startup names each mismatched one in a warning. `POST /api/ontologies/{ontologyKey}/model/rebuild-search-data` rebuilds one ontology's saved-query description vectors and that index at the new width — run it once per ontology after a provider switch.
 

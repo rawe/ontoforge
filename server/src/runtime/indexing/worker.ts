@@ -11,8 +11,8 @@
  *    relations of the grouped types, their targets, its document), read
  *    outside any transaction — never a transaction across an HTTP call.
  * 3. Skip parts whose text hash is unchanged; embed the rest in provider
- *    batches (semantic); write the entries and drop the parts that no
- *    longer exist.
+ *    batches (semantic), renewing the claim's lease while the provider
+ *    runs; write the entries and drop the parts that no longer exist.
  * 4. Complete the claim. On failure: attempts + 1 and exponential backoff;
  *    after `SEARCH_MAX_ATTEMPTS` the item counts as failed and stays
  *    queued for status until a rebuild or a new write of its entity.
@@ -76,8 +76,12 @@ import { syncManagedSearchIndices } from "./managed.js";
 
 type Row = Record<string, unknown>;
 
-/** How long a claim may take before another worker may take it over. */
+/** How long a claim may go unrenewed before another worker may take it
+ * over — also how long a dead worker's items wait. */
 const LEASE_SECONDS = 300;
+
+/** While it embeds, a claim renews its lease this often: three renewals per lease. */
+const LEASE_HEARTBEAT_MS = (LEASE_SECONDS * 1000) / 3;
 
 /** Every relation of an entity in one group is composed — no cap. */
 const ALL_RELATIONS = 2 ** 31 - 1;
@@ -222,6 +226,7 @@ async function processOntology(
   const store = await getSearchIndexStore(ontologyKey);
   await reconcileIfMoved(store);
   const provider = getEmbeddingProvider();
+  const heartbeat = new ClaimHeartbeat(store, Date.now());
   const claimed = await store.claimQueueItems({
     limit: options.batchSize,
     leaseSeconds: LEASE_SECONDS,
@@ -236,8 +241,12 @@ async function processOntology(
     const generations = new Map(
       (await store.listGenerations()).map((g) => [g.generationId, g] as const),
     );
-    const byGeneration = groupBy(claimed, (item) => item.generationId);
-    for (const [generationId, items] of byGeneration) {
+    const byGeneration = [...groupBy(claimed, (item) => item.generationId)];
+    for (const [i, [generationId, items]] of byGeneration.entries()) {
+      // The generations before this one are settled; this one's and the
+      // later ones' items are renewed while it embeds.
+      const keepClaim: KeepClaim = (embed) =>
+        heartbeat.renewWhile(byGeneration.slice(i).flatMap(([, unsettled]) => unsettled), embed);
       if (options.signal?.aborted) {
         await store.releaseQueueItems(items);
         countSearchItems("released", items.length);
@@ -249,7 +258,9 @@ async function processOntology(
         const written =
           generation === undefined
             ? 0
-            : await processGeneration(store, runtime, context, generation, items, provider, options.signal);
+            : await processGeneration(
+                store, runtime, context, generation, items, provider, options.signal, keepClaim,
+              );
         const { completed, lost } = await store.completeQueueItems(items);
         reportLost(generationId, lost, items.length);
         countSearchItems("completed", completed);
@@ -299,6 +310,70 @@ async function failItems(
   }
 }
 
+/** Runs an embedding while the claim's lease is renewed. */
+type KeepClaim = (embed: () => Promise<number[][]>) => Promise<number[][]>;
+
+/**
+ * Keeps a claim's lease while it embeds: a provider call can outlast the
+ * lease — a slow or throttled provider — and another worker would take the
+ * claim over. Once a heartbeat has passed since the lease was last written
+ * (by the claim or a renewal), the lease of every item not yet settled is
+ * renewed. Only while an embedding runs: a renewal changes the lease the
+ * claim's own writes are fenced by, so it never overlaps them. A worker
+ * that dies stops renewing; its items wait out one lease.
+ */
+class ClaimHeartbeat {
+  /** When the next renewal is due. */
+  private due: number;
+
+  /** `claimedAt` — taken before the claim, so never later than its lease. */
+  constructor(
+    private readonly store: SearchIndexStore,
+    claimedAt: number,
+  ) {
+    this.due = claimedAt + LEASE_HEARTBEAT_MS;
+  }
+
+  /** `embed`'s result, once it settled and no renewal of `items` runs any more. */
+  async renewWhile<T>(items: ClaimedSearchQueueItem[], embed: () => Promise<T>): Promise<T> {
+    let running = true;
+    let renewal: Promise<void> = Promise.resolve();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = (): void => {
+      timer = setTimeout(() => {
+        renewal = this.renew(items).then(() => {
+          if (running) schedule();
+        });
+      }, Math.max(0, this.due - Date.now()));
+    };
+    schedule();
+    try {
+      return await embed();
+    } finally {
+      running = false;
+      clearTimeout(timer);
+      await renewal;
+    }
+  }
+
+  /** Renew, and carry each item's new lease: the claim's later writes are fenced by it. */
+  private async renew(items: ClaimedSearchQueueItem[]): Promise<void> {
+    const started = Date.now();
+    try {
+      const leases = await this.store.renewQueueClaim(items, LEASE_SECONDS);
+      leases.forEach((lease, i) => {
+        if (lease !== null) items[i]!.lease = lease;
+      });
+      this.due = started + LEASE_HEARTBEAT_MS;
+    } catch (exc) {
+      // The next heartbeat tries again; should the lease run out meanwhile,
+      // a takeover drops this claim's effects, as without renewal.
+      console.warn(`Search claim not renewed: ${message(exc)}`);
+      this.due = Date.now() + LEASE_HEARTBEAT_MS;
+    }
+  }
+}
+
 /** One line when a claim lost items — taken over by another worker after
  * its lease expired, or withdrawn by a write that deleted them: what this
  * worker did for them was dropped. */
@@ -344,8 +419,9 @@ async function processGeneration(
   items: ClaimedSearchQueueItem[],
   provider: EmbeddingProvider | null,
   signal: AbortSignal | undefined,
+  keepClaim: KeepClaim,
 ): Promise<number> {
-  const index = context.indices.find((i) => i.searchIndexId === generation.searchIndexId);
+  const index =context.indices.find((i) => i.searchIndexId === generation.searchIndexId);
   if (index === undefined) return 0;
   const definition = index.definition;
   const representation = generation.representation;
@@ -402,7 +478,7 @@ async function processGeneration(
     if (provider === null || provider.modelId !== generation.modelId) {
       throw new Error(`No embedding provider for model ${generation.modelId}`);
     }
-    vectors = await provider.embedBatch(changed.map((c) => c.text), signal);
+    vectors = await keepClaim(() => provider.embedBatch(changed.map((c) => c.text), signal));
   }
 
   const writes: SearchEntryWrite[] = changed.map(({ entityId, part, text, textHash }, i) => ({

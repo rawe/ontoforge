@@ -1075,6 +1075,31 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
     }));
   }
 
+  async renewQueueClaim(items: ClaimedSearchQueueItem[], leaseSeconds: number): Promise<(string | null)[]> {
+    if (items.length === 0) return [];
+    // One statement: a takeover skips the rows it locks, and a takeover
+    // committed first leaves them no longer held.
+    const result = await this.query(
+      `UPDATE search_queue q SET lease_until = now() + make_interval(secs => $2::double precision)
+       FROM ${CLAIMED_SOURCE}
+       WHERE ${CLAIMED_MATCH} AND ${CLAIM_HELD}
+       RETURNING q.generation_id, q.entity_id, q.part_kind, q.group_no, q.part_id,
+                 q.lease_until::text AS lease`,
+      [claimedJson(items.map((item) => ({ item, delayMs: 0 }))), leaseSeconds],
+    );
+    const renewed = new Map(
+      result.rows.map((row) => [
+        JSON.stringify([row["generation_id"], row["entity_id"], row["part_kind"], row["group_no"], row["part_id"]]),
+        row["lease"] as string,
+      ]),
+    );
+    return items.map(
+      (item) =>
+        renewed.get(JSON.stringify([item.generationId, item.entityId, item.partKind, item.groupNo, item.partId])) ??
+        null,
+    );
+  }
+
   async completeQueueItems(
     items: ClaimedSearchQueueItem[],
   ): Promise<{ completed: number; lost: number }> {

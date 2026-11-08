@@ -131,7 +131,8 @@ passage item with an empty part id stands for all of the entity's passages, re-c
 Queueing an item already queued refreshes it instead of duplicating it: it is due at once,
 its attempts start afresh, and it carries a new token. A claim's lease is its fencing
 token: every claim of an item writes a later lease than the one it takes over, and a claim
-holds an item only while the item still carries its lease. Settling a claim — complete,
+holds an item only while the item still carries its lease. Renewing writes a later lease
+for the items the claim still holds, and the claim goes on under it. Settling a claim — complete,
 fail, release — and the entry writes made for it act only on the items it holds, and only
 for entities whose claimed items it all holds; what it lost was taken over after its lease
 ran out, or withdrawn by a write that deleted it, and what it would have done is dropped.
@@ -141,6 +142,7 @@ The worker's surface:
 |---|---|
 | Queue a type | Queue every entity of a type, as one whole-entity item each, into the given generations — those neither building nor ready are skipped. Returns the count. |
 | Claim | Lease up to a limit of claimable items — due, not leased or with an expired lease, attempts below the maximum, of a building or ready generation — keyword items first, then oldest first; semantic items only of generations of the given model id. Items another claim holds are skipped, never waited for. The lease commits with the claim. Each item carries its attempts, its token and its lease. |
+| Renew | Extend the lease of the held items to now plus the given lease length; items no longer held are left untouched. Returns each item's new lease, in the order given, or none for an item no longer held. Takes no other effect: a renewal never settles, charges or releases. |
 | Complete | Remove the held items — except one queued again since its claim (its token changed): that one stays, released for the next claim, like every other held item it does not remove. A write during a lease is never lost. Returns the count removed and the count no longer held. |
 | Fail | Record a failed attempt on the held items — attempts plus one, the error and its time, the lease released, the item held back by its delay. An item queued again since its claim is not charged. Returns each charged item's attempts and the count no longer held. |
 | Release | Release the held items without charging them, so the next claim takes them at once. Returns the count released. |

@@ -531,7 +531,10 @@ transaction. It skips parts whose text is unchanged, embeds the rest in provider
 writes the entries and completes the claim. The lease fences the claim: once it runs out
 another process may take the items over, and from then on whatever the first worker
 writes or settles for them is dropped and logged — as for an entity deleted while the
-worker composed. A write that queues an item again while it is
+worker composed. While the provider embeds, the worker renews the lease of the items it
+has not yet settled, so a slow or throttled provider does not cost it the claim; it never
+renews while it writes, since the renewed lease fences those writes. A process that dies
+stops renewing, and its items are taken over once their lease runs out. A write that queues an item again while it is
 claimed is never lost: completing the older claim leaves it queued. A failed batch is
 retried with exponentially growing delays; after the configured number of attempts its
 items count as failed and wait for a rebuild or a new write of their entity. The worker

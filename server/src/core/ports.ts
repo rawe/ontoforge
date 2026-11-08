@@ -1747,6 +1747,11 @@ export interface SearchIndexStore {
     semanticModelId: string | null;
   }): Promise<ClaimedSearchQueueItem[]>;
 
+  /** Extend the lease of the items the claim still holds to now plus
+   * `leaseSeconds`. Each item's new lease, in the order given — null for an
+   * item no longer held; the claim goes on under the new leases. */
+  renewQueueClaim(items: ClaimedSearchQueueItem[], leaseSeconds: number): Promise<(string | null)[]>;
+
   /** Remove processed items — unless one was enqueued again since its
    * claim; that one stays, released for the next claim, like every other
    * item still held. The count removed, and the count no longer held. */

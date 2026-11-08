@@ -18,10 +18,11 @@ function okResponse(payload: unknown): Response {
   return { ok: true, status: 200, json: async () => payload } as unknown as Response;
 }
 
-function errorResponse(status: number, body = ""): Response {
+function errorResponse(status: number, body = "", headers: Record<string, string> = {}): Response {
   return {
     ok: false,
     status,
+    headers: new Headers(headers),
     json: async () => ({}),
     text: async () => body,
   } as unknown as Response;
@@ -290,12 +291,13 @@ describe("embedBatch", () => {
 
   it("throws on an HTTP error with status, body and model id", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const fetchFn = vi.fn(async () => errorResponse(429, "rate limited"));
+    const fetchFn = vi.fn(async () => errorResponse(500, "server error"));
     const provider = new OllamaEmbeddingProvider("bge-m3", "http://o", 2, fetchFn as FetchFn);
 
     await expect(provider.embedBatch(["a"])).rejects.toThrow(
-      "Embedding failed (ollama:bge-m3:2): HTTP 429: rate limited",
+      "Embedding failed (ollama:bge-m3:2): HTTP 500: server error",
     );
+    expect(fetchFn).toHaveBeenCalledTimes(1);
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -340,6 +342,133 @@ describe("embedBatch", () => {
     await expect(provider.embedBatch(["a"], controller.signal)).rejects.toThrow(
       "caller gave up",
     );
+  });
+});
+
+describe("embedBatch on HTTP 429", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Ollama fake that answers 429 to the requests `limited` names (by call
+   * number) and otherwise answers after 10 ms, recording how many requests
+   * were in flight as each one started. */
+  function throttlingFetch(limited: Set<number>, retryAfter?: string) {
+    const state = { inFlight: 0, peaks: [] as number[] };
+    let call = 0;
+    const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (limited.has(call++)) {
+        return errorResponse(429, "slow down", retryAfter ? { "retry-after": retryAfter } : {});
+      }
+      state.inFlight += 1;
+      state.peaks.push(state.inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      state.inFlight -= 1;
+      const { input } = JSON.parse(init!.body as string) as { input: string[] };
+      return okResponse({ embeddings: input.map(vectorFor) });
+    });
+    return { fetchFn, state };
+  }
+
+  function provider(fetchFn: FetchFn, concurrency = 1) {
+    return new OllamaEmbeddingProvider("m", "http://o", 2, fetchFn, { batchSize: 1, concurrency });
+  }
+
+  /** How long a request waits after a 429 answered with `retryAfter`. */
+  async function retryDelay(retryAfter?: string): Promise<number> {
+    vi.useFakeTimers();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { fetchFn } = throttlingFetch(new Set([0]), retryAfter);
+    const pending = provider(fetchFn as FetchFn).embedBatch(["t0"]);
+    const start = Date.now();
+    while (fetchFn.mock.calls.length < 2) {
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    const waited = Date.now() - start;
+    await vi.runAllTimersAsync();
+    expect((await pending).map((v) => v[0])).toEqual([0]);
+    return waited;
+  }
+
+  it("retries the request after the Retry-After seconds", async () => {
+    expect(await retryDelay("5")).toBe(5_000);
+  });
+
+  it("retries after the time a Retry-After HTTP-date names", async () => {
+    vi.useFakeTimers({ now: new Date("2026-01-01T00:00:00Z") });
+    expect(await retryDelay("Thu, 01 Jan 2026 00:00:07 GMT")).toBe(7_000);
+  });
+
+  it("waits 2 s without a Retry-After or with an unparsable one", async () => {
+    expect(await retryDelay()).toBe(2_000);
+    expect(await retryDelay("soon")).toBe(2_000);
+  });
+
+  it("waits at most 60 s", async () => {
+    expect(await retryDelay("3600")).toBe(60_000);
+  });
+
+  it("fails as before after 5 attempts", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { fetchFn } = throttlingFetch(new Set([0, 1, 2, 3, 4, 5]), "1");
+    const pending = provider(fetchFn as FetchFn).embedBatch(["t0"]);
+    const failed = expect(pending).rejects.toThrow(
+      "Embedding failed (ollama:m:2): HTTP 429: slow down",
+    );
+    await vi.runAllTimersAsync();
+    await failed;
+    expect(fetchFn).toHaveBeenCalledTimes(5);
+  });
+
+  it("halves the concurrency on each 429 for the rest of the call, never below 1", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The first two requests (t0, t1) are rate-limited: 4 → 2 → 1.
+    const { fetchFn, state } = throttlingFetch(new Set([0, 1]), "1");
+    const pending = provider(fetchFn as FetchFn, 4).embedBatch(texts(8));
+    await vi.runAllTimersAsync();
+
+    expect((await pending).map((v) => v[0])).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    // t2 and t3 were already in flight; everything after them, the retries
+    // included, runs one request at a time.
+    expect(state.peaks).toEqual([1, 2, 1, 1, 1, 1, 1, 1]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "Embedding rate-limited (HTTP 429): concurrency 4 → 2 for this batch, waiting 1 s",
+    );
+  });
+
+  it("starts the next call at the full concurrency again, warning once per call", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The first request of each call is rate-limited (calls 0 and 9).
+    const { fetchFn, state } = throttlingFetch(new Set([0, 9]), "1");
+    const embedder = provider(fetchFn as FetchFn, 4);
+
+    for (const round of [1, 2]) {
+      state.peaks = [];
+      const pending = embedder.embedBatch(texts(8));
+      await vi.runAllTimersAsync();
+      expect((await pending).map((v) => v[0])).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+      // t1..t3 start at the full concurrency; then the waiting t0 holds one
+      // of the two remaining slots.
+      expect(state.peaks).toEqual([1, 2, 3, 1, 1, 1, 1, 1]);
+      expect(warn).toHaveBeenCalledTimes(round);
+    }
+  });
+
+  it("stops waiting when the caller aborts", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { fetchFn } = throttlingFetch(new Set([0]), "30");
+    const controller = new AbortController();
+    const pending = provider(fetchFn as FetchFn).embedBatch(["t0"], controller.signal);
+    const aborted = expect(pending).rejects.toThrow("caller gave up");
+    await vi.advanceTimersByTimeAsync(1_000);
+    controller.abort(new Error("caller gave up"));
+    await aborted;
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 });
 

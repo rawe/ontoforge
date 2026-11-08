@@ -402,6 +402,8 @@ describe("embedBatch on HTTP 429", () => {
   it("waits 2 s without a Retry-After or with an unparsable one", async () => {
     expect(await retryDelay()).toBe(2_000);
     expect(await retryDelay("soon")).toBe(2_000);
+    expect(await retryDelay("-1")).toBe(2_000);
+    expect(await retryDelay("1.5")).toBe(2_000);
   });
 
   it("waits at most 60 s", async () => {

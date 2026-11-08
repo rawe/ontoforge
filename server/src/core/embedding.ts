@@ -299,7 +299,9 @@ function retryAfterMs(header: string | null, now = Date.now()): number {
   let waitMs = RATE_LIMIT_DEFAULT_WAIT_MS;
   if (/^\d+$/.test(value)) {
     waitMs = Number(value) * 1000;
-  } else if (value) {
+  } else if (/[a-z]/i.test(value)) {
+    // An HTTP-date names its day and month; `Date.parse` alone would also
+    // accept values such as "-1".
     const date = Date.parse(value);
     if (!Number.isNaN(date)) {
       waitMs = Math.max(0, date - now);

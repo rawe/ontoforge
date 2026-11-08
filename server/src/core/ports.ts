@@ -1748,7 +1748,7 @@ export interface SearchIndexStore {
   }): Promise<ClaimedSearchQueueItem[]>;
 
   /** Extend the lease of the items the claim still holds to now plus
-   * `leaseSeconds`. Each item's new lease, in the order given — null for an
+   * `leaseSeconds` — always later than the lease it replaces. Each item's new lease, in the order given — null for an
    * item no longer held; the claim goes on under the new leases. */
   renewQueueClaim(items: ClaimedSearchQueueItem[], leaseSeconds: number): Promise<(string | null)[]>;
 

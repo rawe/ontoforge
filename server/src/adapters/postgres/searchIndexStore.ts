@@ -1078,9 +1078,13 @@ export class PostgresSearchIndexStore implements SearchIndexStore {
   async renewQueueClaim(items: ClaimedSearchQueueItem[], leaseSeconds: number): Promise<(string | null)[]> {
     if (items.length === 0) return [];
     // One statement: a takeover skips the rows it locks, and a takeover
-    // committed first leaves them no longer held.
+    // committed first leaves them no longer held. The new lease is always
+    // later than the one it replaces, whatever the clock does, so it never
+    // equals an earlier claim's.
     const result = await this.query(
-      `UPDATE search_queue q SET lease_until = now() + make_interval(secs => $2::double precision)
+      `UPDATE search_queue q
+       SET lease_until = GREATEST(now() + make_interval(secs => $2::double precision),
+                                  q.lease_until + interval '1 microsecond')
        FROM ${CLAIMED_SOURCE}
        WHERE ${CLAIMED_MATCH} AND ${CLAIM_HELD}
        RETURNING q.generation_id, q.entity_id, q.part_kind, q.group_no, q.part_id,

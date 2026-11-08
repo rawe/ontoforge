@@ -24,8 +24,8 @@
  * Every call streams `<kind>.tool_call`, then `<kind>.tool_result`, then
  * the tool's presented events (ADR 0021). A failure the tool expects, or
  * arguments that fail its schema, become the call's `{error}` result so
- * the model can correct itself; any other error, or a tool name the model
- * made up, aborts the turn.
+ * the model can correct itself, as does a tool name outside the toolset
+ * (with no tool events); any other error aborts the turn.
  */
 import { createHash, randomUUID } from "node:crypto";
 

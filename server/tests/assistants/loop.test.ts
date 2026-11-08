@@ -99,6 +99,20 @@ describe("tool loop", () => {
     expect(invalid.error).toMatch(/^Invalid arguments for echo: /);
   });
 
+  it("hands an unknown tool name back to the model with the available tools", async () => {
+    const model = new FakeToolCallingModel([
+      toolCallMessage("echo<|channel|>commentary", { x: "a" }), new AIMessage("recovered"),
+    ]);
+    const other = echo({ name: "other" });
+
+    const { reply } = await turn(prepared(model, [echo(), other]));
+
+    expect(reply).toBe("recovered");
+    expect(toolResults(model)).toEqual([
+      { error: 'Unknown tool "echo<|channel|>commentary". Available tools: echo, other' },
+    ]);
+  });
+
   it("aborts the turn on any other error", async () => {
     const model = new FakeToolCallingModel([calls("a"), new AIMessage("never")]);
     const run = async () => { throw new Error("boom"); };

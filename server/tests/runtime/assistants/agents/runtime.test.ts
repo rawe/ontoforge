@@ -542,15 +542,19 @@ describe("tool failures", () => {
     await expect(aiChat("full_lens", "list", asRuntimeStore(store))).rejects.toThrow("boom");
   });
 
-  it("a tool name outside the toolset aborts the run", async () => {
-    installFake([
+  it("a tool name outside the toolset goes back to the model with the available tools", async () => {
+    const fake = installFake([
       toolCallMessage("drop_everything", {}),
-      new AIMessage("never reached"),
+      new AIMessage("recovered"),
     ]);
 
-    await expect(aiChat("full_lens", "go", asRuntimeStore(store))).rejects.toThrow(
-      'Tool "drop_everything" not found.',
-    );
+    const result = await aiChat("full_lens", "go", asRuntimeStore(store));
+
+    expect(result.reply).toBe("recovered");
+    const toolMessages = fake.calls[1]!.filter((m) => m instanceof ToolMessage);
+    expect(toolMessages).toHaveLength(1);
+    const { error } = JSON.parse(String(toolMessages[0]!.content));
+    expect(error).toMatch(/^Unknown tool "drop_everything"\. Available tools: .*\blist_entities\b/);
   });
 });
 

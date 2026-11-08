@@ -24,8 +24,8 @@
  * Every call streams `<kind>.tool_call`, then `<kind>.tool_result`, then
  * the tool's presented events (ADR 0021). A failure the tool expects, or
  * arguments that fail its schema, become the call's `{error}` result so
- * the model can correct itself; any other error, or a tool name the model
- * made up, aborts the turn.
+ * the model can correct itself, as does a tool name outside the toolset
+ * (with no tool events); any other error aborts the turn.
  */
 import { createHash, randomUUID } from "node:crypto";
 
@@ -263,17 +263,22 @@ const RECURSION_LIMIT = 100;
 /**
  * Tool errors abort the run. `createAgent` hands every tool error back to
  * the model unless a `wrapToolCall` middleware is present, whose errors it
- * rethrows; this pass-through is that middleware. A tool name the model
- * made up fails the same way. Its name, like `ThreadTurns`, is part of the
- * thread's stored state.
+ * rethrows; this pass-through is that middleware. A tool name outside
+ * `toolNames` is handed back to the model as the call's result, naming the
+ * available tools, so it can retry. Its name, like `ThreadTurns`, is part of
+ * the thread's stored state.
  */
-const ABORT_ON_TOOL_ERROR = createMiddleware({
-  name: "AbortOnToolError",
-  wrapToolCall: async (request, handler) => {
-    if (request.tool === undefined) throw new Error(`Tool "${request.toolCall.name}" not found.`);
-    return handler(request);
-  },
-});
+function abortOnToolError(toolNames: string[]) {
+  return createMiddleware({
+    name: "AbortOnToolError",
+    wrapToolCall: async (request, handler) => {
+      if (request.tool !== undefined) return handler(request);
+      const { name, id } = request.toolCall;
+      const error = `Unknown tool "${name}". Available tools: ${toolNames.join(", ")}`;
+      return new ToolMessage({ content: JSON.stringify({ error }), name, tool_call_id: id ?? "" });
+    },
+  });
+}
 
 /** Runs one turn of `message` on the thread; returns the final reply text. */
 export async function runToolLoop<C>(
@@ -316,7 +321,7 @@ export async function runToolLoop<C>(
   // would be turned into a content-block array.
   const agent = createAgent({
     model, tools, systemPrompt: new SystemMessage(system),
-    middleware: [turns, ABORT_ON_TOOL_ERROR], checkpointer: thread.checkpointer,
+    middleware: [turns, abortOnToolError(run.tools.map((def) => def.name))], checkpointer: thread.checkpointer,
   });
   const state = await agent.invoke(
     {

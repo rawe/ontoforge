@@ -3,7 +3,7 @@
  * transaction, the dependency map's fan-out and deletes, generation
  * reconciliation, the worker building keyword and semantic generations
  * with a deterministic fake provider (hash skip, retries, failure), the
- * claim token, the lease fencing a claim taken over or withdrawn, release
+ * claim token, the lease fencing a claim taken over or withdrawn, its renewal, release
  * on stop, wake-ups, and relation entries that pair one relation with its
  * own target. Index rows are created through the store directly.
  * Requires the docker-compose PostgreSQL.
@@ -786,6 +786,57 @@ describe("PostgreSQL search pipeline", () => {
 
     expect(await store.completeQueueItems([current!])).toEqual({ completed: 1, lost: 0 });
     expect(await queued()).toEqual([]);
+  });
+
+  it("renews only what a claim still holds; the renewed lease fences it from then on", async () => {
+    setEmbeddingProvider(null);
+    await addIndex();
+    await drainSearchWork();
+    const ada = await person("Ada");
+    const bob = await person("Bob");
+    const options = { limit: 10, leaseSeconds: 300, maxAttempts: 5, semanticModelId: null };
+    const claim = await store.claimQueueItems(options);
+    const a = claim.find((item) => item.entityId === ada)!;
+    const b = claim.find((item) => item.entityId === bob)!;
+
+    // Bob's item is taken over.
+    await runQuery(`UPDATE ${NAMESPACE}.search_queue SET lease_until = now() - interval '1 second'
+                    WHERE entity_id = $1`, [bob]);
+    const [takeover] = await store.claimQueueItems(options);
+    expect(takeover?.entityId).toBe(bob);
+
+    const leases = await store.renewQueueClaim([a, b], 300);
+    expect(leases[1]).toBeNull();
+    const renewed = leases[0]!;
+    expect(new Date(renewed).getTime()).toBeGreaterThan(new Date(a.lease).getTime());
+    const [{ seconds }] = (
+      await runQuery(
+        `SELECT extract(epoch FROM lease_until - now())::float AS seconds FROM ${NAMESPACE}.search_queue
+         WHERE entity_id = $1`,
+        [ada],
+      )
+    ).rows as { seconds: number }[];
+    expect(seconds).toBeGreaterThan(290);
+    expect(await store.claimQueueItems(options)).toEqual([]);
+    // The takeover is untouched; the old lease no longer holds Ada's item.
+    expect(await store.releaseQueueItems([a])).toBe(0);
+    expect(await store.completeQueueItems([takeover!])).toEqual({ completed: 1, lost: 0 });
+    expect(await store.completeQueueItems([{ ...a, lease: renewed }])).toEqual({ completed: 1, lost: 0 });
+    expect(await queued()).toEqual([]);
+    expect(await store.renewQueueClaim([], 300)).toEqual([]);
+  });
+
+  it("renews to a later lease even when now plus the lease length is not later", async () => {
+    setEmbeddingProvider(null);
+    await addIndex();
+    await drainSearchWork();
+    await person("Ada");
+    const [claim] = await store.claimQueueItems({ limit: 10, leaseSeconds: 3600, maxAttempts: 5, semanticModelId: null });
+    const [renewed] = await store.renewQueueClaim([claim!], 300);
+    const later = await runQuery(`SELECT $1::timestamptz > $2::timestamptz AS later`, [renewed, claim!.lease]);
+    expect(later.rows[0]!["later"]).toBe(true);
+    expect(await store.releaseQueueItems([claim!])).toBe(0);
+    expect(await store.releaseQueueItems([{ ...claim!, lease: renewed! }])).toBe(1);
   });
 
   it("drops the late batch of a worker taken over mid-embedding; progress counts once", async () => {

@@ -62,6 +62,7 @@ export function createMockSearchIndexStore(ontologyKey = "test_ont"): MockSearch
     })),
     enqueueEntityType: vi.fn(async () => 0),
     claimQueueItems: vi.fn(async () => []),
+    renewQueueClaim: vi.fn(async (items: unknown[]) => items.map(() => null)),
     completeQueueItems: vi.fn(async () => ({ completed: 0, lost: 0 })),
     failQueueItems: vi.fn(async () => ({ attempts: [], lost: 0 })),
     releaseQueueItems: vi.fn(async () => 0),

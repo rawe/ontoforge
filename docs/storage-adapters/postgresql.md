@@ -283,6 +283,11 @@ The queue works in plain SQL on `search_queue`:
   the claimed rows whose `lease_until` still equals the claim's lease, for the rest of
   their transaction: a takeover skips the locked rows, and a write that deletes or queues
   one again waits for it.
+- **Renew** is one `UPDATE` that sets `lease_until` to now plus the lease length — but at
+  least one microsecond past the current lease, so a clock set back cannot repeat an
+  earlier lease — on the claimed rows whose `lease_until` still equals the claim's lease,
+  returning the new `lease_until` as text. A takeover skips the rows it locks; one committed first leaves
+  them no longer held, so they are not renewed.
 - **Complete** deletes the held rows whose `enqueued_at` still equals the token and
   clears the lease of the other held rows; **fail** increments attempts, records the error
   and its time and sets the earliest retry on the held rows whose token still matches, and

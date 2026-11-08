@@ -168,6 +168,22 @@ describe("a claim's lease while it embeds", () => {
     await pass;
   });
 
+  it("is renewed on time even when the wall clock is set back", async () => {
+    store.claimQueueItems.mockResolvedValue([item("g1", "e1"), item("g2", "e2")]);
+    const first = pendingEmbedding();
+    const second = pendingEmbedding();
+    const pass = drainOnce({ ontologyKey: "o", signal: new AbortController().signal });
+    await settle();
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS - 10_000);
+    vi.setSystemTime(Date.now() - 300_000);
+    first.resolve();
+    await settle();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(store.renewQueueClaim).toHaveBeenCalledTimes(1);
+    second.resolve();
+    await pass;
+  });
+
   it("is not renewed while the claim writes: a renewal in flight finishes first", async () => {
     const a = item("g1", "e1");
     store.claimQueueItems.mockResolvedValue([a]);

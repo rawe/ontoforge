@@ -226,7 +226,7 @@ async function processOntology(
   const store = await getSearchIndexStore(ontologyKey);
   await reconcileIfMoved(store);
   const provider = getEmbeddingProvider();
-  const heartbeat = new ClaimHeartbeat(store, Date.now());
+  const heartbeat = new ClaimHeartbeat(store);
   const claimed = await store.claimQueueItems({
     limit: options.batchSize,
     leaseSeconds: LEASE_SECONDS,
@@ -323,15 +323,14 @@ type KeepClaim = (embed: () => Promise<number[][]>) => Promise<number[][]>;
  * that dies stops renewing; its items wait out one lease.
  */
 class ClaimHeartbeat {
-  /** When the next renewal is due. */
+  /** When the next renewal is due, on the monotonic clock: a wall clock
+   * set back would delay it past the lease. */
   private due: number;
 
-  /** `claimedAt` — taken before the claim, so never later than its lease. */
-  constructor(
-    private readonly store: SearchIndexStore,
-    claimedAt: number,
-  ) {
-    this.due = claimedAt + LEASE_HEARTBEAT_MS;
+  /** Made before the claim, so the first renewal is never due later than a
+   * heartbeat after the claim's lease was written. */
+  constructor(private readonly store: SearchIndexStore) {
+    this.due = performance.now() + LEASE_HEARTBEAT_MS;
   }
 
   /** `embed`'s result, once it settled and no renewal of `items` runs any more. */
@@ -344,7 +343,7 @@ class ClaimHeartbeat {
         renewal = this.renew(items).then(() => {
           if (running) schedule();
         });
-      }, Math.max(0, this.due - Date.now()));
+      }, Math.max(0, this.due - performance.now()));
     };
     schedule();
     try {
@@ -358,7 +357,7 @@ class ClaimHeartbeat {
 
   /** Renew, and carry each item's new lease: the claim's later writes are fenced by it. */
   private async renew(items: ClaimedSearchQueueItem[]): Promise<void> {
-    const started = Date.now();
+    const started = performance.now();
     try {
       const leases = await this.store.renewQueueClaim(items, LEASE_SECONDS);
       leases.forEach((lease, i) => {
@@ -369,7 +368,7 @@ class ClaimHeartbeat {
       // The next heartbeat tries again; should the lease run out meanwhile,
       // a takeover drops this claim's effects, as without renewal.
       console.warn(`Search claim not renewed: ${message(exc)}`);
-      this.due = Date.now() + LEASE_HEARTBEAT_MS;
+      this.due = performance.now() + LEASE_HEARTBEAT_MS;
     }
   }
 }

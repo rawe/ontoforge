@@ -24,7 +24,8 @@
  * (`conversationCaching`).
  *
  * A model call that fails, or whose answer is cut off, ends the turn with a
- * `ModelError` naming the reason (`core/ai.ts`).
+ * `ModelError` naming the reason (`core/ai.ts`). A turn that reaches its
+ * step limit without an answer ends with TOO_MANY_STEPS.
  *
  * Every call streams `<kind>.tool_call`, then `<kind>.tool_result`, then
  * the tool's presented events (ADR 0021). A failure the tool expects, or
@@ -37,11 +38,12 @@ import { createHash, randomUUID } from "node:crypto";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 import { tool, ToolInputParsingException, type StructuredToolInterface } from "@langchain/core/tools";
+import { GraphRecursionError } from "@langchain/langgraph";
 import { createAgent, createMiddleware } from "langchain";
 import { z } from "zod";
 
 import { conversationCaching, cutOff, modelFailure } from "../core/ai.js";
-import { ModelError } from "../core/exceptions.js";
+import { ModelError, ValidationError } from "../core/exceptions.js";
 import type { StreamExecution } from "./session.js";
 import { PERSON_TEXT } from "./threads/access.js";
 import type { GraphThread } from "./threads/threadStore.js";
@@ -267,6 +269,15 @@ const ThreadContext = z.object({
 // plus one per tool batch.
 const RECURSION_LIMIT = 100;
 
+/** The turn used its whole budget and the model still asks for tools: the
+ * server's own limit, not a model failure. */
+function tooManySteps(): ValidationError {
+  return new ValidationError(
+    "The assistant stopped after too many steps without an answer; ask a narrower question.",
+    { code: "TOO_MANY_STEPS" },
+  );
+}
+
 /**
  * Tool errors abort the run. `createAgent` hands every tool error back to
  * the model unless a `wrapToolCall` middleware is present, whose errors it
@@ -352,7 +363,8 @@ export async function runToolLoop<C>(
   ).catch((error: unknown) => {
     // The engine wraps what a middleware throws; the model's failure is its cause.
     const cause = (error as { cause?: unknown } | null)?.cause;
-    throw cause instanceof ModelError ? cause : error;
+    if (cause instanceof ModelError) throw cause;
+    throw error instanceof GraphRecursionError ? tooManySteps() : error;
   });
   const finalMessages = state.messages as BaseMessage[];
   return { reply: messageText(finalMessages[finalMessages.length - 1]) };

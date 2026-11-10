@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Sparkles, Undo2 } from 'lucide-react'
+import { LoaderCircle, Sparkles, Undo2 } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useFeatures } from '@/api/hooks'
 import * as model from '@/api/model'
+import { getAgentSchema } from '@/api/runtime'
 import { qk } from '@/api/queryKeys'
 import { AGENT_TOOL_NAMES, type Agent, type Lens } from '@/api/types'
 import { AiChangedMark, useAssistantPanel, useDraftFill, type DraftTarget } from '@/assistants'
@@ -315,6 +316,7 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
               className="font-mono text-xs"
               placeholder="You are a helpful assistant for…"
             />
+            <AgentSchemaNote ontologyKey={ontologyKey} lensKey={lensKey} />
           </div>
           <div className="grid gap-2">
             <div className="flex items-center gap-2">
@@ -340,5 +342,64 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
       </form>
       {dialog}
     </AssistantEditorPage>
+  )
+}
+
+/**
+ * Under the system prompt: the lens's schema always follows the prompt (or
+ * the built-in one when it is empty). The text is read only when opened.
+ */
+function AgentSchemaNote({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="grid gap-1.5">
+      <div className="flex items-center gap-2">
+        <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+          The schema this lens shows is always added after this prompt.
+        </p>
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          aria-expanded={open}
+          data-testid="agent-schema-toggle"
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? 'Hide schema' : 'Show schema'}
+        </Button>
+      </div>
+      {open && <AgentSchemaText ontologyKey={ontologyKey} lensKey={lensKey} />}
+    </div>
+  )
+}
+
+function AgentSchemaText({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
+  const schema = useQuery({
+    queryKey: qk.agentSchema(ontologyKey, lensKey),
+    queryFn: () => getAgentSchema(ontologyKey, lensKey),
+    refetchOnMount: 'always',
+  })
+  if (schema.isPending) {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <LoaderCircle className="size-3.5 animate-spin" /> Loading the schema…
+      </p>
+    )
+  }
+  if (schema.error) {
+    return (
+      <p className="text-xs text-destructive">
+        Could not load the schema: {schema.error.message}{' '}
+        <Button type="button" size="xs" variant="link" className="h-auto px-0" onClick={() => void schema.refetch()}>Retry</Button>
+      </p>
+    )
+  }
+  return (
+    <pre
+      data-testid="agent-schema-text"
+      className="max-h-72 overflow-auto rounded-md border bg-muted/30 p-2 font-mono text-[11px] whitespace-pre-wrap break-words"
+    >
+      {schema.data.text}
+    </pre>
   )
 }

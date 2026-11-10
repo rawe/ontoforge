@@ -332,6 +332,10 @@ export const getRulesetView = (ontologyKey: string, lensKey: string, rulesetKey:
 export const listAssistants = (ontologyKey: string, lensKey: string, kind: AssistantKind) =>
   request<RuntimeAssistant[]>(assistantPath({ ontologyKey, lensKey }, kind))
 
+/** The schema text the lens shows, exactly as every agent of the lens gets it after its prompt. */
+export const getAgentSchema = (ontologyKey: string, lensKey: string) =>
+  request<{ text: string }>(assistantPath({ ontologyKey, lensKey }, 'agent-schema'))
+
 /** One message to an agent (`_default` included); without `threadId` it starts a new thread. */
 export const agentChat = (
   ontologyKey: string,

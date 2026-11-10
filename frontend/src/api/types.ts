@@ -1025,17 +1025,15 @@ export interface NamedSearchInput {
 
 /** Runtime tool names an agent may be restricted to. */
 export const AGENT_TOOL_NAMES = [
-  'get_schema',
   'list_entities',
   'get_entity',
-  'get_document',
-  'list_relations',
   'get_neighbors',
   'search',
   'search_documents',
+  'get_document',
   'execute_query',
   'list_saved_queries',
-  'search_saved_queries',
   'run_saved_query',
+  'search_saved_queries',
 ] as const
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number]

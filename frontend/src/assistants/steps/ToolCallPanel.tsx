@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlertTriangle, Check, ChevronRight, CircleSlash, LoaderCircle } from 'lucide-react'
+import { AlertTriangle, Check, ChevronRight, CircleSlash, Info, LoaderCircle } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useDisplayLabel, useRuntimeSchema } from '@/api/hooks'
 import type {
@@ -22,6 +22,7 @@ import {
   toolCallSummary,
   toolError,
   toolLabel,
+  toolResultMore,
   toolTime,
 } from './toolCallModel'
 
@@ -136,6 +137,7 @@ function ToolCallCard({
 }) {
   const summary = toolCallSummary(call)
   const error = toolError(call)
+  const more = toolResultMore(call)
   const duration = callDuration(call)
   return (
     <li data-testid="tool-call" data-tool={call.tool} className={cn('rounded-lg border bg-card', error !== null && 'border-(--tc-amber-border)')}>
@@ -185,6 +187,12 @@ function ToolCallCard({
             ) : (
               <Section title="Result">
                 {result?.(call) ?? <ToolResult at={at} call={call} />}
+                {more !== null && (
+                  <p data-testid="tool-call-more" className="flex gap-1.5 text-[11px] text-muted-foreground" title="What the tool told the model it left out">
+                    <Info className="mt-px size-3 shrink-0" />
+                    <span>{more}</span>
+                  </p>
+                )}
               </Section>
             ))}
           {call.status === 'completed' && <RawJson value={call.result} />}

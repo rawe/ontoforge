@@ -259,11 +259,27 @@ const UNREACHED = new Set([
 
 const UNREACHED_ERRORS = new Set(["TimeoutError", "APIConnectionError", "APIConnectionTimeoutError"]);
 
+/** The reasons a provider's own error type or code names. An error sent
+ * after an answer stream has started has no HTTP status: these are then
+ * all that tells the reason. Anthropic's error types, then the OpenAI
+ * protocol's. */
+const NAMED: Record<string, ModelFailure> = {
+  overloaded_error: "unavailable",
+  api_error: "unavailable",
+  timeout_error: "unavailable",
+  rate_limit_error: "rate_limited",
+  authentication_error: "misconfigured",
+  permission_error: "misconfigured",
+  not_found_error: "misconfigured",
+  server_error: "unavailable",
+  rate_limit_exceeded: "rate_limited",
+};
+
 function failureOf(error: unknown): ModelFailure {
   // A provider's failure may arrive wrapped: the reason is read from the
   // first error of the chain that tells one.
   for (let e = error, depth = 0; e !== null && typeof e === "object" && depth < 6; depth += 1) {
-    const { status, code, name, message, lc_error_code: tag, cause } = e as Record<string, unknown>;
+    const { status, code, type, name, message, lc_error_code: tag, cause } = e as Record<string, unknown>;
     if (
       ContextOverflowError.isInstance(e) || tag === "CONTEXT_OVERFLOW" || code === "context_length_exceeded" ||
       (typeof message === "string" && CONTEXT_FULL.test(message))
@@ -277,6 +293,8 @@ function failureOf(error: unknown): ModelFailure {
       UNREACHED_ERRORS.has(String(name)) || UNREACHED_ERRORS.has(e.constructor?.name ?? "") ||
       UNREACHED.has(String(code)) || message === "fetch failed"
     ) return "unavailable";
+    const named = NAMED[String(type)] ?? NAMED[String(code)];
+    if (named !== undefined) return named;
     e = cause;
   }
   return "failed";

@@ -491,11 +491,12 @@ cancelled or failed turn leaves nothing in its thread — ask again.
 ### Agents
 
 An agent answers whole in `final`, never as `delta`; its tool events arrive always. An
-agent may be granted exactly twelve runtime tools: `get_schema`, `list_entities`,
-`get_entity`, `get_document`, `list_relations`, `get_neighbors`, `search`,
-`search_documents`, `execute_query`, `list_saved_queries`, `run_saved_query`,
-`search_saved_queries`. Every write tool is outside that set, and so is the read-only
-`get_relation`. After an entity tool's result (`get_entity`, `list_entities`,
+agent may be granted exactly ten runtime tools: `list_entities`, `get_entity`,
+`get_document`, `get_neighbors`, `search`, `search_documents`, `execute_query`,
+`list_saved_queries`, `run_saved_query`, `search_saved_queries`. Every write tool is
+outside that set, and so are the read-only `get_schema`, `list_relations` and
+`get_relation`. A tool result holds at most about 24,000 characters; one that left
+something out carries `more`, a sentence naming what is missing. After an entity tool's result (`get_entity`, `list_entities`,
 `get_neighbors`, `search`, `search_documents`), an `entities` event carries the entities it
 returned that the turn had not sent yet.
 

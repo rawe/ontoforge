@@ -51,9 +51,9 @@ know it: it is not listed, read or written there.
   that set, so a write tool name is not merely ignored — it is rejected at definition
   time and at import. An agent acts on a model's judgment; granting a write tool would
   let that judgment change stored data.
-- The grantable set is *narrower* than the read tools available over MCP — being read-only
-  is not sufficient to be grantable. The tools are named, and the read-only one left out
-  of the set is called out, in [../interfaces/](../interfaces/mcp.md#runtime-tools).
+- The grantable set is the ten [tools](#tools) below. It is *narrower* than the read tools
+  available over MCP — being read-only is not sufficient to be grantable; the read-only
+  tools left out are called out in [../interfaces/](../interfaces/mcp.md#runtime-tools).
 - **An agent reads documents by passage.** `search_documents` returns passages, each
   naming its document and its character offset and length. `get_document` reads those
   coordinates. MCP exposes the same document-search tool; neither surface takes a method
@@ -64,9 +64,14 @@ know it: it is not listed, read or written there.
   discovery requires an embedding provider specifically. This applies to the default
   toolset and explicit allowlists. The search tools return the search's response.
 - An unknown tool name in an allowlist is rejected, and the error names the valid set.
+  `get_schema` and `list_relations` are the exception when an allowlist is read from
+  storage or from an imported file: they are not agent tools, and the allowlist is read
+  without them instead of failing.
 - When an agent defines a system prompt, that prompt is used and the schema description is
   appended to it. When it does not, a built-in prompt containing the schema is used. The
-  schema is in the prompt either way; a custom prompt cannot omit it.
+  schema is in the prompt either way; a custom prompt cannot omit it, and an agent
+  therefore has no tool that reads the schema. The built-in prompt names no tool: an agent
+  may have any subset, and each tool's description says what it is for.
 - A tool that fails with a not-found or validation error does not fail the run. The error
   message is handed back to the model as the tool's result, so it can correct itself and
   retry within the same turn. A call to a tool name outside the agent's toolset is handed
@@ -109,6 +114,82 @@ adds to the rules there:
   current tools. A saved prompt applies to new threads.
 - **Threads are per conversation, not per agent.** Two clients chatting with the same
   agent share nothing unless they share a thread id.
+
+## Tools
+
+An agent has up to ten tools, all reads through its lens:
+
+| Tool | What it reads |
+|---|---|
+| `list_entities` | The entities of one type, a page at a time: filtered (also through one relation type), searched by a term, sorted |
+| `get_entity` | One entity, by id |
+| `get_neighbors` | One entity's neighbours with the relations that join them, by direction and relation type |
+| `search` | Entities ranked for a text |
+| `search_documents` | Document passages ranked for a text |
+| `get_document` | The text of a document property, a piece at a time |
+| `execute_query` | An [OQL](oql.md) query |
+| `list_saved_queries`, `search_saved_queries` | The lens's [saved queries](saved-queries.md) |
+| `run_saved_query` | One saved query, by its key |
+
+They run the operations the runtime interfaces run, but they answer a different reader. A
+model reads every result again with each later step of its conversation, cannot ask for
+the rest unless the tool offers it, and takes what it sees for the whole. The rules below
+follow from that, and they are what sets an agent's tool apart from the MCP tool of the
+same name.
+
+### Result size
+
+**A result holds at most about 24,000 characters of data** — about 6,000 tokens, read
+again with every later model call. The tool cuts its own result where it is made:
+
+- at a whole row — an entity, a neighbour, a query row, a search item — never inside one;
+- for a document, at the end of a piece: `get_document` returns at most that many
+  characters per call, and without a range the first piece;
+- inside one row or value that is larger than the bound alone: a long text ends with a
+  marker saying how many of its characters are shown, a long list with one saying how
+  many of its items.
+
+The result keeps its shape, the thread keeps it as it was sent
+([threads.md](threads.md#turns)), and the web client is given the same result as the
+model. The list of saved queries is not cut: it is as long as the saved queries a person
+designed for the lens. Why the bound sits in the tools:
+[ADR 0035](../adr/0035-a-tool-result-is-bounded-where-it-is-made.md).
+
+### What a result left out
+
+A result that leaves something out says so in `more`: one sentence for the model that
+names what is missing and the call that gets it.
+
+| Tool | `more` says |
+|---|---|
+| `list_entities` | Which rows of the total are shown, and the `offset` of the next ones |
+| `execute_query`, `run_saved_query` | The same; both take an `offset` of rows to skip, and the query runs again for each page. Without ORDER BY the order of rows can change between calls, and the sentence says that too |
+| `get_document` | Which characters are shown, and the `offset` where the text goes on |
+| `get_neighbors` | Each direction that has more neighbours than were read. Neighbours cannot be paged, because they are read in no fixed order: the sentence names what narrows them — the relation type, the direction, fewer fields |
+| `search`, `search_documents` | How many found items did not fit; a passage search can be repeated without the passages' text |
+
+`get_entity` carries no `more`: a cut value says so itself. A value of a plain property
+that is longer than the bound cannot be read further — long text belongs in a
+[document property](documents.md), which is read in pieces.
+
+### Selecting properties
+
+`list_entities`, `get_entity` and `get_neighbors` take `fields`, the property keys to
+return in place of every property; the id and the name are always returned. A document
+property is a [stub](documents.md) in every result, also when `fields` names it: only
+`get_document` reads its text. A query result follows
+[the query language's own rule](oql.md#results) for a renamed document column; the size
+bound cuts such a value like any other.
+
+### Arguments
+
+Every parameter is described in the tool's own schema, a fixed choice is an enumeration,
+and a limit has its range. An argument outside them, an unknown property in `fields`, an
+unknown sort field or an unknown relation type goes back to the model as the call's
+error, naming what is valid — never as another meaning of the call.
+
+`get_neighbors` reads each direction with its own limit, so one direction never takes the
+other's room, as it can in the [runtime read](instance-data.md#traversal).
 
 ## Through the interfaces
 

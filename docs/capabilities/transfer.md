@@ -224,7 +224,8 @@ Import is a write path, and the write-path rules apply to it:
   lens validation warns about an index the lens cannot search
   ([ontology-lenses.md](ontology-lenses.md#validation-warnings)).
 - Every agent's tool allowlist is checked against the read-only agent tool set, exactly as
-  at definition time. An unknown tool name fails the import.
+  at definition time. An unknown tool name fails the import; `get_schema` and
+  `list_relations` are left out of the allowlist instead ([agents.md](agents.md#rules)).
 - Every saved query's steps are checked structurally, exactly as at definition time:
   known step types, unique step names, required fields per type, well-formed bindings
   referring only to earlier steps — to a search step's references only — and the

@@ -163,13 +163,15 @@ Every changeset tool but `start_changeset` and `list_changesets` takes `changese
 `get_staged_document` takes those of `get_document`. The changeset tools
 answer what the REST routes answer, and `unstage` and `discard_changeset` a message.
 
-An agent configuration may grant twelve tools: `get_schema`, `list_entities`,
-`get_entity`, `get_document`, `list_relations`, `get_neighbors`, `search`,
-`search_documents`, `execute_query`, `list_saved_queries`, `run_saved_query`,
-`search_saved_queries`. Every write tool is outside that set, and so are the read-only
+An agent configuration may grant ten tools: `list_entities`, `get_entity`,
+`get_document`, `get_neighbors`, `search`, `search_documents`, `execute_query`,
+`list_saved_queries`, `run_saved_query`, `search_saved_queries`. Every write tool is
+outside that set, and so are the read-only `get_schema`, `list_relations`,
 `get_relation`, `get_path`, `get_ruleset`, `list_changesets`, `get_changeset` and
 `get_staged_document` — being
-read-only is not sufficient to be grantable. `search` runs the
+read-only is not sufficient to be grantable. An agent's tool takes its own arguments and
+bounds its result, unlike the MCP tool of the same name:
+[capabilities/agents.md](../capabilities/agents.md#tools). `search` runs the
 [entity search](../capabilities/search.md#entity-search) and answers its response; it takes
 `query`, `types`, `filters` and `limit`, and on MCP `indices` instead of `types`.
 `search_documents` runs the [passage search](../capabilities/search.md#passage-search) and

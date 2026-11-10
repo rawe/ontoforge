@@ -54,8 +54,8 @@ and `offers` would make the first two searchable.
 ## Agent and saved queries
 
 - `visitor_assistant` — finds exhibitors for a visitor's interest and names stand and hall;
-  tools `get_schema`, `search`, `search_documents`, `get_document`, `list_entities`,
-  `get_entity`, `get_neighbors`, `execute_query`, `list_saved_queries`, `run_saved_query`.
+  tools `search`, `search_documents`, `get_document`, `list_entities`, `get_entity`,
+  `get_neighbors`, `execute_query`, `list_saved_queries`, `run_saved_query`.
 - `exhibitors-in-hall` — OQL, parameter `hall` (hall number); exhibitors and stands of one hall.
 - `find-exhibitor-stands` — search step over `exhibitor` with parameter `q`, feeding an OQL
   step that returns stand number and hall.

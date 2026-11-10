@@ -13,6 +13,12 @@ never defer one to another tool. Tools are loaded and enabled individually, so a
 description that relies on another tool becomes incomplete when that tool is absent.
 Another tool may be named as a next step, provided it is available on that surface.
 
+A rule that concerns one parameter may stand in that parameter's own description in the
+tool's schema: it is part of the same tool. Every parameter of an agent tool carries one,
+because a small model reads the schema before the prose. An agent tool's description is
+built for the tools the agent was granted, so it names another tool only when the agent
+has it.
+
 For example, a tool accepting `filters` must describe its own supported keys and
 operators, rather than saying "same filters as list_entities". The shared
 [`filterRules` helper](../../server/src/runtime/readHelpers.ts) composes the applicable
@@ -35,7 +41,8 @@ tightening wording, never by moving parameter rules into another tool's descript
 The [description tests](../../server/tests/mcp/tool-descriptions.test.ts) check this
 budget on the listed modeling and runtime MCP tools, ruleset variants, and built-in
 agent tools. They also check self-containment, filter rules and descriptions affected by
-write access. The policy applies to new descriptions as well as the variants covered by
+write access; the [agent tool tests](../../server/tests/runtime/assistants/agents/tools.test.ts)
+check that every parameter is described and that no description names a tool the agent lacks. The policy applies to new descriptions as well as the variants covered by
 those tests.
 
 ## Check the resulting surface
@@ -55,4 +62,4 @@ those tests.
 
 The description definitions live in the [modeling MCP server](../../server/src/mcp/modeling.ts),
 [runtime MCP server](../../server/src/mcp/runtime.ts) and
-[agent runtime's `buildTools`](../../server/src/runtime/assistants/agents/runtime.ts).
+[agent tools](../../server/src/runtime/assistants/agents/tools.ts).

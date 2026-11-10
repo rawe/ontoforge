@@ -360,8 +360,7 @@
               "list_saved_queries",
               "run_saved_query",
               "search_saved_queries",
-              "execute_query",
-              "get_schema"
+              "execute_query"
             ]
           }
         ],

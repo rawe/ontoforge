@@ -183,6 +183,7 @@ language-model provider; the list remains available without one.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/ai/assistants/agents` | List the lens's agents, the default first |
+| GET | `/ai/assistants/agent-schema` | The schema text every agent of the lens is given |
 | POST | `/ai/assistants/agents/{assistantKey}/chat` | Converse with one agent |
 | GET | `/ai/assistants/agents/{assistantKey}/threads/{threadId}` | Read a thread back |
 
@@ -190,6 +191,11 @@ The default agent is implicit — it needs no configuration, exists on every len
 addressed by the key `_default` like any configured agent. The list names every agent as
 `key`, `name`, `description` and `builtIn`; the default comes first, named `Default`, with
 `builtIn` true.
+
+The schema read answers `{ "text": … }`: the description of the lens's schema that follows
+every agent's prompt, its own or the built-in one, exactly as the model receives it. Like
+the list it needs no provider, and the ontology's administrators may read it as they read
+the lens's schema.
 
 Chat takes the [shared request](#assistant-chat-and-threads) and streams the shared frame:
 `thread`, then the agent's tool events, then one terminal `final` or `error`; the answer
@@ -199,7 +205,7 @@ response-mode option.
 | Event `type` | Fields | Meaning |
 |---|---|---|
 | `agent.tool_call` | `callId`, `tool`, `args` | One invocation begins, including schema-invalid arguments |
-| `agent.tool_result` | `callId`, `result` | That invocation completes; result retains its native JSON structure |
+| `agent.tool_result` | `callId`, `result` | That invocation completes; result retains its native JSON structure, as the model was given it: [bounded, with `more` when it left something out](../capabilities/agents.md#result-size) |
 
 After a successful result of `get_entity`, `list_entities`, `get_neighbors`, `search` or
 `search_documents`, an `entities` event carries the lens's entities it returned that the

@@ -49,6 +49,12 @@ work is its tool calls and their results; they stay in the thread with the turn.
 - **A conversation that no longer fits the model ends.** Nothing is cut or summarised to
   make room: the turn fails as too long, and the client starts a new thread
   ([ADR 0034](../adr/0034-a-full-context-window-ends-the-conversation.md)).
+- **A half answer is never kept.** An answer the model's output limit cut off fails the
+  turn, for every kind. Where the answer streams, the person has read the part already
+  sent; the thread does not hold it.
+- **A turn's tool work is bounded.** An agent's or the Studio helper's turn makes at most
+  50 model calls. One that has no answer by then fails, and the person asks a narrower
+  question.
 
 A retriever's and a navigator's thread also keep what a follow-up question may refer to
 ([retrievers.md](retrievers.md#follow-up-questions),

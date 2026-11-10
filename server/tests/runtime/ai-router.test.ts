@@ -353,6 +353,22 @@ it("a model failure ends the stream with its reason, never the provider's words 
   warned.mockRestore();
 });
 
+it("a turn that reaches its step limit ends the stream with TOO_MANY_STEPS, not INTERNAL_ERROR", async () => {
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  // The model never answers: it calls a tool again on every call.
+  setAiModel(new FakeToolCallingModel(Array.from({ length: 60 }, (_, i) => toolCallMessage("get_schema", {}, `call-${i}`))));
+  const response = await app.inject({ method: "POST", url: chatPath + "/_default/chat", payload: { message: "Hi" } });
+  expect(events(response.body).at(-1)).toEqual({
+    type: "error",
+    error: {
+      code: "VALIDATION_ERROR", details: { code: "TOO_MANY_STEPS" },
+      message: "The assistant stopped after too many steps without an answer; ask a narrower question.",
+    },
+  });
+  expect(logged).not.toHaveBeenCalled();
+  logged.mockRestore();
+});
+
 it("unexpected failures never expose raw exceptions, but are logged", async () => {
   const logged = vi.spyOn(console, "error").mockImplementation(() => {});
   holder.store.getEntity.mockRejectedValue(new Error("secret provider details"));

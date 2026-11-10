@@ -60,8 +60,10 @@ cuts. A closed connection cancels the turn so work nobody will receive stops, an
 in its thread. A turn whose result cannot be kept ends with `error`: `THREAD_NOT_FOUND`
 when its thread is gone meanwhile, `THREAD_BUSY` when it lost its hold on the thread,
 `VALIDATION_ERROR` when the thread grew too large to keep, `STORAGE_ERROR` when the thread
-store is full or fails. A turn whose language model fails ends with `error` `MODEL_ERROR`
-([its reasons](README.md#errors)). Unexpected failures after streaming begins have the generic `INTERNAL_ERROR` message `Internal Server Error`.
+store is full or fails. A turn whose language model fails or cuts its answer off ends with
+`error` `MODEL_ERROR` ([its reasons](README.md#errors)); `delta` text sent before it is not
+an answer. A turn that reaches its step limit ends with `error` `VALIDATION_ERROR`,
+`details.code` `TOO_MANY_STEPS`. Unexpected failures after streaming begins have the generic `INTERNAL_ERROR` message `Internal Server Error`.
 Delivery bounds buffering and terminates stalled or oversized streams.
 
 There is no background continuation after a disconnect.

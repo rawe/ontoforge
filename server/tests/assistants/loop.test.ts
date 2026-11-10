@@ -16,7 +16,7 @@ import {
   type Guide, type GraphThread, type PreparedRun, type StreamEvent, type Tool,
 } from "../../src/assistants/index.js";
 import { personText } from "../../src/assistants/threads/access.js";
-import { ModelError } from "../../src/core/exceptions.js";
+import { ModelError, ValidationError } from "../../src/core/exceptions.js";
 import { FakeToolCallingModel, toolCallMessage } from "../runtime/aiHelpers.js";
 import { newGraphThread } from "./threads/graphThread.js";
 
@@ -157,6 +157,20 @@ describe("tool loop", () => {
     const cutCall = new AIMessage({ content: "", response_metadata: { stop_reason: "max_tokens" } });
     await expect(turn(prepared(new FakeToolCallingModel([calls("a"), cutCall]), [echo()])))
       .rejects.toMatchObject({ reason: "answer_cut_off" });
+  });
+
+  it("ends a turn that reaches its step limit with TOO_MANY_STEPS, a sentence the person can act on", async () => {
+    // The model never answers: it calls the tool again on every call.
+    const model = new FakeToolCallingModel(Array.from({ length: 60 }, (_, i) => toolCallMessage("echo", { x: "a" }, `call-${i}`)));
+
+    const failed = await turn(prepared(model, [echo()])).catch((error: unknown) => error);
+
+    expect(failed).toBeInstanceOf(ValidationError);
+    expect(failed).toMatchObject({
+      message: "The assistant stopped after too many steps without an answer; ask a narrower question.",
+      details: { code: "TOO_MANY_STEPS" },
+    });
+    expect(model.calls).toHaveLength(50);
   });
 
   it("leaves a cancelled model call a cancellation", async () => {

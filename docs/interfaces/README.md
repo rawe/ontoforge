@@ -227,7 +227,7 @@ There are exactly eleven top-level codes:
 | The identity provider's keys cannot be fetched to check a token (authentication on) | 503 | `PROVIDER_UNAVAILABLE` | — |
 | Resource does not exist | 404 | `RESOURCE_NOT_FOUND` | — or `code` |
 | Uniqueness or referential conflict | 409 | `RESOURCE_CONFLICT` | —, `code` or `violations` |
-| Input rejected | 422 | `VALIDATION_ERROR` | `fields` map, `errors` list, `violations` list with `total`, or `items` list |
+| Input rejected | 422 | `VALIDATION_ERROR` | `code`, `fields` map, `errors` list, `violations` list with `total`, or `items` list |
 | Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses`, `affectedIndices` |
 | Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
 | A language model gave no usable answer | 502 | `MODEL_ERROR` | — or `code` |
@@ -244,7 +244,9 @@ another principal answers `404 RESOURCE_NOT_FOUND` with `details.code` of
 `THREAD_NOT_FOUND`, a message to a thread still running `409 RESOURCE_CONFLICT` with
 `details.code` of `THREAD_BUSY`, and a message to a thread that holds its most turns
 `409 RESOURCE_CONFLICT` with `details.code` of `THREAD_FULL`
-([thread store](../architecture.md#thread-store)).
+([thread store](../architecture.md#thread-store)). A turn that reaches its step limit ends
+with `VALIDATION_ERROR` and `details.code` of `TOO_MANY_STEPS`
+([turns](../capabilities/threads.md#turns)).
 
 **A refused relation rules write carries its violations.** A relation rules change — on
 create, update or import — that the stored relations break answers `409

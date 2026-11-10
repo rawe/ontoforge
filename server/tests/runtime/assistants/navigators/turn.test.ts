@@ -237,6 +237,25 @@ describe("a navigator turn", () => {
     await expect(turn("Which projects?")).rejects.toMatchObject({ reason: "failed", message: "The language model failed; no automatic retry." });
   });
 
+  it("an answer cut off at the model's output limit fails the answer step after its text was streamed", async () => {
+    fake.stream.mockImplementationOnce(async () => (async function* () {
+      yield { content: "Half an" };
+      yield { content: "", additional_kwargs: { stop_reason: "max_tokens" } };
+    })());
+    const events: StreamEvent[] = [];
+    const thread = await newThread();
+
+    await expect(runNavigatorTurn({ key: "_default", config: deriveNavigator(), loaded: { scoped: LENS, full: LENS } as unknown as LoadedSchema },
+      "org", {} as RuntimeStore, "Which projects?", thread, { signal: new AbortController().signal, onToolEvent: async (e) => { events.push(e); } }))
+      .rejects.toMatchObject({ reason: "answer_cut_off", details: { code: "ANSWER_CUT_OFF" } });
+
+    expect(events.filter((e) => e.type === "delta")).toEqual([{ type: "delta", text: "Half an" }]);
+    expect(steps(events).at(-1)).toBe("answer:failed:1");
+    // The half answer never joined the thread.
+    const messages = (await graphValues(thread)).messages as { text: string }[];
+    expect(messages.map((m) => m.text)).toEqual(["Which projects?"]);
+  });
+
   it("a cancelled request calls no model", async () => {
     const controller = new AbortController();
     controller.abort();

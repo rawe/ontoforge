@@ -318,9 +318,11 @@ const CUT_OFF: Record<string, ModelFailure> = {
 };
 
 /** The failure a model's answer ended with, if it named one: the answer is
- * incomplete, and a tool call in it may be too. */
-export function cutOff(responseMetadata: Record<string, unknown> | undefined): ModelError | undefined {
-  const reason = CUT_OFF[String(responseMetadata?.finish_reason ?? responseMetadata?.stop_reason ?? "")];
+ * incomplete, and a tool call in it may be too. `fields` is where the
+ * client put the reason: a whole answer's response metadata, or the fields
+ * of one chunk of a streamed one. */
+export function cutOff(fields: Record<string, unknown> | undefined): ModelError | undefined {
+  const reason = CUT_OFF[String(fields?.finish_reason ?? fields?.stop_reason ?? "")];
   return reason === undefined ? undefined : new ModelError(reason);
 }
 

@@ -78,6 +78,13 @@ const providerDuration = new Histogram({
   registers: [registry],
 });
 
+const aiTokens = new Counter({
+  name: "ontoforge_ai_tokens_total",
+  help: "Tokens of language-model calls as the provider reported them, by kind: input (the whole prompt), cache_read and cache_write (the parts of it the provider read from and wrote to its cache), output.",
+  labelNames: ["kind"] as const,
+  registers: [registry],
+});
+
 /** The connection counts a database pool reports. */
 export interface PoolCounts {
   totalCount: number;
@@ -123,7 +130,24 @@ export async function timeProviderCall<T>(provider: Provider, call: () => Promis
   }
 }
 
-/** Times every call of a LangChain chat model, streamed ones to their end. */
+/** Counts the usage a finished model call reported, if it reported any. A
+ * provider's input count holds its cached parts. */
+function countTokens(output: unknown): void {
+  const generations = (output as { generations?: { message?: { usage_metadata?: Record<string, unknown> } }[][] }).generations;
+  const usage = generations?.[0]?.[0]?.message?.usage_metadata;
+  if (usage === undefined) return;
+  const cached = (usage.input_token_details ?? {}) as Record<string, unknown>;
+  const counts = {
+    input: usage.input_tokens, output: usage.output_tokens,
+    cache_read: cached.cache_read, cache_write: cached.cache_creation,
+  };
+  for (const [kind, count] of Object.entries(counts)) {
+    if (typeof count === "number" && count > 0) aiTokens.inc({ kind }, count);
+  }
+}
+
+/** Times every call of a LangChain chat model, streamed ones to their end,
+ * and counts the tokens a language model reports. */
 export class ProviderCallMetrics extends BaseCallbackHandler {
   name = "ontoforge-provider-metrics";
   private readonly running = new Map<string, (labels: { outcome: string }) => void>();
@@ -136,9 +160,10 @@ export class ProviderCallMetrics extends BaseCallbackHandler {
     this.running.set(runId, providerDuration.startTimer({ provider: this.provider }));
   }
 
-  override handleLLMEnd(_output: unknown, runId: string): void {
+  override handleLLMEnd(output: unknown, runId: string): void {
     this.running.get(runId)?.({ outcome: "ok" });
     this.running.delete(runId);
+    if (this.provider === "ai") countTokens(output);
   }
 
   override handleLLMError(_error: unknown, runId: string): void {

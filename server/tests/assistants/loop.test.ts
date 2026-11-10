@@ -84,6 +84,16 @@ describe("tool loop", () => {
     expect(toolResults(model)).toEqual([{ echoed: "a" }]);
   });
 
+  it("hands a text result to the model as it is, and to the stream as a string", async () => {
+    const model = new FakeToolCallingModel([toolCallMessage("echo", { x: "a" }), new AIMessage("done")]);
+
+    const { events } = await turn(prepared(model, [echo({ run: async () => 'line one\n"quoted"' })]));
+
+    const sent = model.calls[1]!.find((m) => m instanceof ToolMessage)!;
+    expect(sent.content).toBe('line one\n"quoted"');
+    expect(events[1]).toMatchObject({ type: "helper.tool_result", result: 'line one\n"quoted"' });
+  });
+
   it("hands an expected failure and invalid arguments back to the model", async () => {
     const model = new FakeToolCallingModel([calls("bad", "ok"), new AIMessage("recovered")]);
     model.responses[0]!.tool_calls!.push({ name: "echo", args: { x: 1 }, id: "c2", type: "tool_call" });

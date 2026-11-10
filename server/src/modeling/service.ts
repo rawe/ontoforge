@@ -84,7 +84,7 @@ import { checkEntitySearch } from "../runtime/search/entitySearch.js";
 import { indexStoreOf, searchableIndices } from "../runtime/search/indexSearch.js";
 import { compileNamedSearch, namedSearchLens, type NamedSearchLens } from "../runtime/search/namedSearch.js";
 import { searchStepRequest, searchStepErrors } from "../runtime/service.js";
-import { VALID_AGENT_TOOLS } from "../runtime/toolNames.js";
+import { VALID_AGENT_TOOLS, withoutFormerTools } from "../runtime/toolNames.js";
 import {
   ExportPayload,
   StepSchema as StepZodSchema,
@@ -1775,7 +1775,7 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
         name: ag.name,
         description: optString(ag.description),
         systemPrompt: optString(ag.systemPrompt),
-        tools: (ag.tools as string[] | null | undefined) ?? null,
+        tools: withoutFormerTools((ag.tools as string[] | null | undefined) ?? null),
       })),
     };
     assistants.retrievers = (await indices.listRetrievers(lens.lensId as string)).map(
@@ -2057,7 +2057,8 @@ export async function importSchema(
       if (ag.key.length > MAX_KEY_LENGTH) {
         errors.push(longKey("agent", ag.key));
       }
-      const tools = ag.tools ?? null;
+      // A tool agents no longer have is left out, not refused (`withoutFormerTools`).
+      const tools = withoutFormerTools(ag.tools ?? null);
       if (tools !== null) {
         const unknown = tools.filter((t) => !VALID_AGENT_TOOLS.has(t));
         if (unknown.length > 0) {
@@ -2334,7 +2335,7 @@ export async function importSchema(
           ag.name,
           ag.description ?? null,
           ag.systemPrompt ?? null,
-          ag.tools ?? null,
+          withoutFormerTools(ag.tools ?? null),
         );
       }
 
@@ -2497,7 +2498,7 @@ function toAgentResponse(data: Row): AgentConfigResponseBody {
     name: data.name as string,
     description: optString(data.description),
     systemPrompt: optString(data.systemPrompt),
-    tools: (data.tools as string[] | null | undefined) ?? null,
+    tools: withoutFormerTools((data.tools as string[] | null | undefined) ?? null),
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
   };

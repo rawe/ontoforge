@@ -1,7 +1,8 @@
 /**
  * Agent configuration modeling endpoints over a mocked store, including
  * the allowlist assertions: an unknown tool name is rejected and the error
- * names the exact twelve-name grantable set.
+ * names the exact ten-name grantable set; a stored allowlist is read
+ * without the tools agents no longer have.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -34,7 +35,7 @@ const MOCK_AGENT = {
   name: "My Agent",
   description: "test desc",
   systemPrompt: "You are helpful",
-  tools: ["get_schema"],
+  tools: ["execute_query"],
   createdAt: NOW,
   updatedAt: NOW,
 };
@@ -76,7 +77,7 @@ describe("list", () => {
     expect(agent.name).toBe("My Agent");
     expect(agent.description).toBe("test desc");
     expect(agent.systemPrompt).toBe("You are helpful");
-    expect(agent.tools).toEqual(["get_schema"]);
+    expect(agent.tools).toEqual(["execute_query"]);
     expect(agent).toHaveProperty("createdAt");
     expect(agent).toHaveProperty("updatedAt");
   });
@@ -99,7 +100,22 @@ describe("read one", () => {
       url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents/my-agent",
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ key: "my-agent", name: "My Agent", tools: ["get_schema"] });
+    expect(res.json()).toMatchObject({ key: "my-agent", name: "My Agent", tools: ["execute_query"] });
+  });
+
+  it("reads a stored allowlist without the tools agents no longer have", async () => {
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
+    holder.store.listAgents.mockResolvedValue([
+      { ...MOCK_AGENT, tools: ["get_schema", "execute_query", "list_relations", "get_entity"] },
+    ]);
+    const one = await app.inject({
+      method: "GET",
+      url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents/my-agent",
+    });
+    expect(one.statusCode).toBe(200);
+    expect(one.json().tools).toEqual(["execute_query", "get_entity"]);
+    const list = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents" });
+    expect((list.json() as Record<string, unknown>[])[0]!.tools).toEqual(["execute_query", "get_entity"]);
   });
 
   it("an unknown agent key answers 404", async () => {
@@ -149,7 +165,7 @@ describe("upsert", () => {
         name: "My Agent",
         description: "test desc",
         systemPrompt: "You are helpful",
-        tools: ["get_schema"],
+        tools: ["execute_query"],
       },
     });
     expect(res.statusCode).toBe(201);
@@ -281,9 +297,11 @@ describe("tool allowlist validation", () => {
   });
 
   it("every write tool and the non-grantable read are OUTSIDE the set", () => {
-    // The set is exactly twelve names; being read-only is not sufficient.
-    expect(VALID_AGENT_TOOLS.size).toBe(12);
+    // The set is exactly ten names; being read-only is not sufficient.
+    expect(VALID_AGENT_TOOLS.size).toBe(10);
     for (const excluded of [
+      "get_schema",
+      "list_relations",
       "get_relation",
       "create_entity",
       "update_entity",
@@ -309,7 +327,7 @@ describe("tool allowlist validation", () => {
     const res = await app.inject({
       method: "PUT",
       url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents/my-agent",
-      payload: { name: "Test", tools: ["get_schema"] },
+      payload: { name: "Test", tools: ["execute_query"] },
     });
     expect(res.statusCode).toBe(201);
   });

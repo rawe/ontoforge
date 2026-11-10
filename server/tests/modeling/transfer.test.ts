@@ -240,6 +240,22 @@ describe("export", () => {
     expect(lens.savedQueries).toEqual([]);
   });
 
+  it("never writes the tools agents no longer have into an agent's allowlist", async () => {
+    holder.store.getFullSchema.mockResolvedValue({
+      entityTypes: [],
+      relationTypes: [],
+      lenses: [{ lensId: "lens-1", key: "hr_view", name: "HR View", description: null, entityInclusions: [], relationInclusions: [] }],
+    });
+    holder.store.listAgentsForExport.mockResolvedValue([
+      { key: "old", name: "Old", description: null, systemPrompt: null, tools: ["get_schema", "get_entity", "list_relations"] },
+      { key: "all", name: "All", description: null, systemPrompt: null, tools: null },
+    ]);
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/export" });
+    expect(res.statusCode).toBe(200);
+    const agents = res.json().lenses[0].assistants.agents as Record<string, unknown>[];
+    expect(agents.map((agent) => agent.tools)).toEqual([["get_entity"], null]);
+  });
+
   it("nests agents and saved queries in their lens, steps with explicit nulls", async () => {
     holder.store.getFullSchema.mockResolvedValue({
       entityTypes: [],
@@ -1291,6 +1307,43 @@ describe("import validations", () => {
     expect(message).toContain("not_a_tool");
     expect(message).toContain("Available tools:");
     expect(holder.store.createLens).not.toHaveBeenCalled();
+    expect(holder.store.upsertAgent).not.toHaveBeenCalled();
+  });
+
+  it("imports an agent allowlist without the tools agents no longer have", async () => {
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    holder.store.addIncludesType.mockResolvedValue({ key: "person", properties: null });
+    const payload = importPayload();
+    (payload.lenses as Record<string, unknown>[])[0]!.assistants = {
+      agents: [{ key: "helper", name: "Helper", tools: ["get_schema", "execute_query", "list_relations", "get_entity"] }],
+    };
+    const res = await postImport(payload);
+    expect(res.statusCode, res.body).toBe(201);
+    expect(holder.store.upsertAgent.mock.calls.map((call) => call[6])).toEqual([["execute_query", "get_entity"]]);
+  });
+
+  it("imports a 6.0 agent allowlist without the tools agents no longer have", async () => {
+    holder.store.createLens.mockResolvedValue(LENS_DATA);
+    holder.store.addIncludesType.mockResolvedValue({ key: "person", properties: null });
+    const payload = importPayload({ formatVersion: "6.0" });
+    (payload.lenses as Record<string, unknown>[])[0]!.aiAgents = [
+      { key: "helper", name: "Helper", tools: ["list_relations", "search", "get_schema"] },
+    ];
+    const res = await postImport(payload);
+    expect(res.statusCode, res.body).toBe(201);
+    expect(holder.store.upsertAgent.mock.calls.map((call) => call[6])).toEqual([["search"]]);
+  });
+
+  it("still rejects another unknown tool beside a former one", async () => {
+    const payload = importPayload();
+    (payload.lenses as Record<string, unknown>[])[0]!.assistants = {
+      agents: [{ key: "helper", name: "Helper", tools: ["get_schema", "execute_query", "not_a_tool"] }],
+    };
+    const res = await postImport(payload);
+    expect(res.statusCode).toBe(422);
+    const message = res.json().error.message as string;
+    expect(message).toContain("references unknown tool(s): ['not_a_tool']. Available tools:");
+    expect(holder.store.createEntityType).not.toHaveBeenCalled();
     expect(holder.store.upsertAgent).not.toHaveBeenCalled();
   });
 

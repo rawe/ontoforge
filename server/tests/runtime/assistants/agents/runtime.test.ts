@@ -14,11 +14,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_AGENT_CONFIG, setAiModel, type AgentConfig } from "../../../../src/core/ai.js";
 import { setEmbeddingProvider } from "../../../../src/core/embedding.js";
 import { NotFoundError, ValidationError } from "../../../../src/core/exceptions.js";
-import {
-  CHAT_TOOLS,
-  describeSchema,
-  runAgentChat,
-} from "../../../../src/runtime/assistants/agents/runtime.js";
+import { describeSchema, runAgentChat } from "../../../../src/runtime/assistants/agents/runtime.js";
+import { CHAT_TOOLS } from "../../../../src/runtime/assistants/agents/tools.js";
 import type { GraphThread } from "../../../../src/assistants/index.js";
 import { TurnSaver } from "../../../../src/assistants/threads/turnSaver.js";
 import { graphValues, newGraphThread } from "../../../assistants/threads/graphThread.js";
@@ -236,13 +233,13 @@ describe("toolset computation", () => {
       name: "Restricted",
       description: null,
       systemPrompt: null,
-      tools: ["search", "execute_query", "get_schema", "not_a_tool"],
+      tools: ["search", "execute_query", "get_entity", "not_a_tool"],
     };
 
     await runAgentChat(config, "full_lens", "hello", asRuntimeStore(store), await newThread());
 
     // search dropped (no provider), unknown name dropped silently.
-    expect(boundToolNames(fake)).toEqual(["execute_query", "get_schema"]);
+    expect(boundToolNames(fake)).toEqual(["execute_query", "get_entity"]);
   });
 
   it("allowlist naming embedding tools still works with the provider present", async () => {
@@ -391,7 +388,7 @@ describe("document reads", () => {
     });
   });
 
-  it("get_document without offset and limit reads the whole document, as the MCP tool does", async () => {
+  it("get_document without offset and limit reads a short document whole, without more", async () => {
     const fake = installFake([
       toolCallMessage("get_document", {
         entity_type_key: "person",
@@ -408,6 +405,7 @@ describe("document reads", () => {
     const payload = JSON.parse(String(toolMessages[0]!.content)) as Row;
     expect(payload.content).toBe(BIO);
     expect(payload.offset).toBe(0);
+    expect(payload).not.toHaveProperty("more");
   });
 
   it("search_documents ranks passages and hands back retrieval coordinates", async () => {
@@ -772,7 +770,7 @@ describe("entities event", () => {
     store.getFullSchemaWithLensInclusions.mockResolvedValue(makeScopedSchema());
     invalidateLoadedSchemaCache();
     store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }, "person", "p1"));
-    store.getNeighbors.mockResolvedValue([
+    const stored = [
       { relation: { ...makeRelation({}, { relationId: "r1" }), direction: "outgoing" },
         entity: makeEntity({ name: "Acme" }, "company", "c1") },
       { relation: { ...makeRelation({}, { relationId: "r2" }), direction: "incoming" },
@@ -781,7 +779,9 @@ describe("entities event", () => {
       // produce): dropped, no card, no link.
       { relation: { ...makeRelation({}, { relationId: "r3" }), direction: "outgoing" },
         entity: makeEntity({ name: "Sales", code: "S" }, "department", "d1") },
-    ]);
+    ];
+    store.getNeighbors.mockImplementation(async (_id: string, direction: string) =>
+      stored.filter((n) => n.relation.direction === direction));
     installFake([
       toolCallMessage("get_neighbors", { entity_type_key: "person", entity_id: "p1" }),
       new AIMessage("Alice works for Acme."),
@@ -824,7 +824,7 @@ describe("entities event", () => {
     store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithDocument());
     invalidateLoadedSchemaCache();
     installFake([
-      toolCallMessage("get_schema", {}, "c1"),
+      toolCallMessage("list_saved_queries", {}, "c1"),
       toolCallMessage("get_document", { entity_type_key: "person", entity_id: "ent-1", property_key: "bio" }, "c2"),
       toolCallMessage("get_entity", { entity_type_key: "person", entity_id: "gone" }, "c3"),
       toolCallMessage("list_entities", { entity_type_key: "person", filters: { anyOf: [] } }, "c4"),

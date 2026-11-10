@@ -1,7 +1,7 @@
 /**
  * AI runtime routes, mounted at
  * `/api/ontologies/:ontologyKey/runtime/lenses/:lensKey` alongside the
- * runtime router: the agent list, chat and thread read, the retriever
+ * runtime router: the agent list, schema text, chat and thread read, the retriever
  * routes (`assistants/retrievers/router.ts`) and the navigator routes
  * (`assistants/navigators/router.ts`), each under `/ai/assistants/<kind>`.
  * Every request binds a runtime store to the ontology its path names.
@@ -41,6 +41,17 @@ export const aiRouter: FastifyPluginAsyncZod<{ threads: ThreadStore }> = async (
     { schema: { tags: ["ai"], params: LensParams } },
     async (request) =>
       agents.listRuntimeAgents(
+        request.params.lensKey,
+        await getRuntimeStore(request.params.ontologyKey),
+      ),
+  );
+
+  // The schema text every agent's prompt ends with; like the list, it needs no model.
+  app.get(
+    "/ai/assistants/agent-schema",
+    { schema: { tags: ["ai"], params: LensParams } },
+    async (request) =>
+      agents.agentSchemaText(
         request.params.lensKey,
         await getRuntimeStore(request.params.ontologyKey),
       ),

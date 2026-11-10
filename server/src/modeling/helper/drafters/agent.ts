@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
 import { supportsKeywordRanking } from "../../../core/ports.js";
-import { unavailableTools } from "../../../runtime/assistants/agents/runtime.js";
+import { unavailableTools } from "../../../runtime/assistants/agents/tools.js";
 import { VALID_AGENT_TOOLS, VALID_AGENT_TOOLS_CSV } from "../../../runtime/toolNames.js";
 import * as service from "../../service.js";
 import { parsed, type Drafter } from "../drafter.js";

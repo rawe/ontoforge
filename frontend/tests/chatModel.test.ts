@@ -165,6 +165,8 @@ test('toolResultMore reads the sentence of what a completed result left out, for
   assert.equal(toolResultMore(call([{ more }])), null)
   assert.equal(toolResultMore(call(more)), null)
   assert.equal(toolResultMore(call({ more }, 'pending')), null)
+  // An entity's own property of that name is not a note.
+  assert.equal(toolResultMore(call({ _id: 'e1', _entityTypeKey: 'part', name: 'P', more })), null)
 })
 
 test('toolCallCounts counts the calls and those that answered with an error', () => {

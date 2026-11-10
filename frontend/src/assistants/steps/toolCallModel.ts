@@ -84,11 +84,14 @@ export function toolError(call: ToolCall): string | null {
 
 /**
  * What a completed call's result left out: the sentence of its `more`
- * field, present only when the tool bounded its answer; null otherwise.
+ * field, present only when the tool bounded its answer; null otherwise,
+ * and for a result that is an entity itself.
  */
 export function toolResultMore(call: ToolCall): string | null {
   const result = call.result
   if (call.status !== 'completed' || !isRecord(result)) return null
+  // An entity carries no note: a `more` there is one of its own properties.
+  if (typeof result._id === 'string') return null
   return typeof result.more === 'string' && result.more.trim() !== '' ? result.more : null
 }
 

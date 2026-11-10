@@ -143,11 +143,12 @@ same name.
 again with every later model call. The tool cuts its own result where it is made:
 
 - at a whole row — an entity, a neighbour, a query row, a search item — never inside one;
-- for a document, at the end of a piece: `get_document` returns at most that many
-  characters per call, and without a range the first piece;
+- for a document, at the end of a piece: `get_document` returns at most 20,000
+  characters per call — written out, quotes and line breaks take more room than they
+  have characters — and without a range the first piece;
 - inside one row or value that is larger than the bound alone: a long text ends with a
   marker saying how many of its characters are shown, a long list with one saying how
-  many of its items.
+  many of its items; an object that is still too large keeps its leading values.
 
 The result keeps its shape, the thread keeps it as it was sent
 ([threads.md](threads.md#turns)), and the web client is given the same result as the
@@ -175,7 +176,7 @@ that is longer than the bound cannot be read further — long text belongs in a
 ### Selecting properties
 
 `list_entities`, `get_entity` and `get_neighbors` take `fields`, the property keys to
-return in place of every property; the id and the name are always returned. A document
+return in place of every property; the id, the type and the name are always returned. A document
 property is a [stub](documents.md) in every result, also when `fields` names it: only
 `get_document` reads its text. A query result follows
 [the query language's own rule](oql.md#results) for a renamed document column; the size
@@ -184,9 +185,10 @@ bound cuts such a value like any other.
 ### Arguments
 
 Every parameter is described in the tool's own schema, a fixed choice is an enumeration,
-and a limit has its range. An argument outside them, an unknown property in `fields`, an
-unknown sort field or an unknown relation type goes back to the model as the call's
-error, naming what is valid — never as another meaning of the call.
+and a limit has its range. An argument outside them, an argument the tool does not have,
+an unknown property in `fields`, an unknown sort field or an unknown relation type goes
+back to the model as the call's error, naming what is valid — never as another meaning
+of the call.
 
 `get_neighbors` reads each direction with its own limit, so one direction never takes the
 other's room, as it can in the [runtime read](instance-data.md#traversal).

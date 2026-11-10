@@ -119,12 +119,12 @@ describe("list_entities", () => {
     expect(result).not.toHaveProperty("more");
   });
 
-  it("returns only the named fields, the _id and the name", async () => {
+  it("returns only the named fields, the _id, the type and the name", async () => {
     store.listEntities.mockResolvedValue([[makeEntity({ name: "Alice", age: 30, email: "a@x", active: true }, "person", "p1")], 1]);
 
     const result = await call("list_entities", { entity_type_key: "person", fields: ["age"] });
 
-    expect(result.items).toEqual([{ _id: "p1", name: "Alice", age: 30 }]);
+    expect(result.items).toEqual([{ _id: "p1", _entityTypeKey: "person", name: "Alice", age: 30 }]);
   });
 
   it("keeps a document property named in fields a stub", async () => {
@@ -133,7 +133,7 @@ describe("list_entities", () => {
 
     const result = await call("list_entities", { entity_type_key: "person", fields: ["bio"] });
 
-    expect(result.items).toEqual([{ _id: "p1", name: "Alice", bio: { document: true, length: bio.length } }]);
+    expect(result.items).toEqual([{ _id: "p1", _entityTypeKey: "person", name: "Alice", bio: { document: true, length: bio.length } }]);
   });
 
   it("refuses an unknown field, naming the type's properties", async () => {
@@ -141,6 +141,20 @@ describe("list_entities", () => {
 
     expect(result.error).toContain("'salary'");
     for (const property of ["name", "age", "email", "active", "bio"]) expect(result.error).toContain(`'${property}'`);
+    expect(store.listEntities).not.toHaveBeenCalled();
+  });
+
+  it("refuses a system field that does not exist", async () => {
+    const result = await call("list_entities", { entity_type_key: "person", fields: ["_typo"] });
+
+    expect(result.error).toContain("Unknown field(s) '_typo' on 'person'");
+    expect(store.listEntities).not.toHaveBeenCalled();
+  });
+
+  it("refuses an argument it does not know instead of dropping it", async () => {
+    const result = await call("list_entities", { entity_type_key: "person", entity_type: "person" });
+
+    expect(result.error).toContain("Invalid arguments for list_entities");
     expect(store.listEntities).not.toHaveBeenCalled();
   });
 
@@ -199,7 +213,7 @@ describe("list_entities", () => {
     const items = result.items as Row[];
     expect(items.length).toBeGreaterThan(0);
     expect(items.length).toBeLessThan(20);
-    expect(size(items)).toBeLessThanOrEqual(BOUND);
+    expect(size(result)).toBeLessThanOrEqual(BOUND);
     // Whole rows: each shown row is the stored row, in order.
     items.forEach((item, i) => expect(item.email).toBe(`${i}`.padEnd(2000, "e")));
     expect(result.more).toBe(
@@ -213,12 +227,12 @@ describe("list_entities", () => {
 // ---------------------------------------------------------------------------
 
 describe("get_entity", () => {
-  it("returns only the named fields, the _id and the name", async () => {
+  it("returns only the named fields, the _id, the type and the name", async () => {
     store.getEntity.mockResolvedValue(makeEntity({ name: "Alice", age: 30, email: "a@x" }, "person", "p1"));
 
     const result = await call("get_entity", { entity_type_key: "person", entity_id: "p1", fields: ["email"] });
 
-    expect(result).toEqual({ _id: "p1", name: "Alice", email: "a@x" });
+    expect(result).toEqual({ _id: "p1", _entityTypeKey: "person", name: "Alice", email: "a@x" });
   });
 
   it("keeps a document property named in fields a stub", async () => {
@@ -227,7 +241,7 @@ describe("get_entity", () => {
 
     const result = await call("get_entity", { entity_type_key: "person", entity_id: "p1", fields: ["bio"] });
 
-    expect(result).toEqual({ _id: "p1", name: "Alice", bio: { document: true, length: 50_000 } });
+    expect(result).toEqual({ _id: "p1", _entityTypeKey: "person", name: "Alice", bio: { document: true, length: 50_000 } });
   });
 
   it("refuses an unknown field, naming the type's properties", async () => {
@@ -250,6 +264,32 @@ describe("get_entity", () => {
   });
 });
 
+describe("get_neighbors and the size rule", () => {
+  it("leaves an entity without neighbours the whole result", async () => {
+    store.getEntity.mockResolvedValue(makeEntity({ name: "Alice", email: "e".repeat(15_000) }, "person", "p1"));
+    store.getNeighbors.mockResolvedValue([]);
+
+    const result = await call("get_neighbors", { entity_type_key: "person", entity_id: "p1" });
+
+    expect((result.entity as Row).email).toBe("e".repeat(15_000));
+    expect(result).not.toHaveProperty("more");
+  });
+
+  it("cuts a long value of the entity to leave room for its neighbours, and says where more of it is", async () => {
+    store.getEntity.mockResolvedValue(makeEntity({ name: "Alice", email: "e".repeat(15_000) }, "person", "p1"));
+    store.getNeighbors.mockImplementation(async (_id: string, direction: string) => direction === "outgoing"
+      ? [{ relation: { ...makeRelation({}, { relationId: "r1" }), direction }, entity: makeEntity({ name: "Acme" }, "company", "c1") }]
+      : []);
+
+    const result = await call("get_neighbors", { entity_type_key: "person", entity_id: "p1" });
+
+    expect(size(result)).toBeLessThanOrEqual(BOUND);
+    expect((result.entity as Row).email).toMatch(/…\[cut: first \d+ of 15000 characters/);
+    expect(result.neighbors).toHaveLength(1);
+    expect(result.more).toBe("A long value of the entity was cut to leave room for its neighbours. get_entity returns more of it.");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // get_document
 // ---------------------------------------------------------------------------
@@ -264,17 +304,33 @@ describe("get_document", () => {
   it("without a range reads the first piece, more naming the next offset", async () => {
     const result = await call("get_document", { entity_type_key: "person", entity_id: "p1", property_key: "bio" });
 
-    expect(result.content).toBe(TEXT.slice(0, 24_000));
-    expect(result).toMatchObject({ offset: 0, length: 24_000, totalLength: 30_000 });
+    expect(result.content).toBe(TEXT.slice(0, 20_000));
+    expect(result).toMatchObject({ offset: 0, length: 20_000, totalLength: 30_000 });
     expect(result.more).toBe(
-      "Showing characters 0-24000 of 30000. To read on, call get_document again with offset: 24000.",
+      "Showing characters 0-20000 of 30000. To read on, call get_document again with offset: 20000.",
+    );
+  });
+
+  it("ends a piece earlier when its text takes more room written out, and names the offset it really reached", async () => {
+    const escaped = '\\"\n'.repeat(10_000);
+    store.getEntity.mockResolvedValue(makeEntity({ name: "Alice", bio: escaped }, "person", "p1"));
+
+    const result = await call("get_document", { entity_type_key: "person", entity_id: "p1", property_key: "bio" });
+
+    const content = result.content as string;
+    expect(size(result)).toBeLessThanOrEqual(BOUND);
+    expect(content.length).toBeLessThan(20_000);
+    expect(escaped.startsWith(content)).toBe(true);
+    expect(result).toMatchObject({ offset: 0, length: content.length, totalLength: 30_000 });
+    expect(result.more).toBe(
+      `Showing characters 0-${content.length} of 30000. To read on, call get_document again with offset: ${content.length}.`,
     );
   });
 
   it("from an offset without a limit reads the rest when it fits, without more", async () => {
-    const result = await call("get_document", { entity_type_key: "person", entity_id: "p1", property_key: "bio", offset: 24_000 });
+    const result = await call("get_document", { entity_type_key: "person", entity_id: "p1", property_key: "bio", offset: 20_000 });
 
-    expect(result).toMatchObject({ offset: 24_000, length: 6_000, totalLength: 30_000 });
+    expect(result).toMatchObject({ offset: 20_000, length: 10_000, totalLength: 30_000 });
     expect(result).not.toHaveProperty("more");
   });
 
@@ -293,8 +349,8 @@ describe("get_document", () => {
     expect(result).toEqual({ propertyKey: "bio", content: "0123456789", offset: 29_990, length: 10, totalLength: 30_000 });
   });
 
-  it("refuses a limit above 24000 by its schema", async () => {
-    const result = await call("get_document", { entity_type_key: "person", entity_id: "p1", property_key: "bio", limit: 24_001 });
+  it("refuses a limit above 20000 by its schema", async () => {
+    const result = await call("get_document", { entity_type_key: "person", entity_id: "p1", property_key: "bio", limit: 20_001 });
 
     expect(result.error).toContain("Invalid arguments for get_document");
     expect(store.getEntity).not.toHaveBeenCalled();
@@ -380,14 +436,14 @@ describe("get_neighbors", () => {
     expect(result).not.toHaveProperty("more");
   });
 
-  it("applies fields to the entity and its neighbours, which keep their type", async () => {
+  it("applies fields to the entity and its neighbours alike", async () => {
     storeNeighbours({
       incoming: [neighbour("p2", "incoming", makeEntity({ name: "Bob", age: 40, email: "b@x" }, "person", "p2"))],
     });
 
     const result = await call("get_neighbors", { entity_type_key: "person", entity_id: "p1", direction: "incoming", fields: ["email"] });
 
-    expect(result.entity).toEqual({ _id: "p1", name: "Alice", email: "a@x" });
+    expect(result.entity).toEqual({ _id: "p1", _entityTypeKey: "person", name: "Alice", email: "a@x" });
     expect((result.neighbors as Row[])[0]!.entity).toEqual({ _id: "p2", _entityTypeKey: "person", name: "Bob", email: "b@x" });
   });
 });
@@ -434,6 +490,33 @@ describe("execute_query", () => {
       `Showing rows 1-${rows.length} of 100. If you need more, call execute_query again with the same query and offset: ${rows.length}.`,
     );
     expect(result.more).toContain("Without ORDER BY the order of rows can change between calls.");
+    expect(size(result)).toBeLessThanOrEqual(BOUND);
+  });
+
+  it("reads the ORDER BY from the query, not from a text inside it", async () => {
+    store.executeOql.mockResolvedValue([["p.name"], rowsOf(100, 500)]);
+
+    const result = await call("execute_query", { query: "MATCH (p:person) WHERE p.name CONTAINS 'ORDER BY' RETURN p.name" });
+
+    expect(result.more).toContain("Without ORDER BY the order of rows can change between calls.");
+  });
+
+  it("keeps the whole result within the bound when a column's name alone is larger", async () => {
+    const column = "c".repeat(30_000);
+    store.executeOql.mockResolvedValue([[column], []]);
+
+    const result = await call("execute_query", { query: QUERY });
+
+    expect(size(result)).toBeLessThanOrEqual(BOUND);
+    expect(result.results).toEqual([]);
+    expect(result.more).toContain("was cut");
+  });
+
+  it("refuses an argument it does not know instead of dropping it", async () => {
+    const result = await call("execute_query", { query: QUERY, limit: 5 });
+
+    expect(result.error).toContain("Invalid arguments for execute_query");
+    expect(store.executeOql).not.toHaveBeenCalled();
   });
 
   it("gives no ORDER BY hint when the query has one", async () => {
@@ -494,9 +577,25 @@ describe("run_saved_query", () => {
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.length).toBeLessThan(100);
     expect(size(rows)).toBeLessThanOrEqual(BOUND);
+    expect(size(result)).toBeLessThanOrEqual(BOUND);
     expect(result.more).toBe(
-      `Showing rows 1-${rows.length} of 100. If you need more, call run_saved_query again with the same arguments and offset: ${rows.length}.`,
+      `Showing rows 1-${rows.length} of 100. If you need more, call run_saved_query again with the same arguments and offset: ${rows.length}. ` +
+        "Without ORDER BY the order of rows can change between calls.",
     );
+  });
+
+  it("gives no ORDER BY hint when the saved query's last step orders its rows", async () => {
+    store.getSavedQueries.mockResolvedValue([{
+      key: "everyone", name: "Everyone", description: "Every person",
+      steps: JSON.stringify([{ name: "main", type: "oql", oql: `${QUERY} ORDER BY p.name` }]),
+      parameters: "[]",
+    }]);
+    invalidateLoadedSchemaCache();
+    store.executeOql.mockResolvedValue([["p.name"], rowsOf(100, 500)]);
+
+    const result = await call("run_saved_query", { query_key: "everyone" });
+
+    expect(result.more).toMatch(/^Showing rows 1-\d+ of 100\. If you need more, call run_saved_query again with the same arguments and offset: \d+\.$/);
   });
 
   it("cuts an oversized single cell with the marker", async () => {

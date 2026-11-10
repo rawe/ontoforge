@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { fitRows, fitValue, RESULT_CHARACTERS } from "../../../../src/runtime/assistants/agents/resultSize.js";
+import { fitRows, fitText, fitValue, RESULT_CHARACTERS } from "../../../../src/runtime/assistants/agents/resultSize.js";
 
 const size = (value: unknown) => JSON.stringify(value).length;
 
@@ -26,6 +26,15 @@ describe("fitRows", () => {
     // The next row would not have fitted.
     expect(size(rows.slice(0, fitted.rows.length + 1))).toBeGreaterThan(RESULT_CHARACTERS);
     expect(fitted.cut).toBe(false);
+  });
+
+  it("keeps the bound when the first row is a wide object", () => {
+    const wide = Object.fromEntries(Array.from({ length: 400 }, (_, i) => [`property_${i}`, "v".repeat(64)]));
+
+    const fitted = fitRows([wide, { id: 2 }]);
+
+    expect(fitted.cut).toBe(true);
+    expect(size(fitted.rows)).toBeLessThanOrEqual(RESULT_CHARACTERS);
   });
 
   it("shrinks a row larger than the bound alone, and goes on with the rows that still fit", () => {
@@ -90,6 +99,26 @@ describe("fitValue", () => {
     for (const text of Object.values(fitted.value)) expect(text).toMatch(/…\[cut: first \d+ of 20000 characters; asking again returns the same part\]$/);
   });
 
+  it("drops trailing values of an object that is too large although no value of it is long", () => {
+    const wide = Object.fromEntries(Array.from({ length: 400 }, (_, i) => [`property_${i}`, "v".repeat(64)]));
+
+    const fitted = fitValue(wide);
+
+    expect(fitted.cut).toBe(true);
+    expect(size(fitted.value)).toBeLessThanOrEqual(RESULT_CHARACTERS);
+    expect(Object.keys(fitted.value)[0]).toBe("property_0");
+    expect((fitted.value as Record<string, string>)["…"]).toMatch(/^\[cut: first \d+ of 400 values\]$/);
+  });
+
+  it("keeps the bound for whatever it is given", () => {
+    const awkward = [
+      { [`k${"k".repeat(30_000)}`]: 1 },
+      Array.from({ length: 5_000 }, (_, i) => ({ id: i, text: "t".repeat(200) })),
+      { nested: { deep: Object.fromEntries(Array.from({ length: 2_000 }, (_, i) => [`p${i}`, i])) } },
+    ];
+    for (const value of awkward) expect(size(fitValue(value).value)).toBeLessThanOrEqual(RESULT_CHARACTERS);
+  });
+
   it("counts characters, not code units, and never splits one", () => {
     const fitted = fitValue({ text: "😀".repeat(30_000) });
     expect(fitted.value.text).toMatch(/^(😀)+…\[cut: first \d+ of 30000 characters; asking again returns the same part\]$/u);
@@ -100,5 +129,26 @@ describe("fitValue", () => {
     fitValue(value);
     expect(value.text).toHaveLength(100_000);
     expect(value.list).toHaveLength(10_000);
+  });
+});
+
+describe("fitText", () => {
+  it("leaves a text that fits written out as it is", () => {
+    expect(fitText("plain text", 100)).toBe("plain text");
+  });
+
+  it("ends a text where its JSON reaches the room, never inside a character", () => {
+    const text = 'a"\n😀'.repeat(1_000);
+
+    const fitted = fitText(text, 1_000);
+
+    expect(text.startsWith(fitted)).toBe(true);
+    expect(size(fitted)).toBeLessThanOrEqual(1_000);
+    expect(size(fitted)).toBeGreaterThan(990);
+    expect(fitted.endsWith("\ud83d")).toBe(false);
+  });
+
+  it("answers an empty text when nothing fits", () => {
+    expect(fitText("abc", 1)).toBe("");
   });
 });

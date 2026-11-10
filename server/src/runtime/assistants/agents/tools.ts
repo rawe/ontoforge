@@ -21,13 +21,14 @@ import { z } from "zod";
 import type { Tool } from "../../../assistants/index.js";
 import type { AgentConfig } from "../../../core/ai.js";
 import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
+import { analyze, parse } from "../../../core/oql/index.js";
 import type { RuntimeStore } from "../../../core/ports.js";
 import {
   applyFieldProjection,
-  ENTITY_ALWAYS_FIELDS,
   ENTITY_NEIGHBOR_ALWAYS_FIELDS,
   filterRules,
 } from "../../readHelpers.js";
+import { cpLength } from "../../codePoints.js";
 import { loadSchema, type EntityTypeDef, type SchemaCacheValue } from "../../schemaCache.js";
 import { deploymentMethods, type SearchCapabilities } from "../../search/availability.js";
 import {
@@ -53,7 +54,7 @@ import {
 } from "../../toolNames.js";
 import { entitiesEvent } from "../entities.js";
 import { TurnEntities } from "./entities.js";
-import { fitRows, fitValue, RESULT_CHARACTERS } from "./resultSize.js";
+import { fitRows, fitText, fitValue, RESULT_CHARACTERS, size } from "./resultSize.js";
 
 type Row = Record<string, unknown>;
 
@@ -84,6 +85,16 @@ const LIST_ROWS_DEFAULT = 20;
 /** Search results at most, as the search tools have always answered. */
 const SEARCH_ITEMS = 20;
 
+/** Characters of a document one call reads at most: below the bound of a
+ * result, because quotes and line breaks take more room written out as JSON. */
+const DOCUMENT_PIECE = 20_000;
+
+/** Room of the bound kept for a result's small fields and its `more` sentence. */
+const NOTE_ROOM = 800;
+
+/** The system fields `fields` may name beside a type's properties. */
+const SYSTEM_FIELDS = ["_id", "_entityTypeKey", "_identity", "_createdAt", "_updatedAt"];
+
 const typeKey = z.string().describe("An entity type key from the schema.");
 const entityId = z.string().describe("The entity's _id, exactly as a result gave it.");
 
@@ -93,11 +104,10 @@ const rowLimit = (what: string, fallback: number, max: number) =>
 const rowOffset = z.number().int().min(0).nullish()
   .describe("Rows to skip, to read on after an earlier call; default 0.");
 
-const fieldList = (also: string) =>
-  z.array(z.string()).nullish().describe(
-    `Property keys to return instead of every property; _id and the name ${also}are always returned. ` +
-    "A document property stays a stub.",
-  );
+const fieldList = z.array(z.string()).nullish().describe(
+  "Property keys to return instead of every property; _id, the type and the name are always returned. " +
+  "A document property stays a stub.",
+);
 
 const filterMap = z.record(z.string(), z.string()).nullish();
 
@@ -122,7 +132,7 @@ function entityType(lens: SchemaCacheValue, key: string): EntityTypeDef {
 /** The `fields` argument, checked against the properties it may name; null when left out. */
 function checkedFields(fields: unknown, known: ReadonlySet<string>, where: string): string[] | null {
   if (!Array.isArray(fields)) return null;
-  const unknown = (fields as string[]).filter((field) => !known.has(field) && !field.startsWith("_"));
+  const unknown = (fields as string[]).filter((field) => !known.has(field) && !SYSTEM_FIELDS.includes(field));
   if (unknown.length > 0) {
     throw new ValidationError(`Unknown field(s) ${quoted(unknown)} ${where}. Properties: ${quoted(known)}`);
   }
@@ -130,11 +140,12 @@ function checkedFields(fields: unknown, known: ReadonlySet<string>, where: strin
 }
 
 /** An entity with only `fields` and what is always returned: its id, its
- * identity and its name. Documents are stubs already and stay stubs. */
-function selected(entity: Row, fields: string[] | null, type: EntityTypeDef | undefined, always: ReadonlySet<string>): Row {
+ * type, its identity and its name — what the model needs to name it and
+ * the web client to show it. Documents are stubs already and stay stubs. */
+function selected(entity: Row, fields: string[] | null, type: EntityTypeDef | undefined): Row {
   if (fields === null) return entity;
   const name = type?.nameProperty ?? null;
-  return applyFieldProjection(entity, name === null ? fields : [...fields, name], always);
+  return applyFieldProjection(entity, name === null ? fields : [...fields, name], ENTITY_NEIGHBOR_ALWAYS_FIELDS);
 }
 
 // ---------------------------------------------------------------------------
@@ -163,8 +174,9 @@ function page(
   total: number,
   again: string,
   skip: boolean,
+  room = RESULT_CHARACTERS - NOTE_ROOM,
 ): { rows: Row[]; said: (string | false)[] } {
-  const fitted = fitRows(skip ? rows.slice(offset) : rows);
+  const fitted = fitRows(skip ? rows.slice(offset) : rows, room);
   const shown = fitted.rows.length;
   const end = offset + shown;
   return {
@@ -176,6 +188,27 @@ function page(
     ],
   };
 }
+
+/**
+ * The fields a result carries beside its rows, within their part of the
+ * bound, and the room they leave the rows. They are small as a rule; a
+ * large one — a column named at length, many limitations — is shrunk.
+ */
+function beside(fields: Row): { fields: Row; cut: boolean; room: number } {
+  const fitted = fitValue(fields, RESULT_CHARACTERS / 2);
+  return { fields: fitted.value, cut: fitted.cut, room: RESULT_CHARACTERS - NOTE_ROOM - size(fitted.value) };
+}
+
+/** Whether an OQL text orders its rows; true when it cannot be read, so no warning is made up. */
+function ordered(oql: string): boolean {
+  try {
+    return analyze(parse(oql).tree).ordered;
+  } catch {
+    return true;
+  }
+}
+
+const UNORDERED = "Without ORDER BY the order of rows can change between calls.";
 
 // ---------------------------------------------------------------------------
 // Tool definitions — instantiated selectively per run
@@ -220,7 +253,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "endpoints, so it needs no marker. A relation type that joins one type to " +
       "itself is the exception: there the direction cannot be derived, and the " +
       `error tells you which marker to add. ${stubReading(granted)}`,
-    input: z.object({
+    input: z.strictObject({
       entity_type_key: typeKey,
       search: z.string().nullish()
         .describe("A word or phrase to find, ignoring case, anywhere in any string property."),
@@ -228,7 +261,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       sort: z.string().nullish()
         .describe("A property key, _createdAt or _updatedAt to sort by; default _createdAt."),
       order: z.enum(["asc", "desc"]).nullish().describe("Sort direction; default asc."),
-      fields: fieldList(""),
+      fields: fieldList,
       limit: rowLimit("Rows of the page", LIST_ROWS_DEFAULT, LIST_ROWS),
       offset: rowOffset,
     }),
@@ -255,7 +288,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         (args.filters as Record<string, string> | null | undefined) ?? {},
         store,
       );
-      const rows = (listed.items as Row[]).map((entity) => selected(entity, fields, type, ENTITY_ALWAYS_FIELDS));
+      const rows = (listed.items as Row[]).map((entity) => selected(entity, fields, type));
       const shown = page(rows, offset, listed.total, "call list_entities again with the same arguments", false);
       return { items: shown.rows, total: listed.total, limit, offset, ...more(...shown.said) };
     },
@@ -265,10 +298,10 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
     description: (granted) =>
       "Read one entity by its _id: every property, or the ones 'fields' names. Use it when you have an " +
       `entity's _id and need its values. ${stubReading(granted)}`,
-    input: z.object({
+    input: z.strictObject({
       entity_type_key: typeKey,
       entity_id: entityId,
-      fields: fieldList(""),
+      fields: fieldList,
     }),
     run: async (lensKey, store, args) => {
       const key = args.entity_type_key as string;
@@ -276,7 +309,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       const fields = checkedFields(args.fields, new Set(Object.keys(type.properties)), `on '${key}'`);
       const entity = await service.getEntity(lensKey, key, args.entity_id as string, store);
       // A value cut here says so itself: an entity has no room for a note beside its properties.
-      return fitValue(selected(entity, fields, type, ENTITY_ALWAYS_FIELDS)).value;
+      return fitValue(selected(entity, fields, type), RESULT_CHARACTERS - NOTE_ROOM).value;
     },
   },
   {
@@ -289,17 +322,17 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "{relation, entity}, the relation with its type, its direction and its own properties. limit counts " +
       "per direction. When neighbours are left out, 'more' says so: the result is then not the whole " +
       "neighbourhood. A document property comes as {\"document\": true, \"length\": N}, never as text.",
-    input: z.object({
+    input: z.strictObject({
       entity_type_key: typeKey,
       entity_id: entityId,
       direction: z.enum(["outgoing", "incoming", "both"]).nullish()
         .describe("Which relations to follow; default both."),
       relation_type_key: z.string().nullish()
         .describe("A relation type key from the schema: only neighbours over this relation type."),
-      fields: fieldList("and the type "),
+      fields: fieldList,
       limit: rowLimit("Neighbours per direction", LIST_ROWS_DEFAULT, LIST_ROWS),
     }),
-    run: async (lensKey, store, args) => {
+    run: async (lensKey, store, args, granted) => {
       const key = args.entity_type_key as string;
       const lens = (await loadSchema(lensKey, store)).scoped;
       entityType(lens, key);
@@ -326,13 +359,15 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         neighbours.push(...(read.neighbors.slice(0, limit) as Row[]));
       }
 
-      const entity = fitValue(selected(centre, fields, lens.entityTypes[key], ENTITY_ALWAYS_FIELDS), RESULT_CHARACTERS / 2);
+      // The entity may take the whole result when it has no neighbours to show, else half of it.
+      const whole = RESULT_CHARACTERS - NOTE_ROOM;
+      const entity = fitValue(selected(centre, fields, lens.entityTypes[key]), neighbours.length === 0 ? whole : whole / 2);
       const rows = neighbours.map((neighbour) => {
         const other = neighbour.entity as Row;
         const type = lens.entityTypes[String(other._entityTypeKey)];
-        return { ...neighbour, entity: selected(other, fields, type, ENTITY_NEIGHBOR_ALWAYS_FIELDS) };
+        return { ...neighbour, entity: selected(other, fields, type) };
       });
-      const fitted = fitRows(rows, RESULT_CHARACTERS - JSON.stringify(entity.value).length);
+      const fitted = fitRows(rows, whole - size(entity.value));
       const narrow = [
         relationType === null && "relation_type_key",
         direction === "both" && "direction",
@@ -348,7 +383,9 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
             `Only the first ${fitted.rows.length} of the ${rows.length} neighbours read fit this result.`,
           left && narrow.length > 0 && `To see others, narrow with ${narrow.join(", ")}.`,
           longer.length > 0 && limit < LIST_ROWS && `Or raise limit, up to ${LIST_ROWS}.`,
-          (entity.cut || fitted.cut) && LONG_VALUE_CUT,
+          entity.cut && "A long value of the entity was cut to leave room for its neighbours." +
+            (granted.has(TOOL_GET_ENTITY) ? " get_entity returns more of it." : ""),
+          fitted.cut && LONG_VALUE_CUT,
         ),
       };
     },
@@ -363,7 +400,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       filterRules({ contains: false, relations: true }) + " " +
       SEARCH_FILTER_EFFECT + " " +
       ENTITY_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
-    input: z.object({
+    input: z.strictObject({
       query: z.string().describe("The text to rank for: plain words."),
       types: z.array(z.string()).nullish().describe("Entity type keys to search; omit for every type."),
       filters: filterMap.describe('Conditions that must all hold, as {"key": "value"}; values are strings.'),
@@ -381,15 +418,17 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         },
         store,
       );
-      const fitted = fitRows(found.items);
+      const { items, ...rest } = found;
+      const other = beside(rest);
+      const fitted = fitRows(items, other.room);
       return {
-        ...found,
+        ...other.fields,
         items: fitted.rows,
         ...more(
-          fitted.rows.length < found.items.length &&
-            `Only the first ${fitted.rows.length} of ${found.items.length} found entities fit this result. ` +
+          fitted.rows.length < items.length &&
+            `Only the first ${fitted.rows.length} of ${items.length} found entities fit this result. ` +
             "Narrow with types or filters, or ask for fewer with limit.",
-          fitted.cut && LONG_VALUE_CUT,
+          (fitted.cut || other.cut) && LONG_VALUE_CUT,
         ),
       };
     },
@@ -407,7 +446,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         " (characters; read it with get_document)",
         granted.has(TOOL_GET_DOCUMENT) ? " (characters; read it with get_document)" : " (characters)",
       ) + " " + SEARCH_RESULT_NOTE,
-    input: z.object({
+    input: z.strictObject({
       query: z.string().describe("The text to rank for: plain words."),
       types: z.array(z.string()).nullish().describe("Entity type keys whose documents to search."),
       documents: z.array(z.string()).nullish().describe("Documents to search, each as 'type.property'."),
@@ -431,17 +470,19 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         },
         store,
       );
-      const fitted = fitRows(found.items);
+      const { items, ...rest } = found;
+      const other = beside(rest);
+      const fitted = fitRows(items, other.room);
       return {
-        ...found,
+        ...other.fields,
         items: fitted.rows,
         ...more(
-          fitted.rows.length < found.items.length &&
-            `Only the first ${fitted.rows.length} of ${found.items.length} found passages fit this result. ` +
+          fitted.rows.length < items.length &&
+            `Only the first ${fitted.rows.length} of ${items.length} found passages fit this result. ` +
             (args.text === false
               ? "Narrow with types, documents or filters."
               : "Call again with text: false to get every passage without its text."),
-          fitted.cut && LONG_VALUE_CUT,
+          (fitted.cut || other.cut) && LONG_VALUE_CUT,
         ),
       };
     },
@@ -451,7 +492,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
     description: (granted) =>
       "Read the text of a document property, a piece at a time. Document properties hold long text and " +
       'never come inline: other tools show them as {"document": true, "length": N}. offset and limit ' +
-      `count characters. Without limit you get the first piece from offset, at most ${RESULT_CHARACTERS} ` +
+      `count characters. Without limit you get the first piece from offset, at most ${DOCUMENT_PIECE} ` +
       "characters. When the text goes on after a piece, 'more' names the offset of the next one. Read only " +
       "the part you need" +
       (granted.has(TOOL_SEARCH_DOCUMENTS)
@@ -460,13 +501,13 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         : ". ") +
       "Returns {propertyKey, content, offset, length, totalLength}: length is the content's, totalLength " +
       "the whole document's.",
-    input: z.object({
+    input: z.strictObject({
       entity_type_key: typeKey,
       entity_id: entityId,
       property_key: z.string().describe("The key of a document property of the entity type."),
       offset: z.number().int().min(0).nullish().describe("The character to start at; default 0."),
-      limit: z.number().int().min(1).max(RESULT_CHARACTERS).nullish()
-        .describe(`Characters to read: 1 to ${RESULT_CHARACTERS}, default ${RESULT_CHARACTERS}.`),
+      limit: z.number().int().min(1).max(DOCUMENT_PIECE).nullish()
+        .describe(`Characters to read: 1 to ${DOCUMENT_PIECE}, default ${DOCUMENT_PIECE}.`),
     }),
     run: async (lensKey, store, args) => {
       const piece = await service.getDocument(
@@ -475,16 +516,22 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         args.entity_id as string,
         args.property_key as string,
         (args.offset as number | null | undefined) ?? 0,
-        (args.limit as number | null | undefined) ?? RESULT_CHARACTERS,
+        (args.limit as number | null | undefined) ?? DOCUMENT_PIECE,
         store,
       );
+      // The piece as it fits the result written out: text full of quotes,
+      // line breaks or control characters ends earlier than it was read.
+      const { content: read, ...rest } = piece as { content: string } & Row;
+      const content = fitText(read, RESULT_CHARACTERS - NOTE_ROOM - size(rest));
       const start = piece.offset as number;
-      const end = start + (piece.length as number);
+      const end = start + cpLength(content);
       const total = piece.totalLength as number;
       // Whatever the piece's size, the model is told when the text goes on:
       // it does not work that out from the lengths.
       return {
-        ...piece,
+        ...rest,
+        content,
+        length: end - start,
         ...more(
           end < total &&
             `Showing characters ${start}-${end} of ${total}. To read on, call get_document again with offset: ${end}.`,
@@ -504,14 +551,14 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "(case-sensitive, no regex). Functions: count(*), count(x), sum, avg, min, max, collect; no others. " +
       "No writes, no CALL. Return the properties you need (p.name) rather than whole nodes: rows stay " +
       "small. Returns {columns, results}. When rows are left out, 'more' says which and how to get them. " +
-      "A document property comes as a stub, never as text" +
-      (granted.has(TOOL_GET_DOCUMENT) ? "; read it with get_document. " : ". ") +
+      'RETURN p.bio answers a document property as a stub {"document": true, "length": N}, not as its text' +
+      (granted.has(TOOL_GET_DOCUMENT) ? "; read the text with get_document. " : ". ") +
       "If the query fails, read the error: it lists the available types and properties. " +
       "Examples: " +
       "MATCH (p:person)-[r:works_for]->(c:company) WHERE c.name = 'Acme' RETURN p.name, r.role | " +
       "MATCH (p:person) RETURN count(*) AS people | " +
       "MATCH (p:person) WHERE p.age > 30 RETURN p.name, p.age ORDER BY p.age DESC LIMIT 10",
-    input: z.object({
+    input: z.strictObject({
       query: z.string().describe("The OQL query."),
       offset: rowOffset,
     }),
@@ -519,16 +566,17 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       const query = args.query as string;
       const { columns, results } = await service.executeQuery(lensKey, query, store);
       const offset = (args.offset as number | null | undefined) ?? 0;
-      const shown = page(results, offset, results.length, "call execute_query again with the same query", true);
+      const other = beside({ columns });
+      const shown = page(results, offset, results.length, "call execute_query again with the same query", true, other.room);
       const rowsLeft = offset + shown.rows.length < results.length;
       return {
-        columns,
+        ...other.fields,
         results: shown.rows,
         ...more(
           ...shown.said,
-          rowsLeft && !/\border\s+by\b/i.test(query) &&
-            "Without ORDER BY the order of rows can change between calls.",
+          rowsLeft && !ordered(query) && UNORDERED,
           rowsLeft && "To get fewer rows, return fewer columns, add WHERE or LIMIT, or count with count(*).",
+          other.cut && LONG_VALUE_CUT,
         ),
       };
     },
@@ -538,7 +586,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
     description: () =>
       "List the saved queries of this lens: queries a person prepared, each run by its key. " +
       "Each has a key, name, description, and parameter definitions (name, description, dataType).",
-    input: z.object({}),
+    input: z.strictObject({}),
     run: async (lensKey, store) => {
       const loaded = await loadSchema(lensKey, store);
       return Object.values(loaded.savedQueries).map((sq) => ({
@@ -567,25 +615,34 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         "'more' says which and how to get them."
       );
     },
-    input: z.object({
+    input: z.strictObject({
       query_key: z.string().describe("The saved query's key."),
       params: z.record(z.string(), z.unknown()).nullish()
         .describe("A value for every parameter the saved query declares, by parameter name."),
       offset: rowOffset,
     }),
     run: async (lensKey, store, args) => {
-      const output = await service.executeSavedQuery(
-        lensKey,
-        args.query_key as string,
-        (args.params as Row | null | undefined) ?? {},
-        store,
-      );
+      const key = args.query_key as string;
+      const output = await service.executeSavedQuery(lensKey, key, (args.params as Row | null | undefined) ?? {}, store);
       // An oql step answers rows under `results`, a search step under `items`.
       const rowsKey = Array.isArray(output.results) ? "results" : "items";
-      const rows = (output[rowsKey] ?? []) as Row[];
+      const { [rowsKey]: answered, ...rest } = output;
+      const rows = (answered ?? []) as Row[];
       const offset = (args.offset as number | null | undefined) ?? 0;
-      const shown = page(rows, offset, rows.length, "call run_saved_query again with the same arguments", true);
-      return { ...output, [rowsKey]: shown.rows, ...more(...shown.said) };
+      const other = beside(rest);
+      const shown = page(rows, offset, rows.length, "call run_saved_query again with the same arguments", true, other.room);
+      // The last step's rows are the answer: a page of them is stable only when that step orders them.
+      const last = (await loadSchema(lensKey, store)).savedQueries[key]?.steps.at(-1);
+      const unordered = last?.type === "oql" && !ordered(last.oql ?? "");
+      return {
+        ...other.fields,
+        [rowsKey]: shown.rows,
+        ...more(
+          ...shown.said,
+          offset + shown.rows.length < rows.length && unordered && UNORDERED,
+          other.cut && LONG_VALUE_CUT,
+        ),
+      };
     },
   },
   {
@@ -595,7 +652,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "Returns the most relevant saved queries ranked by how well their " +
       "description matches your query. Use this to find the right saved query " +
       "for a user's intent instead of listing all queries.",
-    input: z.object({
+    input: z.strictObject({
       query: z.string().describe("What the saved query should answer, in plain words."),
     }),
     run: async (lensKey, store, args) =>

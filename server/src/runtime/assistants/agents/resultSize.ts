@@ -37,9 +37,16 @@ function leading<T>(items: T[], cap: number): T[] {
   return kept;
 }
 
+/** What an object keeps whatever its size: the values that give it its
+ * shape — a system field, a nested object or list (a neighbour's relation
+ * and entity, a row's node) — as against the plain values it may lose. */
+const structural = ([key, item]: readonly [string, unknown]) =>
+  key.startsWith("_") || (item !== null && typeof item === "object");
+
 /** `value` with every text longer than `cap` characters cut to them and
  * every list cut to the leading items that take `cap` characters; with
- * `wide`, an object too is cut to the leading values that take them. */
+ * `wide`, an object too is cut to its leading plain values that take
+ * them, beside the values that give it its shape. */
 function shrunk(value: unknown, cap: number, wide: boolean): unknown {
   if (typeof value === "string") {
     // The code units bound the code points, so a short text is not counted.
@@ -56,11 +63,13 @@ function shrunk(value: unknown, cap: number, wide: boolean): unknown {
   }
   if (isPlainObject(value)) {
     const entries = Object.entries(value).map(([key, item]) => [key, shrunk(item, cap, wide)] as const);
-    if (!wide) return Object.fromEntries(entries);
-    const kept = leading(entries, cap);
-    return Object.fromEntries(
-      kept.length < entries.length ? [...kept, ["…", `[cut: first ${kept.length} of ${entries.length} values]`]] : kept,
-    );
+    const plain = entries.filter((entry) => !structural(entry));
+    if (!wide || size(Object.fromEntries(plain)) <= cap) return Object.fromEntries(entries);
+    const kept = new Set(leading(plain, cap));
+    return Object.fromEntries([
+      ...entries.filter((entry) => structural(entry) || kept.has(entry)),
+      ["…", `[cut: first ${kept.size} of ${plain.length} values]`],
+    ]);
   }
   return value;
 }

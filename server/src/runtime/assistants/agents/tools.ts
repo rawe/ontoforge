@@ -210,6 +210,16 @@ function ordered(oql: string): boolean {
 
 const UNORDERED = "Without ORDER BY the order of rows can change between calls.";
 
+/** Rows are keyed by their columns' names: names that fill a result leave
+ * no room for rows, and shortening them would part them from their rows. */
+function checkColumns(columns: unknown): void {
+  if (size(columns) > RESULT_CHARACTERS / 4) {
+    throw new ValidationError(
+      `The column names of this result take ${size(columns)} characters. Give the columns short names with AS.`,
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tool definitions — instantiated selectively per run
 // ---------------------------------------------------------------------------
@@ -365,7 +375,9 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       const rows = neighbours.map((neighbour) => {
         const other = neighbour.entity as Row;
         const type = lens.entityTypes[String(other._entityTypeKey)];
-        return { ...neighbour, entity: selected(other, fields, type) };
+        // The direction leads the relation: of a relation too large for a result the leading values stay.
+        const { direction: way, ...relation } = neighbour.relation as Row;
+        return { ...neighbour, relation: { direction: way, ...relation }, entity: selected(other, fields, type) };
       });
       const fitted = fitRows(rows, whole - size(entity.value));
       const narrow = [
@@ -383,9 +395,10 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
             `Only the first ${fitted.rows.length} of the ${rows.length} neighbours read fit this result.`,
           left && narrow.length > 0 && `To see others, narrow with ${narrow.join(", ")}.`,
           longer.length > 0 && limit < LIST_ROWS && `Or raise limit, up to ${LIST_ROWS}.`,
-          entity.cut && "A long value of the entity was cut to leave room for its neighbours." +
+          // With neighbours the entity had half the result: get_entity gives it the whole.
+          entity.cut && neighbours.length > 0 && "A long value of the entity was cut to leave room for its neighbours." +
             (granted.has(TOOL_GET_ENTITY) ? " get_entity returns more of it." : ""),
-          fitted.cut && LONG_VALUE_CUT,
+          ((entity.cut && neighbours.length === 0) || fitted.cut) && LONG_VALUE_CUT,
         ),
       };
     },
@@ -566,6 +579,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       const query = args.query as string;
       const { columns, results } = await service.executeQuery(lensKey, query, store);
       const offset = (args.offset as number | null | undefined) ?? 0;
+      checkColumns(columns);
       const other = beside({ columns });
       const shown = page(results, offset, results.length, "call execute_query again with the same query", true, other.room);
       const rowsLeft = offset + shown.rows.length < results.length;
@@ -576,7 +590,6 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
           ...shown.said,
           rowsLeft && !ordered(query) && UNORDERED,
           rowsLeft && "To get fewer rows, return fewer columns, add WHERE or LIMIT, or count with count(*).",
-          other.cut && LONG_VALUE_CUT,
         ),
       };
     },
@@ -627,6 +640,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       // An oql step answers rows under `results`, a search step under `items`.
       const rowsKey = Array.isArray(output.results) ? "results" : "items";
       const { [rowsKey]: answered, ...rest } = output;
+      checkColumns(rest.columns);
       const rows = (answered ?? []) as Row[];
       const offset = (args.offset as number | null | undefined) ?? 0;
       const other = beside(rest);
@@ -679,9 +693,12 @@ function correction(error: NotFoundError | ValidationError): string {
   return text === "" || error.message.includes(text) ? error.message : `${error.message}: ${text}`;
 }
 
-/** Not-found and validation errors go back to the model, which corrects itself. */
+/** Not-found and validation errors go back to the model, which corrects
+ * itself. An error is a result too, and holds no more than one: it can
+ * repeat an argument of any length. */
 function selfCorrectable(error: unknown): { error: string } | undefined {
-  return error instanceof NotFoundError || error instanceof ValidationError ? { error: correction(error) } : undefined;
+  if (!(error instanceof NotFoundError || error instanceof ValidationError)) return undefined;
+  return fitValue({ error: correction(error) }, RESULT_CHARACTERS - NOTE_ROOM).value;
 }
 
 /** A result's entities the turn has not sent yet, as the shared `entities` event. */

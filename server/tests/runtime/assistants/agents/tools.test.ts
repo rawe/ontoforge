@@ -86,6 +86,20 @@ const PERSON_INDEX_SCHEMA = {
   relationTypes: {},
 };
 
+/** The unscoped fixture whose company and works_for carry `count` more
+ * string properties, `extra_<i>` and `rel_<i>`. */
+function schemaWithManyProperties(count: number): Row {
+  const schema = makeFullSchema({ lensKey: "full_lens", lensName: "Full Lens" });
+  const more = (prefix: string) => Array.from({ length: count }, (_, i) => (
+    { key: `${prefix}_${i}`, displayName: `${prefix} ${i}`, dataType: "string", required: false, defaultValue: null }
+  ));
+  const company = (schema.entityTypes as Row[]).find((type) => type.key === "company")!;
+  (company.properties as Row[]).push(...more("extra"));
+  const worksFor = (schema.relationTypes as Row[]).find((type) => type.key === "works_for")!;
+  (worksFor.properties as Row[]).push(...more("rel"));
+  return schema;
+}
+
 /** One turn in which the model calls `name` with `args` once; what the model
  * then reads as the tool's result. */
 async function call(name: string, args: Row, config: AgentConfig = DEFAULT_AGENT_CONFIG): Promise<Row> {
@@ -264,7 +278,65 @@ describe("get_entity", () => {
   });
 });
 
+describe("errors and the size rule", () => {
+  it("bounds an error that repeats an argument of any length", async () => {
+    const result = await call("get_entity", { entity_type_key: "t".repeat(30_000), entity_id: "p1" });
+
+    expect(Object.keys(result)).toEqual(["error"]);
+    expect(result.error).toMatch(/^Entity type 't+…\[cut: first \d+ of \d+ characters/);
+    expect(size(result)).toBeLessThanOrEqual(BOUND);
+  });
+
+  it("bounds the failure of arguments that do not fit a tool's schema", async () => {
+    const result = await call("get_entity", { entity_type_key: "person", entity_id: "p1", ["x".repeat(30_000)]: 1 });
+
+    expect(result.error).toContain("Invalid arguments for get_entity");
+    expect(size(result)).toBeLessThanOrEqual(BOUND);
+  });
+});
+
 describe("get_neighbors and the size rule", () => {
+  it("keeps the relation and the entity of a neighbour too large for one result, and still presents it", async () => {
+    const wide = (prefix: string) => Object.fromEntries(Array.from({ length: 400 }, (_, i) => [`${prefix}_${i}`, "v".repeat(64)]));
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithManyProperties(400));
+    invalidateLoadedSchemaCache();
+    store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }, "person", "p1"));
+    store.getNeighbors.mockImplementation(async (_id: string, direction: string) => direction === "outgoing"
+      ? [{
+          relation: { ...makeRelation(wide("rel"), { relationId: "r1" }), direction },
+          entity: makeEntity({ name: "Acme", ...wide("extra") }, "company", "c1"),
+        }]
+      : []);
+    const events: Row[] = [];
+    const fake = new FakeToolCallingModel([toolCallMessage("get_neighbors", { entity_type_key: "person", entity_id: "p1" }), new AIMessage("done")]);
+    setAiModel(fake);
+
+    await runAgentChat(DEFAULT_AGENT_CONFIG, "full_lens", "go", asRuntimeStore(store), await newGraphThread(), {
+      onToolEvent: async (event) => { events.push(event); },
+    });
+
+    const result = events.find((event) => event.type === "agent.tool_result")!.result as Row;
+    const [neighbour] = result.neighbors as { relation: Row; entity: Row }[];
+    expect(size(result)).toBeLessThanOrEqual(BOUND);
+    expect(neighbour!.relation).toMatchObject({ _id: "r1", _relationTypeKey: "works_for", direction: "outgoing" });
+    expect(neighbour!.entity).toMatchObject({ _id: "c1", _entityTypeKey: "company", name: "Acme" });
+    // The turn's cards were made from the bounded result.
+    const cards = events.find((event) => event.type === "entities")!.entities as { id: string }[];
+    expect(cards.map((card) => card.id).sort()).toEqual(["c1", "p1"]);
+  });
+
+  it("says of an entity without neighbours only that its value was cut", async () => {
+    store.getEntity.mockResolvedValue(makeEntity({ name: "Alice", email: "e".repeat(100_000) }, "person", "p1"));
+    store.getNeighbors.mockResolvedValue([]);
+
+    const result = await call("get_neighbors", { entity_type_key: "person", entity_id: "p1" });
+
+    expect(size(result)).toBeLessThanOrEqual(BOUND);
+    expect(result.more).toContain("Asking again returns the same part");
+    expect(result.more).not.toContain("get_entity");
+  });
+
+
   it("leaves an entity without neighbours the whole result", async () => {
     store.getEntity.mockResolvedValue(makeEntity({ name: "Alice", email: "e".repeat(15_000) }, "person", "p1"));
     store.getNeighbors.mockResolvedValue([]);
@@ -341,6 +413,19 @@ describe("get_document", () => {
       propertyKey: "bio", content: "01234", offset: 10, length: 5, totalLength: 30_000,
       more: "Showing characters 10-15 of 30000. To read on, call get_document again with offset: 15.",
     });
+  });
+
+  it("counts a piece of characters outside the basic plane in characters, as the document does", async () => {
+    const astral = "😀\n".repeat(15_000);
+    store.getEntity.mockResolvedValue(makeEntity({ name: "Alice", bio: astral }, "person", "p1"));
+
+    const result = await call("get_document", { entity_type_key: "person", entity_id: "p1", property_key: "bio" });
+
+    const shown = Array.from(result.content as string).length;
+    expect(size(result)).toBeLessThanOrEqual(BOUND);
+    expect(astral.startsWith(result.content as string)).toBe(true);
+    expect(result).toMatchObject({ offset: 0, length: shown, totalLength: 30_000 });
+    expect(result.more).toContain(`call get_document again with offset: ${shown}.`);
   });
 
   it("carries no more for a range that ends with the text", async () => {
@@ -501,15 +586,33 @@ describe("execute_query", () => {
     expect(result.more).toContain("Without ORDER BY the order of rows can change between calls.");
   });
 
-  it("keeps the whole result within the bound when a column's name alone is larger", async () => {
-    const column = "c".repeat(30_000);
-    store.executeOql.mockResolvedValue([[column], []]);
+  it("refuses a result whose column names alone would fill it, instead of parting them from their rows", async () => {
+    const column = "c".repeat(13_000);
+    store.executeOql.mockResolvedValue([[column], [{ [column]: "Alice" }]]);
 
     const result = await call("execute_query", { query: QUERY });
 
+    expect(Object.keys(result)).toEqual(["error"]);
+    expect(result.error).toContain("Give the columns short names with AS.");
     expect(size(result)).toBeLessThanOrEqual(BOUND);
-    expect(result.results).toEqual([]);
-    expect(result.more).toContain("was cut");
+  });
+
+  it("counts only an ORDER BY of the RETURN as ordering the rows", async () => {
+    store.executeOql.mockResolvedValue([["p.name", "n"], rowsOf(100, 500)]);
+
+    const result = await call("execute_query", {
+      query: "MATCH (p:person) WITH p ORDER BY p.name RETURN p.name, count(*) AS n",
+    });
+
+    expect(result.more).toContain("Without ORDER BY the order of rows can change between calls.");
+  });
+
+  it("takes null for an argument left out", async () => {
+    store.executeOql.mockResolvedValue([["p.name"], rowsOf(3)]);
+
+    const result = await call("execute_query", { query: QUERY, offset: null });
+
+    expect(result.results).toEqual(rowsOf(3));
   });
 
   it("refuses an argument it does not know instead of dropping it", async () => {

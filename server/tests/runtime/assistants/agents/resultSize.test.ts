@@ -110,6 +110,18 @@ describe("fitValue", () => {
     expect((fitted.value as Record<string, string>)["…"]).toMatch(/^\[cut: first \d+ of 400 values\]$/);
   });
 
+  it("never drops what gives an object its shape: a system field, a nested object", () => {
+    const bag = (prefix: string) => Object.fromEntries(Array.from({ length: 400 }, (_, i) => [`${prefix}_${i}`, "v".repeat(64)]));
+    const neighbour = { relation: { ...bag("r"), _id: "r1", direction: "outgoing" }, entity: { ...bag("e"), _id: "c1", _entityTypeKey: "company" } };
+
+    const fitted = fitValue(neighbour).value;
+
+    expect(size(fitted)).toBeLessThanOrEqual(RESULT_CHARACTERS);
+    expect(Object.keys(fitted)).toEqual(["relation", "entity"]);
+    expect(fitted.relation._id).toBe("r1");
+    expect(fitted.entity).toMatchObject({ _id: "c1", _entityTypeKey: "company" });
+  });
+
   it("keeps the bound for whatever it is given", () => {
     const awkward = [
       { [`k${"k".repeat(30_000)}`]: 1 },

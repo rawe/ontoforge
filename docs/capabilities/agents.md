@@ -148,7 +148,12 @@ again with every later model call. The tool cuts its own result where it is made
   have characters — and without a range the first piece;
 - inside one row or value that is larger than the bound alone: a long text ends with a
   marker saying how many of its characters are shown, a long list with one saying how
-  many of its items; an object that is still too large keeps its leading values.
+  many of its items; an object that is still too large keeps its leading values, beside
+  its system fields and what it holds as objects.
+
+An error handed back to the model is bounded the same way. A query whose column names
+alone would fill a result is refused, with the hint to name the columns shortly: rows are
+keyed by those names.
 
 The result keeps its shape, the thread keeps it as it was sent
 ([threads.md](threads.md#turns)), and the web client is given the same result as the
@@ -164,7 +169,7 @@ names what is missing and the call that gets it.
 | Tool | `more` says |
 |---|---|
 | `list_entities` | Which rows of the total are shown, and the `offset` of the next ones |
-| `execute_query`, `run_saved_query` | The same; both take an `offset` of rows to skip, and the query runs again for each page. Without ORDER BY the order of rows can change between calls, and the sentence says that too |
+| `execute_query`, `run_saved_query` | The same; both take an `offset` of rows to skip, and the query runs again for each page. Without an ORDER BY on its RETURN the order of rows can change between calls, and the sentence says that too |
 | `get_document` | Which characters are shown, and the `offset` where the text goes on |
 | `get_neighbors` | Each direction that has more neighbours than were read. Neighbours cannot be paged, because they are read in no fixed order: the sentence names what narrows them — the relation type, the direction, fewer fields |
 | `search`, `search_documents` | How many found items did not fit; a passage search can be repeated without the passages' text |

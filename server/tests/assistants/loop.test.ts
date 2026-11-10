@@ -111,6 +111,18 @@ describe("tool loop", () => {
     expect(invalid.error).toMatch(/^Invalid arguments for echo: /);
   });
 
+  it("hands back at most the start of a schema failure that repeats arguments of any length", async () => {
+    const model = new FakeToolCallingModel([toolCallMessage("echo", { x: 1, ["y".repeat(50_000)]: 2 }), new AIMessage("done")]);
+    const strict = echo({ input: z.strictObject({ x: z.string() }) });
+
+    await turn(prepared(model, [strict]));
+
+    const [{ error }] = toolResults(model) as [{ error: string }];
+    expect(error).toMatch(/^Invalid arguments for echo: /);
+    expect(error.length).toBeLessThan(2_100);
+    expect(error.endsWith("…")).toBe(true);
+  });
+
   it("hands an unknown tool name back to the model with the available tools", async () => {
     const model = new FakeToolCallingModel([
       toolCallMessage("echo<|channel|>commentary", { x: "a" }), new AIMessage("recovered"),

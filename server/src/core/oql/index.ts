@@ -131,7 +131,9 @@ export interface Analysis {
   /** Bare variables used as ORDER BY sort keys (checked against the
    * node/relationship variables in `validate()`). */
   orderBySymbols: string[];
-  /** Whether the query orders its rows: it carries an ORDER BY. */
+  /** Whether the query orders the rows it returns: its RETURN carries an
+   * ORDER BY. An ordering in a WITH does not count: it need not survive
+   * the projection after it. */
   ordered: boolean;
 }
 
@@ -506,6 +508,8 @@ class Collector extends CypherParserListener {
   // -- DISTINCT (both positions: projection and function call) --
 
   override enterProjectionBody = (ctx: ProjectionBodyContext): void => {
+    // Each projection starts unordered; the last one is the RETURN.
+    this.analysis.ordered = false;
     if (ctx.DISTINCT() !== null) {
       this.analysis.unsupported.add("distinct");
     }

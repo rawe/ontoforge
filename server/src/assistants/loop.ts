@@ -151,6 +151,14 @@ export function withoutReasoning(message: BaseMessage): BaseMessage {
   });
 }
 
+/** The most characters of a schema failure the model is handed: enough to
+ * name every argument at fault; beyond them a failure only repeats the
+ * call's own arguments, which the thread already holds. */
+const ARGUMENT_FAULT_CHARACTERS = 2_000;
+
+const argumentFault = (message: string) =>
+  message.length <= ARGUMENT_FAULT_CHARACTERS ? message : `${message.slice(0, ARGUMENT_FAULT_CHARACTERS)}…`;
+
 /** Runs one piece of work after the one before it. Once a piece fails, every
  * later one fails with the same error without running: a failure that
  * reaches the queue aborts the turn (expected ones are results by then). */
@@ -208,7 +216,7 @@ function engineTool<C>(
       result = output.artifact;
     } catch (error) {
       if (!(error instanceof ToolInputParsingException)) throw error;
-      result = { error: `Invalid arguments for ${name}: ${error.message}` };
+      result = { error: `Invalid arguments for ${name}: ${argumentFault(error.message)}` };
       output = new ToolMessage({
         content: JSON.stringify(result), name,
         tool_call_id: isToolCall ? String(input.id ?? "") : callId,

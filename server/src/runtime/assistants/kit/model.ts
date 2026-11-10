@@ -14,8 +14,8 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { ChatOpenAI } from "@langchain/openai";
 
 import { settings } from "../../../config.js";
-import { createAiModel, getAiModel, modelFailure } from "../../../core/ai.js";
-import { ValidationError } from "../../../core/exceptions.js";
+import { createAiModel, cutOff, getAiModel, modelFailure } from "../../../core/ai.js";
+import { type ModelError, ValidationError } from "../../../core/exceptions.js";
 import type { Trace } from "./trace.js";
 
 function disabled(): ValidationError {
@@ -99,7 +99,8 @@ export interface StreamedAnswer {
 
 /** One streamed call; every text delta goes to `onDelta`. A failed call
  * fails with the reason the provider gave (`modelFailure`); there is no
- * automatic retry. */
+ * automatic retry. An answer the model ended early fails too (`cutOff`),
+ * once its stream has ended: its text was streamed, but it is no answer. */
 export async function streamAnswer(
   model: BaseChatModel,
   system: string,
@@ -109,12 +110,17 @@ export async function streamAnswer(
 ): Promise<StreamedAnswer> {
   let output = "";
   let usage: unknown;
+  let cut: ModelError | undefined;
   try {
     const stream = await model.stream([new SystemMessage(system), new HumanMessage(input)], { signal });
     for await (const chunk of stream) {
       signal.throwIfAborted();
       const delta = contentText(chunk.content);
       if (chunk.usage_metadata) usage = chunk.usage_metadata;
+      // The reason an answer ended is on one chunk, not always the last: the
+      // OpenAI protocol's among the chunk's response metadata, Anthropic's
+      // among its additional fields.
+      cut ??= cutOff(chunk.response_metadata) ?? cutOff(chunk.additional_kwargs);
       if (delta) {
         output += delta;
         await onDelta(delta);
@@ -125,5 +131,6 @@ export async function streamAnswer(
     console.warn(`Answer model failed: ${error instanceof Error ? error.message : String(error)}`);
     throw modelFailure(error);
   }
+  if (cut !== undefined) throw cut;
   return { text: output, usage };
 }

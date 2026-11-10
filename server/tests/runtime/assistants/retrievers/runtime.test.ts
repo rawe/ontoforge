@@ -188,6 +188,23 @@ describe("retriever pipeline", () => {
     expect(fake.stream).toHaveBeenCalledTimes(1);
   });
 
+  it("an answer cut off at the model's output limit fails the turn after its text was streamed; the half answer is not kept", async () => {
+    fake.stream.mockImplementationOnce(async () => (async function* () {
+      yield { content: "Ada lives" };
+      yield { content: "", response_metadata: { finish_reason: "length" } };
+    })());
+    const events: Record<string, unknown>[] = [];
+    const thread = await newThread();
+
+    await expect(chat(agent, "Everyone in Berlin", thread, {
+      signal: new AbortController().signal, onToolEvent: async (event) => { events.push(event); },
+    }, false)).rejects.toMatchObject({ reason: "answer_cut_off", details: { code: "ANSWER_CUT_OFF" } });
+
+    expect(events.filter((e) => e.type === "delta")).toEqual([{ type: "delta", text: "Ada lives" }]);
+    const messages = (await graphValues(thread)).messages as { text: string }[];
+    expect(messages.map((m) => m.text)).toEqual(["Everyone in Berlin"]);
+  });
+
   it("the default retriever's diagnostics plan carries its derived filter definitions", async () => {
     const config = defaultRetrieverConfig(LENS);
     const fallback: RunnableRetriever = { key: DEFAULT_RETRIEVER_KEY, config, scope: { ...agent.scope, config } };

@@ -1,7 +1,9 @@
 /**
- * A provider's failure after its answer stream has started: the HTTP status
- * was 200, so only the error's own type or code names the reason. Run
- * through the real provider clients on a scripted HTTP stream.
+ * What only the answer stream itself tells, run through the real provider
+ * clients on a scripted HTTP stream: a provider's failure after the stream
+ * has started — the HTTP status was 200, so only the error's own type or
+ * code names the reason — and an answer the model ended early, which each
+ * client reports in its own place.
  */
 
 import { ChatAnthropic } from "@langchain/anthropic";
@@ -75,5 +77,67 @@ describe("a failure after the answer stream started", () => {
 
     expect(failed).toMatchObject({ name: "ModelError", reason });
     expect((failed as Error).message).not.toContain("provider words");
+  });
+});
+
+const chunk = (delta: unknown, finishReason: string | null) => `data: ${JSON.stringify({
+  id: "c1", object: "chat.completion.chunk", created: 1, model: "any",
+  choices: [{ index: 0, delta, finish_reason: finishReason }],
+})}\n\n`;
+
+/** The usage chunk the OpenAI protocol sends last, after the finish reason. */
+const OPENAI_USAGE = `data: ${JSON.stringify({
+  id: "c1", object: "chat.completion.chunk", created: 1, model: "any", choices: [],
+  usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+})}\n\ndata: [DONE]\n\n`;
+
+/** How Anthropic ends a message: the stop reason, then the stop. */
+const anthropicEnd = (stopReason: string) =>
+  event("content_block_stop", { type: "content_block_stop", index: 0 }) +
+  event("message_delta", { type: "message_delta", delta: { stop_reason: stopReason, stop_sequence: null }, usage: { output_tokens: 2 } }) +
+  event("message_stop", { type: "message_stop" });
+
+describe("an answer the model ended early", () => {
+  it.each([
+    ["on a chunk of its own, before the usage chunk", OPENAI_START + chunk({}, "length") + OPENAI_USAGE, ["Half an"]],
+    ["on the chunk of the last text", OPENAI_START + chunk({ content: " answer" }, "length") + "data: [DONE]\n\n", ["Half an", " answer"]],
+    ["before any text", chunk({ role: "assistant", content: "" }, null) + chunk({}, "length") + OPENAI_USAGE, []],
+  ])("fails as cut off when the OpenAI protocol names the output limit %s", async (_where, body, streamed) => {
+    const { deltas, failed } = await answer(openai(body));
+
+    expect(deltas).toEqual(streamed);
+    expect(failed).toMatchObject({ name: "ModelError", reason: "answer_cut_off", details: { code: "ANSWER_CUT_OFF" } });
+  });
+
+  it.each([
+    ["max_tokens", "answer_cut_off"],
+    ["model_context_window_exceeded", "context_full"],
+  ])("fails when Anthropic stops the answer with %s, as %s", async (stopReason, reason) => {
+    const { deltas, failed } = await answer(anthropic(ANTHROPIC_START + anthropicEnd(stopReason)));
+
+    expect(deltas).toEqual(["Half an"]);
+    expect(failed).toMatchObject({ name: "ModelError", reason });
+  });
+
+  it("logs no provider failure for it: the call itself succeeded", async () => {
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    warned.mockClear();
+
+    await answer(openai(OPENAI_START + chunk({}, "length") + OPENAI_USAGE));
+
+    expect(warned).not.toHaveBeenCalled();
+    warned.mockRestore();
+  });
+
+  it.each([
+    ["the OpenAI protocol's stop", () => openai(OPENAI_START + chunk({}, "stop") + OPENAI_USAGE)],
+    ["Anthropic's end_turn", () => anthropic(ANTHROPIC_START + anthropicEnd("end_turn"))],
+    // An endpoint that names no reason at all gives no ground to fail the turn.
+    ["no reason at all", () => openai(OPENAI_START + "data: [DONE]\n\n")],
+  ])("keeps a complete answer: %s", async (_name, model) => {
+    const { deltas, failed } = await answer(model());
+
+    expect(deltas).toEqual(["Half an"]);
+    expect(failed).toMatchObject({ text: "Half an" });
   });
 });

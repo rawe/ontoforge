@@ -42,9 +42,13 @@ work is its tool calls and their results; they stay in the thread with the turn.
 - **The model sees the whole thread** — for an agent and the Studio helper including
   their tool calls and results — but never a model's reasoning. For those two, nothing a
   thread sent is ever changed: its instructions stay as its first turn set them, and what
-  changes later (the schema, what the person has open) goes with a message.
+  changes later (the schema, what the person has open) goes with a message — so a provider
+  can reuse what it already read, and one that caches only on request is asked to.
 - **A thread holds a bounded number of turns.** A message beyond them is refused before
   anything runs; the client starts a new thread. Nothing is removed.
+- **A conversation that no longer fits the model ends.** Nothing is cut or summarised to
+  make room: the turn fails as too long, and the client starts a new thread
+  ([ADR 0034](../adr/0034-a-full-context-window-ends-the-conversation.md)).
 
 A retriever's and a navigator's thread also keep what a follow-up question may refer to
 ([retrievers.md](retrievers.md#follow-up-questions),

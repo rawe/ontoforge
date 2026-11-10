@@ -151,9 +151,9 @@ export function withoutReasoning(message: BaseMessage): BaseMessage {
   });
 }
 
-/** The most characters of a schema failure the model is handed: enough to
- * name every argument at fault; beyond them a failure only repeats the
- * call's own arguments, which the thread already holds. */
+/** The most characters of a schema failure, or of an unknown tool's name,
+ * the model is handed: enough to name every argument at fault; beyond them
+ * a failure only repeats the call itself, which the thread already holds. */
 const ARGUMENT_FAULT_CHARACTERS = 2_000;
 
 const argumentFault = (message: string) =>
@@ -300,7 +300,7 @@ function abortOnToolError(toolNames: string[]) {
     wrapToolCall: async (request, handler) => {
       if (request.tool !== undefined) return handler(request);
       const { name, id } = request.toolCall;
-      const error = `Unknown tool "${name}". Available tools: ${toolNames.join(", ")}`;
+      const error = `Unknown tool "${argumentFault(name)}". Available tools: ${toolNames.join(", ")}`;
       return new ToolMessage({ content: JSON.stringify({ error }), name, tool_call_id: id ?? "" });
     },
   });

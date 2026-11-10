@@ -15,6 +15,8 @@ import { DEFAULT_AGENT_CONFIG, setAiModel, type AgentConfig } from "../../../../
 import { runAgentChat } from "../../../../src/runtime/assistants/agents/runtime.js";
 import { ALL_TOOL_NAMES, buildTools, CHAT_TOOLS } from "../../../../src/runtime/assistants/agents/tools.js";
 import { invalidateLoadedSchemaCache, loadSchema } from "../../../../src/runtime/schemaCache.js";
+import { toolEntities } from "../../../../src/runtime/assistants/agents/entities.js";
+import { EntityRefs } from "../../../../src/runtime/assistants/entities.js";
 import { FORMER_AGENT_TOOLS, VALID_AGENT_TOOLS } from "../../../../src/runtime/toolNames.js";
 import { newGraphThread } from "../../../assistants/threads/graphThread.js";
 import { FakeToolCallingModel, toolCallMessage } from "../../aiHelpers.js";
@@ -321,6 +323,36 @@ describe("get_neighbors and the size rule", () => {
     expect(neighbour!.relation).toMatchObject({ _id: "r1", _relationTypeKey: "works_for", direction: "outgoing" });
     expect(neighbour!.entity).toMatchObject({ _id: "c1", _entityTypeKey: "company", name: "Acme" });
     // The turn's cards were made from the bounded result.
+    const cards = events.find((event) => event.type === "entities")!.entities as { id: string }[];
+    expect(cards.map((card) => card.id).sort()).toEqual(["c1", "p1"]);
+  });
+
+  it("keeps a neighbour whose entity is mostly document stubs an entity, and still presents it", async () => {
+    const schema = makeFullSchema({ lensKey: "full_lens", lensName: "Full Lens" });
+    const company = (schema.entityTypes as Row[]).find((type) => type.key === "company")!;
+    (company.properties as Row[]).push(...Array.from({ length: 1_000 }, (_, i) => (
+      { key: `doc_${i}`, displayName: `Doc ${i}`, dataType: "document", required: false, defaultValue: null }
+    )));
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(schema);
+    invalidateLoadedSchemaCache();
+    const documents = Object.fromEntries(Array.from({ length: 1_000 }, (_, i) => [`doc_${i}`, `text ${i}`]));
+    store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }, "person", "p1"));
+    store.getNeighbors.mockImplementation(async (_id: string, direction: string) => direction === "outgoing"
+      ? [{ relation: { ...makeRelation({}, { relationId: "r1" }), direction }, entity: makeEntity({ name: "Acme", ...documents }, "company", "c1") }]
+      : []);
+    const events: Row[] = [];
+    setAiModel(new FakeToolCallingModel([toolCallMessage("get_neighbors", { entity_type_key: "person", entity_id: "p1" }), new AIMessage("done")]));
+
+    await runAgentChat(DEFAULT_AGENT_CONFIG, "full_lens", "go", asRuntimeStore(store), await newGraphThread(), {
+      onToolEvent: async (event) => { events.push(event); },
+    });
+
+    const result = events.find((event) => event.type === "agent.tool_result")!.result as Row;
+    const [neighbour] = result.neighbors as { relation: Row; entity: Row }[];
+    expect(size(result)).toBeLessThanOrEqual(BOUND);
+    expect(neighbour!.relation).toMatchObject({ _id: "r1", direction: "outgoing" });
+    expect(neighbour!.entity).toMatchObject({ _id: "c1", _entityTypeKey: "company" });
+    expect(result.more).toContain("was cut");
     const cards = events.find((event) => event.type === "entities")!.entities as { id: string }[];
     expect(cards.map((card) => card.id).sort()).toEqual(["c1", "p1"]);
   });
@@ -874,5 +906,25 @@ describe("stored allowlists", () => {
     await runAgentChat(loaded.agentConfigs.old!, "full_lens", "hello", asRuntimeStore(store), await newGraphThread());
 
     expect((fake.boundTools[0] ?? []).map((tool) => (tool as { name: string }).name)).toEqual(["execute_query", "get_entity"]);
+  });
+});
+
+describe("entity cards", () => {
+  it("are read off the parts of a result that are entities, and skip any other part", async () => {
+    const lens = (await loadSchema("full_lens", asRuntimeStore(store))).scoped;
+    const acme = makeEntity({ name: "Acme" }, "company", "c1");
+    const relation = { ...makeRelation({}, { relationId: "r1" }), direction: "outgoing" };
+
+    const neighbours = toolEntities("get_neighbors", { entity_type_key: "person" }, {
+      entity: makeEntity({ name: "Alice" }, "person", "p1"),
+      neighbors: ["…[cut]", { relation }, { relation, entity: "…[cut]" }, { relation, entity: acme }],
+    }, lens, new EntityRefs());
+    expect(neighbours.entities.map((card) => card.id)).toEqual(["p1", "c1"]);
+    expect(neighbours.links).toHaveLength(1);
+
+    const found = toolEntities("search", {}, {
+      items: ["…[cut]", { rank: 1 }, { rank: 2, entity: { _id: "c1", _entityTypeKey: "company", name: "Acme" } }],
+    }, lens, new EntityRefs());
+    expect(found.entities.map((card) => card.id)).toEqual(["c1"]);
   });
 });

@@ -110,16 +110,25 @@ describe("fitValue", () => {
     expect((fitted.value as Record<string, string>)["…"]).toMatch(/^\[cut: first \d+ of 400 values\]$/);
   });
 
-  it("never drops what gives an object its shape: a system field, a nested object", () => {
-    const bag = (prefix: string) => Object.fromEntries(Array.from({ length: 400 }, (_, i) => [`${prefix}_${i}`, "v".repeat(64)]));
-    const neighbour = { relation: { ...bag("r"), _id: "r1", direction: "outgoing" }, entity: { ...bag("e"), _id: "c1", _entityTypeKey: "company" } };
+  it("keeps an object's system fields whatever else it loses, also when its values are objects", () => {
+    const stubs = Object.fromEntries(Array.from({ length: 1_000 }, (_, i) => [`doc_${i}`, { document: true, length: 5_000 + i }]));
+    const entity = { ...stubs, _id: "c1", _entityTypeKey: "company" };
 
-    const fitted = fitValue(neighbour).value;
+    const fitted = fitValue(entity);
 
-    expect(size(fitted)).toBeLessThanOrEqual(RESULT_CHARACTERS);
-    expect(Object.keys(fitted)).toEqual(["relation", "entity"]);
-    expect(fitted.relation._id).toBe("r1");
-    expect(fitted.entity).toMatchObject({ _id: "c1", _entityTypeKey: "company" });
+    expect(fitted.cut).toBe(true);
+    expect(size(fitted.value)).toBeLessThanOrEqual(RESULT_CHARACTERS);
+    expect(fitted.value).toMatchObject({ _id: "c1", _entityTypeKey: "company", doc_0: { document: true, length: 5_000 } });
+    expect((fitted.value as Record<string, unknown>)["…"]).toMatch(/^\[cut: first \d+ of 1000 values\]$/);
+  });
+
+  it("leaves an object an object and a list a list, whatever they hold", () => {
+    const object = fitValue({ [`k${"k".repeat(30_000)}`]: 1, _id: "x" }).value as Record<string, unknown>;
+    expect(object).toEqual({ _id: "x", "…": "[cut: first 0 of 1 values]" });
+
+    const list = fitValue([`v${"v".repeat(100_000)}`]).value;
+    expect(Array.isArray(list)).toBe(true);
+    expect(size(list)).toBeLessThanOrEqual(RESULT_CHARACTERS);
   });
 
   it("keeps the bound for whatever it is given", () => {

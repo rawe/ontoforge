@@ -137,6 +137,16 @@ describe("tool loop", () => {
     ]);
   });
 
+  it("repeats at most the start of an unknown tool's name of any length", async () => {
+    const model = new FakeToolCallingModel([toolCallMessage("z".repeat(50_000), {}), new AIMessage("done")]);
+
+    await turn(prepared(model, [echo()]));
+
+    const [{ error }] = toolResults(model) as [{ error: string }];
+    expect(error).toMatch(/^Unknown tool "z+…"\. Available tools: echo$/);
+    expect(error.length).toBeLessThan(2_100);
+  });
+
   it("aborts the turn on any other error", async () => {
     const model = new FakeToolCallingModel([calls("a"), new AIMessage("never")]);
     const run = async () => { throw new Error("boom"); };

@@ -25,28 +25,25 @@ export const size = (value: unknown): number => JSON.stringify(value)?.length ??
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value) && !(value instanceof Date);
 
-/** The leading `items` that take `cap` characters together, at least one. */
-function leading<T>(items: T[], cap: number): T[] {
+/** The leading `items` that take `cap` characters together, at least `least` of them. */
+function leading<T>(items: T[], cap: number, least: number): T[] {
   const kept: T[] = [];
   let used = 0;
   for (const item of items) {
     used += size(item) + 1;
-    if (used > cap && kept.length > 0) break;
+    if (used > cap && kept.length >= least) break;
     kept.push(item);
   }
   return kept;
 }
 
-/** What an object keeps whatever its size: the values that give it its
- * shape — a system field, a nested object or list (a neighbour's relation
- * and entity, a row's node) — as against the plain values it may lose. */
-const structural = ([key, item]: readonly [string, unknown]) =>
-  key.startsWith("_") || (item !== null && typeof item === "object");
+/** A system field: an object keeps it whatever its size — its id, its type. */
+const system = ([key]: readonly [string, unknown]) => key.startsWith("_");
 
 /** `value` with every text longer than `cap` characters cut to them and
  * every list cut to the leading items that take `cap` characters; with
- * `wide`, an object too is cut to its leading plain values that take
- * them, beside the values that give it its shape. */
+ * `wide`, an object larger than `cap` too is cut, to its system fields
+ * and the leading other values that take the rest. */
 function shrunk(value: unknown, cap: number, wide: boolean): unknown {
   if (typeof value === "string") {
     // The code units bound the code points, so a short text is not counted.
@@ -57,18 +54,18 @@ function shrunk(value: unknown, cap: number, wide: boolean): unknown {
       : `${cpSlice(value, 0, cap)}…[cut: first ${cap} of ${length} characters; asking again returns the same part]`;
   }
   if (Array.isArray(value)) {
-    const kept = leading(value.map((item) => shrunk(item, cap, wide)), cap);
+    const kept = leading(value.map((item) => shrunk(item, cap, wide)), cap, 1);
     if (kept.length < value.length) kept.push(`…[cut: first ${kept.length} of ${value.length} items]`);
     return kept;
   }
   if (isPlainObject(value)) {
     const entries = Object.entries(value).map(([key, item]) => [key, shrunk(item, cap, wide)] as const);
-    const plain = entries.filter((entry) => !structural(entry));
-    if (!wide || size(Object.fromEntries(plain)) <= cap) return Object.fromEntries(entries);
-    const kept = new Set(leading(plain, cap));
+    if (!wide || size(Object.fromEntries(entries)) <= cap) return Object.fromEntries(entries);
+    const others = entries.filter((entry) => !system(entry));
+    const kept = new Set(leading(others, cap - size(Object.fromEntries(entries.filter(system))), 0));
     return Object.fromEntries([
-      ...entries.filter((entry) => structural(entry) || kept.has(entry)),
-      ["…", `[cut: first ${kept.size} of ${plain.length} values]`],
+      ...entries.filter((entry) => system(entry) || kept.has(entry)),
+      ["…", `[cut: first ${kept.size} of ${others.length} values]`],
     ]);
   }
   return value;
@@ -78,7 +75,8 @@ function shrunk(value: unknown, cap: number, wide: boolean): unknown {
  * `value` in at most `budget` characters: as it is when it fits, else a
  * copy whose long texts and long lists are cut, each ending with a marker
  * that says how much of it is shown — and, when that is not enough, whose
- * objects keep only their leading values. `cut` tells which.
+ * objects keep only their system fields and their leading other values.
+ * An object stays an object and a list a list. `cut` tells which.
  */
 export function fitValue<T>(value: T, budget = RESULT_CHARACTERS): { value: T; cut: boolean } {
   if (size(value) <= budget) return { value, cut: false };

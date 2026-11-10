@@ -92,6 +92,9 @@ const DOCUMENT_PIECE = 20_000;
 /** Room of the bound kept for a result's small fields and its `more` sentence. */
 const NOTE_ROOM = 800;
 
+/** The characters a neighbour's two keys and brackets take around its relation and its entity. */
+const NEIGHBOUR_FRAME = 40;
+
 /** The system fields `fields` may name beside a type's properties. */
 const SYSTEM_FIELDS = ["_id", "_entityTypeKey", "_identity", "_createdAt", "_updatedAt"];
 
@@ -372,14 +375,23 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       // The entity may take the whole result when it has no neighbours to show, else half of it.
       const whole = RESULT_CHARACTERS - NOTE_ROOM;
       const entity = fitValue(selected(centre, fields, lens.entityTypes[key]), neighbours.length === 0 ? whole : whole / 2);
+      // A neighbour is a relation and an entity: each is fitted on its own,
+      // so a large one is shortened inside and the neighbour keeps both.
+      const room = whole - size(entity.value);
+      let shortened = false;
+      const part = (value: Row): Row => {
+        const fitted = fitValue(value, Math.floor(room / 2) - NEIGHBOUR_FRAME);
+        shortened ||= fitted.cut;
+        return fitted.value;
+      };
       const rows = neighbours.map((neighbour) => {
         const other = neighbour.entity as Row;
         const type = lens.entityTypes[String(other._entityTypeKey)];
         // The direction leads the relation: of a relation too large for a result the leading values stay.
         const { direction: way, ...relation } = neighbour.relation as Row;
-        return { ...neighbour, relation: { direction: way, ...relation }, entity: selected(other, fields, type) };
+        return { ...neighbour, relation: part({ direction: way, ...relation }), entity: part(selected(other, fields, type)) };
       });
-      const fitted = fitRows(rows, whole - size(entity.value));
+      const fitted = fitRows(rows, room);
       const narrow = [
         relationType === null && "relation_type_key",
         direction === "both" && "direction",
@@ -398,7 +410,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
           // With neighbours the entity had half the result: get_entity gives it the whole.
           entity.cut && neighbours.length > 0 && "A long value of the entity was cut to leave room for its neighbours." +
             (granted.has(TOOL_GET_ENTITY) ? " get_entity returns more of it." : ""),
-          ((entity.cut && neighbours.length === 0) || fitted.cut) && LONG_VALUE_CUT,
+          ((entity.cut && neighbours.length === 0) || shortened || fitted.cut) && LONG_VALUE_CUT,
         ),
       };
     },

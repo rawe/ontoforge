@@ -148,8 +148,8 @@ again with every later model call. The tool cuts its own result where it is made
   have characters — and without a range the first piece;
 - inside one row or value that is larger than the bound alone: a long text ends with a
   marker saying how many of its characters are shown, a long list with one saying how
-  many of its items; an object that is still too large keeps its leading values, beside
-  its system fields and what it holds as objects.
+  many of its items; an object that is still too large keeps its system fields and its
+  leading other values.
 
 An error handed back to the model is bounded the same way. A query whose column names
 alone would fill a result is refused, with the hint to name the columns shortly: rows are

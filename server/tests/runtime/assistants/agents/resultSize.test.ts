@@ -28,12 +28,22 @@ describe("fitRows", () => {
     expect(fitted.cut).toBe(false);
   });
 
-  it("returns one row, shrunk, when the first alone is larger than the bound", () => {
-    const fitted = fitRows([{ id: 1, text: "x".repeat(100_000) }, { id: 2, text: "short" }]);
+  it("shrinks a row larger than the bound alone, and goes on with the rows that still fit", () => {
+    const fitted = fitRows([{ id: 1, text: "x".repeat(100_000) }, { id: 2, text: "short" }, { id: 3, text: "y".repeat(30_000) }]);
+    expect(fitted.cut).toBe(true);
+    expect(fitted.rows.map((row) => (row as { id: number }).id)).toEqual([1, 2]);
+    expect((fitted.rows[0] as { text: string }).text).toMatch(/…\[cut: first \d+ of 100000 characters; asking again returns the same part\]$/);
+    expect(fitted.rows[1]).toEqual({ id: 2, text: "short" });
+    expect(size(fitted.rows)).toBeLessThanOrEqual(RESULT_CHARACTERS);
+  });
+
+  it("returns one row at least, shrunk to the bound", () => {
+    const fitted = fitRows([{ id: 1, text: "x".repeat(100_000) }]);
     expect(fitted.rows).toHaveLength(1);
     expect(fitted.cut).toBe(true);
-    expect(size(fitted.rows)).toBeLessThanOrEqual(RESULT_CHARACTERS + 100);
-    expect((fitted.rows[0] as { id: number }).id).toBe(1);
+    expect(size(fitted.rows)).toBeLessThanOrEqual(RESULT_CHARACTERS);
+    // Most of the bound is used, not a fraction of it.
+    expect(size(fitted.rows)).toBeGreaterThan(RESULT_CHARACTERS * 0.75);
   });
 
   it("answers no rows with no rows", () => {
@@ -59,8 +69,8 @@ describe("fitValue", () => {
     const { name, bio } = fitted.value;
     expect(fitted.cut).toBe(true);
     expect(name).toBe("Alice");
-    expect(bio).toMatch(/^y+…\[cut: first \d+ of 100000 characters\]$/);
-    expect(size(fitted.value)).toBeLessThanOrEqual(RESULT_CHARACTERS + 100);
+    expect(bio).toMatch(/^y+…\[cut: first \d+ of 100000 characters; asking again returns the same part\]$/);
+    expect(size(fitted.value)).toBeLessThanOrEqual(RESULT_CHARACTERS);
   });
 
   it("cuts a long list to its leading items and says how many are shown", () => {
@@ -70,19 +80,19 @@ describe("fitValue", () => {
     expect(fitted.cut).toBe(true);
     expect(people.slice(0, 3)).toEqual(["name-0", "name-1", "name-2"]);
     expect(people[people.length - 1]).toMatch(/^…\[cut: first \d+ of 20000 items\]$/);
-    expect(size(fitted.value)).toBeLessThanOrEqual(RESULT_CHARACTERS + 100);
+    expect(size(fitted.value)).toBeLessThanOrEqual(RESULT_CHARACTERS);
   });
 
   it("shrinks several long values until the whole fits", () => {
     const fitted = fitValue({ a: "a".repeat(20_000), b: "b".repeat(20_000), c: "c".repeat(20_000) });
     expect(fitted.cut).toBe(true);
-    expect(size(fitted.value)).toBeLessThanOrEqual(RESULT_CHARACTERS + 300);
-    for (const text of Object.values(fitted.value)) expect(text).toMatch(/…\[cut: first \d+ of 20000 characters\]$/);
+    expect(size(fitted.value)).toBeLessThanOrEqual(RESULT_CHARACTERS);
+    for (const text of Object.values(fitted.value)) expect(text).toMatch(/…\[cut: first \d+ of 20000 characters; asking again returns the same part\]$/);
   });
 
   it("counts characters, not code units, and never splits one", () => {
     const fitted = fitValue({ text: "😀".repeat(30_000) });
-    expect(fitted.value.text).toMatch(/^(😀)+…\[cut: first \d+ of 30000 characters\]$/u);
+    expect(fitted.value.text).toMatch(/^(😀)+…\[cut: first \d+ of 30000 characters; asking again returns the same part\]$/u);
   });
 
   it("does not change the value it was given", () => {

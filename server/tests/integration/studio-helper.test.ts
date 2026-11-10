@@ -221,14 +221,14 @@ describe("the Studio helper", () => {
     expect((await chat({ message: "Hi", draft: { ...draft, fields: { ...draft.fields, key: "x" } } })).status).toBe(422);
 
     const model = new FakeToolCallingModel([
-      toolCallMessage("fill_draft", { fields: { name: "Visitor guide", tools: ["get_schema", "search"] } }),
+      toolCallMessage("fill_draft", { fields: { name: "Visitor guide", tools: ["list_entities", "search"] } }),
       new AIMessage("Filled."),
     ]);
     setAiModel(model);
     const res = await chat({ message: "Draft an agent for this lens", draft });
     expect(res.events.find((e) => e.type === "studio.tool_result")!.result).toEqual({
       target: { kind: "agent", lens: "visitor", agent: null }, sourceVersion: 3,
-      fields: { name: "Visitor guide", tools: ["get_schema", "search"] },
+      fields: { name: "Visitor guide", tools: ["list_entities", "search"] },
     });
     expect(String(model.calls[0]!.at(-1)!.content)).toContain('<context label="Agent draft"');
     expect(systemPromptOf(model)).not.toContain('<context label="Agent draft"');

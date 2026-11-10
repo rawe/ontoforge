@@ -5,7 +5,8 @@
  * reads. A tool cuts its own result here, once, where it is made — at
  * whole rows, and inside one oversized row at a text or a list, each
  * ending with a marker — so the result keeps its shape, and the thread
- * keeps it as it was sent (ADR 0034).
+ * keeps it as it was sent (ADR 0034). A cut text says that asking again
+ * returns the same part: a model that is not told repeats the call.
  */
 
 import { cpLength, cpSlice } from "../../codePoints.js";
@@ -30,7 +31,7 @@ function shrunk(value: unknown, cap: number): unknown {
     // The code units bound the code points, so a short text is not counted.
     if (value.length <= cap) return value;
     const length = cpLength(value);
-    return length <= cap ? value : `${cpSlice(value, 0, cap)}…[cut: first ${cap} of ${length} characters]`;
+    return length <= cap ? value : `${cpSlice(value, 0, cap)}…[cut: first ${cap} of ${length} characters; asking again returns the same part]`;
   }
   if (Array.isArray(value)) {
     const kept: unknown[] = [];
@@ -59,8 +60,9 @@ export function fitValue<T>(value: T, budget = RESULT_CHARACTERS): { value: T; c
   if (size(value) <= budget) return { value, cut: false };
   let cap = budget;
   let fitted = shrunk(value, cap);
+  // The markers and the values around a cut take room too: lower the cap until the whole fits.
   while (size(fitted) > budget && cap > SMALLEST_CUT) {
-    cap = Math.max(SMALLEST_CUT, Math.floor(cap / 2));
+    cap = Math.max(SMALLEST_CUT, Math.floor(cap * 0.8));
     fitted = shrunk(value, cap);
   }
   return { value: fitted as T, cut: true };
@@ -68,21 +70,21 @@ export function fitValue<T>(value: T, budget = RESULT_CHARACTERS): { value: T; c
 
 /**
  * The leading rows that fit `budget` characters together, never a part of
- * a row. At least one: a first row larger than the budget alone is shrunk
- * (`fitValue`), and `cut` says so.
+ * a row. A row larger than the budget alone is shrunk first (`fitValue`),
+ * so one long value does not end a page; `cut` says a row was shrunk. At
+ * least one row is returned.
  */
 export function fitRows<T>(rows: T[], budget = RESULT_CHARACTERS): { rows: T[]; cut: boolean } {
-  if (rows.length === 0) return { rows: [], cut: false };
-  const first = fitValue(rows[0] as T, budget);
-  // A shrunk row stands alone: the rows after it start a result of their own.
-  if (first.cut) return { rows: [first.value], cut: true };
-  const fitted = [first.value];
+  const fitted: T[] = [];
+  let cut = false;
   // Two brackets, and a comma before every further row.
-  let used = 2 + size(first.value);
-  for (const row of rows.slice(1)) {
-    used += 1 + size(row);
-    if (used > budget) break;
-    fitted.push(row);
+  let used = 2;
+  for (const row of rows) {
+    const one = fitValue(row, budget);
+    used += size(one.value) + (fitted.length === 0 ? 0 : 1);
+    if (used > budget && fitted.length > 0) break;
+    fitted.push(one.value);
+    cut ||= one.cut;
   }
-  return { rows: fitted, cut: first.cut };
+  return { rows: fitted, cut };
 }

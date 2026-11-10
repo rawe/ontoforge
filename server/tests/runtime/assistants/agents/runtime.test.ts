@@ -385,6 +385,7 @@ describe("document reads", () => {
       offset: 22,
       length: 21,
       totalLength: BIO.length,
+      more: `Showing characters 22-43 of ${BIO.length}. To read on, call get_document again with offset: 43.`,
     });
   });
 

@@ -246,7 +246,7 @@ describe("get_entity", () => {
 
     expect(size(result)).toBeLessThanOrEqual(BOUND);
     expect(result.name).toBe("Alice");
-    expect(result.email).toMatch(/^e+…\[cut: first \d+ of 30000 characters\]$/);
+    expect(result.email).toMatch(/^e+…\[cut: first \d+ of 30000 characters; asking again returns the same part\]$/);
   });
 });
 
@@ -278,10 +278,19 @@ describe("get_document", () => {
     expect(result).not.toHaveProperty("more");
   });
 
-  it("with an explicit range reads it, without more", async () => {
+  it("reads a range the model chose, and still says where the text goes on", async () => {
     const result = await call("get_document", { entity_type_key: "person", entity_id: "p1", property_key: "bio", offset: 10, limit: 5 });
 
-    expect(result).toEqual({ propertyKey: "bio", content: "01234", offset: 10, length: 5, totalLength: 30_000 });
+    expect(result).toEqual({
+      propertyKey: "bio", content: "01234", offset: 10, length: 5, totalLength: 30_000,
+      more: "Showing characters 10-15 of 30000. To read on, call get_document again with offset: 15.",
+    });
+  });
+
+  it("carries no more for a range that ends with the text", async () => {
+    const result = await call("get_document", { entity_type_key: "person", entity_id: "p1", property_key: "bio", offset: 29_990, limit: 10 });
+
+    expect(result).toEqual({ propertyKey: "bio", content: "0123456789", offset: 29_990, length: 10, totalLength: 30_000 });
   });
 
   it("refuses a limit above 24000 by its schema", async () => {
@@ -358,7 +367,7 @@ describe("get_neighbors", () => {
 
     const result = await call("get_neighbors", { entity_type_key: "person", entity_id: "p1", limit: 2 });
 
-    expect(result.more).toContain("More outgoing neighbours exist than the 2 shown.");
+    expect(result.more).toContain("More outgoing neighbours exist than the 2 read.");
     expect(result.more).not.toContain("incoming");
   });
 
@@ -392,6 +401,16 @@ const rowsOf = (count: number, width = 10) =>
   Array.from({ length: count }, (_, i) => ({ "p.name": `${i}`.padEnd(width, "n") }));
 
 describe("execute_query", () => {
+  it("hands a rejected query back with the hints that name what would be valid", async () => {
+    const result = await call("execute_query", { query: "MATCH (p:persn) RETURN p.name" });
+
+    expect(Object.keys(result)).toEqual(["error"]);
+    expect(result.error).toContain("Query validation failed: ");
+    expect(result.error).toContain("persn");
+    expect(result.error).toContain("person");
+    expect(result.error).toContain("company");
+  });
+
   it("starts at offset", async () => {
     store.executeOql.mockResolvedValue([["p.name"], rowsOf(30)]);
 
@@ -433,7 +452,7 @@ describe("execute_query", () => {
 
     const rows = result.results as Row[];
     expect(rows).toHaveLength(1);
-    expect(rows[0]!["p.name"]).toMatch(/…\[cut: first \d+ of 30000 characters\]$/);
+    expect(rows[0]!["p.name"]).toMatch(/…\[cut: first \d+ of 30000 characters; asking again returns the same part\]$/);
     expect(size(result)).toBeLessThanOrEqual(BOUND + 500);
     expect(result.more).toContain("was cut");
   });
@@ -485,7 +504,7 @@ describe("run_saved_query", () => {
 
     const result = await call("run_saved_query", { query_key: "everyone" });
 
-    expect((result.results as Row[])[0]!["p.name"]).toMatch(/…\[cut: first \d+ of 30000 characters\]$/);
+    expect((result.results as Row[])[0]!["p.name"]).toMatch(/…\[cut: first \d+ of 30000 characters; asking again returns the same part\]$/);
     expect(result.more).toContain("was cut");
   });
 

@@ -141,7 +141,9 @@ function selected(entity: Row, fields: string[] | null, type: EntityTypeDef | un
 // What a result says about what it left out
 // ---------------------------------------------------------------------------
 
-const LONG_VALUE_CUT = "A value too long for one result was cut; it says how much of it is shown.";
+const LONG_VALUE_CUT =
+  "A value too long for one result was cut; it says how much of it is shown. Asking again returns the " +
+  "same part: only a document property can be read in pieces.";
 
 /** `more` for a result that left something out, from the sentences that apply. */
 const more = (...sentences: (string | false)[]): { more?: string } => {
@@ -341,7 +343,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         entity: entity.value,
         neighbors: fitted.rows,
         ...more(
-          ...longer.map((side) => `More ${side} neighbours exist than the ${limit} shown.`),
+          ...longer.map((side) => `More ${side} neighbours exist than the ${limit} read.`),
           fitted.rows.length < rows.length &&
             `Only the first ${fitted.rows.length} of the ${rows.length} neighbours read fit this result.`,
           left && narrow.length > 0 && `To see others, narrow with ${narrow.join(", ")}.`,
@@ -450,7 +452,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       "Read the text of a document property, a piece at a time. Document properties hold long text and " +
       'never come inline: other tools show them as {"document": true, "length": N}. offset and limit ' +
       `count characters. Without limit you get the first piece from offset, at most ${RESULT_CHARACTERS} ` +
-      "characters; when the text goes on after it, 'more' names the offset of the next piece. Read only " +
+      "characters. When the text goes on after a piece, 'more' names the offset of the next one. Read only " +
       "the part you need" +
       (granted.has(TOOL_SEARCH_DOCUMENTS)
         ? ": to read one passage search_documents found, pass its property, charOffset and charLength as " +
@@ -467,24 +469,24 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         .describe(`Characters to read: 1 to ${RESULT_CHARACTERS}, default ${RESULT_CHARACTERS}.`),
     }),
     run: async (lensKey, store, args) => {
-      const asked = (args.limit as number | null | undefined) ?? null;
       const piece = await service.getDocument(
         lensKey,
         args.entity_type_key as string,
         args.entity_id as string,
         args.property_key as string,
         (args.offset as number | null | undefined) ?? 0,
-        asked ?? RESULT_CHARACTERS,
+        (args.limit as number | null | undefined) ?? RESULT_CHARACTERS,
         store,
       );
       const start = piece.offset as number;
       const end = start + (piece.length as number);
       const total = piece.totalLength as number;
-      // A range the model chose is what it asked for; only a piece the tool ended says so.
+      // Whatever the piece's size, the model is told when the text goes on:
+      // it does not work that out from the lengths.
       return {
         ...piece,
         ...more(
-          asked === null && end < total &&
+          end < total &&
             `Showing characters ${start}-${end} of ${total}. To read on, call get_document again with offset: ${end}.`,
         ),
       };
@@ -608,9 +610,21 @@ const AGENT_TOOL_DEFS_BY_NAME: ReadonlyMap<string, AgentToolDef> = new Map(
 /** Every instantiable tool name. */
 export const ALL_TOOL_NAMES: ReadonlySet<string> = new Set(AGENT_TOOL_DEFS_BY_NAME.keys());
 
+/** A not-found or validation error as the model reads it: its message with
+ * what its details name — the fields at fault, or the collected errors with
+ * their hints — so the next attempt can be right. */
+function correction(error: NotFoundError | ValidationError): string {
+  const details = error.details as { fields?: Record<string, unknown>; errors?: unknown[] } | null;
+  const named = details?.fields !== undefined
+    ? Object.entries(details.fields).map(([key, value]) => `${key}: ${String(value)}`)
+    : (details?.errors ?? []).map(String);
+  const text = named.join("; ");
+  return text === "" || error.message.includes(text) ? error.message : `${error.message}: ${text}`;
+}
+
 /** Not-found and validation errors go back to the model, which corrects itself. */
 function selfCorrectable(error: unknown): { error: string } | undefined {
-  return error instanceof NotFoundError || error instanceof ValidationError ? { error: error.message } : undefined;
+  return error instanceof NotFoundError || error instanceof ValidationError ? { error: correction(error) } : undefined;
 }
 
 /** A result's entities the turn has not sent yet, as the shared `entities` event. */

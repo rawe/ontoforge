@@ -129,6 +129,21 @@ describe("an answer the model ended early", () => {
     warned.mockRestore();
   });
 
+  it("stays a cancellation when the request is cancelled while its last text is handed on", async () => {
+    const controller = new AbortController();
+    const model = openai(OPENAI_START + chunk({ content: " answer" }, "length") + "data: [DONE]\n\n");
+
+    const failed = await streamAnswer(model, "Answer.", "Who?", controller.signal, async (text) => {
+      if (text !== " answer") return;
+      // The client reads the rest of the stream meanwhile; then the request is cancelled.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      controller.abort();
+    }).catch((error: unknown) => error);
+
+    expect(failed).not.toMatchObject({ name: "ModelError" });
+    expect(failed).toMatchObject({ name: "AbortError" });
+  });
+
   it.each([
     ["the OpenAI protocol's stop", () => openai(OPENAI_START + chunk({}, "stop") + OPENAI_USAGE)],
     ["Anthropic's end_turn", () => anthropic(ANTHROPIC_START + anthropicEnd("end_turn"))],

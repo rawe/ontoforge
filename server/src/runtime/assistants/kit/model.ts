@@ -131,6 +131,8 @@ export async function streamAnswer(
     console.warn(`Answer model failed: ${error instanceof Error ? error.message : String(error)}`);
     throw modelFailure(error);
   }
+  // Cancelled while the last text was handed on: a cancellation, not a cut-off answer.
+  signal.throwIfAborted();
   if (cut !== undefined) throw cut;
   return { text: output, usage };
 }

@@ -333,6 +333,26 @@ it("unknown lens and agent are ordinary pre-stream JSON errors", async () => {
   expect(lens.json()).toEqual({ error: { code: "RESOURCE_NOT_FOUND", message: "Lens missing" } });
 });
 
+it("a model failure ends the stream with its reason, never the provider's words or INTERNAL_ERROR", async () => {
+  const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const model = new FakeToolCallingModel([new AIMessage("never")]);
+  model.beforeResponse = async () => {
+    throw Object.assign(new Error("400 prompt is too long: 210000 tokens > 200000 maximum"), { status: 400 });
+  };
+  setAiModel(model);
+  const response = await app.inject({ method: "POST", url: chatPath + "/_default/chat", payload: { message: "Hi" } });
+  expect(events(response.body).at(-1)).toEqual({
+    type: "error",
+    error: {
+      code: "MODEL_ERROR", details: { code: "CONTEXT_FULL" },
+      message: "This conversation is too long for the language model; start a new conversation.",
+    },
+  });
+  expect(response.body).not.toContain("210000");
+  expect(warned).toHaveBeenCalledWith(expect.stringContaining("prompt is too long"));
+  warned.mockRestore();
+});
+
 it("unexpected failures never expose raw exceptions, but are logged", async () => {
   const logged = vi.spyOn(console, "error").mockImplementation(() => {});
   holder.store.getEntity.mockRejectedValue(new Error("secret provider details"));

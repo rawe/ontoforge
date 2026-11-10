@@ -60,6 +60,7 @@ import {
 } from "../../search/indexSearch.js";
 import type { RuntimeAssistant } from "../assistant.js";
 import { entitiesEvent } from "../entities.js";
+import { modelFailure } from "../../../core/ai.js";
 import { contentText, streamAnswer, turnModel } from "../kit/model.js";
 import { checkRetrieverConfig } from "./config.js";
 import {
@@ -275,7 +276,7 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
     } catch (error) {
       signal.throwIfAborted();
       console.warn(`Planning model failed: ${error instanceof Error ? error.message : String(error)}`);
-      throw new ValidationError("Planning model failed; no automatic retry.");
+      throw modelFailure(error);
     }
     const output = contentText(response.content);
     timings.planModel = (timings.planModel ?? 0) + performance.now() - modelStart;
@@ -475,7 +476,7 @@ export async function chat(
             timings.firstDelta = performance.now() - started;
           }
           await emit({ type: "delta", text: delta });
-        }, "Response model failed; no automatic retry.");
+        });
         io.push({ phase: "answer", ...modelInputTrace(ANSWER, input), output: output.slice(0, OUTPUT_TRACE_CHARACTERS), usage });
         return output;
       });

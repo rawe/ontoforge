@@ -15,6 +15,7 @@ import { setEmbeddingProvider } from "../../src/core/embedding.js";
 import {
   CascadeRequiredError,
   ConflictError,
+  ModelError,
   NotFoundError,
   StoreError,
   ValidationError,
@@ -43,6 +44,12 @@ beforeAll(async () => {
   });
   app.get("/boom/store", () => {
     throw new StoreError();
+  });
+  app.get("/boom/model", () => {
+    throw new ModelError("rate_limited", new Error("secret upstream detail"));
+  });
+  app.get("/boom/model-unknown", () => {
+    throw new ModelError("failed");
   });
   // A route with a body schema, to drive framework-level shape failures.
   app.post(
@@ -118,6 +125,23 @@ describe("domain exceptions map to their exact status and envelope", () => {
     expect(body.error.message).toBe("A storage operation failed");
     expect(body.error.details.errorId).toMatch(/^[0-9a-f]{8}$/);
     expect(res.body).not.toContain("Internal Server Error");
+  });
+});
+
+describe("a model failure answers in the envelope", () => {
+  it("ModelError -> 502 MODEL_ERROR with the reason as details.code, nothing of the provider's", async () => {
+    const res = await app.inject({ method: "GET", url: "/boom/model" });
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toEqual({
+      error: { code: "MODEL_ERROR", message: "The language model is busy; try again in a moment.", details: { code: "RATE_LIMITED" } },
+    });
+    expect(res.body).not.toContain("secret");
+  });
+
+  it("a failure the provider gave no reason for omits the details key", async () => {
+    const res = await app.inject({ method: "GET", url: "/boom/model-unknown" });
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toEqual({ error: { code: "MODEL_ERROR", message: "The language model failed; no automatic retry." } });
   });
 });
 

@@ -2,7 +2,7 @@
  * Fastify application factory: routes, error handlers, CORS, OpenAPI.
  *
  * Every error response uses the one envelope
- * `{"error": {"code", "message", "details?"}}` with exactly ten codes —
+ * `{"error": {"code", "message", "details?"}}` with exactly eleven codes —
  * see the error model in `docs/architecture.md`. Framework-level failures
  * are mapped into the same envelope: an unparsable JSON body answers
  * `400 INVALID_JSON`, a body over `REQUEST_BODY_LIMIT` `413
@@ -34,6 +34,7 @@ import {
   CascadeRequiredError,
   ConflictError,
   ForbiddenError,
+  ModelError,
   NotFoundError,
   ProviderUnavailableError,
   StoreError,
@@ -292,6 +293,9 @@ export async function createApp(shared?: SharedState, auth: AuthRuntime | null =
         affectedLenses: error.affectedLenses,
         affectedIndices: error.affectedIndices,
       });
+    }
+    if (error instanceof ModelError) {
+      return sendError(reply, 502, "MODEL_ERROR", error.message, error.details);
     }
     if (error instanceof StoreError) {
       // The adapter has already logged the originating failure against this

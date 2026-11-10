@@ -8,7 +8,7 @@
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ValidationError } from "../../../../src/core/exceptions.js";
+import { ModelError, ValidationError } from "../../../../src/core/exceptions.js";
 import { invalidateLoadedSchemaCache } from "../../../../src/runtime/schemaCache.js";
 import { createMockModelingStore, type MockModelingStore } from "../../../modeling/helpers.js";
 import { createMockRuntimeStore, makeFullSchema, NOW, type MockRuntimeStore } from "../../helpers.js";
@@ -179,11 +179,17 @@ describe("runtime chat", () => {
   });
 
   it("a failing turn ends the stream with an error event", async () => {
-    run.mockRejectedValueOnce(new ValidationError("The language model failed while answering; no automatic retry."));
+    run.mockRejectedValueOnce(new ModelError("context_full"));
     const response = await app.inject({ method: "POST", url: `${RUNTIME}/_default/chat`, payload: { message: "Who?" } });
     const events = lines(response.body);
     expect(events[0]).toMatchObject({ type: "thread" });
-    expect(events.at(-1)).toMatchObject({ type: "error", error: { message: "The language model failed while answering; no automatic retry." } });
+    expect(events.at(-1)).toEqual({
+      type: "error",
+      error: {
+        code: "MODEL_ERROR", details: { code: "CONTEXT_FULL" },
+        message: "This conversation is too long for the language model; start a new conversation.",
+      },
+    });
   });
 });
 

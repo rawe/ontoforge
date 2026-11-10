@@ -15,7 +15,10 @@ const graph = vi.hoisted(() => ({ reader: null as unknown }));
 vi.mock("../../../../src/config.js", () => ({
   settings: { AI_PROVIDER: "fake", AI_MODEL: "test", AI_BASE_URL: "http://unused" },
 }));
-vi.mock("../../../../src/core/ai.js", () => ({ createAiModel: vi.fn(() => fake), getAiModel: vi.fn(() => null) }));
+vi.mock("../../../../src/core/ai.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../../src/core/ai.js")>()),
+  createAiModel: vi.fn(() => fake), getAiModel: vi.fn(() => null),
+}));
 vi.mock("../../../../src/runtime/assistants/navigators/reader.js", () => ({ lensReader: () => graph.reader }));
 
 import { settings } from "../../../../src/config.js";
@@ -214,12 +217,12 @@ describe("a navigator turn", () => {
   });
 
   it("a failed understand call fails the step and the turn; no answer, no retry", async () => {
-    fake.invoke.mockRejectedValueOnce(new Error("overloaded"));
+    fake.invoke.mockRejectedValueOnce(Object.assign(new Error("Overloaded"), { status: 529 }));
     const events: StreamEvent[] = [];
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await expect(runNavigatorTurn({ key: "_default", config: deriveNavigator(), loaded: { scoped: LENS, full: LENS } as unknown as LoadedSchema },
       "org", {} as RuntimeStore, "Who?", await newThread(), { signal: new AbortController().signal, onToolEvent: async (e) => { events.push(e); } }))
-      .rejects.toThrow("The language model failed (navigator_intent); no automatic retry.");
+      .rejects.toMatchObject({ reason: "unavailable", message: "The language model cannot be reached; try again later." });
     expect(steps(events)).toEqual(["understand:running:1", "understand:failed:1"]);
     expect(fake.invoke).toHaveBeenCalledTimes(1);
     expect(fake.stream).not.toHaveBeenCalled();
@@ -231,7 +234,7 @@ describe("a navigator turn", () => {
   it("a failed answer fails the answer step", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     fake.stream.mockImplementationOnce(async () => { throw new Error("down"); });
-    await expect(turn("Which projects?")).rejects.toThrow("The language model failed while answering; no automatic retry.");
+    await expect(turn("Which projects?")).rejects.toMatchObject({ reason: "failed", message: "The language model failed; no automatic retry." });
   });
 
   it("a cancelled request calls no model", async () => {

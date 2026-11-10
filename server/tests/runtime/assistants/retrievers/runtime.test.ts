@@ -23,7 +23,10 @@ const engine = vi.hoisted(() => ({
 vi.mock("../../../../src/config.js", () => ({
   settings: { AI_PROVIDER: "fake", AI_MODEL: "test", AI_BASE_URL: "http://unused" },
 }));
-vi.mock("../../../../src/core/ai.js", () => ({ createAiModel: vi.fn(() => fake) }));
+vi.mock("../../../../src/core/ai.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../../src/core/ai.js")>()),
+  createAiModel: vi.fn(() => fake),
+}));
 vi.mock("../../../../src/runtime/search/indexSearch.js", async (importOriginal) => ({
   runSearchTree: (await importOriginal<typeof import("../../../../src/runtime/search/indexSearch.js")>()).runSearchTree,
   ...engine,
@@ -180,8 +183,8 @@ describe("retriever pipeline", () => {
   });
 
   it("a failed answer call fails the turn after the answer phase started; no retry", async () => {
-    fake.stream.mockRejectedValueOnce(new Error("boom"));
-    await expect(run("Everyone in Berlin", false)).rejects.toThrow("Response model failed; no automatic retry.");
+    fake.stream.mockRejectedValueOnce(Object.assign(new Error("Too Many Requests"), { status: 429 }));
+    await expect(run("Everyone in Berlin", false)).rejects.toMatchObject({ reason: "rate_limited" });
     expect(fake.stream).toHaveBeenCalledTimes(1);
   });
 
@@ -540,7 +543,7 @@ describe("retrieve", () => {
 
   it("refuses as chat does: a failed or malformed plan, no retry", async () => {
     fake.invoke.mockRejectedValueOnce(new Error("boom"));
-    await expect(retrieveQuestion(agent, "Who?", signal())).rejects.toThrow("Planning model failed; no automatic retry.");
+    await expect(retrieveQuestion(agent, "Who?", signal())).rejects.toMatchObject({ reason: "failed", message: "The language model failed; no automatic retry." });
     fake.invoke.mockResolvedValueOnce({ content: "not json" });
     await expect(retrieveQuestion(agent, "Who?", signal())).rejects.toThrow();
     expect(fake.invoke).toHaveBeenCalledTimes(2);

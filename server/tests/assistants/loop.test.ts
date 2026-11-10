@@ -7,7 +7,8 @@
  */
 
 import { AIMessage, ToolMessage, type BaseMessage, type ToolCall } from "@langchain/core/messages";
-import { describe, expect, it } from "vitest";
+import { ChatAnthropic } from "@langchain/anthropic";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import {
@@ -15,6 +16,7 @@ import {
   type Guide, type GraphThread, type PreparedRun, type StreamEvent, type Tool,
 } from "../../src/assistants/index.js";
 import { personText } from "../../src/assistants/threads/access.js";
+import { ModelError } from "../../src/core/exceptions.js";
 import { FakeToolCallingModel, toolCallMessage } from "../runtime/aiHelpers.js";
 import { newGraphThread } from "./threads/graphThread.js";
 
@@ -119,6 +121,74 @@ describe("tool loop", () => {
 
     await expect(turn(prepared(model, [echo({ run })]))).rejects.toThrow("boom");
     expect(model.calls).toHaveLength(1);
+  });
+
+  it("ends the turn with the reason a failed model call gave, never the provider's words", async () => {
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const model = new FakeToolCallingModel([calls("a"), new AIMessage("never")]);
+    model.beforeResponse = async (messages) => {
+      if (messages.some((m) => m instanceof ToolMessage)) {
+        throw Object.assign(new Error("400 prompt is too long: 210000 tokens > 200000 maximum"), { status: 400 });
+      }
+    };
+
+    const failed = await turn(prepared(model, [echo()])).catch((error: unknown) => error);
+
+    expect(failed).toBeInstanceOf(ModelError);
+    expect(failed).toMatchObject({ reason: "context_full", details: { code: "CONTEXT_FULL" } });
+    expect((failed as Error).message).not.toContain("210000");
+    warned.mockRestore();
+  });
+
+  it("names the failure of a model call without tools as well", async () => {
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const model = new FakeToolCallingModel([new AIMessage("never")]);
+    model.beforeResponse = async () => { throw Object.assign(new Error("Too Many Requests"), { status: 429 }); };
+
+    await expect(turn(prepared(model, []))).rejects.toMatchObject({ reason: "rate_limited" });
+    warned.mockRestore();
+  });
+
+  it("ends the turn when the model's answer was cut off, a cut tool call included", async () => {
+    const cutAnswer = new AIMessage({ content: "The first half of", response_metadata: { finish_reason: "length" } });
+    await expect(turn(prepared(new FakeToolCallingModel([cutAnswer]), [echo()])))
+      .rejects.toMatchObject({ reason: "answer_cut_off" });
+
+    const cutCall = new AIMessage({ content: "", response_metadata: { stop_reason: "max_tokens" } });
+    await expect(turn(prepared(new FakeToolCallingModel([calls("a"), cutCall]), [echo()])))
+      .rejects.toMatchObject({ reason: "answer_cut_off" });
+  });
+
+  it("leaves a cancelled model call a cancellation", async () => {
+    const controller = new AbortController();
+    const model = new FakeToolCallingModel([new AIMessage("never")]);
+    model.beforeResponse = async () => {
+      controller.abort();
+      throw new Error("socket closed");
+    };
+
+    const failed = await runToolLoop(prepared(model, [echo()]), "go", newGraphThread(), { signal: controller.signal })
+      .catch((error: unknown) => error);
+
+    expect(failed).not.toBeInstanceOf(ModelError);
+    expect(controller.signal.aborted).toBe(true);
+  });
+
+  it("asks a provider that caches only on request to cache, with every model call", async () => {
+    const asked: unknown[] = [];
+    class RecordingAnthropic extends ChatAnthropic {
+      private readonly script = [toolCallMessage("echo", { x: "a" }), new AIMessage("done")];
+      override async _generate(_messages: BaseMessage[], options: this["ParsedCallOptions"]) {
+        asked.push(options.cache_control);
+        return { generations: [{ text: "", message: this.script.shift()! }] };
+      }
+    }
+    const model = new RecordingAnthropic({ model: "claude-haiku-5-5", apiKey: "fake-test-key" });
+
+    const { reply } = await turn({ kind: "helper", instructions: "Help.", state: [], context: [], tools: [echo()], ctx: [], model });
+
+    expect(reply).toBe("done");
+    expect(asked).toEqual([{ type: "ephemeral" }, { type: "ephemeral" }]);
   });
 
   /** Both calls of one model step, as their runs started and ended. */

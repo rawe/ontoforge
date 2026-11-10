@@ -26,11 +26,13 @@
  */
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { ContextOverflowError } from "@langchain/core/errors";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOpenAI } from "@langchain/openai";
 
 import { settings } from "../config.js";
 import { ProviderCallMetrics } from "../metrics.js";
+import { ModelError, type ModelFailure } from "./exceptions.js";
 
 /** A named language-model configuration belonging to one lens. */
 export interface AgentConfig {
@@ -242,4 +244,75 @@ export function getAiModel(): BaseChatModel | null {
 /** Install (or clear) the active model. Startup and tests only. */
 export function setAiModel(next: BaseChatModel | null): void {
   model = next;
+}
+
+/** A provider's own words for a prompt over its context window, where it
+ * sends no structured code: llama.cpp, vLLM and others behind the
+ * OpenAI-compatible protocol. Narrow on purpose — a plain 400 is not one. */
+const CONTEXT_FULL = /context_length_exceeded|maximum context length|exceeds? the (available )?context (size|window)|prompt is too long|input tokens exceed/i;
+
+/** Network failures that mean the provider was not reached. */
+const UNREACHED = new Set([
+  "ECONNREFUSED", "ECONNRESET", "ENOTFOUND", "ETIMEDOUT", "EAI_AGAIN", "EPIPE",
+  "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET",
+]);
+
+const UNREACHED_ERRORS = new Set(["TimeoutError", "APIConnectionError", "APIConnectionTimeoutError"]);
+
+function failureOf(error: unknown): ModelFailure {
+  // A provider's failure may arrive wrapped: the reason is read from the
+  // first error of the chain that tells one.
+  for (let e = error, depth = 0; e !== null && typeof e === "object" && depth < 6; depth += 1) {
+    const { status, code, name, message, lc_error_code: tag, cause } = e as Record<string, unknown>;
+    if (
+      ContextOverflowError.isInstance(e) || tag === "CONTEXT_OVERFLOW" || code === "context_length_exceeded" ||
+      (typeof message === "string" && CONTEXT_FULL.test(message))
+    ) return "context_full";
+    if (status === 429 || tag === "MODEL_RATE_LIMIT") return "rate_limited";
+    if (status === 401 || status === 403 || status === 404 || tag === "MODEL_AUTHENTICATION" || tag === "MODEL_NOT_FOUND") {
+      return "misconfigured";
+    }
+    if (
+      (typeof status === "number" && status >= 500) ||
+      UNREACHED_ERRORS.has(String(name)) || UNREACHED_ERRORS.has(e.constructor?.name ?? "") ||
+      UNREACHED.has(String(code)) || message === "fetch failed"
+    ) return "unavailable";
+    e = cause;
+  }
+  return "failed";
+}
+
+/**
+ * What a failed model call becomes for a client: a `ModelError` naming the
+ * reason the provider gave, for every provider alike. Callers check their
+ * abort signal first — a cancelled call is not a model failure.
+ */
+export function modelFailure(error: unknown): ModelError {
+  return error instanceof ModelError ? error : new ModelError(failureOf(error), error);
+}
+
+/** The reasons a model names for ending its output early, by provider:
+ * the output limit, and (Anthropic) a context window filled while answering. */
+const CUT_OFF: Record<string, ModelFailure> = {
+  length: "answer_cut_off",
+  max_tokens: "answer_cut_off",
+  model_context_window_exceeded: "context_full",
+};
+
+/** The failure a model's answer ended with, if it named one: the answer is
+ * incomplete, and a tool call in it may be too. */
+export function cutOff(responseMetadata: Record<string, unknown> | undefined): ModelError | undefined {
+  const reason = CUT_OFF[String(responseMetadata?.finish_reason ?? responseMetadata?.stop_reason ?? "")];
+  return reason === undefined ? undefined : new ModelError(reason);
+}
+
+/**
+ * The call options that make the provider cache a conversation that only
+ * grows. Anthropic caches only on request: the top-level `cache_control`
+ * puts the cache boundary on the last block and moves it on as the
+ * conversation grows. OpenAI-compatible endpoints cache an unchanged
+ * beginning on their own, or not at all — there is nothing to send.
+ */
+export function conversationCaching(model: BaseChatModel): Record<string, unknown> {
+  return model instanceof ChatAnthropic ? { cache_control: { type: "ephemeral" } } : {};
 }

@@ -14,7 +14,7 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { ChatOpenAI } from "@langchain/openai";
 
 import { settings } from "../../../config.js";
-import { createAiModel, getAiModel } from "../../../core/ai.js";
+import { createAiModel, getAiModel, modelFailure } from "../../../core/ai.js";
 import { ValidationError } from "../../../core/exceptions.js";
 import type { Trace } from "./trace.js";
 
@@ -54,7 +54,8 @@ export type JsonSchema = Record<string, unknown>;
 
 /**
  * One structured call: the model answers with JSON of the schema, which is
- * parsed and returned. A failed call or unparsable output fails the step;
+ * parsed and returned. A failed call fails the step with the reason the
+ * provider gave (`modelFailure`), unparsable output as a validation error;
  * there is no automatic retry.
  */
 export async function decide(
@@ -79,7 +80,7 @@ export async function decide(
   } catch (error) {
     signal.throwIfAborted();
     console.warn(`${name} model call failed: ${error instanceof Error ? error.message : String(error)}`);
-    throw new ValidationError(`The language model failed (${name}); no automatic retry.`);
+    throw modelFailure(error);
   }
   try {
     // Some providers wrap JSON in a fence despite the format.
@@ -97,14 +98,14 @@ export interface StreamedAnswer {
 }
 
 /** One streamed call; every text delta goes to `onDelta`. A failed call
- * fails with `failure`; there is no automatic retry. */
+ * fails with the reason the provider gave (`modelFailure`); there is no
+ * automatic retry. */
 export async function streamAnswer(
   model: BaseChatModel,
   system: string,
   input: string,
   signal: AbortSignal,
   onDelta: (text: string) => Promise<void>,
-  failure = "The language model failed while answering; no automatic retry.",
 ): Promise<StreamedAnswer> {
   let output = "";
   let usage: unknown;
@@ -122,7 +123,7 @@ export async function streamAnswer(
   } catch (error) {
     signal.throwIfAborted();
     console.warn(`Answer model failed: ${error instanceof Error ? error.message : String(error)}`);
-    throw new ValidationError(failure);
+    throw modelFailure(error);
   }
   return { text: output, usage };
 }

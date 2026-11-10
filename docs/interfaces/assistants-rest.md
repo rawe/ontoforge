@@ -60,7 +60,8 @@ cuts. A closed connection cancels the turn so work nobody will receive stops, an
 in its thread. A turn whose result cannot be kept ends with `error`: `THREAD_NOT_FOUND`
 when its thread is gone meanwhile, `THREAD_BUSY` when it lost its hold on the thread,
 `VALIDATION_ERROR` when the thread grew too large to keep, `STORAGE_ERROR` when the thread
-store is full or fails. Unexpected failures after streaming begins have the generic `INTERNAL_ERROR` message `Internal Server Error`.
+store is full or fails. A turn whose language model fails ends with `error` `MODEL_ERROR`
+([its reasons](README.md#errors)). Unexpected failures after streaming begins have the generic `INTERNAL_ERROR` message `Internal Server Error`.
 Delivery bounds buffering and terminates stalled or oversized streams.
 
 There is no background continuation after a disconnect.
@@ -126,8 +127,8 @@ id or `diagnostics` among them — are rejected.
 It is refused exactly as chat is, with plain error responses: `FEATURE_DISABLED` without
 a language-model provider, not found for an
 unknown retriever, `VALIDATION_ERROR` for a retriever its lens can no longer run (errors under
-`details.errors`), a default retriever with nothing to search, a planner input over the cap,
-a failed planning call or a malformed plan. A closed connection cancels the work.
+`details.errors`), a default retriever with nothing to search, a planner input over the cap
+or a malformed plan; a failed planning call answers `MODEL_ERROR`. A closed connection cancels the work.
 
 The response is `200` with `results` — best first, each `entityId`, `entityType`,
 `label`, `conditions` (`filter`, `value`, `text`) and `matched` (a search hit's form, or

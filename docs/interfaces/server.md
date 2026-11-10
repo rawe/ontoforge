@@ -160,13 +160,16 @@ use the error envelope.
 | `ontoforge_search_items_total` | counter | `outcome` (`completed`, `failed`, `released`) |
 | `ontoforge_search_entries_total` | counter | `representation` (`keyword`, `semantic`) |
 | `ontoforge_provider_request_duration_seconds` | histogram | `provider` (`embedding`, `ai`), `outcome` (`ok`, `error`) |
+| `ontoforge_ai_tokens_total` | counter | `kind` (`input`, `output`, `cache_read`, `cache_write`) |
 | `process_*`, `nodejs_*` | as the client library defines them | none |
 
 `route` is the route template (`/api/ontologies/:ontologyKey`), or `unmatched` for a request
 no route answers; `status` is the status code, or `aborted` when the client left before any
 response was sent. No label carries an ontology, a lens, a principal or a raw path. The
 number of series therefore depends on the code alone, and metrics do not disclose what
-an ontology holds. A streamed response or model call is timed to its end.
+an ontology holds. A streamed response or model call is timed to its end. Tokens are counted
+as the language-model provider reports them: `input` is the whole prompt, `cache_read` and
+`cache_write` the parts of it read from and written to the provider's cache.
 
 The search counters count this server's worker; the queue is shared, so every server reports
 the same queue, as of its last pass over every ontology. A `failed` item there waits for a

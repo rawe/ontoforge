@@ -20,6 +20,11 @@
  *   tools and the system prompt stay the same on every turn;
  * - no reasoning a model returned is ever sent back to it, in any
  *   provider's form: replies keep their text and tool calls.
+ * A provider that caches only on request is asked to with every call
+ * (`conversationCaching`).
+ *
+ * A model call that fails, or whose answer is cut off, ends the turn with a
+ * `ModelError` naming the reason (`core/ai.ts`).
  *
  * Every call streams `<kind>.tool_call`, then `<kind>.tool_result`, then
  * the tool's presented events (ADR 0021). A failure the tool expects, or
@@ -35,6 +40,8 @@ import { tool, ToolInputParsingException, type StructuredToolInterface } from "@
 import { createAgent, createMiddleware } from "langchain";
 import { z } from "zod";
 
+import { conversationCaching, cutOff, modelFailure } from "../core/ai.js";
+import { ModelError } from "../core/exceptions.js";
 import type { StreamExecution } from "./session.js";
 import { PERSON_TEXT } from "./threads/access.js";
 import type { GraphThread } from "./threads/threadStore.js";
@@ -290,6 +297,7 @@ export async function runToolLoop<C>(
   const { signal } = execution;
   signal?.throwIfAborted();
   const { model } = run;
+  const caching = conversationCaching(model);
   const serial = queue();
   const tools = run.tools.map((def) => engineTool(def, run, execution, serial));
   const config = { configurable: { thread_id: thread.threadId } };
@@ -311,10 +319,22 @@ export async function runToolLoop<C>(
     stateSchema: ThreadContext,
     wrapModelCall: async (request, handler) => {
       const messages = request.messages.map(withoutReasoning);
-      // No tools: a plain model call is the same conversation without the
-      // tool loop (binding an empty toolset is rejected by providers).
-      if (tools.length === 0) return model.invoke([request.systemMessage, ...messages], { signal });
-      return handler({ ...request, messages });
+      let response;
+      try {
+        // No tools: a plain model call is the same conversation without the
+        // tool loop (binding an empty toolset is rejected by providers).
+        response = tools.length === 0
+          ? await model.invoke([request.systemMessage, ...messages], { signal, ...caching })
+          : await handler({ ...request, messages, modelSettings: { ...request.modelSettings, ...caching } });
+      } catch (error) {
+        signal?.throwIfAborted();
+        console.warn(`Model call failed: ${error instanceof Error ? error.message : String(error)}`);
+        throw modelFailure(error);
+      }
+      // An answer cut off is no answer: its text or a tool call's arguments end mid-way.
+      const cut = AIMessage.isInstance(response) ? cutOff(response.response_metadata) : undefined;
+      if (cut !== undefined) throw cut;
+      return response;
     },
   });
   // A SystemMessage keeps the prompt as plain string content; a string
@@ -329,7 +349,11 @@ export async function runToolLoop<C>(
       systemPrompt: system, stateSeen, contextSeen, guidesSent,
     },
     { recursionLimit: RECURSION_LIMIT, signal, ...config },
-  );
+  ).catch((error: unknown) => {
+    // The engine wraps what a middleware throws; the model's failure is its cause.
+    const cause = (error as { cause?: unknown } | null)?.cause;
+    throw cause instanceof ModelError ? cause : error;
+  });
   const finalMessages = state.messages as BaseMessage[];
   return { reply: messageText(finalMessages[finalMessages.length - 1]) };
 }

@@ -130,6 +130,28 @@ describe("provider metrics", () => {
   });
 });
 
+describe("token metrics", () => {
+  /** The token counter's value for a kind. */
+  async function tokens(kind: string): Promise<number> {
+    const metric = await registry.getSingleMetric("ontoforge_ai_tokens_total")!.get();
+    return metric.values.find((value) => value.labels.kind === kind)?.value ?? 0;
+  }
+
+  it("count what a language-model call reported, its cached parts beside the whole input", async () => {
+    const before = { input: await tokens("input"), output: await tokens("output"), read: await tokens("cache_read"), write: await tokens("cache_write") };
+    const handler = new ProviderCallMetrics("ai");
+    const usage = { input_tokens: 1200, output_tokens: 80, input_token_details: { cache_read: 1000, cache_creation: 150 } };
+    handler.handleLLMEnd({ generations: [[{ message: { usage_metadata: usage } }]] }, "run-1");
+    // A call that reported no usage counts nothing; neither does an embedding call.
+    handler.handleLLMEnd({ generations: [[{ message: {} }]] }, "run-2");
+    new ProviderCallMetrics("embedding").handleLLMEnd({ generations: [[{ message: { usage_metadata: usage } }]] }, "run-3");
+    expect(await tokens("input")).toBe(before.input + 1200);
+    expect(await tokens("output")).toBe(before.output + 80);
+    expect(await tokens("cache_read")).toBe(before.read + 1000);
+    expect(await tokens("cache_write")).toBe(before.write + 150);
+  });
+});
+
 describe("pool metrics", () => {
   it("read a pool's counts at scrape time, and skip a closed one", async () => {
     let counts: { totalCount: number; idleCount: number; waitingCount: number } | null = {

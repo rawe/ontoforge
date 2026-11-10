@@ -218,7 +218,7 @@ Every REST error response has the same envelope:
 { "error": { "code": "...", "message": "...", "details": { } } }
 ```
 
-There are exactly ten top-level codes:
+There are exactly eleven top-level codes:
 
 | Condition | Status | Code | `details` |
 |---|---|---|---|
@@ -230,13 +230,14 @@ There are exactly ten top-level codes:
 | Input rejected | 422 | `VALIDATION_ERROR` | `fields` map, `errors` list, `violations` list with `total`, or `items` list |
 | Change requires explicit cascade | 409 | `CASCADE_REQUIRED` | `affectedLenses`, `affectedIndices` |
 | Unexpected storage failure | 500 | `STORAGE_ERROR` | `errorId` |
+| A language model gave no usable answer | 502 | `MODEL_ERROR` | — or `code` |
 | Malformed request body | 400 | `INVALID_JSON` | — |
 | Request body over the configured limit | 413 | `PAYLOAD_TOO_LARGE` | — |
 
-Four refinements:
+Five refinements:
 
 **`details.code` narrows, it does not replace.** Where it appears, the top-level code
-stays one of the ten. A search with a `semantic` block and no embedding provider, saved-query discovery with no embedding provider, an AI request with no
+stays one of the eleven. A search with a `semantic` block and no embedding provider, saved-query discovery with no embedding provider, an AI request with no
 language-model provider configured answers `422 VALIDATION_ERROR` with `details.code` of `FEATURE_DISABLED`.
 An assistant thread that is unknown, expired, bound to another assistant or started by
 another principal answers `404 RESOURCE_NOT_FOUND` with `details.code` of
@@ -259,6 +260,12 @@ generated `errorId` and returns only that id, so a reported failure can still be
 its server-side record. This error does not promise that a failure is retryable. Expected
 domain conditions use their documented errors
 ([ADR 0012](../adr/0012-unexpected-storage-failures-become-storeerror.md)).
+
+**`MODEL_ERROR` names a reason, never the provider's words.** `details.code` is
+`CONTEXT_FULL` when the conversation no longer fits the model, `RATE_LIMITED`,
+`UNAVAILABLE`, `MISCONFIGURED` when the provider refuses the server's credentials or model
+name, and `ANSWER_CUT_OFF` when an answer ended at the model's output limit. It is absent
+when the provider gave no reason. The provider's own message is logged, not returned.
 
 **What a caller holds no role in is not found.** An ontology or lens outside the caller's
 assignments answers `RESOURCE_NOT_FOUND`, as an unknown key does; `FORBIDDEN` is for what

@@ -11,7 +11,7 @@
 import { once } from "node:events";
 import type { Writable } from "node:stream";
 
-import { ConflictError, NotFoundError, StoreError, ValidationError } from "../core/exceptions.js";
+import { ConflictError, ModelError, NotFoundError, StoreError, ValidationError } from "../core/exceptions.js";
 import { threadBusy, threadNotFound } from "./threads/access.js";
 import { TURN_HEARTBEAT_MS, type Artifact, type GraphThread, type ThreadStore, type Turn } from "./threads/threadStore.js";
 import { TurnSaver } from "./threads/turnSaver.js";
@@ -49,6 +49,10 @@ function publicError(error: unknown) {
   };
   if (error instanceof ValidationError) return {
     code: "VALIDATION_ERROR", message: error.message,
+    ...(error.details === null ? {} : { details: error.details }),
+  };
+  if (error instanceof ModelError) return {
+    code: "MODEL_ERROR", message: error.message,
     ...(error.details === null ? {} : { details: error.details }),
   };
   if (error instanceof StoreError) return {

@@ -162,3 +162,57 @@ export class StoreError extends OntoForgeError {
     this.errorId = errorId ?? randomBytes(4).toString("hex");
   }
 }
+
+/** Why a language-model call gave no usable answer, as far as the provider
+ * tells; `failed` when it does not. */
+export type ModelFailure =
+  | "context_full"
+  | "rate_limited"
+  | "unavailable"
+  | "misconfigured"
+  | "answer_cut_off"
+  | "failed";
+
+const MODEL_FAILURES: Record<ModelFailure, { code: string | null; message: string }> = {
+  context_full: {
+    code: "CONTEXT_FULL",
+    message: "This conversation is too long for the language model; start a new conversation.",
+  },
+  rate_limited: {
+    code: "RATE_LIMITED",
+    message: "The language model is busy; try again in a moment.",
+  },
+  unavailable: {
+    code: "UNAVAILABLE",
+    message: "The language model cannot be reached; try again later.",
+  },
+  misconfigured: {
+    code: "MISCONFIGURED",
+    message: "The language model refused the server's credentials or model name; an administrator has to fix the configuration.",
+  },
+  answer_cut_off: {
+    code: "ANSWER_CUT_OFF",
+    message: "The language model's answer was cut off at its output limit; ask for less at once.",
+  },
+  failed: { code: null, message: "The language model failed; no automatic retry." },
+};
+
+/**
+ * A language-model call gave no usable answer. -> 502 MODEL_ERROR,
+ * `details.code` naming the reason when the provider told it.
+ *
+ * Carries nothing of the provider's own answer: the originating failure is
+ * set as `cause` and logged where the call was made.
+ */
+export class ModelError extends OntoForgeError {
+  readonly reason: ModelFailure;
+  readonly details: Record<string, unknown> | null;
+
+  constructor(reason: ModelFailure, cause?: unknown) {
+    super(MODEL_FAILURES[reason].message);
+    this.reason = reason;
+    const { code } = MODEL_FAILURES[reason];
+    this.details = code === null ? null : { code };
+    if (cause !== undefined) this.cause = cause;
+  }
+}

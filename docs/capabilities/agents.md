@@ -72,6 +72,7 @@ know it: it is not listed, read or written there.
   retry within the same turn. A call to a tool name outside the agent's toolset is handed
   back the same way, with an error naming the called tool and the available tools. Only
   errors outside these cases abort.
+- An answer the model's output limit cut off fails the turn; a half answer is never kept.
 - Agents belong to a lens: keys are unique within it, deleting the lens deletes them, and
   they travel with it through [transfer](transfer.md).
 

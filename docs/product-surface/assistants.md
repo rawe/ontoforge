@@ -24,7 +24,8 @@ state, and its time inside the tool. Calls start collapsed and open by hand. An 
 shows its arguments and its result in a form fitting the result — a table for query rows,
 search items and passages with Advanced search's rows, entities, neighbours with their relation
 and direction, document text — linking entities to their pages, with the raw result one
-click away; a tool that answers with an error shows it highlighted. The panel heads with
+click away; a result that [left something out](../capabilities/agents.md#what-a-result-left-out)
+shows the sentence the model was given about it; a tool that answers with an error shows it highlighted. The panel heads with
 the question, the number of calls, the time spent inside tools — parallel calls once, said
 so when calls overlapped, the model's thinking not at all — and how long the answer took.
 Each answer's button shows the count of calls and of entities. A "Show details" switch,
@@ -100,8 +101,11 @@ configuration semantics are owned by [capabilities/agents.md](../capabilities/ag
 **List.** Each card shows the agent's tool posture: all tools, or how many.
 
 **Editor.** After the identity, **Behaviour**: the system prompt, and either all tools or
-an explicit checklist of the read-only runtime tools, at least one required. An agent is
-never invalid in its lens.
+an explicit checklist of the agent's [tools](../capabilities/agents.md#tools), at least
+one required; an agent saved with none may stay so. Under the system prompt one line says that the schema the lens shows is
+always added after it; *Show schema* opens the text an agent is given, read from the
+server when opened and shown in a block that scrolls. An agent is never invalid in its
+lens.
 
 **Test panel.** The agent's side panel — entities and tool calls, as in the
 [Assistants panel](#assistants-panel) — is always shown.

@@ -1,7 +1,7 @@
 /**
  * The agent routes over HTTP with a mocked store: the FEATURE_DISABLED
  * envelope (`details.code` alongside 422 VALIDATION_ERROR), the list
- * answering without a provider, the built-in default addressed by its key,
+ * and the agent schema answering without a provider, the built-in default addressed by its key,
  * the chat stream, and chat on threads: starting, continuing, refusing an
  * unknown or busy thread, atomic turns, reading a thread back, and threads
  * shared by servers over one store.
@@ -12,11 +12,13 @@ import { AIMessage } from "@langchain/core/messages";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_AGENT_CONFIG, setAiModel } from "../../src/core/ai.js";
-import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
+import { describeSchema } from "../../src/runtime/assistants/agents/runtime.js";
+import { invalidateLoadedSchemaCache, loadSchema } from "../../src/runtime/schemaCache.js";
 import { NotFoundError, StoreError } from "../../src/core/exceptions.js";
 import { MemoryThreadStore, type Turn } from "../../src/assistants/index.js";
 import { FakeToolCallingModel, toolCallMessage } from "./aiHelpers.js";
 import {
+  asRuntimeStore,
   createMockRuntimeStore,
   makeFullSchema,
   type MockRuntimeStore,
@@ -91,6 +93,21 @@ describe("FEATURE_DISABLED without a provider", () => {
       { key: "_default", name: "Default", description: DEFAULT_AGENT_CONFIG.description, builtIn: true },
       { key: "my-agent", name: "My Agent", description: "A custom agent", builtIn: false },
     ]);
+  });
+
+  it("the agent schema answers the text every agent's prompt carries", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/test_lens/ai/assistants/agent-schema" });
+    expect(res.statusCode).toBe(200);
+    const loaded = await loadSchema("test_lens", asRuntimeStore(holder.store));
+    expect(res.json()).toEqual({ text: describeSchema(loaded.scoped) });
+    expect(res.json().text).toContain("\nEntity types:\n");
+  });
+
+  it("the agent schema of an unknown lens answers 404", async () => {
+    holder.store.getFullSchemaWithLensInclusions.mockResolvedValue(null);
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/test_ont/runtime/lenses/missing/ai/assistants/agent-schema" });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error.code).toBe("RESOURCE_NOT_FOUND");
   });
 });
 
@@ -411,27 +428,15 @@ it("disconnect during storage work prevents a follow-up model call and handles l
   expect(laterModel).not.toHaveBeenCalled();
 });
 
-it("delivers a root string result without JSON double encoding", async () => {
+it("terminates an oversized event with one public error instead of buffering it", async () => {
   setAiModel(new FakeToolCallingModel([
-    toolCallMessage("get_schema", {}), new AIMessage("Schema ready"),
-  ]));
-  const res = await app.inject({ method: "POST", url: chatPath + "/_default/chat", payload: { message: "Schema" } });
-  const stream = turnEvents(res.body);
-  expect(stream[1].result).toMatch(/^Lens: HR View/);
-  expect(stream[1].result).toContain("\nEntity types:\n");
-  expect(stream.at(-1)).toEqual({ type: "final", reply: "Schema ready" });
-});
-
-it("terminates an oversized result with one public error instead of buffering it", async () => {
-  holder.store.getEntity.mockResolvedValue({ _id: "huge", name: "x".repeat(8 * 1024 * 1024) });
-  setAiModel(new FakeToolCallingModel([
-    toolCallMessage("get_entity", { entity_type_key: "person", entity_id: "huge" }),
+    toolCallMessage("get_entity", { entity_type_key: "person", entity_id: "x".repeat(8 * 1024 * 1024) }),
     new AIMessage("Must not appear"),
   ]));
   const res = await app.inject({ method: "POST", url: chatPath + "/_default/chat", payload: { message: "Go" } });
   const stream = turnEvents(res.body);
-  expect(stream.map((event) => event.type)).toEqual(["agent.tool_call", "error"]);
-  expect(stream[1].error).toEqual({ code: "VALIDATION_ERROR", message: "Chat stream exceeded its buffer limit" });
+  expect(stream.map((event) => event.type)).toEqual(["error"]);
+  expect(stream[0].error).toEqual({ code: "VALIDATION_ERROR", message: "Chat stream exceeded its buffer limit" });
 });
 
 describe("chat on threads", () => {

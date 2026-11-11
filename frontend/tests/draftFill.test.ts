@@ -6,7 +6,7 @@ import {
 } from '../src/assistants/draft/draftFillModel.ts'
 import { DRAFT_VIEWS, draftViewOf, proposedLabels } from '../src/assistants/draft/drafters.ts'
 import {
-  agentFields, draftOf, sameDraft, withAgentFields, withKey, withName, type AgentDraft,
+  agentFields, draftOf, hasNoTools, sameDraft, toolChoiceValid, withAgentFields, withKey, withName, type AgentDraft,
 } from '../src/components/studio/assistants/agentDraft.ts'
 
 const fields = { name: 'Support', description: '', systemPrompt: 'Be brief.', tools: ['get_schema'] as string[] | null }
@@ -136,4 +136,23 @@ test('lists the labels of the proposed fields in the view order, unknown fields 
 
 test('gives every drafter view its own kind', () => {
   assert.equal(new Set(DRAFT_VIEWS.map((v) => v.kind)).size, DRAFT_VIEWS.length)
+})
+
+test('an agent saved without tools may be saved so again; no agent is newly left without tools', () => {
+  const agent = (tools: string[] | null) =>
+    draftOf({ key: 'a', name: 'A', description: null, systemPrompt: null, tools, createdAt: '', updatedAt: '' })
+  // Its allowlist named only tools agents no longer have: read, it names none.
+  const none = agent([])
+  assert.equal(hasNoTools(none), true)
+  assert.equal(toolChoiceValid({ ...none, name: 'Renamed' }, none), true)
+  assert.equal(toolChoiceValid({ ...none, tools: ['search'] }, none), true)
+
+  const some = agent(['search'])
+  assert.equal(hasNoTools(some), false)
+  assert.equal(toolChoiceValid({ ...some, tools: [] }, some), false)
+  assert.equal(toolChoiceValid({ ...some, allTools: true, tools: [] }, some), true)
+
+  // A new agent starts with every tool; switching that off with nothing chosen cannot be saved.
+  const fresh = draftOf(null)
+  assert.equal(toolChoiceValid({ ...fresh, allTools: false }, fresh), false)
 })

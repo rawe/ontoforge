@@ -22,6 +22,7 @@ import {
   toolCallSummary,
   toolCallTurns,
   toolError,
+  toolResultMore,
   toolTime,
 } from '../src/assistants/steps/toolCallModel.ts'
 import { retrieverTurns, type RetrieverInsight } from '../src/components/assistants/retrievers/retrieverModel.ts'
@@ -149,6 +150,23 @@ test('toolError reads an {error} result only: its text, or the message of a {cod
   assert.equal(toolError(call({ error: 'x', items: [] })), null)
   assert.equal(toolError(call('text')), null)
   assert.equal(toolError(call({ error: 'x' }, 'pending')), null)
+})
+
+test('toolResultMore reads the sentence of what a completed result left out, for every shape', () => {
+  const call = (result: unknown, status: ToolCall['status'] = 'completed'): ToolCall => ({ callId: 'c', tool: 't', args: {}, result, status })
+  const more = 'Showing rows 1-20 of 3400. If you need more, call list_entities again with the same arguments and offset: 20.'
+  assert.equal(toolResultMore(call({ items: [], total: 3400, limit: 20, offset: 0, more })), more)
+  assert.equal(toolResultMore(call({ columns: [], results: [], more })), more)
+  assert.equal(toolResultMore(call({ entity: {}, neighbors: [], more })), more)
+  assert.equal(toolResultMore(call({ propertyKey: 'body', content: 'x', more })), more)
+  assert.equal(toolResultMore(call({ items: [], total: 3 })), null)
+  assert.equal(toolResultMore(call({ more: '  ' })), null)
+  assert.equal(toolResultMore(call({ more: 3 })), null)
+  assert.equal(toolResultMore(call([{ more }])), null)
+  assert.equal(toolResultMore(call(more)), null)
+  assert.equal(toolResultMore(call({ more }, 'pending')), null)
+  // An entity's own property of that name is not a note.
+  assert.equal(toolResultMore(call({ _id: 'e1', _entityTypeKey: 'part', name: 'P', more })), null)
 })
 
 test('toolCallCounts counts the calls and those that answered with an error', () => {

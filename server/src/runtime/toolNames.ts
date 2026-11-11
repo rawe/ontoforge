@@ -1,10 +1,10 @@
 /**
  * Shared tool-name constants for the runtime MCP server and agent
- * allowlists. The grantable set is exactly twelve names — the document reads
- * included, `get_relation` still deliberately not grantable
- * (`docs/interfaces/mcp.md#runtime-tools`). `search_documents` is agent-only: it
- * is the MCP `search` restricted to document passages, split off as
- * its own tool so a small model chooses it by name rather than by argument.
+ * allowlists. The grantable set is exactly ten names
+ * (`docs/interfaces/mcp.md#runtime-tools`): being read-only is not
+ * sufficient to be grantable. `search_documents` is the MCP `search`
+ * restricted to document passages, split off as its own tool so a small
+ * model chooses it by name rather than by argument.
  */
 
 // Read tools (shared by MCP + agent)
@@ -21,13 +21,11 @@ export const TOOL_LIST_SAVED_QUERIES = "list_saved_queries";
 export const TOOL_RUN_SAVED_QUERY = "run_saved_query";
 export const TOOL_SEARCH_SAVED_QUERIES = "search_saved_queries";
 
-/** The fixed twelve-name set an agent configuration may grant. */
+/** The fixed ten-name set an agent configuration may grant. */
 export const VALID_AGENT_TOOLS: ReadonlySet<string> = new Set([
-  TOOL_GET_SCHEMA,
   TOOL_LIST_ENTITIES,
   TOOL_GET_ENTITY,
   TOOL_GET_DOCUMENT,
-  TOOL_LIST_RELATIONS,
   TOOL_GET_NEIGHBORS,
   TOOL_SEARCH,
   TOOL_SEARCH_DOCUMENTS,
@@ -39,3 +37,13 @@ export const VALID_AGENT_TOOLS: ReadonlySet<string> = new Set([
 
 /** Formatted list for use in descriptions (e.g. MCP modeling tool docs). */
 export const VALID_AGENT_TOOLS_CSV: string = [...VALID_AGENT_TOOLS].sort().join(", ");
+
+/** Names an allowlist written before may still hold: tools agents no
+ * longer have. A stored or imported allowlist loses them; any other
+ * unknown name is refused. */
+export const FORMER_AGENT_TOOLS: ReadonlySet<string> = new Set([TOOL_GET_SCHEMA, TOOL_LIST_RELATIONS]);
+
+/** An allowlist without the tools agents no longer have; null stays null. */
+export function withoutFormerTools(tools: string[] | null): string[] | null {
+  return tools === null ? null : tools.filter((tool) => !FORMER_AGENT_TOOLS.has(tool));
+}

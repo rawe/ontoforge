@@ -29,6 +29,10 @@ import {
   type EntityLink,
 } from "../entities.js";
 
+/** A result's part that is an object: a card is only ever read off one,
+ * whatever shape a result has taken. */
+const isRow = (value: unknown): value is Row => value !== null && typeof value === "object" && !Array.isArray(value);
+
 export interface FoundEntities {
   entities: EntityCard[];
   links: EntityLink[];
@@ -70,7 +74,9 @@ export function toolEntities(
     case TOOL_SEARCH:
     case TOOL_SEARCH_DOCUMENTS:
       // A search names its entities: the name and identity properties make the card.
-      for (const { entity } of (value.items ?? []) as { entity: Row }[]) {
+      for (const item of (value.items ?? []) as unknown[]) {
+        const entity = isRow(item) ? item.entity : undefined;
+        if (!isRow(entity)) continue;
         const type = lens.entityTypes[String(entity._entityTypeKey)];
         const nameProperty = type?.nameProperty ?? null;
         const named = nameProperty === null ? {} : { [nameProperty]: entity.name };
@@ -79,7 +85,9 @@ export function toolEntities(
       break;
     case TOOL_GET_NEIGHBORS: {
       const centre = card(value.entity as Row | undefined, args.entity_type_key);
-      for (const { relation, entity } of (value.neighbors ?? []) as { relation: Row; entity: Row }[]) {
+      for (const item of (value.neighbors ?? []) as unknown[]) {
+        const { relation, entity } = (isRow(item) ? item : {}) as { relation?: unknown; entity?: unknown };
+        if (!isRow(relation) || !isRow(entity)) continue;
         const neighbour = card(entity, entity._entityTypeKey);
         const type = relation._relationTypeKey;
         if (

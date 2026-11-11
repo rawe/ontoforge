@@ -113,7 +113,7 @@ describe("agent configurations (modeling REST)", () => {
         name: "HR Assistant",
         description: "Answers HR questions",
         systemPrompt: "You are an HR assistant.",
-        tools: ["get_schema", "execute_query"],
+        tools: ["list_entities", "execute_query"],
       },
     );
     expect(created.statusCode).toBe(201);
@@ -121,7 +121,7 @@ describe("agent configurations (modeling REST)", () => {
     expect(agent.key).toBe("hr-assistant");
     expect(agent.name).toBe("HR Assistant");
     expect(agent.systemPrompt).toBe("You are an HR assistant.");
-    expect(agent.tools).toEqual(["get_schema", "execute_query"]);
+    expect(agent.tools).toEqual(["list_entities", "execute_query"]);
 
     const replaced = await inject(
       "PUT",
@@ -491,7 +491,7 @@ describe("modeling MCP tools", () => {
         name: "MCP Agent",
         description: "made over MCP",
         system_prompt: "Be terse.",
-        tools: ["get_schema"],
+        tools: ["list_entities"],
       });
       expect(created.isError).toBeUndefined();
       expect(json(created).created).toBe(true);

@@ -50,7 +50,7 @@ schema validation.
 All on `all`.
 
 - `org_analyst` — tools `list_saved_queries`, `run_saved_query`, `search_saved_queries`,
-  `execute_query`, `get_schema`.
+  `execute_query`.
 
 | Saved query | Steps | Parameters | Result |
 |---|---|---|---|

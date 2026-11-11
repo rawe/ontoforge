@@ -84,6 +84,16 @@ describe("tool loop", () => {
     expect(toolResults(model)).toEqual([{ echoed: "a" }]);
   });
 
+  it("hands a text result to the model as it is, and to the stream as a string", async () => {
+    const model = new FakeToolCallingModel([toolCallMessage("echo", { x: "a" }), new AIMessage("done")]);
+
+    const { events } = await turn(prepared(model, [echo({ run: async () => 'line one\n"quoted"' })]));
+
+    const sent = model.calls[1]!.find((m) => m instanceof ToolMessage)!;
+    expect(sent.content).toBe('line one\n"quoted"');
+    expect(events[1]).toMatchObject({ type: "helper.tool_result", result: 'line one\n"quoted"' });
+  });
+
   it("hands an expected failure and invalid arguments back to the model", async () => {
     const model = new FakeToolCallingModel([calls("bad", "ok"), new AIMessage("recovered")]);
     model.responses[0]!.tool_calls!.push({ name: "echo", args: { x: 1 }, id: "c2", type: "tool_call" });
@@ -101,6 +111,18 @@ describe("tool loop", () => {
     expect(invalid.error).toMatch(/^Invalid arguments for echo: /);
   });
 
+  it("hands back at most the start of a schema failure that repeats arguments of any length", async () => {
+    const model = new FakeToolCallingModel([toolCallMessage("echo", { x: 1, ["y".repeat(50_000)]: 2 }), new AIMessage("done")]);
+    const strict = echo({ input: z.strictObject({ x: z.string() }) });
+
+    await turn(prepared(model, [strict]));
+
+    const [{ error }] = toolResults(model) as [{ error: string }];
+    expect(error).toMatch(/^Invalid arguments for echo: /);
+    expect(error.length).toBeLessThan(2_100);
+    expect(error.endsWith("…")).toBe(true);
+  });
+
   it("hands an unknown tool name back to the model with the available tools", async () => {
     const model = new FakeToolCallingModel([
       toolCallMessage("echo<|channel|>commentary", { x: "a" }), new AIMessage("recovered"),
@@ -113,6 +135,16 @@ describe("tool loop", () => {
     expect(toolResults(model)).toEqual([
       { error: 'Unknown tool "echo<|channel|>commentary". Available tools: echo, other' },
     ]);
+  });
+
+  it("repeats at most the start of an unknown tool's name of any length", async () => {
+    const model = new FakeToolCallingModel([toolCallMessage("z".repeat(50_000), {}), new AIMessage("done")]);
+
+    await turn(prepared(model, [echo()]));
+
+    const [{ error }] = toolResults(model) as [{ error: string }];
+    expect(error).toMatch(/^Unknown tool "z+…"\. Available tools: echo$/);
+    expect(error.length).toBeLessThan(2_100);
   });
 
   it("aborts the turn on any other error", async () => {

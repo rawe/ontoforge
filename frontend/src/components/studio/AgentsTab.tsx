@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Sparkles, Undo2 } from 'lucide-react'
+import { LoaderCircle, Sparkles, Undo2 } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useFeatures } from '@/api/hooks'
 import * as model from '@/api/model'
+import { getAgentSchema } from '@/api/runtime'
 import { qk } from '@/api/queryKeys'
 import { AGENT_TOOL_NAMES, type Agent, type Lens } from '@/api/types'
 import { AiChangedMark, useAssistantPanel, useDraftFill, type DraftTarget } from '@/assistants'
@@ -16,7 +17,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { toDiffValue } from '@/lib/valueDiff'
-import { agentFields, draftOf, sameDraft, toInput, withAgentFields, withKey, withName, type AgentDraft } from './assistants/agentDraft'
+import { agentFields, draftOf, hasNoTools, sameDraft, toInput, toolChoiceValid, withAgentFields, withKey, withName, type AgentDraft } from './assistants/agentDraft'
 import { AssistantActionBar } from './assistants/AssistantActionBar'
 import { AssistantCard } from './assistants/AssistantCard'
 import { AssistantDefaultPage, AssistantEditorPage } from './assistants/AssistantEditorPage'
@@ -185,7 +186,7 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
 
   const dirty = !sameDraft(draft, baseline)
   const keyValid = !isNew || (isValidLensResourceKey(key) && assistantKeyError(key, existingKeys, 'Agent') === undefined)
-  const valid = draft.name.trim() !== '' && (draft.allTools || draft.tools.length > 0) && keyValid
+  const valid = draft.name.trim() !== '' && toolChoiceValid(draft, baseline) && keyValid
   const canSave = (dirty || isNew) && valid && !busy
   const blockedReason = isNew ? 'Save this agent to test it.'
     : dirty ? 'Unsaved changes. Save them to test; questions use the saved configuration.'
@@ -315,6 +316,7 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
               className="font-mono text-xs"
               placeholder="You are a helpful assistant for…"
             />
+            <AgentSchemaNote ontologyKey={ontologyKey} lensKey={lensKey} />
           </div>
           <div className="grid gap-2">
             <div className="flex items-center gap-2">
@@ -332,7 +334,9 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
                     <span className="font-mono text-xs">{tool}</span>
                   </label>
                 ))}
-                {draft.tools.length === 0 && <p className="col-span-2 text-xs text-destructive">Select at least one tool.</p>}
+                {draft.tools.length === 0 && (hasNoTools(baseline)
+                  ? <p className="col-span-2 text-xs text-muted-foreground" data-testid="agent-no-tools">This agent has no tools: it answers from its prompt and the schema alone.</p>
+                  : <p className="col-span-2 text-xs text-destructive">Select at least one tool.</p>)}
               </div>
             )}
           </div>
@@ -340,5 +344,66 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
       </form>
       {dialog}
     </AssistantEditorPage>
+  )
+}
+
+/**
+ * Under the system prompt: the lens's schema always follows the prompt (or
+ * the built-in one when it is empty). The text is read only when opened.
+ */
+function AgentSchemaNote({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="grid gap-1.5">
+      {/* The sentence wraps: kept on one line it would set the form's least width. */}
+      <div className="flex items-start gap-2">
+        <p className="min-w-0 flex-1 pt-1 text-xs text-muted-foreground">
+          The schema this lens shows is always added after this prompt.
+        </p>
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          className="shrink-0"
+          aria-expanded={open}
+          data-testid="agent-schema-toggle"
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? 'Hide schema' : 'Show schema'}
+        </Button>
+      </div>
+      {open && <AgentSchemaText ontologyKey={ontologyKey} lensKey={lensKey} />}
+    </div>
+  )
+}
+
+function AgentSchemaText({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
+  const schema = useQuery({
+    queryKey: qk.agentSchema(ontologyKey, lensKey),
+    queryFn: () => getAgentSchema(ontologyKey, lensKey),
+    refetchOnMount: 'always',
+  })
+  if (schema.isPending) {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <LoaderCircle className="size-3.5 animate-spin" /> Loading the schema…
+      </p>
+    )
+  }
+  if (schema.error) {
+    return (
+      <p className="text-xs text-destructive">
+        Could not load the schema: {schema.error.message}{' '}
+        <Button type="button" size="xs" variant="link" className="h-auto px-0" onClick={() => void schema.refetch()}>Retry</Button>
+      </p>
+    )
+  }
+  return (
+    <pre
+      data-testid="agent-schema-text"
+      className="max-h-72 overflow-auto rounded-md border bg-muted/30 p-2 font-mono text-[11px] whitespace-pre-wrap break-words"
+    >
+      {schema.data.text}
+    </pre>
   )
 }

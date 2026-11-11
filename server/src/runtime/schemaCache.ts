@@ -29,6 +29,7 @@
 import type { AgentConfig, SavedQueryConfig, SavedQueryParameter, StepConfig } from "../core/ai.js";
 import type { NamedSearchConfig, StoredSearchNode } from "../core/namedSearch.js";
 import { NotFoundError } from "../core/exceptions.js";
+import { withoutFormerTools } from "./toolNames.js";
 import { sameDesign } from "../core/designRevision.js";
 import type { DesignRevision, RuntimeStore, SearchIndexRecord, SearchIndexStore } from "../core/ports.js";
 import type { ParentEnd, PropertyDef } from "../core/schemas.js";
@@ -281,7 +282,7 @@ export async function loadSchemaUncached(
       name: row.name as string,
       description: (row.description as string | undefined) ?? null,
       systemPrompt: (row.systemPrompt as string | undefined) ?? null,
-      tools: (row.tools as string[] | undefined) ?? null,
+      tools: withoutFormerTools((row.tools as string[] | undefined) ?? null),
     };
   }
 

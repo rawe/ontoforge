@@ -131,6 +131,10 @@ export interface Analysis {
   /** Bare variables used as ORDER BY sort keys (checked against the
    * node/relationship variables in `validate()`). */
   orderBySymbols: string[];
+  /** Whether the query orders the rows it returns: its RETURN carries an
+   * ORDER BY. An ordering in a WITH does not count: it need not survive
+   * the projection after it. */
+  ordered: boolean;
 }
 
 /** True if any node variable appears without a label and is never bound
@@ -182,6 +186,7 @@ class Collector extends CypherParserListener {
     functionCalls: new Set(),
     inlineMaps: [],
     orderBySymbols: [],
+    ordered: false,
   };
 
   /** Nesting depth of aggregate function invocations (nested-aggregate check). */
@@ -503,6 +508,8 @@ class Collector extends CypherParserListener {
   // -- DISTINCT (both positions: projection and function call) --
 
   override enterProjectionBody = (ctx: ProjectionBodyContext): void => {
+    // Each projection starts unordered; the last one is the RETURN.
+    this.analysis.ordered = false;
     if (ctx.DISTINCT() !== null) {
       this.analysis.unsupported.add("distinct");
     }
@@ -568,6 +575,7 @@ class Collector extends CypherParserListener {
   // -- ORDER BY sort keys, SKIP/LIMIT operands --
 
   override enterOrderItem = (ctx: OrderItemContext): void => {
+    this.analysis.ordered = true;
     const shape = classifyExpression(ctx.expression());
     if (shape.kind === "variable") {
       this.analysis.orderBySymbols.push(shape.name);

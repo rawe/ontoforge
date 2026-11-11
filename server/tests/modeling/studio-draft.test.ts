@@ -26,7 +26,7 @@ const LENS = { lensId: "lens-1", key: "hr", name: "HR", description: null, creat
 const DRAFT: Draft<AgentFields> = {
   target: { kind: "agent", lens: "hr", agent: "support" },
   version: 7,
-  fields: { name: "Support", description: "", systemPrompt: "Be brief.", tools: ["get_schema"] },
+  fields: { name: "Support", description: "", systemPrompt: "Be brief.", tools: ["execute_query"] },
 };
 
 let store: MockModelingStore;
@@ -80,7 +80,7 @@ describe("the draft in a Studio turn", () => {
     const block = prepared.context.at(-1)!;
     expect(block.label).toBe("Agent draft");
     expect(block.text).toBe(
-      "kind: agent\nlens: hr\nagent: (new, not saved yet)\nname: Support\ndescription: (empty)\ntools: get_schema\nsystem prompt:\nBe brief.",
+      "kind: agent\nlens: hr\nagent: (new, not saved yet)\nname: Support\ndescription: (empty)\ntools: execute_query\nsystem prompt:\nBe brief.",
     );
     expect(prepared.guides).toEqual([{ label: "Agent draft", text: expect.stringContaining("systemPrompt") }]);
     expect(prepared.instructions).not.toContain("systemPrompt");
@@ -108,8 +108,8 @@ describe("the agent drafter", () => {
     expect(refusal(await call({ tools: "search" }))).toMatchObject({ details: { fields: { tools: expect.any(String) } } });
   });
 
-  it("refuses a tool name outside the grantable twelve and names them", async () => {
-    const error = refusal(await call({ tools: ["get_schema", "delete_everything"] }));
+  it("refuses a tool name outside the grantable ten and names them", async () => {
+    const error = refusal(await call({ tools: ["execute_query", "delete_everything"] }));
     expect(error.code).toBe("VALIDATION_ERROR");
     expect(error.message).toContain("Unknown tool(s): ['delete_everything']");
   });

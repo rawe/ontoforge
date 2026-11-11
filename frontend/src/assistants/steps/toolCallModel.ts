@@ -82,6 +82,19 @@ export function toolError(call: ToolCall): string | null {
   return isRecord(error) && typeof error.message === 'string' ? error.message : null
 }
 
+/**
+ * What a completed call's result left out: the sentence of its `more`
+ * field, present only when the tool bounded its answer; null otherwise,
+ * and for a result that is an entity itself.
+ */
+export function toolResultMore(call: ToolCall): string | null {
+  const result = call.result
+  if (call.status !== 'completed' || !isRecord(result)) return null
+  // An entity carries no note: a `more` there is one of its own properties.
+  if (typeof result._id === 'string') return null
+  return typeof result.more === 'string' && result.more.trim() !== '' ? result.more : null
+}
+
 /** How many calls an answer made, and how many of them answered with an error. */
 export function toolCallCounts(calls: readonly ToolCall[]): { calls: number; errors: number } {
   return { calls: calls.length, errors: calls.filter((call) => toolError(call) !== null).length }

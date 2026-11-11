@@ -18,7 +18,7 @@ import { fillDraftTool } from "../../src/modeling/helper/drafter.js";
 import { proposeSchemaChangeTool } from "../../src/modeling/helper/propose.js";
 import { designTools } from "../../src/modeling/helper/tools.js";
 import { createRuntimeMcpServer } from "../../src/mcp/runtime.js";
-import { ALL_TOOL_NAMES, buildTools } from "../../src/runtime/assistants/agents/runtime.js";
+import { ALL_TOOL_NAMES, buildTools } from "../../src/runtime/assistants/agents/tools.js";
 import { filterRules } from "../../src/runtime/readHelpers.js";
 import { VALID_AGENT_TOOLS } from "../../src/runtime/toolNames.js";
 import { TOOLS, allows } from "../../src/runtime/writeAccess.js";
@@ -373,7 +373,7 @@ describe("tool descriptions", () => {
       expect(VALID_AGENT_TOOLS.has(name), name).toBe(false);
       expect(agent.has(name), name).toBe(false);
     }
-    expect(VALID_AGENT_TOOLS.size).toBe(12);
+    expect(VALID_AGENT_TOOLS.size).toBe(10);
   });
 
   it("the search-index tools state the status fields", () => {

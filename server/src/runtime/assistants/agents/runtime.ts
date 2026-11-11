@@ -3,75 +3,25 @@
  * agent list — the runtime host of the tool loop (`assistants/loop.ts`).
  *
  * Each turn prepares a run with the agent's current configuration: its
- * prompt with the lens schema, and a scoped tool subset bound to the lens.
- * Tools invoke the same runtime service functions the MCP tools use — no
- * HTTP hop. A tool failure that is a not-found or validation error is
+ * prompt with the lens schema, and its tools bound to the lens
+ * (`tools.ts`). A tool failure that is a not-found or validation error is
  * returned to the model as the tool's result so it can correct itself and
  * retry (`docs/capabilities/oql.md#self-correction-hints`); any other
  * error aborts the run. An entity tool's result is followed by the shared
  * `entities` event (`./entities.ts`).
  */
 
-import {
-  ENTITY_SEARCH_RESPONSE,
-  PASSAGE_SEARCH_RESPONSE,
-  SEARCH_FILTER_EFFECT,
-  SEARCH_QUERY_RULE,
-  SEARCH_RESULT_NOTE,
-  toolMethods,
-} from "../../search/tools.js";
-import { deploymentMethods, type SearchCapabilities } from "../../search/availability.js";
-import { filterRules } from "../../readHelpers.js";
-
-import { z } from "zod";
-
-import { runToolLoop, type GraphThread, type StreamExecution, type Tool } from "../../../assistants/index.js";
+import { runToolLoop, type GraphThread, type StreamExecution } from "../../../assistants/index.js";
 import { DEFAULT_AGENT_CONFIG, type AgentConfig } from "../../../core/ai.js";
-import { NotFoundError, ValidationError } from "../../../core/exceptions.js";
+import { NotFoundError } from "../../../core/exceptions.js";
 import type { RuntimeStore } from "../../../core/ports.js";
 import { loadSchema, type SchemaCacheValue } from "../../schemaCache.js";
-import * as service from "../../service.js";
-import {
-  TOOL_EXECUTE_QUERY,
-  TOOL_GET_DOCUMENT,
-  TOOL_GET_ENTITY,
-  TOOL_GET_NEIGHBORS,
-  TOOL_GET_SCHEMA,
-  TOOL_LIST_ENTITIES,
-  TOOL_LIST_RELATIONS,
-  TOOL_LIST_SAVED_QUERIES,
-  TOOL_RUN_SAVED_QUERY,
-  TOOL_SEARCH_DOCUMENTS,
-  TOOL_SEARCH_SAVED_QUERIES,
-  TOOL_SEARCH,
-} from "../../toolNames.js";
 import type { RuntimeAssistant } from "../assistant.js";
-import { entitiesEvent } from "../entities.js";
 import { requireLanguageModel } from "../kit/model.js";
 import { TurnEntities } from "./entities.js";
+import { buildTools, resolveChatToolNames } from "./tools.js";
 
 type Row = Record<string, unknown>;
-
-// ---------------------------------------------------------------------------
-// Tool allowlists — controls which tools each AI feature can use
-// ---------------------------------------------------------------------------
-
-export const CHAT_TOOLS = [
-  TOOL_GET_SCHEMA,
-  TOOL_LIST_ENTITIES,
-  TOOL_GET_ENTITY,
-  TOOL_GET_DOCUMENT,
-  TOOL_LIST_RELATIONS,
-  TOOL_GET_NEIGHBORS,
-  TOOL_SEARCH,
-  TOOL_SEARCH_DOCUMENTS,
-  TOOL_EXECUTE_QUERY,
-  TOOL_LIST_SAVED_QUERIES,
-  TOOL_RUN_SAVED_QUERY,
-  TOOL_SEARCH_SAVED_QUERIES,
-];
-
-const EMBEDDING_TOOLS: ReadonlySet<string> = new Set([TOOL_SEARCH_SAVED_QUERIES]);
 
 // ---------------------------------------------------------------------------
 // Schema description builder (for system prompts)
@@ -125,375 +75,21 @@ export function describeSchema(schema: SchemaCacheValue): string {
 }
 
 // ---------------------------------------------------------------------------
-// Tool definitions — instantiated selectively per run
-// ---------------------------------------------------------------------------
-
-interface AgentToolDef {
-  name: string;
-  description: string;
-  input: z.ZodType;
-  run: (lensKey: string, store: RuntimeStore, args: Row) => Promise<unknown>;
-}
-
-const clampLimit = (limit: unknown, fallback: number, max: number): number =>
-  Math.min(typeof limit === "number" ? limit : fallback, max);
-
-/** The scope arguments a search tool was given (null: left out), under the search's names. */
-function searchScope(args: Row): { types?: string[]; documents?: string[] } {
-  const scope: { types?: string[]; documents?: string[] } = {};
-  for (const field of ["types", "documents"] as const) {
-    if (Array.isArray(args[field])) scope[field] = args[field] as string[];
-  }
-  return scope;
-}
-
-const AGENT_TOOL_DEFS: AgentToolDef[] = [
-  {
-    name: TOOL_GET_SCHEMA,
-    description:
-      "Get the full lens schema including entity types, relation types, " +
-      "and their property definitions with data types and required flags. " +
-      "Call this if you need to verify available types or properties.",
-    input: z.object({}),
-    run: async (lensKey, store) => {
-      const loaded = await loadSchema(lensKey, store);
-      return describeSchema(loaded.scoped);
-    },
-  },
-  {
-    name: TOOL_LIST_ENTITIES,
-    description:
-      "List entities of a type with optional filtering and search. " +
-      "Use 'search' to match a term across ALL string properties at once. " +
-      "Use 'filters' to filter on specific properties: exact match " +
-      '("name": "Alice"), greater than ("age__gt": "25"), greater or equal ' +
-      '("__gte"), less than ("__lt"), less or equal ("__lte"), contains ' +
-      '("name__contains": "ali"). All filter values must be strings. ' +
-      "A filter key may also reach through ONE relation type, which answers a " +
-      "question about connections in a single call — use it instead of listing " +
-      "relations and matching ids by hand. Write the relation type key, then a " +
-      "dot for a property of the entity at the other end, or an at sign for a " +
-      'property of the relation itself. Listing person: ("works_for.name": ' +
-      '"Acme") are the people employed by Acme, ("works_for@role": "CTO") those ' +
-      'whose employment role is CTO, ("works_for@since__gte": "2021-01-01") ' +
-      "those employed since 2021. The direction follows the relation type's " +
-      "endpoints, so it needs no marker. A relation type that joins one type to " +
-      "itself is the exception: there the direction cannot be derived, and the " +
-      "error tells you which marker to add.",
-    input: z.object({
-      entity_type_key: z.string(),
-      search: z.string().nullish(),
-      filters: z.record(z.string(), z.string()).nullish(),
-      limit: z.number().int().nullish(),
-    }),
-    run: async (lensKey, store, args) =>
-      service.listEntities(
-        lensKey,
-        args.entity_type_key as string,
-        clampLimit(args.limit, 20, 50),
-        0,
-        "_createdAt",
-        "asc",
-        (args.search as string | null | undefined) ?? null,
-        (args.filters as Record<string, string> | null | undefined) ?? {},
-        store,
-      ),
-  },
-  {
-    name: TOOL_GET_ENTITY,
-    description: "Retrieve a specific entity by its _id. Returns all properties.",
-    input: z.object({
-      entity_type_key: z.string(),
-      entity_id: z.string(),
-    }),
-    run: async (lensKey, store, args) =>
-      service.getEntity(lensKey, args.entity_type_key as string, args.entity_id as string, store),
-  },
-  {
-    name: TOOL_GET_DOCUMENT,
-    description:
-      "Read a document property's content, whole or by character range. " +
-      "Document properties hold large text and are never returned inline by " +
-      'the other tools — they appear as {"document": true, "length": N} ' +
-      "stubs. 'offset' and 'limit' count characters; omit both to read the " +
-      "whole document. Read a segment rather than the whole document when you " +
-      "know where to look: pass a search_documents passage's property, charOffset " +
-      "and charLength as property_key, offset and limit to read exactly that passage.",
-    input: z.object({
-      entity_type_key: z.string(),
-      entity_id: z.string(),
-      property_key: z.string(),
-      offset: z.number().int().nullish(),
-      limit: z.number().int().nullish(),
-    }),
-    run: async (lensKey, store, args) =>
-      service.getDocument(
-        lensKey,
-        args.entity_type_key as string,
-        args.entity_id as string,
-        args.property_key as string,
-        Math.max(0, (args.offset as number | null | undefined) ?? 0),
-        typeof args.limit === "number" ? Math.max(1, args.limit) : null,
-        store,
-      ),
-  },
-  {
-    name: TOOL_LIST_RELATIONS,
-    description:
-      "List relations of a type. Each result includes _id, source and target " +
-      "entity IDs, and relation properties.",
-    input: z.object({
-      relation_type_key: z.string(),
-      limit: z.number().int().nullish(),
-    }),
-    run: async (lensKey, store, args) =>
-      service.listRelations(
-        lensKey,
-        args.relation_type_key as string,
-        clampLimit(args.limit, 20, 50),
-        0,
-        "_createdAt",
-        "asc",
-        {},
-        {},
-        store,
-      ),
-  },
-  {
-    name: TOOL_GET_NEIGHBORS,
-    description:
-      "Explore an entity's connections. Returns the entity plus all connected " +
-      "entities with their connecting relations. Use this to answer 'what is X " +
-      "connected to?' questions. Direction: 'outgoing', 'incoming', or 'both'.",
-    input: z.object({
-      entity_type_key: z.string(),
-      entity_id: z.string(),
-      direction: z.string().nullish(),
-      limit: z.number().int().nullish(),
-    }),
-    run: async (lensKey, store, args) =>
-      service.getNeighbors(
-        lensKey,
-        args.entity_type_key as string,
-        args.entity_id as string,
-        (args.direction as string | null | undefined) ?? "both",
-        null,
-        clampLimit(args.limit, 20, 50),
-        store,
-      ),
-  },
-  {
-    name: TOOL_SEARCH,
-    description:
-      "Rank entities for a text, best first. " + SEARCH_QUERY_RULE + " " +
-      "types: entity type keys to search, their own fields and their documents' passages; omit to " +
-      "search every type. " +
-      filterRules({ contains: false, relations: true }) + " " +
-      SEARCH_FILTER_EFFECT + " limit: an integer up to 20, default 10. " +
-      ENTITY_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
-    input: z.object({
-      query: z.string(),
-      types: z.array(z.string()).nullish(),
-      filters: z.record(z.string(), z.string()).nullish(),
-      limit: z.number().int().nullish(),
-    }),
-    run: async (lensKey, store, args) =>
-      service.searchEntities(
-        lensKey,
-        {
-          query: args.query as string,
-          ...searchScope(args),
-          ...toolMethods(store),
-          filter: (args.filters as Record<string, string> | null | undefined) ?? {},
-          limit: clampLimit(args.limit, 10, 20),
-        },
-        store,
-      ),
-  },
-  {
-    name: TOOL_SEARCH_DOCUMENTS,
-    description:
-      "Rank passages of documents for a text, best first: a passage is one chunk of one entity's document. " +
-      SEARCH_QUERY_RULE + " " +
-      "Scope, at most one of: types (entity type keys: all their documents) or documents ('type.property', " +
-      'e.g. "person.bio"); neither searches every document. ' + filterRules({ contains: false, relations: true }) +
-      " They apply to the document's entity. " + SEARCH_FILTER_EFFECT + " " +
-      "limit: passages, an integer up to 20, default 5. per_entity: at most this many passages per entity, " +
-      "1 to limit; omit for no cap. text: false omits the passage text. " +
-      PASSAGE_SEARCH_RESPONSE + " " + SEARCH_RESULT_NOTE,
-    input: z.object({
-      query: z.string(),
-      types: z.array(z.string()).nullish(),
-      documents: z.array(z.string()).nullish(),
-      filters: z.record(z.string(), z.string()).nullish(),
-      limit: z.number().int().nullish(),
-      per_entity: z.number().int().nullish(),
-      text: z.boolean().nullish(),
-    }),
-    run: async (lensKey, store, args) =>
-      service.searchPassages(
-        lensKey,
-        {
-          query: args.query as string,
-          ...searchScope(args),
-          ...toolMethods(store),
-          filter: (args.filters as Record<string, string> | null | undefined) ?? {},
-          limit: clampLimit(args.limit, 5, 20),
-          ...(typeof args.per_entity === "number" ? { perEntity: args.per_entity } : {}),
-          ...(typeof args.text === "boolean" ? { text: args.text } : {}),
-        },
-        store,
-      ),
-  },
-  {
-    name: TOOL_EXECUTE_QUERY,
-    description:
-      "Execute a read-only OQL query (openCypher-style graph pattern syntax) " +
-      "against the knowledge graph. " +
-      "Use entity type keys (snake_case) as node labels and relation type keys " +
-      "as relationship types. ALL node patterns MUST have a label. Only " +
-      "MATCH/RETURN — no writes, no CALL. Use CONTAINS for substring matching " +
-      "(not regex). If the query fails, read the error — it lists available " +
-      "types and properties. " +
-      "Examples: " +
-      "MATCH (p:person {name: 'Alice'}) RETURN p | " +
-      "MATCH (p:person)-[r:works_for]->(c:company) RETURN p.name, c.name | " +
-      "MATCH (p:person) WHERE p.age > 30 RETURN p.name, p.age LIMIT 10",
-    input: z.object({
-      query: z.string(),
-    }),
-    run: async (lensKey, store, args) => service.executeQuery(lensKey, args.query as string, store),
-  },
-  {
-    name: TOOL_LIST_SAVED_QUERIES,
-    description:
-      "List available saved queries with their parameters. " +
-      "Each query has a key, name, description, and parameter definitions.",
-    input: z.object({}),
-    run: async (lensKey, store) => {
-      const loaded = await loadSchema(lensKey, store);
-      return Object.values(loaded.savedQueries).map((sq) => ({
-        key: sq.key,
-        name: sq.name,
-        description: sq.description,
-        parameters: sq.parameters.map((p) => ({
-          name: p.name,
-          description: p.description,
-          dataType: p.dataType,
-        })),
-      }));
-    },
-  },
-  {
-    name: TOOL_RUN_SAVED_QUERY,
-    description:
-      "Execute a saved query by key with parameter values. " +
-      "Use list_saved_queries first to discover available queries and " +
-      "their required parameters. Answers with the last step's output: {columns, results} " +
-      "for an oql step; for a search step {ran, items, limitations}, each item a rank, the " +
-      "found entity (_id, _entityTypeKey, name) and the entry that matched.",
-    input: z.object({
-      query_key: z.string(),
-      params: z.record(z.string(), z.unknown()).nullish(),
-    }),
-    run: async (lensKey, store, args) =>
-      service.executeSavedQuery(
-        lensKey,
-        args.query_key as string,
-        (args.params as Row | null | undefined) ?? {},
-        store,
-      ),
-  },
-  {
-    name: TOOL_SEARCH_SAVED_QUERIES,
-    description:
-      "Search saved queries by semantic similarity to a natural language query. " +
-      "Returns the most relevant saved queries ranked by how well their " +
-      "description matches your query. Use this to find the right saved query " +
-      "for a user's intent instead of listing all queries.",
-    input: z.object({
-      query: z.string(),
-    }),
-    run: async (lensKey, store, args) =>
-      service.searchSavedQueries(lensKey, args.query as string, 3, 0.7, store),
-  },
-];
-
-const AGENT_TOOL_DEFS_BY_NAME: ReadonlyMap<string, AgentToolDef> = new Map(
-  AGENT_TOOL_DEFS.map((def) => [def.name, def]),
-);
-
-/** Every instantiable tool name. */
-export const ALL_TOOL_NAMES: ReadonlySet<string> = new Set(AGENT_TOOL_DEFS_BY_NAME.keys());
-
-/** Not-found and validation errors go back to the model, which corrects itself. */
-function selfCorrectable(error: unknown): { error: string } | undefined {
-  return error instanceof NotFoundError || error instanceof ValidationError ? { error: error.message } : undefined;
-}
-
-/** A result's entities the turn has not sent yet, as the shared `entities` event. */
-const unsentEntities = (name: string) => (args: Row, result: unknown, entities: TurnEntities) => {
-  const found = entities.unsent(name, args, result);
-  return found.entities.length > 0 || found.links.length > 0 ? [entitiesEvent(found.entities, found.links)] : [];
-};
-
-/** The named tools, bound to one lens; the turn's entities present their results. */
-export function buildTools(lensKey: string, store: RuntimeStore, toolNames: string[]): Tool<TurnEntities>[] {
-  return toolNames.flatMap((name) => {
-    const def = AGENT_TOOL_DEFS_BY_NAME.get(name);
-    if (!def) return [];
-    return [{
-      name, description: def.description, input: def.input,
-      run: (args: Row) => def.run(lensKey, store, args),
-      expected: selfCorrectable,
-      present: unsentEntities(name),
-    }];
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Feature: Schema-Aware Chat
 // ---------------------------------------------------------------------------
 
-const CHAT_SYSTEM_PROMPT = `You are a knowledge graph assistant. You answer questions by querying data with the available tools. You can only read data, not create or modify it. The Schema context block names what the lens shows; a newer one replaces an older one.
+/** The built-in prompt. It names no tool: an agent may have any subset,
+ * and each tool says itself what it is for. */
+const CHAT_SYSTEM_PROMPT = `You are a knowledge graph assistant. You answer questions from the data of one lens, with the tools you have. You can only read data, not create or change it. The Schema context block names what the lens shows; a newer one replaces an older one.
 
-STRATEGY — use the exact keys from the schema as tool arguments (e.g. entity_type_key="person"):
-1. For questions about connections or relationships, use execute_query with a
-   relationship pattern. Example: "What does Lena do?" →
-   MATCH (p:person)-[r:works_for]->(c:company) WHERE p.name CONTAINS 'Lena' RETURN p.name, c.name
-2. For counting, filtering, or combining conditions, use execute_query.
-3. For fuzzy or "find something like..." questions, use search.
-4. For exploring an entity's connections when you have its _id, use get_neighbors.
-5. For browsing entities of a type, use list_entities.
-6. A property shown as {"document": true, "length": N} is a large text held back
-   from the result. To answer from its content, use search_documents to find the
-   matching passages, then get_document with a passage's property as property_key
-   and its charOffset/charLength as offset/limit to read it — read a segment, not
-   the whole document.
+How to work:
+- Use the exact keys from the schema as tool arguments (e.g. entity_type_key="person").
+- Each tool says what it is for. Prefer one call that narrows, with a filter or a query, over many calls that read everything.
+- A result that carries "more" left something out: it says what, and how to get it. Get more when the question needs it, and never present such a result as complete.
+- A property shown as {"document": true, "length": N} is a large text held back from the result. Answer from its content only after reading the part you need.
+- Name entities by their names, not by their ids.
 
 Never make up answers — only use data from tool results. If the data doesn't contain the answer, say so. Be concise.`;
-
-/** The tools of `tools` this deployment cannot run: the embedding-dependent
- * ones without an embedding provider, the search tools when no search
- * method can run. */
-export function unavailableTools(tools: readonly string[], store: SearchCapabilities): string[] {
-  const methods = deploymentMethods(store);
-  const hasEmbedding = methods.includes("semantic");
-  const hasSearch = methods.length > 0;
-  return tools.filter(
-    (t) =>
-      (EMBEDDING_TOOLS.has(t) && !hasEmbedding) ||
-      ([TOOL_SEARCH, TOOL_SEARCH_DOCUMENTS].includes(t) && !hasSearch),
-  );
-}
-
-/** Effective toolset: allowlist ∩ available — the unavailable tools are
- * dropped for the default agent and explicit allowlists alike. */
-export function resolveChatToolNames(agentConfig: AgentConfig, store: RuntimeStore): string[] {
-  const tools = agentConfig.tools ?? CHAT_TOOLS;
-  const unavailable = new Set(unavailableTools(tools, store));
-  return tools.filter((t) => ALL_TOOL_NAMES.has(t) && !unavailable.has(t));
-}
 
 /** One turn of agent chat on a thread. */
 export async function runAgentChat(
@@ -534,8 +130,15 @@ export async function prepareChat(lensKey: string, store: RuntimeStore, agentKey
 }
 
 // ---------------------------------------------------------------------------
-// Agent list
+// Agent list and schema text
 // ---------------------------------------------------------------------------
+
+/** The schema as every agent of the lens reads it: the text of the Schema
+ * block that follows its prompt, built-in or its own. Needs no model. */
+export async function agentSchemaText(lensKey: string, store: RuntimeStore): Promise<{ text: string }> {
+  const loaded = await loadSchema(lensKey, store);
+  return { text: describeSchema(loaded.scoped) };
+}
 
 /** Every agent of a lens, the built-in default first. Needs no model. */
 export async function listRuntimeAgents(lensKey: string, store: RuntimeStore): Promise<RuntimeAssistant[]> {

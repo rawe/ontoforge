@@ -37,6 +37,7 @@ const MCP_LENS = "/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey";
 /** The routes below a lens that `ROUTES` does not list: assistants and decisions. */
 export const LENS_ROUTES: Record<string, Operation> = {
   "GET /ai/assistants/agents": "read",
+  "GET /ai/assistants/agent-schema": "read",
   "POST /ai/assistants/agents/:assistantKey/chat": "read",
   "GET /ai/assistants/agents/:assistantKey/threads/:threadId": "read",
   "GET /ai/assistants/retrievers": "read",
@@ -49,7 +50,8 @@ export const LENS_ROUTES: Record<string, Operation> = {
   "POST /decisions/compare-entities": "read",
 };
 
-/** The runtime routes below a lens that read its design, not data: its schema and search catalog. */
+/** The runtime routes below a lens that read its design, not data: its schema, also as an
+ * agent's prompt carries it, and its search catalog. */
 const DESIGN_READS = new Set([
   "GET /schema",
   "GET /schema/entity-types",
@@ -57,6 +59,7 @@ const DESIGN_READS = new Set([
   "GET /schema/relation-types",
   "GET /schema/relation-types/:key",
   "GET /search-indices",
+  "GET /ai/assistants/agent-schema",
 ]);
 
 /** Outside `/api` and `/mcp`: probes, metrics, the API documentation, resource metadata. */

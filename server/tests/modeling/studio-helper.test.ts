@@ -106,3 +106,12 @@ describe("a design address", () => {
     expect(valid({ kind: "agent", lens: "main", agent: "support", key: "support" })).toBe(false);
   });
 });
+
+describe("the Studio helper's chat body", () => {
+  it("takes the shared diagnostics switch, off unless asked", async () => {
+    const { StudioChatPayload } = await import("../../src/modeling/helper/router.js");
+    expect(StudioChatPayload.parse({ message: "Hi" }).diagnostics).toBe(false);
+    expect(StudioChatPayload.parse({ message: "Hi", diagnostics: true }).diagnostics).toBe(true);
+    expect(StudioChatPayload.safeParse({ message: "Hi", diagnostics: "yes" }).success).toBe(false);
+  });
+});

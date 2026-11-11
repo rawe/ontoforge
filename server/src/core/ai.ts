@@ -317,12 +317,20 @@ const CUT_OFF: Record<string, ModelFailure> = {
   model_context_window_exceeded: "context_full",
 };
 
+/** The reason a model gave for ending its answer, as it gave it, if it
+ * did. `fields` is where the client put the reason: a whole answer's
+ * response metadata, or the fields of one chunk of a streamed one — the
+ * OpenAI protocol's `finish_reason`, Anthropic's `stop_reason`. */
+export function finishReason(fields: Record<string, unknown> | undefined): string | undefined {
+  const reason = fields?.finish_reason ?? fields?.stop_reason;
+  return typeof reason === "string" ? reason : undefined;
+}
+
 /** The failure a model's answer ended with, if it named one: the answer is
- * incomplete, and a tool call in it may be too. `fields` is where the
- * client put the reason: a whole answer's response metadata, or the fields
- * of one chunk of a streamed one. */
+ * incomplete, and a tool call in it may be too. `fields` as for
+ * `finishReason`. */
 export function cutOff(fields: Record<string, unknown> | undefined): ModelError | undefined {
-  const reason = CUT_OFF[String(fields?.finish_reason ?? fields?.stop_reason ?? "")];
+  const reason = CUT_OFF[finishReason(fields) ?? ""];
   return reason === undefined ? undefined : new ModelError(reason);
 }
 

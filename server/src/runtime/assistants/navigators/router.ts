@@ -34,7 +34,8 @@ export const navigatorRuntimeRouter: FastifyPluginAsyncZod<{ threads: ThreadStor
       // answer with a plain error response.
       const navigator = await loadRunnableNavigator(lensKey, assistantKey, store);
       const turn = await openThread(threads, await threadBinding(request, "navigators"), request.body.threadId);
-      return sendChatStream(reply, { threads, turn }, (execution, thread) =>
+      const { diagnostics } = request.body;
+      return sendChatStream(reply, { threads, turn, diagnostics }, (execution, thread) =>
         runNavigatorTurn(navigator, lensKey, store, request.body.message, thread, execution),
       );
     },

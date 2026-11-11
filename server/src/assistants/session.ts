@@ -1,6 +1,7 @@
 /**
  * One chat turn as a stream, shared by every assistant kind: bounded
- * writes, the shared events (`thread` first, then the kind's events, one
+ * writes, the shared events (`thread` first, then the kind's events and,
+ * when the chat asked for them, `diagnostics` (`modelCalls.ts`), one
  * terminal `final` or `error`), disconnect cancellation, and the turn's
  * thread: the graph runs on a local saver seeded from the thread's last
  * published state, which is published on success and dropped on cancel or
@@ -12,6 +13,7 @@ import { once } from "node:events";
 import type { Writable } from "node:stream";
 
 import { ConflictError, ModelError, NotFoundError, StoreError, ValidationError } from "../core/exceptions.js";
+import { ModelCalls } from "./modelCalls.js";
 import { threadBusy, threadNotFound } from "./threads/access.js";
 import { TURN_HEARTBEAT_MS, type Artifact, type GraphThread, type ThreadStore, type Turn } from "./threads/threadStore.js";
 import { TurnSaver } from "./threads/turnSaver.js";
@@ -22,12 +24,16 @@ export type StreamEvent = { type: string; [key: string]: unknown };
 export interface StreamExecution {
   signal: AbortSignal;
   onToolEvent: (event: StreamEvent) => Promise<void>;
+  /** The turn's model calls; sent as `diagnostics` when the chat asked. */
+  modelCalls: ModelCalls;
 }
 
 /** The turn a chat runs, its lease already taken (`threads/access.ts`). */
 export interface ChatTurn {
   threads: ThreadStore;
   turn: Turn;
+  /** Whether the chat asked for `diagnostics` events. */
+  diagnostics?: boolean;
 }
 
 /** Where a turn's events go: the response the host has not opened yet. */
@@ -135,7 +141,8 @@ export async function streamTurn(
   };
   try {
     await write({ type: "thread", threadId });
-    const result = await run({ signal, onToolEvent: write }, { checkpointer: saver, threadId });
+    const modelCalls = new ModelCalls(turn.diagnostics === true ? write : undefined);
+    const result = await run({ signal, onToolEvent: write, modelCalls }, { checkpointer: saver, threadId });
     const artifacts = (result.artifacts as Artifact[] | undefined) ?? [];
     await saver.keepArtifacts(artifacts);
     const published = await threads.publish(owned, saver.dump());

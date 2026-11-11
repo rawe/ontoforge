@@ -25,7 +25,8 @@
  *
  * A model call that fails, or whose answer is cut off, ends the turn with a
  * `ModelError` naming the reason (`core/ai.ts`). A turn that reaches its
- * step limit without an answer ends with TOO_MANY_STEPS.
+ * step limit without an answer ends with TOO_MANY_STEPS. Every model call,
+ * failed or not, is recorded on the turn's model calls (`modelCalls.ts`).
  *
  * Every call streams `<kind>.tool_call`, then `<kind>.tool_result`, then
  * the tool's presented events (ADR 0021). A failure the tool expects, or
@@ -44,6 +45,7 @@ import { z } from "zod";
 
 import { conversationCaching, cutOff, modelFailure } from "../core/ai.js";
 import { ModelError, ValidationError } from "../core/exceptions.js";
+import { messageEnd, ModelCalls } from "./modelCalls.js";
 import type { StreamExecution } from "./session.js";
 import { PERSON_TEXT } from "./threads/access.js";
 import type { GraphThread } from "./threads/threadStore.js";
@@ -315,6 +317,7 @@ export async function runToolLoop<C>(
 ): Promise<{ reply: string }> {
   const { signal } = execution;
   signal?.throwIfAborted();
+  const modelCalls = execution.modelCalls ?? new ModelCalls();
   const { model } = run;
   const caching = conversationCaching(model);
   const serial = queue();
@@ -338,6 +341,7 @@ export async function runToolLoop<C>(
     stateSchema: ThreadContext,
     wrapModelCall: async (request, handler) => {
       const messages = request.messages.map(withoutReasoning);
+      const call = modelCalls.start();
       let response;
       try {
         // No tools: a plain model call is the same conversation without the
@@ -346,12 +350,15 @@ export async function runToolLoop<C>(
           ? await model.invoke([request.systemMessage, ...messages], { signal, ...caching })
           : await handler({ ...request, messages, modelSettings: { ...request.modelSettings, ...caching } });
       } catch (error) {
+        await call.failed();
         signal?.throwIfAborted();
         console.warn(`Model call failed: ${error instanceof Error ? error.message : String(error)}`);
         throw modelFailure(error);
       }
+      const answer = AIMessage.isInstance(response) ? response : undefined;
+      await call.done(answer === undefined ? {} : messageEnd(answer));
       // An answer cut off is no answer: its text or a tool call's arguments end mid-way.
-      const cut = AIMessage.isInstance(response) ? cutOff(response.response_metadata) : undefined;
+      const cut = answer === undefined ? undefined : cutOff(answer.response_metadata);
       if (cut !== undefined) throw cut;
       return response;
     },

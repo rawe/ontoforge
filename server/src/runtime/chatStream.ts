@@ -16,11 +16,13 @@ import {
 } from "../assistants/index.js";
 import { accessOf } from "../auth/plugin.js";
 
-/** The chat body every assistant kind shares; a kind may add fields. */
+/** The chat body every assistant kind shares; a kind may add fields.
+ * `diagnostics` asks for the shared `diagnostics` events. */
 export const ChatPayload = z
   .object({
     message: z.string().min(1).max(2000),
     threadId: z.string().optional(),
+    diagnostics: z.boolean().default(false),
   })
   .strict();
 

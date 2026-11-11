@@ -4,9 +4,9 @@
  * how much of it is shown.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { fitRows, fitText, fitValue, RESULT_CHARACTERS } from "../../../../src/runtime/assistants/agents/resultSize.js";
+import { fitRows, fitText, fitValue, LEAST_BUDGET, RESULT_CHARACTERS } from "../../../../src/runtime/assistants/agents/resultSize.js";
 
 const size = (value: unknown) => JSON.stringify(value).length;
 
@@ -51,15 +51,28 @@ describe("fitRows", () => {
     expect(fitRows(rows.slice(1)).rows).toEqual([{ id: 2, text: "short" }]);
   });
 
-  it("keeps the values named to it whatever an object loses", () => {
+  it("keeps the values an object is told to keep, whatever else it loses", () => {
     const wide = Object.fromEntries(Array.from({ length: 600 }, (_, i) => [`property_${i}`, "v".repeat(64)]));
+    const named = () => ["display_title"];
 
-    const fitted = fitValue({ ...wide, display_title: "Acme", direction: "outgoing" }, RESULT_CHARACTERS, new Set(["display_title"]));
+    const fitted = fitValue({ ...wide, display_title: "Acme", direction: "outgoing" }, RESULT_CHARACTERS, named);
 
     expect(size(fitted.value)).toBeLessThanOrEqual(RESULT_CHARACTERS);
     expect(fitted.value.display_title).toBe("Acme");
     expect(fitted.value).not.toHaveProperty("direction");
-    expect(fitRows([{ ...wide, display_title: "Acme" }], RESULT_CHARACTERS, new Set(["display_title"])).rows[0]!.display_title).toBe("Acme");
+    expect(fitRows([{ ...wide, display_title: "Acme" }], RESULT_CHARACTERS, named).rows[0]!.display_title).toBe("Acme");
+  });
+
+  it("asks each object what it keeps, so one object's kept key is an ordinary key in another", () => {
+    const bag = (prefix: string) => Object.fromEntries(Array.from({ length: 600 }, (_, i) => [`${prefix}_${i}`, "v".repeat(64)]));
+    const keep = (object: Record<string, unknown>) => (object._kind === "a" ? ["title"] : []);
+
+    const a = fitValue({ ...bag("x"), title: "kept", _kind: "a" }, RESULT_CHARACTERS, keep).value as Record<string, unknown>;
+    const b = fitValue({ ...bag("x"), title: "lost", _kind: "b" }, RESULT_CHARACTERS, keep).value as Record<string, unknown>;
+
+    expect(a.title).toBe("kept");
+    expect(b).not.toHaveProperty("title");
+    expect(b._kind).toBe("b");
   });
 
   it("returns one row at least, shrunk to the bound", () => {
@@ -142,6 +155,13 @@ describe("fitValue", () => {
     const object = fitValue({ [`k${"k".repeat(30_000)}`]: 1, _id: "x" }).value as Record<string, unknown>;
     expect(object).toEqual({ _id: "x", "…": "[cut: first 0 of 1 values]" });
 
+    // Even when what it must keep is too much: its system fields and a marker remain.
+    const systems = Object.fromEntries(Array.from({ length: 2_000 }, (_, i) => [`_s${i}`, "v".repeat(20)]));
+    const left = fitValue({ ...systems, name: "Acme" }).value as Record<string, unknown>;
+    expect(typeof left).toBe("object");
+    expect(left._s0).toBe("v".repeat(20));
+    expect(left["…"]).toMatch(/^\[cut: a value of \d+ characters that does not fit a result\]$/);
+
     const list = fitValue([`v${"v".repeat(100_000)}`]).value;
     expect(Array.isArray(list)).toBe(true);
     expect(size(list)).toBeLessThanOrEqual(RESULT_CHARACTERS);
@@ -154,6 +174,34 @@ describe("fitValue", () => {
       { nested: { deep: Object.fromEntries(Array.from({ length: 2_000 }, (_, i) => [`p${i}`, i])) } },
     ];
     for (const value of awkward) expect(size(fitValue(value).value)).toBeLessThanOrEqual(RESULT_CHARACTERS);
+  });
+
+  it("needs a few passes, not thousands, when cutting texts and lists cannot help", () => {
+    // 24,001 characters of JSON, none of them in a long text or list.
+    const flat = Object.fromEntries(Array.from({ length: 2_000 }, (_, i) => [`k${String(i).padStart(6, "0")}`, 1]));
+    expect(size(flat)).toBe(RESULT_CHARACTERS + 1);
+    const stringify = vi.spyOn(JSON, "stringify");
+
+    const fitted = fitValue(flat);
+
+    const calls = stringify.mock.calls.length;
+    stringify.mockRestore();
+    expect(size(fitted.value)).toBeLessThanOrEqual(RESULT_CHARACTERS);
+    expect(Object.keys(fitted.value)[0]).toBe("k000000");
+    // One size per value and pass: four passes of 2,000 values stay far below this.
+    expect(calls).toBeLessThan(30_000);
+  });
+
+  it("reads a budget below the least one as the least one, and keeps the value's shape", () => {
+    const entity = { _id: "c1", name: "x".repeat(1_000) };
+
+    const fitted = fitValue(entity, 0);
+
+    expect(fitted.cut).toBe(true);
+    expect(fitted.value._id).toBe("c1");
+    expect(fitted.value.name).toMatch(/^x+…\[cut: first \d+ of 1000 characters/);
+    expect(size(fitted.value)).toBeLessThanOrEqual(LEAST_BUDGET);
+    expect(size(fitRows([entity], 5).rows)).toBeLessThanOrEqual(LEAST_BUDGET + 2);
   });
 
   it("counts characters, not code units, and never splits one", () => {

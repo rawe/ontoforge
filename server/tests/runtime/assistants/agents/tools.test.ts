@@ -450,6 +450,59 @@ describe("get_neighbors and the size rule", () => {
     expect(around.entity).toMatchObject({ _id: "c1", name: "Acme" });
   });
 
+  it("says nothing of a cut made only to a neighbour the result leaves out", async () => {
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithManyProperties(1));
+    invalidateLoadedSchemaCache();
+    store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }, "person", "p1"));
+    const neighbour = (id: string, length: number) => ({
+      relation: { ...makeRelation({}, { relationId: `r-${id}` }), direction: "outgoing" },
+      entity: makeEntity({ name: id, extra_0: "i".repeat(length) }, "company", id),
+    });
+    store.getNeighbors.mockImplementation(async (_id: string, direction: string) => direction === "outgoing"
+      ? [neighbour("c1", 10_000), neighbour("c2", 10_000), neighbour("c3", 40_000)]
+      : []);
+
+    const result = await call("get_neighbors", { entity_type_key: "person", entity_id: "p1" });
+
+    const shown = result.neighbors as { entity: Row }[];
+    expect(shown.map((one) => one.entity._id)).toEqual(["c1", "c2"]);
+    expect(shown[0]!.entity.extra_0).toBe("i".repeat(10_000));
+    expect(result.more).toContain("Only the first 2 of the 3 neighbours read fit this result.");
+    expect(result.more).not.toContain("was cut");
+  });
+
+  it("keeps an entity an entity, with the name of its own type, when many types of the lens name theirs differently", async () => {
+    // 400 more entity types, each named by a property of its own; a company carries all those properties too.
+    const schema = makeFullSchema({ lensKey: "full_lens", lensName: "Full Lens" });
+    const titles = Array.from({ length: 400 }, (_, i) => `title_${i}`);
+    const property = (key: string) => ({ key, displayName: key, dataType: "string", required: false, defaultValue: null });
+    (schema.entityTypes as Row[]).push(...titles.map((title, i) => ({
+      entityTypeId: `et-x${i}`, key: `kind_${i}`, displayName: `Kind ${i}`, description: null, nameProperty: title, properties: [property(title)],
+    })));
+    const company = (schema.entityTypes as Row[]).find((type) => type.key === "company")!;
+    (company.properties as Row[]).push(...titles.map(property));
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(schema);
+    invalidateLoadedSchemaCache();
+    const acme = makeEntity({ ...Object.fromEntries(titles.map((title) => [title, "t".repeat(64)])), name: "Acme" }, "company", "c1");
+    store.getEntity.mockResolvedValue(structuredClone(acme));
+    store.listEntities.mockResolvedValue([[structuredClone(acme)], 1]);
+    store.executeOql.mockResolvedValue([titles, [Object.fromEntries(titles.map((title) => [title, "t".repeat(64)]))]]);
+
+    const read = await call("get_entity", { entity_type_key: "company", entity_id: "c1" });
+    expect(size(read)).toBeLessThanOrEqual(BOUND);
+    expect(read).toMatchObject({ _id: "c1", _entityTypeKey: "company", name: "Acme" });
+
+    const listed = await call("list_entities", { entity_type_key: "company" });
+    expect((listed.items as Row[])[0]).toMatchObject({ _id: "c1", _entityTypeKey: "company", name: "Acme" });
+
+    // A query row is no entity: its columns are ordinary values, and the row stays an object.
+    const queried = await call("execute_query", { query: QUERY });
+    const [row] = queried.results as Row[];
+    expect(size(queried)).toBeLessThanOrEqual(BOUND);
+    expect(typeof row).toBe("object");
+    expect(row!.title_0).toBe("t".repeat(64));
+  });
+
   it("says of an entity without neighbours only that its value was cut", async () => {
     store.getEntity.mockResolvedValue(makeEntity({ name: "Alice", email: "e".repeat(100_000) }, "person", "p1"));
     store.getNeighbors.mockResolvedValue([]);

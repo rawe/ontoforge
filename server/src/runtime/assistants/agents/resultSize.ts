@@ -22,11 +22,22 @@ const SMALLEST_CUT = 64;
 /** Characters a cut marker may grow by when its numbers change with the cap. */
 const MARKER_ROOM = 16;
 
+/** The least budget a value is fitted to: room for an object's system
+ * fields and a marker. Every caller leaves far more; a smaller budget is
+ * read as this one. */
+export const LEAST_BUDGET = 256;
+
 /** The characters `value` takes as JSON. */
 export const size = (value: unknown): number => JSON.stringify(value)?.length ?? 0;
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value) && !(value instanceof Date);
+
+/** The keys an object keeps beside its system fields, whatever it loses:
+ * an entity its name, by its own type. Asked of every object met. */
+export type Kept = (object: Record<string, unknown>) => readonly string[];
+
+const NOTHING_MORE: Kept = () => [];
 
 /** The leading `items` that take `cap` characters together, at least `least` of them. */
 function leading<T>(items: T[], cap: number, least: number): T[] {
@@ -40,71 +51,96 @@ function leading<T>(items: T[], cap: number, least: number): T[] {
   return kept;
 }
 
-/** No further keys to keep. */
-const NO_KEYS: ReadonlySet<string> = new Set();
+/**
+ * The shortening of one value, pass after pass with a falling `cap`:
+ * every text longer than `cap` characters is cut to them and every list
+ * to the leading items that take `cap` characters; with `wide`, an object
+ * larger than `cap` too is cut, to the values it always keeps — its
+ * system fields (its id, its type) and those `keep` names for it — and
+ * the leading other values that take the rest. A long text is measured
+ * once for all passes, and only its start is ever copied.
+ */
+function shortening(keep: Kept): (value: unknown, cap: number, wide: boolean) => unknown {
+  const lengths = new Map<string, number>();
+  const lengthOf = (text: string): number => {
+    let length = lengths.get(text);
+    if (length === undefined) lengths.set(text, (length = cpLength(text)));
+    return length;
+  };
+  const shrunk = (value: unknown, cap: number, wide: boolean): unknown => {
+    if (typeof value === "string") {
+      // The code units bound the code points, so a short text is not counted.
+      if (value.length <= cap) return value;
+      const length = lengthOf(value);
+      if (length <= cap) return value;
+      // `cap` characters lie within the first `2 * cap` code units.
+      return `${cpSlice(value.slice(0, 2 * cap), 0, cap)}…[cut: first ${cap} of ${length} characters; asking again returns the same part]`;
+    }
+    if (Array.isArray(value)) {
+      const first = leading(value.map((item) => shrunk(item, cap, wide)), cap, 1);
+      if (first.length < value.length) first.push(`…[cut: first ${first.length} of ${value.length} items]`);
+      return first;
+    }
+    if (isPlainObject(value)) {
+      const entries = Object.entries(value).map(([key, item]) => [key, shrunk(item, cap, wide)] as const);
+      if (!wide || size(Object.fromEntries(entries)) <= cap) return Object.fromEntries(entries);
+      const own = keep(value);
+      const always = ([key]: readonly [string, unknown]) => key.startsWith("_") || own.includes(key);
+      const others = entries.filter((entry) => !always(entry));
+      const first = new Set(leading(others, cap - size(Object.fromEntries(entries.filter(always))), 0));
+      return Object.fromEntries([
+        ...entries.filter((entry) => always(entry) || first.has(entry)),
+        ["…", `[cut: first ${first.size} of ${others.length} values]`],
+      ]);
+    }
+    return value;
+  };
+  return shrunk;
+}
 
-/** `value` with every text longer than `cap` characters cut to them and
- * every list cut to the leading items that take `cap` characters; with
- * `wide`, an object larger than `cap` too is cut, to the values it always
- * keeps — its system fields (its id, its type) and those under `keep` —
- * and the leading other values that take the rest. */
-function shrunk(value: unknown, cap: number, wide: boolean, keep: ReadonlySet<string>): unknown {
-  const kept = ([key]: readonly [string, unknown]) => key.startsWith("_") || keep.has(key);
-  if (typeof value === "string") {
-    // The code units bound the code points, so a short text is not counted.
-    if (value.length <= cap) return value;
-    const length = cpLength(value);
-    return length <= cap
-      ? value
-      : `${cpSlice(value, 0, cap)}…[cut: first ${cap} of ${length} characters; asking again returns the same part]`;
-  }
-  if (Array.isArray(value)) {
-    const first = leading(value.map((item) => shrunk(item, cap, wide, keep)), cap, 1);
-    if (first.length < value.length) first.push(`…[cut: first ${first.length} of ${value.length} items]`);
-    return first;
-  }
-  if (isPlainObject(value)) {
-    const entries = Object.entries(value).map(([key, item]) => [key, shrunk(item, cap, wide, keep)] as const);
-    if (!wide || size(Object.fromEntries(entries)) <= cap) return Object.fromEntries(entries);
-    const others = entries.filter((entry) => !kept(entry));
-    const first = new Set(leading(others, cap - size(Object.fromEntries(entries.filter(kept))), 0));
-    return Object.fromEntries([
-      ...entries.filter((entry) => kept(entry) || first.has(entry)),
-      ["…", `[cut: first ${first.size} of ${others.length} values]`],
-    ]);
-  }
-  return value;
+/** What is left of a value nothing shortens enough: its shape and a marker
+ * — an object its system fields, a list nothing. */
+function remnant(value: unknown): unknown {
+  const marker = `[cut: a value of ${size(value)} characters that does not fit a result]`;
+  if (Array.isArray(value)) return [`…${marker}`];
+  if (!isPlainObject(value)) return `…${marker}`;
+  return Object.fromEntries([...Object.entries(value).filter(([key]) => key.startsWith("_")), ["…", marker]]);
 }
 
 /**
  * `value` in at most `budget` characters: as it is when it fits, else a
  * copy whose long texts and long lists are cut, each ending with a marker
  * that says how much of it is shown — and, when that is not enough, whose
- * objects keep only their system fields, the values under `keep` (an
- * entity's name) and their leading other values. An object stays an
- * object and a list a list. `cut` tells which.
+ * objects keep only their system fields, the values `keep` names for them
+ * (an entity's name) and their leading other values. An object stays an
+ * object and a list a list. `cut` tells which. A budget below
+ * `LEAST_BUDGET` is read as that.
  */
-export function fitValue<T>(
-  value: T,
-  budget = RESULT_CHARACTERS,
-  keep: ReadonlySet<string> = NO_KEYS,
-): { value: T; cut: boolean } {
-  if (size(value) <= budget) return { value, cut: false };
+export function fitValue<T>(value: T, budget = RESULT_CHARACTERS, keep: Kept = NOTHING_MORE): { value: T; cut: boolean } {
+  const room = Math.max(budget, LEAST_BUDGET);
+  if (size(value) <= room) return { value, cut: false };
+  const shrunk = shortening(keep);
   // Texts and lists first; an object loses values only when it is still too large.
   for (const wide of [false, true]) {
-    let cap = Math.max(SMALLEST_CUT, budget);
+    let cap = Math.max(SMALLEST_CUT, room);
+    let before = Infinity;
+    // The first excess is taken off the cap as it is — the markers and the
+    // values around a cut take room too — so the result uses its bound;
+    // after that the cap falls by a fifth, so the passes stay few.
+    let exact = true;
     for (;;) {
-      const fitted = shrunk(value, cap, wide, keep);
-      const over = size(fitted) - budget;
-      if (over <= 0) return { value: fitted as T, cut: true };
-      if (cap === SMALLEST_CUT) break;
-      // The markers and the values around a cut take room too. A small
-      // excess is taken off the cap as it is, so the result uses its
-      // bound; a large one lowers the cap by a fifth.
-      cap = Math.max(SMALLEST_CUT, Math.min(cap - 1, Math.max(cap - over - MARKER_ROOM, Math.floor(cap * 0.8))));
+      const fitted = shrunk(value, cap, wide);
+      const now = size(fitted);
+      if (now <= room) return { value: fitted as T, cut: true };
+      // Cutting texts and lists further changes nothing: it is the object that is too large.
+      if (cap === SMALLEST_CUT || (!wide && now >= before)) break;
+      const fifth = Math.floor(cap * 0.8);
+      cap = Math.max(SMALLEST_CUT, exact ? Math.min(cap - 1, Math.max(cap - (now - room) - MARKER_ROOM, fifth)) : fifth);
+      exact = false;
+      before = now;
     }
   }
-  return { value: `…[cut: a value of ${size(value)} characters that does not fit a result]` as T, cut: true };
+  return { value: remnant(value) as T, cut: true };
 }
 
 /**
@@ -113,11 +149,7 @@ export function fitValue<T>(
  * so one long value does not end a page; `cut` says a row was shrunk. At
  * least one row is returned.
  */
-export function fitRows<T>(
-  rows: T[],
-  budget = RESULT_CHARACTERS,
-  keep: ReadonlySet<string> = NO_KEYS,
-): { rows: T[]; cut: boolean } {
+export function fitRows<T>(rows: T[], budget = RESULT_CHARACTERS, keep: Kept = NOTHING_MORE): { rows: T[]; cut: boolean } {
   const fitted: T[] = [];
   let cut = false;
   // Two brackets, and a comma before every further row.

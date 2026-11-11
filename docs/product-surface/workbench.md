@@ -183,6 +183,12 @@ one-per-pair relation type already links says "Already linked by this relation".
 The graph canvas, and beside it the ask dock, where an assistant's answers fill the canvas.
 See [Working set](finding-and-collecting.md#working-set) for both.
 
+**Quick load** in the toolbar or empty canvas adds a bounded set of existing entities
+and their connections; see [Working set](finding-and-collecting.md#working-set).
+The **2D / 3D** switch renders the same working set in either view. Search, type and
+hierarchy filters, entity inspection, relation details and neighbour expansion remain
+available. See [3D graph exploration](graph-3d.md) for spatial navigation and presentation controls.
+
 ## Query
 
 Two tabs — Console and Library — which both stay live, so results survive a switch. See

@@ -98,6 +98,7 @@ export const router = createBrowserRouter([
       { path: 'schema', element: <Navigate to="graph" replace /> },
       // One page element for every schema address: switching views keeps it mounted.
       { path: 'schema/graph', element: suspended(<SchemaPage />) },
+      { path: 'schema/3d', element: suspended(<SchemaPage />) },
       { path: 'schema/types', element: suspended(<SchemaPage />) },
       { path: 'schema/types/:kind/:key', element: suspended(<SchemaPage />) },
       { path: 'entity-types/:id', element: suspended(<EntityTypePage />) },

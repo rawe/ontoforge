@@ -45,7 +45,7 @@ export function Inspector() {
           size="xs"
           className="text-muted-foreground"
           onClick={() => switchView('classic')}
-          title="Same components as a full page · switch with V"
+          title="Open the same components as a full page"
         >
           <PanelTop /> Classic view
         </Button>

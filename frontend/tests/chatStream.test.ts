@@ -50,6 +50,7 @@ for (const [name, body] of [
   ['no thread first', '{"type":"final","reply":"x"}\n'],
   ['a second thread', THREAD + THREAD + '{"type":"final","reply":"x"}\n'],
   ['an unknown shared event', THREAD + '{"type":"tool_call","callId":"1","tool":"search","args":{}}\n'],
+  ['malformed diagnostics', THREAD + '{"type":"diagnostics","modelCalls":[{"index":1}]}\n{"type":"final","reply":"x"}\n'],
 ]) {
   test(name, async () => {
     await assert.rejects(readChatStream(response([new TextEncoder().encode(body)]), () => {}))
@@ -224,4 +225,35 @@ test('thread refusals and refused questions read from the error details', () => 
     'Agent cannot run: A. B.')
   assert.equal(chatErrorText(new Error('Plain')), 'Plain')
   assert.equal(chatErrorText('nope', 'Fallback'), 'Fallback')
+})
+
+test('diagnostics are a shared event: checked by the reader, the kind checks its own fields', async () => {
+  const events = [
+    { type: 'thread', threadId: 't1' },
+    { type: 'diagnostics', modelCalls: [{ index: 1, durationMs: 0, usage: { input: 5210, output: 31, cacheRead: 4800 }, finishReason: 'tool_use' }] },
+    { type: 'agent.tool_call', callId: '1', tool: 'search', args: {} },
+    { type: 'agent.tool_result', callId: '1', result: [] },
+    { type: 'diagnostics', modelCalls: [{ index: 2, durationMs: 0, failed: true }] },
+    { type: 'final', reply: 'Done.' },
+  ]
+  const received: unknown[] = []
+  await readChatStream(response([new TextEncoder().encode(events.map((e) => JSON.stringify(e)).join('\n'))]), (e) => received.push(e))
+  assert.deepEqual(received, events)
+  const own = { parse: () => null, diagnostics: (e: Record<string, unknown>) => e.plan === undefined || typeof e.plan === 'object' }
+  const body = (event: object) => response([new TextEncoder().encode([{ type: 'thread', threadId: 't1' }, event, { type: 'final', reply: '' }].map((e) => JSON.stringify(e)).join('\n'))])
+  await readAssistantStream(body({ type: 'diagnostics', plan: {} }), own, () => {})
+  await assert.rejects(readAssistantStream(body({ type: 'diagnostics', plan: 1 }), own, () => {}), /Invalid diagnostics/)
+})
+
+test('the chat request carries diagnostics when asked', async () => {
+  const original = globalThis.fetch
+  let sent: unknown
+  globalThis.fetch = async (_input, init) => {
+    sent = JSON.parse(String(init?.body))
+    return response([new TextEncoder().encode('{"type":"thread","threadId":"t1"}\n{"type":"final","reply":""}\n')])
+  }
+  try {
+    await postChat('/x', { message: 'Hi', diagnostics: true }, agentReader(), () => {}, new AbortController().signal)
+    assert.deepEqual(sent, { message: 'Hi', diagnostics: true })
+  } finally { globalThis.fetch = original }
 })

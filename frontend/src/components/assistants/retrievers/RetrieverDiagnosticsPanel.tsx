@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import type { RetrieverDiagnostics, RetrieverResult } from '@/api/retrievers'
+import { ModelCallList } from '@/assistants'
+import type { RetrieverDiagnostics, RetrieverModelCall, RetrieverResult } from '@/api/retrievers'
 import type { RuntimeSchema, SearchCatalogEntry } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -109,20 +110,19 @@ function Results({ meta, catalog, schema }: { meta: RetrieverDiagnostics } & Con
   </div>
 }
 
-function ModelCalls({ meta }: { meta: RetrieverDiagnostics }) {
-  if (!meta.modelIO?.length) return <Intro>No model calls yet.</Intro>
+/** A model call's bounded texts. */
+function CallTexts({ call }: { call: RetrieverModelCall }) {
+  return <>
+    {call.systemPrompt !== undefined && <Pre title="System instructions" text={call.systemPrompt} />}
+    {call.input !== undefined && <Pre title="Input" text={call.input} note={call.inputTruncated ? 'Trace is truncated; the model received the full input.' : undefined} />}
+    {call.output !== undefined && <Pre title="Output" text={call.output} note={call.outputTruncated ? 'Trace is truncated.' : undefined} />}
+  </>
+}
+
+function ModelCalls({ meta, status }: { meta: RetrieverDiagnostics; status: TurnStatus }) {
   return <div className="space-y-4">
     <Intro>The language model calls: the planner turns the question into sub-queries, the response model writes the answer from the found evidence. When a follow-up's first plan searches nothing, planning is repeated once.</Intro>
-    {meta.modelIO.map((call) => {
-      const usage = call.usage as { input_tokens?: number; output_tokens?: number } | undefined
-      return <section key={call.phase} className="space-y-2 rounded border p-3">
-        <h4 className="flex justify-between gap-3 font-medium"><span>{modelCallName(call.phase)}</span>
-          <span className="font-normal text-muted-foreground tabular-nums">{usage ? `${usage.input_tokens ?? '–'} tokens in · ${usage.output_tokens ?? '–'} out` : ''}{call.finishReason ? ` · ${call.finishReason}` : ''}</span></h4>
-        {call.systemPrompt !== undefined && <Pre title="System instructions" text={call.systemPrompt} />}
-        <Pre title="Input" text={call.input} note={call.inputTruncated ? 'Trace is truncated; the model received the full input.' : undefined} />
-        <Pre title="Output" text={call.output} note={call.outputTruncated ? 'Trace is truncated.' : undefined} />
-      </section>
-    })}
+    <ModelCallList calls={meta.modelCalls} status={status} nameOf={modelCallName} detail={(call) => <CallTexts call={call} />} />
   </div>
 }
 
@@ -144,7 +144,7 @@ export function RetrieverDiagnosticsPanel({ meta, question, status, catalog, sch
         <TabsContent value="overview"><Overview meta={meta} status={status} /></TabsContent>
         <TabsContent value="plan"><Plan meta={meta} catalog={catalog} schema={schema} /></TabsContent>
         <TabsContent value="results"><Results meta={meta} catalog={catalog} schema={schema} /></TabsContent>
-        <TabsContent value="models"><ModelCalls meta={meta} /></TabsContent>
+        <TabsContent value="models"><ModelCalls meta={meta} status={status} /></TabsContent>
       </div>
     </Tabs>
   </div>

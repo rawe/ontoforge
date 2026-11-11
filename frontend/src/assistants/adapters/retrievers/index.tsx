@@ -9,9 +9,7 @@ export const retrievers: PresentationAdapter<RetrieverKindEvent, RetrieverInsigh
   kind: 'retrievers',
   nouns: { one: 'Retriever', many: 'retrievers' },
   icon: ScanSearch,
-  // Diagnostics are the Workbench's own chat; asked from elsewhere, a retriever shows its running phase only.
-  send: (at, key, body, onEvent, signal) =>
-    chatRetriever(at.ontologyKey, lensOf(at), key, { ...body, diagnostics: false }, onEvent, signal),
+  send: (at, key, body, onEvent, signal) => chatRetriever(at.ontologyKey, lensOf(at), key, body, onEvent, signal),
   model: retrieverTurns,
   cites: false,
   details: null,

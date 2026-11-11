@@ -1,14 +1,16 @@
 /**
  * Pure turn handling of the assistant chat, for every assistant kind: a
  * turn is one question and its answer; the shared stream events (`thread`,
- * `delta`, `entities`, `final`, `error`) build the answer and the entities
- * it met, and the kind folds its own events into the turn's `insight`
- * (what its side panel shows) through a `TurnModel`. Timing is the client clock — the stream carries none.
+ * `delta`, `entities`, `diagnostics`, `final`, `error`) build the answer,
+ * the entities it met and its diagnostics, and the kind folds its own
+ * events into the turn's `insight` (what its side panel shows) through a
+ * `TurnModel`. A turn's timing is the client clock.
  *
  * No React, no I/O — unit-tested with `node --test`.
  */
 
 import type { SharedEvent } from '../stream/chatStream.ts'
+import { diagnosticsOf, mergeDiagnostics, type Diagnostics } from '../diagnostics/diagnostics.ts'
 import type { EntityCard, EntityLink } from '@/api/entities'
 import type { ChatMessage } from '@/api/types'
 
@@ -34,6 +36,8 @@ export interface Turn<I> {
   links: EntityLink[]
   /** What the kind reported about this answer — for a restored one, what its artifacts give (`restore`), else empty. */
   insight: I
+  /** The answer's diagnostics, merged as they arrived; absent when none came (not asked, or restored). */
+  diagnostics?: Diagnostics
   /** Read back from the server's thread, not asked in this view. */
   restored?: boolean
   /** Client clock (ms) when the question was sent and the turn ended. */
@@ -64,7 +68,7 @@ export const STOPPED_TEXT = 'Stopped. This answer is not part of the conversatio
 /** The longest question every kind accepts. */
 export const MAX_MESSAGE = 2000
 
-const SHARED: ReadonlySet<string> = new Set(['thread', 'delta', 'entities', 'final', 'error'])
+const SHARED: ReadonlySet<string> = new Set(['thread', 'delta', 'entities', 'diagnostics', 'final', 'error'])
 const isShared = (event: { type: string }): event is SharedEvent => SHARED.has(event.type)
 
 /** A new, pending turn, sent at `now`. */
@@ -107,6 +111,8 @@ export function applyEvent<E extends { type: string }, I>(
         entities: upsert(turn.entities, event.entities, (card) => card.ref),
         links: upsert(turn.links, event.links, (link) => link.id),
       }
+    case 'diagnostics':
+      return { ...turn, diagnostics: mergeDiagnostics(turn.diagnostics ?? {}, diagnosticsOf(event)) }
     case 'final':
       return { ...turn, reply: event.reply, status: 'complete', finishedAt: now }
     case 'error':
@@ -154,9 +160,9 @@ export function restoredTurns<I>(
   return turns
 }
 
-/** Whether the side panel has something to show for the turn: entities, or the kind's insight. */
+/** Whether the side panel has something to show for the turn: entities, diagnostics, or the kind's insight. */
 export const hasDetail = <I>(turn: Turn<I>, hasInsight: (insight: I) => boolean) =>
-  turn.entities.length > 0 || hasInsight(turn.insight)
+  turn.entities.length > 0 || turn.diagnostics !== undefined || hasInsight(turn.insight)
 
 /** The turn the side panel shows: the chosen one, else the latest with something to show. */
 export function inspectedTurn<I>(

@@ -28,8 +28,9 @@
  *                               writing at once (`lib/pinnedChangeset.ts`)
  *   of.chatToolCalls          — "true" | "false": Workbench agent chat shows its
  *                               entities and tool calls in a side panel (default true)
- *   of.retrieverDiagnostics   — "true" | "false": Workbench retriever chat
- *                               requests and shows diagnostics
+ *   of.chatDiagnostics        — "true" | "false": the Workbench chat of every
+ *                               assistant kind requests and shows diagnostics
+ *                               (default false)
  *   of.retrieverTestMode      — "chat" | "retrieve": the retriever
  *                               editor's test panel mode
  *   of.graphSidebar.{kind}    — "true" | "false": the Workbench chat of a graph
@@ -65,7 +66,7 @@ export const storageKeys = {
   changeset: (ontologyKey: string, lensKey: string) =>
     `of.changeset.${ontologyKey}.${lensKey}`,
   chatToolCalls: 'of.chatToolCalls',
-  retrieverDiagnostics: 'of.retrieverDiagnostics',
+  chatDiagnostics: 'of.chatDiagnostics',
   retrieverTestMode: 'of.retrieverTestMode',
   graphSidebar: (kind: string) => `of.graphSidebar.${kind}`,
   retriever: (ontologyKey: string, lensKey: string) =>

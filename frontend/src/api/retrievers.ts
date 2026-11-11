@@ -11,6 +11,7 @@
  * catalog of its own.
  */
 import { assistantPath, postChat, readAssistantStream, type ChatRequest, type KindReader, type SharedEvent } from '../assistants/stream/chatStream.ts'
+import type { Diagnostics, ModelCall } from '../assistants/diagnostics/diagnostics.ts'
 import { request } from './http.ts'
 import type { Matched, RelationDirection } from './types'
 
@@ -89,25 +90,20 @@ export interface RetrieverResult {
   matched?: Matched
   answerFields: Record<string, unknown>
 }
-export interface ModelCall {
-  phase: string
+/** A retriever's model call also carries its bounded texts. */
+export interface RetrieverModelCall extends ModelCall {
   systemPrompt?: string
-  input: string
-  output: string
-  usage?: unknown
-  finishReason?: string
+  input?: string
+  output?: string
   inputTruncated?: boolean
   outputTruncated?: boolean
 }
-/** What `retriever.diagnostics` events report about one answer, merged as they arrive. */
-export interface RetrieverDiagnostics {
-  llmCalls?: number
+/** What a retriever's `diagnostics` events report about one answer, merged as they arrive: the shared model calls and its own fields. */
+export interface RetrieverDiagnostics extends Diagnostics {
+  modelCalls?: RetrieverModelCall[]
   searchCalls?: number
   plan?: { subQueries?: PlanSubQuery[] } & Record<string, unknown>
   results?: RetrieverResult[]
-  timings?: Record<string, number>
-  modelIO?: ModelCall[]
-  limitations?: string[]
 }
 /** One exact condition a result is proven to satisfy. */
 export interface RetrieveCondition {
@@ -132,10 +128,8 @@ export interface RetrieveResponse {
   unsupportedReason?: string
 }
 
-/** A retriever's own stream events. */
-export type RetrieverKindEvent =
-  | { type: 'retriever.phase'; phase: string; status: 'start' | 'end'; durationMs?: number }
-  | ({ type: 'retriever.diagnostics' } & RetrieverDiagnostics)
+/** A retriever's own stream event. */
+export type RetrieverKindEvent = { type: 'retriever.phase'; phase: string; status: 'start' | 'end'; durationMs?: number }
 
 /** A retriever's turn: the shared events plus its own. */
 export type RetrieverEvent = SharedEvent | RetrieverKindEvent
@@ -169,7 +163,7 @@ export const importRetriever = (ontologyKey: string, lensKey: string, body: Retr
 /** One message to the saved (or default) retriever on a thread; the browser never sends a configuration. */
 export async function chatRetriever(
   ontologyKey: string, lensKey: string, key: string,
-  body: ChatRequest & { diagnostics: boolean },
+  body: ChatRequest,
   onEvent: (event: RetrieverEvent) => void, signal: AbortSignal,
 ) {
   await postChat(assistantPath({ ontologyKey, lensKey }, 'retrievers', key), body, retrieverReader, onEvent, signal)
@@ -188,21 +182,21 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 const strings = (value: unknown) => Array.isArray(value) && value.every((item) => typeof item === 'string')
 
+/** The retriever's own fields of a `diagnostics` event; the shared reader checks the rest. */
 function validDiagnostics(event: Record<string, unknown>): boolean {
-  if (event.timings !== undefined && (!record(event.timings) || Object.values(event.timings).some((x) => typeof x !== 'number' || !Number.isFinite(x)))) return false
-  // Preserve additional bounded metadata, including finishReason from a failed plan parse.
-  if (event.modelIO !== undefined && (!Array.isArray(event.modelIO) || event.modelIO.some((x) => !record(x) || typeof x.phase !== 'string' || typeof x.input !== 'string' || typeof x.output !== 'string'))) return false
-  if (event.limitations !== undefined && !strings(event.limitations)) return false
+  if (event.modelCalls !== undefined && (!Array.isArray(event.modelCalls) || event.modelCalls.some((x) => !record(x) ||
+    ['systemPrompt', 'input', 'output'].some((key) => x[key] !== undefined && typeof x[key] !== 'string') ||
+    ['inputTruncated', 'outputTruncated'].some((key) => x[key] !== undefined && typeof x[key] !== 'boolean')))) return false
   if (event.plan !== undefined && (!record(event.plan) || (event.plan.subQueries !== undefined && (!Array.isArray(event.plan.subQueries) ||
     event.plan.subQueries.some((q) => !record(q) || !strings(q.indices) || typeof q.query !== 'string' || (q.relations !== undefined && !strings(q.relations)) || (q.filters !== undefined && !Array.isArray(q.filters))))))) return false
   if (event.results !== undefined && (!Array.isArray(event.results) || event.results.some((x) => !record(x) ||
     typeof x.entityId !== 'string' || typeof x.entityType !== 'string' || typeof x.subQuery !== 'number' ||
     (x.matched !== undefined && !record(x.matched)) || (x.answerFields !== undefined && !record(x.answerFields))))) return false
-  if (['llmCalls', 'searchCalls'].some((key) => event[key] !== undefined && typeof event[key] !== 'number')) return false
+  if (event.searchCalls !== undefined && typeof event.searchCalls !== 'number') return false
   return true
 }
 
-/** The retriever's own events, validated before they reach the UI; kind events it does not know are ignored. */
+/** The retriever's own events and diagnostics fields, validated before they reach the UI; kind events it does not know are ignored. */
 const retrieverReader: KindReader<RetrieverKindEvent> = {
   parse(event) {
     switch (event.type) {
@@ -210,11 +204,11 @@ const retrieverReader: KindReader<RetrieverKindEvent> = {
         if (typeof event.phase === 'string' && ['start', 'end'].includes(String(event.status)) &&
             (event.durationMs === undefined || typeof event.durationMs === 'number')) return event as RetrieverKindEvent
         break
-      case 'retriever.diagnostics': if (validDiagnostics(event)) return event as RetrieverKindEvent; break
       default: if (typeof event.type === 'string' && event.type.includes('.')) return null
     }
     throw new Error('Invalid event in the retriever stream.')
   },
+  diagnostics: validDiagnostics,
 }
 
 export const readRetrieverStream = (response: Response, onEvent: (event: RetrieverEvent) => void, signal: AbortSignal) =>

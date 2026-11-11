@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   retrieverExecution, defaultAnswerFields, draftOf, draftProblems, editableConfig, emptyConfig, filterChoices, filterLabel,
-  callCounts, importProblem, modelCallName, isSupportedRetriever, mergeDiagnostics, stepText, newFilter, plannedFilterText, relationName, resultTypes, resultsBySubQuery, sameDraft,
+  callCounts, importProblem, modelCallName, isSupportedRetriever, stepText, newFilter, plannedFilterText, relationName, resultTypes, resultsBySubQuery, sameDraft,
   toInput, withIndex, withRelations, withoutIndex, type RetrieverSchema,
 } from '../src/components/assistants/retrievers/retrieverModel.ts'
 import { chatRetriever, readRetrieverStream, saveRetriever, type Retriever, type RetrieverConfig } from '../src/api/retrievers.ts'
@@ -127,12 +127,7 @@ test('imports need a version 2 export whose key is free', () => {
   assert.match(importProblem({ ...body, configVersion: 1 }, []) ?? '', /version 2/)
 })
 
-test('diagnostics: events merge, results group per sub-query, planned filters read from their carried definition', () => {
-  const merged = mergeDiagnostics({ timings: { plan: 5 }, limitations: ['a'], modelIO: [{ phase: 'plan', input: 'i', output: 'o' }] },
-    { timings: { answer: 7 }, limitations: ['a', 'b'], modelIO: [{ phase: 'plan', input: 'i2', output: 'o2' }] })
-  assert.deepEqual(merged.timings, { plan: 5, answer: 7 })
-  assert.deepEqual(merged.limitations, ['a', 'b'])
-  assert.deepEqual(merged.modelIO?.map((c) => c.input), ['i2'])
+test('diagnostics: results group per sub-query, planned filters read from their carried definition', () => {
   const result = (subQuery: number, entityId: string) => ({ entityId, entityType: 'person', label: null, subQuery, answerFields: {} })
   const groups = resultsBySubQuery({
     plan: { subQueries: [{ indices: ['person~default'], relations: [], query: 'q0', variants: [], mode: 'hybrid', filters: [] }] },
@@ -154,16 +149,21 @@ function stream(events: unknown[]) {
 
 const T = { type: 'thread', threadId: 't1' }
 
-test('the stream reader accepts retriever diagnostics and rejects malformed results', async () => {
+test('the stream reader accepts the retriever\'s diagnostics fields and rejects malformed ones', async () => {
   const received: unknown[] = []
   await readRetrieverStream(stream([
     T,
-    { type: 'retriever.diagnostics', plan: { subQueries: [{ indices: ['person~default'], relations: [], query: 'q', variants: [], mode: 'hybrid', filters: [] }] }, searchCalls: 1 },
-    { type: 'retriever.diagnostics', results: [{ entityId: 'e1', entityType: 'person', label: 'Ada', subQuery: 0, answerFields: { name: 'Ada' }, matched: { index: 'person~default', partKind: 'self' } }] },
+    { type: 'diagnostics', modelCalls: [{ index: 1, name: 'plan', durationMs: 3, usage: { input: 1, output: 2 }, systemPrompt: 's', input: '{}', inputTruncated: false, output: '{}', outputTruncated: false }] },
+    { type: 'diagnostics', plan: { subQueries: [{ indices: ['person~default'], relations: [], query: 'q', variants: [], mode: 'hybrid', filters: [] }] } },
+    { type: 'diagnostics', results: [{ entityId: 'e1', entityType: 'person', label: 'Ada', subQuery: 0, answerFields: { name: 'Ada' }, matched: { index: 'person~default', partKind: 'self' } }], limitations: [], searchCalls: 1, timings: { retrieve: 1.5 } },
     { type: 'final', reply: 'Ada' },
   ]), (event) => received.push(event), new AbortController().signal)
-  assert.equal(received.length, 4)
-  await assert.rejects(readRetrieverStream(stream([T, { type: 'retriever.diagnostics', results: [{ entityId: 'e1' }] }]), () => {}, new AbortController().signal), /Invalid event/)
+  assert.equal(received.length, 5)
+  const fails = (event: object) => assert.rejects(readRetrieverStream(stream([T, { type: 'diagnostics', ...event }]), () => {}, new AbortController().signal), /Invalid diagnostics/)
+  await fails({ results: [{ entityId: 'e1' }] })
+  await fails({ searchCalls: '1' })
+  await fails({ modelCalls: [{ index: 1, durationMs: 1, output: 42 }] })
+  await fails({ modelCalls: [{ index: 1, durationMs: 1, outputTruncated: 'yes' }] })
   await assert.rejects(readRetrieverStream(stream([T, { type: 'delta', text: 'Partial' }]), () => {}, new AbortController().signal), /Connection closed/)
   // The final answer must be the streamed text.
   await assert.rejects(readRetrieverStream(stream([T, { type: 'delta', text: 'Ada' }, { type: 'final', reply: 'Bob' }]), () => {}, new AbortController().signal), /Invalid final/)
@@ -206,15 +206,17 @@ test('chat and save use the assistant routes and never send browser configuratio
   } finally { globalThis.fetch = original }
 })
 
-test('a finished turn never looks pending: missing steps read stopped / not run, model calls count the traced ones', () => {
+test('a finished turn never looks pending: missing steps read stopped / not run, model calls count the reported ones', () => {
   const timings = { plan: 800 }
   assert.deepEqual(['plan', 'retrieve', 'answer'].map((s) => stepText(timings, s as 'plan', 'pending')), ['800 ms', '…', '…'])
   assert.deepEqual(['plan', 'retrieve', 'answer'].map((s) => stepText(timings, s as 'plan', 'failed')), ['800 ms', 'stopped', 'not run'])
   assert.equal(stepText({}, 'answer', 'complete'), 'not run')
-  const planned = { modelIO: [{ phase: 'plan', input: 'i', output: 'o' }] }
+  const planned = { modelCalls: [{ index: 1, name: 'plan', durationMs: 5 }] }
   assert.deepEqual(callCounts(planned, 'failed'), { model: 1, search: 0 })
+  assert.deepEqual(callCounts(planned, 'pending'), { model: 1, search: null })
   assert.deepEqual(callCounts({}, 'pending'), { model: null, search: null })
-  assert.deepEqual(callCounts({ llmCalls: 2, searchCalls: 3 }, 'complete'), { model: 2, search: 3 })
+  assert.deepEqual(callCounts({}, 'complete'), { model: 0, search: 0 })
+  assert.deepEqual(callCounts({ ...planned, searchCalls: 3 }, 'complete'), { model: 1, search: 3 })
 })
 
 test('model calls are named; a repeated planning call is the repeated planner', () => {
@@ -222,7 +224,4 @@ test('model calls are named; a repeated planning call is the repeated planner', 
   assert.equal(modelCallName('replan'), 'Planner (repeated)')
   assert.equal(modelCallName('answer'), 'Response')
   assert.equal(modelCallName('other'), 'other')
-  // A repeated plan keeps both planner traces: merged by phase, `replan` never replaces `plan`.
-  const merged = mergeDiagnostics({ modelIO: [{ phase: 'plan', input: 'i', output: 'o' }] }, { modelIO: [{ phase: 'replan', input: 'i', output: 'o2' }] })
-  assert.deepEqual(merged.modelIO?.map((call) => call.phase), ['plan', 'replan'])
 })

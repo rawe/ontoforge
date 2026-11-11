@@ -313,10 +313,10 @@ export function stepText(timings: Record<string, number>, step: (typeof STEPS)[n
   return step === firstMissing ? 'stopped' : 'not run'
 }
 
-/** Model and search call counts; model calls fall back to the traced calls, a finished turn without searches made none. */
+/** Model and search call counts; a finished turn without model calls or searches made none. */
 export function callCounts(meta: RetrieverDiagnostics, status: TurnStatus): { model: number | null; search: number | null } {
   return {
-    model: meta.llmCalls ?? (meta.modelIO !== undefined || status !== 'pending' ? (meta.modelIO?.length ?? 0) : null),
+    model: meta.modelCalls !== undefined || status !== 'pending' ? (meta.modelCalls?.length ?? 0) : null,
     search: meta.searchCalls ?? (status === 'pending' ? null : 0),
   }
 }
@@ -325,32 +325,19 @@ export const formatMs = (ms: number) => ms < 1000 ? `${ms.toFixed(ms < 10 ? 1 : 
 
 export const MODE_LABEL: Record<SearchMode, string> = { semantic: 'by meaning', keyword: 'by keywords', hybrid: 'by meaning and keywords' }
 
-/** A retriever answer's insight: its diagnostics, and the phase it is in while it runs. */
-export interface RetrieverInsight { diagnostics: RetrieverDiagnostics; phase?: string }
+/**
+ * A retriever answer's insight: the phase it is in while it runs. Its
+ * diagnostics are the turn's (`Turn.diagnostics`), read as `RetrieverDiagnostics`.
+ */
+export interface RetrieverInsight { phase?: string }
 
 /** How the retriever's own events build an answer's insight. */
 export const retrieverTurns: TurnModel<RetrieverKindEvent, RetrieverInsight> = {
-  empty: () => ({ diagnostics: {} }),
-  apply(insight, event) {
-    switch (event.type) {
-      case 'retriever.phase':
-        return event.status === 'start' ? { ...insight, phase: event.phase } : insight
-      case 'retriever.diagnostics':
-        return { ...insight, diagnostics: mergeDiagnostics(insight.diagnostics, event) }
-    }
-  },
-  hasInsight: (insight) => Object.keys(insight.diagnostics).length > 0,
+  empty: () => ({}),
+  apply: (insight, event) => (event.status === 'start' ? { ...insight, phase: event.phase } : insight),
+  // The running phase is the live detail, nothing for the side panel.
+  hasInsight: () => false,
   progress: (insight) => (insight.phase === undefined ? undefined : phaseName(insight.phase)),
-}
-
-/** Merge one `retriever.diagnostics` event into a turn's diagnostics: timings and model calls accumulate, limitations dedupe. */
-export function mergeDiagnostics(current: RetrieverDiagnostics, data: RetrieverDiagnostics): RetrieverDiagnostics {
-  return {
-    ...current, ...data,
-    timings: { ...current.timings, ...data.timings },
-    modelIO: data.modelIO ? [...(current.modelIO ?? []).filter((call) => !data.modelIO?.some((next) => next.phase === call.phase)), ...data.modelIO] : current.modelIO,
-    limitations: [...new Set([...(current.limitations ?? []), ...(data.limitations ?? [])])],
-  }
 }
 
 export const indexName = (key: string, catalog: readonly SearchCatalogEntry[] | undefined) =>

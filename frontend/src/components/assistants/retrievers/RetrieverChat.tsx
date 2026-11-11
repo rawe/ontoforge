@@ -1,10 +1,9 @@
 import { Activity } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { AssistantChat, type ChatRequest, formatDuration, InsightToggle } from '@/assistants'
-import { chatRetriever } from '@/api/retrievers'
+import { AssistantChat, type ChatRequest, DiagnosticsToggle, formatDuration, useDiagnosticsSetting } from '@/assistants'
+import { chatRetriever, type RetrieverDiagnostics } from '@/api/retrievers'
 import type { RuntimeSchema, SearchCatalogEntry } from '@/api/types'
 import { EntitiesTabs, type EntitiesTab } from '@/components/assistants/entities/EntitiesTabs'
-import { readString, storageKeys, writeString } from '@/lib/storage'
 import { RetrieverDiagnosticsPanel } from './RetrieverDiagnosticsPanel'
 import { retrieverTurns } from './retrieverModel'
 
@@ -18,10 +17,10 @@ interface RetrieverChatProps {
   /** Why questions are blocked (unsaved, invalid, unsupported); null = they run. */
   blockedReason: string | null
   /**
-   * `toggle`: the "Show diagnostics" switch (remembered, off by default)
-   * decides whether diagnostics are requested and shown beside the
-   * entities (the Workbench); `always`: requested and shown with every
-   * answer (the Studio test panel).
+   * `toggle`: the "Show diagnostics" switch (one remembered setting for
+   * every kind, off by default) decides whether diagnostics are requested
+   * and shown beside the entities (the Workbench); `always`: requested and
+   * shown with every answer (the Studio test panel).
    */
   diagnostics: 'toggle' | 'always'
   /** Remember the thread in the browser and restore it on open (the Workbench); else each mount starts a new one. */
@@ -39,7 +38,7 @@ interface RetrieverChatProps {
  * answer's entities and, when requested, its diagnostics in the side panel.
  */
 export function RetrieverChat({ ontologyKey, lensKey, retrieverKey, name, description, blockedReason, diagnostics, remember, catalog, schema, picker, actions }: RetrieverChatProps) {
-  const [switchedOn, setSwitchedOn] = useState(() => readString(storageKeys.retrieverDiagnostics) === 'true')
+  const [switchedOn, setSwitchedOn] = useDiagnosticsSetting()
   const withDiagnostics = diagnostics === 'always' || switchedOn
   const [tab, setTab] = useState<EntitiesTab>('entities')
   return (
@@ -60,17 +59,7 @@ export function RetrieverChat({ ontologyKey, lensKey, retrieverKey, name, descri
           : chatRetriever(ontologyKey, lensKey, retrieverKey, { ...body, diagnostics: withDiagnostics }, onEvent, signal)}
       picker={picker}
       actions={actions}
-      toggle={diagnostics === 'toggle'
-        ? <InsightToggle
-            label="Show diagnostics"
-            title="Stream the search plan, results, timings and model calls with each answer"
-            checked={switchedOn}
-            onChange={(checked) => {
-              setSwitchedOn(checked)
-              writeString(storageKeys.retrieverDiagnostics, String(checked))
-            }}
-          />
-        : undefined}
+      toggle={diagnostics === 'toggle' ? <DiagnosticsToggle checked={switchedOn} onChange={setSwitchedOn} /> : undefined}
       insight={{
         panel: {
           title: 'Details',
@@ -87,7 +76,7 @@ export function RetrieverChat({ ontologyKey, lensKey, retrieverKey, name, descri
                 lensKey={lensKey}
                 turn={turn}
                 own={withDiagnostics
-                  ? { label: 'Diagnostics', content: <RetrieverDiagnosticsPanel meta={turn.insight.diagnostics} question={turn.question} status={turn.status} catalog={catalog} schema={schema} /> }
+                  ? { label: 'Diagnostics', content: <RetrieverDiagnosticsPanel meta={(turn.diagnostics ?? {}) as RetrieverDiagnostics} question={turn.question} status={turn.status} catalog={catalog} schema={schema} /> }
                   : undefined}
                 tab={tab}
                 onTab={setTab}
@@ -95,9 +84,9 @@ export function RetrieverChat({ ontologyKey, lensKey, retrieverKey, name, descri
         },
         button: (turn) => {
           const { entities } = turn
-          const diagnosed = withDiagnostics && retrieverTurns.hasInsight(turn.insight)
+          const diagnosed = withDiagnostics && turn.diagnostics !== undefined
           if (entities.length === 0 && !diagnosed) return null
-          const total = turn.insight.diagnostics.timings?.total
+          const total = turn.diagnostics?.timings?.total
           return {
             icon: Activity,
             label: <>

@@ -449,7 +449,8 @@ and runs them.
 
 - `POST /ai/assistants/<kind>/{assistantKey}/chat`
   One message to one assistant. Request body: `message` (1–2,000 characters), optional
-  `threadId`; unknown fields are rejected. Without `threadId` the message starts a new
+  `threadId`, optional `diagnostics` (default `false`) to receive the turn's
+  `diagnostics` events; unknown fields are rejected. Without `threadId` the message starts a new
   thread; with it, the message continues that thread. The client sends only its new
   message — the server holds the conversation.
 
@@ -473,13 +474,13 @@ responses before the stream opens.
 |---|---|---|
 | `thread` | `threadId` | Always first: the thread this turn runs on; keep it to continue |
 | `delta` | `text` | A fragment of the answer (retrievers and navigators) |
-| `final` | `reply` | Terminal: the complete answer |
+| `final` | `reply`, `artifacts` when the turn left any | Terminal: the complete answer |
 | `error` | `error` | Terminal: the error object with `code`, `message`, optional `details` |
+| `diagnostics` | `modelCalls` (each `index`, `name` where the kind has steps, `durationMs`, `usage` — `input`, `output`, `cacheRead`, `cacheWrite`, each only as reported — `finishReason`, `failed`); a retriever adds `plan`, `results`, `limitations`, `searchCalls`, `timings`, and bounded texts on each model call | Only when requested, every kind; may come several times — merge `modelCalls` by `index`, `timings` by key, dedupe `limitations`, replace other fields |
 | `entities` | `entities` (each `ref`, `id`, `type`, `typeName`, `label`, `fields`, `evidence`; a navigator adds `role`, `hop`, `reason`), `links` (`id` of the stored relation, `from`, `to`, `type`, `label`) | The entities the turn met, every kind; replace cards by `ref`, links by `id`; read an entity by `type` + `id` |
 | `agent.tool_call` | `callId`, `tool`, `args` | An agent's tool invocation begins |
 | `agent.tool_result` | `callId`, `result` | That invocation completes |
 | `retriever.phase` | `phase` (`plan`, `retrieve`, `answer`), `status` (`start`, `end`), `durationMs` on end | Progress |
-| `retriever.diagnostics` | `plan`, `results`, `limitations`, `searchCalls`, `timings`, `modelIO`, `llmCalls` | Only when requested |
 | `navigator.graph` | `steps`, `edges` | The pipeline, once, after `thread` |
 | `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, `durationMs` and optional `summary` on end | Progress, in plain words; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary and no duration |
 | `navigator.summary` | `modelCalls`, `durationMs`, `entities`, `evidence`, `hops`, `timings` | Once, before `final` |
@@ -502,10 +503,9 @@ returned that the turn had not sent yet.
 
 ### Retrievers
 
-A retriever's chat body may add `diagnostics` (default `false`) to receive
-`retriever.diagnostics`; the request cannot change the retriever's configuration. A
-stored retriever the lens can no longer run answers `422 VALIDATION_ERROR` with the
-errors under `details.errors`. Before the answer, an `entities` event carries the results
+A retriever's chat request cannot change the retriever's configuration. A stored
+retriever the lens can no longer run answers `422 VALIDATION_ERROR` with the errors under
+`details.errors`. Before the answer, an `entities` event carries the results
 the answer model was given.
 
 - `POST /ai/assistants/retrievers/{assistantKey}/retrieve`

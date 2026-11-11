@@ -13,6 +13,8 @@ import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 import type { FastifyInstance } from "fastify";
 import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from "prom-client";
 
+import { tokenUsage } from "./core/usage.js";
+
 export const registry = new Registry();
 
 // Process metrics: CPU, memory, event-loop lag, garbage collection.
@@ -133,16 +135,12 @@ export async function timeProviderCall<T>(provider: Provider, call: () => Promis
 /** Counts the usage a finished model call reported, if it reported any. A
  * provider's input count holds its cached parts. */
 function countTokens(output: unknown): void {
-  const generations = (output as { generations?: { message?: { usage_metadata?: Record<string, unknown> } }[][] }).generations;
-  const usage = generations?.[0]?.[0]?.message?.usage_metadata;
+  const generations = (output as { generations?: { message?: { usage_metadata?: unknown } }[][] }).generations;
+  const usage = tokenUsage(generations?.[0]?.[0]?.message?.usage_metadata);
   if (usage === undefined) return;
-  const cached = (usage.input_token_details ?? {}) as Record<string, unknown>;
-  const counts = {
-    input: usage.input_tokens, output: usage.output_tokens,
-    cache_read: cached.cache_read, cache_write: cached.cache_creation,
-  };
+  const counts = { input: usage.input, output: usage.output, cache_read: usage.cacheRead, cache_write: usage.cacheWrite };
   for (const [kind, count] of Object.entries(counts)) {
-    if (typeof count === "number" && count > 0) aiTokens.inc({ kind }, count);
+    if (count !== undefined && count > 0) aiTokens.inc({ kind }, count);
   }
 }
 

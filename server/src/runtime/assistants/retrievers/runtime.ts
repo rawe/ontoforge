@@ -13,9 +13,10 @@
  *
  * Chat stream events: `retriever.phase` (start/end of plan, retrieve,
  * answer), the shared `entities` (`../entities.ts`: the results handed to
- * the answer model, before it streams), `delta` (answer text),
- * `retriever.diagnostics` (on request), then the transport's `final` or
- * `error`.
+ * the answer model, before it streams), `delta` (answer text), the
+ * shared `diagnostics` (on request: each model call with its texts, then
+ * the plan, results, limitations, search calls and timings as they become
+ * known), then the transport's `final` or `error`.
  *
  * Retrieve runs the first two phases only (`retrieveQuestion`): one
  * planning call without a conversation, then retrieval; it returns the
@@ -43,6 +44,8 @@ import {
 } from "@langchain/langgraph";
 
 import {
+  messageEnd,
+  ModelCalls,
   type GraphThread,
   type StreamExecution,
 } from "../../../assistants/index.js";
@@ -100,6 +103,12 @@ import {
 
 /** Characters of model output kept in diagnostics. */
 const OUTPUT_TRACE_CHARACTERS = 12_000;
+
+/** A model call's output as its diagnostics entry carries it, bounded. */
+const outputTrace = (output: string) => ({
+  output: output.slice(0, OUTPUT_TRACE_CHARACTERS),
+  outputTruncated: output.length > OUTPUT_TRACE_CHARACTERS,
+});
 
 /** A stored retriever, valid in its lens, ready to answer. */
 export interface RunnableRetriever {
@@ -176,17 +185,6 @@ For every recommendation, identify a concrete passage in the supplied fields or 
 Use names and relevant fields and relations. Never mention sub-queries, filter ids or paths, index keys or entity ids: state facts in plain words (for example "lives in Berlin"), and tell results with the same name apart by their fields. Never infer location, ownership, type or any other fact from an identifier, name or formatted code. If no matching evidence exists, say so. Explain unsupportedReason as a data gap.
 Respect every limitation. Omitted candidates were not supplied to you; you have not assessed their relevance and must not describe them as further matches; completeness cannot be guaranteed then. At most about 700 words.`;
 
-interface ModelCall {
-  phase: string;
-  systemPrompt?: string;
-  input: string;
-  inputTruncated?: boolean;
-  output: string;
-  usage?: unknown;
-  finishReason?: string;
-  outputTruncated?: boolean;
-}
-
 /** What a follow-up may refer to: the last answered turn's results and
  * the configuration that found them. */
 interface Verified {
@@ -238,11 +236,10 @@ interface Planning {
   plannerModel: PlannerModel;
   /** Accumulates `planModel` and `validation`. */
   timings: Record<string, number>;
-  /** Receives every planning call's trace. */
-  io: ModelCall[];
-  /** Diagnostics as planning proceeds: the call's output first, so a
-   * failed plan stays diagnosable, then the checked plan. */
-  report: (payload: Record<string, unknown>) => Promise<void>;
+  /** Records every planning call, its texts included, and reports the
+   * diagnostics as planning proceeds: the call first, so a failed plan
+   * stays diagnosable, then the checked plan. */
+  calls: ModelCalls;
 }
 
 /**
@@ -252,7 +249,7 @@ interface Planning {
  * planning context over the cap, a failed call and a malformed plan.
  */
 export async function planQuestion(planning: Planning): Promise<{ plan: Plan; notes: string[] }> {
-  const { retriever, scope, modes, message, history, previous, plannerModel, timings, io, report } = planning;
+  const { retriever, scope, modes, message, history, previous, plannerModel, timings, calls } = planning;
   const { signal } = scope;
   const values = await filterValues(scope);
   signal.throwIfAborted();
@@ -270,10 +267,12 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
   }
   const planWith = async (systemPrompt: string, callPhase: string) => {
     const modelStart = performance.now();
+    const call = calls.start(callPhase, modelInputTrace(systemPrompt, input));
     let response;
     try {
       response = await plannerModel.invoke([new SystemMessage(systemPrompt), new HumanMessage(input)], { signal });
     } catch (error) {
+      await call.failed();
       signal.throwIfAborted();
       console.warn(`Planning model failed: ${error instanceof Error ? error.message : String(error)}`);
       throw modelFailure(error);
@@ -282,17 +281,9 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
     timings.planModel = (timings.planModel ?? 0) + performance.now() - modelStart;
     const rawFinishReason = response.response_metadata?.finish_reason;
     const finishReason = typeof rawFinishReason === "string" ? rawFinishReason : undefined;
-    const call: ModelCall = {
-      phase: callPhase,
-      ...modelInputTrace(systemPrompt, input),
-      output: output.slice(0, OUTPUT_TRACE_CHARACTERS),
-      usage: response.usage_metadata,
-      finishReason,
-      outputTruncated: output.length > OUTPUT_TRACE_CHARACTERS,
-    };
-    io.push(call);
     // Visible model output first, so a failed plan stays diagnosable.
-    await report({ modelIO: [call], timings: { planModel: timings.planModel } });
+    await call.done(messageEnd(response), outputTrace(output));
+    await calls.report({ timings: { planModel: timings.planModel } });
     const validation = performance.now();
     const checked = validatePlan(
       parsePlannerOutput(output, finishReason),
@@ -305,7 +296,7 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
       values,
     );
     timings.validation = (timings.validation ?? 0) + performance.now() - validation;
-    await report({ plan: diagnosticPlan(checked.plan, retriever.config), modelIO: [call] });
+    await calls.report({ plan: diagnosticPlan(checked.plan, retriever.config) });
     return checked;
   };
   const first = await planWith(PLANNER, "plan");
@@ -345,7 +336,7 @@ export async function retrieveQuestion(
   signal.throwIfAborted();
   const scope: RetrievalScope = { ...retriever.scope, signal };
   const { plannerModel } = models();
-  // Timings and model calls are recorded for diagnostics, which only chat reports.
+  // Timings and model calls are recorded for diagnostics, which only chat sends.
   const { plan, notes } = await planQuestion({
     retriever,
     scope,
@@ -355,8 +346,7 @@ export async function retrieveQuestion(
     previous: undefined,
     plannerModel,
     timings: {},
-    io: [],
-    report: async () => {},
+    calls: new ModelCalls(),
   });
   signal.throwIfAborted();
   const retrieval = await retrieve(scope, plan);
@@ -381,16 +371,11 @@ export async function chat(
   message: string,
   thread: GraphThread,
   execution: StreamExecution,
-  diagnostics: boolean,
 ): Promise<Record<string, unknown>> {
-  const { signal, onToolEvent: emit } = execution;
   // Without diagnostics the stream carries progress and the answer only.
-  const report = async (payload: Record<string, unknown>) => {
-    if (diagnostics) await emit({ type: "retriever.diagnostics", ...payload });
-  };
+  const { signal, onToolEvent: emit, modelCalls: calls } = execution;
   const started = performance.now();
   const timings: Record<string, number> = {};
-  const io: ModelCall[] = [];
   const scope: RetrievalScope = { ...retriever.scope, signal };
   const modes = availableModes(retriever.scope.store);
   let firstDelta = false;
@@ -436,7 +421,7 @@ export async function chat(
     .addNode("planning", async (state) => {
       const { previous, history } = state;
       const { plan, notes } = await phase("plan", () =>
-        planQuestion({ retriever, scope, modes, message, history, previous, plannerModel, timings, io, report }),
+        planQuestion({ retriever, scope, modes, message, history, previous, plannerModel, timings, calls }),
       );
       return { plan, notes };
     })
@@ -451,7 +436,7 @@ export async function chat(
       if (context.included.length > 0) await emit(entitiesEvent(entityCards(context.included, scope.lens), []));
       timings.search = retrieval.searchMs;
       searchCalls = retrieval.searchCalls;
-      await report({
+      await calls.report({
         results: diagnosticResults(retrieval),
         limitations: context.limitations,
         searchCalls: retrieval.searchCalls,
@@ -470,15 +455,14 @@ export async function chat(
           results: context.results,
           limitations: context.limitations,
         });
-        const { text: output, usage } = await streamAnswer(model, ANSWER, input, signal, async (delta) => {
+        const call = calls.start("answer", modelInputTrace(ANSWER, input));
+        return streamAnswer(model, call, ANSWER, input, signal, async (delta) => {
           if (!firstDelta) {
             firstDelta = true;
             timings.firstDelta = performance.now() - started;
           }
           await emit({ type: "delta", text: delta });
-        });
-        io.push({ phase: "answer", ...modelInputTrace(ANSWER, input), output: output.slice(0, OUTPUT_TRACE_CHARACTERS), usage });
-        return output;
+        }, outputTrace);
       });
       return { reply };
     })
@@ -510,6 +494,6 @@ export async function chat(
   );
   timings.total = performance.now() - started;
   timings.answerModel = timings.answer ?? 0;
-  await report({ timings, modelIO: io, searchCalls, llmCalls: io.length });
+  await calls.report({ timings, searchCalls });
   return { reply: result.reply };
 }

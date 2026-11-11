@@ -20,7 +20,6 @@ import {
 const LensParams = z.object({ ontologyKey: z.string(), lensKey: z.string() });
 const Params = LensParams.extend({ assistantKey: z.string() });
 const ThreadParams = Params.extend({ threadId: z.string() });
-const Chat = ChatPayload.extend({ diagnostics: z.boolean().default(false) }).strict();
 const Retrieve = z.object({ query: z.string().min(1).max(2000) }).strict();
 
 export const retrieverRuntimeRouter: FastifyPluginAsyncZod<{ threads: ThreadStore }> = async (app, { threads }) => {
@@ -33,16 +32,17 @@ export const retrieverRuntimeRouter: FastifyPluginAsyncZod<{ threads: ThreadStor
 
   app.post(
     "/ai/assistants/retrievers/:assistantKey/chat",
-    { schema: { tags: ["ai"], params: Params, body: Chat } },
+    { schema: { tags: ["ai"], params: Params, body: ChatPayload } },
     async (request, reply) => {
       requireLanguageModel();
       const store = await getRuntimeStore(request.params.ontologyKey);
       // Resolved before the stream opens: unknown and invalid retrievers answer
       // with a plain error response.
       const retriever = await loadRunnableRetriever(request.params.lensKey, request.params.assistantKey, store);
-      const turn = await openThread(threads, await threadBinding(request, "retrievers"), request.body.threadId);
-      return sendChatStream(reply, { threads, turn }, (execution, thread) =>
-        chat(retriever, request.body.message, thread, execution, request.body.diagnostics),
+      const { message, threadId, diagnostics } = request.body;
+      const turn = await openThread(threads, await threadBinding(request, "retrievers"), threadId);
+      return sendChatStream(reply, { threads, turn, diagnostics }, (execution, thread) =>
+        chat(retriever, message, thread, execution),
       );
     },
   );

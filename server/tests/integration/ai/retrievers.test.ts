@@ -61,7 +61,7 @@ async function ask(
   expect(events[0]?.type).toBe("thread");
   if (threadId) expect(events[0]!.threadId).toBe(threadId);
   expect(events.at(-1)?.type, JSON.stringify(events.at(-1))).toBe("final");
-  const meta = Object.assign({}, ...events.filter((event) => event.type === "retriever.diagnostics"));
+  const meta = Object.assign({}, ...events.filter((event) => event.type === "diagnostics"));
   return { reply: events.at(-1)!.reply as string, meta, threadId: events[0]!.threadId as string };
 }
 

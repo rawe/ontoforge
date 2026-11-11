@@ -49,7 +49,7 @@ import {
   retrieveQuestion,
   type RunnableRetriever,
 } from "../../../../src/runtime/assistants/retrievers/runtime.js";
-import type { GraphThread } from "../../../../src/assistants/index.js";
+import { ModelCalls, type GraphThread, type StreamExecution } from "../../../../src/assistants/index.js";
 import { TurnSaver } from "../../../../src/assistants/threads/turnSaver.js";
 import { graphValues, newGraphThread } from "../../../assistants/threads/graphThread.js";
 import { CONFIG, LENS, SCHEMA } from "./fixture.js";
@@ -114,6 +114,12 @@ async function newThread(): Promise<GraphThread> {
   return newGraphThread();
 }
 
+/** A turn's execution; its events go to `events`, its diagnostics too when asked. */
+function execution(events: Record<string, unknown>[], diagnostics: boolean, signal = new AbortController().signal): StreamExecution {
+  const push = async (event: Record<string, unknown>) => { events.push(event); };
+  return { signal, onToolEvent: push, modelCalls: new ModelCalls(diagnostics ? push : undefined) };
+}
+
 /** One question, on a new thread unless one is given. */
 async function run(
   message: string,
@@ -124,12 +130,17 @@ async function run(
 ) {
   const events: Record<string, unknown>[] = [];
   const on = thread ?? (await newThread());
-  const result = await chat(asked, message, on, { signal, onToolEvent: async (event) => { events.push(event); } }, diagnostics);
+  const result = await chat(asked, message, on, execution(events, diagnostics, signal));
   return { events, result, thread: on };
 }
 
 const diagnosticsWith = (events: Record<string, unknown>[], field: string) =>
-  events.find((e) => e.type === "retriever.diagnostics" && e[field] !== undefined)!;
+  events.find((e) => e.type === "diagnostics" && e[field] !== undefined)!;
+
+/** Every model call the diagnostics listed, in the order they were sent. */
+const modelCalls = (events: Record<string, unknown>[]) =>
+  events.filter((e) => e.type === "diagnostics" && e.modelCalls !== undefined)
+    .flatMap((e) => e.modelCalls as Record<string, unknown>[]);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -168,24 +179,44 @@ describe("retriever pipeline", () => {
     ]);
     expect(retrieved.searchCalls).toBe(0);
     expect(retrieved.limitations).toEqual([]);
-    const summary = diagnosticsWith(events, "llmCalls");
-    expect(summary.llmCalls).toBe(2);
+    const summary = events.at(-1)!;
+    expect(summary).toEqual({ type: "diagnostics", timings: expect.any(Object), searchCalls: 0 });
     expect(Object.keys(summary.timings as object)).toEqual(
       expect.arrayContaining(["plan", "planModel", "validation", "retrieve", "search", "context", "answer", "firstDelta", "answerModel", "total"]),
     );
-    const calls = summary.modelIO as { phase: string; systemPrompt: string; input: string }[];
-    expect(calls.map((c) => c.phase)).toEqual(["plan", "answer"]);
-    expect(calls[0]!.input).toBe(fake.invoke.mock.calls[0]![0][1].content);
-    expect(calls[1]!.systemPrompt).toBe(fake.stream.mock.calls[0]![0][0].content);
-    // The answer's usage is the last the provider reported.
-    expect((calls[1] as { usage?: unknown }).usage).toEqual({ input_tokens: 1, output_tokens: 1 });
-    expect(events.at(-1)).toBe(summary);
+    // Each model call once, with its texts, as soon as it ended.
+    const calls = modelCalls(events);
+    expect(calls).toEqual([
+      {
+        index: 1, name: "plan", durationMs: expect.any(Number), usage: { input: 1, output: 2 },
+        systemPrompt: PLANNER, input: fake.invoke.mock.calls[0]![0][1].content, inputTruncated: false,
+        output: planned([sub()]).content, outputTruncated: false,
+      },
+      {
+        index: 2, name: "answer", durationMs: expect.any(Number), usage: { input: 1, output: 1 },
+        systemPrompt: fake.stream.mock.calls[0]![0][0].content, input: fake.stream.mock.calls[0]![0][1].content, inputTruncated: false,
+        output: "Ada.", outputTruncated: false,
+      },
+    ]);
+    const sent = events.filter((e) => e.type === "diagnostics" && e.modelCalls !== undefined);
+    expect(events.indexOf(sent[0]!)).toBeLessThan(events.findIndex((e) => e.type === "retriever.phase" && e.phase === "plan" && e.status === "end"));
+    expect(events.indexOf(sent[1]!)).toBeGreaterThan(events.findLastIndex((e) => e.type === "delta"));
+    expect(events.some((e) => "modelIO" in e || "llmCalls" in e)).toBe(false);
   });
 
   it("a failed answer call fails the turn after the answer phase started; no retry", async () => {
     fake.stream.mockRejectedValueOnce(Object.assign(new Error("Too Many Requests"), { status: 429 }));
     await expect(run("Everyone in Berlin", false)).rejects.toMatchObject({ reason: "rate_limited" });
     expect(fake.stream).toHaveBeenCalledTimes(1);
+  });
+
+  it("lists a failed call, with no usage, before the turn fails", async () => {
+    fake.stream.mockRejectedValueOnce(Object.assign(new Error("Too Many Requests"), { status: 429 }));
+    const events: Record<string, unknown>[] = [];
+    await expect(chat(agent, "Everyone in Berlin", await newThread(), execution(events, true))).rejects.toMatchObject({ reason: "rate_limited" });
+    const failed = modelCalls(events).at(-1)!;
+    expect(failed).toMatchObject({ index: 2, name: "answer", failed: true, output: "" });
+    expect(failed).not.toHaveProperty("usage");
   });
 
   it("an answer cut off at the model's output limit fails the turn after its text was streamed; the half answer is not kept", async () => {
@@ -196,9 +227,8 @@ describe("retriever pipeline", () => {
     const events: Record<string, unknown>[] = [];
     const thread = await newThread();
 
-    await expect(chat(agent, "Everyone in Berlin", thread, {
-      signal: new AbortController().signal, onToolEvent: async (event) => { events.push(event); },
-    }, false)).rejects.toMatchObject({ reason: "answer_cut_off", details: { code: "ANSWER_CUT_OFF" } });
+    await expect(chat(agent, "Everyone in Berlin", thread, execution(events, false)))
+      .rejects.toMatchObject({ reason: "answer_cut_off", details: { code: "ANSWER_CUT_OFF" } });
 
     expect(events.filter((e) => e.type === "delta")).toEqual([{ type: "delta", text: "Ada lives" }]);
     const messages = (await graphValues(thread)).messages as { text: string }[];
@@ -308,9 +338,9 @@ describe("retriever pipeline", () => {
   it("shows the planner's output before a parse failure and never calls the answer model", async () => {
     fake.invoke.mockResolvedValue({ content: '{"subQueries":[', usage_metadata: { output_tokens: 1800 }, response_metadata: { finish_reason: "length" } });
     const events: Record<string, unknown>[] = [];
-    await expect(chat(agent, "Who?", await newThread(), { signal: new AbortController().signal, onToolEvent: async (e) => { events.push(e); } }, true)).rejects.toThrow("token limit");
-    expect(diagnosticsWith(events, "modelIO")?.modelIO).toEqual([
-      expect.objectContaining({ output: '{"subQueries":[', finishReason: "length", usage: { output_tokens: 1800 } }),
+    await expect(chat(agent, "Who?", await newThread(), execution(events, true))).rejects.toThrow("token limit");
+    expect(modelCalls(events)).toEqual([
+      expect.objectContaining({ name: "plan", output: '{"subQueries":[', finishReason: "length", usage: { output: 1800 } }),
     ]);
     expect(fake.stream).not.toHaveBeenCalled();
   });
@@ -361,15 +391,15 @@ describe("retriever pipeline", () => {
     });
     async function followUp() {
       const { events } = await run("And what is his role there?", true, thread);
-      const summary = diagnosticsWith(events, "llmCalls");
+      const calls = modelCalls(events);
       const limitations = diagnosticsWith(events, "results").limitations as string[];
-      return { events, summary, limitations };
+      return { events, calls, limitations };
     }
 
     it("is planned once more with the appended instruction, and the second plan is used", async () => {
       rankEntries.mockResolvedValue([]);
       fake.invoke.mockResolvedValueOnce(unsupported).mockResolvedValueOnce(planned([sub({ query: "Bob role at ACME", filters: [] })]));
-      const { summary, limitations } = await followUp();
+      const { calls, limitations } = await followUp();
       expect(fake.invoke).toHaveBeenCalledTimes(2);
       expect(fake.invoke.mock.calls[0]![0][0].content).toBe(PLANNER);
       expect(fake.invoke.mock.calls[1]![0][0].content).toBe(`${PLANNER}\n${REPLAN}`);
@@ -377,20 +407,19 @@ describe("retriever pipeline", () => {
       expect(fake.invoke.mock.calls[1]![0][1].content).toBe(fake.invoke.mock.calls[0]![0][1].content);
       expect(rankEntries.mock.calls[0]![0].text).toBe("Bob role at ACME");
       expect(fake.stream).toHaveBeenCalledTimes(1);
-      expect(summary.llmCalls).toBe(3);
-      expect((summary.modelIO as { phase: string }[]).map((c) => c.phase)).toEqual(["plan", "replan", "answer"]);
+      expect(calls.map((c) => [c.index, c.name])).toEqual([[1, "plan"], [2, "replan"], [3, "answer"]]);
       expect(limitations).toContain("Planning was repeated once: the first plan for this follow-up searched nothing.");
     });
 
     it("still empty, answers as unsupported", async () => {
       fake.invoke.mockResolvedValue(unsupported);
-      const { summary, limitations } = await followUp();
+      const { calls, limitations } = await followUp();
       expect(fake.invoke).toHaveBeenCalledTimes(2);
       expect(rankEntries).not.toHaveBeenCalled();
       const answerInput = JSON.parse(fake.stream.mock.calls[0]![0][1].content);
       expect(answerInput.unsupportedReason).toBe("already answered");
       expect(answerInput.searches).toEqual([]);
-      expect(summary.llmCalls).toBe(3);
+      expect(calls).toHaveLength(3);
       expect(limitations).toContain(
         "Planning was repeated once: the first plan for this follow-up searched nothing; the repeated plan searched nothing either.",
       );
@@ -408,7 +437,7 @@ describe("retriever pipeline", () => {
       fake.invoke.mockResolvedValue(unsupported);
       const { events } = await run("What is Ada's salary?");
       expect(fake.invoke).toHaveBeenCalledTimes(1);
-      expect(diagnosticsWith(events, "llmCalls").llmCalls).toBe(2);
+      expect(modelCalls(events).map((c) => c.name)).toEqual(["plan", "answer"]);
     });
   });
 

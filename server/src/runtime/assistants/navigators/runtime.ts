@@ -91,8 +91,8 @@ export async function runNavigatorTurn(
   thread: GraphThread,
   execution: StreamExecution,
 ): Promise<{ reply: string }> {
-  const { signal, onToolEvent: emit } = execution;
-  const trace = new Trace(NAVIGATOR_EVENT, emit, signal);
+  const { signal, onToolEvent: emit, modelCalls } = execution;
+  const trace = new Trace(NAVIGATOR_EVENT, emit, signal, modelCalls);
   await trace.graph(NAVIGATOR_TOPOLOGY);
   const reply = await run({
     key: runnable.key,

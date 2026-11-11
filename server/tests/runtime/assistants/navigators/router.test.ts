@@ -157,6 +157,21 @@ describe("runtime chat", () => {
     expect(runtime.navigatorStore.getNavigator).toHaveBeenCalledWith("lens-1", "walker");
   });
 
+  it("on request, sends the turn's model calls on the stream before the final event", async () => {
+    run.mockImplementationOnce(async (turn: NavigatorTurn) => {
+      await turn.trace.calls.start("answer").done({ usage: { input_tokens: 3, output_tokens: 1 }, finishReason: "stop" });
+      return "Answer";
+    });
+    const response = await app.inject({ method: "POST", url: `${RUNTIME}/_default/chat`, payload: { message: "Who?", diagnostics: true } });
+    expect(lines(response.body).slice(2)).toEqual([
+      {
+        type: "diagnostics",
+        modelCalls: [{ index: 1, name: "answer", durationMs: expect.any(Number), usage: { input: 3, output: 1 }, finishReason: "stop" }],
+      },
+      { type: "final", reply: "Answer" },
+    ]);
+  });
+
   it("runs the built-in default without reading the store", async () => {
     const response = await app.inject({ method: "POST", url: `${RUNTIME}/_default/chat`, payload: { message: "Who?" } });
     expect(lines(response.body).at(-1)).toEqual({ type: "final", reply: "Answer" });
@@ -170,6 +185,7 @@ describe("runtime chat", () => {
       { message: "Who?", history: [] },
       { message: "" },
       { message: "x".repeat(2001) },
+      { message: "Who?", diagnostics: 1 },
       {},
     ]) {
       const response = await app.inject({ method: "POST", url: `${RUNTIME}/_default/chat`, payload });

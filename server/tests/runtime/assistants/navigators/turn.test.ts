@@ -22,7 +22,7 @@ vi.mock("../../../../src/core/ai.js", async (importOriginal) => ({
 vi.mock("../../../../src/runtime/assistants/navigators/reader.js", () => ({ lensReader: () => graph.reader }));
 
 import { settings } from "../../../../src/config.js";
-import type { GraphThread, StreamEvent } from "../../../../src/assistants/index.js";
+import { ModelCalls, type GraphThread, type StreamEvent, type StreamExecution } from "../../../../src/assistants/index.js";
 import { TurnSaver } from "../../../../src/assistants/threads/turnSaver.js";
 import { createAiModel } from "../../../../src/core/ai.js";
 import type { RuntimeStore } from "../../../../src/core/ports.js";
@@ -49,9 +49,16 @@ const answer = (...chunks: string[]) =>
     for (const content of chunks) yield { content };
   })());
 
+/** A turn's execution; its events go to `events`, its diagnostics too when asked. */
+function execution(events: StreamEvent[], diagnostics = false, signal = new AbortController().signal): StreamExecution {
+  // As the stream does: each event as it was when emitted.
+  const push = async (event: StreamEvent) => { events.push(structuredClone(event)); };
+  return { signal, onToolEvent: push, modelCalls: new ModelCalls(diagnostics ? push : undefined) };
+}
+
 async function turn(
   message: string,
-  options: { thread?: GraphThread; config?: Partial<NavigatorConfig>; signal?: AbortSignal } = {},
+  options: { thread?: GraphThread; config?: Partial<NavigatorConfig>; signal?: AbortSignal; diagnostics?: boolean } = {},
 ) {
   const events: StreamEvent[] = [];
   const thread = options.thread ?? (await newThread());
@@ -60,11 +67,9 @@ async function turn(
     config: { ...deriveNavigator(), ...options.config },
     loaded: { scoped: LENS, full: LENS } as unknown as LoadedSchema,
   };
-  const { reply } = await runNavigatorTurn(runnable, "org", {} as RuntimeStore, message, thread, {
-    signal: options.signal ?? new AbortController().signal,
-    // As the stream does: each event as it was when emitted.
-    onToolEvent: async (event) => { events.push(structuredClone(event)); },
-  });
+  const { reply } = await runNavigatorTurn(
+    runnable, "org", {} as RuntimeStore, message, thread, execution(events, options.diagnostics, options.signal),
+  );
   return { events, reply, thread };
 }
 
@@ -118,6 +123,25 @@ describe("a navigator turn", () => {
     expect(fake.withConfig).toHaveBeenCalledWith({
       response_format: { type: "json_schema", json_schema: { name: "navigator_intent", strict: true, schema: expect.any(Object) } },
     });
+  });
+
+  it("on request, sends each model call named by its step as it ends; the rest of the stream stays as it is", async () => {
+    fake.invoke.mockResolvedValueOnce({ ...plan(TWO_HOPS), usage_metadata: { input_tokens: 900, output_tokens: 40 } });
+    answer("Kira Novak [E2] works on Apollo [E4].");
+    const { events } = await turn("Which projects do Lena's reports work on?", { diagnostics: true });
+
+    const diagnostics = events.filter((e) => e.type === "diagnostics");
+    expect(diagnostics).toEqual([
+      { type: "diagnostics", modelCalls: [{ index: 1, name: "understand", durationMs: expect.any(Number), usage: { input: 900, output: 40 } }] },
+      { type: "diagnostics", modelCalls: [{ index: 2, name: "answer", durationMs: expect.any(Number) }] },
+    ]);
+    const at = (e: StreamEvent) => events.indexOf(e);
+    expect(at(diagnostics[0]!)).toBeLessThan(events.findIndex((e) => e.type === "navigator.step" && e.id === "understand" && e.status === "done"));
+    expect(at(diagnostics[1]!)).toBeGreaterThan(events.findLastIndex((e) => e.type === "delta"));
+    expect(events.filter((e) => e.type !== "diagnostics").map((e) => e.type)).toEqual(
+      (await turn("Which projects do Lena's reports work on?")).events.map((e) => e.type),
+    );
+    expect(events.at(-1)).toMatchObject({ type: "navigator.summary", modelCalls: 2 });
   });
 
   it("summarises each step in plain words with its duration", async () => {
@@ -221,9 +245,14 @@ describe("a navigator turn", () => {
     const events: StreamEvent[] = [];
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await expect(runNavigatorTurn({ key: "_default", config: deriveNavigator(), loaded: { scoped: LENS, full: LENS } as unknown as LoadedSchema },
-      "org", {} as RuntimeStore, "Who?", await newThread(), { signal: new AbortController().signal, onToolEvent: async (e) => { events.push(e); } }))
+      "org", {} as RuntimeStore, "Who?", await newThread(), execution(events, true)))
       .rejects.toMatchObject({ reason: "unavailable", message: "The language model cannot be reached; try again later." });
     expect(steps(events)).toEqual(["understand:running:1", "understand:failed:1"]);
+    // The failed call is listed before the step fails.
+    expect(events.filter((e) => e.type === "diagnostics")).toEqual([
+      { type: "diagnostics", modelCalls: [{ index: 1, name: "understand", durationMs: expect.any(Number), failed: true }] },
+    ]);
+    expect(events.findIndex((e) => e.type === "diagnostics")).toBeLessThan(events.findIndex((e) => e.status === "failed"));
     expect(fake.invoke).toHaveBeenCalledTimes(1);
     expect(fake.stream).not.toHaveBeenCalled();
 
@@ -246,11 +275,16 @@ describe("a navigator turn", () => {
     const thread = await newThread();
 
     await expect(runNavigatorTurn({ key: "_default", config: deriveNavigator(), loaded: { scoped: LENS, full: LENS } as unknown as LoadedSchema },
-      "org", {} as RuntimeStore, "Which projects?", thread, { signal: new AbortController().signal, onToolEvent: async (e) => { events.push(e); } }))
+      "org", {} as RuntimeStore, "Which projects?", thread, execution(events, true)))
       .rejects.toMatchObject({ reason: "answer_cut_off", details: { code: "ANSWER_CUT_OFF" } });
 
     expect(events.filter((e) => e.type === "delta")).toEqual([{ type: "delta", text: "Half an" }]);
     expect(steps(events).at(-1)).toBe("answer:failed:1");
+    // A cut-off answer is a call that completed: it keeps its finish reason.
+    expect(events.filter((e) => e.type === "diagnostics").at(-1)).toEqual({
+      type: "diagnostics",
+      modelCalls: [{ index: 2, name: "answer", durationMs: expect.any(Number), finishReason: "max_tokens" }],
+    });
     // The half answer never joined the thread.
     const messages = (await graphValues(thread)).messages as { text: string }[];
     expect(messages.map((m) => m.text)).toEqual(["Which projects?"]);

@@ -9,12 +9,14 @@
  * - the shared `entities` event (`../entities.ts`) — entity cards and the
  *   links between them, upserted by ref, before the answer;
  * - `<event>.summary` — model calls, duration and counts, once, last;
- * - the answer as the shared `delta` events.
+ * - the answer as the shared `delta` events;
+ * - when the chat asked for it, the shared `diagnostics` event after each
+ *   model call, named by its step (`calls`).
  *
  * Summaries are written for people: display names, never ids or keys.
  */
 
-import type { StreamEvent } from "../../../assistants/index.js";
+import { ModelCalls, type StreamEvent } from "../../../assistants/index.js";
 import { entitiesEvent, type EntityCard, type EntityLink } from "../entities.js";
 
 /** One step of a pipeline, as the client draws it. */
@@ -48,13 +50,14 @@ export interface StepReport {
 export class Trace {
   private readonly rounds = new Map<string, number>();
   readonly timings: Record<string, number> = {};
-  modelCalls = 0;
   private readonly started = performance.now();
 
   constructor(
     private readonly event: string,
     private readonly emit: (event: StreamEvent) => Promise<void>,
     private readonly signal: AbortSignal,
+    /** The turn's model calls; each step starts its own by its id. */
+    readonly calls: ModelCalls = new ModelCalls(),
   ) {}
 
   graph(topology: Topology): Promise<void> {
@@ -107,7 +110,7 @@ export class Trace {
   summary(counts: Record<string, number>): Promise<void> {
     return this.emit({
       type: `${this.event}.summary`,
-      modelCalls: this.modelCalls,
+      modelCalls: this.calls.count,
       durationMs: Math.round(performance.now() - this.started),
       ...counts,
       timings: this.timings,

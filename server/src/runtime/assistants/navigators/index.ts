@@ -134,7 +134,7 @@ export async function run(turn: NavigatorTurn): Promise<string> {
       previous = state.carried ?? [];
       intent = await trace.step("understand", async (report) => {
         const raw = await decide(
-          model, trace, "navigator_intent",
+          model, trace.calls.start("understand"), "navigator_intent",
           intentSchema(Object.keys(lens.entityTypes), [...anchorTypes], [...relations]),
           UNDERSTAND,
           understandInput(schemaText(lens, relations, anchorTypes), message, history, previous),
@@ -223,9 +223,9 @@ export async function run(turn: NavigatorTurn): Promise<string> {
     }, ["walk", "focus"])
     .addNode("answer", async () => {
       reply = await trace.step("answer", async (report) => {
-        trace.modelCalls++;
-        const { text } = await streamAnswer(
+        const text = await streamAnswer(
           model,
+          trace.calls.start("answer"),
           config.instructions ? `${ANSWER}\n\nADDITIONAL INSTRUCTIONS:\n${config.instructions}` : ANSWER,
           answerInput(board, evidence, message, history, notes),
           signal,

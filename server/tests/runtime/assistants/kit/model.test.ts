@@ -2,14 +2,16 @@
  * What only the answer stream itself tells, run through the real provider
  * clients on a scripted HTTP stream: a provider's failure after the stream
  * has started — the HTTP status was 200, so only the error's own type or
- * code names the reason — and an answer the model ended early, which each
- * client reports in its own place.
+ * code names the reason — an answer the model ended early, which each
+ * client reports in its own place, and the usage of the whole call, which
+ * each client reports in its own chunks.
  */
 
 import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOpenAI } from "@langchain/openai";
 import { describe, expect, it, vi } from "vitest";
 
+import { ModelCalls } from "../../../../src/assistants/index.js";
 import { streamAnswer } from "../../../../src/runtime/assistants/kit/model.js";
 
 /** A fetch answering every request with one 200 event stream. */
@@ -42,11 +44,16 @@ const OPENAI_START = `data: ${JSON.stringify({
   choices: [{ index: 0, delta: { role: "assistant", content: "Half an" }, finish_reason: null }],
 })}\n\n`;
 
+/** One streamed answer; `calls` are the model-call entries it sent. */
 async function answer(model: ChatAnthropic | ChatOpenAI) {
   const deltas: string[] = [];
-  const failed = await streamAnswer(model, "Answer.", "Who?", new AbortController().signal, async (text) => { deltas.push(text); })
-    .catch((error: unknown) => error);
-  return { deltas, failed };
+  const sent: Record<string, unknown>[] = [];
+  const recorder = new ModelCalls(async (event) => { sent.push(event); });
+  const failed = await streamAnswer(
+    model, recorder.start("answer"), "Answer.", "Who?", new AbortController().signal, async (text) => { deltas.push(text); },
+  ).catch((error: unknown) => error);
+  const calls = sent.flatMap((event) => event.modelCalls as Record<string, unknown>[]);
+  return { deltas, failed, calls };
 }
 
 describe("a failure after the answer stream started", () => {
@@ -133,7 +140,7 @@ describe("an answer the model ended early", () => {
     const controller = new AbortController();
     const model = openai(OPENAI_START + chunk({ content: " answer" }, "length") + "data: [DONE]\n\n");
 
-    const failed = await streamAnswer(model, "Answer.", "Who?", controller.signal, async (text) => {
+    const failed = await streamAnswer(model, new ModelCalls().start(), "Answer.", "Who?", controller.signal, async (text) => {
       if (text !== " answer") return;
       // The client reads the rest of the stream meanwhile; then the request is cancelled.
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -153,6 +160,59 @@ describe("an answer the model ended early", () => {
     const { deltas, failed } = await answer(model());
 
     expect(deltas).toEqual(["Half an"]);
-    expect(failed).toMatchObject({ text: "Half an" });
+    expect(failed).toBe("Half an");
+  });
+});
+
+describe("the model call of a streamed answer", () => {
+  it("carries the whole call's usage from Anthropic, which reports the input first and the output last", async () => {
+    const start = event("message_start", {
+      type: "message_start",
+      message: {
+        id: "msg_1", type: "message", role: "assistant", model: "claude-haiku-5-5", content: [],
+        stop_reason: null, stop_sequence: null,
+        usage: { input_tokens: 410, output_tokens: 0, cache_read_input_tokens: 4800, cache_creation_input_tokens: 0 },
+      },
+    });
+    const body = start +
+      event("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }) +
+      event("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Ada." } }) +
+      event("content_block_stop", { type: "content_block_stop", index: 0 }) +
+      event("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 312 } }) +
+      event("message_stop", { type: "message_stop" });
+
+    const { calls } = await answer(anthropic(body));
+
+    // Input from the first chunk (its cached parts included), output from the last.
+    expect(calls).toEqual([{
+      index: 1, name: "answer", durationMs: expect.any(Number),
+      usage: { input: 5210, output: 312, cacheRead: 4800, cacheWrite: 0 }, finishReason: "end_turn",
+    }]);
+  });
+
+  it("carries the whole call's usage from the OpenAI protocol, which reports it once, last", async () => {
+    const { calls } = await answer(openai(OPENAI_START + chunk({}, "stop") + OPENAI_USAGE));
+
+    expect(calls).toEqual([{
+      index: 1, name: "answer", durationMs: expect.any(Number), usage: { input: 5, output: 2 }, finishReason: "stop",
+    }]);
+  });
+
+  it("keeps the usage and finish reason of an answer refused as cut off", async () => {
+    const { failed, calls } = await answer(openai(OPENAI_START + chunk({}, "length") + OPENAI_USAGE));
+
+    expect(failed).toMatchObject({ reason: "answer_cut_off" });
+    expect(calls).toEqual([{
+      index: 1, name: "answer", durationMs: expect.any(Number), usage: { input: 5, output: 2 }, finishReason: "length",
+    }]);
+  });
+
+  it("lists a call that failed, without usage", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const body = OPENAI_START + `data: ${JSON.stringify({ error: { message: "provider words", type: "server_error", code: null } })}\n\n`;
+
+    const { calls } = await answer(openai(body));
+
+    expect(calls).toEqual([{ index: 1, name: "answer", durationMs: expect.any(Number), failed: true }]);
   });
 });

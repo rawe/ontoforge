@@ -69,7 +69,9 @@ describe("Trace", () => {
   it("entities, deltas and the summary with model calls, counts and timings", async () => {
     const { events, trace: t } = trace();
     await t.step("answer", async () => undefined);
-    t.modelCalls += 2;
+    // The summary counts every call started, failed ones too.
+    await t.calls.start("understand").done({});
+    await t.calls.start("answer").failed();
     const card = { ref: "E1", id: "x", type: "person", typeName: "Person", label: "Lena", role: "anchor" as const, hop: 0, reason: "r", fields: [], evidence: true };
     await t.entities([card], [{ id: "r1", from: "E1", to: "E1", type: "manages", label: "manages" }]);
     await t.delta("Hi");

@@ -388,6 +388,9 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       const names = nameKeys(lens);
       const entity = fitValue(selected(centre, fields, lens.entityTypes[key]), neighbours.length === 0 ? whole : whole / 2, names);
       const room = whole - size(entity.value);
+      // What one neighbour may take: the room of the list less its two brackets,
+      // the measure `fitRows` holds a row to — so no row is fitted a second time.
+      const rowRoom = room - 2;
       // A neighbour that fits the result stays as it is. One that is larger
       // alone is a relation and an entity, each shortened inside — the
       // relation within half the room, the entity within what is left — so
@@ -396,10 +399,10 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       const rows = neighbours.map((neighbour) => {
         const other = neighbour.entity as Row;
         const row = { ...neighbour, entity: selected(other, fields, lens.entityTypes[String(other._entityTypeKey)]) };
-        if (size(row) <= room) return row;
+        if (size(row) <= rowRoom) return row;
         shortened = true;
-        const relation = fitValue(neighbour.relation as Row, Math.floor(room / 2), RELATION_KEPT).value;
-        return { ...row, relation, entity: fitValue(row.entity, room - NEIGHBOUR_FRAME - size(relation), names).value };
+        const relation = fitValue(neighbour.relation as Row, Math.floor(rowRoom / 2), RELATION_KEPT).value;
+        return { ...row, relation, entity: fitValue(row.entity, rowRoom - NEIGHBOUR_FRAME - size(relation), names).value };
       });
       const fitted = fitRows(rows, room, names);
       const narrow = [
@@ -420,7 +423,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
           // With neighbours the entity had half the result: get_entity gives it the whole.
           entity.cut && neighbours.length > 0 && "A long value of the entity was cut to leave room for its neighbours." +
             (granted.has(TOOL_GET_ENTITY) ? " get_entity returns more of it." : ""),
-          shortened && "A long value of a neighbour was cut to fit this result.",
+          (shortened || fitted.cut) && "A long value of a neighbour was cut to fit this result.",
           entity.cut && neighbours.length === 0 && LONG_VALUE_CUT,
         ),
       };

@@ -373,6 +373,32 @@ describe("get_neighbors and the size rule", () => {
     expect(result).not.toHaveProperty("more");
   });
 
+  it("keeps a neighbour's relation and entity at every size around the room a result has", async () => {
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithManyProperties(1));
+    invalidateLoadedSchemaCache();
+    store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }, "person", "p1"));
+    const neighbourOf = (length: number) => ({
+      relation: { ...makeRelation({}, { relationId: "r1" }), direction: "outgoing" },
+      entity: makeEntity({ name: "Acme", extra_0: "i".repeat(length) }, "company", "c1"),
+    });
+    // The length at which the neighbour alone is as large as a whole result, and the sizes around it.
+    const atBound = BOUND - size(neighbourOf(0));
+    for (let length = atBound - 1_100; length <= atBound + 40; length += 1) {
+      store.getNeighbors.mockImplementation(async (_id: string, direction: string) => (direction === "outgoing" ? [neighbourOf(length)] : []));
+
+      const result = await call("get_neighbors", { entity_type_key: "person", entity_id: "p1" });
+
+      const [neighbour] = result.neighbors as { relation: Row; entity: Row }[];
+      expect(size(result), `length ${length}`).toBeLessThanOrEqual(BOUND);
+      expect(neighbour!.relation, `length ${length}`).toMatchObject({ _id: "r1", direction: "outgoing" });
+      expect(neighbour!.entity, `length ${length}`).toMatchObject({ _id: "c1", _entityTypeKey: "company", name: "Acme" });
+      // Whole, or shortened and said so: never one without the other.
+      const whole = neighbour!.entity.extra_0 === "i".repeat(length);
+      expect("more" in result, `length ${length}`).toBe(!whole);
+      if (!whole) expect(result.more).toBe("A long value of a neighbour was cut to fit this result.");
+    }
+  });
+
   it("says of a neighbour's value cut to fit that reading the neighbour itself returns more", async () => {
     store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithManyProperties(1));
     invalidateLoadedSchemaCache();

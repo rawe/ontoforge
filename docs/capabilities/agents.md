@@ -84,7 +84,7 @@ know it: it is not listed, read or written there.
 
 REST chat reports every tool invocation as it starts, with complete arguments, and attaches
 its structured result as soon as it completes — always, with no switch: tool activity is
-part of the product, not diagnostics. Repeated calls remain distinguishable, and one slow
+part of the product, not [diagnostics](threads.md#diagnostics). Repeated calls remain distinguishable, and one slow
 parallel call does not hide another's result. Schema-invalid arguments and recoverable
 validation/not-found failures remain visible while the model corrects them. The assistant
 answer appears once, complete, after tool work finishes; a turn using no tools still

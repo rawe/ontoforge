@@ -15,6 +15,12 @@ assistant, so it survives a reload; without one — or with one the lens does no
 `Default` is shown and the address updated to name it. Each assistant has its own
 conversation, restored from the server when it is picked.
 
+Every tab has a "Show diagnostics" switch, off by default and remembered once for all
+three: on, each answer asks for its [diagnostics](../capabilities/threads.md#diagnostics)
+and the side panel shows them — even where the kind's own switch hides the panel — as a
+*Model calls* tab with the [model-call list](#assistant-chat) for agents and navigators,
+as the [diagnostics panel](#assistant-chat) for retrievers; off, none are requested.
+
 **Agents** — the side panel has two tabs: *Entities*, the cards of the
 [entities the answer met](../capabilities/threads.md#the-entities-a-turn-met), each linking to
 the entity's page, and *Tool calls*. Tool calls stream into a **tool-call panel** that
@@ -28,8 +34,9 @@ click away; a result that [left something out](../capabilities/agents.md#what-a-
 shows the sentence the model was given about it; a tool that answers with an error shows it highlighted. The panel heads with
 the question, the number of calls, the time spent inside tools — parallel calls once, said
 so when calls overlapped, the model's thinking not at all — and how long the answer took.
-Each answer's button shows the count of calls and of entities. A "Show details" switch,
-remembered per browser and on by default, shows the panel and the buttons; off hides both. Tool calls live
+Each answer's button shows the count of calls and of entities, and says when the answer
+has diagnostics. A "Show details" switch, remembered per browser and on by default, shows
+the panel and the buttons; off hides both. Tool calls live
 as long as the open chat: answers restored from the server have none, and the panel says
 so. A failed or stopped answer marks its unfinished calls interrupted.
 
@@ -37,10 +44,8 @@ so. A failed or stopped answer marks its unfinished calls interrupted.
 is the lens's [default retriever](../capabilities/retrievers.md#the-default-retriever). The
 side panel shows the cards of the
 [results the answer was given](../capabilities/threads.md#the-entities-a-turn-met), each linking
-to the entity's page. A "Show diagnostics" switch, off by default and remembered, requests
-diagnostics with every answer and shows them in the
-[diagnostics panel](#assistant-chat), a second tab beside the entities; off, none are
-requested. A question to a retriever
+to the entity's page. With diagnostics, the [diagnostics panel](#assistant-chat) is a
+second tab beside the entities. A question to a retriever
 the lens cannot run shows the server's refusal with its reasons.
 
 **Navigators** — chat with the lens's [navigators](../capabilities/navigators.md); `Default`
@@ -90,7 +95,9 @@ the default.
 **Test panel.** Beside the form: a header with the kind's controls and one line on what it
 asks, then the kind's [assistant chat](#assistant-chat) with no picker. It asks the saved
 version; saving starts a new conversation, and none is restored. A new or changed
-assistant blocks questions and says why; a kind may block more. Without a
+assistant blocks questions and says why; a kind may block more. Every answer asks for
+[diagnostics](../capabilities/threads.md#diagnostics) and the side panel shows them, as
+in the [Assistants panel](#assistants-panel) with the switch on. Without a
 language-model provider the panel says that the kind cannot answer.
 
 ## Agent editor
@@ -180,7 +187,8 @@ invalid navigator also blocks questions.
 ## Evidence sidebar
 
 The side panel of a navigator's answer, filling while the question runs — the entities
-appear before the answer. Three views, each with its count where it has one:
+appear before the answer. Three views, each with its count where it has one, and a
+fourth with diagnostics:
 
 - **Entities** — the cards, grouped as anchors (named in the question), carried over
   from the previous answer, and reached by the walk, each group explained in a line. A
@@ -197,6 +205,7 @@ appear before the answer. Three views, each with its count where it has one:
   or interrupted — its time, and its one-line summary; a repeated step shows its rounds,
   and the repeat edge its reason. A footer sums up model calls, total time, entities and
   evidence.
+- **Model calls** — the [model-call list](#assistant-chat), each call named after its step.
 
 ## Assistant chat
 
@@ -222,6 +231,13 @@ restores its messages from the server.
 - **Side panel** — beside the conversation, stacked below it on a narrow screen, showing
   the kind's insight into one answer. A button under each answer selects it; by default,
   and after every new question, the panel follows the latest answer that has any.
+- **Model-call list** — with [diagnostics](../capabilities/threads.md#diagnostics), the
+  same for every kind and filling while the answer runs: per model call its number, its
+  step's name where the kind has steps, its duration, the tokens in, out, read from and
+  written to the cache — each only as the provider reported it, a reported 0 shown — its
+  finish reason, and whether it failed; then a total line with the number of calls and
+  failures, their summed time and tokens. The ask dock and the Studio's assistant panel
+  never ask for diagnostics.
 
 Follow-up questions refer to earlier completed answers of the thread. A failed answer
 keeps what arrived and says "Incomplete" with the reason; a stopped one says it is not
@@ -244,9 +260,9 @@ on its button, in four tabs, filling while the question runs:
 - **Results** — per sub-query, best first, each result's type, label and
   [matched-via](finding-and-collecting.md#matched-via) line; expanding one shows the answer fields sent as
   evidence and the index that found it.
-- **Model calls** — each model call under its name — Planner, Planner (repeated) when a
-  follow-up's planning was repeated, Response — with token usage, finish reason,
-  instructions, input and output, marked where the trace is truncated.
+- **Model calls** — the [model-call list](#assistant-chat), each call under its name —
+  Planner, Planner (repeated) when a follow-up's planning was repeated, Response — with
+  its instructions, input and output, marked where the trace is truncated.
 
 No score is shown anywhere. See
 [capabilities/retrievers.md](../capabilities/retrievers.md#diagnostics).

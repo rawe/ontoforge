@@ -17,8 +17,10 @@ routes, its extra request fields and its own events.
 | POST | `/ai/assistants/<kind>/{assistantKey}/chat` | One message: a new thread, or a turn on an existing one |
 | GET | `/ai/assistants/<kind>/{assistantKey}/threads/{threadId}` | Read a thread back |
 
-**Request.** `message` (1 to 2,000 characters) and optionally `threadId`; a kind may add
-fields, and unknown fields are rejected. Without `threadId` the message starts a new
+**Request.** `message` (1 to 2,000 characters), optionally `threadId`, and optionally
+`diagnostics` (boolean, default `false`) to receive the turn's
+[`diagnostics` events](#diagnostics); a kind may add fields, and unknown fields are
+rejected. Without `threadId` the message starts a new
 thread bound to the addressed assistant; with it, the message continues that thread. A
 thread that is unknown, expired, bound to another assistant or started by another
 principal answers `RESOURCE_NOT_FOUND` with `details.code` `THREAD_NOT_FOUND`; a thread
@@ -41,7 +43,8 @@ The shared events mean the same for every kind:
 | `thread` | `threadId` | Always first: the thread this turn runs on |
 | `delta` | `text` | A fragment of the answer, for kinds that stream their answer |
 | `entities` | `entities` — each `ref`, `id`, `type`, `typeName`, `label`, `fields` (`name`, `value`), `evidence`, and as the kind sends them `reason`, `role`, `hop` — and `links` — each `id` (the stored relation's id), `from`, `to` (refs, directed as stored), `type`, `label` | The entities the turn met and the stored relations between them; a later card replaces an earlier one with the same `ref`, a link is identified by its `id` |
-| `final` | `reply` | Terminal: the complete answer |
+| `diagnostics` | `modelCalls`, and the kind's own fields | Only when the request asked for diagnostics; [below](#diagnostics) |
+| `final` | `reply`, and `artifacts` when the turn left any (each `type`, `version`, `value`) | Terminal: the complete answer |
 | `error` | `error` | Terminal: the public error object with `code`, `message` and optional `details` |
 
 Refs are `E1`, `E2`, … in the order the turn met the entities, unique within a turn; an
@@ -75,6 +78,27 @@ the turns a thread keeps, without tool payloads. Unknown, expired, another assis
 another principal's thread: `THREAD_NOT_FOUND`. Reading needs no language-model provider
 and does not count as use; it is gated like the kind's list.
 
+### Diagnostics
+
+With `diagnostics` true, a turn sends `diagnostics` events
+([semantics](../capabilities/threads.md#diagnostics)), several in a turn, each before the
+terminal event: one after each model call ends, a failed call included, and for a kind
+with fields of its own one whenever they become known. `modelCalls` lists model calls,
+each:
+
+| Field | Content |
+|---|---|
+| `index` | 1, 2, … in the order the calls started; the call's identity |
+| `name` | The step that made the call, where the kind has steps: a retriever's `plan`, `replan`, `answer`; a navigator's step id. Absent for an agent and the Studio helper |
+| `durationMs` | Whole milliseconds |
+| `usage` | `input` (the whole prompt, cached parts included), `output`, `cacheRead`, `cacheWrite` — each only when the provider reported it, a reported 0 kept; absent when nothing was reported |
+| `finishReason` | As the provider gave it, when it did |
+| `failed` | `true` for a call that threw; it has no usage |
+
+A client merges a turn's events: `modelCalls` entries by `index`, `timings` by key,
+`limitations` without duplicates; any other field replaces the one before. Without
+`diagnostics` no such event is sent.
+
 ## Retriever list, chat and retrieve
 
 The stored retriever runs — or, under the key `_default`, the lens's
@@ -95,9 +119,8 @@ and [retrieve](../capabilities/retrievers.md#retrieve).
 with `builtIn` true. The list carries no configuration and no validation, and needs no
 language-model provider.
 
-**Chat.** The [shared request](#assistant-chat-and-threads) plus `diagnostics` (boolean,
-default false). Without a language-model provider the route answers
-`FEATURE_DISABLED`, as the AI routes do. An unknown retriever answers not found, a retriever its
+**Chat.** The [shared request](#assistant-chat-and-threads). Without a language-model
+provider the route answers `FEATURE_DISABLED`, as the AI routes do. An unknown retriever answers not found, a retriever its
 lens can no longer run `VALIDATION_ERROR` with the errors under `details.errors`, a
 default retriever with nothing to search `VALIDATION_ERROR`, an unknown or busy thread as
 shared — each before the stream opens.
@@ -107,8 +130,7 @@ as `delta` events, then one terminal `final` or `error`. Before the answer, when
 reached the answer model, one `entities` event carries them, all evidence, without links —
 with or without diagnostics. Its own events:
 `retriever.phase` (`phase` `plan`, `retrieve` or `answer`, `status` `start` or `end`, an
-end with `durationMs`), and — only with `diagnostics` true — `retriever.diagnostics`
-events, which carry:
+end with `durationMs`). Its [`diagnostics` events](#diagnostics) add:
 
 | Field | Content |
 |---|---|
@@ -117,8 +139,7 @@ events, which carry:
 | `limitations` | What the answer model was told limits the results |
 | `searchCalls` | The number of query texts searched |
 | `timings` | Milliseconds: `plan`, `retrieve`, `answer`, `planModel`, `validation`, `search`, `context`, `firstDelta`, `answerModel`, `total`; `planModel` and `validation` add up both planning calls when planning was repeated |
-| `modelIO` | Bounded system prompt, input and output traces of every model call, each with its `phase` — `plan`, `replan` for a follow-up's repeated planning, `answer` — and with usage and finish reason where the provider reports them |
-| `llmCalls` | The number of model calls: 2, or 3 when planning was repeated |
+| `modelCalls` | Each call, named `plan`, `replan` for a follow-up's repeated planning, or `answer`, also carries bounded traces: `systemPrompt`, `input` with `inputTruncated`, `output` with `outputTruncated` |
 
 `matched` has the form [capabilities/search.md](../capabilities/search.md#what-matched) describes.
 

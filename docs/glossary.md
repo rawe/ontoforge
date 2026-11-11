@@ -303,8 +303,8 @@ a question into searches of the retriever's indices, optionally narrowed to rela
 groups and exact filters, and an answer model replies from what they found — or, for a
 retrieve, the found entities are returned without an answer. Every lens also has an
 implicit **default retriever**, derived from its managed indices. Its insight into a run
-is **diagnostics** — plan, results per sub-query, timings, model traces — a debugging
-feature, given only on request. See
+is its diagnostics — beside its model calls the plan, results per sub-query, timings and
+model traces — given only on request. See
 [capabilities/retrievers.md](capabilities/retrievers.md).
 
 **Navigator** — the assistant kind that answers by walking the graph: a planning model
@@ -318,6 +318,11 @@ also has an implicit **default navigator**. See
 **Thread** — one conversation with one assistant, held by the server: a client sends its
 new message and the thread's id, and the server continues from the turns the thread kept.
 See [capabilities/threads.md](capabilities/threads.md).
+
+**Diagnostics** — what an assistant's turn did, sent only when its message asks: each model
+call with its duration, the tokens the provider reported, its finish reason and whether it
+failed, the same for every kind, plus what a kind adds. A debugging and tuning feature. See
+[capabilities/threads.md](capabilities/threads.md#diagnostics).
 
 ### Access
 

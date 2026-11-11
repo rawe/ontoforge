@@ -81,6 +81,24 @@ it was handed to the answer model; kind-specific context keeps its own meaning.
 All kinds use the shared `entities` event for these cards; a kind's own events and tool
 events do not carry the cards ([ADR 0027](../adr/0027-one-shared-entities-event.md)).
 
+## Diagnostics
+
+A message may ask for **diagnostics**: what its turn did, for debugging and tuning an
+assistant. Every assistant reports them the same way: each model call of the turn — its
+number in the order the calls started, the step that made it where the kind has steps,
+how long it took, the tokens the provider reported (the whole prompt with its cached
+parts, the output, what was read from and written to the provider's cache; a count the
+provider did not report is left out, never estimated), the reason the model gave for
+stopping, and whether the call failed. A call is reported as soon as it ends, so a turn
+that fails has already shown the calls before it. A kind may add its own: a
+[retriever](retrievers.md#diagnostics) its plan, results, timings and model texts.
+
+Nothing of this is sent unless asked, and the work and answer are the same either way.
+Each kind's progress — an agent's tool activity, a retriever's phase, a navigator's steps
+— is always streamed and stays the kind's own. Diagnostics belong to the turn's stream
+only: a thread does not keep them
+([ADR 0036](../adr/0036-one-shared-opt-in-diagnostics-event.md)).
+
 ## Lifetime
 
 A thread expires after a period without activity: a message accepted for it or a turn
@@ -102,4 +120,5 @@ wherever the assistant kind's list is.
 
 REST only, per assistant kind: the chat request's optional thread id, the stream's leading
 thread event, the read route, and the refusals for an unknown and a busy thread
-([../interfaces/](../interfaces/assistants-rest.md#assistant-chat-and-threads)). No MCP tool reaches a thread.
+([../interfaces/](../interfaces/assistants-rest.md#assistant-chat-and-threads)); the
+diagnostics request and event ([../interfaces/](../interfaces/assistants-rest.md#diagnostics)). No MCP tool reaches a thread.

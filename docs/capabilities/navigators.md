@@ -161,6 +161,8 @@ A turn streams its work before its answer:
   client had under the same refs.
 - **A summary** — model calls, duration, entities met, evidence, hops — once, before the
   end of the turn.
+- **Diagnostics**, on request — its model calls, each named after its step,
+  [as every assistant reports them](threads.md#diagnostics).
 
 Only evidence can be cited. The event format is in
 [../interfaces/](../interfaces/assistants-rest.md#navigator-list-and-chat).

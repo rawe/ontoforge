@@ -279,11 +279,12 @@ each cut to 2,000 characters.
 
 ### Diagnostics
 
-On request, the stream also reports what the retriever did: the validated plan — each
+On request, the stream also reports what the retriever did: beside its model calls —
+the plan, a repeated plan, the answer — [as every assistant reports them](threads.md#diagnostics),
+each with bounded traces of its instructions, input and output, the validated plan — each
 planned filter with its definition, so the plan reads without the configuration — one result
 row per entity and sub-query with what matched and its answer fields, the limitations,
-the number of searches, phase timings and bounded traces of every model call —
-the plan, a repeated plan, the answer. Diagnostics are for debugging: they are sent only
+the number of searches and phase timings. Diagnostics are for debugging: they are sent only
 when a question asks for them, and any question may. Progress — which phase runs — and
 the answer text are always streamed. The event format is in [../interfaces/](../interfaces/assistants-rest.md#retriever-list-chat-and-retrieve).
 

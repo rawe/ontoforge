@@ -10,13 +10,14 @@
 
 import type { ChatAnthropic } from "@langchain/anthropic";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { HumanMessage, mergeUsageMetadata, SystemMessage, type UsageMetadata } from "@langchain/core/messages";
+import { HumanMessage, SystemMessage, type UsageMetadata } from "@langchain/core/messages";
 import type { ChatOpenAI } from "@langchain/openai";
 
 import { messageEnd, type ModelCall } from "../../../assistants/index.js";
 import { settings } from "../../../config.js";
 import { createAiModel, cutOff, finishReason, getAiModel, modelFailure } from "../../../core/ai.js";
 import { type ModelError, ValidationError } from "../../../core/exceptions.js";
+import { largerUsage } from "../../../core/usage.js";
 
 function disabled(): ValidationError {
   return new ValidationError("AI feature is disabled (AI_PROVIDER not configured)", { code: "FEATURE_DISABLED" });
@@ -117,8 +118,8 @@ export async function streamAnswer(
       signal.throwIfAborted();
       const delta = contentText(chunk.content);
       // A provider may report usage in parts: Anthropic the input with the
-      // first chunk and the output with the last. The call's usage is their sum.
-      if (chunk.usage_metadata) usage = usage === undefined ? chunk.usage_metadata : mergeUsageMetadata(usage, chunk.usage_metadata);
+      // first chunk and the output, as a running total, with later ones.
+      if (chunk.usage_metadata) usage = usage === undefined ? chunk.usage_metadata : largerUsage(usage, chunk.usage_metadata);
       // The reason an answer ended is on one chunk, not always the last: the
       // OpenAI protocol's among the chunk's response metadata, Anthropic's
       // among its additional fields.

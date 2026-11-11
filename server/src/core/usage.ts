@@ -27,3 +27,21 @@ export function tokenUsage(usage: unknown): TokenUsage | undefined {
   }).filter(([, count]) => typeof count === "number" && Number.isFinite(count));
   return counts.length === 0 ? undefined : Object.fromEntries(counts) as TokenUsage;
 }
+
+type Counts = Record<string, unknown>;
+
+/**
+ * The usage of a streamed call from the usage two of its chunks carried:
+ * per count, the larger one. A provider reports a count once (the OpenAI
+ * protocol with its last chunk, Anthropic the input with its first) or as
+ * a running total (Anthropic's output), never as amounts to add up.
+ */
+export function largerUsage<T extends object>(a: T, b: T): T {
+  const whole = { ...a } as Counts;
+  for (const [key, count] of Object.entries(b)) {
+    const other = whole[key];
+    if (typeof count === "number") whole[key] = typeof other === "number" ? Math.max(other, count) : count;
+    else if (count !== null && typeof count === "object") whole[key] = largerUsage((other ?? {}) as Counts, count as Counts);
+  }
+  return whole as T;
+}

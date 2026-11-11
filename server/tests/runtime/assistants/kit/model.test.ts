@@ -171,7 +171,7 @@ describe("the model call of a streamed answer", () => {
       message: {
         id: "msg_1", type: "message", role: "assistant", model: "claude-haiku-5-5", content: [],
         stop_reason: null, stop_sequence: null,
-        usage: { input_tokens: 410, output_tokens: 0, cache_read_input_tokens: 4800, cache_creation_input_tokens: 0 },
+        usage: { input_tokens: 410, output_tokens: 1, cache_read_input_tokens: 4800, cache_creation_input_tokens: 0 },
       },
     });
     const body = start +
@@ -183,7 +183,8 @@ describe("the model call of a streamed answer", () => {
 
     const { calls } = await answer(anthropic(body));
 
-    // Input from the first chunk (its cached parts included), output from the last.
+    // Input from the first chunk (its cached parts included); the output is the
+    // last chunk's running total, not the first chunk's count added to it.
     expect(calls).toEqual([{
       index: 1, name: "answer", durationMs: expect.any(Number),
       usage: { input: 5210, output: 312, cacheRead: 4800, cacheWrite: 0 }, finishReason: "end_turn",

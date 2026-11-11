@@ -98,13 +98,12 @@ function shortening(keep: Kept): (value: unknown, cap: number, wide: boolean) =>
   return shrunk;
 }
 
-/** What is left of a value nothing shortens enough: its shape and a marker
- * — an object its system fields, a list nothing. */
+/** What is left of a value nothing shortens enough: its kind and a
+ * marker, and nothing of its content — so it can never be large. */
 function remnant(value: unknown): unknown {
   const marker = `[cut: a value of ${size(value)} characters that does not fit a result]`;
   if (Array.isArray(value)) return [`…${marker}`];
-  if (!isPlainObject(value)) return `…${marker}`;
-  return Object.fromEntries([...Object.entries(value).filter(([key]) => key.startsWith("_")), ["…", marker]]);
+  return isPlainObject(value) ? { "…": marker } : `…${marker}`;
 }
 
 /**
@@ -113,7 +112,8 @@ function remnant(value: unknown): unknown {
  * that says how much of it is shown — and, when that is not enough, whose
  * objects keep only their system fields, the values `keep` names for them
  * (an entity's name) and their leading other values. An object stays an
- * object and a list a list. `cut` tells which. A budget below
+ * object and a list a list; one that even then does not fit is replaced
+ * by a marker of its kind. `cut` tells which. A budget below
  * `LEAST_BUDGET` is read as that.
  */
 export function fitValue<T>(value: T, budget = RESULT_CHARACTERS, keep: Kept = NOTHING_MORE): { value: T; cut: boolean } {
@@ -123,21 +123,19 @@ export function fitValue<T>(value: T, budget = RESULT_CHARACTERS, keep: Kept = N
   // Texts and lists first; an object loses values only when it is still too large.
   for (const wide of [false, true]) {
     let cap = Math.max(SMALLEST_CUT, room);
-    let before = Infinity;
     // The first excess is taken off the cap as it is — the markers and the
     // values around a cut take room too — so the result uses its bound;
-    // after that the cap falls by a fifth, so the passes stay few.
+    // after that the cap falls by a fifth, down to the smallest cut: a
+    // pass that changes nothing says nothing about a smaller cap.
     let exact = true;
     for (;;) {
       const fitted = shrunk(value, cap, wide);
       const now = size(fitted);
       if (now <= room) return { value: fitted as T, cut: true };
-      // Cutting texts and lists further changes nothing: it is the object that is too large.
-      if (cap === SMALLEST_CUT || (!wide && now >= before)) break;
+      if (cap === SMALLEST_CUT) break;
       const fifth = Math.floor(cap * 0.8);
       cap = Math.max(SMALLEST_CUT, exact ? Math.min(cap - 1, Math.max(cap - (now - room) - MARKER_ROOM, fifth)) : fifth);
       exact = false;
-      before = now;
     }
   }
   return { value: remnant(value) as T, cut: true };

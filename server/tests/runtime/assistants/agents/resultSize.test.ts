@@ -155,12 +155,11 @@ describe("fitValue", () => {
     const object = fitValue({ [`k${"k".repeat(30_000)}`]: 1, _id: "x" }).value as Record<string, unknown>;
     expect(object).toEqual({ _id: "x", "…": "[cut: first 0 of 1 values]" });
 
-    // Even when what it must keep is too much: its system fields and a marker remain.
-    const systems = Object.fromEntries(Array.from({ length: 2_000 }, (_, i) => [`_s${i}`, "v".repeat(20)]));
+    // What it must keep can be too much on its own: then a marker stands for it, within the bound.
+    const systems = Object.fromEntries(Array.from({ length: 2_000 }, (_, i) => [`_s${i}`, "v".repeat(1_000)]));
     const left = fitValue({ ...systems, name: "Acme" }).value as Record<string, unknown>;
-    expect(typeof left).toBe("object");
-    expect(left._s0).toBe("v".repeat(20));
-    expect(left["…"]).toMatch(/^\[cut: a value of \d+ characters that does not fit a result\]$/);
+    expect(left).toEqual({ "…": expect.stringMatching(/^\[cut: a value of \d+ characters that does not fit a result\]$/) });
+    expect(size(left)).toBeLessThanOrEqual(RESULT_CHARACTERS);
 
     const list = fitValue([`v${"v".repeat(100_000)}`]).value;
     expect(Array.isArray(list)).toBe(true);
@@ -176,7 +175,17 @@ describe("fitValue", () => {
     for (const value of awkward) expect(size(fitValue(value).value)).toBeLessThanOrEqual(RESULT_CHARACTERS);
   });
 
-  it("needs a few passes, not thousands, when cutting texts and lists cannot help", () => {
+  it("shortens two texts that fit the bound each but not together, and keeps both", () => {
+    const fitted = fitValue({ a: "a".repeat(13_000), b: "b".repeat(13_000) }, 23_200);
+
+    expect(fitted.cut).toBe(true);
+    expect(size(fitted.value)).toBeLessThanOrEqual(23_200);
+    expect(fitted.value.a).toMatch(/^a+…\[cut: first \d+ of 13000 characters/);
+    expect(fitted.value.b).toMatch(/^b+…\[cut: first \d+ of 13000 characters/);
+    expect(fitted.value).not.toHaveProperty("…");
+  });
+
+  it("needs tens of passes, not thousands, when cutting texts and lists cannot help", () => {
     // 24,001 characters of JSON, none of them in a long text or list.
     const flat = Object.fromEntries(Array.from({ length: 2_000 }, (_, i) => [`k${String(i).padStart(6, "0")}`, 1]));
     expect(size(flat)).toBe(RESULT_CHARACTERS + 1);
@@ -188,7 +197,7 @@ describe("fitValue", () => {
     stringify.mockRestore();
     expect(size(fitted.value)).toBeLessThanOrEqual(RESULT_CHARACTERS);
     expect(Object.keys(fitted.value)[0]).toBe("k000000");
-    // One size per value and pass: four passes of 2,000 values stay far below this.
+    // Some thirty passes that measure the whole, then a few that measure each value: far below this.
     expect(calls).toBeLessThan(30_000);
   });
 

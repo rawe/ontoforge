@@ -381,9 +381,11 @@ describe("get_neighbors and the size rule", () => {
       relation: { ...makeRelation({}, { relationId: "r1" }), direction: "outgoing" },
       entity: makeEntity({ name: "Acme", extra_0: "i".repeat(length) }, "company", "c1"),
     });
-    // The length at which the neighbour alone is as large as a whole result, and the sizes around it.
+    // Every length around the one where the neighbour stops fitting whole, and a few far from it.
     const atBound = BOUND - size(neighbourOf(0));
-    for (let length = atBound - 1_100; length <= atBound + 40; length += 1) {
+    const whole: number[] = [];
+    const lengths = [atBound - 5_000, ...Array.from({ length: 140 }, (_, i) => atBound - 990 + i), atBound, atBound + 5_000];
+    for (const length of lengths) {
       store.getNeighbors.mockImplementation(async (_id: string, direction: string) => (direction === "outgoing" ? [neighbourOf(length)] : []));
 
       const result = await call("get_neighbors", { entity_type_key: "person", entity_id: "p1" });
@@ -393,11 +395,16 @@ describe("get_neighbors and the size rule", () => {
       expect(neighbour!.relation, `length ${length}`).toMatchObject({ _id: "r1", direction: "outgoing" });
       expect(neighbour!.entity, `length ${length}`).toMatchObject({ _id: "c1", _entityTypeKey: "company", name: "Acme" });
       // Whole, or shortened and said so: never one without the other.
-      const whole = neighbour!.entity.extra_0 === "i".repeat(length);
-      expect("more" in result, `length ${length}`).toBe(!whole);
-      if (!whole) expect(result.more).toBe("A long value of a neighbour was cut to fit this result.");
+      const kept = neighbour!.entity.extra_0 === "i".repeat(length);
+      expect("more" in result, `length ${length}`).toBe(!kept);
+      if (kept) whole.push(length);
+      else expect(result.more).toBe("A long value of a neighbour was cut to fit this result.");
     }
-  });
+    // The sweep crossed the boundary: some lengths fitted whole, the larger ones did not.
+    expect(whole.length).toBeGreaterThan(1);
+    expect(whole.length).toBeLessThan(lengths.length - 2);
+    expect(Math.max(...whole)).toBeLessThan(atBound);
+  }, 30_000);
 
   it("says of a neighbour's value cut to fit that reading the neighbour itself returns more", async () => {
     store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithManyProperties(1));

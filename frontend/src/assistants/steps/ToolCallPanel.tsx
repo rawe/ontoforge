@@ -246,10 +246,12 @@ function Arguments({ args }: { args: Record<string, unknown> }) {
 
 function RawJson({ value }: { value: unknown }) {
   const json = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+  // The count is of the result as the model read it, not of the indented text shown here.
+  const size = typeof value === 'string' ? value.length : JSON.stringify(value).length
   return (
     <details className="rounded border">
       <summary className="cursor-pointer px-2 py-1 text-[11px] text-muted-foreground">
-        Raw result · {json.length.toLocaleString()} characters
+        Raw result · {size.toLocaleString()} characters
       </summary>
       <pre className="max-h-72 overflow-auto border-t p-2 font-mono text-[11px] whitespace-pre-wrap break-words">{json}</pre>
     </details>

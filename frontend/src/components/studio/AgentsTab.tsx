@@ -353,14 +353,16 @@ function AgentSchemaNote({ ontologyKey, lensKey }: { ontologyKey: string; lensKe
   const [open, setOpen] = useState(false)
   return (
     <div className="grid gap-1.5">
-      <div className="flex items-center gap-2">
-        <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+      {/* The sentence wraps: kept on one line it would set the form's least width. */}
+      <div className="flex items-start gap-2">
+        <p className="min-w-0 flex-1 pt-1 text-xs text-muted-foreground">
           The schema this lens shows is always added after this prompt.
         </p>
         <Button
           type="button"
           size="xs"
           variant="ghost"
+          className="shrink-0"
           aria-expanded={open}
           data-testid="agent-schema-toggle"
           onClick={() => setOpen((o) => !o)}

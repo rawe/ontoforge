@@ -53,6 +53,15 @@ export const withAgentFields = (draft: AgentDraft, fields: AgentFields): AgentDr
   allTools: fields.tools === null, tools: fields.tools ?? draft.tools,
 })
 
+/** Whether a saved agent has an allowlist that names no tool: it answers from its prompt and the schema alone. */
+export const hasNoTools = (saved: AgentDraft): boolean => !saved.allTools && saved.tools.length === 0
+
+/** Whether the draft's tool choice can be saved: every tool, at least one,
+ * or none for an agent that is saved with none — it may stay so, while no
+ * agent is newly left without tools. */
+export const toolChoiceValid = (draft: AgentDraft, saved: AgentDraft): boolean =>
+  draft.allTools || draft.tools.length > 0 || hasNoTools(saved)
+
 export function sameDraft(a: AgentDraft, b: AgentDraft): boolean {
   return a.key === b.key && a.name === b.name && a.description === b.description && a.systemPrompt === b.systemPrompt
     && a.allTools === b.allTools && (a.allTools || (a.tools.length === b.tools.length && a.tools.every((t) => b.tools.includes(t))))

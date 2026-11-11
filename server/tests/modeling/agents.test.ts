@@ -332,6 +332,19 @@ describe("tool allowlist validation", () => {
     expect(res.statusCode).toBe(201);
   });
 
+  it("an allowlist that names no tool is accepted and stays empty", async () => {
+    holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
+    holder.store.upsertAgent.mockResolvedValue([{ ...MOCK_AGENT, tools: [] }, false]);
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/ontologies/onto/model/lenses/test_lens/assistants/agents/my-agent",
+      payload: { name: "Renamed", tools: [] },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().tools).toEqual([]);
+    expect(holder.store.upsertAgent.mock.calls[0]!.at(-1)).toEqual([]);
+  });
+
   it("tools=null means 'all available tools' and is accepted", async () => {
     holder.store.getLensByKey.mockResolvedValue(MOCK_LENS);
     holder.store.upsertAgent.mockResolvedValue([{ ...MOCK_AGENT, tools: null }, true]);

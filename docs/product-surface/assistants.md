@@ -102,7 +102,7 @@ configuration semantics are owned by [capabilities/agents.md](../capabilities/ag
 
 **Editor.** After the identity, **Behaviour**: the system prompt, and either all tools or
 an explicit checklist of the agent's [tools](../capabilities/agents.md#tools), at least
-one required. Under the system prompt one line says that the schema the lens shows is
+one required; an agent saved with none may stay so. Under the system prompt one line says that the schema the lens shows is
 always added after it; *Show schema* opens the text an agent is given, read from the
 server when opened and shown in a block that scrolls. An agent is never invalid in its
 lens.

@@ -357,6 +357,66 @@ describe("get_neighbors and the size rule", () => {
     expect(cards.map((card) => card.id).sort()).toEqual(["c1", "p1"]);
   });
 
+  it("leaves a neighbour whole when the result holds it, however large one of its values is", async () => {
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithManyProperties(1));
+    invalidateLoadedSchemaCache();
+    store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }, "person", "p1"));
+    store.getNeighbors.mockImplementation(async (_id: string, direction: string) => direction === "outgoing"
+      ? [{ relation: { ...makeRelation({}, { relationId: "r1" }), direction }, entity: makeEntity({ name: "Acme", extra_0: "i".repeat(15_000) }, "company", "c1") }]
+      : []);
+
+    const result = await call("get_neighbors", { entity_type_key: "person", entity_id: "p1" });
+
+    const [neighbour] = result.neighbors as { entity: Row }[];
+    expect(size(result)).toBeLessThanOrEqual(BOUND);
+    expect(neighbour!.entity.extra_0).toBe("i".repeat(15_000));
+    expect(result).not.toHaveProperty("more");
+  });
+
+  it("says of a neighbour's value cut to fit that reading the neighbour itself returns more", async () => {
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithManyProperties(1));
+    invalidateLoadedSchemaCache();
+    store.getEntity.mockResolvedValue(makeEntity({ name: "Alice" }, "person", "p1"));
+    store.getNeighbors.mockImplementation(async (_id: string, direction: string) => direction === "outgoing"
+      ? [{ relation: { ...makeRelation({}, { relationId: "r1" }), direction }, entity: makeEntity({ name: "Acme", extra_0: "i".repeat(40_000) }, "company", "c1") }]
+      : []);
+
+    const result = await call("get_neighbors", { entity_type_key: "person", entity_id: "p1" });
+
+    const [neighbour] = result.neighbors as { relation: Row; entity: Row }[];
+    expect(size(result)).toBeLessThanOrEqual(BOUND);
+    expect(neighbour!.relation).toMatchObject({ _id: "r1", direction: "outgoing" });
+    expect(neighbour!.entity.extra_0).toMatch(/^i+…\[cut: first \d+ of 40000 characters/);
+    // The neighbour has nearly the whole result, not a fixed half of it.
+    expect(size(neighbour!.entity)).toBeGreaterThan(BOUND * 0.8);
+    expect(result.more).toBe("A long value of a neighbour was cut to fit this result.");
+  });
+
+  it("keeps the name of an entity that loses values, wherever the name stands among them", async () => {
+    const wide = Object.fromEntries(Array.from({ length: 600 }, (_, i) => [`extra_${i}`, "v".repeat(64)]));
+    store.getFullSchemaWithLensInclusions.mockResolvedValue(schemaWithManyProperties(600));
+    invalidateLoadedSchemaCache();
+    // The name comes last, as a store may hand it.
+    const acme = { ...makeEntity(wide, "company", "c1"), name: "Acme" };
+    store.getEntity.mockResolvedValue(structuredClone(acme));
+    store.listEntities.mockResolvedValue([[structuredClone(acme)], 1]);
+    store.getNeighbors.mockImplementation(async (_id: string, direction: string) => direction === "incoming"
+      ? [{ relation: { ...makeRelation({}, { relationId: "r1" }), direction }, entity: makeEntity({ name: "Alice" }, "person", "p1") }]
+      : []);
+
+    const read = await call("get_entity", { entity_type_key: "company", entity_id: "c1" });
+    expect(size(read)).toBeLessThanOrEqual(BOUND);
+    expect(read["…"]).toMatch(/^\[cut: first \d+ of \d+ values\]$/);
+    expect(read).toMatchObject({ _id: "c1", _entityTypeKey: "company", name: "Acme" });
+
+    const listed = await call("list_entities", { entity_type_key: "company" });
+    expect((listed.items as Row[])[0]).toMatchObject({ _id: "c1", name: "Acme" });
+
+    const around = await call("get_neighbors", { entity_type_key: "company", entity_id: "c1" });
+    expect(size(around)).toBeLessThanOrEqual(BOUND);
+    expect(around.entity).toMatchObject({ _id: "c1", name: "Acme" });
+  });
+
   it("says of an entity without neighbours only that its value was cut", async () => {
     store.getEntity.mockResolvedValue(makeEntity({ name: "Alice", email: "e".repeat(100_000) }, "person", "p1"));
     store.getNeighbors.mockResolvedValue([]);

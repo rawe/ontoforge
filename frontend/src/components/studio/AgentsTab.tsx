@@ -17,7 +17,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { toDiffValue } from '@/lib/valueDiff'
-import { agentFields, draftOf, sameDraft, toInput, withAgentFields, withKey, withName, type AgentDraft } from './assistants/agentDraft'
+import { agentFields, draftOf, hasNoTools, sameDraft, toInput, toolChoiceValid, withAgentFields, withKey, withName, type AgentDraft } from './assistants/agentDraft'
 import { AssistantActionBar } from './assistants/AssistantActionBar'
 import { AssistantCard } from './assistants/AssistantCard'
 import { AssistantDefaultPage, AssistantEditorPage } from './assistants/AssistantEditorPage'
@@ -186,7 +186,7 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
 
   const dirty = !sameDraft(draft, baseline)
   const keyValid = !isNew || (isValidLensResourceKey(key) && assistantKeyError(key, existingKeys, 'Agent') === undefined)
-  const valid = draft.name.trim() !== '' && (draft.allTools || draft.tools.length > 0) && keyValid
+  const valid = draft.name.trim() !== '' && toolChoiceValid(draft, baseline) && keyValid
   const canSave = (dirty || isNew) && valid && !busy
   const blockedReason = isNew ? 'Save this agent to test it.'
     : dirty ? 'Unsaved changes. Save them to test; questions use the saved configuration.'
@@ -334,7 +334,9 @@ function AgentPage({ ontologyKey, lensKey, aiEnabled, existingKeys, agent, onSav
                     <span className="font-mono text-xs">{tool}</span>
                   </label>
                 ))}
-                {draft.tools.length === 0 && <p className="col-span-2 text-xs text-destructive">Select at least one tool.</p>}
+                {draft.tools.length === 0 && (hasNoTools(baseline)
+                  ? <p className="col-span-2 text-xs text-muted-foreground" data-testid="agent-no-tools">This agent has no tools: it answers from its prompt and the schema alone.</p>
+                  : <p className="col-span-2 text-xs text-destructive">Select at least one tool.</p>)}
               </div>
             )}
           </div>

@@ -37,13 +37,29 @@ describe("fitRows", () => {
     expect(size(fitted.rows)).toBeLessThanOrEqual(RESULT_CHARACTERS);
   });
 
-  it("shrinks a row larger than the bound alone, and goes on with the rows that still fit", () => {
-    const fitted = fitRows([{ id: 1, text: "x".repeat(100_000) }, { id: 2, text: "short" }, { id: 3, text: "y".repeat(30_000) }]);
-    expect(fitted.cut).toBe(true);
-    expect(fitted.rows.map((row) => (row as { id: number }).id)).toEqual([1, 2]);
-    expect((fitted.rows[0] as { text: string }).text).toMatch(/…\[cut: first \d+ of 100000 characters; asking again returns the same part\]$/);
-    expect(fitted.rows[1]).toEqual({ id: 2, text: "short" });
-    expect(size(fitted.rows)).toBeLessThanOrEqual(RESULT_CHARACTERS);
+  it("shrinks a row larger than the bound alone to the bound, where it fills a result of its own", () => {
+    const rows = [{ id: 1, text: "x".repeat(100_000) }, { id: 2, text: "short" }, { id: 3, text: "y".repeat(30_000) }];
+
+    const first = fitRows(rows);
+    expect(first.cut).toBe(true);
+    expect(first.rows.map((row) => row.id)).toEqual([1]);
+    expect(first.rows[0]!.text).toMatch(/…\[cut: first \d+ of 100000 characters; asking again returns the same part\]$/);
+    expect(size(first.rows)).toBeLessThanOrEqual(RESULT_CHARACTERS);
+    expect(size(first.rows)).toBeGreaterThan(RESULT_CHARACTERS * 0.95);
+
+    // A small row before a large one keeps its place; the large one starts the next result.
+    expect(fitRows(rows.slice(1)).rows).toEqual([{ id: 2, text: "short" }]);
+  });
+
+  it("keeps the values named to it whatever an object loses", () => {
+    const wide = Object.fromEntries(Array.from({ length: 600 }, (_, i) => [`property_${i}`, "v".repeat(64)]));
+
+    const fitted = fitValue({ ...wide, display_title: "Acme", direction: "outgoing" }, RESULT_CHARACTERS, new Set(["display_title"]));
+
+    expect(size(fitted.value)).toBeLessThanOrEqual(RESULT_CHARACTERS);
+    expect(fitted.value.display_title).toBe("Acme");
+    expect(fitted.value).not.toHaveProperty("direction");
+    expect(fitRows([{ ...wide, display_title: "Acme" }], RESULT_CHARACTERS, new Set(["display_title"])).rows[0]!.display_title).toBe("Acme");
   });
 
   it("returns one row at least, shrunk to the bound", () => {
@@ -51,8 +67,8 @@ describe("fitRows", () => {
     expect(fitted.rows).toHaveLength(1);
     expect(fitted.cut).toBe(true);
     expect(size(fitted.rows)).toBeLessThanOrEqual(RESULT_CHARACTERS);
-    // Most of the bound is used, not a fraction of it.
-    expect(size(fitted.rows)).toBeGreaterThan(RESULT_CHARACTERS * 0.75);
+    // The bound is used, not a fraction of it.
+    expect(size(fitted.rows)).toBeGreaterThan(RESULT_CHARACTERS * 0.95);
   });
 
   it("answers no rows with no rows", () => {

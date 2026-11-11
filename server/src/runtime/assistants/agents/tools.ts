@@ -125,6 +125,14 @@ function searchScope(args: Row): { types?: string[]; documents?: string[] } {
 
 const quoted = (keys: Iterable<string>) => [...keys].map((key) => `'${key}'`).join(", ");
 
+/** The keys under which the lens's entity types keep their names: an
+ * entity too large for a result loses values, never the one it is called by. */
+const nameKeys = (lens: SchemaCacheValue): ReadonlySet<string> =>
+  new Set(Object.values(lens.entityTypes).flatMap((type) => (type.nameProperty === null ? [] : [type.nameProperty])));
+
+/** What a neighbour's relation keeps whatever it loses. */
+const RELATION_KEPT: ReadonlySet<string> = new Set(["direction"]);
+
 /** The lens's entity type, or the not-found error every entity read gives. */
 function entityType(lens: SchemaCacheValue, key: string): EntityTypeDef {
   const type = lens.entityTypes[key];
@@ -177,9 +185,10 @@ function page(
   total: number,
   again: string,
   skip: boolean,
+  names: ReadonlySet<string>,
   room = RESULT_CHARACTERS - NOTE_ROOM,
 ): { rows: Row[]; said: (string | false)[] } {
-  const fitted = fitRows(skip ? rows.slice(offset) : rows, room);
+  const fitted = fitRows(skip ? rows.slice(offset) : rows, room, names);
   const shown = fitted.rows.length;
   const end = offset + shown;
   return {
@@ -280,7 +289,8 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
     }),
     run: async (lensKey, store, args) => {
       const key = args.entity_type_key as string;
-      const type = entityType((await loadSchema(lensKey, store)).scoped, key);
+      const lens = (await loadSchema(lensKey, store)).scoped;
+      const type = entityType(lens, key);
       const properties = new Set(Object.keys(type.properties));
       const fields = checkedFields(args.fields, properties, `on '${key}'`);
       const sort = (args.sort as string | null | undefined) ?? "_createdAt";
@@ -302,7 +312,7 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
         store,
       );
       const rows = (listed.items as Row[]).map((entity) => selected(entity, fields, type));
-      const shown = page(rows, offset, listed.total, "call list_entities again with the same arguments", false);
+      const shown = page(rows, offset, listed.total, "call list_entities again with the same arguments", false, nameKeys(lens));
       return { items: shown.rows, total: listed.total, limit, offset, ...more(...shown.said) };
     },
   },
@@ -318,11 +328,12 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
     }),
     run: async (lensKey, store, args) => {
       const key = args.entity_type_key as string;
-      const type = entityType((await loadSchema(lensKey, store)).scoped, key);
+      const lens = (await loadSchema(lensKey, store)).scoped;
+      const type = entityType(lens, key);
       const fields = checkedFields(args.fields, new Set(Object.keys(type.properties)), `on '${key}'`);
       const entity = await service.getEntity(lensKey, key, args.entity_id as string, store);
       // A value cut here says so itself: an entity has no room for a note beside its properties.
-      return fitValue(selected(entity, fields, type), RESULT_CHARACTERS - NOTE_ROOM).value;
+      return fitValue(selected(entity, fields, type), RESULT_CHARACTERS - NOTE_ROOM, nameKeys(lens)).value;
     },
   },
   {
@@ -374,24 +385,23 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
 
       // The entity may take the whole result when it has no neighbours to show, else half of it.
       const whole = RESULT_CHARACTERS - NOTE_ROOM;
-      const entity = fitValue(selected(centre, fields, lens.entityTypes[key]), neighbours.length === 0 ? whole : whole / 2);
-      // A neighbour is a relation and an entity: each is fitted on its own,
-      // so a large one is shortened inside and the neighbour keeps both.
+      const names = nameKeys(lens);
+      const entity = fitValue(selected(centre, fields, lens.entityTypes[key]), neighbours.length === 0 ? whole : whole / 2, names);
       const room = whole - size(entity.value);
+      // A neighbour that fits the result stays as it is. One that is larger
+      // alone is a relation and an entity, each shortened inside — the
+      // relation within half the room, the entity within what is left — so
+      // the neighbour keeps both.
       let shortened = false;
-      const part = (value: Row): Row => {
-        const fitted = fitValue(value, Math.floor(room / 2) - NEIGHBOUR_FRAME);
-        shortened ||= fitted.cut;
-        return fitted.value;
-      };
       const rows = neighbours.map((neighbour) => {
         const other = neighbour.entity as Row;
-        const type = lens.entityTypes[String(other._entityTypeKey)];
-        // The direction leads the relation: of a relation too large for a result the leading values stay.
-        const { direction: way, ...relation } = neighbour.relation as Row;
-        return { ...neighbour, relation: part({ direction: way, ...relation }), entity: part(selected(other, fields, type)) };
+        const row = { ...neighbour, entity: selected(other, fields, lens.entityTypes[String(other._entityTypeKey)]) };
+        if (size(row) <= room) return row;
+        shortened = true;
+        const relation = fitValue(neighbour.relation as Row, Math.floor(room / 2), RELATION_KEPT).value;
+        return { ...row, relation, entity: fitValue(row.entity, room - NEIGHBOUR_FRAME - size(relation), names).value };
       });
-      const fitted = fitRows(rows, room);
+      const fitted = fitRows(rows, room, names);
       const narrow = [
         relationType === null && "relation_type_key",
         direction === "both" && "direction",
@@ -410,7 +420,8 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
           // With neighbours the entity had half the result: get_entity gives it the whole.
           entity.cut && neighbours.length > 0 && "A long value of the entity was cut to leave room for its neighbours." +
             (granted.has(TOOL_GET_ENTITY) ? " get_entity returns more of it." : ""),
-          ((entity.cut && neighbours.length === 0) || shortened || fitted.cut) && LONG_VALUE_CUT,
+          shortened && "A long value of a neighbour was cut to fit this result.",
+          entity.cut && neighbours.length === 0 && LONG_VALUE_CUT,
         ),
       };
     },
@@ -593,7 +604,8 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       const offset = (args.offset as number | null | undefined) ?? 0;
       checkColumns(columns);
       const other = beside({ columns });
-      const shown = page(results, offset, results.length, "call execute_query again with the same query", true, other.room);
+      const names = nameKeys((await loadSchema(lensKey, store)).scoped);
+      const shown = page(results, offset, results.length, "call execute_query again with the same query", true, names, other.room);
       const rowsLeft = offset + shown.rows.length < results.length;
       return {
         ...other.fields,
@@ -656,9 +668,10 @@ const AGENT_TOOL_DEFS: AgentToolDef[] = [
       const rows = (answered ?? []) as Row[];
       const offset = (args.offset as number | null | undefined) ?? 0;
       const other = beside(rest);
-      const shown = page(rows, offset, rows.length, "call run_saved_query again with the same arguments", true, other.room);
+      const loaded = await loadSchema(lensKey, store);
+      const shown = page(rows, offset, rows.length, "call run_saved_query again with the same arguments", true, nameKeys(loaded.scoped), other.room);
       // The last step's rows are the answer: a page of them is stable only when that step orders them.
-      const last = (await loadSchema(lensKey, store)).savedQueries[key]?.steps.at(-1);
+      const last = loaded.savedQueries[key]?.steps.at(-1);
       const unordered = last?.type === "oql" && !ordered(last.oql ?? "");
       return {
         ...other.fields,

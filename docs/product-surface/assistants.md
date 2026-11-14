@@ -1,7 +1,7 @@
 # Assistants
 
 Interaction models for assistants: the panel, their management and editors, the evidence
-sidebar and the chat.
+sidebar, the chat and its diagnostics.
 
 ## Assistants panel
 
@@ -15,11 +15,9 @@ assistant, so it survives a reload; without one — or with one the lens does no
 `Default` is shown and the address updated to name it. Each assistant has its own
 conversation, restored from the server when it is picked.
 
-Every tab has a "Show diagnostics" switch, off by default and remembered once for all
-three: on, each answer asks for its [diagnostics](../capabilities/threads.md#diagnostics)
-and the side panel shows them — even where the kind's own switch hides the panel — as a
-*Model calls* tab with the [model-call list](#assistant-chat) for agents and navigators,
-as the [diagnostics panel](#assistant-chat) for retrievers; off, none are requested.
+Every tab has a "Show diagnostics" switch in the toolbar, set apart from the kind's own
+switch, off by default and remembered once for all three: on, each answer asks for its
+[diagnostics](#diagnostics) and shows them under it; off, none are requested or shown.
 
 **Agents** — the side panel has two tabs: *Entities*, the cards of the
 [entities the answer met](../capabilities/threads.md#the-entities-a-turn-met), each linking to
@@ -34,8 +32,7 @@ click away; a result that [left something out](../capabilities/agents.md#what-a-
 shows the sentence the model was given about it; a tool that answers with an error shows it highlighted. The panel heads with
 the question, the number of calls, the time spent inside tools — parallel calls once, said
 so when calls overlapped, the model's thinking not at all — and how long the answer took.
-Each answer's button shows the count of calls and of entities, and says when the answer
-has diagnostics. A "Show details" switch, remembered per browser and on by default, shows
+Each answer's button shows the count of calls and of entities. A "Show details" switch, remembered per browser and on by default, shows
 the panel and the buttons; off hides both. Tool calls live
 as long as the open chat: answers restored from the server have none, and the panel says
 so. A failed or stopped answer marks its unfinished calls interrupted.
@@ -44,8 +41,7 @@ so. A failed or stopped answer marks its unfinished calls interrupted.
 is the lens's [default retriever](../capabilities/retrievers.md#the-default-retriever). The
 side panel shows the cards of the
 [results the answer was given](../capabilities/threads.md#the-entities-a-turn-met), each linking
-to the entity's page. With diagnostics, the [diagnostics panel](#assistant-chat) is a
-second tab beside the entities. A question to a retriever
+to the entity's page. A question to a retriever
 the lens cannot run shows the server's refusal with its reasons.
 
 **Navigators** — chat with the lens's [navigators](../capabilities/navigators.md); `Default`
@@ -96,8 +92,7 @@ the default.
 asks, then the kind's [assistant chat](#assistant-chat) with no picker. It asks the saved
 version; saving starts a new conversation, and none is restored. A new or changed
 assistant blocks questions and says why; a kind may block more. Every answer asks for
-[diagnostics](../capabilities/threads.md#diagnostics) and the side panel shows them, as
-in the [Assistants panel](#assistants-panel) with the switch on. Without a
+its [diagnostics](#diagnostics) and shows them, without a switch. Without a
 language-model provider the panel says that the kind cannot answer.
 
 ## Agent editor
@@ -187,8 +182,7 @@ invalid navigator also blocks questions.
 ## Evidence sidebar
 
 The side panel of a navigator's answer, filling while the question runs — the entities
-appear before the answer. Three views, each with its count where it has one, and a
-fourth with diagnostics:
+appear before the answer. Three views, each with its count where it has one:
 
 - **Entities** — the cards, grouped as anchors (named in the question), carried over
   from the previous answer, and reached by the walk, each group explained in a line. A
@@ -205,7 +199,6 @@ fourth with diagnostics:
   or interrupted — its time, and its one-line summary; a repeated step shows its rounds,
   and the repeat edge its reason. A footer sums up model calls, total time, entities and
   evidence.
-- **Model calls** — the [model-call list](#assistant-chat), each call named after its step.
 
 ## Assistant chat
 
@@ -231,13 +224,8 @@ restores its messages from the server.
 - **Side panel** — beside the conversation, stacked below it on a narrow screen, showing
   the kind's insight into one answer. A button under each answer selects it; by default,
   and after every new question, the panel follows the latest answer that has any.
-- **Model-call list** — with [diagnostics](../capabilities/threads.md#diagnostics), the
-  same for every kind and filling while the answer runs: per model call its number, its
-  step's name where the kind has steps, its duration, the tokens in, out, read from and
-  written to the cache — each only as the provider reported it, a reported 0 shown — its
-  finish reason, and whether it failed; then a total line with the number of calls and
-  failures, their summed time and tokens. The ask dock and the Studio's assistant panel
-  never ask for diagnostics.
+- **Diagnostics** — where the chat asks for them, a strip under each answer that opens
+  the [diagnostics drawer](#diagnostics).
 
 Follow-up questions refer to earlier completed answers of the thread. A failed answer
 keeps what arrived and says "Incomplete" with the reason; a stopped one says it is not
@@ -249,20 +237,52 @@ refused for it — the chat says so and starts a new conversation; a refused mes
 back into the input. Switching assistant, tab, ontology or lens cancels the active request;
 late events cannot enter another thread. Storage failure does not break live chat.
 
-A retriever's **diagnostics panel** shows the selected answer, with the answer's total time
-on its button, in four tabs, filling while the question runs:
+## Diagnostics
 
-- **Overview** — time spent in each of the three steps and in total, the number of model
-  and search calls, the limitations the run reported, and detailed timings.
-- **Plan** — what the planning model made of the question: per sub-query the indices
-  searched, the relation groups, the query and its mode with variants, and the exact
-  filters; the reason when the question cannot be answered from the lens; the raw plan.
-- **Results** — per sub-query, best first, each result's type, label and
-  [matched-via](finding-and-collecting.md#matched-via) line; expanding one shows the answer fields sent as
-  evidence and the index that found it.
-- **Model calls** — the [model-call list](#assistant-chat), each call under its name —
-  Planner, Planner (repeated) when a follow-up's planning was repeated, Response — with
-  its instructions, input and output, marked where the trace is truncated.
+An answer's [diagnostics](../capabilities/threads.md#diagnostics), the same for every
+assistant kind. The Workbench's [Assistants panel](#assistants-panel) asks for them with
+its "Show diagnostics" switch, a Studio [test panel](#assistant-management) always; the ask
+dock and the Studio's assistant panel never do. They live as long as the open chat: an
+answer restored from the server, or asked while the switch was off, has none. They are
+not part of the side panel, which shows the kind's insight alone.
 
-No score is shown anywhere. See
+**Strip.** One line under each answer that has diagnostics: a small bar of where its time
+went — model calls in the accent colour, other work grey, a failed call red, each part as
+wide as its share of the time, however many parts there are — then the answer's time, the
+number of model calls, the tokens as far as reported, and how many calls failed. It grows
+while the answer runs and stays on a failed or stopped one. A click opens the drawer on
+that answer.
+
+**Drawer.** A wide panel over the right side of the page, full height, that leaves the
+chat usable: an answer keeps streaming under it, and a new question moves it to the new
+answer. Its header names the question and marks a running, failed or stopped answer;
+‹ › step between the conversation's answers that have diagnostics; ✕ or Escape close it.
+It fills while the answer runs, in the same order for every kind, each part only where
+the kind has it:
+
+- **Summary** — the answer's time, the number of model calls and of failed ones, the
+  tokens in, out, read from and written to the cache — each only as the provider reported
+  it, a reported 0 shown — and the kind's counts: a retriever's search calls, a
+  navigator's entities and evidence. The limitations a retriever's run reported follow.
+- **Where the time went** — one bar per part, in order, each starting where the one
+  before ended. An agent: each model call, and the tool calls it asked for as one part;
+  tool times and the total are measured in the browser, so approximate, as a line says.
+  A retriever: its three steps — plan, search, answer — marked stopped or not run where
+  the answer did not get that far, its detailed timings folded below. A navigator: each
+  run of its steps, a repeated step per round, a skipped step greyed.
+- **Model calls** — per model call its number, its name where the kind has one, its
+  duration, its tokens as above, its finish reason, and whether it failed; then a total
+  line with the number of calls and failures, their summed time and tokens. A
+  navigator's calls are named after their step; a retriever's are Planner, Planner
+  (repeated) when a follow-up's planning was repeated, and Response, each with its
+  instructions, input and output, marked where the trace is truncated.
+- **Plan** (retrievers) — what the planning model made of the question: per sub-query the
+  indices searched, the relation groups, the query and its mode with variants, and the
+  exact filters; the reason when the question cannot be answered from the lens; the raw
+  plan.
+- **Results** (retrievers) — per sub-query, best first, each result's type, label and
+  [matched-via](finding-and-collecting.md#matched-via) line; expanding one shows the answer
+  fields sent as evidence and the index that found it.
+
+Model calls, Plan and Results are tabs. No score is shown anywhere. See
 [capabilities/retrievers.md](../capabilities/retrievers.md#diagnostics).

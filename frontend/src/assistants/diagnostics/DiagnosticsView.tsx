@@ -43,12 +43,17 @@ function partTone(kind: PartKind, state: PartState): string {
   return state === 'running' ? cn(tone, 'motion-safe:animate-pulse') : tone
 }
 
-/** The strip's bar: the answer's timed parts end to end, each as wide as its share. */
+/**
+ * The strip's bar: the answer's timed parts end to end, each as wide as its
+ * share. The bar keeps its width beside the text, which gives way first;
+ * where even the whole line is narrower than the bar, every segment narrows
+ * alike, so none is cut off at the end.
+ */
 export function TimeBar({ items }: { items: readonly Segment[] }) {
   return (
-    <span aria-hidden className="flex h-1.5 min-w-10 shrink items-stretch gap-px overflow-hidden rounded-full" style={{ width: barWidth(items.length) }}>
+    <span aria-hidden className="flex h-1.5 max-w-full shrink-0 items-stretch gap-px overflow-hidden rounded-full" style={{ width: barWidth(items.length) }}>
       {items.map((segment) => (
-        <span key={segment.key} className={partTone(segment.kind, segment.state)} style={{ flex: `${segment.share} 1 0px`, minWidth: SEGMENT_MIN_PX }} />
+        <span key={segment.key} className={partTone(segment.kind, segment.state)} style={{ flex: `${segment.share} 1 ${SEGMENT_MIN_PX}px`, minWidth: 0 }} />
       ))}
     </span>
   )

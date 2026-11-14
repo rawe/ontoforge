@@ -72,8 +72,11 @@ test('agent, twenty model calls with tool calls between them, some parallel: eve
   assert.equal(bar.length, 39)
   close(sum(bar.map((s) => s.share)), 1)
   assert.deepEqual(bar.filter((s) => s.kind === 'model').length, 20)
-  // The bar has room for every segment at its least width, with the gaps.
+  // The bar has room for every segment at its least width, with the gaps,
+  // and never grows past its most width, however many calls an answer made.
   assert.ok(barWidth(bar.length) >= bar.length * SEGMENT_MIN_PX + (bar.length - 1) * SEGMENT_GAP_PX)
+  assert.equal(barWidth(17), 102)
+  assert.equal(barWidth(99), 240)
 })
 
 test('agent, running: a running tool group grows to now; with no tool running, the next model call runs', () => {
@@ -191,6 +194,17 @@ test('retriever: stopped after planning — plan timed, retrieve stopped, answer
     ['Plan question', 'model', 'done', 1100], ['Search indices', 'work', 'stopped', undefined], ['Write answer', 'model', 'not-run', undefined],
   ])
   assert.deepEqual(segments(timeline(parts)).map((s) => s.key), ['plan'])
+})
+
+test('retriever: planning failed — the plan is marked failed with its time, the later steps did not run', () => {
+  // The server ends the phase with its time, then the error: nothing was searched.
+  let t = pendingTurn('t', 'q', retrieverTurns.empty(), 0, true)
+  t = applyEvent(retrieverTurns, t, { type: 'retriever.phase', phase: 'plan', status: 'start' }, 1)
+  t = applyEvent(retrieverTurns, t, { type: 'retriever.phase', phase: 'plan', status: 'end', durationMs: 900 }, 901)
+  t = applyEvent(retrieverTurns, t, { type: 'error', error: { code: 'MODEL_ERROR', message: 'failed' } }, 902)
+  const parts = retrieverParts(t.diagnostics!, t.insight, t.status)
+  assert.deepEqual(parts.map((p) => [p.key, p.state, p.durationMs]), [['plan', 'failed', 900], ['retrieve', 'not-run', undefined], ['answer', 'not-run', undefined]])
+  assert.deepEqual(segments(timeline(parts)).map((s) => [s.key, s.state]), [['plan', 'failed']])
 })
 
 test('retriever, running: an ended phase is timed before its timings arrive; the started one runs, later ones wait', () => {

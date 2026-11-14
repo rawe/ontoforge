@@ -95,14 +95,18 @@ export function segments(time: Timeline): Segment[] {
 export const SEGMENT_MIN_PX = 2
 export const SEGMENT_GAP_PX = 1
 const BAR_MIN_PX = 64
+const BAR_MAX_PX = 240
+/** The room one segment gets before the bar reaches its most width. */
+const SEGMENT_ROOM_PX = 6
 
 /**
- * The bar's width in px: 64, or wider with many segments so each keeps at
- * least its least width and the gaps; the strip may still narrow it to
- * the room it has.
+ * The bar's width in px: 64, wider with more segments so a model call
+ * still reads as longer than the tool call beside it, and at most 240 so
+ * the numbers beside it stay readable. Past that, and where the strip has
+ * less room, every segment narrows alike (`TimeBar`).
  */
 export const barWidth = (count: number) =>
-  Math.max(BAR_MIN_PX, count * (SEGMENT_MIN_PX + SEGMENT_GAP_PX + 1))
+  Math.min(BAR_MAX_PX, Math.max(BAR_MIN_PX, count * SEGMENT_ROOM_PX))
 
 /** The answer's time: elapsed while it runs, else the kind's reported total, the client's, or the parts' sum. */
 export function answerTime(

@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 import { formatDuration, type TurnStatus } from '../conversation/chatModel'
-import { InsightToggle } from '../shell/AssistantChat'
 import { modelCallTotals, usageParts, type ModelCall } from './diagnostics'
 
 /**
@@ -56,17 +55,5 @@ function Facts({ parts, failed }: { parts: string[]; failed: boolean }) {
       {failed && <span className="font-medium text-destructive">Failed{parts.length > 0 && ' · '}</span>}
       {parts.join(' · ')}
     </p>
-  )
-}
-
-/** The Workbench chat's "Show diagnostics" switch, the same for every kind. */
-export function DiagnosticsToggle({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
-  return (
-    <InsightToggle
-      label="Show diagnostics"
-      title="Ask for each answer's diagnostics (its model calls with duration and tokens, and what the kind reports besides) and show them in the side panel"
-      checked={checked}
-      onChange={onChange}
-    />
   )
 }

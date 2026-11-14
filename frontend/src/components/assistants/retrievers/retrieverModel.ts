@@ -18,6 +18,7 @@ import type {
 } from '@/api/retrievers'
 import type { SearchCatalogEntry, ValidationError } from '@/api/types'
 import type { TurnModel, TurnStatus } from '../../../assistants/conversation/chatModel.ts'
+import type { PartInput } from '../../../assistants/diagnostics/timeline.ts'
 
 /** Client defaults (the server has no catalog endpoint for them). */
 export const DEFAULT_THRESHOLD = 0.35
@@ -294,6 +295,9 @@ export const phaseName = (phase: string) => phaseNames[phase] ?? phase
 export const modelCallName = (phase: string) =>
   ({ plan: 'Planner', replan: 'Planner (repeated)', answer: 'Response' } as Record<string, string>)[phase] ?? phaseName(phase)
 
+/** The diagnostics' Model calls tab: what the retriever's calls are. */
+export const MODEL_CALLS_INTRO = 'The language model calls: the planner turns the question into sub-queries, the response model writes the answer from the found evidence. When a follow-up\'s first plan searches nothing, planning is repeated once.'
+
 /** The sequential steps of one question; every other timing is a part of one of them. */
 export const STEPS = ['plan', 'retrieve', 'answer'] as const
 
@@ -326,18 +330,42 @@ export const formatMs = (ms: number) => ms < 1000 ? `${ms.toFixed(ms < 10 ? 1 : 
 export const MODE_LABEL: Record<SearchMode, string> = { semantic: 'by meaning', keyword: 'by keywords', hybrid: 'by meaning and keywords' }
 
 /**
- * A retriever answer's insight: the phase it is in while it runs. Its
+ * A retriever answer's insight: the phase it is in while it runs and how
+ * long each ended phase took (its timings in diagnostics come later). Its
  * diagnostics are the turn's (`Turn.diagnostics`), read as `RetrieverDiagnostics`.
  */
-export interface RetrieverInsight { phase?: string }
+export interface RetrieverInsight { phase?: string; durations?: Record<string, number> }
 
 /** How the retriever's own events build an answer's insight. */
 export const retrieverTurns: TurnModel<RetrieverKindEvent, RetrieverInsight> = {
   empty: () => ({}),
-  apply: (insight, event) => (event.status === 'start' ? { ...insight, phase: event.phase } : insight),
+  apply: (insight, event) => event.status === 'start' ? { ...insight, phase: event.phase }
+    : event.durationMs === undefined ? insight
+    : { ...insight, durations: { ...insight.durations, [event.phase]: event.durationMs } },
   // The running phase is the live detail, nothing for the side panel.
   hasInsight: () => false,
   progress: (insight) => (insight.phase === undefined ? undefined : phaseName(insight.phase)),
+}
+
+const STEP_KIND: Record<(typeof STEPS)[number], PartInput['kind']> = { plan: 'model', retrieve: 'work', answer: 'model' }
+
+/**
+ * Where a retriever answer's time went: plan, retrieve, answer, one after
+ * another, from its timings (or, before they arrive, its ended phases).
+ * While it runs, the started step is running and later ones wait; in a
+ * failed or stopped answer the first step without a time "stopped" and
+ * later ones did not run — as `stepText` says.
+ */
+export function retrieverParts(meta: RetrieverDiagnostics, insight: RetrieverInsight, status: TurnStatus): PartInput[] {
+  const timings = { ...insight.durations, ...meta.timings }
+  return STEPS.map((step): PartInput => {
+    const base = { key: step, label: phaseName(step), kind: STEP_KIND[step] }
+    const ms = timings[step]
+    if (ms !== undefined) return { ...base, state: 'done', durationMs: ms }
+    if (status === 'pending') return { ...base, state: insight.phase === step ? 'running' : 'waiting' }
+    const text = stepText(timings, step, status)
+    return { ...base, state: text === 'stopped' ? 'stopped' : 'not-run' }
+  })
 }
 
 export const indexName = (key: string, catalog: readonly SearchCatalogEntry[] | undefined) =>

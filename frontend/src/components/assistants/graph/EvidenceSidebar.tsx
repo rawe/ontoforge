@@ -1,11 +1,11 @@
-import { ModelCallList, StepList, type Turn } from '@/assistants'
+import { StepList, type Turn } from '@/assistants'
 import { EntityCardList } from '@/components/assistants/entities/EntityCardList'
 import { roleInfo } from '@/components/assistants/entities/entityModel'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EvidenceGraph } from './EvidenceGraph'
 import type { GraphInsight } from './graphTurnModel'
 
-export type SidebarView = 'entities' | 'graph' | 'steps' | 'calls'
+export type SidebarView = 'entities' | 'graph' | 'steps'
 
 interface EvidenceSidebarProps {
   ontologyKey: string
@@ -16,20 +16,17 @@ interface EvidenceSidebarProps {
   /** The selected card's ref in this answer, if any. */
   selected: string | null
   onSelect: (ref: string) => void
-  /** Diagnostics were asked: a Model calls tab follows the steps. */
-  diagnostics: boolean
 }
 
 /**
  * A graph kind's insight panel for one answer: the cards it found
- * (Entities), the same as a node-link view (Graph), its pipeline with live
- * status (Steps) and, with diagnostics, its model calls. It fills while the
- * answer streams.
+ * (Entities), the same as a node-link view (Graph) and its pipeline with
+ * live status (Steps). It fills while the answer streams.
  */
-export function EvidenceSidebar({ ontologyKey, lensKey, turn, view, onView, selected, onSelect, diagnostics }: EvidenceSidebarProps) {
+export function EvidenceSidebar({ ontologyKey, lensKey, turn, view, onView, selected, onSelect }: EvidenceSidebarProps) {
   const { entities, links } = turn
   return (
-    <Tabs value={view === 'calls' && !diagnostics ? 'steps' : view} onValueChange={(value) => onView(value as SidebarView)} className="flex min-h-0 flex-1 flex-col gap-0">
+    <Tabs value={view} onValueChange={(value) => onView(value as SidebarView)} className="flex min-h-0 flex-1 flex-col gap-0">
       <div className="border-b px-3 py-2">
         <TabsList className="h-7 w-full">
           <TabsTrigger value="entities" className="text-xs">
@@ -37,7 +34,6 @@ export function EvidenceSidebar({ ontologyKey, lensKey, turn, view, onView, sele
           </TabsTrigger>
           <TabsTrigger value="graph" className="text-xs">Graph</TabsTrigger>
           <TabsTrigger value="steps" className="text-xs">Steps</TabsTrigger>
-          {diagnostics && <TabsTrigger value="calls" className="text-xs">Model calls</TabsTrigger>}
         </TabsList>
       </div>
       <TabsContent value="entities" className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -58,11 +54,6 @@ export function EvidenceSidebar({ ontologyKey, lensKey, turn, view, onView, sele
       <TabsContent value="steps" className="min-h-0 flex-1 overflow-y-auto p-3">
         <StepList turn={turn} />
       </TabsContent>
-      {diagnostics && (
-        <TabsContent value="calls" className="min-h-0 flex-1 overflow-y-auto p-3">
-          <ModelCallList calls={turn.diagnostics?.modelCalls} status={turn.status} />
-        </TabsContent>
-      )}
     </Tabs>
   )
 }

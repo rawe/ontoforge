@@ -10,6 +10,8 @@
 import type { ToolCall } from '@/api/types'
 import type { ToolEvent } from '../stream/chatStream.ts'
 import type { TurnModel } from '../conversation/chatModel.ts'
+import type { ModelCall } from '../diagnostics/diagnostics.ts'
+import type { PartInput } from '../diagnostics/timeline.ts'
 
 /**
  * A tool loop's answer: its insight is its tool calls, in the order they
@@ -69,6 +71,52 @@ export function toolTime(calls: readonly ToolCall[]): number | undefined {
     end = Math.max(end, e)
   }
   return total + end - start
+}
+
+/**
+ * Where a tool-loop answer's time went: model call 1, the tool calls that
+ * started after it arrived (one part, its time from the first start to
+ * the last end, so parallel calls count once), model call 2, … A call's
+ * place comes from when its entry arrived (`ModelCall.arrivedAt`, sent
+ * when it ended, before the tools it asked for run). While the answer
+ * runs and no tool does, the next model call runs. Tool times are the
+ * client's clock; `end` closes calls still open (the turn's end, or now).
+ */
+export function toolLoopParts(calls: readonly ModelCall[], tools: readonly ToolCall[], running: boolean, end: number): PartInput[] {
+  const models = [...calls].sort((a, b) => a.index - b.index)
+  // Group g: the tools that started after g model calls had arrived.
+  const groups = new Map<number, ToolCall[]>()
+  for (const tool of tools) {
+    if (tool.startedAt === undefined) continue
+    const g = models.filter((call) => call.arrivedAt === undefined || call.arrivedAt <= tool.startedAt!).length
+    groups.set(g, [...(groups.get(g) ?? []), tool])
+  }
+  const parts: PartInput[] = []
+  const group = (g: number) => {
+    const members = groups.get(g)
+    if (members === undefined) return
+    const start = Math.min(...members.map((tool) => tool.startedAt!))
+    const stop = Math.max(...members.map((tool) => tool.finishedAt ?? end))
+    const labels = [...new Set(members.map((tool) => toolLabel(tool.tool)))]
+    parts.push({
+      key: `tools-${g}`,
+      label: members.length === 1 ? labels[0]! : `${members.length} tool calls`,
+      kind: 'work',
+      state: running && members.some((tool) => tool.status === 'pending') ? 'running' : 'done',
+      durationMs: Math.max(0, stop - start),
+      ...(members.length > 1 && { detail: labels.join(', ') }),
+    })
+  }
+  group(0)
+  models.forEach((call, i) => {
+    parts.push({ key: `model-${call.index}`, label: `Model call ${call.index}`, kind: 'model', state: call.failed ? 'failed' : 'done', durationMs: call.durationMs })
+    group(i + 1)
+  })
+  if (running && !parts.some((part) => part.state === 'running')) {
+    const index = (models.at(-1)?.index ?? 0) + 1
+    parts.push({ key: `model-${index}`, label: `Model call ${index}`, kind: 'model', state: 'running' })
+  }
+  return parts
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)

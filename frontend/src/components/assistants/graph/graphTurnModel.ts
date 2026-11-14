@@ -13,6 +13,7 @@ import {
   type StepStatus,
 } from '../../../api/graphEvents.ts'
 import type { TurnModel } from '../../../assistants/conversation/chatModel.ts'
+import type { PartInput, PartState } from '../../../assistants/diagnostics/timeline.ts'
 
 /** A run that was still going when the turn failed or was stopped. */
 export type RunStatus = StepStatus | 'interrupted'
@@ -76,4 +77,28 @@ export const graphTurns: TurnModel<GraphEvent, GraphInsight> = {
 export function stepState(insight: Pick<GraphInsight, 'steps'>, id: string, ended: boolean): RunStatus | 'waiting' | 'not-run' {
   const runs = insight.steps.filter((s) => s.id === id)
   return runs.at(-1)?.status ?? (ended ? 'not-run' : 'waiting')
+}
+
+const RUN_STATE: Record<RunStatus, PartState> = {
+  running: 'running', done: 'done', failed: 'failed', skipped: 'skipped', interrupted: 'stopped',
+}
+
+/**
+ * Where a graph answer's time went: each run of a step in the order they
+ * started, a repeated step once per round, a model step as a model call.
+ * The running step gets the time still unaccounted for; a skipped step
+ * took none.
+ */
+export function graphParts(insight: Pick<GraphInsight, 'graph' | 'steps'>): PartInput[] {
+  return insight.steps.map((run): PartInput => {
+    const rounds = insight.steps.filter((s) => s.id === run.id).length
+    const state = RUN_STATE[run.status]
+    return {
+      key: `${run.id}-${run.round}`,
+      label: rounds > 1 ? `${stepLabel(insight, run.id)} · round ${run.round}` : stepLabel(insight, run.id),
+      kind: insight.graph?.steps.find((s) => s.id === run.id)?.model === true ? 'model' : 'work',
+      state,
+      ...(run.durationMs !== undefined ? { durationMs: run.durationMs } : state === 'running' ? {} : { durationMs: 0 }),
+    }
+  })
 }

@@ -29,6 +29,11 @@ import {
 } from '../conversation/chatModel'
 import type { ThreadOwner } from '../conversation/threadStore'
 import { useAssistantConversation } from '../conversation/useAssistantConversation'
+import { DiagnosticsDrawer } from '../diagnostics/DiagnosticsDrawer'
+import { DiagnosticsStrip } from '../diagnostics/DiagnosticsStrip'
+import type { DiagnosticsSlot } from '../diagnostics/DiagnosticsView'
+import { drawerTurn } from '../diagnostics/timeline'
+import { useDiagnostics } from '../diagnostics/useDiagnostics'
 
 /** How a kind shows what it reported about each answer. */
 export interface InsightView<I> {
@@ -73,6 +78,12 @@ interface AssistantChatProps<E extends { type: string }, I> {
   /** Toolbar, right: the side-panel switch. */
   toggle?: ReactNode
   /**
+   * The kind's diagnostics. Where they are allowed, the shell asks for them
+   * (always, or by its "Show diagnostics" switch) and shows a strip under
+   * each answer that has them, which opens the diagnostics drawer.
+   */
+  diagnostics?: DiagnosticsSlot<I>
+  /**
    * Where "New conversation" goes instead of the toolbar, which is then
    * never shown (the Studio test panel's header); null until it is mounted.
    */
@@ -83,13 +94,14 @@ interface AssistantChatProps<E extends { type: string }, I> {
  * One conversation with one assistant on a server thread, for every
  * assistant kind: toolbar, messages, input with Send / Stop, "New
  * conversation", restore and the side panel beside (or, when narrow, below)
- * the conversation. The kind supplies its events' meaning (`model`), its
- * request (`send`) and its insight. Remount it (React `key`) for another
- * assistant or a new thread.
+ * the conversation, and the answers' diagnostics. The kind supplies its
+ * events' meaning (`model`), its request (`send`), its insight and its
+ * diagnostics parts. Remount it (React `key`) for another assistant or a
+ * new thread.
  */
 export function AssistantChat<E extends { type: string }, I>({
   ontologyKey, lensKey, kind, assistantKey, name, description, intro, placeholder, remember,
-  blockedReason = null, model, send, insight, renderAnswer, picker, toggle, actions,
+  blockedReason = null, model, send, insight, renderAnswer, picker, toggle, diagnostics, actions,
 }: AssistantChatProps<E, I>) {
   const owner = useMemo<ThreadOwner | null>(
     () => (remember && assistantKey !== null ? { ontologyKey, lensKey, kind, assistantKey } : null),
@@ -98,14 +110,25 @@ export function AssistantChat<E extends { type: string }, I>({
   const [confirmNew, setConfirmNew] = useState(false)
   // The answer the panel shows; null follows the latest with insight.
   const [selected, setSelected] = useState<string | null>(null)
+  const gate = useDiagnostics(diagnostics?.mode ?? 'toggle')
+  // Shown and asked: the kind has diagnostics, they are allowed and on.
+  const diagnosing = diagnostics !== undefined && gate.allowed && gate.on
+  // The diagnostics drawer and its answer; null follows the latest with diagnostics.
+  const [drawer, setDrawer] = useState<{ open: boolean; id: string | null }>({ open: false, id: null })
   const conversation = useAssistantConversation({
-    owner, model, send, blocked: assistantKey === null || blockedReason !== null, onSent: () => setSelected(null),
+    owner, model, send, blocked: assistantKey === null || blockedReason !== null, diagnostics: diagnosing,
+    onSent: () => {
+      setSelected(null)
+      // An open drawer moves to the new answer.
+      setDrawer((current) => (current.open ? { open: true, id: null } : current))
+    },
   })
   const { turns, restoring, notice, running } = conversation
   const scroll = useRef<HTMLDivElement>(null)
   const panel = insight.panel
   const icon = adapters[kind].icon
   const shown = inspectedTurn(turns, selected, model.hasInsight)
+  const drawerShown = diagnosing ? drawerTurn(turns, drawer.id) : undefined
 
   useEffect(() => {
     if (scroll.current !== null) scroll.current.scrollTop = scroll.current.scrollHeight
@@ -115,6 +138,7 @@ export function AssistantChat<E extends { type: string }, I>({
   function startOver() {
     conversation.startOver()
     setSelected(null)
+    setDrawer({ open: false, id: null })
   }
 
   const newConversation = turns.length > 0 && (
@@ -129,7 +153,20 @@ export function AssistantChat<E extends { type: string }, I>({
       New conversation
     </Button>
   )
-  const hasToolbar = actions === undefined && (picker !== undefined || toggle !== undefined || turns.length > 0)
+  const diagnosticsSwitch = diagnostics?.mode === 'toggle' && gate.allowed && (
+    <div className={cn(toggle !== undefined && 'border-l pl-3')}>
+      <InsightToggle
+        label="Show diagnostics"
+        title="Ask for each answer's diagnostics (where its time went, its model calls with tokens, and what the kind reports besides) and show them under the answer"
+        checked={gate.on}
+        onChange={(on) => {
+          gate.setOn(on)
+          if (!on) setDrawer({ open: false, id: null })
+        }}
+      />
+    </div>
+  )
+  const hasToolbar = actions === undefined && (picker !== undefined || toggle !== undefined || diagnosticsSwitch !== false || turns.length > 0)
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {hasToolbar && (
@@ -137,6 +174,7 @@ export function AssistantChat<E extends { type: string }, I>({
           {picker}
           <div className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
             {toggle}
+            {diagnosticsSwitch}
             {newConversation}
           </div>
         </div>
@@ -171,6 +209,15 @@ export function AssistantChat<E extends { type: string }, I>({
                         progress={turn.status === 'pending' ? model.progress(turn.insight) : undefined}
                         insight={panel !== null && (
                           <InsightButton spec={insight.button(turn)} selected={turn.id === shown?.id} onSelect={() => setSelected(turn.id)} />
+                        )}
+                        diagnostics={diagnosing && turn.diagnostics !== undefined && (
+                          <DiagnosticsStrip
+                            turn={turn}
+                            slot={diagnostics}
+                            open={drawer.open && drawerShown?.id === turn.id}
+                            onOpen={() => setDrawer((current) =>
+                              current.open && drawerShown?.id === turn.id ? { ...current, open: false } : { open: true, id: turn.id })}
+                          />
                         )}
                       />
                     ))}
@@ -210,6 +257,16 @@ export function AssistantChat<E extends { type: string }, I>({
         </div>
       </div>
 
+      {diagnosing && drawerShown !== undefined && (
+        <DiagnosticsDrawer
+          open={drawer.open}
+          turn={drawerShown}
+          turns={turns}
+          slot={diagnostics}
+          onShow={(id) => setDrawer({ open: true, id })}
+          onClose={() => setDrawer((current) => ({ ...current, open: false }))}
+        />
+      )}
       <NewConversationDialog open={confirmNew} onOpenChange={setConfirmNew} onConfirm={startOver} />
     </div>
   )
@@ -300,8 +357,15 @@ function AssistantIcon({ icon: Icon, className }: { icon: LucideIcon; className?
   )
 }
 
-/** One question and its answer. */
-export function TurnView<I>({ turn, icon, answer, progress, insight }: { turn: Turn<I>; icon: LucideIcon; answer: ReactNode; progress: string | undefined; insight: ReactNode }) {
+/** One question and its answer; under it, the side-panel button and the diagnostics strip, where given. */
+export function TurnView<I>({ turn, icon, answer, progress, insight, diagnostics }: {
+  turn: Turn<I>
+  icon: LucideIcon
+  answer: ReactNode
+  progress: string | undefined
+  insight: ReactNode
+  diagnostics?: ReactNode
+}) {
   const ended = endText(turn)
   return (
     <article className="space-y-3" data-testid="chat-turn" data-status={turn.status}>
@@ -326,6 +390,7 @@ export function TurnView<I>({ turn, icon, answer, progress, insight }: { turn: T
             </p>
           )}
           {insight}
+          {diagnostics}
         </div>
       </div>
     </article>

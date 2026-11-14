@@ -1,13 +1,17 @@
 import { useState } from 'react'
-import { ModelCallList } from '@/assistants'
 import type { RetrieverDiagnostics, RetrieverModelCall, RetrieverResult } from '@/api/retrievers'
 import type { RuntimeSchema, SearchCatalogEntry } from '@/api/types'
 import { TypeChip } from '@/components/TypeChip'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { matchedViaText } from '@/lib/matchedVia'
 import {
-  MODE_LABEL, STEPS, callCounts, formatMs, indexName, stepText, type TurnStatus, modelCallName, phaseName, plannedFilterText, relationName, resultLabel, resultsBySubQuery,
+  MODE_LABEL, STEPS, formatMs, indexName, phaseName, plannedFilterText, relationName, resultLabel, resultsBySubQuery,
 } from './retrieverModel'
+
+/*
+ * A retriever answer's own parts of the diagnostics drawer: its detailed
+ * timings, its Plan and Results tabs and its model calls' texts. The
+ * drawer draws the rest the same for every kind.
+ */
 
 interface Context { catalog: SearchCatalogEntry[] | undefined; schema: RuntimeSchema | undefined }
 
@@ -20,7 +24,7 @@ function Value({ value, depth = 0 }: { value: unknown; depth?: number }) {
 }
 
 function Intro({ children }: { children: string }) {
-  return <p className="text-muted-foreground">{children}</p>
+  return <p className="text-xs text-muted-foreground">{children}</p>
 }
 
 function Pre({ title, text, note }: { title: string; text: string; note?: string }) {
@@ -31,40 +35,23 @@ function Pre({ title, text, note }: { title: string; text: string; note?: string
   </details>
 }
 
-function Overview({ meta, status }: { meta: RetrieverDiagnostics; status: TurnStatus }) {
-  const steps = STEPS
-  const timings = meta.timings ?? {}
-  const calls = callCounts(meta, status)
-  const total = timings.total ?? steps.reduce((sum, key) => sum + (timings[key] ?? 0), 0)
-  const details = Object.entries(timings).filter(([key]) => !(steps as readonly string[]).includes(key) && key !== 'total')
-  return <div className="space-y-4">
-    <Intro>Where the time went. The three steps run one after another.</Intro>
-    <div className="space-y-2">{steps.map((key) => {
-      const ms = timings[key]
-      return <div key={key} className="grid grid-cols-[8.5rem_1fr_4.5rem] items-center gap-2">
-        <span>{phaseName(key)}</span>
-        <span className="h-2 overflow-hidden rounded bg-muted"><span className="block h-full rounded bg-primary/70" style={{ width: ms && total ? `${Math.max(1, (ms / total) * 100)}%` : 0 }} /></span>
-        <span className={`text-right tabular-nums ${ms === undefined && status !== 'pending' ? 'text-muted-foreground' : ''}`}>{stepText(timings, key, status)}</span>
-      </div>
-    })}
-    {timings.total !== undefined && <p className="text-right font-medium tabular-nums">Total {formatMs(timings.total)}</p>}</div>
-    <dl className="grid grid-cols-2 gap-2 text-center">
-      {([['Model calls', calls.model], ['Search calls', calls.search]] as const).map(([name, value]) =>
-        <div key={name} className="rounded border p-2"><dd className="text-base font-semibold tabular-nums">{value ?? '–'}</dd><dt className="text-muted-foreground">{name}</dt></div>)}
-    </dl>
-    {!!meta.limitations?.length && <section className="space-y-1"><h4 className="font-medium">Limitations</h4>{meta.limitations.map((text, i) => <p key={i} className="rounded border border-amber-500/30 bg-amber-500/5 p-2">{text}</p>)}</section>}
-    {details.length > 0 && <details><summary className="cursor-pointer">Detailed timings</summary>
-      <dl className="mt-2 space-y-1">{details.map(([key, ms]) => <div key={key} className="flex justify-between gap-3"><dt>{phaseName(key)}</dt><dd className="tabular-nums">{formatMs(ms)}</dd></div>)}</dl>
-      <p className="mt-1 text-muted-foreground">These are parts of the steps above; do not add them up.</p>
-    </details>}
-  </div>
+/** The parts of the three steps, folded: what the planner model, the search calls and so on took. */
+export function RetrieverTimingDetails({ meta }: { meta: RetrieverDiagnostics }) {
+  const details = Object.entries(meta.timings ?? {}).filter(([key]) => !(STEPS as readonly string[]).includes(key) && key !== 'total')
+  if (details.length === 0) return null
+  return <details className="text-xs">
+    <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Detailed timings</summary>
+    <dl className="mt-2 space-y-1">{details.map(([key, ms]) => <div key={key} className="flex justify-between gap-3"><dt>{phaseName(key)}</dt><dd className="tabular-nums">{formatMs(ms)}</dd></div>)}</dl>
+    <p className="mt-1 text-muted-foreground">These are parts of the steps above; do not add them up.</p>
+  </details>
 }
 
-function Plan({ meta, catalog, schema }: { meta: RetrieverDiagnostics } & Context) {
+/** What the planning model made of the question. */
+export function RetrieverPlan({ meta, catalog, schema }: { meta: RetrieverDiagnostics } & Context) {
   const plan = meta.plan
   if (!plan) return <Intro>No plan yet.</Intro>
   const unsupported = typeof plan.unsupportedReason === 'string' ? plan.unsupportedReason : null
-  return <div className="space-y-4">
+  return <div className="space-y-4 text-xs">
     <Intro>What the planning model made of the question. The search runs exactly these sub-queries; it never sees the question text itself.</Intro>
     {unsupported && <p className="rounded border border-amber-500/30 p-2">Not answerable from this lens: {unsupported}</p>}
     {plan.subQueries?.length === 0 && <p>No search planned.</p>}
@@ -96,10 +83,11 @@ function ResultRow({ result, rank, via, schema }: { result: RetrieverResult; ran
   </li>
 }
 
-function Results({ meta, catalog, schema }: { meta: RetrieverDiagnostics } & Context) {
+/** What the search found per sub-query, best first. */
+export function RetrieverResults({ meta, catalog, schema }: { meta: RetrieverDiagnostics } & Context) {
   if (!meta.results) return <Intro>No results yet.</Intro>
   const groups = resultsBySubQuery(meta)
-  return <div className="space-y-4">
+  return <div className="space-y-4 text-xs">
     <Intro>What the search found per sub-query, best first, and the entry each result was found by. These results are the answer's evidence.</Intro>
     {groups.length === 0 && <p>Nothing found.</p>}
     {groups.map((group) => <section key={group.subQuery} className="space-y-2">
@@ -111,7 +99,7 @@ function Results({ meta, catalog, schema }: { meta: RetrieverDiagnostics } & Con
 }
 
 /** A model call's bounded texts. */
-function CallTexts({ call }: { call: RetrieverModelCall }) {
+export function RetrieverCallTexts({ call }: { call: RetrieverModelCall }) {
   return <>
     {call.systemPrompt !== undefined && <Pre title="System instructions" text={call.systemPrompt} />}
     {call.input !== undefined && <Pre title="Input" text={call.input} note={call.inputTruncated ? 'Trace is truncated; the model received the full input.' : undefined} />}
@@ -119,33 +107,3 @@ function CallTexts({ call }: { call: RetrieverModelCall }) {
   </>
 }
 
-function ModelCalls({ meta, status }: { meta: RetrieverDiagnostics; status: TurnStatus }) {
-  return <div className="space-y-4">
-    <Intro>The language model calls: the planner turns the question into sub-queries, the response model writes the answer from the found evidence. When a follow-up's first plan searches nothing, planning is repeated once.</Intro>
-    <ModelCallList calls={meta.modelCalls} status={status} nameOf={modelCallName} detail={(call) => <CallTexts call={call} />} />
-  </div>
-}
-
-/**
- * Diagnostics of one answer, split along the pipeline so each tab answers
- * one question. No scores.
- */
-export function RetrieverDiagnosticsPanel({ meta, question, status, catalog, schema }: { meta: RetrieverDiagnostics; question: string; status: TurnStatus } & Context) {
-  const [tab, setTab] = useState('overview')
-  const tabs = [['overview', 'Overview'], ['plan', 'Plan'], ['results', `Results${meta.results ? ` (${meta.results.length})` : ''}`], ['models', 'Model calls']]
-  return <div className="flex min-h-0 flex-1 flex-col text-xs">
-    <p className="truncate px-4 pt-3 text-muted-foreground" title={question}>For: <span className="text-foreground">{question}</span>{status === 'failed' && <span className="text-destructive"> · failed or cancelled</span>}</p>
-    <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">
-      <TabsList variant="line" className="mx-2 mt-2 h-8 w-auto justify-start border-b">
-        {tabs.map(([value, name]) =>
-          <TabsTrigger key={value} value={value} className="px-2 text-xs">{name}</TabsTrigger>)}
-      </TabsList>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <TabsContent value="overview"><Overview meta={meta} status={status} /></TabsContent>
-        <TabsContent value="plan"><Plan meta={meta} catalog={catalog} schema={schema} /></TabsContent>
-        <TabsContent value="results"><Results meta={meta} catalog={catalog} schema={schema} /></TabsContent>
-        <TabsContent value="models"><ModelCalls meta={meta} status={status} /></TabsContent>
-      </div>
-    </Tabs>
-  </div>
-}

@@ -29,6 +29,8 @@ export interface ModelCall {
   finishReason?: string
   /** The call threw. */
   failed?: true
+  /** Client clock (ms) when the call's entry first arrived — set by the client, never sent. */
+  arrivedAt?: number
 }
 
 /** What the `diagnostics` events report about one answer, merged as they arrive. */
@@ -70,15 +72,19 @@ export function checkDiagnostics(e: Record<string, unknown>, own?: (e: Record<st
 }
 
 /**
- * One event's fields merged into an answer's diagnostics: model calls
- * upsert by index (kept in index order), timings merge by key, limitations
- * dedupe, every other field replaces.
+ * One event's fields, arrived at `now`, merged into an answer's
+ * diagnostics: model calls upsert by index (kept in index order, each
+ * keeping when its entry first arrived), timings merge by key,
+ * limitations dedupe, every other field replaces.
  */
-export function mergeDiagnostics(current: Diagnostics, next: Diagnostics): Diagnostics {
+export function mergeDiagnostics(current: Diagnostics, next: Diagnostics, now?: number): Diagnostics {
   const merged: Diagnostics = { ...current, ...next }
   if (next.modelCalls !== undefined) {
     const calls = new Map((current.modelCalls ?? []).map((call) => [call.index, call]))
-    for (const call of next.modelCalls) calls.set(call.index, call)
+    for (const call of next.modelCalls) {
+      const arrivedAt = calls.get(call.index)?.arrivedAt ?? now
+      calls.set(call.index, arrivedAt === undefined ? call : { ...call, arrivedAt })
+    }
     merged.modelCalls = [...calls.values()].sort((a, b) => a.index - b.index)
   }
   if (next.timings !== undefined) merged.timings = { ...current.timings, ...next.timings }

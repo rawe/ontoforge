@@ -64,8 +64,9 @@ test('diagnostics events merge on the turn beside the kind\'s insight, for every
   t = applyEvent(agentTurns, t, { type: 'error', error: { code: 'MODEL_ERROR', message: 'down' } }, 5)
   assert.equal(t.status, 'failed')
   assert.equal(t.insight.length, 1)
-  assert.deepEqual(t.diagnostics, { modelCalls: [{ index: 1, durationMs: 40, usage: { input: 10, output: 0 } }, { index: 2, durationMs: 5, failed: true }] })
-  assert.equal(hasDetail({ ...agentTurn(), diagnostics: {} }, agentTurns.hasInsight), true)
+  assert.deepEqual(t.diagnostics, { modelCalls: [{ index: 1, durationMs: 40, usage: { input: 10, output: 0 }, arrivedAt: 1 }, { index: 2, durationMs: 5, failed: true, arrivedAt: 4 }] })
+  // Diagnostics are not the side panel's: they alone give it nothing to show.
+  assert.equal(hasDetail({ ...agentTurn(), diagnostics: {} }, agentTurns.hasInsight), false)
 })
 
 test('an error event fails the turn and keeps the partial answer', () => {
@@ -238,7 +239,8 @@ test('retriever: the started phase is the live detail; its diagnostics merge on 
   turn = applyEvent(retrieverTurns, turn, { type: 'delta', text: 'Found' }, 6)
   turn = applyEvent(retrieverTurns, turn, { type: 'final', reply: 'Found' }, 7)
   assert.equal(turn.status, 'complete')
-  assert.equal(hasDetail(turn, retrieverTurns.hasInsight), true)
+  assert.equal(hasDetail(turn, retrieverTurns.hasInsight), false)
+  assert.deepEqual(turn.insight.durations, { plan: 1200 })
   assert.deepEqual(turn.diagnostics?.timings, { plan: 1200, retrieve: 100, total: 1400 })
   assert.deepEqual(turn.diagnostics?.limitations, ['a', 'b'])
 })

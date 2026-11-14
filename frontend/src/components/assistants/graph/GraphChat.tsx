@@ -1,12 +1,12 @@
 import { Waypoints } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { AssistantChat, type ChatRequest, DiagnosticsToggle, hasDetail, InsightToggle, type SharedEvent, useDiagnosticsSetting } from '@/assistants'
+import { AssistantChat, type ChatRequest, hasDetail, InsightToggle, type SharedEvent } from '@/assistants'
 import type { GraphEvent } from '@/api/graphEvents'
 import type { AssistantKind } from '@/api/types'
 import { CitedAnswer } from '@/components/assistants/entities/CitedAnswer'
 import { readString, storageKeys, writeString } from '@/lib/storage'
 import { EvidenceSidebar, type SidebarView } from './EvidenceSidebar'
-import { graphTurns } from './graphTurnModel'
+import { graphParts, graphTurns, stepLabel } from './graphTurnModel'
 
 export interface GraphChatProps {
   ontologyKey: string
@@ -24,10 +24,10 @@ export interface GraphChatProps {
   remember: boolean
   /**
    * `toggle`: a "Show evidence" switch (remembered per kind, on by
-   * default) shows or hides the sidebar, and the "Show diagnostics" switch
-   * (shared by every kind, off by default) asks for diagnostics (the
-   * Workbench); `always`: the sidebar is always shown and diagnostics are
-   * always asked (the Studio test panel).
+   * default) shows or hides the sidebar, and diagnostics follow the
+   * shell's "Show diagnostics" switch (the Workbench); `always`: the
+   * sidebar is always shown and diagnostics are always asked (the Studio
+   * test panel).
    */
   sidebar: 'toggle' | 'always'
   send: (body: ChatRequest, onEvent: (event: SharedEvent | GraphEvent) => void, signal: AbortSignal) => Promise<void>
@@ -38,15 +38,13 @@ export interface GraphChatProps {
 
 /**
  * The assistant chat of every graph kind: the evidence sidebar (Entities,
- * Graph, Steps, and Model calls with diagnostics) fills while an answer
- * streams, and the answer's citations are chips that select their card
- * there.
+ * Graph, Steps) fills while an answer streams, and the answer's citations
+ * are chips that select their card there. Diagnostics: its steps' times
+ * and its model calls named by step.
  */
 export function GraphChat({ kind, sidebar, send, ...chat }: GraphChatProps) {
   const [switchedOn, setSwitchedOn] = useState(() => readString(storageKeys.graphSidebar(kind)) !== 'false')
-  const [diagnosticsOn, setDiagnosticsOn] = useDiagnosticsSetting()
-  const withDiagnostics = sidebar === 'always' || diagnosticsOn
-  const shown = sidebar === 'always' || switchedOn || diagnosticsOn
+  const shown = sidebar === 'always' || switchedOn
   const switchSidebar = (on: boolean) => {
     setSwitchedOn(on)
     writeString(storageKeys.graphSidebar(kind), String(on))
@@ -61,18 +59,27 @@ export function GraphChat({ kind, sidebar, send, ...chat }: GraphChatProps) {
       {...chat}
       kind={kind}
       model={graphTurns}
-      send={(body, onEvent, signal) => send({ ...body, diagnostics: withDiagnostics }, onEvent, signal)}
+      send={send}
       toggle={sidebar === 'toggle'
-        ? <>
-            <InsightToggle
-              label="Show evidence"
-              title="Show each answer's entities, graph and steps in a sidebar, as it runs"
-              checked={switchedOn}
-              onChange={switchSidebar}
-            />
-            <DiagnosticsToggle checked={diagnosticsOn} onChange={setDiagnosticsOn} />
-          </>
+        ? <InsightToggle
+            label="Show evidence"
+            title="Show each answer's entities, graph and steps in a sidebar, as it runs"
+            checked={switchedOn}
+            onChange={switchSidebar}
+          />
         : undefined}
+      diagnostics={{
+        mode: sidebar,
+        time: (turn) => ({ parts: graphParts(turn.insight), totalMs: turn.insight.summary?.durationMs }),
+        facts: (turn) => {
+          const summary = turn.insight.summary
+          return [
+            ...(summary?.entities !== undefined ? [`${summary.entities} ${summary.entities === 1 ? 'entity' : 'entities'}`] : []),
+            ...(summary?.evidence !== undefined ? [`${summary.evidence} evidence`] : []),
+          ]
+        },
+        calls: { nameOf: (name, turn) => stepLabel(turn.insight, name) },
+      }}
       renderAnswer={(turn, show) => (
         <CitedAnswer
           text={turn.reply}
@@ -81,7 +88,7 @@ export function GraphChat({ kind, sidebar, send, ...chat }: GraphChatProps) {
           onSelect={(ref) => {
             setSelection({ turnId: turn.id, ref })
             if (!shown) switchSidebar(true)
-            if (view === 'steps' || view === 'calls') setView('entities')
+            if (view === 'steps') setView('entities')
             show()
           }}
         />
@@ -105,7 +112,6 @@ export function GraphChat({ kind, sidebar, send, ...chat }: GraphChatProps) {
                     onView={setView}
                     selected={selectedIn(turn.id)}
                     onSelect={(ref) => setSelection({ turnId: turn.id, ref })}
-                    diagnostics={withDiagnostics}
                   />,
             }
           : null,

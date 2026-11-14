@@ -352,15 +352,20 @@ const STEP_KIND: Record<(typeof STEPS)[number], PartInput['kind']> = { plan: 'mo
 /**
  * Where a retriever answer's time went: plan, retrieve, answer, one after
  * another, from its timings (or, before they arrive, its ended phases).
- * While it runs, the started step is running and later ones wait; in a
- * failed or stopped answer the first step without a time "stopped" and
- * later ones did not run — as `stepText` says.
+ * While it runs, the started step is running and later ones wait. A failed
+ * or stopped answer ended in the last step it started: that step failed
+ * (it reported its time) or stopped (it did not), and later ones did not
+ * run. Without a started step, the first one without a time "stopped" — as
+ * `stepText` says.
  */
 export function retrieverParts(meta: RetrieverDiagnostics, insight: RetrieverInsight, status: TurnStatus): PartInput[] {
   const timings = { ...insight.durations, ...meta.timings }
-  return STEPS.map((step): PartInput => {
+  const last = status === 'failed' ? STEPS.findIndex((step) => step === insight.phase) : -1
+  return STEPS.map((step, i): PartInput => {
     const base = { key: step, label: phaseName(step), kind: STEP_KIND[step] }
     const ms = timings[step]
+    if (last !== -1 && i > last) return { ...base, state: 'not-run' }
+    if (last === i) return ms === undefined ? { ...base, state: 'stopped' } : { ...base, state: 'failed', durationMs: ms }
     if (ms !== undefined) return { ...base, state: 'done', durationMs: ms }
     if (status === 'pending') return { ...base, state: insight.phase === step ? 'running' : 'waiting' }
     const text = stepText(timings, step, status)

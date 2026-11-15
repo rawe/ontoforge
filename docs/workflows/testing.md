@@ -60,8 +60,8 @@ and restores the settings it changes, but it pauses and restarts the container, 
 ends the conversations a dev server keeps there. Like the integration suite, it fails
 loudly when its Valkey is down.
 
-The access store and authorization tests of the integration suite (`access-store`,
-`access-authorization`) need a second database: `ontoforge_access_test`, beside the test
+The access store, authorization and authorization server tests of the integration suite
+(`access-store`, `access-authorization`, `authorization-server`) need a second database: `ontoforge_access_test`, beside the test
 database in the same PostgreSQL, which they drop and create themselves. They stand in a
 stub for the identity provider. Authentication end to end — browser sign-in against the
 development Keycloak, bearer tokens, MCP OAuth with a real client, roles, revocation and

@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
+    "@fastify/middie": "^9.3.6",
     "@fastify/swagger": "^9.8.1",
     "@fastify/swagger-ui": "^6.1.1",
     "@langchain/anthropic": "^1.5.12",
@@ -36,6 +37,7 @@
     "iovalkey": "0.4.0",
     "jose": "^6.2.13",
     "langchain": "^1.5.16",
+    "oidc-provider": "~9.15.0",
     "openid-client": "^6.8.8",
     "pg": "^8.23.0",
     "pgvector": "^0.3.0",
@@ -44,6 +46,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
+    "@types/oidc-provider": "^9.13.1",
     "@types/pg": "^8.23.0",
     "antlr-ng": "^1.0.10",
     "tsx": "^4.23.1",

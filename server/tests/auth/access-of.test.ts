@@ -110,9 +110,9 @@ describe("accessOf", () => {
 
   it("decides by the bearer token alone when one is sent", async () => {
     const id = await session("reader");
-    fakes.oidc.tokens.set("good", identified("writer"));
+    fakes.oidc.tokens.set("jwt.good.sig", identified("writer"));
     fakes.access.add("writer");
-    expect(await ask({ headers: { authorization: "Bearer good", cookie: `${SESSION_COOKIE}=${id}` } })).toMatchObject({
+    expect(await ask({ headers: { authorization: "Bearer jwt.good.sig", cookie: `${SESSION_COOKIE}=${id}` } })).toMatchObject({
       kind: "caller",
       via: "bearer",
       subject: "writer",
@@ -126,43 +126,43 @@ describe("accessOf", () => {
   });
 
   it("needs no CSRF check for a bearer-authenticated change", async () => {
-    fakes.oidc.tokens.set("good", identified("writer"));
-    expect(await ask({ method: "POST", headers: { authorization: "bearer good" } })).toMatchObject({ kind: "caller", via: "bearer" });
+    fakes.oidc.tokens.set("jwt.good.sig", identified("writer"));
+    expect(await ask({ method: "POST", headers: { authorization: "bearer jwt.good.sig" } })).toMatchObject({ kind: "caller", via: "bearer" });
   });
 
   it("provisions an unknown bearer identity as a role-less principal, once", async () => {
-    fakes.oidc.tokens.set("new", identified("service-a"));
-    expect(await ask({ headers: { authorization: "Bearer new" } })).toEqual({
+    fakes.oidc.tokens.set("jwt.new.sig", identified("service-a"));
+    expect(await ask({ headers: { authorization: "Bearer jwt.new.sig" } })).toEqual({
       kind: "caller",
       via: "bearer",
       subject: "service-a",
       roles: [],
     });
-    expect(await ask({ headers: { authorization: "Bearer new" } })).toMatchObject({ subject: "service-a" });
+    expect(await ask({ headers: { authorization: "Bearer jwt.new.sig" } })).toMatchObject({ subject: "service-a" });
     expect(fakes.access.calls.filter((c) => c.startsWith("signIn"))).toEqual(["signIn service-a false"]);
   });
 
   it("restores the configured administrator when it lost its standing, and only then", async () => {
-    fakes.oidc.tokens.set("admin", identified(ADMIN_SUBJECT));
+    fakes.oidc.tokens.set("jwt.admin.sig", identified(ADMIN_SUBJECT));
     const admin = fakes.access.add(ADMIN_SUBJECT, "disabled");
-    expect(await ask({ headers: { authorization: "Bearer admin" } })).toMatchObject({ kind: "caller", roles: ["platform_admin"] });
+    expect(await ask({ headers: { authorization: "Bearer jwt.admin.sig" } })).toMatchObject({ kind: "caller", roles: ["platform_admin"] });
     expect(fakes.access.principals.get(admin.id)!.status).toBe("active");
-    expect(await ask({ headers: { authorization: "Bearer admin" } })).toMatchObject({ kind: "caller" });
+    expect(await ask({ headers: { authorization: "Bearer jwt.admin.sig" } })).toMatchObject({ kind: "caller" });
     expect(fakes.access.calls.filter((c) => c.startsWith("signIn"))).toEqual([`signIn ${ADMIN_SUBJECT} true`]);
   });
 
   it("refuses a disabled bearer principal", async () => {
-    fakes.oidc.tokens.set("t", identified("blocked"));
+    fakes.oidc.tokens.set("jwt.t.sig", identified("blocked"));
     fakes.access.add("blocked", "disabled");
-    expect(await ask({ headers: { authorization: "Bearer t" } })).toEqual({ error: "forbidden", message: "This account is disabled" });
+    expect(await ask({ headers: { authorization: "Bearer jwt.t.sig" } })).toEqual({ error: "forbidden", message: "This account is disabled" });
   });
 
   it("takes bearer tokens only on MCP mounts", async () => {
     const id = await session("reader");
     const url = "/mcp/ontologies/o/model";
     expect(await ask({ url, headers: { cookie: `${SESSION_COOKIE}=${id}` } })).toEqual({ kind: "anonymous" });
-    fakes.oidc.tokens.set("t", identified("reader"));
-    expect(await ask({ url, headers: { authorization: "Bearer t" } })).toMatchObject({ kind: "caller", via: "bearer" });
+    fakes.oidc.tokens.set("jwt.t.sig", identified("reader"));
+    expect(await ask({ url, headers: { authorization: "Bearer jwt.t.sig" } })).toMatchObject({ kind: "caller", via: "bearer" });
   });
 });
 

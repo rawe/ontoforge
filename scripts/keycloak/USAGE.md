@@ -18,12 +18,11 @@ Compose project `ontoforge-keycloak` (`docker/keycloak/compose.yml`), image
 | Issuer | `http://localhost:8180/realms/ontoforge`, the same for the browser, a server on the host and a server in a container (`KC_HOSTNAME`; containers reach it on the back channel, `OIDC_BACKCHANNEL_URL`) |
 | Keycloak administrator | `ontoforge-admin` in `master`, permanent. Keycloak's temporary bootstrap administrator (`KC_BOOTSTRAP_ADMIN_*`) is used once to create it and then deleted. |
 | Realm | `ontoforge` — created once, its settings reconciled; never deleted |
-| Client scope `ontoforge-api` | Audience mapper (`aud: ontoforge-api`, access tokens only); a realm optional scope: a client gets it when it asks for it |
+| Client scope `ontoforge-api` | Audience mapper (`aud: ontoforge-api`, access tokens only) — `OIDC_AUDIENCE`; a default scope of `ontoforge-service` only |
 | Client `ontoforge-api` | The audience; no flows |
-| Client `ontoforge-web` | Confidential; the OntoForge server signs browsers in with it (code + PKCE). Redirects `http://localhost:5173/api/auth/callback` and `http://localhost:13000/api/auth/callback` |
-| Client `ontoforge-mcp` | Public, code + PKCE, loopback redirects; scripts use it to get a user's access token |
+| Client `ontoforge-web` | Confidential; the OntoForge server signs people in with it (code + PKCE), for its web client and for its authorization server. Two redirect URIs per stack, `WEB_CLIENT_URL/api/auth/callback` and `PUBLIC_URL/oauth/callback`: `http://localhost:5173/api/auth/callback`, `http://localhost:8000/oauth/callback` (single stack) and `http://localhost:13000/api/auth/callback`, `http://localhost:18000/oauth/callback` (scale stack) |
 | Client `ontoforge-service` | Client credentials; the audience by default — a service principal once an OntoForge administrator admits it |
-| Dynamic registration | Anonymous, as MCP clients register: loopback redirect URIs only, scope `ontoforge-api` allowed. Keycloak's own policies stay: such clients need the user's consent, and at most 200 exist (`./dev.sh keycloak reset` clears them) |
+| MCP clients, own tools | Nothing at Keycloak: they sign in at OntoForge's authorization server, which signs the person in through `ontoforge-web`. The presets name the command-line client in `OAUTH_CLIENTS` ([scripts/auth/](../auth/USAGE.md)) |
 | Users of `ontoforge` | `admin`, `reader`, `writer`, `newcomer` — email `<name>@ontoforge.test`. `admin` is the OntoForge bootstrap administrator (`AUTH_ADMIN_SUBJECT`). Roles in OntoForge are assigned in OntoForge, never derived from Keycloak. |
 
 A rerun changes only what differs: it never deletes the realm, never duplicates a client, scope

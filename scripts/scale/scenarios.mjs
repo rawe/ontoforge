@@ -5,19 +5,21 @@
 //   node scripts/scale/scenarios.mjs [all | <scenario>…]
 //
 // Scenarios: continue, replace, valkey-reset, stale-schema, fencing, drain, upgrade
-// (authentication off), auth-session, auth-revoke, auth-bearer (authentication on).
+// (authentication off), auth-session, auth-revoke, auth-bearer, auth-oauth (authentication on).
 // Each prints PASS, FAIL or SKIP with its evidence; the exit code is 1 when any
 // selected scenario failed. They touch only the ontoforge-scale Compose project
 // and the seed ontology fx_people_basic, which they load when it is missing;
 // `upgrade` rewrites the storage of the harness database. The auth scenarios sign
-// the development Keycloak's test users in (scripts/auth/lib.mjs) and create and
-// delete an ontology of their own.
+// the development Keycloak's test users in (scripts/auth/lib.mjs), get OntoForge tokens
+// through the command-line client, and create and delete an ontology of their own.
 
 import {
   SEED, authEnabled, backendReady, chat, compose, composeAsync, ensureSeed, fakeControl, http, logsSince, modelPath,
   readThread, readiness, runtimePath, serviceByIp, sleep, sql, urls, waitFor,
 } from './lib.mjs';
-import { appLogin, call, deliverCallback, startAppLogin, userToken } from '../auth/lib.mjs';
+import {
+  appLogin, authorizationRequest, authorizeInBrowser, call, deliverCallback, oauthToken, ontoforgeTokens, startAppLogin,
+} from '../auth/lib.mjs';
 
 /** One scenario's checks and notes, printed as it goes. */
 class Run {
@@ -446,7 +448,7 @@ async function authRevokeScenario(run) {
     const readerId = userOf(await call(u.a, 'GET', '/api/auth/me', { jar: reader.jar }));
     const granted = await asAdmin('POST', `/api/users/${readerId}/assignments`, { role: 'reader', ontologyKey: ontology, lensKey: 'l' });
     if (!run.check('reader granted on A', granted.status === 201, `HTTP ${granted.status}, user ${readerId}, assignment ${granted.json?.id}`)) return;
-    const token = await userToken('reader');
+    const { access_token: token } = await ontoforgeTokens('reader', `${u.lb}/api`);
     const path = `/api/ontologies/${ontology}/runtime/lenses/l/entities/item?limit=1`;
     const before = await call(u.b, 'GET', path, { token });
     run.check('reader reads on B', before.status === 200, `HTTP ${before.status}`);
@@ -466,7 +468,7 @@ async function authRevokeScenario(run) {
 /** One user's bearer token is accepted by A and B alike; without it both refuse. */
 async function authBearerScenario(run) {
   const u = urls();
-  const token = await userToken('reader');
+  const { access_token: token } = await ontoforgeTokens('reader', `${u.lb}/api`);
   const ids = [];
   for (const [where, base] of [['A', u.a], ['B', u.b]]) {
     const me = await call(base, 'GET', '/api/auth/me', { token });
@@ -482,6 +484,41 @@ async function authBearerScenario(run) {
   run.check('token through the LB', lb.every((r) => r.status === 200), lb.map((r) => `${r.status} from ${upstreamName(r)}`).join(', '));
 }
 
+/**
+ * OntoForge's authorization server keeps nothing in one instance: the authorization (sign-in
+ * and consent) runs on A, its code is redeemed on B, the refresh token is rotated on A, and
+ * each token works on both. The browser believes it talks to PUBLIC_URL (the load balancer)
+ * and sends its origin with the consent answer.
+ */
+async function authOAuthScenario(run) {
+  const u = urls();
+  const resource = `${u.lb}/api`;
+  const onA = (url) => (url.startsWith(u.lb) ? u.a + url.slice(u.lb.length) : url);
+  const request = await authorizationRequest(u.lb, { resource });
+  const outcome = await authorizeInBrowser(request.url, 'reader', { via: onA });
+  const answer = outcome.redirect ? new URL(outcome.redirect) : null;
+  const code = answer?.searchParams.get('code');
+  if (!run.check('authorized on A: sign-in, consent, code', !!code && answer.searchParams.get('state') === request.state,
+    answer ? `redirect ${answer.origin}${answer.pathname}, code ${code ? 'present' : 'absent'}, error ${answer.searchParams.get('error')}` : `HTTP ${outcome.page?.status} ${outcome.page?.message}`)) return;
+  const redeemed = await oauthToken(u.b, {
+    grant_type: 'authorization_code', code, redirect_uri: request.redirectUri, client_id: request.clientId, code_verifier: request.verifier, resource,
+  });
+  if (!run.check('the code redeemed on B', redeemed.status === 200 && !!redeemed.json?.refresh_token,
+    `HTTP ${redeemed.status} ${redeemed.json?.error ?? ''}`)) return;
+  const userOn = async (base, token) => userOf(await call(base, 'GET', '/api/auth/me', { token }));
+  const first = [await userOn(u.a, redeemed.json.access_token), await userOn(u.b, redeemed.json.access_token)];
+  run.check('its access token works on A and B', first[0] !== null && first[0] === first[1], first.join(' / '));
+  const refreshed = await oauthToken(u.a, { grant_type: 'refresh_token', refresh_token: redeemed.json.refresh_token, client_id: request.clientId, resource });
+  if (!run.check('refreshed on A: a new pair', refreshed.status === 200 && refreshed.json?.refresh_token !== redeemed.json.refresh_token,
+    `HTTP ${refreshed.status} ${refreshed.json?.error ?? ''}`)) return;
+  const second = [await userOn(u.a, refreshed.json.access_token), await userOn(u.b, refreshed.json.access_token)];
+  run.check('the new access token works on A and B', second[0] === first[0] && second[1] === first[0], second.join(' / '));
+  const reused = await oauthToken(u.b, { grant_type: 'refresh_token', refresh_token: redeemed.json.refresh_token, client_id: request.clientId, resource });
+  run.check('the spent refresh token is refused on B', reused.status === 400 && reused.json?.error === 'invalid_grant', `HTTP ${reused.status} ${reused.json?.error}`);
+  const after = [await userOn(u.a, refreshed.json.access_token), await userOn(u.b, refreshed.json.access_token)];
+  run.check('that reuse revoked the authorization on A and B', after.every((id) => id === null), after.map((id) => id ?? 'refused').join(' / '));
+}
+
 const SCENARIOS = {
   continue: continueScenario,
   replace: replaceScenario,
@@ -493,10 +530,11 @@ const SCENARIOS = {
   'auth-session': authSessionScenario,
   'auth-revoke': authRevokeScenario,
   'auth-bearer': authBearerScenario,
+  'auth-oauth': authOAuthScenario,
 };
 
 /** Scenarios that need authentication on; every other one needs it off. */
-const AUTH_SCENARIOS = new Set(['auth-session', 'auth-revoke', 'auth-bearer']);
+const AUTH_SCENARIOS = new Set(['auth-session', 'auth-revoke', 'auth-bearer', 'auth-oauth']);
 
 // --- Main --------------------------------------------------------------------
 

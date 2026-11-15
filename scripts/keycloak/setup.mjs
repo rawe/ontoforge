@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // One-command development identity provider: starts Keycloak, waits for it, reconciles the
-// realm, clients, scopes, registration policies, administrators and test users, writes the
+// realm, clients, the audience scope, administrators and test users, writes the
 // OntoForge configuration and verifies it. Reruns change only what differs: no realm is
 // deleted, no duplicate is created, no password is reset. See USAGE.md beside this file.
 //
@@ -25,8 +25,14 @@ const PERMANENT_ADMIN = 'ontoforge-admin';
 const BOOTSTRAP_ADMIN = 'bootstrap-admin';
 const READY_SECONDS = 180;
 
-/** Browser origins of the two stacks: Vite (solo) and the harness's frontend container. */
-const ORIGINS = ['http://localhost:5173', 'http://localhost:13000'];
+/** The two stacks: the web client's address (WEB_CLIENT_URL) and the server's (PUBLIC_URL) —
+ * the single stack (Vite, one server) and the shared-state harness (frontend container, load
+ * balancer). The OntoForge server signs people in at both: the web client's login and the
+ * authorization server's. */
+const STACKS = [
+  { web: 'http://localhost:5173', public: 'http://localhost:8000' },
+  { web: 'http://localhost:13000', public: 'http://localhost:18000' },
+];
 
 /** The application realm's test identities: username → profile. */
 export const USERS = {
@@ -219,16 +225,8 @@ async function ensureRealm() {
   }
 }
 
-/** The audience every OntoForge access token carries. A realm optional scope: every client
- * — dynamically registered MCP clients included — may ask for it, and only a client that asks
- * gets a token OntoForge accepts. */
-/** In the token's `scope` claim, which the server requires; shown on the consent screen. */
-const SCOPE_ATTRIBUTES = {
-  'include.in.token.scope': 'true',
-  'display.on.consent.screen': 'true',
-  'consent.screen.text': 'Use OntoForge as you',
-};
-
+/** The audience a machine's access token carries for OntoForge (OIDC_AUDIENCE): a client
+ * scope with an audience mapper, a default scope of the service client only. */
 async function ensureAudienceScope() {
   const scopes = await api('GET', `/${REALM}/client-scopes`);
   let scope = scopes.find((s) => s.name === AUDIENCE);
@@ -248,7 +246,6 @@ async function ensureAudienceScope() {
       name: AUDIENCE,
       description: 'OntoForge API audience',
       protocol: 'openid-connect',
-      attributes: SCOPE_ATTRIBUTES,
       protocolMappers: [mapper],
     });
     scope = (await api('GET', `/${REALM}/client-scopes`)).find((s) => s.name === AUDIENCE);
@@ -261,17 +258,8 @@ async function ensureAudienceScope() {
     } else {
       await api('PUT', `/${REALM}/client-scopes/${scope.id}/protocol-mappers/models/${current.id}`, { ...current, config: mapper.config });
     }
-    await api('PUT', `/${REALM}/client-scopes/${scope.id}`, {
-      ...scope,
-      attributes: { ...scope.attributes, ...SCOPE_ATTRIBUTES },
-    });
     step(`client scope '${AUDIENCE}': reconciled`);
   }
-  const defaults = await api('GET', `/${REALM}/default-default-client-scopes`);
-  if (defaults.some((s) => s.id === scope.id)) {
-    await api('DELETE', `/${REALM}/default-default-client-scopes/${scope.id}`);
-  }
-  await api('PUT', `/${REALM}/default-optional-client-scopes/${scope.id}`, undefined, { allowConflict: true });
   return scope;
 }
 
@@ -288,32 +276,19 @@ function clientDefinitions(secrets) {
     },
     {
       clientId: 'ontoforge-web',
-      name: 'OntoForge web client (the server signs browsers in)',
+      name: 'OntoForge (the server signs people in: web client and authorization server)',
       publicClient: false,
       secret: secrets.OIDC_CLIENT_SECRET,
       standardFlowEnabled: true,
       implicitFlowEnabled: false,
       directAccessGrantsEnabled: false,
       serviceAccountsEnabled: false,
-      redirectUris: ORIGINS.map((o) => `${o}/api/auth/callback`),
+      redirectUris: STACKS.flatMap((s) => [`${s.web}/api/auth/callback`, `${s.public}/oauth/callback`]),
       webOrigins: [],
       attributes: {
         'pkce.code.challenge.method': 'S256',
-        'post.logout.redirect.uris': ORIGINS.map((o) => `${o}/*`).join('##'),
+        'post.logout.redirect.uris': STACKS.map((s) => `${s.web}/*`).join('##'),
       },
-    },
-    {
-      clientId: 'ontoforge-mcp',
-      name: 'OntoForge MCP and command-line clients',
-      publicClient: true,
-      standardFlowEnabled: true,
-      implicitFlowEnabled: false,
-      directAccessGrantsEnabled: false,
-      serviceAccountsEnabled: false,
-      redirectUris: ['http://127.0.0.1/*', 'http://localhost/*'],
-      webOrigins: [],
-      attributes: { 'pkce.code.challenge.method': 'S256' },
-      audience: 'optional',
     },
     {
       clientId: 'ontoforge-service',
@@ -324,7 +299,7 @@ function clientDefinitions(secrets) {
       implicitFlowEnabled: false,
       directAccessGrantsEnabled: false,
       serviceAccountsEnabled: true,
-      audience: 'default',
+      audience: true,
     },
   ];
 }
@@ -346,46 +321,11 @@ async function ensureClients(secrets, audienceScope) {
       });
       step(`client '${definition.clientId}': reconciled`);
     }
-    // The service principal always gets the audience; the MCP client asks for it.
+    // The service principal always gets the audience.
     if (audience) {
-      const other = audience === 'default' ? 'optional' : 'default';
-      const attached = await api('GET', `/${REALM}/clients/${id}/${other}-client-scopes`);
-      if (attached.some((s) => s.id === audienceScope.id)) {
-        await api('DELETE', `/${REALM}/clients/${id}/${other}-client-scopes/${audienceScope.id}`);
-      }
-      await api('PUT', `/${REALM}/clients/${id}/${audience}-client-scopes/${audienceScope.id}`, undefined, { allowConflict: true });
+      await api('PUT', `/${REALM}/clients/${id}/default-client-scopes/${audienceScope.id}`, undefined, { allowConflict: true });
     }
   }
-}
-
-/** Anonymous dynamic client registration, as MCP clients use it: only loopback redirect
- * URIs, and the audience scope among the scopes such a client may receive. */
-async function ensureRegistrationPolicies() {
-  const type = 'org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy';
-  const components = await api('GET', `/${REALM}/components?type=${encodeURIComponent(type)}`);
-  const anonymous = components.filter((c) => c.subType === 'anonymous');
-  const trusted = anonymous.find((c) => c.providerId === 'trusted-hosts');
-  if (!trusted) fail('the realm has no anonymous trusted-hosts registration policy');
-  await api('PUT', `/${REALM}/components/${trusted.id}`, {
-    ...trusted,
-    config: {
-      ...trusted.config,
-      'trusted-hosts': ['localhost', '127.0.0.1'],
-      // Docker's port mapping hides the caller's address; the redirect URIs still must be loopback.
-      'host-sending-registration-request-must-match': ['false'],
-      'client-uris-must-match': ['true'],
-    },
-  });
-  const allowed = anonymous.find((c) => c.providerId === 'allowed-client-templates');
-  if (allowed) {
-    const scopes = new Set(allowed.config?.['allowed-client-scopes'] ?? []);
-    scopes.add(AUDIENCE);
-    await api('PUT', `/${REALM}/components/${allowed.id}`, {
-      ...allowed,
-      config: { ...allowed.config, 'allowed-client-scopes': [...scopes], 'allow-default-scopes': ['true'] },
-    });
-  }
-  step('dynamic client registration: loopback redirect URIs only, audience scope allowed');
 }
 
 async function ensureUsers(secrets) {
@@ -466,7 +406,6 @@ async function verify(secrets, subjects) {
   const audience = [access.aud].flat();
   if (!audience.includes(AUDIENCE)) fail(`the service token's audience is ${JSON.stringify(access.aud)}, not '${AUDIENCE}'`);
   if (access.iss !== ISSUER) fail(`the service token's issuer is '${access.iss}'`);
-  if (!String(access.scope ?? '').split(' ').includes(AUDIENCE)) fail(`the service token's scope lacks '${AUDIENCE}'`);
   if (access.sub !== subjects.service) fail('the service token names another subject');
   // Exactly one of everything the script owns: a rerun must never duplicate.
   const clients = await api('GET', `/${REALM}/clients?max=1000`);
@@ -516,7 +455,6 @@ async function main() {
   await ensureRealm();
   const audienceScope = await ensureAudienceScope();
   await ensureClients(secrets, audienceScope);
-  await ensureRegistrationPolicies();
   const users = await ensureUsers(secrets);
   const subjects = { ...users, service: await serviceSubject() };
   const generated = {

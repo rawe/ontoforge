@@ -18,6 +18,7 @@ import type {
   AccessStore,
   Assignment,
   NewAssignment,
+  OAuthRecords,
   Principal,
   PrincipalPage,
   PrincipalStatus,
@@ -28,8 +29,8 @@ import { ConflictError, OntoForgeError } from "../../core/exceptions.js";
 import { observePool } from "../../metrics.js";
 import { toStoreError } from "./errors.js";
 
-/** The layout this code creates. 2 adds the Proposer lens role. */
-export const ACCESS_STORAGE_VERSION = 2;
+/** The layout this code creates. 2 adds the Proposer lens role, 3 the authorization server's records. */
+export const ACCESS_STORAGE_VERSION = 3;
 
 /** Any number; the boot of every server takes it before creating or upgrading. */
 const SCHEMA_LOCK = 4_711_001;
@@ -93,6 +94,17 @@ CREATE TABLE IF NOT EXISTS audit (
   target_id uuid,
   details jsonb NOT NULL DEFAULT '{}'::jsonb
 );
+-- The authorization server's records: id is a digest, payload what the library stores.
+CREATE TABLE IF NOT EXISTS oauth_record (
+  model text NOT NULL,
+  id text NOT NULL,
+  payload jsonb NOT NULL,
+  grant_id text,
+  expires_at timestamptz,
+  PRIMARY KEY (model, id)
+);
+CREATE INDEX IF NOT EXISTS oauth_record_grant ON oauth_record (grant_id) WHERE grant_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS oauth_record_expiry ON oauth_record (expires_at) WHERE expires_at IS NOT NULL;
 `;
 
 type Row = Record<string, unknown>;
@@ -204,8 +216,42 @@ const ASSIGNMENT_COLUMNS = "id, principal_id, role, ontology_id, lens_id, create
 
 type Client = pg.PoolClient;
 
+/** A record is live until its expiry. */
+const LIVE = "(expires_at IS NULL OR expires_at > now())";
+
 class PostgresAccessStore implements AccessStore {
   constructor(private readonly pool: pg.Pool) {}
+
+  readonly oauth: OAuthRecords = {
+    find: async (model, id) => {
+      const rows = await this.query(`SELECT payload FROM oauth_record WHERE model = $1 AND id = $2 AND ${LIVE}`, [model, id]);
+      return (rows[0]?.payload as Record<string, unknown> | undefined) ?? null;
+    },
+    upsert: async (model, id, payload, grantId, expiresIn) => {
+      await this.query("DELETE FROM oauth_record WHERE expires_at <= now()");
+      await this.query(
+        `INSERT INTO oauth_record (model, id, payload, grant_id, expires_at)
+         VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5))
+         ON CONFLICT (model, id) DO UPDATE
+         SET payload = EXCLUDED.payload, grant_id = EXCLUDED.grant_id, expires_at = EXCLUDED.expires_at`,
+        [model, id, JSON.stringify(payload), grantId, expiresIn ?? null],
+      );
+    },
+    consume: async (model, id) => {
+      const rows = await this.query(
+        `UPDATE oauth_record SET payload = payload || jsonb_build_object('consumed', floor(extract(epoch FROM now()))::bigint)
+         WHERE model = $1 AND id = $2 AND payload->'consumed' IS NULL AND ${LIVE} RETURNING 1`,
+        [model, id],
+      );
+      return rows.length === 1;
+    },
+    destroy: async (model, id) => {
+      await this.query("DELETE FROM oauth_record WHERE model = $1 AND id = $2", [model, id]);
+    },
+    revokeByGrantId: async (model, grantId) => {
+      await this.query("DELETE FROM oauth_record WHERE model = $1 AND grant_id = $2", [model, grantId]);
+    },
+  };
 
   async migrate(): Promise<void> {
     const client = await this.pool.connect();

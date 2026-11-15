@@ -11,6 +11,7 @@ import { openAccessStore } from "./adapters/postgres/accessStore.js";
 import type { AccessStore } from "./access/store.js";
 import { createApp } from "./app.js";
 import type { AuthRuntime } from "./auth/runtime.js";
+import { createAuthorizationServer } from "./auth/authorizationServer.js";
 import { connectOidc } from "./auth/oidc.js";
 import { authSettings, settings } from "./config.js";
 import { closeAiModel, initAiModel } from "./core/ai.js";
@@ -30,8 +31,8 @@ import { openSharedState } from "./sharedState.js";
  * 1. Connect storage, verify reachability, ensure constraints and indexes.
  *    Open the shared state; a Valkey must be reachable and evict nothing.
  *    With authentication on, open the access database (creating and
- *    upgrading it) and discover the OpenID provider; either failing fails
- *    the boot. With it off, neither is touched.
+ *    upgrading it), discover the OpenID provider and set up the
+ *    authorization server; any of them failing fails the boot. With it off, neither is touched.
  * 2. Initialize the embedding provider, if configured.
  * 3. Initialize the language-model provider, if configured.
  * 4. If embeddings are enabled, reconcile vector index widths against the
@@ -56,7 +57,13 @@ export async function startServer(): Promise<FastifyInstance> {
     let runtime: AuthRuntime | null = null;
     if (auth !== null) {
       access = await openAccessStore(auth.accessDbUri, settings.DB_USER, settings.DB_PASSWORD);
-      runtime = { settings: auth, oidc: await connectOidc(auth), access, sessions: shared.sessions };
+      runtime = {
+        settings: auth,
+        oidc: await connectOidc(auth),
+        access,
+        sessions: shared.sessions,
+        oauth: createAuthorizationServer(auth, access),
+      };
     }
     initEmbeddingProvider();
     initAiModel();

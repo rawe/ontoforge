@@ -1,6 +1,8 @@
 /**
  * The OpenID provider as this server sees it: the browser login it runs as a
- * confidential client (authorization code with PKCE, `openid-client`), and
+ * confidential client (authorization code with PKCE, `openid-client`; its
+ * secret sent as `client_secret_post` where the provider offers it, else as
+ * `client_secret_basic`), and
  * the access tokens REST and MCP callers present (`jose`, keys from the
  * provider's JWKS).
  *
@@ -15,10 +17,6 @@ import * as client from "openid-client";
 
 import type { AuthSettings } from "../config.js";
 import { ProviderUnavailableError } from "../core/exceptions.js";
-
-/** The OAuth scope that puts this server's audience into an access token; an
- * access token must carry it. */
-export const API_SCOPE = "ontoforge-api";
 
 /** The display claims of a signed-in person or service. */
 export interface Identified {
@@ -68,24 +66,18 @@ function text(claims: JWTPayload, name: string): string | null {
   return typeof value === "string" && value !== "" ? value : null;
 }
 
-function identified(claims: JWTPayload): Identified {
+/** The identity a token names, its subject read from `subjectClaim`; null without that claim. */
+function identified(claims: JWTPayload, subjectClaim: string): Identified | null {
+  const subject = text(claims, subjectClaim);
+  if (subject === null) return null;
   const username = text(claims, "preferred_username");
   return {
     issuer: claims.iss!,
-    subject: claims.sub!,
-    displayName: text(claims, "name") ?? username ?? claims.sub!,
+    subject,
+    displayName: text(claims, "name") ?? username ?? subject,
     email: text(claims, "email"),
     username,
   };
-}
-
-/** The scopes a token grants: `scope` space-separated, or `scp` as a string or a list. */
-function grantedScopes(claims: JWTPayload): string[] {
-  const { scope, scp } = claims as { scope?: unknown; scp?: unknown };
-  if (typeof scope === "string") return scope.split(" ");
-  if (typeof scp === "string") return scp.split(" ");
-  if (Array.isArray(scp)) return scp.filter((value): value is string => typeof value === "string");
-  return [];
 }
 
 /** Discovers the provider (bounded) and keeps its configuration; a failure fails the boot. */
@@ -112,8 +104,14 @@ export async function connectOidc(auth: AuthSettings): Promise<Oidc> {
       { cause: error },
     );
   }
-  config[client.customFetch] = (url, options) => send(url, options as RequestInit);
   const metadata = config.serverMetadata();
+  // The secret goes in the request body where the provider offers that: providers differ in
+  // how they read a secret from the Authorization header, not in how they read a form field.
+  if (metadata.token_endpoint_auth_methods_supported?.includes("client_secret_post")) {
+    config = new client.Configuration(metadata, auth.clientId, { client_secret: auth.clientSecret }, client.ClientSecretPost(auth.clientSecret));
+    if (insecure) client.allowInsecureRequests(config);
+  }
+  config[client.customFetch] = (url, options) => send(url, options as RequestInit);
   if (!metadata.jwks_uri) throw new Error(`OpenID provider ${auth.issuer} publishes no jwks_uri`);
   const keys = createRemoteJWKSet(new URL(metadata.jwks_uri), {
     timeoutDuration: 5000,
@@ -145,7 +143,9 @@ export async function connectOidc(auth: AuthSettings): Promise<Oidc> {
       });
       const claims = tokens.claims();
       if (!claims) throw new Error("The provider returned no ID token");
-      return identified(claims as JWTPayload);
+      const identity = identified(claims as JWTPayload, auth.subjectClaim);
+      if (identity === null) throw new Error(`The ID token carries no '${auth.subjectClaim}' claim`);
+      return identity;
     },
 
     logoutUrl(postLogoutRedirectUri) {
@@ -156,20 +156,22 @@ export async function connectOidc(auth: AuthSettings): Promise<Oidc> {
     },
 
     async verifyAccessToken(token) {
+      // Without an audience nothing binds a provider's token to this server.
+      if (auth.audience === null) return null;
       try {
         const { payload } = await jwtVerify(token, keys, {
           issuer: auth.issuer,
           audience: auth.audience,
           algorithms: ALGORITHMS,
           clockTolerance: 30,
-          requiredClaims: ["exp", "sub", "iss"],
+          requiredClaims: ["exp", "iss"],
         });
-        // Keycloak names its token kinds; an ID or refresh token is never an API credential.
+        // A provider that names its token kinds: an ID or refresh token is never an API credential.
         const kind = payload["typ"];
         if (kind !== undefined && kind !== "Bearer") return null;
-        // An ID token carries a nonce and no scope; an access token for this API its scope.
-        if (payload["nonce"] !== undefined || !grantedScopes(payload).includes(API_SCOPE)) return null;
-        return identified(payload);
+        // An ID token carries a nonce; it is never an API credential.
+        if (payload["nonce"] !== undefined) return null;
+        return identified(payload, auth.subjectClaim);
       } catch (error) {
         if (isTokenRejection(error)) return null;
         const { message, code, cause } = error as { message?: string; code?: string; cause?: { code?: string } };

@@ -67,6 +67,11 @@ capability remains the home for what the feature means.
 | [bulk-inserts](capabilities/bulk-inserts.md) | Loading many entities and relations through changesets: lists of calls, puts by identity, chunks, failures and reruns, review |
 | [authentication](capabilities/authentication.md) | Signing in through an OpenID provider, roles on the platform, an ontology or a lens, what a caller sees, user management, authentication off |
 
+## Identity providers
+
+- **[Identity provider setup](providers/identity-providers.md)** — What to set up at
+  Keycloak, Auth0 or Microsoft Entra ID, and the configuration values that follow.
+
 ## Internal provider interfaces
 
 - **[Decision API](providers/decision-api.md)** — Optional internal client for typed

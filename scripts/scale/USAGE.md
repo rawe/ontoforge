@@ -49,7 +49,9 @@ is missing, and chat with its unscoped lens's built-in agent. The fake answers
 These need authentication off; with it on they skip, and the `auth-*` scenarios run
 instead (they skip with it off). The `auth-*` scenarios sign Keycloak's test users in
 without a browser ([scripts/auth/lib.mjs](../auth/lib.mjs)) and send cookie POSTs with
-`Origin: http://localhost:13000`, as a browser on the frontend would.
+`Origin: http://localhost:13000`, as a browser on the frontend would. Their bearer tokens are
+OntoForge's, for `PUBLIC_URL/api`, from the command-line client
+([scripts/auth/cli.mjs](../auth/USAGE.md)) through the load balancer.
 
 | Name | Checks |
 |---|---|
@@ -63,6 +65,7 @@ without a browser ([scripts/auth/lib.mjs](../auth/lib.mjs)) and send cookie POST
 | `auth-session` | `reader` signs in on A (login and callback on A); the session cookie works on B, through the LB and through the frontend; a logout through B ends it on A and through the LB |
 | `auth-revoke` | `admin` (session on A) creates an ontology `scale_auth_<time>` with a lens, grants `reader` Reader; reader's token reads on B; the grant is revoked through A; the next request on B and through the LB is refused; the ontology is deleted |
 | `auth-bearer` | `reader`'s access token is accepted on A, on B (the same user) and through the LB; without it both answer 401 |
+| `auth-oauth` | OntoForge's authorization server across instances: `reader` is authorized on A (sign-in, consent with `Origin: http://localhost:18000`), the code is redeemed on B; the access token works on A and B; the refresh token is rotated on A and the new access token works on both; the spent refresh token is refused on B, and that reuse revokes the authorization on A and B |
 
 Each prints its evidence (HTTP statuses, thread ids, counts) and PASS, FAIL or SKIP;
 the exit code is 1 when one failed.

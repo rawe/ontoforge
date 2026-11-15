@@ -2,7 +2,7 @@
  * Authorization and user management end to end: the app with
  * authentication on over the real access store (`ontoforge_access_test`,
  * beside the suite's database) and a stub provider whose bearer token is
- * the caller's subject. Covers the route checks (401, 403, 404), the
+ * the caller's subject (shaped as a JWT: `jwt.<subject>.sig`). Covers the route checks (401, 403, 404), the
  * filtered lists, the creator becoming administrator, user management's
  * scope, deletes forgetting assignments, the runtime MCP mount at a
  * Reader's level, a Proposer's changesets a Writer commits and owned
@@ -21,8 +21,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AccessStore } from "../../src/access/store.js";
 import { openAccessStore } from "../../src/adapters/postgres/accessStore.js";
 import { createApp } from "../../src/app.js";
+import { createAuthorizationServer } from "../../src/auth/authorizationServer.js";
 import type { AuthRuntime } from "../../src/auth/runtime.js";
-import { settings } from "../../src/config.js";
+import { settings, type AuthSettings } from "../../src/config.js";
 import { setAiModel } from "../../src/core/ai.js";
 import { StoreError } from "../../src/core/exceptions.js";
 import { closeStores, initStores } from "../../src/core/ports.js";
@@ -51,7 +52,7 @@ async function truncate(): Promise<void> {
   });
   await client.connect();
   try {
-    await client.query("TRUNCATE audit, assignment, identity, principal");
+    await client.query("TRUNCATE audit, assignment, identity, principal, oauth_record");
   } finally {
     await client.end();
   }
@@ -63,12 +64,15 @@ let baseUrl: string;
 
 type Json = Record<string, unknown>;
 
+/** The bearer header of `subject`: a token the stub provider accepts. */
+const bearer = (subject: string) => `Bearer jwt.${subject}.sig`;
+
 /** A request as `subject` (a bearer token the stub accepts), or anonymous. */
 async function as(subject: string | null, method: string, url: string, payload?: object) {
   const res = await app.inject({
     method: method as "GET",
     url,
-    headers: subject === null ? {} : { authorization: `Bearer ${subject}` },
+    headers: subject === null ? {} : { authorization: bearer(subject) },
     ...(payload === undefined ? {} : { payload }),
   });
   return { status: res.statusCode, body: res.body === "" ? null : (res.json() as Json & Json[]) };
@@ -83,7 +87,7 @@ async function mcpAs(subject: string, path: string): Promise<Client> {
   const client = new Client({ name: "access-tests", version: "0.0.1" });
   await client.connect(
     new StreamableHTTPClientTransport(new URL(`${baseUrl}${path}`), {
-      requestInit: { headers: { authorization: `Bearer ${subject}` } },
+      requestInit: { headers: { authorization: bearer(subject) } },
     }),
   );
   return client;
@@ -103,20 +107,27 @@ beforeAll(async () => {
   await wipeDatabase();
   access = await openAccessStore(accessUrl(), settings.DB_USER, settings.DB_PASSWORD);
   await truncate();
+  const authSettings = {
+    issuer: ISSUER,
+    adminSubject: "admin",
+    publicUrl: PUBLIC_URL,
+    webClientUrl: WEB_CLIENT_URL,
+    clientSecret: "x".repeat(32),
+    oauthClients: [],
+    oauthClientHosts: null,
+  } as unknown as AuthSettings;
   const auth = {
-    settings: { issuer: ISSUER, adminSubject: "admin", publicUrl: PUBLIC_URL, webClientUrl: WEB_CLIENT_URL, clientSecret: "x".repeat(32) },
+    settings: authSettings,
     oidc: {
       issuer: ISSUER,
-      verifyAccessToken: async (token: string) => ({
-        issuer: ISSUER,
-        subject: token,
-        displayName: token,
-        email: `${token}@x.test`,
-        username: token,
-      }),
+      verifyAccessToken: async (token: string) => {
+        const subject = token.split(".")[1]!;
+        return { issuer: ISSUER, subject, displayName: subject, email: `${subject}@x.test`, username: subject };
+      },
     },
     sessions: { get: async () => null, create: async () => {}, delete: async () => {} },
     access,
+    oauth: createAuthorizationServer(authSettings, access),
   } as unknown as AuthRuntime;
   app = await createApp(undefined, auth);
   await app.listen({ port: 0, host: "127.0.0.1" });
@@ -305,7 +316,7 @@ describe("authorization with authentication on", () => {
     const thread = (id: string) => `${fair}/model/ai/threads/${id}`;
     setAiModel(new FakeToolCallingModel([new AIMessage("A design answer.")]));
     try {
-      const res = await app.inject({ method: "POST", url: chat, headers: { authorization: "Bearer creator" }, payload: { message: "Explain" } });
+      const res = await app.inject({ method: "POST", url: chat, headers: { authorization: bearer("creator") }, payload: { message: "Explain" } });
       expect(res.statusCode, res.body).toBe(200);
       const events = res.body.trim().split("\n").map((line) => JSON.parse(line) as Json);
       expect(events.at(-1)).toEqual({ type: "final", reply: "A design answer." });
@@ -347,7 +358,7 @@ describe("authorization with authentication on", () => {
       const client = new Client({ name: "access-tests", version: "0.0.1" });
       await client.connect(
         new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/ontologies/fair/runtime/lenses/visitor`), {
-          requestInit: { headers: { authorization: `Bearer ${subject}` } },
+          requestInit: { headers: { authorization: bearer(subject) } },
         }),
       );
       return client;
@@ -370,7 +381,7 @@ describe("authorization with authentication on", () => {
     // The modeling mount needs the ontology's administrator.
     const res = await fetch(`${baseUrl}/mcp/ontologies/fair/model`, {
       method: "POST",
-      headers: { authorization: "Bearer alice", "content-type": "application/json", accept: "application/json, text/event-stream" },
+      headers: { authorization: bearer("alice"), "content-type": "application/json", accept: "application/json, text/event-stream" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     expect(res.status).toBe(403);

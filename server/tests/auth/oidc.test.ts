@@ -1,7 +1,8 @@
 /**
  * Access-token verification against a provider on a local port: a wrong
  * token is no caller, a provider whose keys cannot be fetched is
- * `ProviderUnavailableError` — never an unhandled error.
+ * `ProviderUnavailableError` — never an unhandled error. Also the subject
+ * claim the browser sign-in reads from the ID token.
  */
 
 import { createServer, type Server } from "node:http";
@@ -11,6 +12,7 @@ import { exportJWK, generateKeyPair, SignJWT, type JWK } from "jose";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { backchannelFetch, connectOidc, type Oidc } from "../../src/auth/oidc.js";
+import type { AuthSettings } from "../../src/config.js";
 import { ProviderUnavailableError } from "../../src/core/exceptions.js";
 import { SETTINGS } from "./fakes.js";
 
@@ -20,6 +22,12 @@ let jwk: JWK;
 let privateKey: CryptoKey;
 let issuer: string;
 let server: Server;
+/** The claims of the ID token the provider's token endpoint answers with. */
+let idTokenClaims: Record<string, unknown> = {};
+/** The client authentication methods the provider's metadata names; undefined: it names none. */
+let authMethods: string[] | undefined;
+/** How the last token request authenticated: its Authorization header and its body. */
+let tokenRequest: { authorization: string | undefined; body: string } | null = null;
 
 beforeAll(async () => {
   const pair = await generateKeyPair("RS256");
@@ -37,9 +45,18 @@ beforeAll(async () => {
         token_endpoint: `${issuer}/token`,
         // A refused key set lives on a port nobody listens on.
         jwks_uri: keys === "refuse" ? "http://127.0.0.1:1/certs" : `${issuer}/certs`,
+        ...(authMethods ? { token_endpoint_auth_methods_supported: authMethods } : {}),
       });
     }
     if (req.url === "/realms/x/certs") return keys === "serve" ? send(200, { keys: [jwk] }) : send(503, {});
+    if (req.url === "/realms/x/token") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => (tokenRequest = { authorization: req.headers.authorization, body }));
+      return void sign({ iss: issuer, aud: SETTINGS.clientId, iat: Math.floor(Date.now() / 1000), ...idTokenClaims }).then((idToken) =>
+        send(200, { access_token: "a", token_type: "Bearer", id_token: idToken }),
+      );
+    }
     send(404, {});
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -53,16 +70,17 @@ beforeEach(() => {
 });
 
 /** A new connection, its key set not cached yet. */
-function connect(answer: typeof keys): Promise<Oidc> {
+function connect(answer: typeof keys, settings: Partial<AuthSettings> = {}): Promise<Oidc> {
   keys = answer;
-  return connectOidc({ ...SETTINGS, issuer, backchannelUrl: issuer });
+  return connectOidc({ ...SETTINGS, issuer, backchannelUrl: issuer, ...settings });
+}
+
+function sign(claims: Record<string, unknown>): Promise<string> {
+  return new SignJWT(claims).setProtectedHeader({ alg: "RS256", kid: "k1" }).setExpirationTime("5m").sign(privateKey);
 }
 
 function token(claims: Record<string, unknown> = {}): Promise<string> {
-  return new SignJWT({ typ: "Bearer", iss: issuer, sub: "sub-1", aud: SETTINGS.audience, scope: "profile ontoforge-api", ...claims })
-    .setProtectedHeader({ alg: "RS256", kid: "k1" })
-    .setExpirationTime("5m")
-    .sign(privateKey);
+  return sign({ typ: "Bearer", iss: issuer, sub: "sub-1", aud: SETTINGS.audience, scope: "profile", ...claims });
 }
 
 describe("verifying an access token", () => {
@@ -78,16 +96,27 @@ describe("verifying an access token", () => {
     expect(await oidc.verifyAccessToken(await token({ typ: "Refresh" }))).toBeNull();
   });
 
-  it("needs the API scope, in scope or scp", async () => {
+  it("needs no scope: the audience binds a token to this server", async () => {
     const oidc = await connect("serve");
-    expect(await oidc.verifyAccessToken(await token({ scope: undefined }))).toBeNull();
-    expect(await oidc.verifyAccessToken(await token({ scope: "openid profile" }))).toBeNull();
-    expect(await oidc.verifyAccessToken(await token({ scope: "ontoforge-api-x" }))).toBeNull();
-    expect(await oidc.verifyAccessToken(await token({ scope: undefined, scp: "ontoforge-api" }))).not.toBeNull();
-    expect(await oidc.verifyAccessToken(await token({ scope: undefined, scp: ["read", "ontoforge-api"] }))).not.toBeNull();
+    expect(await oidc.verifyAccessToken(await token({ scope: undefined }))).not.toBeNull();
+    expect(await oidc.verifyAccessToken(await token({ scope: undefined, roles: ["reader"] }))).not.toBeNull();
   });
 
-  it("takes no ID token, even one carrying the API audience and scope", async () => {
+  it("accepts no token at all without a configured audience", async () => {
+    const oidc = await connect("serve", { audience: null });
+    expect(await oidc.verifyAccessToken(await token())).toBeNull();
+    expect(await oidc.verifyAccessToken(await token({ aud: undefined }))).toBeNull();
+  });
+
+  it("reads the subject from the configured claim and rejects a token without it", async () => {
+    const oidc = await connect("serve", { subjectClaim: "oid" });
+    expect(await oidc.verifyAccessToken(await token({ oid: "object-1" }))).toMatchObject({ subject: "object-1" });
+    expect(await oidc.verifyAccessToken(await token())).toBeNull();
+    expect(await oidc.verifyAccessToken(await token({ sub: undefined }))).toBeNull();
+    expect(await (await connect("serve")).verifyAccessToken(await token({ sub: undefined, oid: "object-1" }))).toBeNull();
+  });
+
+  it("takes no ID token, even one carrying the API audience", async () => {
     const oidc = await connect("serve");
     expect(await oidc.verifyAccessToken(await token({ typ: undefined, nonce: "n-1" }))).toBeNull();
   });
@@ -100,6 +129,38 @@ describe("verifying an access token", () => {
   it("fails as an unavailable provider when the key set answers an error", async () => {
     const oidc = await connect("fail");
     await expect(oidc.verifyAccessToken(await token())).rejects.toBeInstanceOf(ProviderUnavailableError);
+  });
+});
+
+describe("finishing a browser sign-in", () => {
+  const checks = { state: "s-1", nonce: "n-1", codeVerifier: "v".repeat(43) };
+  const callback = () => new URL("http://localhost:5173/api/auth/callback?code=c-1&state=s-1");
+
+  it("reads the subject from the configured claim of the ID token", async () => {
+    idTokenClaims = { sub: "pairwise-1", oid: "object-1", nonce: "n-1" };
+    expect(await (await connect("serve")).finishLogin(callback(), checks)).toMatchObject({ subject: "pairwise-1" });
+    expect(await (await connect("serve", { subjectClaim: "oid" })).finishLogin(callback(), checks)).toMatchObject({
+      subject: "object-1",
+    });
+  });
+
+  it("sends the client secret in the request body where the provider offers that, else in the Authorization header", async () => {
+    idTokenClaims = { sub: "pairwise-1", nonce: "n-1" };
+    authMethods = ["client_secret_basic", "client_secret_post"];
+    await (await connect("serve")).finishLogin(callback(), checks);
+    expect(tokenRequest?.authorization).toBeUndefined();
+    expect(new URLSearchParams(tokenRequest!.body).get("client_secret")).toBe(SETTINGS.clientSecret);
+
+    authMethods = undefined;
+    await (await connect("serve")).finishLogin(callback(), checks);
+    expect(tokenRequest?.authorization).toMatch(/^Basic /);
+    expect(new URLSearchParams(tokenRequest!.body).has("client_secret")).toBe(false);
+  });
+
+  it("fails when the ID token lacks the configured claim", async () => {
+    idTokenClaims = { sub: "pairwise-1", nonce: "n-1" };
+    const oidc = await connect("serve", { subjectClaim: "oid" });
+    await expect(oidc.finishLogin(callback(), checks)).rejects.toThrow(/no 'oid' claim/);
   });
 });
 

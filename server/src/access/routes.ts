@@ -62,8 +62,9 @@ const DESIGN_READS = new Set([
   "GET /ai/assistants/agent-schema",
 ]);
 
-/** Outside `/api` and `/mcp`: probes, metrics, the API documentation, resource metadata. */
-const PUBLIC_PATHS = ["/livez", "/readyz", "/metrics", "/openapi.json", "/docs", "/.well-known"];
+/** Outside `/api` and `/mcp`: probes, metrics, the API documentation, resource metadata,
+ * the authorization server's sign-in and consent. */
+const PUBLIC_PATHS = ["/livez", "/readyz", "/metrics", "/openapi.json", "/docs", "/.well-known", "/oauth"];
 
 /** `path` is `prefix` or lies below it. */
 function within(path: string, prefix: string): boolean {

@@ -10,7 +10,7 @@ import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import type { AccessStore } from "../../src/access/store.js";
-import { openAccessStore } from "../../src/adapters/postgres/accessStore.js";
+import { ACCESS_STORAGE_VERSION, openAccessStore } from "../../src/adapters/postgres/accessStore.js";
 import { settings } from "../../src/config.js";
 import { ConflictError } from "../../src/core/exceptions.js";
 
@@ -56,7 +56,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await connect(DATABASE, (c) => c.query("TRUNCATE audit, assignment, identity, principal"));
+  await connect(DATABASE, (c) => c.query("TRUNCATE audit, assignment, identity, principal, oauth_record"));
 });
 
 async function auditActions(): Promise<string[]> {
@@ -123,7 +123,7 @@ describe("opening", () => {
       expect((await upgraded.assignmentsOf(user.id)).map((a) => a.role)).toEqual(["proposer"]);
       expect((await upgraded.assignmentsOf(principalId)).map((a) => a.role)).toEqual(["platform_admin"]);
       const version = await connect(OLD, (c) => c.query("SELECT version FROM access_storage_version"));
-      expect(version.rows[0].version).toBe(2);
+      expect(version.rows[0].version).toBe(ACCESS_STORAGE_VERSION);
       // A lens role still needs its lens.
       await expect(
         upgraded.assign({ principalId: user.id, role: "proposer", ontologyId: lens.ontologyId, lensId: null }, user.id),
@@ -131,6 +131,19 @@ describe("opening", () => {
     } finally {
       await upgraded.close();
       await maintenance((c) => c.query(`DROP DATABASE IF EXISTS ${OLD} WITH (FORCE)`));
+    }
+  });
+
+  it("upgrades a version 2 database: the authorization server's records get their table", async () => {
+    await connect(DATABASE, (c) => c.query("DROP TABLE oauth_record; UPDATE access_storage_version SET version = 2"));
+    const upgraded = await openAccessStore(accessUrl(), settings.DB_USER, settings.DB_PASSWORD);
+    try {
+      await upgraded.oauth.upsert("Grant", "g", { kind: "Grant" }, null, 60);
+      expect(await upgraded.oauth.find("Grant", "g")).toEqual({ kind: "Grant" });
+      const version = await connect(DATABASE, (c) => c.query("SELECT version FROM access_storage_version"));
+      expect(version.rows[0].version).toBe(3);
+    } finally {
+      await upgraded.close();
     }
   });
 
@@ -326,5 +339,50 @@ describe("principals", () => {
       "principal.disabled",
       "principal.enabled",
     ]);
+  });
+});
+
+describe("the authorization server's records", () => {
+  it("keeps, replaces and removes a record by model and id", async () => {
+    const { oauth } = store;
+    await oauth.upsert("AccessToken", "a", { kind: "AccessToken", accountId: "p" }, "grant-1", 60);
+    expect(await oauth.find("AccessToken", "a")).toEqual({ kind: "AccessToken", accountId: "p" });
+    expect(await oauth.find("RefreshToken", "a")).toBeNull();
+    await oauth.upsert("AccessToken", "a", { kind: "AccessToken", accountId: "q" }, "grant-1", undefined);
+    expect(await oauth.find("AccessToken", "a")).toEqual({ kind: "AccessToken", accountId: "q" });
+    await oauth.destroy("AccessToken", "a");
+    expect(await oauth.find("AccessToken", "a")).toBeNull();
+  });
+
+  it("consumes a record once, also when two consume it at the same moment", async () => {
+    const { oauth } = store;
+    await oauth.upsert("AuthorizationCode", "c", { kind: "AuthorizationCode" }, null, 60);
+    const results = await Promise.all([1, 2, 3, 4].map(() => oauth.consume("AuthorizationCode", "c")));
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(await oauth.find("AuthorizationCode", "c")).toMatchObject({ consumed: expect.any(Number) });
+    expect(await oauth.consume("AuthorizationCode", "c")).toBe(false);
+    expect(await oauth.consume("AuthorizationCode", "missing")).toBe(false);
+  });
+
+  it("revokes the records of one grant and one model", async () => {
+    const { oauth } = store;
+    await oauth.upsert("AccessToken", "a1", { kind: "AccessToken" }, "g1", 60);
+    await oauth.upsert("AccessToken", "a2", { kind: "AccessToken" }, "g2", 60);
+    await oauth.upsert("RefreshToken", "r1", { kind: "RefreshToken" }, "g1", 60);
+    await oauth.revokeByGrantId("AccessToken", "g1");
+    expect(await oauth.find("AccessToken", "a1")).toBeNull();
+    expect(await oauth.find("AccessToken", "a2")).not.toBeNull();
+    expect(await oauth.find("RefreshToken", "r1")).not.toBeNull();
+  });
+
+  it("never returns an expired record and removes it with the next write", async () => {
+    const { oauth } = store;
+    await oauth.upsert("Session", "old", { kind: "Session" }, null, 60);
+    await connect(DATABASE, (c) => c.query("UPDATE oauth_record SET expires_at = now() - interval '1 second' WHERE id = 'old'"));
+    expect(await oauth.find("Session", "old")).toBeNull();
+    expect(await oauth.consume("Session", "old")).toBe(false);
+    await oauth.upsert("Session", "new", { kind: "Session" }, null, 60);
+    const left = await connect(DATABASE, (c) => c.query("SELECT id FROM oauth_record"));
+    expect(left.rows.map((r) => r.id)).toEqual(["new"]);
   });
 });

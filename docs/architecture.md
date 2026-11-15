@@ -13,7 +13,8 @@ Four parts, two processes; with [authentication](#authentication-and-authorizati
 two more.
 
 **Server** — one deployable unit. Serves the ontology registry, the modeling API, the
-runtime API, both MCP servers and the OpenAPI description. There is no mode switch and no
+runtime API, both MCP servers and the OpenAPI description, and with authentication on the
+OAuth authorization server for clients acting for a person. There is no mode switch and no
 partial deployment: every instance serves everything, and any number of instances share one
 database and one [shared state](#shared-state) — and, with authentication on, one access
 database and one identity provider. The schema and the data it governs must not diverge
@@ -36,10 +37,10 @@ separation inside the database is the adapter's business.
 [storage-adapters/](storage-adapters/README.md).
 
 **Access database** — with authentication on, a PostgreSQL database of its own beside the
-ontology database: principals, their identities, role assignments and the audit of every
-change to them. Reached through the access store, a port of its own, never through the
-persistence port; it carries its own storage version. Locally it is a second database in
-the same PostgreSQL.
+ontology database: principals, their identities, role assignments, the audit of every
+change to them, and the authorization server's records. Reached through the access store,
+a port of its own, never through the persistence port; it carries its own storage
+version. Locally it is a second database in the same PostgreSQL.
 
 **Identity provider** — with authentication on, an external OpenID provider where people
 and services sign in; Keycloak in development. It says who a caller is, never what it may
@@ -243,6 +244,7 @@ In the access database, with authentication on; nothing here belongs to an ontol
 | Sign-in identity | issuer + subject, unique | its principal |
 | Assignment | id | its principal, role, ontology id (ontology and lens roles), lens id (lens roles), who granted it |
 | Audit entry | internal | who changed what, and when |
+| Authorization record | kind + a digest of its id | an authorization server's code, token, grant or authorization in progress: its grant, expiry, whether it was used |
 
 Assignments name ontologies and lenses by their never-reused ids; keys are resolved on
 every request, and an assignment whose ontology or lens is gone is left out.
@@ -409,13 +411,17 @@ nothing below runs. What a caller experiences, and what each role allows:
 
 **Who is calling.** A request proves itself by a bearer access token or by the browser's
 session cookie, never both: a bearer header decides alone, and the MCP mounts take bearer
-tokens only. A token is checked against the provider's published keys — issuer, audience,
-OntoForge's scope, expiry, an asymmetric signature, and no nonce, which only an ID token
-carries — and never sent to the provider to ask. Its sign-in identity, or
-the session's, leads to the principal in the access database, read with its assignments
-afresh on every request, with no cache: a revoked role or a disabled principal is refused
-on the next request, on every server. A sign-in identity seen for the first time becomes a
-principal with no role, created once however many first requests race.
+tokens only. A bearer token is one the server's own authorization server issued, or a
+provider's access token for a machine; its form tells which, and it is checked only as
+that. The server's own token is looked up in the access database and opens only the
+resource it was issued for. A provider token is checked against the provider's published
+keys — issuer, the configured audience, expiry, an asymmetric signature, and no nonce,
+which only an ID token carries — and never sent to the provider to ask; without a
+configured audience none is accepted. The token, or the session, leads to the principal in
+the access database, read with its assignments afresh on every request, with no cache: a
+revoked role or a disabled principal is refused on the next request, on every server. A
+sign-in identity seen for the first time becomes a principal with no role, created once
+however many first requests race.
 
 **Browser sessions.** The web client has no server side, so the server is its browser's
 OpenID client: authorization code with PKCE, as a confidential client ([ADR 0031](adr/0031-server-as-browser-openid-client.md)).
@@ -429,6 +435,20 @@ address's port. A cookie request that may change something must carry the web cl
 address's origin, and cross-origin browser calls are allowed without credentials only.
 Browser sessions exist only when the deployment names a web client address; without one,
 the server accepts bearer tokens only.
+
+**Clients acting for a person.** MCP clients and other applications acting for a person get
+their tokens from the server: it is an OAuth authorization server, its issuer the public
+address ([ADR 0037](adr/0037-server-as-authorization-server-for-clients.md)). It signs the
+person in at the provider through the same confidential client as the browser, with a
+callback of its own under the public address, asks for consent, and issues opaque access
+tokens bound to one resource — the REST API or one MCP mount — and rotating refresh
+tokens. The protected-resource metadata of the REST API and of every MCP mount names it,
+so a client finds it from a `401`. It registers no clients: a client is known by its
+client ID metadata document, fetched over https, or by the deployment's configuration.
+Its codes, grants, tokens and authorizations in progress live in the access database,
+keyed by a digest and never by the token itself, so any server serves any step and
+accepts any token; its cookie keys are derived from the client secret, the same on every
+server with nothing to store.
 
 **What a route needs.** Every route declares its need — public, any signed-in caller, a
 platform role, the administrator or any member of the ontology in its path, a role on the
@@ -643,9 +663,9 @@ per-ontology deployment configuration.
 | Shutdown | How long a stopping server drains | Default applies |
 | Language model | Provider, model, endpoint, credential | AI capabilities unavailable |
 | Decision model | Endpoint, model, credential | Entity identity comparison unavailable |
-| Public URL | The address API and MCP clients reach the server at, reported to clients; MCP resources are named after it | No address is reported; required with authentication on |
+| Public URL | The address API and MCP clients reach the server at, reported to clients; the authorization server's issuer, and the resources its tokens are for are named after it | No address is reported; required with authentication on |
 | Web client URL | With authentication on, the address the web client is served from, where browser sign-in runs | No browser sign-in; bearer tokens only |
-| Authentication | On or off; the identity provider, how this server reaches it, the client and its secret, the audience, the configured administrator, the session idle time, the access database | Off: every caller trusted |
+| Authentication | On or off; the identity provider, how this server reaches it, the client and its secret, the audience for machines, the subject claim, the configured administrator, the session idle time, the access database, the authorization server's configured clients and the hosts it fetches client metadata documents from | Off: every caller trusted |
 
 Exact variable names are in the repository README; they are deployment surface, not
 architecture.

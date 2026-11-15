@@ -27,6 +27,7 @@ import {
 
 import { accessRouter } from "./access/router.js";
 import { challenge, classifyRoutes, guardRoutes } from "./auth/plugin.js";
+import { mountAuthorizationServer, oauthRouter } from "./auth/oauthRouter.js";
 import { authRouter, resourceMetadataRouter } from "./auth/router.js";
 import type { AuthRuntime } from "./auth/runtime.js";
 import { settings } from "./config.js";
@@ -229,6 +230,9 @@ export async function createApp(shared?: SharedState, auth: AuthRuntime | null =
     },
   );
 
+  // The authorization server answers its own requests, CORS included.
+  if (auth !== null) await mountAuthorizationServer(app, auth);
+
   // CORS allow-all: origins, methods and headers unrestricted, credentials
   // allowed (the origin is reflected). With authentication on, no credentials:
   // the session cookie serves this deployment's own origin only, and a
@@ -341,6 +345,7 @@ export async function createApp(shared?: SharedState, auth: AuthRuntime | null =
     // User management exists only with authentication on.
     await app.register(accessRouter, { prefix: "/api" });
     await app.register(resourceMetadataRouter);
+    await app.register(oauthRouter, { prefix: "/oauth" });
   }
   // The modeling and runtime surfaces are ontology-scoped: every request
   // names its ontology in the path and runs against a store bound to it;

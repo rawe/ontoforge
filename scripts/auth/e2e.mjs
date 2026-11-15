@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // End-to-end check of authentication against a running server with AUTH_ENABLED=true and the
-// development Keycloak: browser sign-in, sessions, CSRF, bearer tokens, roles, revocation,
-// disabling, user management and MCP OAuth with a real MCP SDK client. See USAGE.md.
+// development Keycloak: browser sign-in, sessions, CSRF, OntoForge's authorization server
+// (the command-line client cli.mjs, consent, refresh rotation, resources) and a real MCP SDK
+// client on it, provider tokens of machines, roles, revocation, disabling and user
+// management. See USAGE.md.
 //
 //   node scripts/auth/e2e.mjs [--base http://localhost:5173] [--public-url http://localhost:8000]
 //                             [--idle-seconds N] [--no-fresh-user]
@@ -11,9 +13,11 @@
 // creates the ontology e2e_auth_<random> and deletes it at the end.
 
 import { randomBytes } from 'node:crypto';
+import { listTools, refresh } from './cli.mjs';
 import {
-  AUDIENCE, ISSUER, appLogin, call, claims, connectMcp, createKeycloakUser, deleteKeycloakUser, deliverCallback,
-  forgedExpiredToken, foreignIssuerToken, idToken, serviceToken, startAppLogin, subject, userToken, userTokens,
+  AUDIENCE, CookieJar, ISSUER, appLogin, authorizationRequest, authorizeInBrowser, call, claims, connectMcp, createKeycloakUser, deleteKeycloakUser,
+  deliverCallback, forgedExpiredToken, foreignIssuerToken, oauthToken, ontoforgeTokens, pageText, providerTokens,
+  serviceToken, startAppLogin, subject, submitConsent, freePort,
 } from './lib.mjs';
 
 const option = (name, fallback) => {
@@ -23,8 +27,11 @@ const option = (name, fallback) => {
 // The web client's address (WEB_CLIENT_URL): browser sign-in, cookies and REST go here.
 const BASE = option('--base', 'http://localhost:5173').replace(/\/$/, '');
 const ORIGIN = new URL(BASE).origin;
-// The server's address (PUBLIC_URL): MCP clients connect and sign in here.
+// The server's address (PUBLIC_URL): the authorization server's issuer; tokens name resources below it.
 const PUBLIC = option('--public-url', 'http://localhost:8000').replace(/\/$/, '');
+const API = `${PUBLIC}/api`;
+// A real client metadata document (CIMD), fetched by the server when online.
+const CLAUDE_CODE = 'https://claude.ai/oauth/claude-code-client-metadata';
 const IDLE = option('--idle-seconds', null);
 const FRESH_USER = !process.argv.includes('--no-fresh-user');
 const FOREIGN = 'http://evil.example';
@@ -72,6 +79,8 @@ const ctx = {
 
 const asAdmin = (method, path, body) => call(BASE, method, path, { jar: ctx.admin.jar, origin: ORIGIN, body });
 const runtime = (lens) => `/api/ontologies/${ctx.ontology}/runtime/lenses/${lens}`;
+const mountUrl = (lens) => `${PUBLIC}/mcp/ontologies/${ctx.ontology}/runtime/lenses/${lens}`;
+const isOpaque = (token) => typeof token === 'string' && token.length > 0 && claims(token) === null;
 const me = (auth) => call(BASE, 'GET', '/api/auth/me', auth);
 const roles = (meAnswer) => (meAnswer.json?.assignments ?? []).map((a) => a.role);
 
@@ -139,8 +148,8 @@ async function newcomerStep() {
   }
   const again = await browserLogin('newcomer');
   const count = (await findUsers('newcomer')).items.filter((u) => u.username === 'newcomer').length;
-  check('repeat sign-in reuses the user', again.me.json?.user?.id === user?.id && count === 1,
-    `first ${user?.id}, repeat ${again.me.json?.user?.id}, ${count} user(s) named newcomer`);
+  check('repeat sign-in reuses the user', again.me.json?.user?.id === user?.id && count === matches.length,
+    `first ${user?.id}, repeat ${again.me.json?.user?.id}, users named newcomer: ${matches.length} before the repeat, ${count} after`);
 }
 
 async function concurrentStep() {
@@ -228,11 +237,50 @@ async function setupStep() {
   }
 }
 
-async function restStep() {
+async function authorizationServerStep() {
+  const r = await call(PUBLIC, 'GET', '/.well-known/oauth-authorization-server');
+  const m = r.json ?? {};
+  check('authorization server metadata at PUBLIC_URL', r.status === 200 && m.issuer === PUBLIC
+    && m.authorization_endpoint === `${PUBLIC}/oauth/authorize` && m.token_endpoint === `${PUBLIC}/oauth/token`,
+    `${said(r)}, issuer ${m.issuer}, authorize ${m.authorization_endpoint}, token ${m.token_endpoint}`);
+  check('PKCE S256, public clients, client documents', (m.code_challenge_methods_supported ?? []).includes('S256')
+    && JSON.stringify(m.token_endpoint_auth_methods_supported) === '["none"]' && m.client_id_metadata_document_supported === true
+    && !m.registration_endpoint,
+    `PKCE ${JSON.stringify(m.code_challenge_methods_supported)}, auth ${JSON.stringify(m.token_endpoint_auth_methods_supported)}, CIMD ${m.client_id_metadata_document_supported}, registration ${m.registration_endpoint ?? 'none'}`);
+  const api = await call(BASE, 'GET', '/api/ontologies');
+  const header = api.headers.get('www-authenticate') ?? '';
+  const metadataUrl = /resource_metadata="([^"]+)"/.exec(header)?.[1];
+  check('REST without a token → 401 pointing to its resource metadata', api.status === 401 && metadataUrl === `${PUBLIC}/.well-known/oauth-protected-resource/api`,
+    `${said(api)}, WWW-Authenticate ${header || 'absent'}`);
+  const doc = await call(PUBLIC, 'GET', '/.well-known/oauth-protected-resource/api');
+  check('the REST API names PUBLIC_URL/api and this authorization server', doc.status === 200 && doc.json?.resource === API
+    && JSON.stringify(doc.json?.authorization_servers) === JSON.stringify([PUBLIC]),
+    `${said(doc)}, resource ${doc.json?.resource}, authorization_servers ${JSON.stringify(doc.json?.authorization_servers)}`);
+}
+
+async function cliStep() {
   need(ctx.ontologyCreated, 'needs the e2e ontology');
   need(ctx.grants.reader && ctx.grants.writer, 'needs the reader and writer grants');
-  ctx.tokens.reader = await userToken('reader');
-  ctx.tokens.writer = await userToken('writer');
+  for (const username of ['reader', 'writer']) {
+    const tokens = await ontoforgeTokens(username, API);
+    ctx.tokens[username] = tokens.access_token;
+    ctx.tokens[`${username}Refresh`] = tokens.refresh_token;
+    const shown = pageText(tokens.consent ?? '');
+    const answer = await me({ token: tokens.access_token });
+    check(`command-line client signs ${username} in for the REST API`,
+      isOpaque(tokens.access_token) && isOpaque(tokens.refresh_token) && answer.json?.user?.username === username,
+      `opaque access + refresh token, expires_in ${tokens.expires_in}, /api/auth/me ${said(answer)} user ${answer.json?.user?.username}`);
+    if (username === 'reader') {
+      check('the consent page names the client, the person, the redirect and the REST API',
+        shown.includes('OntoForge CLI wants to act as you') && shown.includes('ontoforge-cli') && shown.includes('http://127.0.0.1:')
+          && shown.includes('reader@ontoforge.test') && shown.includes('the REST API'),
+        shown.slice(0, 220));
+    }
+  }
+}
+
+async function restStep() {
+  need(ctx.tokens.reader && ctx.tokens.writer, 'needs the reader and writer tokens');
   const reader = { token: ctx.tokens.reader };
   const writer = { token: ctx.tokens.writer };
   const list = (lens, auth) => call(BASE, 'GET', `${runtime(lens)}/entities/${ctx.type}?limit=5`, auth);
@@ -263,15 +311,82 @@ async function restStep() {
     check(label, answer.status === 401 && /^Bearer\b/i.test(header), `${said(answer)}, WWW-Authenticate ${header || 'absent'}`);
   };
   await challenged('no token → 401 with a challenge', undefined);
-  const plain = (await userTokens('reader', { scope: 'openid' })).access_token;
-  await challenged(`token without audience ${AUDIENCE} (aud ${JSON.stringify(claims(plain).aud)}) → 401`, plain);
+  const provider = await providerTokens('reader');
+  await challenged(`provider token of a person without audience ${AUDIENCE} (aud ${JSON.stringify(claims(provider.access_token).aud)}) → 401`, provider.access_token);
   await challenged('garbage token → 401', 'not-a-token');
   await challenged('forged expired token → 401', forgedExpiredToken());
-  await challenged('ID token as bearer → 401', await idToken('reader'));
+  await challenged('ID token as bearer → 401', provider.id_token);
   const foreign = await foreignIssuerToken();
   await challenged(`token of another issuer (${claims(foreign).iss}) → 401`, foreign);
-  const tampered = ctx.tokens.reader.slice(0, -4) + (ctx.tokens.reader.endsWith('AAAA') ? 'BBBB' : 'AAAA');
-  await challenged('reader token with a broken signature → 401', tampered);
+  const service = await serviceToken();
+  await challenged('service token with a broken signature → 401', service.slice(0, -4) + (service.endsWith('AAAA') ? 'BBBB' : 'AAAA'));
+  const changed = ctx.tokens.reader.slice(0, -1) + (ctx.tokens.reader.endsWith('A') ? 'B' : 'A');
+  await challenged('OntoForge token with one character changed → 401', changed);
+}
+
+async function rotationStep() {
+  need(ctx.grants.reader, 'needs the reader grant');
+  // A sign-in of its own: reusing a refresh token revokes its whole authorization.
+  const first = await ontoforgeTokens('reader', API);
+  const second = await refresh({ resource: API, refreshToken: first.refresh_token });
+  check('refresh: a new access and refresh token', isOpaque(second.access_token) && second.access_token !== first.access_token
+    && isOpaque(second.refresh_token) && second.refresh_token !== first.refresh_token,
+    `new access token ${second.access_token !== first.access_token}, new refresh token ${second.refresh_token !== first.refresh_token}`);
+  const fresh = await me({ token: second.access_token });
+  check('the refreshed access token works', fresh.json?.user?.username === 'reader', `${said(fresh)}, user ${fresh.json?.user?.username}`);
+  const reused = await oauthToken(PUBLIC, { grant_type: 'refresh_token', refresh_token: first.refresh_token, client_id: 'ontoforge-cli', resource: API });
+  check('the spent refresh token is refused', reused.status === 400 && reused.json?.error === 'invalid_grant',
+    `HTTP ${reused.status} ${reused.json?.error} (${reused.json?.error_description})`);
+  const revoked = await call(BASE, 'GET', '/api/ontologies', { token: second.access_token });
+  const again = await oauthToken(PUBLIC, { grant_type: 'refresh_token', refresh_token: second.refresh_token, client_id: 'ontoforge-cli', resource: API });
+  check('its reuse revoked the authorization: newest access and refresh token refused',
+    revoked.status === 401 && again.status === 400,
+    `/api/ontologies ${said(revoked)}, refresh HTTP ${again.status} ${again.json?.error}`);
+}
+
+async function consentStep() {
+  need(ctx.grants.reader, 'needs the reader grant');
+  const request = await authorizationRequest(PUBLIC, { resource: API });
+  const reached = await authorizeInBrowser(request.url, 'reader', { decision: null });
+  const at = need(reached.at, `no consent page (${reached.page ? `HTTP ${reached.page.status} ${reached.page.message}` : reached.redirect})`);
+  const none = await submitConsent(at, 'allow', { origin: null });
+  const foreign = await submitConsent(at, 'allow', { origin: FOREIGN });
+  check('the consent answer is refused without Origin or with a foreign one', none.page?.status === 403 && foreign.page?.status === 403,
+    `without Origin HTTP ${none.page?.status}, foreign Origin HTTP ${foreign.page?.status}`);
+  const deny = await submitConsent(at, 'deny');
+  const answer = deny.redirect ? new URL(deny.redirect) : null;
+  check("Deny (with the consent page's Origin) → the client gets access_denied, no code",
+    answer !== null && `${answer.origin}${answer.pathname}` === request.redirectUri && answer.searchParams.get('error') === 'access_denied'
+      && answer.searchParams.get('state') === request.state && !answer.searchParams.has('code'),
+    answer ? `redirect ${answer.origin}${answer.pathname}, error ${answer.searchParams.get('error')}, state ${answer.searchParams.get('state') === request.state ? 'kept' : 'differs'}` : `HTTP ${deny.page?.status} ${deny.page?.message}`);
+}
+
+async function clientDocumentStep() {
+  const doc = await fetch(CLAUDE_CODE, { signal: AbortSignal.timeout(10_000) }).then((r) => (r.ok ? r.json() : null), () => null);
+  need(doc?.redirect_uris?.length, `offline: ${CLAUDE_CODE} not reachable from here`);
+  // As the real client does: its registered loopback redirect, on the port it happens to listen on.
+  const redirect = new URL(doc.redirect_uris[0]);
+  redirect.port = String(await freePort());
+  const request = new URLSearchParams({
+    response_type: 'code', client_id: CLAUDE_CODE, redirect_uri: redirect.href, state: 'cimd', resource: API,
+    code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM', code_challenge_method: 'S256',
+  });
+  let path = `/oauth/authorize?${request}`;
+  const jar = new CookieJar();
+  const hops = [];
+  let location = null;
+  for (let hop = 0; hop < 5; hop++) {
+    const r = await call(PUBLIC, 'GET', path, { jar });
+    location = r.headers.get('location');
+    hops.push(`${r.status}${location ? ` → ${new URL(location, PUBLIC).origin === PUBLIC ? new URL(location, PUBLIC).pathname : new URL(location, PUBLIC).origin + new URL(location, PUBLIC).pathname}` : ''}`);
+    if (!location || new URL(location, PUBLIC).origin !== PUBLIC) break;
+    const next = new URL(location, PUBLIC);
+    path = next.pathname + next.search;
+  }
+  const target = location ? new URL(location, PUBLIC) : null;
+  check(`authorization for ${doc.client_name} (${CLAUDE_CODE}) reaches the sign-in at the provider`,
+    target?.origin === new URL(ISSUER).origin && target.searchParams.get('redirect_uri') === `${PUBLIC}/oauth/callback`,
+    hops.join(', '));
 }
 
 async function serviceStep() {
@@ -295,27 +410,30 @@ async function serviceStep() {
 
 async function mcpStep() {
   need(ctx.ontologyCreated && ctx.grants.reader, 'needs the e2e ontology and the reader grant');
-  const mount = `/mcp/ontologies/${ctx.ontology}/runtime/lenses/${ctx.lensA}`;
+  const mount = mountUrl(ctx.lensA);
   const initialize = {
     jsonrpc: '2.0', id: 1, method: 'initialize',
     params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'e2e', version: '1' } },
   };
-  const anonymous = await call(PUBLIC, 'POST', mount, { body: initialize, headers: { accept: 'application/json, text/event-stream' } });
+  const post = (token) => call(mount, 'POST', '', { body: initialize, token, headers: { accept: 'application/json, text/event-stream' } });
+  const anonymous = await post();
   const header = anonymous.headers.get('www-authenticate') ?? '';
   const metadataUrl = /resource_metadata="([^"]+)"/.exec(header)?.[1];
   check('unauthenticated MCP call → 401 with resource_metadata', anonymous.status === 401 && !!metadataUrl,
     `${said(anonymous)}, WWW-Authenticate ${header || 'absent'}`);
   if (metadataUrl) {
     const doc = await fetch(metadataUrl).then(async (res) => ({ status: res.status, json: await res.json().catch(() => null) }), () => ({ status: 0 }));
-    check('protected-resource metadata names the issuer and this mount',
-      doc.status === 200 && doc.json?.authorization_servers?.includes(ISSUER) && doc.json?.resource === `${PUBLIC}${mount}`,
-      `HTTP ${doc.status}, resource ${doc.json?.resource}, authorization_servers ${JSON.stringify(doc.json?.authorization_servers)}, scopes ${JSON.stringify(doc.json?.scopes_supported)}`);
+    check('protected-resource metadata names this server and this mount',
+      doc.status === 200 && JSON.stringify(doc.json?.authorization_servers) === JSON.stringify([PUBLIC]) && doc.json?.resource === mount,
+      `HTTP ${doc.status}, resource ${doc.json?.resource}, authorization_servers ${JSON.stringify(doc.json?.authorization_servers)}`);
   }
 
-  const mcp = await connectMcp(`${PUBLIC}${mount}`, 'reader');
+  const mcp = await connectMcp(mount, 'reader');
   try {
-    check('MCP SDK client authorized as reader (discovery, registration, consent, code + PKCE)', true,
-      `registered client ${mcp.registration.clientId ?? 'unknown'}`);
+    const asked = mcp.authorizationUrl.searchParams;
+    check('MCP SDK client authorized as reader with the configured client (discovery, sign-in, consent, code + PKCE)',
+      asked.get('client_id') === 'ontoforge-cli' && asked.get('resource') === mount && isOpaque(mcp.tokens()?.access_token),
+      `client_id ${asked.get('client_id')}, resource ${asked.get('resource')}, scope ${asked.get('scope') ?? 'none sent'}, opaque token ${isOpaque(mcp.tokens()?.access_token)}`);
     const { tools } = await mcp.client.listTools();
     const names = tools.map((t) => t.name);
     const writes = names.filter((n) => WRITE_TOOLS.has(n));
@@ -331,10 +449,22 @@ async function mcpStep() {
       refusal = `error: ${String(error?.message ?? error).slice(0, 160)}`;
     }
     check('write tool create_entity is refused', refusal !== null, refusal ?? 'the entity was created');
+
+    const mountToken = mcp.tokens().access_token;
+    const onRest = await call(BASE, 'GET', '/api/ontologies', { token: mountToken });
+    const restOnMount = await post(ctx.tokens.reader);
+    const otherLens = await call(mountUrl(ctx.lensB), 'POST', '', { body: initialize, token: mountToken, headers: { accept: 'application/json, text/event-stream' } });
+    check('a token works on its resource only: mount token on REST, REST token on the mount, mount token on another mount → 401',
+      onRest.status === 401 && restOnMount.status === 401 && otherLens.status === 401,
+      `REST ${said(onRest)}, mount ${said(restOnMount)}, lens B mount ${said(otherLens)}`);
   } finally {
     await mcp.close();
-    console.log(`    · cleanup: MCP session closed, registered Keycloak client ${mcp.registration.uri ? 'deleted' : 'unknown'}`);
   }
+
+  const cli = await ontoforgeTokens('reader', mount);
+  const listed = (await listTools(mount, cli.access_token)).map((t) => t.name);
+  check('command-line client for the mount (--mcp) lists the same read tools', listed.includes('get_schema') && !listed.some((n) => WRITE_TOOLS.has(n)),
+    `${listed.length} tools`);
 }
 
 const WRITE_TOOLS = new Set([
@@ -361,7 +491,13 @@ async function disableStep() {
   check('administrator disables writer', off.status === 200 && off.json?.status === 'disabled', `${said(off)}, status ${off.json?.status}`);
   try {
     const read = await call(BASE, 'GET', `${runtime(ctx.lensA)}/entities/${ctx.type}?limit=1`, auth);
-    check("writer's next request → 403", read.status === 403, said(read));
+    check("writer's next request with its live OntoForge token → 403", read.status === 403, said(read));
+    const refreshed = await oauthToken(PUBLIC, { grant_type: 'refresh_token', refresh_token: ctx.tokens.writerRefresh, client_id: 'ontoforge-cli', resource: API });
+    check('writer gets no new token by refresh', refreshed.status === 400 && refreshed.json?.error === 'invalid_grant',
+      `HTTP ${refreshed.status} ${refreshed.json?.error}`);
+    const authorized = await authorizeInBrowser((await authorizationRequest(PUBLIC, { resource: API })).url, 'writer');
+    check('writer is refused at a new authorization', authorized.page?.status === 403 && authorized.redirect === null,
+      authorized.page ? `HTTP ${authorized.page.status} ${authorized.page.message}` : `redirect ${authorized.redirect}`);
     const login = await browserLogin('writer');
     check('writer browser sign-in → /?login=disabled, no session', target(login.location) === '/?login=disabled' && login.me.json?.user === null,
       `HTTP ${login.status} → ${login.location}, user ${JSON.stringify(login.me.json?.user)}`);
@@ -430,9 +566,14 @@ const STEPS = [
   ['logout and CSRF', logoutStep],
   ['CSRF on another route', csrfStep],
   ['setup: ontology, lenses, roles', setupStep],
+  ['authorization server', authorizationServerStep],
+  ['command-line client', cliStep],
   ['REST with bearer tokens', restStep],
+  ['refresh rotation', rotationStep],
+  ['consent: Origin and Deny', consentStep],
+  ['a client metadata document (online)', clientDocumentStep],
   ['service principal', serviceStep],
-  ['MCP OAuth', mcpStep],
+  ['MCP for a person', mcpStep],
   ['revocation', revokeStep],
   ['disabling', disableStep],
   ['user management', usersStep],

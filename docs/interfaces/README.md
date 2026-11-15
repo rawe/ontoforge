@@ -20,7 +20,7 @@ response bodies are reproduced here except the shared error envelope.
 |---|---|
 | Addressing, filtering, errors and access | [Conventions](#conventions) |
 | Ontologies and deployment information | [Registry](server.md#registry), [Server](server.md#server) |
-| Sign-in, users and deployment health | [Sign-in](server.md#sign-in), [User management](server.md#user-management), [Exposure](server.md#exposure), [Probes](server.md#probes), [Metrics](server.md#metrics) |
+| Sign-in, users and deployment health | [Sign-in](server.md#sign-in), [Authorization server](server.md#authorization-server), [User management](server.md#user-management), [Exposure](server.md#exposure), [Probes](server.md#probes), [Metrics](server.md#metrics) |
 | Design an ontology | [Modeling REST](modeling-rest.md) |
 | Work with instance data through a lens | [Runtime REST](runtime-rest.md), [Rulesets](runtime-rest.md#rulesets) |
 | Chat with an assistant of a lens or the Studio helper | [Assistants REST](assistants-rest.md) |
@@ -43,7 +43,7 @@ response bodies are reproduced here except the shared error envelope.
 | `/mcp/ontologies/{ontologyKey}/model` | Modeling MCP server, bound to one ontology |
 | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}` | Runtime MCP server, bound to one ontology and one lens |
 | `/mcp/ontologies/{ontologyKey}/runtime/lenses/{lensKey}/rulesets/{rulesetKey}` | Ruleset runtime MCP server, bound to one ontology, one lens and one ruleset |
-| `/.well-known/oauth-protected-resource` | Where MCP clients discover how to sign in; authentication on only |
+| `/oauth`, `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource` | Authorization server — tokens for clients acting for a person, and where clients discover it; authentication on only |
 
 Every ontology-scoped request names its ontology in the path, and an ontology is always
 spelled `ontologies/<key>`, a lens always `lenses/<key>` — uniformly across REST, MCP
@@ -272,7 +272,7 @@ when the provider gave no reason. The provider's own message is logged, not retu
 **What a caller holds no role in is not found.** An ontology or lens outside the caller's
 assignments answers `RESOURCE_NOT_FOUND`, as an unknown key does; `FORBIDDEN` is for what
 the caller may know of ([capabilities/authentication.md](../capabilities/authentication.md#what-a-caller-sees)).
-A `401` carries a `WWW-Authenticate` challenge ([sign-in](server.md#sign-in)).
+A `401` carries a `WWW-Authenticate` challenge ([authorization server](server.md#authorization-server)).
 
 When a value cannot be coerced, its field error names the expected schema type and
 describes the received value by its JSON type. Field errors are strings in
@@ -318,7 +318,7 @@ unavailable, rather than offering it and explaining the refusal afterwards.
 ### Who may call
 
 With authentication off, every route serves every caller. With it on, every route except
-sign-in, `/api/server`, the probes, the API description and the resource metadata needs a
+sign-in, `/api/server`, the probes, the API description and the authorization server needs a
 signed-in caller — a bearer access token, or on REST the browser's session cookie — holding
 the role the route needs ([capabilities/authentication.md](../capabilities/authentication.md#roles)):
 

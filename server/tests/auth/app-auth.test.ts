@@ -71,17 +71,23 @@ describe("with authentication on", () => {
     expect(res.json().user).toBeNull();
   });
 
-  it("answers an anonymous request 401 with a bearer challenge", async () => {
+  it("answers an anonymous request 401 with a challenge naming the REST API's resource metadata", async () => {
     const res = await app.inject({ url: "/api/ontologies" });
     expect(res.statusCode).toBe(401);
     expect(res.json()).toEqual({ error: { code: "UNAUTHENTICATED", message: expect.any(String) } });
-    expect(res.headers["www-authenticate"]).toBe('Bearer realm="ontoforge"');
+    expect(res.headers["www-authenticate"]).toBe(
+      `Bearer resource_metadata="${PUBLIC_URL}/.well-known/oauth-protected-resource/api"`,
+    );
   });
 
   it("names a rejected token in the challenge", async () => {
-    const res = await app.inject({ url: "/api/ontologies", headers: { authorization: "Bearer junk" } });
-    expect(res.statusCode).toBe(401);
-    expect(res.headers["www-authenticate"]).toBe('Bearer realm="ontoforge", error="invalid_token"');
+    for (const token of ["junk", "jwt.junk.sig"]) {
+      const res = await app.inject({ url: "/api/ontologies", headers: { authorization: `Bearer ${token}` } });
+      expect(res.statusCode).toBe(401);
+      expect(res.headers["www-authenticate"]).toBe(
+        `Bearer resource_metadata="${PUBLIC_URL}/.well-known/oauth-protected-resource/api", error="invalid_token"`,
+      );
+    }
   });
 
   it("points an MCP client to the mount's resource metadata, before the transport takes over", async () => {
@@ -92,23 +98,23 @@ describe("with authentication on", () => {
       expect(res.statusCode).toBe(401);
       expect(res.json().error.code).toBe("UNAUTHENTICATED");
       expect(res.headers["www-authenticate"]).toBe(
-        `Bearer resource_metadata="${PUBLIC_URL}/.well-known/oauth-protected-resource${url}", scope="ontoforge-api"`,
+        `Bearer resource_metadata="${PUBLIC_URL}/.well-known/oauth-protected-resource${url}"`,
       );
     }
   });
 
   it("answers an authenticated caller without the role 403", async () => {
-    fakes.oidc.tokens.set("t", identified("plain"));
-    const res = await app.inject({ method: "POST", url: "/api/ontologies", headers: { authorization: "Bearer t" }, payload: { key: "x" } });
+    fakes.oidc.tokens.set("jwt.t.sig", identified("plain"));
+    const res = await app.inject({ method: "POST", url: "/api/ontologies", headers: { authorization: "Bearer jwt.t.sig" }, payload: { key: "x" } });
     expect(res.statusCode).toBe(403);
     expect(res.json()).toEqual({ error: { code: "FORBIDDEN", message: expect.stringMatching(/Ontology Creator/) } });
   });
 
   it("answers 503 while the provider's keys cannot be fetched, admitting nothing", async () => {
-    fakes.oidc.tokens.set("t", identified("plain"));
+    fakes.oidc.tokens.set("jwt.t.sig", identified("plain"));
     fakes.oidc.unavailable = true;
     try {
-      const res = await app.inject({ url: "/api/ontologies", headers: { authorization: "Bearer t" } });
+      const res = await app.inject({ url: "/api/ontologies", headers: { authorization: "Bearer jwt.t.sig" } });
       expect(res.statusCode).toBe(503);
       expect(res.json()).toEqual({
         error: { code: "PROVIDER_UNAVAILABLE", message: "The identity provider cannot be reached; try again later" },
@@ -142,14 +148,14 @@ describe("with authentication on", () => {
     expect(refused.headers["access-control-expose-headers"]).toMatch(/WWW-Authenticate/i);
   });
 
-  it("publishes protected-resource metadata for the server and each mount", async () => {
+  it("publishes protected-resource metadata for the server, the REST API and each mount", async () => {
     const expected = (resource: string) => ({
       resource,
-      authorization_servers: [ISSUER],
+      authorization_servers: [PUBLIC_URL],
       bearer_methods_supported: ["header"],
-      scopes_supported: ["ontoforge-api"],
     });
     expect((await app.inject({ url: "/.well-known/oauth-protected-resource" })).json()).toEqual(expected(PUBLIC_URL));
+    expect((await app.inject({ url: "/.well-known/oauth-protected-resource/api" })).json()).toEqual(expected(`${PUBLIC_URL}/api`));
     const mount = "/mcp/ontologies/books/runtime/lenses/public";
     expect((await app.inject({ url: `/.well-known/oauth-protected-resource${mount}` })).json()).toEqual(
       expected(`${PUBLIC_URL}${mount}`),
@@ -286,8 +292,8 @@ describe("without a web client", () => {
   });
 
   it("still serves bearer callers and MCP sign-in under PUBLIC_URL", async () => {
-    bareFakes.oidc.tokens.set("t", identified("plain"));
-    const me = await bare.inject({ url: "/api/auth/me", headers: { authorization: "Bearer t" } });
+    bareFakes.oidc.tokens.set("jwt.t.sig", identified("plain"));
+    const me = await bare.inject({ url: "/api/auth/me", headers: { authorization: "Bearer jwt.t.sig" } });
     expect(me.json()).toMatchObject({ authentication: true, user: { username: "plain" } });
     const mount = "/mcp/ontologies/books/runtime/lenses/public";
     expect((await bare.inject({ url: `/.well-known/oauth-protected-resource${mount}` })).json()).toMatchObject({

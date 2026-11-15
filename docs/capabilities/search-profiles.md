@@ -96,7 +96,7 @@ No other limit applies: neither the number of nodes nor the number of texts is c
 ## Running one
 
 A caller lists a lens's search profiles and runs one by its key with a query text. It sees
-neither the tree nor its indices: the listing gives each profile's key, name, description,
+neither the tree nor its indices: the listing gives each search profile's key, name, description,
 `result` — what a run returns, `entities` or `passages`, the unit of the tree's root — and
 `types`, the entity types whose indices the tree searches, sorted. An index the lens can no
 longer search is left out of `types`.
@@ -107,9 +107,9 @@ A run takes the **query** — required, not blank — and optional **filter**s, 
 2. The query goes in place of every `$query` in every search node's text, as written: no
    character of the query is special, and a text without `$query` stays as it is.
 3. The tree is checked against the lens again — the shape and the tree's rules of
-   [Checks at save](#checks-at-save), stored filters included. A profile the lens no longer
-   fits, because the lens was narrowed or an index switched off after it was saved, is a
-   validation error naming the profile and every path; it never runs. Nothing proactively
+   [Checks at save](#checks-at-save), stored filters included. A search profile the lens no
+   longer fits, because the lens was narrowed or an index switched off after it was saved, is a
+   validation error naming the search profile and every path; it never runs. Nothing proactively
    invalidates a stored tree; re-saving it after such a change is the designer's job.
 4. The filters take the keys and values of the
    [entity search's filters](search.md#scope-and-filters) and apply to the listed `types`:

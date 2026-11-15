@@ -249,7 +249,7 @@ One form per field of the [entity search](../capabilities/search.md#entity-searc
 [search profile](../capabilities/search-profiles.md#running-one); a field left empty is not sent,
 so the server's default applies, and the server judges what the form cannot.
 
-**Form.** A mode — Entities, Passages, or Profile when the lens has search profiles — and the
+**Form.** A mode — Entities, Passages, or Search profile when the lens has search profiles — and the
 text, run by Enter or Run once it is not blank. On a wide screen the settings sit in a panel beside the results; on a narrow
 one they fold above them into a one-line summary. A scope over one field at a time:
 types, indices, or — for passages — document properties, each chosen from a list that can
@@ -262,9 +262,9 @@ any or all words and an optional similarity floor. A filter with the
 scope item belongs to one type. A limit, and for passages a cap per entity. A "?" beside
 the title explains how search works, step by step over one example.
 
-**Profile.** A picker of the lens's search profiles by name and key; beneath it, what the
+**Search profile.** A picker of the lens's search profiles by name and key; beneath it, what the
 chosen one finds — entities or passages — and its description. Only the text and a filter
-are the caller's: scope, methods and limits are hidden, the profile decides them. The
+are the caller's: scope, methods and limits are hidden, the search profile decides them. The
 filter is offered when the search profile searches exactly one type.
 
 **Results.** The count, which methods ran, and each limitation as a sentence naming its

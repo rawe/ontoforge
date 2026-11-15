@@ -1295,11 +1295,11 @@ export function createRuntimeMcpServer(
     "run_search_profile",
     {
       description:
-        "Run a search profile of this lens by its key, best first: its indices, methods and ranking are " +
-        "fixed; the query and filters are yours. key: the profile's key. " +
-        SEARCH_QUERY_RULE + " It fills the profile's texts. " +
-        filterRules({ contains: false, relations: true }) + " They apply to the entity types the " +
-        "profile searches (a passage's: its document's entity); a key none of them resolves is refused. " +
+        "Run the search profile of this lens that key names, best first: its indices, methods and ranking " +
+        "are fixed; the query and filters are yours. " +
+        SEARCH_QUERY_RULE + " It fills the search profile's texts. " +
+        filterRules({ contains: false, relations: true }) + " They apply to the search profile's " +
+        "entity types (a passage's: its document's entity); a key none of them resolves is refused. " +
         SEARCH_FILTER_EFFECT + " " + SEARCH_PROFILE_RESPONSE + " Items are candidates, not verified answers. " +
         "Read-only.",
       inputSchema: {

@@ -198,7 +198,7 @@ test('a request key ignores the order scope and filter keys were chosen in', () 
   assert.notEqual(requestKey('entities', a), requestKey('entities', searchBody(form({}))))
 })
 
-test('Profile is offered only while the lens has search profiles', () => {
+test('Search profile is offered only while the lens has search profiles', () => {
   assert.deepEqual(formModes(false), ['entities', 'passages'])
   assert.deepEqual(formModes(true), ['entities', 'passages', 'profile'])
   assert.equal(modeInEffect('profile', true), 'profile')

@@ -26,12 +26,12 @@ export type SearchMode = 'entities' | 'passages'
 /** The form's mode control: the two searches, and a search profile of the lens. */
 export type FormMode = SearchMode | 'profile'
 
-/** The modes offered: Profile only when the lens has search profiles. */
+/** The modes offered: Search profile only when the lens has search profiles. */
 export function formModes(hasProfiles: boolean): FormMode[] {
   return hasProfiles ? ['entities', 'passages', 'profile'] : ['entities', 'passages']
 }
 
-/** The mode in effect: a picked Profile falls back to Entities while the lens has none. */
+/** The mode in effect: a picked Search profile falls back to Entities while the lens has none. */
 export function modeInEffect(picked: FormMode, hasProfiles: boolean): FormMode {
   return picked === 'profile' && !hasProfiles ? 'entities' : picked
 }

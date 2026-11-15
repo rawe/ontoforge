@@ -198,7 +198,7 @@ export function useSearchCatalog(ontologyKey: string, lensKey: string, enabled =
   })
 }
 
-/** The runtime search profiles of a lens — Advanced search's Profile mode. */
+/** The runtime search profiles of a lens — Advanced search's Search profile mode. */
 export function useSearchProfiles(ontologyKey: string, lensKey: string) {
   return useQuery({
     queryKey: qk.searchProfiles(ontologyKey, lensKey),

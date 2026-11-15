@@ -406,11 +406,11 @@ lens; runtime lists and runs it with a query text, never seeing its design.
   ```
   `filter` takes the entity search's filter keys and applies to `types`; a type that does
   not declare every key drops out. The response is the entity search's (`result`
-  `entities`) or the passage search's (`passages`, text always included). When the profile
-  uses more than one query text, each `match` (or `passage`) also carries `queryText`, the
+  `entities`) or the passage search's (`passages`, text always included). When the search
+  profile uses more than one query text, each `match` (or `passage`) also carries `queryText`, the
   text that found it. Without an embedding provider its semantic parts run nothing and are
-  the limitation `no-provider`. An unknown key answers not found; a profile the lens no
-  longer fits answers a validation error. MCP: `list_search_profiles`, `run_search_profile`
+  the limitation `no-provider`. An unknown key answers not found; a search profile the
+  lens no longer fits answers a validation error. MCP: `list_search_profiles`, `run_search_profile`
   (`key`, `query`, `filters`).
 
 ## Entity Identity Comparison

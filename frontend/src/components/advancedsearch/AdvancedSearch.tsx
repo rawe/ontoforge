@@ -66,7 +66,7 @@ const runKey = (request: SearchRequest) =>
     ? profileRequestKey(request.key, request.body)
     : requestKey(request.mode, request.body)
 
-const MODE_LABELS: Record<FormMode, string> = { entities: 'Entities', passages: 'Passages', profile: 'Profile' }
+const MODE_LABELS: Record<FormMode, string> = { entities: 'Entities', passages: 'Passages', profile: 'Search profile' }
 
 /** The search route rejects substring operators. */
 const EXCLUDED_OPS = ['contains'] as const
@@ -202,7 +202,7 @@ interface AdvancedSearchProps {
  * `/search/passages` — mode and query text on top; scope, methods, a filter
  * and the limits in a settings panel beside the ranked items (above them on
  * a narrow screen, folded); the items with what ran and what could not.
- * Profile mode runs one of the lens's search profiles: only the query and a
+ * Search profile mode runs one of the lens's search profiles: only the query and a
  * filter are the caller's, its tree decides the rest.
  */
 export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchProps) {

@@ -44,17 +44,17 @@ const SCORES =
   "fuses both, following neither)";
 
 /** A search profile's response, as `run_search_profile` answers it: the
- * entity or the passage search's, its semantic scores under the profile's
- * own floors, and `queryText` where the profile uses several texts. */
+ * entity or the passage search's, its semantic scores under the search profile's
+ * own floors, and `queryText` where the search profile uses several texts. */
 export const SEARCH_PROFILE_RESPONSE =
   "Returns ran (methods that ran), items and limitations (what could not run: code, message, method, " +
-  `indices, types). Each item has rank (from 1), ${ENTITY} and, by the profile's result: entities — ` +
+  `indices, types). Each item has rank (from 1), ${ENTITY} and, by the search profile's result: entities — ` +
   "match, the entry that found it: index, part (self, relation or passage), snippet (null if this lens " +
   "hides it), a relation's relationType and target, a passage's property, charOffset and charLength; " +
   "passages — passage: property (the document), ordinal, charOffset, charLength and text. Both carry " +
   "scores (each method that found the entry: semantic, similarity 0 to 1; keyword, query words held " +
   "plus a fraction below 1; not comparable; no score does not mean that method missed it) and, when " +
-  "the profile runs several query texts, queryText: the text that found it.";
+  "the search profile runs several query texts, queryText: the text that found it.";
 
 /** The entity search's response, as `search` answers it. */
 export const ENTITY_SEARCH_RESPONSE =

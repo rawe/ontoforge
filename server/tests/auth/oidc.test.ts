@@ -24,6 +24,10 @@ let issuer: string;
 let server: Server;
 /** The claims of the ID token the provider's token endpoint answers with. */
 let idTokenClaims: Record<string, unknown> = {};
+/** The client authentication methods the provider's metadata names; undefined: it names none. */
+let authMethods: string[] | undefined;
+/** How the last token request authenticated: its Authorization header and its body. */
+let tokenRequest: { authorization: string | undefined; body: string } | null = null;
 
 beforeAll(async () => {
   const pair = await generateKeyPair("RS256");
@@ -41,10 +45,14 @@ beforeAll(async () => {
         token_endpoint: `${issuer}/token`,
         // A refused key set lives on a port nobody listens on.
         jwks_uri: keys === "refuse" ? "http://127.0.0.1:1/certs" : `${issuer}/certs`,
+        ...(authMethods ? { token_endpoint_auth_methods_supported: authMethods } : {}),
       });
     }
     if (req.url === "/realms/x/certs") return keys === "serve" ? send(200, { keys: [jwk] }) : send(503, {});
     if (req.url === "/realms/x/token") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => (tokenRequest = { authorization: req.headers.authorization, body }));
       return void sign({ iss: issuer, aud: SETTINGS.clientId, iat: Math.floor(Date.now() / 1000), ...idTokenClaims }).then((idToken) =>
         send(200, { access_token: "a", token_type: "Bearer", id_token: idToken }),
       );
@@ -134,6 +142,19 @@ describe("finishing a browser sign-in", () => {
     expect(await (await connect("serve", { subjectClaim: "oid" })).finishLogin(callback(), checks)).toMatchObject({
       subject: "object-1",
     });
+  });
+
+  it("sends the client secret in the request body where the provider offers that, else in the Authorization header", async () => {
+    idTokenClaims = { sub: "pairwise-1", nonce: "n-1" };
+    authMethods = ["client_secret_basic", "client_secret_post"];
+    await (await connect("serve")).finishLogin(callback(), checks);
+    expect(tokenRequest?.authorization).toBeUndefined();
+    expect(new URLSearchParams(tokenRequest!.body).get("client_secret")).toBe(SETTINGS.clientSecret);
+
+    authMethods = undefined;
+    await (await connect("serve")).finishLogin(callback(), checks);
+    expect(tokenRequest?.authorization).toMatch(/^Basic /);
+    expect(new URLSearchParams(tokenRequest!.body).has("client_secret")).toBe(false);
   });
 
   it("fails when the ID token lacks the configured claim", async () => {

@@ -1,6 +1,8 @@
 /**
  * The OpenID provider as this server sees it: the browser login it runs as a
- * confidential client (authorization code with PKCE, `openid-client`), and
+ * confidential client (authorization code with PKCE, `openid-client`; its
+ * secret sent as `client_secret_post` where the provider offers it, else as
+ * `client_secret_basic`), and
  * the access tokens REST and MCP callers present (`jose`, keys from the
  * provider's JWKS).
  *
@@ -102,8 +104,14 @@ export async function connectOidc(auth: AuthSettings): Promise<Oidc> {
       { cause: error },
     );
   }
-  config[client.customFetch] = (url, options) => send(url, options as RequestInit);
   const metadata = config.serverMetadata();
+  // The secret goes in the request body where the provider offers that: providers differ in
+  // how they read a secret from the Authorization header, not in how they read a form field.
+  if (metadata.token_endpoint_auth_methods_supported?.includes("client_secret_post")) {
+    config = new client.Configuration(metadata, auth.clientId, { client_secret: auth.clientSecret }, client.ClientSecretPost(auth.clientSecret));
+    if (insecure) client.allowInsecureRequests(config);
+  }
+  config[client.customFetch] = (url, options) => send(url, options as RequestInit);
   if (!metadata.jwks_uri) throw new Error(`OpenID provider ${auth.issuer} publishes no jwks_uri`);
   const keys = createRemoteJWKSet(new URL(metadata.jwks_uri), {
     timeoutDuration: 5000,

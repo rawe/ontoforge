@@ -306,6 +306,7 @@ describe("authentication settings", () => {
       clientId: "ontoforge-web",
       clientSecret: "s3cret",
       audience: "ontoforge-api",
+      subjectClaim: "sub",
       adminSubject: "4f1c",
       sessionIdleSeconds: 28800,
       accessDbUri: "postgresql://localhost:5432/ontoforge_access",
@@ -320,7 +321,7 @@ describe("authentication settings", () => {
   });
 
   it("fails the boot naming each missing variable when on", () => {
-    for (const name of Object.keys(enabled).filter((n) => n !== "AUTH_ENABLED")) {
+    for (const name of Object.keys(enabled).filter((n) => n !== "AUTH_ENABLED" && n !== "OIDC_AUDIENCE")) {
       const env: Record<string, string> = { ...enabled };
       delete env[name];
       expect(() => loadSettings(env), name).toThrow(new RegExp(name));
@@ -333,6 +334,17 @@ describe("authentication settings", () => {
     expect(() => loadSettings({ ...enabled, ACCESS_DB_URI: "mysql://x/y" })).toThrow(/ACCESS_DB_URI/);
     expect(() => loadSettings({ ...enabled, OIDC_BACKCHANNEL_URL: "nope" })).toThrow(/OIDC_BACKCHANNEL_URL/);
     expect(() => loadSettings({ ...enabled, AUTH_SESSION_IDLE_SECONDS: "0" })).toThrow(/AUTH_SESSION_IDLE_SECONDS/);
+  });
+
+  it("leaves the API audience optional: unset, no provider-issued bearer token is accepted", () => {
+    const env: Record<string, string> = { ...enabled };
+    delete env.OIDC_AUDIENCE;
+    expect(authSettings(loadSettings(env))!.audience).toBeNull();
+  });
+
+  it("reads the subject from sub unless OIDC_SUBJECT_CLAIM names another claim", () => {
+    expect(authSettings(loadSettings({ ...enabled, OIDC_SUBJECT_CLAIM: "oid" }))!.subjectClaim).toBe("oid");
+    expect(authSettings(loadSettings({ ...enabled, OIDC_SUBJECT_CLAIM: "" }))!.subjectClaim).toBe("sub");
   });
 
   it("refuses an API audience an ID token would carry: the client id", () => {

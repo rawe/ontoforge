@@ -24,6 +24,7 @@ export const SETTINGS: AuthSettings = {
   clientId: "ontoforge-web",
   clientSecret: "test-secret",
   audience: "ontoforge-api",
+  subjectClaim: "sub",
   adminSubject: ADMIN_SUBJECT,
   sessionIdleSeconds: 3600,
   accessDbUri: "postgresql://localhost:5432/ontoforge_access_test",

@@ -23,7 +23,7 @@ import { needOf } from "../access/routes.js";
 import type { AccessActor, Profile } from "../access/store.js";
 import { ForbiddenError, UnauthenticatedError } from "../core/exceptions.js";
 import { cookieNames, readCookie } from "./cookies.js";
-import { API_SCOPE, type Identified } from "./oidc.js";
+import type { Identified } from "./oidc.js";
 import type { AuthRuntime } from "./runtime.js";
 
 declare module "fastify" {
@@ -170,7 +170,7 @@ export function challenge(request: FastifyRequest, error: UnauthenticatedError):
   if (auth !== null && isMcpRoute(request)) {
     const path = request.url.split("?")[0];
     const metadata = `${auth.settings.publicUrl}/.well-known/oauth-protected-resource${path}`;
-    return `Bearer resource_metadata="${metadata}", scope="${API_SCOPE}"${invalid}`;
+    return `Bearer resource_metadata="${metadata}"${invalid}`;
   }
   return `Bearer realm="ontoforge"${invalid}`;
 }

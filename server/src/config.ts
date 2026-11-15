@@ -53,6 +53,7 @@ export interface Settings {
   OIDC_CLIENT_ID: string | null;
   OIDC_CLIENT_SECRET: string | null;
   OIDC_AUDIENCE: string | null;
+  OIDC_SUBJECT_CLAIM: string | null;
   AUTH_ADMIN_SUBJECT: string | null;
   AUTH_SESSION_IDLE_SECONDS: number | null;
   ACCESS_DB_URI: string | null;
@@ -65,7 +66,10 @@ export interface AuthSettings {
   backchannelUrl: string;
   clientId: string;
   clientSecret: string;
-  audience: string;
+  /** The audience a provider-issued access token must name; null: none is accepted. */
+  audience: string | null;
+  /** The claim a sign-in identity's subject is read from. */
+  subjectClaim: string;
   adminSubject: string;
   sessionIdleSeconds: number;
   accessDbUri: string;
@@ -212,6 +216,7 @@ function auth(
   | "OIDC_CLIENT_ID"
   | "OIDC_CLIENT_SECRET"
   | "OIDC_AUDIENCE"
+  | "OIDC_SUBJECT_CLAIM"
   | "AUTH_ADMIN_SUBJECT"
   | "AUTH_SESSION_IDLE_SECONDS"
   | "ACCESS_DB_URI"
@@ -226,6 +231,7 @@ function auth(
       OIDC_CLIENT_ID: null,
       OIDC_CLIENT_SECRET: null,
       OIDC_AUDIENCE: null,
+      OIDC_SUBJECT_CLAIM: null,
       AUTH_ADMIN_SUBJECT: null,
       AUTH_SESSION_IDLE_SECONDS: null,
       ACCESS_DB_URI: null,
@@ -247,7 +253,8 @@ function auth(
   // The back channel may be http anywhere: the server's own way to the issuer, e.g. in a container network.
   const backchannel = optStr(env, "OIDC_BACKCHANNEL_URL");
   const clientId = required("OIDC_CLIENT_ID");
-  const audience = required("OIDC_AUDIENCE");
+  // Optional: unset, the server accepts no provider-issued bearer token.
+  const audience = optStr(env, "OIDC_AUDIENCE");
   // An ID token names the client as its audience: it must never pass as an API credential.
   if (audience === clientId) {
     throw new Error("Environment variable OIDC_AUDIENCE must differ from OIDC_CLIENT_ID");
@@ -263,6 +270,7 @@ function auth(
     OIDC_CLIENT_ID: clientId,
     OIDC_CLIENT_SECRET: required("OIDC_CLIENT_SECRET"),
     OIDC_AUDIENCE: audience,
+    OIDC_SUBJECT_CLAIM: str(env, "OIDC_SUBJECT_CLAIM", "sub"),
     AUTH_ADMIN_SUBJECT: required("AUTH_ADMIN_SUBJECT"),
     AUTH_SESSION_IDLE_SECONDS: positiveInt(env, "AUTH_SESSION_IDLE_SECONDS", 8 * 60 * 60),
     ACCESS_DB_URI: accessDb,
@@ -278,7 +286,8 @@ export function authSettings(s: Settings): AuthSettings | null {
     backchannelUrl: s.OIDC_BACKCHANNEL_URL ?? s.OIDC_ISSUER!,
     clientId: s.OIDC_CLIENT_ID!,
     clientSecret: s.OIDC_CLIENT_SECRET!,
-    audience: s.OIDC_AUDIENCE!,
+    audience: s.OIDC_AUDIENCE,
+    subjectClaim: s.OIDC_SUBJECT_CLAIM!,
     adminSubject: s.AUTH_ADMIN_SUBJECT!,
     sessionIdleSeconds: s.AUTH_SESSION_IDLE_SECONDS!,
     accessDbUri: s.ACCESS_DB_URI!,

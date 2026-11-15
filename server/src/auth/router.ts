@@ -29,7 +29,6 @@ import {
   sessionCookie,
 } from "./cookies.js";
 import { LOGIN_LIFETIME_MS, loginCookieKey, openLogin, sealLogin } from "./loginCookie.js";
-import { API_SCOPE } from "./oidc.js";
 import { accessOf, checkOrigin, isConfiguredAdmin, profileOf } from "./plugin.js";
 
 const MeResponse = z.object({
@@ -157,7 +156,6 @@ export const resourceMetadataRouter: FastifyPluginAsync = async (app) => {
     resource: auth.settings.publicUrl + path,
     authorization_servers: [auth.settings.issuer],
     bearer_methods_supported: ["header"],
-    scopes_supported: [API_SCOPE],
   });
   const prefix = "/.well-known/oauth-protected-resource";
   app.get(prefix, { schema: { hide: true } }, async () => describe(""));

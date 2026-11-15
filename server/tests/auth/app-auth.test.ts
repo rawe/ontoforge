@@ -92,7 +92,7 @@ describe("with authentication on", () => {
       expect(res.statusCode).toBe(401);
       expect(res.json().error.code).toBe("UNAUTHENTICATED");
       expect(res.headers["www-authenticate"]).toBe(
-        `Bearer resource_metadata="${PUBLIC_URL}/.well-known/oauth-protected-resource${url}", scope="ontoforge-api"`,
+        `Bearer resource_metadata="${PUBLIC_URL}/.well-known/oauth-protected-resource${url}"`,
       );
     }
   });
@@ -147,7 +147,6 @@ describe("with authentication on", () => {
       resource,
       authorization_servers: [ISSUER],
       bearer_methods_supported: ["header"],
-      scopes_supported: ["ontoforge-api"],
     });
     expect((await app.inject({ url: "/.well-known/oauth-protected-resource" })).json()).toEqual(expected(PUBLIC_URL));
     const mount = "/mcp/ontologies/books/runtime/lenses/public";

@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import { formatDuration, type Turn } from '../conversation/chatModel'
 import { stepTotals, usageParts } from './diagnostics'
 import {
-  SEGMENT_MIN_PX, answerTime, barWidth, failedText, modelCallsText, stepRows, stripFacts, timeText, type Segment, type StepRow, type Tone,
+  SEGMENT_MIN_PX, answerTime, barLeastWidth, barWidth, failedText, modelCallsText, stepRows, stripFacts, timeText, type Segment, type StepRow, type Tone,
 } from './timeline'
 import type { DiagnosticsMode } from './useDiagnostics'
 import { useNow } from './useNow'
@@ -33,12 +33,12 @@ function toneClass(tone: Tone, failed: boolean): string {
 /**
  * The strip's bar: the answer's steps end to end, each segment as wide as
  * its share. The bar gives way before the numbers beside it: where the
- * line is narrow it shrinks, and every segment narrows alike, so none is
- * cut off at the end.
+ * line is narrow it shrinks, and every segment narrows alike, down to the
+ * width that still shows each one (`barLeastWidth`).
  */
 export function TimeBar({ items }: { items: readonly Segment[] }) {
   return (
-    <span aria-hidden className="flex h-1.5 min-w-8 shrink-[100] items-stretch gap-px overflow-hidden rounded-full" style={{ width: barWidth(items.length) }}>
+    <span aria-hidden className="flex h-1.5 shrink-[100] items-stretch gap-px overflow-hidden rounded-full" style={{ width: barWidth(items.length), minWidth: barLeastWidth(items.length) }}>
       {items.map((segment) => (
         <span key={segment.key} className={toneClass(segment.tone, segment.failed)} style={{ flex: `${segment.share} 1 ${SEGMENT_MIN_PX}px`, minWidth: 0 }} />
       ))}

@@ -90,6 +90,16 @@ const SEGMENT_ROOM_PX = 6
 export const barWidth = (count: number) =>
   Math.min(BAR_MAX_PX, Math.max(BAR_MIN_PX, count * SEGMENT_ROOM_PX))
 
+/** The narrowest the bar may get in px. */
+const BAR_LEAST_PX = 32
+
+/**
+ * The least width the bar keeps where the line is narrow: room for every
+ * gap and one px per segment, so no segment narrows to nothing.
+ */
+export const barLeastWidth = (count: number) =>
+  Math.min(barWidth(count), Math.max(BAR_LEAST_PX, count * (SEGMENT_GAP_PX + 1)))
+
 /** A step's readable name: the kind's label for its name; a model step without one is a model call. */
 export const stepName = (step: Pick<DiagnosticsStep, 'name'>, nameOf?: (name: string) => string) =>
   step.name === undefined ? 'Model call' : nameOf?.(step.name) ?? step.name

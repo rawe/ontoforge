@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { applyEvent, pendingTurn, type Turn } from '../src/assistants/conversation/chatModel.ts'
 import type { Diagnostics, DiagnosticsStep } from '../src/assistants/diagnostics/diagnostics.ts'
 import {
-  SEGMENT_GAP_PX, SEGMENT_MIN_PX, answerSummary, answerTime, barWidth, diagnosedTurns, drawerTurn, stepName, stepRows, stepping, stepsEnd,
+  SEGMENT_GAP_PX, SEGMENT_MIN_PX, answerSummary, answerTime, barLeastWidth, barWidth, diagnosedTurns, drawerTurn, stepName, stepRows, stepping, stepsEnd,
   stripFacts, stripLabel, stripSegments, stripText,
 } from '../src/assistants/diagnostics/timeline.ts'
 import { agentTurns, toolLabel } from '../src/assistants/steps/toolCallModel.ts'
@@ -63,6 +63,10 @@ test('twenty model calls with tool calls between them, three in parallel: the st
   assert.ok(barWidth(bar.length) >= bar.length * SEGMENT_MIN_PX + (bar.length - 1) * SEGMENT_GAP_PX)
   assert.equal(barWidth(17), 102)
   assert.equal(barWidth(99), 240)
+  // Squeezed, the bar keeps room for every gap and one px per segment.
+  assert.equal(barLeastWidth(3), 32)
+  assert.equal(barLeastWidth(39), 78)
+  assert.ok(barLeastWidth(99) - 98 * SEGMENT_GAP_PX >= 99)
 
   const rows = stepRows(steps, total, toolLabel)
   assert.equal(rows.length, 41)

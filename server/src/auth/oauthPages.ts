@@ -25,14 +25,24 @@ export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (c) => ESCAPES[c]!);
 }
 
-const STYLE = `body{font-family:system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1rem;line-height:1.5;color:#1f2328}
-dt{font-weight:600;margin-top:.75rem}dd{margin:0;overflow-wrap:anywhere}code{font-size:.9em}
-.notice{margin-top:1rem;padding:.6rem .8rem;border-left:4px solid #b45309;background:#fffbeb}
-form{display:flex;gap:.75rem;margin-top:1.5rem}button{font:inherit;padding:.5rem 1.25rem;cursor:pointer}`;
+/** The pages' whole styling: one card, readable in a light and a dark browser. */
+const STYLE = `:root{color-scheme:light dark;--bg:#f6f7f9;--card:#fff;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--warn:#9a6700;--warn-bg:#fff8c5}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--card:#161b22;--ink:#e6edf3;--muted:#9198a1;--line:#30363d;--warn:#d29922;--warn-bg:#2b2206}}
+body{margin:0;padding:1rem;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}
+main{max-width:32rem;margin:8vh auto;padding:1.75rem 2rem;background:var(--card);border:1px solid var(--line);border-radius:12px}
+.brand{margin:0 0 1rem;font-size:.8rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+h1{margin:0 0 .75rem;font-size:1.4rem;line-height:1.25}
+p{margin:.5rem 0}dl{margin:1.25rem 0 0}
+dt{margin-top:.85rem;font-size:.8rem;font-weight:600;color:var(--muted)}dd{margin:.1rem 0 0;overflow-wrap:anywhere}
+code{font:.85em ui-monospace,SFMono-Regular,Menlo,monospace}
+.notice{margin:1.25rem 0 0;padding:.7rem .9rem;border-left:4px solid var(--warn);border-radius:4px;background:var(--warn-bg)}
+form{display:flex;gap:.75rem;margin-top:1.5rem}
+button{font:inherit;font-weight:600;padding:.55rem 1.4rem;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--ink);cursor:pointer}
+button[value=allow]{border-color:#4f46e5;background:#4f46e5;color:#fff}`;
 
 /** A whole page; `body` is HTML whose values are already escaped. */
 function page(title: string, body: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)} — OntoForge</title><style>${STYLE}</style></head><body><h1>${escapeHtml(title)}</h1>${body}</body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)} — OntoForge</title><style>${STYLE}</style></head><body><main><p class="brand">OntoForge</p><h1>${escapeHtml(title)}</h1>${body}</main></body></html>`;
 }
 
 /** A plain message: a title and one sentence. */

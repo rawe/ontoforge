@@ -56,8 +56,8 @@ export type JsonSchema = Record<string, unknown>;
 /**
  * One structured call, recorded as `step`: the model answers with JSON of
  * the schema, which `read` (it must not throw) turns into the step's value
- * and, optionally, the detail its diagnostics carry: what it decided, in
- * plain text. A failed call fails the step with the reason the provider
+ * and, optionally, the detail its diagnostics carry: what it decided, as
+ * formatted JSON. A failed call fails the step with the reason the provider
  * gave (`modelFailure`), unparsable output as a validation error (the step
  * then carries no detail); there is no automatic retry.
  */

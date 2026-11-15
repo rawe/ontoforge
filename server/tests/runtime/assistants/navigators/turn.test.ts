@@ -44,6 +44,9 @@ async function newThread(): Promise<GraphThread> {
 const plan = (intent: Partial<Intent>) => ({
   content: JSON.stringify({ mentions: [], targets: [], path: [], useFocus: false, search: "", ...intent }),
 });
+/** A parsed intent as the understand step's detail carries it: formatted JSON. */
+const intentJson = (intent: Partial<Intent>) =>
+  JSON.stringify({ mentions: [], targets: [], path: [], useFocus: false, search: "", ...intent }, null, 2);
 const answer = (...chunks: string[]) =>
   fake.stream.mockImplementationOnce(async () => (async function* () {
     for (const content of chunks) yield { content };
@@ -141,7 +144,7 @@ describe("a navigator turn", () => {
         type: "diagnostics",
         steps: [{
           index: 1, name: "understand", model: true, ...time, usage: { input: 900, output: 40 },
-          detail: "Looking for Project · starting at “Lena” · path manages → works on",
+          detail: intentJson(TWO_HOPS),
         }],
       },
       { type: "diagnostics", steps: [{ index: 2, name: "anchor", ...time }] },
@@ -426,7 +429,7 @@ describe("follow-ups on a thread", () => {
       ["E4", "Zeus", "focus", 0, "From the previous answer"],
     ]);
     expect(events.find((e) => e.type === "diagnostics")!.steps).toMatchObject([
-      { name: "understand", detail: "Looking for Team · continuing from the previous answer · path member of" },
+      { name: "understand", detail: intentJson({ targets: ["team"], path: [{ relation: "member_of", direction: "outgoing" }], useFocus: true }) },
     ]);
     expect(stepDone(events, "anchor").summary).toBe("Continuing from the previous answer: 4 entities");
     expect(lastCards(events).map((c) => c.label)).toEqual(["Kira Novak", "Apollo", "Omar Haddad", "Zeus", "Platform", "Data"]);

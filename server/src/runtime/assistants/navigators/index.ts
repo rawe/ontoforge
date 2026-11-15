@@ -34,7 +34,7 @@ import { Board, type BoardNode } from "./board.js";
 import { allowedAnchors, allowedRelations, type NavigatorConfig } from "./config.js";
 import { lensReader } from "./reader.js";
 import {
-  intentSchema, intentSummary, parseIntent, pathText, schemaText, understandInput, UNDERSTAND, type Intent,
+  intentSchema, parseIntent, pathText, schemaText, understandInput, UNDERSTAND, type Intent,
 } from "./understand.js";
 import { anchor, explore, focus, followPath, type FocusEntity, type WalkResult } from "./walk.js";
 
@@ -140,7 +140,7 @@ export async function run(turn: NavigatorTurn): Promise<string> {
         signal,
         (raw) => {
           const parsed = parseIntent(raw, lens, relations, anchorTypes);
-          return { value: parsed, detail: intentSummary(parsed, lens) };
+          return { value: parsed, detail: JSON.stringify(parsed, null, 2) };
         },
       ));
       return { round: 0 };

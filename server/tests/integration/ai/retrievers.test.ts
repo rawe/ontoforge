@@ -45,15 +45,15 @@ async function post(url: string, payload: object, expected = 201): Promise<Row> 
 
 /** Ask the retriever, on a new thread or continuing one; the stream's events,
  * checked for the leading `thread` and one terminal `final`: the plan the
- * turn used, in words (the `detail` of its last planning step that has
- * one, from diagnostics; "" without), and the results handed to the answer
+ * turn used (the JSON in the `detail` of its last planning step that has
+ * one, from diagnostics; {} without) and the results handed to the answer
  * model (the `entities` cards, in order). */
 async function ask(
   message: string,
   threadId?: string,
   runtime = RUNTIME,
   agent = "people",
-): Promise<{ reply: string; plan: string; results: Row[]; threadId: string }> {
+): Promise<{ reply: string; plan: Row; results: Row[]; threadId: string }> {
   const res = await app!.inject({
     method: "POST",
     url: `${runtime}/ai/assistants/retrievers/${agent}/chat`,
@@ -65,16 +65,11 @@ async function ask(
   if (threadId) expect(events[0]!.threadId).toBe(threadId);
   expect(events.at(-1)?.type, JSON.stringify(events.at(-1))).toBe("final");
   const steps = events.filter((event) => event.type === "diagnostics").flatMap((event) => (event.steps ?? []) as Row[]);
-  const plan = (steps.filter((step) => step.detail !== undefined).at(-1)?.detail ?? "") as string;
+  const detail = steps.filter((step) => step.detail !== undefined).at(-1)?.detail as string | undefined;
+  const plan = (detail === undefined ? {} : JSON.parse(detail)) as Row;
   const results = events.filter((event) => event.type === "entities").flatMap((event) => event.entities as Row[]);
   return { reply: events.at(-1)!.reply as string, plan, results, threadId: events[0]!.threadId as string };
 }
-
-/** A plan's searches: its "Search n in …" lines. */
-const searchesOf = (plan: string) => plan.split("\n").filter((line) => line.startsWith("Search "));
-
-/** A plan's queries and their variants: what it wrote in quotes. */
-const queriesOf = (plan: string) => (plan.match(/“[^”]*”/g) ?? []).join(" ");
 
 /** Asks each question in turn on one thread; the last answer. */
 async function conversation(questions: string[], runtime = RUNTIME): ReturnType<typeof ask> {
@@ -274,7 +269,8 @@ const ifAvailable = (name: string, fn: () => Promise<void>, turns = 1) =>
 describe("retriever with a real model", () => {
   ifAvailable("answers who is CTO at ACME through the employment index", async () => {
     const { reply, plan, results } = await ask("Who is CTO at ACME?");
-    expect(plan).toContain("People by employment");
+    const subQueries = plan.subQueries as Row[];
+    expect(subQueries.some((sub) => sub.indices.includes("person_employment")), JSON.stringify(subQueries)).toBe(true);
     // Ada's employment entry (CTO, ACME) matches best.
     expect(results[0]).toMatchObject({ label: "Ada Lovelace" });
     expect(reply).toContain("Ada");
@@ -282,9 +278,13 @@ describe("retriever with a real model", () => {
 
   ifAvailable("answers a two-relation question by fusing sub-queries or by a filter", async () => {
     const { reply, plan, results } = await ask("Who works at ACME and lives in Berlin?");
-    // Both relations are covered: a search in the index of each, or one plus the city filter.
-    expect(plan).toContain("People by employment");
-    expect(plan.includes("People by home city") || /filters: .*Lives in City Name:/.test(plan), plan).toBe(true);
+    const subQueries = plan.subQueries as Row[];
+    // Both relations are covered: a sub-query on each, or one plus the city filter.
+    const touches = (relation: string, index: string) =>
+      subQueries.some((sub) => sub.relations.includes(relation) || sub.indices.includes(index));
+    const filtered = subQueries.some((sub) => sub.filters.some((filter: Row) => filter.id === "city"));
+    expect(touches("works_for", "person_employment"), JSON.stringify(subQueries)).toBe(true);
+    expect(touches("lives_in", "person_home") || filtered, JSON.stringify(subQueries)).toBe(true);
     // Found by both relations, Ada ranks first.
     expect(results[0].label).toBe("Ada Lovelace");
     expect(reply).toContain("Ada");
@@ -296,7 +296,7 @@ describe("retriever with a real model", () => {
       "Where does Bob Builder live?",
       "And where does he work?",
     ]);
-    const queries = queriesOf(plan);
+    const queries = JSON.stringify((plan.subQueries as Row[]).map((sub) => [sub.query, ...sub.variants]));
     expect(queries).toMatch(/bob/i);
     expect(queries).not.toMatch(/ada/i);
     expect(results[0].label).toBe("Bob Builder");
@@ -306,14 +306,16 @@ describe("retriever with a real model", () => {
     // Referred to directly when the first turn was a verified exact list,
     // otherwise restated as a fresh search; never unsupported.
     const { plan, results } = await conversation(["Who lives in Berlin?", "Which of these work at ACME?"]);
-    expect(plan).not.toContain("Not answerable:");
-    expect(searchesOf(plan).length, plan).toBeGreaterThan(0);
+    expect(plan.unsupportedReason ?? null, JSON.stringify(plan)).toBeNull();
+    expect((plan.subQueries as Row[]).length, JSON.stringify(plan)).toBeGreaterThan(0);
     // Ada works at ACME and lives in Berlin; Eve works at ACME but lives in Hamburg.
     expect(results[0].label).toBe("Ada Lovelace");
   }, 2);
 });
 
 describe("follow-up sequences of the end-to-end run", () => {
+  const queriesOf = (plan: Row) => JSON.stringify((plan.subQueries as Row[]).map((sub) => [sub.query, ...sub.variants]));
+
   ifAvailable("resolves 'his' to the person the latest answer named when the question named none", async () => {
     // q2 names no person; Bob exists only in its answer. Ada, of the earlier
     // exchange, fits "role there" (CTO at ACME) better — the trap.
@@ -322,7 +324,7 @@ describe("follow-up sequences of the end-to-end run", () => {
       F_RUNTIME,
     );
     const queries = queriesOf(plan);
-    expect(searchesOf(plan).length, plan).toBeGreaterThan(0);
+    expect(plan.subQueries.length, JSON.stringify(plan)).toBeGreaterThan(0);
     expect(queries).toMatch(/bob/i);
     expect(queries).not.toMatch(/ada/i);
     expect(results[0].label).toBe("Bob Martin");
@@ -333,15 +335,19 @@ describe("follow-up sequences of the end-to-end run", () => {
     // Bob Martin and Frank Weber live in Berlin; of them, Bob works at ACME.
     const first = await ask("List everyone who lives in Berlin.", undefined, F_RUNTIME);
     const { reply, plan, results } = await ask("Which of these work at ACME?", first.threadId, F_RUNTIME);
-    expect(plan).not.toContain("Not answerable:");
-    if (searchesOf(first.plan).every((search) => search.includes("no query, an exact list"))) {
+    expect(plan.unsupportedReason ?? null, JSON.stringify(plan)).toBeNull();
+    if ((first.plan.subQueries as Row[]).every((sub) => sub.query === "")) {
       // A verified exact list: "these" restricts the follow-up to it.
-      expect(searchesOf(plan).some((search) => search.includes("limited by the previous results")), plan).toBe(true);
+      expect((plan.subQueries as Row[]).some((sub) => sub.previous !== null), JSON.stringify(plan)).toBe(true);
     } else {
       // Searched candidates: restated as a fresh search with the earlier
       // constraint — Berlin, as the city filter or in a query — and ACME.
-      const berlin = /filters: .*Lives in City Name: berlin/i.test(plan) || /berlin/i.test(queriesOf(plan));
-      expect(berlin, plan).toBe(true);
+      const berlin = (plan.subQueries as Row[]).some(
+        (sub) =>
+          sub.filters.some((filter: Row) => filter.id === "city" && /berlin/i.test(filter.value)) ||
+          /berlin/i.test(JSON.stringify([sub.query, ...sub.variants])),
+      );
+      expect(berlin, JSON.stringify(plan)).toBe(true);
     }
     expect((results as Row[]).map((result) => result.label)).toContain("Bob Martin");
     expect(reply).toContain("Bob");

@@ -138,9 +138,13 @@ async function run(
 const stepsOf = (events: Record<string, unknown>[]) =>
   events.filter((e) => e.type === "diagnostics").flatMap((e) => e.steps as Record<string, unknown>[]);
 
-/** The detail of the turn's last planning step that carries one: the plan it used, in words. */
+/** The detail of the turn's last planning step that carries one: the plan it used. */
 const planDetailOf = (events: Record<string, unknown>[]) =>
   stepsOf(events).filter((step) => step.detail !== undefined).at(-1)!.detail as string;
+
+/** A checked plan as a planning step's detail carries it: formatted JSON. */
+const planJson = (subQueries: unknown[], unsupportedReason: string | null = null) =>
+  JSON.stringify({ subQueries, unsupportedReason }, null, 2);
 
 /** The limitations the last answer model call was told. */
 const limitationsOf = () => JSON.parse(fake.stream.mock.calls.at(-1)![0][1].content).limitations as string[];
@@ -171,8 +175,8 @@ describe("retriever pipeline", () => {
       "plan:start", "plan:end", "retrieve:start", "retrieve:end", "answer:start", "answer:end",
     ]);
     expect(events.some((e) => "durationMs" in e && e.type !== "diagnostics")).toBe(false);
-    // The planning step says what it planned, as text in display names.
-    const detail = "Search 1 in person~default: no query, an exact list · filters: lives in City Name: Berlin";
+    // The planning step carries the checked plan it ran, as formatted JSON.
+    const detail = planJson([sub()]);
     // Each step once, as soon as it ended: the two model calls and the retrieve phase.
     expect(stepsOf(events)).toEqual([
       { index: 1, name: "plan", model: true, ...time, usage: { input: 1, output: 2 }, detail },
@@ -217,12 +221,12 @@ describe("retriever pipeline", () => {
     expect(messages.map((m) => m.text)).toEqual(["Everyone in Berlin"]);
   });
 
-  it("the default retriever's planning step names its derived filters in words", async () => {
+  it("the default retriever's planning step carries its derived filter's id and value", async () => {
     const config = defaultRetrieverConfig(LENS);
     const fallback: RunnableRetriever = { key: DEFAULT_RETRIEVER_KEY, config, scope: { ...agent.scope, config } };
     fake.invoke.mockResolvedValue(planned([sub({ filters: [{ id: "person.lives_in.outgoing", value: "Berlin", quote: "Berlin" }] })]));
     const { events } = await run("Everyone in Berlin", true, undefined, undefined, fallback);
-    expect(planDetailOf(events)).toBe("Search 1 in person~default: no query, an exact list · filters: lives in City Name: Berlin");
+    expect(planDetailOf(events)).toBe(planJson([sub({ filters: [{ id: "person.lives_in.outgoing", value: "Berlin", quote: "Berlin" }] })]));
   });
 
   it("hands Anthropic the plan schema as its own output format", async () => {
@@ -383,9 +387,9 @@ describe("retriever pipeline", () => {
       expect(rankEntries.mock.calls[0]![0].text).toBe("Bob role at ACME");
       expect(fake.stream).toHaveBeenCalledTimes(1);
       expect(steps.map((step) => [step.index, step.name])).toEqual([[1, "plan"], [2, "replan"], [3, "retrieve"], [4, "answer"]]);
-      // Each planning step says what it decided; the second plan is the one used.
-      expect(steps[0]!.detail).toBe("Not answerable: already answered");
-      expect(steps[1]!.detail).toBe("Search 1 in person~default: “Bob role at ACME”, by keywords");
+      // Each planning step carries the plan it decided; the second plan is the one used.
+      expect(steps[0]!.detail).toBe(planJson([], "already answered"));
+      expect(steps[1]!.detail).toBe(planJson([sub({ query: "Bob role at ACME", filters: [] })]));
       expect(limitations).toContain("Planning was repeated once: the first plan for this follow-up searched nothing.");
     });
 

@@ -42,7 +42,6 @@ import {
   CONTEXT_CHARACTERS,
   entityCards,
   filterValues,
-  planDetail,
   retrieve,
   retrievedResults,
   type RetrievalScope,
@@ -519,62 +518,5 @@ describe("fusion and context", () => {
     for (const internal of ['"eve"', '"ada"', '"c"', "works_for", "lives_in", "person_employment", "person_home", '"city"', "→", "city.name", "subQuery", '"id"', '"path"']) {
       expect(payload).not.toContain(internal);
     }
-  });
-});
-
-describe("planDetail", () => {
-  // Indices by the names a person configuring the retriever sees.
-  const NAMES: Record<string, string> = {
-    "person~default": "People",
-    person_employment: "People by employment",
-    person_home: "People by home",
-  };
-  const named = { ...LENS, catalog: CATALOG.map((entry) => ({ ...entry, name: NAMES[entry.key] ?? entry.name })) };
-  const detail = (plan: Plan) => planDetail(plan, CONFIG, named);
-
-  it("writes one line per search: indices, query with variants and mode, relation groups when not all, filters with their values", () => {
-    expect(detail({
-      subQueries: [
-        subQuery({
-          indices: ["person_employment", "person~default"],
-          relations: ["works_for"],
-          query: "works at ACME",
-          variants: ["employed by ACME", "ACME staff"],
-          filters: [{ id: "city", value: "Berlin", quote: "lives in Berlin" }],
-        }),
-        subQuery({ indices: ["person_home"], query: "", mode: "keyword", filters: [{ id: "city", value: "Paris", quote: "Paris" }] }),
-        subQuery({ indices: ["person~default"], query: "Ada", mode: "semantic" }),
-      ],
-      unsupportedReason: null,
-    })).toBe([
-      "Search 1 in People by employment, People: “works at ACME” (also “employed by ACME”, “ACME staff”), by meaning and keywords · relation groups: Employment · filters: lives in City Name: Berlin",
-      "Search 2 in People by home: no query, an exact list · filters: lives in City Name: Paris",
-      "Search 3 in People: “Ada”, by meaning",
-    ].join("\n"));
-  });
-
-  it("says when previous results restrict a search", () => {
-    expect(detail({
-      subQueries: [subQuery({ indices: ["person~default"], query: "", previous: { filterId: null, quote: "these" } })],
-      unsupportedReason: null,
-    })).toBe("Search 1 in People: no query, an exact list · limited by the previous results");
-  });
-
-  it("names why a question is not answerable, after any searches", () => {
-    expect(detail({ subQueries: [], unsupportedReason: "The lens holds no salaries." })).toBe("Not answerable: The lens holds no salaries.");
-    expect(detail({ subQueries: [subQuery({ indices: ["person~default"], query: "Ada", mode: "keyword" })], unsupportedReason: "Salaries are not stored." }))
-      .toBe("Search 1 in People: “Ada”, by keywords\nNot answerable: Salaries are not stored.");
-  });
-
-  it("says so when the checks left no search", () => {
-    expect(detail({ subQueries: [], unsupportedReason: null })).toBe("No search planned.");
-  });
-
-  it("holds no key, id or JSON", () => {
-    const text = detail({
-      subQueries: [subQuery({ relations: ["works_for"], filters: [{ id: "city", value: "Berlin", quote: "Berlin" }] })],
-      unsupportedReason: null,
-    });
-    for (const internal of ["person_employment", "works_for", "lives_in", '"city"', "hybrid", "{", "["]) expect(text).not.toContain(internal);
   });
 });

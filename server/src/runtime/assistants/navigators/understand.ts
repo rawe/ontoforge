@@ -145,20 +145,6 @@ export function parseIntent(
   };
 }
 
-/** What understand decided, the detail of its diagnostics step: what the
- * walk will look for, in display names. */
-export function intentSummary(intent: Intent, lens: SchemaCacheValue): string {
-  const names = (keys: string[], of: Record<string, { displayName: string }>) =>
-    keys.map((k) => of[k]?.displayName ?? k).join(", ");
-  const parts: string[] = [];
-  if (intent.targets.length > 0) parts.push(`Looking for ${names(intent.targets, lens.entityTypes)}`);
-  if (intent.mentions.length > 0) parts.push(`starting at ${intent.mentions.map((m) => `“${m.text}”`).join(", ")}`);
-  if (intent.useFocus) parts.push("continuing from the previous answer");
-  if (intent.mentions.length === 0 && !intent.useFocus && intent.search) parts.push(`topic “${intent.search}”`);
-  if (intent.path.length > 0) parts.push(`path ${pathText(intent.path, lens)}`);
-  return parts.join(" · ") || "No starting point in the question";
-}
-
 /** A planned path in display names: "manages → member of". */
 export function pathText(path: PathStep[], lens: SchemaCacheValue): string {
   return path

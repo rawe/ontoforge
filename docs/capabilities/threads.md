@@ -92,19 +92,19 @@ words —, when it started from the turn's start and how long it took, all measu
 server, so steps that ran in parallel overlap, and whether it failed. A model step adds the tokens the provider reported (the
 whole prompt with its cached parts, the output, what was read from and written to the
 provider's cache; a count the provider did not report is left out, never estimated) and
-the reason the model gave for stopping. Any step may add a **detail**: short plain text
-about what it did or decided, written for the person reading diagnostics, in display
-names, with a line break between its lines — a
-[retriever's plan](retrievers.md#diagnostics), the sentence a
-[navigator](navigators.md#understand) read the question as. A detail is text to read,
-never data to parse, and never needed to show the answer. A step is reported as soon as
+the reason the model gave for stopping. Any step may add a **detail**: one string with the
+exact data the step produced, for the person debugging it — a value as formatted JSON,
+with its keys and ids as the step used them: a
+[retriever's plan](retrievers.md#diagnostics), the intent a
+[navigator](navigators.md#understand) read the question as. A client shows a detail as
+written and never parses it; it is never needed to show the answer. A step is reported as soon as
 it ends, so a turn that fails has already shown the steps before it; last comes the
 turn's whole time.
 
 Nothing in diagnostics depends on the assistant kind. A kind reports the steps its turn
 takes, each with its name and, where it helps, a detail, and adds nothing else; a client
 shows any step from these fields alone — its name as words, its time, its tokens, its
-detail as text. So a new kind, or a new step of an existing one, needs no change in a
+detail as written. So a new kind, or a new step of an existing one, needs no change in a
 client.
 
 Nothing of this is sent unless asked, and the work and answer are the same either way.

@@ -321,7 +321,7 @@ See [capabilities/threads.md](capabilities/threads.md).
 **Diagnostics** — how long an assistant's turn took and what it cost, sent only when its
 message asks: the turn's **steps** — each model call and each other piece of work — with
 when each started, how long it took and whether it failed, a model call's reported tokens
-and finish reason, a step's detail — plain text about what it did or decided —, and the
+and finish reason, a step's detail — the exact data it produced, as text —, and the
 turn's whole time; the same for every kind. A debugging and tuning feature. See
 [capabilities/threads.md](capabilities/threads.md#diagnostics).
 

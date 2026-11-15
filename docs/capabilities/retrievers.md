@@ -281,20 +281,38 @@ each cut to 2,000 characters.
 
 On request, the stream also reports the retriever's steps
 [as every assistant reports them](threads.md#diagnostics): planning, planning again for a
-follow-up, the retrieval and the answer. A planning step's detail is the checked plan in
-words, in display names: one line per search with the indices it searches, its query with
-its variants and whether it searches by meaning, by keywords or both — or that it has no
-query and lists exactly —, the relation groups it is restricted to when not all, its
-exact filters with their values, and whether previous results restrict it; then, when the
-planner found the question not answerable from the lens, a line with the reason.
+follow-up, the retrieval and the answer. A planning step's detail is the checked plan as
+it runs, as formatted JSON, in the keys and ids of the retriever's configuration: its
+searches (`subQueries`), each with the indices it searches, the relation types it is
+restricted to (none: all), its query (empty for an exact list) and variants, its mode
+(`semantic`, `keyword` or `hybrid`), its exact filters — the filter's id, the compared
+value and the user's words it rests on — and the reference to previous results that
+restricts it, or null; then why the planner found the question not answerable from the
+lens (`unsupportedReason`), or null.
 
-```text
-Search 1 in People by employment: “works at ACME” (also “employed by ACME”), by keywords · relation groups: Employment · filters: lives in City Name: Berlin
-Search 2 in People by home city, People: “lives in Berlin”, by keywords
-```
-
-```text
-Not answerable: The lens holds no salaries.
+```json
+{
+  "subQueries": [
+    {
+      "indices": [
+        "person~default"
+      ],
+      "relations": [],
+      "query": "",
+      "variants": [],
+      "mode": "keyword",
+      "filters": [
+        {
+          "id": "city",
+          "value": "Berlin",
+          "quote": "Berlin"
+        }
+      ],
+      "previous": null
+    }
+  ],
+  "unsupportedReason": null
+}
 ```
 
 A planning step whose output could not be read has no detail; the plan the answer used is

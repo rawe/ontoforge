@@ -271,6 +271,6 @@ Inside:
   same rule for every kind; "Model call" for a model call without a name —, a bar at its
   real start on the scale of the answer's time, so parallel tool calls overlap, and its
   time; a model call adds its tokens and finish reason below, a failed step is red. A
-  step that has a detail opens to it: the text as the server wrote it, with its line
-  breaks — a retriever's plan, the sentence a navigator's Understand read the question
-  as.
+  step that has a detail opens to it: the text as the server wrote it, in a monospace
+  font with its line breaks and indentation, long lines wrapped — a retriever's plan, what
+  a navigator's Understand read the question as, each as formatted JSON.

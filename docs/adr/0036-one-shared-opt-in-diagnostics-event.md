@@ -15,8 +15,8 @@ kind-specific fields.
 
 Every assistant kind takes the same opt-in `diagnostics` request field and answers it with
 one shared `diagnostics` event: the turn's steps — each model call and each other piece of
-work — in one shape, measured by the server, with an optional detail on any step, plain
-text about what it did or decided, then the turn's time; nothing a kind adds besides, so
+work — in one shape, measured by the server, with an optional detail on any step, one
+string with the exact data it produced, then the turn's time; nothing a kind adds besides, so
 a client shows every kind's diagnostics without knowing the kind. The kinds' events keep their names and
 say what was done and found, never how long it took or what it cost.
 
@@ -40,4 +40,5 @@ say what was done and found, never how long it took or what it cost.
   steps.
 - **A structured value on a step, shaped by its kind.** A retriever's plan as an object
   and a navigator's as another would make a client know the kind to read a step, and every
-  new kind would need work in every client; text reads the same for all.
+  new kind would need work in every client; one string, shown as written, reads the same
+  for all.

@@ -17,9 +17,11 @@
  * - on a model step `usage` (`core/usage.ts`) and `finishReason`, as the
  *   provider reported them;
  * - `failed: true` when the step threw;
- * - `detail`: optional plain text about what the step did or decided, for
- *   the person reading diagnostics. Display names, never keys, ids or
- *   JSON; line breaks are kept. Never needed to show the answer.
+ * - `detail`: optional, one string with the exact data the step produced,
+ *   for the person debugging it: a value as formatted JSON
+ *   (`JSON.stringify(value, null, 2)`), keys and ids as the step used
+ *   them. A client shows it as written and never parses it. Never needed
+ *   to show the answer.
  *
  * Adding diagnostics to an assistant kind is recording its steps here, and
  * nothing else — a client shows any step as it comes:

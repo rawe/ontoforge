@@ -285,15 +285,9 @@ variable below without a default is then required, as is `PUBLIC_URL`; a missing
 unreachable provider or an unusable access database fails the boot. With it off they are
 not read. Every server of one deployment needs the same values.
 
-**At the identity provider**, register one confidential client (`OIDC_CLIENT_ID`,
-`OIDC_CLIENT_SECRET`) for the authorization code flow, with two redirect URIs:
-`WEB_CLIENT_URL/api/auth/callback` for the web client (when `WEB_CLIENT_URL` is set) and
-`PUBLIC_URL/oauth/callback` for OntoForge's authorization server. MCP clients and own
-tools acting for a person sign in at that authorization server, not at the provider, so
-the provider needs nothing for them. For machines, define an audience for OntoForge
-(`OIDC_AUDIENCE`) and one client per service, using client credentials, whose access
-tokens carry that audience; each service's roles are assigned in OntoForge. The steps for
-Keycloak, Auth0 and Microsoft Entra ID:
+**At the identity provider**, OntoForge needs one confidential client with two redirect
+URIs, and for machines an audience. What to set up at Keycloak, Auth0 and Microsoft Entra
+ID, and the values that follow:
 [docs/providers/identity-providers.md](docs/providers/identity-providers.md).
 
 **An own tool** acting for a person — a script, command-line tool, desktop app or browser
@@ -312,13 +306,13 @@ must send `resource`: an MCP mount's URL or `PUBLIC_URL/api`.
 | `OIDC_CLIENT_ID` | *(required)* | The confidential client the server signs people in with, for the web client and for its authorization server |
 | `OIDC_CLIENT_SECRET` | *(required)* | That client's secret; never in a committed file |
 | `OIDC_AUDIENCE` | *(unset)* | The audience a machine's provider token must carry to be accepted on REST and MCP. It must be an audience no client signs people in with: an ID token for it would pass as an API credential, which is why `OIDC_CLIENT_ID` fails the boot. Unset: no provider token is accepted, and only people sign in |
-| `OIDC_SUBJECT_CLAIM` | `sub` | The token claim that names a person or machine at the provider, such as `oid` for Microsoft Entra ID; `AUTH_ADMIN_SUBJECT` and admitted services are named by its value |
+| `OIDC_SUBJECT_CLAIM` | `sub` | The token claim that names a person or machine at the provider, such as `oid`; `AUTH_ADMIN_SUBJECT` and admitted services are named by its value |
 | `WEB_CLIENT_URL` | *(unset)* | The address the browser loads the web client from, which forwards `/api` to this server. Browser sign-in runs there: `/api/auth/callback` under it is the sign-in callback registered at the provider, and a signed-in change must come from it. Unset: no browser sign-in; callers send bearer tokens. It must be `https` unless its host is localhost |
 | `AUTH_ADMIN_SUBJECT` | *(required)* | The subject, at `OIDC_ISSUER`, that is made an active Platform Administrator whenever it signs in |
 | `AUTH_SESSION_IDLE_SECONDS` | `28800` (8 h) | How long a browser session lasts unused; at most 24 hours after sign-in in any case (positive integer) |
 | `ACCESS_DB_URI` | *(required)* | `postgresql://` URL of the access database, which holds users and roles; the server creates it when missing. Its user and password are `DB_USER` and `DB_PASSWORD` unless the URL carries its own |
 | `OAUTH_CLIENTS` | *(unset)* | The authorization server's clients that publish no client metadata document: `client ID\|display name\|redirect URIs`, several separated by `;`, redirect URIs by `,`, such as `ontoforge-cli\|OntoForge CLI\|http://127.0.0.1/callback`. A redirect URI is `https`, or `http` on `localhost`, `127.0.0.1` or `[::1]`, where any port matches; a malformed entry fails the boot |
-| `OAUTH_CLIENT_HOSTS` | *(unset)* | The hosts the authorization server fetches client metadata documents from, comma-separated, such as `claude.ai,chatgpt.com`. Unset: any public `https` host |
+| `OAUTH_CLIENT_HOSTS` | *(unset)* | The hosts the authorization server fetches client metadata documents from, comma-separated, such as `claude.ai`. Unset: any public `https` host |
 
 ## Optional Features
 

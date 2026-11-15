@@ -14,7 +14,9 @@ Fix two addresses first; they decide the redirect URIs and may be on different d
 
 - **One confidential client** (a web application) for the authorization code flow, with a
   client secret and two redirect URIs: `WEB_CLIENT_URL/api/auth/callback` and
-  `PUBLIC_URL/oauth/callback`. Sign-out returns to `WEB_CLIENT_URL/`.
+  `PUBLIC_URL/oauth/callback`. The server sends the secret in the request body where the
+  provider offers `client_secret_post`, else in the Authorization header.
+- **Where sign-out returns:** `WEB_CLIENT_URL/`, registered where the provider asks for it.
 - **The first administrator's subject** at the provider, for `AUTH_ADMIN_SUBJECT`.
 - **Only when machines call OntoForge:** an audience for OntoForge, and one client per
   service that uses client credentials and whose access tokens carry that audience.
@@ -35,9 +37,10 @@ The test users are `admin`, `reader`, `writer` and `newcomer`; their passwords a
 [scripts/keycloak/](../../scripts/keycloak/USAGE.md). Checking the whole setup:
 [scripts/auth/](../../scripts/auth/USAGE.md).
 
-In a Keycloak of your own, the client has client authentication and the standard flow on.
-For machines, a client scope with an audience mapper is added to each service's client,
-which has service accounts on.
+In a Keycloak of your own, the client has client authentication and the standard flow on,
+and `WEB_CLIENT_URL/` among its valid post logout redirect URIs. For machines, a client
+scope with an audience mapper is added to each service's client, which has service
+accounts on.
 
 | Variable | Value |
 |---|---|
@@ -46,13 +49,15 @@ which has service accounts on.
 | `OIDC_AUDIENCE` | The audience the mapper adds |
 | `AUTH_ADMIN_SUBJECT` | The administrator's user ID |
 
+A service's subject is the ID of its service account user.
+
 ## Auth0
 
 1. **Applications → Create Application → Regular Web Application.** Allowed Callback URLs:
-   the two redirect URIs. Allowed Logout URLs: `WEB_CLIENT_URL/`. Credentials →
-   Authentication Method: Client Secret (Basic).
+   the two redirect URIs. Allowed Logout URLs: `WEB_CLIENT_URL/`.
 2. **For machines only:** Applications → APIs → Create API; its identifier is the audience.
-   Then one Machine to Machine application per service, authorized for that API.
+   Then one Machine to Machine application per service, authorized for that API; it asks
+   for tokens with `audience` set to that identifier.
 
 | Variable | Value |
 |---|---|
@@ -68,25 +73,26 @@ A service's subject is `<its client ID>@clients`.
 A tenant administrator sets this up, as Application Administrator or Cloud Application
 Administrator.
 
-- **An app registration** for one tenant, with the platform Web and the two redirect URIs,
-  and a client secret.
+- **An app registration** for one tenant, with the platform Web, a client secret, and
+  three redirect URIs: the two above and `WEB_CLIENT_URL/`, where sign-out returns.
 - **Delegated Microsoft Graph permissions** `openid`, `profile` and `email`, with admin
-  consent where the tenant requires it. The optional claim `email` in the ID token shows
-  people's email addresses in OntoForge.
+  consent where the tenant requires it.
 - **Who may sign in:** everyone in the tenant, or, with "Assignment required" on the
   enterprise application, the assigned users and groups.
-- **For machines only:** a second app registration as the API. It exposes an Application ID
-  URI, defines an app role for applications, and has `requestedAccessTokenVersion` 2 in its
-  manifest, so that its tokens name the issuer below. Each service is an app registration
-  of its own with a client secret, granted that app role with admin consent; it asks for
-  the scope `<Application ID URI>/.default`.
+- **For machines only:** a second app registration as the API, with an Application ID URI
+  (Expose an API) and `requestedAccessTokenVersion` 2 in its manifest, so that its tokens
+  name the issuer below. Each service is an app registration of its own with a client
+  secret; it asks for the scope `<Application ID URI>/.default`. To limit which
+  applications get a token: an app role for applications, granted to each service with
+  admin consent, and "Assignment required" on the API's enterprise application.
 
 | Variable | Value |
 |---|---|
-| `OIDC_ISSUER` | `https://login.microsoftonline.com/<tenant ID>/v2.0` |
+| `OIDC_ISSUER` | `https://login.microsoftonline.com/<tenant ID>/v2.0`, with the directory (tenant) ID, not `common` |
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | The app registration's application (client) ID and its secret's value |
 | `OIDC_SUBJECT_CLAIM` | `oid`: Entra ID's `sub` differs from one application to the next |
 | `AUTH_ADMIN_SUBJECT` | The administrator's object ID (Users) |
 | `OIDC_AUDIENCE` | The API registration's application (client) ID |
 
-A service's subject is the object ID of its enterprise application.
+A service's subject is the object ID of its enterprise application, not of its app
+registration.

@@ -87,6 +87,7 @@ A reference client is `scripts/auth/cli.mjs` ([scripts/auth/](../../scripts/auth
 | GET | `/.well-known/oauth-authorization-server` | Authorization server metadata (RFC 8414): the issuer, the public address, and its endpoints |
 | GET | `/oauth/authorize` | Authorization request: `response_type=code`, `client_id`, `redirect_uri`, `code_challenge` with `code_challenge_method=S256`, `state`, and exactly one `resource`; any `scope` is ignored |
 | POST | `/oauth/token` | Token request: `grant_type=authorization_code` with the code, the PKCE verifier and the same `resource`, or `grant_type=refresh_token`; no client secret. Answers `access_token`, `refresh_token` and `expires_in` |
+| GET | `/oauth/jwks` | The authorization server's public key set |
 | GET | `/oauth/callback` | Where the provider sends the browser back during an authorization |
 | GET, POST | `/oauth/interaction/{uid}` | The consent page, and its Allow or Deny, accepted only with the public address's `Origin` |
 
@@ -128,7 +129,7 @@ one port with one exposure rule keeps deployment simpler.
 |---|---|---|
 | `/api/*` | public | REST clients and the web client |
 | `/mcp/*` | public | MCP clients |
-| `/.well-known/*` | public | MCP clients finding where to sign in (authentication on) |
+| `/.well-known/*`, `/oauth/*` | public | Clients finding where to sign in, and the authorization server they sign in at (authentication on) |
 | `/openapi.json` | public | Clients reading the contract or generating code from it |
 | `/docs/*` | optional | People browsing the same description |
 | `/livez`, `/readyz` | internal | The orchestrator, on each server directly |

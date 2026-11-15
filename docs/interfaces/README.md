@@ -272,7 +272,7 @@ when the provider gave no reason. The provider's own message is logged, not retu
 **What a caller holds no role in is not found.** An ontology or lens outside the caller's
 assignments answers `RESOURCE_NOT_FOUND`, as an unknown key does; `FORBIDDEN` is for what
 the caller may know of ([capabilities/authentication.md](../capabilities/authentication.md#what-a-caller-sees)).
-A `401` carries a `WWW-Authenticate` challenge ([sign-in](server.md#sign-in)).
+A `401` carries a `WWW-Authenticate` challenge ([authorization server](server.md#authorization-server)).
 
 When a value cannot be coerced, its field error names the expected schema type and
 describes the received value by its JSON type. Field errors are strings in

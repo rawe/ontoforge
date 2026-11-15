@@ -49,12 +49,12 @@ request includes a bearer token, authentication uses that token alone and ignore
 session cookie. The MCP mounts take bearer tokens only.
 
 **First sign-in.** When a previously unknown sign-in identity first signs in, in any of
-these ways, OntoForge creates a principal without any roles, except for the configured
-administrator described below. Concurrent first sign-ins for the same sign-in identity
-create only one principal. Later sign-ins resolve the principal by its issuer–subject
-pair. Each sign-in at the provider, for the web client or for an authorization, updates
-the displayed name, email, and username. Status and roles remain unchanged, except for
-the configured administrator described below. Sign-in identities are never linked by email: a different issuer or subject value
+these ways, OntoForge creates a principal without any roles. Concurrent first sign-ins for
+the same sign-in identity create only one principal. Later sign-ins resolve the principal
+by its issuer–subject pair. Each sign-in at the provider, for the web client or for an
+authorization, updates the displayed name, email, and username; status and roles remain
+unchanged. The configured administrator described below is the exception to both.
+Sign-in identities are never linked by email: a different issuer or subject value
 identifies a different principal.
 
 **The configured administrator.** The deployment configuration identifies one account
@@ -86,7 +86,8 @@ A client signs in with the authorization code flow and PKCE.
   nothing to configure; the deployment may limit the hosts such documents are fetched
   from. A tool that cannot publish one is entered in the deployment's configuration.
   Clients cannot register themselves. Every client is public: it holds no secret. A
-  redirect URI is https, or http on a loopback address, where any port matches.
+  redirect URI on a loopback address matches on any port; a configured client's redirect
+  URIs are https, or http on a loopback address.
 - **Resource, no scope.** A client names exactly one resource the token is for, with the
   `resource` parameter: an MCP mount by its URL, or the REST API as the public address
   followed by `/api`. A request without one is refused. The client needs no scope: the

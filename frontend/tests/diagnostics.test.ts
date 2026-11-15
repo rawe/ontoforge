@@ -66,7 +66,7 @@ function imports(): [string, string][] {
   for (const entry of readdirSync(SRC, { recursive: true, withFileTypes: true })) {
     if (!entry.isFile() || !/\.tsx?$/.test(entry.name)) continue
     const path = join(entry.parentPath, entry.name)
-    for (const match of readFileSync(path, 'utf8').matchAll(/\bfrom\s+'([^']+)'/g)) found.push([relative(SRC, path), match[1]!])
+    for (const match of readFileSync(path, 'utf8').matchAll(/\bfrom\s+['"]([^'"]+)['"]/g)) found.push([relative(SRC, path), match[1]!])
   }
   return found
 }

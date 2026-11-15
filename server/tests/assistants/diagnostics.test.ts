@@ -30,15 +30,16 @@ describe("Diagnostics", () => {
     ]);
   });
 
-  it("a step of either form may say in plain text what it did; without it, the entry has no detail", async () => {
+  it("a step of either form may carry what it produced as text; without it, the entry has no detail", async () => {
     const { events, diagnostics } = recorder();
-    await diagnostics.model("plan").done({}, "Search 1 in People: “Ada”, by keywords\nNot answerable: no salaries");
+    const plan = JSON.stringify({ subQueries: [{ indices: ["person~default"], query: "Ada" }], unsupportedReason: null }, null, 2);
+    await diagnostics.model("plan").done({}, plan);
     expect(await diagnostics.work("retrieve", async (step) => {
       step.detail = "3 entities";
       return 3;
     })).toBe(3);
     expect(events.flatMap((event) => event.steps)).toEqual([
-      { index: 1, name: "plan", model: true, ...time, detail: "Search 1 in People: “Ada”, by keywords\nNot answerable: no salaries" },
+      { index: 1, name: "plan", model: true, ...time, detail: plan },
       { index: 2, name: "retrieve", ...time, detail: "3 entities" },
     ]);
   });
@@ -62,7 +63,7 @@ describe("Diagnostics", () => {
     expect(events).toEqual([{ type: "diagnostics", durationMs: expect.any(Number) }]);
 
     const silent = new Diagnostics();
-    await silent.model("plan").done({}, "Not answerable: x");
+    await silent.model("plan").done({}, "{}");
     await silent.work("retrieve", async () => undefined);
     await silent.total();
   });

@@ -115,10 +115,11 @@ export function createAuthorizationServer(settings: AuthSettings, access: Access
       client_id: client.id,
       client_name: client.name,
       redirect_uris: client.redirectUris,
-      // Native: a loopback redirect matches whatever port the tool listens on (RFC 8252).
-      application_type: "native",
     })),
     clientDefaults: {
+      // Native, unless a client's metadata document says otherwise: a loopback redirect then
+      // matches whatever port the tool listens on (RFC 8252), and http is loopback only.
+      application_type: "native",
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: "none",

@@ -231,6 +231,28 @@ describe("the authorization server", () => {
     expect(refused.headers["access-control-allow-credentials"]).toBeUndefined();
   });
 
+  it("matches a metadata document's loopback redirect on any port, as a command-line client needs", async () => {
+    const cli = "https://cli.example.com/oauth/client.json";
+    vi.stubGlobal("fetch", async () =>
+      new Response(
+        JSON.stringify({
+          client_id: cli,
+          client_name: "Example CLI",
+          redirect_uris: ["http://localhost/callback", "http://127.0.0.1/callback"],
+          grant_types: ["authorization_code", "refresh_token"],
+          response_types: ["code"],
+          token_endpoint_auth_method: "none",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    for (const redirectUri of ["http://localhost:54321/callback", "http://127.0.0.1:61000/callback"]) {
+      const outcome = await flow({ challenge: pkce().challenge, clientId: cli, redirectUri });
+      expect(outcome.location?.origin, redirectUri).toBe(new URL(redirectUri).origin);
+      expect(outcome.location?.searchParams.get("code"), redirectUri).toBeTruthy();
+    }
+  });
+
   it("knows a client by its metadata document, showing its host", async () => {
     const fetched: string[] = [];
     vi.stubGlobal("fetch", async (url: string | URL) => {

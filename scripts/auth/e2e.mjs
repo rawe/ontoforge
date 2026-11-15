@@ -17,7 +17,7 @@ import { listTools, refresh } from './cli.mjs';
 import {
   AUDIENCE, CookieJar, ISSUER, appLogin, authorizationRequest, authorizeInBrowser, call, claims, connectMcp, createKeycloakUser, deleteKeycloakUser,
   deliverCallback, forgedExpiredToken, foreignIssuerToken, oauthToken, ontoforgeTokens, pageText, providerTokens,
-  serviceToken, startAppLogin, subject, submitConsent,
+  serviceToken, startAppLogin, subject, submitConsent, freePort,
 } from './lib.mjs';
 
 const option = (name, fallback) => {
@@ -364,8 +364,11 @@ async function consentStep() {
 async function clientDocumentStep() {
   const doc = await fetch(CLAUDE_CODE, { signal: AbortSignal.timeout(10_000) }).then((r) => (r.ok ? r.json() : null), () => null);
   need(doc?.redirect_uris?.length, `offline: ${CLAUDE_CODE} not reachable from here`);
+  // As the real client does: its registered loopback redirect, on the port it happens to listen on.
+  const redirect = new URL(doc.redirect_uris[0]);
+  redirect.port = String(await freePort());
   const request = new URLSearchParams({
-    response_type: 'code', client_id: CLAUDE_CODE, redirect_uri: doc.redirect_uris[0], state: 'cimd', resource: API,
+    response_type: 'code', client_id: CLAUDE_CODE, redirect_uri: redirect.href, state: 'cimd', resource: API,
     code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM', code_challenge_method: 'S256',
   });
   let path = `/oauth/authorize?${request}`;

@@ -30,7 +30,7 @@ import Provider, { errors, interactionPolicy, type Adapter, type AdapterPayload,
 
 import type { AccessStore } from "../access/store.js";
 import type { AuthSettings } from "../config.js";
-import { errorPage } from "./oauthPages.js";
+import { errorPage, PAGE_HEADERS } from "./oauthPages.js";
 import { resourceOf, SCOPE } from "./resources.js";
 import { digest } from "./sessionStore.js";
 
@@ -181,7 +181,7 @@ export function createAuthorizationServer(settings: AuthSettings, access: Access
     jwks: { keys: [signingKey(derived(settings.clientSecret, "signing key"))] },
     routes: { authorization: AUTHORIZE, token: "/token", jwks: "/jwks" },
     async renderError(ctx, out) {
-      ctx.type = "html";
+      ctx.set(PAGE_HEADERS);
       ctx.body = errorPage(out.error_description ?? out.error ?? "The request could not be processed");
     },
   });

@@ -78,11 +78,11 @@ function granted(resource: Resource): string {
   return `the MCP mount of ${ontology}, lens <strong>${escapeHtml(resource.lensKey)}</strong>${ruleset}, with what your role there allows`;
 }
 
-/** A client ID that is a URL (a client metadata document) shows its host first. */
-function clientIdHtml(clientId: string): string {
-  const url = URL.parse(clientId);
-  if (url === null || url.protocol !== "https:") return `<code>${escapeHtml(clientId)}</code>`;
-  return `<strong>${escapeHtml(url.host)}</strong><br><code>${escapeHtml(clientId)}</code>`;
+/** A value that is a URL shows its host first: what a person can judge, whatever the rest reads like. */
+function hostFirst(value: string): string {
+  const url = URL.parse(value);
+  if (url === null || url.host === "") return `<code>${escapeHtml(value)}</code>`;
+  return `<strong>${escapeHtml(url.host)}</strong><br><code>${escapeHtml(value)}</code>`;
 }
 
 /** The consent page: who asks, for whom, where the answer goes, what is granted; Allow or Deny. */
@@ -94,8 +94,8 @@ export function consentPage(consent: Consent, action: string): string {
 <dl>
 <dt>Signed in as</dt><dd>${person}</dd>
 <dt>Application</dt><dd>${escapeHtml(consent.clientName)}</dd>
-<dt>Client ID</dt><dd>${clientIdHtml(consent.clientId)}</dd>
-<dt>The answer goes to</dt><dd><code>${escapeHtml(consent.redirectUri)}</code></dd>
+<dt>Client ID</dt><dd>${hostFirst(consent.clientId)}</dd>
+<dt>The answer goes to</dt><dd>${hostFirst(consent.redirectUri)}</dd>
 <dt>Access to</dt><dd>${granted(consent.resource)}</dd>
 </dl>${consent.noAccess ? `\n${NO_ACCESS}` : ""}
 <form method="post" action="${escapeHtml(action)}">

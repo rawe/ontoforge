@@ -62,8 +62,9 @@ function basePath(publicUrl: string): string {
 /** An authorization request with the one scope set, whatever the client asked for: clients
  * deal with no scopes (`resources.ts`). Any other path is returned as it is. */
 function withScope(path: string): string {
-  const url = new URL(path, "http://localhost");
-  if (url.pathname !== AUTHORIZE) return path;
+  const url = URL.parse(path, "http://localhost");
+  // The library's router ignores case and a trailing slash.
+  if (url === null || url.pathname.toLowerCase().replace(/\/$/, "") !== AUTHORIZE) return path;
   url.searchParams.set("scope", SCOPE);
   return url.pathname + url.search;
 }

@@ -170,6 +170,25 @@ describe("the authorization server", () => {
     }
   });
 
+  it("refuses a provider answer that belongs to no sign-in of this browser, on a page of its own", async () => {
+    for (const cookie of [undefined, "ontoforge_login_8000=not-a-sealed-login"]) {
+      const res = await app.inject({ url: "/oauth/callback?code=provider-code&state=state-1", headers: cookie ? { cookie } : {} });
+      expect(res.statusCode, String(cookie)).toBe(400);
+      expect(res.body).toContain("Sign-in failed");
+      expect(res.headers["x-frame-options"]).toBe("DENY");
+    }
+  });
+
+  it("sets its one scope on an authorization request however its path is spelt, and leaves a path that is no URL alone", async () => {
+    for (const path of ["/oauth/AUTHORIZE", "/oauth/authorize/"]) {
+      const query = new URLSearchParams({ response_type: "code", client_id: CLI, redirect_uri: "http://127.0.0.1:43210/callback", code_challenge: pkce().challenge, code_challenge_method: "S256", state: "s", resource: MOUNT });
+      const res = await app.inject({ url: `${path}?${query}` });
+      expect(res.statusCode, path).toBe(303);
+      expect(String(res.headers.location), path).toContain("/oauth/interaction/");
+    }
+    expect((await app.inject({ url: "/oauth//" })).statusCode).toBeLessThan(500);
+  });
+
   it("answers Deny with access_denied", async () => {
     const outcome = await flow({ challenge: pkce().challenge }, "deny");
     expect(outcome.location?.searchParams.get("error")).toBe("access_denied");

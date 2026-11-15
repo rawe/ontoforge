@@ -41,7 +41,7 @@ function Legend() {
   )
 }
 
-/** One step: its number, name, bar at its real place and time; a model step's tokens and finish reason under it; its detail, when it has one, to open and read as the text the server wrote. */
+/** One step: its number, name, bar at its real place and time; a model step's tokens and finish reason under it; its detail, when it has one, to open and read as the server wrote it: monospace, line breaks and indentation kept, long lines wrapped. */
 function StepItem({ row }: { row: StepRow }) {
   const [open, setOpen] = useState(false)
   const { detail } = row
@@ -81,7 +81,7 @@ function StepItem({ row }: { row: StepRow }) {
         </p>
       )}
       {open && detail !== undefined && (
-        <p data-testid="diagnostics-step-detail" className="ml-9 rounded border p-3 break-words whitespace-pre-wrap">{detail}</p>
+        <pre data-testid="diagnostics-step-detail" className="ml-9 rounded border p-3 font-mono text-[11px] break-words whitespace-pre-wrap">{detail}</pre>
       )}
     </li>
   )

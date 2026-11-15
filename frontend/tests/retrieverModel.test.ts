@@ -137,7 +137,7 @@ test('the stream reader reads the retriever\'s phases and its steps in diagnosti
   const events = [
     T,
     { type: 'retriever.phase', phase: 'plan', status: 'start' },
-    { type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 1, durationMs: 900, usage: { input: 1, output: 2 }, detail: 'Search 1 in People: “Bob role at ACME”, by keywords' }] },
+    { type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 1, durationMs: 900, usage: { input: 1, output: 2 }, detail: JSON.stringify({ subQueries: [], unsupportedReason: 'already answered' }, null, 2) }] },
     { type: 'retriever.phase', phase: 'plan', status: 'end' },
     { type: 'retriever.phase', phase: 'retrieve', status: 'start' },
     { type: 'diagnostics', steps: [{ index: 2, name: 'retrieve', startMs: 902, durationMs: 40 }] },

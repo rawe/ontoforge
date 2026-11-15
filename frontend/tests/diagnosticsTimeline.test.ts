@@ -162,8 +162,11 @@ test('a step\'s name is shown by one rule for every kind: underscores to spaces,
   assert.equal(stepName({ name: '' }), 'Other work')
 })
 
-test('a step with detail carries it to its row as the text it is, line breaks kept; a step without has none', () => {
-  const plan = 'Search 1 in People by employment: “works at ACME” (also “employed by ACME”), by keywords · relation groups: Employment · filters: lives in City Name: Berlin\nSearch 2 in People by home city, People: “lives in Berlin”, by keywords'
+test('a step with detail carries it to its row as the text it is, line breaks and indentation kept; a step without has none', () => {
+  const plan = JSON.stringify({
+    subQueries: [{ indices: ['person_employment'], relations: ['works_for'], query: 'works at ACME', variants: [], mode: 'keyword', filters: [{ id: 'city', value: 'Berlin', quote: 'lives in Berlin' }], previous: null }],
+    unsupportedReason: null,
+  }, null, 2)
   const rows = stepRows([
     model(1, 1, 300, { name: 'plan', detail: plan }),
     work(2, 'retrieve', 302, 10),
@@ -172,15 +175,16 @@ test('a step with detail carries it to its row as the text it is, line breaks ke
   ], 400)
   assert.deepEqual(rows.map((r) => [r.label, r.detail]), [['Plan', plan], ['Retrieve', undefined], ['Count', '3 entities'], ['Answer', undefined]])
   assert.equal('detail' in rows[1]!, false)
-  assert.equal(rows[0]!.detail!.split('\n').length, 2)
+  assert.match(rows[0]!.detail!, /\n {6}"indices": \[\n {8}"person_employment"/)
 })
 
-test('retriever, through the turn as the server sends it: the planning step opens to its plan in words, an unsupported plan to its reason, an unreadable one to nothing', () => {
+test('retriever, through the turn as the server sends it: the planning step opens to its plan, an unreadable one to nothing', () => {
   let t = pendingTurn('t', 'q', retrieverTurns.empty(), 0, true)
+  const plan = JSON.stringify({ subQueries: [], unsupportedReason: 'The lens holds no salaries.' }, null, 2)
   for (const event of [
     { type: 'thread', threadId: 'th' },
     { type: 'retriever.phase', phase: 'plan', status: 'start' },
-    { type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 3, durationMs: 0, usage: { input: 900, output: 20 }, detail: 'Not answerable: The lens holds no salaries.' }] },
+    { type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 3, durationMs: 0, usage: { input: 900, output: 20 }, detail: plan }] },
     { type: 'diagnostics', steps: [{ index: 2, name: 'replan', model: true, startMs: 4, durationMs: 0 }] },
     { type: 'retriever.phase', phase: 'plan', status: 'end' },
     { type: 'diagnostics', steps: [{ index: 3, name: 'retrieve', startMs: 4, durationMs: 0 }] },
@@ -190,15 +194,21 @@ test('retriever, through the turn as the server sends it: the planning step open
   ] as const) t = applyEvent(retrieverTurns, t, event)
   const rows = stepRows(t.diagnostics!.steps!, answerTime(t, 0))
   assert.deepEqual(rows.map((r) => [r.index, r.label, r.tone, r.detail]), [
-    [1, 'Plan', 'model', 'Not answerable: The lens holds no salaries.'], [2, 'Replan', 'model', undefined], [3, 'Retrieve', 'work', undefined], [4, 'Answer', 'model', undefined],
+    [1, 'Plan', 'model', plan], [2, 'Replan', 'model', undefined], [3, 'Retrieve', 'work', undefined], [4, 'Answer', 'model', undefined],
   ])
 })
 
-test('navigator, through the turn: its steps by their names, a repeated walk two rows, the understand step with its sentence', () => {
+test('navigator, through the turn: its steps by their names, a repeated walk two rows, the understand step with its intent', () => {
   let t = pendingTurn('t', 'q', graphTurns.empty(), 0, true)
   // The pipeline's own labels are the Steps tab's; diagnostics do not read them.
   const steps = ['understand', 'anchor', 'walk', 'focus', 'answer'].map((id) => ({ id, label: `Step ${id}`, description: '' }))
-  const detail = 'Looking for Project · starting at “Lena” · path manages → works on'
+  const detail = JSON.stringify({
+    mentions: [{ text: 'Lena', types: ['person'] }],
+    targets: ['project'],
+    path: [{ relation: 'manages', direction: 'outgoing' }, { relation: 'works_on', direction: 'outgoing' }],
+    useFocus: false,
+    search: '',
+  }, null, 2)
   for (const event of [
     { type: 'thread', threadId: 'th' },
     { type: 'navigator.graph', steps, edges: [] },

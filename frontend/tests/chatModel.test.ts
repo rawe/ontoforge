@@ -221,7 +221,7 @@ test('retriever: the started phase is the live detail; its steps merge on the tu
   assert.equal(hasDetail(turn, retrieverTurns.hasInsight), false)
   turn = applyEvent(retrieverTurns, turn, { type: 'retriever.phase', phase: 'plan', status: 'start' })
   assert.equal(retrieverTurns.progress(turn.insight), 'Plan question')
-  turn = applyEvent(retrieverTurns, turn, { type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 1, durationMs: 1200, detail: 'No search planned.' }] })
+  turn = applyEvent(retrieverTurns, turn, { type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 1, durationMs: 1200, detail: JSON.stringify({ subQueries: [], unsupportedReason: 'no salaries' }, null, 2) }] })
   turn = applyEvent(retrieverTurns, turn, { type: 'retriever.phase', phase: 'plan', status: 'end' })
   assert.equal(retrieverTurns.progress(turn.insight), 'Plan question')
   turn = applyEvent(retrieverTurns, turn, { type: 'retriever.phase', phase: 'retrieve', status: 'start' })

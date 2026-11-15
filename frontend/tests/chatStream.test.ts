@@ -243,7 +243,7 @@ test('diagnostics are a shared event, checked by the reader: one step each, then
   assert.deepEqual(received, events)
   const own = { parse: () => null }
   const body = (event: object) => response([new TextEncoder().encode([{ type: 'thread', threadId: 't1' }, event, { type: 'final', reply: '' }].map((e) => JSON.stringify(e)).join('\n'))])
-  await readAssistantStream(body({ type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 0, durationMs: 3, detail: 'Search 1 in People: “Ada”, by keywords\nNot answerable: no salaries' }] }), own, () => {})
+  await readAssistantStream(body({ type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 0, durationMs: 3, detail: JSON.stringify({ subQueries: [], unsupportedReason: 'no salaries' }, null, 2) }] }), own, () => {})
   for (const bad of [
     { steps: {} },
     { steps: [{ index: 0, startMs: 0, durationMs: 1 }] },

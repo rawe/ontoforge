@@ -29,7 +29,7 @@ test('merge takes the event as it came: its steps and its time, never its type',
 
 test('the check: a step\'s detail is a string of any text, and nothing about a step depends on the assistant kind', () => {
   const event = (extra: Record<string, unknown>) => ({ type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 0, durationMs: 3, ...extra }] })
-  const detail = 'Search 1 in People: “Ada”, by keywords\nNot answerable: no salaries'
+  const detail = JSON.stringify({ subQueries: [], unsupportedReason: 'no salaries' }, null, 2)
   assert.equal(checkDiagnostics(event({ detail })).steps?.[0]?.detail, detail)
   assert.equal(checkDiagnostics(event({})).steps?.[0]?.detail, undefined)
   // A step of other work may carry one too.

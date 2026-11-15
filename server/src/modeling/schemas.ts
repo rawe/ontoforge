@@ -15,7 +15,7 @@ import {
   PARENT_ENDS,
   SCHEMA_KEY_PATTERN,
 } from "../core/schemas.js";
-import { StoredSearchTree } from "../core/namedSearch.js";
+import { StoredSearchTree } from "../core/searchProfile.js";
 import { SearchIndexDefinition } from "../core/searchIndex.js";
 
 // --- Lens ---
@@ -290,16 +290,16 @@ export const SavedQueryResponse = z.object({
   updatedAt: z.iso.datetime(),
 });
 
-// --- Named Search ---
+// --- Search Profile ---
 
-/** A named search: a search tree stored under a key in a lens. */
-export const NamedSearchUpsert = z.object({
+/** A search profile: a search tree stored under a key in a lens. */
+export const SearchProfileUpsert = z.object({
   name: z.string(),
   description: z.string(),
   tree: StoredSearchTree,
 });
 
-export const NamedSearchResponse = z.object({
+export const SearchProfileResponse = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string(),
@@ -413,10 +413,10 @@ export const ExportSavedQuery = z.object({
   parameters: z.array(ExportSavedQueryParameter).default([]),
 });
 
-/** A named search in the transfer format: its tree in the stored shape,
+/** A search profile in the transfer format: its tree in the stored shape,
  * a field a node does not define refused at its path. Import checks the
  * rest of the save rules itself. */
-export const ExportNamedSearch = z.object({
+export const ExportSearchProfile = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string(),
@@ -462,7 +462,7 @@ export const ExportLens = z.object({
   indexInclusions: z.array(z.string()).optional(),
   assistants: ExportAssistants.default(ExportAssistants.parse({})),
   savedQueries: z.array(ExportSavedQuery).default([]),
-  namedSearches: z.array(ExportNamedSearch).default([]),
+  searchProfiles: z.array(ExportSearchProfile).default([]),
 });
 
 /** The transfer format's search indices: the custom definitions and the
@@ -626,8 +626,8 @@ export type SavedQueryParameterInput = z.infer<typeof SavedQueryParameterSchema>
 export type SavedQueryUpsertInput = z.infer<typeof SavedQueryUpsert>;
 export type StepResponseBody = z.infer<typeof StepResponse>;
 export type SavedQueryResponseBody = z.infer<typeof SavedQueryResponse>;
-export type NamedSearchUpsertInput = z.infer<typeof NamedSearchUpsert>;
-export type NamedSearchResponseBody = z.infer<typeof NamedSearchResponse>;
+export type SearchProfileUpsertInput = z.infer<typeof SearchProfileUpsert>;
+export type SearchProfileResponseBody = z.infer<typeof SearchProfileResponse>;
 export type ExportPayloadInput = z.infer<typeof ExportPayload>;
 export type SearchSettingsUpdateInput = z.infer<typeof SearchSettingsUpdate>;
 export type SearchSettingsResponseBody = z.infer<typeof SearchSettingsResponse>;

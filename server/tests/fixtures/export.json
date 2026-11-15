@@ -238,7 +238,7 @@
                     ]
                 }
             ],
-            "namedSearches": []
+            "searchProfiles": []
         },
         {
             "key": "test_lens",
@@ -252,7 +252,7 @@
                 "navigators": []
             },
             "savedQueries": [],
-            "namedSearches": []
+            "searchProfiles": []
         }
     ],
     "keywordLanguages": [

@@ -1,13 +1,13 @@
-# Named searches
+# Search profiles
 
-A named search is a search tree stored under a key in a lens. The designer composes the
+A search profile is a search tree stored under a key in a lens. The designer composes the
 search once — which indices, which methods, how the rankings combine, what restricts
 them — and a caller later supplies a query text and, if it wants, filters. It never sees
 the tree.
 
 ## What it holds
 
-A named search carries a **key**, a **name**, a **description** and a **tree**. The tree
+A search profile carries a **key**, a **name**, a **description** and a **tree**. The tree
 is JSON: one node at the root, each node an object with a `kind` and that kind's fields
 only; a node's inputs are nodes again.
 
@@ -50,8 +50,8 @@ A minimal tree — people ranked by keyword and by meaning, fused, the first ten
 
 - Keys follow the lens-resource [key](../glossary.md#schema-and-design) rule, at up to 64
   characters, and are unique within the lens. Name and description are required.
-- Writing a named search is an upsert on its key: it creates or replaces it wholesale.
-- Named searches belong to a lens ([ontology-lenses.md](ontology-lenses.md)). Deleting
+- Writing a search profile is an upsert on its key: it creates or replaces it wholesale.
+- Search profiles belong to a lens ([ontology-lenses.md](ontology-lenses.md)). Deleting
   the lens deletes them, and they travel with it through [transfer](transfer.md).
 
 ### Checks at save
@@ -95,8 +95,8 @@ No other limit applies: neither the number of nodes nor the number of texts is c
 
 ## Running one
 
-A caller lists a lens's named searches and runs one by its key with a query text. It sees
-neither the tree nor its indices: the listing gives each search's key, name, description,
+A caller lists a lens's search profiles and runs one by its key with a query text. It sees
+neither the tree nor its indices: the listing gives each profile's key, name, description,
 `result` — what a run returns, `entities` or `passages`, the unit of the tree's root — and
 `types`, the entity types whose indices the tree searches, sorted. An index the lens can no
 longer search is left out of `types`.
@@ -107,9 +107,9 @@ A run takes the **query** — required, not blank — and optional **filter**s, 
 2. The query goes in place of every `$query` in every search node's text, as written: no
    character of the query is special, and a text without `$query` stays as it is.
 3. The tree is checked against the lens again — the shape and the tree's rules of
-   [Checks at save](#checks-at-save), stored filters included. A search the lens no longer
+   [Checks at save](#checks-at-save), stored filters included. A profile the lens no longer
    fits, because the lens was narrowed or an index switched off after it was saved, is a
-   validation error naming the search and every path; it never runs. Nothing proactively
+   validation error naming the profile and every path; it never runs. Nothing proactively
    invalidates a stored tree; re-saving it after such a change is the designer's job.
 4. The filters take the keys and values of the
    [entity search's filters](search.md#scope-and-filters) and apply to the listed `types`:
@@ -140,6 +140,6 @@ never refused for it.
 | | Modeling (define) | Runtime (use) |
 |---|---|---|
 | REST | List, upsert by key, delete, under the lens's route | List, run by key |
-| MCP | `list_named_searches`, `set_named_search`, `delete_named_search` | `list_named_searches`, `run_named_search` |
+| MCP | `list_search_profiles`, `set_search_profile`, `delete_search_profile` | `list_search_profiles`, `run_search_profile` |
 
 Complete operation index: [../interfaces/](../interfaces/README.md).

@@ -1,5 +1,5 @@
 /**
- * Named-search modeling endpoints over mocked stores: list, upsert and
+ * Search-profile modeling endpoints over mocked stores: list, upsert and
  * delete by key; the stored tree's shape, a field a node does not define
  * refused at its path; the rule that needs no lens (`$query` in a text);
  * and the lens check — R1–R8 and the stored filters' conditions, each at
@@ -47,7 +47,7 @@ const grouped = (index: string, text: string) => ({
 const TREE = { kind: "cut", limit: 10, input: grouped("person~default", "$query") };
 
 const STORED = {
-  namedSearchId: "ns-1",
+  searchProfileId: "sp-1",
   key: "people",
   name: "People",
   description: "Find people",
@@ -95,7 +95,7 @@ function withLens(): void {
 async function put(key: string, tree: unknown, extra: Row = {}) {
   return app.inject({
     method: "PUT",
-    url: `/api/ontologies/onto/model/lenses/full_lens/named-searches/${key}`,
+    url: `/api/ontologies/onto/model/lenses/full_lens/search-profiles/${key}`,
     payload: { name: "People", description: "Find people", tree, ...extra },
   });
 }
@@ -104,9 +104,9 @@ const errorsOf = (res: { json: () => Row }) =>
   ((res.json().error as Row).details as { errors: unknown[] }).errors;
 
 describe("list", () => {
-  it("answers the lens's named searches with their stored trees", async () => {
-    holder.store.listNamedSearches.mockResolvedValue([STORED]);
-    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/lenses/full_lens/named-searches" });
+  it("answers the lens's search profiles with their stored trees", async () => {
+    holder.store.listSearchProfiles.mockResolvedValue([STORED]);
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/lenses/full_lens/search-profiles" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual([
       {
@@ -118,35 +118,35 @@ describe("list", () => {
         updatedAt: NOW.toISOString(),
       },
     ]);
-    expect(holder.store.listNamedSearches).toHaveBeenCalledWith("lens-1");
+    expect(holder.store.listSearchProfiles).toHaveBeenCalledWith("lens-1");
   });
 
   it("an unknown lens key answers 404", async () => {
     holder.store.getLensByKey.mockResolvedValue(null);
-    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/lenses/nope/named-searches" });
+    const res = await app.inject({ method: "GET", url: "/api/ontologies/onto/model/lenses/nope/search-profiles" });
     expect(res.statusCode).toBe(404);
   });
 });
 
 describe("upsert", () => {
   it("create answers 201 and stores the tree as JSON", async () => {
-    holder.store.upsertNamedSearch.mockResolvedValue([STORED, true]);
+    holder.store.upsertSearchProfile.mockResolvedValue([STORED, true]);
     const res = await put("people", TREE);
     expect(res.statusCode, res.body).toBe(201);
-    const [lensId, , key, name, description, treeJson] = holder.store.upsertNamedSearch.mock.calls[0]!;
+    const [lensId, , key, name, description, treeJson] = holder.store.upsertSearchProfile.mock.calls[0]!;
     expect([lensId, key, name, description]).toEqual(["lens-1", "people", "People", "Find people"]);
     expect(JSON.parse(treeJson as string)).toEqual(TREE);
   });
 
   it("replace answers 200", async () => {
-    holder.store.upsertNamedSearch.mockResolvedValue([STORED, false]);
+    holder.store.upsertSearchProfile.mockResolvedValue([STORED, false]);
     expect((await put("people", TREE)).statusCode).toBe(200);
   });
 
   it("a key violating the lens-resource key rule is rejected 422", async () => {
     const res = await put("People!", TREE);
     expect(res.statusCode).toBe(422);
-    expect(holder.store.upsertNamedSearch).not.toHaveBeenCalled();
+    expect(holder.store.upsertSearchProfile).not.toHaveBeenCalled();
   });
 
   it("a key longer than 64 characters is rejected 422 naming the cap", async () => {
@@ -207,11 +207,11 @@ describe("upsert", () => {
     expect(errorsOf(res)).toEqual([
       "tree: At least one search node's text holds $query, where the runtime query goes",
     ]);
-    expect(holder.store.upsertNamedSearch).not.toHaveBeenCalled();
+    expect(holder.store.upsertSearchProfile).not.toHaveBeenCalled();
   });
 
   it("the lens check is skipped when the lens's schema cannot be loaded", async () => {
-    holder.store.upsertNamedSearch.mockResolvedValue([STORED, true]);
+    holder.store.upsertSearchProfile.mockResolvedValue([STORED, true]);
     const res = await put("unchecked", { kind: "cut", limit: 10, input: grouped("spaceship~default", "$query") });
     expect(res.statusCode).toBe(201);
   });
@@ -220,7 +220,7 @@ describe("upsert", () => {
 describe("the lens check", () => {
   it("accepts a tree the lens can run", async () => {
     withLens();
-    holder.store.upsertNamedSearch.mockResolvedValue([STORED, true]);
+    holder.store.upsertSearchProfile.mockResolvedValue([STORED, true]);
     const res = await put("people", {
       kind: "cut",
       limit: 10,
@@ -252,7 +252,7 @@ describe("the lens check", () => {
     });
     expect(res.statusCode).toBe(422);
     expect(errorsOf(res)).toEqual(["tree.input.input.index: Search index 'person~bio' reads no document this lens shows"]);
-    expect(holder.store.upsertNamedSearch).not.toHaveBeenCalled();
+    expect(holder.store.upsertSearchProfile).not.toHaveBeenCalled();
   });
 
   it("names an index the lens cannot search and a type it does not show at their fields", async () => {
@@ -328,19 +328,19 @@ describe("the lens check", () => {
 
 describe("delete", () => {
   it("answers 204", async () => {
-    holder.store.deleteNamedSearch.mockResolvedValue(true);
+    holder.store.deleteSearchProfile.mockResolvedValue(true);
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/ontologies/onto/model/lenses/full_lens/named-searches/people",
+      url: "/api/ontologies/onto/model/lenses/full_lens/search-profiles/people",
     });
     expect(res.statusCode).toBe(204);
-    expect(holder.store.deleteNamedSearch).toHaveBeenCalledWith("lens-1", "people");
+    expect(holder.store.deleteSearchProfile).toHaveBeenCalledWith("lens-1", "people");
   });
 
   it("an unknown key answers 404", async () => {
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/ontologies/onto/model/lenses/full_lens/named-searches/nope",
+      url: "/api/ontologies/onto/model/lenses/full_lens/search-profiles/nope",
     });
     expect(res.statusCode).toBe(404);
   });

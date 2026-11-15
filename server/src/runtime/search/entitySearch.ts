@@ -81,7 +81,7 @@ export type EntityMatch = (
     }
 ) & {
   scores: MethodScores;
-  /** The query text that found the entry — only on a named search's item,
+  /** The query text that found the entry — only on a search profile's item,
    * when its tree searches more than one text. */
   queryText?: string;
 };

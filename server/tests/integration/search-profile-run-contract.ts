@@ -1,6 +1,6 @@
 /**
- * The runtime HTTP contract of named searches (`GET named-searches`,
- * `POST named-searches/{key}/run`), run with and without local
+ * The runtime HTTP contract of search profiles (`GET search-profiles`,
+ * `POST search-profiles/{key}/run`), run with and without local
  * embeddings: the listing; a run answering exactly as the entity and the
  * passage search with the same tree; the run's `filter`; the refusals —
  * an unknown key, an unknown body field, a lens narrowed after the save;
@@ -24,7 +24,7 @@ import { wipeDatabase } from "./reset.js";
 
 type Row = Record<string, any>;
 
-const O = "named_run";
+const O = "profile_run";
 const MODEL = `/api/ontologies/${O}/model`;
 const runtimeOf = (lens: string) => `/api/ontologies/${O}/runtime/lenses/${lens}`;
 const RUNTIME = runtimeOf("all");
@@ -40,7 +40,7 @@ const group = (input: object, key = "entity") => ({ kind: "group", key, input })
 const fuse = (...inputs: object[]) => ({ kind: "fuse", inputs });
 const cut = (input: object, limit = 10) => ({ kind: "cut", input, limit });
 
-export function namedSearchRunContract(embedding: boolean, enabled = true) {
+export function searchProfileRunContract(embedding: boolean, enabled = true) {
   let app: FastifyInstance;
   let baseUrl: string;
   const ids: Record<string, string> = {};
@@ -57,7 +57,7 @@ export function namedSearchRunContract(embedding: boolean, enabled = true) {
   }
 
   async function save(key: string, tree: object, lens = "all"): Promise<void> {
-    const res = await inject("PUT", `${MODEL}/lenses/${lens}/named-searches/${key}`, {
+    const res = await inject("PUT", `${MODEL}/lenses/${lens}/search-profiles/${key}`, {
       name: key,
       description: `About ${key}`,
       tree,
@@ -67,7 +67,7 @@ export function namedSearchRunContract(embedding: boolean, enabled = true) {
 
   async function run(key: string, body: object, lens = "all") {
     await drainSearchWork({ ontologyKey: O });
-    return inject("POST", `${runtimeOf(lens)}/named-searches/${key}/run`, body);
+    return inject("POST", `${runtimeOf(lens)}/search-profiles/${key}/run`, body);
   }
 
   async function ran(key: string, body: object, lens = "all"): Promise<Row> {
@@ -76,7 +76,7 @@ export function namedSearchRunContract(embedding: boolean, enabled = true) {
     return res.body!;
   }
 
-  describe.skipIf(!enabled)(`named search run contract (${embedding ? "Ollama" : "no provider"})`, () => {
+  describe.skipIf(!enabled)(`search profile run contract (${embedding ? "Ollama" : "no provider"})`, () => {
     beforeAll(async () => {
       await initStores();
       await wipeDatabase();
@@ -159,7 +159,7 @@ export function namedSearchRunContract(embedding: boolean, enabled = true) {
     });
 
     it("lists by key: name, description, result and the types searched; no tree", async () => {
-      const listed = await inject("GET", `${RUNTIME}/named-searches`);
+      const listed = await inject("GET", `${RUNTIME}/search-profiles`);
       expect(listed.status).toBe(200);
       expect(listed.body).toEqual([
         { key: "bios", name: "bios", description: "About bios", result: "passages", types: ["person"] },
@@ -180,19 +180,19 @@ export function namedSearchRunContract(embedding: boolean, enabled = true) {
         keyword: {},
       });
       expect(entities.status).toBe(200);
-      const named = await ran("people", { query: "ada" });
-      expect(named.items.map((item: Row) => item.entity._id)).toEqual([ids.ada]);
-      expect(named).toEqual(entities.body);
+      const profileEntities = await ran("people", { query: "ada" });
+      expect(profileEntities.items.map((item: Row) => item.entity._id)).toEqual([ids.ada]);
+      expect(profileEntities).toEqual(entities.body);
 
       const passages = await inject("POST", `${RUNTIME}/search/passages`, {
         query: "engine",
         indices: ["person~bio"],
         keyword: {},
       });
-      const namedPassages = await ran("bios", { query: "engine" });
-      expect(namedPassages.items).toHaveLength(2);
-      expect(namedPassages.items[0].passage.text).toContain("engine");
-      expect(namedPassages).toEqual(passages.body);
+      const profilePassages = await ran("bios", { query: "engine" });
+      expect(profilePassages.items).toHaveLength(2);
+      expect(profilePassages.items[0].passage.text).toContain("engine");
+      expect(profilePassages).toEqual(passages.body);
       // Over an index of own fields, a passage search counts no entry.
       expect((await ran("own-fields", { query: "ada" })).items).toEqual([]);
     });
@@ -229,7 +229,7 @@ export function namedSearchRunContract(embedding: boolean, enabled = true) {
     it("refuses an unknown key, an empty query and an unknown body field", async () => {
       const unknown = await run("ghost", { query: "x" });
       expect(unknown.status).toBe(404);
-      expect(unknown.body!.error.message).toBe("Named search 'ghost' not found");
+      expect(unknown.body!.error.message).toBe("Search profile 'ghost' not found");
       const empty = await run("people", { query: " " });
       expect(empty.status).toBe(422);
       expect(empty.body!.error.details.fields).toEqual({ query: "Required non-empty query" });
@@ -246,12 +246,12 @@ export function namedSearchRunContract(embedding: boolean, enabled = true) {
       expect(removed.statusCode, removed.body).toBeLessThan(300);
       const res = await run("both", { query: "engine" }, "narrow");
       expect(res.status).toBe(422);
-      expect(res.body!.error.message).toBe("Named search 'both' validation failed");
+      expect(res.body!.error.message).toBe("Search profile 'both' validation failed");
       expect(res.body!.error.details.errors).toEqual([
         "tree.input.inputs.1.input.index: Search index 'company~default' is not searchable in this lens",
       ]);
       // Listed still, with the types it can search.
-      const listed = (await inject("GET", `${runtimeOf("narrow")}/named-searches`)).body as Row[];
+      const listed = (await inject("GET", `${runtimeOf("narrow")}/search-profiles`)).body as Row[];
       expect(listed).toEqual([
         { key: "both", name: "both", description: "About both", result: "entities", types: ["person"] },
       ]);
@@ -276,9 +276,9 @@ export function namedSearchRunContract(embedding: boolean, enabled = true) {
       const error = "tree.input.input.index: Search index 'person~bio' reads no document this lens shows";
       const res = await run("bios", { query: "engine" }, "nobio");
       expect(res.status).toBe(422);
-      expect(res.body!.error.message).toBe("Named search 'bios' validation failed");
+      expect(res.body!.error.message).toBe("Search profile 'bios' validation failed");
       expect(res.body!.error.details.errors).toEqual([error]);
-      const saved = await inject("PUT", `${MODEL}/lenses/nobio/named-searches/bios`, {
+      const saved = await inject("PUT", `${MODEL}/lenses/nobio/search-profiles/bios`, {
         name: "bios",
         description: "About bios",
         tree,
@@ -323,7 +323,7 @@ export function namedSearchRunContract(embedding: boolean, enabled = true) {
     });
 
     it("MCP lists and runs them, read-only", async () => {
-      const client = new Client({ name: "named-search-run-tests", version: "0.0.1" });
+      const client = new Client({ name: "search-profile-run-tests", version: "0.0.1" });
       await client.connect(
         new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/ontologies/${O}/runtime/lenses/all`)),
       );
@@ -331,19 +331,19 @@ export function namedSearchRunContract(embedding: boolean, enabled = true) {
       const call = async (name: string, args: Row) =>
         (await client.callTool({ name, arguments: args })) as unknown as Result;
       try {
-        const listed = await call("list_named_searches", {});
+        const listed = await call("list_search_profiles", {});
         expect(listed.isError).toBeFalsy();
-        expect((JSON.parse(listed.content[0]!.text) as Row[]).map((ns) => ns.key)).toContain("people");
+        expect((JSON.parse(listed.content[0]!.text) as Row[]).map((profile) => profile.key)).toContain("people");
 
         await drainSearchWork({ ontologyKey: O });
-        const result = await call("run_named_search", { key: "everyone", query: "ada", filters: { status: "active" } });
+        const result = await call("run_search_profile", { key: "everyone", query: "ada", filters: { status: "active" } });
         expect(result.isError, result.content[0]!.text).toBeFalsy();
         expect(JSON.parse(result.content[0]!.text)).toEqual(
           (await ran("everyone", { query: "ada", filter: { status: "active" } })),
         );
-        const unknown = await call("run_named_search", { key: "ghost", query: "x" });
+        const unknown = await call("run_search_profile", { key: "ghost", query: "x" });
         expect(unknown.isError).toBe(true);
-        expect(unknown.content[0]!.text).toContain("Named search 'ghost' not found");
+        expect(unknown.content[0]!.text).toContain("Search profile 'ghost' not found");
       } finally {
         await client.close();
       }

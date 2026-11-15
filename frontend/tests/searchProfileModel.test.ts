@@ -18,7 +18,7 @@ import {
   resultUnit,
   updateAt,
   wrapAt,
-} from '../src/components/studio/namedsearches/namedSearchModel.ts'
+} from '../src/components/studio/searchprofiles/searchProfileModel.ts'
 
 const kw = (index: string, text = '$query'): SearchTreeNode => ({ kind: 'keywordSearch', index, text })
 const sem = (index: string): SearchTreeNode => ({ kind: 'semanticSearch', index, text: '$query' })
@@ -217,7 +217,7 @@ test('a server path names a node and the field below it', () => {
 })
 
 const validation = (details: Record<string, unknown>) =>
-  new ApiError(422, 'VALIDATION_ERROR', "Named search 'x' validation failed", details)
+  new ApiError(422, 'VALIDATION_ERROR', "Search profile 'x' validation failed", details)
 
 test('reasons as strings or objects land on their node and in the summary', () => {
   const placed = placeErrors(

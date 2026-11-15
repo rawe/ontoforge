@@ -1,5 +1,5 @@
 /**
- * A named search's tree against its lens (`core/namedSearch.ts` holds the
+ * A search profile's tree against its lens (`core/searchProfile.ts` holds the
  * stored form): each stored filter's conditions resolved against its
  * entity type through the lens, no search below a passage group over a
  * document the lens hides, then the tree's rules R1–R8
@@ -7,7 +7,7 @@
  * same check serves the save, the import and the run.
  *
  * The runtime listing and the run by key
- * (`docs/capabilities/named-searches.md`):
+ * (`docs/capabilities/search-profiles.md`):
  *
  * 1. The query goes in place of every `$query`; the tree is checked
  *    against the lens again — one it no longer fits is refused, never run.
@@ -29,13 +29,13 @@
 import { getEmbeddingProvider } from "../../core/embedding.js";
 import { NotFoundError, ValidationError } from "../../core/exceptions.js";
 import {
-  namedSearchResult,
+  searchProfileResult,
   storedInputs,
   storedSearchNodes,
   treePath,
   withQuery,
   type StoredSearchNode,
-} from "../../core/namedSearch.js";
+} from "../../core/searchProfile.js";
 import type { RuntimeStore, SearchIndexRecord, SearchPartKind } from "../../core/ports.js";
 import { documentField } from "../../core/searchComposition.js";
 import type { SearchRepresentation } from "../../core/searchIndex.js";
@@ -59,7 +59,7 @@ import { described, rootTypes, shownDocument, type SearchLimitation } from "./sc
 /** What a tree is checked against: the lens's schema, the indices it may
  * search, and whether the adapter's search evaluates relation
  * conditions. */
-export interface NamedSearchLens {
+export interface SearchProfileLens {
   loaded: Pick<LoadedSchema, "scoped">;
   /** The keys of the indices the lens may search. */
   indices: ReadonlySet<string>;
@@ -72,11 +72,11 @@ export interface NamedSearchLens {
 
 /** A lens to check a tree against, from its schema before and after its
  * scope and the indices it may search. */
-export function namedSearchLens(
+export function searchProfileLens(
   loaded: Pick<LoadedSchema, "full" | "scoped">,
   searchable: readonly SearchIndexRecord[],
-  store: NamedSearchLens["store"],
-): NamedSearchLens {
+  store: SearchProfileLens["store"],
+): SearchProfileLens {
   const hidesDocument = (index: SearchIndexRecord) =>
     documentField(index.definition, loaded.full) !== null && shownDocument(loaded, index) === null;
   return {
@@ -90,9 +90,9 @@ export function namedSearchLens(
 /** The tree as the executor runs it, and every rule it breaks against
  * the lens, each as `<path>: <message>`; the tree only when there are
  * none. */
-export function compileNamedSearch(
+export function compileSearchProfile(
   tree: StoredSearchNode,
-  lens: NamedSearchLens,
+  lens: SearchProfileLens,
 ): { tree: TreeNode; errors: [] } | { tree: null; errors: string[] } {
   const errors: string[] = [];
   const compiled = compile(tree, "", lens, errors);
@@ -112,7 +112,7 @@ export function compileNamedSearch(
 function compile(
   at: StoredSearchNode,
   path: string,
-  lens: NamedSearchLens,
+  lens: SearchProfileLens,
   errors: string[],
   passage = false,
 ): TreeNode {
@@ -200,8 +200,8 @@ function nodeAt(tree: TreeNode, path: string): TreeNode {
 // Listing and running by key
 // ---------------------------------------------------------------------------
 
-/** A named search as the runtime lists it: no tree. */
-export interface NamedSearchListing {
+/** A search profile as the runtime lists it: no tree. */
+export interface SearchProfileListing {
   key: string;
   name: string;
   description: string;
@@ -214,46 +214,46 @@ export interface NamedSearchListing {
 
 /** A run's request: the query text, and exact conditions as the entity
  * search's `filter`. */
-export interface NamedSearchRunRequest {
+export interface SearchProfileRunRequest {
   query: string;
   filter?: Record<string, string> | undefined;
 }
 
-/** The lens's named searches, by key, from the schema cache. */
-export async function listNamedSearches(lensKey: string, store: RuntimeStore): Promise<NamedSearchListing[]> {
+/** The lens's search profiles, by key, from the schema cache. */
+export async function listSearchProfiles(lensKey: string, store: RuntimeStore): Promise<SearchProfileListing[]> {
   const loaded = await loadSchema(lensKey, store);
   const searchable = await searchableIndices(loaded, indexStoreOf(store));
-  const byKey = Object.values(loaded.namedSearches).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-  return byKey.map((search) => {
-    const named = new Set(storedSearchNodes(search.tree).map((node) => node.index));
+  const byKey = Object.values(loaded.searchProfiles).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return byKey.map((profile) => {
+    const named = new Set(storedSearchNodes(profile.tree).map((node) => node.index));
     return {
-      key: search.key,
-      name: search.name,
-      description: search.description,
-      result: namedSearchResult(search.tree),
+      key: profile.key,
+      name: profile.name,
+      description: profile.description,
+      result: searchProfileResult(profile.tree),
       types: rootTypes(searchable.filter((index) => named.has(index.key))).sort(),
     };
   });
 }
 
-/** Run a named search by key with a query text (module comment). */
-export async function runNamedSearch(
+/** Run a search profile by key with a query text (module comment). */
+export async function runSearchProfile(
   lensKey: string,
   key: string,
-  request: NamedSearchRunRequest,
+  request: SearchProfileRunRequest,
   store: RuntimeStore,
 ): Promise<EntitySearchResponse | PassageSearchResponse> {
   const loaded = await loadSchema(lensKey, store);
-  const search = loaded.namedSearches[key];
-  if (search === undefined) throw new NotFoundError(`Named search '${key}' not found`);
+  const profile = loaded.searchProfiles[key];
+  if (profile === undefined) throw new NotFoundError(`Search profile '${key}' not found`);
   if (!request.query?.trim()) {
     throw new ValidationError("Required non-empty query", { fields: { query: "Required non-empty query" } });
   }
 
   const searchable = await searchableIndices(loaded, indexStoreOf(store));
-  const compiled = compileNamedSearch(withQuery(search.tree, request.query), namedSearchLens(loaded, searchable, store));
+  const compiled = compileSearchProfile(withQuery(profile.tree, request.query), searchProfileLens(loaded, searchable, store));
   if (compiled.tree === null) {
-    throw new ValidationError(`Named search '${key}' validation failed`, { errors: compiled.errors });
+    throw new ValidationError(`Search profile '${key}' validation failed`, { errors: compiled.errors });
   }
   const nodes = searchNodesOf(compiled.tree);
   const indices = searchable.filter((index) => nodes.some((node) => node.index === index.key));
@@ -282,7 +282,7 @@ export async function runNamedSearch(
   const picked = result.hits.map(bestMatch);
   const hits = picked.map((match) => match.hit!);
 
-  if (namedSearchResult(search.tree) === "passages") {
+  if (searchProfileResult(profile.tree) === "passages") {
     const entities = await readPassageEntities(loaded, store, hits, true);
     const kept = picked.filter((match) => entities.has(match.hit!.entityId));
     const items = passageSearchItems(loaded, hits, entities, true).map((item, i) =>
@@ -365,7 +365,7 @@ function ranMethods(nodes: SearchNode[], limitations: { method: SearchRepresenta
   );
 }
 
-/** What found an item, as a named search answers it: the search with the
+/** What found an item, as a search profile answers it: the search with the
  * best rank in its own text's ranking; equal ranks, the earlier in the
  * tree. */
 function bestMatch(hit: TreeHit): Provenance {
@@ -374,6 +374,6 @@ function bestMatch(hit: TreeHit): Provenance {
     if (row.hit === null || row.rank === null) continue;
     if (best === undefined || row.rank < best.rank!) best = row;
   }
-  if (best === undefined) throw new Error("A named search's item is found by a search");
+  if (best === undefined) throw new Error("A search profile's item is found by a search");
   return best;
 }

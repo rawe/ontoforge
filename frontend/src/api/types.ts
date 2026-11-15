@@ -124,7 +124,7 @@ export interface SavedQuery {
 /** The parts of an index entry a search node counts. */
 export type SearchPartKind = 'self' | 'relation' | 'passage'
 
-/** A node of a named search's stored tree; `$query` in a search node's text
+/** A node of a search profile's stored tree; `$query` in a search node's text
  * is where the caller's query goes. */
 export type SearchTreeNode =
   | {
@@ -154,15 +154,15 @@ export type SearchTreeNode =
   | { kind: 'filter'; entityType: string; conditions: Record<string, string> }
   | { kind: 'cut'; input: SearchTreeNode; limit: number; perEntity?: number }
 
-export interface NamedSearch {
+export interface SearchProfile {
   key: string
   name: string
   description: string
   tree: SearchTreeNode
 }
 
-/** A named search as the runtime lists it: what a caller needs to run it, never its tree. */
-export interface RuntimeNamedSearch {
+/** A search profile as the runtime lists it: what a caller needs to run it, never its tree. */
+export interface RuntimeSearchProfile {
   key: string
   name: string
   description: string
@@ -172,8 +172,8 @@ export interface RuntimeNamedSearch {
   types: string[]
 }
 
-/** The body `POST /named-searches/{key}/run` takes. */
-export interface NamedSearchRunBody {
+/** The body `POST /search-profiles/{key}/run` takes. */
+export interface SearchProfileRunBody {
   query: string
   /** The entity search's `filter`. */
   filter?: Record<string, string>
@@ -549,7 +549,7 @@ export interface EntityMatch {
   target?: EntityReference
   /** Every method that found this very entry. */
   scores: MethodScores
-  /** A named search with several query texts: the text this entry ranked best for. */
+  /** A search profile with several query texts: the text this entry ranked best for. */
   queryText?: string
 }
 
@@ -577,7 +577,7 @@ export interface PassageSearchItem {
     text?: string
     /** Every method that found this passage. */
     scores: MethodScores
-    /** A named search with several query texts: the text this passage ranked best for. */
+    /** A search profile with several query texts: the text this passage ranked best for. */
     queryText?: string
   }
 }
@@ -1013,7 +1013,7 @@ export interface SavedQueryInput {
   parameters?: SavedQueryParameter[]
 }
 
-export interface NamedSearchInput {
+export interface SearchProfileInput {
   name: string
   /** Required, may be empty. */
   description: string

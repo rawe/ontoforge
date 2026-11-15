@@ -80,7 +80,7 @@ export function SearchSummary({
   )
 }
 
-/** The query text an item ranked best for, when a named search ran several. */
+/** The query text an item ranked best for, when a search profile ran several. */
 function QueryText({ text }: { text: string | undefined }) {
   if (text === undefined) return null
   return <span className="min-w-0 text-[11px] break-words text-muted-foreground">for “{text}”</span>
@@ -99,7 +99,7 @@ function Scores({ scores }: { scores: MethodScores }) {
 
 /** One item of the entity search: rank, type, name with identity, the part
  * that matched — with the custom index that found it, its scores and, from a
- * named search with several texts, the text it ranked best for — and its
+ * search profile with several texts, the text it ranked best for — and its
  * snippet. */
 export function EntitySearchItemRow({
   ontologyKey,

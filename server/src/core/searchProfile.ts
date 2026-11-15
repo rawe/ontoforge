@@ -1,12 +1,12 @@
 /**
- * A named search's stored form: a search tree (`searchTree.ts`) as plain
- * JSON, kept under a key in a lens (`docs/capabilities/named-searches.md`).
+ * A search profile's stored form: a search tree (`searchTree.ts`) as plain
+ * JSON, kept under a key in a lens (`docs/capabilities/search-profiles.md`).
  * `$query` in a search node's text marks where the runtime query goes.
  *
  * The stored node set is the tree's without `append`, sub-queries and
  * fixed ids: a stored `filter` carries its conditions in the public
  * filter syntax, resolved against the lens when the tree is checked
- * (`runtime/search/namedSearch.ts`). Here: the shape — a field a node does
+ * (`runtime/search/searchProfile.ts`). Here: the shape — a field a node does
  * not define refused at its path — and the check that needs no lens.
  *
  * Pure — no storage, no I/O.
@@ -124,8 +124,8 @@ export function storedTreeErrors(tree: StoredSearchNode): string[] {
   return marked ? [] : [`tree: At least one search node's text holds ${QUERY_MARK}, where the runtime query goes`];
 }
 
-/** A named search as the runtime holds it, from the lens's schema cache. */
-export interface NamedSearchConfig {
+/** A search profile as the runtime holds it, from the lens's schema cache. */
+export interface SearchProfileConfig {
   key: string;
   name: string;
   description: string;
@@ -140,16 +140,16 @@ export function storedSearchNodes(tree: StoredSearchNode): Extract<StoredSearchN
 
 /** What a stored tree ranks — the unit of its root (R8), set by the group
  * its first ranking reaches. A tree checked at save always reaches one. */
-export function namedSearchResult(tree: StoredSearchNode): "entities" | "passages" {
+export function searchProfileResult(tree: StoredSearchNode): "entities" | "passages" {
   switch (tree.kind) {
     case "group":
       return tree.key === "entity" ? "entities" : "passages";
     case "cut":
     case "restrict":
-      return namedSearchResult(tree.input);
+      return searchProfileResult(tree.input);
     case "merge":
     case "fuse":
-      if (tree.inputs[0] !== undefined) return namedSearchResult(tree.inputs[0]);
+      if (tree.inputs[0] !== undefined) return searchProfileResult(tree.inputs[0]);
       break;
   }
   throw new Error(`A stored search tree with '${tree.kind}' here ranks nothing`);

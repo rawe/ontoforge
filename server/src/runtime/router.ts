@@ -140,11 +140,11 @@ const SavedQueryRunPayload = z.looseObject({
   params: z.record(z.string(), z.unknown()).default({}),
 });
 
-const NamedSearchRunParams = LensParams.extend({ searchKey: z.string() });
+const SearchProfileRunParams = LensParams.extend({ profileKey: z.string() });
 
-/** Named-search run request: the query text and, as the entity search's
- * `filter`, exact conditions; nothing else. Rules in `runNamedSearch`. */
-const NamedSearchRunPayload = z.strictObject({
+/** Search-profile run request: the query text and, as the entity search's
+ * `filter`, exact conditions; nothing else. Rules in `runSearchProfile`. */
+const SearchProfileRunPayload = z.strictObject({
   query: z.string(),
   filter: z.record(z.string(), z.string()).optional(),
 });
@@ -517,25 +517,25 @@ export const runtimeRouter: FastifyPluginAsyncZod = async (app) => {
       ),
   );
 
-  // --- Named searches (runtime: list from the cache, run by key) ---
+  // --- Search profiles (runtime: list from the cache, run by key) ---
 
   app.get(
-    "/named-searches",
+    "/search-profiles",
     { schema: { tags: ["runtime"], params: LensParams } },
     async (request) =>
-      service.listNamedSearches(
+      service.listSearchProfiles(
         request.params.lensKey,
         await getRuntimeStore(request.params.ontologyKey),
       ),
   );
 
   app.post(
-    "/named-searches/:searchKey/run",
-    { schema: { tags: ["runtime"], params: NamedSearchRunParams, body: NamedSearchRunPayload } },
+    "/search-profiles/:profileKey/run",
+    { schema: { tags: ["runtime"], params: SearchProfileRunParams, body: SearchProfileRunPayload } },
     async (request) =>
-      service.runNamedSearch(
+      service.runSearchProfile(
         request.params.lensKey,
-        request.params.searchKey,
+        request.params.profileKey,
         request.body,
         await getRuntimeStore(request.params.ontologyKey),
       ),

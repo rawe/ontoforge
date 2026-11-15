@@ -11,7 +11,7 @@
  *   ['lenses', ontologyKey]                          modeling lens list
  *   ['schema', ontologyKey, lensKey]                 runtime schema
  *   ['schema', ontologyKey, lensKey, 'search-indices']  runtime search catalog
- *   ['schema', ontologyKey, lensKey, 'named-searches']  runtime named searches
+ *   ['schema', ontologyKey, lensKey, 'search-profiles']  runtime search profiles
  *   ['schema', ontologyKey, lensKey, 'agent-schema']    the schema text an agent of the lens gets
  *   ['entities', ontologyKey, lensKey, typeKey, params]
  *   ['entity', ontologyKey, lensKey, typeKey, id]
@@ -57,8 +57,8 @@ export const qk = {
   schema: (ontologyKey: string, lensKey: string) =>
     ['schema', ontologyKey, lensKey] as const,
   /** Below the schema, like the search catalog: modeling saves and lens changes refresh it. */
-  namedSearches: (ontologyKey: string, lensKey: string) =>
-    ['schema', ontologyKey, lensKey, 'named-searches'] as const,
+  searchProfiles: (ontologyKey: string, lensKey: string) =>
+    ['schema', ontologyKey, lensKey, 'search-profiles'] as const,
   /** Below the schema: the text every agent of the lens gets after its prompt. */
   agentSchema: (ontologyKey: string, lensKey: string) =>
     ['schema', ontologyKey, lensKey, 'agent-schema'] as const,

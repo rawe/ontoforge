@@ -24,7 +24,7 @@ import type {
   EntitySearchResponse,
   JsonValue,
   ListResponse,
-  NamedSearchRunBody,
+  SearchProfileRunBody,
   NeighborDirection,
   NeighborsResponse,
   ParentRelationInput,
@@ -37,7 +37,7 @@ import type {
   RulesetPatch,
   RulesetView,
   RuntimeAssistant,
-  RuntimeNamedSearch,
+  RuntimeSearchProfile,
   RuntimeSchema,
   SavedQuery,
   SavedQuerySearchHit,
@@ -252,20 +252,20 @@ export const searchPassages = (ontologyKey: string, lensKey: string, body: Passa
     body,
   })
 
-/* ------------------------------- named searches ------------------------------ */
+/* ------------------------------ search profiles ------------------------------ */
 
-export const listNamedSearches = (ontologyKey: string, lensKey: string) =>
-  request<RuntimeNamedSearch[]>(`${base(ontologyKey, lensKey)}/named-searches`)
+export const listSearchProfiles = (ontologyKey: string, lensKey: string) =>
+  request<RuntimeSearchProfile[]>(`${base(ontologyKey, lensKey)}/search-profiles`)
 
-/** Run a named search for a query text: an entity or a passage search response, by its `result`. */
-export const runNamedSearch = (
+/** Run a search profile for a query text: an entity or a passage search response, by its `result`. */
+export const runSearchProfile = (
   ontologyKey: string,
   lensKey: string,
-  searchKey: string,
-  body: NamedSearchRunBody,
+  profileKey: string,
+  body: SearchProfileRunBody,
 ) =>
   request<EntitySearchResponse | PassageSearchResponse>(
-    `${base(ontologyKey, lensKey)}/named-searches/${searchKey}/run`,
+    `${base(ontologyKey, lensKey)}/search-profiles/${profileKey}/run`,
     { method: 'POST', body },
   )
 

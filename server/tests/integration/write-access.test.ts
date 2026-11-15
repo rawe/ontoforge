@@ -377,8 +377,8 @@ describe("through a 'none' ruleset's URL (REST)", () => {
       ["GET /saved-queries", "/saved-queries"],
       ["GET /saved-queries/search", "/saved-queries/search?q=task"],
       ["POST /saved-queries/:queryKey/run", "/saved-queries/q1/run", {}],
-      ["GET /named-searches", "/named-searches"],
-      ["POST /named-searches/:searchKey/run", "/named-searches/n1/run", { query: "x" }],
+      ["GET /search-profiles", "/search-profiles"],
+      ["POST /search-profiles/:profileKey/run", "/search-profiles/p1/run", { query: "x" }],
       ["POST /relations/:relationTypeKey", "/relations/assigned_to", { fromEntityId: e.T2, toEntityId: e.Kim }],
       ["GET /relations/:relationTypeKey", "/relations/has_task"],
       ["GET /relations/:relationTypeKey/:relationId", `/relations/has_task/${hasTask}`],
@@ -402,13 +402,13 @@ describe("through a 'none' ruleset's URL (REST)", () => {
     ];
   }
 
-  /** The reads this test server cannot serve: no saved query or named search, no
+  /** The reads this test server cannot serve: no saved query or search profile, no
    * embedding provider for the semantic saved-query search, no entity
    * type with an identity. */
   const UNSERVED: Record<string, number> = {
     "GET /saved-queries/search": 422,
     "POST /saved-queries/:queryKey/run": 404,
-    "POST /named-searches/:searchKey/run": 404,
+    "POST /search-profiles/:profileKey/run": 404,
     "GET /entities/:entityTypeKey/identity/:identity": 404,
     "GET /entities/:entityTypeKey/identity/:identity/path": 404,
     "GET /entities/:entityTypeKey/identity/:identity/documents/:propertyKey": 404,
@@ -570,12 +570,12 @@ describe("the MCP tool set at 'none'", () => {
       "get_staged_document",
       "list_changesets",
       "list_entities",
-      "list_named_searches",
       "list_relations",
       "list_saved_queries",
       "list_search_indices",
-      "run_named_search",
+      "list_search_profiles",
       "run_saved_query",
+      "run_search_profile",
       "search",
       "search_documents",
       "search_saved_queries",

@@ -34,8 +34,8 @@ import {
   LensCreate,
   LensResponse,
   LensUpdate,
-  NamedSearchResponse,
-  NamedSearchUpsert,
+  SearchProfileResponse,
+  SearchProfileUpsert,
   PropertyDefinitionCreate,
   PropertyDefinitionResponse,
   PropertyDefinitionUpdate,
@@ -72,12 +72,12 @@ const RelationTypePropertyParams = OntologyParams.extend({
   propertyId: z.string(),
 });
 
-// Assistants, saved queries and named searches are the modeling exceptions
+// Assistants, saved queries and search profiles are the modeling exceptions
 // addressed by KEY, not internal identifier (`docs/interfaces/`).
 const LensKeyParams = OntologyParams.extend({ lensKey: z.string() });
 const AssistantKeyParams = OntologyParams.extend({ lensKey: z.string(), assistantKey: z.string() });
 const QueryKeyParams = OntologyParams.extend({ lensKey: z.string(), queryKey: z.string() });
-const NamedSearchKeyParams = OntologyParams.extend({ lensKey: z.string(), searchKey: z.string() });
+const SearchProfileKeyParams = OntologyParams.extend({ lensKey: z.string(), profileKey: z.string() });
 // Search indices are addressed by key too: managed keys are derived from
 // the schema and carry no identifier of their own.
 const IndexKeyParams = OntologyParams.extend({ indexKey: z.string() });
@@ -1120,38 +1120,38 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
-  // --- Named Searches (addressed by lens key + key) ---
+  // --- Search Profiles (addressed by lens key + key) ---
 
   app.get(
-    "/lenses/:lensKey/named-searches",
+    "/lenses/:lensKey/search-profiles",
     {
       schema: {
         tags: ["modeling"],
         params: LensKeyParams,
-        response: { 200: z.array(NamedSearchResponse) },
+        response: { 200: z.array(SearchProfileResponse) },
       },
     },
     async (request) =>
-      service.listNamedSearches(
+      service.listSearchProfiles(
         request.params.lensKey,
         await getModelingStore(request.params.ontologyKey),
       ),
   );
 
   app.put(
-    "/lenses/:lensKey/named-searches/:searchKey",
+    "/lenses/:lensKey/search-profiles/:profileKey",
     {
       schema: {
         tags: ["modeling"],
-        params: NamedSearchKeyParams,
-        body: NamedSearchUpsert,
-        response: { 200: NamedSearchResponse, 201: NamedSearchResponse },
+        params: SearchProfileKeyParams,
+        body: SearchProfileUpsert,
+        response: { 200: SearchProfileResponse, 201: SearchProfileResponse },
       },
     },
     async (request, reply) => {
-      const [result, created] = await service.upsertNamedSearch(
+      const [result, created] = await service.upsertSearchProfile(
         request.params.lensKey,
-        request.params.searchKey,
+        request.params.profileKey,
         request.body,
         await getModelingStore(request.params.ontologyKey),
         await getRuntimeStore(request.params.ontologyKey),
@@ -1161,14 +1161,14 @@ export const modelingRouter: FastifyPluginAsyncZod = async (app) => {
   );
 
   app.delete(
-    "/lenses/:lensKey/named-searches/:searchKey",
+    "/lenses/:lensKey/search-profiles/:profileKey",
     {
-      schema: { tags: ["modeling"], params: NamedSearchKeyParams },
+      schema: { tags: ["modeling"], params: SearchProfileKeyParams },
     },
     async (request, reply) => {
-      await service.deleteNamedSearch(
+      await service.deleteSearchProfile(
         request.params.lensKey,
-        request.params.searchKey,
+        request.params.profileKey,
         await getModelingStore(request.params.ontologyKey),
       );
       return reply.status(204).send();

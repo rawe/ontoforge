@@ -8,7 +8,7 @@ schema; see [how an ontology is addressed](README.md#how-an-ontology-and-a-lens-
 Find routes for [lenses](#lenses), [entity types](#entity-types),
 [relation types](#relation-types), [properties](#property-definitions),
 [scope inclusions](#scope-inclusions), [assistants](#agent-configurations),
-[saved queries](#saved-queries), [named searches](#named-searches),
+[saved queries](#saved-queries), [search profiles](#search-profiles),
 [search indices](#search-indices), [schema proposals](#schema-proposals), or
 [schema-wide operations](#schema-wide-operations).
 
@@ -125,16 +125,16 @@ Per-lens, addressed by lens key. Semantics:
 | PUT | `/lenses/{lensKey}/saved-queries/{queryKey}` | Create or replace one; answers 201 on create, 200 on replace |
 | DELETE | `/lenses/{lensKey}/saved-queries/{queryKey}` | Delete a saved query |
 
-## Named searches
+## Search profiles
 
 Per-lens, addressed by lens key. Semantics:
-[capabilities/named-searches.md](../capabilities/named-searches.md).
+[capabilities/search-profiles.md](../capabilities/search-profiles.md).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/lenses/{lensKey}/named-searches` | List the lens's named searches, each with its tree |
-| PUT | `/lenses/{lensKey}/named-searches/{searchKey}` | Create or replace one; answers 201 on create, 200 on replace |
-| DELETE | `/lenses/{lensKey}/named-searches/{searchKey}` | Delete a named search |
+| GET | `/lenses/{lensKey}/search-profiles` | List the lens's search profiles, each with its tree |
+| PUT | `/lenses/{lensKey}/search-profiles/{profileKey}` | Create or replace one; answers 201 on create, 200 on replace |
+| DELETE | `/lenses/{lensKey}/search-profiles/{profileKey}` | Delete a search profile |
 
 A tree of the wrong shape is refused as a request of the wrong shape, each path named; a
 tree breaking a rule is refused with one validation error listing each violation as
@@ -283,7 +283,7 @@ provider: without one it skips the vector work and says so in its summary. It do
 touch search indices. After an embedding-provider switch it is run once per ontology. See
 [capabilities/search.md](../capabilities/search.md#rebuild).
 
-Transfer carries the design only — schema, lenses, agents, saved queries, named searches,
+Transfer carries the design only — schema, lenses, agents, saved queries, search profiles,
 retrievers, navigators, search indices; no instance
 data and no ontology identity — see
 [capabilities/transfer.md](../capabilities/transfer.md) and

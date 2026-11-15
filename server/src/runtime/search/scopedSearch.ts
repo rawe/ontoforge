@@ -232,7 +232,7 @@ const METHOD_NAMES: Record<SearchRepresentation, string> = { semantic: "Semantic
 
 /** A search node limitation of the tree, as the response tells it. The
  * entity and passage searches compile semantic search nodes only with an
- * embedding provider; a named search's run may hold some without one. */
+ * embedding provider; a search profile's run may hold some without one. */
 export function described({ code, method, indices }: Limitation): SearchLimitation {
   const messages: Record<typeof code, string> = {
     "switched-off": `${METHOD_NAMES[method]} search is switched off on these indices`,

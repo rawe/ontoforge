@@ -15,7 +15,7 @@ import { AgentsTab } from '@/components/studio/AgentsTab'
 import { ASSISTANT_DEFAULT, ASSISTANT_NEW } from '@/components/studio/assistants/assistantModel'
 import { ConnectTab } from '@/components/studio/ConnectTab'
 import { NavigatorsTab } from '@/components/studio/NavigatorsTab'
-import { NamedSearchesTab } from '@/components/studio/NamedSearchesTab'
+import { SearchProfilesTab } from '@/components/studio/SearchProfilesTab'
 import { RetrieversTab } from '@/components/studio/RetrieversTab'
 import { ScopeTab } from '@/components/studio/ScopeTab'
 import { SavedQueriesTab } from '@/components/studio/SavedQueriesTab'
@@ -38,10 +38,10 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-const TABS = ['scope', 'agents', 'retriever-agents', 'navigators', 'queries', 'named-searches', 'connect'] as const
+const TABS = ['scope', 'agents', 'retriever-agents', 'navigators', 'queries', 'search-profiles', 'connect'] as const
 type Tab = (typeof TABS)[number]
 
-/** `/o/:ontologyKey/studio/lenses/:id` — scope editor, agents, retrievers, navigators, saved queries, named searches, connect. */
+/** `/o/:ontologyKey/studio/lenses/:id` — scope editor, agents, retrievers, navigators, saved queries, search profiles, connect. */
 export function LensDetailPage() {
   const { ontologyKey, id } = useParams<{ ontologyKey: string; id: string }>()
   const navigate = useNavigate()
@@ -149,7 +149,7 @@ export function LensDetailPage() {
                   <AlertDialogTitle>Delete "{lens.name}"?</AlertDialogTitle>
                   <AlertDialogDescription>
                     This deletes the lens, its scope, agents, retrievers, navigators, saved queries,
-                    named searches and changesets, submitted ones included. The ontology's schema and instance data are not affected. This
+                    search profiles and changesets, submitted ones included. The ontology's schema and instance data are not affected. This
                     cannot be undone.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
@@ -200,8 +200,8 @@ export function LensDetailPage() {
             <TabsTrigger value="queries">
               <SquareTerminal className="size-3.5" /> Saved queries
             </TabsTrigger>
-            <TabsTrigger value="named-searches">
-              <ListTree className="size-3.5" /> Named searches
+            <TabsTrigger value="search-profiles">
+              <ListTree className="size-3.5" /> Search profiles
             </TabsTrigger>
             <TabsTrigger value="connect">
               <Plug className="size-3.5" /> Connect
@@ -222,8 +222,8 @@ export function LensDetailPage() {
           <TabsContent value="queries">
             <SavedQueriesTab ontologyKey={ontologyKey} lens={lens} />
           </TabsContent>
-          <TabsContent value="named-searches">
-            <NamedSearchesTab ontologyKey={ontologyKey} lens={lens} />
+          <TabsContent value="search-profiles">
+            <SearchProfilesTab ontologyKey={ontologyKey} lens={lens} />
           </TabsContent>
           <TabsContent value="connect">
             <ConnectTab ontologyKey={ontologyKey} lens={lens} />

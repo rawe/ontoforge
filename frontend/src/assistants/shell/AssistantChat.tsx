@@ -29,6 +29,7 @@ import {
 } from '../conversation/chatModel'
 import type { ThreadOwner } from '../conversation/threadStore'
 import { useAssistantConversation } from '../conversation/useAssistantConversation'
+import { DiagnosticsDrawer, DiagnosticsStrip, DiagnosticsSwitch, useDiagnostics } from '../diagnostics'
 
 /** How a kind shows what it reported about each answer. */
 export interface InsightView<I> {
@@ -55,7 +56,12 @@ interface AssistantChatProps<E extends { type: string }, I> {
   /** One line under the name in the empty state, about what this kind does. */
   intro: string
   placeholder: string
-  /** Remember the thread in the browser and restore it on open (the Workbench); else each mount starts a new one. */
+  /**
+   * The Workbench: remember the thread in the browser and restore it on
+   * open, and show diagnostics by the "Show diagnostics" switch. Else a
+   * Studio test panel: each mount starts a new thread, and every answer
+   * shows its diagnostics.
+   */
   remember: boolean
   /** Why questions are blocked (unsaved, invalid, unsupported); null = they run. */
   blockedReason?: string | null
@@ -83,8 +89,10 @@ interface AssistantChatProps<E extends { type: string }, I> {
  * One conversation with one assistant on a server thread, for every
  * assistant kind: toolbar, messages, input with Send / Stop, "New
  * conversation", restore and the side panel beside (or, when narrow, below)
- * the conversation. The kind supplies its events' meaning (`model`), its
- * request (`send`) and its insight. Remount it (React `key`) for another
+ * the conversation, and the answers' diagnostics. The kind supplies its
+ * events' meaning (`model`), its request (`send`) and its insight.
+ * Diagnostics are no part of a kind: the shell only says in which mode
+ * they run (`../diagnostics`). Remount it (React `key`) for another
  * assistant or a new thread.
  */
 export function AssistantChat<E extends { type: string }, I>({
@@ -98,8 +106,14 @@ export function AssistantChat<E extends { type: string }, I>({
   const [confirmNew, setConfirmNew] = useState(false)
   // The answer the panel shows; null follows the latest with insight.
   const [selected, setSelected] = useState<string | null>(null)
+  // All the shell says about diagnostics: the Workbench has the switch, a Studio test panel always shows them.
+  const diagnostics = useDiagnostics(remember ? 'toggle' : 'always')
   const conversation = useAssistantConversation({
-    owner, model, send, blocked: assistantKey === null || blockedReason !== null, onSent: () => setSelected(null),
+    owner, model, send, blocked: assistantKey === null || blockedReason !== null, diagnostics: diagnostics.on,
+    onSent: () => {
+      setSelected(null)
+      diagnostics.follow()
+    },
   })
   const { turns, restoring, notice, running } = conversation
   const scroll = useRef<HTMLDivElement>(null)
@@ -115,6 +129,7 @@ export function AssistantChat<E extends { type: string }, I>({
   function startOver() {
     conversation.startOver()
     setSelected(null)
+    diagnostics.reset()
   }
 
   const newConversation = turns.length > 0 && (
@@ -129,7 +144,12 @@ export function AssistantChat<E extends { type: string }, I>({
       New conversation
     </Button>
   )
-  const hasToolbar = actions === undefined && (picker !== undefined || toggle !== undefined || turns.length > 0)
+  const diagnosticsSwitch = diagnostics.hasSwitch && (
+    <div className={cn(toggle !== undefined && 'border-l pl-3')}>
+      <DiagnosticsSwitch diagnostics={diagnostics} />
+    </div>
+  )
+  const hasToolbar = actions === undefined && (picker !== undefined || toggle !== undefined || diagnosticsSwitch !== false || turns.length > 0)
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {hasToolbar && (
@@ -137,6 +157,7 @@ export function AssistantChat<E extends { type: string }, I>({
           {picker}
           <div className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
             {toggle}
+            {diagnosticsSwitch}
             {newConversation}
           </div>
         </div>
@@ -172,6 +193,7 @@ export function AssistantChat<E extends { type: string }, I>({
                         insight={panel !== null && (
                           <InsightButton spec={insight.button(turn)} selected={turn.id === shown?.id} onSelect={() => setSelected(turn.id)} />
                         )}
+                        diagnostics={<DiagnosticsStrip diagnostics={diagnostics} answer={turn} answers={turns} />}
                       />
                     ))}
                   </div>
@@ -210,6 +232,7 @@ export function AssistantChat<E extends { type: string }, I>({
         </div>
       </div>
 
+      <DiagnosticsDrawer diagnostics={diagnostics} answers={turns} />
       <NewConversationDialog open={confirmNew} onOpenChange={setConfirmNew} onConfirm={startOver} />
     </div>
   )
@@ -300,8 +323,15 @@ function AssistantIcon({ icon: Icon, className }: { icon: LucideIcon; className?
   )
 }
 
-/** One question and its answer. */
-export function TurnView<I>({ turn, icon, answer, progress, insight }: { turn: Turn<I>; icon: LucideIcon; answer: ReactNode; progress: string | undefined; insight: ReactNode }) {
+/** One question and its answer; under it, the side-panel button and the diagnostics strip, where given. */
+export function TurnView<I>({ turn, icon, answer, progress, insight, diagnostics }: {
+  turn: Turn<I>
+  icon: LucideIcon
+  answer: ReactNode
+  progress: string | undefined
+  insight: ReactNode
+  diagnostics?: ReactNode
+}) {
   const ended = endText(turn)
   return (
     <article className="space-y-3" data-testid="chat-turn" data-status={turn.status}>
@@ -326,6 +356,7 @@ export function TurnView<I>({ turn, icon, answer, progress, insight }: { turn: T
             </p>
           )}
           {insight}
+          {diagnostics}
         </div>
       </div>
     </article>

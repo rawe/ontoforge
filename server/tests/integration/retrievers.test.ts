@@ -412,7 +412,6 @@ describe("retrievers", () => {
       subQueries: [sub({}), sub({ indices: ["person_home"], relations: ["lives_in"], query: "Berlin" })],
       unsupportedReason: null,
     });
-    expect(fused.searchCalls).toBe(2);
     expect(fused.items[0]).toMatchObject({
       entityId: ids.ada,
       label: "Ada",
@@ -444,7 +443,6 @@ describe("retrievers", () => {
       subQueries: [sub({ indices: ["person~default"], relations: [], query: "", filters: [{ id: "city", value: "Berlin", quote: "Berlin" }] })],
       unsupportedReason: null,
     });
-    expect(listed.searchCalls).toBe(0);
     expect(listed.items.map((item) => item.label).sort()).toEqual(["Ada", "Eve"]);
   });
 

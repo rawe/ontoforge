@@ -48,7 +48,7 @@ src/
 │   ├── entity/  # entity detail building blocks
 │   ├── query/   # query console (OQL) + saved-query library
 │   ├── ai/      # Assistants page tabs: agent chat, retriever chat
-│   ├── assistants/retrievers/ # retriever editor parts, chat + diagnostics (Studio test panel and Workbench)
+│   ├── assistants/retrievers/ # retriever editor parts and chat (Studio test panel and Workbench)
 │   ├── search/  # Studio Search area: index list parts, index designer, managed index view
 │   ├── studio/  # Studio editors (types, scope, agents, retrievers, saved queries, transfer)
 │   └── home/    # Workbench Home cards

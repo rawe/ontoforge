@@ -18,6 +18,8 @@ interface ConversationOptions<E extends { type: string }, I> {
    * reason (`refused`), to send again by hand. Otherwise its turn fails.
    */
   takeBackRefused?: boolean
+  /** Ask each new question's diagnostics: its turn starts with them and the request carries `diagnostics: true`. */
+  diagnostics?: boolean
   /** A question was sent. */
   onSent?: () => void
   /** An answer completed. */
@@ -32,7 +34,7 @@ interface ConversationOptions<E extends { type: string }, I> {
  * `key`) for another assistant.
  */
 export function useAssistantConversation<E extends { type: string }, I>({
-  owner, model, send, blocked, takeBackRefused = false, onSent, onComplete,
+  owner, model, send, blocked, takeBackRefused = false, diagnostics = false, onSent, onComplete,
 }: ConversationOptions<E, I>) {
   const [state, dispatch] = useReducer(
     conversationReducer as (state: Conversation<I>, action: ConversationAction<I>) => Conversation<I>,
@@ -79,7 +81,7 @@ export function useAssistantConversation<E extends { type: string }, I>({
     if (!question || !canAsk || active.current !== null) return
     const controller = new AbortController()
     active.current = controller
-    let turn = pendingTurn(crypto.randomUUID(), question, model.empty(), Date.now())
+    let turn = pendingTurn(crypto.randomUUID(), question, model.empty(), Date.now(), diagnostics)
     const save = () => { if (active.current === controller) dispatch({ type: 'updated', turn }) }
     setInput('')
     callbacks.current.onSent?.()
@@ -92,11 +94,11 @@ export function useAssistantConversation<E extends { type: string }, I>({
         threadId.current = (event as SharedEvent & { type: 'thread' }).threadId
         if (owner !== null) rememberThread(owner, threadId.current)
       }
-      turn = applyEvent(model, turn, event, Date.now())
+      turn = applyEvent(model, turn, event)
       save()
     }
     try {
-      await send({ message: question, threadId: threadId.current ?? undefined }, onEvent, controller.signal)
+      await send({ message: question, threadId: threadId.current ?? undefined, ...(diagnostics && { diagnostics: true }) }, onEvent, controller.signal)
       if (active.current === controller && turn.status === 'complete') callbacks.current.onComplete?.(turn)
     } catch (error) {
       if (active.current !== controller) return
@@ -117,7 +119,7 @@ export function useAssistantConversation<E extends { type: string }, I>({
         setInput(question)
         return
       }
-      turn = failure === 'stopped' ? stopTurn(model, turn, Date.now()) : failTurn(model, turn, chatErrorText(error), Date.now())
+      turn = failure === 'stopped' ? stopTurn(model, turn) : failTurn(model, turn, chatErrorText(error))
       save()
     } finally {
       if (active.current === controller) active.current = null

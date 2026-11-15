@@ -101,7 +101,7 @@ the address.
 | Pinned changeset | Per ontology + lens | One |
 | Current conversation thread id (Workbench Agents, Retrievers and Navigators tabs, Explorer ask dock) | Per ontology + lens + kind + assistant | One |
 | Agent details panel switch (Workbench) | Global | — |
-| Retriever diagnostics switch (Workbench) | Global | — |
+| Diagnostics switch (Workbench Agents, Retrievers and Navigators tabs) | Global | — |
 | Navigator evidence sidebar switch (Workbench) | Global | — |
 | Retriever test panel mode (Chat or Retrieve) | Global | — |
 | Retriever for palette questions | Per ontology + lens | — |

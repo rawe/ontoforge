@@ -81,6 +81,39 @@ it was handed to the answer model; kind-specific context keeps its own meaning.
 All kinds use the shared `entities` event for these cards; a kind's own events and tool
 events do not carry the cards ([ADR 0027](../adr/0027-one-shared-entities-event.md)).
 
+## Diagnostics
+
+A message may ask for **diagnostics**: how long its turn took and what it cost, for
+debugging and tuning an assistant. Every assistant reports them the same way, as the
+turn's **steps**: each model call is one step, and each other piece of work — a tool call,
+a pipeline step that calls no model — is one too. A step has its number in the order the
+steps started, its name — the pipeline step or the tool, a stable key that reads well as
+words —, when it started from the turn's start and how long it took, all measured by the
+server, so steps that ran in parallel overlap, and whether it failed. A model step adds the tokens the provider reported (the
+whole prompt with its cached parts, the output, what was read from and written to the
+provider's cache; a count the provider did not report is left out, never estimated) and
+the reason the model gave for stopping. Any step may add a **detail**: one string with the
+exact data the step produced, for the person debugging it — a value as formatted JSON,
+with its keys and ids as the step used them: a
+[retriever's plan](retrievers.md#diagnostics), the intent a
+[navigator](navigators.md#understand) read the question as. A client shows a detail as
+written and never parses it; it is never needed to show the answer. A step is reported as soon as
+it ends, so a turn that fails has already shown the steps before it; last comes the
+turn's whole time.
+
+Nothing in diagnostics depends on the assistant kind. A kind reports the steps its turn
+takes, each with its name and, where it helps, a detail, and adds nothing else; a client
+shows any step from these fields alone — its name as words, its time, its tokens, its
+detail as written. So a new kind, or a new step of an existing one, needs no change in a
+client.
+
+Nothing of this is sent unless asked, and the work and answer are the same either way.
+What a turn did and found — an agent's tool activity, a retriever's phase, a navigator's
+steps with what each did, the entities, the answer — is always streamed, stays each
+kind's own and carries no time, token count or number of model calls. Diagnostics belong
+to the turn's stream only: a thread does not keep them
+([ADR 0036](../adr/0036-one-shared-opt-in-diagnostics-event.md)).
+
 ## Lifetime
 
 A thread expires after a period without activity: a message accepted for it or a turn
@@ -102,4 +135,5 @@ wherever the assistant kind's list is.
 
 REST only, per assistant kind: the chat request's optional thread id, the stream's leading
 thread event, the read route, and the refusals for an unknown and a busy thread
-([../interfaces/](../interfaces/assistants-rest.md#assistant-chat-and-threads)). No MCP tool reaches a thread.
+([../interfaces/](../interfaces/assistants-rest.md#assistant-chat-and-threads)); the
+diagnostics request and event ([../interfaces/](../interfaces/assistants-rest.md#diagnostics)). No MCP tool reaches a thread.

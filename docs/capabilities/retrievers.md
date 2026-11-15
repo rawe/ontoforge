@@ -166,7 +166,7 @@ states that is not listed is kept as stated and matches nothing.
 Before anything is searched, the server checks the plan and leaves out what it cannot
 honour, naming each omission in the limitations the answer model receives — in plain
 words from the lens's display names, never by sub-query number, key or id, and in the
-same text the diagnostics report: an index the
+same text a [retrieve](#retrieve) reports: an index the
 retriever does not search, a relation it does not allow for the sub-query's indices, a filter
 that is not the retriever's or not for the sub-query's result types, a filter value without
 that quote and not a listed value it names, and an invalid previous-result reference — the sub-query then runs as a fresh
@@ -279,13 +279,46 @@ each cut to 2,000 characters.
 
 ### Diagnostics
 
-On request, the stream also reports what the retriever did: the validated plan — each
-planned filter with its definition, so the plan reads without the configuration — one result
-row per entity and sub-query with what matched and its answer fields, the limitations,
-the number of searches, phase timings and bounded traces of every model call —
-the plan, a repeated plan, the answer. Diagnostics are for debugging: they are sent only
-when a question asks for them, and any question may. Progress — which phase runs — and
-the answer text are always streamed. The event format is in [../interfaces/](../interfaces/assistants-rest.md#retriever-list-chat-and-retrieve).
+On request, the stream also reports the retriever's steps
+[as every assistant reports them](threads.md#diagnostics): planning, planning again for a
+follow-up, the retrieval and the answer. A planning step's detail is the checked plan as
+it runs, as formatted JSON, in the keys and ids of the retriever's configuration: its
+searches (`subQueries`), each with the indices it searches, the relation types it is
+restricted to (none: all), its query (empty for an exact list) and variants, its mode
+(`semantic`, `keyword` or `hybrid`), its exact filters — the filter's id, the compared
+value and the user's words it rests on — and the reference to previous results that
+restricts it, or null; then why the planner found the question not answerable from the
+lens (`unsupportedReason`), or null.
+
+```json
+{
+  "subQueries": [
+    {
+      "indices": [
+        "person~default"
+      ],
+      "relations": [],
+      "query": "",
+      "variants": [],
+      "mode": "keyword",
+      "filters": [
+        {
+          "id": "city",
+          "value": "Berlin",
+          "quote": "Berlin"
+        }
+      ],
+      "previous": null
+    }
+  ],
+  "unsupportedReason": null
+}
+```
+
+A planning step whose output could not be read has no detail; the plan the answer used is
+the last one reported. Diagnostics are for debugging: they are sent only when a question asks for
+them, and any question may. Progress — which phase runs —, the entities and the answer
+text are always streamed. The event format is in [../interfaces/](../interfaces/assistants-rest.md#retriever-list-chat-and-retrieve).
 
 ## Retrieve
 

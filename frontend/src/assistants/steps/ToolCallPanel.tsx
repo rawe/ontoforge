@@ -14,16 +14,14 @@ import { TypeChip } from '@/components/TypeChip'
 import { ResultsTable } from '@/components/query/ResultsTable'
 import { isEntityObject } from '@/components/query/resultUtils'
 import { cn } from '@/lib/utils'
-import { formatDuration, turnDuration, type Turn } from '../conversation/chatModel'
+import type { Turn } from '../conversation/chatModel'
 import type { Binding } from '../types'
 import {
-  callDuration,
   toolCallCounts,
   toolCallSummary,
   toolError,
   toolLabel,
   toolResultMore,
-  toolTime,
 } from './toolCallModel'
 
 /** A kind's own view of a completed call's result; undefined leaves it to the shared views. */
@@ -52,9 +50,9 @@ export function ToolCallsSummary({ calls, nouns = { one: 'tool call', many: 'too
 
 /**
  * The tool calls of one assistant turn, in the order the assistant made
- * them: what each asked for, how long it took and what it answered —
- * readable per tool, raw JSON one click away. Follows a running turn as
- * calls arrive.
+ * them: one line per call with what it asked for and its state; opened,
+ * what it answered, readable per tool, with its arguments and raw JSON
+ * under one fold. Follows a running turn as calls arrive.
  */
 export function ToolCallPanel({ at, turn, hasRestoredTurns, result }: ToolCallPanelProps) {
   const calls = turn?.insight ?? []
@@ -76,11 +74,6 @@ export function ToolCallPanel({ at, turn, hasRestoredTurns, result }: ToolCallPa
       </p>
     )
   }
-  const time = toolTime(calls)
-  const answered = turnDuration(turn)
-  // Calls that overlapped: the tool time is less than their sum.
-  const parallel =
-    time !== undefined && calls.reduce((sum, c) => sum + (callDuration(c) ?? 0), 0) > time + 1
   const failed = toolCallCounts(calls).errors
   return (
     <div className="flex min-h-0 flex-1 flex-col text-xs">
@@ -90,12 +83,6 @@ export function ToolCallPanel({ at, turn, hasRestoredTurns, result }: ToolCallPa
         </p>
         <p className="text-muted-foreground">
           {calls.length} {calls.length === 1 ? 'call' : 'calls'}
-          {time !== undefined && (
-            <span title="Time spent inside tools — parallel calls count once, the model's thinking not at all">
-              {' '}· {formatDuration(time)} in tools{parallel && ', partly in parallel'}
-            </span>
-          )}
-          {answered !== undefined && ` · answered after ${formatDuration(answered)}`}
           {failed > 0 && <span className="text-(--tc-amber)"> · {failed} answered with an error</span>}
           {running && ' · running'}
           {turn.status === 'failed' && <span className="text-destructive"> · turn failed or cancelled</span>}
@@ -138,38 +125,32 @@ function ToolCallCard({
   const summary = toolCallSummary(call)
   const error = toolError(call)
   const more = toolResultMore(call)
-  const duration = callDuration(call)
   return (
     <li data-testid="tool-call" data-tool={call.tool} className={cn('rounded-lg border bg-card', error !== null && 'border-(--tc-amber-border)')}>
       <button
         type="button"
         aria-expanded={open}
         onClick={() => onToggle(!open)}
-        className="flex w-full items-start gap-2 px-2.5 py-2 text-left transition-colors hover:bg-muted/40"
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-muted/40"
       >
-        <span className="mt-px flex size-4 shrink-0 items-center justify-center rounded-full border text-[10px] text-muted-foreground tabular-nums">
+        <span className="flex size-4 shrink-0 items-center justify-center rounded-full border text-[10px] text-muted-foreground tabular-nums">
           {step}
         </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5">
-            <span className="font-medium text-foreground">{toolLabel(call.tool)}</span>
-            <code className="text-[10.5px] text-muted-foreground">{call.tool}</code>
-          </span>
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+          <span className="shrink-0 font-medium text-foreground">{toolLabel(call.tool)}</span>
           {summary !== undefined && (
-            <span className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground" title={summary}>
+            <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={summary}>
               {summary}
             </span>
           )}
         </span>
-        <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground tabular-nums">
-          {duration !== undefined && formatDuration(duration)}
+        <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
           <StatusIcon call={call} error={error} />
           <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
         </span>
       </button>
       {open && (
         <div className="space-y-2.5 border-t px-2.5 py-2.5">
-          <Arguments args={call.args} />
           {call.status === 'pending' && (
             <p className="flex items-center gap-1.5 text-muted-foreground">
               <LoaderCircle className="size-3.5 animate-spin" /> Waiting for the result…
@@ -185,7 +166,7 @@ function ToolCallCard({
                 <span>{error}</span>
               </p>
             ) : (
-              <Section title="Result">
+              <>
                 {result?.(call) ?? <ToolResult at={at} call={call} />}
                 {more !== null && (
                   <p data-testid="tool-call-more" className="flex gap-1.5 text-[11px] text-muted-foreground" title="What the tool told the model it left out">
@@ -193,9 +174,9 @@ function ToolCallCard({
                     <span>{more}</span>
                   </p>
                 )}
-              </Section>
+              </>
             ))}
-          {call.status === 'completed' && <RawJson value={call.result} />}
+          <CallSource call={call} />
         </div>
       )}
     </li>
@@ -218,43 +199,52 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-/** The arguments as key–value lines; long text (a query) on its own block. */
-function Arguments({ args }: { args: Record<string, unknown> }) {
-  const entries = Object.entries(args).filter(([, v]) => v !== null && v !== undefined && v !== '')
-  if (entries.length === 0) return <Section title="Arguments"><p className="text-muted-foreground">None</p></Section>
+/** One fold under a call: the tool's key, its arguments as key–value lines (long text on its own block) and the raw result. */
+function CallSource({ call }: { call: ToolCall }) {
+  const entries = Object.entries(call.args).filter(([, v]) => v !== null && v !== undefined && v !== '')
   return (
-    <Section title="Arguments">
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
-        {entries.map(([key, value]) => (
-          <div key={key} className="contents">
-            <dt className="font-mono text-[11px] text-muted-foreground">{key}</dt>
-            <dd className="min-w-0">
-              {typeof value === 'string' && (value.includes('\n') || value.length > 60) ? (
-                <pre className="overflow-x-auto rounded border bg-muted/30 p-1.5 font-mono text-[11px] whitespace-pre-wrap">{value}</pre>
-              ) : (
-                <span className="font-mono text-[11px] break-words">
-                  {typeof value === 'string' ? value : JSON.stringify(value)}
-                </span>
-              )}
-            </dd>
-          </div>
-        ))}
-      </dl>
-    </Section>
+    <details className="rounded border">
+      <summary className="cursor-pointer px-2 py-1 text-[11px] text-muted-foreground">
+        Arguments{call.status === 'completed' && ' and raw result'}
+      </summary>
+      <div className="space-y-2.5 border-t p-2">
+        <Section title="Tool">
+          <code className="font-mono text-[11px]">{call.tool}</code>
+        </Section>
+        <Section title="Arguments">
+          {entries.length === 0 ? <p className="text-muted-foreground">None</p> : (
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+              {entries.map(([key, value]) => (
+                <div key={key} className="contents">
+                  <dt className="font-mono text-[11px] text-muted-foreground">{key}</dt>
+                  <dd className="min-w-0">
+                    {typeof value === 'string' && (value.includes('\n') || value.length > 60) ? (
+                      <pre className="overflow-x-auto rounded border bg-muted/30 p-1.5 font-mono text-[11px] whitespace-pre-wrap">{value}</pre>
+                    ) : (
+                      <span className="font-mono text-[11px] break-words">
+                        {typeof value === 'string' ? value : JSON.stringify(value)}
+                      </span>
+                    )}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </Section>
+        {call.status === 'completed' && <RawResult value={call.result} />}
+      </div>
+    </details>
   )
 }
 
-function RawJson({ value }: { value: unknown }) {
+function RawResult({ value }: { value: unknown }) {
   const json = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
   // The count is of the result as the model read it, not of the indented text shown here.
   const size = typeof value === 'string' ? value.length : JSON.stringify(value).length
   return (
-    <details className="rounded border">
-      <summary className="cursor-pointer px-2 py-1 text-[11px] text-muted-foreground">
-        Raw result · {size.toLocaleString()} characters
-      </summary>
-      <pre className="max-h-72 overflow-auto border-t p-2 font-mono text-[11px] whitespace-pre-wrap break-words">{json}</pre>
-    </details>
+    <Section title={`Raw result · ${size.toLocaleString()} characters`}>
+      <pre className="max-h-72 overflow-auto rounded border bg-muted/30 p-2 font-mono text-[11px] whitespace-pre-wrap break-words">{json}</pre>
+    </Section>
   )
 }
 

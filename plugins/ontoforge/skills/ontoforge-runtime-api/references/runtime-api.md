@@ -449,7 +449,8 @@ and runs them.
 
 - `POST /ai/assistants/<kind>/{assistantKey}/chat`
   One message to one assistant. Request body: `message` (1–2,000 characters), optional
-  `threadId`; unknown fields are rejected. Without `threadId` the message starts a new
+  `threadId`, optional `diagnostics` (default `false`) to receive the turn's
+  `diagnostics` events; unknown fields are rejected. Without `threadId` the message starts a new
   thread; with it, the message continues that thread. The client sends only its new
   message — the server holds the conversation.
 
@@ -473,16 +474,15 @@ responses before the stream opens.
 |---|---|---|
 | `thread` | `threadId` | Always first: the thread this turn runs on; keep it to continue |
 | `delta` | `text` | A fragment of the answer (retrievers and navigators) |
-| `final` | `reply` | Terminal: the complete answer |
+| `final` | `reply`, `artifacts` when the turn left any | Terminal: the complete answer |
 | `error` | `error` | Terminal: the error object with `code`, `message`, optional `details` |
+| `diagnostics` | `steps`, one finished step: `index`, `name` (a retriever's `plan`, `replan`, `retrieve`, `answer`; a navigator's step id; an agent's tool; absent on an agent's model call), `model: true` on a model call, `startMs` from the turn's start, `durationMs`, on a model call `usage` (`input`, `output`, `cacheRead`, `cacheWrite`, each only as reported) and `finishReason`, `failed`, and optionally `detail`, one string with the exact data the step produced, a value as formatted JSON, to show as written (a retriever's checked plan on `plan` and `replan`; a navigator's checked intent on `understand`) — or, last, the turn's `durationMs` | Only when requested, every kind; one per step as it ends, then the total before `final` or `error` — merge `steps` by `index`, the total replaces |
 | `entities` | `entities` (each `ref`, `id`, `type`, `typeName`, `label`, `fields`, `evidence`; a navigator adds `role`, `hop`, `reason`), `links` (`id` of the stored relation, `from`, `to`, `type`, `label`) | The entities the turn met, every kind; replace cards by `ref`, links by `id`; read an entity by `type` + `id` |
 | `agent.tool_call` | `callId`, `tool`, `args` | An agent's tool invocation begins |
 | `agent.tool_result` | `callId`, `result` | That invocation completes |
-| `retriever.phase` | `phase` (`plan`, `retrieve`, `answer`), `status` (`start`, `end`), `durationMs` on end | Progress |
-| `retriever.diagnostics` | `plan`, `results`, `limitations`, `searchCalls`, `timings`, `modelIO`, `llmCalls` | Only when requested |
+| `retriever.phase` | `phase` (`plan`, `retrieve`, `answer`), `status` (`start`, `end`) | Progress |
 | `navigator.graph` | `steps`, `edges` | The pipeline, once, after `thread` |
-| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, `durationMs` and optional `summary` on end | Progress, in plain words; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary and no duration |
-| `navigator.summary` | `modelCalls`, `durationMs`, `entities`, `evidence`, `hops`, `timings` | Once, before `final` |
+| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, optional `summary` on end | Progress, in plain words; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary |
 
 Ignore kind events you do not know. A stream ends with exactly one `final` or `error`;
 EOF without one is an incomplete turn. Closing the connection cancels the turn, and a
@@ -502,10 +502,9 @@ returned that the turn had not sent yet.
 
 ### Retrievers
 
-A retriever's chat body may add `diagnostics` (default `false`) to receive
-`retriever.diagnostics`; the request cannot change the retriever's configuration. A
-stored retriever the lens can no longer run answers `422 VALIDATION_ERROR` with the
-errors under `details.errors`. Before the answer, an `entities` event carries the results
+A retriever's chat request cannot change the retriever's configuration. A stored
+retriever the lens can no longer run answers `422 VALIDATION_ERROR` with the errors under
+`details.errors`. Before the answer, an `entities` event carries the results
 the answer model was given.
 
 - `POST /ai/assistants/retrievers/{assistantKey}/retrieve`

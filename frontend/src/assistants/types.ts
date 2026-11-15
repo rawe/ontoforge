@@ -25,7 +25,11 @@ export interface PresentationAdapter<E extends { type: string }, I> {
   kind: string
   nouns: { one: string; many: string }
   icon: LucideIcon
-  /** One message to an assistant of the kind; refusals before the stream throw. */
+  /**
+   * One message to an assistant of the kind; refusals before the stream
+   * throw. The surfaces that send through it (the ask dock, the Studio's
+   * assistant panel) never ask for diagnostics.
+   */
   send(at: Binding, assistantKey: string, body: ChatRequest, onEvent: (event: SharedEvent | E) => void, signal: AbortSignal): Promise<void>
   model: TurnModel<E, I>
   /** Its answers cite entities they met: the ask dock's auto-add has something to put on the canvas. */

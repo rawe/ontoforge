@@ -1,7 +1,7 @@
 /**
  * A whole navigator turn with a fake model and an in-memory graph: the
  * event sequence of the contract, exactly two model calls, the step
- * summaries, the widen rules, a turn that finds nothing, failures and
+ * summaries, its steps as diagnostics, the widen rules, a turn that finds nothing, failures and
  * cancellation — and follow-ups on the same thread, which start from what
  * the previous answer cited.
  */
@@ -22,7 +22,7 @@ vi.mock("../../../../src/core/ai.js", async (importOriginal) => ({
 vi.mock("../../../../src/runtime/assistants/navigators/reader.js", () => ({ lensReader: () => graph.reader }));
 
 import { settings } from "../../../../src/config.js";
-import type { GraphThread, StreamEvent } from "../../../../src/assistants/index.js";
+import { Diagnostics, type GraphThread, type StreamEvent, type StreamExecution } from "../../../../src/assistants/index.js";
 import { TurnSaver } from "../../../../src/assistants/threads/turnSaver.js";
 import { createAiModel } from "../../../../src/core/ai.js";
 import type { RuntimeStore } from "../../../../src/core/ports.js";
@@ -44,14 +44,24 @@ async function newThread(): Promise<GraphThread> {
 const plan = (intent: Partial<Intent>) => ({
   content: JSON.stringify({ mentions: [], targets: [], path: [], useFocus: false, search: "", ...intent }),
 });
+/** A parsed intent as the understand step's detail carries it: formatted JSON. */
+const intentJson = (intent: Partial<Intent>) =>
+  JSON.stringify({ mentions: [], targets: [], path: [], useFocus: false, search: "", ...intent }, null, 2);
 const answer = (...chunks: string[]) =>
   fake.stream.mockImplementationOnce(async () => (async function* () {
     for (const content of chunks) yield { content };
   })());
 
+/** A turn's execution; its events go to `events`, its diagnostics too when asked. */
+function execution(events: StreamEvent[], diagnostics = false, signal = new AbortController().signal): StreamExecution {
+  // As the stream does: each event as it was when emitted.
+  const push = async (event: StreamEvent) => { events.push(structuredClone(event)); };
+  return { signal, onToolEvent: push, diagnostics: new Diagnostics(diagnostics ? push : undefined) };
+}
+
 async function turn(
   message: string,
-  options: { thread?: GraphThread; config?: Partial<NavigatorConfig>; signal?: AbortSignal } = {},
+  options: { thread?: GraphThread; config?: Partial<NavigatorConfig>; signal?: AbortSignal; diagnostics?: boolean } = {},
 ) {
   const events: StreamEvent[] = [];
   const thread = options.thread ?? (await newThread());
@@ -60,11 +70,9 @@ async function turn(
     config: { ...deriveNavigator(), ...options.config },
     loaded: { scoped: LENS, full: LENS } as unknown as LoadedSchema,
   };
-  const { reply } = await runNavigatorTurn(runnable, "org", {} as RuntimeStore, message, thread, {
-    signal: options.signal ?? new AbortController().signal,
-    // As the stream does: each event as it was when emitted.
-    onToolEvent: async (event) => { events.push(structuredClone(event)); },
-  });
+  const { reply } = await runNavigatorTurn(
+    runnable, "org", {} as RuntimeStore, message, thread, execution(events, options.diagnostics, options.signal),
+  );
   return { events, reply, thread };
 }
 
@@ -106,9 +114,13 @@ describe("a navigator turn", () => {
       "step walk:running", "step walk:done", "entities",
       "step focus:running", "step focus:done", "entities",
       "step answer:running", "delta", "delta", "step answer:done",
-      "navigator.summary",
     ]);
-    expect(events[0]).toEqual({ type: "navigator.graph", ...NAVIGATOR_TOPOLOGY });
+    // Which step calls the model is not sent.
+    expect(events[0]).toEqual({
+      type: "navigator.graph",
+      steps: NAVIGATOR_TOPOLOGY.steps.map(({ id, label, description }) => ({ id, label, description })),
+      edges: NAVIGATOR_TOPOLOGY.edges,
+    });
     expect(reply).toBe("Kira Novak [E2] works on Apollo [E4]; Omar Haddad [E3] on Zeus [E5].");
     expect(events.filter((e) => e.type === "delta").map((e) => e.text).join("")).toBe(reply);
 
@@ -120,27 +132,56 @@ describe("a navigator turn", () => {
     });
   });
 
-  it("summarises each step in plain words with its duration", async () => {
+  it("on request, sends each step as it ends: understand and answer by their model call, with what understand decided", async () => {
+    fake.invoke.mockResolvedValueOnce({ ...plan(TWO_HOPS), usage_metadata: { input_tokens: 900, output_tokens: 40 } });
+    answer("Kira Novak [E2] works on Apollo [E4].");
+    const { events } = await turn("Which projects do Lena's reports work on?", { diagnostics: true });
+
+    const diagnostics = events.filter((e) => e.type === "diagnostics");
+    const time = { startMs: expect.any(Number), durationMs: expect.any(Number) };
+    expect(diagnostics).toEqual([
+      {
+        type: "diagnostics",
+        steps: [{
+          index: 1, name: "understand", model: true, ...time, usage: { input: 900, output: 40 },
+          detail: intentJson(TWO_HOPS),
+        }],
+      },
+      { type: "diagnostics", steps: [{ index: 2, name: "anchor", ...time }] },
+      { type: "diagnostics", steps: [{ index: 3, name: "walk", ...time }] },
+      { type: "diagnostics", steps: [{ index: 4, name: "focus", ...time }] },
+      { type: "diagnostics", steps: [{ index: 5, name: "answer", model: true, ...time }] },
+    ]);
+    const at = (e: StreamEvent) => events.indexOf(e);
+    expect(at(diagnostics[0]!)).toBeLessThan(events.findIndex((e) => e.type === "navigator.step" && e.id === "understand" && e.status === "done"));
+    expect(at(diagnostics[4]!)).toBeGreaterThan(events.findLastIndex((e) => e.type === "delta"));
+    expect(events.filter((e) => e.type !== "diagnostics").map((e) => e.type)).toEqual(
+      (await turn("Which projects do Lena's reports work on?")).events.map((e) => e.type),
+    );
+  });
+
+  it("on request, a repeated walk is a step of its own, and a skipped step is none", async () => {
+    fake.invoke.mockResolvedValueOnce(plan({ ...TWO_HOPS, path: [{ relation: "requires", direction: "any" }] }));
+    const widened = await turn("Which projects?", { diagnostics: true });
+    const names = (events: StreamEvent[]) =>
+      events.filter((e) => e.type === "diagnostics").flatMap((e) => (e.steps as { name: string }[]).map((step) => step.name));
+    expect(names(widened.events)).toEqual(["understand", "anchor", "walk", "walk", "focus", "answer"]);
+
+    fake.invoke.mockResolvedValueOnce(plan({ mentions: [{ text: "Zed", types: [] }] }));
+    const empty = await turn("Who is Zed?", { diagnostics: true });
+    expect(names(empty.events)).toEqual(["understand", "anchor", "answer"]);
+  });
+
+  it("summarises what each step did in plain words, without its time; what understand decided is no step summary", async () => {
     answer("Kira Novak [E2] works on Apollo [E4], Omar Haddad [E3] on Zeus [E5] [E9].");
     const { events } = await turn("Which projects do Lena's reports work on?");
-    expect(stepDone(events, "understand")).toMatchObject({
-      status: "done", durationMs: expect.any(Number),
-      summary: "Looking for Project · starting at “Lena” · path manages → works on",
-    });
+    expect(stepDone(events, "understand")).toEqual({ type: "navigator.step", id: "understand", status: "done", round: 1 });
     expect(stepDone(events, "anchor").summary).toBe("“Lena” → Lena Vogt (Person)");
     expect(stepDone(events, "walk").summary).toBe("Path manages → works on: 4 entities · reached Project at hop 2");
     expect(stepDone(events, "focus").summary).toBe("Kept 5 of 5 · 2 matches of Project with their paths");
     // E9 is no evidence: not counted.
     expect(stepDone(events, "answer").summary).toBe("Cited 4 entities");
-    expect(events.at(-1)).toEqual({
-      type: "navigator.summary",
-      modelCalls: 2,
-      durationMs: expect.any(Number),
-      entities: 5,
-      evidence: 5,
-      hops: 2,
-      timings: { understand: expect.any(Number), anchor: expect.any(Number), walk: expect.any(Number), focus: expect.any(Number), answer: expect.any(Number) },
-    });
+    expect(events.some((e) => "durationMs" in e)).toBe(false);
   });
 
   it("streams the cards before the answer: anchors first, then upserts with links and evidence", async () => {
@@ -205,7 +246,6 @@ describe("a navigator turn", () => {
     expect(events.filter((e) => e.type === "entities")).toHaveLength(1);
     expect(answerInput()).toContain("ENTITIES: none were found.");
     expect(answerInput()).toContain("- No entity of the question was found in the graph.");
-    expect(events.at(-1)).toMatchObject({ type: "navigator.summary", modelCalls: 2, entities: 0, evidence: 0, hops: 0 });
   });
 
   it("a closest match is told to the answer", async () => {
@@ -221,14 +261,26 @@ describe("a navigator turn", () => {
     const events: StreamEvent[] = [];
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await expect(runNavigatorTurn({ key: "_default", config: deriveNavigator(), loaded: { scoped: LENS, full: LENS } as unknown as LoadedSchema },
-      "org", {} as RuntimeStore, "Who?", await newThread(), { signal: new AbortController().signal, onToolEvent: async (e) => { events.push(e); } }))
+      "org", {} as RuntimeStore, "Who?", await newThread(), execution(events, true)))
       .rejects.toMatchObject({ reason: "unavailable", message: "The language model cannot be reached; try again later." });
     expect(steps(events)).toEqual(["understand:running:1", "understand:failed:1"]);
+    // The failed call is listed before the step fails.
+    expect(events.filter((e) => e.type === "diagnostics")).toEqual([
+      { type: "diagnostics", steps: [{ index: 1, name: "understand", model: true, startMs: expect.any(Number), durationMs: expect.any(Number), failed: true }] },
+    ]);
+    expect(events.findIndex((e) => e.type === "diagnostics")).toBeLessThan(events.findIndex((e) => e.status === "failed"));
     expect(fake.invoke).toHaveBeenCalledTimes(1);
     expect(fake.stream).not.toHaveBeenCalled();
 
+    // Output that cannot be read: the call completed, its step carries no detail.
     fake.invoke.mockResolvedValueOnce({ content: "not json" });
-    await expect(turn("Who?")).rejects.toThrow("The language model answered no readable JSON (navigator_intent).");
+    const unread: StreamEvent[] = [];
+    await expect(runNavigatorTurn({ key: "_default", config: deriveNavigator(), loaded: { scoped: LENS, full: LENS } as unknown as LoadedSchema },
+      "org", {} as RuntimeStore, "Who?", await newThread(), execution(unread, true)))
+      .rejects.toThrow("The language model answered no readable JSON (navigator_intent).");
+    expect(unread.filter((e) => e.type === "diagnostics")).toEqual([
+      { type: "diagnostics", steps: [{ index: 1, name: "understand", model: true, startMs: expect.any(Number), durationMs: expect.any(Number) }] },
+    ]);
   });
 
   it("a failed answer fails the answer step", async () => {
@@ -246,11 +298,16 @@ describe("a navigator turn", () => {
     const thread = await newThread();
 
     await expect(runNavigatorTurn({ key: "_default", config: deriveNavigator(), loaded: { scoped: LENS, full: LENS } as unknown as LoadedSchema },
-      "org", {} as RuntimeStore, "Which projects?", thread, { signal: new AbortController().signal, onToolEvent: async (e) => { events.push(e); } }))
+      "org", {} as RuntimeStore, "Which projects?", thread, execution(events, true)))
       .rejects.toMatchObject({ reason: "answer_cut_off", details: { code: "ANSWER_CUT_OFF" } });
 
     expect(events.filter((e) => e.type === "delta")).toEqual([{ type: "delta", text: "Half an" }]);
     expect(steps(events).at(-1)).toBe("answer:failed:1");
+    // A cut-off answer is a call that completed: it keeps its finish reason.
+    expect(events.filter((e) => e.type === "diagnostics").at(-1)).toEqual({
+      type: "diagnostics",
+      steps: [{ index: 5, name: "answer", model: true, startMs: expect.any(Number), durationMs: expect.any(Number), finishReason: "max_tokens" }],
+    });
     // The half answer never joined the thread.
     const messages = (await graphValues(thread)).messages as { text: string }[];
     expect(messages.map((m) => m.text)).toEqual(["Which projects?"]);
@@ -356,7 +413,7 @@ describe("follow-ups on a thread", () => {
 
     fake.invoke.mockResolvedValueOnce(plan({ targets: ["team"], path: [{ relation: "member_of", direction: "outgoing" }], useFocus: true }));
     answer("Kira Novak [E1] is in Platform [E5].");
-    const { events, reply } = await turn("And which teams are they in?", { thread: first.thread });
+    const { events, reply } = await turn("And which teams are they in?", { thread: first.thread, diagnostics: true });
 
     // The understand step sees the conversation and the cited entities, in order of citation.
     const input = understandInput();
@@ -371,7 +428,9 @@ describe("follow-ups on a thread", () => {
       ["E3", "Omar Haddad", "focus", 0, "From the previous answer"],
       ["E4", "Zeus", "focus", 0, "From the previous answer"],
     ]);
-    expect(stepDone(events, "understand").summary).toBe("Looking for Team · continuing from the previous answer · path member of");
+    expect(events.find((e) => e.type === "diagnostics")!.steps).toMatchObject([
+      { name: "understand", detail: intentJson({ targets: ["team"], path: [{ relation: "member_of", direction: "outgoing" }], useFocus: true }) },
+    ]);
     expect(stepDone(events, "anchor").summary).toBe("Continuing from the previous answer: 4 entities");
     expect(lastCards(events).map((c) => c.label)).toEqual(["Kira Novak", "Apollo", "Omar Haddad", "Zeus", "Platform", "Data"]);
     expect(reply).toBe("Kira Novak [E1] is in Platform [E5].");

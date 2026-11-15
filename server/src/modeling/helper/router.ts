@@ -44,9 +44,9 @@ export const studioHelperRouter: FastifyPluginAsyncZod<{ threads: ThreadStore }>
       const { ontologyKey } = request.params;
       const store = await getModelingStore(ontologyKey);
       const model = requireLanguageModel();
-      const { message, threadId, focus, draft } = request.body;
+      const { message, threadId, diagnostics, focus, draft } = request.body;
       const turn = await openThread(threads, await studioBinding(request), threadId);
-      return sendChatStream(reply, { threads, turn }, (execution, thread) => runStudioChat(
+      return sendChatStream(reply, { threads, turn, diagnostics }, (execution, thread) => runStudioChat(
         ontologyKey,
         { message, ...(focus === undefined ? {} : { focus }), ...(draft === undefined ? {} : { draft }) },
         store, model, thread, execution,

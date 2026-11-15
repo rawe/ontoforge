@@ -163,6 +163,7 @@ describe("chat wire shape", () => {
       { message: "Hi", turnToken: "t" },
       { message: "x".repeat(2001) },
       { message: "Hi", threadId: 42 },
+      { message: "Hi", diagnostics: "yes" },
     ]) {
       const res = await app.inject({
         method: "POST",
@@ -368,6 +369,39 @@ it("a model failure ends the stream with its reason, never the provider's words 
   expect(response.body).not.toContain("210000");
   expect(warned).toHaveBeenCalledWith(expect.stringContaining("prompt is too long"));
   warned.mockRestore();
+});
+
+describe("diagnostics", () => {
+  const time = { startMs: expect.any(Number), durationMs: expect.any(Number) };
+
+  it("on request, each step arrives as it ends, then the turn's time, before the final event", async () => {
+    setAiModel(new FakeToolCallingModel([toolCallMessage("list_saved_queries", {}), new AIMessage("Done.")]));
+    const response = await app.inject({ method: "POST", url: chatPath + "/_default/chat", payload: { message: "Hi", diagnostics: true } });
+    const sent = turnEvents(response.body);
+    expect(sent.map((event) => event.type)).toEqual([
+      "diagnostics", "agent.tool_call", "diagnostics", "agent.tool_result", "diagnostics", "diagnostics", "final",
+    ]);
+    expect(sent.filter((event) => event.type === "diagnostics")).toEqual([
+      { type: "diagnostics", steps: [{ index: 1, model: true, ...time }] },
+      { type: "diagnostics", steps: [{ index: 2, name: "list_saved_queries", ...time }] },
+      { type: "diagnostics", steps: [{ index: 3, model: true, ...time }] },
+      { type: "diagnostics", durationMs: expect.any(Number) },
+    ]);
+  });
+
+  it("a failed model call is listed, then the turn's time, before the error ends the stream", async () => {
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const model = new FakeToolCallingModel([new AIMessage("never")]);
+    model.beforeResponse = async () => { throw Object.assign(new Error("Too Many Requests"), { status: 429 }); };
+    setAiModel(model);
+    const response = await app.inject({ method: "POST", url: chatPath + "/_default/chat", payload: { message: "Hi", diagnostics: true } });
+    expect(turnEvents(response.body)).toEqual([
+      { type: "diagnostics", steps: [{ index: 1, model: true, ...time, failed: true }] },
+      { type: "diagnostics", durationMs: expect.any(Number) },
+      { type: "error", error: expect.objectContaining({ code: "MODEL_ERROR" }) },
+    ]);
+    warned.mockRestore();
+  });
 });
 
 it("a turn that reaches its step limit ends the stream with TOO_MANY_STEPS, not INTERNAL_ERROR", async () => {

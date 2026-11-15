@@ -17,8 +17,10 @@ routes, its extra request fields and its own events.
 | POST | `/ai/assistants/<kind>/{assistantKey}/chat` | One message: a new thread, or a turn on an existing one |
 | GET | `/ai/assistants/<kind>/{assistantKey}/threads/{threadId}` | Read a thread back |
 
-**Request.** `message` (1 to 2,000 characters) and optionally `threadId`; a kind may add
-fields, and unknown fields are rejected. Without `threadId` the message starts a new
+**Request.** `message` (1 to 2,000 characters), optionally `threadId`, and optionally
+`diagnostics` (boolean, default `false`) to receive the turn's
+[`diagnostics` events](#diagnostics); a kind may add fields, and unknown fields are
+rejected. Without `threadId` the message starts a new
 thread bound to the addressed assistant; with it, the message continues that thread. A
 thread that is unknown, expired, bound to another assistant or started by another
 principal answers `RESOURCE_NOT_FOUND` with `details.code` `THREAD_NOT_FOUND`; a thread
@@ -41,7 +43,8 @@ The shared events mean the same for every kind:
 | `thread` | `threadId` | Always first: the thread this turn runs on |
 | `delta` | `text` | A fragment of the answer, for kinds that stream their answer |
 | `entities` | `entities` — each `ref`, `id`, `type`, `typeName`, `label`, `fields` (`name`, `value`), `evidence`, and as the kind sends them `reason`, `role`, `hop` — and `links` — each `id` (the stored relation's id), `from`, `to` (refs, directed as stored), `type`, `label` | The entities the turn met and the stored relations between them; a later card replaces an earlier one with the same `ref`, a link is identified by its `id` |
-| `final` | `reply` | Terminal: the complete answer |
+| `diagnostics` | `steps` (one finished step) or `durationMs` (the whole turn) | Only when the request asked for diagnostics; [below](#diagnostics) |
+| `final` | `reply`, and `artifacts` when the turn left any (each `type`, `version`, `value`) | Terminal: the complete answer |
 | `error` | `error` | Terminal: the public error object with `code`, `message` and optional `details` |
 
 Refs are `E1`, `E2`, … in the order the turn met the entities, unique within a turn; an
@@ -75,6 +78,31 @@ the turns a thread keeps, without tool payloads. Unknown, expired, another assis
 another principal's thread: `THREAD_NOT_FOUND`. Reading needs no language-model provider
 and does not count as use; it is gated like the kind's list.
 
+### Diagnostics
+
+With `diagnostics` true, a turn sends `diagnostics` events
+([semantics](../capabilities/threads.md#diagnostics)), all before the terminal event: one
+as each step ends, a failed step included, each `steps` holding that one step; then one
+with the turn's `durationMs` in whole milliseconds, right before `final`, or before `error`
+while the stream is still open. A step is one model call or one other piece of work, the
+same shape for every kind:
+
+| Field | Content |
+|---|---|
+| `index` | 1, 2, … in the order the steps started; the step's identity |
+| `name` | A stable key in lower case with underscores: a retriever's `plan`, `replan`, `retrieve`, `answer`; a navigator's step id (a repeated step is one step per round); the tool's name for an agent and the Studio helper. Absent on their model calls |
+| `model` | `true` on a step that is one model call; absent on other work |
+| `startMs` | Whole milliseconds from the turn's start, measured by the server; steps that ran in parallel overlap |
+| `durationMs` | Whole milliseconds |
+| `usage` | Model steps only: `input` (the whole prompt, cached parts included), `output`, `cacheRead`, `cacheWrite` — each only when the provider reported it, a reported 0 kept; absent when nothing was reported |
+| `finishReason` | Model steps only, as the provider gave it, when it did |
+| `failed` | `true` for a step that threw; a failed model call has no usage. A tool that answered with an error has not failed |
+| `detail` | Optional, on any step: one string with the exact data the step produced, a value as formatted JSON; show it as written. On a retriever's `plan` and `replan` steps its checked plan, on a navigator's `understand` step its checked intent — each only when the step's output could be read |
+
+A client merges a turn's events: `steps` by `index`, and `durationMs` replaces the one
+before. Totals — model calls, tokens — are the client's to add up. Time outside every step
+shows only as the gap to `durationMs`. Without `diagnostics` no such event is sent.
+
 ## Retriever list, chat and retrieve
 
 The stored retriever runs — or, under the key `_default`, the lens's
@@ -95,9 +123,8 @@ and [retrieve](../capabilities/retrievers.md#retrieve).
 with `builtIn` true. The list carries no configuration and no validation, and needs no
 language-model provider.
 
-**Chat.** The [shared request](#assistant-chat-and-threads) plus `diagnostics` (boolean,
-default false). Without a language-model provider the route answers
-`FEATURE_DISABLED`, as the AI routes do. An unknown retriever answers not found, a retriever its
+**Chat.** The [shared request](#assistant-chat-and-threads). Without a language-model
+provider the route answers `FEATURE_DISABLED`, as the AI routes do. An unknown retriever answers not found, a retriever its
 lens can no longer run `VALIDATION_ERROR` with the errors under `details.errors`, a
 default retriever with nothing to search `VALIDATION_ERROR`, an unknown or busy thread as
 shared — each before the stream opens.
@@ -106,21 +133,11 @@ The response streams the [shared frame](#assistant-chat-and-threads): `thread`, 
 as `delta` events, then one terminal `final` or `error`. Before the answer, when results
 reached the answer model, one `entities` event carries them, all evidence, without links —
 with or without diagnostics. Its own events:
-`retriever.phase` (`phase` `plan`, `retrieve` or `answer`, `status` `start` or `end`, an
-end with `durationMs`), and — only with `diagnostics` true — `retriever.diagnostics`
-events, which carry:
-
-| Field | Content |
-|---|---|
-| `plan` | `subQueries` — each `indices`, `relations`, `query`, `variants`, `mode`, `filters` (`id`, `value`, `quote`, and the filter's definition from the retriever's configuration: `entityType`, `path`, `field`) and `previous` — and `unsupportedReason` |
-| `results` | One row per entity and sub-query that found it, in fused order: `entityId`, `entityType`, `label`, `subQuery`, `matched` when the search ranked the entity, `answerFields` |
-| `limitations` | What the answer model was told limits the results |
-| `searchCalls` | The number of query texts searched |
-| `timings` | Milliseconds: `plan`, `retrieve`, `answer`, `planModel`, `validation`, `search`, `context`, `firstDelta`, `answerModel`, `total`; `planModel` and `validation` add up both planning calls when planning was repeated |
-| `modelIO` | Bounded system prompt, input and output traces of every model call, each with its `phase` — `plan`, `replan` for a follow-up's repeated planning, `answer` — and with usage and finish reason where the provider reports them |
-| `llmCalls` | The number of model calls: 2, or 3 when planning was repeated |
-
-`matched` has the form [capabilities/search.md](../capabilities/search.md#what-matched) describes.
+`retriever.phase` (`phase` `plan`, `retrieve` or `answer`, `status` `start` or `end`).
+Its [diagnostics](#diagnostics) steps are `plan`, `replan` for a follow-up's repeated
+planning, `retrieve` and `answer`. The `detail` of a planning step is
+[its checked plan](../capabilities/retrievers.md#diagnostics); the plan the answer used
+is the last step's that carries one.
 
 **Read a thread.** As [shared](#assistant-chat-and-threads).
 
@@ -133,8 +150,8 @@ unknown retriever, `VALIDATION_ERROR` for a retriever its lens can no longer run
 or a malformed plan; a failed planning call answers `MODEL_ERROR`. A closed connection cancels the work.
 
 The response is `200` with `results` — best first, each `entityId`, `entityType`,
-`label`, `conditions` (`filter`, `value`, `text`) and `matched` (a search hit's form, or
-null) — `limitations` and `unsupportedReason` when no index can answer. No results is not
+`label`, `conditions` (`filter`, `value`, `text`) and `matched` (the form
+[capabilities/search.md](../capabilities/search.md#what-matched) describes, or null) — `limitations` and `unsupportedReason` when no index can answer. No results is not
 an error.
 
 A question or a retrieve needs a language-model provider; without an embedding provider it
@@ -167,9 +184,8 @@ its own events, all in display names, never ids or keys:
 
 | Event `type` | Fields | Meaning |
 |---|---|---|
-| `navigator.graph` | `steps` (`id`, `label`, `description`, `model`), `edges` (`from`, `to`, optional `label`; an edge to itself is a repeat) | The pipeline, once, right after `thread` |
-| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, and when it ends `durationMs` and an optional `summary` | One step starting or ending; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary and no duration |
-| `navigator.summary` | `modelCalls`, `durationMs`, `entities`, `evidence`, `hops`, `timings` (milliseconds per step id) | Once, before `final` |
+| `navigator.graph` | `steps` (`id`, `label`, `description`), `edges` (`from`, `to`, optional `label`; an edge to itself is a repeat) | The pipeline, once, right after `thread` |
+| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, and when it ends an optional `summary` of what it did | One step starting or ending; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary. `understand` ends without a summary: what it read the question as is the `detail` of its [diagnostics](#diagnostics) step |
 
 The answer cites evidence by ref in square brackets, one or several: `[E2]`, `[E2, E5]`.
 

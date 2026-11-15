@@ -1,7 +1,7 @@
 /**
  * The stream events every graph assistant kind sends, namespaced by the
- * kind (`navigator.graph`, `navigator.step`, …): its pipeline once, the
- * live trace of its steps and a summary before `final`. One reader checks
+ * kind (`navigator.graph`, `navigator.step`): its pipeline once and the
+ * live trace of its steps, what each did. One reader checks
  * them for any kind; the entities it found come as the shared `entities`
  * event (`entities.ts`).
  *
@@ -15,8 +15,6 @@ export interface GraphStep {
   id: string
   label: string
   description: string
-  /** The step calls a language model. */
-  model?: boolean
 }
 /** A transition of the pipeline; `from === to` is a repeat (a loop). */
 export interface GraphEdge {
@@ -31,15 +29,6 @@ export interface GraphTopology {
 
 export type StepStatus = 'running' | 'done' | 'skipped' | 'failed'
 
-export interface GraphSummary {
-  modelCalls?: number
-  durationMs?: number
-  entities?: number
-  evidence?: number
-  hops?: number
-  timings?: Record<string, number>
-}
-
 export type GraphTopologyEvent = { type: string } & GraphTopology
 export interface GraphStepEvent {
   type: string
@@ -47,19 +36,16 @@ export interface GraphStepEvent {
   status: StepStatus
   /** Counts repeats of the step, from 1. */
   round?: number
-  durationMs?: number
   /** Plain human text: what the step did. */
   summary?: string
 }
-export type GraphSummaryEvent = { type: string } & GraphSummary
 
 /** A graph kind's own events; tell them apart with `isGraphEvent`. */
-export type GraphEvent = GraphTopologyEvent | GraphStepEvent | GraphSummaryEvent
+export type GraphEvent = GraphTopologyEvent | GraphStepEvent
 
 interface GraphEventMap {
   graph: GraphTopologyEvent
   step: GraphStepEvent
-  summary: GraphSummaryEvent
 }
 export type GraphEventName = keyof GraphEventMap
 
@@ -73,24 +59,18 @@ const number = (value: unknown): value is number => typeof value === 'number' &&
 const STATUSES: ReadonlySet<unknown> = new Set(['running', 'done', 'skipped', 'failed'])
 
 const validTopology = (e: Record<string, unknown>) =>
-  Array.isArray(e.steps) && e.steps.every((s) => record(s) && text(s.id) && text(s.label) &&
-    optional(s.description, text) && optional(s.model, (v) => typeof v === 'boolean')) &&
+  Array.isArray(e.steps) && e.steps.every((s) => record(s) && text(s.id) && text(s.label) && optional(s.description, text)) &&
   Array.isArray(e.edges) && e.edges.every((x) => record(x) && text(x.from) && text(x.to) && optional(x.label, text))
 
 const validStep = (e: Record<string, unknown>) =>
-  text(e.id) && STATUSES.has(e.status) && optional(e.round, (v) => number(v) && v >= 1) &&
-  optional(e.durationMs, number) && optional(e.summary, text)
-
-const validSummary = (e: Record<string, unknown>) =>
-  ['modelCalls', 'durationMs', 'entities', 'evidence', 'hops'].every((key) => optional(e[key], number)) &&
-  optional(e.timings, (t) => record(t) && Object.values(t).every(number))
+  text(e.id) && STATUSES.has(e.status) && optional(e.round, (v) => number(v) && v >= 1) && optional(e.summary, text)
 
 const CHECKS: Record<GraphEventName, (e: Record<string, unknown>) => boolean> = {
-  graph: validTopology, step: validStep, summary: validSummary,
+  graph: validTopology, step: validStep,
 }
 
 /**
- * The reader of one graph kind's events (`<kind>.graph|step|summary`),
+ * The reader of one graph kind's events (`<kind>.graph|step`),
  * checked before they reach the UI. Other dotted events — another kind's,
  * or one of this kind this client does not know — are ignored; a malformed
  * one throws.

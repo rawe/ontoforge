@@ -8,10 +8,10 @@ import { graphTurns, stepState } from '../src/components/assistants/graph/graphT
 const GRAPH = {
   type: 'navigator.graph',
   steps: [
-    { id: 'understand', label: 'Understand', description: 'Reads the question.', model: true },
-    { id: 'anchor', label: 'Anchor', description: 'Finds the entities.', model: false },
-    { id: 'walk', label: 'Walk', description: 'Follows relations.', model: false },
-    { id: 'answer', label: 'Answer', description: 'Writes the answer.', model: true },
+    { id: 'understand', label: 'Understand', description: 'Reads the question.' },
+    { id: 'anchor', label: 'Anchor', description: 'Finds the entities.' },
+    { id: 'walk', label: 'Walk', description: 'Follows relations.' },
+    { id: 'answer', label: 'Answer', description: 'Writes the answer.' },
   ],
   edges: [{ from: 'understand', to: 'anchor' }, { from: 'anchor', to: 'walk' }, { from: 'walk', to: 'walk', label: 'widen' }, { from: 'walk', to: 'answer' }],
 }
@@ -28,13 +28,12 @@ const FINAL = { type: 'final', reply: '' }
 
 /* --------------------------------- reader ---------------------------------- */
 
-test('the reader passes the three graph events of its kind through, beside the shared entities', async () => {
+test('the reader passes the graph events of its kind through, beside the shared entities', async () => {
   const events = [
     THREAD, GRAPH,
     { type: 'navigator.step', id: 'walk', status: 'running', round: 1 },
-    { type: 'navigator.step', id: 'walk', status: 'done', round: 1, durationMs: 42, summary: 'Hop 1: 14 entities' },
+    { type: 'navigator.step', id: 'walk', status: 'done', round: 1, summary: 'Hop 1: 14 entities' },
     { type: 'entities', entities: [{ ref: 'E1', id: 'a', type: 'person', typeName: 'Person', label: 'Ana', fields: [], evidence: true, role: 'anchor', hop: 0 }], links: [] },
-    { type: 'navigator.summary', modelCalls: 2, durationMs: 3120, entities: 23, evidence: 11, hops: 2, timings: { walk: 61 } },
     FINAL,
   ]
   assert.deepEqual(await read(events), events)
@@ -52,7 +51,7 @@ for (const [name, event] of [
   ['a step with round 0', { type: 'navigator.step', id: 'walk', status: 'done', round: 0 }],
   ['a graph without edges', { type: 'navigator.graph', steps: [] }],
   ['a graph step without label', { type: 'navigator.graph', steps: [{ id: 'a' }], edges: [] }],
-  ['a summary with a string count', { type: 'navigator.summary', modelCalls: '2' }],
+  ['a step with a summary that is no text', { type: 'navigator.step', id: 'walk', status: 'done', summary: 3 }],
   ['an undotted unknown event', { type: 'graph', steps: [], edges: [] }],
 ] as const) {
   test(`the reader refuses ${name}`, async () => {
@@ -64,7 +63,7 @@ for (const [name, event] of [
 
 const fold = (events: GraphEvent[]) => {
   let turn = pendingTurn('t', 'q', graphTurns.empty(), 0)
-  events.forEach((event, i) => { turn = applyEvent(graphTurns, turn, event, i + 1) })
+  events.forEach((event) => { turn = applyEvent(graphTurns, turn, event) })
   return turn
 }
 
@@ -72,11 +71,11 @@ test('steps go running → done per id and round; repeated rounds are separate r
   const turn = fold([
     GRAPH,
     { type: 'navigator.step', id: 'walk', status: 'running', round: 1 },
-    { type: 'navigator.step', id: 'walk', status: 'done', round: 1, durationMs: 40, summary: 'Hop 1: 3 entities' },
+    { type: 'navigator.step', id: 'walk', status: 'done', round: 1, summary: 'Hop 1: 3 entities' },
     { type: 'navigator.step', id: 'walk', status: 'running', round: 2 },
   ])
   assert.deepEqual(turn.insight.steps, [
-    { id: 'walk', round: 1, status: 'done', durationMs: 40, summary: 'Hop 1: 3 entities' },
+    { id: 'walk', round: 1, status: 'done', summary: 'Hop 1: 3 entities' },
     { id: 'walk', round: 2, status: 'running' },
   ])
   assert.equal(graphTurns.progress(turn.insight), 'Walk · round 2')
@@ -102,15 +101,13 @@ test('a failed or stopped turn interrupts the running steps and keeps the finish
     { type: 'navigator.step', id: 'anchor', status: 'done', round: 1 },
     { type: 'navigator.step', id: 'walk', status: 'running', round: 1 },
   ])
-  for (const ended of [failTurn(graphTurns, turn, 'boom', 9), stopTurn(graphTurns, turn, 9)]) {
+  for (const ended of [failTurn(graphTurns, turn, 'boom'), stopTurn(graphTurns, turn)]) {
     assert.deepEqual(ended.insight.steps.map((s) => s.status), ['done', 'interrupted'])
   }
 })
 
-test('the summary and the pipeline are kept', () => {
-  const turn = fold([GRAPH, { type: 'navigator.summary', modelCalls: 2, durationMs: 3120, entities: 23, evidence: 11 }])
-  assert.equal(turn.insight.summary?.modelCalls, 2)
-  assert.equal(turn.insight.summary?.durationMs, 3120)
+test('the pipeline is kept', () => {
+  const turn = fold([GRAPH])
   assert.deepEqual(turn.insight.graph?.steps.map((s) => s.id), ['understand', 'anchor', 'walk', 'answer'])
   assert.equal(graphTurns.hasInsight(turn.insight), true)
   assert.equal(graphTurns.hasInsight(graphTurns.empty()), false)

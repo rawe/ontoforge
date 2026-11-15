@@ -1,8 +1,8 @@
 /**
  * Pure helpers of the steps of every kind that runs on the tool loop
  * (agents, the Studio helper): how its tool events build an answer's tool
- * calls (with client-side timing — the stream carries none), what the
- * running answer is doing, and a short description of each call.
+ * calls, what the running answer is doing, and a short description of each
+ * call.
  *
  * No React, no I/O — unit-tested with `node --test`.
  */
@@ -18,13 +18,13 @@ import type { TurnModel } from '../conversation/chatModel.ts'
 export function toolCallTurns<P extends string>(prefix: P): TurnModel<ToolEvent<P>, ToolCall[]> {
   return {
     empty: () => [],
-    apply(calls, event, now) {
+    apply(calls, event) {
       if ('tool' in event && event.type === `${prefix}.tool_call`) {
-        return [...calls, { callId: event.callId, tool: event.tool, args: event.args, status: 'pending', startedAt: now }]
+        return [...calls, { callId: event.callId, tool: event.tool, args: event.args, status: 'pending' }]
       }
       if ('result' in event && event.type === `${prefix}.tool_result`) {
         return calls.map((call) =>
-          call.callId === event.callId ? { ...call, result: event.result, status: 'completed', finishedAt: now } : call)
+          call.callId === event.callId ? { ...call, result: event.result, status: 'completed' } : call)
       }
       return calls
     },
@@ -43,33 +43,6 @@ export type AgentEvent = ToolEvent<'agent'>
 
 /** An agent answer's insight is its tool calls. */
 export const agentTurns = toolCallTurns('agent')
-
-/** How long a call ran, in ms; undefined while running or when not timed. */
-export function callDuration(call: ToolCall): number | undefined {
-  return call.startedAt !== undefined && call.finishedAt !== undefined
-    ? Math.max(0, call.finishedAt - call.startedAt)
-    : undefined
-}
-
-/**
- * The time spent inside tools, in ms: the union of the calls' intervals,
- * so calls run in parallel count once and the model's thinking between
- * calls does not count. Undefined until every call finished.
- */
-export function toolTime(calls: readonly ToolCall[]): number | undefined {
-  if (calls.length === 0 || calls.some((c) => c.finishedAt === undefined || c.startedAt === undefined)) return undefined
-  const spans = calls.map((c) => [c.startedAt!, c.finishedAt!] as const).sort((a, b) => a[0] - b[0])
-  let total = 0
-  let [start, end] = spans[0]!
-  for (const [s, e] of spans.slice(1)) {
-    if (s > end) {
-      total += end - start
-      start = s
-    }
-    end = Math.max(end, e)
-  }
-  return total + end - start
-}
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 

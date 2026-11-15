@@ -10,6 +10,7 @@
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { StreamExecution } from "../../../../src/assistants/index.js";
 import { ValidationError } from "../../../../src/core/exceptions.js";
 
 const runtime = { ontologyKey: "one" };
@@ -62,24 +63,37 @@ describe("retriever list route", () => {
 });
 
 describe("retriever chat route", () => {
+  // A turn that streams its answer and records one step.
+  const answering = async (...args: unknown[]) => {
+    const execution = args[3] as StreamExecution;
+    await execution.diagnostics.work("retrieve", async () => undefined);
+    await execution.onToolEvent({ type: "delta", text: "Answer" });
+    return { reply: "Answer" };
+  };
+
   it("runs the saved retriever and keeps the stream contract", async () => {
-    pipeline.chat.mockImplementationOnce(async (...args: unknown[]) => {
-      const execution = args[3] as { onToolEvent(event: Record<string, unknown>): Promise<void> };
-      await execution.onToolEvent({ type: "delta", text: "Answer" });
-      return { reply: "Answer" };
-    });
+    pipeline.chat.mockImplementationOnce(answering);
     const response = await app.inject({ method: "POST", url: `${BASE}/ai/assistants/retrievers/find/chat`, payload: { message: "Who?", diagnostics: true } });
     expect(response.headers["content-type"]).toBe("application/x-ndjson");
     const events = response.body.trim().split("\n").map((line) => JSON.parse(line));
     expect(events).toEqual([
       { type: "thread", threadId: expect.any(String) },
+      { type: "diagnostics", steps: [{ index: 1, name: "retrieve", startMs: expect.any(Number), durationMs: expect.any(Number) }] },
       { type: "delta", text: "Answer" },
+      { type: "diagnostics", durationMs: expect.any(Number) },
       { type: "final", reply: "Answer" },
     ]);
     expect(pipeline.loadRunnableRetriever).toHaveBeenCalledWith("main", "find", runtime);
-    const [ran, message, thread, , diagnostics] = pipeline.chat.mock.calls[0]!;
-    expect([ran, message, diagnostics]).toEqual([agent, "Who?", true]);
+    const [ran, message, thread] = pipeline.chat.mock.calls[0]!;
+    expect([ran, message]).toEqual([agent, "Who?"]);
     expect(thread).toMatchObject({ threadId: events[0].threadId });
+  });
+
+  it("sends no diagnostics unless asked", async () => {
+    pipeline.chat.mockImplementationOnce(answering);
+    const response = await app.inject({ method: "POST", url: `${BASE}/ai/assistants/retrievers/find/chat`, payload: { message: "Who?" } });
+    const events = response.body.trim().split("\n").map((line) => JSON.parse(line));
+    expect(events.map((event) => event.type)).toEqual(["thread", "delta", "final"]);
   });
 
   it("refuses a configuration, a history, a follow-up token, unknown fields and a message over 2,000 characters", async () => {

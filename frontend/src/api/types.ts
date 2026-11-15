@@ -638,9 +638,6 @@ export interface ToolCall {
   args: Record<string, unknown>
   result?: unknown
   status: 'pending' | 'completed' | 'interrupted'
-  /** Client clock (ms) when the call and its result arrived; the stream carries no timing. */
-  startedAt?: number
-  finishedAt?: number
 }
 
 /* ------------------------------ authentication ------------------------------ */

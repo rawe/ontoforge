@@ -68,7 +68,7 @@ test('refs belong to one turn: a link to a card of another stream is refused', a
 
 const fold = (events: Parameters<typeof applyEvent>[2][]) => {
   let turn = pendingTurn('t', 'q', agentTurns.empty(), 0)
-  events.forEach((event, i) => { turn = applyEvent(agentTurns, turn, event as never, i + 1) })
+  events.forEach((event) => { turn = applyEvent(agentTurns, turn, event as never) })
   return turn
 }
 

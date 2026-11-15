@@ -1,9 +1,11 @@
 /**
  * The assistant module of the web client: the one import path for every
  * page and component outside it. Inside, the pure parts (`stream/`,
- * `conversation/` models, `steps/` models) import each other by relative
- * path, so `node --test` can load them; the API clients do the same for the
- * stream reader.
+ * `conversation/` models, `steps/` and `diagnostics/` models) import each
+ * other by relative path, so `node --test` can load them; the API clients
+ * do the same for the stream reader. Diagnostics are the shell's alone
+ * (`diagnostics/index.ts`): nothing of them is exported here, and an
+ * assistant kind gives the shell nothing for them.
  */
 
 export {
@@ -17,7 +19,6 @@ export {
 } from './stream/chatStream'
 export {
   DEFAULT_ASSISTANT,
-  formatDuration,
   hasDetail,
   type Turn,
   type TurnModel,

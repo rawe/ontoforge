@@ -20,7 +20,7 @@ interface EvidenceSidebarProps {
 
 /**
  * A graph kind's insight panel for one answer: the cards it found
- * (Entities), the same as a node-link view (Graph), and its pipeline with
+ * (Entities), the same as a node-link view (Graph) and its pipeline with
  * live status (Steps). It fills while the answer streams.
  */
 export function EvidenceSidebar({ ontologyKey, lensKey, turn, view, onView, selected, onSelect }: EvidenceSidebarProps) {

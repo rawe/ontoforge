@@ -1,14 +1,13 @@
 /**
  * The understand step's contract with the model: the structured-output
  * schema, the parsing that never trusts the output, the schema and input
- * the model reads, and the plain-words summary.
+ * the model reads, and the path in plain words.
  */
 
 import { describe, expect, it } from "vitest";
 
 import {
   intentSchema,
-  intentSummary,
   parseIntent,
   pathText,
   schemaText,
@@ -146,22 +145,7 @@ describe("what the model reads", () => {
   });
 });
 
-describe("the step summary", () => {
-  it("says what the walk looks for, where it starts and the path, in display names", () => {
-    expect(intentSummary(intent({
-      targets: ["project", "team"],
-      mentions: [{ text: "Lena", types: ["person"] }, { text: "Apollo", types: [] }],
-      path: [{ relation: "manages", direction: "outgoing" }, { relation: "works_on", direction: "incoming" }],
-    }), LENS)).toBe("Looking for Project, Team · starting at “Lena”, “Apollo” · path manages → works on (backwards)");
-  });
-
-  it("names a follow-up; a topic only without mentions or follow-up", () => {
-    expect(intentSummary(intent({ useFocus: true, search: "robots" }), LENS)).toBe("continuing from the previous answer");
-    expect(intentSummary(intent({ search: "robots" }), LENS)).toBe("topic “robots”");
-    expect(intentSummary(intent({ mentions: [{ text: "Lena", types: [] }], search: "robots" }), LENS)).toBe("starting at “Lena”");
-    expect(intentSummary(intent(), LENS)).toBe("No starting point in the question");
-  });
-
+describe("the path in words", () => {
   it("pathText lowercases display names and marks backward hops", () => {
     expect(pathText([
       { relation: "member_of", direction: "any" },

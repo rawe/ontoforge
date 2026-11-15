@@ -72,8 +72,8 @@ relation or a passage carries one short line:
 
 The line never shows the entry's text. The palette and the relation target picker use the
 [entity search](../capabilities/search.md#entity-search) over the lens's managed indices,
-so no relation line appears there; relation lines appear in a retriever's diagnostics and
-in the palette's question results, whose searches reach custom indices.
+so no relation line appears there; relation lines appear in the palette's question
+results and a retriever's Retrieve test, whose searches reach custom indices.
 
 ## Quick add
 

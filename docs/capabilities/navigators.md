@@ -146,12 +146,12 @@ navigator's current configuration.
 
 A turn streams its work before its answer:
 
-- **The pipeline** — its steps, which of them call the model, and the edges between them,
-  once, first.
-- **Each step** — when it starts and how it ends (done or failed), how long it took, a
-  one-line summary in plain words and display names only — "Path manages → member of: 6
-  entities · reached Person at hop 2" — and, for the walk, which round. A step the turn
-  does not need arrives once, as skipped, with a summary and no duration.
+- **The pipeline** — its steps and the edges between them, once, first.
+- **Each step** — when it starts and how it ends (done or failed), a one-line summary of
+  what it did in plain words and display names only — "Path manages → member of: 6
+  entities · reached Person at hop 2" — and, for the walk, which round. Understand ends
+  without a summary; what it understood comes with diagnostics, below. A step the turn
+  does not need arrives once, as skipped, with a summary.
 - **The entities** — [as every assistant reports them](threads.md#the-entities-a-turn-met):
   each with a ref unique in the turn, its type, label, identity when it has one, up to six fields, its role — anchor, reached by the walk, or carried over from the previous answer — its
   distance from the nearest anchor, why it is there ("Lena Fischer manages Kira Novak", or
@@ -159,8 +159,10 @@ A turn streams its work before its answer:
   and the relations between them, each naming the stored relation it stands for. They are
   sent after the anchors, after each walk and after the focus, each time replacing what the
   client had under the same refs.
-- **A summary** — model calls, duration, entities met, evidence, hops — once, before the
-  end of the turn.
+- **Diagnostics**, on request — its steps, each named by its step id, a repeated walk once
+  per round, [as every assistant reports them](threads.md#diagnostics); Understand's detail
+  is what it returned, [checked](#understand), as formatted JSON in type and relation keys
+  (`mentions`, `targets`, `path`, `useFocus` for referring back, `search` for the topic).
 
 Only evidence can be cited. The event format is in
 [../interfaces/](../interfaces/assistants-rest.md#navigator-list-and-chat).

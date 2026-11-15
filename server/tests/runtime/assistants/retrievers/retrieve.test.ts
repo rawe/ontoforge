@@ -40,7 +40,6 @@ import {
   answerSearches,
   boundContext,
   CONTEXT_CHARACTERS,
-  diagnosticResults,
   entityCards,
   filterValues,
   retrieve,
@@ -194,7 +193,6 @@ describe("sub-query search", () => {
     finds("person_employment", "chief technology officer ACME", ["ada", "Employment Role: CTO Company: ACME"]);
     const plan: Plan = { subQueries: [subQuery({ indices: ["person_employment", "person_home"], variants: ["chief technology officer ACME"] })], unsupportedReason: null };
     const retrieval = await retrieve(scope(), plan);
-    expect(retrieval.searchCalls).toBe(2);
     // Per index: the retriever's relation subset (works_for), all groups for person_home.
     expect(tree()).toBe(
       [
@@ -297,7 +295,6 @@ describe("sub-query search", () => {
     };
     const retrieval = await retrieve(scope(), plan);
     expect(rankEntries).not.toHaveBeenCalled();
-    expect(retrieval.searchCalls).toBe(0);
     // Each result carries the filter it satisfies, for the answer model.
     const fact = "lives in City Name: Berlin";
     const condition = { filter: "city", value: "Berlin", text: fact };
@@ -328,16 +325,8 @@ describe("sub-query search", () => {
     expect(boundContext(retrieval, { subQueries: [], unsupportedReason: null }, LENS, CONFIG).limitations).toContain(
       "Answer fields cut to 800 characters: Email.",
     );
-    const rows = diagnosticResults(retrieval);
-    expect(rows.map((row) => [row.entityId, row.subQuery])).toEqual([["ada", 0], ["ada", 1], ["bob", 0], ["eve", 1]]);
-    expect(rows[0]).toEqual({
-      entityId: "ada",
-      entityType: "person",
-      label: "Ada",
-      subQuery: 0,
-      matched: expect.objectContaining({ index: "person_employment", partKind: "relation" }),
-      answerFields: { name: "Ada", email: "ada@acme.test" },
-    });
+    expect(retrieval.items[0]).toMatchObject({ entityType: "person", label: "Ada", fields: { name: "Ada", email: "ada@acme.test" } });
+    expect(retrieval.items[0]!.matches[0]!.matched).toEqual(expect.objectContaining({ index: "person_employment", partKind: "relation" }));
   });
 
   it("compiles the whole plan into one tree: variants fused, a filter and a previous reference pushed down and appended", async () => {
@@ -472,7 +461,7 @@ describe("fusion and context", () => {
       entity: { _id: `e${i}`, name: "n".repeat(400) },
     }));
     const plan: Plan = { subQueries: [subQuery({})], unsupportedReason: null };
-    const context = boundContext({ items, limitations: [], searchCalls: 0, searchMs: 0, cutFields: [] }, plan, LENS, CONFIG);
+    const context = boundContext({ items, limitations: [], cutFields: [] }, plan, LENS, CONFIG);
     expect(JSON.stringify({ results: context.results }).length).toBeLessThanOrEqual(CONTEXT_CHARACTERS);
     expect(context.results.length + context.omitted).toBe(40);
     expect(context.omitted).toBeGreaterThan(0);
@@ -492,7 +481,7 @@ describe("fusion and context", () => {
     });
     const items = [item("ada", "Ada"), item("big", "b".repeat(CONTEXT_CHARACTERS)), item("eve", "Eve")];
     const plan: Plan = { subQueries: [subQuery({})], unsupportedReason: null };
-    const context = boundContext({ items, limitations: [], searchCalls: 0, searchMs: 0, cutFields: [] }, plan, LENS, CONFIG);
+    const context = boundContext({ items, limitations: [], cutFields: [] }, plan, LENS, CONFIG);
     expect(context.omitted).toBe(1);
     expect(context.results.map((result) => result.label)).toEqual(["Ada", "Eve"]);
     expect(context.included.map((included) => included.entityId)).toEqual(["ada", "eve"]);

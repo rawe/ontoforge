@@ -24,8 +24,8 @@ export interface GraphChatProps {
   remember: boolean
   /**
    * `toggle`: a "Show evidence" switch (remembered per kind, on by
-   * default) shows or hides the sidebar (the Workbench); `always`: it is
-   * always shown (the Studio test panel).
+   * default) shows or hides the sidebar (the Workbench); `always`: the
+   * sidebar is always shown (the Studio test panel).
    */
   sidebar: 'toggle' | 'always'
   send: (body: ChatRequest, onEvent: (event: SharedEvent | GraphEvent) => void, signal: AbortSignal) => Promise<void>

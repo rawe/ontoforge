@@ -1,7 +1,9 @@
 /**
  * One chat turn as a stream, shared by every assistant kind: bounded
- * writes, the shared events (`thread` first, then the kind's events, one
- * terminal `final` or `error`), disconnect cancellation, and the turn's
+ * writes, the shared events (`thread` first, then the kind's events and,
+ * when the chat asked for them, `diagnostics` (`diagnostics.ts`): each
+ * step, then the turn's time right before the one terminal `final` or
+ * `error`), disconnect cancellation, and the turn's
  * thread: the graph runs on a local saver seeded from the thread's last
  * published state, which is published on success and dropped on cancel or
  * failure, the lease released. The host owns the request: it resolves the
@@ -12,6 +14,7 @@ import { once } from "node:events";
 import type { Writable } from "node:stream";
 
 import { ConflictError, ModelError, NotFoundError, StoreError, ValidationError } from "../core/exceptions.js";
+import { Diagnostics } from "./diagnostics.js";
 import { threadBusy, threadNotFound } from "./threads/access.js";
 import { TURN_HEARTBEAT_MS, type Artifact, type GraphThread, type ThreadStore, type Turn } from "./threads/threadStore.js";
 import { TurnSaver } from "./threads/turnSaver.js";
@@ -22,12 +25,16 @@ export type StreamEvent = { type: string; [key: string]: unknown };
 export interface StreamExecution {
   signal: AbortSignal;
   onToolEvent: (event: StreamEvent) => Promise<void>;
+  /** The turn's steps; sent as `diagnostics` when the chat asked. */
+  diagnostics: Diagnostics;
 }
 
 /** The turn a chat runs, its lease already taken (`threads/access.ts`). */
 export interface ChatTurn {
   threads: ThreadStore;
   turn: Turn;
+  /** Whether the chat asked for `diagnostics` events. */
+  diagnostics?: boolean;
 }
 
 /** Where a turn's events go: the response the host has not opened yet. */
@@ -75,6 +82,8 @@ export async function streamTurn(
 ): Promise<void> {
   const { threads, turn: owned } = turn;
   const { threadId } = owned;
+  // The turn begins here, so its time includes loading and publishing it.
+  const diagnostics = new Diagnostics(turn.diagnostics === true ? (event) => write(event) : undefined);
   // The heartbeat keeps the lease while the turn runs. A lost lease does not
   // abort the turn: its publish is refused anyway.
   const heartbeat = setInterval(() => {
@@ -135,7 +144,7 @@ export async function streamTurn(
   };
   try {
     await write({ type: "thread", threadId });
-    const result = await run({ signal, onToolEvent: write }, { checkpointer: saver, threadId });
+    const result = await run({ signal, onToolEvent: write, diagnostics }, { checkpointer: saver, threadId });
     const artifacts = (result.artifacts as Artifact[] | undefined) ?? [];
     await saver.keepArtifacts(artifacts);
     const published = await threads.publish(owned, saver.dump());
@@ -143,6 +152,7 @@ export async function streamTurn(
     clearInterval(heartbeat);
     if (published === "taken") throw threadBusy();
     if (published === "gone") throw threadNotFound();
+    await diagnostics.total();
     await write({ type: "final", reply: result.reply, ...(artifacts.length > 0 ? { artifacts } : {}) });
   } catch (error) {
     // A cancelled or failed turn leaves nothing in its thread.
@@ -152,6 +162,8 @@ export async function streamTurn(
       // Expected errors describe themselves to the client; anything else is
       // logged here, as the app's error handler does for plain requests.
       if (payload.code === "INTERNAL_ERROR") console.error("Chat stream failed:", error);
+      // The turn's time goes first; a failure to send it does not keep the error back.
+      try { await diagnostics.total(); } catch { /* the error follows */ }
       try { await write({ type: "error", error: payload }); }
       catch { raw.destroy(); }
     }

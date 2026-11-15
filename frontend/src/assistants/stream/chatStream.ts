@@ -5,13 +5,15 @@
  * `/api/ontologies/{ontologyKey}/model/ai`:
  * one message per request (`{message, threadId?}`), its NDJSON stream read
  * by one reader for the shared events — `thread` first, `delta`,
- * `entities`, one terminal `final` or `error` — with the kind's own events
- * (`<kind>.<event>`) checked by the kind, and a thread read back.
+ * `entities`, `diagnostics` when asked, one terminal `final` or `error` —
+ * with the kind's own events (`<kind>.<event>`) checked by the kind, and a
+ * thread read back.
  */
 import { record } from '../../api/checks.ts'
 import { checkEntities, type EntitiesEvent } from '../../api/entities.ts'
 import { ApiError, parseError, request } from '../../api/http.ts'
 import type { AssistantThread } from '../../api/types.ts'
+import { checkDiagnostics, type DiagnosticsEvent } from '../diagnostics/events.ts'
 import type { Binding } from '../types.ts'
 
 export interface StreamError { code: string; message: string; details?: Record<string, unknown> }
@@ -21,6 +23,7 @@ export type SharedEvent =
   | { type: 'thread'; threadId: string }
   | { type: 'delta'; text: string }
   | EntitiesEvent
+  | DiagnosticsEvent
   | { type: 'final'; reply: string }
   | { type: 'error'; error: StreamError }
 
@@ -84,7 +87,8 @@ export async function readNdjsonStream(
 /**
  * One assistant turn: `thread` exactly once and first, `delta` text that the
  * `final` reply must match, `entities` whose links join cards of this
- * turn, one terminal `final` or `error`; every other event goes to the
+ * turn, `diagnostics` checked, one terminal
+ * `final` or `error`; every other event goes to the
  * kind's reader. Each checked event reaches `onEvent`.
  */
 export async function readAssistantStream<K>(
@@ -114,6 +118,9 @@ export async function readAssistantStream<K>(
         break
       case 'entities':
         event = checkEntities(e, refs)
+        break
+      case 'diagnostics':
+        event = checkDiagnostics(e)
         break
       case 'final':
         if (typeof e.reply !== 'string' || (streamed && streamed !== e.reply)) throw new Error('Invalid final answer')
@@ -193,6 +200,8 @@ export interface ChatRequest {
   message: string
   /** Continue this thread; without one the message starts a new thread. */
   threadId?: string
+  /** Ask for the answer's `diagnostics` events. */
+  diagnostics?: boolean
 }
 
 /** Send one message and read its turn. Refusals before the stream opens throw an `ApiError`. */

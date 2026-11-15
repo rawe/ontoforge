@@ -1,23 +1,18 @@
 /**
  * Pure helpers of the retriever editor, test panel and Workbench chat:
  * config v2 draft edits, client-side checks, execution rule, filter paths
- * and diagnostics formatting. No React, no runtime imports — unit-tested
+ * and the names an answer's phases show with. No React, no runtime imports — unit-tested
  * with `node --test`.
  */
 import type {
-  PlannedFilter,
-  PlanSubQuery,
   Retriever,
   RetrieverConfig,
   RetrieverFilter,
-  RetrieverDiagnostics,
   RetrieverKindEvent,
   RetrieverPathStep,
-  RetrieverResult,
-  SearchMode,
 } from '@/api/retrievers'
 import type { SearchCatalogEntry, ValidationError } from '@/api/types'
-import type { TurnModel, TurnStatus } from '../../../assistants/conversation/chatModel.ts'
+import type { TurnModel } from '../../../assistants/conversation/chatModel.ts'
 
 /** Client defaults (the server has no catalog endpoint for them). */
 export const DEFAULT_THRESHOLD = 0.35
@@ -205,7 +200,7 @@ export function newFilter(config: RetrieverConfig, entityType: string, choice: P
   return { id: uniqueId(base, config.filters.map((f) => f.id)), entityType, path: choice.path, field }
 }
 
-/** "Person · works for → Company · City" — the readable form of a filter, also for diagnostics. */
+/** "Person · works for → Company · City" — the readable form of a filter, also in a plan. */
 export function filterLabel(filter: RetrieverFilter, schema: RetrieverSchema | undefined): string {
   const choice = schema === undefined ? undefined : filterChoices(schema, filter.entityType).find((c) => c.key === pathKey(filter.path))
   if (choice === undefined) return filter.id
@@ -280,101 +275,22 @@ export function importProblem(body: unknown, existingKeys: readonly string[]): s
   return null
 }
 
-/* -------------------------------- diagnostics ------------------------------ */
+/* ---------------------------------- answers --------------------------------- */
 
-/** Display names of chat phases and timings; unknown names show as sent. */
+/** Display names of the phases a running answer goes through; unknown names show as sent. */
 export const phaseNames: Record<string, string> = {
-  plan: 'Plan question', validation: 'Validate plan', retrieve: 'Search indices', context: 'Build answer context',
-  answer: 'Write answer', firstDelta: 'First answer text', total: 'Total', schemaRead: 'Read schema',
-  planModel: 'Planner model', search: 'Search calls', answerModel: 'Response model',
+  plan: 'Plan question', retrieve: 'Search indices', answer: 'Write answer',
 }
 export const phaseName = (phase: string) => phaseNames[phase] ?? phase
 
-/** Heading of one model call in the diagnostics: the planner (possibly repeated once) or the response model. */
-export const modelCallName = (phase: string) =>
-  ({ plan: 'Planner', replan: 'Planner (repeated)', answer: 'Response' } as Record<string, string>)[phase] ?? phaseName(phase)
-
-/** The sequential steps of one question; every other timing is a part of one of them. */
-export const STEPS = ['plan', 'retrieve', 'answer'] as const
-
-export type { TurnStatus }
-
-/**
- * One step's timing cell: its duration; while the turn runs, "…"; in a
- * failed or cancelled turn the first step without a timing "stopped" and
- * later ones "not run" — a finished turn never looks pending.
- */
-export function stepText(timings: Record<string, number>, step: (typeof STEPS)[number], status: TurnStatus): string {
-  const ms = timings[step]
-  if (ms !== undefined) return formatMs(ms)
-  if (status === 'pending') return '…'
-  if (status === 'complete') return 'not run'
-  const firstMissing = STEPS.find((key) => timings[key] === undefined)
-  return step === firstMissing ? 'stopped' : 'not run'
-}
-
-/** Model and search call counts; model calls fall back to the traced calls, a finished turn without searches made none. */
-export function callCounts(meta: RetrieverDiagnostics, status: TurnStatus): { model: number | null; search: number | null } {
-  return {
-    model: meta.llmCalls ?? (meta.modelIO !== undefined || status !== 'pending' ? (meta.modelIO?.length ?? 0) : null),
-    search: meta.searchCalls ?? (status === 'pending' ? null : 0),
-  }
-}
-
-export const formatMs = (ms: number) => ms < 1000 ? `${ms.toFixed(ms < 10 ? 1 : 0)} ms` : `${(ms / 1000).toFixed(2)} s`
-
-export const MODE_LABEL: Record<SearchMode, string> = { semantic: 'by meaning', keyword: 'by keywords', hybrid: 'by meaning and keywords' }
-
-/** A retriever answer's insight: its diagnostics, and the phase it is in while it runs. */
-export interface RetrieverInsight { diagnostics: RetrieverDiagnostics; phase?: string }
+/** A retriever answer's insight: the phase it is in while it runs. */
+export interface RetrieverInsight { phase?: string }
 
 /** How the retriever's own events build an answer's insight. */
 export const retrieverTurns: TurnModel<RetrieverKindEvent, RetrieverInsight> = {
-  empty: () => ({ diagnostics: {} }),
-  apply(insight, event) {
-    switch (event.type) {
-      case 'retriever.phase':
-        return event.status === 'start' ? { ...insight, phase: event.phase } : insight
-      case 'retriever.diagnostics':
-        return { ...insight, diagnostics: mergeDiagnostics(insight.diagnostics, event) }
-    }
-  },
-  hasInsight: (insight) => Object.keys(insight.diagnostics).length > 0,
+  empty: () => ({}),
+  apply: (insight, event) => (event.status === 'start' ? { ...insight, phase: event.phase } : insight),
+  // The running phase is the live detail, nothing for the side panel.
+  hasInsight: () => false,
   progress: (insight) => (insight.phase === undefined ? undefined : phaseName(insight.phase)),
 }
-
-/** Merge one `retriever.diagnostics` event into a turn's diagnostics: timings and model calls accumulate, limitations dedupe. */
-export function mergeDiagnostics(current: RetrieverDiagnostics, data: RetrieverDiagnostics): RetrieverDiagnostics {
-  return {
-    ...current, ...data,
-    timings: { ...current.timings, ...data.timings },
-    modelIO: data.modelIO ? [...(current.modelIO ?? []).filter((call) => !data.modelIO?.some((next) => next.phase === call.phase)), ...data.modelIO] : current.modelIO,
-    limitations: [...new Set([...(current.limitations ?? []), ...(data.limitations ?? [])])],
-  }
-}
-
-export const indexName = (key: string, catalog: readonly SearchCatalogEntry[] | undefined) =>
-  catalog?.find((entry) => entry.key === key)?.name ?? key
-
-/** A relation group's label in the given indices, else the relation type's display name. */
-export function relationName(key: string, indices: readonly string[], catalog: readonly SearchCatalogEntry[] | undefined, schema: RetrieverSchema | undefined): string {
-  const label = catalog?.filter((entry) => indices.includes(entry.key)).flatMap((entry) => entry.relations)
-    .find((group) => group.relationType === key && group.label !== null)?.label
-  return label ?? schema?.relationTypes.find((r) => r.key === key)?.displayName ?? key
-}
-
-/** Results per planned sub-query, in plan order; results of an unknown sub-query come last. */
-export function resultsBySubQuery(meta: RetrieverDiagnostics): { subQuery: number; plan: PlanSubQuery | null; results: RetrieverResult[] }[] {
-  const planned = meta.plan?.subQueries ?? []
-  const groups = new Map<number, RetrieverResult[]>()
-  for (const result of meta.results ?? []) groups.set(result.subQuery, [...(groups.get(result.subQuery) ?? []), result])
-  return [...groups.keys()].sort((a, b) => a - b).map((subQuery) => ({ subQuery, plan: planned[subQuery] ?? null, results: groups.get(subQuery) ?? [] }))
-}
-
-/** "Person · City = Berlin (from “in Berlin”)" for one planned filter, from the definition it carries. */
-export function plannedFilterText(filter: PlannedFilter, schema: RetrieverSchema | undefined): string {
-  return `${filterLabel(filter, schema)} = ${filter.value}${filter.quote ? ` (from “${filter.quote}”)` : ''}`
-}
-
-/** A result's display label: its label, else the truncated id. */
-export const resultLabel = (result: RetrieverResult) => result.label ?? result.entityId.slice(0, 12)

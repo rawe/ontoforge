@@ -34,12 +34,11 @@ import { Board, type BoardNode } from "./board.js";
 import { allowedAnchors, allowedRelations, type NavigatorConfig } from "./config.js";
 import { lensReader } from "./reader.js";
 import {
-  intentSchema, intentSummary, parseIntent, pathText, schemaText, understandInput, UNDERSTAND, type Intent,
+  intentSchema, parseIntent, pathText, schemaText, understandInput, UNDERSTAND, type Intent,
 } from "./understand.js";
 import { anchor, explore, focus, followPath, type FocusEntity, type WalkResult } from "./walk.js";
 
-/** The event prefix and the noun: `navigator.graph`, `navigator.step`,
- * `navigator.summary`. */
+/** The event prefix and the noun: `navigator.graph`, `navigator.step`. */
 export const NAVIGATOR_EVENT = "navigator";
 
 /** The built-in default's runtime list description. */
@@ -132,18 +131,18 @@ export async function run(turn: NavigatorTurn): Promise<string> {
     .addNode("understand", async (state) => {
       history = historyOf(state.messages.slice(0, -1));
       previous = state.carried ?? [];
-      intent = await trace.step("understand", async (report) => {
-        const raw = await decide(
-          model, trace, "navigator_intent",
-          intentSchema(Object.keys(lens.entityTypes), [...anchorTypes], [...relations]),
-          UNDERSTAND,
-          understandInput(schemaText(lens, relations, anchorTypes), message, history, previous),
-          signal,
-        );
-        const parsed = parseIntent(raw, lens, relations, anchorTypes);
-        report.summary = intentSummary(parsed, lens);
-        return parsed;
-      });
+      // What understand decided is its diagnostics detail, not its step summary.
+      intent = await trace.step("understand", () => decide(
+        model, trace.diagnostics.model("understand"), "navigator_intent",
+        intentSchema(Object.keys(lens.entityTypes), [...anchorTypes], [...relations]),
+        UNDERSTAND,
+        understandInput(schemaText(lens, relations, anchorTypes), message, history, previous),
+        signal,
+        (raw) => {
+          const parsed = parseIntent(raw, lens, relations, anchorTypes);
+          return { value: parsed, detail: JSON.stringify(parsed, null, 2) };
+        },
+      ));
       return { round: 0 };
     })
     .addNode("anchor", async () => {
@@ -223,9 +222,9 @@ export async function run(turn: NavigatorTurn): Promise<string> {
     }, ["walk", "focus"])
     .addNode("answer", async () => {
       reply = await trace.step("answer", async (report) => {
-        trace.modelCalls++;
-        const { text } = await streamAnswer(
+        const text = await streamAnswer(
           model,
+          trace.diagnostics.model("answer"),
           config.instructions ? `${ANSWER}\n\nADDITIONAL INSTRUCTIONS:\n${config.instructions}` : ANSWER,
           answerInput(board, evidence, message, history, notes),
           signal,
@@ -259,10 +258,5 @@ export async function run(turn: NavigatorTurn): Promise<string> {
     { messages: [new HumanMessage(message)] },
     { signal, configurable: { thread_id: thread.threadId } },
   );
-  await trace.summary({
-    entities: board.size,
-    evidence: evidence.length,
-    hops: walks.reduce((max, w) => Math.max(max, w.hops), 0),
-  });
   return reply;
 }

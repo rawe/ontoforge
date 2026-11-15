@@ -25,7 +25,10 @@
  *
  * A model call that fails, or whose answer is cut off, ends the turn with a
  * `ModelError` naming the reason (`core/ai.ts`). A turn that reaches its
- * step limit without an answer ends with TOO_MANY_STEPS.
+ * step limit without an answer ends with TOO_MANY_STEPS. Every model call
+ * and every tool run, failed or not, is a step of the turn's diagnostics
+ * (`diagnostics.ts`): a model step without a name, a work step named by the
+ * tool.
  *
  * Every call streams `<kind>.tool_call`, then `<kind>.tool_result`, then
  * the tool's presented events (ADR 0021). A failure the tool expects, or
@@ -44,6 +47,7 @@ import { z } from "zod";
 
 import { conversationCaching, cutOff, modelFailure } from "../core/ai.js";
 import { ModelError, ValidationError } from "../core/exceptions.js";
+import { Diagnostics, messageEnd } from "./diagnostics.js";
 import type { StreamExecution } from "./session.js";
 import { PERSON_TEXT } from "./threads/access.js";
 import type { GraphThread } from "./threads/threadStore.js";
@@ -176,6 +180,7 @@ function engineTool<C>(
   def: Tool<C>,
   run: PreparedRun<C>,
   execution: Partial<StreamExecution>,
+  diagnostics: Diagnostics,
   serial: ReturnType<typeof queue>,
 ): StructuredToolInterface {
   const { signal, onToolEvent } = execution;
@@ -208,20 +213,23 @@ function engineTool<C>(
     let result: unknown;
     await onToolEvent?.({ type: `${run.kind}.tool_call`, callId, tool: name, args });
     signal?.throwIfAborted();
-    let output: ToolMessage;
-    try {
-      output = await baseInvoke(isToolCall ? input : {
-        type: "tool_call", name, args, id: callId,
-      }, config) as ToolMessage;
-      result = output.artifact;
-    } catch (error) {
-      if (!(error instanceof ToolInputParsingException)) throw error;
-      result = { error: `Invalid arguments for ${name}: ${argumentFault(error.message)}` };
-      output = new ToolMessage({
-        content: JSON.stringify(result), name,
-        tool_call_id: isToolCall ? String(input.id ?? "") : callId,
-      });
-    }
+    // The tool's run is a work step; an `{error}` result is a result, not a failure.
+    const output = await diagnostics.work(name, async () => {
+      try {
+        const message = await baseInvoke(isToolCall ? input : {
+          type: "tool_call", name, args, id: callId,
+        }, config) as ToolMessage;
+        result = message.artifact;
+        return message;
+      } catch (error) {
+        if (!(error instanceof ToolInputParsingException)) throw error;
+        result = { error: `Invalid arguments for ${name}: ${argumentFault(error.message)}` };
+        return new ToolMessage({
+          content: JSON.stringify(result), name,
+          tool_call_id: isToolCall ? String(input.id ?? "") : callId,
+        });
+      }
+    });
     signal?.throwIfAborted();
     await onToolEvent?.({ type: `${run.kind}.tool_result`, callId, result });
     for (const event of def.present?.(args, result, run.ctx) ?? []) {
@@ -315,10 +323,11 @@ export async function runToolLoop<C>(
 ): Promise<{ reply: string }> {
   const { signal } = execution;
   signal?.throwIfAborted();
+  const diagnostics = execution.diagnostics ?? new Diagnostics();
   const { model } = run;
   const caching = conversationCaching(model);
   const serial = queue();
-  const tools = run.tools.map((def) => engineTool(def, run, execution, serial));
+  const tools = run.tools.map((def) => engineTool(def, run, execution, diagnostics, serial));
   const config = { configurable: { thread_id: thread.threadId } };
   const kept = ((await thread.checkpointer.getTuple(config))?.checkpoint.channel_values ?? {}) as z.infer<typeof ThreadContext>;
   const stateSeen = stateDigest(run.state);
@@ -338,6 +347,7 @@ export async function runToolLoop<C>(
     stateSchema: ThreadContext,
     wrapModelCall: async (request, handler) => {
       const messages = request.messages.map(withoutReasoning);
+      const call = diagnostics.model();
       let response;
       try {
         // No tools: a plain model call is the same conversation without the
@@ -346,12 +356,15 @@ export async function runToolLoop<C>(
           ? await model.invoke([request.systemMessage, ...messages], { signal, ...caching })
           : await handler({ ...request, messages, modelSettings: { ...request.modelSettings, ...caching } });
       } catch (error) {
+        await call.failed();
         signal?.throwIfAborted();
         console.warn(`Model call failed: ${error instanceof Error ? error.message : String(error)}`);
         throw modelFailure(error);
       }
+      const answer = AIMessage.isInstance(response) ? response : undefined;
+      await call.done(answer === undefined ? {} : messageEnd(answer));
       // An answer cut off is no answer: its text or a tool call's arguments end mid-way.
-      const cut = AIMessage.isInstance(response) ? cutOff(response.response_metadata) : undefined;
+      const cut = answer === undefined ? undefined : cutOff(answer.response_metadata);
       if (cut !== undefined) throw cut;
       return response;
     },

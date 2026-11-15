@@ -1,4 +1,3 @@
-import { useRuntimeSchema, useSearchCatalog } from '@/api/hooks'
 import { AssistantTab } from '@/components/assistants/AssistantTab'
 import { RetrieverChat } from './RetrieverChat'
 
@@ -7,9 +6,6 @@ import { RetrieverChat } from './RetrieverChat'
  * retrievers.
  */
 export function RetrieverTab({ ontologyKey, lensKey }: { ontologyKey: string; lensKey: string }) {
-  const catalog = useSearchCatalog(ontologyKey, lensKey)
-  const schema = useRuntimeSchema(ontologyKey, lensKey)
-
   return (
     <AssistantTab ontologyKey={ontologyKey} lensKey={lensKey} kind="retrievers">
       {(retriever, picker) => (
@@ -21,10 +17,7 @@ export function RetrieverTab({ ontologyKey, lensKey }: { ontologyKey: string; le
           name={retriever.name}
           description={retriever.description}
           blockedReason={null}
-          diagnostics="toggle"
           remember
-          catalog={catalog.data}
-          schema={schema.data}
           picker={picker}
         />
       )}

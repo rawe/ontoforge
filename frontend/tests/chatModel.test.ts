@@ -6,45 +6,41 @@ import {
   elapsedSeconds,
   endText,
   failTurn,
-  formatDuration,
+  hasDetail,
   inspectedTurn,
   pendingTurn,
   restoredTurns,
   stopTurn,
-  turnDuration,
   type Turn,
   type TurnModel,
 } from '../src/assistants/conversation/chatModel.ts'
 import {
   agentTurns,
-  callDuration,
   toolCallCounts,
   toolCallSummary,
   toolCallTurns,
   toolError,
   toolResultMore,
-  toolTime,
 } from '../src/assistants/steps/toolCallModel.ts'
 import { retrieverTurns, type RetrieverInsight } from '../src/components/assistants/retrievers/retrieverModel.ts'
 import type { ToolCall } from '../src/api/types.ts'
 
-const agentTurn = (now = 0) => pendingTurn('t', 'q', agentTurns.empty(), now)
-const retrieverTurn = (now = 0) => pendingTurn('t', 'q', retrieverTurns.empty(), now)
+const agentTurn = () => pendingTurn('t', 'q', agentTurns.empty(), 0)
+const retrieverTurn = () => pendingTurn('t', 'q', retrieverTurns.empty(), 0)
 
 /* --------------------------------- shared ---------------------------------- */
 
 test('shared events build the answer for every kind: deltas append, final replaces and ends', () => {
   const flow = <E extends { type: string }, I>(model: TurnModel<E, I>) => {
     const turn = pendingTurn('t', 'q', model.empty(), 0)
-    let t = applyEvent(model, turn, { type: 'thread', threadId: 'th' }, 1)
+    let t = applyEvent(model, turn, { type: 'thread', threadId: 'th' })
     assert.equal(t, turn)
-    t = applyEvent(model, t, { type: 'delta', text: 'Hel' }, 2)
-    t = applyEvent(model, t, { type: 'delta', text: 'lo' }, 3)
+    t = applyEvent(model, t, { type: 'delta', text: 'Hel' })
+    t = applyEvent(model, t, { type: 'delta', text: 'lo' })
     assert.equal(t.reply, 'Hello')
     assert.equal(t.status, 'pending')
-    t = applyEvent(model, t, { type: 'final', reply: 'Hello' }, 10)
+    t = applyEvent(model, t, { type: 'final', reply: 'Hello' })
     assert.equal(t.status, 'complete')
-    assert.equal(turnDuration(t), 10)
     assert.equal(endText(t), null)
     assert.equal(model.hasInsight(t.insight), false)
   }
@@ -52,22 +48,46 @@ test('shared events build the answer for every kind: deltas append, final replac
   flow(retrieverTurns)
 })
 
+test('diagnostics events merge on the turn beside the kind\'s insight, for every kind; a failed turn keeps them', () => {
+  let t = agentTurn()
+  assert.equal(t.diagnostics, undefined)
+  assert.equal(hasDetail(t, agentTurns.hasInsight), false)
+  t = applyEvent(agentTurns, t, { type: 'diagnostics', steps: [{ index: 1, model: true, startMs: 2, durationMs: 40, usage: { input: 10, output: 0 } }] })
+  t = applyEvent(agentTurns, t, { type: 'agent.tool_call', callId: 'c', tool: 'search', args: {} })
+  t = applyEvent(agentTurns, t, { type: 'diagnostics', steps: [{ index: 2, name: 'search', startMs: 45, durationMs: 5 }] })
+  t = applyEvent(agentTurns, t, { type: 'agent.tool_result', callId: 'c', result: [] })
+  t = applyEvent(agentTurns, t, { type: 'diagnostics', steps: [{ index: 3, model: true, startMs: 52, durationMs: 5, failed: true }] })
+  t = applyEvent(agentTurns, t, { type: 'diagnostics', durationMs: 60 })
+  t = applyEvent(agentTurns, t, { type: 'error', error: { code: 'MODEL_ERROR', message: 'down' } })
+  assert.equal(t.status, 'failed')
+  assert.equal(t.insight.length, 1)
+  assert.deepEqual(t.diagnostics, {
+    steps: [
+      { index: 1, model: true, startMs: 2, durationMs: 40, usage: { input: 10, output: 0 } },
+      { index: 2, name: 'search', startMs: 45, durationMs: 5 },
+      { index: 3, model: true, startMs: 52, durationMs: 5, failed: true },
+    ],
+    durationMs: 60,
+  })
+  // Diagnostics are not the side panel's: they alone give it nothing to show.
+  assert.equal(hasDetail({ ...agentTurn(), diagnostics: {} }, agentTurns.hasInsight), false)
+})
+
 test('an error event fails the turn and keeps the partial answer', () => {
-  let t = applyEvent(retrieverTurns, retrieverTurn(), { type: 'delta', text: 'part' }, 1)
-  t = applyEvent(retrieverTurns, t, { type: 'error', error: { code: 'X', message: 'model down' } }, 5)
+  let t = applyEvent(retrieverTurns, retrieverTurn(), { type: 'delta', text: 'part' })
+  t = applyEvent(retrieverTurns, t, { type: 'error', error: { code: 'X', message: 'model down' } })
   assert.equal(t.status, 'failed')
   assert.equal(t.reply, 'part')
   assert.equal(endText(t), 'Incomplete: model down')
-  assert.equal(turnDuration(t), 5)
 })
 
 test('a stopped turn says so, without a reason', () => {
-  const t = stopTurn(retrieverTurns, retrieverTurn(), 4)
+  const t = stopTurn(retrieverTurns, retrieverTurn())
   assert.equal(t.status, 'failed')
   assert.equal(t.stopped, true)
   assert.equal(t.error, undefined)
   assert.equal(endText(t), STOPPED_TEXT)
-  assert.equal(endText(failTurn(retrieverTurns, retrieverTurn(), 'Thread is busy', 4)), 'Incomplete: Thread is busy')
+  assert.equal(endText(failTurn(retrieverTurns, retrieverTurn(), 'Thread is busy')), 'Incomplete: Thread is busy')
 })
 
 test('restoredTurns pairs each question with the answer after it', () => {
@@ -105,40 +125,35 @@ test('inspectedTurn picks the chosen turn, else the latest with insight', () => 
   assert.equal(inspectedTurn([], null, agentTurns.hasInsight), undefined)
 })
 
-test('formatDuration and elapsed seconds', () => {
-  assert.equal(formatDuration(412.4), '412 ms')
-  assert.equal(formatDuration(2440), '2.4 s')
+test('elapsed seconds', () => {
   assert.equal(elapsedSeconds(1000, 13999), 12)
   assert.equal(elapsedSeconds(1000, 500), 0)
 })
 
 /* ---------------------------------- agent ---------------------------------- */
 
-test('agent: tool events are timed and matched out of order by callId; the running tool is the live detail', () => {
+test('agent: tool events are matched out of order by callId; the running tool is the live detail', () => {
   let turn = agentTurn()
-  turn = applyEvent(agentTurns, turn, { type: 'agent.tool_call', callId: 'a', tool: 'get_entity', args: { entity_id: 'x' } }, 100)
-  turn = applyEvent(agentTurns, turn, { type: 'agent.tool_call', callId: 'b', tool: 'search', args: { query: 'q' } }, 110)
+  turn = applyEvent(agentTurns, turn, { type: 'agent.tool_call', callId: 'a', tool: 'get_entity', args: { entity_id: 'x' } })
+  turn = applyEvent(agentTurns, turn, { type: 'agent.tool_call', callId: 'b', tool: 'search', args: { query: 'q' } })
   assert.equal(agentTurns.progress(turn.insight), 'Get entity, Search')
-  turn = applyEvent(agentTurns, turn, { type: 'agent.tool_result', callId: 'b', result: { ran: [], items: [], limitations: [] } }, 150)
+  turn = applyEvent(agentTurns, turn, { type: 'agent.tool_result', callId: 'b', result: { ran: [], items: [], limitations: [] } })
   assert.equal(agentTurns.progress(turn.insight), 'Get entity')
-  turn = applyEvent(agentTurns, turn, { type: 'agent.tool_result', callId: 'a', result: { _id: 'x' } }, 400)
+  turn = applyEvent(agentTurns, turn, { type: 'agent.tool_result', callId: 'a', result: { _id: 'x' } })
   assert.equal(agentTurns.progress(turn.insight), undefined)
-  turn = applyEvent(agentTurns, turn, { type: 'final', reply: 'done' }, 410)
+  turn = applyEvent(agentTurns, turn, { type: 'final', reply: 'done' })
   assert.equal(turn.status, 'complete')
   assert.equal(turn.reply, 'done')
-  assert.deepEqual(turn.insight.map((c) => [c.callId, c.status, callDuration(c)]), [['a', 'completed', 300], ['b', 'completed', 40]])
-  assert.equal(toolTime(turn.insight), 300)
-  assert.equal(turnDuration(turn), 410)
+  assert.deepEqual(turn.insight.map((c) => [c.callId, c.status]), [['a', 'completed'], ['b', 'completed']])
   assert.equal(agentTurns.hasInsight(turn.insight), true)
   assert.equal(agentTurns.hasInsight(agentTurns.empty()), false)
 })
 
 test('agent: a failed or stopped turn interrupts running calls', () => {
-  const turn = applyEvent(agentTurns, agentTurn(), { type: 'agent.tool_call', callId: 'a', tool: 'search', args: {} }, 1)
-  for (const ended of [failTurn(agentTurns, turn, 'boom', 5), stopTurn(agentTurns, turn, 5), applyEvent(agentTurns, turn, { type: 'error', error: { code: 'X', message: 'm' } }, 5)]) {
+  const turn = applyEvent(agentTurns, agentTurn(), { type: 'agent.tool_call', callId: 'a', tool: 'search', args: {} })
+  for (const ended of [failTurn(agentTurns, turn, 'boom'), stopTurn(agentTurns, turn), applyEvent(agentTurns, turn, { type: 'error', error: { code: 'X', message: 'm' } })]) {
     assert.equal(ended.status, 'failed')
     assert.equal(ended.insight[0]!.status, 'interrupted')
-    assert.equal(toolTime(ended.insight), undefined)
   }
 })
 
@@ -178,13 +193,13 @@ test('toolCallCounts counts the calls and those that answered with an error', ()
 test('studio: the tool events with its own prefix build the calls; another kind\'s are ignored', () => {
   const studioTurns = toolCallTurns('studio')
   let turn = pendingTurn('t', 'q', studioTurns.empty(), 0)
-  turn = applyEvent(studioTurns, turn, { type: 'studio.tool_call', callId: 'a', tool: 'validate_lens', args: { lens_key: 'main' } }, 10)
+  turn = applyEvent(studioTurns, turn, { type: 'studio.tool_call', callId: 'a', tool: 'validate_lens', args: { lens_key: 'main' } })
   assert.equal(studioTurns.progress(turn.insight), 'Validate a lens')
-  turn = applyEvent(studioTurns, turn, { type: 'agent.tool_call', callId: 'b', tool: 'search', args: {} } as never, 11)
-  turn = applyEvent(studioTurns, turn, { type: 'studio.tool_result', callId: 'a', result: { valid: true, errors: [] } }, 30)
-  assert.deepEqual(turn.insight.map((c) => [c.callId, c.status, callDuration(c)]), [['a', 'completed', 20]])
+  turn = applyEvent(studioTurns, turn, { type: 'agent.tool_call', callId: 'b', tool: 'search', args: {} } as never)
+  turn = applyEvent(studioTurns, turn, { type: 'studio.tool_result', callId: 'a', result: { valid: true, errors: [] } })
+  assert.deepEqual(turn.insight.map((c) => [c.callId, c.status]), [['a', 'completed']])
   assert.equal(toolCallSummary(turn.insight[0]!), 'main')
-  const ended = stopTurn(studioTurns, applyEvent(studioTurns, turn, { type: 'studio.tool_call', callId: 'c', tool: 'get_schema', args: {} }, 40), 50)
+  const ended = stopTurn(studioTurns, applyEvent(studioTurns, turn, { type: 'studio.tool_call', callId: 'c', tool: 'get_schema', args: {} }))
   assert.deepEqual(ended.insight.map((c) => c.status), ['completed', 'interrupted'])
 })
 
@@ -198,38 +213,33 @@ test('toolCallSummary says what a call asked for', () => {
   assert.equal(summary('get_schema', {}), undefined)
 })
 
-test('toolTime counts parallel calls once and leaves out the time between calls', () => {
-  const call = (startedAt: number, finishedAt: number): ToolCall => ({ callId: `${startedAt}`, tool: 't', args: {}, status: 'completed', startedAt, finishedAt })
-  assert.equal(toolTime([call(0, 10), call(1500, 1520)]), 30)
-  assert.equal(toolTime([call(0, 20), call(5, 19)]), 20)
-  assert.equal(toolTime([call(0, 10), { callId: 'p', tool: 't', args: {}, status: 'pending', startedAt: 3 }]), undefined)
-})
-
 /* -------------------------------- retriever -------------------------------- */
 
-test('retriever: the started phase is the live detail; diagnostics merge as they arrive', () => {
+test('retriever: the started phase is the live detail; its steps merge on the turn as they arrive', () => {
   let turn: Turn<RetrieverInsight> = retrieverTurn()
   assert.equal(retrieverTurns.progress(turn.insight), undefined)
-  assert.equal(retrieverTurns.hasInsight(turn.insight), false)
-  turn = applyEvent(retrieverTurns, turn, { type: 'retriever.phase', phase: 'plan', status: 'start' }, 1)
+  assert.equal(hasDetail(turn, retrieverTurns.hasInsight), false)
+  turn = applyEvent(retrieverTurns, turn, { type: 'retriever.phase', phase: 'plan', status: 'start' })
   assert.equal(retrieverTurns.progress(turn.insight), 'Plan question')
-  turn = applyEvent(retrieverTurns, turn, { type: 'retriever.diagnostics', timings: { plan: 1200 }, limitations: ['a'] }, 2)
-  turn = applyEvent(retrieverTurns, turn, { type: 'retriever.phase', phase: 'plan', status: 'end', durationMs: 1200 }, 3)
+  turn = applyEvent(retrieverTurns, turn, { type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 1, durationMs: 1200, detail: JSON.stringify({ subQueries: [], unsupportedReason: 'no salaries' }, null, 2) }] })
+  turn = applyEvent(retrieverTurns, turn, { type: 'retriever.phase', phase: 'plan', status: 'end' })
   assert.equal(retrieverTurns.progress(turn.insight), 'Plan question')
-  turn = applyEvent(retrieverTurns, turn, { type: 'retriever.phase', phase: 'retrieve', status: 'start' }, 4)
+  turn = applyEvent(retrieverTurns, turn, { type: 'retriever.phase', phase: 'retrieve', status: 'start' })
   assert.equal(retrieverTurns.progress(turn.insight), 'Search indices')
-  turn = applyEvent(retrieverTurns, turn, { type: 'retriever.diagnostics', timings: { retrieve: 100, total: 1400 }, limitations: ['a', 'b'] }, 5)
-  turn = applyEvent(retrieverTurns, turn, { type: 'delta', text: 'Found' }, 6)
-  turn = applyEvent(retrieverTurns, turn, { type: 'final', reply: 'Found' }, 7)
+  turn = applyEvent(retrieverTurns, turn, { type: 'diagnostics', steps: [{ index: 2, name: 'retrieve', startMs: 1202, durationMs: 100 }] })
+  turn = applyEvent(retrieverTurns, turn, { type: 'delta', text: 'Found' })
+  turn = applyEvent(retrieverTurns, turn, { type: 'diagnostics', durationMs: 1400 })
+  turn = applyEvent(retrieverTurns, turn, { type: 'final', reply: 'Found' })
   assert.equal(turn.status, 'complete')
-  assert.equal(retrieverTurns.hasInsight(turn.insight), true)
-  assert.deepEqual(turn.insight.diagnostics.timings, { plan: 1200, retrieve: 100, total: 1400 })
-  assert.deepEqual(turn.insight.diagnostics.limitations, ['a', 'b'])
+  assert.equal(hasDetail(turn, retrieverTurns.hasInsight), false)
+  assert.deepEqual(turn.insight, { phase: 'retrieve' })
+  assert.deepEqual(turn.diagnostics?.steps?.map((step) => step.name), ['plan', 'retrieve'])
+  assert.equal(turn.diagnostics?.durationMs, 1400)
 })
 
-test('retriever: a stopped turn keeps its diagnostics', () => {
-  const turn = applyEvent(retrieverTurns, retrieverTurn(), { type: 'retriever.diagnostics', timings: { plan: 5 } }, 1)
-  const stopped = stopTurn(retrieverTurns, turn, 2)
-  assert.deepEqual(stopped.insight.diagnostics.timings, { plan: 5 })
+test('retriever: a stopped turn keeps its steps', () => {
+  const turn = applyEvent(retrieverTurns, retrieverTurn(), { type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 0, durationMs: 5 }] })
+  const stopped = stopTurn(retrieverTurns, turn)
+  assert.equal(stopped.diagnostics?.steps?.length, 1)
   assert.equal(endText(stopped), STOPPED_TEXT)
 })

@@ -476,14 +476,13 @@ responses before the stream opens.
 | `delta` | `text` | A fragment of the answer (retrievers and navigators) |
 | `final` | `reply`, `artifacts` when the turn left any | Terminal: the complete answer |
 | `error` | `error` | Terminal: the error object with `code`, `message`, optional `details` |
-| `diagnostics` | `modelCalls` (each `index`, `name` where the kind has steps, `durationMs`, `usage` — `input`, `output`, `cacheRead`, `cacheWrite`, each only as reported — `finishReason`, `failed`); a retriever adds `plan`, `results`, `limitations`, `searchCalls`, `timings`, and bounded texts on each model call | Only when requested, every kind; may come several times — merge `modelCalls` by `index`, `timings` by key, dedupe `limitations`, replace other fields |
+| `diagnostics` | `steps`, one finished step: `index`, `name` (a retriever's `plan`, `replan`, `retrieve`, `answer`; a navigator's step id; an agent's tool; absent on an agent's model call), `model: true` on a model call, `startMs` from the turn's start, `durationMs`, on a model call `usage` (`input`, `output`, `cacheRead`, `cacheWrite`, each only as reported) and `finishReason`, `failed`, and on a planning step `plan` (a retriever's plan; a navigator's `{summary}`) — or, last, the turn's `durationMs` | Only when requested, every kind; one per step as it ends, then the total before `final` or `error` — merge `steps` by `index`, the total replaces |
 | `entities` | `entities` (each `ref`, `id`, `type`, `typeName`, `label`, `fields`, `evidence`; a navigator adds `role`, `hop`, `reason`), `links` (`id` of the stored relation, `from`, `to`, `type`, `label`) | The entities the turn met, every kind; replace cards by `ref`, links by `id`; read an entity by `type` + `id` |
 | `agent.tool_call` | `callId`, `tool`, `args` | An agent's tool invocation begins |
 | `agent.tool_result` | `callId`, `result` | That invocation completes |
-| `retriever.phase` | `phase` (`plan`, `retrieve`, `answer`), `status` (`start`, `end`), `durationMs` on end | Progress |
+| `retriever.phase` | `phase` (`plan`, `retrieve`, `answer`), `status` (`start`, `end`) | Progress |
 | `navigator.graph` | `steps`, `edges` | The pipeline, once, after `thread` |
-| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, `durationMs` and optional `summary` on end | Progress, in plain words; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary and no duration |
-| `navigator.summary` | `modelCalls`, `durationMs`, `entities`, `evidence`, `hops`, `timings` | Once, before `final` |
+| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, optional `summary` on end | Progress, in plain words; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary |
 
 Ignore kind events you do not know. A stream ends with exactly one `final` or `error`;
 EOF without one is an incomplete turn. Closing the connection cancels the turn, and a

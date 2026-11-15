@@ -1,9 +1,11 @@
 // Shared helpers for the authentication checks (e2e.mjs, scripts/scale/scenarios.mjs): a
-// cookie jar, the Keycloak sign-in form driven without a browser, tokens of the development
-// realm's test users and service client, a browser-style sign-in to OntoForge, an HTTP call
-// with a cookie or a token, and an MCP client that authorizes itself through Keycloak.
-// Node 22; the MCP client comes from the server's installed SDK. Secrets come from
-// env/keycloak.local.env (./dev.sh keycloak) and are never printed.
+// cookie jar, the Keycloak sign-in form driven without a browser, a browser going through
+// OntoForge's authorization server (sign-in and consent), OntoForge tokens of the development
+// realm's test users through the command-line client (cli.mjs), provider tokens for checks
+// that refuse them, a browser-style sign-in to OntoForge, an HTTP call with a cookie or a
+// token, and an MCP SDK client that authorizes itself at OntoForge. Node 22; the MCP client
+// comes from the server's installed SDK. Secrets come from env/keycloak.local.env
+// (./dev.sh keycloak) and are never printed.
 //
 //   node scripts/auth/lib.mjs --self-check     tokens from the running Keycloak, claims only
 
@@ -12,6 +14,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { signIn } from './cli.mjs';
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const KEYCLOAK_URL = 'http://localhost:8180';
@@ -227,22 +231,22 @@ async function tokenRequest(params) {
 }
 
 /**
- * A test user's tokens from the public client `ontoforge-mcp`: authorization code + PKCE with
- * a loopback redirect, the Keycloak form driven by `keycloakLogin` (no password grant).
- * Scope `openid ontoforge-api` gives an access token for OntoForge; leave `ontoforge-api`
- * out for one with another audience.
+ * A test user's tokens straight from Keycloak — an ID token and an access token without
+ * OntoForge's audience — for checks that the server refuses them. The web client's code flow
+ * with the form driven by `keycloakLogin`; the code is taken from the redirect before it
+ * reaches OntoForge and redeemed with that client's secret.
  */
-export async function userTokens(username, { scope = `openid ${AUDIENCE}` } = {}) {
+export async function providerTokens(username) {
   const { authorization_endpoint: endpoint } = await oidcConfiguration();
-  const redirectUri = `http://127.0.0.1:${await freePort()}/callback`;
+  const redirectUri = 'http://localhost:5173/api/auth/callback';
   const verifier = base64url(randomBytes(32));
   const state = base64url(randomBytes(16));
   const url = new URL(endpoint);
   url.search = new URLSearchParams({
-    client_id: 'ontoforge-mcp',
+    client_id: 'ontoforge-web',
     response_type: 'code',
     redirect_uri: redirectUri,
-    scope,
+    scope: 'openid',
     state,
     code_challenge: base64url(createHash('sha256').update(verifier).digest()),
     code_challenge_method: 'S256',
@@ -251,17 +255,10 @@ export async function userTokens(username, { scope = `openid ${AUDIENCE}` } = {}
   if (callback.searchParams.get('state') !== state) throw new Error(`sign-in of ${username} returned another state`);
   const code = callback.searchParams.get('code');
   if (!code) throw new Error(`sign-in of ${username} returned no code (${callback.searchParams.get('error') ?? 'no error'})`);
-  return tokenRequest({ grant_type: 'authorization_code', client_id: 'ontoforge-mcp', code, redirect_uri: redirectUri, code_verifier: verifier });
-}
-
-/** An access token for OntoForge (`aud` contains ontoforge-api) of a test user. */
-export async function userToken(username) {
-  return (await userTokens(username)).access_token;
-}
-
-/** A test user's ID token (audience: the client, never ontoforge-api). */
-export async function idToken(username) {
-  return (await userTokens(username)).id_token;
+  return tokenRequest({
+    grant_type: 'authorization_code', client_id: 'ontoforge-web', client_secret: secret('OIDC_CLIENT_SECRET'),
+    code, redirect_uri: redirectUri, code_verifier: verifier,
+  });
 }
 
 /** The service client's access token (client credentials; the audience by default). */
@@ -290,8 +287,9 @@ export async function foreignIssuerToken() {
   return (await response.json()).access_token;
 }
 
-/** A JWT's claims, unverified (for evidence and self-checks). */
+/** A JWT's claims, unverified (for evidence and self-checks); null for an opaque token. */
 export function claims(jwt) {
+  if (jwt.split('.').length !== 3) return null;
   return JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8'));
 }
 
@@ -397,16 +395,130 @@ export async function appLogin(base, username, { deliverTo = base, ...options } 
   return { jar, ...(await deliverCallback(deliverTo, callback, jar)) };
 }
 
+// --- OntoForge's authorization server ---------------------------------------------
+
+/**
+ * A browser through OntoForge's authorization server, from an authorization URL (at
+ * PUBLIC_URL) on: OntoForge sends it to Keycloak, `keycloakLogin` signs `username` in (or the
+ * Keycloak session in `jar` does), OntoForge shows its consent page, and the answer
+ * `decision` ('allow' or 'deny') is submitted as a browser submits the form — `Origin` and
+ * `Referer` of the consent page. `decision: null` stops at the consent page (see
+ * `submitConsent`). `via(url)` names where a request to PUBLIC_URL really goes, such as one
+ * backend behind the load balancer; the browser still believes it talks to PUBLIC_URL.
+ *
+ * Answers {redirect, consent, page, at}: `redirect` is the client's redirect URI with the
+ * answer (code or error), not followed; `consent` the consent page's HTML when one was shown;
+ * `page` {status, message} when it stopped at another page (an error, a refusal); `at` the
+ * consent form's context for `submitConsent`.
+ */
+export async function authorizeInBrowser(authorizationUrl, username, { password, decision = 'allow', jar = new CookieJar(), via = (url) => url } = {}) {
+  const context = { publicOrigin: new URL(authorizationUrl).origin, username, password: password ?? passwordOf(username), jar, via };
+  const reached = await browse(context, authorizationUrl, { method: 'GET' });
+  if (reached.at === null || decision === null) return reached;
+  return { ...(await submitConsent(reached.at, decision)), consent: reached.consent };
+}
+
+/**
+ * Answers a consent page `at` (from `authorizeInBrowser` with `decision: null`) and follows
+ * on. `origin` is the Origin header sent: the consent page's own by default, as a browser
+ * sends it; null sends none.
+ */
+export async function submitConsent(at, decision, { origin = at.context.publicOrigin } = {}) {
+  const headers = {
+    'content-type': 'application/x-www-form-urlencoded',
+    referer: at.pageUrl,
+    ...(origin ? { origin } : {}),
+  };
+  return browse(at.context, at.action, { method: 'POST', headers, body: new URLSearchParams({ decision }).toString() });
+}
+
+/** Follows the browser until the consent page, a redirect leaving PUBLIC_URL and Keycloak, or another page. */
+async function browse(context, url, request) {
+  const keycloak = new URL(ISSUER).origin;
+  const result = (fields) => ({ redirect: null, consent: null, page: null, at: null, ...fields });
+  for (let hop = 0; hop < 20; hop++) {
+    const { origin } = new URL(url);
+    if (origin === keycloak) {
+      url = await keycloakLogin(url, context.username, context.password, context.jar);
+      request = { method: 'GET' };
+      continue;
+    }
+    if (origin !== context.publicOrigin) return result({ redirect: url });
+    const response = await send(context.via(url), { ...request, jar: context.jar });
+    if (response.status >= 300 && response.status < 400) {
+      await response.arrayBuffer();
+      url = new URL(response.headers.get('location'), url).href;
+      request = { method: 'GET' };
+      continue;
+    }
+    const html = await response.text();
+    const action = /<form\b[^>]*\baction="([^"]*)"/i.exec(html)?.[1];
+    if (response.status === 200 && action && html.includes('name="decision"')) {
+      return result({ consent: html, at: { context, action: new URL(decodeHtml(action), url).href, pageUrl: url } });
+    }
+    return result({ page: { status: response.status, message: pageMessage(html) } });
+  }
+  throw new Error(`authorization of ${context.username}: more than 20 redirects`);
+}
+
+/** The text of a page without its markup (for checks on the consent page's content). */
+export const pageText = (html) => decodeHtml(html.replace(/<head>[\s\S]*<\/head>/i, '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+
+/**
+ * OntoForge tokens of a test user for `resource` (`PUBLIC_URL/api` or an MCP mount's URL),
+ * through the command-line client (cli.mjs) with `authorizeInBrowser` as its browser.
+ * Answers the token response plus `consent` (the consent page's HTML); throws when the
+ * authorization ends on a page or with an error (Deny).
+ */
+export async function ontoforgeTokens(username, resource, { clientId, ...browser } = {}) {
+  let consent = null;
+  const tokens = await signIn({
+    resource,
+    clientId,
+    openUrl: async (url) => {
+      const outcome = await authorizeInBrowser(url, username, browser);
+      consent = outcome.consent;
+      if (outcome.redirect === null) throw new Error(`authorization of ${username} stopped at a page: HTTP ${outcome.page?.status} ${outcome.page?.message}`);
+      await fetch(outcome.redirect); // the browser following the redirect to the loopback listener
+    },
+  });
+  return { ...tokens, consent };
+}
+
+/** One token request at `base`/oauth/token; never throws for an HTTP status. Answers {status, json}. */
+export async function oauthToken(base, fields) {
+  const response = await fetch(`${base}/oauth/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(fields),
+  });
+  return { status: response.status, json: await response.json().catch(() => null) };
+}
+
+/** An authorization request's URL and what redeeming its code needs: PKCE, state, a loopback redirect. */
+export async function authorizationRequest(publicUrl, { clientId = 'ontoforge-cli', resource }) {
+  const verifier = base64url(randomBytes(32));
+  const state = base64url(randomBytes(16));
+  const redirectUri = `http://127.0.0.1:${await freePort()}/callback`;
+  const url = new URL(`${publicUrl}/oauth/authorize`);
+  url.search = new URLSearchParams({
+    response_type: 'code', client_id: clientId, redirect_uri: redirectUri, state, resource,
+    code_challenge: base64url(createHash('sha256').update(verifier).digest()), code_challenge_method: 'S256',
+  }).toString();
+  return { url: url.href, clientId, redirectUri, state, verifier, resource };
+}
+
 // --- MCP -------------------------------------------------------------------------
 
 /**
- * Connects a real MCP SDK client to `serverUrl` (an MCP mount under PUBLIC_URL) as `username`:
- * the SDK discovers the protected-resource metadata and Keycloak, registers itself dynamically,
- * and sends the user to the authorization URL; `keycloakLogin` stands in for the browser
- * (consent included), the redirect reaches a loopback listener, and the SDK exchanges the code.
- * Answers {client, registration, close} — `close` also deletes the registered Keycloak client.
+ * Connects a real MCP SDK client to `serverUrl` (an MCP mount under PUBLIC_URL) as `username`
+ * with the client ID `clientId` (an OAUTH_CLIENTS entry with a loopback redirect): the SDK
+ * discovers the protected-resource metadata and OntoForge's authorization server, and sends
+ * the person to the authorization URL; `authorizeInBrowser` stands in for the browser (Keycloak
+ * sign-in, consent), the redirect reaches a loopback listener, and the SDK exchanges the code.
+ * Answers {client, authorizationUrl, consent, tokens(), close}.
  */
-export async function connectMcp(serverUrl, username) {
+export async function connectMcp(serverUrl, username, { clientId = 'ontoforge-cli' } = {}) {
   const { Client } = await import(pathToFileURL(join(SDK, 'client', 'index.js')).href);
   const { StreamableHTTPClientTransport } = await import(pathToFileURL(join(SDK, 'client', 'streamableHttp.js')).href);
   const { UnauthorizedError } = await import(pathToFileURL(join(SDK, 'client', 'auth.js')).href);
@@ -427,60 +539,39 @@ export async function connectMcp(serverUrl, username) {
   const provider = {
     get redirectUrl() { return redirectUrl; },
     get clientMetadata() {
-      return {
-        client_name: `ontoforge-e2e-${username}`,
-        redirect_uris: [redirectUrl],
-        grant_types: ['authorization_code', 'refresh_token'],
-        response_types: ['code'],
-        token_endpoint_auth_method: 'none',
-      };
+      return { client_name: 'OntoForge e2e', redirect_uris: [redirectUrl], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none' };
     },
-    clientInformation: () => store.client,
-    saveClientInformation: (info) => { store.client = info; },
+    // Known to the server by configuration: nothing to register.
+    clientInformation: () => ({ client_id: clientId }),
     tokens: () => store.tokens,
     saveTokens: (tokens) => { store.tokens = tokens; },
     redirectToAuthorization: (url) => { authorizationUrl = url; },
     saveCodeVerifier: (verifier) => { store.verifier = verifier; },
     codeVerifier: () => store.verifier,
   };
-  // The SDK keeps only RFC 7591's fields; the registration's management token is read here.
-  const registration = {};
-  const fetchFn = async (url, init) => {
-    const response = await fetch(url, init);
-    if (init?.method === 'POST' && response.status === 201) {
-      const json = await response.clone().json().catch(() => null);
-      if (json?.registration_access_token) {
-        Object.assign(registration, { clientId: json.client_id, uri: json.registration_client_uri, token: json.registration_access_token });
-      }
-    }
-    return response;
-  };
-  const transportOptions = { authProvider: provider, fetch: fetchFn };
+  const transportOptions = { authProvider: provider };
   const client = new Client({ name: 'ontoforge-e2e', version: '1.0.0' });
-
   const close = async () => {
     await client.close().catch(() => {});
     listener.close();
-    if (registration.uri) {
-      await fetch(registration.uri, { method: 'DELETE', headers: { authorization: `Bearer ${registration.token}` } }).catch(() => {});
-    }
   };
   try {
     const first = new StreamableHTTPClientTransport(new URL(serverUrl), transportOptions);
     try {
       await client.connect(first);
-      return { client, registration, close }; // tokens already held: nothing to authorize
+      throw new Error('the mount answered without authorization');
     } catch (error) {
       if (!(error instanceof UnauthorizedError) || !authorizationUrl) throw error;
     }
-    const delivered = await keycloakLogin(authorizationUrl.href, username, passwordOf(username), new CookieJar());
-    await fetch(delivered); // the browser following the redirect to the loopback listener
+    const outcome = await authorizeInBrowser(authorizationUrl.href, username);
+    if (outcome.redirect === null) throw new Error(`authorization stopped at a page: HTTP ${outcome.page?.status} ${outcome.page?.message}`);
+    await fetch(outcome.redirect); // the browser following the redirect to the loopback listener
     const callback = await received;
     const code = callback.searchParams.get('code');
     if (!code) throw new Error(`authorization returned no code (${callback.searchParams.get('error') ?? 'no error'})`);
     await first.finishAuth(code);
     await client.connect(new StreamableHTTPClientTransport(new URL(serverUrl), transportOptions));
-    return { client, registration, close };
+    return { client, authorizationUrl, consent: outcome.consent, tokens: () => store.tokens, close };
   } catch (error) {
     await close();
     throw error;
@@ -501,21 +592,18 @@ async function selfCheck() {
 
   console.log(`Keycloak ${ISSUER}`);
   const config = await oidcConfiguration();
-  check('discovery', config.issuer === ISSUER && !!config.registration_endpoint, `issuer ${config.issuer}, registration endpoint ${config.registration_endpoint ? 'present' : 'absent'}`);
+  check('discovery', config.issuer === ISSUER, `issuer ${config.issuer}`);
 
-  const reader = await userTokens('reader');
+  const reader = await providerTokens('reader');
   const access = claims(reader.access_token);
-  check('reader access token (ontoforge-mcp, code + PKCE, form driven)',
-    aud(access).includes(AUDIENCE) && access.iss === ISSUER && access.typ === 'Bearer' && access.sub === subject('reader'),
+  check('reader access token (ontoforge-web, code + PKCE, form driven) lacks the audience',
+    !aud(access).includes(AUDIENCE) && access.iss === ISSUER && access.sub === subject('reader'),
     `${show(access)}, sub = SUBJECT_READER ${access.sub === subject('reader')}`);
   const id = claims(reader.id_token);
   check('reader ID token', id.typ === 'ID' && !aud(id).includes(AUDIENCE) && id.iss === ISSUER, show(id));
 
-  const plain = claims((await userTokens('reader', { scope: 'openid' })).access_token);
-  check('access token without the ontoforge-api scope lacks the audience', !aud(plain).includes(AUDIENCE), show(plain));
-
   const service = claims(await serviceToken());
-  check('service token (client credentials)', aud(service).includes(AUDIENCE) && service.iss === ISSUER && service.sub === subject('service'),
+  check('service token (client credentials) carries the audience', aud(service).includes(AUDIENCE) && service.iss === ISSUER && service.sub === subject('service'),
     `${show(service)}, sub = SUBJECT_SERVICE ${service.sub === subject('service')}`);
 
   const foreign = claims(await foreignIssuerToken());
@@ -523,40 +611,6 @@ async function selfCheck() {
 
   const forged = claims(forgedExpiredToken());
   check('forged expired token', forged.exp < Date.now() / 1000, `exp ${new Date(forged.exp * 1000).toISOString()}`);
-
-  // Dynamic registration and consent as an MCP client meets them, without an MCP server.
-  const port = await freePort();
-  const redirectUri = `http://127.0.0.1:${port}/callback`;
-  const registered = await fetch(config.registration_endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      client_name: 'ontoforge-selfcheck', redirect_uris: [redirectUri], grant_types: ['authorization_code'],
-      response_types: ['code'], token_endpoint_auth_method: 'none', scope: AUDIENCE,
-    }),
-  });
-  const client = await registered.json();
-  check('dynamic client registration', registered.status === 201 && !!client.client_id, `HTTP ${registered.status}`);
-  if (registered.status === 201) {
-    try {
-      const verifier = base64url(randomBytes(32));
-      const url = new URL(config.authorization_endpoint);
-      url.search = new URLSearchParams({
-        client_id: client.client_id, response_type: 'code', redirect_uri: redirectUri, scope: AUDIENCE, state: 's',
-        code_challenge: base64url(createHash('sha256').update(verifier).digest()), code_challenge_method: 'S256',
-      }).toString();
-      const callback = new URL(await keycloakLogin(url.href, 'reader', passwordOf('reader'), new CookieJar()));
-      const tokens = await tokenRequest({
-        grant_type: 'authorization_code', client_id: client.client_id, code: callback.searchParams.get('code'),
-        redirect_uri: redirectUri, code_verifier: verifier,
-      });
-      const dcr = claims(tokens.access_token);
-      check('registered client: consent accepted, token for OntoForge', aud(dcr).includes(AUDIENCE) && dcr.iss === ISSUER, show(dcr));
-    } finally {
-      const removed = await fetch(client.registration_client_uri, { method: 'DELETE', headers: { authorization: `Bearer ${client.registration_access_token}` } });
-      check('registered client removed', removed.status === 204, `HTTP ${removed.status}`);
-    }
-  }
 
   const fresh = await createKeycloakUser(`e2e-selfcheck-${base64url(randomBytes(4)).toLowerCase()}`);
   await deleteKeycloakUser(fresh.id);

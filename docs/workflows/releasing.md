@@ -58,8 +58,8 @@ touching anything else.
 
 **A major release clears the upgrade steps out:**
 
-1. Delete every upgrade step and set `OLDEST_UPGRADABLE_VERSION` to the version the
-   previous major line ended on.
+1. Delete the upgrade steps of the previous major line and set `OLDEST_UPGRADABLE_VERSION`
+   to the version it ended on.
 2. Renaming or removing storage happens only here, as the major release's own step.
 3. Freeze the oldest upgradable layout as SQL produced by the last release of the
    previous major line (`server/tests/fixtures/storage-<x.y.z>.sql`), delete the previous

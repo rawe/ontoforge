@@ -3,7 +3,8 @@
  * browser started — kept in the browser itself, in a short-lived cookie
  * sealed with AES-256-GCM. The key is derived from the client secret, so
  * every server of one deployment can open what another sealed, and no
- * server keeps state per login.
+ * server keeps state per login. Browser sign-in seals a `LoginTransaction`;
+ * the authorization server's sign-in seals its own (`oauthRouter.ts`).
  */
 
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
@@ -29,7 +30,7 @@ export function loginCookieKey(clientSecret: string): Buffer {
   return Buffer.from(hkdfSync("sha256", clientSecret, Buffer.alloc(0), "ontoforge login cookie", 32));
 }
 
-export function sealLogin(transaction: LoginTransaction, key: Buffer): string {
+export function sealLogin<T extends { exp: number } = LoginTransaction>(transaction: T, key: Buffer): string {
   const iv = randomBytes(IV_BYTES);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   const sealed = Buffer.concat([cipher.update(JSON.stringify(transaction), "utf8"), cipher.final()]);
@@ -37,15 +38,15 @@ export function sealLogin(transaction: LoginTransaction, key: Buffer): string {
 }
 
 /** The transaction, or null when the value is not one this key sealed or has expired. */
-export function openLogin(value: string, key: Buffer, now: number = Date.now()): LoginTransaction | null {
+export function openLogin<T extends { exp: number } = LoginTransaction>(value: string, key: Buffer, now: number = Date.now()): T | null {
   const raw = Buffer.from(value, "base64url");
   if (raw.length <= IV_BYTES + TAG_BYTES) return null;
-  let transaction: LoginTransaction;
+  let transaction: T;
   try {
     const decipher = createDecipheriv("aes-256-gcm", key, raw.subarray(0, IV_BYTES));
     decipher.setAuthTag(raw.subarray(raw.length - TAG_BYTES));
     const text = Buffer.concat([decipher.update(raw.subarray(IV_BYTES, raw.length - TAG_BYTES)), decipher.final()]);
-    transaction = JSON.parse(text.toString("utf8")) as LoginTransaction;
+    transaction = JSON.parse(text.toString("utf8")) as T;
   } catch {
     return null;
   }

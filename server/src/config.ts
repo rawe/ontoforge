@@ -58,6 +58,15 @@ export interface Settings {
   AUTH_SESSION_IDLE_SECONDS: number | null;
   ACCESS_DB_URI: string | null;
   WEB_CLIENT_URL: string | null;
+  OAUTH_CLIENTS: OAuthClient[];
+  OAUTH_CLIENT_HOSTS: string[] | null;
+}
+
+/** A client of the authorization server entered in `OAUTH_CLIENTS`: public, with PKCE. */
+export interface OAuthClient {
+  id: string;
+  name: string;
+  redirectUris: string[];
 }
 
 /** The settings authentication runs on: present only when it is enabled. */
@@ -77,6 +86,10 @@ export interface AuthSettings {
   publicUrl: string;
   /** The web client's address, where browser sign-in runs; null: no browser sign-in. */
   webClientUrl: string | null;
+  /** The authorization server's clients from the environment. */
+  oauthClients: OAuthClient[];
+  /** The hosts client metadata documents are fetched from; null: any public https host. */
+  oauthClientHosts: string[] | null;
 }
 
 function str(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
@@ -200,6 +213,54 @@ function secureUrl(name: string, value: string, exact = false): string {
   return url;
 }
 
+/** The hosts a loopback redirect may name (RFC 8252): its port is the client's to choose. */
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * `OAUTH_CLIENTS`: the authorization server's clients that publish no client
+ * metadata document — clients separated by `;`, each `client ID|display
+ * name|redirect URIs`, the redirect URIs separated by `,`. A redirect URI is
+ * https, or http on a loopback host. A malformed entry fails the boot.
+ */
+export function parseOAuthClients(value: string | null): OAuthClient[] {
+  const clients: OAuthClient[] = [];
+  for (const entry of (value ?? "").split(";").map((e) => e.trim())) {
+    if (entry === "") continue;
+    const fail = (reason: string): never => {
+      throw new Error(`Environment variable OAUTH_CLIENTS: entry '${entry}' ${reason}`);
+    };
+    const fields = entry.split("|").map((f) => f.trim());
+    if (fields.length !== 3) fail("must have three fields: 'client ID|display name|redirect URIs'");
+    const [id, name, uris] = fields as [string, string, string];
+    if (id === "") fail("has no client ID");
+    if (name === "") fail("has no display name");
+    if (clients.some((c) => c.id === id)) fail("repeats a client ID");
+    const redirectUris = uris.split(",").map((u) => u.trim()).filter((u) => u !== "");
+    if (redirectUris.length === 0) fail("has no redirect URI");
+    for (const uri of redirectUris) {
+      const url = URL.parse(uri);
+      const allowed = url !== null && (url.protocol === "https:" || (url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname)));
+      if (!allowed) fail(`has redirect URI '${uri}': it must be https, or http on localhost, 127.0.0.1 or [::1]`);
+      if (uri.includes("#")) fail(`has redirect URI '${uri}': it must not contain a fragment`);
+    }
+    clients.push({ id, name, redirectUris });
+  }
+  return clients;
+}
+
+/** `OAUTH_CLIENT_HOSTS`: comma-separated host names; null when unset. */
+export function parseOAuthClientHosts(value: string | null): string[] | null {
+  if (value === null) return null;
+  const hosts = value.split(",").map((h) => h.trim().toLowerCase()).filter((h) => h !== "");
+  for (const host of hosts) {
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(host)) {
+      throw new Error(`Environment variable OAUTH_CLIENT_HOSTS must list host names such as 'claude.ai': '${host}'`);
+    }
+  }
+  if (hosts.length === 0) throw new Error("Environment variable OAUTH_CLIENT_HOSTS names no host");
+  return hosts;
+}
+
 /**
  * Authentication: `AUTH_ENABLED` is `true` or `false` (the default). When
  * it is on, every variable it needs must be set — a missing one fails the
@@ -221,6 +282,8 @@ function auth(
   | "AUTH_SESSION_IDLE_SECONDS"
   | "ACCESS_DB_URI"
   | "WEB_CLIENT_URL"
+  | "OAUTH_CLIENTS"
+  | "OAUTH_CLIENT_HOSTS"
 > {
   const enabled = optOneOf(env, "AUTH_ENABLED", ["true", "false"]) === "true";
   if (!enabled) {
@@ -236,6 +299,8 @@ function auth(
       AUTH_SESSION_IDLE_SECONDS: null,
       ACCESS_DB_URI: null,
       WEB_CLIENT_URL: null,
+      OAUTH_CLIENTS: [],
+      OAUTH_CLIENT_HOSTS: null,
     };
   }
   const required = (name: string): string => {
@@ -275,6 +340,8 @@ function auth(
     AUTH_SESSION_IDLE_SECONDS: positiveInt(env, "AUTH_SESSION_IDLE_SECONDS", 8 * 60 * 60),
     ACCESS_DB_URI: accessDb,
     WEB_CLIENT_URL: webClient === null ? null : secureUrl("WEB_CLIENT_URL", webClient),
+    OAUTH_CLIENTS: parseOAuthClients(optStr(env, "OAUTH_CLIENTS")),
+    OAUTH_CLIENT_HOSTS: parseOAuthClientHosts(optStr(env, "OAUTH_CLIENT_HOSTS")),
   };
 }
 
@@ -293,6 +360,8 @@ export function authSettings(s: Settings): AuthSettings | null {
     accessDbUri: s.ACCESS_DB_URI!,
     publicUrl: httpUrl("PUBLIC_URL", s.PUBLIC_URL!),
     webClientUrl: s.WEB_CLIENT_URL === null ? null : httpUrl("WEB_CLIENT_URL", s.WEB_CLIENT_URL),
+    oauthClients: s.OAUTH_CLIENTS,
+    oauthClientHosts: s.OAUTH_CLIENT_HOSTS,
   };
 }
 

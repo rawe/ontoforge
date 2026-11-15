@@ -1,12 +1,14 @@
 /**
  * Fakes for authentication tests: an access store in memory (only what
- * authentication calls), a provider that knows a fixed set of tokens, and
- * the runtime around them.
+ * authentication calls, the authorization server's records included), a
+ * provider that knows a fixed set of tokens, and the runtime around them —
+ * with the real authorization server over the fake store.
  */
 
 import { randomUUID } from "node:crypto";
 
-import type { AccessStore, Assignment, Principal, Profile, Role } from "../../src/access/store.js";
+import type { AccessStore, Assignment, OAuthRecords, Principal, Profile, Role } from "../../src/access/store.js";
+import { createAuthorizationServer } from "../../src/auth/authorizationServer.js";
 import type { Identified, LoginStart, Oidc } from "../../src/auth/oidc.js";
 import type { AuthRuntime } from "../../src/auth/runtime.js";
 import { MemorySessionStore } from "../../src/auth/sessionStore.js";
@@ -30,13 +32,57 @@ export const SETTINGS: AuthSettings = {
   accessDbUri: "postgresql://localhost:5432/ontoforge_access_test",
   publicUrl: PUBLIC_URL,
   webClientUrl: WEB_CLIENT_URL,
+  oauthClients: [],
+  oauthClientHosts: null,
 };
 
 export function identified(subject: string): Identified {
   return { issuer: ISSUER, subject, displayName: `Name of ${subject}`, email: `${subject}@example.com`, username: subject };
 }
 
+interface MemoryRecord {
+  payload: Record<string, unknown>;
+  grantId: string | null;
+  expiresAt: number | null;
+}
+
+/** The authorization server's records in memory, expiring as the PostgreSQL store's do. */
+export class MemoryOAuthRecords implements OAuthRecords {
+  readonly records = new Map<string, MemoryRecord>();
+
+  private live(model: string, id: string): MemoryRecord | null {
+    const record = this.records.get(`${model} ${id}`);
+    return record === undefined || (record.expiresAt !== null && record.expiresAt <= Date.now()) ? null : record;
+  }
+
+  async find(model: string, id: string): Promise<Record<string, unknown> | null> {
+    const record = this.live(model, id);
+    return record === null ? null : structuredClone(record.payload);
+  }
+
+  async upsert(model: string, id: string, payload: Record<string, unknown>, grantId: string | null, expiresIn: number | undefined): Promise<void> {
+    const expiresAt = expiresIn === undefined ? null : Date.now() + expiresIn * 1000;
+    this.records.set(`${model} ${id}`, { payload: structuredClone(payload), grantId, expiresAt });
+  }
+
+  async consume(model: string, id: string): Promise<boolean> {
+    const record = this.live(model, id);
+    if (record === null || record.payload.consumed !== undefined) return false;
+    record.payload.consumed = Math.floor(Date.now() / 1000);
+    return true;
+  }
+
+  async destroy(model: string, id: string): Promise<void> {
+    this.records.delete(`${model} ${id}`);
+  }
+
+  async revokeByGrantId(model: string, grantId: string): Promise<void> {
+    for (const [key, record] of this.records) if (key.startsWith(`${model} `) && record.grantId === grantId) this.records.delete(key);
+  }
+}
+
 export class FakeAccess {
+  readonly oauth = new MemoryOAuthRecords();
   readonly principals = new Map<string, Principal>();
   readonly identities = new Map<string, string>();
   readonly assignments: Assignment[] = [];
@@ -157,5 +203,6 @@ export function fakeRuntime(settings: AuthSettings = SETTINGS): Fakes {
   const access = new FakeAccess();
   const oidc = new FakeOidc();
   const sessions = new MemorySessionStore({ idleMs: 60_000, absoluteMs: 120_000 });
-  return { runtime: { settings, oidc, access: access.store(), sessions }, access, oidc };
+  const oauth = createAuthorizationServer(settings, access.store());
+  return { runtime: { settings, oidc, access: access.store(), sessions, oauth }, access, oidc };
 }

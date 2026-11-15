@@ -10,9 +10,13 @@
  * they keep working whatever the access store or the provider does.
  *
  * A request proves itself by a bearer access token or by the session
- * cookie, never both: a bearer header decides alone. MCP mounts take
- * bearer tokens only. A request authenticated by the cookie that may
- * change state must come from the deployment's own origin (CSRF).
+ * cookie, never both: a bearer header decides alone. A bearer token is a
+ * provider's JWT or an access token of this server's authorization server
+ * (opaque, never three dot-separated parts); each is only tried as what it
+ * is. This server's token opens only the resource it was issued for: its
+ * MCP mount, or `/api/*` for the REST API's. MCP mounts take bearer tokens
+ * only. A request authenticated by the cookie that may change state must
+ * come from the deployment's own origin (CSRF).
  */
 
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -24,6 +28,7 @@ import type { AccessActor, Profile } from "../access/store.js";
 import { ForbiddenError, UnauthenticatedError } from "../core/exceptions.js";
 import { cookieNames, readCookie } from "./cookies.js";
 import type { Identified } from "./oidc.js";
+import { resourceOfRequest } from "./resources.js";
 import type { AuthRuntime } from "./runtime.js";
 
 declare module "fastify" {
@@ -89,7 +94,7 @@ async function resolve(request: FastifyRequest): Promise<Access> {
   if (auth === null) return TRUSTED;
   const header = request.headers.authorization;
   const bearer = header === undefined ? null : /^Bearer(?:\s+(.*))?$/is.exec(header.trim());
-  if (bearer !== null) return bearerAccess(auth, bearer[1]?.trim() ?? "");
+  if (bearer !== null) return bearerAccess(auth, request, bearer[1]?.trim() ?? "");
   const { webClientUrl } = auth.settings;
   if (isMcpRoute(request) || webClientUrl === null) return ANONYMOUS;
   const sessionId = readCookie(request, cookieNames(webClientUrl).session);
@@ -115,7 +120,8 @@ export function isConfiguredAdmin(auth: AuthRuntime, issuer: string, subject: st
   return issuer === auth.settings.issuer && subject === auth.settings.adminSubject;
 }
 
-async function bearerAccess(auth: AuthRuntime, token: string): Promise<Access> {
+async function bearerAccess(auth: AuthRuntime, request: FastifyRequest, token: string): Promise<Access> {
+  if (token !== "" && token.split(".").length !== 3) return issuedAccess(auth, request, token);
   const identified = token === "" ? null : await auth.oidc.verifyAccessToken(token);
   if (identified === null) throw new UnauthenticatedError("The bearer token is not valid", true);
   const { issuer, subject } = identified;
@@ -131,6 +137,17 @@ async function bearerAccess(auth: AuthRuntime, token: string): Promise<Access> {
     assignments = await auth.access.assignmentsOf(principal.id);
   }
   if (principal.status === "disabled") throw new ForbiddenError("This account is disabled");
+  return { kind: "caller", caller: { principal, assignments, via: "bearer" } };
+}
+
+/** An access token this server issued: its principal, on the resource it was issued for only. */
+async function issuedAccess(auth: AuthRuntime, request: FastifyRequest, token: string): Promise<Access> {
+  const resource = resourceOfRequest(request.url.split("?")[0]!, isMcpRoute(request), auth.settings.publicUrl);
+  const principalId = resource === null ? null : await auth.oauth.verifyAccessToken(token, resource);
+  const principal = principalId === null ? null : await auth.access.principal(principalId);
+  if (principal === null) throw new UnauthenticatedError("The bearer token is not valid", true);
+  if (principal.status === "disabled") throw new ForbiddenError("This account is disabled");
+  const assignments = await auth.access.assignmentsOf(principal.id);
   return { kind: "caller", caller: { principal, assignments, via: "bearer" } };
 }
 
@@ -161,15 +178,16 @@ export function isMcpRoute(request: FastifyRequest): boolean {
   return request.routeOptions.url?.startsWith("/mcp/") ?? false;
 }
 
-/** The `WWW-Authenticate` challenge of a 401. An MCP mount points its client
- * to the mount's protected-resource metadata (RFC 9728), and from there to
- * the provider. */
+/** The `WWW-Authenticate` challenge of a 401. An MCP mount and the REST API
+ * point their client to their protected-resource metadata (RFC 9728), and
+ * from there to this server's authorization server. */
 export function challenge(request: FastifyRequest, error: UnauthenticatedError): string {
   const auth = request.server.auth ?? null;
   const invalid = error.invalidToken ? ', error="invalid_token"' : "";
-  if (auth !== null && isMcpRoute(request)) {
-    const path = request.url.split("?")[0];
-    const metadata = `${auth.settings.publicUrl}/.well-known/oauth-protected-resource${path}`;
+  const path = request.url.split("?")[0]!;
+  const resource = auth === null ? null : resourceOfRequest(path, isMcpRoute(request), auth.settings.publicUrl);
+  if (auth !== null && resource !== null) {
+    const metadata = `${auth.settings.publicUrl}/.well-known/oauth-protected-resource${resource.slice(auth.settings.publicUrl.length)}`;
     return `Bearer resource_metadata="${metadata}"${invalid}`;
   }
   return `Bearer realm="ontoforge"${invalid}`;

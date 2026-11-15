@@ -6,7 +6,8 @@
  * opened only when authentication is on.
  *
  * Assignments name ontologies and lenses by their immutable ids; keys are
- * resolved on every request. Nothing here knows about tokens or sessions.
+ * resolved on every request. It also keeps the authorization server's
+ * records (`OAuthRecords`), which it stores without reading them.
  */
 
 export type PrincipalKind = "user" | "service";
@@ -66,6 +67,24 @@ export interface PrincipalPage {
   total: number;
 }
 
+/**
+ * What the authorization server keeps (`auth/authorizationServer.ts`):
+ * codes, tokens, grants and sign-ins in progress, one record per model and
+ * id. The caller passes a digest as the id, never a token itself. A record
+ * past its expiry is never returned, and expired records are removed as
+ * new ones are written.
+ */
+export interface OAuthRecords {
+  find(model: string, id: string): Promise<Record<string, unknown> | null>;
+  /** Inserts or replaces the record; it expires `expiresIn` seconds from now, or never. */
+  upsert(model: string, id: string, payload: Record<string, unknown>, grantId: string | null, expiresIn: number | undefined): Promise<void>;
+  /** Marks the record consumed, in one atomic step; false when it was consumed before or is gone. */
+  consume(model: string, id: string): Promise<boolean>;
+  destroy(model: string, id: string): Promise<void>;
+  /** Removes the records of `model` that belong to the grant `grantId`. */
+  revokeByGrantId(model: string, grantId: string): Promise<void>;
+}
+
 export interface AccessStore {
   /**
    * The principal of `(issuer, subject)`, created with its identity in one
@@ -110,6 +129,8 @@ export interface AccessStore {
    * reused, and authorization counts no role on a lens that is gone. */
   forgetOntology(ontologyId: string, actorId: string): Promise<number>;
   forgetLens(lensId: string, actorId: string): Promise<number>;
+
+  readonly oauth: OAuthRecords;
 
   close(): Promise<void>;
 }

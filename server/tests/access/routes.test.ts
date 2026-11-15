@@ -9,7 +9,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { Need } from "../../src/access/caller.js";
 import { needOf } from "../../src/access/routes.js";
+import { createAuthorizationServer } from "../../src/auth/authorizationServer.js";
 import type { AuthRuntime } from "../../src/auth/runtime.js";
+import type { AuthSettings } from "../../src/config.js";
 
 /** Every `METHOD url` each app registered, as its routes register. */
 const registered = vi.hoisted(() => new WeakMap<object, string[]>());
@@ -34,16 +36,22 @@ function routesOf(app: FastifyInstance): string[] {
   return registered.get(app)!;
 }
 
+const FAKE_SETTINGS = {
+  issuer: "http://issuer.test/realms/x",
+  publicUrl: "http://localhost:8000",
+  webClientUrl: "http://localhost:5173",
+  clientSecret: "test-secret-test-secret-test-secret",
+  oauthClients: [],
+  oauthClientHosts: null,
+} as unknown as AuthSettings;
+const FAKE_ACCESS = { close: async () => {} } as unknown as AuthRuntime["access"];
+
 const FAKE_AUTH = {
-  settings: {
-    issuer: "http://issuer.test/realms/x",
-    publicUrl: "http://localhost:8000",
-    webClientUrl: "http://localhost:5173",
-    clientSecret: "test-secret-test-secret-test-secret",
-  },
+  settings: FAKE_SETTINGS,
   oidc: {},
   sessions: {},
-  access: { close: async () => {} },
+  access: FAKE_ACCESS,
+  oauth: createAuthorizationServer(FAKE_SETTINGS, FAKE_ACCESS),
 } as unknown as AuthRuntime;
 
 describe("every registered route has a need", () => {
@@ -85,7 +93,7 @@ describe("every registered route has a need", () => {
       counts[kind] = (counts[kind] ?? 0) + 1;
     }
     expect(counts).toEqual({
-      public: 19,
+      public: 22,
       "signed-in": 1,
       platform: 1,
       "user-admin": 7,
@@ -116,6 +124,8 @@ describe("needOf", () => {
     ["GET", "/api/auth/me", { kind: "public" }],
     ["POST", "/api/auth/logout", { kind: "public" }],
     ["GET", "/.well-known/oauth-protected-resource/*", { kind: "public" }],
+    ["GET", "/oauth/callback", { kind: "public" }],
+    ["POST", "/oauth/interaction/:uid", { kind: "public" }],
     ["GET", "/api/ontologies", { kind: "signed-in" }],
     ["HEAD", "/api/ontologies", { kind: "signed-in" }],
     ["POST", "/api/ontologies", { kind: "platform", role: "ontology_creator" }],

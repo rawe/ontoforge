@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { authSettings, loadSettings } from "../../src/config.js";
+import { authSettings, loadSettings, parseOAuthClientHosts, parseOAuthClients } from "../../src/config.js";
 
 describe("config defaults", () => {
   const settings = loadSettings({});
@@ -312,6 +312,8 @@ describe("authentication settings", () => {
       accessDbUri: "postgresql://localhost:5432/ontoforge_access",
       publicUrl: "http://localhost:8000",
       webClientUrl: null,
+      oauthClients: [],
+      oauthClientHosts: null,
     });
     expect(
       authSettings(
@@ -389,5 +391,64 @@ describe("authentication settings", () => {
     expect(() => loadSettings({ ...enabled, WEB_CLIENT_URL: "http://studio.example.com" })).toThrow(
       /WEB_CLIENT_URL must be an https URL/,
     );
+  });
+
+  it("reads the authorization server's clients and client hosts", () => {
+    const settings = loadSettings({
+      ...enabled,
+      OAUTH_CLIENTS: "ontoforge-cli|OntoForge CLI|http://127.0.0.1/callback;my-extension|My Extension|https://abcdefghijklmnop.chromiumapp.org/",
+      OAUTH_CLIENT_HOSTS: "claude.ai, ChatGPT.com",
+    });
+    expect(authSettings(settings)).toMatchObject({
+      oauthClients: [
+        { id: "ontoforge-cli", name: "OntoForge CLI", redirectUris: ["http://127.0.0.1/callback"] },
+        { id: "my-extension", name: "My Extension", redirectUris: ["https://abcdefghijklmnop.chromiumapp.org/"] },
+      ],
+      oauthClientHosts: ["claude.ai", "chatgpt.com"],
+    });
+    // Off, neither is read.
+    expect(loadSettings({ OAUTH_CLIENTS: "broken", OAUTH_CLIENT_HOSTS: "https://x" }).OAUTH_CLIENTS).toEqual([]);
+  });
+});
+
+describe("OAUTH_CLIENTS", () => {
+  it("parses clients with several redirect URIs, any loopback host, a trailing separator", () => {
+    expect(parseOAuthClients(" a | A tool | http://localhost/cb , http://[::1]/cb ;b|B|https://b.example.com/cb;")).toEqual([
+      { id: "a", name: "A tool", redirectUris: ["http://localhost/cb", "http://[::1]/cb"] },
+      { id: "b", name: "B", redirectUris: ["https://b.example.com/cb"] },
+    ]);
+    expect(parseOAuthClients(null)).toEqual([]);
+  });
+
+  it("fails on a malformed entry, naming it and the reason", () => {
+    const cases: [string, RegExp][] = [
+      ["a|A", /entry 'a\|A' must have three fields/],
+      ["a|A|b|c", /must have three fields/],
+      ["|A|http://127.0.0.1/cb", /has no client ID/],
+      ["a||http://127.0.0.1/cb", /has no display name/],
+      ["a|A| , ", /has no redirect URI/],
+      ["a|A|http://example.com/cb", /redirect URI 'http:\/\/example.com\/cb': it must be https, or http on localhost/],
+      ["a|A|myapp://cb", /must be https/],
+      ["a|A|not a url", /must be https/],
+      ["a|A|https://a.example.com/cb#x", /must not contain a fragment/],
+      ["a|A|http://127.0.0.1/cb;a|B|http://127.0.0.1/cb", /entry 'a\|B\|http:\/\/127.0.0.1\/cb' repeats a client ID/],
+    ];
+    for (const [value, message] of cases) {
+      expect(() => parseOAuthClients(value), value).toThrow(message);
+      expect(() => parseOAuthClients(value), value).toThrow(/^Environment variable OAUTH_CLIENTS: /);
+    }
+  });
+});
+
+describe("OAUTH_CLIENT_HOSTS", () => {
+  it("reads host names, lower-cased; unset means any host", () => {
+    expect(parseOAuthClientHosts("claude.ai,Chatgpt.COM")).toEqual(["claude.ai", "chatgpt.com"]);
+    expect(parseOAuthClientHosts(null)).toBeNull();
+  });
+
+  it("refuses what is no host name", () => {
+    for (const value of ["https://claude.ai", "claude.ai/path", "claude.ai:443", " , "]) {
+      expect(() => parseOAuthClientHosts(value), value).toThrow(/OAUTH_CLIENT_HOSTS/);
+    }
   });
 });

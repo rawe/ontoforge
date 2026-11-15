@@ -7,8 +7,9 @@
  * mounted with authentication off too — tells the web client the mode and
  * who is signed in.
  *
- * Also the protected-resource metadata (RFC 9728) MCP clients discover the
- * provider through, mounted at the root with authentication on.
+ * Also the protected-resource metadata (RFC 9728) MCP clients and the REST
+ * API's clients discover this server's authorization server through,
+ * mounted at the root with authentication on.
  */
 
 import type { FastifyPluginAsync } from "fastify";
@@ -149,12 +150,13 @@ export const authRouter: FastifyPluginAsyncZod = async (app) => {
 };
 
 /** Protected-resource metadata (RFC 9728), mounted at the root with authentication on:
- * the bare document describes the server, `/<mount path>` one MCP mount. */
+ * the bare document describes the server, `/api` the REST API, `/<mount path>` one MCP
+ * mount. The authorization server is this server's own (`authorizationServer.ts`). */
 export const resourceMetadataRouter: FastifyPluginAsync = async (app) => {
   const auth = app.auth!;
   const describe = (path: string) => ({
     resource: auth.settings.publicUrl + path,
-    authorization_servers: [auth.settings.issuer],
+    authorization_servers: [auth.settings.publicUrl],
     bearer_methods_supported: ["header"],
   });
   const prefix = "/.well-known/oauth-protected-resource";

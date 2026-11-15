@@ -4,7 +4,10 @@
  * scope cookies by host, not by port, so each name carries the port of
  * `WEB_CLIENT_URL`: two deployments on one host never read each other's.
  *
- * Both are `HttpOnly; Secure; SameSite=Lax` without `Domain`. The session
+ * The authorization server's sign-in uses a login cookie of its own, named
+ * for `PUBLIC_URL`'s port and scoped to its callback (`oauthRouter.ts`).
+ *
+ * All are `HttpOnly; Secure; SameSite=Lax` without `Domain`. The session
  * cookie has no lifetime of its own — the server expires the session — and
  * holds 32 random bytes; the server keeps only their digest.
  */
@@ -49,8 +52,8 @@ export function sessionCookie(name: string, value: string): string {
   return `${name}=${value}; Path=/; ${ATTRIBUTES}`;
 }
 
-export function loginCookie(name: string, value: string, maxAgeSeconds: number): string {
-  return `${name}=${value}; Path=${LOGIN_COOKIE_PATH}; Max-Age=${maxAgeSeconds}; ${ATTRIBUTES}`;
+export function loginCookie(name: string, value: string, maxAgeSeconds: number, path = LOGIN_COOKIE_PATH): string {
+  return `${name}=${value}; Path=${path}; Max-Age=${maxAgeSeconds}; ${ATTRIBUTES}`;
 }
 
 /** Removes the cookie `name` set at `path`. */

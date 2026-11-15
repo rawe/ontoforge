@@ -1,12 +1,14 @@
 /**
  * What authentication runs on when it is enabled: its settings, the
- * provider, the access store and the browser sessions. The app carries it
+ * provider, the access store, the browser sessions and the authorization
+ * server. The app carries it
  * as `app.auth` (null when authentication is off), so every entrance reads
  * the same instance.
  */
 
 import type { AccessStore } from "../access/store.js";
 import type { AuthSettings } from "../config.js";
+import type { AuthorizationServer } from "./authorizationServer.js";
 import type { Oidc } from "./oidc.js";
 import type { SessionStore } from "./sessionStore.js";
 
@@ -15,6 +17,7 @@ export interface AuthRuntime {
   oidc: Oidc;
   access: AccessStore;
   sessions: SessionStore;
+  oauth: AuthorizationServer;
 }
 
 declare module "fastify" {

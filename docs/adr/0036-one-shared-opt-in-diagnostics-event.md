@@ -24,8 +24,8 @@ say what was done and found, never how long it took or what it cost.
 - **A shared `step` progress event for every kind.** The kinds' work differs in shape,
   and each client view already reads its kind's own events; a common always-on event would
   add a second account of the same work that no view needs. The diagnostics steps are
-  sent only on request and when a step has ended, carry no content, and give a time one
-  place instead of several.
+  sent only on request and when a step has ended, and give a time one place instead of
+  several.
 - **Usage totals always on `final`.** Model calls and tokens are for debugging and tuning,
   not for every answer; keeping them behind the request keeps the default stream free of
   cost numbers.

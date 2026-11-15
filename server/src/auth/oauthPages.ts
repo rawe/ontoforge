@@ -27,6 +27,7 @@ export function escapeHtml(value: string): string {
 
 const STYLE = `body{font-family:system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1rem;line-height:1.5;color:#1f2328}
 dt{font-weight:600;margin-top:.75rem}dd{margin:0;overflow-wrap:anywhere}code{font-size:.9em}
+.notice{margin-top:1rem;padding:.6rem .8rem;border-left:4px solid #b45309;background:#fffbeb}
 form{display:flex;gap:.75rem;margin-top:1.5rem}button{font:inherit;padding:.5rem 1.25rem;cursor:pointer}`;
 
 /** A whole page; `body` is HTML whose values are already escaped. */
@@ -52,7 +53,12 @@ export interface Consent {
   clientId: string;
   redirectUri: string;
   resource: Resource;
+  /** The person holds no role the mount needs: the token will be refused there. */
+  noAccess: boolean;
 }
+
+/** One sentence whether the mount is unknown or the role is missing: it gives nothing away. */
+const NO_ACCESS = `<p class="notice"><strong>Your account has no access to this MCP mount.</strong> The application will be refused there until an administrator gives you a role on it.</p>`;
 
 function granted(resource: Resource): string {
   if (resource.kind === "api") return "the REST API, with everything your roles allow";
@@ -81,7 +87,7 @@ export function consentPage(consent: Consent, action: string): string {
 <dt>Client ID</dt><dd>${clientIdHtml(consent.clientId)}</dd>
 <dt>The answer goes to</dt><dd><code>${escapeHtml(consent.redirectUri)}</code></dd>
 <dt>Access to</dt><dd>${granted(consent.resource)}</dd>
-</dl>
+</dl>${consent.noAccess ? `\n${NO_ACCESS}` : ""}
 <form method="post" action="${escapeHtml(action)}">
 <button type="submit" name="decision" value="allow">Allow</button>
 <button type="submit" name="decision" value="deny">Deny</button>

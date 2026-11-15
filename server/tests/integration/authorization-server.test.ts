@@ -212,6 +212,23 @@ describe("the authorization server on two instances", () => {
     expect((await call(a, `Bearer ${tokens.access_token}`, "GET", "/api/ontologies")).status).toBe(401);
   });
 
+  it("says on the consent page when the person has no role on the mount, in the same words for an unknown one", async () => {
+    const consentFor = async (path: string) =>
+      (await authorize([a], new Jar(), { clientId: CLIENT, redirectUri: REDIRECT, resource: `${PUBLIC_URL}${path}`, challenge: pkce().challenge }, {
+        publicUrl: PUBLIC_URL,
+        providerOrigin: new URL(ISSUER).origin,
+      })).consent!;
+    const notice = (html: string) => /<p class="notice">.*?<\/p>/.exec(html)?.[0];
+    expect(notice(await consentFor(VISITOR))).toBeUndefined();
+    expect(notice(await consentFor(STAFF))).toContain("no access to this MCP mount");
+    expect(notice(await consentFor("/mcp/ontologies/nowhere/runtime/lenses/none"))).toBe(notice(await consentFor(STAFF)));
+    const api = (await authorize([a], new Jar(), { clientId: CLIENT, redirectUri: REDIRECT, resource: API, challenge: pkce().challenge }, {
+      publicUrl: PUBLIC_URL,
+      providerOrigin: new URL(ISSUER).origin,
+    })).consent!;
+    expect(notice(api)).toBeUndefined();
+  });
+
   it("rotates refresh tokens across instances; a reused one is refused and ends the chain", async () => {
     const first = await tokensFor(API);
     const refreshed = await token(a, { grant_type: "refresh_token", refresh_token: first.refresh_token, client_id: CLIENT });

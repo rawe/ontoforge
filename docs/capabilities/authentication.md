@@ -96,7 +96,8 @@ A client signs in with the authorization code flow and PKCE.
 - **Sign-in and consent.** Every authorization signs the person in at the provider and
   asks for consent; the provider's own single sign-on usually makes the sign-in quick. The
   consent page names the client, its client ID, the person, the address the answer goes to
-  and the resource. Deny answers the client `access_denied`.
+  and the resource, and says when the person has no access to that MCP mount. Deny answers
+  the client `access_denied`.
 - **Tokens.** An access token is opaque and valid for one hour. A refresh token gives a
   new access and refresh token and is spent by that; presenting a spent one again revokes
   the whole authorization. An authorization lasts 14 days from consent; then the person

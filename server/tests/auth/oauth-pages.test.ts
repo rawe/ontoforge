@@ -15,9 +15,15 @@ const consent = {
   clientId: "https://agent.example.com/client.json",
   redirectUri: "https://agent.example.com/cb?a=1&b=<2>",
   resource: { kind: "mcp" as const, ontologyKey: "books", lensKey: "public", rulesetKey: "<r>" },
+  noAccess: false,
 };
 
 describe("the consent page", () => {
+  it("says when the person has no access to the mount, and only then", () => {
+    expect(consentPage(consent, "/x")).not.toContain("no access");
+    expect(consentPage({ ...consent, noAccess: true }, "/x")).toContain("Your account has no access to this MCP mount.");
+  });
+
   it("escapes every value and posts its answer to its own address", () => {
     const html = consentPage(consent, "/oauth/interaction/abc");
     expect(html).not.toContain("<script");

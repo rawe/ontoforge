@@ -29,13 +29,16 @@ import middie from "@fastify/middie";
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import type { InteractionResults } from "oidc-provider";
 
+import { authorize } from "../access/authorize.js";
+import { needOf } from "../access/routes.js";
 import type { Principal } from "../access/store.js";
+import { ForbiddenError, NotFoundError } from "../core/exceptions.js";
 import { clearedCookie, cookieNames, loginCookie, readCookie } from "./cookies.js";
 import { LOGIN_LIFETIME_MS, loginCookieKey, openLogin, sealLogin } from "./loginCookie.js";
 import { consentPage, messagePage, PAGE_HEADERS } from "./oauthPages.js";
 import { AUTHORIZE } from "./authorizationServer.js";
 import { isConfiguredAdmin, profileOf } from "./plugin.js";
-import { resourceOf, SCOPE } from "./resources.js";
+import { resourceOf, SCOPE, type Resource } from "./resources.js";
 import type { AuthRuntime } from "./runtime.js";
 
 const METADATA = "/.well-known/oauth-authorization-server";
@@ -145,6 +148,26 @@ export const oauthRouter: FastifyPluginAsync = async (app) => {
     return principal !== null && principal.status === "active" ? principal : null;
   }
 
+  /** Whether the person lacks the role the resource's mount needs, judged as a request to it
+   * is: the consent page then says so. The REST API is open to every signed-in person. */
+  async function lacksAccess(principal: Principal, resource: Resource): Promise<boolean> {
+    if (resource.kind === "api") return false;
+    const { ontologyKey, lensKey } = resource;
+    const route = lensKey === null ? "/mcp/ontologies/:ontologyKey/model" : "/mcp/ontologies/:ontologyKey/runtime/lenses/:lensKey";
+    const assignments = await auth.access.assignmentsOf(principal.id);
+    try {
+      await authorize(
+        { kind: "caller", caller: { principal, assignments, via: "bearer" } },
+        needOf("POST", route)!,
+        lensKey === null ? { ontologyKey } : { ontologyKey, lensKey },
+      );
+      return false;
+    } catch (error) {
+      if (error instanceof ForbiddenError || error instanceof NotFoundError) return true;
+      throw error;
+    }
+  }
+
   /** Ends the interaction: the browser returns to the library, which answers the client. */
   async function finish(request: FastifyRequest, reply: FastifyReply, result: InteractionResults) {
     let resume: string;
@@ -181,6 +204,7 @@ export const oauthRouter: FastifyPluginAsync = async (app) => {
       clientId: client.clientId,
       redirectUri: String(params.redirect_uri),
       resource,
+      noAccess: await lacksAccess(principal, resource),
     };
     return show(reply, 200, consentPage(consent, `${prefix}/oauth/interaction/${interaction.uid}`));
   });

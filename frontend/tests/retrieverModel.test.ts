@@ -2,10 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   retrieverExecution, defaultAnswerFields, draftOf, draftProblems, editableConfig, emptyConfig, filterChoices, filterLabel,
-  importProblem, isSupportedRetriever, newFilter, phaseName, plannedFilterText, relationName, resultTypes, sameDraft,
+  importProblem, isSupportedRetriever, newFilter, phaseName, resultTypes, sameDraft,
   toInput, withIndex, withRelations, withoutIndex, type RetrieverSchema,
 } from '../src/components/assistants/retrievers/retrieverModel.ts'
-import { chatRetriever, readRetrieverStream, retrieverPlan, saveRetriever, type Retriever, type RetrieverConfig } from '../src/api/retrievers.ts'
+import { chatRetriever, readRetrieverStream, saveRetriever, type Retriever, type RetrieverConfig } from '../src/api/retrievers.ts'
 import type { SearchCatalogEntry } from '../src/api/types.ts'
 
 const prop = (key: string, dataType = 'string') => ({ key, displayName: key[0].toUpperCase() + key.slice(1), dataType })
@@ -127,32 +127,17 @@ test('imports need a version 2 export whose key is free', () => {
   assert.match(importProblem({ ...body, configVersion: 1 }, []) ?? '', /version 2/)
 })
 
-test('a plan: planned filters read from their carried definition, relation groups by their label', () => {
-  // The label comes from the definition the planned filter carries, not from a configuration.
-  assert.equal(plannedFilterText({ id: 'own', entityType: 'person', path: [], field: 'email', value: 'a@b.c', quote: 'a@b.c' }, schema), 'Person · Email = a@b.c (from “a@b.c”)')
-  const hop = { relationTypeKey: 'works_for', direction: 'outgoing' as const }
-  assert.equal(plannedFilterText({ id: 'employer', entityType: 'person', path: [hop], field: 'title', value: 'ACME', quote: 'at ACME' }, schema), 'Person · works for → Company · Title = ACME (from “at ACME”)')
-  assert.equal(plannedFilterText({ id: 'gone', entityType: 'unknown', path: [], field: 'x', value: 'x', quote: '' }, schema), 'gone = x')
-  assert.equal(relationName('works_for', ['person_employment'], catalog, schema), 'Employment')
-  assert.equal(relationName('works_for', ['person~default'], catalog, schema), 'works for')
-})
-
 function stream(events: unknown[]) {
   return new Response(events.map((event) => JSON.stringify(event)).join('\n'), { headers: { 'content-type': 'application/x-ndjson' } })
 }
 
 const T = { type: 'thread', threadId: 't1' }
 
-const PLAN = {
-  subQueries: [{ indices: ['person~default'], relations: [], query: 'Bob role at ACME', variants: [], mode: 'keyword', filters: [{ id: 'own', value: 'x', quote: 'x', entityType: 'person', path: [], field: 'email' }], previous: null }],
-  unsupportedReason: null,
-}
-
-test('the stream reader reads the retriever\'s phases and its steps in diagnostics, a planning step with its plan', async () => {
+test('the stream reader reads the retriever\'s phases and its steps in diagnostics, a planning step with its detail', async () => {
   const events = [
     T,
     { type: 'retriever.phase', phase: 'plan', status: 'start' },
-    { type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 1, durationMs: 900, usage: { input: 1, output: 2 }, plan: PLAN }] },
+    { type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 1, durationMs: 900, usage: { input: 1, output: 2 }, detail: 'Search 1 in People: “Bob role at ACME”, by keywords' }] },
     { type: 'retriever.phase', phase: 'plan', status: 'end' },
     { type: 'retriever.phase', phase: 'retrieve', status: 'start' },
     { type: 'diagnostics', steps: [{ index: 2, name: 'retrieve', startMs: 902, durationMs: 40 }] },
@@ -206,15 +191,6 @@ test('chat and save use the assistant routes and never send browser configuratio
   } finally { globalThis.fetch = original }
 })
 
-test('a step\'s plan reads as a retriever plan only in its shape; the steps have readable names', () => {
-  assert.equal(retrieverPlan(PLAN), PLAN)
-  assert.deepEqual(retrieverPlan({ subQueries: [], unsupportedReason: 'already answered' }), { subQueries: [], unsupportedReason: 'already answered' })
-  for (const bad of [
-    null, 'plan', {}, { subQueries: {} },
-    { subQueries: [{ ...PLAN.subQueries[0], indices: 'person~default' }] },
-    { subQueries: [{ ...PLAN.subQueries[0], variants: undefined }] },
-    { subQueries: [{ ...PLAN.subQueries[0], filters: [{ id: 'own' }] }] },
-    { subQueries: [], unsupportedReason: 3 },
-  ]) assert.equal(retrieverPlan(bad), null, JSON.stringify(bad))
-  assert.deepEqual(['plan', 'replan', 'retrieve', 'answer', 'other'].map(phaseName), ['Plan question', 'Plan question again', 'Search indices', 'Write answer', 'other'])
+test('the phases of a running answer have readable names; an unknown one shows as sent', () => {
+  assert.deepEqual(['plan', 'retrieve', 'answer', 'other'].map(phaseName), ['Plan question', 'Search indices', 'Write answer', 'other'])
 })

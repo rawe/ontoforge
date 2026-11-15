@@ -3,18 +3,75 @@
  * its steps where the server placed them (`startMs`, `durationMs` from the
  * turn's start), so parallel work overlaps. The strip under an answer draws
  * them as one small bar beside its numbers, the diagnostics drawer as one
- * row per step. Also stepping between the conversation's answers that have
- * diagnostics.
+ * row per step, with the step's name as words and its detail to open. Also
+ * stepping between the conversation's answers that have diagnostics.
  *
  * No React, no I/O — unit-tested with `node --test`.
  */
-import { formatDuration, type Turn } from '../conversation/chatModel.ts'
-import { stepTotals, usageParts, type Diagnostics, type DiagnosticsStep } from './diagnostics.ts'
+import { USAGE_FIELDS, type Diagnostics, type DiagnosticsStep, type TokenUsage } from './events.ts'
+
+/** What diagnostics reads of one answer; a chat turn has all of it. */
+export interface Answer {
+  id: string
+  question: string
+  status: 'pending' | 'complete' | 'failed'
+  /** A failed answer the user stopped. */
+  stopped?: boolean
+  /** Client clock (ms) when the question was sent: only the running answer's ticking time reads it. */
+  startedAt?: number
+  /** Present when the answer asked for diagnostics. */
+  diagnostics?: Diagnostics
+}
 
 /** A model call, other work, or the time a running answer has spent since its last finished step. */
 export type Tone = 'model' | 'work' | 'running'
 
 const toneOf = (step: DiagnosticsStep): Tone => (step.model === true ? 'model' : 'work')
+
+/** `412 ms`, `2.4 s`. */
+export function formatDuration(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`
+}
+
+/**
+ * A step's name as shown, by the one rule for every step of every kind:
+ * the name the server sent with spaces for its underscores and its first
+ * letter in upper case (`get_entity` → `Get entity`). A step without a
+ * name is a model call. A name that reads badly this way is fixed where
+ * the server records the step, never with a table here.
+ */
+export function stepName(step: Pick<DiagnosticsStep, 'name' | 'model'>): string {
+  if (step.name === undefined || step.name === '') return step.model === true ? 'Model call' : 'Other work'
+  const words = step.name.replace(/_/g, ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/** The steps together: how many were model calls, how many failed, and the tokens reported — a field only when some step reported it. */
+export function stepTotals(steps: readonly DiagnosticsStep[]): { modelCalls: number; failed: number; usage: TokenUsage } {
+  const usage: TokenUsage = {}
+  for (const step of steps) {
+    for (const field of USAGE_FIELDS) {
+      const value = step.usage?.[field]
+      if (value !== undefined) usage[field] = (usage[field] ?? 0) + value
+    }
+  }
+  return {
+    modelCalls: steps.filter((step) => step.model === true).length,
+    failed: steps.filter((step) => step.failed === true).length,
+    usage,
+  }
+}
+
+const USAGE_LABEL: Record<(typeof USAGE_FIELDS)[number], string> = {
+  input: 'in', output: 'out', cacheRead: 'cache read', cacheWrite: 'cache write',
+}
+
+/** `5,210 in`, `312 out`, `4,800 cache read`, `0 cache write` — only what was reported, in that order. */
+export function usageParts(usage: TokenUsage | undefined): string[] {
+  if (usage === undefined) return []
+  return USAGE_FIELDS.filter((field) => usage[field] !== undefined)
+    .map((field) => `${usage[field]!.toLocaleString('en-US')} ${USAGE_LABEL[field]}`)
+}
 
 /** Where the steps end: the latest end, in ms since the turn began; 0 without steps. */
 export const stepsEnd = (steps: readonly DiagnosticsStep[]) =>
@@ -25,9 +82,9 @@ export const stepsEnd = (steps: readonly DiagnosticsStep[]) =>
  * number that ticks), else the turn's time the server reported, else — when
  * the turn ended before the server sent it — where its last step ended.
  */
-export function answerTime(turn: Pick<Turn<unknown>, 'status' | 'startedAt' | 'diagnostics'>, now: number): number {
-  if (turn.status === 'pending' && turn.startedAt !== undefined) return Math.max(0, now - turn.startedAt)
-  return turn.diagnostics?.durationMs ?? stepsEnd(turn.diagnostics?.steps ?? [])
+export function answerTime(answer: Pick<Answer, 'status' | 'startedAt' | 'diagnostics'>, now: number): number {
+  if (answer.status === 'pending' && answer.startedAt !== undefined) return Math.max(0, now - answer.startedAt)
+  return answer.diagnostics?.durationMs ?? stepsEnd(answer.diagnostics?.steps ?? [])
 }
 
 /** One segment of the strip's bar and its share (0–1) of the bar. */
@@ -100,10 +157,6 @@ const BAR_LEAST_PX = 32
 export const barLeastWidth = (count: number) =>
   Math.min(barWidth(count), Math.max(BAR_LEAST_PX, count * (SEGMENT_GAP_PX + 1)))
 
-/** A step's readable name: the kind's label for its name; a model step without one is a model call. */
-export const stepName = (step: Pick<DiagnosticsStep, 'name'>, nameOf?: (name: string) => string) =>
-  step.name === undefined ? 'Model call' : nameOf?.(step.name) ?? step.name
-
 /** One row of the drawer's list. */
 export interface StepRow {
   key: string
@@ -118,7 +171,8 @@ export interface StepRow {
   width: number
   /** A model step's tokens as reported and its finish reason. */
   facts: string[]
-  plan?: Record<string, unknown>
+  /** The step's detail, when it has one: the row opens to it. */
+  detail?: string
 }
 
 /**
@@ -127,26 +181,21 @@ export interface StepRow {
  * they reach further). While the answer runs (`elapsedMs` given), a last
  * row runs from the end of the steps to now.
  */
-export function stepRows(
-  steps: readonly DiagnosticsStep[],
-  timeMs: number,
-  nameOf?: (name: string) => string,
-  elapsedMs?: number,
-): StepRow[] {
+export function stepRows(steps: readonly DiagnosticsStep[], timeMs: number, elapsedMs?: number): StepRow[] {
   const end = stepsEnd(steps)
   const scale = Math.max(timeMs, end, elapsedMs ?? 0)
   const at = (ms: number) => (scale > 0 ? (ms / scale) * 100 : 0)
   const rows = steps.map((step): StepRow => ({
     key: `step-${step.index}`,
     index: step.index,
-    label: stepName(step, nameOf),
+    label: stepName(step),
     tone: toneOf(step),
     failed: step.failed === true,
     durationMs: step.durationMs,
     left: at(step.startMs),
     width: scale > 0 ? at(step.durationMs) : 100,
     facts: [...usageParts(step.usage), ...(step.finishReason !== undefined ? [`finish: ${step.finishReason}`] : [])],
-    ...(step.plan !== undefined && { plan: step.plan }),
+    ...(step.detail !== undefined && step.detail !== '' && { detail: step.detail }),
   }))
   if (elapsedMs === undefined) return rows
   const rest = Math.max(0, scale - end)
@@ -203,30 +252,30 @@ export function stripLabel(facts: StripFacts): string {
 
 /** The strip's numbers and bar for an answer at `now` (which matters only while it runs). */
 export function answerSummary(
-  turn: Pick<Turn<unknown>, 'status' | 'startedAt' | 'diagnostics'>,
+  answer: Pick<Answer, 'status' | 'startedAt' | 'diagnostics'>,
   now: number,
 ): { facts: StripFacts; segments: Segment[] } {
-  const running = turn.status === 'pending'
-  const timeMs = answerTime(turn, now)
+  const running = answer.status === 'pending'
+  const timeMs = answerTime(answer, now)
   return {
-    facts: stripFacts(turn.diagnostics ?? {}, timeMs, running),
-    segments: stripSegments(turn.diagnostics?.steps ?? [], running ? timeMs : undefined),
+    facts: stripFacts(answer.diagnostics ?? {}, timeMs, running),
+    segments: stripSegments(answer.diagnostics?.steps ?? [], running ? timeMs : undefined),
   }
 }
 
 /** The conversation's answers that have diagnostics, in order. */
-export const diagnosedTurns = <I>(turns: readonly Turn<I>[]) => turns.filter((turn) => turn.diagnostics !== undefined)
+export const diagnosedAnswers = <A extends Answer>(answers: readonly A[]) => answers.filter((answer) => answer.diagnostics !== undefined)
 
 /** The answer the drawer shows: the chosen one, else (null) the latest with diagnostics. */
-export function drawerTurn<I>(turns: readonly Turn<I>[], id: string | null): Turn<I> | undefined {
-  const diagnosed = diagnosedTurns(turns)
-  return (id === null ? undefined : diagnosed.find((turn) => turn.id === id)) ?? diagnosed.at(-1)
+export function drawerAnswer<A extends Answer>(answers: readonly A[], id: string | null): A | undefined {
+  const diagnosed = diagnosedAnswers(answers)
+  return (id === null ? undefined : diagnosed.find((answer) => answer.id === id)) ?? diagnosed.at(-1)
 }
 
 /** Where an answer stands among those with diagnostics, and its neighbours ‹ ›. */
-export function stepping<I>(turns: readonly Turn<I>[], id: string): { position: number; count: number; previous: string | null; next: string | null } {
-  const diagnosed = diagnosedTurns(turns)
-  const at = diagnosed.findIndex((turn) => turn.id === id)
+export function stepping(answers: readonly Answer[], id: string): { position: number; count: number; previous: string | null; next: string | null } {
+  const diagnosed = diagnosedAnswers(answers)
+  const at = diagnosed.findIndex((answer) => answer.id === id)
   return {
     position: at + 1,
     count: diagnosed.length,

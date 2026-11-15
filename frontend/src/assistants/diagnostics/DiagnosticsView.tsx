@@ -1,27 +1,12 @@
 import { ChevronRight } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { formatDuration, type Turn } from '../conversation/chatModel'
-import { stepTotals, usageParts } from './diagnostics'
 import {
-  SEGMENT_MIN_PX, answerTime, barLeastWidth, barWidth, failedText, modelCallsText, stepRows, stripFacts, timeText, type Segment, type StepRow, type Tone,
+  SEGMENT_MIN_PX, answerTime, barLeastWidth, barWidth, failedText, formatDuration, modelCallsText, stepRows, stepTotals, stripFacts, timeText, usageParts,
+  type Answer, type Segment, type StepRow, type Tone,
 } from './timeline'
-import type { DiagnosticsMode } from './useDiagnostics'
 import { useNow } from './useNow'
-
-/**
- * What a kind gives the shell for its diagnostics: the shell draws the
- * switch, the strip under each answer and the drawer, the same for every
- * kind; the kind adds only its steps' readable names and how a plan reads.
- */
-export interface DiagnosticsSlot<I> {
-  mode: DiagnosticsMode
-  /** A step's readable name (a tool's label, a pipeline step's); its name as sent when omitted. */
-  nameOf?: (name: string, turn: Turn<I>) => string
-  /** What a step's plan shows when the step is opened; null when it cannot be read. */
-  plan?: (plan: Record<string, unknown>, turn: Turn<I>) => ReactNode
-}
 
 /** A bar's colour: model calls in the accent, other work grey, failed red; the running time pulses. */
 function toneClass(tone: Tone, failed: boolean): string {
@@ -56,16 +41,17 @@ function Legend() {
   )
 }
 
-/** One step: its number, name, bar at its real place and time; a model step's tokens and finish reason under it; a plan to open. */
-function StepItem({ row, plan }: { row: StepRow; plan: ReactNode }) {
+/** One step: its number, name, bar at its real place and time; a model step's tokens and finish reason under it; its detail, when it has one, to open and read as the text the server wrote. */
+function StepItem({ row }: { row: StepRow }) {
   const [open, setOpen] = useState(false)
+  const { detail } = row
   const running = row.tone === 'running'
   const head = (
     <>
       <span className="w-6 shrink-0 text-right text-muted-foreground tabular-nums">{row.index ?? ''}</span>
       <span className={cn('flex min-w-0 items-center gap-1', row.failed && 'text-destructive', running && 'text-muted-foreground')}>
         <span className="truncate" title={row.label}>{row.label}</span>
-        {plan !== null && <ChevronRight aria-hidden className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />}
+        {detail !== undefined && <ChevronRight aria-hidden className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />}
       </span>
       <span className="relative h-2 overflow-hidden rounded-full bg-muted">
         <span
@@ -81,7 +67,7 @@ function StepItem({ row, plan }: { row: StepRow; plan: ReactNode }) {
   const grid = 'grid w-full grid-cols-[1.5rem_minmax(0,10rem)_minmax(3rem,1fr)_4.5rem] items-center gap-x-3 text-left'
   return (
     <li className="space-y-1 text-xs" data-testid="diagnostics-step">
-      {plan === null ? (
+      {detail === undefined ? (
         <div className={grid}>{head}</div>
       ) : (
         <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className={cn(grid, '-mx-1 rounded px-1 py-0.5 hover:bg-muted/50')}>
@@ -94,7 +80,9 @@ function StepItem({ row, plan }: { row: StepRow; plan: ReactNode }) {
           {row.facts.join(' · ')}
         </p>
       )}
-      {open && plan !== null && <div className="ml-9 rounded border p-3">{plan}</div>}
+      {open && detail !== undefined && (
+        <p data-testid="diagnostics-step-detail" className="ml-9 rounded border p-3 break-words whitespace-pre-wrap">{detail}</p>
+      )}
     </li>
   )
 }
@@ -104,15 +92,14 @@ function StepItem({ row, plan }: { row: StepRow; plan: ReactNode }) {
  * model calls, failed steps, tokens as reported), then one list of its
  * steps in order. It grows with each finished step while the answer runs.
  */
-export function DiagnosticsView<I>({ turn, slot }: { turn: Turn<I>; slot: DiagnosticsSlot<I> }) {
-  const running = turn.status === 'pending'
+export function DiagnosticsView({ answer }: { answer: Answer }) {
+  const running = answer.status === 'pending'
   const now = useNow(running)
-  const steps = turn.diagnostics?.steps ?? []
-  const timeMs = answerTime(turn, now)
-  const facts = stripFacts(turn.diagnostics ?? {}, timeMs, running)
+  const steps = answer.diagnostics?.steps ?? []
+  const timeMs = answerTime(answer, now)
+  const facts = stripFacts(answer.diagnostics ?? {}, timeMs, running)
   const failed = failedText(facts)
-  const nameOf = slot.nameOf && ((name: string) => slot.nameOf!(name, turn))
-  const rows = stepRows(steps, timeMs, nameOf, running ? timeMs : undefined)
+  const rows = stepRows(steps, timeMs, running ? timeMs : undefined)
   const chip = 'font-normal tabular-nums'
   return (
     <div className="space-y-6">
@@ -129,9 +116,7 @@ export function DiagnosticsView<I>({ turn, slot }: { turn: Turn<I>; slot: Diagno
           <p className="text-xs text-muted-foreground">No steps reported for this answer.</p>
         ) : (
           <ol className="space-y-1.5" data-testid="diagnostics-steps">
-            {rows.map((row) => (
-              <StepItem key={row.key} row={row} plan={row.plan !== undefined && slot.plan !== undefined ? slot.plan(row.plan, turn) ?? null : null} />
-            ))}
+            {rows.map((row) => <StepItem key={row.key} row={row} />)}
           </ol>
         )}
       </section>

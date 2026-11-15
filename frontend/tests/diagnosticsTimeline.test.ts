@@ -1,13 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { applyEvent, pendingTurn, type Turn } from '../src/assistants/conversation/chatModel.ts'
-import type { Diagnostics, DiagnosticsStep } from '../src/assistants/diagnostics/diagnostics.ts'
+import type { Diagnostics, DiagnosticsStep } from '../src/assistants/diagnostics/events.ts'
 import {
-  SEGMENT_GAP_PX, SEGMENT_MIN_PX, answerSummary, answerTime, barLeastWidth, barWidth, diagnosedTurns, drawerTurn, stepName, stepRows, stepping, stepsEnd,
+  SEGMENT_GAP_PX, SEGMENT_MIN_PX, answerSummary, answerTime, barLeastWidth, barWidth, diagnosedAnswers, drawerAnswer, formatDuration, stepName, stepRows, stepping, stepsEnd,
   stripFacts, stripLabel, stripSegments, stripText,
 } from '../src/assistants/diagnostics/timeline.ts'
-import { agentTurns, toolLabel } from '../src/assistants/steps/toolCallModel.ts'
-import { graphTurns, stepLabel } from '../src/components/assistants/graph/graphTurnModel.ts'
+import { agentTurns } from '../src/assistants/steps/toolCallModel.ts'
+import { graphTurns } from '../src/components/assistants/graph/graphTurnModel.ts'
+import { retrieverTurns } from '../src/components/assistants/retrievers/retrieverModel.ts'
 
 const model = (index: number, startMs: number, durationMs: number, extra: Partial<DiagnosticsStep> = {}): DiagnosticsStep =>
   ({ index, model: true, startMs, durationMs, ...extra })
@@ -68,7 +69,7 @@ test('twenty model calls with tool calls between them, three in parallel: the st
   assert.equal(barLeastWidth(39), 78)
   assert.ok(barLeastWidth(99) - 98 * SEGMENT_GAP_PX >= 99)
 
-  const rows = stepRows(steps, total, toolLabel)
+  const rows = stepRows(steps, total)
   assert.equal(rows.length, 41)
   assert.deepEqual(rows.map((r) => r.index), steps.map((s) => s.index))
   assert.deepEqual(rows.slice(4, 9).map((r) => r.label), ['Model call', 'Search', 'Get entity', 'Search', 'Model call'])
@@ -97,7 +98,7 @@ test('agent, through the turn as the server sends it: two parallel tool calls ov
   assert.deepEqual(segments.map((s) => [s.key, s.tone]), [['step-1', 'model'], ['step-2', 'work'], ['step-4', 'model']])
   close(segments[1]!.share, 22 / 23)
   assert.equal(stripText(facts), '41 ms · 2 model calls')
-  const rows = stepRows(t.diagnostics!.steps!, facts.timeMs, toolLabel)
+  const rows = stepRows(t.diagnostics!.steps!, facts.timeMs)
   assert.deepEqual(rows.map((r) => r.label), ['Model call', 'List saved queries', 'Get entity', 'Model call'])
   assert.equal(rows[1]!.left, rows[2]!.left)
   // A tool that answered with an error is not a failed step.
@@ -115,7 +116,7 @@ test('a running answer: its time is the client clock; the time since the last fi
   // It grows with the clock.
   assert.ok(at(5000).segments[1]!.share > at(3000).segments[1]!.share)
   assert.equal(stripText(at(3000).facts), '2.0 s so far · 1 model call')
-  const rows = stepRows(running.diagnostics.steps, 2000, undefined, 2000)
+  const rows = stepRows(running.diagnostics.steps, 2000, 2000)
   assert.deepEqual(rows.map((r) => [r.label, r.tone]), [['Model call', 'model'], ['Running', 'running']])
   close(rows[1]!.left, 70.1)
   close(rows[1]!.width, 29.9)
@@ -139,30 +140,69 @@ test('a failed step: red in the strip and the drawer, counted; a failed answer k
   assert.deepEqual(facts, { timeMs: 980, running: false, modelCalls: 2, failed: 1, tokens: 3310 })
   assert.equal(stripLabel(facts), 'Diagnostics: 980 ms · 2 model calls · 3,310 tokens · 1 failed. Open the details.')
   const rows = stepRows(steps, 980)
-  assert.deepEqual(rows.map((r) => [r.label, r.failed]), [['plan', false], ['retrieve', false], ['answer', true]])
+  assert.deepEqual(rows.map((r) => [r.label, r.failed]), [['Plan', false], ['Retrieve', false], ['Answer', true]])
   assert.deepEqual(rows[2]!.facts, [])
   // With the total it ends there.
   assert.equal(answerTime(ended({ steps, durationMs: 1000 }, 'failed'), 0), 1000)
 })
 
-/* ---------------------------------- plans ----------------------------------- */
+/* ----------------------------- names and detail ----------------------------- */
 
-test('a step with a plan carries it to its row; steps have readable names, an unnamed model step is a model call', () => {
-  const plan = { summary: 'Looking for Project · starting at “Lena”' }
-  const rows = stepRows([model(1, 1, 300, { name: 'understand', plan }), work(2, 'anchor', 302, 10)], 400, (name) => name.toUpperCase())
-  assert.deepEqual(rows.map((r) => [r.label, r.plan]), [['UNDERSTAND', plan], ['ANCHOR', undefined]])
-  assert.equal(stepName({}), 'Model call')
-  assert.equal(stepName({ name: 'get_entity' }, toolLabel), 'Get entity')
-  assert.equal(stepName({ name: 'walk' }), 'walk')
+test('a step\'s name is shown by one rule for every kind: underscores to spaces, first letter upper case; a model step without a name is a model call', () => {
+  assert.equal(stepName({ name: 'get_entity' }), 'Get entity')
+  assert.equal(stepName({ name: 'list_saved_queries' }), 'List saved queries')
+  assert.equal(stepName({ name: 'plan', model: true }), 'Plan')
+  assert.equal(stepName({ name: 'replan', model: true }), 'Replan')
+  assert.equal(stepName({ name: 'walk' }), 'Walk')
+  // The rule changes nothing else: no table, no other rewriting.
+  assert.equal(stepName({ name: 'Run OQL' }), 'Run OQL')
+  assert.equal(stepName({ name: 'äpfel_zählen' }), 'Äpfel zählen')
+  assert.equal(stepName({ model: true }), 'Model call')
+  assert.equal(stepName({}), 'Other work')
+  assert.equal(stepName({ name: '' }), 'Other work')
 })
 
-test('navigator, through the turn: steps named by its pipeline, a repeated walk two rows, the understand step with its plan', () => {
+test('a step with detail carries it to its row as the text it is, line breaks kept; a step without has none', () => {
+  const plan = 'Search 1 in People by employment: “works at ACME” (also “employed by ACME”), by keywords · relation groups: Employment · filters: lives in City Name: Berlin\nSearch 2 in People by home city, People: “lives in Berlin”, by keywords'
+  const rows = stepRows([
+    model(1, 1, 300, { name: 'plan', detail: plan }),
+    work(2, 'retrieve', 302, 10),
+    work(3, 'count', 313, 1, { detail: '3 entities' }),
+    model(4, 315, 80, { name: 'answer', detail: '' }),
+  ], 400)
+  assert.deepEqual(rows.map((r) => [r.label, r.detail]), [['Plan', plan], ['Retrieve', undefined], ['Count', '3 entities'], ['Answer', undefined]])
+  assert.equal('detail' in rows[1]!, false)
+  assert.equal(rows[0]!.detail!.split('\n').length, 2)
+})
+
+test('retriever, through the turn as the server sends it: the planning step opens to its plan in words, an unsupported plan to its reason, an unreadable one to nothing', () => {
+  let t = pendingTurn('t', 'q', retrieverTurns.empty(), 0, true)
+  for (const event of [
+    { type: 'thread', threadId: 'th' },
+    { type: 'retriever.phase', phase: 'plan', status: 'start' },
+    { type: 'diagnostics', steps: [{ index: 1, name: 'plan', model: true, startMs: 3, durationMs: 0, usage: { input: 900, output: 20 }, detail: 'Not answerable: The lens holds no salaries.' }] },
+    { type: 'diagnostics', steps: [{ index: 2, name: 'replan', model: true, startMs: 4, durationMs: 0 }] },
+    { type: 'retriever.phase', phase: 'plan', status: 'end' },
+    { type: 'diagnostics', steps: [{ index: 3, name: 'retrieve', startMs: 4, durationMs: 0 }] },
+    { type: 'diagnostics', steps: [{ index: 4, name: 'answer', model: true, startMs: 4, durationMs: 0, usage: { input: 1, output: 1 } }] },
+    { type: 'diagnostics', durationMs: 6 },
+    { type: 'final', reply: 'No.' },
+  ] as const) t = applyEvent(retrieverTurns, t, event)
+  const rows = stepRows(t.diagnostics!.steps!, answerTime(t, 0))
+  assert.deepEqual(rows.map((r) => [r.index, r.label, r.tone, r.detail]), [
+    [1, 'Plan', 'model', 'Not answerable: The lens holds no salaries.'], [2, 'Replan', 'model', undefined], [3, 'Retrieve', 'work', undefined], [4, 'Answer', 'model', undefined],
+  ])
+})
+
+test('navigator, through the turn: its steps by their names, a repeated walk two rows, the understand step with its sentence', () => {
   let t = pendingTurn('t', 'q', graphTurns.empty(), 0, true)
-  const steps = ['understand', 'anchor', 'walk', 'focus', 'answer'].map((id) => ({ id, label: id[0]!.toUpperCase() + id.slice(1), description: '' }))
+  // The pipeline's own labels are the Steps tab's; diagnostics do not read them.
+  const steps = ['understand', 'anchor', 'walk', 'focus', 'answer'].map((id) => ({ id, label: `Step ${id}`, description: '' }))
+  const detail = 'Looking for Project · starting at “Lena” · path manages → works on'
   for (const event of [
     { type: 'thread', threadId: 'th' },
     { type: 'navigator.graph', steps, edges: [] },
-    { type: 'diagnostics', steps: [{ index: 1, name: 'understand', model: true, startMs: 1, durationMs: 1200, plan: { summary: 'starting at “Lena”' } }] },
+    { type: 'diagnostics', steps: [{ index: 1, name: 'understand', model: true, startMs: 1, durationMs: 1200, detail }] },
     { type: 'diagnostics', steps: [{ index: 2, name: 'anchor', startMs: 1201, durationMs: 90 }] },
     { type: 'diagnostics', steps: [{ index: 3, name: 'walk', startMs: 1291, durationMs: 180 }] },
     { type: 'diagnostics', steps: [{ index: 4, name: 'walk', startMs: 1471, durationMs: 100 }] },
@@ -171,11 +211,11 @@ test('navigator, through the turn: steps named by its pipeline, a repeated walk 
     { type: 'diagnostics', durationMs: 4100 },
     { type: 'final', reply: 'Nothing.' },
   ] as const) t = applyEvent(graphTurns, t, event)
-  const rows = stepRows(t.diagnostics!.steps!, answerTime(t, 0), (name) => stepLabel(t.insight, name))
+  const rows = stepRows(t.diagnostics!.steps!, answerTime(t, 0))
   assert.deepEqual(rows.map((r) => [r.index, r.label, r.tone]), [
     [1, 'Understand', 'model'], [2, 'Anchor', 'work'], [3, 'Walk', 'work'], [4, 'Walk', 'work'], [5, 'Focus', 'work'], [6, 'Answer', 'model'],
   ])
-  assert.deepEqual(rows[0]!.plan, { summary: 'starting at “Lena”' })
+  assert.equal(rows[0]!.detail, detail)
   assert.equal(stripText(answerSummary(t, 0).facts), '4.1 s · 2 model calls · 6,400 tokens')
 })
 
@@ -201,18 +241,23 @@ test('several answers in one conversation: each keeps its own diagnostics; the d
     turn('c', {}),
     turn('d', { steps: [model(1, 0, 5), work(2, 'search', 6, 3), model(3, 10, 4)], durationMs: 15 }),
   ]
-  assert.deepEqual(diagnosedTurns(turns).map((t) => t.id), ['a', 'c', 'd'])
-  assert.equal(drawerTurn(turns, null)?.id, 'd')
-  assert.equal(drawerTurn(turns, 'a')?.id, 'a')
+  assert.deepEqual(diagnosedAnswers(turns).map((t) => t.id), ['a', 'c', 'd'])
+  assert.equal(drawerAnswer(turns, null)?.id, 'd')
+  assert.equal(drawerAnswer(turns, 'a')?.id, 'a')
   // An answer without diagnostics, or one gone, falls back to the latest.
-  assert.equal(drawerTurn(turns, 'b')?.id, 'd')
-  assert.equal(drawerTurn([turn('x')], null), undefined)
+  assert.equal(drawerAnswer(turns, 'b')?.id, 'd')
+  assert.equal(drawerAnswer([turn('x')], null), undefined)
   assert.deepEqual(stepping(turns, 'a'), { position: 1, count: 3, previous: null, next: 'c' })
   assert.deepEqual(stepping(turns, 'c'), { position: 2, count: 3, previous: 'a', next: 'd' })
   assert.deepEqual(stepping(turns, 'd'), { position: 3, count: 3, previous: 'c', next: null })
   // Each answer's numbers and bar are its own.
-  assert.deepEqual(diagnosedTurns(turns).map((t) => stripText(answerSummary(t, 0).facts)), ['12 ms · 1 model call', '0 ms · 0 model calls', '15 ms · 2 model calls'])
-  assert.deepEqual(diagnosedTurns(turns).map((t) => answerSummary(t, 0).segments.length), [1, 0, 3])
+  assert.deepEqual(diagnosedAnswers(turns).map((t) => stripText(answerSummary(t, 0).facts)), ['12 ms · 1 model call', '0 ms · 0 model calls', '15 ms · 2 model calls'])
+  assert.deepEqual(diagnosedAnswers(turns).map((t) => answerSummary(t, 0).segments.length), [1, 0, 3])
+})
+
+test('times read as milliseconds below a second, as seconds from there', () => {
+  assert.equal(formatDuration(412.4), '412 ms')
+  assert.equal(formatDuration(2440), '2.4 s')
 })
 
 test('a turn that asks for diagnostics has them from the start; one that does not has none', () => {

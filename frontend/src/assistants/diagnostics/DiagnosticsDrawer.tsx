@@ -3,39 +3,58 @@ import { useRef } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
-import type { Turn } from '../conversation/chatModel'
-import { DiagnosticsView, type DiagnosticsSlot } from './DiagnosticsView'
-import { stepping } from './timeline'
+import { DiagnosticsView } from './DiagnosticsView'
+import { drawerAnswer, stepping, type Answer } from './timeline'
+import type { DiagnosticsControl } from './useDiagnostics'
 
 /** The answer's state beside the title, when it is not simply complete. */
-function StateMark({ turn }: { turn: Turn<unknown> }) {
-  if (turn.status === 'pending') {
+function StateMark({ answer }: { answer: Answer }) {
+  if (answer.status === 'pending') {
     return <Badge variant="outline" className="font-normal"><LoaderCircle className="animate-spin" /> Running</Badge>
   }
-  if (turn.status !== 'failed') return null
-  return turn.stopped === true
+  if (answer.status !== 'failed') return null
+  return answer.stopped === true
     ? <Badge variant="secondary" className="font-normal">Stopped</Badge>
     : <Badge variant="destructive" className="font-normal">Failed</Badge>
 }
 
 /**
  * The diagnostics of one answer in a wide panel over the page's right
- * side. Non-modal: the chat stays usable and an answer keeps streaming
- * under it. ‹ › step between the conversation's answers that have
- * diagnostics; ✕ and Escape close it, and focus returns to the answer's
- * strip.
+ * side: the answer a strip opened, or the latest one after a new question.
+ * Non-modal: the chat stays usable and an answer keeps streaming under it.
+ * ‹ › step between the conversation's answers that have diagnostics; ✕ and
+ * Escape close it, and focus returns to the answer's strip. Nothing while
+ * diagnostics are off or no answer has any.
  */
-export function DiagnosticsDrawer<I>({ open, turn, turns, slot, onShow, onClose }: {
+export function DiagnosticsDrawer({ diagnostics, answers }: {
+  diagnostics: DiagnosticsControl
+  /** The conversation's answers. */
+  answers: readonly Answer[]
+}) {
+  const { drawer, setDrawer } = diagnostics.view
+  const answer = diagnostics.on ? drawerAnswer(answers, drawer.id) : undefined
+  if (answer === undefined) return null
+  return (
+    <Drawer
+      open={drawer.open}
+      answer={answer}
+      answers={answers}
+      onShow={(id) => setDrawer({ open: true, id })}
+      onClose={() => setDrawer((current) => ({ ...current, open: false }))}
+    />
+  )
+}
+
+function Drawer({ open, answer, answers, onShow, onClose }: {
   open: boolean
-  turn: Turn<I>
-  turns: readonly Turn<I>[]
-  slot: DiagnosticsSlot<I>
+  answer: Answer
+  answers: readonly Answer[]
   /** Show another answer. */
   onShow: (id: string) => void
   onClose: () => void
 }) {
   const content = useRef<HTMLDivElement>(null)
-  const { position, count, previous, next } = stepping(turns, turn.id)
+  const { position, count, previous, next } = stepping(answers, answer.id)
   return (
     <Sheet open={open} onOpenChange={(value) => { if (!value) onClose() }} modal={false}>
       <SheetContent
@@ -50,7 +69,7 @@ export function DiagnosticsDrawer<I>({ open, turn, turns, slot, onShow, onClose 
           content.current?.focus()
         }}
         onCloseAutoFocus={(e) => {
-          const strip = document.querySelector<HTMLElement>(`[data-diagnostics-strip="${CSS.escape(turn.id)}"]`)
+          const strip = document.querySelector<HTMLElement>(`[data-diagnostics-strip="${CSS.escape(answer.id)}"]`)
           if (strip === null) return
           e.preventDefault()
           strip.focus()
@@ -62,10 +81,10 @@ export function DiagnosticsDrawer<I>({ open, turn, turns, slot, onShow, onClose 
               <SheetTitle className="flex items-center gap-1.5">
                 <Gauge className="size-3.5 text-muted-foreground" /> Diagnostics
               </SheetTitle>
-              <StateMark turn={turn} />
+              <StateMark answer={answer} />
             </div>
-            <SheetDescription className="truncate" title={turn.question}>
-              For: <span className="text-foreground">{turn.question}</span>
+            <SheetDescription className="truncate" title={answer.question}>
+              For: <span className="text-foreground">{answer.question}</span>
             </SheetDescription>
           </div>
           <div className="flex shrink-0 items-center gap-0.5">
@@ -88,7 +107,7 @@ export function DiagnosticsDrawer<I>({ open, turn, turns, slot, onShow, onClose 
           </div>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          <DiagnosticsView turn={turn} slot={slot} />
+          <DiagnosticsView key={answer.id} answer={answer} />
         </div>
       </SheetContent>
     </Sheet>

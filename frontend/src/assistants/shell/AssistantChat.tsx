@@ -29,11 +29,7 @@ import {
 } from '../conversation/chatModel'
 import type { ThreadOwner } from '../conversation/threadStore'
 import { useAssistantConversation } from '../conversation/useAssistantConversation'
-import { DiagnosticsDrawer } from '../diagnostics/DiagnosticsDrawer'
-import { DiagnosticsStrip } from '../diagnostics/DiagnosticsStrip'
-import type { DiagnosticsSlot } from '../diagnostics/DiagnosticsView'
-import { drawerTurn } from '../diagnostics/timeline'
-import { useDiagnostics } from '../diagnostics/useDiagnostics'
+import { DiagnosticsDrawer, DiagnosticsStrip, DiagnosticsSwitch, useDiagnostics } from '../diagnostics'
 
 /** How a kind shows what it reported about each answer. */
 export interface InsightView<I> {
@@ -60,7 +56,12 @@ interface AssistantChatProps<E extends { type: string }, I> {
   /** One line under the name in the empty state, about what this kind does. */
   intro: string
   placeholder: string
-  /** Remember the thread in the browser and restore it on open (the Workbench); else each mount starts a new one. */
+  /**
+   * The Workbench: remember the thread in the browser and restore it on
+   * open, and show diagnostics by the "Show diagnostics" switch. Else a
+   * Studio test panel: each mount starts a new thread, and every answer
+   * shows its diagnostics.
+   */
   remember: boolean
   /** Why questions are blocked (unsaved, invalid, unsupported); null = they run. */
   blockedReason?: string | null
@@ -78,12 +79,6 @@ interface AssistantChatProps<E extends { type: string }, I> {
   /** Toolbar, right: the side-panel switch. */
   toggle?: ReactNode
   /**
-   * The kind's diagnostics. Where they are allowed, the shell asks for them
-   * (always, or by its "Show diagnostics" switch) and shows a strip under
-   * each answer that has them, which opens the diagnostics drawer.
-   */
-  diagnostics?: DiagnosticsSlot<I>
-  /**
    * Where "New conversation" goes instead of the toolbar, which is then
    * never shown (the Studio test panel's header); null until it is mounted.
    */
@@ -95,13 +90,14 @@ interface AssistantChatProps<E extends { type: string }, I> {
  * assistant kind: toolbar, messages, input with Send / Stop, "New
  * conversation", restore and the side panel beside (or, when narrow, below)
  * the conversation, and the answers' diagnostics. The kind supplies its
- * events' meaning (`model`), its request (`send`), its insight and its
- * diagnostics parts. Remount it (React `key`) for another assistant or a
- * new thread.
+ * events' meaning (`model`), its request (`send`) and its insight.
+ * Diagnostics are no part of a kind: the shell only says in which mode
+ * they run (`../diagnostics`). Remount it (React `key`) for another
+ * assistant or a new thread.
  */
 export function AssistantChat<E extends { type: string }, I>({
   ontologyKey, lensKey, kind, assistantKey, name, description, intro, placeholder, remember,
-  blockedReason = null, model, send, insight, renderAnswer, picker, toggle, diagnostics, actions,
+  blockedReason = null, model, send, insight, renderAnswer, picker, toggle, actions,
 }: AssistantChatProps<E, I>) {
   const owner = useMemo<ThreadOwner | null>(
     () => (remember && assistantKey !== null ? { ontologyKey, lensKey, kind, assistantKey } : null),
@@ -110,17 +106,13 @@ export function AssistantChat<E extends { type: string }, I>({
   const [confirmNew, setConfirmNew] = useState(false)
   // The answer the panel shows; null follows the latest with insight.
   const [selected, setSelected] = useState<string | null>(null)
-  const gate = useDiagnostics(diagnostics?.mode ?? 'toggle')
-  // Shown and asked: the kind has diagnostics, they are allowed and on.
-  const diagnosing = diagnostics !== undefined && gate.allowed && gate.on
-  // The diagnostics drawer and its answer; null follows the latest with diagnostics.
-  const [drawer, setDrawer] = useState<{ open: boolean; id: string | null }>({ open: false, id: null })
+  // All the shell says about diagnostics: the Workbench has the switch, a Studio test panel always shows them.
+  const diagnostics = useDiagnostics(remember ? 'toggle' : 'always')
   const conversation = useAssistantConversation({
-    owner, model, send, blocked: assistantKey === null || blockedReason !== null, diagnostics: diagnosing,
+    owner, model, send, blocked: assistantKey === null || blockedReason !== null, diagnostics: diagnostics.on,
     onSent: () => {
       setSelected(null)
-      // An open drawer moves to the new answer.
-      setDrawer((current) => (current.open ? { open: true, id: null } : current))
+      diagnostics.follow()
     },
   })
   const { turns, restoring, notice, running } = conversation
@@ -128,7 +120,6 @@ export function AssistantChat<E extends { type: string }, I>({
   const panel = insight.panel
   const icon = adapters[kind].icon
   const shown = inspectedTurn(turns, selected, model.hasInsight)
-  const drawerShown = diagnosing ? drawerTurn(turns, drawer.id) : undefined
 
   useEffect(() => {
     if (scroll.current !== null) scroll.current.scrollTop = scroll.current.scrollHeight
@@ -138,7 +129,7 @@ export function AssistantChat<E extends { type: string }, I>({
   function startOver() {
     conversation.startOver()
     setSelected(null)
-    setDrawer({ open: false, id: null })
+    diagnostics.reset()
   }
 
   const newConversation = turns.length > 0 && (
@@ -153,17 +144,9 @@ export function AssistantChat<E extends { type: string }, I>({
       New conversation
     </Button>
   )
-  const diagnosticsSwitch = diagnostics?.mode === 'toggle' && gate.allowed && (
+  const diagnosticsSwitch = diagnostics.hasSwitch && (
     <div className={cn(toggle !== undefined && 'border-l pl-3')}>
-      <InsightToggle
-        label="Show diagnostics"
-        title="Ask for each answer's diagnostics (how long each step took and the tokens each model call used) and show them under the answer"
-        checked={gate.on}
-        onChange={(on) => {
-          gate.setOn(on)
-          if (!on) setDrawer({ open: false, id: null })
-        }}
-      />
+      <DiagnosticsSwitch diagnostics={diagnostics} />
     </div>
   )
   const hasToolbar = actions === undefined && (picker !== undefined || toggle !== undefined || diagnosticsSwitch !== false || turns.length > 0)
@@ -210,14 +193,7 @@ export function AssistantChat<E extends { type: string }, I>({
                         insight={panel !== null && (
                           <InsightButton spec={insight.button(turn)} selected={turn.id === shown?.id} onSelect={() => setSelected(turn.id)} />
                         )}
-                        diagnostics={diagnosing && turn.diagnostics !== undefined && (
-                          <DiagnosticsStrip
-                            turn={turn}
-                            open={drawer.open && drawerShown?.id === turn.id}
-                            onOpen={() => setDrawer((current) =>
-                              current.open && drawerShown?.id === turn.id ? { ...current, open: false } : { open: true, id: turn.id })}
-                          />
-                        )}
+                        diagnostics={<DiagnosticsStrip diagnostics={diagnostics} answer={turn} answers={turns} />}
                       />
                     ))}
                   </div>
@@ -256,16 +232,7 @@ export function AssistantChat<E extends { type: string }, I>({
         </div>
       </div>
 
-      {diagnosing && drawerShown !== undefined && (
-        <DiagnosticsDrawer
-          open={drawer.open}
-          turn={drawerShown}
-          turns={turns}
-          slot={diagnostics}
-          onShow={(id) => setDrawer({ open: true, id })}
-          onClose={() => setDrawer((current) => ({ ...current, open: false }))}
-        />
-      )}
+      <DiagnosticsDrawer diagnostics={diagnostics} answers={turns} />
       <NewConversationDialog open={confirmNew} onOpenChange={setConfirmNew} onConfirm={startOver} />
     </div>
   )

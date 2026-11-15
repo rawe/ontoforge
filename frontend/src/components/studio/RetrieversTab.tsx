@@ -240,10 +240,7 @@ function RetrieverTestPanel({
             name={name}
             description={description}
             blockedReason={blockedReason}
-            diagnostics="always"
             remember={false}
-            catalog={catalog}
-            schema={schema}
             actions={actions}
           />
         )}

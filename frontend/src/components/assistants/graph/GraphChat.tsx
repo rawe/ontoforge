@@ -6,7 +6,7 @@ import type { AssistantKind } from '@/api/types'
 import { CitedAnswer } from '@/components/assistants/entities/CitedAnswer'
 import { readString, storageKeys, writeString } from '@/lib/storage'
 import { EvidenceSidebar, type SidebarView } from './EvidenceSidebar'
-import { graphTurns, stepLabel } from './graphTurnModel'
+import { graphTurns } from './graphTurnModel'
 
 export interface GraphChatProps {
   ontologyKey: string
@@ -24,10 +24,8 @@ export interface GraphChatProps {
   remember: boolean
   /**
    * `toggle`: a "Show evidence" switch (remembered per kind, on by
-   * default) shows or hides the sidebar, and diagnostics follow the
-   * shell's "Show diagnostics" switch (the Workbench); `always`: the
-   * sidebar is always shown and diagnostics are always asked (the Studio
-   * test panel).
+   * default) shows or hides the sidebar (the Workbench); `always`: the
+   * sidebar is always shown (the Studio test panel).
    */
   sidebar: 'toggle' | 'always'
   send: (body: ChatRequest, onEvent: (event: SharedEvent | GraphEvent) => void, signal: AbortSignal) => Promise<void>
@@ -39,9 +37,7 @@ export interface GraphChatProps {
 /**
  * The assistant chat of every graph kind: the evidence sidebar (Entities,
  * Graph, Steps) fills while an answer streams, and the answer's citations
- * are chips that select their card there. Diagnostics: its steps named by
- * the pipeline, the Understand step opening to the sentence it read the
- * question as.
+ * are chips that select their card there.
  */
 export function GraphChat({ kind, sidebar, send, ...chat }: GraphChatProps) {
   const [switchedOn, setSwitchedOn] = useState(() => readString(storageKeys.graphSidebar(kind)) !== 'false')
@@ -69,11 +65,6 @@ export function GraphChat({ kind, sidebar, send, ...chat }: GraphChatProps) {
             onChange={switchSidebar}
           />
         : undefined}
-      diagnostics={{
-        mode: sidebar,
-        nameOf: (name, turn) => stepLabel(turn.insight, name),
-        plan: (plan) => (typeof plan.summary === 'string' ? <p className="text-xs">{plan.summary}</p> : null),
-      }}
       renderAnswer={(turn, show) => (
         <CitedAnswer
           text={turn.reply}

@@ -1,9 +1,10 @@
 /**
- * An answer's diagnostics, the same for every assistant kind: asked with
- * `diagnostics: true` on the chat request, sent as `diagnostics` events.
- * Each event carries one finished step of the turn (a model call or other
- * work, measured by the server from the turn's start) or, last, the whole
- * turn's time. Steps upsert by index; the time replaces.
+ * The `diagnostics` event of an assistant chat, the same for every
+ * assistant kind: its shape, its check for the stream reader, and how the
+ * events of one answer merge. Each event carries one finished step of the
+ * turn (a model call or other work, measured by the server from the turn's
+ * start) or, last, the whole turn's time. Steps upsert by index; the time
+ * replaces. The pattern and the view: `index.ts`.
  *
  * No React, no I/O — unit-tested with `node --test`.
  */
@@ -22,7 +23,7 @@ export interface TokenUsage {
 export interface DiagnosticsStep {
   /** 1, 2, … in the order the steps started; the step's identity. */
   index: number
-  /** The pipeline step or the tool; absent on a tool loop's model call. */
+  /** A stable key (`plan`, `get_entity`); absent on a tool loop's model call. */
   name?: string
   /** The step is exactly one model call. */
   model?: true
@@ -35,8 +36,8 @@ export interface DiagnosticsStep {
   finishReason?: string
   /** The step threw. */
   failed?: true
-  /** What a planning step decided; its shape is the kind's. */
-  plan?: Record<string, unknown>
+  /** What the step did or decided, in plain text the server wrote for the reader; line breaks count. */
+  detail?: string
 }
 
 /** What the `diagnostics` events report about one answer, merged as they arrive. */
@@ -61,7 +62,7 @@ const validStep = (step: unknown) => record(step) &&
   position(step.index) && optional(step.name, text) && optional(step.model, (v) => v === true) &&
   time(step.startMs) && time(step.durationMs) &&
   optional(step.usage, validUsage) && optional(step.finishReason, text) &&
-  optional(step.failed, (v) => v === true) && optional(step.plan, record)
+  optional(step.failed, (v) => v === true) && optional(step.detail, text)
 
 /** A `diagnostics` event checked; throws on a malformed one. */
 export function checkDiagnostics(e: Record<string, unknown>): DiagnosticsEvent {
@@ -72,48 +73,13 @@ export function checkDiagnostics(e: Record<string, unknown>): DiagnosticsEvent {
 }
 
 /** One event merged into an answer's diagnostics: steps upsert by index (kept in index order), the time replaces. */
-export function mergeDiagnostics(current: Diagnostics, next: Diagnostics): Diagnostics {
+export function mergeDiagnostics(current: Diagnostics | undefined, event: Diagnostics): Diagnostics {
   const merged: Diagnostics = { ...current }
-  if (next.steps !== undefined) {
-    const steps = new Map((current.steps ?? []).map((step) => [step.index, step]))
-    for (const step of next.steps) steps.set(step.index, step)
+  if (event.steps !== undefined) {
+    const steps = new Map((current?.steps ?? []).map((step) => [step.index, step]))
+    for (const step of event.steps) steps.set(step.index, step)
     merged.steps = [...steps.values()].sort((a, b) => a.index - b.index)
   }
-  if (next.durationMs !== undefined) merged.durationMs = next.durationMs
+  if (event.durationMs !== undefined) merged.durationMs = event.durationMs
   return merged
-}
-
-/** The diagnostics fields of an event, without its type. */
-export function diagnosticsOf(event: DiagnosticsEvent): Diagnostics {
-  return {
-    ...(event.steps !== undefined && { steps: event.steps }),
-    ...(event.durationMs !== undefined && { durationMs: event.durationMs }),
-  }
-}
-
-/** The steps together: how many were model calls, how many failed, and the tokens reported — a field only when some step reported it. */
-export function stepTotals(steps: readonly DiagnosticsStep[]): { modelCalls: number; failed: number; usage: TokenUsage } {
-  const usage: TokenUsage = {}
-  for (const step of steps) {
-    for (const field of USAGE_FIELDS) {
-      const value = step.usage?.[field]
-      if (value !== undefined) usage[field] = (usage[field] ?? 0) + value
-    }
-  }
-  return {
-    modelCalls: steps.filter((step) => step.model === true).length,
-    failed: steps.filter((step) => step.failed === true).length,
-    usage,
-  }
-}
-
-const USAGE_LABEL: Record<(typeof USAGE_FIELDS)[number], string> = {
-  input: 'in', output: 'out', cacheRead: 'cache read', cacheWrite: 'cache write',
-}
-
-/** `5,210 in`, `312 out`, `4,800 cache read`, `0 cache write` — only what was reported, in that order. */
-export function usageParts(usage: TokenUsage | undefined): string[] {
-  if (usage === undefined) return []
-  return USAGE_FIELDS.filter((field) => usage[field] !== undefined)
-    .map((field) => `${usage[field]!.toLocaleString('en-US')} ${USAGE_LABEL[field]}`)
 }

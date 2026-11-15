@@ -14,8 +14,6 @@ import { assistantPath, postChat, readAssistantStream, type ChatRequest, type Ki
 import { request } from './http.ts'
 import type { Matched, RelationDirection } from './types'
 
-export type SearchMode = 'semantic' | 'keyword' | 'hybrid'
-
 /** One index the retriever searches; `relations` absent = all its relation groups. */
 export interface RetrieverIndex {
   index: string
@@ -65,27 +63,8 @@ export interface Retriever {
   updatedAt: string
 }
 
-/* ----------------------------------- plan ----------------------------------- */
+/* --------------------------------- retrieve --------------------------------- */
 
-/** A planned filter: the planner's value and quote, with the filter's definition from the configuration that ran the turn. */
-export interface PlannedFilter extends RetrieverFilter {
-  value: string
-  quote: string
-}
-export interface PlanSubQuery {
-  indices: string[]
-  relations: string[]
-  query: string
-  variants: string[]
-  mode: SearchMode
-  filters: PlannedFilter[]
-}
-/** What a planning step decided — the `plan` of a retriever's `plan` or `replan` step in diagnostics. */
-export interface RetrieverPlan {
-  subQueries: PlanSubQuery[]
-  /** Why the question cannot be answered from the lens; null or absent when it can. */
-  unsupportedReason?: string | null
-}
 /** One exact condition a result is proven to satisfy. */
 export interface RetrieveCondition {
   /** The filter id of the retriever's configuration. */
@@ -157,22 +136,6 @@ export const retrieveQuestion = (
 ) => request<RetrieveResponse>(`${assistantPath({ ontologyKey, lensKey }, 'retrievers', key)}/retrieve`, { method: 'POST', body, signal })
 
 /* ------------------------------- stream reader ------------------------------ */
-
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-const strings = (value: unknown) => Array.isArray(value) && value.every((item) => typeof item === 'string')
-
-const validSubQuery = (q: unknown) => record(q) && strings(q.indices) && typeof q.query === 'string' &&
-  strings(q.relations) && strings(q.variants) && typeof q.mode === 'string' &&
-  Array.isArray(q.filters) && q.filters.every((f) => record(f) && typeof f.id === 'string' && typeof f.value === 'string')
-
-/** A step's plan read as a retriever's plan; null when it is not one. */
-export function retrieverPlan(plan: unknown): RetrieverPlan | null {
-  if (!record(plan) || !Array.isArray(plan.subQueries) || !plan.subQueries.every(validSubQuery)) return null
-  if (plan.unsupportedReason !== undefined && plan.unsupportedReason !== null && typeof plan.unsupportedReason !== 'string') return null
-  return plan as unknown as RetrieverPlan
-}
 
 /** The retriever's own events, validated before they reach the UI; kind events it does not know are ignored. */
 const retrieverReader: KindReader<RetrieverKindEvent> = {

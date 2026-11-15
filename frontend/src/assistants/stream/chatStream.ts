@@ -13,7 +13,7 @@ import { record } from '../../api/checks.ts'
 import { checkEntities, type EntitiesEvent } from '../../api/entities.ts'
 import { ApiError, parseError, request } from '../../api/http.ts'
 import type { AssistantThread } from '../../api/types.ts'
-import { checkDiagnostics, type DiagnosticsEvent } from '../diagnostics/diagnostics.ts'
+import { checkDiagnostics, type DiagnosticsEvent } from '../diagnostics/events.ts'
 import type { Binding } from '../types.ts'
 
 export interface StreamError { code: string; message: string; details?: Record<string, unknown> }

@@ -10,7 +10,7 @@
  */
 
 import type { SharedEvent } from '../stream/chatStream.ts'
-import { diagnosticsOf, mergeDiagnostics, type Diagnostics } from '../diagnostics/diagnostics.ts'
+import { mergeDiagnostics, type Diagnostics } from '../diagnostics/events.ts'
 import type { EntityCard, EntityLink } from '@/api/entities'
 import type { ChatMessage } from '@/api/types'
 
@@ -110,7 +110,7 @@ export function applyEvent<E extends { type: string }, I>(
         links: upsert(turn.links, event.links, (link) => link.id),
       }
     case 'diagnostics':
-      return { ...turn, diagnostics: mergeDiagnostics(turn.diagnostics ?? {}, diagnosticsOf(event)) }
+      return { ...turn, diagnostics: mergeDiagnostics(turn.diagnostics, event) }
     case 'final':
       return { ...turn, reply: event.reply, status: 'complete' }
     case 'error':
@@ -170,11 +170,6 @@ export function inspectedTurn<I>(
 ): Turn<I> | undefined {
   const withInsight = turns.filter((t) => hasDetail(t, hasInsight))
   return withInsight.find((t) => t.id === selectedId) ?? withInsight.at(-1)
-}
-
-/** `412 ms`, `2.4 s`. */
-export function formatDuration(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`
 }
 
 /** Whole seconds since `since`, for the running indicator. */

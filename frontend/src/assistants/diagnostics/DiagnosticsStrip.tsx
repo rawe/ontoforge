@@ -1,30 +1,43 @@
 import { AlertCircle, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { Turn } from '../conversation/chatModel'
 import { TimeBar } from './DiagnosticsView'
-import { answerSummary, failedText, stripLabel, stripText } from './timeline'
+import { answerSummary, drawerAnswer, failedText, stripLabel, stripText, type Answer } from './timeline'
+import type { DiagnosticsControl } from './useDiagnostics'
 import { useNow } from './useNow'
 
 /**
  * One line under an answer with diagnostics: a small bar of its steps, its
  * time, model calls and tokens, and a mark when a step failed. It grows
  * with each finished step while the answer runs; a click opens the drawer
- * on it.
+ * on it, a second one closes it. Nothing while diagnostics are off or the
+ * answer has none.
  */
-export function DiagnosticsStrip<I>({ turn, open, onOpen }: {
-  turn: Turn<I>
+export function DiagnosticsStrip({ diagnostics, answer, answers }: {
+  diagnostics: DiagnosticsControl
+  answer: Answer
+  /** The conversation's answers: which of them the drawer shows. */
+  answers: readonly Answer[]
+}) {
+  if (!diagnostics.on || answer.diagnostics === undefined) return null
+  const { drawer, setDrawer } = diagnostics.view
+  const open = drawer.open && drawerAnswer(answers, drawer.id)?.id === answer.id
+  return <Strip answer={answer} open={open} onOpen={() => setDrawer(open ? { ...drawer, open: false } : { open: true, id: answer.id })} />
+}
+
+function Strip({ answer, open, onOpen }: {
+  answer: Answer
   /** The drawer shows this answer. */
   open: boolean
   onOpen: () => void
 }) {
-  const now = useNow(turn.status === 'pending')
-  const { facts, segments } = answerSummary(turn, now)
+  const now = useNow(answer.status === 'pending')
+  const { facts, segments } = answerSummary(answer, now)
   const failed = failedText(facts)
   return (
     <button
       type="button"
       data-testid="diagnostics-strip"
-      data-diagnostics-strip={turn.id}
+      data-diagnostics-strip={answer.id}
       aria-label={stripLabel(facts)}
       aria-haspopup="dialog"
       aria-expanded={open}

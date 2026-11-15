@@ -1,17 +1,15 @@
 /**
  * Pure helpers of the retriever editor, test panel and Workbench chat:
  * config v2 draft edits, client-side checks, execution rule, filter paths
- * and the names an answer's steps and plan show with. No React, no runtime imports — unit-tested
+ * and the names an answer's phases show with. No React, no runtime imports — unit-tested
  * with `node --test`.
  */
 import type {
-  PlannedFilter,
   Retriever,
   RetrieverConfig,
   RetrieverFilter,
   RetrieverKindEvent,
   RetrieverPathStep,
-  SearchMode,
 } from '@/api/retrievers'
 import type { SearchCatalogEntry, ValidationError } from '@/api/types'
 import type { TurnModel } from '../../../assistants/conversation/chatModel.ts'
@@ -279,13 +277,11 @@ export function importProblem(body: unknown, existingKeys: readonly string[]): s
 
 /* ---------------------------------- answers --------------------------------- */
 
-/** Display names of an answer's steps: its phases while it runs, its steps in diagnostics; unknown names show as sent. */
+/** Display names of the phases a running answer goes through; unknown names show as sent. */
 export const phaseNames: Record<string, string> = {
-  plan: 'Plan question', replan: 'Plan question again', retrieve: 'Search indices', answer: 'Write answer',
+  plan: 'Plan question', retrieve: 'Search indices', answer: 'Write answer',
 }
 export const phaseName = (phase: string) => phaseNames[phase] ?? phase
-
-export const MODE_LABEL: Record<SearchMode, string> = { semantic: 'by meaning', keyword: 'by keywords', hybrid: 'by meaning and keywords' }
 
 /** A retriever answer's insight: the phase it is in while it runs. */
 export interface RetrieverInsight { phase?: string }
@@ -297,19 +293,4 @@ export const retrieverTurns: TurnModel<RetrieverKindEvent, RetrieverInsight> = {
   // The running phase is the live detail, nothing for the side panel.
   hasInsight: () => false,
   progress: (insight) => (insight.phase === undefined ? undefined : phaseName(insight.phase)),
-}
-
-export const indexName = (key: string, catalog: readonly SearchCatalogEntry[] | undefined) =>
-  catalog?.find((entry) => entry.key === key)?.name ?? key
-
-/** A relation group's label in the given indices, else the relation type's display name. */
-export function relationName(key: string, indices: readonly string[], catalog: readonly SearchCatalogEntry[] | undefined, schema: RetrieverSchema | undefined): string {
-  const label = catalog?.filter((entry) => indices.includes(entry.key)).flatMap((entry) => entry.relations)
-    .find((group) => group.relationType === key && group.label !== null)?.label
-  return label ?? schema?.relationTypes.find((r) => r.key === key)?.displayName ?? key
-}
-
-/** "Person · City = Berlin (from “in Berlin”)" for one planned filter, from the definition it carries. */
-export function plannedFilterText(filter: PlannedFilter, schema: RetrieverSchema | undefined): string {
-  return `${filterLabel(filter, schema)} = ${filter.value}${filter.quote ? ` (from “${filter.quote}”)` : ''}`
 }

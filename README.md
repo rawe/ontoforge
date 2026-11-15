@@ -292,7 +292,9 @@ not read. Every server of one deployment needs the same values.
 tools acting for a person sign in at that authorization server, not at the provider, so
 the provider needs nothing for them. For machines, define an audience for OntoForge
 (`OIDC_AUDIENCE`) and one client per service, using client credentials, whose access
-tokens carry that audience; each service's roles are assigned in OntoForge.
+tokens carry that audience; each service's roles are assigned in OntoForge. The steps for
+Keycloak, Auth0 and Microsoft Entra ID:
+[docs/providers/identity-providers.md](docs/providers/identity-providers.md).
 
 **An own tool** acting for a person — a script, command-line tool, desktop app or browser
 extension that cannot publish a client metadata document — is entered in `OAUTH_CLIENTS`.

@@ -150,8 +150,8 @@ A turn streams its work before its answer:
 - **Each step** — when it starts and how it ends (done or failed), a one-line summary of
   what it did in plain words and display names only — "Path manages → member of: 6
   entities · reached Person at hop 2" — and, for the walk, which round. Understand ends
-  without a summary; its sentence comes with diagnostics. A step the turn does not need
-  arrives once, as skipped, with a summary.
+  without a summary; what it understood comes with diagnostics, below. A step the turn
+  does not need arrives once, as skipped, with a summary.
 - **The entities** — [as every assistant reports them](threads.md#the-entities-a-turn-met):
   each with a ref unique in the turn, its type, label, identity when it has one, up to six fields, its role — anchor, reached by the walk, or carried over from the previous answer — its
   distance from the nearest anchor, why it is there ("Lena Fischer manages Kira Novak", or

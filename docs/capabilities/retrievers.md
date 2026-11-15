@@ -166,7 +166,7 @@ states that is not listed is kept as stated and matches nothing.
 Before anything is searched, the server checks the plan and leaves out what it cannot
 honour, naming each omission in the limitations the answer model receives — in plain
 words from the lens's display names, never by sub-query number, key or id, and in the
-same text the diagnostics report: an index the
+same text a [retrieve](#retrieve) reports: an index the
 retriever does not search, a relation it does not allow for the sub-query's indices, a filter
 that is not the retriever's or not for the sub-query's result types, a filter value without
 that quote and not a listed value it names, and an invalid previous-result reference — the sub-query then runs as a fresh
@@ -279,14 +279,14 @@ each cut to 2,000 characters.
 
 ### Diagnostics
 
-On request, the stream also reports what the retriever did: beside its model calls —
-the plan, a repeated plan, the answer — [as every assistant reports them](threads.md#diagnostics),
-each with bounded traces of its instructions, input and output, the validated plan — each
-planned filter with its definition, so the plan reads without the configuration — one result
-row per entity and sub-query with what matched and its answer fields, the limitations,
-the number of searches and phase timings. Diagnostics are for debugging: they are sent only
-when a question asks for them, and any question may. Progress — which phase runs — and
-the answer text are always streamed. The event format is in [../interfaces/](../interfaces/assistants-rest.md#retriever-list-chat-and-retrieve).
+On request, the stream also reports the retriever's steps
+[as every assistant reports them](threads.md#diagnostics): planning, planning again for a
+follow-up, the retrieval and the answer. A planning step carries the checked plan — each
+planned filter with its definition, so the plan reads without the configuration — or none
+when the planner's output could not be read; the plan the answer used is the last one
+reported. Diagnostics are for debugging: they are sent only when a question asks for
+them, and any question may. Progress — which phase runs —, the entities and the answer
+text are always streamed. The event format is in [../interfaces/](../interfaces/assistants-rest.md#retriever-list-chat-and-retrieve).
 
 ## Retrieve
 

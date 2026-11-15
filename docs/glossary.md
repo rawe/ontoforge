@@ -302,9 +302,8 @@ indices and answers from what it found: a planning model turns
 a question into searches of the retriever's indices, optionally narrowed to relation
 groups and exact filters, and an answer model replies from what they found — or, for a
 retrieve, the found entities are returned without an answer. Every lens also has an
-implicit **default retriever**, derived from its managed indices. Its insight into a run
-is its diagnostics — beside its model calls the plan, results per sub-query, timings and
-model traces — given only on request. See
+implicit **default retriever**, derived from its managed indices. Its plan comes with its
+diagnostics, given only on request. See
 [capabilities/retrievers.md](capabilities/retrievers.md).
 
 **Navigator** — the assistant kind that answers by walking the graph: a planning model
@@ -319,9 +318,11 @@ also has an implicit **default navigator**. See
 new message and the thread's id, and the server continues from the turns the thread kept.
 See [capabilities/threads.md](capabilities/threads.md).
 
-**Diagnostics** — what an assistant's turn did, sent only when its message asks: each model
-call with its duration, the tokens the provider reported, its finish reason and whether it
-failed, the same for every kind, plus what a kind adds. A debugging and tuning feature. See
+**Diagnostics** — how long an assistant's turn took and what it cost, sent only when its
+message asks: the turn's **steps** — each model call and each other piece of work — with
+when each started, how long it took and whether it failed, a model call's reported tokens
+and finish reason, a planning step's plan, and the turn's whole time; the same for every
+kind. A debugging and tuning feature. See
 [capabilities/threads.md](capabilities/threads.md#diagnostics).
 
 ### Access

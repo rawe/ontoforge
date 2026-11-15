@@ -83,20 +83,26 @@ events do not carry the cards ([ADR 0027](../adr/0027-one-shared-entities-event.
 
 ## Diagnostics
 
-A message may ask for **diagnostics**: what its turn did, for debugging and tuning an
-assistant. Every assistant reports them the same way: each model call of the turn — its
-number in the order the calls started, the step that made it where the kind has steps,
-how long it took, the tokens the provider reported (the whole prompt with its cached
-parts, the output, what was read from and written to the provider's cache; a count the
-provider did not report is left out, never estimated), the reason the model gave for
-stopping, and whether the call failed. A call is reported as soon as it ends, so a turn
-that fails has already shown the calls before it. A kind may add its own: a
-[retriever](retrievers.md#diagnostics) its plan, results, timings and model texts.
+A message may ask for **diagnostics**: how long its turn took and what it cost, for
+debugging and tuning an assistant. Every assistant reports them the same way, as the
+turn's **steps**: each model call is one step, and each other piece of work — a tool call,
+a pipeline step that calls no model — is one too. A step has its number in the order the
+steps started, its name — the pipeline step or the tool —, when it started from the turn's
+start and how long it took, all measured by the server, so steps that ran in parallel
+overlap, and whether it failed. A model step adds the tokens the provider reported (the
+whole prompt with its cached parts, the output, what was read from and written to the
+provider's cache; a count the provider did not report is left out, never estimated) and
+the reason the model gave for stopping. A planning step adds what it decided: a
+[retriever's plan](retrievers.md#diagnostics), the sentence a
+[navigator](navigators.md#understand) read the question as. A step is reported as soon as
+it ends, so a turn that fails has already shown the steps before it; last comes the
+turn's whole time.
 
 Nothing of this is sent unless asked, and the work and answer are the same either way.
-Each kind's progress — an agent's tool activity, a retriever's phase, a navigator's steps
-— is always streamed and stays the kind's own. Diagnostics belong to the turn's stream
-only: a thread does not keep them
+What a turn did and found — an agent's tool activity, a retriever's phase, a navigator's
+steps with what each did, the entities, the answer — is always streamed, stays each
+kind's own and carries no time, token count or number of model calls. Diagnostics belong
+to the turn's stream only: a thread does not keep them
 ([ADR 0036](../adr/0036-one-shared-opt-in-diagnostics-event.md)).
 
 ## Lifetime

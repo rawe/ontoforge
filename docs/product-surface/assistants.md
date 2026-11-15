@@ -23,15 +23,15 @@ switch, off by default and remembered once for all three: on, each answer asks f
 [entities the answer met](../capabilities/threads.md#the-entities-a-turn-met), each linking to
 the entity's page, and *Tool calls*. Tool calls stream into a **tool-call panel** that
 follows the running answer:
-each call in order, with a readable name, a one-line summary of what it asked for, its
-state, and its time inside the tool. Calls start collapsed and open by hand. An open call
-shows its arguments and its result in a form fitting the result — a table for query rows,
-search items and passages with Advanced search's rows, entities, neighbours with their relation
-and direction, document text — linking entities to their pages, with the raw result one
-click away; a result that [left something out](../capabilities/agents.md#what-a-result-left-out)
-shows the sentence the model was given about it; a tool that answers with an error shows it highlighted. The panel heads with
-the question, the number of calls, the time spent inside tools — parallel calls once, said
-so when calls overlapped, the model's thinking not at all — and how long the answer took.
+one line per call in order: its number, a readable name, a one-line summary of what it
+asked for and its state. Calls start collapsed and open by hand. An open call shows its
+result in a form fitting the result — a table for query rows, search items and passages
+with Advanced search's rows, entities, neighbours with their relation and direction,
+document text — linking entities to their pages; a result that
+[left something out](../capabilities/agents.md#what-a-result-left-out) shows the sentence
+the model was given about it; a tool that answers with an error shows it highlighted. The
+tool's key, its arguments and the raw result sit under one fold. The panel heads with the
+question, the number of calls and how many answered with an error. No time is shown.
 Each answer's button shows the count of calls and of entities. A "Show details" switch, remembered per browser and on by default, shows
 the panel and the buttons; off hides both. Tool calls live
 as long as the open chat: answers restored from the server have none, and the panel says
@@ -194,11 +194,10 @@ appear before the answer. Three views, each with its count where it has one:
   column further right, borders colored by role, evidence bold and the rest faded, links
   labelled with the relation. A click on a node selects its card; a selected card is
   brought into view. Large graphs open on the anchors.
-- **Steps** — the navigator's pipeline as a vertical list: each step's name, whether it
-  calls the model, what it does, its live state — waiting, running, done, skipped, failed
-  or interrupted — its time, and its one-line summary; a repeated step shows its rounds,
-  and the repeat edge its reason. A footer sums up model calls, total time, entities and
-  evidence.
+- **Steps** — the navigator's pipeline as a vertical list: each step's name, what it
+  does, its live state — waiting, running, done, skipped, failed or interrupted — and its
+  one-line summary where it has one; a repeated step shows its rounds, and the repeat edge
+  its reason. No time is shown.
 
 ## Assistant chat
 
@@ -246,43 +245,32 @@ dock and the Studio's assistant panel never do. They live as long as the open ch
 answer restored from the server, or asked while the switch was off, has none. They are
 not part of the side panel, which shows the kind's insight alone.
 
-**Strip.** One line under each answer that has diagnostics: a small bar of where its time
-went — model calls in the accent colour, other work grey, a failed call red, each part as
-wide as its share of the time, however many parts there are — then the answer's time, the
-number of model calls, the tokens as far as reported, and how many calls failed. It grows
-while the answer runs and stays on a failed or stopped one. A click opens the drawer on
-that answer.
+Both are built from the answer's steps alone, the same for every kind. While the answer
+runs they grow with each finished step, the time ticks by the browser's clock, and the
+time since the last finished step pulses at the end; a failed or stopped answer keeps the
+steps it got.
+
+**Strip.** One line under each answer that has diagnostics: a small bar of its steps in
+order — model calls in the accent colour, other work grey, a failed step red, each as wide
+as its share of the time, steps that ran in parallel as one part, however many steps there
+are — then the answer's time, the number of model calls, the tokens as far as reported,
+and how many steps failed. Where the line is narrow the bar gives way before the numbers.
+A click opens the drawer on that answer.
 
 **Drawer.** A wide panel over the right side of the page, full height, that leaves the
 chat usable: an answer keeps streaming under it, and a new question moves it to the new
 answer. Its header names the question and marks a running, failed or stopped answer;
 ‹ › step between the conversation's answers that have diagnostics; ✕ or Escape close it.
-It fills while the answer runs, in the same order for every kind, each part only where
-the kind has it:
+Inside:
 
-- **Summary** — the answer's time, the number of model calls and of failed ones, the
+- **Summary** — the answer's time, the number of model calls and of failed steps, the
   tokens in, out, read from and written to the cache — each only as the provider reported
-  it, a reported 0 shown — and the kind's counts: a retriever's search calls, a
-  navigator's entities and evidence. The limitations a retriever's run reported follow.
-- **Where the time went** — one bar per part, in order, each starting where the one
-  before ended. An agent: each model call, and the tool calls it asked for as one part;
-  tool times and the total are measured in the browser, so approximate, as a line says.
-  A retriever: its three steps — plan, search, answer — marked stopped or not run where
-  the answer did not get that far, its detailed timings folded below. A navigator: each
-  run of its steps, a repeated step per round, a skipped step greyed.
-- **Model calls** — per model call its number, its name where the kind has one, its
-  duration, its tokens as above, its finish reason, and whether it failed; then a total
-  line with the number of calls and failures, their summed time and tokens. A
-  navigator's calls are named after their step; a retriever's are Planner, Planner
-  (repeated) when a follow-up's planning was repeated, and Response, each with its
-  instructions, input and output, marked where the trace is truncated.
-- **Plan** (retrievers) — what the planning model made of the question: per sub-query the
-  indices searched, the relation groups, the query and its mode with variants, and the
-  exact filters; the reason when the question cannot be answered from the lens; the raw
-  plan.
-- **Results** (retrievers) — per sub-query, best first, each result's type, label and
-  [matched-via](finding-and-collecting.md#matched-via) line; expanding one shows the answer
-  fields sent as evidence and the index that found it.
-
-Model calls, Plan and Results are tabs. No score is shown anywhere. See
-[capabilities/retrievers.md](../capabilities/retrievers.md#diagnostics).
+  it, a reported 0 shown.
+- **Steps** — one row per step in order: its number, its readable name — a tool's name,
+  a pipeline step's label, "Model call" for an agent's model call —, a bar at its real
+  start on the scale of the answer's time, so parallel tool calls overlap, and its time; a
+  model call adds its tokens and finish reason below, a failed step is red. A planning
+  step opens to its plan: a retriever's per sub-query the indices searched, the relation
+  groups, the query and its mode with variants, and the exact filters, the reason when the
+  question cannot be answered from the lens, and the raw plan; a navigator's Understand
+  the sentence it read the question as.

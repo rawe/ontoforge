@@ -43,7 +43,7 @@ The shared events mean the same for every kind:
 | `thread` | `threadId` | Always first: the thread this turn runs on |
 | `delta` | `text` | A fragment of the answer, for kinds that stream their answer |
 | `entities` | `entities` — each `ref`, `id`, `type`, `typeName`, `label`, `fields` (`name`, `value`), `evidence`, and as the kind sends them `reason`, `role`, `hop` — and `links` — each `id` (the stored relation's id), `from`, `to` (refs, directed as stored), `type`, `label` | The entities the turn met and the stored relations between them; a later card replaces an earlier one with the same `ref`, a link is identified by its `id` |
-| `diagnostics` | `modelCalls`, and the kind's own fields | Only when the request asked for diagnostics; [below](#diagnostics) |
+| `diagnostics` | `steps` (one finished step) or `durationMs` (the whole turn) | Only when the request asked for diagnostics; [below](#diagnostics) |
 | `final` | `reply`, and `artifacts` when the turn left any (each `type`, `version`, `value`) | Terminal: the complete answer |
 | `error` | `error` | Terminal: the public error object with `code`, `message` and optional `details` |
 
@@ -81,23 +81,27 @@ and does not count as use; it is gated like the kind's list.
 ### Diagnostics
 
 With `diagnostics` true, a turn sends `diagnostics` events
-([semantics](../capabilities/threads.md#diagnostics)), several in a turn, each before the
-terminal event: one after each model call ends, a failed call included, and for a kind
-with fields of its own one whenever they become known. `modelCalls` lists model calls,
-each:
+([semantics](../capabilities/threads.md#diagnostics)), all before the terminal event: one
+as each step ends, a failed step included, each `steps` holding that one step; then one
+with the turn's `durationMs` in whole milliseconds, right before `final`, or before `error`
+while the stream is still open. A step is one model call or one other piece of work, the
+same shape for every kind:
 
 | Field | Content |
 |---|---|
-| `index` | 1, 2, … in the order the calls started; the call's identity |
-| `name` | The step that made the call, where the kind has steps: a retriever's `plan`, `replan`, `answer`; a navigator's step id. Absent for an agent and the Studio helper |
+| `index` | 1, 2, … in the order the steps started; the step's identity |
+| `name` | A retriever's `plan`, `replan`, `retrieve`, `answer`; a navigator's step id (a repeated step is one step per round); the tool's name for an agent and the Studio helper. Absent on their model calls |
+| `model` | `true` on a step that is one model call; absent on other work |
+| `startMs` | Whole milliseconds from the turn's start, measured by the server; steps that ran in parallel overlap |
 | `durationMs` | Whole milliseconds |
-| `usage` | `input` (the whole prompt, cached parts included), `output`, `cacheRead`, `cacheWrite` — each only when the provider reported it, a reported 0 kept; absent when nothing was reported |
-| `finishReason` | As the provider gave it, when it did |
-| `failed` | `true` for a call that threw; it has no usage |
+| `usage` | Model steps only: `input` (the whole prompt, cached parts included), `output`, `cacheRead`, `cacheWrite` — each only when the provider reported it, a reported 0 kept; absent when nothing was reported |
+| `finishReason` | Model steps only, as the provider gave it, when it did |
+| `failed` | `true` for a step that threw; a failed model call has no usage. A tool that answered with an error has not failed |
+| `plan` | What a planning step decided, when its output could be read: on a retriever's `plan` and `replan` steps the plan below; on a navigator's `understand` step `summary`, the sentence it read the question as |
 
-A client merges a turn's events: `modelCalls` entries by `index`, `timings` by key,
-`limitations` without duplicates; any other field replaces the one before. Without
-`diagnostics` no such event is sent.
+A client merges a turn's events: `steps` by `index`, and `durationMs` replaces the one
+before. Totals — model calls, tokens — are the client's to add up. Time outside every step
+shows only as the gap to `durationMs`. Without `diagnostics` no such event is sent.
 
 ## Retriever list, chat and retrieve
 
@@ -129,19 +133,13 @@ The response streams the [shared frame](#assistant-chat-and-threads): `thread`, 
 as `delta` events, then one terminal `final` or `error`. Before the answer, when results
 reached the answer model, one `entities` event carries them, all evidence, without links —
 with or without diagnostics. Its own events:
-`retriever.phase` (`phase` `plan`, `retrieve` or `answer`, `status` `start` or `end`, an
-end with `durationMs`). Its [`diagnostics` events](#diagnostics) add:
-
-| Field | Content |
-|---|---|
-| `plan` | `subQueries` — each `indices`, `relations`, `query`, `variants`, `mode`, `filters` (`id`, `value`, `quote`, and the filter's definition from the retriever's configuration: `entityType`, `path`, `field`) and `previous` — and `unsupportedReason` |
-| `results` | One row per entity and sub-query that found it, in fused order: `entityId`, `entityType`, `label`, `subQuery`, `matched` when the search ranked the entity, `answerFields` |
-| `limitations` | What the answer model was told limits the results |
-| `searchCalls` | The number of query texts searched |
-| `timings` | Milliseconds: `plan`, `retrieve`, `answer`, `planModel`, `validation`, `search`, `context`, `firstDelta`, `answerModel`, `total`; `planModel` and `validation` add up both planning calls when planning was repeated |
-| `modelCalls` | Each call, named `plan`, `replan` for a follow-up's repeated planning, or `answer`, also carries bounded traces: `systemPrompt`, `input` with `inputTruncated`, `output` with `outputTruncated` |
-
-`matched` has the form [capabilities/search.md](../capabilities/search.md#what-matched) describes.
+`retriever.phase` (`phase` `plan`, `retrieve` or `answer`, `status` `start` or `end`).
+Its [diagnostics](#diagnostics) steps are `plan`, `replan` for a follow-up's repeated
+planning, `retrieve` and `answer`. The `plan` of a planning step: `subQueries` — each
+`indices`, `relations`, `query`, `variants`, `mode`, `filters` (`id`, `value`, `quote`, and
+the filter's definition from the retriever's configuration: `entityType`, `path`, `field`)
+and `previous` — and `unsupportedReason`. The plan the answer used is the last step's that
+carries one.
 
 **Read a thread.** As [shared](#assistant-chat-and-threads).
 
@@ -154,8 +152,8 @@ unknown retriever, `VALIDATION_ERROR` for a retriever its lens can no longer run
 or a malformed plan; a failed planning call answers `MODEL_ERROR`. A closed connection cancels the work.
 
 The response is `200` with `results` — best first, each `entityId`, `entityType`,
-`label`, `conditions` (`filter`, `value`, `text`) and `matched` (a search hit's form, or
-null) — `limitations` and `unsupportedReason` when no index can answer. No results is not
+`label`, `conditions` (`filter`, `value`, `text`) and `matched` (the form
+[capabilities/search.md](../capabilities/search.md#what-matched) describes, or null) — `limitations` and `unsupportedReason` when no index can answer. No results is not
 an error.
 
 A question or a retrieve needs a language-model provider; without an embedding provider it
@@ -188,9 +186,8 @@ its own events, all in display names, never ids or keys:
 
 | Event `type` | Fields | Meaning |
 |---|---|---|
-| `navigator.graph` | `steps` (`id`, `label`, `description`, `model`), `edges` (`from`, `to`, optional `label`; an edge to itself is a repeat) | The pipeline, once, right after `thread` |
-| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, and when it ends `durationMs` and an optional `summary` | One step starting or ending; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary and no duration |
-| `navigator.summary` | `modelCalls`, `durationMs`, `entities`, `evidence`, `hops`, `timings` (milliseconds per step id) | Once, before `final` |
+| `navigator.graph` | `steps` (`id`, `label`, `description`), `edges` (`from`, `to`, optional `label`; an edge to itself is a repeat) | The pipeline, once, right after `thread` |
+| `navigator.step` | `id`, `status` (`running`, `done`, `skipped`, `failed`), `round`, and when it ends an optional `summary` of what it did | One step starting or ending; every `running` is followed by exactly one end of the same `id` and `round`, unless the turn is cancelled; `skipped` arrives alone, with a summary. `understand` ends without a summary: its sentence is the `plan` of its [diagnostics](#diagnostics) step |
 
 The answer cites evidence by ref in square brackets, one or several: `[E2]`, `[E2, E5]`.
 

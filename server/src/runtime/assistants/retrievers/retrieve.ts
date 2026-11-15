@@ -99,9 +99,6 @@ export interface Retrieval {
   /** Fused, best first. */
   items: RetrievedItem[];
   limitations: string[];
-  searchCalls: number;
-  /** Milliseconds spent in search calls. */
-  searchMs: number;
   /** Display names of answer fields cut to the configured characters. */
   cutFields: string[];
 }
@@ -347,8 +344,6 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
   const retrieval: Retrieval = {
     items: [],
     limitations: plan.unsupportedReason ? [plan.unsupportedReason] : [],
-    searchCalls: 0,
-    searchMs: 0,
     cutFields: [],
   };
   // Per sub-query, its restrictions and what resolving them noted.
@@ -364,14 +359,8 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
   let unrun: Limitation[] = [];
   if (tree !== null) {
     scope.signal.throwIfAborted();
-    const started = performance.now();
     ({ hits, limitations: unrun } = await runSearchTree(scope.loaded, scope.indexStore, scope.records, tree));
-    retrieval.searchMs = performance.now() - started;
   }
-  retrieval.searchCalls = plan.subQueries.reduce(
-    (calls, sub) => calls + (sub.query === "" ? 0 : 1 + sub.variants.length),
-    0,
-  );
   // Per sub-query, what resolving its restrictions noted, then whether its
   // list left restricted entities out — every entity it ranked is in the
   // fused ranking, which is not cut.
@@ -477,7 +466,7 @@ export async function retrieve(scope: RetrievalScope, plan: Plan, previous?: Pre
 }
 
 // ---------------------------------------------------------------------------
-// The answer model's context and the diagnostics
+// The answer model's context and the results
 // ---------------------------------------------------------------------------
 
 /** One result as the answer model gets it: in the lens's display names —
@@ -611,20 +600,6 @@ export function answerSearches(plan: Plan, config: RetrieverConfig, lens: Retrie
       return filter === undefined ? [] : [filterCondition(lens.scoped, filter, applied.value)];
     }),
   }));
-}
-
-/** One diagnostics row per entity and sub-query that found it, in fused order. */
-export function diagnosticResults(retrieval: Retrieval) {
-  return retrieval.items.flatMap((item) =>
-    item.matches.map((match) => ({
-      entityId: item.entityId,
-      entityType: item.entityType,
-      label: item.label,
-      subQuery: match.subQuery,
-      ...(match.matched === null ? {} : { matched: match.matched }),
-      answerFields: item.fields,
-    })),
-  );
 }
 
 /** One found entity as the retrieve route returns it. */

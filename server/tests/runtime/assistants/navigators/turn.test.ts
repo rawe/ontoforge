@@ -141,7 +141,7 @@ describe("a navigator turn", () => {
         type: "diagnostics",
         steps: [{
           index: 1, name: "understand", model: true, ...time, usage: { input: 900, output: 40 },
-          plan: { summary: "Looking for Project · starting at “Lena” · path manages → works on" },
+          detail: "Looking for Project · starting at “Lena” · path manages → works on",
         }],
       },
       { type: "diagnostics", steps: [{ index: 2, name: "anchor", ...time }] },
@@ -269,7 +269,7 @@ describe("a navigator turn", () => {
     expect(fake.invoke).toHaveBeenCalledTimes(1);
     expect(fake.stream).not.toHaveBeenCalled();
 
-    // Output that cannot be read: the call completed, its step carries no plan.
+    // Output that cannot be read: the call completed, its step carries no detail.
     fake.invoke.mockResolvedValueOnce({ content: "not json" });
     const unread: StreamEvent[] = [];
     await expect(runNavigatorTurn({ key: "_default", config: deriveNavigator(), loaded: { scoped: LENS, full: LENS } as unknown as LoadedSchema },
@@ -426,7 +426,7 @@ describe("follow-ups on a thread", () => {
       ["E4", "Zeus", "focus", 0, "From the previous answer"],
     ]);
     expect(events.find((e) => e.type === "diagnostics")!.steps).toMatchObject([
-      { name: "understand", plan: { summary: "Looking for Team · continuing from the previous answer · path member of" } },
+      { name: "understand", detail: "Looking for Team · continuing from the previous answer · path member of" },
     ]);
     expect(stepDone(events, "anchor").summary).toBe("Continuing from the previous answer: 4 entities");
     expect(lastCards(events).map((c) => c.label)).toEqual(["Kira Novak", "Apollo", "Omar Haddad", "Zeus", "Platform", "Data"]);

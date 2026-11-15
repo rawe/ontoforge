@@ -131,7 +131,7 @@ export async function run(turn: NavigatorTurn): Promise<string> {
     .addNode("understand", async (state) => {
       history = historyOf(state.messages.slice(0, -1));
       previous = state.carried ?? [];
-      // What understand decided is its diagnostics plan, not its step summary.
+      // What understand decided is its diagnostics detail, not its step summary.
       intent = await trace.step("understand", () => decide(
         model, trace.diagnostics.model("understand"), "navigator_intent",
         intentSchema(Object.keys(lens.entityTypes), [...anchorTypes], [...relations]),
@@ -140,7 +140,7 @@ export async function run(turn: NavigatorTurn): Promise<string> {
         signal,
         (raw) => {
           const parsed = parseIntent(raw, lens, relations, anchorTypes);
-          return { value: parsed, plan: { summary: intentSummary(parsed, lens) } };
+          return { value: parsed, detail: intentSummary(parsed, lens) };
         },
       ));
       return { round: 0 };

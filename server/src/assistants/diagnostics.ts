@@ -1,20 +1,42 @@
 /**
- * The steps of one turn, for the shared `diagnostics` event every assistant
- * kind sends when a chat asks for it. One recorder per turn (`session.ts`),
- * used by every engine around each piece of work it does: a model call is
- * a model step, anything else (a tool call, a pipeline step that calls no
- * model) a work step. Each step is timed and, once it ended — failed too —
- * sent as one entry of `steps`; every send is awaited by the step's own
- * code, so it reaches the stream before the turn's terminal event. Last,
- * the session sends the whole turn's `durationMs`. Without diagnostics
- * nothing is sent.
+ * Diagnostics: the steps of one turn, sent as the shared `diagnostics`
+ * event when a chat asks for it (`diagnostics: true`). The same for every
+ * assistant kind: nothing in the event, and nothing in a client, depends
+ * on the kind.
  *
- * An entry: `index` (1, 2, … in the order the steps started), `name` (the
- * pipeline step or the tool; absent for a tool loop's model call), `model:
- * true` on a model step, `startMs` (since the turn began) and `durationMs`,
- * whole milliseconds; on a model step `usage` (`core/usage.ts`) and
- * `finishReason` as the provider reported them; `failed: true` for a step
- * that threw; `plan`, what a planning step decided.
+ * A step is one piece of work the engine did for the answer: one model
+ * call (a model step) or anything else (a work step: a tool call, a
+ * search, a pipeline step that calls no model). Its entry:
+ *
+ * - `index`: 1, 2, … in the order the steps started;
+ * - `name`: a stable key in lower case with underscores (`plan`,
+ *   `get_entity`). A client shows it as words ("Get entity"), so choose one
+ *   that reads well that way. Absent only on a tool loop's model call;
+ * - `model: true` on a model step;
+ * - `startMs` (since the turn began) and `durationMs`, whole milliseconds;
+ * - on a model step `usage` (`core/usage.ts`) and `finishReason`, as the
+ *   provider reported them;
+ * - `failed: true` when the step threw;
+ * - `detail`: optional plain text about what the step did or decided, for
+ *   the person reading diagnostics. Display names, never keys, ids or
+ *   JSON; line breaks are kept. Never needed to show the answer.
+ *
+ * Adding diagnostics to an assistant kind is recording its steps here, and
+ * nothing else — a client shows any step as it comes:
+ *
+ * - take the turn's recorder from `StreamExecution.diagnostics`
+ *   (`session.ts` creates one per turn and sends the turn's time last);
+ * - a model call: `const step = diagnostics.model("plan")`, then exactly
+ *   one of `await step.done(messageEnd(response), detail)` and
+ *   `await step.failed()`;
+ * - other work: `await diagnostics.work("retrieve", async (step) => …)`,
+ *   which may set `step.detail`.
+ *
+ * Each entry is sent when its step ends, failed too, and awaited by the
+ * step's own code, so it reaches the stream before the turn's terminal
+ * event. Unless the chat asked for diagnostics, nothing is sent. What the
+ * assistant did and found (tool calls, progress, entities) is not
+ * diagnostics: it stays on the kind's own events, which are always sent.
  */
 
 import type { BaseMessage } from "@langchain/core/messages";
@@ -35,10 +57,17 @@ export interface CallEnd {
 /** One model step, started: ended exactly once, by `done` or `failed`. */
 export interface ModelStep {
   /** The call completed — also one whose answer is then refused as cut off
-   * or unreadable. `plan` is what the step decided, when it could be read. */
-  done(end: CallEnd, plan?: Row): Promise<void>;
+   * or unreadable. `detail` says what the step decided, when that could be
+   * read. */
+  done(end: CallEnd, detail?: string): Promise<void>;
   /** The call threw: no usage. */
   failed(): Promise<void>;
+}
+
+/** One work step while it runs. */
+export interface WorkStep {
+  /** What the step did or decided, when there is something to say. */
+  detail?: string;
 }
 
 /** What a whole answer message reported. */
@@ -62,12 +91,12 @@ export class Diagnostics {
   model(name?: string): ModelStep {
     const step = this.begin(name, true);
     return {
-      done: async (end, plan) => {
+      done: async (end, detail) => {
         const usage = tokenUsage(end.usage);
         await step({
           ...(usage === undefined ? {} : { usage }),
           ...(end.finishReason === undefined ? {} : { finishReason: end.finishReason }),
-          ...(plan === undefined ? {} : { plan }),
+          ...(detail === undefined ? {} : { detail }),
         });
       },
       failed: () => step({ failed: true }),
@@ -75,16 +104,17 @@ export class Diagnostics {
   }
 
   /** Runs `run` as one work step: failed when it throws (the error goes on). */
-  async work<T>(name: string, run: () => Promise<T>): Promise<T> {
-    const step = this.begin(name, false);
+  async work<T>(name: string, run: (step: WorkStep) => Promise<T>): Promise<T> {
+    const end = this.begin(name, false);
+    const step: WorkStep = {};
     let result: T;
     try {
-      result = await run();
+      result = await run(step);
     } catch (error) {
-      await step({ failed: true });
+      await end({ failed: true });
       throw error;
     }
-    await step({});
+    await end(step.detail === undefined ? {} : { detail: step.detail });
     return result;
   }
 

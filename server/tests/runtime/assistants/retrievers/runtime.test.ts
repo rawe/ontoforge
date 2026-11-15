@@ -138,9 +138,9 @@ async function run(
 const stepsOf = (events: Record<string, unknown>[]) =>
   events.filter((e) => e.type === "diagnostics").flatMap((e) => e.steps as Record<string, unknown>[]);
 
-/** The plan of the turn's last planning step that carries one. */
-const planOf = (events: Record<string, unknown>[]) =>
-  stepsOf(events).filter((step) => step.plan !== undefined).at(-1)!.plan as { subQueries: Record<string, unknown>[] };
+/** The detail of the turn's last planning step that carries one: the plan it used, in words. */
+const planDetailOf = (events: Record<string, unknown>[]) =>
+  stepsOf(events).filter((step) => step.detail !== undefined).at(-1)!.detail as string;
 
 /** The limitations the last answer model call was told. */
 const limitationsOf = () => JSON.parse(fake.stream.mock.calls.at(-1)![0][1].content).limitations as string[];
@@ -171,18 +171,11 @@ describe("retriever pipeline", () => {
       "plan:start", "plan:end", "retrieve:start", "retrieve:end", "answer:start", "answer:end",
     ]);
     expect(events.some((e) => "durationMs" in e && e.type !== "diagnostics")).toBe(false);
-    const plan = planOf(events);
-    expect(plan.subQueries).toEqual([
-      {
-        indices: ["person~default"], relations: [], query: "", variants: [], mode: "keyword", previous: null,
-        // Each planned filter carries its definition, so the plan reads without the configuration.
-        filters: [{ id: "city", value: "Berlin", quote: "Berlin", entityType: "person", path: [{ relationTypeKey: "lives_in", direction: "outgoing" }], field: "name" }],
-      },
-    ]);
-    expect(plan).toMatchObject({ unsupportedReason: null });
+    // The planning step says what it planned, as text in display names.
+    const detail = "Search 1 in person~default: no query, an exact list · filters: lives in City Name: Berlin";
     // Each step once, as soon as it ended: the two model calls and the retrieve phase.
     expect(stepsOf(events)).toEqual([
-      { index: 1, name: "plan", model: true, ...time, usage: { input: 1, output: 2 }, plan },
+      { index: 1, name: "plan", model: true, ...time, usage: { input: 1, output: 2 }, detail },
       { index: 2, name: "retrieve", ...time },
       { index: 3, name: "answer", model: true, ...time, usage: { input: 1, output: 1 } },
     ]);
@@ -224,15 +217,12 @@ describe("retriever pipeline", () => {
     expect(messages.map((m) => m.text)).toEqual(["Everyone in Berlin"]);
   });
 
-  it("the default retriever's diagnostics plan carries its derived filter definitions", async () => {
+  it("the default retriever's planning step names its derived filters in words", async () => {
     const config = defaultRetrieverConfig(LENS);
     const fallback: RunnableRetriever = { key: DEFAULT_RETRIEVER_KEY, config, scope: { ...agent.scope, config } };
     fake.invoke.mockResolvedValue(planned([sub({ filters: [{ id: "person.lives_in.outgoing", value: "Berlin", quote: "Berlin" }] })]));
     const { events } = await run("Everyone in Berlin", true, undefined, undefined, fallback);
-    const plan = planOf(events);
-    expect(plan.subQueries[0]!.filters).toEqual([
-      { id: "person.lives_in.outgoing", value: "Berlin", quote: "Berlin", entityType: "person", path: [{ relationTypeKey: "lives_in", direction: "outgoing" }], field: "name" },
-    ]);
+    expect(planDetailOf(events)).toBe("Search 1 in person~default: no query, an exact list · filters: lives in City Name: Berlin");
   });
 
   it("hands Anthropic the plan schema as its own output format", async () => {
@@ -324,7 +314,7 @@ describe("retriever pipeline", () => {
     });
   });
 
-  it("lists the planning call, without a plan, before a parse failure and never calls the answer model", async () => {
+  it("lists the planning call, without detail, before a parse failure and never calls the answer model", async () => {
     fake.invoke.mockResolvedValue({ content: '{"subQueries":[', usage_metadata: { output_tokens: 1800 }, response_metadata: { finish_reason: "length" } });
     const events: Record<string, unknown>[] = [];
     await expect(chat(agent, "Who?", await newThread(), execution(events, true))).rejects.toThrow("token limit");
@@ -393,9 +383,9 @@ describe("retriever pipeline", () => {
       expect(rankEntries.mock.calls[0]![0].text).toBe("Bob role at ACME");
       expect(fake.stream).toHaveBeenCalledTimes(1);
       expect(steps.map((step) => [step.index, step.name])).toEqual([[1, "plan"], [2, "replan"], [3, "retrieve"], [4, "answer"]]);
-      // Each planning step carries the plan it decided; the second is the one used.
-      expect(steps[0]!.plan).toEqual({ subQueries: [], unsupportedReason: "already answered" });
-      expect((steps[1]!.plan as { subQueries: { query: string }[] }).subQueries[0]!.query).toBe("Bob role at ACME");
+      // Each planning step says what it decided; the second plan is the one used.
+      expect(steps[0]!.detail).toBe("Not answerable: already answered");
+      expect(steps[1]!.detail).toBe("Search 1 in person~default: “Bob role at ACME”, by keywords");
       expect(limitations).toContain("Planning was repeated once: the first plan for this follow-up searched nothing.");
     });
 
@@ -418,7 +408,7 @@ describe("retriever pipeline", () => {
       const { steps, limitations } = await followUp();
       const answerInput = JSON.parse(fake.stream.mock.calls[0]![0][1].content);
       expect(answerInput.unsupportedReason).toBe("already answered");
-      // The repeated call completed; its output could not be read, so it decided no plan.
+      // The repeated call completed; its output could not be read, so its step has no detail.
       expect(steps[1]).toEqual({ index: 2, name: "replan", model: true, ...time });
       expect(limitations).toContain("Planning was repeated once: the first plan for this follow-up searched nothing; the repeated plan failed.");
     });

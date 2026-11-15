@@ -56,10 +56,10 @@ export type JsonSchema = Record<string, unknown>;
 /**
  * One structured call, recorded as `step`: the model answers with JSON of
  * the schema, which `read` (it must not throw) turns into the step's value
- * and, optionally, the plan its diagnostics carry. A failed call fails the
- * step with the reason the provider gave (`modelFailure`), unparsable
- * output as a validation error (the step then carries no plan); there is
- * no automatic retry.
+ * and, optionally, the detail its diagnostics carry: what it decided, in
+ * plain text. A failed call fails the step with the reason the provider
+ * gave (`modelFailure`), unparsable output as a validation error (the step
+ * then carries no detail); there is no automatic retry.
  */
 export async function decide<T>(
   model: BaseChatModel,
@@ -69,7 +69,7 @@ export async function decide<T>(
   system: string,
   input: string,
   signal: AbortSignal,
-  read: (output: unknown) => { value: T; plan?: Record<string, unknown> },
+  read: (output: unknown) => { value: T; detail?: string },
 ): Promise<T> {
   const bound = settings.AI_PROVIDER === "anthropic"
     ? (model as ChatAnthropic).withConfig({ outputConfig: { format: { type: "json_schema", schema } } })
@@ -96,7 +96,7 @@ export async function decide<T>(
     throw new ValidationError(`The language model answered no readable JSON (${name}).`);
   }
   const decided = read(parsed);
-  await step.done(end, decided.plan);
+  await step.done(end, decided.detail);
   return decided.value;
 }
 

@@ -65,10 +65,10 @@ describe("Trace", () => {
   it("a step that calls the model is recorded by its model call only", async () => {
     const { events, trace: t } = trace();
     await t.graph(TOPOLOGY);
-    await t.step("understand", () => t.diagnostics.model("understand").done({}, { summary: "Looking for Person" }));
+    await t.step("understand", () => t.diagnostics.model("understand").done({}, "Looking for Person"));
     expect(events.slice(1)).toEqual([
       { type: "navigator.step", id: "understand", status: "running", round: 1 },
-      { type: "diagnostics", steps: [{ index: 1, name: "understand", model: true, ...time, plan: { summary: "Looking for Person" } }] },
+      { type: "diagnostics", steps: [{ index: 1, name: "understand", model: true, ...time, detail: "Looking for Person" }] },
       { type: "navigator.step", id: "understand", status: "done", round: 1 },
     ]);
   });

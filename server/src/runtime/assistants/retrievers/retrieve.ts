@@ -602,6 +602,39 @@ export function answerSearches(plan: Plan, config: RetrieverConfig, lens: Retrie
   }));
 }
 
+/** A search mode in words. */
+const MODE_WORDS: Record<SubQuery["mode"], string> = {
+  semantic: "by meaning",
+  keyword: "by keywords",
+  hybrid: "by meaning and keywords",
+};
+
+/**
+ * The plan as text for the person reading diagnostics, the `detail` of a
+ * planning step: one line per search — its indices, its query with its
+ * variants and the mode, the relation groups it was restricted to, its
+ * exact conditions (both in the words the answer model gets,
+ * `answerSearches`) and whether previous results restrict it — then why
+ * the question cannot be answered, when the planner said so.
+ */
+export function planDetail(plan: Plan, config: RetrieverConfig, lens: RetrieverLens): string {
+  const searches = answerSearches(plan, config, lens);
+  const lines = plan.subQueries.map((sub, i) => {
+    const { relations, filters } = searches[i]!;
+    const indices = sub.indices.map((key) => lens.catalog.find((entry) => entry.key === key)?.name ?? key);
+    const variants = sub.variants.length > 0 ? ` (also ${sub.variants.map((variant) => `“${variant}”`).join(", ")})` : "";
+    const parts = [
+      sub.query === "" ? "no query, an exact list" : `“${sub.query}”${variants}, ${MODE_WORDS[sub.mode]}`,
+      ...(relations.length > 0 ? [`relation groups: ${relations.join(", ")}`] : []),
+      ...(filters.length > 0 ? [`filters: ${filters.join("; ")}`] : []),
+      ...(sub.previous !== null ? ["limited by the previous results"] : []),
+    ];
+    return `Search ${i + 1} in ${indices.join(", ")}: ${parts.join(" · ")}`;
+  });
+  if (plan.unsupportedReason) lines.push(`Not answerable: ${plan.unsupportedReason}`);
+  return lines.join("\n") || "No search planned.";
+}
+
 /** One found entity as the retrieve route returns it. */
 export interface RetrievedResult {
   entityId: string;

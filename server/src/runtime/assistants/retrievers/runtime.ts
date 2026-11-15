@@ -15,8 +15,8 @@
  * answer), the shared `entities` (`../entities.ts`: the results handed to
  * the answer model, before it streams), `delta` (answer text), the
  * shared `diagnostics` (on request: the model steps `plan`, `replan` and
- * `answer`, a planning step with the plan it decided, and the work step
- * `retrieve`), then the transport's `final` or `error`.
+ * `answer`, a planning step with its plan in words as `detail`, and the
+ * work step `retrieve`), then the transport's `final` or `error`.
  *
  * Retrieve runs the first two phases only (`retrieveQuestion`): one
  * planning call without a conversation, then retrieval; it returns the
@@ -73,7 +73,6 @@ import {
   defaultRetrieverConfig,
 } from "./defaultRetriever.js";
 import {
-  diagnosticPlan,
   PLANNER,
   PLANNER_INPUT_CHARACTERS,
   PLANNER_RESPONSE_FORMAT,
@@ -90,6 +89,7 @@ import {
   boundContext,
   entityCards,
   filterValues,
+  planDetail,
   resultIds,
   retrieve,
   retrievedResults,
@@ -224,7 +224,7 @@ interface Planning {
   previous: Previous | undefined;
   plannerModel: PlannerModel;
   /** Records every planning call as a model step, with the checked plan
-   * when there is one. */
+   * as its detail when there is one. */
   diagnostics: Diagnostics;
 }
 
@@ -265,7 +265,8 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
     const end = messageEnd(response);
     const rawFinishReason = response.response_metadata?.finish_reason;
     const finishReason = typeof rawFinishReason === "string" ? rawFinishReason : undefined;
-    // The step ends once its plan is checked; a plan refused leaves it without one.
+    // The step ends once its plan is checked and carries it as text; a plan
+    // refused leaves the step without detail.
     let checked;
     try {
       checked = validatePlan(
@@ -282,7 +283,7 @@ export async function planQuestion(planning: Planning): Promise<{ plan: Plan; no
       await step.done(end);
       throw error;
     }
-    await step.done(end, diagnosticPlan(checked.plan, retriever.config));
+    await step.done(end, planDetail(checked.plan, retriever.config, scope.lens));
     return checked;
   };
   const first = await planWith(PLANNER, "plan");

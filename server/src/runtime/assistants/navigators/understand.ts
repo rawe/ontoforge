@@ -145,8 +145,8 @@ export function parseIntent(
   };
 }
 
-/** What understand decided, its diagnostics plan: what the walk will look
- * for, in display names. */
+/** What understand decided, the detail of its diagnostics step: what the
+ * walk will look for, in display names. */
 export function intentSummary(intent: Intent, lens: SchemaCacheValue): string {
   const names = (keys: string[], of: Record<string, { displayName: string }>) =>
     keys.map((k) => of[k]?.displayName ?? k).join(", ");

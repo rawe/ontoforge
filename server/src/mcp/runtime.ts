@@ -28,7 +28,7 @@
 
 import {
   ENTITY_SEARCH_RESPONSE,
-  NAMED_SEARCH_RESPONSE,
+  SEARCH_PROFILE_RESPONSE,
   PASSAGE_SEARCH_RESPONSE,
   SEARCH_FILTER_EFFECT,
   SEARCH_QUERY_RULE,
@@ -1277,30 +1277,30 @@ export function createRuntimeMcpServer(
   );
 
   register(
-    "list_named_searches",
+    "list_search_profiles",
     {
       description:
-        "List the named searches of this lens: searches designed in advance, each run by its key with " +
+        "List the search profiles of this lens: searches designed in advance, each run by its key with " +
         "a query text. Each has key, name, description (what it finds — choose by it), result " +
         "('entities' or 'passages': what a run returns) and types (the entity types it searches; " +
         "filters apply to these). Read-only.",
       inputSchema: {},
     },
-    tool("list_named_searches", async (_args, open) =>
-      jsonResult(await service.listNamedSearches(lensKey, await open())),
+    tool("list_search_profiles", async (_args, open) =>
+      jsonResult(await service.listSearchProfiles(lensKey, await open())),
     ),
   );
 
   register(
-    "run_named_search",
+    "run_search_profile",
     {
       description:
-        "Run a named search of this lens by its key, best first: its indices, methods and ranking are " +
-        "fixed; the query and filters are yours. key: a named search's key. " +
-        SEARCH_QUERY_RULE + " It fills the search's texts. " +
-        filterRules({ contains: false, relations: true }) + " They apply to the entity types the " +
-        "search searches (a passage's: its document's entity); a key none of them resolves is refused. " +
-        SEARCH_FILTER_EFFECT + " " + NAMED_SEARCH_RESPONSE + " Items are candidates, not verified answers. " +
+        "Run the search profile of this lens that key names, best first: its indices, methods and ranking " +
+        "are fixed; the query and filters are yours. " +
+        SEARCH_QUERY_RULE + " It fills the search profile's texts. " +
+        filterRules({ contains: false, relations: true }) + " They apply to the search profile's " +
+        "entity types (a passage's: its document's entity); a key none of them resolves is refused. " +
+        SEARCH_FILTER_EFFECT + " " + SEARCH_PROFILE_RESPONSE + " Items are candidates, not verified answers. " +
         "Read-only.",
       inputSchema: {
         key: z.string(),
@@ -1309,10 +1309,10 @@ export function createRuntimeMcpServer(
       },
     },
     tool(
-      "run_named_search",
+      "run_search_profile",
       async (args: { key: string; query: string; filters?: Record<string, unknown> | undefined }, open) =>
         jsonResult(
-          await service.runNamedSearch(
+          await service.runSearchProfile(
             lensKey,
             args.key,
             { query: args.query, filter: filterText(args.filters) },

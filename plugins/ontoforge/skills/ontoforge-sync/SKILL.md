@@ -62,7 +62,7 @@ All paths below are relative to this skill directory (`scripts/`).
 
 Export one ontology's design — entity types, relation types, properties, the keyword
 language set, custom search indices, lenses with their inclusions, agents, retrievers,
-navigators, saved queries and named searches — to a single JSON file.
+navigators, saved queries and search profiles — to a single JSON file.
 
 ```bash
 node scripts/export-schema.mjs [-o <output>] [--ontology <key>] [--base-url <url>]
@@ -341,7 +341,7 @@ Produced by `GET /api/ontologies/{ontologyKey}/model/export`:
       "indexInclusions": [],
       "assistants": { "agents": [], "retrievers": [], "navigators": [] },
       "savedQueries": [],
-      "namedSearches": []
+      "searchProfiles": []
     }
   ]
 }

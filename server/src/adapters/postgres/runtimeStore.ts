@@ -387,14 +387,14 @@ export class PostgresRuntimeStore implements RuntimeStore {
     return result.rows.map(camelizeRow);
   }
 
-  /** Named-search rows for one lens, by key. */
-  async getNamedSearches(lensKey: string): Promise<Row[]> {
+  /** Search-profile rows for one lens, by key. */
+  async getSearchProfiles(lensKey: string): Promise<Row[]> {
     const result = await this.query(
-      `SELECT ns.key, ns.name, ns.description, ns.tree
-       FROM named_search ns
-       JOIN lens o ON o.lens_id = ns.lens_id
+      `SELECT sp.key, sp.name, sp.description, sp.tree
+       FROM search_profile sp
+       JOIN lens o ON o.lens_id = sp.lens_id
        WHERE o.key = $1
-       ORDER BY ns.key`,
+       ORDER BY sp.key`,
       [lensKey],
     );
     return result.rows.map(camelizeRow);

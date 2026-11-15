@@ -36,7 +36,7 @@ import {
   wrapAt,
   type ConditionRow,
   type NodeDefaults,
-} from './namedSearchModel'
+} from './searchProfileModel'
 
 /** What every card of one tree shares: the tree, what its fields choose from, and its errors. */
 export interface TreeEditing {

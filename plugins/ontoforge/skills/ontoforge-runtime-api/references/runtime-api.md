@@ -390,16 +390,16 @@ Runtime runs them; the modeling surface defines them.
   { "params": { "city": "Berlin" } }
   ```
 
-## Named Searches
+## Search Profiles
 
-A named search is a search designed on the modeling surface and stored under a key in the
+A search profile is a search designed on the modeling surface and stored under a key in the
 lens; runtime lists and runs it with a query text, never seeing its design.
 
-- `GET /named-searches`
+- `GET /search-profiles`
   Lists them in key order: `key`, `name`, `description`, `result` (`entities` or
   `passages`) and `types` (the entity types it searches).
 
-- `POST /named-searches/{searchKey}/run`
+- `POST /search-profiles/{profileKey}/run`
   Runs one. Request body — `query` (required) and optional `filter`, nothing else:
   ```json
   { "query": "engine", "filter": { "status": "active" } }
@@ -407,10 +407,10 @@ lens; runtime lists and runs it with a query text, never seeing its design.
   `filter` takes the entity search's filter keys and applies to `types`; a type that does
   not declare every key drops out. The response is the entity search's (`result`
   `entities`) or the passage search's (`passages`, text always included). When the search
-  uses more than one query text, each `match` (or `passage`) also carries `queryText`, the
+  profile uses more than one query text, each `match` (or `passage`) also carries `queryText`, the
   text that found it. Without an embedding provider its semantic parts run nothing and are
-  the limitation `no-provider`. An unknown key answers not found; a search the lens no
-  longer fits answers a validation error. MCP: `list_named_searches`, `run_named_search`
+  the limitation `no-provider`. An unknown key answers not found; a search profile the
+  lens no longer fits answers a validation error. MCP: `list_search_profiles`, `run_search_profile`
   (`key`, `query`, `filters`).
 
 ## Entity Identity Comparison

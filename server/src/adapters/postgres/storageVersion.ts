@@ -48,7 +48,7 @@ import { quoteIdent } from "./oql/bindings.js";
 import { camelizeRow } from "./rows.js";
 
 /** The layout this code creates and serves. */
-export const STORAGE_VERSION = 13;
+export const STORAGE_VERSION = 14;
 
 /** The version the previous major line ended on; older storage is refused. */
 export const OLDEST_UPGRADABLE_VERSION = 1;
@@ -655,7 +655,7 @@ const STEPS: Step[] = [
     actions: [convertSearchSteps],
   },
   {
-    // Named searches: the table of search trees stored per lens.
+    // The first table of search trees stored per lens; step 14 replaces it.
     to: 13,
     actions: [
       `CREATE TABLE named_search (
@@ -669,6 +669,26 @@ const STEPS: Step[] = [
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT named_search_key_unique UNIQUE (lens_id, key)
+)`,
+    ],
+  },
+  {
+    // Search profiles: the table of search trees stored per lens,
+    // replacing step 13's.
+    to: 14,
+    actions: [
+      `DROP TABLE IF EXISTS named_search`,
+      `CREATE TABLE search_profile (
+  search_profile_id uuid        CONSTRAINT search_profile_pk PRIMARY KEY,
+  lens_id           uuid        NOT NULL CONSTRAINT search_profile_lens_fk
+                                REFERENCES lens (lens_id) ON DELETE CASCADE,
+  key               text        NOT NULL,
+  name              text        NOT NULL,
+  description       text        NOT NULL,
+  tree              jsonb       NOT NULL,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT search_profile_key_unique UNIQUE (lens_id, key)
 )`,
     ],
   },

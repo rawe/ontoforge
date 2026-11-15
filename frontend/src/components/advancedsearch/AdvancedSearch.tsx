@@ -1,12 +1,12 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { ChevronDown, Info, Play, Search, SlidersHorizontal, X } from 'lucide-react'
-import { useFeatures, useNamedSearches, useSearchCatalog } from '@/api/hooks'
+import { useFeatures, useSearchProfiles, useSearchCatalog } from '@/api/hooks'
 import { ApiError } from '@/api/http'
 import * as runtime from '@/api/runtime'
 import type {
   EntitySearchResponse,
-  NamedSearchRunBody,
+  SearchProfileRunBody,
   PassageSearchBody,
   PassageSearchResponse,
   RuntimeSchema,
@@ -30,14 +30,14 @@ import { cn } from '@/lib/utils'
 import { SearchExplainerButton } from './explainer/SearchExplainer'
 import { ScopePicker, type ScopeChoice } from './ScopePicker'
 import {
-  chosenNamedSearch,
+  chosenSearchProfile,
   fieldErrorsAt,
   formModes,
   modeInEffect,
-  NAMED_CONTROLS,
-  namedRequestKey,
-  namedRunBody,
-  namedRunResult,
+  PROFILE_CONTROLS,
+  profileRequestKey,
+  profileRunBody,
+  profileRunResult,
   requestKey,
   scopeSummary,
   SEARCH_CONTROLS,
@@ -56,17 +56,17 @@ type Outcome =
   | { mode: 'entities'; response: EntitySearchResponse }
   | { mode: 'passages'; response: PassageSearchResponse }
 
-/** What Run sends: one of the two searches, or a named search's run. */
+/** What Run sends: one of the two searches, or a search profile's run. */
 type SearchRequest =
   | { kind: 'search'; mode: SearchMode; body: PassageSearchBody }
-  | { kind: 'named'; key: string; result: SearchMode; body: NamedSearchRunBody }
+  | { kind: 'profile'; key: string; result: SearchMode; body: SearchProfileRunBody }
 
 const runKey = (request: SearchRequest) =>
-  request.kind === 'named'
-    ? namedRequestKey(request.key, request.body)
+  request.kind === 'profile'
+    ? profileRequestKey(request.key, request.body)
     : requestKey(request.mode, request.body)
 
-const MODE_LABELS: Record<FormMode, string> = { entities: 'Entities', passages: 'Passages', named: 'Named' }
+const MODE_LABELS: Record<FormMode, string> = { entities: 'Entities', passages: 'Passages', profile: 'Search profile' }
 
 /** The search route rejects substring operators. */
 const EXCLUDED_OPS = ['contains'] as const
@@ -202,7 +202,7 @@ interface AdvancedSearchProps {
  * `/search/passages` — mode and query text on top; scope, methods, a filter
  * and the limits in a settings panel beside the ranked items (above them on
  * a narrow screen, folded); the items with what ran and what could not.
- * Named mode runs one of the lens's named searches: only the query and a
+ * Search profile mode runs one of the lens's search profiles: only the query and a
  * filter are the caller's, its tree decides the rest.
  */
 export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchProps) {
@@ -211,18 +211,18 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
   const catalogData = useSearchCatalog(ontologyKey, lensKey).data
   const catalog = useMemo(() => catalogData ?? [], [catalogData])
 
-  const namedData = useNamedSearches(ontologyKey, lensKey).data
-  const namedSearches = useMemo(() => namedData ?? [], [namedData])
+  const profileData = useSearchProfiles(ontologyKey, lensKey).data
+  const searchProfiles = useMemo(() => profileData ?? [], [profileData])
 
   const [modePick, setModePick] = useState<FormMode>('entities')
-  const [namedKey, setNamedKey] = useState('')
-  const formMode = modeInEffect(modePick, namedSearches.length > 0)
-  const named = useMemo(
-    () => (formMode === 'named' ? chosenNamedSearch(namedSearches, namedKey) : undefined),
-    [formMode, namedSearches, namedKey],
+  const [profileKey, setProfileKey] = useState('')
+  const formMode = modeInEffect(modePick, searchProfiles.length > 0)
+  const profile = useMemo(
+    () => (formMode === 'profile' ? chosenSearchProfile(searchProfiles, profileKey) : undefined),
+    [formMode, searchProfiles, profileKey],
   )
-  // The unit searched: a named search's result, else the mode.
-  const mode: SearchMode = named?.result ?? (formMode === 'named' ? 'entities' : formMode)
+  // The unit searched: a search profile's result, else the mode.
+  const mode: SearchMode = profile?.result ?? (formMode === 'profile' ? 'entities' : formMode)
   const [query, setQuery] = useState('')
   // One scope field is sent; each keeps its own choice while another is shown.
   const [scopeField, setScopeField] = useState<ScopeField>('types')
@@ -298,10 +298,10 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
     features === undefined ? null : semanticAvailable ? (methodPick ?? 'both') : 'keyword'
 
   // The filter editor works on one type: every chosen scope item must share
-  // it, or the named search must search exactly one.
+  // it, or the search profile must search exactly one.
   const filterTypeKey =
-    named !== undefined
-      ? sharedType(named.types, (key) => key)
+    profile !== undefined
+      ? sharedType(profile.types, (key) => key)
       : sharedType(scopeKeys, (key) =>
           scopeField === 'types'
             ? key
@@ -333,8 +333,8 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
 
   const filterParam = filtersToParam(conditions, filterSubjects)
   const request: SearchRequest =
-    named !== undefined
-      ? { kind: 'named', key: named.key, result: named.result, body: namedRunBody(query, filterParam) }
+    profile !== undefined
+      ? { kind: 'profile', key: profile.key, result: profile.result, body: profileRunBody(query, filterParam) }
       : {
           kind: 'search',
           mode,
@@ -360,10 +360,10 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
           ? { mode: 'entities', response: await runtime.searchEntities(ontologyKey, lensKey, sent.body) }
           : { mode: 'passages', response: await runtime.searchPassages(ontologyKey, lensKey, sent.body) }
       }
-      const response = await runtime.runNamedSearch(ontologyKey, lensKey, sent.key, sent.body)
+      const response = await runtime.runSearchProfile(ontologyKey, lensKey, sent.key, sent.body)
       // The response's items say which unit came back: the listed result may
       // be older than the search the server ran.
-      return namedRunResult(response, sent.result) === 'entities'
+      return profileRunResult(response, sent.result) === 'entities'
         ? { mode: 'entities', response: response as EntitySearchResponse }
         : { mode: 'passages', response: response as PassageSearchResponse }
     },
@@ -383,8 +383,8 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
     execute.mutate(request)
   }
 
-  // A named search's run shows only the query and the filter.
-  const controls = named !== undefined ? NAMED_CONTROLS : SEARCH_CONTROLS
+  // A search profile's run shows only the query and the filter.
+  const controls = profile !== undefined ? PROFILE_CONTROLS : SEARCH_CONTROLS
   const fields = error instanceof ApiError ? (error.fieldErrors ?? {}) : {}
   const errorsAt = (control: SearchControl) => fieldErrorsAt(fields, control)
   const featureDisabled = error instanceof ApiError && error.details?.code === 'FEATURE_DISABLED'
@@ -411,7 +411,7 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
   const methodName = method === null ? 'Methods' : methodOptions.find((o) => o.value === method)?.label
   const filterCount = conditions.length > 0 ? `${conditions.length} filter${conditions.length === 1 ? '' : 's'}` : null
   const summary = (
-    named !== undefined
+    profile !== undefined
       ? [filterCount ?? 'No filter']
       : [
           scopeSummary(scopeField, scopeKeys.length, choices[scopeField].length),
@@ -430,19 +430,19 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
         <Segmented
           label="Search for"
           value={formMode}
-          options={formModes(namedSearches.length > 0).map((value) => ({ value, label: MODE_LABELS[value] }))}
+          options={formModes(searchProfiles.length > 0).map((value) => ({ value, label: MODE_LABELS[value] }))}
           onChange={switchMode}
         />
-        {named !== undefined && (
-          <Select value={named.key} onValueChange={setNamedKey}>
-            <SelectTrigger className="h-8 w-full min-w-0 text-[13px] sm:w-64" aria-label="Named search">
+        {profile !== undefined && (
+          <Select value={profile.key} onValueChange={setProfileKey}>
+            <SelectTrigger className="h-8 w-full min-w-0 text-[13px] sm:w-64" aria-label="Search profile">
               {/* The name only: the items' keys would crowd it out. */}
               <SelectValue>
-                <span className="truncate">{named.name}</span>
+                <span className="truncate">{profile.name}</span>
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {namedSearches.map((s) => (
+              {searchProfiles.map((s) => (
                 <SelectItem key={s.key} value={s.key}>
                   <span className="truncate">{s.name}</span>
                   <span className="font-mono text-[11px] text-muted-foreground">{s.key}</span>
@@ -461,8 +461,8 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
                 if (e.key === 'Enter') run()
               }}
               placeholder={
-                named !== undefined
-                  ? `Search with ${named.name}…`
+                profile !== undefined
+                  ? `Search with ${profile.name}…`
                   : mode === 'entities'
                     ? 'Search entities…'
                     : 'Search passages of documents…'
@@ -477,10 +477,10 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
             {execute.isPending ? 'Running…' : 'Run'}
           </Button>
         </div>
-        {named !== undefined && (
+        {profile !== undefined && (
           <p className="w-full text-[12px] leading-snug text-muted-foreground">
             <span className="font-medium text-foreground">Finds {unitName}</span>
-            {named.description !== '' && ` · ${named.description}`}
+            {profile.description !== '' && ` · ${profile.description}`}
           </p>
         )}
         {errorsAt('query').map((message) => (
@@ -514,7 +514,7 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
             <ChevronDown className={cn('size-4 text-muted-foreground transition-transform', settingsOpen && 'rotate-180')} />
           </button>
           <div className={cn('divide-y border-t lg:border-t-0', !settingsOpen && 'hidden lg:block')}>
-            {named === undefined && (
+            {profile === undefined && (
               <>
                 <Section
                   title="Where to look"
@@ -613,9 +613,9 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
                 )
               }
             >
-              {filterType === undefined && named !== undefined ? (
+              {filterType === undefined && profile !== undefined ? (
                 <p className="text-[11px] leading-snug text-muted-foreground">
-                  Filters work on one type’s properties: this named search searches {named.types.length} types.
+                  Filters work on one type’s properties: this search profile searches {profile.types.length} types.
                 </p>
               ) : filterType === undefined ? (
                 <p className="text-[11px] leading-snug text-muted-foreground">
@@ -636,7 +636,7 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
               )}
             </Section>
 
-            {named === undefined && (
+            {profile === undefined && (
               <Section title="How many" errors={[...errorsAt('limit'), ...errorsAt('perEntity')]}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[12px]">{mode === 'entities' ? 'Entities' : 'Passages'}</span>
@@ -711,10 +711,10 @@ export function AdvancedSearch({ ontologyKey, lensKey, schema }: AdvancedSearchP
           {outcome === null && error === null && (
             <EmptyState
               icon={Search}
-              title={named !== undefined ? `Run ${named.name}` : 'Search this lens'}
+              title={profile !== undefined ? `Run ${profile.name}` : 'Search this lens'}
               description={
-                named !== undefined
-                  ? `Rank ${unitName} for a text, as this named search decides.`
+                profile !== undefined
+                  ? `Rank ${unitName} for a text, as this search profile decides.`
                   : `Rank ${unitName} for a text — by keyword, by meaning, or both.`
               }
               action={<SearchExplainerButton labeled />}

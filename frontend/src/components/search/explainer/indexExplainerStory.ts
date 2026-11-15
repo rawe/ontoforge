@@ -1,7 +1,7 @@
 /**
  * What the index explainer shows: what a search index consists of, told over one example
  * exhibitor, in four modules that never mix — the entries an entity becomes, which index
- * makes which parts, how a search uses the entries, and what a named search's `parts` keeps.
+ * makes which parts, how a search uses the entries, and what a search profile's `parts` keeps.
  * A newcomer's view: no storage, no generations.
  *
  * The example follows the real rules: a managed default index makes `self` entries from own
@@ -11,7 +11,7 @@
 
 import type { SearchPartKind } from '@/api/types'
 
-export type Module = 'Entries' | 'Indices' | 'Search' | 'Named search'
+export type Module = 'Entries' | 'Indices' | 'Search' | 'Search profile'
 
 export type IndexId = 'default' | 'passages' | 'custom'
 
@@ -21,7 +21,7 @@ export type Lit = 'entity' | 'entries' | IndexId | 'search' | 'parts'
 /** Where in the example an entry's text comes from. */
 export type Source = 'name' | 'relation' | 'description'
 
-export type ExampleView = 'entity' | 'entries' | IndexId | 'search' | 'named'
+export type ExampleView = 'entity' | 'entries' | IndexId | 'search' | 'profile'
 
 export interface StoryStep {
   title: string
@@ -125,8 +125,8 @@ export const SEARCH_ENTRIES: { index: IndexId; entry: ExampleEntry; similarity: 
   { index: 'custom', entry: PASSAGES[1], similarity: 0.55 },
 ]
 
-/** The named search's step in the example: one index, one part chosen. */
-export const NAMED_STEP = { index: 'custom' as IndexId, parts: ['relation'] as SearchPartKind[] }
+/** The search profile's step in the example: one index, one part chosen. */
+export const PROFILE_STEP = { index: 'custom' as IndexId, parts: ['relation'] as SearchPartKind[] }
 
 export const STORY: StoryStep[] = [
   {
@@ -172,7 +172,7 @@ export const STORY: StoryStep[] = [
     body:
       'A modeler decides what a custom index reads. Own fields make a self entry, a relation group makes one relation entry per relation, ' +
       'a document field makes passage entries. Only custom indices have relation groups.',
-    note: 'A custom index is searched only where it is chosen — in Advanced search, or as the index of a named search’s step.',
+    note: 'A custom index is searched only where it is chosen — in Advanced search, or as the index of a search profile’s step.',
     module: 'Indices',
     lit: ['custom'],
     view: 'custom',
@@ -188,16 +188,16 @@ export const STORY: StoryStep[] = [
     view: 'search',
   },
   {
-    title: 'In a named search: parts',
+    title: 'In a search profile: parts',
     body:
-      'Each search step of a named search reads one index. Its parts keep only that index’s entries of the chosen parts; none chosen keeps them all. ' +
+      'Each search step of a search profile reads one index. Its parts keep only that index’s entries of the chosen parts; none chosen keeps them all. ' +
       'An index has only the parts it makes: relation on a default index finds nothing.',
     note: 'Below a passage group only passage entries count: a step there keeps passages, and a step naming another part is refused.',
-    module: 'Named search',
+    module: 'Search profile',
     lit: ['parts'],
-    view: 'named',
+    view: 'profile',
   },
 ]
 
-/** The step a page opens on to explain a named search's parts. */
-export const PARTS_STEP = STORY.findIndex((step) => step.view === 'named')
+/** The step a page opens on to explain a search profile's parts. */
+export const PARTS_STEP = STORY.findIndex((step) => step.view === 'profile')

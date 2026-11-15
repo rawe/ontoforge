@@ -79,7 +79,7 @@ export interface PassageReference {
   /** Per method that found this passage in the index it ranks by, that
    * method's own score. */
   scores: MethodScores;
-  /** The query text that found the passage — only on a named search's
+  /** The query text that found the passage — only on a search profile's
    * item, when its tree searches more than one text. */
   queryText?: string;
 }

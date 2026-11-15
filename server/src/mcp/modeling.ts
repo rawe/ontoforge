@@ -55,7 +55,7 @@ import {
   PropertyDefinitionUpdate,
   RelationTypeCreate,
   RelationTypeUpdate,
-  NamedSearchUpsert,
+  SearchProfileUpsert,
   SavedQueryUpsert,
   SearchSettingsUpdate,
   TRANSFER_FORMAT_VERSION,
@@ -297,7 +297,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         "Get the current state of the ontology's schema. Returns all entity types, " +
         "relation types, and their properties, the keyword language set, the search " +
         "indices (custom definitions and switched-off managed indices) and the lenses with " +
-        "their type and search-index inclusions, assistants (agents, retrievers and navigators), saved queries and named searches.",
+        "their type and search-index inclusions, assistants (agents, retrievers and navigators), saved queries and search profiles.",
       inputSchema: {},
     },
     wrap("get_schema", async () => {
@@ -685,7 +685,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
       description:
         `Export the full schema in the OntoForge v${TRANSFER_FORMAT_VERSION} transfer format ` +
         "(JSON), including the keyword language set, the search indices and each lens's " +
-        "assistants (agents, retrievers and navigators), saved queries and named searches.",
+        "assistants (agents, retrievers and navigators), saved queries and search profiles.",
       inputSchema: {},
     },
     wrap("export_schema", async () => {
@@ -701,7 +701,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         `Import a v${TRANSFER_FORMAT_VERSION} schema payload (also accepted, upgraded on the way in: ` +
         IMPORTABLE_FORMAT_VERSIONS.filter((v) => v !== TRANSFER_FORMAT_VERSION).map((v) => `v${v}`).join(", ") +
         "). Creates entity types, relation types, and lenses with scope configuration, " +
-        "assistants, saved queries and named searches. Answers with the created lenses and leftOutSavedQueries: " +
+        "assistants, saved queries and search profiles. Answers with the created lenses and leftOutSavedQueries: " +
         "the saved queries ({lens, key}) of an older payload the upgrade could not convert.",
       inputSchema: {
         payload: z.record(z.string(), z.unknown()),
@@ -977,7 +977,7 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     "delete_lens",
     {
       description:
-        "Delete a lens, with its agents, saved queries, named searches and changesets (changes staged and not yet committed). " +
+        "Delete a lens, with its agents, saved queries, search profiles and changesets (changes staged and not yet committed). " +
         "Does not affect the schema, the instance data or other lenses. The result states how many changesets were deleted.",
       inputSchema: {
         lens_key: z.string(),
@@ -1486,27 +1486,27 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
     }),
   );
 
-  // --- Named Search Tools ---
+  // --- Search Profile Tools ---
 
   server.registerTool(
-    "list_named_searches",
+    "list_search_profiles",
     {
-      description: "List the named searches of a lens: key, name, description and stored tree of each.",
+      description: "List the search profiles of a lens: key, name, description and stored tree of each.",
       inputSchema: {
         lens_key: z.string(),
       },
     },
-    wrap("list_named_searches", async (args: { lens_key: string }) => {
-      const results = await service.listNamedSearches(args.lens_key, await getModelingStore(ontologyKey));
+    wrap("list_search_profiles", async (args: { lens_key: string }) => {
+      const results = await service.listSearchProfiles(args.lens_key, await getModelingStore(ontologyKey));
       return jsonResult(results);
     }),
   );
 
   server.registerTool(
-    "set_named_search",
+    "set_search_profile",
     {
       description:
-        "Create or replace a named search of a lens: a search tree stored under a key, run by key with a " +
+        "Create or replace a search profile of a lens: a search tree stored under a key, run by key with a " +
         `query text. Key must match pattern ${LENS_RESOURCE_KEY_PATTERN.source} and be at most ${MAX_KEY_LENGTH} ` +
         "characters. 'tree' is one node; each node has 'kind' and only its own fields. " +
         "keywordSearch {index, text, match?: 'any'|'all' (default any), relations?, parts?}: the entries of one " +
@@ -1535,15 +1535,15 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
         tree: z.record(z.string(), z.unknown()),
       },
     },
-    wrap("set_named_search", async (args: {
+    wrap("set_search_profile", async (args: {
       lens_key: string;
       key: string;
       name: string;
       description: string;
       tree: Record<string, unknown>;
     }) => {
-      const body = NamedSearchUpsert.parse({ name: args.name, description: args.description, tree: args.tree });
-      const [result, created] = await service.upsertNamedSearch(
+      const body = SearchProfileUpsert.parse({ name: args.name, description: args.description, tree: args.tree });
+      const [result, created] = await service.upsertSearchProfile(
         args.lens_key,
         args.key,
         body,
@@ -1555,17 +1555,17 @@ export function createModelingMcpServer(ontologyKey: string, actor: AccessActor 
   );
 
   server.registerTool(
-    "delete_named_search",
+    "delete_search_profile",
     {
-      description: "Delete a named search from a lens.",
+      description: "Delete a search profile from a lens.",
       inputSchema: {
         lens_key: z.string(),
-        search_key: z.string(),
+        profile_key: z.string(),
       },
     },
-    wrap("delete_named_search", async (args: { lens_key: string; search_key: string }) => {
-      await service.deleteNamedSearch(args.lens_key, args.search_key, await getModelingStore(ontologyKey));
-      return textResult(`Named search '${args.search_key}' deleted from lens '${args.lens_key}'.`);
+    wrap("delete_search_profile", async (args: { lens_key: string; profile_key: string }) => {
+      await service.deleteSearchProfile(args.lens_key, args.profile_key, await getModelingStore(ontologyKey));
+      return textResult(`Search profile '${args.profile_key}' deleted from lens '${args.lens_key}'.`);
     }),
   );
 

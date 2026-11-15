@@ -9,7 +9,7 @@ import {
   CHUNKS,
   EXHIBITOR,
   INDUSTRY,
-  NAMED_STEP,
+  PROFILE_STEP,
   ONE_OF_EACH,
   PARTS_STEP,
   PART_MEANING,
@@ -140,8 +140,8 @@ function Example({ step }: { step: StoryStep }) {
         </div>
       </div>
     }
-    case 'named': {
-      const index = indexById(NAMED_STEP.index)
+    case 'profile': {
+      const index = indexById(PROFILE_STEP.index)
       return <div className="grid gap-2.5">
         <div className="grid gap-1.5 rounded-md border bg-muted/30 px-2.5 py-2 text-[12px]">
           <span className={microLabel}>A search step</span>
@@ -150,11 +150,11 @@ function Example({ step }: { step: StoryStep }) {
             <span className="ml-2 text-muted-foreground">parts</span>
             {(['self', 'relation', 'passage'] as const).map((part) => <span key={part}
               className={cn('rounded-md border px-2 py-0.5 font-mono text-[11px]',
-                NAMED_STEP.parts.includes(part) ? 'border-primary bg-primary/10 text-foreground' : 'text-muted-foreground')}>{part}</span>)}
+                PROFILE_STEP.parts.includes(part) ? 'border-primary bg-primary/10 text-foreground' : 'text-muted-foreground')}>{part}</span>)}
           </span>
         </div>
         <ul className="grid gap-1">
-          {index.entries.map((entry, i) => <Entry key={i} entry={entry} faded={!NAMED_STEP.parts.includes(entry.part)} />)}
+          {index.entries.map((entry, i) => <Entry key={i} entry={entry} faded={!PROFILE_STEP.parts.includes(entry.part)} />)}
         </ul>
       </div>
     }
@@ -168,8 +168,8 @@ function ModuleTag({ module }: { module: Module }) {
 
 /**
  * Opens how indices work — what a search index consists of, told over one example exhibitor:
- * `labeled` — "? How indices work" — where a page points to it; `parts` opens on what a named
- * search's parts keep.
+ * `labeled` — "? How indices work" — where a page points to it; `parts` opens on what a search
+ * profile's parts keep.
  */
 export function IndexExplainerButton({ labeled = false, parts = false, className }: { labeled?: boolean; parts?: boolean; className?: string }) {
   return <ExplainerButton title={EXPLAINER.title} label={labeled ? EXPLAINER.title : undefined} className={className}>

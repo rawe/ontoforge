@@ -1,5 +1,5 @@
 /**
- * Pure helpers of the named-search editor: the canonical tree a start choice
+ * Pure helpers of the search-profile editor: the canonical tree a start choice
  * writes, edits of the tree at a node's path, and the server's errors placed
  * on the node they name. No React, no I/O — unit-tested with `node --test`.
  *
@@ -15,7 +15,7 @@ export type ResultUnit = 'entities' | 'passages'
 export type Method = 'keyword' | 'semantic'
 
 /** The URL value of a draft — outside the key pattern, so no saved key collides. */
-export const NAMED_SEARCH_NEW = '_new'
+export const SEARCH_PROFILE_NEW = '_new'
 
 /** Every kind, in the order the editor offers them. */
 export const NODE_KINDS: readonly NodeKind[] = [
@@ -51,7 +51,7 @@ export const KIND_HINT: Record<NodeKind, string> = {
 
 /* ------------------------------- start choice ------------------------------- */
 
-/** What a new named search starts from. */
+/** What a new search profile starts from. */
 export interface StartChoice {
   unit: ResultUnit
   indices: string[]

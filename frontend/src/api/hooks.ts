@@ -198,11 +198,11 @@ export function useSearchCatalog(ontologyKey: string, lensKey: string, enabled =
   })
 }
 
-/** The runtime named searches of a lens — Advanced search's Named mode. */
-export function useNamedSearches(ontologyKey: string, lensKey: string) {
+/** The runtime search profiles of a lens — Advanced search's Search profile mode. */
+export function useSearchProfiles(ontologyKey: string, lensKey: string) {
   return useQuery({
-    queryKey: qk.namedSearches(ontologyKey, lensKey),
-    queryFn: () => runtime.listNamedSearches(ontologyKey, lensKey),
+    queryKey: qk.searchProfiles(ontologyKey, lensKey),
+    queryFn: () => runtime.listSearchProfiles(ontologyKey, lensKey),
     retry: false,
   })
 }

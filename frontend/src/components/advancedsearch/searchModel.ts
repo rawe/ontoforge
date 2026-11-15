@@ -1,6 +1,6 @@
 /**
  * Pure helpers for the Advanced search page: the body the form sends to
- * `POST /search/entities`, `/search/passages` or a named search's run, the
+ * `POST /search/entities`, `/search/passages` or a search profile's run, the
  * field errors a control
  * shows, `ran` and the limitations as readable sentences, and how a found
  * entity links and reads.
@@ -12,7 +12,7 @@
 import type {
   EntityReference,
   EntitySearchResponse,
-  NamedSearchRunBody,
+  SearchProfileRunBody,
   PassageSearchBody,
   PassageSearchResponse,
   QueryResult,
@@ -23,25 +23,25 @@ import type {
 
 export type SearchMode = 'entities' | 'passages'
 
-/** The form's mode control: the two searches, and a named search of the lens. */
-export type FormMode = SearchMode | 'named'
+/** The form's mode control: the two searches, and a search profile of the lens. */
+export type FormMode = SearchMode | 'profile'
 
-/** The modes offered: Named only when the lens has named searches. */
-export function formModes(hasNamed: boolean): FormMode[] {
-  return hasNamed ? ['entities', 'passages', 'named'] : ['entities', 'passages']
+/** The modes offered: Search profile only when the lens has search profiles. */
+export function formModes(hasProfiles: boolean): FormMode[] {
+  return hasProfiles ? ['entities', 'passages', 'profile'] : ['entities', 'passages']
 }
 
-/** The mode in effect: a picked Named falls back to Entities while the lens has none. */
-export function modeInEffect(picked: FormMode, hasNamed: boolean): FormMode {
-  return picked === 'named' && !hasNamed ? 'entities' : picked
+/** The mode in effect: a picked Search profile falls back to Entities while the lens has none. */
+export function modeInEffect(picked: FormMode, hasProfiles: boolean): FormMode {
+  return picked === 'profile' && !hasProfiles ? 'entities' : picked
 }
 
-/** The named search the form runs: the chosen one, else the first. */
-export function chosenNamedSearch<T extends { key: string }>(
-  searches: readonly T[],
+/** The search profile the form runs: the chosen one, else the first. */
+export function chosenSearchProfile<T extends { key: string }>(
+  profiles: readonly T[],
   key: string,
 ): T | undefined {
-  return searches.find((s) => s.key === key) ?? searches[0]
+  return profiles.find((p) => p.key === key) ?? profiles[0]
 }
 
 /** The request's scope fields; `documents` is the passage search's only. */
@@ -97,12 +97,12 @@ export function searchBody(form: SearchForm): PassageSearchBody {
 const filterStrings = (filter: Record<string, string | number | boolean>) =>
   Object.fromEntries(Object.entries(filter).map(([key, value]) => [key, String(value)]))
 
-/** A named search's run body: the trimmed query, the filter values as strings. */
-export function namedRunBody(
+/** A search profile's run body: the trimmed query, the filter values as strings. */
+export function profileRunBody(
   query: string,
   filter: Record<string, string | number | boolean> | undefined,
-): NamedSearchRunBody {
-  const body: NamedSearchRunBody = { query: query.trim() }
+): SearchProfileRunBody {
+  const body: SearchProfileRunBody = { query: query.trim() }
   if (filter !== undefined) body.filter = filterStrings(filter)
   return body
 }
@@ -163,11 +163,11 @@ export function requestKey(mode: SearchMode, body: PassageSearchBody): string {
   })
 }
 
-/** A named search's run as a comparable text, apart from every search's:
+/** A search profile's run as a comparable text, apart from every search's:
  * the same run reads the same whatever order its filter keys were chosen in. */
-export function namedRequestKey(searchKey: string, body: NamedSearchRunBody): string {
+export function profileRequestKey(profileKey: string, body: SearchProfileRunBody): string {
   return JSON.stringify({
-    named: searchKey,
+    profile: profileKey,
     query: body.query,
     filter: body.filter === undefined ? undefined : Object.entries(body.filter).sort(([a], [b]) => a.localeCompare(b)),
   })
@@ -188,8 +188,8 @@ export const SEARCH_CONTROLS = [
 
 export type SearchControl = (typeof SEARCH_CONTROLS)[number]
 
-/** The controls a named search's run shows: the tree decides the rest. */
-export const NAMED_CONTROLS = ['query', 'filter'] as const satisfies readonly SearchControl[]
+/** The controls a search profile's run shows: the tree decides the rest. */
+export const PROFILE_CONTROLS = ['query', 'filter'] as const satisfies readonly SearchControl[]
 
 const under = (path: string, control: string) =>
   path === control || path.startsWith(`${control}.`)
@@ -290,10 +290,10 @@ export function isEntitySearchResponse(
   return 'items' in result && 'ran' in result
 }
 
-/** Which unit a named search's run answered with, read from its items: the
+/** Which unit a search profile's run answered with, read from its items: the
  * listed `result` may be older than the search the server ran. With no
  * items either renderer fits, so the listed one stands. */
-export function namedRunResult(
+export function profileRunResult(
   response: EntitySearchResponse | PassageSearchResponse,
   listed: SearchMode,
 ): SearchMode {

@@ -81,7 +81,7 @@ export { parseFilters, parseFilterConditions, docLengthKey } from "./readHelpers
 export { searchIndexCatalog } from "./search/indexSearch.js";
 export { searchEntities } from "./search/entitySearch.js";
 export { searchPassages } from "./search/passageSearch.js";
-export { listNamedSearches, runNamedSearch } from "./search/namedSearch.js";
+export { listSearchProfiles, runSearchProfile } from "./search/searchProfile.js";
 
 type Row = Record<string, unknown>;
 

@@ -6,7 +6,7 @@ import {
   EXAMPLE_INDICES,
   EXHIBITOR,
   INDUSTRY,
-  NAMED_STEP,
+  PROFILE_STEP,
   PART_RESULT,
   PART_TONE,
   RELATION,
@@ -53,13 +53,13 @@ export function IndexExplainerDiagram({ lit, onSelect }: { lit: Lit[]; onSelect:
   const id = useId()
   const on = (region: Lit) => lit.includes(region)
   const stepOf = (region: Lit) => STORY.findIndex((step) => step.lit.includes(region))
-  const named = on('parts')
-  const laneOn = (index: IndexId) => on(index) || (named && index === NAMED_STEP.index)
+  const profile = on('parts')
+  const laneOn = (index: IndexId) => on(index) || (profile && index === PROFILE_STEP.index)
   /** A source is lit while a lit lane reads it; under parts only where its part is kept. */
   const sourceOn = (source: Source) => on('entity') ||
-    INTO.some((into) => into.source === source && laneOn(into.index) && (!named || NAMED_STEP.parts.includes(SOURCE_PART[source])))
+    INTO.some((into) => into.source === source && laneOn(into.index) && (!profile || PROFILE_STEP.parts.includes(SOURCE_PART[source])))
   const entryOn = (index: IndexId, part: SearchPartKind) => on('entries') || on('search') ||
-    (named ? index === NAMED_STEP.index && NAMED_STEP.parts.includes(part) : on(index))
+    (profile ? index === PROFILE_STEP.index && PROFILE_STEP.parts.includes(part) : on(index))
 
   const fade = (lit: boolean) => cn('transition-opacity duration-500', !lit && 'opacity-30')
   /** A region of another step: a click jumps there. */
@@ -144,9 +144,9 @@ export function IndexExplainerDiagram({ lit, onSelect }: { lit: Lit[]; onSelect:
           <tspan className="fill-foreground font-semibold">{index.name}</tspan>
           <tspan dx={8} className="fill-muted-foreground">{index.kind}{index.reads !== undefined && ` — reads ${index.reads}`}</tspan>
         </text>
-        {named && index.id === NAMED_STEP.index && <g>
+        {profile && index.id === PROFILE_STEP.index && <g>
           <rect x={LANE.x + LANE.width - 112} y={top + height - 28} width={100} height={20} rx={10} className="fill-primary/12 stroke-primary" />
-          <text x={LANE.x + LANE.width - 62} y={top + height - 14} textAnchor="middle" className="fill-primary text-[10.5px] font-medium">parts: {NAMED_STEP.parts.join(', ')}</text>
+          <text x={LANE.x + LANE.width - 62} y={top + height - 14} textAnchor="middle" className="fill-primary text-[10.5px] font-medium">parts: {PROFILE_STEP.parts.join(', ')}</text>
         </g>}
         {index.entries.map((entry, i) => {
           const x = CHIP.x + i * (CHIP.width + CHIP.gap)
@@ -155,7 +155,7 @@ export function IndexExplainerDiagram({ lit, onSelect }: { lit: Lit[]; onSelect:
           const lit = entryOn(index.id, entry.part)
           return <g key={i} className={fade(lit)}>
             <rect x={x} y={y} width={CHIP.width} height={CHIP.height} rx={7} strokeWidth={lit ? 1.5 : 1}
-              strokeDasharray={named && index.id === NAMED_STEP.index && !lit ? '4 3' : undefined} className={cn('fill-card', tone.stroke)} />
+              strokeDasharray={profile && index.id === PROFILE_STEP.index && !lit ? '4 3' : undefined} className={cn('fill-card', tone.stroke)} />
             <text x={x + 12} y={y + 21} className={cn(tone.fill, 'text-[11px]')}>
               <tspan className="font-semibold">{entry.part}</tspan> · {entry.label}
             </text>

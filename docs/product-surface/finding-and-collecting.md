@@ -246,10 +246,10 @@ expands automatically, and runs immediately when it has no parameters.
 
 One form per field of the [entity search](../capabilities/search.md#entity-search) and the
 [passage search](../capabilities/search.md#passage-search), and the run of a
-[named search](../capabilities/named-searches.md#running-one); a field left empty is not sent,
+[search profile](../capabilities/search-profiles.md#running-one); a field left empty is not sent,
 so the server's default applies, and the server judges what the form cannot.
 
-**Form.** A mode — Entities, Passages, or Named when the lens has named searches — and the
+**Form.** A mode — Entities, Passages, or Search profile when the lens has search profiles — and the
 text, run by Enter or Run once it is not blank. On a wide screen the settings sit in a panel beside the results; on a narrow
 one they fold above them into a one-line summary. A scope over one field at a time:
 types, indices, or — for passages — document properties, each chosen from a list that can
@@ -262,18 +262,18 @@ any or all words and an optional similarity floor. A filter with the
 scope item belongs to one type. A limit, and for passages a cap per entity. A "?" beside
 the title explains how search works, step by step over one example.
 
-**Named.** A picker of the lens's named searches by name and key; beneath it, what the
+**Search profile.** A picker of the lens's search profiles by name and key; beneath it, what the
 chosen one finds — entities or passages — and its description. Only the text and a filter
-are the caller's: scope, methods and limits are hidden, the search decides them. The
-filter is offered when the named search searches exactly one type.
+are the caller's: scope, methods and limits are hidden, the search profile decides them. The
+filter is offered when the search profile searches exactly one type.
 
 **Results.** The count, which methods ran, and each limitation as a sentence naming its
 types, indices or documents. An entity row has its rank, type chip, name linking to its
-detail, the part that matched, its scores and the snippet — and, from a named search with several
+detail, the part that matched, its scores and the snippet — and, from a search profile with several
 texts, the text it ranked best for ("for “…”"); a row found through a custom index names
 it; a passage row has the entity, the document
 property — opening the [document viewer](schema-editing.md#document-viewer-and-editor) — and
-the passage text — and, from a named search with several texts, the text it ranked best for.
+the passage text — and, from a search profile with several texts, the text it ranked best for.
 Beside the part that matched, each method's score — "Semantic 0.82 · Keyword 2.17", two
 decimals — with a hover saying the two are not comparable. A rejected field shows its
 error under its control; others show verbatim below the form. Results searched with other

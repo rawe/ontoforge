@@ -25,8 +25,8 @@ import type {
   JsonValue,
   Lens,
   LensInput,
-  NamedSearch,
-  NamedSearchInput,
+  SearchProfile,
+  SearchProfileInput,
   PropertyDefinition,
   PropertyInput,
   PropertyUpdate,
@@ -297,7 +297,7 @@ export const importSchema = (ontologyKey: string, data: Record<string, JsonValue
   })
 
 /* ---------------------------------- Agents ---------------------------------- */
-/* Unlike the routes above, assistant, saved-query and named-search routes address the lens
+/* Unlike the routes above, assistant, saved-query and search-profile routes address the lens
    by its KEY, not its UUID. The built-in default agent is no modeling resource. */
 
 export const listAgents = (ontologyKey: string, lensKey: string) =>
@@ -347,26 +347,26 @@ export const deleteSavedQuery = (
     { method: 'DELETE' },
   )
 
-/* ------------------------------- named searches ------------------------------ */
+/* ------------------------------ search profiles ------------------------------ */
 
-export const listNamedSearches = (ontologyKey: string, lensKey: string) =>
-  request<NamedSearch[]>(`${base(ontologyKey)}/lenses/${lensKey}/named-searches`)
+export const listSearchProfiles = (ontologyKey: string, lensKey: string) =>
+  request<SearchProfile[]>(`${base(ontologyKey)}/lenses/${lensKey}/search-profiles`)
 
 /** Upsert — 201 created / 200 updated. */
-export const upsertNamedSearch = (
+export const upsertSearchProfile = (
   ontologyKey: string,
   lensKey: string,
-  searchKey: string,
-  body: NamedSearchInput,
+  profileKey: string,
+  body: SearchProfileInput,
 ) =>
-  request<NamedSearch>(
-    `${base(ontologyKey)}/lenses/${lensKey}/named-searches/${searchKey}`,
+  request<SearchProfile>(
+    `${base(ontologyKey)}/lenses/${lensKey}/search-profiles/${profileKey}`,
     { method: 'PUT', body },
   )
 
-export const deleteNamedSearch = (ontologyKey: string, lensKey: string, searchKey: string) =>
+export const deleteSearchProfile = (ontologyKey: string, lensKey: string, profileKey: string) =>
   request<undefined>(
-    `${base(ontologyKey)}/lenses/${lensKey}/named-searches/${searchKey}`,
+    `${base(ontologyKey)}/lenses/${lensKey}/search-profiles/${profileKey}`,
     { method: 'DELETE' },
   )
 

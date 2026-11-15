@@ -1,5 +1,5 @@
 /**
- * Named searches at run time, against a fake search-index store: the
+ * Search profiles at run time, against a fake search-index store: the
  * query in place of `$query`, the listing, the run's refusals — an unknown
  * key, an empty query, a tree the lens no longer fits — the run's `filter`
  * as one restrict under the root cut (types that drop out, a key no type
@@ -12,7 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setEmbeddingProvider } from "../../src/core/embedding.js";
-import { withQuery, type StoredSearchNode } from "../../src/core/namedSearch.js";
+import { withQuery, type StoredSearchNode } from "../../src/core/searchProfile.js";
 import type {
   RankedSearchEntry,
   SearchEntryQuery,
@@ -23,12 +23,12 @@ import type {
 import { deriveManagedIndices } from "../../src/core/searchIndex.js";
 import { invalidateLoadedSchemaCache } from "../../src/runtime/schemaCache.js";
 import {
-  compileNamedSearch,
-  listNamedSearches,
-  namedSearchLens,
-  runNamedSearch,
-  type NamedSearchLens,
-} from "../../src/runtime/search/namedSearch.js";
+  compileSearchProfile,
+  listSearchProfiles,
+  searchProfileLens,
+  runSearchProfile,
+  type SearchProfileLens,
+} from "../../src/runtime/search/searchProfile.js";
 import { createMockRuntimeStore, makeFullSchema } from "./helpers.js";
 
 const MODEL = "fake:hash:2";
@@ -118,7 +118,7 @@ beforeEach(() => {
     Object.fromEntries(ids.map((id) => [id, { _id: id, _entityTypeKey: "person", name: `N-${id}` }])),
   );
   stored = [];
-  runtime.getNamedSearches.mockImplementation(async () => stored);
+  runtime.getSearchProfiles.mockImplementation(async () => stored);
   lists = {};
   rank = vi.fn(async (query: SearchEntryQuery) =>
     (lists[`${query.generationId} ${query.text ?? "(vector)"}`] ?? []).slice(0, query.limit),
@@ -138,8 +138,8 @@ afterEach(() => setEmbeddingProvider(null));
 
 const save = (key: string, tree: StoredSearchNode, name = key) =>
   stored.push({ key, name, description: `About ${key}`, tree });
-const run = (key: string, request: Parameters<typeof runNamedSearch>[2]) =>
-  runNamedSearch("all", key, request, runtime);
+const run = (key: string, request: Parameters<typeof runSearchProfile>[2]) =>
+  runSearchProfile("all", key, request, runtime);
 
 describe("the query", () => {
   it("goes in place of every $query, as written; other texts stay", () => {
@@ -163,7 +163,7 @@ describe("the listing", () => {
   it("lists by key: result, and the sorted root types of the indices the lens can search; no tree", async () => {
     save("zeta", cut({ kind: "group", key: "passage", input: kw("person~default", "$query") }), "A first");
     save("alpha", cut(fuse(group(kw("person~default", "$query")), group(kw("company~default", "$query")))));
-    expect(await listNamedSearches("all", runtime)).toEqual([
+    expect(await listSearchProfiles("all", runtime)).toEqual([
       { key: "alpha", name: "alpha", description: "About alpha", result: "entities", types: ["company", "person"] },
       { key: "zeta", name: "A first", description: "About zeta", result: "passages", types: ["person"] },
     ]);
@@ -175,7 +175,7 @@ describe("the listing", () => {
       ...makeFullSchema({ lensKey: "all", entityInclusions: [{ key: "person", properties: null }] }),
       searchIndexInclusions: ["person~default"],
     });
-    expect((await listNamedSearches("all", runtime))[0]!.types).toEqual(["person"]);
+    expect((await listSearchProfiles("all", runtime))[0]!.types).toEqual(["person"]);
   });
 });
 
@@ -184,7 +184,7 @@ describe("refusals", () => {
     save("people", cut(group(kw("person~default", "$query"))));
     await expect(run("nope", { query: "x" })).rejects.toMatchObject({
       name: "NotFoundError",
-      message: "Named search 'nope' not found",
+      message: "Search profile 'nope' not found",
     });
     await expect(run("people", { query: "  " })).rejects.toMatchObject({
       details: { fields: { query: "Required non-empty query" } },
@@ -198,7 +198,7 @@ describe("refusals", () => {
       searchIndexInclusions: ["person~default"],
     });
     await expect(run("both", { query: "x" })).rejects.toMatchObject({
-      message: "Named search 'both' validation failed",
+      message: "Search profile 'both' validation failed",
       details: {
         errors: ["tree.input.inputs.1.input.index: Search index 'company~default' is not searchable in this lens"],
       },
@@ -233,7 +233,7 @@ describe("refusals", () => {
 
     runtime.getFullSchemaWithLensInclusions.mockResolvedValue(schema(["name"]));
     await expect(run("notes", { query: "x" })).rejects.toMatchObject({
-      message: "Named search 'notes' validation failed",
+      message: "Search profile 'notes' validation failed",
       details: { errors: ["tree.input.input.index: Search index 'person~notes' reads no document this lens shows"] },
     });
     expect(rank).not.toHaveBeenCalled();
@@ -350,14 +350,14 @@ describe("shapes the executor runs, checked at save and run", () => {
     indices: new Set(["person~default", "person~notes", "person~memo"]),
     hiddenDocuments: new Set(["person~memo"]),
     store: { supportsSearchPathConditions: () => false },
-  } as unknown as NamedSearchLens;
+  } as unknown as SearchProfileLens;
   const passage = (input: StoredSearchNode): StoredSearchNode => ({ kind: "group", key: "passage", input });
-  const errors = (tree: StoredSearchNode) => compileNamedSearch(tree, lens).errors;
+  const errors = (tree: StoredSearchNode) => compileSearchProfile(tree, lens).errors;
 
   it("a search node below a passage group counts passage entries: by default, or refused at its parts", () => {
-    const one = compileNamedSearch(cut(passage(kw("person~notes", "q"))), lens).tree!;
+    const one = compileSearchProfile(cut(passage(kw("person~notes", "q"))), lens).tree!;
     expect(one).toMatchObject({ input: { input: { parts: ["passage"] } } });
-    const entity = compileNamedSearch(cut(group(kw("person~notes", "q"))), lens).tree!;
+    const entity = compileSearchProfile(cut(group(kw("person~notes", "q"))), lens).tree!;
     expect((entity as { input: { input: object } }).input.input).not.toHaveProperty("parts");
     expect(errors(cut(passage({ kind: "keywordSearch", index: "person~notes", text: "q", parts: ["passage", "self"] })))).toEqual([
       "tree.input.input.parts: A passage group counts passage entries only",
@@ -382,9 +382,9 @@ describe("shapes the executor runs, checked at save and run", () => {
     const loaded = {
       full: { entityTypes: { person: type({ name: "string", notes: "document", memo: "document" }) }, relationTypes: {} },
       scoped: { entityTypes: { person: type({ name: "string", notes: "document" }) }, relationTypes: {} },
-    } as unknown as Parameters<typeof namedSearchLens>[0];
+    } as unknown as Parameters<typeof searchProfileLens>[0];
     const indices = [record("person~default", ["name"]), record("person~notes", ["notes"]), record("person~memo", ["memo"])];
-    const built = namedSearchLens(loaded, indices, lens.store);
+    const built = searchProfileLens(loaded, indices, lens.store);
     expect([...built.indices]).toEqual(["person~default", "person~notes", "person~memo"]);
     expect([...built.hiddenDocuments]).toEqual(["person~memo"]);
   });

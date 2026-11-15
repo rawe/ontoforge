@@ -27,7 +27,7 @@
  */
 
 import type { AgentConfig, SavedQueryConfig, SavedQueryParameter, StepConfig } from "../core/ai.js";
-import type { NamedSearchConfig, StoredSearchNode } from "../core/namedSearch.js";
+import type { SearchProfileConfig, StoredSearchNode } from "../core/searchProfile.js";
 import { NotFoundError } from "../core/exceptions.js";
 import { withoutFormerTools } from "./toolNames.js";
 import { sameDesign } from "../core/designRevision.js";
@@ -81,8 +81,8 @@ export interface LoadedSchema {
   agentConfigs: Record<string, AgentConfig>;
   /** Saved-query pipelines keyed by query key. */
   savedQueries: Record<string, SavedQueryConfig>;
-  /** Named searches keyed by key, in key order. */
-  namedSearches: Record<string, NamedSearchConfig>;
+  /** Search profiles keyed by key, in key order. */
+  searchProfiles: Record<string, SearchProfileConfig>;
   /** Whether the lens has type inclusions, and the search indices it
    * includes by key (`core/searchQuery.ts` decides availability). */
   searchIndexScope: { scoped: boolean; includedIndices: string[] };
@@ -292,9 +292,9 @@ export async function loadSchemaUncached(
     savedQueries[row.key as string] = toSavedQueryConfig(row);
   }
 
-  const namedSearches: Record<string, NamedSearchConfig> = {};
-  for (const row of await store.getNamedSearches(lensKey)) {
-    namedSearches[row.key as string] = {
+  const searchProfiles: Record<string, SearchProfileConfig> = {};
+  for (const row of await store.getSearchProfiles(lensKey)) {
+    searchProfiles[row.key as string] = {
       key: row.key as string,
       name: row.name as string,
       description: row.description as string,
@@ -314,7 +314,7 @@ export async function loadSchemaUncached(
     full,
     agentConfigs,
     savedQueries,
-    namedSearches,
+    searchProfiles,
     searchIndexScope,
     design: schema.design as DesignRevision,
   };

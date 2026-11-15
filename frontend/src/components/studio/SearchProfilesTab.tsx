@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { useFeatures, useRuntimeSchema, useSearchCatalog } from '@/api/hooks'
 import * as model from '@/api/model'
 import { qk } from '@/api/queryKeys'
-import type { Lens, NamedSearch, Representation, SearchCatalogEntry, SearchTreeNode } from '@/api/types'
+import type { Lens, SearchProfile, Representation, SearchCatalogEntry, SearchTreeNode } from '@/api/types'
 import { TypeDot } from '@/components/TypeChip'
 import { EmptyState } from '@/components/EmptyState'
 import {
@@ -30,9 +30,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { ASSISTANT_STATUS_TEXT, assistantKeyError, assistantStatus } from './assistants/assistantModel'
 import { useAssistantLeaveGuard } from './assistants/useAssistantLeaveGuard'
 import { deriveKey, invalidateModeling, isValidLensResourceKey, toastError } from './lib'
-import { NodeCard } from './namedsearches/NodeCard'
+import { NodeCard } from './searchprofiles/NodeCard'
 import {
-  NAMED_SEARCH_NEW,
+  SEARCH_PROFILE_NEW,
   canonicalTree,
   cleanTree,
   placeErrors,
@@ -41,37 +41,37 @@ import {
   type PlacedErrors,
   type ResultUnit,
   type StartChoice,
-} from './namedsearches/namedSearchModel'
+} from './searchprofiles/searchProfileModel'
 import { KeyField } from './shared'
 
-const TAB = 'named-searches'
-const PARAM = 'search'
+const TAB = 'search-profiles'
+const PARAM = 'profile'
 
 /**
- * Lens detail → Named searches: the lens's named searches (list, delete) and
- * the editor of one (`?search=<key>`, `?search=_new` for a draft) — the
+ * Lens detail → Search profiles: the lens's search profiles (list, delete) and
+ * the editor of one (`?profile=<key>`, `?profile=_new` for a draft) — the
  * stored search tree as nested cards, root on top.
  */
-export function NamedSearchesTab({ ontologyKey, lens }: { ontologyKey: string; lens: Lens }) {
+export function SearchProfilesTab({ ontologyKey, lens }: { ontologyKey: string; lens: Lens }) {
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedKey = searchParams.get(PARAM)
-  const [toDelete, setToDelete] = useState<NamedSearch | null>(null)
+  const [toDelete, setToDelete] = useState<SearchProfile | null>(null)
   // Each save remounts the editor on the saved version.
   const [saves, setSaves] = useState(0)
 
-  // NOTE: modeling named-search routes are key-addressed, like saved queries.
-  const listKey = qk.model(ontologyKey, 'lenses', lens.key, 'named-searches')
-  const searches = useQuery({
+  // NOTE: modeling search-profile routes are key-addressed, like saved queries.
+  const listKey = qk.model(ontologyKey, 'lenses', lens.key, 'search-profiles')
+  const profiles = useQuery({
     queryKey: listKey,
-    queryFn: () => model.listNamedSearches(ontologyKey, lens.key),
+    queryFn: () => model.listSearchProfiles(ontologyKey, lens.key),
   })
 
   const remove = useMutation({
-    mutationFn: (key: string) => model.deleteNamedSearch(ontologyKey, lens.key, key),
+    mutationFn: (key: string) => model.deleteSearchProfile(ontologyKey, lens.key, key),
     onSuccess: () => {
       invalidateModeling(queryClient)
-      toast.success('Named search deleted')
+      toast.success('Search profile deleted')
     },
     onError: toastError,
   })
@@ -79,65 +79,65 @@ export function NamedSearchesTab({ ontologyKey, lens }: { ontologyKey: string; l
   const select = (key: string | null) =>
     setSearchParams(key === null ? { tab: TAB } : { tab: TAB, [PARAM]: key }, { replace: true })
 
-  if (searches.isPending) return <Skeleton className="h-32 rounded-xl" />
-  if (searches.error || !searches.data) {
+  if (profiles.isPending) return <Skeleton className="h-32 rounded-xl" />
+  if (profiles.error || !profiles.data) {
     return (
       <div className="text-sm">
         <p role="alert" className="text-destructive">
-          Could not load named searches: {placeErrors(searches.error).summary.join(' ')}
+          Could not load search profiles: {placeErrors(profiles.error).summary.join(' ')}
         </p>
-        <Button variant="outline" size="sm" className="mt-3" onClick={() => void searches.refetch()}>Reload</Button>
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => void profiles.refetch()}>Reload</Button>
       </div>
     )
   }
 
-  // The saved search goes into the list before the editor remounts on it; the refetch follows.
-  const onSaved = (saved: NamedSearch) => {
-    queryClient.setQueryData<NamedSearch[]>(listKey, (list = []) =>
+  // The saved search profile goes into the list before the editor remounts on it; the refetch follows.
+  const onSaved = (saved: SearchProfile) => {
+    queryClient.setQueryData<SearchProfile[]>(listKey, (list = []) =>
       list.some((s) => s.key === saved.key) ? list.map((s) => (s.key === saved.key ? saved : s)) : [...list, saved])
     setSaves((n) => n + 1)
     invalidateModeling(queryClient)
   }
   const common = {
-    ontologyKey, lensKey: lens.key, existingKeys: searches.data.map((s) => s.key), onClose: () => select(null),
+    ontologyKey, lensKey: lens.key, existingKeys: profiles.data.map((s) => s.key), onClose: () => select(null),
   }
-  if (selectedKey === NAMED_SEARCH_NEW) {
-    return <NamedSearchPage key={NAMED_SEARCH_NEW} {...common} search={null} onSaved={(saved) => { onSaved(saved); select(saved.key) }} />
+  if (selectedKey === SEARCH_PROFILE_NEW) {
+    return <SearchProfilePage key={SEARCH_PROFILE_NEW} {...common} profile={null} onSaved={(saved) => { onSaved(saved); select(saved.key) }} />
   }
   if (selectedKey !== null) {
-    const search = searches.data.find((s) => s.key === selectedKey)
-    if (search === undefined) {
+    const profile = profiles.data.find((s) => s.key === selectedKey)
+    if (profile === undefined) {
       return (
         <EmptyState
           icon={ListTree}
-          title="Named search not found"
-          description={`This lens has no named search ${selectedKey}. It may have been deleted.`}
-          action={<Button variant="outline" onClick={() => select(null)}>All named searches</Button>}
+          title="Search profile not found"
+          description={`This lens has no search profile ${selectedKey}. It may have been deleted.`}
+          action={<Button variant="outline" onClick={() => select(null)}>All search profiles</Button>}
         />
       )
     }
-    return <NamedSearchPage key={`${search.key}:${saves}`} {...common} search={search} onSaved={onSaved} />
+    return <SearchProfilePage key={`${profile.key}:${saves}`} {...common} profile={profile} onSaved={onSaved} />
   }
 
-  const list = searches.data
+  const list = profiles.data
   return (
     <div>
       <div className="mb-3 flex items-center gap-2">
-        <h3 className="text-[13px] font-semibold">Named searches</h3>
+        <h3 className="text-[13px] font-semibold">Search profiles</h3>
         <span className="text-[13px] text-muted-foreground">{list.length}</span>
-        <Button size="sm" className="ml-auto" onClick={() => select(NAMED_SEARCH_NEW)}>
-          <Plus className="size-3.5" /> New named search
+        <Button size="sm" className="ml-auto" onClick={() => select(SEARCH_PROFILE_NEW)}>
+          <Plus className="size-3.5" /> New search profile
         </Button>
       </div>
 
       {list.length === 0 && (
         <EmptyState
           icon={ListTree}
-          title="No named searches"
-          description="A named search stores a search tree under a key; callers run it by key with their query."
+          title="No search profiles"
+          description="A search profile stores a search tree under a key; callers run it by key with their query."
           action={
-            <Button onClick={() => select(NAMED_SEARCH_NEW)}>
-              <Plus className="size-4" /> New named search
+            <Button onClick={() => select(SEARCH_PROFILE_NEW)}>
+              <Plus className="size-4" /> New search profile
             </Button>
           }
         />
@@ -175,9 +175,9 @@ export function NamedSearchesTab({ ontologyKey, lens }: { ontologyKey: string; l
       <AlertDialog open={toDelete !== null} onOpenChange={(open) => !open && setToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete named search "{toDelete?.key ?? ''}"?</AlertDialogTitle>
+            <AlertDialogTitle>Delete search profile "{toDelete?.key ?? ''}"?</AlertDialogTitle>
             <AlertDialogDescription>
-              The named search is removed from this lens. This cannot be undone.
+              The search profile is removed from this lens. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -188,7 +188,7 @@ export function NamedSearchesTab({ ontologyKey, lens }: { ontologyKey: string; l
                 if (toDelete !== null) remove.mutate(toDelete.key)
               }}
             >
-              Delete named search
+              Delete search profile
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -283,9 +283,9 @@ function StartChoiceSection({
           </div>
         </div>
         <div className="grid w-28 gap-1.5">
-          <Label htmlFor="ns-start-limit">Limit</Label>
+          <Label htmlFor="sp-start-limit">Limit</Label>
           <Input
-            id="ns-start-limit"
+            id="sp-start-limit"
             type="number"
             min={1}
             max={100}
@@ -305,43 +305,43 @@ function StartChoiceSection({
 
 /* ---------------------------------- editor ---------------------------------- */
 
-interface NamedSearchPageProps {
+interface SearchProfilePageProps {
   ontologyKey: string
   lensKey: string
   existingKeys: string[]
-  /** The saved search; null for a new one. */
-  search: NamedSearch | null
-  onSaved: (search: NamedSearch) => void
+  /** The saved search profile; null for a new one. */
+  profile: SearchProfile | null
+  onSaved: (profile: SearchProfile) => void
   onClose: () => void
 }
 
 /**
- * Draft + Save editor of one named search. Remount it (React `key`) to
+ * Draft + Save editor of one search profile. Remount it (React `key`) to
  * re-seed the draft from a newer saved version.
  */
-function NamedSearchPage({ ontologyKey, lensKey, existingKeys, search, onSaved, onClose }: NamedSearchPageProps) {
-  const isNew = search === null
+function SearchProfilePage({ ontologyKey, lensKey, existingKeys, profile, onSaved, onClose }: SearchProfilePageProps) {
+  const isNew = profile === null
   const catalog = useSearchCatalog(ontologyKey, lensKey).data ?? []
   const entityTypes = useRuntimeSchema(ontologyKey, lensKey).data?.entityTypes.map((t) => t.key) ?? []
   const semanticAvailable = useFeatures().data?.semanticSearch === true
 
-  const baselineTree = useMemo(() => (search === null ? null : JSON.stringify(search.tree)), [search])
-  const [name, setName] = useState(search?.name ?? '')
-  const [key, setKey] = useState(search?.key ?? '')
+  const baselineTree = useMemo(() => (profile === null ? null : JSON.stringify(profile.tree)), [profile])
+  const [name, setName] = useState(profile?.name ?? '')
+  const [key, setKey] = useState(profile?.key ?? '')
   const [keyTouched, setKeyTouched] = useState(false)
-  const [description, setDescription] = useState(search?.description ?? '')
-  const [tree, setTree] = useState<SearchTreeNode | null>(search?.tree ?? null)
+  const [description, setDescription] = useState(profile?.description ?? '')
+  const [tree, setTree] = useState<SearchTreeNode | null>(profile?.tree ?? null)
   const [showJson, setShowJson] = useState(false)
   const [busy, setBusy] = useState(false)
   const [errors, setErrors] = useState<PlacedErrors>({ summary: [], byNode: {} })
 
   const dirty = isNew
     ? key !== '' || name !== '' || description !== '' || tree !== null
-    : name !== search.name || description !== search.description || JSON.stringify(tree) !== baselineTree
-  const keyError = isNew ? assistantKeyError(key, existingKeys, 'Named search') : undefined
+    : name !== profile.name || description !== profile.description || JSON.stringify(tree) !== baselineTree
+  const keyError = isNew ? assistantKeyError(key, existingKeys, 'Search profile') : undefined
   const valid = name.trim() !== '' && tree !== null && (!isNew || (isValidLensResourceKey(key) && keyError === undefined))
   const canSave = (dirty || isNew) && valid && !busy
-  const title = name.trim() || search?.name || 'New named search'
+  const title = name.trim() || profile?.name || 'New search profile'
   const status = ASSISTANT_STATUS_TEXT[assistantStatus({ isNew, dirty, invalid: false })]
   const { leave, dialog } = useAssistantLeaveGuard(dirty, title)
   const json = tree === null ? '' : JSON.stringify(cleanTree(tree), null, 2)
@@ -357,12 +357,12 @@ function NamedSearchPage({ ontologyKey, lensKey, existingKeys, search, onSaved, 
     setBusy(true)
     clearErrors()
     try {
-      const saved = await model.upsertNamedSearch(ontologyKey, lensKey, key, {
+      const saved = await model.upsertSearchProfile(ontologyKey, lensKey, key, {
         name: name.trim(),
         description: description.trim(),
         tree: cleanTree(tree),
       })
-      toast.success(isNew ? `Named search "${saved.name}" created` : `Named search "${saved.name}" saved`)
+      toast.success(isNew ? `Search profile "${saved.name}" created` : `Search profile "${saved.name}" saved`)
       if (isNew) leave(() => onSaved(saved))
       else onSaved(saved)
     } catch (error) {
@@ -382,16 +382,16 @@ function NamedSearchPage({ ontologyKey, lensKey, existingKeys, search, onSaved, 
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="ghost" size="sm" className="-ml-2 h-7 gap-1 text-xs text-muted-foreground" onClick={onClose}>
-          <ChevronLeft className="size-3.5" /> All named searches
+          <ChevronLeft className="size-3.5" /> All search profiles
         </Button>
         <h2 className="text-[14px] font-semibold">{title}</h2>
-        {search !== null && <Badge variant="outline" className="font-mono text-[11px]" title="Immutable key">{search.key}</Badge>}
+        {profile !== null && <Badge variant="outline" className="font-mono text-[11px]" title="Immutable key">{profile.key}</Badge>}
         <span className={`text-xs ${status.className}`}>{status.text}</span>
       </div>
 
       <form className="grid gap-4" onSubmit={(e) => { e.preventDefault(); if (canSave) void save() }}>
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="submit" size="sm" disabled={!canSave}>{isNew ? 'Create named search' : 'Save'}</Button>
+          <Button type="submit" size="sm" disabled={!canSave}>{isNew ? 'Create search profile' : 'Save'}</Button>
           {!isNew && (
             <Button
               type="button"
@@ -399,9 +399,9 @@ function NamedSearchPage({ ontologyKey, lensKey, existingKeys, search, onSaved, 
               variant="ghost"
               disabled={!dirty || busy}
               onClick={() => {
-                setName(search.name)
-                setDescription(search.description)
-                setTree(search.tree)
+                setName(profile.name)
+                setDescription(profile.description)
+                setTree(profile.tree)
                 clearErrors()
               }}
             >
@@ -421,9 +421,9 @@ function NamedSearchPage({ ontologyKey, lensKey, existingKeys, search, onSaved, 
         <section className="grid gap-3 rounded-xl border bg-card p-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid gap-1.5">
-              <Label htmlFor="ns-name">Name</Label>
+              <Label htmlFor="sp-name">Name</Label>
               <Input
-                id="ns-name"
+                id="sp-name"
                 value={name}
                 disabled={busy}
                 autoFocus={isNew}
@@ -435,7 +435,7 @@ function NamedSearchPage({ ontologyKey, lensKey, existingKeys, search, onSaved, 
               />
             </div>
             <KeyField
-              id="ns-key"
+              id="sp-key"
               lensResource
               value={key}
               disabled={!isNew || busy}
@@ -444,9 +444,9 @@ function NamedSearchPage({ ontologyKey, lensKey, existingKeys, search, onSaved, 
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="ns-description">Description</Label>
+            <Label htmlFor="sp-description">Description</Label>
             <Textarea
-              id="ns-description"
+              id="sp-description"
               rows={2}
               value={description}
               disabled={busy}

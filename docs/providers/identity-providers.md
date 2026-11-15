@@ -1,9 +1,7 @@
 # Identity provider setup
 
 What to set up at an OpenID provider so that OntoForge can sign people in, and which values
-then go into the server's [configuration](../../README.md#authentication). The Keycloak and
-Auth0 steps are verified; the Microsoft Entra ID section follows Microsoft's documentation
-and has not been run against a tenant.
+then go into the server's [configuration](../../README.md#authentication).
 
 ## What every provider needs
 

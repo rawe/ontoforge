@@ -1837,8 +1837,8 @@ export async function getSchemaExport(store: ModelingStore): Promise<Row> {
  * the violation list as a flag write is. The saved-query descriptions are
  * embedded before anything is written; the checks against the target and
  * every write are then one design change, so a failure at any point —
- * the provider's included — leaves the target as it was. A named
- * search's tree is checked against its lens as written, inside that
+ * the provider's included — leaves the target as it was. A search
+ * profile's tree is checked against its lens as written, inside that
  * design change, so its lens violations are refused after the conflicts.
  *
  * Every imported key is validated against the same patterns the

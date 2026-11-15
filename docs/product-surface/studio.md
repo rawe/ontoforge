@@ -176,7 +176,7 @@ as Advanced search's ranked items, or either as raw JSON. See
 **Search profiles** — the authoring surface for the lens's
 [search profiles](../capabilities/search-profiles.md). The list shows each one's name, key,
 description and result unit (entities or passages), with edit and delete behind a
-confirmation. The editor (`?search=<key>`, a draft `?search=_new`) holds name,
+confirmation. The editor (`?profile=<key>`, a draft `?profile=_new`) holds name,
 derived-and-then-immutable key and description, and the stored search tree as nested
 cards: the root on top, each node's inputs indented below it. A card names its node kind
 in plain words, says what it does, and holds its fields — a search's index (from the lens's
